@@ -1,5 +1,34 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-sidebar: var(--sb-bg);
+  --color-sidebar-foreground: var(--sb-fg);
+  --color-sidebar-accent: var(--sb-accent);
+  --color-sidebar-accent-foreground: var(--sb-accent-fg);
+  --color-sidebar-border: var(--sb-border);
+}
+
 :root {
   --background: 0 0% 100%;
   --foreground: 240 10% 3.9%;
@@ -20,7 +49,17 @@
   --border: 240 5.9% 90%;
   --input: 240 5.9% 90%;
   --ring: 240 5.9% 10%;
-  --radius: 0.5rem;
+
+  --sb-bg: oklch(0.98 0.013 255);
+  --sb-fg: oklch(0.145 0 0);
+  --sb-accent: oklch(0.945 0.03 255);
+  --sb-accent-fg: oklch(0.46 0.17 255);
+  --sb-border: oklch(0.93 0.02 255);
+  --sidebar-gradient: linear-gradient(
+    180deg,
+    oklch(0.975 0.02 255),
+    oklch(0.998 0.003 255)
+  );
 }
 
 .dark {
@@ -43,6 +82,17 @@
   --border: 240 3.7% 15.9%;
   --input: 240 3.7% 15.9%;
   --ring: 240 4.9% 83.9%;
+
+  --sb-bg: oklch(0.17 0.013 255);
+  --sb-fg: oklch(0.98 0 0);
+  --sb-accent: oklch(0.22 0.02 255);
+  --sb-accent-fg: oklch(0.75 0.12 255);
+  --sb-border: oklch(0.25 0.02 255);
+  --sidebar-gradient: linear-gradient(
+    180deg,
+    oklch(0.17 0.02 255),
+    oklch(0.15 0.01 255)
+  );
 }
 
 * {
