@@ -1,0 +1,41 @@
+---
+description: AgentCore 项目背景与当前阶段
+alwaysApply: true
+---
+
+# AgentCore 项目上下文
+
+## 项目阶段：开发期
+
+设计阶段已完成，核心决策全部确定。以 `docs/` 设计文档为蓝图编码，中央决策记录见 `docs/DECISIONS.md`。
+
+## 产品定位
+
+面向大众的 Multi-Agent AI 工作台，对标 Cursor / Codex / Claude。核心差异：真正的 Agent 团队协作，而非"单 Agent + 子任务派发"。用户心智模型是"管理一个 Agent 团队"。
+
+## 影响编码的关键决策
+
+| 决策 | 内容 |
+|---|---|
+| 协议 | MCP（Agent ↔ 工具）、A2A（Agent ↔ Agent） |
+| 编排器 | 专职 LLM + 检查点，结构化 JSON 计划 + depends_on 依赖图，流式解析 |
+| 执行引擎 | DAG 调度 + asyncio 协程 + 事件流，Agent 实例可复用 |
+| Agent 协作 | 串行/并行/辩论/混合，统一 DAG，共享工作区通信 |
+| 后端 | Python + FastAPI，OpenAPI 自动生成 TS 类型 |
+| 前端 | electron-vite / React 19 / Zustand / Tailwind / shadcn/ui / React Flow |
+| LLM | DeepSeek V4（Flash + Pro），LLMProvider 抽象预留 |
+| 存储 | PostgreSQL + pgvector / Redis / S3 |
+| 部署 | Docker Compose 单机（阿里云深圳） |
+| 沙箱 | MVP 受限 subprocess，SandboxProvider 抽象预留 |
+| 客户端 | Electron + React 桌面端优先 |
+| MVP | 6 模块全量 Day 1（聊天/多Agent/角色分配/工具/进度/记忆） |
+
+## 仓库结构
+
+设计文档见 `docs/` 目录（19 份），中央决策记录见 `docs/DECISIONS.md`。`杂项/` 为历史对话存档，仅供参考。
+
+## 工作准则
+
+- 以 `docs/` 设计文档为蓝图，发现设计缺陷应提报决策
+- 技术方案讨论保持开放，不要在未确认前将候选方案当作已定
+- 引用或修改设计文档时，保持与现有文档风格一致（中文 Markdown）

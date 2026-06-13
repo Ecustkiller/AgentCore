@@ -1,0 +1,36 @@
+---
+description: LLM 接入规范——DeepSeek V4 外部 API 约束与配置事实
+alwaysApply: false
+---
+
+# LLM 规范
+
+## DeepSeek V4 配置事实（权威，AI 易错点）
+
+默认 Provider 是 DeepSeek V4。以下是**外部 API 约束**（代码里看不出来），改模型/LLM 配置前以此为准：
+
+| 项 | 正确值 / 约束 |
+|---|---|
+| 模型名 | `deepseek-v4-pro`（旗舰）/ `deepseek-v4-flash`（默认档）。旧名 `deepseek-chat`/`deepseek-reasoner` 已退役——**勿再写旧名** |
+| base_url | `https://api.deepseek.com`（兼容 `/v1`）；升级只换 model 名，base_url 不变 |
+| 双模式 | 思考 / 非思考。思考开关在 `extra_body` 里传 `thinking.type=enabled/disabled`，**默认 enabled** |
+| 思考强度 | `reasoning_effort` 仅 `high` / `max` 两档有效（`low`/`medium`→`high`，`xhigh`→`max`）；默认 `high` |
+| 温度坑 | **思考模式下 `temperature`/`top_p`/`presence_penalty`/`frequency_penalty` 一律被忽略**（不报错、静默无效） |
+| 工具调用坑 | 思考模式支持工具调用；但**发生工具调用的回合，`reasoning_content` 必须原样回传**，缺失则 API 返回 400 |
+| 上下文 | 实际 1M；建议收窄到 64K 控成本 |
+
+## Provider 路由规则
+
+1. 精确匹配: 模型名注册在某个 provider → 路由到该 provider
+2. 前缀匹配: `provider_name/model` → 路由到 `provider_name`, 实际模型取 `/` 后部分
+3. 回退: 路由到 default provider
+
+## 思考强度按角色分档
+
+| 角色 | thinking / effort |
+|---|---|
+| 编排器（captain/auditor/含委派） | 思考 on，`max` |
+| 叶子 worker（被委派的执行子 Agent） | **非思考**（提速省钱） |
+| standalone / 未分类 | 不显式设 → DeepSeek 默认（思考 on） |
+
+per-agent 可在版本配置里声明 `thinking`（bool）/ `reasoning_effort`（`high`/`max`）覆盖角色默认。

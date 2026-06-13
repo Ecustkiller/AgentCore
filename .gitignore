@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+
+# Node / pnpm
+node_modules/
+.pnpm-store/
+
+# Electron
+out/
+release/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test / Coverage
+htmlcov/
+.coverage
+.coverage.*
+.pytest_cache/
+coverage/
+
+# Build artifacts
+*.so
+*.dylib
+*.dll
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite3
+
+# Docker volumes (local dev)
+.docker-data/
+
+# Generated types (regenerated from OpenAPI)
+apps/desktop/src/renderer/types/api.generated.ts

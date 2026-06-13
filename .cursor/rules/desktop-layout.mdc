@@ -1,0 +1,64 @@
+---
+description: 桌面端页面布局宽度规范——新增/修改页面时参考
+globs:
+  - "**/*.tsx"
+alwaysApply: false
+---
+
+# 桌面端布局宽度规范
+
+两级宽度梯度 + 统一 padding，所有页面必须归入其中之一。
+
+## 宽度梯度
+
+| 梯度 | Tailwind | 像素 | 适用场景 |
+|---|---|---|---|
+| **content** | `max-w-4xl mx-auto` | 896px | 对话、设置、详情、表单——线性阅读 |
+| **canvas** | `max-w-[1200px] mx-auto` | 1200px | 探索、列表、文件管理——网格/多列 |
+
+## 对话页特殊结构
+
+消息滚动区和底部输入区分别用 `max-w-4xl mx-auto w-full` 内层 wrapper：
+
+```
+滚动容器(full-width) → 内层(max-w-4xl mx-auto, px-6 py-4) → messages
+底部区域(max-w-4xl mx-auto) → error/approval/InputBar
+```
+
+滚动条保持在全宽容器边缘，内容居中。
+
+## padding 规范
+
+- 内容页横向：`px-6`（24px）
+- 内容页纵向：`py-8`（32px）
+- 对话页：上下 `py-4`，InputBar 自带 `px-4 pb-4 pt-2`
+
+## 字体大小层级（严格 4 级）
+
+| 级别 | Tailwind | 像素 | 用途 |
+|---|---|---|---|
+| caption | `text-xs` | 12px | 元数据、badge、时间戳、小按钮 |
+| body | `text-sm` | 14px | 所有正文、表单、按钮、消息 |
+| heading | `text-base` | 16px | 组件标题、导航项 |
+| title | `text-xl` | 20px | 页面标题 |
+
+**禁止**：`text-[10px]`、`text-[11px]`、`text-[13px]`、`text-lg`、`text-2xl` 及任何自定义像素值。
+
+## 圆角层级（严格 3 级）
+
+| 级别 | Tailwind | 像素 | 用途 |
+|---|---|---|---|
+| small | `rounded-lg` | 8px | 输入框、按钮、小卡片、tab |
+| large | `rounded-xl` | 12px | 卡片、面板、气泡、弹窗 |
+| pill | `rounded-full` | ∞ | 头像、badge、pill 标签、进度条 |
+
+**禁止**：`rounded-sm`、`rounded-md`、`rounded-2xl`、`rounded-3xl`。
+
+## 按钮尺寸（2 档）
+
+| 档位 | 值 | 用途 |
+|---|---|---|
+| sm | `size-7` (28px) | icon-only 小按钮 |
+| md | `size-8` (32px) | 标准交互按钮 |
+
+导航项使用 `h-9`（36px）为专用例外。
