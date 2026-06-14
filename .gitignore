@@ -33,6 +33,8 @@ release/
 .env
 .env.local
 .env.*.local
+# Real production secrets (created on the server from production.env.example)
+deploy/config/production.env
 
 # OS
 .DS_Store

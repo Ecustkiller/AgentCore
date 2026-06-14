@@ -140,7 +140,9 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
     }
     case "turn_saved": {
       const payload = event.payload as TurnSavedPayload;
-      useConversationStore.getState().reconcileLastTurn(payload.user_message_id);
+      useConversationStore
+        .getState()
+        .reconcileLastTurn(payload.user_message_id);
       break;
     }
 

@@ -6,6 +6,7 @@ import {
 import { useConversationStore } from "@/stores/conversation";
 import { useExecutionStore, useProjectedExecution } from "@/stores/execution";
 import { useUIStore } from "@/stores/ui";
+import { AlertTriangle, RotateCw, X } from "lucide-react";
 import { CheckpointCard } from "./CheckpointCard";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
@@ -102,6 +103,43 @@ function TeamPreviewHost({
   );
 }
 
+/**
+ * Banner for a failed turn (send / regenerate transport error), shown just above
+ * the input. The retry closure is supplied by the failing call and re-runs that
+ * exact turn; dismissing only hides the banner.
+ */
+function RetryBanner() {
+  const error = useConversationStore((s) => s.error);
+  const retry = useConversationStore((s) => s.retry);
+  const clearError = useConversationStore((s) => s.clearError);
+  if (!error) return null;
+
+  return (
+    <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      <AlertTriangle size={15} className="shrink-0" />
+      <span className="min-w-0 flex-1">{error}</span>
+      {retry && (
+        <button
+          type="button"
+          onClick={() => retry()}
+          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-destructive px-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
+        >
+          <RotateCw size={13} />
+          重试
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={clearError}
+        aria-label="关闭"
+        className="shrink-0 text-destructive/70 hover:text-destructive"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
 export function ChatView() {
   const messages = useConversationStore((s) => s.messages);
   const currentConversationId = useConversationStore(
@@ -139,6 +177,7 @@ export function ChatView() {
 
       {/* Bottom input area */}
       <div className="mx-auto w-full max-w-4xl">
+        <RetryBanner />
         <MessageInput />
       </div>
     </div>
