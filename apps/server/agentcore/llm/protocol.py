@@ -8,8 +8,6 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
-from agentcore.core.types import ModelTier
-
 
 @dataclass
 class ToolCallFunction:
@@ -112,8 +110,4 @@ class LLMProvider(Protocol):
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
         """Streaming call. Yields chunks as they arrive."""
-        ...
-
-    def resolve_model(self, tier: ModelTier) -> str:
-        """Map a ModelTier preference to a concrete model identifier."""
         ...

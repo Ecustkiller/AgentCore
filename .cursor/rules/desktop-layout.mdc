@@ -62,3 +62,11 @@ alwaysApply: false
 | md | `size-8` (32px) | 标准交互按钮 |
 
 导航项使用 `h-9`（36px）为专用例外。
+
+## 图标尺寸
+
+| 场景 | lucide size | 像素 | 说明 |
+|---|---|---|---|
+| 主导航项 | `size={18}` | 18px | 配合 heading 级 `text-base` |
+| body 级按钮/列表 | `size={16}` | 16px | 正文行内图标 |
+| caption 级/辅助 | `size={14}` | 14px | 小按钮、元数据图标 |

@@ -11,11 +11,11 @@ from agentcore.config import settings
 from agentcore.db.base import Base
 from agentcore.db.models import (  # noqa: F401 - ensure all models are imported
     Conversation,
-    Execution,
+    Credentials,
+    Invite,
     Message,
     RefreshToken,
     User,
-    UserMemory,
 )
 
 config = context.config

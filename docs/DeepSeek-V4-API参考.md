@@ -22,10 +22,13 @@
 
 | AgentCore 角色 | 模型 | 思考模式 |
 |---------------|------|---------|
-| 编排器 | deepseek-v4-flash | 非思考模式（最低延迟） |
-| 简单任务 Agent | deepseek-v4-flash | 思考模式 (high) |
-| 复杂任务 Agent | deepseek-v4-pro | 思考模式 (high) |
-| 极复杂任务 Agent | deepseek-v4-pro | 思考模式 (max) |
+| 编排器（含检查点复核） | deepseek-v4-flash | 思考模式 (max) |
+| `fast` 档 worker（较简单 / 范围明确） | deepseek-v4-flash | 思考模式 (high)、回合预算小 |
+| `strong` 档 worker、单聊、合成 | deepseek-v4-flash（strong 设计本意 Pro，开发期暂走 Flash） | 思考模式 (high) |
+| 极复杂任务（per-agent 按需解锁） | deepseek-v4-flash | 思考模式 (max) |
+| 标题 / 记忆维护（后台机械任务） | deepseek-v4-flash | 非思考（提速省钱） |
+
+> 开发期统一为「`high`/`max` 两档有效思考强度 + 后台机械任务非思考」，全部走 Flash。`fast` 与 `strong` 同为 `high`，靠回合预算（4 vs 28）与 per-agent `max` 解锁区分；不再保留非思考的 worker 档。
 
 ---
 
@@ -165,7 +168,7 @@ messages.append({
 
 ## 七、代码示例
 
-### 7.1 基础调用（非思考模式，适用于编排器）
+### 7.1 基础调用（非思考模式，适用于 fast 档 worker / 标题 / 记忆）
 
 ```python
 from openai import OpenAI
@@ -177,12 +180,12 @@ client = OpenAI(
 
 response = client.chat.completions.create(
     model="deepseek-v4-flash",
-    messages=[{"role": "user", "content": "分析这个任务并生成执行计划"}],
+    messages=[{"role": "user", "content": "用一句话给这段对话起个标题"}],
     extra_body={"thinking": {"type": "disabled"}},
 )
 ```
 
-### 7.2 思考模式调用（适用于 Worker Agent）
+### 7.2 思考模式调用（适用于编排器 / Worker Agent）
 
 ```python
 response = client.chat.completions.create(
@@ -263,7 +266,7 @@ for chunk in stream:
 
 1. **reasoning_content 必须回传**：这是 V4 与其他模型最大的 API 差异。在 tool call 场景中，如果前一轮有 reasoning_content 且该轮包含 tool_calls，后续所有请求都必须包含它。
 
-2. **思考模式默认启用**：如果不需要思考（如编排器的快速判断），必须显式设置 `{"thinking": {"type": "disabled"}}`。
+2. **思考模式默认启用**：如果不需要思考（如标题生成 / 记忆维护 / fast 档 worker），必须显式设置 `{"thinking": {"type": "disabled"}}`。
 
 3. **缓存命中**：DeepSeek 服务端自动做 prompt prefix caching，相同前缀的请求会命中缓存，输入价格大幅降低（Flash: $0.14 → $0.0028）。多轮对话场景天然受益。
 

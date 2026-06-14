@@ -8,6 +8,7 @@ Executes code in a restricted subprocess with:
 """
 
 import asyncio
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -28,6 +29,27 @@ _FILE_EXTENSIONS: dict[str, str] = {
 }
 
 
+async def _cleanup_tempdir(path: str) -> None:
+    """Best-effort removal of an execution temp dir.
+
+    On Windows the subprocess holds its cwd (the temp dir) and the OS releases
+    that handle only shortly after the process exits, so an immediate rmtree can
+    fail with a sharing violation (WinError 32). Retry a few times, then give up:
+    a stray temp dir is harmless and eventually reaped by the OS.
+    """
+    for delay in (0.0, 0.05, 0.2, 0.5):
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            continue
+    shutil.rmtree(path, ignore_errors=True)
+
+
 class SubprocessSandbox:
     """Restricted subprocess sandbox for MVP code execution."""
 
@@ -44,7 +66,8 @@ class SubprocessSandbox:
 
         start = time.monotonic()
 
-        with tempfile.TemporaryDirectory(prefix="agentcore_sandbox_") as tmpdir:
+        tmpdir = tempfile.mkdtemp(prefix="agentcore_sandbox_")
+        try:
             ext = _FILE_EXTENSIONS[request.language]
             code_file = Path(tmpdir) / f"main{ext}"
             code_file.write_text(request.code, encoding="utf-8")
@@ -96,6 +119,8 @@ class SubprocessSandbox:
                 )
             except OSError as e:
                 raise SandboxError(f"Failed to start process: {e}") from e
+        finally:
+            await _cleanup_tempdir(tmpdir)
 
     async def health_check(self) -> bool:
         """Verify the sandbox can execute code."""

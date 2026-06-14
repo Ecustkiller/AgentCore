@@ -3,9 +3,10 @@
 from agentcore.llm.config import (
     DEEPSEEK_V4_FLASH,
     DEEPSEEK_V4_PRO,
-    ModelConfig,
-    get_model_config,
-    resolve_model_for_tier,
+    ModelProfile,
+    agent_profile,
+    build_request,
+    get_profile,
 )
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.protocol import (
@@ -27,9 +28,10 @@ __all__ = [
     "LLMProvider",
     "LLMRequest",
     "LLMResponse",
-    "ModelConfig",
+    "ModelProfile",
     "TokenUsage",
     "ToolCall",
-    "get_model_config",
-    "resolve_model_for_tier",
+    "agent_profile",
+    "build_request",
+    "get_profile",
 ]

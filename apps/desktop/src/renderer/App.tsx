@@ -1,5 +1,11 @@
-import { AppLayout } from "./components/layout/AppLayout";
+import { RouterProvider } from "react-router-dom";
+import { AuthGate } from "./components/auth/AuthGate";
+import { router } from "./router";
 
 export function App() {
-  return <AppLayout />;
+  return (
+    <AuthGate>
+      <RouterProvider router={router} />
+    </AuthGate>
+  );
 }

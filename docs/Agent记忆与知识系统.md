@@ -1,8 +1,6 @@
 # Agent 记忆与知识系统
 
 > **状态**：MVP 方案已确定（存储基础、分层策略、注入流程）；高级特性待定
-> **创建时间**：2026-06-13
-> **更新时间**：2026-06-14（新增 §五 工作区上下文模型）
 
 ---
 
@@ -14,17 +12,21 @@
 
 ## 一、MVP 记忆分层 ✅ 已确定
 
-MVP 阶段实现三层记忆，覆盖最核心的用户体验需求。
+MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 ### 1.1 分层总览
 
 | 层级 | 存储 | 生命周期 | MVP 状态 |
 |------|------|----------|----------|
 | **工作记忆** | 内存（对话历史 + TaskWorkspace） | 会话内 | ✅ 必须 |
-| **会话摘要** | PostgreSQL `conversations` 表 | 持久化 | ✅ Day 1 必须 |
-| **用户偏好** | PostgreSQL `user_memory` 表 | 持久化，可演进 | ✅ Day 1 必须 |
+| **用户长期记忆** | 文件树 `rule` 文件（`ai_maintained=true`） | 持久化，可演进 | ✅ Day 1 必须 |
 | 项目知识库 | pgvector 语义检索 | 跟随项目 | ❌ 延后 |
 | 跨 Agent 共享记忆 | — | — | ❌ 延后 |
+| ~~会话摘要（跨会话）~~ | — | — | ❌ 已降级移除（见 §1.3） |
+
+> **记忆与规则统一**：长期记忆不再是独立的 `user_memory` 表，而是文件树里一个由 AI 维护的 `rule` 文件——与用户写的规则**同载体、同注入管线**，仅靠 `ai_maintained` 布尔位区分「谁可静默改写」。设计依据见 §五；被否决的 `user_memory` 表方案见 §八。
+
+> **会话摘要降级**：原三层方案中的「会话摘要」记忆层已移除，只保留「自动标题」这一侧边栏 UX 副产品（它不是记忆层）。理由与现状见 §1.3。
 
 ### 1.2 工作记忆（会话内）
 
@@ -32,108 +34,106 @@ MVP 阶段实现三层记忆，覆盖最核心的用户体验需求。
 
 | 来源 | 内容 | 已有设计 |
 |------|------|----------|
-| 对话历史 | 用户消息 + Agent 回复 | Zustand `useSessionStore` |
-| TaskWorkspace | Agent 步骤输出 + 产物 | [执行引擎 §十一](执行引擎架构设计.md) |
-| Agent 消息历史 | Agent 实例的 LLM 对话上下文 | `AgentInstance.message_history` |
+| 对话历史 | 用户消息 + Agent 回复 | Zustand `useConversationStore` |
+| TaskWorkspace | Agent 步骤输出 + 产物 | [执行引擎 §一](执行引擎架构设计.md) |
+| Agent 消息历史 | 每个 step 的 LLM 对话上下文 | `engine.react_loop` 内构建的 `messages` 列表 |
 
 工作记忆**不需要额外设计**，它就是现有运行时数据。
 
-### 1.3 会话摘要（跨会话）
+### 1.3 自动标题（替代已移除的「会话摘要」）
 
-会话结束时自动生成摘要，供后续会话的编排器使用。
+> **降级记录**：原设计有「会话摘要」记忆层——会话结束时用 flash 生成 `summary` / `key_decisions`，存进 `conversations` 表并注入编排器 `context.session_history_summary`。**已移除**。理由：它喂给的对象是编排器，而编排器只做意图理解与分工（不做内容生产、强偏向 single_agent），「5 个会话前做过什么」几乎不改变其单/多 Agent 判断；真正可复用的跨会话信号（用户偏好/事实）已由长期记忆文件（§1.4）承载，会话摘要在此冗余；其独有的「情景记忆」命中率低（相关任务多在同一会话续，跨会话续接靠用户显式引用更可靠）。`summary` / `key_decisions` 列与 `SessionSummary` 桩均未落地，移除零成本。→ 见代码：`apps/server/agentcore/memory/conversation_title.py`
 
-```python
-@dataclass
-class SessionSummary:
-    conversation_id: str
-    user_id: str
-    title: str                      # LLM 自动生成的一句话标题
-    summary: str                    # ≤500 字的会话摘要
-    key_decisions: list[str]        # 本次会话做出的关键决策
-    tools_used: list[str]           # 使用过的工具
-    agent_count: int                # 使用了几个 Agent
-    created_at: datetime
-    updated_at: datetime
+唯一保留的是**自动标题**：一句话标题，写入已有的 `conversations.title` 列，仅用于侧边栏展示。它是 UX 特性、不是记忆层——**不注入编排器、不含 `key_decisions`**。
+
+- **现状**：`conversation/service.py` 在会话首轮用 flash 模型（`LLMTitleGenerator`，非思考）生成一句话标题；模型输出为空或调用失败时回退为「截断首条用户消息」。LLM 调用在 DB 会话之外、且在 `message_end` 之后进行，不影响用户感知的响应结束。标题落库后在 SSE 流关闭前发 `title_generated` 事件，前端 `renameConversation` 即时刷新侧边栏。
+- **接口**：`TitleGenerator` Protocol + `LLMTitleGenerator` 实现（`memory/conversation_title.py`），模型角色为 `title`（见 `llm/config.py`，flash/非思考/`max_tokens=64`）。
+
+### 1.4 用户长期记忆（AI 维护的 rule 文件）
+
+用户的长期偏好和事实，存为文件树里一个 AI 维护的 `rule` 文件（`ai_maintained=true`，用户可见名如 `记忆.md`）。它与用户手写规则共享存储和注入，区别仅在于 AI 可静默改写它（详见 §五）。
+
+**落点**：用户云端根目录（`parent_id IS NULL` → 全局作用域），`role=rule`、`ai_maintained=true`、`apply_mode=always`。
+
+**内部格式（轻结构化 markdown）**：固定小节做锚点，AI 只在小节内增删 bullet，防止自由文本漂移。
+
+```markdown
+# 用户记忆
+> 本文件由 AI 自动维护，你可随时编辑或删除任何条目。
+
+## 沟通偏好
+- 用简体中文回复
+- 先给结论，再给细节
+
+## 技术栈与工具
+- 后端 Python + FastAPI；函数必须有类型标注
+
+## 工作习惯
+- 倾向小步可验证，不喜欢一次性大改
+
+## 关于用户的事实
+- 在做 Multi-Agent 工作台项目（AgentCore）
 ```
 
-**摘要生成时机**：会话结束时（用户关闭 / 超时 / 新开会话），后台用 flash 模型生成。
+固定小节集合：`沟通偏好` / `技术栈与工具` / `工作习惯` / `关于用户的事实`。
 
-**摘要生成 prompt**（简化）：
-```
-根据以下对话历史，生成一份摘要（≤500字），包括：
-1. 用户要做什么
-2. 最终完成了什么
-3. 做出了哪些关键决策
-4. 还有什么未完成的
+**注入语气**：内容用软措辞（「倾向于」而非「必须」）。权威性由措辞携带——AI 推测的偏好与用户硬规则冲突时，以用户规则为准（见 §二）。
 
-对话历史：
-{messages}
-```
+### 1.5 记忆维护协议（LLM 判断 + 代码落盘）
 
-### 1.4 用户偏好（长期记忆）
+为避免自由文本「越改越乱」，**不让 LLM 直接重写整篇**，而是「LLM 产出结构化变更指令 → 确定性代码套用到 markdown」：
 
-从用户的修正和反馈中积累偏好，影响编排器和 Agent 的行为。
+1. 会话结束时，flash 模型输入「当前记忆文件全文 + 本次对话」，输出**变更指令 JSON**（非新全文）：
 
-```python
-@dataclass
-class UserMemory:
-    user_id: str
-    preferences: dict[str, str]     # 结构化偏好，如 {"code_style": "type hints always"}
-    facts: list[MemoryFact]         # 学习到的事实
-    updated_at: datetime
-
-@dataclass
-class MemoryFact:
-    content: str                    # 如 "用户偏好 Python type hints"
-    source_conversation: str         # 来源对话 ID
-    confidence: float               # 0.0-1.0
-    created_at: datetime
+```json
+{ "ops": [
+  {"action": "add",    "section": "技术栈与工具", "content": "偏好 pnpm 管理 Node 依赖"},
+  {"action": "remove", "section": "工作习惯",     "match": "不喜欢一次性大改"},
+  {"action": "update", "section": "沟通偏好",     "match": "用英文回复", "content": "用简体中文回复"}
+] }
 ```
 
-**偏好提取时机**：与会话摘要同时，用 LLM 从对话中提取新偏好。
+2. 服务端用确定性代码按「小节定位 + bullet 匹配」套用 ops。
+3. 职责分工：LLM 只负责「发现该记/删什么」（语义判断），去重 / 冲突 / 格式稳定由代码保证（确定性操作）。
+4. 冲突与去重：`update` 天然覆盖旧条目；`add` 前代码做规范化去重（MVP 字符串归一，未来 embedding）。
+5. 写权限：维护任务**只写 `ai_maintained=true` 的文件**，永不触碰用户手写规则（见 §五 写边界）。
 
-**提取 prompt**（简化）：
-```
-分析以下对话，提取用户的偏好和特征（如技术栈偏好、沟通风格、工作习惯等）。
-只输出新发现的、高置信度的事实，不要重复已知的。
-
-已知偏好：
-{existing_facts}
-
-本次对话：
-{messages}
-```
+> **现状（MVP 实现，§1.4/§1.5 已接线）**：上文「文件树 `rule` Document + 文件注入管线」是**目标形态**；云端文件树/Document 子系统尚未落地，故 MVP 先用过渡实现，存储与注入都隐藏在抽象后，文件树到位后为一处替换：
+> - **存储**：`MemoryStore` 协议 + `FileMemoryStore`——每用户一个 markdown 文件落在 `data_dir/memory/<user_id>.md`（内容即上文格式）。文件树到位后迁成 `ai_maintained=true` 的 `rule` Document。
+> - **注入**：会话 Prepare 阶段 `assemble_system_prompt(memory_markdown=...)` 直接把非空记忆包成软措辞 `<rules>` 注入，**单/多 Agent 共用同一基座**（多 Agent 经 `runs.py` 以基座拼接子 Agent 提示）。尚无文件夹作用域与 `MAX_INSTRUCTION_*` 预算（全局根级、全文注入）。
+> - **维护触发**：每轮会话末 `maintain_user_memory` 跑 load→extract→apply→save，无净变化则跳过写；提取用 `memory` 角色（flash/非思考）。全程兜底，失败只记日志、不影响对话。
+> - 模型角色见 `llm/config.py`（`memory`）。→ 见代码：`apps/server/agentcore/memory/{store,maintenance,user_memory}.py`、`runtime/prompt.py`、`conversation/service.py`
 
 ---
 
 ## 二、记忆注入流程 ✅ 已确定
 
-记忆通过编排器输入的 `context` 字段注入到系统中。
+工作记忆（当前对话历史）直接在窗口内、编排器侧也会读到；**用户长期记忆**随文件注入管线进执行 Agent 的 `<rules>`（不进编排器 context）。会话摘要注入路径已移除（见 §1.3）。
 
 ```
 用户发消息
   │
-  ├── 1. 工作记忆 → 当前对话历史（直接可用）
+  ├── 1. 工作记忆 → 当前对话历史（直接在窗口）
+  │        编排器侧由 _summarize_history 截取最近数条
+  │        （见 编排器Prompt与输出结构.md §一）
   │
-  ├── 2. 会话摘要 → 最近 5 个会话的 summary
-  │        SQL: SELECT title, summary FROM conversations
-  │             WHERE user_id = ? ORDER BY updated_at DESC LIMIT 5
+  ├── 2. 用户长期记忆 → ai_maintained 的 rule 文件
+  │        随文件注入管线合成进 Agent 的 <rules>（与用户规则同管线）
+  │        全局（根目录）+ 关联文件夹级，按 MAX_INSTRUCTION_* 预算
   │
-  ├── 3. 用户偏好 → preferences + facts
-  │        SQL: SELECT preferences, facts FROM user_memory WHERE user_id = ?
-  │
-  └── 4. 组装编排器输入
-         context.session_history_summary = 拼接最近 5 个会话摘要
-         context.user_preferences = preferences JSON + facts 列表
-         context.project_context = null (MVP 不做)
+  └── 3. context.user_preferences / project_context → MVP 置空
 ```
+
+**关键决策：用户偏好只注入执行 Agent（via `<rules>`），不注入编排器。** 偏好主要影响内容生产（用什么语言、什么代码风格），归 Agent；编排器只做意图理解和分工，不需要。少维护一条注入路径，编排器 `context.user_preferences` MVP 置空。
+
+**规则 vs 记忆的优先级**：合成 `<rules>` 时，用户手写规则在前（权威措辞「必须」），AI 维护的记忆在后（软措辞「倾向于」）；冲突时以用户规则为准。权威性由措辞携带，不靠单独的注入段或结构。
 
 与编排器输入结构的对应关系（见 [`编排器Prompt与输出结构.md` §一](编排器Prompt与输出结构.md)）：
 
 | 编排器 context 字段 | 记忆来源 | MVP 实现 |
 |---------------------|---------|----------|
-| `session_history_summary` | 会话摘要 | ✅ 最近 5 个 SessionSummary |
-| `user_preferences` | 用户偏好 | ✅ UserMemory.preferences + facts |
+| `recent_history` | 工作记忆（当前会话历史） | ✅ `_summarize_history` 截取最近数条 |
+| `user_preferences` | （已改为注入 Agent 的 `<rules>`） | ❌ 编排器侧置空 |
 | `project_context` | 项目知识库 | ❌ 空（MVP 不做） |
 
 ---
@@ -143,8 +143,7 @@ class MemoryFact:
 ```
 会话开始
   │
-  ├── 加载 UserMemory → 注入编排器 context.user_preferences
-  ├── 加载最近 SessionSummary → 注入编排器 context.session_history_summary
+  ├── 加载 ai_maintained 记忆文件 → 合成进 Agent <rules>
   │
   ▼
 会话进行中
@@ -156,16 +155,17 @@ class MemoryFact:
   ▼
 会话结束
   │
-  ├── LLM 生成会话摘要 → INSERT INTO conversations
-  ├── LLM 提取用户偏好 → UPDATE user_memory（合并新 facts）
+  ├──（可选）flash 生成一句话标题 → UPDATE conversations.title（见 §1.3）
+  ├── LLM 产出记忆变更 ops → 代码套用到 ai_maintained 记忆文件（见 §1.5）
   └── TaskWorkspace 归档到 PostgreSQL
 ```
 
 ---
 
-## 四、运行时上下文管理 ✅ 已确定
+## 四、运行时上下文管理 ✅ 设计已定；MVP 延后实现
 
 > 多 Agent 长任务的上下文管理机制。补充 §一的「存储层」，本节定义「运行时如何装配和传递上下文」。
+> **MVP 范围**：DeepSeek V4 的 1M 窗口足够容纳 MVP 全部记忆（见 §六），本节的 TWM / 可寻回归档 / 委派预算等复杂上下文工程**延后到窗口不足时实现**，MVP 只做「工作记忆 + 记忆文件注入」。
 
 ### 4.1 上下文全景：8 类 × 5 种边界
 
@@ -273,19 +273,23 @@ Agent 拥有 `recall` 工具，可列出归档目录并按需取回完整内容�
 - 已绑定的对话不可解绑、不可迁移（`folder_id` 一旦设置即为终态）
 - 无文件夹的对话仍受账号级全局规则约束
 
-### 5.2 文件角色模型
+### 5.2 文件角色模型（记忆与规则统一）
 
-| role | 含义 | 谁写 | 注入行为 |
+记忆与规则**同载体、同注入**：合并为单一 `rule` 角色，仅靠 `ai_maintained` 布尔位区分「谁可静默改写」。
+
+| role | ai_maintained | 含义 | 注入行为 |
 |---|---|---|---|
-| `instruction` | 用户指令文档 | 用户 | 按 `apply_mode` 进入统一 `<rules>` |
-| `preference` | AI 维护的偏好文档 | AI | 恒为 `always` 合成规则 |
-| `general` | 普通文件/文档 | 用户/AI | 经 RAG top-K 进入 `<workspace_context>` |
+| `rule` | `false` | 用户规则（用户拥有，AI 可起草但不静默改） | 按 `apply_mode` 进入 `<rules>` |
+| `rule` | `true` | AI 维护的长期记忆 | 进入 `<rules>`（默认 `always`，软措辞） |
+| `general` | — | 普通文件/文档 | 经 RAG top-K 进入 `<workspace_context>` |
 
-用户视角：`instruction` 属"规则"族，`preference` 显示为"记忆"（AI 维护），`general` 是普通文档。
+用户视角：`rule + ai_maintained=false` 显示为"规则"，`rule + ai_maintained=true` 显示为"记忆"，`general` 是普通文档。
+
+**为什么不合并成一种、也不拆成两个角色**：注入进 prompt 后一切都是文本，「权威 vs 推测」无法靠结构硬性区分，由内容措辞携带即可——所以无需独立的 `preference` 角色。但「后台维护任务可静默改写哪些文件」是**代码层安全分支**：类比 repo 里「手写文件 vs 生成文件」都是文件、却必须标记以免工具乱改。`ai_maintained` 就是这个标记，删不得。`instruction` / `preference` 旧二分见 §八 否决记录。
 
 ### 5.3 位置即作用域
 
-全局规则不靠标记位，而靠**位置**：放在云端根（`parent_id IS NULL`）的 `instruction` 文档注入所有对话。子文件夹的 `instruction` 只对该文件夹上下文内的对话生效。
+全局规则不靠标记位，而靠**位置**：放在云端根（`parent_id IS NULL`）的 `rule` 文档注入所有对话。子文件夹的 `rule` 只对该文件夹上下文内的对话生效。
 
 - 全局规则与文件夹规则共享同一注入预算口径（`MAX_INSTRUCTION_*`），不各自一份
 - 累积合并时**全局优先**（始终生效基线，预算紧张时优先存活）
@@ -293,7 +297,7 @@ Agent 拥有 `recall` 工具，可列出归档目录并按需取回完整内容�
 
 ### 5.4 注入模式
 
-`instruction` 文档支持三种 `apply_mode`：
+`rule` 文档支持三种 `apply_mode`（用户规则与 AI 记忆通用）：
 
 | 模式 | 行为 | 字符预算 |
 |---|---|---|
@@ -313,10 +317,10 @@ Agent system_prompt → Marketplace Rules → Skills → Workspace Context → �
 
 | 机制 | 范围 | 限制手段 |
 |---|---|---|
-| instruction/preference 注入 | 仅关联文件夹的 **direct children** | `MAX_INSTRUCTION_DOCS` / `MAX_INSTRUCTION_CHARS` |
+| `rule` 注入（规则 + 记忆） | 仅关联文件夹的 **direct children** | `MAX_INSTRUCTION_DOCS` / `MAX_INSTRUCTION_CHARS` |
 | RAG 知识检索 | **整棵子树**，无深度限制 | chunk 上限 + top-K + 相关度阈值 |
 
-instruction 不递归是因为规则按层级生效（子文件夹有自己的指令）；RAG 不限深度是因为用户心智是"文件夹里的东西 AI 都能看到"。
+`rule` 不递归是因为规则按层级生效（子文件夹有自己的规则）；RAG 不限深度是因为用户心智是"文件夹里的东西 AI 都能看到"。
 
 ---
 
@@ -327,13 +331,12 @@ DeepSeek V4 有 1M token 上下文窗口，这极大简化了记忆设计：
 | 内容 | 估算 token 数 | 说明 |
 |------|-------------|------|
 | 当前对话历史 | 5K-50K | 大多数对话 |
-| 会话摘要（5 个 × 500 字） | ~3K | 很小 |
-| 用户偏好 | ~1K | 很小 |
+| 用户长期记忆文件 | ~1K | 很小 |
 | Agent system prompt | ~2K | 每个 Agent |
 | 依赖注入（前置步骤输出） | 5K-20K | 来自 TaskWorkspace |
-| **合计** | ~15K-75K | 远小于 1M 窗口 |
+| **合计** | ~13K-73K | 远小于 1M 窗口 |
 
-**MVP 阶段利用 1M token 窗口优势，仅实现基础上下文管理（工作记忆 + 会话摘要 + 用户偏好），复杂压缩/裁剪策略留待窗口不足时实现**。1M 窗口足够容纳 MVP 所有记忆内容。
+**MVP 阶段利用 1M token 窗口优势，仅实现基础上下文管理（工作记忆 + 用户长期记忆文件注入），复杂压缩/裁剪策略留待窗口不足时实现**。1M 窗口足够容纳 MVP 所有记忆内容。
 
 ---
 
@@ -342,7 +345,7 @@ DeepSeek V4 有 1M token 上下文窗口，这极大简化了记忆设计：
 | 产品 | 记忆能力 | 我们的优势 |
 |------|----------|-----------|
 | ChatGPT Memory | 跨会话记忆事实 | 类似能力（用户偏好），但我们的记忆服务多 Agent |
-| Cursor | .cursor/rules + 上下文窗口 | 跨会话摘要让编排器了解历史上下文 |
+| Cursor | .cursor/rules + 上下文窗口 | AI 自动维护的长期记忆文件（`ai_maintained` rule），与用户规则同管线注入 |
 | Claude Projects | 项目级知识库 | MVP 同等（都不做深度项目索引），但我们有多 Agent 协作记忆 |
 
 ---
@@ -352,22 +355,28 @@ DeepSeek V4 有 1M token 上下文窗口，这极大简化了记忆设计：
 | 能力 | MVP | 未来 |
 |------|-----|------|
 | 工作记忆（当前会话） | ✅ 已有设计 | ✅ |
-| 会话摘要（跨会话） | ✅ Day 1 必须（PostgreSQL + LLM 摘要） | 向量检索相关会话 |
-| 用户偏好（长期） | ✅ Day 1 必须（基础 KV + facts） | 自动学习 + 置信度衰减 |
+| 用户长期记忆（`ai_maintained` rule 文件） | ✅ Day 1 必须（轻结构化 markdown + ops 维护） | 子文件夹级作用域、embedding 去重 |
+| 自动标题（侧边栏 UX） | ✅ Day 1（`conversations.title`；已接线 flash 生成 `LLMTitleGenerator`，失败回退截断） | — |
+| ~~会话摘要（跨会话）~~ | ❌ 已降级移除（见 §1.3） | — |
+| 记忆可见/编辑 | ✅ **免费**（文件树直接看/改/删） | 专门的记忆管理面板 |
 | 项目知识库 | ❌ | pgvector 语义检索 |
 | 跨 Agent 共享记忆 | ❌ | 共享知识图 |
-| 记忆编辑 UI | ❌ | 用户查看/编辑/删除记忆 |
+| 运行时上下文工程（§四 TWM/recall/委派预算） | ❌ 延后 | ✅ 窗口不足时 |
 | 遗忘机制 | ❌ | 基于访问频率和时间衰减 |
 | 记忆导入/导出 | ❌ | 用户迁移支持 |
+
+> **被否决方案**：独立 `user_memory` 表（`preferences` JSONB + `facts`）+ 独立 `preference` 角色。否决理由：与正在建的文件系统职责重叠、记忆对用户黑盒（可见/编辑要另建 UI）、且「权威 vs 推测」无需用独立角色承载。改为 `ai_maintained` 的 `rule` 文件统一承载。→ 见代码: `apps/server/agentcore/memory/`
 
 ---
 
 ## 九、开放问题
 
-- [x] 记忆分层策略 → 三层：工作记忆 / 会话摘要 / 用户偏好
-- [x] 记忆检索方式 → MVP 用 SQL 时间序列查询，不做语义检索
-- [x] MVP 最小可行版本 → 自动摘要 + 偏好提取 + 编排器注入
+- [x] 记忆分层策略 → 两层：工作记忆 / 用户长期记忆（会话摘要已降级移除，见 §1.3）
+- [x] 记忆检索方式 → MVP 全文注入记忆文件（无检索，非 SQL 时间序列查询），不做语义检索
+- [x] MVP 最小可行版本 → 记忆文件 ops 维护 + Agent `<rules>` 注入 + 自动标题
 - [x] 记忆与上下文窗口 → 1M token 窗口足够，MVP 仅基础上下文管理，复杂压缩留待窗口不足时实现
 - [x] 记忆粒度 → 用户级（非 Agent 级），所有 Agent 共享同一用户的记忆
-- [ ] 会话摘要的质量评估（如何验证 LLM 生成的摘要是否有用）
-- [ ] 用户偏好 facts 的去重和冲突解决策略
+- [x] 记忆与规则是否统一 → 统一：同载体（`rule` 文件）、同注入（`<rules>`），仅 `ai_maintained` 区分写边界（见 §五）
+- [x] 用户偏好去重 / 冲突 → 由记忆维护协议的代码层解决（`update` 覆盖 + `add` 规范化去重，见 §1.5）
+- [x] 会话摘要是否值得做 → 否，已降级移除（编排器不需要跨会话情景记忆，见 §1.3）
+- [ ] 记忆维护的触发频率与成本（每会话末跑一次 flash 是否够，长会话是否需要中途更新）

@@ -1,67 +1,94 @@
 # 编排器 Prompt 工程与输出结构设计
 
 > **状态**：已确定方向（输出结构和流式策略）；system prompt 细节待迭代
-> **创建时间**：2026-06-14
 
 ---
 
-## 核心定位
+## 核心定位（2026-06-14 修订：CEO 主 Agent 模型）
 
-编排器是 AgentCore 的中枢大脑。它接收用户请求，输出结构化协作计划，驱动执行引擎调度多个 Agent 并行/串行工作。
+编排能力归属于一个**会话型「CEO」主 Agent**——它既是**唯一对话入口与声音**，也是**团队规划大脑**。CEO 直接与用户对话、可来回澄清；当任务确需团队时，它**下达指令**（结构化协作计划），驱动执行引擎调度多个 Agent 并行/串行工作，并**用自己的声音收尾汇报**（合成器角色并入 CEO）。
 
-### 职责边界
+> 这是对「聊天优先 + 按需编排」的统一收敛：把原先的「聊天 Agent + 隐形编排器 + 合成器」三套人格合并为**一个 CEO**，消除职责重叠与人格切换，并让编排器获得「先澄清再下达」的能力。完整讨论与决策见 `规划/编排器重定位-讨论与规划.md`。
+>
+> **底线不变**：合并的是「对用户的身份/声音」，不是「每轮都跑重规划」。CEO 默认走快的会话档，简单对话直接作答（零编排开销）；「组团/下计划」是按需触发的能力。
+>
+> 现状：代码仍是「聊天 Agent（`pipeline.py`）+ 独立编排器（`planner.py`）+ 合成器（`runs.py`）」的分离接线，CEO 统一为已确认的下一步重构，尚未落地。
+
+### 职责边界（CEO）
 
 ```
-✅ 理解用户意图
-✅ 分解任务为可执行步骤
-✅ 决定 Agent 数量与角色
-✅ 分配工具集
-✅ 定义步骤间依赖关系（驱动并行/串行）
-✅ 设定检查点位置
+✅ 与用户直接对话、必要时来回澄清（D2）
+✅ 简单请求直接作答（承袭聊天优先，零编排开销）
+✅ 理解意图、分解任务、决定 Agent 数量与角色、分配工具集
+✅ 定义步骤间依赖关系（驱动并行/串行）、设定检查点
 ✅ 在检查点审视中间结果并调整计划
-❌ 不做任何内容生产
-❌ 不调用任何工具
-❌ 不直接与用户对话（通过 UI 层转发）
+✅ 团队跑完用自己的声音收尾汇报（D3）
+❌ 复杂任务的内容生产交给 workers，CEO 不亲自下场堆产出
+❌ 重规划只在按需触发时支付，绝不让简单对话背上规划税
 ```
+
+### 实现方案 ✅ 已确定
+
+**自研编排器，不依赖 LangGraph / CrewAI 等第三方编排框架。**
+
+| 设计点 | 决策 |
+|--------|------|
+| 编排器定位 | CEO 主 Agent 的「按需规划能力」：CEO 既对话又规划；简单请求直接答，复杂任务才下达全景计划 |
+| 调度模式 | 检查点模式：规划后在关键节点轻量审视中间结果，决定是否调整 |
+| 输入 | 用户请求 + 可用工具清单 + 行为模板（如有）+ 项目/会话上下文摘要 |
+| 输出 | 结构化 JSON 协作计划（见 §二） |
+
+**为什么自研（被否决：LangGraph 等框架）：**
+
+1. 编排器是 AgentCore 的核心竞争力和产品壁垒，必须完全掌控
+2. 第三方框架的抽象与「Agent 团队管理」心智模型不完全匹配
+3. 自研可针对产品需求深度定制，不受框架约束
+4. 避免框架锁定风险
+
+### 检查点触发条件
+
+| 触发条件 | 编排器行为 |
+|----------|-----------|
+| Agent 完成一个阶段 | 审视输出摘要，确认是否继续下一步 |
+| Agent 报告失败 / 异常 | 重新规划或分配备用 Agent |
+| Agent 请求协助 | 决定是否增加新 Agent |
+| 用户主动干预 | 重新规划 |
+| 并行任务全部完成 | 触发汇总阶段 |
+
+### 聊天优先 + 按需编排（CEO 统一身份）✅ 已确定（2026-06-14 修订）
+
+入口即 **CEO 主 Agent**（默认走快的 `chat` 档），它直接拥有并回复对话。只有当 CEO 判断某请求**确实需要一个团队**（多视角并行、设计→实现→测试流水线、辩论/对比）时，才**下达全景计划**、执行 DAG，并由 CEO 自己收尾汇报。简单对话由同一个 CEO 直接作答，不经任何重规划。
+
+| 场景 | 路径 | 用户感知 |
+|------|------|---------|
+| 简单对话 / 问答 / 单点工具 | CEO 直接流式回答（零编排开销） | 首字即时，体验同 ChatGPT |
+| 需要团队的复杂任务 | CEO 下达计划 → 多 Agent DAG → CEO 收尾汇报 | 协作面板展开，展示完整分工；全程一个声音 |
+
+升级由模型自决：CEO 每轮都在，自己判断要不要组团；升级时给用户明确的视觉信号（任务卡片 + 图视图）。误判时优雅降级——若判定任务实为单 Agent，直接由 CEO 作答，不空转组团。
+
+→ 见代码：`runtime/pipeline.py`（聊天入口）、`tools/builtin/assemble_team.py`（按需编排工具 + 降级）、`runtime/planner.py`（团队规划）、`runtime/runs.py`（DAG 执行）
+
+> **被否决：编排器是唯一入口（无前置分类器，每轮必经编排器）。** 原方案让每条消息（哪怕「你好」）都先付一次完整编排器往返，实测对简单输入也有 ~15s 首字延迟；叠加「编排器强烈偏向 single_agent」后，95% 对话的编排纯属高频聊天的「税」。改为「聊天优先 + 按需编排」后，编排开销只在真正需要团队时支付，对齐 Claude Code（Agent/Task 工具）、OpenAI Agents SDK（agents-as-tools）的行业范式。原方案「避免两套决策逻辑不一致」的诉求，改由聊天 Agent 统一承担「每轮判断是否升级」来满足，不再需要独立前置编排。
 
 ---
 
 ## 一、编排器输入结构
 
-```json
-{
-  "user_request": "帮我实现一个用户登录模块，支持 JWT 和 OAuth",
-  
-  "context": {
-    "session_history_summary": "之前已讨论过数据库 schema 设计...",
-    "project_context": "Python FastAPI 项目，已有 user model...",
-    "user_preferences": null
-  },
-  
-  "available_tools": [
-    { "name": "file_read", "description": "读取文件内容", "category": "filesystem" },
-    { "name": "file_write", "description": "写入文件", "category": "filesystem" },
-    { "name": "web_search", "description": "搜索互联网", "category": "research" },
-    { "name": "code_execute", "description": "在沙箱中执行代码", "category": "sandbox" }
-  ],
+编排器的输入由 planner 在调用前组装为一段文本提示（用户请求 + 最近对话摘要 + 可用工具清单 + 约束），而非传入结构化 JSON。
 
-  "constraints": {
-    "max_agents": 5,
-    "max_parallel": 10,
-    "user_behavior_template": null
-  }
-}
-```
+→ 见代码：`apps/server/agentcore/runtime/planner.py`（`_build_messages` 组装、`_summarize_history` 历史摘要）
+
+下表为输入的概念字段：
 
 ### 字段说明
 
 | 字段 | 来源 | 作用 |
 |------|------|------|
 | `user_request` | 用户原文 | 编排器理解意图的基础 |
-| `context.session_history_summary` | 系统自动生成 | 避免编排器失去对话上下文 |
-| `context.project_context` | 项目索引/摘要 | 让编排器了解当前工作环境 |
+| `recent_history` | 当前会话最近对话（工作记忆，`_summarize_history` 截取最近数条） | 让编排器保有当前对话上下文 |
 | `available_tools` | 工具注册表 | 编排器只能分配已有工具 |
 | `constraints` | 系统配置/用户设置 | 硬性限制 |
+| `context.project_context` | 项目索引/摘要 | 让编排器了解工作环境（MVP 未注入） |
 
 ---
 
@@ -69,162 +96,13 @@
 
 编排器的输出是一个结构化协作计划，直接驱动执行引擎。
 
-### 完整 Schema
+### 数据结构与 Schema
 
-```json
-{
-  "plan_type": "multi_agent | single_agent",
-  "task_summary": "string — 一句话任务摘要（展示给用户）",
-  
-  "agents": [
-    {
-      "id": "string — 唯一标识",
-      "role": "string — 角色名称（展示给用户）",
-      "objective": "string — 该 Agent 的目标描述",
-      "system_prompt_supplement": "string | null — 补充到 Agent 基础 prompt 后的角色指令",
-      "tools": ["string — 分配给该 Agent 的工具列表"],
-      "model_preference": "fast | standard | strong"
-    }
-  ],
+计划的类型化数据结构（`OrchestratorPlan` / `PlannedAgent` / `PlannedStep` / `PlannedCheckpoint` / `OutputStrategy`）与容错解析（始终产出合法计划、无环校验）已落地；给 LLM 的 JSON Schema 内嵌在编排器 system prompt 中：
 
-  "steps": [
-    {
-      "id": "string — 步骤唯一标识",
-      "agent_id": "string — 执行该步骤的 Agent",
-      "task": "string — 该步骤的具体任务描述（作为 Agent 的用户 prompt）",
-      "depends_on": ["string — 依赖的步骤 ID 列表"],
-      "expected_output": "string — 预期产出描述"
-    }
-  ],
+→ 见代码：`apps/server/agentcore/runtime/plan.py`（数据类 + `parse_plan` + `_assert_acyclic`）、`runtime/planner.py`（`_PLANNER_SYSTEM_PROMPT` 内的输出 JSON Schema）
 
-  "checkpoints": [
-    {
-      "after_step": "string — 在哪个步骤后触发",
-      "reason": "string — 为什么需要检查（展示给用户）",
-      "review_focus": "string — 审视时关注什么（指导编排器自己的审视）"
-    }
-  ],
-
-  "output_strategy": {
-    "merge_type": "direct | sequential | merge | compare",
-    "final_summary": "boolean — 是否需要最终汇总"
-  },
-
-  "constraints": {
-    "max_parallel": 10
-  }
-}
-```
-
-### 简单任务示例
-
-```json
-{
-  "plan_type": "single_agent",
-  "task_summary": "回答用户关于 JWT 的问题",
-  
-  "agents": [
-    {
-      "id": "agent_1",
-      "role": "通用助手",
-      "objective": "直接回答用户问题",
-      "system_prompt_supplement": null,
-      "tools": ["web_search"],
-      "model_preference": "standard"
-    }
-  ],
-
-  "steps": [
-    {
-      "id": "step_1",
-      "agent_id": "agent_1",
-      "task": "回答用户关于 JWT token 的问题",
-      "depends_on": [],
-      "expected_output": "清晰的解答"
-    }
-  ],
-
-  "checkpoints": [],
-
-  "output_strategy": {
-    "merge_type": "direct",
-    "final_summary": false
-  }
-}
-```
-
-### 复杂任务示例
-
-```json
-{
-  "plan_type": "multi_agent",
-  "task_summary": "实现用户登录模块，支持 JWT 和 OAuth",
-  
-  "agents": [
-    {
-      "id": "agent_1",
-      "role": "架构师",
-      "objective": "设计认证模块的 API 接口和数据模型",
-      "system_prompt_supplement": "你是一个后端架构师，专注于 RESTful API 设计和安全认证方案。输出应包含完整的端点列表、请求/响应格式、以及安全考虑。",
-      "tools": ["file_read", "file_write", "web_search"],
-      "model_preference": "strong"
-    },
-    {
-      "id": "agent_2",
-      "role": "开发者",
-      "objective": "根据架构师的设计实现登录逻辑",
-      "system_prompt_supplement": "你是一个 Python 开发者，擅长 FastAPI 和安全认证。写出生产级质量的代码，包含异常处理和输入验证。",
-      "tools": ["file_read", "file_write", "code_execute"],
-      "model_preference": "strong"
-    },
-    {
-      "id": "agent_3",
-      "role": "测试工程师",
-      "objective": "编写单元测试和集成测试",
-      "system_prompt_supplement": "你是一个测试工程师，使用 pytest 编写全面的测试用例。覆盖正常路径和异常路径。",
-      "tools": ["file_read", "file_write", "code_execute"],
-      "model_preference": "standard"
-    }
-  ],
-
-  "steps": [
-    {
-      "id": "step_1",
-      "agent_id": "agent_1",
-      "task": "分析现有 user model，设计认证相关的 API 端点（login/register/refresh/oauth）和数据结构",
-      "depends_on": [],
-      "expected_output": "API 设计文档（端点列表、请求/响应格式、认证流程图）"
-    },
-    {
-      "id": "step_2",
-      "agent_id": "agent_2",
-      "task": "根据架构师的 API 设计实现 JWT 登录和 OAuth 集成",
-      "depends_on": ["step_1"],
-      "expected_output": "可运行的认证模块代码"
-    },
-    {
-      "id": "step_3",
-      "agent_id": "agent_3",
-      "task": "为认证模块编写单元测试和集成测试",
-      "depends_on": ["step_2"],
-      "expected_output": "测试文件 + 测试通过报告"
-    }
-  ],
-
-  "checkpoints": [
-    {
-      "after_step": "step_1",
-      "reason": "API 设计是后续实现的基础，需确认方向正确",
-      "review_focus": "API 端点是否完整，OAuth 流程是否合理，是否与现有系统兼容"
-    }
-  ],
-
-  "output_strategy": {
-    "merge_type": "sequential",
-    "final_summary": true
-  }
-}
-```
+字段语义与设计理由见 §三；各字段的取值约束（如 `model_preference ∈ fast/strong`、`merge_type ∈ direct/sequential/merge/compare`、最多 5 agent / 20 step）由 `plan.py` 解析时强制。
 
 ---
 
@@ -239,13 +117,14 @@
 
 ### 3.2 `agents[].model_preference` — 模型偏好
 
-编排器不指定具体模型，只表达能力需求，由运行时映射到具体模型（此处使用 fast/standard/strong 抽象，运行时映射为 DeepSeek V4）：
+编排器不指定具体模型，只表达能力需求，由运行时映射到具体模型（此处使用 fast/strong 两档抽象，运行时映射为 DeepSeek V4）：
 
 | 值 | 含义 | 运行时映射示例 |
 |---|---|---|
-| `fast` | 速度优先，简单任务 | DeepSeek V4 Flash |
-| `standard` | 平衡质量和成本 | DeepSeek V4 Flash（thinking） |
-| `strong` | 质量优先，复杂任务 | DeepSeek V4 Pro（thinking） |
+| `fast` | 速度/成本优先，简单机械子任务 | DeepSeek V4 Flash（非思考） |
+| `strong` | 质量优先，复杂子任务 | DeepSeek V4 Pro（thinking；暂走 Flash） |
+
+> 现状：`strong` 当前临时映射为 Flash（thinking，测试期降本，`llm/config.py` `_STRONG_MODEL` 单点翻转），非 Pro。
 
 设计理由：
 1. 解耦编排器与具体模型，模型更新不需改编排逻辑
@@ -286,7 +165,11 @@
 
 ## 四、流式编排实现
 
-根据已确定的「流式编排」策略（DECISIONS §14），编排器输出应可被增量解析。
+根据已确定的「流式编排」策略（见上文「聊天优先 + 按需编排」），编排器输出应可被增量解析。
+
+> 现状：当前 planner 用非流式 `llm.complete()` 一次性产出完整计划再解析（`runtime/planner.py` `make_plan`），下述增量解析 / 增量触发尚未实现，属规划中的优化。
+>
+> 重要：编排器已**不在每轮对话的热路径**上——它只在聊天 Agent 调用 `assemble_team` 后才运行。因此其首 token 延迟只影响「确实需要团队」的请求，简单对话完全不经过它（首字即时）。下表延迟目标仅针对团队场景。
 
 ### 输出字段顺序
 
@@ -322,7 +205,7 @@
 
 | 阶段 | 目标延迟 | 手段 |
 |------|---------|------|
-| 用户输入 → 首 token | < 500ms | 编排器用快速模型（fast 档，映射为 DeepSeek V4 Flash） |
+| 调用 `assemble_team` → 计划首 token | 思考档下不强保 <500ms（仅团队场景；简单对话不经此路径） | 编排器 Flash 思考档（`reasoning_effort=max`，规划质量优先） |
 | 首 token → UI 响应 | < 100ms | 流式解析 + 增量渲染 |
 | 计划完成 → Agent 启动 | < 200ms | 不等完整计划，增量触发 |
 
@@ -331,6 +214,8 @@
 ## 五、检查点审视（Checkpoint Review）
 
 检查点触发时，编排器被再次调用，但输入和输出与初始规划不同。
+
+> ⚠️ 现状与本节设计有差异：MVP **未实现**「编排器 LLM 审视」。实际在检查点处直接挂起并向**用户**请求决策（approve / adjust / stop），无 continue/escalate 的 LLM 自动判定——见 `runtime/runs.py`（`handle_checkpoint`）、`runtime/interactions.py`。本节的 LLM 审视模型保留为设计方向，是否落地待定（见 §九）。
 
 ### 检查点审视输入
 
@@ -408,37 +293,13 @@
 
 ## 六、编排器 System Prompt 结构
 
-### 推荐结构
+### 结构与现状
 
-```
-[角色定义]
-你是 AgentCore 的任务编排器。你的职责是...
+编排器 system prompt 已落地：角色定义 + 输出 JSON Schema + 决策规则（强烈偏向 single_agent、depends_on 决定并行、工具白名单、model_preference 选择、检查点克制）+ 反例。
 
-[输出格式]
-你必须输出严格符合以下 JSON Schema 的计划：
-{schema}
+→ 见代码：`apps/server/agentcore/runtime/planner.py`（`_PLANNER_SYSTEM_PROMPT`）
 
-[决策规则]
-- 何时使用 single_agent vs multi_agent
-- 何时设置检查点
-- 如何选择 model_preference
-- 工具分配原则
-
-[约束]
-- 最多 {max_agents} 个 Agent
-- 最多 {max_parallel} 个并行步骤
-- 不要过度拆分简单任务
-
-[反例]
-- 不要为"今天天气如何"创建 3 个 Agent
-- 不要给不需要的 Agent 分配工具
-- 不要设置不必要的检查点
-
-[Few-shot 示例]
-示例 1: 简单问答 → single_agent
-示例 2: 代码实现 → multi_agent (2-3 agents)
-示例 3: 研究报告 → multi_agent (3+ agents, parallel)
-```
+> 现状：尚未引入 §六原设计的 few-shot 示例库与 `{schema}`/`{max_agents}` 模板占位，schema 直接内嵌在 prompt 中；待迭代（见 §九）。
 
 ### 关键设计原则
 
@@ -460,6 +321,10 @@
 
 回退到 single_agent 是安全的兜底——用户最差也能得到一个普通聊天体验。
 
+→ 见代码：`apps/server/agentcore/runtime/plan.py`（`parse_plan` 容错解析 + `single_agent_plan` 兜底）、`runtime/planner.py`（`make_plan` 的 try/except 兜底）
+
+> 现状：当前实现为「容错解析（丢弃非法 agent/step、校验取值、去悬挂依赖、无环校验）+ 任意失败即回退 single_agent」，尚未实现表中的「重试 1 次」与编排器专用 fallback 模型。
+
 ---
 
 ## 八、与其他模块的接口
@@ -474,7 +339,7 @@
 ### 编排器 → UI 层
 
 ```
-输入: 流式计划输出
+输入: 一次性产出的完整计划（run_plan SSE 事件；§四 流式增量解析未实现）
 输出: 
   - plan_type → 决定是否显示任务卡片
   - agents → 填充任务卡片的 Agent 列表
@@ -500,11 +365,3 @@
 | 模型选择 | 编排器本身用什么模型（偏向 fast + structured output 好的） |
 | 输出 schema 验证 | 是否用 JSON Schema 严格验证，还是宽松解析 |
 | 多轮对话中的编排 | 后续消息是否沿用/修改之前的计划 |
-
----
-
-## 变更日志
-
-| 日期 | 变更 |
-|------|------|
-| 2026-06-14 | 初稿：输入/输出结构、流式编排策略、检查点审视、失败处理 |

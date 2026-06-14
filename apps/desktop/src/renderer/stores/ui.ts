@@ -1,19 +1,27 @@
 import { create } from "zustand";
 
-export type ViewMode = "chat" | "graph";
-
 interface UIState {
-  viewMode: ViewMode;
+  graphOpen: boolean;
+  searchOpen: boolean;
   theme: "light" | "dark" | "system";
 
-  setViewMode: (mode: ViewMode) => void;
+  openGraph: () => void;
+  closeGraph: () => void;
+  openSearch: () => void;
+  closeSearch: () => void;
+  toggleSearch: () => void;
   setTheme: (theme: UIState["theme"]) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
-  viewMode: "chat",
+  graphOpen: false,
+  searchOpen: false,
   theme: "system",
 
-  setViewMode: (mode) => set({ viewMode: mode }),
+  openGraph: () => set({ graphOpen: true }),
+  closeGraph: () => set({ graphOpen: false }),
+  openSearch: () => set({ searchOpen: true }),
+  closeSearch: () => set({ searchOpen: false }),
+  toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),
   setTheme: (theme) => set({ theme }),
 }));

@@ -1,6 +1,7 @@
-import { app, BrowserWindow, shell } from "electron";
-import { join } from "path";
+import { join } from "node:path";
 import { is } from "@electron-toolkit/utils";
+import { BrowserWindow, app, ipcMain, shell } from "electron";
+import { registerFsIpc } from "./fs-service";
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -9,12 +10,23 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 600,
     show: false,
+    frame: false,
+    ...(process.platform === "darwin" && {
+      titleBarStyle: "hidden",
+      trafficLightPosition: { x: 12, y: 12 },
+    }),
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
     },
   });
+
+  ipcMain.on("window:minimize", () => mainWindow.minimize());
+  ipcMain.on("window:maximize", () => {
+    mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
+  });
+  ipcMain.on("window:close", () => mainWindow.close());
 
   mainWindow.on("ready-to-show", () => {
     mainWindow.show();
@@ -33,6 +45,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  registerFsIpc();
   createWindow();
 
   app.on("activate", () => {

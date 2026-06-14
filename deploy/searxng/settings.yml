@@ -1,0 +1,53 @@
+# 面向中国大陆默认：只保留大陆可达且结果质量可靠的搜索引擎为活跃引擎。
+# 1) 默认引擎集（google/duckduckgo/brave/startpage/wikipedia…）在大陆全部超时，
+#    会让 web_search 返回空（实测 results=0、引擎全 timeout）。
+# 2) bing 引擎在本实例对中文查询常返回完全跑题的 SEO 垃圾（实测「贝叶斯定理」→
+#    披萨/小说站），故剔除；baidu/360search 结果相关性最好，sogou/quark 作补充覆盖。
+# 用 keep_only 把活跃引擎收敛为下列几家；下方 engines: 再把它们显式 enabled。
+use_default_settings:
+  engines:
+    keep_only:
+      - baidu
+      - 360search
+      - sogou
+      - quark
+
+general:
+  instance_name: "AgentCore Search"
+  debug: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  formats:
+    - html
+    - json
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "agentcore-searxng-dev-secret"
+  limiter: false
+  image_proxy: false
+
+brand: {}
+
+ui:
+  static_use_hash: true
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 15.0
+
+# 显式启用国内可达引擎（baidu/sogou/360search/quark 在 SearXNG 默认里多为
+# disabled: true，必须在此手动打开）。bing 已剔除（中文结果质量不稳定）。
+engines:
+  - name: baidu
+    disabled: false
+  - name: 360search
+    disabled: false
+  - name: sogou
+    disabled: false
+  - name: quark
+    disabled: false

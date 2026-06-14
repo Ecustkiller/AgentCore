@@ -29,6 +29,23 @@ services:
       timeout: 5s
       retries: 5
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: agentcore-searxng
+    ports:
+      # 18888 而非 8888：Windows winnat/Hyper-V 会把 8866–8965 整段保留为排除端口，
+      # 绑 8888 会报 "bind: ... forbidden by its access permissions"。18888 跨平台通用。
+      - "18888:8080"
+    environment:
+      SEARXNG_BASE_URL: "http://localhost:18888"
+    volumes:
+      - ./searxng:/etc/searxng
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 volumes:
   pgdata:
   redisdata:

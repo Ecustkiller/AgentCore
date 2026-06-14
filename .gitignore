@@ -45,6 +45,10 @@ htmlcov/
 .coverage.*
 .pytest_cache/
 coverage/
+# pytest tmp_path scratch dirs (test artifacts, see tests using tmp_path)
+.pytest_tmp/
+.pytest_tmp_run/
+.pytest_fresh/
 
 # Build artifacts
 *.so
@@ -61,6 +65,10 @@ logs/
 
 # Docker volumes (local dev)
 .docker-data/
+
+# Server local data (MVP long-term memory files, see apps/server/agentcore/memory/store.py)
+apps/server/data/
+data/
 
 # Generated types (regenerated from OpenAPI)
 apps/desktop/src/renderer/types/api.generated.ts

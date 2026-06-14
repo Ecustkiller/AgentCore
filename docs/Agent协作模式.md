@@ -1,8 +1,6 @@
 # Agent 协作模式
 
 > **状态**：已确定（编排器架构、协作范式、通信机制、冲突解决均已定）
-> **创建时间**：2026-06-13
-> **更新时间**：2026-06-14（新增 §八 团队设计模式）
 
 ---
 
@@ -44,26 +42,24 @@ AgentCore 以多 Agent 协作为默认范式，而非将其视为单 Agent 之�
 
 ## 一、协作范式 ✅ 已确定
 
-MVP 支持四种范式，全部统一为 DAG 执行模型。编排器自动选择范式，用户无需手动指定。
-
-> 详见 [DECISIONS.md §21](DECISIONS.md#21-agent-协作范式)
+MVP 支持四种范式，**均由通用 DAG + 完成后汇总（`_synthesize`）统一表达**，无独立 `plan_type` 或 debate 专用执行路径。编排器通过 `depends_on` 定序（无依赖即并行）、多步骤计划表达串行/并行/辩论/混合；辩论靠编排器产出对立步骤 + 汇总综合，不靠运行时分支。用户无需手动指定范式。
 
 | 范式 | DAG 表示 | 场景举例 | MVP 状态 |
 |------|---------|---------|---------|
-| **串行流水线** | A → B → C | 调研→分析→报告 | ✅ 支持 |
-| **并行分工** | A ∥ B → 汇总 | 同时研究多个方面 | ✅ 支持 |
-| **辩论/审查** | A(pro) ∥ B(con) → 比较 | 方案对比、代码审查 | ✅ 支持 |
-| **混合** | 串行 + 并行组合 | 先并行调研，再串行综合 | ✅ 支持 |
+| **串行流水线** | A → B → C（`depends_on` 链） | 调研→分析→报告 | ✅ DAG 支持 |
+| **并行分工** | A ∥ B → 汇总 | 同时研究多个方面 | ✅ DAG 支持 |
+| **辩论/审查** | A(pro) ∥ B(con) → 汇总 | 方案对比、代码审查 | ✅ 编排器多步 + 汇总（无独立 debate 路径） |
+| **混合** | 串行 + 并行组合 | 先并行调研，再串行综合 | ✅ DAG 支持 |
 | ~~主从委派~~ | — | — | 已被编排器架构吸收 |
 | ~~自由对话~~ | — | — | 延后（复杂度高、成本高） |
+
+> `PlanType.DEBATE` 枚举在 `core/types.py` 预留，**运行时未引用**；实际计划类型为 `single_agent` / `multi_agent`（→ 见代码 `runtime/plan.py`、`runtime/runs.py`）。
 
 ---
 
 ## 二、通信机制 ✅ 已确定
 
 共享工作区 + 编排器中转。Agent 间不直接通信。
-
-> 详见 [DECISIONS.md §21](DECISIONS.md#21-agent-协作范式)
 
 ```
 Agent A 输出 → 写入 TaskWorkspace → 编排器检查点审视 → Agent B 读取
@@ -100,11 +96,8 @@ Agent A 输出 → 写入 TaskWorkspace → 编排器检查点审视 → Agent B
 ## 四、任务编排 ✅ 已确定
 
 编排器架构和实现方案已确定，详见：
-- [DECISIONS.md §6 编排器架构](DECISIONS.md#6-编排器架构) — 专职 LLM + 检查点模式
-- [DECISIONS.md §10 编排器实现方案](DECISIONS.md#10-编排器实现方案) — 自研，不依赖 LangGraph
-- [DECISIONS.md §14 简单任务处理策略](DECISIONS.md#14-简单任务处理策略) — 统一编排器入口，自适应 UI
-- [DECISIONS.md §17 执行引擎架构](DECISIONS.md#17-执行引擎架构) — DAG 调度、Agent 管理、事件流
-- [`编排器Prompt与输出结构.md`](编排器Prompt与输出结构.md) — Prompt 工程与 JSON 输出 Schema
+- [`编排器Prompt与输出结构.md`](编排器Prompt与输出结构.md) — 专职 LLM + 检查点模式、自研（不依赖 LangGraph）、统一入口与自适应规模、Prompt 工程与 JSON 输出 Schema
+- [`执行引擎架构设计.md`](执行引擎架构设计.md) — DAG 调度、Agent 管理、事件流
 
 ---
 
@@ -116,11 +109,11 @@ Agent A 输出 → 写入 TaskWorkspace → 编排器检查点审视 → Agent B
 |---|------|-------|---------|
 | 1 | **单一职责** | 每 Agent 一个明确职责，prompt 不出现"先…再…" | Anthropic: orchestrator + specialized workers |
 | 2 | **强制上层委派** | Agent 间任务传递只走编排器调度，禁止隐式状态共享 | Supervisor + Specialists 模式的故障隔离 |
-| 3 | **读写分离** | 分析型 Agent 不持有写入工具（Analyzer / Mutator 二分） | LangGraph 强制不可变状态更新 |
+| 3 | **读写分离** | 分析型 Agent 不持有写入工具（Analyzer / Mutator 二分） | LangGraph 强制不可变状态更新（⏳ `mutation` 工具过滤未实现） |
 | 4 | **上下文最小传递** | 子 Agent 只收到它声明需要的上下文，非父 Agent 全量历史 | 避免 5000 token planner 输出无差别传递 |
-| 5 | **分层熔断** | 单 Agent 失败不拖垮整个 DAG（5 层×3 重试 = 243× 放大） | Google SRE Book |
+| 5 | **分层熔断** | 单 Agent 失败不拖垮整个 DAG（5 层×3 重试 = 243× 放大） | Google SRE Book（⏳ Redis 熔断 fail-open 未实现） |
 | 6 | **幂等性执行** | 有副作用的操作携带幂等 key，重试不产生双重执行 | Cycles.io: 写操作必须 idempotency key |
-| 7 | **模型分级** | 编排器用 V4-Flash 非思考模式（低延迟）；Worker 简单任务用 Flash 思考模式(high)，复杂任务用 Pro 思考模式(high/max) | 编排器轻量规划 + Worker 按复杂度分级，成本与质量平衡 |
+| 7 | **模型分级** | 编排器用 V4-Flash 思考模式(max)；Worker 简单/叶子任务用 Flash 非思考，复杂任务用 Pro 思考模式(high) | 编排器重规划质量 + Worker 按复杂度分级，成本与质量平衡 |
 
 ### 约束 1 判断标准
 
@@ -139,7 +132,7 @@ Agent A 输出 → 写入 TaskWorkspace → 编排器检查点审视 → Agent B
 | **Analyzer（分析型）** | 读取、检索、推理、评估 | 仅注入只读工具 |
 | **Mutator（执行型）** | 写入、修改、创建、删除 | 注入读写工具 |
 
-实现要点：工具需标记 `mutation` 属性；运行时按 Agent 角色自动过滤写入工具。
+实现要点：工具需标记 `mutation` 属性；运行时按 Agent 角色自动过滤写入工具。（⏳ 未实现）
 
 ### 约束 5 熔断参数参考
 
@@ -148,15 +141,15 @@ Agent A 输出 → 写入 TaskWorkspace → 编排器检查点审视 → Agent B
 | 熔断阈值 | 连续 3 次失败 | 平衡故障识别速度和噪声容忍 |
 | 冷却期 | 60 秒 | 足够让短暂故障恢复 |
 | 隔离键 | (parent_agent_id, agent_id) | 某子 Agent 在一个父下故障，不连累别的父 |
-| Redis 不可用时 | fail-open（放行） | 熔断器记账不能成为委派跑不起来的原因 |
+| Redis 不可用时 | fail-open（放行） | 熔断器记账不能成为委派跑不起来的原因（⏳ 未实现） |
 
 ### 约束 7 模型分级策略
 
 | 角色 | 默认模型档 | 思考强度 |
 |------|----------|---------|
-| 编排器 / 检查点审视 | V4-Flash | 非思考（低延迟） |
-| Worker Agent（简单任务） | V4-Flash | 思考模式 high |
-| Worker Agent（复杂任务） | V4-Pro | 思考模式 high/max |
+| 编排器 / 检查点审视 | V4-Flash | 思考模式 (max) |
+| Worker Agent（简单 / 叶子任务） | V4-Flash | 非思考（提速省钱） |
+| Worker Agent（复杂任务） | V4-Pro（暂走 Flash）| 思考模式 (high) |
 | Standalone 直答 | 系统默认 | 默认 |
 
 **关键原则**：分级跟「行为」不跟「位置」——判据是该 Agent 是否还有下游调度任务，而非它被谁调用。
@@ -204,9 +197,11 @@ Agent A 输出 → 写入 TaskWorkspace → 编排器检查点审视 → Agent B
 
 ## 七、多 Agent 运行时机制 ✅ 已确定
 
-> 三种多 Agent 交互模式（委派 / 编排 / Arena）的运行时机制，均复用同一 RuntimeEngine 内核。
+> **实现现状**：以下为**目标运行时设计**；MVP **未接线**。实际路径为 `planner.make_plan` → `run_multi_agent`（→ 见代码 `runtime/pipeline.py`）。无 `delegate` 工具、无两阶段 Preflight Audit、无 Team 实体/`orchestration` 模式分支、无 Arena 模块/独立 SSE 事件族；`build_run_plan` / `WaveScheduler` 亦未落地。
 
-### 7.1 委派（Delegation）
+> 三种多 Agent 交互模式（委派 / 编排 / Arena）的运行时机制，均复用同一 RuntimeEngine 内核（目标态）。
+
+### 7.1 委派（Delegation）⏳ 未实现
 
 父 Agent 通过统一的 `delegate` 工具将子任务交给目标 Agent。执行链经过**规划（纯函数）→ 调度**两阶段：
 
@@ -222,7 +217,7 @@ Agent A 输出 → 写入 TaskWorkspace → 编排器检查点审视 → Agent B
 | 深度限制 | 最大委派深度 3 层；树级并发上限 10 |
 | 路由引擎 | 统一 embedding 语义匹配，供委派动态扩展 + Agent 发现端点消费 |
 
-### 7.2 委派预审（Preflight Audit）
+### 7.2 委派预审（Preflight Audit）⏳ 未实现
 
 当 Team 配置了预审 Agent 时，Captain 的所有委派走两阶段流程：
 
@@ -245,7 +240,7 @@ Agent A 输出 → 写入 TaskWorkspace → 编排器检查点审视 → Agent B
 
 每轮对话最多 N 次 plan→audit（默认 2）。达上限后不再审计，直接「带风险放行」执行最新方案，由后续质量闸门兜底。这是补在 Captain 自由裁量之外的硬收敛保证。
 
-### 7.3 Team 编排（Orchestration）
+### 7.3 Team 编排（Orchestration）⏳ 未实现
 
 Team 的 `orchestration` 字段决定执行模式：
 
@@ -267,7 +262,7 @@ Team 的 `orchestration` 字段决定执行模式：
 
 **依赖传递保真默认全文**：分析/检索→写作链路必须保留金额、法条编号等细节，「一律摘要」会丢失关键信息。`summarize` 仅用于大扇入合成省 token 的场景。
 
-### 7.4 Arena（对抗）
+### 7.4 Arena（对抗）⏳ 未实现
 
 独立于协作模式的结构化多 Agent 对话（辩论/法庭/谈判）：
 
@@ -287,7 +282,7 @@ setup → running ⇄ paused → completed | cancelled | error
 
 重新打开终态 Arena 时回灌已落库内容、不启动 SSE——按「加载时后端状态是否终态」分流，终态走回放，非终态才续跑。
 
-### 7.5 Agent 通信协议 (v1)
+### 7.5 Agent 通信协议 (v1)⏳ 未实现
 
 委派从进程内函数调用升级为标准化协议交互，内外部 Agent 走同一接口：
 
@@ -360,16 +355,3 @@ setup → running ⇄ paused → completed | cancelled | error
 | 结构化 spec + 校验闸门 | 落库前 `validate_spec` 一次返回全部问题；`persist_spec` 原子落库 + 回执对比 |
 | 归属强制 | `creator_id` 强制 = 当前用户，工具层强制，不信任 LLM 传参 |
 | 草稿 + 发布 | 创建即 `draft`，发布需用户显式确认 |
-
----
-
-## 九、开放问题
-
-- [x] 第一版应该支持哪些协作范式？ → 四种：串行/并行/辩论/混合，统一 DAG 执行
-- [x] Agent 间通信的协议选择 → 共享工作区 + 编排器中转
-- [x] 冲突解决的默认策略 → 编排器裁决，低置信度升级给用户
-- [x] 任务编排引擎的技术选型 → 自研编排器，专职 LLM + 检查点模式
-- [x] TaskWorkspace 数据结构 → Key 命名规范 + StepOutput 格式，见 [执行引擎架构设计.md §十一](执行引擎架构设计.md)
-- [x] 编排器 prompt 设计和输出格式 → 见 [编排器Prompt与输出结构.md](编排器Prompt与输出结构.md)
-- [x] Multi-Agent 行为约束 → 7 条设计约束（见上 §五）
-- [x] 产物传递机制 → 对话级工作区 + 指针注入 + 只追加安全网（见上 §六）

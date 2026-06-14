@@ -9,37 +9,59 @@ Each repository handles CRUD for a single model.
 """
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
-from agentcore.db.models import Conversation, Execution, Message, User, UserMemory
+from agentcore.db.models import (
+    Conversation,
+    Credentials,
+    Invite,
+    Message,
+    RefreshToken,
+    User,
+)
 
 
 class UserRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
-    async def create(self, *, email: str, password_hash: str, name: str | None = None) -> User:
-        user = User(id=new_id(), email=email, password_hash=password_hash, name=name)
+    async def get_by_id(self, user_id: str) -> User | None:
+        result = await self._session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_username(self, username: str) -> User | None:
+        result = await self._session.execute(
+            select(User).where(User.username == username)
+        )
+        return result.scalar_one_or_none()
+
+    async def create(
+        self,
+        *,
+        username: str,
+        display_name: str | None = None,
+        email: str | None = None,
+        role: str = "user",
+        status: str = "active",
+    ) -> User:
+        user = User(
+            user_id=new_id(),
+            username=username,
+            display_name=display_name or "",
+            email=email,
+            role=role,
+            status=status,
+        )
         self._session.add(user)
         await self._session.commit()
         await self._session.refresh(user)
         return user
-
-    async def get_by_id(self, user_id: str) -> User | None:
-        result = await self._session.execute(
-            select(User).where(User.id == user_id, User.deleted_at.is_(None))
-        )
-        return result.scalar_one_or_none()
-
-    async def get_by_email(self, email: str) -> User | None:
-        result = await self._session.execute(
-            select(User).where(User.email == email, User.deleted_at.is_(None))
-        )
-        return result.scalar_one_or_none()
 
 
 class ConversationRepository:
@@ -47,19 +69,30 @@ class ConversationRepository:
         self._session = session
 
     async def create(self, *, user_id: str, title: str | None = None) -> Conversation:
-        conv = Conversation(id=new_id(), user_id=user_id, title=title)
+        # Omit title when not provided so the DB server_default ('') applies.
+        # The live `conversations.title` column is NOT NULL; passing an explicit
+        # None would emit `INSERT ... title=NULL` and violate the constraint.
+        conv = Conversation(id=new_id(), user_id=user_id)
+        if title is not None:
+            conv.title = title
         self._session.add(conv)
         await self._session.commit()
         await self._session.refresh(conv)
         return conv
 
-    async def get_by_id(self, conversation_id: str) -> Conversation | None:
-        result = await self._session.execute(
-            select(Conversation).where(
-                Conversation.id == conversation_id,
-                Conversation.deleted_at.is_(None),
-            )
-        )
+    async def get_by_id(
+        self, conversation_id: str, *, user_id: str | None = None
+    ) -> Conversation | None:
+        # When user_id is given, scope by owner so a non-owner gets None (the
+        # route then 404s, preventing cross-user access / existence leaks).
+        # Internal trusted callers omit user_id.
+        conditions = [
+            Conversation.id == conversation_id,
+            Conversation.deleted_at.is_(None),
+        ]
+        if user_id is not None:
+            conditions.append(Conversation.user_id == user_id)
+        result = await self._session.execute(select(Conversation).where(*conditions))
         return result.scalar_one_or_none()
 
     async def list_by_user(
@@ -80,27 +113,25 @@ class ConversationRepository:
         )
         return result.scalars().all(), total
 
-    async def update_title(self, conversation_id: str, title: str) -> Conversation | None:
-        conv = await self.get_by_id(conversation_id)
+    async def update_title(
+        self, conversation_id: str, title: str, *, user_id: str | None = None
+    ) -> Conversation | None:
+        conv = await self.get_by_id(conversation_id, user_id=user_id)
         if conv:
             conv.title = title
             await self._session.commit()
             await self._session.refresh(conv)
         return conv
 
-    async def soft_delete(self, conversation_id: str) -> bool:
-        conv = await self.get_by_id(conversation_id)
+    async def soft_delete(
+        self, conversation_id: str, *, user_id: str | None = None
+    ) -> bool:
+        conv = await self.get_by_id(conversation_id, user_id=user_id)
         if conv:
             conv.deleted_at = datetime.now()
             await self._session.commit()
             return True
         return False
-
-    async def increment_message_count(self, conversation_id: str) -> None:
-        conv = await self.get_by_id(conversation_id)
-        if conv:
-            conv.message_count += 1
-            await self._session.commit()
 
 
 class MessageRepository:
@@ -113,17 +144,20 @@ class MessageRepository:
         conversation_id: str,
         role: str,
         content: str,
-        execution_id: str | None = None,
+        reasoning_content: str | None = None,
         metadata: dict | None = None,
+        attachments: list | None = None,
     ) -> Message:
         msg = Message(
             id=new_id(),
             conversation_id=conversation_id,
             role=role,
             content=content,
-            execution_id=execution_id,
-            metadata_=metadata or {},
+            reasoning_content=reasoning_content,
+            usage=metadata,
         )
+        if attachments is not None:
+            msg.attachments = attachments
         self._session.add(msg)
         await self._session.commit()
         await self._session.refresh(msg)
@@ -144,72 +178,172 @@ class MessageRepository:
         )
         return result.scalars().all(), total
 
+    async def get_by_id(
+        self, message_id: str, *, conversation_id: str
+    ) -> Message | None:
+        result = await self._session.execute(
+            select(Message).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
+        return result.scalar_one_or_none()
 
-class ExecutionRepository:
+    async def update_content(self, message_id: str, content: str) -> None:
+        await self._session.execute(
+            update(Message).where(Message.id == message_id).values(content=content)
+        )
+        await self._session.commit()
+
+    async def delete_after(
+        self, conversation_id: str, *, after_created_at: datetime
+    ) -> int:
+        """Hard-delete messages created strictly after a point in time.
+
+        Used by regenerate / edit-and-resend to drop the superseded assistant
+        reply (and any later turns) before re-running. Messages have no
+        soft-delete column — replacing a turn means the old branch is gone
+        (conversation branching is a separate, later feature).
+        """
+        result = await self._session.execute(
+            delete(Message).where(
+                Message.conversation_id == conversation_id,
+                Message.created_at > after_created_at,
+            )
+        )
+        await self._session.commit()
+        return result.rowcount or 0
+
+
+class CredentialsRepository:
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def create(self, *, user_id: str, password_hash: str) -> Credentials:
+        cred = Credentials(user_id=user_id, password_hash=password_hash)
+        self._session.add(cred)
+        await self._session.commit()
+        await self._session.refresh(cred)
+        return cred
+
+    async def get_by_user_id(self, user_id: str) -> Credentials | None:
+        result = await self._session.execute(
+            select(Credentials).where(Credentials.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def set_failure_state(
+        self, user_id: str, *, failed_attempts: int, locked_until: datetime | None
+    ) -> None:
+        await self._session.execute(
+            update(Credentials)
+            .where(Credentials.user_id == user_id)
+            .values(failed_attempts=failed_attempts, locked_until=locked_until)
+        )
+        await self._session.commit()
+
+    async def reset_failure_state(self, user_id: str) -> None:
+        await self._session.execute(
+            update(Credentials)
+            .where(Credentials.user_id == user_id)
+            .values(failed_attempts=0, locked_until=None)
+        )
+        await self._session.commit()
+
+
+class RefreshTokenRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
     async def create(
-        self, *, conversation_id: str, plan: dict, status: str = "planning"
-    ) -> Execution:
-        execution = Execution(
+        self,
+        *,
+        user_id: str,
+        token_hash: str,
+        token_family: str,
+        expires_at: datetime,
+    ) -> RefreshToken:
+        token = RefreshToken(
             id=new_id(),
-            conversation_id=conversation_id,
-            plan=plan,
-            status=status,
+            user_id=user_id,
+            token_hash=token_hash,
+            token_family=token_family,
+            expires_at=expires_at,
         )
-        self._session.add(execution)
+        self._session.add(token)
         await self._session.commit()
-        await self._session.refresh(execution)
-        return execution
+        await self._session.refresh(token)
+        return token
 
-    async def get_by_id(self, execution_id: str) -> Execution | None:
+    async def get_by_hash(self, token_hash: str) -> RefreshToken | None:
         result = await self._session.execute(
-            select(Execution).where(Execution.id == execution_id)
+            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
         )
         return result.scalar_one_or_none()
 
-    async def update_status(
-        self, execution_id: str, status: str, *, completed_at: datetime | None = None
-    ) -> Execution | None:
-        execution = await self.get_by_id(execution_id)
-        if execution:
-            execution.status = status
-            if completed_at:
-                execution.completed_at = completed_at
-            await self._session.commit()
-            await self._session.refresh(execution)
-        return execution
+    async def mark_rotated(self, token_id: str) -> None:
+        await self._session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.id == token_id)
+            .values(rotated_at=datetime.now(UTC))
+        )
+        await self._session.commit()
+
+    async def revoke_family(self, token_family: str) -> None:
+        await self._session.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.token_family == token_family,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=datetime.now(UTC))
+        )
+        await self._session.commit()
+
+    async def revoke_all_for_user(self, user_id: str) -> None:
+        await self._session.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=datetime.now(UTC))
+        )
+        await self._session.commit()
 
 
-class UserMemoryRepository:
+class InviteRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
-    async def get_or_create(self, user_id: str) -> UserMemory:
-        result = await self._session.execute(
-            select(UserMemory).where(UserMemory.user_id == user_id)
+    async def create(
+        self,
+        *,
+        code: str,
+        created_by: str | None = None,
+        expires_at: datetime | None = None,
+    ) -> Invite:
+        invite = Invite(
+            id=new_id(),
+            code=code,
+            created_by=created_by,
+            expires_at=expires_at,
         )
-        memory = result.scalar_one_or_none()
-        if not memory:
-            memory = UserMemory(user_id=user_id)
-            self._session.add(memory)
-            await self._session.commit()
-            await self._session.refresh(memory)
-        return memory
-
-    async def update_preferences(self, user_id: str, preferences: dict) -> UserMemory:
-        memory = await self.get_or_create(user_id)
-        memory.preferences = preferences
+        self._session.add(invite)
         await self._session.commit()
-        await self._session.refresh(memory)
-        return memory
+        await self._session.refresh(invite)
+        return invite
 
-    async def add_facts(self, user_id: str, new_facts: list[str]) -> UserMemory:
-        memory = await self.get_or_create(user_id)
-        existing = set(memory.facts)
-        merged = list(existing | set(new_facts))
-        memory.facts = merged
+    async def get_by_code(self, code: str) -> Invite | None:
+        result = await self._session.execute(
+            select(Invite).where(Invite.code == code)
+        )
+        return result.scalar_one_or_none()
+
+    async def mark_used(self, invite_id: str, *, used_by: str) -> None:
+        await self._session.execute(
+            update(Invite)
+            .where(Invite.id == invite_id)
+            .values(used_by=used_by, used_at=datetime.now(UTC))
+        )
         await self._session.commit()
-        await self._session.refresh(memory)
-        return memory

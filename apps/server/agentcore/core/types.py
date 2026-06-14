@@ -23,10 +23,14 @@ def new_id() -> str:
 
 
 class ModelTier(StrEnum):
-    """Orchestrator output model preference, mapped to concrete model at runtime."""
+    """Orchestrator output model preference (two tiers), mapped to a concrete
+    agent profile at runtime.
+
+    The single-chat/default reply path is intentionally NOT a tier: it uses the
+    standalone ``chat`` profile so everyday chat stays decoupled from ``strong``.
+    """
 
     FAST = "fast"
-    STANDARD = "standard"
     STRONG = "strong"
 
 
@@ -74,3 +78,4 @@ class ToolCategory(StrEnum):
     SEARCH = "search"
     EXECUTION = "execution"
     RESEARCH = "research"
+    ORCHESTRATION = "orchestration"

@@ -1,14 +1,21 @@
 """SQLAlchemy ORM model definitions.
 
-ORM is the single source of truth for the database schema.
-All tables use UUID primary keys generated at the application layer.
-No ForeignKey constraints — referential integrity maintained in application code.
+This ORM is the single source of truth for the AgentCore schema; structure is
+applied via Alembic migrations (``alembic check`` must report zero drift).
 """
 
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, Index, Integer, String, Text, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -21,19 +28,34 @@ def _new_uuid() -> str:
 
 
 # --- Users ---
+# Primary key is user_id (the users table's established convention); other
+# tables reference it via a `user_id` foreign-key column (app-level integrity).
 
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("role in ('user', 'admin')", name="ck_users_role"),
+        CheckConstraint(
+            "status in ('active', 'disabled')", name="ck_users_status"
+        ),
+    )
 
-    id: Mapped[str] = mapped_column(
+    user_id: Mapped[str] = mapped_column(
         PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
     )
+    # Login identifier (D1: username + password). Unique, required.
+    username: Mapped[str] = mapped_column(String(100), unique=True)
+    display_name: Mapped[str] = mapped_column(
+        String(200), server_default=text("''")
+    )
+    # Optional, reserved for future password recovery / OAuth.
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
-    name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    preferences: Mapped[dict] = mapped_column(
-        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    role: Mapped[str] = mapped_column(
+        String(20), default="user", server_default=text("'user'")
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), default="active", server_default=text("'active'")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
@@ -41,30 +63,57 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )
-    deleted_at: Mapped[datetime | None] = mapped_column(
+
+
+# --- Credentials ---
+# Local password auth, separated from the user profile. One row per user.
+
+
+class Credentials(Base):
+    __tablename__ = "credentials"
+
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    # Brute-force lockout bookkeeping.
+    failed_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0")
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )
 
 
-class RefreshToken(Base):
-    __tablename__ = "refresh_tokens"
+# --- Invites ---
+# Invite-code gated registration (D6).
+
+
+class Invite(Base):
+    __tablename__ = "invites"
 
     id: Mapped[str] = mapped_column(
         PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
     )
-    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
-    token_hash: Mapped[str] = mapped_column(String(255))
-    family_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
-    rotated_at: Mapped[datetime | None] = mapped_column(
+    code: Mapped[str] = mapped_column(String(64), unique=True)
+    created_by: Mapped[str | None] = mapped_column(
+        PG_UUID(as_uuid=False), index=True, nullable=True
+    )
+    used_by: Mapped[str | None] = mapped_column(
+        PG_UUID(as_uuid=False), index=True, nullable=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
-    )
-
-    __table_args__ = (
-        Index("idx_refresh_tokens_hash", "token_hash"),
     )
 
 
@@ -78,12 +127,18 @@ class Conversation(Base):
         PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
     )
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
-    title: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    key_decisions: Mapped[list] = mapped_column(
-        JSONB, default=list, server_default=text("'[]'::jsonb")
+    agent_id: Mapped[str] = mapped_column(
+        PG_UUID(as_uuid=False),
+        default="00000000-0000-0000-0000-000000000000",
+        server_default=text("'00000000-0000-0000-0000-000000000000'"),
     )
-    message_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    title: Mapped[str] = mapped_column(
+        String(500), nullable=False, server_default=text("''")
+    )
+    archived: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    mode: Mapped[str] = mapped_column(
+        String(20), default="chat", server_default=text("'chat'")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -92,10 +147,6 @@ class Conversation(Base):
     )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
-    )
-
-    __table_args__ = (
-        Index("idx_conversations_user_updated", "user_id", "updated_at"),
     )
 
 
@@ -110,68 +161,39 @@ class Message(Base):
     )
     conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     role: Mapped[str] = mapped_column(String(20))
-    content: Mapped[str] = mapped_column(Text)
-    execution_id: Mapped[str | None] = mapped_column(
-        PG_UUID(as_uuid=False), nullable=True
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reasoning_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_calls: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    usage: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # User-referenced attachments metadata (list of {name, path, truncated}).
+    attachments: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
-    metadata_: Mapped[dict] = mapped_column(
-        "metadata", JSONB, default=dict, server_default=text("'{}'::jsonb")
-    )
+    finish_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
 
-    __table_args__ = (
-        CheckConstraint("role IN ('user', 'assistant', 'system')", name="ck_message_role"),
-        Index("idx_messages_conversation_created", "conversation_id", "created_at"),
-    )
+
+# --- Refresh Tokens ---
 
 
-# --- Executions ---
-
-
-class Execution(Base):
-    __tablename__ = "executions"
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
 
     id: Mapped[str] = mapped_column(
         PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
     )
-    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
-    plan: Mapped[dict] = mapped_column(JSONB)
-    status: Mapped[str] = mapped_column(String(20))
-    workspace_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    metrics: Mapped[dict] = mapped_column(
-        JSONB, default=dict, server_default=text("'{}'::jsonb")
-    )
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()")
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    token_hash: Mapped[str] = mapped_column(String(255))
+    token_family: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('planning', 'running', 'paused', 'completed', 'failed', 'cancelled')",
-            name="ck_execution_status",
-        ),
-        Index("idx_executions_conversation_started", "conversation_id", "started_at"),
+    rotated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
-
-
-# --- User Memory ---
-
-
-class UserMemory(Base):
-    __tablename__ = "user_memory"
-
-    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
-    preferences: Mapped[dict] = mapped_column(
-        JSONB, default=dict, server_default=text("'{}'::jsonb")
-    )
-    facts: Mapped[list] = mapped_column(
-        JSONB, default=list, server_default=text("'[]'::jsonb")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
     )

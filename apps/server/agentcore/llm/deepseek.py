@@ -15,8 +15,6 @@ import httpx
 
 from agentcore.core.errors import LLMError, LLMRateLimitError, LLMTimeoutError
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ModelTier
-from agentcore.llm.config import DEFAULT_MODEL_MAPPING, ModelMapping, resolve_model_for_tier
 from agentcore.llm.protocol import (
     LLMChunk,
     LLMRequest,
@@ -42,11 +40,9 @@ class DeepSeekProvider:
         self,
         api_key: str,
         base_url: str = "https://api.deepseek.com",
-        model_mapping: ModelMapping | None = None,
     ):
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
-        self._model_mapping = model_mapping or DEFAULT_MODEL_MAPPING
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             headers={
@@ -155,10 +151,6 @@ class DeepSeekProvider:
                 usage=usage,
             )
 
-    def resolve_model(self, tier: ModelTier) -> str:
-        """Map ModelTier to concrete model identifier."""
-        return resolve_model_for_tier(tier, self._model_mapping)
-
     def _build_payload(self, request: LLMRequest, *, stream: bool) -> dict:
         """Build the API request payload from LLMRequest."""
         messages = []
@@ -197,20 +189,17 @@ class DeepSeekProvider:
             payload["tools"] = request.tools
             payload["tool_choice"] = request.tool_choice
 
-        # Thinking mode configuration (per llm.mdc)
         if request.thinking is not None:
             if request.thinking:
-                payload["extra_body"] = {"thinking": {"type": "enabled"}}
-                # Temperature is ignored in thinking mode per API constraint
+                payload["thinking"] = {"type": "enabled"}
             else:
-                payload["extra_body"] = {"thinking": {"type": "disabled"}}
+                payload["thinking"] = {"type": "disabled"}
                 payload["temperature"] = request.temperature
         else:
             payload["temperature"] = request.temperature
 
         if request.reasoning_effort and request.thinking is not False:
-            payload.setdefault("extra_body", {})
-            payload["extra_body"]["reasoning_effort"] = request.reasoning_effort
+            payload["reasoning_effort"] = request.reasoning_effort
 
         if stream:
             payload["stream_options"] = {"include_usage": True}

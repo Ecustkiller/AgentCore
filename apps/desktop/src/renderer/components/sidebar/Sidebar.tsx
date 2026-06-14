@@ -1,17 +1,16 @@
+import { useConversationStore } from "@/stores/conversation";
+import { useSidebarStore } from "@/stores/sidebar";
 import {
   Compass,
   FolderOpen,
   Mail,
   MessageSquare,
-  PanelLeft,
-  PanelLeftClose,
   Plus,
-  Search,
-  Settings,
   Wrench,
 } from "lucide-react";
-import { useSidebarStore } from "@/stores/sidebar";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ConversationList } from "./ConversationList";
+import { UserMenu } from "./UserMenu";
 
 const NAV_ITEMS = [
   { icon: MessageSquare, label: "对话", route: "/" },
@@ -23,61 +22,46 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const collapsed = useSidebarStore((s) => s.collapsed);
-  const toggleCollapsed = useSidebarStore((s) => s.toggleCollapsed);
+  const switchConversation = useConversationStore((s) => s.switchConversation);
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+
+  const isNavActive = (route: string) =>
+    route === "/"
+      ? pathname === "/" || pathname.startsWith("/conversations")
+      : pathname === route || pathname.startsWith(`${route}/`);
+
+  const handleNewConversation = () => {
+    // 新对话先以草稿态存在（不落库），首条消息发送时由 MessageInput 真正创建后端会话。
+    switchConversation(null);
+    navigate("/");
+  };
 
   return (
     <aside
       className={`flex flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ${collapsed ? "w-14" : "w-60"}`}
       style={{ backgroundImage: "var(--sidebar-gradient)" }}
     >
-      {/* Brand header */}
-      <div className="flex h-10 items-center gap-2 px-3 [-webkit-app-region:drag]">
-        {!collapsed && (
-          <span className="flex-1 text-base font-semibold [-webkit-app-region:no-drag]">
-            AgentCore
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          className="flex size-7 items-center justify-center rounded-lg text-sidebar-foreground/60 hover:bg-sidebar-accent [-webkit-app-region:no-drag]"
-        >
-          {collapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
-        </button>
-      </div>
-
-      {/* Search */}
-      <div className="px-2 pb-1">
-        {collapsed ? (
-          <button
-            type="button"
-            className="flex size-8 mx-auto items-center justify-center rounded-lg text-sidebar-foreground/50 hover:bg-sidebar-accent"
-          >
-            <Search size={16} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="flex h-8 w-full items-center gap-2 rounded-lg border border-sidebar-border px-3 text-sm text-sidebar-foreground/40 hover:border-sidebar-foreground/20"
-          >
-            <Search size={14} />
-            <span>搜索…</span>
-          </button>
-        )}
-      </div>
-
       {/* Navigation */}
-      <nav className="space-y-0.5 px-2 pb-2">
-        {NAV_ITEMS.map((item) => (
-          <button
-            key={item.route}
-            type="button"
-            className={`flex h-9 w-full items-center gap-3 rounded-lg text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${collapsed ? "justify-center px-0" : "px-3"}`}
-          >
-            <item.icon size={16} className="shrink-0" />
-            {!collapsed && <span>{item.label}</span>}
-          </button>
-        ))}
+      <nav className="space-y-0.5 px-2 pt-2 pb-2">
+        {NAV_ITEMS.map((item) => {
+          const active = isNavActive(item.route);
+          return (
+            <button
+              key={item.route}
+              type="button"
+              onClick={() => navigate(item.route)}
+              className={`flex h-9 w-full items-center gap-3 rounded-lg text-base ${collapsed ? "justify-center px-0" : "px-3"} ${
+                active
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              }`}
+            >
+              <item.icon size={18} className="shrink-0" />
+              {!collapsed && <span>{item.label}</span>}
+            </button>
+          );
+        })}
       </nav>
 
       {/* Divider + Conversation header */}
@@ -89,6 +73,9 @@ export function Sidebar() {
           </span>
           <button
             type="button"
+            onClick={handleNewConversation}
+            title="新建对话"
+            aria-label="新建对话"
             className="flex size-7 items-center justify-center rounded-lg text-sidebar-foreground/50 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
           >
             <Plus size={14} />
@@ -101,16 +88,8 @@ export function Sidebar() {
         {!collapsed && <ConversationList />}
       </div>
 
-      {/* Footer */}
-      <div className="border-t border-sidebar-border p-2">
-        <button
-          type="button"
-          className={`flex h-9 w-full items-center gap-3 rounded-lg text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${collapsed ? "justify-center px-0" : "px-3"}`}
-        >
-          <Settings size={16} className="shrink-0" />
-          {!collapsed && <span>设置</span>}
-        </button>
-      </div>
+      {/* Footer: User menu */}
+      <UserMenu />
     </aside>
   );
 }

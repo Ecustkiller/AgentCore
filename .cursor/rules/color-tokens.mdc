@@ -1,0 +1,46 @@
+---
+description: 配色 token 规范——写任何颜色（Tailwind 类或 CSS）时参考，只用语义 token、禁硬编码
+globs:
+  - "**/*.tsx"
+  - "**/*.css"
+alwaysApply: false
+---
+
+# 配色 token 规范
+
+只用语义 token，颜色由主题统一定义。**禁止**硬编码任何具体颜色值。
+
+## 单一定义源
+
+所有 token 在 `apps/desktop/src/renderer/styles/globals.css` 的 `:root` / `.dark` 定义（**OKLCH**，hue 255 为品牌色），`@theme inline` 映射成 Tailwind 工具类。需要新颜色 → 先在这里加 token，不要就地造色。
+
+## 语义 token
+
+| 用途 | token | 典型类 |
+|---|---|---|
+| 品牌 / 主 CTA / 活跃 / 运行中 | `primary` `primary-foreground` | `bg-primary` `text-primary` |
+| 信息提示（蓝） | `info` `info-foreground` | `text-info` `bg-info/10` |
+| 成功 / 已完成（绿） | `success` `success-foreground` | `text-success` `ring-success` |
+| 警告 / 检查点 / 待裁决（琥珀） | `warning` `warning-foreground` | `text-warning` `bg-warning/10` |
+| 错误 / 失败 / 停止（红） | `destructive` `destructive-foreground` | `text-destructive` |
+| 闲置 / 等待 / 次要文本 | `muted` `muted-foreground` | `text-muted-foreground` |
+| hover 表面 / 选中底色（**中性，非状态色**） | `accent` `accent-foreground` | `hover:bg-accent` |
+| 表面 / 文本 / 描边 | `background` `foreground` `card` `popover` `border` `input` `ring` | `bg-card` `border-border` |
+| 侧栏专属 | `sidebar` `sidebar-foreground` `sidebar-primary` `sidebar-accent(-foreground)` `sidebar-border` `sidebar-ring` | `bg-sidebar` `bg-sidebar-accent` |
+
+## 执行状态 → token（统一映射，勿再分叉）
+
+| 状态 | token |
+|---|---|
+| `pending` / `ready` / `cancelled` | `muted` / `muted-foreground` |
+| `running` | `primary`（品牌蓝） |
+| `completed` | `success`（绿） |
+| `failed` | `destructive`（红） |
+| 检查点 / 待裁决 | `warning`（琥珀） |
+
+## 禁止
+
+- **硬编码调色板与 hex**：`bg-blue-500`、`text-red-600`、`#3B82F6`、`bg-[#...]`。唯一彩色出口是上表 token。
+- **`hsl(var(--…))` 包裹**：token 已是 OKLCH，`hsl()` 会产出非法值。内联样式直接写 `var(--primary)`；类名优先用语义工具类（如 `accent-primary` 而非 `accent-[…]`）。
+- **拿 `accent` 当成功色**：`accent` 是中性 hover 表面。「已完成 / 成功」一律 `success`（曾误用为灰，已修正）。
+- **绕过 token 新建散色变量**：先评估能否复用，必须新增则进 `globals.css` 成为正式 token。

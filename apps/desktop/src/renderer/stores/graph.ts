@@ -1,42 +1,26 @@
 import { create } from "zustand";
-import type { StepStatus } from "./execution";
 
-export interface GraphNode {
-  id: string;
-  type: "agent";
-  data: {
-    agentId: string;
-    role: string;
-    stepId: string;
-    status: StepStatus;
-    isAnimating: boolean;
-  };
-  position: { x: number; y: number };
-}
-
+/** Structural edge (DAG dependency). Visual state (animated) is derived live. */
 export interface GraphEdge {
   id: string;
   source: string;
   target: string;
-  animated: boolean;
 }
 
 interface GraphState {
-  nodes: GraphNode[];
+  /** ELK-computed positions keyed by step id. Recomputed only on shape change. */
+  positions: Record<string, { x: number; y: number }>;
   edges: GraphEdge[];
-  selectedNodeId: string | null;
 
-  setNodes: (nodes: GraphNode[]) => void;
-  setEdges: (edges: GraphEdge[]) => void;
-  selectNode: (nodeId: string | null) => void;
+  setLayout: (
+    positions: Record<string, { x: number; y: number }>,
+    edges: GraphEdge[],
+  ) => void;
 }
 
 export const useGraphStore = create<GraphState>((set) => ({
-  nodes: [],
+  positions: {},
   edges: [],
-  selectedNodeId: null,
 
-  setNodes: (nodes) => set({ nodes }),
-  setEdges: (edges) => set({ edges }),
-  selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
+  setLayout: (positions, edges) => set({ positions, edges }),
 }));
