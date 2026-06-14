@@ -121,6 +121,9 @@ class FakeInvites:
     async def get_by_code(self, code):
         return next((i for i in self.records.values() if i.code == code), None)
 
+    async def list_recent(self, *, limit=100):
+        return list(self.records.values())[:limit]
+
     async def mark_used(self, invite_id, *, used_by):
         self.records[invite_id].used_by = used_by
         self.records[invite_id].used_at = datetime.now(UTC)
@@ -288,3 +291,31 @@ async def test_logout_revokes_family():
     assert all(r.revoked_at is not None for r in tokens.records.values())
     with pytest.raises(AuthenticationError):
         await svc.refresh(refresh_token=pair.refresh_token)
+
+
+# --- invites (admin issuance) ---
+
+
+async def test_create_invite_mints_unique_registerable_code():
+    svc, _u, _c, _t, _i = _make()
+    a = await svc.create_invite(created_by="admin-1")
+    b = await svc.create_invite(created_by="admin-1")
+    assert a.code and b.code and a.code != b.code
+    assert a.created_by == "admin-1" and a.expires_at is None
+    # a freshly minted code works end-to-end for registration
+    user = await svc.register(username="newbie", password=_PW, invite_code=a.code)
+    assert user.username == "newbie"
+
+
+async def test_create_invite_with_expiry_sets_future_expiry():
+    svc, *_ = _make()
+    before = datetime.now(UTC)
+    invite = await svc.create_invite(created_by="admin-1", expires_in_days=7)
+    assert invite.expires_at is not None and invite.expires_at > before
+
+
+async def test_list_invites_returns_all_minted():
+    svc, _u, _c, _t, _i = _make()
+    await svc.create_invite(created_by="admin-1")
+    await svc.create_invite(created_by="admin-1")
+    assert len(await svc.list_invites()) == 2

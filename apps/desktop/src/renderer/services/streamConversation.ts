@@ -1,20 +1,22 @@
 import { notifyUnauthorized, tryRefresh } from "@/services/api";
+import { useApprovalStore } from "@/stores/approvals";
 import { useConversationStore } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
+import { useUsageStore } from "@/stores/usage";
 import type {
   ApprovalRequiredPayload,
   ApprovalResolvedPayload,
-  CheckpointReviewPayload,
+  CitationsPayload,
   ContentDeltaPayload,
   ErrorPayload,
-  PlanReviewRequiredPayload,
-  PlanReviewResolvedPayload,
+  MessageEndPayload,
   ReasoningDeltaPayload,
   RunCompletedPayload,
   RunFailedPayload,
   RunOutputDeltaPayload,
   RunPlanPayload,
   RunProgressPayload,
+  RunReasoningDeltaPayload,
   RunStartedPayload,
   SSEEvent,
   TitleGeneratedPayload,
@@ -109,13 +111,31 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       break;
     }
     case "message_end": {
-      useConversationStore.getState().finalizeLastMessage();
+      const payload = event.payload as MessageEndPayload;
+      const conv = useConversationStore.getState();
+      // Stamp the turn total (回合总账) onto the assistant bubble before
+      // finalizing, so the per-turn cost row (§7.3A) renders from state; null on
+      // the error / not-found paths where no turn ran.
+      if (payload.cost) {
+        conv.attachCostToLastMessage(payload.cost);
+        // Fold this turn into the conversation total so the 对话累计 chip (§7.3C)
+        // updates live; the turn is persisted too, so a later reload re-seeds the
+        // same sum from the ledger. `message_end.usage` uses the legacy *_tokens
+        // keys (see MessageEndPayload).
+        const u = payload.usage;
+        const tokens = u ? u.input_tokens + u.output_tokens : 0;
+        useUsageStore
+          .getState()
+          .addTurnCost(ctx.conversationId, payload.cost.total, tokens);
+      }
+      conv.finalizeLastMessage();
+      // The turn is over — any approval still on screen is moot (all were
+      // resolved to get here; this just guards a degraded/edge end).
+      useApprovalStore.getState().clear();
       const exec = useExecutionStore.getState();
       if (exec.plan && exec.status !== "failed") {
         exec.setStatus("completed");
       }
-      exec.clearPendingCheckpoint();
-      exec.clearPendingReview();
       break;
     }
     case "error": {
@@ -125,8 +145,23 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
         `\n\n**Error**: ${(event.payload as ErrorPayload).message}`,
       );
       store.finalizeLastMessage();
+      useApprovalStore.getState().clear();
       const exec = useExecutionStore.getState();
       if (exec.plan) exec.setStatus("failed");
+      break;
+    }
+
+    // ---- tool approval gate (CEO chat path) ----
+    // A GRANTABLE tool call is paused awaiting the user's decision; the inline
+    // prompt (rendered above the composer) settles it via the resolve endpoint.
+    case "approval_required": {
+      useApprovalStore.getState().add(event.payload as ApprovalRequiredPayload);
+      break;
+    }
+    case "approval_resolved": {
+      useApprovalStore
+        .getState()
+        .remove((event.payload as ApprovalResolvedPayload).approval_id);
       break;
     }
     case "title_generated": {
@@ -145,6 +180,13 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
         .reconcileLastTurn(payload.user_message_id);
       break;
     }
+    case "citations": {
+      const payload = event.payload as CitationsPayload;
+      useConversationStore
+        .getState()
+        .attachCitationsToLastMessage(payload.citations);
+      break;
+    }
 
     // ---- multi-agent execution stream ----
     // Each run/tool fact is appended to the journal; the graph is a projection
@@ -152,7 +194,10 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
     // one fold and there is no per-event UI wiring beyond recording the fact.
     case "run_plan": {
       const payload = event.payload as RunPlanPayload;
-      useExecutionStore.getState().startExecution({
+      // ingestPlan (not startExecution): a second delegate batch in the same
+      // turn shares the execution id and is merged into the live graph instead
+      // of resetting it (see stores/execution.ts).
+      useExecutionStore.getState().ingestPlan({
         id: payload.execution_id,
         planType: payload.plan_type,
         taskSummary: payload.task_summary,
@@ -163,32 +208,23 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
           thinking: a.thinking,
           reasoningEffort: a.reasoning_effort,
         })),
-        steps: payload.steps.map((s) => ({
+        runs: payload.runs.map((s) => ({
           id: s.id,
           agentId: s.agent_id,
           task: s.task,
           dependsOn: s.depends_on,
         })),
       });
-      break;
-    }
-    case "plan_review_required": {
-      const payload = event.payload as PlanReviewRequiredPayload;
-      const exec = useExecutionStore.getState();
-      exec.setPendingReview({ reviewId: payload.review_id });
-      exec.setStatus("paused");
-      break;
-    }
-    case "plan_review_resolved": {
-      const payload = event.payload as PlanReviewResolvedPayload;
-      const exec = useExecutionStore.getState();
-      if (payload.action === "cancel") {
-        // Nothing ran: drop the whole execution so no idle team card lingers
-        // (the "已取消执行。" content_delta becomes the assistant reply).
-        exec.clearExecution();
-      } else {
-        exec.clearPendingReview();
-        if (exec.plan) exec.setStatus("running");
+      // Mark the assistant turn as team-driven: its bubble renders the inline
+      // collaboration graph (统一团队展示草案) and defers the cost row to the
+      // graph's status strip (§7.3A). Single-agent turns emit no run_plan, so
+      // their bubble keeps `executionId === null` and shows its own ¥ caption.
+      // The detail panel is no longer auto-opened — it is a passive drill-down
+      // target, opened on demand by clicking a graph node.
+      if (payload.plan_type === "multi_agent") {
+        useConversationStore
+          .getState()
+          .setLastAssistantExecutionId(payload.execution_id);
       }
       break;
     }
@@ -198,7 +234,9 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
         t: frameTime(event),
         kind: "run_started",
         agentId: payload.agent_id,
-        stepId: payload.step_id,
+        runId: payload.run_id,
+        parentRunId: payload.parent_run_id,
+        runKind: payload.kind,
       });
       break;
     }
@@ -212,15 +250,31 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       });
       break;
     }
+    case "run_reasoning_delta": {
+      const payload = event.payload as RunReasoningDeltaPayload;
+      useExecutionStore.getState().recordFrame({
+        t: frameTime(event),
+        kind: "run_reasoning_delta",
+        agentId: payload.agent_id,
+        delta: payload.delta,
+      });
+      break;
+    }
     case "run_completed": {
       const payload = event.payload as RunCompletedPayload;
       useExecutionStore.getState().recordFrame({
         t: frameTime(event),
         kind: "run_completed",
-        stepId: payload.run_id,
+        runId: payload.run_id,
         agentId: payload.agent_id,
         outputSummary: payload.output_summary,
         durationMs: payload.duration_ms,
+        // Carry the priced cost onto the frame so the projected run lights up the
+        // team payroll (§7.3B) live, with no separate cost wiring.
+        role: payload.role,
+        model: payload.model,
+        usage: payload.usage,
+        cost: payload.cost,
       });
       break;
     }
@@ -229,7 +283,7 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       useExecutionStore.getState().recordFrame({
         t: frameTime(event),
         kind: "run_failed",
-        stepId: payload.run_id,
+        runId: payload.run_id,
         agentId: payload.agent_id,
         error: payload.error,
       });
@@ -243,45 +297,6 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
         completed: payload.completed,
         total: payload.total,
       });
-      break;
-    }
-    case "checkpoint_review": {
-      const payload = event.payload as CheckpointReviewPayload;
-      useExecutionStore.getState().recordFrame({
-        t: frameTime(event),
-        kind: "checkpoint_review",
-        checkpointId: payload.checkpoint_id,
-        stepId: payload.after_step,
-        decision: payload.decision,
-        reason: payload.reason,
-        summary: payload.summary,
-      });
-      break;
-    }
-    case "approval_required": {
-      const payload = event.payload as ApprovalRequiredPayload;
-      const exec = useExecutionStore.getState();
-      exec.setPendingCheckpoint({
-        checkpointId: payload.checkpoint_id,
-        afterStep: payload.after_step,
-        summary: payload.summary,
-        reason: payload.reason,
-        actions: payload.actions,
-      });
-      exec.setStatus("paused");
-      break;
-    }
-    case "approval_resolved": {
-      const payload = event.payload as ApprovalResolvedPayload;
-      const exec = useExecutionStore.getState();
-      exec.recordFrame({
-        t: frameTime(event),
-        kind: "checkpoint_resolved",
-        checkpointId: payload.checkpoint_id,
-        action: payload.action,
-      });
-      exec.clearPendingCheckpoint();
-      if (exec.plan) exec.setStatus("running");
       break;
     }
     case "tool_use_start": {
@@ -337,9 +352,11 @@ async function runMessageStream(
   conversationId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  // Each turn is replanned: drop any prior execution graph / checkpoint so the
-  // UI reflects only the current turn (run_plan repopulates for multi-agent).
+  // Each turn is replanned: drop any prior execution graph so the UI reflects
+  // only the current turn (run_plan repopulates for multi-agent). Likewise drop
+  // any stale approval prompt so a new turn always starts from a clean gate.
   useExecutionStore.getState().clearExecution();
+  useApprovalStore.getState().clear();
 
   const doFetch = () =>
     fetch(`${BASE_URL}${path}`, {

@@ -22,6 +22,7 @@ from agentcore.tools.builtin.web._net import (
     describe_net_error,
     note_failure,
     note_success,
+    site_of,
     web_timeout,
 )
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -284,4 +285,5 @@ class ReadUrlTool:
             duration_ms=int((time.monotonic() - start) * 1000),
             output_limit=max_chars + 1024,
             metadata={"title": title, "content_chars": len(text)},
+            citations=[{"url": url, "title": title, "snippet": "", "site": site_of(url)}],
         )

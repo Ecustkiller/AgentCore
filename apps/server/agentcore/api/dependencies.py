@@ -7,12 +7,14 @@ from fastapi import Cookie, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.auth import AuthService
-from agentcore.core.errors import AuthenticationError
+from agentcore.core.errors import AuthenticationError, AuthorizationError
 from agentcore.db.base import get_session
 from agentcore.db.models import User
 from agentcore.db.repositories import (
     ConversationRepository,
+    CostEventRepository,
     CredentialsRepository,
+    FolderRepository,
     InviteRepository,
     MessageRepository,
     RefreshTokenRepository,
@@ -38,8 +40,16 @@ def get_conversation_repo(session: AsyncSession = Depends(get_db)) -> Conversati
     return ConversationRepository(session)
 
 
+def get_folder_repo(session: AsyncSession = Depends(get_db)) -> FolderRepository:
+    return FolderRepository(session)
+
+
 def get_message_repo(session: AsyncSession = Depends(get_db)) -> MessageRepository:
     return MessageRepository(session)
+
+
+def get_cost_event_repo(session: AsyncSession = Depends(get_db)) -> CostEventRepository:
+    return CostEventRepository(session)
 
 
 def get_auth_service(session: AsyncSession = Depends(get_db)) -> AuthService:
@@ -85,3 +95,13 @@ async def get_optional_user(
 
 AuthUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+
+
+async def get_current_admin(user: AuthUser) -> User:
+    """Resolve the current user and require the admin role (403 otherwise)."""
+    if user.role != "admin":
+        raise AuthorizationError("Admin privileges required")
+    return user
+
+
+AdminUser = Annotated[User, Depends(get_current_admin)]

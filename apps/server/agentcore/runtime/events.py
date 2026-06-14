@@ -21,18 +21,19 @@ class EventType(StrEnum):
     ERROR = "error"
     TITLE_GENERATED = "title_generated"
     TURN_SAVED = "turn_saved"
-    # Multi-agent execution events
+    CITATIONS = "citations"
+    # Tool approval gate (CEO chat path): a GRANTABLE tool is paused awaiting the
+    # user's decision, then resolved.
+    APPROVAL_REQUIRED = "approval_required"
+    APPROVAL_RESOLVED = "approval_resolved"
+    # Multi-agent execution events (CEO delegate path)
     RUN_PLAN = "run_plan"
-    PLAN_REVIEW_REQUIRED = "plan_review_required"
-    PLAN_REVIEW_RESOLVED = "plan_review_resolved"
     RUN_STARTED = "run_started"
     RUN_OUTPUT_DELTA = "run_output_delta"
+    RUN_REASONING_DELTA = "run_reasoning_delta"
     RUN_COMPLETED = "run_completed"
     RUN_FAILED = "run_failed"
     RUN_PROGRESS = "run_progress"
-    CHECKPOINT_REVIEW = "checkpoint_review"
-    APPROVAL_REQUIRED = "approval_required"
-    APPROVAL_RESOLVED = "approval_resolved"
 
 
 class FinishReason(StrEnum):
@@ -82,6 +83,17 @@ def tool_use_start(tool_call_id: str, tool_name: str, arguments: dict[str, Any])
     )
 
 
+def citations_event(citations: list[dict[str, Any]]) -> SSEEvent:
+    """Aggregated, de-duplicated web sources consulted during the turn.
+
+    Emitted once near end-of-turn (before ``message_end``) so the client attaches
+    source cards to the just-finished assistant message. Each entry is a
+    ``{url, title, snippet, site}`` dict. Persisted on the message too, so reload
+    replays the same cards.
+    """
+    return SSEEvent(type=EventType.CITATIONS, payload={"citations": citations})
+
+
 def tool_use_end(tool_call_id: str, tool_name: str, *, success: bool, output: str) -> SSEEvent:
     return SSEEvent(
         type=EventType.TOOL_USE_END,
@@ -94,14 +106,67 @@ def tool_use_end(tool_call_id: str, tool_name: str, *, success: bool, output: st
     )
 
 
+def approval_required(
+    *,
+    approval_id: str,
+    conversation_id: str,
+    tool_call_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> SSEEvent:
+    """A GRANTABLE tool call is paused, awaiting the user's authorization.
+
+    ``approval_id`` is the key the client echoes back to the resolve endpoint
+    (it equals ``tool_call_id``). ``arguments`` is a size-bounded preview so the
+    user can see what the tool would do before allowing it.
+    """
+    return SSEEvent(
+        type=EventType.APPROVAL_REQUIRED,
+        payload={
+            "approval_id": approval_id,
+            "conversation_id": conversation_id,
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "arguments": arguments,
+        },
+    )
+
+
+def approval_resolved(*, approval_id: str, tool_call_id: str, decision: str) -> SSEEvent:
+    """A pending approval was settled (approve / approve_always / deny / timeout).
+
+    Lets the client clear the inline prompt; ``decision`` mirrors the resolution
+    (a timeout resolves as ``deny``).
+    """
+    return SSEEvent(
+        type=EventType.APPROVAL_RESOLVED,
+        payload={
+            "approval_id": approval_id,
+            "tool_call_id": tool_call_id,
+            "decision": decision,
+        },
+    )
+
+
 def message_end(
     finish_reason: FinishReason,
     *,
     input_tokens: int = 0,
     output_tokens: int = 0,
     reasoning_tokens: int = 0,
+    cache_hit_tokens: int = 0,
+    cache_miss_tokens: int = 0,
     rounds: int = 0,
+    cost: dict[str, Any] | None = None,
 ) -> SSEEvent:
+    """End-of-turn event carrying the turn's total usage + cost (回合总账).
+
+    ``usage`` keeps the long ``*_tokens`` keys (back-compat) and now also carries
+    the cache hit/miss split, so the bill can be shown honestly. ``cost`` is the
+    turn total ``{input, cached, output, total, currency}`` in integer nano-USD
+    (sum of the per-run prices — see ``costing.aggregate_cost``); ``None`` on the
+    error / not-found paths where no turn ran.
+    """
     return SSEEvent(
         type=EventType.MESSAGE_END,
         payload={
@@ -110,7 +175,10 @@ def message_end(
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
                 "reasoning_tokens": reasoning_tokens,
+                "cache_hit_tokens": cache_hit_tokens,
+                "cache_miss_tokens": cache_miss_tokens,
             },
+            "cost": cost,
             "rounds": rounds,
         },
     )
@@ -152,7 +220,7 @@ def run_plan(
     plan_type: str,
     task_summary: str,
     agents: list[dict[str, Any]],
-    steps: list[dict[str, Any]],
+    runs: list[dict[str, Any]],
 ) -> SSEEvent:
     return SSEEvent(
         type=EventType.RUN_PLAN,
@@ -161,46 +229,33 @@ def run_plan(
             "plan_type": plan_type,
             "task_summary": task_summary,
             "agents": agents,
-            "steps": steps,
+            "runs": runs,
         },
     )
 
 
-def plan_review_required(
+def run_started(
+    run_id: str,
+    agent_id: str,
     *,
-    review_id: str,
-    execution_id: str,
-    agents: list[dict[str, Any]],
+    parent_run_id: str | None = None,
+    kind: str = "agent",
 ) -> SSEEvent:
-    """Pre-execution gate: the team is planned but not yet running.
+    """A Run node entered RUNNING.
 
-    The client shows a "team preview" where the user can override each agent's
-    model tier and reasoning depth, then resolves this interaction with action
-    "start" (carrying the chosen per-agent overrides) or "cancel". ``agents``
-    echoes the planned roster with each agent's tier plus its effective
-    thinking/reasoning_effort so the client can seed the editor.
+    ``parent_run_id`` (the delegating run, ``None`` at the turn root) and ``kind``
+    (agent / arena / synthesis) are 阶段2 声明位: every 阶段1 worker is a flat
+    ``agent`` under the CEO, so these are constant for now, but the contract is
+    pre-wired so nested delegation + synthesis nodes need no further event change.
     """
     return SSEEvent(
-        type=EventType.PLAN_REVIEW_REQUIRED,
-        payload={
-            "review_id": review_id,
-            "execution_id": execution_id,
-            "agents": agents,
-        },
-    )
-
-
-def plan_review_resolved(review_id: str, action: str) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.PLAN_REVIEW_RESOLVED,
-        payload={"review_id": review_id, "action": action},
-    )
-
-
-def run_started(run_id: str, agent_id: str, step_id: str) -> SSEEvent:
-    return SSEEvent(
         type=EventType.RUN_STARTED,
-        payload={"run_id": run_id, "agent_id": agent_id, "step_id": step_id},
+        payload={
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "parent_run_id": parent_run_id,
+            "kind": kind,
+        },
     )
 
 
@@ -211,7 +266,38 @@ def run_output_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
     )
 
 
-def run_completed(run_id: str, agent_id: str, *, output_summary: str, duration_ms: int) -> SSEEvent:
+def run_reasoning_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
+    """A delegated worker's thinking increment — the reasoning twin of
+    ``run_output_delta`` (run-scoped, so the team UI can stream a worker's
+    思考全文 into its run-detail live instead of discarding it). Journaled, so a
+    reload replays the same thinking through the client-side fold.
+    """
+    return SSEEvent(
+        type=EventType.RUN_REASONING_DELTA,
+        payload={"run_id": run_id, "agent_id": agent_id, "delta": delta},
+    )
+
+
+def run_completed(
+    run_id: str,
+    agent_id: str,
+    *,
+    output_summary: str,
+    duration_ms: int,
+    role: str = "member",
+    model: str = "",
+    usage: dict[str, int] | None = None,
+    cost: dict[str, Any] | None = None,
+) -> SSEEvent:
+    """A Run finished — lights up one team-payroll row live (§七B).
+
+    ``role`` is the cost-ledger category (阶段1 workers are always ``member``);
+    ``usage`` is the ledger short-key form (``{input, output, reasoning,
+    cache_hit, cache_miss}``) and ``cost`` the priced ``{input, cached, output,
+    total, currency}`` (nano-USD). Both default to a zeroed shape (not omitted),
+    so the client always gets a full, typed object — a run that never metered the
+    LLM simply shows zeros (rendered as「—」, per §七5).
+    """
     return SSEEvent(
         type=EventType.RUN_COMPLETED,
         payload={
@@ -219,6 +305,14 @@ def run_completed(run_id: str, agent_id: str, *, output_summary: str, duration_m
             "agent_id": agent_id,
             "output_summary": output_summary,
             "duration_ms": duration_ms,
+            "role": role,
+            "model": model,
+            "usage": usage
+            if usage is not None
+            else {"input": 0, "output": 0, "reasoning": 0, "cache_hit": 0, "cache_miss": 0},
+            "cost": cost
+            if cost is not None
+            else {"input": 0, "cached": 0, "output": 0, "total": 0, "currency": "USD"},
         },
     )
 
@@ -237,57 +331,22 @@ def run_progress(completed: int, total: int) -> SSEEvent:
     )
 
 
-def checkpoint_review(
-    *,
-    checkpoint_id: str,
-    after_step: str,
-    decision: str,
-    reason: str,
-    summary: str,
-) -> SSEEvent:
-    """Orchestrator's verdict at a checkpoint: continue / adjust / escalate.
-
-    Emitted before any user prompt. Only `escalate` is followed by an
-    `approval_required` (the user decides); `continue` / `adjust` proceed
-    automatically. `reason` is the orchestrator's rationale (shown to the user).
-    """
-    return SSEEvent(
-        type=EventType.CHECKPOINT_REVIEW,
-        payload={
-            "checkpoint_id": checkpoint_id,
-            "after_step": after_step,
-            "decision": decision,
-            "reason": reason,
-            "summary": summary,
-        },
-    )
-
-
-def approval_required(
-    *,
-    checkpoint_id: str,
-    after_step: str,
-    summary: str,
-    reason: str,
-    actions: list[str],
-) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.APPROVAL_REQUIRED,
-        payload={
-            "checkpoint_id": checkpoint_id,
-            "after_step": after_step,
-            "summary": summary,
-            "reason": reason,
-            "actions": actions,
-        },
-    )
-
-
-def approval_resolved(checkpoint_id: str, action: str) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.APPROVAL_RESOLVED,
-        payload={"checkpoint_id": checkpoint_id, "action": action},
-    )
+# Event types that make up the multi-agent execution journal: persisted on the
+# assistant message (messages.runs) so a past turn's team graph replays on reload
+# through the same client-side fold as the live stream.
+_JOURNAL_EVENT_TYPES = frozenset(
+    {
+        EventType.RUN_PLAN,
+        EventType.RUN_STARTED,
+        EventType.RUN_OUTPUT_DELTA,
+        EventType.RUN_REASONING_DELTA,
+        EventType.RUN_COMPLETED,
+        EventType.RUN_FAILED,
+        EventType.RUN_PROGRESS,
+        EventType.TOOL_USE_START,
+        EventType.TOOL_USE_END,
+    }
+)
 
 
 class EventSink:
@@ -300,10 +359,32 @@ class EventSink:
     def __init__(self) -> None:
         self._queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue()
         self._closed = False
+        # Ordered run/tool events of this turn (the multi-agent execution
+        # journal), accumulated as they are emitted so the team graph can be
+        # persisted and replayed. Empty for a pure single-agent turn.
+        self._journal: list[dict[str, Any]] = []
 
     def emit(self, event: SSEEvent) -> None:
         if not self._closed:
+            if event.type in _JOURNAL_EVENT_TYPES:
+                self._journal.append(
+                    {
+                        "type": event.type.value,
+                        "payload": event.payload,
+                        "timestamp": event.timestamp,
+                    }
+                )
             self._queue.put_nowait(event)
+
+    def execution_journal(self) -> list[dict[str, Any]] | None:
+        """This turn's ordered run/tool events, or None if it never delegated.
+
+        Returns None unless a ``run_plan`` was emitted, so a single-agent turn
+        (whose only journalled events would be the CEO's own tool calls) persists
+        no runs payload.
+        """
+        has_plan = any(e["type"] == EventType.RUN_PLAN.value for e in self._journal)
+        return self._journal if has_plan else None
 
     def close(self) -> None:
         """Signal end-of-stream to consumer."""

@@ -4,11 +4,27 @@ import {
   regenerateConversation,
   streamConversation,
 } from "@/services/streamConversation";
-import { useConversationStore } from "@/stores/conversation";
+import { useApprovalStore } from "@/stores/approvals";
+import { type Message, useConversationStore } from "@/stores/conversation";
 
 /** The user's explicit stop (abort button) — never surfaced as an error. */
 function isAbort(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
+}
+
+/** The most recent user message in the open conversation, or null. Backs the
+ * task card's retry / adjust-instruction / replan actions. */
+export function lastUserMessage(): Message | null {
+  const msgs = useConversationStore.getState().messages;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === "user") return msgs[i];
+  }
+  return null;
+}
+
+/** Id of {@link lastUserMessage}, or null. */
+export function lastUserMessageId(): string | null {
+  return lastUserMessage()?.id ?? null;
 }
 
 /**
@@ -29,6 +45,7 @@ export async function runRegenerate(
   if (!conversationId || store.isGenerating) return;
 
   store.clearError();
+  store.bumpConversation(conversationId);
   store.truncateAfter(userMessageId);
   store.createAssistantMessage();
 
@@ -45,6 +62,8 @@ export async function runRegenerate(
     if (isAbort(err)) return;
     const s = useConversationStore.getState();
     if (s.isGenerating) s.finalizeLastMessage();
+    // A failed turn never delivers `approval_resolved`; drop any paused prompt.
+    useApprovalStore.getState().clear();
     const msg = describeStreamError(err);
     if (msg) s.setError(msg, () => void runRegenerate(userMessageId, content));
   } finally {
@@ -76,6 +95,13 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   const store = useConversationStore.getState();
   store.clearError();
 
+  // Snapshot the pre-bump position so we can undo the optimistic bump if the
+  // send fails before the server ever persisted the turn.
+  const beforeBump = store.conversations;
+  const origIndex = beforeBump.findIndex((c) => c.id === conversationId);
+  const origUpdatedAt = origIndex >= 0 ? beforeBump[origIndex].updatedAt : null;
+  store.bumpConversation(conversationId);
+
   // Persisted already? Then the optimistic id was swapped out — regenerate from
   // the saved user message rather than resending (which would duplicate it).
   const stillOptimistic = store.messages.some((m) => m.id === optimisticUserId);
@@ -106,6 +132,14 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     if (isAbort(err)) return;
     const s = useConversationStore.getState();
     if (s.isGenerating) s.finalizeLastMessage();
+    // A failed turn never delivers `approval_resolved`; drop any paused prompt.
+    useApprovalStore.getState().clear();
+    // If the turn never persisted (no `turn_saved` reconciled the optimistic
+    // id), the server order never changed — undo the optimistic bump.
+    const notPersisted = s.messages.some((m) => m.id === optimisticUserId);
+    if (notPersisted && origIndex >= 0 && origUpdatedAt !== null) {
+      s.restoreConversation(conversationId, origIndex, origUpdatedAt);
+    }
     const msg = describeStreamError(err);
     if (msg) s.setError(msg, () => void sendTurn(spec));
   } finally {

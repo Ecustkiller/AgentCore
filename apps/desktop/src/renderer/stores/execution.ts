@@ -1,7 +1,8 @@
+import type { CostBreakdown, RunKind, UsageBreakdown } from "@/types/events";
 import { useMemo } from "react";
 import { create } from "zustand";
 
-export type StepStatus =
+export type RunStatus =
   | "pending"
   | "ready"
   | "running"
@@ -14,7 +15,8 @@ export type ExecutionStatus =
   | "running"
   | "paused"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 /**
  * Orchestrator per-agent model preference (the two backend tiers). Single-agent
@@ -37,7 +39,8 @@ export const MODEL_TIER_META: Record<
   strong: {
     label: "强力档",
     short: "强",
-    description: "思考·high、回合预算大，面向需要判断或对质量有要求的子任务；可经「深度」升 max。",
+    description:
+      "思考·high、回合预算大，面向需要判断或对质量有要求的子任务；可经「深度」升 max。",
   },
 };
 
@@ -49,25 +52,8 @@ export const MODEL_TIER_META: Record<
  */
 export type ReasoningEffort = "high" | "max" | null;
 
-/**
- * Resolve the effective (thinking, effort) the UI shows/sends for an agent, from
- * its tier and a single "deep thinking" intent. Mirrors backend
- * `llm.config.apply_overrides`: both tiers think at 思考·high; the `deep` toggle
- * unlocks 思考·max on `strong` only (the documented 极复杂 upgrade). `fast` is the
- * no-max tier — to downgrade from max, switch tier to fast, never turn off here.
- */
-export function deriveEffective(
-  tier: ModelTier,
-  deep: boolean,
-): { thinking: boolean; reasoningEffort: ReasoningEffort } {
-  if (tier === "fast") return { thinking: true, reasoningEffort: "high" };
-  return deep
-    ? { thinking: true, reasoningEffort: "max" }
-    : { thinking: true, reasoningEffort: "high" };
-}
-
 /** Display label for the effective reasoning state — the single source the
- * preview, graph badge, and detail panel share. */
+ * graph badge and detail panel share. */
 export function reasoningMeta(
   thinking: boolean,
   effort: ReasoningEffort,
@@ -106,35 +92,42 @@ export interface AgentState {
   /** Effective reasoning state (tier default + per-agent override, 提案 B). */
   thinking: boolean;
   reasoningEffort: ReasoningEffort;
-  status: "idle" | "working" | "completed" | "error";
-  currentStepId: string | null;
+  status: "idle" | "working" | "completed" | "error" | "cancelled";
+  currentRunId: string | null;
   outputChunks: string[];
+  /** Streamed thinking chunks (run_reasoning_delta), joined for 思考全文. Empty
+   * for non-thinking workers or older journals that never carried reasoning. */
+  reasoningChunks: string[];
   toolCalls: ToolCallState[];
 }
 
-/**
- * Orchestrator checkpoint attached to a step. `decision` is the orchestrator's
- * verdict (continue / adjust / escalate). Only `escalate` is then handed to the
- * user, whose call lands in `action` (null while awaiting). So the lifecycle is:
- * continue/adjust → terminal; escalate → action null (待裁决) → approve/adjust/stop.
- */
-export interface StepCheckpoint {
-  id: string;
-  reason: string;
-  summary: string;
-  decision: "continue" | "adjust" | "escalate";
-  action: "approve" | "adjust" | "stop" | null;
-}
-
-export interface StepState {
+export interface RunNode {
   id: string;
   agentId: string;
   task: string;
-  status: StepStatus;
+  status: RunStatus;
   dependsOn: string[];
   outputSummary: string | null;
   durationMs: number | null;
-  checkpoint: StepCheckpoint | null;
+  /** Failure reason from `run_failed`; null unless this run failed. */
+  error: string | null;
+  /** Delegating run id (`run_started` slot). 阶段1 always null (flat workers
+   * under the CEO); set for 阶段2 nested delegation. */
+  parentRunId: string | null;
+  /** Node kind from `run_started`. 阶段1 always `agent`; `synthesis` / `arena`
+   * are 阶段2 slots, carried here so the graph can later style them. */
+  kind: RunKind;
+  /** Cost-ledger role of the run (member/captain/…) from `run_completed`; null
+   * until the run completes. 阶段1 scheduled runs are always "member". */
+  role: string | null;
+  /** Model id the run billed on (e.g. deepseek-v4-flash); null until completed.
+   * Workers may differ in tier, so this is per-run (payroll power detail). */
+  model: string | null;
+  /** This run's token usage (payroll power detail); null until completed. */
+  usage: UsageBreakdown | null;
+  /** This run's priced cost in nano-USD (lights up one payroll row, §7.3B);
+   * null until completed / unmetered. All-zero `total` renders as「—」(§7.5). */
+  cost: CostBreakdown | null;
 }
 
 export interface Execution {
@@ -143,26 +136,8 @@ export interface Execution {
   taskSummary: string;
   status: ExecutionStatus;
   agents: AgentState[];
-  steps: StepState[];
+  runs: RunNode[];
   progress: { completed: number; total: number };
-}
-
-export interface PendingCheckpoint {
-  checkpointId: string;
-  afterStep: string;
-  summary: string;
-  reason: string;
-  actions: ("approve" | "adjust" | "stop")[];
-}
-
-/**
- * The pre-execution team-preview gate. While set, the run is suspended on the
- * backend awaiting the user's "start" (with any tier overrides) or "cancel".
- * Tier edits during preview mutate the plan directly, so the graph badges and
- * the preview card stay in sync from one source.
- */
-export interface PendingReview {
-  reviewId: string;
 }
 
 /**
@@ -180,7 +155,7 @@ export interface ExecutionPlan {
     thinking?: boolean;
     reasoningEffort?: ReasoningEffort;
   }[];
-  steps: { id: string; agentId: string; task: string; dependsOn: string[] }[];
+  runs: { id: string; agentId: string; task: string; dependsOn: string[] }[];
 }
 
 /**
@@ -191,20 +166,37 @@ export interface ExecutionPlan {
  * so there is no second code path to keep in sync.
  */
 export type RunFrame =
-  | { t: number; kind: "run_started"; agentId: string; stepId: string }
+  | {
+      t: number;
+      kind: "run_started";
+      agentId: string;
+      runId: string;
+      // `runKind` (not `kind`) because `kind` is this union's discriminant; it
+      // carries the wire `kind` (agent/synthesis/arena). 阶段2 declaration slots.
+      parentRunId: string | null;
+      runKind: RunKind;
+    }
   | { t: number; kind: "run_output_delta"; agentId: string; delta: string }
+  | { t: number; kind: "run_reasoning_delta"; agentId: string; delta: string }
   | {
       t: number;
       kind: "run_completed";
-      stepId: string;
+      runId: string;
       agentId: string;
       outputSummary: string;
       durationMs: number;
+      // Cost-ledger fields from `run_completed` (§7.3B payroll). Optional so a
+      // frame without them (older streams / a journal replay that lacks cost)
+      // still projects — the run simply carries no priced cost.
+      role?: string;
+      model?: string;
+      usage?: UsageBreakdown;
+      cost?: CostBreakdown;
     }
   | {
       t: number;
       kind: "run_failed";
-      stepId: string;
+      runId: string;
       agentId: string;
       error: string;
     }
@@ -222,21 +214,6 @@ export type RunFrame =
       toolCallId: string;
       result: string;
       status: "success" | "error";
-    }
-  | {
-      t: number;
-      kind: "checkpoint_review";
-      checkpointId: string;
-      stepId: string;
-      decision: "continue" | "adjust" | "escalate";
-      reason: string;
-      summary: string;
-    }
-  | {
-      t: number;
-      kind: "checkpoint_resolved";
-      checkpointId: string;
-      action: "approve" | "adjust" | "stop";
     };
 
 /**
@@ -257,11 +234,12 @@ export function projectExecution(
     thinking: a.thinking ?? true,
     reasoningEffort: a.reasoningEffort ?? "high",
     status: "idle",
-    currentStepId: null,
+    currentRunId: null,
     outputChunks: [],
+    reasoningChunks: [],
     toolCalls: [],
   }));
-  const steps: StepState[] = plan.steps.map((s) => ({
+  const runs: RunNode[] = plan.runs.map((s) => ({
     id: s.id,
     agentId: s.agentId,
     task: s.task,
@@ -269,22 +247,33 @@ export function projectExecution(
     dependsOn: s.dependsOn,
     outputSummary: null,
     durationMs: null,
-    checkpoint: null,
+    error: null,
+    parentRunId: null,
+    kind: "agent",
+    role: null,
+    model: null,
+    usage: null,
+    cost: null,
   }));
-  let progress = { completed: 0, total: plan.steps.length };
 
   const agentById = (id: string) => agents.find((a) => a.id === id);
-  const stepById = (id: string) => steps.find((s) => s.id === id);
+  const runById = (id: string) => runs.find((s) => s.id === id);
 
   for (const f of frames) {
     switch (f.kind) {
       case "run_started": {
-        const step = stepById(f.stepId);
-        if (step) step.status = "running";
+        const run = runById(f.runId);
+        if (run) {
+          run.status = "running";
+          // Capture the 阶段2 declaration slots onto the node so a later graph
+          // can read them from the projected run (inert in 阶段1).
+          run.parentRunId = f.parentRunId;
+          run.kind = f.runKind;
+        }
         const agent = agentById(f.agentId);
         if (agent) {
           agent.status = "working";
-          agent.currentStepId = f.stepId;
+          agent.currentRunId = f.runId;
         }
         break;
       }
@@ -293,35 +282,50 @@ export function projectExecution(
         if (agent) agent.outputChunks.push(f.delta);
         break;
       }
+      case "run_reasoning_delta": {
+        const agent = agentById(f.agentId);
+        if (agent) agent.reasoningChunks.push(f.delta);
+        break;
+      }
       case "run_completed": {
-        const step = stepById(f.stepId);
-        if (step) {
-          step.status = "completed";
-          step.outputSummary = f.outputSummary;
-          step.durationMs = f.durationMs;
+        const run = runById(f.runId);
+        if (run) {
+          run.status = "completed";
+          run.outputSummary = f.outputSummary;
+          run.durationMs = f.durationMs;
+          // Light up this run's payroll row (§7.3B); absent on cost-less frames.
+          run.role = f.role ?? null;
+          run.model = f.model ?? null;
+          run.usage = f.usage ?? null;
+          run.cost = f.cost ?? null;
         }
         const agent = agentById(f.agentId);
         if (agent) {
           agent.status = "completed";
-          agent.currentStepId = null;
+          agent.currentRunId = null;
         }
         break;
       }
       case "run_failed": {
-        const step = stepById(f.stepId);
-        if (step) step.status = "failed";
+        const run = runById(f.runId);
+        if (run) {
+          run.status = "failed";
+          run.error = f.error;
+        }
         const agent = agentById(f.agentId);
         if (agent) agent.status = "error";
         break;
       }
       case "run_progress": {
-        progress = { completed: f.completed, total: f.total };
+        // Progress is derived from run states below so it stays correct and
+        // cumulative across multiple delegate batches (the per-batch wire
+        // counters would reset). The frame is kept only as a timeline marker.
         break;
       }
       case "tool_use_start": {
-        // Tool events are not run-scoped on the wire; attach to whichever step
+        // Tool events are not run-scoped on the wire; attach to whichever run
         // is running at this point in the fold (matches prior live behaviour).
-        const running = steps.find((s) => s.status === "running");
+        const running = runs.find((s) => s.status === "running");
         const agent = running ? agentById(running.agentId) : undefined;
         if (agent) {
           agent.toolCalls.push({
@@ -345,27 +349,15 @@ export function projectExecution(
         }
         break;
       }
-      case "checkpoint_review": {
-        const step = stepById(f.stepId);
-        if (step) {
-          step.checkpoint = {
-            id: f.checkpointId,
-            reason: f.reason,
-            summary: f.summary,
-            decision: f.decision,
-            action: null,
-          };
-        }
-        break;
-      }
-      case "checkpoint_resolved": {
-        const step = steps.find((s) => s.checkpoint?.id === f.checkpointId);
-        if (step?.checkpoint) {
-          step.checkpoint = { ...step.checkpoint, action: f.action };
-        }
-        break;
-      }
     }
+  }
+
+  // A stopped turn never receives terminal run frames for its in-flight nodes;
+  // freeze them as cancelled so the card leaves its live state (no spinners /
+  // progress bar) instead of looking like it is still running.
+  if (status === "cancelled") {
+    for (const s of runs) if (s.status === "running") s.status = "cancelled";
+    for (const a of agents) if (a.status === "working") a.status = "cancelled";
   }
 
   return {
@@ -374,8 +366,13 @@ export function projectExecution(
     taskSummary: plan.taskSummary,
     status,
     agents,
-    steps,
-    progress,
+    runs,
+    // Derived (not from run_progress): count terminal-completed nodes over the
+    // cumulative run set, so multi-batch delegate progress is always correct.
+    progress: {
+      completed: runs.filter((s) => s.status === "completed").length,
+      total: runs.length,
+    },
   };
 }
 
@@ -383,14 +380,16 @@ export function projectExecution(
 export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
   const role = (agentId: string) =>
     plan.agents.find((a) => a.id === agentId)?.role ?? agentId;
-  const task = (stepId: string) =>
-    plan.steps.find((s) => s.id === stepId)?.task ?? stepId;
+  const task = (runId: string) =>
+    plan.runs.find((s) => s.id === runId)?.task ?? runId;
 
   switch (frame.kind) {
     case "run_started":
-      return `${role(frame.agentId)} 开始 · ${task(frame.stepId)}`;
+      return `${role(frame.agentId)} 开始 · ${task(frame.runId)}`;
     case "run_output_delta":
       return `${role(frame.agentId)} 输出中…`;
+    case "run_reasoning_delta":
+      return `${role(frame.agentId)} 思考中…`;
     case "run_completed":
       return `${role(frame.agentId)} 完成`;
     case "run_failed":
@@ -401,25 +400,19 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       return `调用工具 ${frame.toolName}`;
     case "tool_use_end":
       return `工具${frame.status === "success" ? "完成" : "失败"}`;
-    case "checkpoint_review": {
-      const label =
-        frame.decision === "continue"
-          ? "编排器继续"
-          : frame.decision === "adjust"
-            ? "编排器调整"
-            : "升级用户裁决";
-      return `检查点 · ${label}（${task(frame.stepId)}）`;
-    }
-    case "checkpoint_resolved": {
-      const label =
-        frame.action === "approve"
-          ? "继续"
-          : frame.action === "adjust"
-            ? "调整"
-            : "停止";
-      return `检查点 · 用户${label}`;
-    }
   }
+}
+
+/**
+ * Wall-clock span covered by a frame stream, in ms (0 if fewer than 2 frames).
+ *
+ * Used for the completed task card's "用时" summary. Wall-clock (last − first
+ * frame timestamp) is correct regardless of parallelism, unlike summing
+ * per-run durations which would overcount concurrent agents.
+ */
+export function elapsedMs(frames: RunFrame[]): number {
+  if (frames.length < 2) return 0;
+  return Math.max(0, frames[frames.length - 1].t - frames[0].t);
 }
 
 interface ExecutionState {
@@ -428,33 +421,32 @@ interface ExecutionState {
   /** Number of frames to project. `null` = follow the live tail. */
   playhead: number | null;
   status: ExecutionStatus;
-  pendingCheckpoint: PendingCheckpoint | null;
-  pendingReview: PendingReview | null;
 
   /**
    * Cross-view selection shared by the graph and the in-chat task card. A
-   * step focus pins one node (and its agent); an agent focus highlights every
+   * run focus pins one node (and its agent); an agent focus highlights every
    * node that agent owns. Bridged through {@link ExecutionPlan} so either view
    * can drive the other even though they are never on screen at once.
    */
-  focusedStepId: string | null;
+  focusedRunId: string | null;
   focusedAgentId: string | null;
 
   startExecution: (plan: ExecutionPlan) => void;
+  /**
+   * Ingest a `run_plan` batch. The first batch of a turn starts a fresh
+   * execution; a later batch with the *same* execution id (the adaptive D1′
+   * case where the CEO delegates again) is merged in — new agents/runs are
+   * appended and the frame stream is kept — so every batch stays on the graph
+   * and timeline. `clearExecution` between turns still gives each turn a fresh
+   * graph, so cross-turn batches never merge.
+   */
+  ingestPlan: (plan: ExecutionPlan) => void;
   clearExecution: () => void;
   recordFrame: (frame: RunFrame) => void;
   setStatus: (status: ExecutionStatus) => void;
   setPlayhead: (index: number | null) => void;
   goLive: () => void;
-  setPendingCheckpoint: (checkpoint: PendingCheckpoint | null) => void;
-  clearPendingCheckpoint: () => void;
-  setPendingReview: (review: PendingReview | null) => void;
-  clearPendingReview: () => void;
-  /** Override one agent's model tier during preview (mutates the plan). */
-  setAgentTier: (agentId: string, tier: ModelTier) => void;
-  /** Toggle one agent's deep thinking (max effort) during preview (提案 B). */
-  setAgentDeep: (agentId: string, deep: boolean) => void;
-  focusStep: (stepId: string | null) => void;
+  focusRun: (runId: string | null) => void;
   focusAgent: (agentId: string | null) => void;
   clearFocus: () => void;
 }
@@ -464,9 +456,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   frames: [],
   playhead: null,
   status: "planning",
-  pendingCheckpoint: null,
-  pendingReview: null,
-  focusedStepId: null,
+  focusedRunId: null,
   focusedAgentId: null,
 
   startExecution: (plan) =>
@@ -475,11 +465,38 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       frames: [],
       playhead: null,
       status: "running",
-      pendingCheckpoint: null,
-      pendingReview: null,
-      focusedStepId: null,
+      focusedRunId: null,
       focusedAgentId: null,
     }),
+
+  ingestPlan: (plan) => {
+    const cur = get().plan;
+    // Different turn / first batch → fresh start (resets frames + focus).
+    if (!cur || cur.id !== plan.id) {
+      get().startExecution(plan);
+      return;
+    }
+    // Same execution → an incremental delegate batch. Append unseen agents and
+    // runs (run-ids are namespaced per delegate call, so no collisions) while
+    // preserving the existing frame stream, playhead and focus.
+    const agents = [...cur.agents];
+    for (const a of plan.agents) {
+      if (!agents.some((x) => x.id === a.id)) agents.push(a);
+    }
+    const runs = [...cur.runs];
+    for (const s of plan.runs) {
+      if (!runs.some((x) => x.id === s.id)) runs.push(s);
+    }
+    set({
+      plan: {
+        ...cur,
+        agents,
+        runs,
+        taskSummary: plan.taskSummary || cur.taskSummary,
+      },
+      status: "running",
+    });
+  },
 
   clearExecution: () =>
     set({
@@ -487,9 +504,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       frames: [],
       playhead: null,
       status: "planning",
-      pendingCheckpoint: null,
-      pendingReview: null,
-      focusedStepId: null,
+      focusedRunId: null,
       focusedAgentId: null,
     }),
 
@@ -506,62 +521,19 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
   goLive: () => set({ playhead: null }),
 
-  setPendingCheckpoint: (checkpoint) => set({ pendingCheckpoint: checkpoint }),
-  clearPendingCheckpoint: () => set({ pendingCheckpoint: null }),
-
-  setPendingReview: (review) => set({ pendingReview: review }),
-  clearPendingReview: () => set({ pendingReview: null }),
-
-  setAgentTier: (agentId, tier) =>
-    set((state) => {
-      if (!state.plan) return {};
-      return {
-        plan: {
-          ...state.plan,
-          agents: state.plan.agents.map((a) => {
-            if (a.id !== agentId) return a;
-            // Preserve the deep intent across a tier switch; fast has no max, so
-            // it resolves to high (switching to fast is how you drop from max).
-            const deep = a.reasoningEffort === "max";
-            return {
-              ...a,
-              modelPreference: tier,
-              ...deriveEffective(tier, deep),
-            };
-          }),
-        },
-      };
-    }),
-
-  setAgentDeep: (agentId, deep) =>
-    set((state) => {
-      if (!state.plan) return {};
-      return {
-        plan: {
-          ...state.plan,
-          agents: state.plan.agents.map((a) =>
-            a.id === agentId
-              ? { ...a, ...deriveEffective(a.modelPreference, deep) }
-              : a,
-          ),
-        },
-      };
-    }),
-
-  focusStep: (stepId) => {
-    if (stepId === null) {
-      set({ focusedStepId: null, focusedAgentId: null });
+  focusRun: (runId) => {
+    if (runId === null) {
+      set({ focusedRunId: null, focusedAgentId: null });
       return;
     }
     const agentId =
-      get().plan?.steps.find((s) => s.id === stepId)?.agentId ?? null;
-    set({ focusedStepId: stepId, focusedAgentId: agentId });
+      get().plan?.runs.find((s) => s.id === runId)?.agentId ?? null;
+    set({ focusedRunId: runId, focusedAgentId: agentId });
   },
 
-  focusAgent: (agentId) =>
-    set({ focusedAgentId: agentId, focusedStepId: null }),
+  focusAgent: (agentId) => set({ focusedAgentId: agentId, focusedRunId: null }),
 
-  clearFocus: () => set({ focusedStepId: null, focusedAgentId: null }),
+  clearFocus: () => set({ focusedRunId: null, focusedAgentId: null }),
 }));
 
 /**

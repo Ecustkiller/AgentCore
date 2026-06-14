@@ -3,7 +3,7 @@
 Long-term memory is NOT a table. It is a single AI-maintained `rule` file
 (`ai_maintained=true`) in the user's file tree — same carrier and same injection
 pipeline as user-written rules, distinguished only by the `ai_maintained` flag
-(see docs/Agent记忆与知识系统.md §五).
+(see docs/03-AI核心/Agent记忆与知识系统.md §五).
 
 To avoid free-text drift, the LLM never rewrites the file directly: it emits
 structured change ops, and deterministic code applies them to the markdown.

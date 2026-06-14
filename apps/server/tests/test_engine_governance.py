@@ -16,6 +16,8 @@ from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
+from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+from agentcore.workspace.server import ServerWorkspace
 
 
 def _tool_chunk(name: str, args: str, *, call_id: str = "c") -> LLMChunk:
@@ -45,11 +47,25 @@ class _ScriptedProvider:
 
 
 class _StubTool:
-    """A tool that records its call count and reports a fixed success/failure."""
+    """A tool that records its call count and reports a fixed success/failure.
 
-    def __init__(self, name: str = "search", *, success: bool = True) -> None:
+    Optionally carries ``citations`` (research-tool data) and/or behaves as a
+    ``terminal`` handoff tool — used to verify the loop's citation aggregation,
+    including the handoff early-return path.
+    """
+
+    def __init__(
+        self,
+        name: str = "search",
+        *,
+        success: bool = True,
+        citations: list[dict] | None = None,
+        terminal: bool = False,
+    ) -> None:
         self._name = name
         self._success = success
+        self._citations = citations
+        self._terminal = terminal
         self.calls = 0
 
     @property
@@ -63,9 +79,16 @@ class _StubTool:
 
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
         self.calls += 1
-        if self._success:
-            return ToolResult(tool_call_id="", success=True, output="result")
-        return ToolResult(tool_call_id="", success=False, output="", error="boom")
+        if not self._success:
+            return ToolResult(tool_call_id="", success=False, output="", error="boom")
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output="result",
+            citations=self._citations,
+            terminal=self._terminal,
+            terminal_content="streamed answer" if self._terminal else None,
+        )
 
 
 def _registry(tool: _StubTool) -> ToolRegistry:
@@ -77,14 +100,20 @@ def _registry(tool: _StubTool) -> ToolRegistry:
 def _context() -> ToolContext:
     return ToolContext(
         execution_id="e",
-        step_id="s",
+        run_id="s",
         agent_id="a",
-        workspace_dir=Path("."),
+        backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
     )
 
 
-async def _run(provider: _ScriptedProvider, tool: _StubTool, *, max_rounds: int):
+async def _run(
+    provider: _ScriptedProvider,
+    tool: _StubTool,
+    *,
+    max_rounds: int,
+    citation_sink: list[dict] | None = None,
+):
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
     profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=max_rounds)
     result = await react_loop(
@@ -94,6 +123,7 @@ async def _run(provider: _ScriptedProvider, tool: _StubTool, *, max_rounds: int)
         sink=EventSink(),
         tool_context=_context(),
         profile=profile,
+        citation_sink=citation_sink,
     )
     return result, messages
 
@@ -105,7 +135,7 @@ async def test_repeated_call_nudges_then_finalizes():
         [[same], [same], [same], [same], [same], [same], [_content_chunk("final answer")]]
     )
     tool = _StubTool()
-    (content, _r, _i, _o, _rt, rounds), messages = await _run(provider, tool, max_rounds=20)
+    (content, _r, _usage, rounds), messages = await _run(provider, tool, max_rounds=20)
 
     assert content == "final answer"
     assert rounds == 6  # finalized at the 6th round, before the cap
@@ -147,7 +177,7 @@ async def test_max_rounds_exhaustion_forces_nonempty_answer():
         ]
     )
     tool = _StubTool()
-    (content, _r, _i, _o, _rt, rounds), _messages = await _run(provider, tool, max_rounds=3)
+    (content, _r, _usage, rounds), _messages = await _run(provider, tool, max_rounds=3)
 
     assert content == "best-effort fallback"
     assert rounds == 3  # reported as the cap → pipeline surfaces MAX_ROUNDS
@@ -166,3 +196,35 @@ async def test_clean_answer_has_no_governance_injection():
     assert content == "done"
     assert tool.calls == 1
     assert not any(m.content and "[系统提示]" in m.content for m in messages if m.content)
+
+
+async def test_research_tool_citations_collected_into_sink():
+    # A successful research tool's citations land in the caller's sink.
+    cites = [{"url": "https://a.com", "title": "A", "snippet": "s", "site": "a.com"}]
+    provider = _ScriptedProvider(
+        [[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]]
+    )
+    sink_list: list[dict] = []
+    (content, *_), _ = await _run(
+        provider, _StubTool(citations=cites), max_rounds=20, citation_sink=sink_list
+    )
+
+    assert content == "done"
+    assert sink_list == cites
+
+
+async def test_terminal_tool_citations_collected_before_handoff():
+    # A handoff (terminal) tool returns early, but its citations must still be
+    # merged into the sink first — the multi-agent → chat-turn source path.
+    cites = [{"url": "https://t.com", "title": "T", "snippet": "", "site": "t.com"}]
+    provider = _ScriptedProvider([[_tool_chunk("assemble", "{}")]])
+    sink_list: list[dict] = []
+    (content, *_), _ = await _run(
+        provider,
+        _StubTool(name="assemble", citations=cites, terminal=True),
+        max_rounds=20,
+        citation_sink=sink_list,
+    )
+
+    assert content == "streamed answer"  # terminal_content surfaced as the reply
+    assert sink_list == cites

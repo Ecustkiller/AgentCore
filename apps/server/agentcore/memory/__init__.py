@@ -1,7 +1,7 @@
 """Memory system.
 
-Two layers (see docs/Agent记忆与知识系统.md):
-- working memory: in-memory conversation history + TaskWorkspace (runtime data)
+Two layers (see docs/03-AI核心/Agent记忆与知识系统.md):
+- working memory: in-memory conversation history + per-turn run state (runtime data)
 - long-term memory: an `ai_maintained` `rule` file in the user's file tree,
   maintained via structured ops (LLM decides, deterministic code applies)
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 
@@ -43,6 +44,19 @@ class EgressError(Exception):
 def web_timeout(read: float = WEB_READ_TIMEOUT) -> httpx.Timeout:
     """Timeout with a short connect deadline and a configurable read window."""
     return httpx.Timeout(read, connect=WEB_CONNECT_TIMEOUT)
+
+
+def site_of(url: str) -> str:
+    """Display hostname for a URL: lowercased, sans a leading ``www.``.
+
+    Used to label source/citation cards. Returns ``""`` when the URL has no
+    parseable host (the card then falls back to the title/url).
+    """
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
 
 
 def describe_net_error(e: BaseException) -> str:

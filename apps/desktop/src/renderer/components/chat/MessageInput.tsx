@@ -6,9 +6,11 @@ import {
   loadFileIndex,
 } from "@/lib/fileIndex";
 import { api } from "@/services/api";
+import { moveConversation } from "@/services/conversations";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import { useConversationStore } from "@/stores/conversation";
+import { useFoldersStore } from "@/stores/folders";
 import { Folder, Paperclip, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -267,6 +269,8 @@ export function MessageInput() {
     let conversationId = store.currentConversationId;
     let createdNew = false;
     if (!conversationId) {
+      // A draft started from a folder header files itself into that folder.
+      const targetFolderId = useFoldersStore.getState().pendingNewChatFolderId;
       try {
         const conv = await api.post<{ id: string }>("/v1/conversations", {
           title: null,
@@ -279,11 +283,22 @@ export function MessageInput() {
             updatedAt: new Date().toISOString(),
             messageCount: 0,
             lastMessagePreview: null,
+            folderId: targetFolderId,
           },
           ...useConversationStore.getState().conversations,
         ]);
         useConversationStore.getState().setCurrentConversation(conv.id);
         createdNew = true;
+        if (targetFolderId) {
+          useFoldersStore.getState().setPendingNewChatFolder(null);
+          void moveConversation(conv.id, targetFolderId).catch(() => {
+            // Membership is cosmetic for an empty new chat; on failure it just
+            // stays ungrouped until the next reload reconciles it.
+            useConversationStore
+              .getState()
+              .setConversationFolder(conv.id, null);
+          });
+        }
       } catch {
         return;
       }

@@ -5,16 +5,21 @@ handles them in JS (XSS-resistant). The refresh cookie is path-scoped to the
 auth endpoints; the access cookie is sent on every API call.
 """
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, Response
 
 from agentcore.api.dependencies import (
     ACCESS_TOKEN_COOKIE,
+    AdminUser,
     AuthUser,
     get_auth_service,
 )
 from agentcore.api.schemas import (
+    CreateInviteRequest,
+    InviteListResponse,
+    InviteResponse,
     LoginRequest,
     RegisterRequest,
     StatusResponse,
@@ -23,7 +28,7 @@ from agentcore.api.schemas import (
 from agentcore.auth import AuthService, TokenPair
 from agentcore.config import settings
 from agentcore.core.errors import AuthenticationError
-from agentcore.db.models import User
+from agentcore.db.models import Invite, User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -42,6 +47,27 @@ def _user_response(user: User) -> UserResponse:
         email=user.email,
         role=user.role,
         created_at=user.created_at,
+    )
+
+
+def _invite_status(invite: Invite, now: datetime) -> str:
+    if invite.used_at is not None:
+        return "used"
+    if invite.expires_at is not None and invite.expires_at <= now:
+        return "expired"
+    return "active"
+
+
+def _invite_response(invite: Invite, now: datetime) -> InviteResponse:
+    return InviteResponse(
+        id=invite.id,
+        code=invite.code,
+        status=_invite_status(invite, now),
+        created_by=invite.created_by,
+        used_by=invite.used_by,
+        created_at=invite.created_at,
+        expires_at=invite.expires_at,
+        used_at=invite.used_at,
     )
 
 
@@ -130,3 +156,29 @@ async def logout(
 @router.get("/me", response_model=UserResponse)
 async def me(user: AuthUser):
     return _user_response(user)
+
+
+@router.post("/invites", response_model=InviteResponse, status_code=201)
+async def create_invite(
+    admin: AdminUser,
+    body: CreateInviteRequest | None = None,
+    service: AuthService = Depends(get_auth_service),
+):
+    invite = await service.create_invite(
+        created_by=admin.user_id,
+        expires_in_days=body.expires_in_days if body else None,
+    )
+    return _invite_response(invite, datetime.now(UTC))
+
+
+@router.get("/invites", response_model=InviteListResponse)
+async def list_invites(
+    admin: AdminUser,
+    service: AuthService = Depends(get_auth_service),
+):
+    now = datetime.now(UTC)
+    invites = await service.list_invites()
+    return InviteListResponse(
+        data=[_invite_response(i, now) for i in invites],
+        total=len(invites),
+    )

@@ -7,7 +7,7 @@ This is the only survivor of the former "session summary" layer. The
 cross-session summary (`summary` / `key_decisions` injected into the orchestrator
 as `session_history_summary`) was dropped: it fed the orchestrator — which does
 planning, not content production — and duplicated the durable signal already
-carried by the long-term `ai_maintained` rule file. See docs/Agent记忆与知识系统.md §1.3.
+carried by the long-term `ai_maintained` rule file. See docs/03-AI核心/Agent记忆与知识系统.md §1.3.
 
 `LLMTitleGenerator` is the concrete `TitleGenerator` (fast, non-thinking model),
 wired in `conversation/service.py`: on the first turn it generates the title and

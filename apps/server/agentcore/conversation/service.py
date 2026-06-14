@@ -4,10 +4,15 @@ Coordinates message persistence, history loading, pipeline execution,
 and title generation for a conversation turn.
 """
 
+from agentcore.config import settings
 from agentcore.conversation.history import load_history
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
-from agentcore.db.repositories import ConversationRepository, MessageRepository
+from agentcore.db.repositories import (
+    ConversationRepository,
+    CostEventRepository,
+    MessageRepository,
+)
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.factory import build_provider
 from agentcore.memory import (
@@ -28,6 +33,9 @@ from agentcore.runtime.events import (
     turn_saved,
 )
 from agentcore.runtime.pipeline import run_chat_pipeline
+from agentcore.workspace.locate import build_server_workspace, workspace_storage_key
+from agentcore.workspace.locks import workspace_lock
+from agentcore.workspace.snapshots import create_snapshot
 
 logger = get_logger(__name__)
 
@@ -73,6 +81,7 @@ async def _run_and_persist(
     conversation_id: str,
     user_message: str,
     user_id: str,
+    folder_id: str | None,
     sink: EventSink,
     history: list[dict],
     attachments: list[dict] | None,
@@ -85,17 +94,28 @@ async def _run_and_persist(
     Title generation is skipped for regenerate (the conversation already has one).
     The user turn is persisted and reconciled by the caller before this runs.
     """
+    # Resolve the workspace for this conversation: a folder's shared project
+    # space when grouped, else the conversation's own space (see workspace.locate).
+    backend = build_server_workspace(
+        user_id=user_id,
+        folder_id=folder_id,
+        conversation_id=conversation_id,
+    )
     result = await run_chat_pipeline(
         conversation_id=conversation_id,
         user_message=user_message,
         history=history,
         sink=sink,
         user_id=user_id,
+        backend=backend,
         attachments=attachments,
     )
 
     assistant_reply = result.get("content") or ""
     assistant_reasoning = result.get("reasoning_content") or None
+    assistant_citations = result.get("citations") or None
+    assistant_runs = result.get("runs") or None
+    cost_runs = result.get("cost_runs") or []
 
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
@@ -107,12 +127,44 @@ async def _run_and_persist(
                 role="assistant",
                 content=assistant_reply,
                 reasoning_content=assistant_reasoning,
+                citations=assistant_citations,
+                # The team graph (when the CEO delegated) and the pipeline's
+                # message id, so a past multi-agent turn replays on reload and
+                # the streamed/persisted assistant ids agree.
+                runs=assistant_runs,
+                message_id=result.get("message_id"),
                 metadata={
                     "input_tokens": result.get("input_tokens", 0),
                     "output_tokens": result.get("output_tokens", 0),
                     "rounds": result.get("rounds", 0),
                 },
             )
+
+        # 落账: persist the per-run cost ledger for this turn (captain root + one
+        # row per delegated member). It shares the pipeline's message_id with the
+        # assistant row above, so the payroll (queried by message_id) lines up
+        # with the persisted message. The ledger is the truth source for spend
+        # (Message.usage is only a display snapshot), so it is written even when
+        # no assistant text was produced — the tokens were still spent. A ledger
+        # failure must NEVER break the turn (文档铁律): we roll back the aborted
+        # cost statement so the session stays usable for the title lookup, then
+        # log and move on. The reply is already committed above and is unaffected.
+        if cost_runs:
+            try:
+                await CostEventRepository(session).record_runs(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message_id=result.get("message_id"),
+                    runs=cost_runs,
+                )
+            except Exception as e:
+                await session.rollback()
+                logger.warning(
+                    "cost_ledger_write_failed",
+                    conversation_id=conversation_id,
+                    message_id=result.get("message_id"),
+                    error=str(e),
+                )
 
         conv = await conv_repo.get_by_id(conversation_id)
         needs_title = bool(generate_title and conv and not conv.title)
@@ -150,6 +202,32 @@ async def _run_and_persist(
             )
     finally:
         await provider.close()
+
+    # Best-effort workspace backup (决策⑥): if this turn changed files, snapshot
+    # the workspace to object storage. It runs after message_end (and the title
+    # event) already fired, so it is off the user-visible path; a backup failure
+    # must NEVER affect the turn (文档铁律), so it is warning-only. Cloud-mode
+    # files already live on the server disk — this is the versioned backup, not
+    # the source of truth.
+    if settings.workspace_snapshot_enabled and getattr(backend, "dirty", False):
+        try:
+            ref = await create_snapshot(
+                user_id=user_id,
+                folder_id=folder_id,
+                conversation_id=conversation_id,
+            )
+            logger.info(
+                "workspace_snapshot_created",
+                conversation_id=conversation_id,
+                snapshot_id=ref.snapshot_id,
+                size_bytes=ref.size_bytes,
+            )
+        except Exception as e:
+            logger.warning(
+                "workspace_snapshot_failed",
+                conversation_id=conversation_id,
+                error=str(e),
+            )
 
 
 async def stream_chat(
@@ -205,15 +283,27 @@ async def stream_chat(
         # than resending it (which would duplicate the user message).
         sink.emit(turn_saved(user_message_id=user_msg.id))
 
-        await _run_and_persist(
-            conversation_id=conversation_id,
-            user_message=user_message,
-            user_id=user_id,
-            sink=sink,
-            history=history[:-1],
-            attachments=attachments,
-            generate_title=True,
-        )
+        # Folder-level lock (决策④): serialize tasks that share this workspace so
+        # same-folder turns never interleave file writes / the snapshot manifest.
+        # Acquired once for the whole turn (the worker team inside runs in parallel,
+        # unaffected). Queued same-folder turns wait here before streaming.
+        async with workspace_lock(
+            workspace_storage_key(
+                user_id=user_id,
+                folder_id=conv.folder_id,
+                conversation_id=conversation_id,
+            )
+        ):
+            await _run_and_persist(
+                conversation_id=conversation_id,
+                user_message=user_message,
+                user_id=user_id,
+                folder_id=conv.folder_id,
+                sink=sink,
+                history=history[:-1],
+                attachments=attachments,
+                generate_title=True,
+            )
 
     except Exception as e:
         logger.error("stream_chat_error", error=str(e), exc_info=True)
@@ -259,24 +349,29 @@ async def regenerate_chat(
                 await msg_repo.update_content(message_id, edited_content)
 
             # Drop the superseded assistant reply (and any later turns).
-            await msg_repo.delete_after(
-                conversation_id, after_created_at=target.created_at
-            )
+            await msg_repo.delete_after(conversation_id, after_created_at=target.created_at)
 
-            user_message = (
-                edited_content if edited_content is not None else (target.content or "")
-            )
+            user_message = edited_content if edited_content is not None else (target.content or "")
             history = await load_history(session, conversation_id, max_messages=40)
 
-        await _run_and_persist(
-            conversation_id=conversation_id,
-            user_message=user_message,
-            user_id=user_id,
-            sink=sink,
-            history=history[:-1],
-            attachments=None,
-            generate_title=False,
-        )
+        # Folder-level lock (决策④): same workspace serialization as stream_chat.
+        async with workspace_lock(
+            workspace_storage_key(
+                user_id=user_id,
+                folder_id=conv.folder_id,
+                conversation_id=conversation_id,
+            )
+        ):
+            await _run_and_persist(
+                conversation_id=conversation_id,
+                user_message=user_message,
+                user_id=user_id,
+                folder_id=conv.folder_id,
+                sink=sink,
+                history=history[:-1],
+                attachments=None,
+                generate_title=False,
+            )
 
     except Exception as e:
         logger.error("regenerate_chat_error", error=str(e), exc_info=True)

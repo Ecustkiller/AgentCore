@@ -1,6 +1,8 @@
 import { copyText } from "@/lib/clipboard";
+import { formatCost } from "@/lib/format";
 import { runRegenerate } from "@/services/turns";
 import { type Message, useConversationStore } from "@/stores/conversation";
+import { useUsageStore } from "@/stores/usage";
 import {
   Bot,
   Brain,
@@ -14,8 +16,9 @@ import {
   RefreshCw,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Markdown } from "./Markdown";
+import { type CitationFlash, SourceCards } from "./SourceCards";
 
 interface Props {
   message: Message;
@@ -236,9 +239,41 @@ function UserMessage({ message }: Props) {
 
 function AssistantMessage({ message }: Props) {
   const isGenerating = useConversationStore((s) => s.isGenerating);
+  const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
+  const loadMessageCost = useUsageStore((s) => s.loadMessageCost);
+  // 回落快照: a reloaded turn carries no live `message.cost`; its persisted total
+  // comes from the ledger cache (fetched on hover below).
+  const cachedTotal = useUsageStore(
+    (s) => s.messageCosts[message.id]?.cost.total ?? null,
+  );
   const { copied, onCopy } = useCopyAction(() => message.content);
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
+  const citations = message.citations ?? [];
+  // 回合成本 caption (§7.3A) — single-agent turns only. A multi-agent turn stamps
+  // `executionId`, so its cost shows on the team card instead (avoids double
+  // display). Live cost wins; a reloaded turn falls back to the ledger snapshot.
+  // 0 / unknown shows nothing, never「¥0.00」(§7.5).
+  const turnTotal = message.cost?.total ?? cachedTotal;
+  const costText =
+    message.executionId === null && turnTotal != null && turnTotal > 0
+      ? formatCost(turnTotal, cnyPerUsd)
+      : null;
+
+  // The caption is hover-revealed, so only a hovered reloaded turn pays for its
+  // ledger fetch (live turns already carry their cost and skip this).
+  const onPeekCost = () => {
+    if (!message.isStreaming && message.cost == null) {
+      void loadMessageCost(message.id);
+    }
+  };
+
+  // Clicking an inline `[n]` chip flashes the matching source card. The nonce
+  // makes re-clicking the same marker re-trigger the scroll/highlight.
+  const [citeFlash, setCiteFlash] = useState<CitationFlash | null>(null);
+  const onCitationClick = useCallback((n: number) => {
+    setCiteFlash((prev) => ({ index: n, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
 
   const handleRegenerate = () => {
     const msgs = useConversationStore.getState().messages;
@@ -255,7 +290,7 @@ function AssistantMessage({ message }: Props) {
   };
 
   return (
-    <div className="group flex gap-3">
+    <div className="group flex gap-3" onMouseEnter={onPeekCost}>
       <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
         <Bot size={16} />
       </div>
@@ -266,12 +301,19 @@ function AssistantMessage({ message }: Props) {
             isStreaming={message.isStreaming}
           />
         )}
-        <Markdown content={message.content} />
+        <Markdown
+          content={message.content}
+          citationCount={citations.length}
+          onCitationClick={onCitationClick}
+        />
         {message.isStreaming && (
           <span
             className="mt-1 inline-block h-4 w-1.5 rounded-full bg-foreground/60"
             style={{ animation: "blink-cursor 0.8s step-end infinite" }}
           />
+        )}
+        {citations.length > 0 && (
+          <SourceCards citations={citations} flash={citeFlash} />
         )}
         {!message.isStreaming &&
           !isGenerating &&
@@ -287,6 +329,11 @@ function AssistantMessage({ message }: Props) {
                 label="重新生成"
                 onClick={handleRegenerate}
               />
+              {costText && (
+                <span className="ml-1 text-xs text-muted-foreground/70">
+                  {costText}
+                </span>
+              )}
             </div>
           )}
       </div>
@@ -295,9 +342,34 @@ function AssistantMessage({ message }: Props) {
 }
 
 export function MessageBubble({ message }: Props) {
-  return message.role === "user" ? (
-    <UserMessage message={message} />
-  ) : (
-    <AssistantMessage message={message} />
+  const focus = useConversationStore((s) => s.messageFocus);
+  const ref = useRef<HTMLDivElement>(null);
+  const [flash, setFlash] = useState(false);
+
+  // Cross-component focus (e.g. the collaboration graph's CEO synthesis node
+  // jumping to this turn's final answer): scroll this message into view and
+  // flash a ring. The nonce dependency re-triggers when the same message is
+  // focused again.
+  useEffect(() => {
+    if (focus?.id !== message.id) return;
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlash(true);
+    const t = setTimeout(() => setFlash(false), 1500);
+    return () => clearTimeout(t);
+  }, [focus?.id, focus?.nonce, message.id]);
+
+  return (
+    <div
+      ref={ref}
+      className={`scroll-mt-6 rounded-xl transition-shadow ${
+        flash ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
+      }`}
+    >
+      {message.role === "user" ? (
+        <UserMessage message={message} />
+      ) : (
+        <AssistantMessage message={message} />
+      )}
+    </div>
   );
 }

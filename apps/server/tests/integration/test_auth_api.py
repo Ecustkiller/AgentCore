@@ -173,3 +173,42 @@ async def test_logout_clears_cookies(client, make_invite):
     assert (await client.post("/v1/auth/logout")).status_code == 200
     # cookies cleared -> protected route is unauthenticated again
     assert (await client.get("/v1/auth/me")).status_code == 401
+
+
+# --- invite issuance (admin) ---
+
+
+async def test_invite_endpoints_require_auth(client):
+    assert (await client.post("/v1/auth/invites", json={})).status_code == 401
+    assert (await client.get("/v1/auth/invites")).status_code == 401
+
+
+async def test_admin_issues_invite_and_new_user_registers_with_it(client, make_admin):
+    username, password = await make_admin()
+    assert (
+        await client.post(
+            "/v1/auth/login", json={"username": username, "password": password}
+        )
+    ).status_code == 200
+
+    r = await client.post("/v1/auth/invites", json={})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["status"] == "active" and body["code"]
+    code = body["code"]
+
+    assert (await client.get("/v1/auth/invites")).json()["total"] == 1
+
+    # a brand-new user registers with the freshly minted code
+    r = await client.post(
+        "/v1/auth/register",
+        json={"username": "rookie", "password": _PW, "invite_code": code},
+    )
+    assert r.status_code == 201, r.text
+
+
+async def test_non_admin_cannot_access_invites(client, make_invite):
+    code = await make_invite("INV-USER")
+    await _register_and_login(client, code, "regular")
+    assert (await client.post("/v1/auth/invites", json={})).status_code == 403
+    assert (await client.get("/v1/auth/invites")).status_code == 403

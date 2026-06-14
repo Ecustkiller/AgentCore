@@ -1,4 +1,9 @@
-"""Code execution tool that delegates to the SandboxProvider."""
+"""Code execution tool — runs code in the workspace via ``ToolContext.backend``.
+
+Thin shell: the backend (``ServerWorkspace`` today, ``LocalWorkspace`` later)
+owns the ``SandboxProvider`` and sets the working directory to the workspace
+root, so executed code sees the same files the file tools do.
+"""
 
 import time
 from typing import Any
@@ -6,14 +11,10 @@ from typing import Any
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.sandbox.protocol import ExecutionRequest
-from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 
 
 class CodeExecuteTool:
     """Execute code in a sandboxed environment."""
-
-    def __init__(self, sandbox: SubprocessSandbox | None = None):
-        self._sandbox = sandbox or SubprocessSandbox()
 
     @property
     def schema(self) -> ToolSchema:
@@ -69,7 +70,7 @@ class CodeExecuteTool:
             timeout_seconds=timeout,
         )
 
-        result = await self._sandbox.execute(request)
+        result = await context.backend.execute(request)
         duration_ms = int((time.monotonic() - start) * 1000)
 
         output_parts = []

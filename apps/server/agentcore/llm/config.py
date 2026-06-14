@@ -1,16 +1,16 @@
 """Model profiles: the single source of truth for every LLM usage scenario.
 
-Each scenario (orchestrator, chat, agent tiers, synthesizer, memory, title) is a
+Each scenario (chat, agent tiers, memory, title) is a
 named ``ModelProfile`` bundling the model + sampling params + the ReAct round
 budget. Call sites resolve a profile and use ``build_request`` to spread it into
 an ``LLMRequest`` — no per-site copying of model/temperature/thinking/... .
 
-The orchestrator's public vocabulary is the two-value ``ModelTier`` (fast/
+The ``delegate`` worker vocabulary is the two-value ``ModelTier`` (fast/
 strong); ``agent_profile`` maps a tier to its concrete agent profile. The single
 high-frequency chat/default reply path uses its own standalone ``chat`` profile,
 kept apart from the two tiers so flipping ``strong`` up to Pro never drags
 everyday chat cost/latency along. Profiles are an internal implementation
-concern and are intentionally NOT exposed to the orchestrator LLM.
+concern and are intentionally NOT exposed to the worker LLMs.
 
 Derived from DeepSeek V4 API constraints documented in .cursor/rules/llm.mdc.
 """
@@ -27,7 +27,7 @@ class ModelProfile:
     """Full LLM profile for one usage scenario: model params + execution budget.
 
     ``max_rounds`` is the ReAct loop cap consumed by ``engine.react_loop``;
-    one-shot ``complete`` callers (orchestrator/synthesizer/memory/title) leave
+    one-shot ``complete`` callers (memory/title) leave
     it at a small default since they never loop.
     """
 
@@ -49,18 +49,11 @@ _STRONG_MODEL = DEEPSEEK_V4_FLASH
 
 
 # Single source of truth: every LLM usage scenario is declared here. The two
-# orchestrator-facing tiers are keyed "agent.<tier>" so agent_profile() can map an
-# orchestrator model_preference (a ModelTier) straight to a concrete profile. The
+# worker tiers are keyed "agent.<tier>" so agent_profile() can map a
+# delegate model_preference (a ModelTier) straight to a concrete profile. The
 # single-chat/default reply path uses the standalone "chat" profile (not a tier),
 # decoupling everyday chat cost/latency from the strong tier.
 PROFILES: dict[str, ModelProfile] = {
-    "orchestrator": ModelProfile(
-        model=DEEPSEEK_V4_FLASH,
-        thinking=True,
-        reasoning_effort="max",
-        temperature=0.3,
-        max_rounds=1,
-    ),
     # Single-agent / default chat reply: the highest-frequency path. Held apart
     # from the two tiers so flipping _STRONG_MODEL to Pro never inflates chat.
     # Inherits the old "standard" sweet spot: thinking on, high effort, mid rounds.
@@ -94,14 +87,6 @@ PROFILES: dict[str, ModelProfile] = {
         temperature=0.7,
         max_rounds=28,
     ),
-    # Final synthesis pass over multi-agent outputs: one shot, no tool loop.
-    "synthesizer": ModelProfile(
-        model=DEEPSEEK_V4_FLASH,
-        thinking=True,
-        reasoning_effort="high",
-        temperature=0.7,
-        max_rounds=1,
-    ),
     "memory": ModelProfile(
         model=DEEPSEEK_V4_FLASH,
         thinking=False,
@@ -132,7 +117,7 @@ def get_profile(name: str) -> ModelProfile:
 
 
 def agent_profile(preference: ModelTier | str) -> ModelProfile:
-    """Map an orchestrator model_preference (fast/strong) to a profile.
+    """Map a delegate worker model_preference (fast/strong) to a profile.
 
     Replaces the former _PREF_TO_ROLE / _PREF_TO_ROUNDS bridge dicts: a single
     agent profile now carries both the model params and the per-tier round budget.
@@ -154,9 +139,9 @@ def apply_overrides(
 ) -> ModelProfile:
     """Apply per-agent knob overrides onto a tier profile (提案 B).
 
-    Overrides let the orchestrator unlock 极复杂 (thinking + ``max``) on a single
+    Overrides let the CEO unlock 极复杂 (thinking + ``max``) on a single
     agent without raising the whole tier. They are **upgrade-only**: an override
-    can raise capability but never lower it, so the orchestrator can never
+    can raise capability but never lower it, so the CEO can never
     silently degrade a tier's quality (turn thinking off / drop effort).
     Downgrades are expressed by choosing the ``fast`` tier instead. A ``None``
     override means "not declared" → keep the tier default.

@@ -1,46 +1,76 @@
 import { LoginPage } from "@/pages/LoginPage";
-import { setUnauthorizedHandler } from "@/services/api";
-import { devAutoLogin, fetchMe } from "@/services/auth";
+import { ServiceUnavailablePage } from "@/pages/ServiceUnavailablePage";
+import {
+  setServiceUnavailableHandler,
+  setUnauthorizedHandler,
+} from "@/services/api";
+import { bootstrapAuth, diagnoseOutage } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useCallback, useEffect } from "react";
 
 /**
  * Gates the whole app behind authentication.
  *
- * On mount it probes `/auth/me` (the access cookie may already be valid) and
- * wires the api-layer 401 handler so any later unrecoverable 401 drops straight
- * back to the login screen. Children (the router) only render once authenticated.
+ * On mount it runs {@link bootstrapAuth}, which resolves to authenticated,
+ * unauthenticated, or unavailable (backend down), and wires the api-layer 401
+ * handler so any later unrecoverable 401 drops straight back to login. Children
+ * (the router) only render once authenticated.
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const status = useAuthStore((s) => s.status);
+  const reason = useAuthStore((s) => s.reason);
+
+  const runBootstrap = useCallback(async () => {
+    useAuthStore.getState().setLoading();
+    const result = await bootstrapAuth();
+    const store = useAuthStore.getState();
+    switch (result.kind) {
+      case "authenticated":
+        store.setAuthenticated(result.user);
+        break;
+      case "unavailable":
+        store.setUnavailable(result.reason);
+        break;
+      case "unauthenticated":
+        store.setUnauthenticated();
+        break;
+    }
+  }, []);
 
   useEffect(() => {
     setUnauthorizedHandler(() => useAuthStore.getState().setUnauthenticated());
-    let cancelled = false;
-    void (async () => {
-      try {
-        const user = await fetchMe();
-        if (!cancelled) useAuthStore.getState().setAuthenticated(user);
-      } catch {
-        // No valid session. In dev, optionally auto-login with seeded creds
-        // (no-op in production); otherwise drop to the login screen.
-        const devUser = await devAutoLogin();
-        if (cancelled) return;
-        if (devUser) useAuthStore.getState().setAuthenticated(devUser);
-        else useAuthStore.getState().setUnauthenticated();
-      }
-    })();
+    // Mid-session outage: a non-auth call hit a 5xx/network error. Confirm with
+    // /readyz before taking over the screen so a one-off endpoint 500 on a
+    // healthy backend doesn't blank the app.
+    setServiceUnavailableHandler(() => {
+      const cur = useAuthStore.getState().status;
+      if (cur === "loading" || cur === "unavailable") return;
+      void (async () => {
+        const reason = await diagnoseOutage();
+        if (reason) useAuthStore.getState().setUnavailable(reason);
+      })();
+    });
+    void runBootstrap();
     return () => {
-      cancelled = true;
       setUnauthorizedHandler(null);
+      setServiceUnavailableHandler(null);
     };
-  }, []);
+  }, [runBootstrap]);
 
   if (status === "loading") {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background text-sm text-muted-foreground">
         加载中…
       </div>
+    );
+  }
+
+  if (status === "unavailable") {
+    return (
+      <ServiceUnavailablePage
+        reason={reason ?? "无法连接后端：请确认后端服务已启动后重试。"}
+        onRetry={() => void runBootstrap()}
+      />
     );
   }
 

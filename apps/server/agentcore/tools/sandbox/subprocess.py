@@ -80,7 +80,9 @@ class SubprocessSandbox:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     stdin=asyncio.subprocess.PIPE if request.stdin else None,
-                    cwd=tmpdir,
+                    # Run in the caller's workspace when given (so code sees the
+                    # same files as the file tools); else the throwaway temp dir.
+                    cwd=request.cwd or tmpdir,
                 )
 
                 stdin_bytes = request.stdin.encode() if request.stdin else None

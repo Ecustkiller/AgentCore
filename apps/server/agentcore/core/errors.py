@@ -71,27 +71,6 @@ class SandboxTimeoutError(SandboxError):
     code = "SANDBOX_TIMEOUT"
 
 
-class OrchestratorError(AgentCoreError):
-    """Orchestrator planning/review failure."""
-
-    code = "ORCHESTRATOR_ERROR"
-    status_code = 500
-
-
-class OrchestratorParseError(OrchestratorError):
-    """Failed to parse orchestrator LLM output into structured plan."""
-
-    code = "ORCHESTRATOR_PARSE_ERROR"
-    retryable = True
-
-
-class EngineError(AgentCoreError):
-    """Execution engine runtime failure."""
-
-    code = "ENGINE_ERROR"
-    status_code = 500
-
-
 class AuthenticationError(AgentCoreError):
     """Authentication failure."""
 

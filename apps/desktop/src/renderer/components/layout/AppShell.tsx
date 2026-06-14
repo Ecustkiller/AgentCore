@@ -1,6 +1,8 @@
-import { listConversations } from "@/services/conversations";
+import { listGrouped } from "@/services/conversations";
 import { useConversationStore } from "@/stores/conversation";
+import { useFoldersStore } from "@/stores/folders";
 import { useUIStore } from "@/stores/ui";
+import { useUsageStore } from "@/stores/usage";
 import { useEffect } from "react";
 import { Outlet } from "react-router-dom";
 import { Sidebar } from "../sidebar/Sidebar";
@@ -8,22 +10,23 @@ import { CommandPalette } from "./CommandPalette";
 import { TitleBar } from "./TitleBar";
 
 export function AppShell() {
-  // Hydrate the sidebar from the backend once on mount so conversations from
-  // previous sessions survive a restart. Best-effort: an unauthenticated 401 or
-  // a network error just leaves the sidebar with whatever the store already has.
+  // Hydrate the sidebar (folders + conversations) from the backend once on mount
+  // so they survive a restart. Best-effort: an unauthenticated 401 or a network
+  // error just leaves the sidebar with whatever the stores already have.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const loaded = await listConversations();
+        const { folders, conversations } = await listGrouped();
         if (cancelled) return;
+        useFoldersStore.getState().setFolders(folders);
         const store = useConversationStore.getState();
         // Keep any conversation created optimistically before this resolved
         // (e.g. a brand-new one prepended by the composer), then append the rest.
         const known = new Set(store.conversations.map((c) => c.id));
         store.setConversations([
           ...store.conversations,
-          ...loaded.filter((c) => !known.has(c.id)),
+          ...conversations.filter((c) => !known.has(c.id)),
         ]);
       } catch {
         /* best-effort hydration; sidebar falls back to session state */
@@ -32,6 +35,13 @@ export function AppShell() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Load the account usage summary once on mount so the FX rate (cnyPerUsd) every
+  // cost row formats with is the authoritative server value, not the default
+  // fallback. Best-effort: the store keeps the default rate on failure.
+  useEffect(() => {
+    void useUsageStore.getState().fetchSummary();
   }, []);
 
   // Global command palette shortcut (Ctrl/Cmd+K). Toggles so the same chord

@@ -1,0 +1,193 @@
+"""WorkspaceBackend Protocol — the single seam for file + execution access.
+
+Every filesystem / code-execution tool talks to a ``WorkspaceBackend`` instead
+of touching ``Path`` directly. This is what lets one agent loop run against two
+execution platforms without forking the engine:
+
+- ``ServerWorkspace`` — files and execution live on the server (cloud mode).
+- ``LocalWorkspace`` — files and execution live on the user's machine, reached
+  over the desktop channel (local mode, added later).
+
+Design constraints (pinned now so the contract never breaks under us):
+
+- **Lean.** The backend owns exactly the pair that must share a platform: file
+  I/O (axis 1) and code execution (axis 2). Persistence / snapshotting (axis 3)
+  is deliberately NOT here — that is a turn-level storage policy handled by a
+  separate ``StorageProvider``.
+- **Typed failures.** Methods raise ``WorkspaceError`` subclasses instead of
+  returning sentinel strings, so the (thin) tool layer can map each failure to
+  its exact user-facing message and a remote ``LocalWorkspace`` can serialize
+  the failure kind. The tool layer is responsible for catching these.
+- **No absolute paths leak.** All inputs and outputs are workspace-relative
+  (POSIX) paths; ``root_label`` is the only human-facing name for the root.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Literal, Protocol
+
+from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
+
+
+class WorkspaceError(Exception):
+    """Base for all workspace-backend failures (caught and mapped by tools)."""
+
+
+class OutsideWorkspace(WorkspaceError):
+    """A supplied path resolved outside the workspace root (traversal guard)."""
+
+
+class PathNotFound(WorkspaceError):
+    """The target file or directory does not exist."""
+
+
+class NotAFile(WorkspaceError):
+    """A file was expected but the path is a directory (or other non-file)."""
+
+
+class NotADirectory(WorkspaceError):
+    """A directory was expected but the path is not one."""
+
+
+class NotUTF8(WorkspaceError):
+    """The file is binary / not valid UTF-8 and cannot be edited as text."""
+
+
+class NoMatch(WorkspaceError):
+    """``replace``: ``old`` was not found in the target file."""
+
+
+class AmbiguousMatch(WorkspaceError):
+    """``replace``: ``old`` matched multiple times without ``all_=True``."""
+
+    def __init__(self, count: int, message: str = "") -> None:
+        self.count = count
+        super().__init__(message or f"{count} matches")
+
+
+class WorkspaceIOError(WorkspaceError):
+    """A low-level I/O failure (read/write) that is not one of the above."""
+
+
+@dataclass(frozen=True)
+class DirEntry:
+    """One entry from ``list`` — workspace-relative POSIX path + kind."""
+
+    path: str
+    is_dir: bool
+
+
+@dataclass(frozen=True)
+class ReplaceOutcome:
+    """Result of ``replace``: how many spans changed, and where the first was."""
+
+    count: int
+    first_line: int | None = None
+
+
+@dataclass(frozen=True)
+class GrepHit:
+    """One content match: workspace-relative POSIX path, 1-based line, text."""
+
+    path: str
+    line_no: int
+    text: str
+
+
+@dataclass
+class GrepQuery:
+    """Inputs for a ``grep`` content search (serializable for remote backends)."""
+
+    pattern: str
+    directory: str = "."
+    glob: str | None = None
+    case_insensitive: bool = False
+    files_only: bool = False
+    max_results: int = 50
+
+
+@dataclass
+class GrepResult:
+    """Bounded result of a ``grep``: line hits, per-file counts, totals, cap."""
+
+    hits: list[GrepHit] = field(default_factory=list)
+    file_counts: list[tuple[str, int]] = field(default_factory=list)
+    total_matches: int = 0
+    truncated: bool = False
+
+
+class WorkspaceBackend(Protocol):
+    """File + execution access for one workspace, on one execution platform."""
+
+    location: Literal["server", "local"]
+    root_label: str  # human-facing root name for relative-path rendering
+    dirty: bool  # True once any mutating op (write/replace/execute) ran this turn,
+    # so the caller can snapshot only workspaces a turn actually touched (决策⑥:
+    # 改过文件的任务才后台备份). Read-only ops (read/list/grep) never set it.
+
+    async def read(self, path: str) -> str:
+        """Return the UTF-8 text content of ``path``.
+
+        Raises ``OutsideWorkspace`` / ``PathNotFound`` / ``NotAFile`` /
+        ``WorkspaceIOError``.
+        """
+        ...
+
+    async def write(self, path: str, content: str) -> int:
+        """Create or overwrite ``path`` (with parents); return chars written.
+
+        Raises ``OutsideWorkspace`` / ``WorkspaceIOError``.
+        """
+        ...
+
+    async def read_bytes(self, path: str) -> bytes:
+        """Return the raw bytes of ``path`` (binary-safe; for file download).
+
+        The byte-level counterpart of ``read`` for non-text files (images, PDFs,
+        archives). Raises ``OutsideWorkspace`` / ``PathNotFound`` / ``NotAFile`` /
+        ``WorkspaceIOError``.
+        """
+        ...
+
+    async def write_bytes(self, path: str, data: bytes) -> int:
+        """Create or overwrite ``path`` with raw ``data`` (with parents).
+
+        The byte-level counterpart of ``write`` for binary uploads; returns the
+        number of bytes written. Raises ``OutsideWorkspace`` / ``WorkspaceIOError``.
+        """
+        ...
+
+    async def list(self, directory: str, pattern: str) -> list[DirEntry]:
+        """List entries under ``directory`` matching glob ``pattern`` (capped).
+
+        Raises ``OutsideWorkspace`` / ``NotADirectory`` / ``WorkspaceIOError``.
+        """
+        ...
+
+    async def replace(
+        self, path: str, old: str, new: str, *, all_: bool
+    ) -> ReplaceOutcome:
+        """Replace exact span(s) ``old`` -> ``new`` in ``path`` atomically.
+
+        Raises ``OutsideWorkspace`` / ``PathNotFound`` / ``NotAFile`` /
+        ``NotUTF8`` / ``NoMatch`` / ``AmbiguousMatch`` / ``WorkspaceIOError``.
+        Argument validation (empty ``old``, ``old == new``) is the caller's job.
+        """
+        ...
+
+    async def grep(self, query: GrepQuery) -> GrepResult:
+        """Regex-search file contents under ``query.directory`` (bounded).
+
+        Raises ``OutsideWorkspace`` / ``PathNotFound`` / ``NotADirectory``.
+        The regex is assumed already validated by the caller.
+        """
+        ...
+
+    async def execute(self, req: ExecutionRequest) -> ExecutionResult:
+        """Run code on this workspace's platform, in the workspace directory.
+
+        The backend fills ``req.cwd`` so code sees the workspace files; it then
+        delegates to its ``SandboxProvider`` (no separate execution path).
+        """
+        ...

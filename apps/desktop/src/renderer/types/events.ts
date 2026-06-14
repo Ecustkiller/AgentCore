@@ -6,23 +6,18 @@ export type SSEEventType =
   | "tool_use_end"
   | "approval_required"
   | "approval_resolved"
-  | "ask_user_requested"
   | "run_plan"
-  | "plan_review_required"
-  | "plan_review_resolved"
   | "run_started"
   | "run_output_delta"
+  | "run_reasoning_delta"
   | "run_completed"
   | "run_failed"
-  | "run_retrying"
   | "run_progress"
-  | "checkpoint_review"
-  | "task_state_updated"
-  | "pipeline_summary"
   | "message_end"
   | "error"
   | "title_generated"
-  | "turn_saved";
+  | "turn_saved"
+  | "citations";
 
 export interface SSEEvent<T = unknown> {
   type: SSEEventType;
@@ -56,27 +51,34 @@ export interface ToolUseEndPayload {
   status: "success" | "error";
 }
 
+/** The user's settlement of a paused GRANTABLE tool call; mirrors the backend
+ * `ApprovalDecision`. `approve` allows this one call, `approve_always` allows the
+ * tool for the rest of the turn, `deny` refuses it. */
+export type ApprovalDecision = "approve" | "approve_always" | "deny";
+
+/** A GRANTABLE tool call (CEO chat path) is paused awaiting the user's
+ * authorization. `approval_id` is echoed back to the resolve endpoint (it equals
+ * `tool_call_id`); `arguments` is a size-bounded preview from the backend so the
+ * user sees what the tool would do before allowing it. */
 export interface ApprovalRequiredPayload {
-  checkpoint_id: string;
-  after_step: string;
-  summary: string;
-  reason: string;
-  actions: ("approve" | "adjust" | "stop")[];
+  approval_id: string;
+  conversation_id: string;
+  tool_call_id: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
 }
 
+/** A pending approval was settled (approve / approve_always / deny / timeout) so
+ * the client can clear the inline prompt. A timeout resolves as `deny`. */
 export interface ApprovalResolvedPayload {
-  checkpoint_id: string;
-  action: "approve" | "adjust" | "stop";
+  approval_id: string;
+  tool_call_id: string;
+  decision: ApprovalDecision;
 }
 
-export interface AskUserRequestedPayload {
-  request_id: string;
-  question: string;
-}
-
-/** Roster entry shared by run_plan + plan_review_required. `thinking` /
- * `reasoning_effort` are the *effective* values (tier default folded with any
- * per-agent override), so the graph/preview show exactly what will run. */
+/** Roster entry used by run_plan. `thinking` / `reasoning_effort` are the
+ * *effective* values (tier default folded with any per-agent override), so the
+ * graph shows exactly what will run. */
 export interface PlanAgentPayload {
   id: string;
   role: string;
@@ -90,7 +92,7 @@ export interface RunPlanPayload {
   plan_type: "single_agent" | "multi_agent";
   task_summary: string;
   agents: PlanAgentPayload[];
-  steps: Array<{
+  runs: Array<{
     id: string;
     agent_id: string;
     task: string;
@@ -98,21 +100,17 @@ export interface RunPlanPayload {
   }>;
 }
 
-export interface PlanReviewRequiredPayload {
-  review_id: string;
-  execution_id: string;
-  agents: PlanAgentPayload[];
-}
-
-export interface PlanReviewResolvedPayload {
-  review_id: string;
-  action: "start" | "cancel";
-}
+/** What a run node *is*. 阶段1 only ever emits `agent`; `arena` / `synthesis`
+ * are 阶段2 declaration slots, pre-wired so nested/synthesis nodes need no
+ * later contract change. */
+export type RunKind = "agent" | "arena" | "synthesis";
 
 export interface RunStartedPayload {
   run_id: string;
   agent_id: string;
-  step_id: string;
+  /** Delegating run; `null` at the turn root (阶段2 nesting slot). */
+  parent_run_id: string | null;
+  kind: RunKind;
 }
 
 export interface RunOutputDeltaPayload {
@@ -121,11 +119,47 @@ export interface RunOutputDeltaPayload {
   delta: string;
 }
 
+/** A worker run's thinking increment (run-scoped twin of run_output_delta). */
+export interface RunReasoningDeltaPayload {
+  run_id: string;
+  agent_id: string;
+  delta: string;
+}
+
+/** Token counts in the ledger short-key form ({input, output, reasoning,
+ * cache_hit, cache_miss}); matches the REST `UsageBreakdown` + cost_events.tokens.
+ * NOTE: `message_end.usage` instead uses the legacy `*_tokens` keys (see
+ * `MessageEndPayload`). `cache_hit + cache_miss === input`; `reasoning ⊆ output`. */
+export interface UsageBreakdown {
+  input: number;
+  output: number;
+  reasoning: number;
+  cache_hit: number;
+  cache_miss: number;
+}
+
+/** A run's / turn's cost in integer nano-USD (1 USD = 1e9), never float. `cached`
+ * re-states the cache-hit portion of `input` (省了多少); `total === input + output`.
+ * All-zero means "no metered cost" → render as「—」, not「¥0.00」(§七5). */
+export interface CostBreakdown {
+  input: number;
+  cached: number;
+  output: number;
+  total: number;
+  currency: string;
+}
+
 export interface RunCompletedPayload {
   run_id: string;
   agent_id: string;
   output_summary: string;
   duration_ms: number;
+  /** Cost-ledger role category (阶段1 scheduled runs are always "member"). */
+  role: string;
+  model: string;
+  /** Lights up one team-payroll row live; zeros until the run metered the LLM. */
+  usage: UsageBreakdown;
+  cost: CostBreakdown;
 }
 
 export interface RunFailedPayload {
@@ -134,35 +168,9 @@ export interface RunFailedPayload {
   error: string;
 }
 
-export interface RunRetryingPayload {
-  run_id: string;
-  agent_id: string;
-  attempt: number;
-  reason: string;
-}
-
 export interface RunProgressPayload {
   completed: number;
   total: number;
-}
-
-export interface CheckpointReviewPayload {
-  checkpoint_id: string;
-  after_step: string;
-  decision: "continue" | "adjust" | "escalate";
-  reason: string;
-  summary: string;
-}
-
-export interface TaskStateUpdatedPayload {
-  snapshot: Record<string, unknown>;
-}
-
-export interface PipelineSummaryPayload {
-  final_result: string;
-  total_duration_ms: number;
-  agents_used: number;
-  steps_completed: number;
 }
 
 export interface MessageEndPayload {
@@ -171,7 +179,12 @@ export interface MessageEndPayload {
     input_tokens: number;
     output_tokens: number;
     reasoning_tokens: number;
+    cache_hit_tokens: number;
+    cache_miss_tokens: number;
   };
+  /** Turn total cost (sum of every run's price = 回合总账); `null` on the
+   * error / not-found paths where no turn ran. */
+  cost?: CostBreakdown | null;
   rounds?: number;
 }
 
@@ -189,6 +202,19 @@ export interface TurnSavedPayload {
   user_message_id: string;
 }
 
+/** One web source consulted for an assistant message (source-card data). */
+export interface Citation {
+  url: string;
+  title: string;
+  snippet?: string;
+  /** Display hostname (sans leading www.); may be empty if unparseable. */
+  site?: string;
+}
+
+export interface CitationsPayload {
+  citations: Citation[];
+}
+
 export type SSEPayloadMap = {
   message_start: MessageStartPayload;
   content_delta: ContentDeltaPayload;
@@ -197,21 +223,16 @@ export type SSEPayloadMap = {
   tool_use_end: ToolUseEndPayload;
   approval_required: ApprovalRequiredPayload;
   approval_resolved: ApprovalResolvedPayload;
-  ask_user_requested: AskUserRequestedPayload;
   run_plan: RunPlanPayload;
-  plan_review_required: PlanReviewRequiredPayload;
-  plan_review_resolved: PlanReviewResolvedPayload;
   run_started: RunStartedPayload;
   run_output_delta: RunOutputDeltaPayload;
+  run_reasoning_delta: RunReasoningDeltaPayload;
   run_completed: RunCompletedPayload;
   run_failed: RunFailedPayload;
-  run_retrying: RunRetryingPayload;
   run_progress: RunProgressPayload;
-  checkpoint_review: CheckpointReviewPayload;
-  task_state_updated: TaskStateUpdatedPayload;
-  pipeline_summary: PipelineSummaryPayload;
   message_end: MessageEndPayload;
   error: ErrorPayload;
   title_generated: TitleGeneratedPayload;
   turn_saved: TurnSavedPayload;
+  citations: CitationsPayload;
 };

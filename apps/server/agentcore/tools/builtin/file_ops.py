@@ -1,26 +1,38 @@
-"""File operations tool (read, write, list).
+"""File operations tools (read, write, list, precise str_replace edit).
 
-All paths are restricted to the workspace directory to prevent path traversal attacks.
+Thin shells over ``ToolContext.backend``: each tool parses arguments, calls the
+workspace backend, maps typed ``WorkspaceError`` failures back to user-facing
+messages, and renders a ``ToolResult``. All actual I/O and the path-traversal
+guard live in the backend, so the same tools run unchanged against a server or a
+local (desktop) workspace.
 """
 
-import os
 import time
-from pathlib import Path
 from typing import Any
 
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
+from agentcore.workspace.protocol import (
+    AmbiguousMatch,
+    NoMatch,
+    NotADirectory,
+    NotAFile,
+    NotUTF8,
+    OutsideWorkspace,
+    PathNotFound,
+    WorkspaceError,
+)
 
 
-def _resolve_safe_path(workspace: Path, relative_path: str) -> Path | None:
-    """Resolve a path safely within the workspace. Returns None if path escapes."""
-    try:
-        resolved = (workspace / relative_path).resolve()
-        if not str(resolved).startswith(str(workspace.resolve())):
-            return None
-        return resolved
-    except (ValueError, OSError):
-        return None
+def _error(error: str, start: float) -> ToolResult:
+    """Build a failed ToolResult with elapsed timing."""
+    return ToolResult(
+        tool_call_id="",
+        success=False,
+        output="",
+        error=error,
+        duration_ms=int((time.monotonic() - start) * 1000),
+    )
 
 
 class FileReadTool:
@@ -49,50 +61,23 @@ class FileReadTool:
         start = time.monotonic()
         rel_path = arguments.get("path", "")
 
-        safe_path = _resolve_safe_path(context.workspace_dir, rel_path)
-        if safe_path is None:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=f"Path '{rel_path}' is outside the workspace",
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
-
-        if not safe_path.exists():
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=f"File not found: {rel_path}",
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
-
-        if not safe_path.is_file():
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=f"Not a file: {rel_path}",
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
-
         try:
-            content = safe_path.read_text(encoding="utf-8")
-            return ToolResult(
-                tool_call_id="",
-                success=True,
-                output=content,
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
-        except Exception as e:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=f"Failed to read file: {e}",
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
+            content = await context.backend.read(rel_path)
+        except OutsideWorkspace:
+            return _error(f"Path '{rel_path}' is outside the workspace", start)
+        except PathNotFound:
+            return _error(f"File not found: {rel_path}", start)
+        except NotAFile:
+            return _error(f"Not a file: {rel_path}", start)
+        except WorkspaceError as e:
+            return _error(f"Failed to read file: {e}", start)
+
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=content,
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
 
 
 class FileWriteTool:
@@ -103,8 +88,11 @@ class FileWriteTool:
         return ToolSchema(
             name="file_write",
             description=(
-                "Write content to a file. Creates parent directories if needed. "
-                "Path must be relative to workspace."
+                "Write content to a file, creating it (and any parent directories) "
+                "or OVERWRITING it wholesale. Use this to create new files. To change "
+                "part of an existing file, prefer str_replace, which edits only the "
+                "matched span instead of rewriting everything. Path must be relative "
+                "to the workspace."
             ),
             parameters={
                 "type": "object",
@@ -129,33 +117,19 @@ class FileWriteTool:
         rel_path = arguments.get("path", "")
         content = arguments.get("content", "")
 
-        safe_path = _resolve_safe_path(context.workspace_dir, rel_path)
-        if safe_path is None:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=f"Path '{rel_path}' is outside the workspace",
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
-
         try:
-            safe_path.parent.mkdir(parents=True, exist_ok=True)
-            safe_path.write_text(content, encoding="utf-8")
-            return ToolResult(
-                tool_call_id="",
-                success=True,
-                output=f"Written {len(content)} bytes to {rel_path}",
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
-        except Exception as e:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=f"Failed to write file: {e}",
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
+            written = await context.backend.write(rel_path, content)
+        except OutsideWorkspace:
+            return _error(f"Path '{rel_path}' is outside the workspace", start)
+        except WorkspaceError as e:
+            return _error(f"Failed to write file: {e}", start)
+
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=f"Written {written} bytes to {rel_path}",
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
 
 
 class FileListTool:
@@ -191,45 +165,121 @@ class FileListTool:
         directory = arguments.get("directory", ".")
         pattern = arguments.get("pattern", "*")
 
-        safe_path = _resolve_safe_path(context.workspace_dir, directory)
-        if safe_path is None:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=f"Path '{directory}' is outside the workspace",
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
+        try:
+            entries = await context.backend.list(directory, pattern)
+        except OutsideWorkspace:
+            return _error(f"Path '{directory}' is outside the workspace", start)
+        except NotADirectory:
+            return _error(f"Not a directory: {directory}", start)
+        except WorkspaceError as e:
+            return _error(f"Failed to list directory: {e}", start)
 
-        if not safe_path.is_dir():
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=f"Not a directory: {directory}",
-                duration_ms=int((time.monotonic() - start) * 1000),
+        lines = [f"{'d ' if entry.is_dir else 'f '}{entry.path}" for entry in entries]
+        output = "\n".join(lines) if lines else "(empty directory)"
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=output,
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+
+
+class StrReplaceTool:
+    """Replace an exact text span in an existing workspace file (precise edit)."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="str_replace",
+            description=(
+                "Edit an existing file by replacing an EXACT text span. Prefer this "
+                "over file_write when changing a file: it rewrites only the matched "
+                "span, so it is safe for large files and won't clobber unrelated "
+                "content. Put enough surrounding context in old_string to match "
+                "EXACTLY ONCE, including whitespace, indentation, and line breaks. "
+                "Fails if old_string is absent, or matches more than once unless "
+                "replace_all is true. To create a new file, use file_write instead."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative file path within the workspace",
+                    },
+                    "old_string": {
+                        "type": "string",
+                        "description": (
+                            "Exact text to replace, with enough surrounding context "
+                            "to be unique in the file."
+                        ),
+                    },
+                    "new_string": {
+                        "type": "string",
+                        "description": "Replacement text (must differ from old_string).",
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": (
+                            "Replace every occurrence instead of requiring a single "
+                            "unique match (default false)."
+                        ),
+                        "default": False,
+                    },
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+            category=ToolCategory.FILESYSTEM,
+            approval=ToolApproval.GRANTABLE,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        start = time.monotonic()
+        rel_path = arguments.get("path", "")
+        old_string = arguments.get("old_string", "")
+        new_string = arguments.get("new_string", "")
+        replace_all = bool(arguments.get("replace_all", False))
+
+        if not old_string:
+            return _error("old_string must not be empty", start)
+        if old_string == new_string:
+            return _error(
+                "old_string and new_string are identical; nothing to change", start
             )
 
         try:
-            entries = sorted(safe_path.glob(pattern))[:100]  # cap at 100 entries
-            lines = []
-            for entry in entries:
-                rel = os.path.relpath(entry, context.workspace_dir)
-                prefix = "d " if entry.is_dir() else "f "
-                lines.append(f"{prefix}{rel}")
+            outcome = await context.backend.replace(
+                rel_path, old_string, new_string, all_=replace_all
+            )
+        except OutsideWorkspace:
+            return _error(f"Path '{rel_path}' is outside the workspace", start)
+        except PathNotFound:
+            return _error(f"File not found: {rel_path}", start)
+        except NotAFile:
+            return _error(f"Not a file: {rel_path}", start)
+        except NotUTF8:
+            return _error(f"Cannot edit a binary / non-UTF-8 file: {rel_path}", start)
+        except NoMatch:
+            return _error(
+                f"old_string not found in {rel_path}; it must match the file "
+                "exactly, including whitespace and indentation.",
+                start,
+            )
+        except AmbiguousMatch as e:
+            return _error(
+                f"old_string is not unique in {rel_path} ({e.count} matches). Add "
+                "more surrounding context to target a single span, or set "
+                "replace_all=true.",
+                start,
+            )
+        except WorkspaceError as e:
+            return _error(f"Failed to write file: {e}", start)
 
-            output = "\n".join(lines) if lines else "(empty directory)"
-            return ToolResult(
-                tool_call_id="",
-                success=True,
-                output=output,
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
-        except Exception as e:
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=f"Failed to list directory: {e}",
-                duration_ms=int((time.monotonic() - start) * 1000),
-            )
+        loc = "" if outcome.first_line is None else f" (around line {outcome.first_line})"
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=f"Replaced {outcome.count} occurrence(s) in {rel_path}{loc}",
+            duration_ms=int((time.monotonic() - start) * 1000),
+            metadata={"replacements": outcome.count},
+        )

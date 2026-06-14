@@ -1,8 +1,11 @@
 import { ChatView } from "@/components/chat/ChatView";
+import { DetailPanel } from "@/components/chat/DetailPanel";
 import { GraphOverlay } from "@/components/graph/GraphOverlay";
 import { api } from "@/services/api";
 import { type Message, useConversationStore } from "@/stores/conversation";
+import { useDetailPanelStore } from "@/stores/detailPanel";
 import { useUIStore } from "@/stores/ui";
+import { useUsageStore } from "@/stores/usage";
 import { useEffect } from "react";
 import { useParams } from "react-router-dom";
 
@@ -17,6 +20,12 @@ interface BackendMessage {
     path: string;
     truncated: boolean;
     kind?: "file" | "dir";
+  }[];
+  citations?: {
+    url: string;
+    title: string;
+    snippet?: string;
+    site?: string;
   }[];
   created_at: string;
 }
@@ -43,6 +52,7 @@ function toMessage(m: BackendMessage): Message {
           kind: a.kind ?? "file",
         }))
       : undefined,
+    citations: m.citations?.length ? m.citations : undefined,
   };
 }
 
@@ -56,6 +66,9 @@ export function ConversationPage() {
     if (!id) return;
     const store = useConversationStore.getState();
     if (id !== store.currentConversationId) store.switchConversation(id);
+
+    // Seed the 对话累计 chip (§7.3C) from the ledger; live turns bump it after.
+    void useUsageStore.getState().fetchConversationCost(id);
 
     let cancelled = false;
     void (async () => {
@@ -78,9 +91,23 @@ export function ConversationPage() {
     };
   }, [id]);
 
+  // Ctrl/Cmd+B toggles the detail panel — only meaningful on the conversation
+  // page, so the listener is scoped here rather than in the global shell.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        useDetailPanelStore.getState().togglePanel();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <>
       <ChatView />
+      <DetailPanel />
       {graphOpen && <GraphOverlay />}
     </>
   );

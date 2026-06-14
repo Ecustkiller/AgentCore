@@ -1,7 +1,7 @@
 """Long-term memory storage.
 
 Long-term memory is the markdown body of the user's `ai_maintained` rule file
-(see docs/Agent记忆与知识系统.md §1.4 / §五). The cloud file-tree / Document
+(see docs/03-AI核心/Agent记忆与知识系统.md §1.4 / §五). The cloud file-tree / Document
 subsystem that will ultimately host that file does not exist yet, so the MVP
 backs it with one markdown file per user under the server data dir. The content
 is exactly the file body; when the file tree lands, migrate it into a

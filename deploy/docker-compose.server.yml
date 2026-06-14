@@ -3,7 +3,7 @@
 # 当前形态：后端 API 进程在宿主机以 uv / systemd 运行（本仓暂无服务端镜像，
 # 容器化是后续待办）；本文件只编排 API 依赖的基础设施：
 # PostgreSQL(pgvector) + Redis + SearXNG。Neo4j/ES/MinIO/NATS 为旧版/未来组件，
-# 本仓代码不依赖，故不纳入（见 docs/部署与运维.md「保留 SearXNG，移除旧版组件」）。
+# 本仓代码不依赖，故不纳入（见 docs/05-平台与运维/部署与运维.md「保留 SearXNG，移除旧版组件」）。
 #
 # 端口一律绑 127.0.0.1（不对外，由宿主机 Nginx + 证书反代）；应用经 127.0.0.1
 # 连接（见 deploy/config/production.env.example 的 *_URL）。

@@ -1,18 +1,7 @@
 """Shared enumerations and base types used across all modules."""
 
 from enum import StrEnum
-from typing import NewType
 from uuid import uuid4
-
-# --- ID Types ---
-
-ConversationId = NewType("ConversationId", str)
-ExecutionId = NewType("ExecutionId", str)
-StepId = NewType("StepId", str)
-AgentId = NewType("AgentId", str)
-UserId = NewType("UserId", str)
-MessageId = NewType("MessageId", str)
-TurnId = NewType("TurnId", str)
 
 
 def new_id() -> str:
@@ -23,7 +12,7 @@ def new_id() -> str:
 
 
 class ModelTier(StrEnum):
-    """Orchestrator output model preference (two tiers), mapped to a concrete
+    """CEO/``delegate`` worker model preference (two tiers), mapped to a concrete
     agent profile at runtime.
 
     The single-chat/default reply path is intentionally NOT a tier: it uses the
@@ -34,35 +23,11 @@ class ModelTier(StrEnum):
     STRONG = "strong"
 
 
-class ExecutionStatus(StrEnum):
-    PLANNING = "planning"
-    RUNNING = "running"
-    PAUSED = "paused"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
-class StepStatus(StrEnum):
-    PENDING = "pending"
-    READY = "ready"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
 class MessageRole(StrEnum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
     TOOL = "tool"
-
-
-class PlanType(StrEnum):
-    SINGLE_AGENT = "single_agent"
-    MULTI_AGENT = "multi_agent"
-    DEBATE = "debate"
 
 
 class ToolApproval(StrEnum):

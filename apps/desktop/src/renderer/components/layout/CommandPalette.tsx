@@ -81,12 +81,10 @@ export function CommandPalette() {
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-dismiss; keyboard dismissal is handled by the Escape key on the input.
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-overlay px-4 pt-[15vh]"
       onMouseDown={close}
     >
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: stops backdrop dismissal when interacting inside the panel. */}
       <div
         className="w-full max-w-xl overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg"
         onMouseDown={(e) => e.stopPropagation()}

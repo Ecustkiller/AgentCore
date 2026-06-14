@@ -92,3 +92,11 @@ def generate_refresh_token() -> tuple[str, str]:
     """Return ``(raw, hash)``: send ``raw`` to the client, persist ``hash``."""
     raw = secrets.token_urlsafe(48)
     return raw, hash_refresh_token(raw)
+
+
+# --- Invite codes (shareable, single-use registration tokens) ---
+
+
+def generate_invite_code() -> str:
+    """Return a high-entropy, URL-safe invite code for admin-issued invites."""
+    return secrets.token_urlsafe(12)

@@ -10,6 +10,8 @@ alwaysApply: false
 
 # 数据库 & ORM 规范
 
+> 本规则是**可执行约定**（怎么写）。约定背后的设计理由（为何不用 ForeignKey、软删除架构选型、JSONB 索引策略、ORM 为何是 schema 真相源）见 `docs/02-架构/核心接口定义.md` §6.2，勿在此重复展开。
+
 ## SQLAlchemy 模型
 
 - 使用 SQLAlchemy 2.0 `Mapped` + `mapped_column` 声明式

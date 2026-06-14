@@ -1,40 +1,172 @@
+import {
+  ContextMenu,
+  MenuDivider,
+  MenuItem,
+} from "@/components/sidebar/ContextMenu";
 import { computeLayout } from "@/lib/elk-layout";
 import { estimateTokens, tailText } from "@/lib/format";
-import { useExecutionStore, useProjectedExecution } from "@/stores/execution";
-import { type GraphEdge, useGraphStore } from "@/stores/graph";
+import { useConversationStore } from "@/stores/conversation";
+import { useDetailPanelStore } from "@/stores/detailPanel";
+import {
+  type Execution,
+  type RunStatus,
+  useExecutionStore,
+  useProjectedExecution,
+} from "@/stores/execution";
+import {
+  type GraphEdge,
+  type GraphLayout,
+  useGraphStore,
+} from "@/stores/graph";
+import { useUIStore } from "@/stores/ui";
 import {
   Background,
   Controls,
   type Edge,
   type Node,
   ReactFlow,
+  type ReactFlowInstance,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Check,
+  Crosshair,
+  ListTree,
+  Maximize2,
+  MoveHorizontal,
+  PanelRight,
+  Radar,
+  ScanSearch,
+  Waypoints,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentNode } from "./AgentNode";
+import { EndpointNode } from "./EndpointNode";
 import { NodeDetail } from "./NodeDetail";
 import { StepEdge } from "./StepEdge";
 import { Timeline } from "./Timeline";
 
-const nodeTypes = { agent: AgentNode };
+const nodeTypes = {
+  agent: AgentNode,
+  input: EndpointNode,
+  synthesis: EndpointNode,
+};
 const edgeTypes = { step: StepEdge };
 
-export function GraphView() {
+// Synthetic graph-only bookends (no scheduled Run): the user's input root and
+// the CEO synthesis sink. Real run ids are server UUIDs, so these never collide.
+const INPUT_ID = "__input__";
+const SYNTHESIS_ID = "__synthesis__";
+const isEndpointId = (id: string): boolean =>
+  id === INPUT_ID || id === SYNTHESIS_ID;
+
+// Right-click layout choices. Each maps to a distinct ELK algorithm in
+// `computeLayout`; the active one is checked in the menu and persisted.
+const LAYOUT_OPTIONS: {
+  kind: GraphLayout;
+  label: string;
+  icon: React.ReactNode;
+}[] = [
+  { kind: "tree", label: "树形布局", icon: <ListTree size={14} /> },
+  { kind: "leftright", label: "左右流", icon: <MoveHorizontal size={14} /> },
+  { kind: "radial", label: "径向布局", icon: <Radar size={14} /> },
+  { kind: "force", label: "力导向", icon: <Waypoints size={14} /> },
+];
+
+/**
+ * The CEO synthesis node has no scheduled Run (the captain is the chat loop),
+ * so its status is derived: it is "summarizing" once every worker is done and
+ * "done" once the whole turn ends — mirroring execution-level state.
+ */
+function deriveSynthesisStatus(execution: Execution): RunStatus {
+  if (execution.status === "failed") return "failed";
+  if (execution.status === "cancelled") return "cancelled";
+  if (execution.status === "completed") return "completed";
+  const allDone =
+    execution.runs.length > 0 &&
+    execution.runs.every((r) => r.status === "completed");
+  return allDone ? "running" : "pending";
+}
+
+interface GraphViewProps {
+  /**
+   * Embedded in the detail panel (vs. the full-screen overlay). Drops the
+   * replay timeline and the inline node-detail sidebar — in the panel a node
+   * click hands off to {@link onNodeSelect} (opens a run-detail tab) so the
+   * narrow column is not split by a second pane.
+   */
+  embedded?: boolean;
+  /** Node-click handler for embedded mode; falls back to in-graph focus. */
+  onNodeSelect?: (runId: string) => void;
+}
+
+export function GraphView({
+  embedded = false,
+  onNodeSelect,
+}: GraphViewProps = {}) {
   const execution = useProjectedExecution();
   const hasFrames = useExecutionStore((s) => s.frames.length > 0);
   const positions = useGraphStore((s) => s.positions);
   const edges = useGraphStore((s) => s.edges);
   const setLayout = useGraphStore((s) => s.setLayout);
-  const focusedStepId = useExecutionStore((s) => s.focusedStepId);
+  const layoutKind = useGraphStore((s) => s.layoutKind);
+  const setLayoutKind = useGraphStore((s) => s.setLayoutKind);
+  // Left-right flow re-anchors node handles to the horizontal axis.
+  const handleDirection =
+    layoutKind === "leftright" ? "horizontal" : "vertical";
+  const focusedRunId = useExecutionStore((s) => s.focusedRunId);
   const focusedAgentId = useExecutionStore((s) => s.focusedAgentId);
-  const focusStep = useExecutionStore((s) => s.focusStep);
+  const focusRun = useExecutionStore((s) => s.focusRun);
+  const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
+  const closeGraph = useUIStore((s) => s.closeGraph);
+  const messages = useConversationStore((s) => s.messages);
+  const focusMessage = useConversationStore((s) => s.focusMessage);
+  // The CEO synthesis has no scheduled Run (the captain is the chat loop), so
+  // its "output" is this turn's assistant answer — found by the execution id the
+  // bubble was stamped with on run_plan. Drives the synthesis node's preview and
+  // its jump-to-answer click.
+  const finalAnswer = useMemo(() => {
+    if (!execution) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "assistant" && m.executionId === execution.id) {
+        // Only usable once the captain has actually started writing the answer;
+        // an empty bubble (workers still running) leaves the node inert.
+        return m.content ? { id: m.id, content: m.content } : null;
+      }
+    }
+    return null;
+  }, [messages, execution]);
+  // The input bookend likewise has no run: it stands in for the user's prompt
+  // that opened this turn — the last user message before this turn's answer
+  // bubble. Drives the input node's jump-to-question click (the bubble already
+  // renders the prompt in full, so the jump *is* the "expand").
+  const taskMessage = useMemo(() => {
+    if (!execution) return null;
+    const answerIdx = messages.findIndex(
+      (m) => m.role === "assistant" && m.executionId === execution.id,
+    );
+    if (answerIdx <= 0) return null;
+    for (let i = answerIdx - 1; i >= 0; i--) {
+      if (messages[i].role === "user") return { id: messages[i].id };
+    }
+    return null;
+  }, [messages, execution]);
   const [layoutReady, setLayoutReady] = useState(false);
+  const rfRef = useRef<ReactFlowInstance | null>(null);
+  // Right-click menu anchor. `nodeId === null` is the pane (empty-canvas) menu.
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    nodeId: string | null;
+  } | null>(null);
+  const menuNodeId = menu?.nodeId ?? null;
 
-  // Layout depends only on graph *shape* (step ids + dependencies), so it is
+  // Layout depends only on graph *shape* (run ids + dependencies), so it is
   // recomputed when the plan changes — not on every streamed token.
   const structuralKey = useMemo(
     () =>
       execution
-        ? execution.steps
+        ? execution.runs
             .map((s) => `${s.id}:${s.dependsOn.join(",")}`)
             .join("|")
         : "",
@@ -47,18 +179,44 @@ export function GraphView() {
       setLayoutReady(false);
       return;
     }
-    const steps = useExecutionStore.getState().plan?.steps ?? [];
-    const nodeIds = steps.map((s) => s.id);
-    const rawEdges: GraphEdge[] = steps.flatMap((step) =>
-      step.dependsOn.map((depId) => ({
-        id: `${depId}->${step.id}`,
+    const runs = useExecutionStore.getState().plan?.runs ?? [];
+    const nodeIds = runs.map((s) => s.id);
+    const rawEdges: GraphEdge[] = runs.flatMap((run) =>
+      run.dependsOn.map((depId) => ({
+        id: `${depId}->${run.id}`,
         source: depId,
-        target: step.id,
+        target: run.id,
       })),
     );
 
+    // Bookend the worker DAG with two synthetic endpoints so the graph reads as
+    // a full collaboration story: user input → team waves → CEO synthesis. They
+    // are laid out alongside the workers but carry no run — guarded everywhere a
+    // real run id is expected (clicks, run-detail, context menu).
+    if (runs.length > 0) {
+      const dependedOn = new Set<string>();
+      for (const r of runs) for (const dep of r.dependsOn) dependedOn.add(dep);
+      nodeIds.push(INPUT_ID, SYNTHESIS_ID);
+      for (const r of runs) {
+        if (r.dependsOn.length === 0) {
+          rawEdges.push({
+            id: `${INPUT_ID}->${r.id}`,
+            source: INPUT_ID,
+            target: r.id,
+          });
+        }
+        if (!dependedOn.has(r.id)) {
+          rawEdges.push({
+            id: `${r.id}->${SYNTHESIS_ID}`,
+            source: r.id,
+            target: SYNTHESIS_ID,
+          });
+        }
+      }
+    }
+
     let cancelled = false;
-    computeLayout(nodeIds, rawEdges).then((layouted) => {
+    computeLayout(nodeIds, rawEdges, layoutKind).then((layouted) => {
       if (cancelled) return;
       setLayout(layouted, rawEdges);
       setLayoutReady(true);
@@ -66,49 +224,213 @@ export function GraphView() {
     return () => {
       cancelled = true;
     };
-  }, [structuralKey, setLayout]);
+  }, [structuralKey, layoutKind, setLayout]);
+
+  // The single-node drill-in: hand off to the embedded panel, or toggle in-graph
+  // focus. Shared by mouse clicks and keyboard (Enter/Space) activation.
+  const activateNode = useCallback(
+    (id: string) => {
+      // The synthetic bookends have no run to drill into — each stands in for a
+      // real chat message (the user's prompt / the CEO's answer), so activating
+      // one jumps the conversation to that bubble and drops the full-screen
+      // overlay so the chat is visible (in the embedded panel it is already
+      // alongside). The target bubble renders its text in full, so the jump is
+      // also the "expand".
+      if (id === INPUT_ID) {
+        if (!taskMessage) return;
+        focusMessage(taskMessage.id);
+        if (!embedded) closeGraph();
+        return;
+      }
+      if (id === SYNTHESIS_ID) {
+        if (!finalAnswer) return;
+        focusMessage(finalAnswer.id);
+        if (!embedded) closeGraph();
+        return;
+      }
+      // Defensive: any other endpoint id carries no run.
+      if (isEndpointId(id)) return;
+      if (onNodeSelect) {
+        onNodeSelect(id);
+        return;
+      }
+      focusRun(id === focusedRunId ? null : id);
+    },
+    [
+      onNodeSelect,
+      focusRun,
+      focusedRunId,
+      finalAnswer,
+      taskMessage,
+      focusMessage,
+      embedded,
+      closeGraph,
+    ],
+  );
 
   const onNodeClick = useCallback(
-    (_: React.MouseEvent, node: Node) => {
-      focusStep(node.id === focusedStepId ? null : node.id);
+    (event: React.MouseEvent, node: Node) => {
+      // Modifier-click is React Flow's multi-select gesture; let it just toggle
+      // selection without also hijacking the single-node focus/detail flow.
+      if (event.shiftKey || event.metaKey || event.ctrlKey) return;
+      activateNode(node.id);
     },
-    [focusStep, focusedStepId],
+    [activateNode],
+  );
+
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      event.preventDefault();
+      setMenu({ x: event.clientX, y: event.clientY, nodeId: node.id });
+    },
+    [],
+  );
+
+  const onPaneContextMenu = useCallback(
+    (event: React.MouseEvent | MouseEvent) => {
+      event.preventDefault();
+      setMenu({ x: event.clientX, y: event.clientY, nodeId: null });
+    },
+    [],
+  );
+
+  const fitView = useCallback(() => {
+    rfRef.current?.fitView({ padding: 0.2, duration: 300 });
+  }, []);
+
+  const centerNode = useCallback((id: string) => {
+    const node = rfRef.current?.getNode(id);
+    if (!node) return;
+    const w = node.measured?.width ?? 210;
+    const h = node.measured?.height ?? 64;
+    rfRef.current?.setCenter(node.position.x + w / 2, node.position.y + h / 2, {
+      zoom: 1.2,
+      duration: 300,
+    });
+  }, []);
+
+  // `F` fits the whole graph to the viewport (ignored while typing in a field).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "f" && e.key !== "F") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      fitView();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fitView]);
+
+  const synthesisStatus = useMemo<RunStatus | null>(
+    () => (execution ? deriveSynthesisStatus(execution) : null),
+    [execution],
   );
 
   const flowNodes = useMemo<Node[]>(() => {
     if (!execution) return [];
-    return execution.steps.map((step) => {
-      const agent = execution.agents.find((a) => a.id === step.agentId);
+    const nodes: Node[] = execution.runs.map((run, i) => {
+      const agent = execution.agents.find((a) => a.id === run.agentId);
       const output = agent ? agent.outputChunks.join("") : "";
       const focused =
-        focusedStepId === step.id ||
-        (focusedStepId === null && focusedAgentId === step.agentId);
+        focusedRunId === run.id ||
+        (focusedRunId === null && focusedAgentId === run.agentId);
       return {
-        id: step.id,
+        id: run.id,
         type: "agent",
-        position: positions[step.id] ?? { x: 0, y: 0 },
+        position: positions[run.id] ?? { x: 0, y: 0 },
         data: {
-          agentId: step.agentId,
-          role: agent?.role ?? step.agentId,
+          agentId: run.agentId,
+          role: agent?.role ?? run.agentId,
           modelPreference: agent?.modelPreference,
           reasoningEffort: agent?.reasoningEffort,
-          stepId: step.id,
-          status: step.status,
-          isAnimating: step.status === "running",
+          runId: run.id,
+          status: run.status,
+          isAnimating: run.status === "running",
           outputPreview: tailText(output),
           tokenCount: estimateTokens(output),
           toolCount: agent?.toolCalls.length ?? 0,
           focused,
-          checkpoint: step.checkpoint,
+          model: run.model,
+          durationMs: run.durationMs,
+          realTokens: run.usage ? run.usage.input + run.usage.output : 0,
+          handleDirection,
+          // Input endpoint is index 0, so workers start at 1.
+          enterIndex: i + 1,
+          onActivate: () => activateNode(run.id),
         },
       } as Node;
     });
-  }, [execution, positions, focusedStepId, focusedAgentId]);
+
+    // Endpoints render only once ELK has placed them (positions present).
+    if (execution.runs.length > 0) {
+      const inputPos = positions[INPUT_ID];
+      if (inputPos) {
+        nodes.push({
+          id: INPUT_ID,
+          type: "input",
+          position: inputPos,
+          data: {
+            variant: "input",
+            status: "completed",
+            label: execution.taskSummary,
+            handleDirection,
+            enterIndex: 0,
+            onActivate: taskMessage
+              ? () => activateNode(INPUT_ID)
+              : undefined,
+          },
+        } as Node);
+      }
+      const synthPos = positions[SYNTHESIS_ID];
+      if (synthPos && synthesisStatus) {
+        nodes.push({
+          id: SYNTHESIS_ID,
+          type: "synthesis",
+          position: synthPos,
+          data: {
+            variant: "synthesis",
+            status: synthesisStatus,
+            label: "",
+            preview: finalAnswer ? tailText(finalAnswer.content) : "",
+            handleDirection,
+            enterIndex: execution.runs.length + 1,
+            onActivate: finalAnswer
+              ? () => activateNode(SYNTHESIS_ID)
+              : undefined,
+          },
+        } as Node);
+      }
+    }
+
+    return nodes;
+  }, [
+    execution,
+    positions,
+    focusedRunId,
+    focusedAgentId,
+    synthesisStatus,
+    handleDirection,
+    activateNode,
+    finalAnswer,
+    taskMessage,
+  ]);
 
   const flowEdges = useMemo<Edge[]>(() => {
     return edges.map((e) => {
-      const target = execution?.steps.find((s) => s.id === e.target);
-      const animated = target?.status === "running";
+      const animated =
+        e.target === SYNTHESIS_ID
+          ? synthesisStatus === "running"
+          : execution?.runs.find((s) => s.id === e.target)?.status ===
+            "running";
       return {
         id: e.id,
         source: e.source,
@@ -118,7 +440,7 @@ export function GraphView() {
         data: { animated },
       } as Edge;
     });
-  }, [edges, execution]);
+  }, [edges, execution, synthesisStatus]);
 
   if (!execution) {
     return (
@@ -142,10 +464,16 @@ export function GraphView() {
             edges={flowEdges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
+            onInit={(inst) => {
+              rfRef.current = inst;
+            }}
             onNodeClick={onNodeClick}
+            onNodeContextMenu={onNodeContextMenu}
+            onPaneContextMenu={onPaneContextMenu}
             fitView
             nodesDraggable={false}
             nodesConnectable={false}
+            nodesFocusable={false}
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={20} size={1} />
@@ -153,15 +481,106 @@ export function GraphView() {
           </ReactFlow>
         )}
 
-        {hasFrames && (
+        {!embedded && hasFrames && (
           <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
             <Timeline />
           </div>
         )}
       </div>
 
-      {focusedStepId && (
-        <NodeDetail nodeId={focusedStepId} onClose={() => focusStep(null)} />
+      {!embedded && focusedRunId && (
+        <NodeDetail nodeId={focusedRunId} onClose={() => focusRun(null)} />
+      )}
+
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
+          {menuNodeId !== null && (
+            <>
+              {!isEndpointId(menuNodeId) && (
+                <>
+                  <MenuItem
+                    icon={<ScanSearch size={14} />}
+                    label="查看详情"
+                    onSelect={() => {
+                      if (onNodeSelect) onNodeSelect(menuNodeId);
+                      else focusRun(menuNodeId);
+                      setMenu(null);
+                    }}
+                  />
+                  {!embedded && (
+                    <MenuItem
+                      icon={<PanelRight size={14} />}
+                      label="在对话面板中查看"
+                      onSelect={() => {
+                        const run = execution.runs.find(
+                          (r) => r.id === menuNodeId,
+                        );
+                        const role = execution.agents.find(
+                          (a) => a.id === run?.agentId,
+                        )?.role;
+                        showRunDetail(menuNodeId, role);
+                        closeGraph();
+                        setMenu(null);
+                      }}
+                    />
+                  )}
+                </>
+              )}
+              {menuNodeId === INPUT_ID && taskMessage && (
+                <MenuItem
+                  icon={<ScanSearch size={14} />}
+                  label="查看完整提问"
+                  onSelect={() => {
+                    activateNode(INPUT_ID);
+                    setMenu(null);
+                  }}
+                />
+              )}
+              {menuNodeId === SYNTHESIS_ID && finalAnswer && (
+                <MenuItem
+                  icon={<ScanSearch size={14} />}
+                  label="查看最终回答"
+                  onSelect={() => {
+                    activateNode(SYNTHESIS_ID);
+                    setMenu(null);
+                  }}
+                />
+              )}
+              <MenuItem
+                icon={<Crosshair size={14} />}
+                label="居中此节点"
+                onSelect={() => {
+                  centerNode(menuNodeId);
+                  setMenu(null);
+                }}
+              />
+              <MenuDivider />
+            </>
+          )}
+          {LAYOUT_OPTIONS.map((opt) => (
+            <MenuItem
+              key={opt.kind}
+              icon={opt.icon}
+              label={opt.label}
+              trailing={
+                layoutKind === opt.kind ? <Check size={14} /> : undefined
+              }
+              onSelect={() => {
+                setLayoutKind(opt.kind);
+                setMenu(null);
+              }}
+            />
+          ))}
+          <MenuDivider />
+          <MenuItem
+            icon={<Maximize2 size={14} />}
+            label="适应画布"
+            onSelect={() => {
+              fitView();
+              setMenu(null);
+            }}
+          />
+        </ContextMenu>
       )}
     </div>
   );

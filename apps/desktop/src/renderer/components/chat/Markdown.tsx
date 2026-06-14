@@ -1,4 +1,5 @@
-import { memo } from "react";
+import { remarkCitations } from "@/lib/remarkCitations";
+import { memo, useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
@@ -13,20 +14,74 @@ const remarkPlugins = [remarkGfm, remarkMath];
 const rehypePlugins = [[rehypeHighlight, { ignoreMissing: true }], rehypeKatex];
 const components: Components = { pre: CodeBlock };
 
+/** A clickable inline citation marker that maps to a source card. */
+function CitationChip({ n, onClick }: { n: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={`来源 ${n}`}
+      className="mx-0.5 inline-flex items-center rounded-full bg-primary/10 px-1.5 align-super text-xs font-medium leading-none text-primary transition-colors hover:bg-primary/20"
+    >
+      {n}
+    </button>
+  );
+}
+
+interface Props {
+  content: string;
+  /** Number of source cards; enables `[n]` (1..count) citation chips. */
+  citationCount?: number;
+  /** Invoked with the 1-based source index when a chip is clicked. */
+  onCitationClick?: (n: number) => void;
+}
+
 /**
  * Assistant-message Markdown: GFM (tables/strikethrough/task lists), syntax
- * highlighting with a per-block copy button, and KaTeX math ($…$ / $$…$$).
+ * highlighting with a per-block copy button, KaTeX math ($…$ / $$…$$), and —
+ * when the message has sources — clickable `[n]` citation chips.
  */
 export const Markdown = memo(function Markdown({
   content,
-}: { content: string }) {
+  citationCount = 0,
+  onCitationClick,
+}: Props) {
+  // Only enrich once sources exist (they arrive at end-of-turn), so streaming
+  // deltas keep using the stable module-level plugins/components.
+  const remarks = useMemo(
+    () =>
+      citationCount > 0
+        ? [...remarkPlugins, remarkCitations(citationCount)]
+        : remarkPlugins,
+    [citationCount],
+  );
+
+  const comps = useMemo<Components>(() => {
+    if (citationCount <= 0) return components;
+    return {
+      pre: CodeBlock,
+      a({ href, children, node: _node, ...props }) {
+        const m = typeof href === "string" ? /^cite:(\d+)$/.exec(href) : null;
+        if (m) {
+          const n = Number(m[1]);
+          return <CitationChip n={n} onClick={() => onCitationClick?.(n)} />;
+        }
+        return (
+          <a href={href} target="_blank" rel="noreferrer" {...props}>
+            {children}
+          </a>
+        );
+      },
+    };
+  }, [citationCount, onCitationClick]);
+
   return (
     <div className="markdown-body text-foreground">
       <ReactMarkdown
-        remarkPlugins={remarkPlugins}
+        remarkPlugins={remarks}
         // biome-ignore lint/suspicious/noExplicitAny: plugin tuple typing is loose across unified versions.
         rehypePlugins={rehypePlugins as any}
-        components={components}
+        components={comps}
       >
         {content}
       </ReactMarkdown>

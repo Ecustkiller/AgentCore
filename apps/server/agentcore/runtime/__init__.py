@@ -1,1 +1,1 @@
-"""Execution runtime: ReAct loop, Run scheduling, Turn Journal, interaction primitives."""
+"""Execution runtime: ReAct loop, Run scheduling, tool approval, SSE events."""

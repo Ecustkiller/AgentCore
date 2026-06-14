@@ -1,0 +1,231 @@
+import { Switch } from "@/components/ui/Switch";
+import { formatCompact, formatCost, formatUsd } from "@/lib/format";
+import { useUIStore } from "@/stores/ui";
+import { useUsageStore } from "@/stores/usage";
+import { useEffect } from "react";
+
+/**
+ * Account usage dashboard (§7.3D) — the manager's view of the team's spend.
+ *
+ * 大众面 leads with two semantic quota meters (本月额度 / 今日 tokens) so the user
+ * reads「还剩多少」at a glance without big raw numbers. The page also hosts the one
+ * global「用量明细 / Power 模式」switch (`usageDetail`, §7.1): turning it on reveals
+ * the token / cost breakdown here AND defaults each run's「资源消耗」to expanded — a
+ * single grain control instead of two. Money (¥) is never gated by it. All numbers
+ * come from `GET /usage/summary` via the usage store; money formats off the single
+ * server FX rate.
+ */
+export function UsageSettings() {
+  const summary = useUsageStore((s) => s.summary);
+  const error = useUsageStore((s) => s.error);
+  const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
+  const fetchSummary = useUsageStore((s) => s.fetchSummary);
+  // The grain switch lives here but is global (§7.1): it also drives run-detail's
+  // 资源消耗 default-expand, so it reads/writes the shared UI store, not local state.
+  const usageDetail = useUIStore((s) => s.usageDetail);
+  const setUsageDetail = useUIStore((s) => s.setUsageDetail);
+
+  // Refresh on open: the bootstrap snapshot may be stale by the time the user
+  // lands here. Best-effort (the store keeps the last value + a soft error).
+  useEffect(() => {
+    void fetchSummary();
+  }, [fetchSummary]);
+
+  return (
+    <div>
+      <h1 className="text-xl font-semibold">用量</h1>
+      <p className="mt-2 text-sm text-muted-foreground">
+        本月额度与今日用量。成本按团队（每个 Agent）累计，以人民币展示。
+      </p>
+
+      <PowerModeToggle enabled={usageDetail} onChange={setUsageDetail} />
+
+      {!summary ? (
+        <p className="mt-6 text-sm text-muted-foreground">
+          {error ?? "加载中…"}
+        </p>
+      ) : (
+        <Dashboard
+          summary={summary}
+          cnyPerUsd={cnyPerUsd}
+          showDetail={usageDetail}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The single global「用量明细 / Power 模式」switch (§7.1). Off by default (大众);
+ * on reveals technical breakdowns and defaults run-detail「资源消耗」to expanded.
+ * 成本（¥）始终可见，不受它控制。
+ */
+function PowerModeToggle({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="mt-6 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-sm text-foreground">用量明细（Power 模式）</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          显示 token、缓存率等技术明细，并默认展开各 Agent 的资源消耗。成本（¥）始终可见。
+        </p>
+      </div>
+      <Switch
+        checked={enabled}
+        onCheckedChange={onChange}
+        label="用量明细（Power 模式）"
+      />
+    </div>
+  );
+}
+
+type Summary = NonNullable<
+  ReturnType<typeof useUsageStore.getState>["summary"]
+>;
+
+function Dashboard({
+  summary,
+  cnyPerUsd,
+  showDetail,
+}: {
+  summary: Summary;
+  cnyPerUsd: number;
+  showDetail: boolean;
+}) {
+  const { today, month, quota } = summary;
+  const monthLimit = quota.monthly_cost_nano;
+  const monthUsed = month.cost.total;
+  const dayTokenLimit = quota.daily_tokens;
+  const dayTokensUsed = today.usage.input + today.usage.output;
+  const monthNear = monthLimit > 0 && monthUsed / monthLimit >= 0.8;
+
+  const now = new Date();
+  const reset = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const resetText = `${reset.getMonth() + 1} 月 ${reset.getDate()} 日重置`;
+
+  const moneyCaption =
+    monthLimit > 0
+      ? `已用 ${formatCost(monthUsed, cnyPerUsd)} / ${formatCost(monthLimit, cnyPerUsd)} · ${resetText}`
+      : `已用 ${formatCost(monthUsed, cnyPerUsd)} · 不限`;
+  const tokenCaption =
+    dayTokenLimit > 0
+      ? `${formatCompact(dayTokensUsed)} / ${formatCompact(dayTokenLimit)}`
+      : `${formatCompact(dayTokensUsed)} · 不限`;
+
+  return (
+    <div className="mt-6 space-y-5">
+      <QuotaMeter
+        label="本月额度"
+        used={monthUsed}
+        limit={monthLimit}
+        caption={moneyCaption}
+      />
+      {monthNear && (
+        <p className="-mt-3 text-xs text-warning">
+          接近本月额度，超出将暂停服务。
+        </p>
+      )}
+      <QuotaMeter
+        label="今日 tokens"
+        used={dayTokensUsed}
+        limit={dayTokenLimit}
+        caption={tokenCaption}
+      />
+
+      {/* 明细 default-collapses; the global 用量明细 switch above reveals it (§7.1). */}
+      {showDetail && <UsageDetail summary={summary} cnyPerUsd={cnyPerUsd} />}
+    </div>
+  );
+}
+
+/** A semantic quota bar: % filled, amber past 80%, no bar when unlimited (§7.3D). */
+function QuotaMeter({
+  label,
+  used,
+  limit,
+  caption,
+}: {
+  label: string;
+  used: number;
+  limit: number;
+  caption: string;
+}) {
+  const unlimited = limit <= 0;
+  const pct = unlimited ? 0 : Math.min(Math.round((used / limit) * 100), 100);
+  const near = !unlimited && pct >= 80;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-foreground">{label}</span>
+        <span className={near ? "text-warning" : "text-muted-foreground"}>
+          {unlimited ? "不限" : `${pct}%`}
+        </span>
+      </div>
+      <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+        {!unlimited && (
+          <div
+            className={`h-full rounded-full ${near ? "bg-warning" : "bg-primary"}`}
+            style={{ width: `${pct}%` }}
+          />
+        )}
+      </div>
+      <p className="mt-1 text-xs text-muted-foreground">{caption}</p>
+    </div>
+  );
+}
+
+/** Power breakdown: today's tokens / cache hit rate, plus month cost + requests. */
+function UsageDetail({
+  summary,
+  cnyPerUsd,
+}: {
+  summary: Summary;
+  cnyPerUsd: number;
+}) {
+  const { today, month } = summary;
+  const input = today.usage.input;
+  const hitRate =
+    input > 0 ? Math.round((today.usage.cache_hit / input) * 100) : 0;
+
+  const rows: { label: string; value: string }[] = [
+    {
+      label: "今日 tokens",
+      value: `输入 ${formatCompact(input)} · 输出 ${formatCompact(today.usage.output)}`,
+    },
+    { label: "今日缓存命中率", value: `${hitRate}%` },
+    {
+      label: "今日成本",
+      value: `${formatCost(today.cost.total, cnyPerUsd)}（${formatUsd(today.cost.total)}）`,
+    },
+    {
+      label: "本月成本",
+      value: `${formatCost(month.cost.total, cnyPerUsd)}（${formatUsd(month.cost.total)}）`,
+    },
+    {
+      label: "请求数",
+      value: `今日 ${today.requests} · 本月 ${month.requests}`,
+    },
+  ];
+
+  return (
+    <div className="rounded-xl border border-border bg-card">
+      {rows.map((row, i) => (
+        <div
+          key={row.label}
+          className={`flex items-center justify-between px-4 py-2.5 text-sm ${
+            i > 0 ? "border-t border-border" : ""
+          }`}
+        >
+          <span className="text-muted-foreground">{row.label}</span>
+          <span className="tabular-nums text-foreground">{row.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -1,15 +1,35 @@
-import { ArrowLeft, Info, Keyboard, Palette, Settings } from "lucide-react";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { useAuthStore } from "@/stores/auth";
+import {
+  ArrowLeft,
+  Gauge,
+  Info,
+  Keyboard,
+  Palette,
+  Settings,
+  Users,
+} from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
-const SECTIONS = [
+const BASE_SECTIONS = [
   { icon: Settings, label: "通用", path: "/more" },
+  { icon: Gauge, label: "用量", path: "/more/usage" },
   { icon: Palette, label: "外观", path: "/more/appearance" },
   { icon: Keyboard, label: "快捷键", path: "/more/shortcuts" },
-  { icon: Info, label: "关于", path: "/more/about" },
-] as const;
+];
+
+const ABOUT_SECTION = { icon: Info, label: "关于", path: "/more/about" };
 
 export function MorePage() {
   const navigate = useNavigate();
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+
+  // Invite management is admin-only; hide the entry otherwise (the page also guards).
+  const sections = [
+    ...BASE_SECTIONS,
+    ...(isAdmin ? [{ icon: Users, label: "成员", path: "/more/members" }] : []),
+    ABOUT_SECTION,
+  ];
 
   return (
     <div className="flex h-full w-full">
@@ -27,7 +47,7 @@ export function MorePage() {
         </div>
 
         <div className="space-y-0.5 px-2">
-          {SECTIONS.map((section) => (
+          {sections.map((section) => (
             <NavLink
               key={section.path}
               to={section.path}
@@ -48,11 +68,9 @@ export function MorePage() {
       </nav>
 
       {/* Content area */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl px-6 py-8">
-          <Outlet />
-        </div>
-      </div>
+      <PageContainer width="content" className="flex-1">
+        <Outlet />
+      </PageContainer>
     </div>
   );
 }

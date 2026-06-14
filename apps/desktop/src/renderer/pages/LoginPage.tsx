@@ -113,7 +113,9 @@ export function LoginPage() {
             className={inputClass}
             type="password"
             placeholder={mode === "register" ? "密码（至少 8 位）" : "密码"}
-            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            autoComplete={
+              mode === "login" ? "current-password" : "new-password"
+            }
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />

@@ -381,9 +381,81 @@
   }
 }
 
+/* Task card entrance — plays once when a multi-agent plan (`run_plan`) first
+ * mounts the in-chat team dashboard. A stable wrapper in TaskCard keeps inner
+ * status swaps (running→completed/failed) from re-triggering it. */
+@keyframes task-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Collaboration-graph node entrance — plays once when a node first mounts
+ * (run_plan declares the whole team up-front, so nodes cascade in via a per-node
+ * animation-delay). Scale/opacity only, applied to an inner wrapper — never the
+ * ReactFlow node element, which owns the node's positioning translate(). */
+@keyframes graph-node-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* One-shot status flash — a brief colored glow + pop when a run reaches a
+ * terminal state. Colour comes from --graph-flash-color (set per status). */
+@keyframes graph-node-flash {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  40% {
+    transform: scale(1.035);
+    box-shadow: 0 0 12px 3px var(--graph-flash-color, var(--success));
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
 @theme inline {
   --animate-dropdown-in: dropdown-in 0.15s ease-out;
   --animate-dropdown-out: dropdown-out 0.1s ease-in;
+  --animate-task-card-enter: task-card-enter 0.3s ease-out;
+  /* `both`: hold the `from` state during the stagger delay (else a delayed node
+     flashes visible → hidden → fades in) and the `to` state after. */
+  --animate-graph-node-enter: graph-node-enter 0.28s ease-out both;
+  --animate-graph-node-flash: graph-node-flash 0.6s ease-out;
+}
+
+/* Smooth node repositioning when the user switches graph layout. ReactFlow sets
+ * each node's position via inline transform; transitioning it morphs nodes to
+ * their new spots instead of teleporting. Nodes aren't draggable here and pan
+ * moves the viewport (not nodes), so this only ever fires on a layout recompute. */
+.react-flow__node {
+  transition: transform 0.3s ease;
+}
+
+/* Honor reduced-motion: skip the entrance/flash/layout transforms. Unlayered, so
+ * it reliably overrides the layered Tailwind `animate-*` utilities. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-task-card-enter,
+  .animate-graph-node-enter,
+  .animate-graph-node-flash {
+    animation: none;
+  }
+  .react-flow__node {
+    transition: none;
+  }
 }
 
 body {

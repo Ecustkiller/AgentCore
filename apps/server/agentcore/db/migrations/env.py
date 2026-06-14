@@ -11,6 +11,7 @@ from agentcore.config import settings
 from agentcore.db.base import Base
 from agentcore.db.models import (  # noqa: F401 - ensure all models are imported
     Conversation,
+    CostEvent,
     Credentials,
     Invite,
     Message,

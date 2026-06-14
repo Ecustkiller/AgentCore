@@ -172,4 +172,88 @@ describe("conversation store", () => {
       expect(store().conversations[0].title).toBe("新标题");
     });
   });
+
+  describe("bumpConversation", () => {
+    it("moves the conversation to the front and refreshes updatedAt", () => {
+      store().setConversations([
+        {
+          id: "a",
+          title: "A",
+          updatedAt: "2020-01-01T00:00:00.000Z",
+          messageCount: 0,
+          lastMessagePreview: null,
+        },
+        {
+          id: "b",
+          title: "B",
+          updatedAt: "2020-01-01T00:00:00.000Z",
+          messageCount: 0,
+          lastMessagePreview: null,
+        },
+      ]);
+
+      store().bumpConversation("b");
+
+      const list = store().conversations;
+      expect(list.map((c) => c.id)).toEqual(["b", "a"]);
+      expect(Date.parse(list[0].updatedAt)).toBeGreaterThan(
+        Date.parse("2020-01-01T00:00:00.000Z"),
+      );
+    });
+
+    it("is a no-op when the id is not in the list", () => {
+      store().setConversations([
+        {
+          id: "a",
+          title: "A",
+          updatedAt: "",
+          messageCount: 0,
+          lastMessagePreview: null,
+        },
+      ]);
+
+      store().bumpConversation("missing");
+      expect(store().conversations.map((c) => c.id)).toEqual(["a"]);
+    });
+  });
+
+  describe("restoreConversation", () => {
+    it("undoes a bump, restoring original position and updatedAt", () => {
+      const original = [
+        {
+          id: "a",
+          title: "A",
+          updatedAt: "2020-01-03T00:00:00.000Z",
+          messageCount: 0,
+          lastMessagePreview: null,
+        },
+        {
+          id: "b",
+          title: "B",
+          updatedAt: "2020-01-02T00:00:00.000Z",
+          messageCount: 0,
+          lastMessagePreview: null,
+        },
+        {
+          id: "c",
+          title: "C",
+          updatedAt: "2020-01-01T00:00:00.000Z",
+          messageCount: 0,
+          lastMessagePreview: null,
+        },
+      ];
+      store().setConversations(original);
+
+      // Bump "c" to the front (as a send would), then roll it back.
+      store().bumpConversation("c");
+      expect(store().conversations.map((x) => x.id)).toEqual(["c", "a", "b"]);
+
+      store().restoreConversation("c", 2, "2020-01-01T00:00:00.000Z");
+
+      expect(store().conversations.map((x) => x.id)).toEqual(["a", "b", "c"]);
+      expect(store().conversations[2].updatedAt).toBe(
+        "2020-01-01T00:00:00.000Z",
+      );
+    });
+  });
 });

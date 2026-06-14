@@ -11,7 +11,7 @@ The target server comes from ``TEST_DATABASE_URL`` (falls back to the app's
 """
 
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 
 import httpx
@@ -27,8 +27,13 @@ import agentcore.db.models  # noqa: F401  (register models on Base.metadata)
 from agentcore.api.dependencies import get_db
 from agentcore.config import settings
 from agentcore.db.base import Base
-from agentcore.db.repositories import InviteRepository
+from agentcore.db.repositories import (
+    CredentialsRepository,
+    InviteRepository,
+    UserRepository,
+)
 from agentcore.main import app
+from agentcore.security import hash_password
 
 _TEST_SCHEMA = "agentcore_it"
 
@@ -91,6 +96,17 @@ def new_client(session_factory) -> Callable:
     return _make
 
 
+@pytest.fixture(autouse=True)
+def _disable_rate_limit() -> Iterator[None]:
+    """Rate-limit state is process-global; disable it so per-IP counters don't
+    accumulate across the many auth POSTs the suite makes (429 is covered by the
+    dedicated unit tests in test_rate_limit.py)."""
+    original = settings.rate_limit_enabled
+    settings.rate_limit_enabled = False
+    yield
+    settings.rate_limit_enabled = original
+
+
 @pytest_asyncio.fixture
 async def make_invite(session_factory) -> Callable:
     """Return an async helper that seeds an invite code into the test schema."""
@@ -99,5 +115,24 @@ async def make_invite(session_factory) -> Callable:
         async with session_factory() as session:
             await InviteRepository(session).create(code=code)
         return code
+
+    return _make
+
+
+@pytest_asyncio.fixture
+async def make_admin(session_factory) -> Callable:
+    """Return an async helper that seeds an admin user (with credentials)."""
+
+    async def _make(
+        username: str = "admin", password: str = "adminpass123"
+    ) -> tuple[str, str]:
+        async with session_factory() as session:
+            user = await UserRepository(session).create(
+                username=username, display_name=username, role="admin"
+            )
+            await CredentialsRepository(session).create(
+                user_id=user.user_id, password_hash=hash_password(password)
+            )
+        return username, password
 
     return _make

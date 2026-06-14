@@ -12,8 +12,10 @@ All intermediate events are emitted to an EventSink for SSE delivery.
 import asyncio
 import json
 from collections.abc import Callable
+from typing import Any
 
 from agentcore.core.logging import get_logger
+from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.llm.config import ModelProfile, build_request, get_profile
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.protocol import (
@@ -23,11 +25,14 @@ from agentcore.llm.protocol import (
     ToolCall,
     ToolCallFunction,
 )
+from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
 from agentcore.runtime.events import (
     EventSink,
     content_delta,
     error_event,
     reasoning_delta,
+    run_output_delta,
+    run_reasoning_delta,
     tool_use_end,
     tool_use_start,
 )
@@ -43,6 +48,33 @@ from agentcore.tools.registry import ToolRegistry
 logger = get_logger(__name__)
 
 _MAX_PARALLEL_TOOLS = 5
+
+# Upper bound on sources surfaced per turn — enough to back any answer without
+# turning the card strip into a wall.
+_CITATION_CAP = 24
+
+
+def _citation_key(citation: dict[str, Any]) -> str:
+    """Normalized dedup key for a citation (same page from search + read_url, or
+    from several engines, collapses): drop ``#fragment`` and trailing ``/``."""
+    return (citation.get("url") or "").split("#", 1)[0].rstrip("/")
+
+
+def _merge_citations(sink: list[dict[str, Any]], new: list[dict[str, Any]]) -> None:
+    """Append unseen citations to ``sink`` in arrival order, capped.
+
+    De-dups by normalized URL against everything already collected this turn, so
+    a page the agent both searched up and read through is cited once.
+    """
+    seen = {_citation_key(c) for c in sink}
+    for c in new:
+        key = _citation_key(c)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        sink.append(c)
+        if len(sink) >= _CITATION_CAP:
+            return
 
 # Injected when convergence governance forces a tool-free answer (a stuck loop
 # trips a hard finalize, or the round budget is exhausted mid-tool-call).
@@ -63,14 +95,20 @@ async def react_loop(
     on_content: Callable[[str], None] | None = None,
     on_reasoning: Callable[[str], None] | None = None,
     raise_on_error: bool = False,
-) -> tuple[str, str, int, int, int, int]:
+    citation_sink: list[dict[str, Any]] | None = None,
+    approval_gate: ApprovalGate | None = None,
+    synthesis_run_id: str | None = None,
+    synthesis_agent_id: str | None = None,
+    begin_synthesis: Callable[[], None] | None = None,
+) -> tuple[str, str, TokenUsage, int]:
     """Run the ReAct loop.
 
-    Returns
-    (final_content, final_reasoning, input_tokens, output_tokens,
-    reasoning_tokens, rounds). ``final_reasoning`` is the concatenated thinking
-    text across all rounds (empty when thinking is disabled), mirroring what was
-    streamed via ``reasoning_delta`` so it can be persisted for replay.
+    Returns ``(final_content, final_reasoning, usage, rounds)`` where ``usage`` is
+    the turn's :class:`TokenUsage` summed across every round (carrying the
+    cache_hit/cache_miss split so cost stays honest on multi-turn chats — a single
+    object instead of loose ints). ``final_reasoning`` is the concatenated
+    thinking text across all rounds (empty when thinking is disabled), mirroring
+    what was streamed via ``reasoning_delta`` so it can be persisted for replay.
 
     The ``profile`` drives both the model params and the round budget
     (``profile.max_rounds``); it defaults to the chat profile. By
@@ -78,7 +116,22 @@ async def react_loop(
     (single-agent path). A caller running a multi-agent run passes ``on_content``
     /``on_reasoning`` to redirect text into ``run_output_delta`` instead.
     ``allowed_tool_names`` filters which tools the model may call (``None`` = all,
-    ``[]`` = none). Tool execution events always go to the sink.
+    ``[]`` = none). Tool execution events always go to the sink. When
+    ``citation_sink`` is provided, web sources consulted by research tools are
+    aggregated into it (de-duped, capped) for the caller to surface/persist.
+    ``approval_gate`` (CEO chat path only; ``None`` for delegated workers) pauses
+    GRANTABLE tool calls until the user authorizes them — a denial is fed back to
+    the model as a tool result so it can adapt.
+
+    ``synthesis_run_id`` / ``synthesis_agent_id`` / ``begin_synthesis`` wire the
+    CEO's 「汇总过程」(D3 / Phase B): when supplied (CEO chat path only) and the
+    captain resumes after a non-terminal ORCHESTRATION tool (``delegate``)
+    returns, the loop flips into synthesis mode for the remaining rounds —
+    ``begin_synthesis`` is invoked once (the caller declares + starts the
+    synthesis run), that phase's reasoning streams run-scoped as the synthesis
+    node's 思考过程 (and is NOT folded into the chat bubble's thinking), and its
+    content streams to the chat bubble AND mirrors to the node's output. Absent
+    (workers / non-delegating turns) the loop behaves exactly as before.
     """
     profile = profile or get_profile("chat")
 
@@ -92,9 +145,25 @@ async def react_loop(
     emit_content = on_content or (lambda delta: sink.emit(content_delta(delta)))
     emit_reasoning = on_reasoning or (lambda delta: sink.emit(reasoning_delta(delta)))
 
-    total_input = 0
-    total_output = 0
-    total_reasoning = 0
+    # CEO synthesis phase (D3 / Phase B). Once the captain resumes after a
+    # non-terminal orchestration tool returns, the integration round's reasoning
+    # is the team's 「汇总过程」 — streamed run-scoped to the synthesis node — and
+    # its content is the user-facing overview, which still streams to the chat
+    # bubble AND mirrors to the node's output. Gated on a synthesis_run_id being
+    # supplied (CEO pipeline only); zero-overhead and inert for workers.
+    synthesis_enabled = (
+        synthesis_run_id is not None and synthesis_agent_id is not None
+    )
+    synthesizing = False
+
+    def _synth_content(delta: str) -> None:
+        emit_content(delta)
+        sink.emit(run_output_delta(synthesis_run_id, synthesis_agent_id, delta))
+
+    def _synth_reasoning(delta: str) -> None:
+        sink.emit(run_reasoning_delta(synthesis_run_id, synthesis_agent_id, delta))
+
+    total_usage = TokenUsage()
     final_content = ""
     final_reasoning = ""
 
@@ -102,6 +171,11 @@ async def react_loop(
     controller = LoopController()
 
     for round_idx in range(profile.max_rounds):
+        # Once in synthesis mode, this round's reasoning/content stream to the
+        # synthesis node; otherwise they take the normal chat/worker path.
+        round_emit_content = _synth_content if synthesizing else emit_content
+        round_emit_reasoning = _synth_reasoning if synthesizing else emit_reasoning
+
         request = build_request(
             profile,
             messages,
@@ -111,42 +185,29 @@ async def react_loop(
 
         try:
             round_content, round_reasoning, round_tool_calls, usage = (
-                await _stream_llm_round(llm, request, emit_content, emit_reasoning)
+                await _stream_llm_round(llm, request, round_emit_content, round_emit_reasoning)
             )
         except Exception as e:
             logger.error("llm_call_failed", round=round_idx, error=str(e))
             if raise_on_error:
                 raise
             sink.emit(error_event("LLM_ERROR", str(e)))
-            return (
-                final_content,
-                final_reasoning,
-                total_input,
-                total_output,
-                total_reasoning,
-                round_idx + 1,
-            )
+            return final_content, final_reasoning, total_usage, round_idx + 1
 
         if usage:
-            total_input += usage.input_tokens
-            total_output += usage.output_tokens
-            total_reasoning += usage.reasoning_tokens
+            total_usage = total_usage + usage
 
         if round_content:
             final_content += round_content
 
-        if round_reasoning:
+        if round_reasoning and not synthesizing:
+            # Synthesis-phase reasoning is the team's 「汇总过程」, journaled
+            # run-scoped to the synthesis node (run_reasoning_delta) rather than
+            # folded into the chat bubble's thinking — so the two stay distinct.
             final_reasoning += round_reasoning
 
         if not round_tool_calls:
-            return (
-                final_content,
-                final_reasoning,
-                total_input,
-                total_output,
-                total_reasoning,
-                round_idx + 1,
-            )
+            return final_content, final_reasoning, total_usage, round_idx + 1
 
         # DeepSeek thinking mode requires reasoning_content to be echoed back on
         # any assistant turn that carried tool_calls, or the next request 400s
@@ -159,32 +220,50 @@ async def react_loop(
         )
         messages.append(assistant_msg)
 
-        tool_results, terminal, attempts = await _execute_tools(
-            round_tool_calls, tools, tool_context, sink
+        tool_results, terminal, attempts, round_citations = await _execute_tools(
+            round_tool_calls, tools, tool_context, sink, approval_gate=approval_gate
         )
         messages.extend(tool_results)
 
-        # A handoff tool (e.g. assemble_team) already streamed the turn's final
+        if citation_sink is not None and round_citations:
+            _merge_citations(citation_sink, round_citations)
+
+        # CEO synthesis boundary (D3 / Phase B): the captain just got a
+        # non-terminal ORCHESTRATION tool's results (delegate) back — the next
+        # round integrates them into the user-facing answer. Flip into synthesis
+        # mode so that round streams to the synthesis node; begin_synthesis
+        # (caller-provided) declares + starts the synthesis run exactly once.
+        if (
+            synthesis_enabled
+            and not synthesizing
+            and begin_synthesis is not None
+            and any(
+                (tool := tools.get_optional(tc.function.name)) is not None
+                and tool.schema.category is ToolCategory.ORCHESTRATION
+                for tc in round_tool_calls
+            )
+        ):
+            begin_synthesis()
+            synthesizing = True
+
+        # A handoff tool (a terminal tool) already streamed the turn's final
         # answer itself. Stop here so the model does not produce a second reply;
         # surface the streamed answer (prefixed by any pre-tool content) for
         # persistence and fold the delegated run's token usage into the totals.
         if terminal is not None:
             usage_meta = terminal.metadata or {}
-            total_input += usage_meta.get("input_tokens", 0)
-            total_output += usage_meta.get("output_tokens", 0)
-            total_reasoning += usage_meta.get("reasoning_tokens", 0)
+            total_usage = total_usage + TokenUsage(
+                input_tokens=usage_meta.get("input_tokens", 0),
+                output_tokens=usage_meta.get("output_tokens", 0),
+                reasoning_tokens=usage_meta.get("reasoning_tokens", 0),
+                cache_hit_tokens=usage_meta.get("cache_hit_tokens", 0),
+                cache_miss_tokens=usage_meta.get("cache_miss_tokens", 0),
+            )
             handoff_content = terminal.terminal_content or ""
             combined = (
                 f"{final_content}{handoff_content}" if final_content else handoff_content
             )
-            return (
-                combined,
-                final_reasoning,
-                total_input,
-                total_output,
-                total_reasoning,
-                round_idx + 1,
-            )
+            return combined, final_reasoning, total_usage, round_idx + 1
 
         # Convergence governance: detect mechanical loops and intervene. NUDGE
         # injects a fact-anchored reflection and lets the model recover; a second
@@ -218,9 +297,7 @@ async def react_loop(
                 emit_reasoning=emit_reasoning,
                 final_content=final_content,
                 final_reasoning=final_reasoning,
-                total_input=total_input,
-                total_output=total_output,
-                total_reasoning=total_reasoning,
+                total_usage=total_usage,
                 rounds=round_idx + 1,
                 reason=signal.reason.value,
             )
@@ -237,9 +314,7 @@ async def react_loop(
         emit_reasoning=emit_reasoning,
         final_content=final_content,
         final_reasoning=final_reasoning,
-        total_input=total_input,
-        total_output=total_output,
-        total_reasoning=total_reasoning,
+        total_usage=total_usage,
         rounds=profile.max_rounds,
         reason="max_rounds",
     )
@@ -254,12 +329,10 @@ async def _force_finalize(
     emit_reasoning: Callable[[str], None],
     final_content: str,
     final_reasoning: str,
-    total_input: int,
-    total_output: int,
-    total_reasoning: int,
+    total_usage: TokenUsage,
     rounds: int,
     reason: str,
-) -> tuple[str, str, int, int, int, int]:
+) -> tuple[str, str, TokenUsage, int]:
     """Force one tool-free LLM round to guarantee a real textual answer.
 
     Disables tools (``tool_choice="none"``) so the model must produce text. Used
@@ -275,32 +348,16 @@ async def _force_finalize(
         )
     except Exception as e:
         logger.error("force_finalize_failed", reason=reason, error=str(e))
-        return (
-            final_content,
-            final_reasoning,
-            total_input,
-            total_output,
-            total_reasoning,
-            rounds,
-        )
+        return final_content, final_reasoning, total_usage, rounds
 
     if usage:
-        total_input += usage.input_tokens
-        total_output += usage.output_tokens
-        total_reasoning += usage.reasoning_tokens
+        total_usage = total_usage + usage
 
     combined_content = f"{final_content}{content}" if final_content else content
     combined_reasoning = (
         f"{final_reasoning}{reasoning}" if final_reasoning else reasoning
     )
-    return (
-        combined_content,
-        combined_reasoning,
-        total_input,
-        total_output,
-        total_reasoning,
-        rounds,
-    )
+    return combined_content, combined_reasoning, total_usage, rounds
 
 
 async def _stream_llm_round(
@@ -371,18 +428,22 @@ async def _execute_tools(
     registry: ToolRegistry,
     context: ToolContext,
     sink: EventSink,
-) -> tuple[list[LLMMessage], ToolResult | None, list[ToolAttempt]]:
+    *,
+    approval_gate: ApprovalGate | None = None,
+) -> tuple[list[LLMMessage], ToolResult | None, list[ToolAttempt], list[dict[str, Any]]]:
     """Execute tool calls (parallel, capped).
 
-    Returns ``(tool_messages, terminal, attempts)`` where ``terminal`` is the
-    first handoff ToolResult (a tool that already produced the turn's final
-    answer) or ``None``, and ``attempts`` carries the per-call fingerprint +
-    success used by convergence governance to detect mechanical loops.
+    Returns ``(tool_messages, terminal, attempts, citations)`` where ``terminal``
+    is the first handoff ToolResult (a tool that already produced the turn's final
+    answer) or ``None``, ``attempts`` carries the per-call fingerprint + success
+    used by convergence governance to detect mechanical loops, and ``citations``
+    are the web sources surfaced by successful research tools this round (in call
+    order; de-dup happens upstream across the whole turn).
     """
 
     async def _run_one(
         tc: ToolCall,
-    ) -> tuple[LLMMessage, ToolResult | None, ToolAttempt]:
+    ) -> tuple[LLMMessage, ToolResult | None, ToolAttempt, list[dict[str, Any]]]:
         name = tc.function.name
         fingerprint = fingerprint_tool_call(name, tc.function.arguments or "")
         try:
@@ -400,7 +461,28 @@ async def _execute_tools(
                 LLMMessage(role="tool", content=error_msg, tool_call_id=tc.id),
                 None,
                 ToolAttempt(fingerprint, name, success=False),
+                [],
             )
+
+        if (
+            approval_gate is not None
+            and tool.schema.approval is ToolApproval.GRANTABLE
+        ):
+            decision = await approval_gate.authorize(
+                tool_name=name, tool_call_id=tc.id, arguments=args
+            )
+            if decision is ApprovalDecision.DENY:
+                denial = (
+                    f"Tool '{name}' was not authorized by the user; the action was "
+                    "not performed. Do not retry it — adapt or ask how to proceed."
+                )
+                sink.emit(tool_use_end(tc.id, name, success=False, output=denial))
+                return (
+                    LLMMessage(role="tool", content=denial, tool_call_id=tc.id),
+                    None,
+                    ToolAttempt(fingerprint, name, success=False),
+                    [],
+                )
 
         result = await tool.execute(args, context)
         result.tool_call_id = tc.id
@@ -408,23 +490,26 @@ async def _execute_tools(
         output = result.output if result.success else (result.error or "Unknown error")
         sink.emit(tool_use_end(tc.id, name, success=result.success, output=output))
 
+        citations = result.citations if (result.success and result.citations) else []
         message = LLMMessage(role="tool", content=output, tool_call_id=tc.id)
         return (
             message,
             (result if result.terminal else None),
             ToolAttempt(fingerprint, name, success=result.success),
+            citations,
         )
 
     sem = asyncio.Semaphore(_MAX_PARALLEL_TOOLS)
 
     async def _bounded(
         tc: ToolCall,
-    ) -> tuple[LLMMessage, ToolResult | None, ToolAttempt]:
+    ) -> tuple[LLMMessage, ToolResult | None, ToolAttempt, list[dict[str, Any]]]:
         async with sem:
             return await _run_one(tc)
 
-    triples = await asyncio.gather(*[_bounded(tc) for tc in tool_calls])
-    messages = [m for m, _, _ in triples]
-    terminal = next((t for _, t, _ in triples if t is not None), None)
-    attempts = [a for _, _, a in triples]
-    return messages, terminal, attempts
+    quads = await asyncio.gather(*[_bounded(tc) for tc in tool_calls])
+    messages = [m for m, _, _, _ in quads]
+    terminal = next((t for _, t, _, _ in quads if t is not None), None)
+    attempts = [a for _, _, a, _ in quads]
+    citations = [c for _, _, _, cs in quads for c in cs]
+    return messages, terminal, attempts, citations

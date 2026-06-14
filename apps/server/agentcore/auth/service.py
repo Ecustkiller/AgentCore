@@ -11,6 +11,7 @@ stays thin. The service depends on repository instances so it is unit-testable
 with in-memory fakes (no DB).
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -26,6 +27,7 @@ from agentcore.db.repositories import (
 )
 from agentcore.security import (
     create_access_token,
+    generate_invite_code,
     generate_refresh_token,
     hash_password,
     hash_refresh_token,
@@ -150,6 +152,26 @@ class AuthService:
         )
         if record is not None:
             await self._refresh_tokens.revoke_family(record.token_family)
+
+    # --- invites (admin) ---
+
+    async def create_invite(
+        self, *, created_by: str, expires_in_days: int | None = None
+    ) -> Invite:
+        """Mint a single-use invite code (D6). ``expires_in_days`` is optional."""
+        expires_at = (
+            datetime.now(UTC) + timedelta(days=expires_in_days)
+            if expires_in_days is not None
+            else None
+        )
+        return await self._invites.create(
+            code=generate_invite_code(),
+            created_by=created_by,
+            expires_at=expires_at,
+        )
+
+    async def list_invites(self, *, limit: int = 100) -> Sequence[Invite]:
+        return await self._invites.list_recent(limit=limit)
 
     # --- internals ---
 

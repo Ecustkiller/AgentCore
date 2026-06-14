@@ -1,19 +1,47 @@
 """FastAPI application entry point."""
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from agentcore.api.routes import auth, conversations, system
+from agentcore.api.routes import auth, conversations, folders, system, tools, usage
 from agentcore.config import settings
 from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import setup_logging
+from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
+
+logger = logging.getLogger(__name__)
+
+# Known placeholder secrets that must never reach production.
+_INSECURE_SECRETS = {
+    "",
+    "dev-secret-change-in-production",
+    "change-this-to-a-random-secret-in-production",
+}
+
+
+def _validate_production_security() -> None:
+    """Fail fast on insecure production config (skipped in debug)."""
+    if settings.debug:
+        return
+    if settings.jwt_secret_key in _INSECURE_SECRETS:
+        raise RuntimeError(
+            "JWT_SECRET_KEY is unset or still a default placeholder. Set a strong, "
+            "random secret before running in production (DEBUG=false)."
+        )
+    if not settings.cookie_secure:
+        logger.warning(
+            "COOKIE_SECURE is false in a non-debug run: auth cookies may travel over "
+            "plain HTTP. Set COOKIE_SECURE=true when serving over HTTPS."
+        )
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(debug=settings.debug)
+    _validate_production_security()
     yield
 
 
@@ -24,9 +52,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Middleware runs outermost-last-added: register the rate limiter first so CORS
+# wraps it and even a 429 response carries the CORS headers the browser needs.
+app.add_middleware(AuthRateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -46,3 +77,6 @@ async def agentcore_error_handler(request, exc: AgentCoreError):
 app.include_router(system.router)
 app.include_router(auth.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
+app.include_router(folders.router, prefix="/v1")
+app.include_router(tools.router, prefix="/v1")
+app.include_router(usage.router, prefix="/v1")

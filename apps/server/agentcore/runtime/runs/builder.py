@@ -1,0 +1,259 @@
+"""build_run_plan — raw delegate args → RunPlan (第一阶段：内联角色版).
+
+Single / parallel / DAG stop being distinct *modes* and become one RunPlan whose
+shape falls out of the ``depends_on`` edges (no deps + 1 task = single; no deps +
+N = parallel; any deps = a DAG). Pure and dict-based.
+
+第一阶段：每个 task 自带「内联角色」（role / objective / tools / model_preference /
+…），无独立 Agent 实体与 allow-list。``agent_id`` 铸成 == ``run_id``，``agent_name``
+取 ``role``，仅供 ``run_*`` 事件与图展示。
+
+Run-id minting preserves two schemes: a no-deps batch numbers nodes
+``{prefix}_{n}`` so a re-delegate in the same turn never reuses an id, while a
+DAG namespaces each declared id ``{prefix}_{raw}`` and rewrites every
+``depends_on`` ref the same way, so intra-DAG edges survive.
+
+→ 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from agentcore.runtime.runs.constants import (
+    DEFAULT_ON_FAILURE,
+    MAX_DELEGATION_TASKS,
+    MAX_RUN_RETRIES,
+    VALID_ON_FAILURE,
+)
+from agentcore.runtime.runs.plan import RunPlan, RunPlanError
+from agentcore.runtime.runs.types import RunContract, RunKind, RunOrigin, RunPolicy, RunSpec
+
+_VALID_TIERS = frozenset({"fast", "strong"})
+_VALID_EFFORTS = frozenset({"high", "max"})
+_VALID_OUTPUT_FORMATS = frozenset({"text", "json"})
+_DEFAULT_TIMEOUT_MS = 120_000
+_DEFAULT_RETRY_DELAY_MS = 5_000
+# Per-sibling task excerpt cap in a fan-out awareness summary.
+_SIBLING_TASK_CHARS = 150
+
+
+def build_run_plan(
+    tasks_raw: list[dict[str, Any]],
+    *,
+    valid_tools: set[str] | None = None,
+    id_prefix: str = "",
+    counter_start: int = 0,
+    max_tasks: int = MAX_DELEGATION_TASKS,
+) -> tuple[RunPlan, list[str]]:
+    """Build a RunPlan from raw delegate-tool task args.
+
+    ``valid_tools`` (when given) is the allow-list each task's ``tools`` is
+    intersected against — an unknown tool name is dropped silently, mirroring the
+    old planner. Returns the plan plus a list of validation errors; a non-empty
+    error list means the batch is rejected and the plan must not be run
+    (reject-on-error for a DAG, reject-when-none-valid for a flat batch).
+    """
+    if not tasks_raw:
+        return RunPlan(), ["'tasks' array is required and cannot be empty"]
+    prefix = id_prefix or f"del_{int(time.time() * 1000)}"
+    if any(item.get("depends_on") for item in tasks_raw):
+        return _dag_plan(tasks_raw, valid_tools, prefix, max_tasks)
+    return _flat_plan(tasks_raw, valid_tools, prefix, counter_start, max_tasks)
+
+
+def _flat_plan(
+    tasks_raw: list[dict[str, Any]],
+    valid_tools: set[str] | None,
+    prefix: str,
+    counter_start: int,
+    max_tasks: int,
+) -> tuple[RunPlan, list[str]]:
+    """Single / parallel batch (no deps). Invalid items (missing role or task)
+    are skipped silently — the legacy flat behaviour — and only an all-invalid
+    batch is an error."""
+    plan = RunPlan()
+    counter = counter_start
+    valid = [
+        item
+        for item in tasks_raw[:max_tasks]
+        if item.get("task") and item.get("role")
+    ]
+    for idx, item in enumerate(valid):
+        counter += 1
+        run_id = f"{prefix}_{counter}"
+        plan.add(
+            _inline_spec(
+                item,
+                run_id=run_id,
+                sibling_summary=_sibling_summary(valid, idx),
+                policy=RunPolicy(
+                    result_handling=item.get("result_handling") or "pass_through",
+                    contract=_parse_contract(item),
+                ),
+                valid_tools=valid_tools,
+            )
+        )
+    if not plan.nodes:
+        return plan, ["No valid tasks: each task needs a non-empty 'role' and 'task'."]
+    return plan, []
+
+
+def _dag_plan(
+    tasks_raw: list[dict[str, Any]],
+    valid_tools: set[str] | None,
+    prefix: str,
+    max_tasks: int,
+) -> tuple[RunPlan, list[str]]:
+    """DAG batch (has deps). Per-run validation collects errors; topology
+    (cycle / unknown edge) is checked via ``RunPlan.waves``."""
+    plan = RunPlan(origin=RunOrigin.TEMPLATE)
+    errors: list[str] = []
+
+    def _nsid(raw: str) -> str:
+        return f"{prefix}_{raw}"
+
+    for i, item in enumerate(tasks_raw[:max_tasks]):
+        raw_id = item.get("id", f"run_{i}")
+        role = item.get("role", "")
+        task = item.get("task", "")
+        if not role:
+            errors.append(f"Run '{raw_id}': missing role")
+            continue
+        if not task:
+            errors.append(f"Run '{raw_id}': missing task")
+            continue
+        plan.add(
+            _inline_spec(
+                item,
+                run_id=_nsid(raw_id),
+                depends_on=[_nsid(d) for d in item.get("depends_on", [])],
+                policy=_dag_policy(item),
+                valid_tools=valid_tools,
+            )
+        )
+
+    if errors:
+        return plan, errors
+    try:
+        plan.waves()
+    except RunPlanError as e:
+        return plan, [str(e)]
+    return plan, []
+
+
+def _inline_spec(
+    item: dict[str, Any],
+    *,
+    run_id: str,
+    depends_on: list[str] | None = None,
+    sibling_summary: str = "",
+    policy: RunPolicy,
+    valid_tools: set[str] | None = None,
+) -> RunSpec:
+    """Assemble one RunSpec from a task item's inline-role fields (阶段1)."""
+    role = item["role"]
+    thinking_raw = item.get("thinking")
+    effort_raw = item.get("reasoning_effort")
+    pref = item.get("model_preference", "strong")
+    return RunSpec(
+        run_id=run_id,
+        agent_id=run_id,
+        agent_name=role,
+        kind=RunKind.AGENT,
+        task=item["task"],
+        role=role,
+        objective=item.get("objective", "") or "",
+        system_prompt_supplement=item.get("system_prompt_supplement") or None,
+        tools=_tools(item.get("tools"), valid_tools),
+        model_preference=pref if pref in _VALID_TIERS else "strong",
+        thinking=thinking_raw if isinstance(thinking_raw, bool) else None,
+        reasoning_effort=effort_raw if effort_raw in _VALID_EFFORTS else None,
+        expected_output=item.get("expected_output", "") or "",
+        depends_on=depends_on or [],
+        sibling_summary=sibling_summary,
+        policy=policy,
+    )
+
+
+def _tools(declared: Any, valid_tools: set[str] | None) -> list[str]:
+    """Normalise a task's declared tool names, intersected with the allow-list."""
+    if not isinstance(declared, list):
+        return []
+    names = [t for t in declared if isinstance(t, str) and t]
+    if valid_tools is None:
+        return names
+    return [t for t in names if t in valid_tools]
+
+
+def _sibling_summary(valid: list[dict[str, Any]], self_idx: int) -> str:
+    """Fan-out awareness body for one flat-parallel node: the *other* concurrent
+    tasks (role + a capped task excerpt). Empty for a lone task."""
+    if len(valid) < 2:
+        return ""
+    lines: list[str] = []
+    for j, other in enumerate(valid):
+        if j == self_idx:
+            continue
+        role = other.get("role", "")
+        task = other.get("task", "")
+        if len(task) > _SIBLING_TASK_CHARS:
+            task = task[:_SIBLING_TASK_CHARS] + "…"
+        lines.append(f"- {role}：{task}")
+    return "\n".join(lines)
+
+
+def _dag_policy(item: dict[str, Any]) -> RunPolicy:
+    """Map a DAG node's declarative knobs onto a RunPolicy (the WaveScheduler
+    reads on_failure / retries; result_handling feeds the dep-context size)."""
+    raw_on_failure = item.get("on_failure", DEFAULT_ON_FAILURE)
+    on_failure = raw_on_failure if raw_on_failure in VALID_ON_FAILURE else DEFAULT_ON_FAILURE
+    timeout_ms = item.get("timeout_ms", _DEFAULT_TIMEOUT_MS)
+    return RunPolicy(
+        on_failure=on_failure,  # type: ignore[arg-type]
+        max_retries=min(item.get("max_retries", 1), MAX_RUN_RETRIES),
+        retry_delay_ms=item.get("retry_delay_ms", _DEFAULT_RETRY_DELAY_MS),
+        timeout_s=max(1, timeout_ms // 1000) if timeout_ms else None,
+        result_handling=item.get("result_handling") or "pass_through",
+        contract=_parse_contract(item),
+    )
+
+
+def _parse_contract(item: dict[str, Any]) -> RunContract | None:
+    """Parse a task's optional ``contract`` block into a :class:`RunContract`.
+
+    Returns None when no contract field is given or it declares no actual rule —
+    the executor still enforces the non-empty baseline regardless. Invalid knob
+    values are dropped (mirroring the lenient tier/effort handling)."""
+    raw = item.get("contract")
+    if not isinstance(raw, dict):
+        return None
+    required_sections = _str_list(raw.get("required_sections"))
+    must_contain = _str_list(raw.get("must_contain"))
+    min_length = raw.get("min_length")
+    max_length = raw.get("max_length")
+    min_length = min_length if isinstance(min_length, int) and min_length > 0 else 0
+    max_length = max_length if isinstance(max_length, int) and max_length > 0 else 0
+    fmt = raw.get("output_format")
+    output_format = fmt if fmt in _VALID_OUTPUT_FORMATS else "text"
+    has_rule = (
+        required_sections or must_contain or min_length or max_length or output_format == "json"
+    )
+    if not has_rule:
+        return None
+    return RunContract(
+        output_format=output_format,
+        required_sections=required_sections,
+        must_contain=must_contain,
+        min_length=min_length,
+        max_length=max_length,
+        strict=bool(raw.get("strict", False)),
+    )
+
+
+def _str_list(value: Any) -> list[str]:
+    """Normalise a declared list field to non-empty trimmed strings."""
+    if not isinstance(value, list):
+        return []
+    return [s.strip() for s in value if isinstance(s, str) and s.strip()]

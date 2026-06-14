@@ -45,12 +45,9 @@ desktop.ini
 htmlcov/
 .coverage
 .coverage.*
-.pytest_cache/
+# pytest cache + ad-hoc --basetemp scratch dirs (test artifacts)
+.pytest_*/
 coverage/
-# pytest tmp_path scratch dirs (test artifacts, see tests using tmp_path)
-.pytest_tmp/
-.pytest_tmp_run/
-.pytest_fresh/
 
 # Build artifacts
 *.so

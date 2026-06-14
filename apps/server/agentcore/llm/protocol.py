@@ -64,7 +64,13 @@ class LLMRequest:
 
 @dataclass
 class TokenUsage:
-    """Token consumption statistics."""
+    """Token consumption statistics.
+
+    ``input_tokens`` is the whole prompt; DeepSeek pre-splits it into
+    ``cache_hit_tokens`` + ``cache_miss_tokens`` (a cache hit is ~50× cheaper),
+    so pricing must keep the split. ``output_tokens`` already includes
+    ``reasoning_tokens`` (reasoning is a billed subset of completion).
+    """
 
     input_tokens: int = 0
     output_tokens: int = 0
@@ -75,6 +81,28 @@ class TokenUsage:
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+    def __add__(self, other: "TokenUsage") -> "TokenUsage":
+        """Field-wise sum, for folding per-round / per-run usage into a total."""
+        return TokenUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            reasoning_tokens=self.reasoning_tokens + other.reasoning_tokens,
+            cache_hit_tokens=self.cache_hit_tokens + other.cache_hit_tokens,
+            cache_miss_tokens=self.cache_miss_tokens + other.cache_miss_tokens,
+        )
+
+    def as_dict(self) -> dict[str, int]:
+        """Short-key ledger form ({input, output, reasoning, cache_hit,
+        cache_miss}) — the shape stored in ``RunState.usage`` and the
+        ``cost_events.tokens`` column."""
+        return {
+            "input": self.input_tokens,
+            "output": self.output_tokens,
+            "reasoning": self.reasoning_tokens,
+            "cache_hit": self.cache_hit_tokens,
+            "cache_miss": self.cache_miss_tokens,
+        }
 
 
 @dataclass

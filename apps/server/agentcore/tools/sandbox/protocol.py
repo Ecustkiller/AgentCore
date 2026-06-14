@@ -13,6 +13,7 @@ class ExecutionRequest:
     timeout_seconds: int = 30
     memory_limit_mb: int = 256
     stdin: str | None = None
+    cwd: str | None = None  # working dir for the process; None = throwaway temp dir
 
 
 @dataclass

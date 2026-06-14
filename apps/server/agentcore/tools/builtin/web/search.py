@@ -6,7 +6,7 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.tools.builtin.web._net import describe_net_error
+from agentcore.tools.builtin.web._net import describe_net_error, site_of
 from agentcore.tools.builtin.web.search_backend import get_search_backend
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
@@ -83,6 +83,10 @@ class WebSearchTool:
 
         items = [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
         output = json.dumps({"query": query, "results": items}, ensure_ascii=False)
+        citations = [
+            {"url": r.url, "title": r.title, "snippet": r.snippet, "site": site_of(r.url)}
+            for r in results
+        ]
         return ToolResult(
             tool_call_id="",
             success=True,
@@ -90,4 +94,5 @@ class WebSearchTool:
             duration_ms=int((time.monotonic() - start) * 1000),
             output_limit=_OUTPUT_LIMIT,
             metadata={"result_count": len(items)},
+            citations=citations or None,
         )
