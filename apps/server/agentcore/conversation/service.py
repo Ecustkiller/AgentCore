@@ -4,13 +4,17 @@ Coordinates message persistence, history loading, pipeline execution,
 and title generation for a conversation turn.
 """
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from agentcore.config import settings
 from agentcore.conversation.history import load_history
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
+from agentcore.db.models import Conversation
 from agentcore.db.repositories import (
     ConversationRepository,
     CostEventRepository,
+    FolderRepository,
     MessageRepository,
 )
 from agentcore.llm.deepseek import DeepSeekProvider
@@ -34,7 +38,12 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
-from agentcore.workspace.locate import build_server_workspace, workspace_storage_key
+from agentcore.workspace.locate import (
+    LocalBinding,
+    build_workspace,
+    resolve_local_binding,
+    workspace_storage_key,
+)
 from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.protocol import WorkspaceBackend
 from agentcore.workspace.snapshots import create_snapshot
@@ -46,6 +55,27 @@ def _fallback_title(user_message: str) -> str:
     """Naive title: the first user message, truncated."""
     title = user_message.strip()
     return title[:TITLE_MAX_CHARS] + "…" if len(title) > TITLE_MAX_CHARS else title
+
+
+async def _resolve_local_binding(
+    session: AsyncSession, conv: Conversation
+) -> LocalBinding | None:
+    """Resolve a turn's local-mode binding (双模式工作区 §七), or None for cloud.
+
+    Looks up the governing scope's desktop-root binding: the conversation's folder
+    when it is filed in one (the shared project space), else the conversation's
+    own. The folder is loaded only when needed; the pure ``resolve_local_binding``
+    applies the precedence rule so this stays a thin DB shim.
+    """
+    folder = None
+    if conv.folder_id:
+        folder = await FolderRepository(session).get_by_id(conv.folder_id)
+    return resolve_local_binding(
+        folder_id=conv.folder_id,
+        folder_local_root_id=folder.local_root_id if folder else None,
+        conversation_local_root_id=conv.local_root_id,
+        label=folder.name if folder else None,
+    )
 
 
 async def _generate_title(
@@ -206,8 +236,14 @@ async def _run_and_persist(
     # event) already fired, so it is off the user-visible path; a backup failure
     # must NEVER affect the turn (文档铁律), so it is warning-only. Cloud-mode
     # files already live on the server disk — this is the versioned backup, not
-    # the source of truth.
-    if settings.workspace_snapshot_enabled and getattr(backend, "dirty", False):
+    # the source of truth. Local mode is skipped: those files live on the user's
+    # machine, not the server, so there is nothing here to snapshot — the local→云
+    # handoff bridge (§四 / P2e) is a separate, explicit path, not this OSS backup.
+    if (
+        settings.workspace_snapshot_enabled
+        and backend.location == "server"
+        and getattr(backend, "dirty", False)
+    ):
         try:
             ref = await create_snapshot(
                 user_id=user_id,
@@ -255,12 +291,20 @@ async def stream_chat(
                 sink.emit(message_end(FinishReason.ERROR))
                 return
             folder_id = conv.folder_id
+            local_binding = await _resolve_local_binding(session, conv)
 
         # Resolve the workspace once: attachment residency writes, the pipeline
         # run, and the end-of-turn snapshot all share this backend instance (so
-        # its `dirty` flag reflects attachments too).
-        backend = build_server_workspace(
-            user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+        # its `dirty` flag reflects attachments too). The cloud/local fork lives in
+        # `build_workspace`: a bound desktop root → ``LocalWorkspace`` (ops stream
+        # over this turn's `sink`), else the server backend. The folder lock + the
+        # snapshot guard below adapt to whichever it returns.
+        backend = build_workspace(
+            user_id=user_id,
+            folder_id=folder_id,
+            conversation_id=conversation_id,
+            sink=sink,
+            local_binding=local_binding,
         )
 
         # Folder-level lock (决策④): serialize tasks that share this workspace so
@@ -352,9 +396,14 @@ async def regenerate_chat(
 
             user_message = edited_content if edited_content is not None else (target.content or "")
             history = await load_history(session, conversation_id, max_messages=40)
+            local_binding = await _resolve_local_binding(session, conv)
 
-        backend = build_server_workspace(
-            user_id=user_id, folder_id=conv.folder_id, conversation_id=conversation_id
+        backend = build_workspace(
+            user_id=user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conversation_id,
+            sink=sink,
+            local_binding=local_binding,
         )
 
         # Folder-level lock (决策④): same workspace serialization as stream_chat.

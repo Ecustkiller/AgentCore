@@ -1,22 +1,31 @@
 import { api } from "@/services/api";
 
-/** Sidebar folder metadata (§七). `localDir` is an optional bound directory. */
+/** Sidebar folder metadata (§七). `localDir` is an optional bound directory;
+ * `localRootId` is the desktop FS root the folder is bound to (local mode marker
+ * — present ⇒ this project runs on the user's machine). */
 export interface FolderMeta {
   id: string;
   name: string;
   localDir: string | null;
+  localRootId: string | null;
 }
 
 interface BackendFolder {
   id: string;
   name: string;
   local_dir: string | null;
+  local_root_id?: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export function toFolder(f: BackendFolder): FolderMeta {
-  return { id: f.id, name: f.name, localDir: f.local_dir };
+  return {
+    id: f.id,
+    name: f.name,
+    localDir: f.local_dir,
+    localRootId: f.local_root_id ?? null,
+  };
 }
 
 export async function listFolders(): Promise<FolderMeta[]> {

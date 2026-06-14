@@ -12,27 +12,27 @@
 
 ---
 
-## 一、全局布局与双视图
+## 一、全局布局与团队展示
 
-全局采用 **侧栏 + 页面级自定义布局**（详见 [`前端技术与架构.md`](前端技术与架构.md) §五）。核心对话页当前为单栏聊天区：
+全局采用 **侧栏 + 页面级自定义布局**（详见 [`前端技术与架构.md`](前端技术与架构.md) §五）。核心对话页为单栏聊天区：
 
 ```
 /conversations/:id（单栏聊天区）
-  消息流 + TaskCard（多 Agent 时） + ApprovalPrompt（工具审批）
+  消息流（多 Agent 回合：助手消息内嵌 InlineTeamGraph）+ ApprovalPrompt（工具审批）
   └ MessageInput（底部固定）
-TaskCard「查看协作图」→ 全屏 GraphOverlay 覆盖
+内嵌图右上「最大化」→ 临时全屏（TeamGraphFullscreen，含回放 Timeline + 大画布）
+点图节点 → 右侧 DetailPanel 滑出该 run 详情（被动下钻）
 ```
 
-**双视图（聊天 + 图）** 是核心范式——聊天视图零学习成本作主交互，图视图全屏可视化团队协作全貌：
+**团队展示统一到「内嵌协作图」**：多 Agent 回合的助手消息上方内嵌一张协作图（`InlineTeamGraph`），它是该回合的**主团队界面**——图顶状态条折进了原任务卡片的职责（状态 · N agents · M/M · 用时 · ¥合计 + 救火行），节点直接显钱，点节点把详情下钻到右侧被动面板，右上「最大化」临时进全屏看大图/回放。单 Agent 回合不出图（纯气泡，零噪音）。原「对话内卡片 + 右侧常驻面板 + 全屏 overlay」三个抢戏的面已收成一面，决策与迁移源见 [`前端技术与架构.md` §9.2–9.6](前端技术与架构.md)。
 
-| 维度 | 聊天视图（主） | 图视图（辅） |
-|------|---------------|-------------|
-| 定位 | 主要交互界面 | 全屏可视化（从任务卡片进入） |
-| 输入能力 | 有（底部输入框） | 有限（只能干预，不发新任务） |
-| 适用场景 | 日常使用、简单任务 | 复杂任务监控、调试、Power User |
-| 进入方式 | 默认 | TaskCard「查看协作图」→ `useUIStore.graphOpen` 全屏 GraphOverlay |
+| 形态 | 何时 | 职责 |
+|------|------|------|
+| 内嵌协作图（主） | 多 Agent 回合，随消息常驻、刷新可回看 | 状态条（进度/成本/救火）+ DAG + 节点 ¥ |
+| 临时全屏（按需） | 点内嵌图「最大化」 | 大画布 + 回放 Timeline + 节点详情 |
+| 右侧 DetailPanel（被动） | 点图节点才滑出 | 单 run 下钻全文（纯下钻目标，可多 run 并存对比） |
 
-> 信息分层模型（Layer 0–4）与完整目标布局见 [目标态 §一](../07-规划/前端UX目标态.md)。当前可见 Layer 0（输出）+ Layer 1（TaskCard 进度）+ Layer 2（DetailPanel，多 Agent 回合时可开）。
+> 信息分层：单 Agent 回合 = 纯气泡（Layer 0 输出）；多 Agent 回合 = 内嵌图（Layer 1–3 状态/进度/协作）+ 点节点进面板看 run 全文（Layer 4）。完整信息层级模型见 [目标态 §一](../07-规划/前端UX目标态.md)。
 
 > 页面宽度由 `PageContainer`（content 896px / canvas 1200px，统一 `px-6 py-8`）约束，各页按档位接入（→ 见代码 `components/layout/PageContainer.tsx`，完整规范见 `.cursor/rules/desktop-layout.mdc`）；对话页 / 文件页自有布局除外。
 
@@ -44,38 +44,38 @@ TaskCard「查看协作图」→ 全屏 GraphOverlay 覆盖
 
 | 元素 | 作用 | 何时出现 |
 |------|------|----------|
-| 任务卡片 | 任务分解、Agent 分工、整体进度 | 多 Agent 任务时自动出现 |
+| 内嵌协作图 | 团队 DAG + 状态条（进度/成本/救火） | 多 Agent 回合自动内嵌于助手消息 |
 | Agent 标签 | 标识当前输出来自哪个 Agent | 流式输出时 |
 | 检查点提示 | CEO 请求确认或调整（**目标态，未实现**） | 检查点触发时 |
 
-简单任务（单 Agent）时任务卡片不出现，体验同 ChatGPT。
+简单任务（单 Agent）时不出图，体验同 ChatGPT。
 
-**已落地**：`MessageInput` 支持 Textarea 自动增高、`@` 引用文件 / 附件按钮浏览（`MentionMenu` + 文件索引）、附件 chips、字数统计、弹窗键盘导航（↑↓/Enter/Tab/Esc）；`MessageBubble` 富文本 Markdown（代码高亮 `rehypeHighlight`、KaTeX 数学、GFM 表格、`[n]` 来源引用 chip + `SourceCards`）、思考过程折叠条（流式时自动展开、结束自动收起）、hover 操作栏（复制 / 编辑重发 / 重新生成）；快捷键 `Ctrl/Cmd+K` 全局搜索（`CommandPalette`，MVP 客户端按标题过滤）、Enter 发送、Ctrl/Cmd+Enter 换行、GraphOverlay 内 Esc 返回（→ 见代码 `components/chat/`、`components/layout/CommandPalette.tsx`）。剩余富功能（Agent/Team 选择器、Slash 命令、文件夹 / 产物 Pill、气泡内工具卡、其余全局快捷键）见 [目标态 §二](../07-规划/前端UX目标态.md)。
+**已落地**：`MessageInput` 支持 Textarea 自动增高、`@` 引用文件 / 附件按钮浏览（`MentionMenu` + 文件索引）、附件 chips、字数统计、弹窗键盘导航（↑↓/Enter/Tab/Esc）；`MessageBubble` 富文本 Markdown（代码高亮 `rehypeHighlight`、KaTeX 数学、GFM 表格、`[n]` 来源引用 chip + `SourceCards`）、思考过程折叠条（流式时自动展开、结束自动收起）、hover 操作栏（复制 / 编辑重发 / 重新生成）；快捷键 `Ctrl/Cmd+K` 全局搜索（`CommandPalette`，MVP 客户端按标题过滤）、`Ctrl/Cmd+N` 新建对话、`Ctrl/Cmd+\` / `Ctrl/Cmd+B` 折叠/展开侧栏、Enter 发送、Ctrl/Cmd+Enter 换行、内嵌图临时全屏内 Esc 返回（→ 见代码 `components/layout/AppShell.tsx`、`components/chat/`、`components/layout/CommandPalette.tsx`）。剩余富功能（Agent/Team 选择器、Slash 命令、文件夹 / 产物 Pill、气泡内工具卡）见 [目标态 §二](../07-规划/前端UX目标态.md)。
 
 ---
 
-## 三、任务卡片（现状）
+## 三、内嵌协作图与状态条（现状）
 
-任务卡片是 AgentCore 聊天界面与普通对话 AI 的核心视觉差异点。`TaskCard.tsx` 按 `execution.status` 分支渲染四态（→ 见代码 `components/chat/TaskCard.tsx`）：
+多 Agent 回合的团队界面是内嵌进助手消息的协作图（`InlineTeamGraph`，→ 见代码 `components/chat/InlineTeamGraph.tsx`）：图顶一条**状态条**按 `execution.status` 分四态渲染，下方是可折叠的协作图（`GraphView` 内嵌形态），右上「最大化」进临时全屏。状态条吃下了原任务卡片的全部职责（AgentCore 聊天界面与普通对话 AI 的核心视觉差异点）：
 
-- **执行中**：标题 + 整体进度条（completed/total）+ Agent 列表（状态点 + 角色名 + 工具数 + 状态标签）+「查看协作图」入口；Agent 行可展开看该 Agent 的工具调用（参数 / 结果），整张卡片可折叠，点击角色名在图视图聚焦该节点。
-- **已完成**：自动收缩为一行战绩摘要（`N 个 Agent · M/M 子任务 · 用时 2m34s`，用时取帧流挂钟跨度 `elapsedMs`），点击展开看 Agent 列表 + 原始任务。**部分失败**（CEO 完成但有 worker 失败）时额外显示琥珀色「N 个子任务失败」横幅 + 救火行。
-- **已停止**（`status=cancelled`）：用户点「停止」后，执行图里在跑的节点冻结为 cancelled（不再转圈），卡片转为「已停止」战绩并提供救火行（可重试）。
-- **失败**（整轮崩溃）：高亮失败 Agent / 步骤 + `run_failed` 错误原因 + 救火行。
+- **执行中**（`RunningStrip`）：转圈 + 任务摘要 + 进度 `completed/total` + 进度条；尾部控件（折叠图 / 全屏 / `[···]` 菜单）。Agent 状态/工具/输出在下方图节点上呈现。
+- **已完成**（`CompletedStrip`）：一行战绩「团队完成 · N 个 Agent · M/M 子任务 · 用时 · ¥合计」（用时取帧流挂钟跨度 `elapsedMs`，¥ 取 `message_end` 回合合计 §7.3A）。**部分失败**（CEO 完成但有 worker 失败）额外显示琥珀色「N 个子任务失败」横幅 + 救火行。
+- **已停止**（`status=cancelled`）：同战绩形态，「已停止」标题，在跑节点冻结为 cancelled（不再转圈），救火行显示「已花 ¥」。
+- **失败**（整轮崩溃，`FailureStrip`）：高亮失败 Agent / run + `run_failed` 错误原因 + 救火行。
 
-救火行（`RecoveryActions`）由失败卡、部分失败的已完成卡、已停止卡共用——重试（从最后一条用户消息整轮重跑）/ 调整指令（内联编辑后重发）/ 放弃（清空执行图）；各态共用 `[···]` 菜单（停止任务 / 重新规划 / 复制任务 ID）；卡片在 `run_plan` 首次挂载时播放一次入场动画（`animate-task-card-enter`，遵循 `prefers-reduced-motion`，见 `styles/globals.css`）。
+救火行（`RecoveryActions`）由失败条、部分失败的已完成条、已停止条共用——重试（从最后一条用户消息整轮重跑）/ 调整指令（内联编辑后重发）/ 放弃（清空该回合执行槽）；各态共用 `[···]` 菜单（停止任务 / 重新规划 / 复制任务 ID）；内嵌图块在 `run_plan` 首次挂载时播放一次入场动画（`animate-task-card-enter`，遵循 `prefers-reduced-motion`，见 `styles/globals.css`）。
 
 **出现时机规则**（核心决策）：
 
 | 场景 | 行为 |
 |------|------|
-| 简单任务（CEO 直接回答，无 plan） | **不出现**，直接流式输出，体验同 ChatGPT |
-| 多 Agent 任务（CEO 调用 `delegate`） | `run_plan` 到达时**自动出现**，嵌入对话流 |
-| 任务完成 | **自动收缩**为一行战绩摘要 |
-| 用户停止任务 | 卡片转为「已停止」，在跑节点冻结，提供重试 |
-| 用户发新消息 | 上一轮执行图随 `clearExecution` 清空 |
+| 简单任务（CEO 直接回答，无 plan） | **不出图**，直接流式输出，体验同 ChatGPT |
+| 多 Agent 任务（CEO 调用 `delegate`） | `run_plan` 到达时**自动内嵌**于助手消息上方 |
+| 任务完成 | 状态条**收缩**为一行战绩摘要 |
+| 用户停止任务 | 状态条转「已停止」，在跑节点冻结，提供重试 |
+| 用户发新消息 / 刷新 | 每条回答各持自己的执行槽（按 `messageId` §9.3），历史图保留，刷新后从 `message.runs` 回放 |
 
-> 检查点卡片、Agent 行补全（输出流 + token/用时）等剩余目标态见 [目标态 §三](../07-规划/前端UX目标态.md)。检查点 / `TeamPreviewCard` 预览 gate **均未实现**。
+> 检查点卡片、Agent 节点补全（输出流 + token/用时）等剩余目标态见 [目标态 §三](../07-规划/前端UX目标态.md)。检查点 / `TeamPreviewCard` 预览 gate **均未实现**。
 
 ---
 
@@ -83,13 +83,13 @@ TaskCard「查看协作图」→ 全屏 GraphOverlay 覆盖
 
 辩论是 MVP Day1 范式（见 [Agent协作模式.md §一](../03-AI核心/Agent协作模式.md)），需专门 UX 区别于普通并行分工。**关键决策**：辩论 SSE 与普通多 Agent 一致；并排渲染触发信号 ⏳ 待定（见 [目标态 §四](../07-规划/前端UX目标态.md)）。
 
-> 当前 TaskCard 不区分并行/辩论范式；并排卡片、辩论专用并排渲染、辩论检查点均未实现。完整辩论 UX（卡片/拓扑/检查点动作）见 [目标态 §四](../07-规划/前端UX目标态.md)。
+> 当前内嵌图状态条不区分并行/辩论范式；并排输出、辩论专用并排渲染、辩论检查点均未实现。完整辩论 UX（卡片/拓扑/检查点动作）见 [目标态 §四](../07-规划/前端UX目标态.md)。
 
 ---
 
 ## 五、图视图（现状）
 
-通过 TaskCard「查看协作图」进入，展示协作 DAG 简图。`GraphView` 将 run 映射为 `agent` 节点 + 两端的端点节点（用户输入 / synthesis 收尾，`EndpointNode`），ELK 多算法布局（树形 / 左右流 / 径向 / 力导向，`lib/elk-layout.ts`，选择持久化 `stores/graph.ts`）；节点含 6 态色环、模型档 / 深度思考徽章、token 估算、输出预览、工具数 + hover tooltip；`StepEdge` 运行中边以 SVG 粒子流（`animateMotion`）动画；节点状态过渡为纯 CSS：按 plan 顺序错峰入场（`graph-node-enter`）、run 进入终态时一次性完成/失败闪烁（`graph-node-flash` + `useTerminalFlash`）、切换布局时位移 morph（`.react-flow__node` transform 过渡），均遵循 `prefers-reduced-motion`。React Flow 内置缩放 / 平移 + `F` 适应画布 + 节点点击 `NodeDetail` 侧栏 + 节点/画布右键菜单（查看详情 / 在面板查看 / 居中此节点 / 适应画布 / 布局切换，复用 `sidebar/ContextMenu`）+ Esc 返回，并叠加帧流时间轴回放（`Timeline`：播放 / 拖动 / 回到实时）（→ 见代码 `components/graph/`）。
+内嵌于多 Agent 回合的助手消息（`InlineTeamGraph` 里 `GraphView` 的 `embedded` 形态），点状态条右上「最大化」进临时全屏（`TeamGraphFullscreen`）。`GraphView` 将 run 映射为 `agent` 节点 + 两端的端点节点（用户输入 / synthesis 收尾，`EndpointNode`），ELK 多算法布局（树形 / 左右流 / 径向 / 力导向，`lib/elk-layout.ts`；布局算法偏好持久化于 `stores/graph.ts`，位置/边为每图本地态，一页多张内嵌图互不覆盖）；节点含 6 态色环、模型档 / 深度思考徽章、token 估算、实时输出预览（运行中带流式光标）、工具数 + **¥ run 成本**（`costText`，§7.3B）+ hover tooltip（模型 / Token / 成本 / 用时 / 工具）；`StepEdge` 运行中边以 SVG 粒子流（`animateMotion`）动画；节点状态过渡为纯 CSS：按 plan 顺序错峰入场（`graph-node-enter`）、run 进入终态时一次性完成/失败闪烁（`graph-node-flash` + `useTerminalFlash`）、切换布局时位移 morph（`.react-flow__node` transform 过渡），均遵循 `prefers-reduced-motion`。内嵌形态点节点 → 右侧 `DetailPanel` 下钻该 run；临时全屏额外叠加 `NodeDetail` 侧栏 + 帧流时间轴回放（`Timeline`：播放 / 拖动 / 回到实时）+ 节点/画布右键菜单（查看详情 / 在面板查看 / 居中此节点 / 适应画布 / 布局切换，复用 `sidebar/ContextMenu`）+ `F` 适应画布 + Esc 退出（→ 见代码 `components/graph/`）。
 
 > 仍在目标态的增量（arena / 检查点 / 工具点节点、工具栏）见 [目标态 §五](../07-规划/前端UX目标态.md)。
 
@@ -99,10 +99,11 @@ TaskCard「查看协作图」→ 全屏 GraphOverlay 覆盖
 
 | 行为 | 现状 |
 |------|------|
-| 进入图视图 | TaskCard「查看协作图」→ `useUIStore.graphOpen` 全屏 GraphOverlay |
-| 切换动画 | GraphOverlay 从右侧滑入（CSS `transition-transform`，无 Framer Motion） |
-| 返回聊天 | 左上角 [← 返回] / Esc；全屏覆盖，返回即恢复对话页原状态 |
-| 数据同步 | 聊天与图共享 `useExecutionStore`，GraphView 从 `execution.steps` 派生，切换无需重载 |
+| 看团队 | 多 Agent 回合的图已内嵌在助手消息里，无需切换；状态条可折叠收起图 |
+| 进临时全屏 | 内嵌图右上「最大化」→ `TeamGraphFullscreen`（portal 到 `body`，含回放 Timeline + 大画布） |
+| 退出全屏 | 左上角 [← 返回] / Esc；退出即回到对话页原状态 |
+| 看单 run 详情 | 点图节点 → 右侧 `DetailPanel` 滑出该 run 全文（被动下钻，可多 run 并存对比） |
+| 数据同步 | 各回合按 `messageId` 投影自己的执行槽（`projectExecution`），实时与回放走同一 fold（§9.3 / §9.4） |
 
 ---
 
@@ -111,10 +112,10 @@ TaskCard「查看协作图」→ 全屏 GraphOverlay 覆盖
 | 原则 | 说明 |
 |------|------|
 | 零门槛入门 | 新用户看到的就是普通聊天，不会被面板或图吓走 |
-| 渐进式揭示差异 | TaskCard → 全屏图视图两级渐进；DetailPanel（第三级）基础版已落地 |
-| 简单任务零噪音 | 单 Agent 时无 TaskCard，体验同 ChatGPT |
+| 渐进式揭示差异 | 单 Agent 纯气泡 → 多 Agent 内嵌图 → 点节点进面板下钻 → 「最大化」进临时全屏 |
+| 简单任务零噪音 | 单 Agent 时不出图，体验同 ChatGPT |
 | 只在关键点求交互 | 检查点和异常时才需要用户操作 |
-| 视图切换无损 | 切到图视图再回来，对话流状态不变 |
+| 临时全屏无损 | 进出临时全屏看完返回，对话流状态不变 |
 | 口碑传播点 | 图视图的截图非常适合社交媒体传播 |
 | 页面自治 | 各页面自定义布局，全局壳不强制面板结构 |
 
@@ -158,9 +159,9 @@ TaskCard「查看协作图」→ 全屏 GraphOverlay 覆盖
 
 ## 十、详情面板与委派展示 ✅ 已确定
 
-> DetailPanel 基础版**已落地**：`useDetailPanelStore` + 进度/详情双 Tab（`ProgressTab` / `RunDetailTab`）+ 可拖拽宽度，多 Agent 回合时在 `ConversationPage` 右侧展开（→ 见代码 `components/chat/DetailPanel.tsx`）。目标态的动态 6 Tab / 物理参数 / 更深 run 树下钻仍未落地，见 [`前端技术与架构.md`](前端技术与架构.md) §五 与 [目标态 §一](../07-规划/前端UX目标态.md)；本节为关键决策。
+> **实现现状**：`DetailPanel` 已降级为**纯 run-detail 下钻面板**——删除了原 `task-progress` / `task-graph` 双 tab（进度/协作图已折进内嵌图），只保留 `run-detail` tab：点内嵌协作图节点把该 run 钉到右侧，多 `run-detail` 可并存对比、可拖拽宽度（280–560px）、仅持久化 `open` + `width`、按 `messageId` 投影对应回合执行槽（→ 见代码 `stores/detailPanel.ts`、`components/chat/DetailPanel.tsx`、[`前端技术与架构.md` §9.2 / §9.4](前端技术与架构.md)）。本节为关键决策。
 
-聊天右侧详情面板 = Agent 执行的「点开看详情」查看器：气泡只放紧凑信号（思考摘要/任务状态/工具卡/协作图），点击后右侧推入完整详情。**核心价值**：Multi-Agent 一次交互信息量大，正文保持简报、细节按需点开。
+聊天右侧详情面板 = Agent 执行的「点开看详情」查看器：正文气泡保持简报（思考折叠条 + 内嵌协作图信号），点图节点后右侧推入该 run 完整详情。**核心价值**：Multi-Agent 一次交互信息量大，正文保持简报、细节按需点开。
 
 **关键行为决策**：
 
@@ -172,11 +173,12 @@ TaskCard「查看协作图」→ 全屏 GraphOverlay 覆盖
 | 多开 | 多个 `run-detail` 可并存对比 | **否决**每次覆盖 |
 | 数据获取 | Tab 只存引用（指针），详情从 run 树现取 | 单一数据源 |
 | 下钻导航 | 子任务点击开新 Tab，无限层级 | 各 Tab 独立 |
-| 自动打开 | 多 Agent 启动自动开 task-progress；单 Agent 不开 | 零噪音 |
+| 打开方式 | 点内嵌图节点下钻该 run（无自动进度 tab） | 按需、零噪音 |
+| 节点高亮 | 内嵌图高亮**派生自**面板当前激活 tab（切/关 tab、关面板自动跟随）；全屏图用自身选中 | 一面一个高亮源，**否决**反向 `selectRun` 跨 store 对账 |
 
-**委派展示统一**：单一可视化（`CollaborationGraph` 一张图同表委派树与 `depends_on` 依赖）+ 单一数据模型（`AgentRun`：编排步骤与委派子 Agent 共用同一节点类型）+ `run_*` 事件族（前端不拼接两路流）。**被否决**：前端按 N 隐藏其一（状态仍分叉）；保留双协议只在前端合并（双写漂移）。
+**委派展示统一**：单一可视化（`GraphView` 一张图同表委派树与 `depends_on` 依赖）+ 单一数据模型（`AgentRun`：编排步骤与委派子 Agent 共用同一节点类型）+ `run_*` 事件族（前端不拼接两路流）。**被否决**：前端按 N 隐藏其一（状态仍分叉）；保留双协议只在前端合并（双写漂移）。
 
-**聊天紧凑化原则**：inline 只做信号展示（思考折叠条/任务状态/工具卡折叠/协作图）；面板承担完整详情（思考全文/run 全文 + 工具 IO + 用量）；失败/运行中强制展开（错误绝不藏）；图 Tab 做缩略预览，详细交互进全屏图视图。
+**聊天紧凑化原则**：inline 只做信号展示（思考折叠条/状态条/内嵌协作图）；面板承担完整详情（思考全文/run 全文 + 工具 IO + 用量）；失败/运行中强制展开（错误绝不藏）；协作图内嵌于回合（非面板 Tab），大图 / 回放进临时全屏。
 
 ---
 
@@ -190,7 +192,20 @@ TaskCard「查看协作图」→ 全屏 GraphOverlay 覆盖
 
 ---
 
-## 十二、待定事项
+## 十二、工具箱（卡片网格）
+
+> **已落地**：工具箱页（`/toolbox`）为卡片网格 IA（→ 见代码 `pages/ToolboxPage.tsx`）；「AI 工具」子页复用内置动作工具只读目录（`BuiltinToolCatalog`，→ 见代码 `pages/toolbox/AiToolsPage.tsx`）。本节为关键决策；工具/产物模型见 [`工具与能力系统.md` §8.4](../03-AI核心/工具与能力系统.md)。
+
+工具箱页用**卡片网格**（`auto-fill minmax(260px,1fr)`，磁贴：图标居左 + 标题/副文 + 右侧 `›` 或「即将上线」徽章），按两组**轻量小标题（非 Tab）**排布：
+
+- **创作工具**：文档 / 思维导图 / 多维表格 / 画布 / 幻灯片 / 可运行产物 / 流程图 / 表单——各为一种产物类型，点击进「该类型产物列表 + 新建」。
+- **能力**：AI 工具（点开 = 内置动作工具只读目录 `/toolbox/ai-tools`）/ 集成 · 连接器（MCP & 第三方）/ 工作流（编排工具 + Agent）。
+
+**关键决策**：两组用小标题而非 Tab——一屏纵览全部能力、零层级切换。**现状**：除「AI 工具」外均为占位（「即将上线」）；各创作工具的编辑器与「产物列表 + 新建」流程归 `file` / `table` 体系，多为 Post-MVP（见 [`工具与能力系统.md` §8.4](../03-AI核心/工具与能力系统.md)）。
+
+---
+
+## 十三、待定事项
 
 | 议题 | 说明 |
 |------|------|

@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getActiveRuntime, useConversationStore } from "../conversation";
+import { useApprovalStore } from "../approvals";
+import {
+  getActiveRuntime,
+  getRuntime,
+  useConversationStore,
+} from "../conversation";
 
 const store = () => useConversationStore.getState();
 /** Active conversation's runtime slice — runtime state is now keyed by id. */
@@ -11,6 +16,8 @@ beforeEach(() => {
     currentConversationId: null,
     byId: {},
   });
+  // The release predicate reads the approval store; keep suites isolated.
+  useApprovalStore.getState().clear();
 });
 
 describe("conversation store", () => {
@@ -90,6 +97,82 @@ describe("conversation store", () => {
       store().switchConversation("a"); // return to a
       expect(store().byId.a?.messages[0].content).toBe("partial");
       expect(store().byId.a?.isGenerating).toBe(true);
+    });
+  });
+
+  // Step 6: the sidebar status dot (useConversationGenerating) reads each
+  // conversation's *own* slice by id, not the active one — so a background turn
+  // lights up its dot while the user looks at another conversation. getRuntime
+  // is the imperative form of that selector (runtimeOf), so it covers the read.
+  describe("per-conversation generating (sidebar status dot)", () => {
+    const userMsg = {
+      id: "m1",
+      role: "user" as const,
+      content: "hi",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    };
+
+    it("reports a background conversation as generating while another is active", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage(); // a is generating
+      store().switchConversation("b"); // active = b, a kept alive (busy)
+
+      expect(getRuntime("a").isGenerating).toBe(true);
+      expect(getRuntime("b").isGenerating).toBe(false);
+    });
+
+    it("reports a released idle conversation as not generating", () => {
+      store().switchConversation("a");
+      store().addMessage(userMsg); // a idle (no live turn)
+      store().switchConversation("b"); // a released
+      expect(getRuntime("a").isGenerating).toBe(false);
+    });
+  });
+
+  // Companion to Step 4's release-on-leave: a turn that finishes while the user
+  // is on another conversation leaves an idle slice no switch will reclaim, so
+  // the turn pipeline calls releaseBackgroundSlice on its terminal events.
+  describe("releaseBackgroundSlice (background turn completion)", () => {
+    it("drops an idle background conversation's buffer", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage(); // a: streaming in the background
+      store().switchConversation("b"); // a kept alive (busy)
+      store().finalizeLastMessage("a"); // a's background turn completes → idle
+      store().releaseBackgroundSlice("a");
+      expect(store().byId.a).toBeUndefined();
+    });
+
+    it("never releases the active conversation", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().finalizeLastMessage(); // active a, now idle
+      store().releaseBackgroundSlice("a");
+      // a is on screen — releasing it would blank the view, so it must survive.
+      expect(store().byId.a).toBeDefined();
+    });
+
+    it("keeps a background slice that still has a pending approval", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().switchConversation("b");
+      store().finalizeLastMessage("a"); // a is no longer generating…
+      useApprovalStore.getState().add({
+        approval_id: "x",
+        conversation_id: "a",
+        tool_call_id: "t",
+        tool_name: "file_write",
+        arguments: {},
+      });
+      store().releaseBackgroundSlice("a"); // …but a paused approval keeps it
+      expect(store().byId.a).toBeDefined();
+    });
+
+    it("is a no-op for an unknown conversation", () => {
+      store().switchConversation("a");
+      store().releaseBackgroundSlice("ghost");
+      expect(store().byId.a).toBeDefined();
     });
   });
 

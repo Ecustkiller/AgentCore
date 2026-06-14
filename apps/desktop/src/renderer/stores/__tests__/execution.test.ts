@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  type ExecutionJournal,
   type ExecutionPlan,
   type RunFrame,
-  activeExec,
   elapsedMs,
+  execRuntime,
   projectExecution,
   reasoningMeta,
   useExecutionStore,
@@ -30,10 +31,10 @@ const plan: ExecutionPlan = {
 };
 
 const store = () => useExecutionStore.getState();
-// Reads target the active conversation's slice (currentConversationId is null in
-// this suite, so everything lands on the byId[""] default key). Mutators keep
-// the bare `store()` form — their optional conversationId defaults to active.
-const rt = () => activeExec(store());
+// Every turn's execution is keyed by its assistant message id (§9.3). This suite
+// drives a single message slot, so mutators take MID and reads project it.
+const MID = "msg-1";
+const rt = () => execRuntime(store(), MID);
 
 /** run_started frame with the 阶段2 declaration slots defaulted (阶段1 flat). */
 function started(agentId: string, runId: string, t = 1): RunFrame {
@@ -48,7 +49,7 @@ function started(agentId: string, runId: string, t = 1): RunFrame {
 }
 
 beforeEach(() => {
-  store().clearExecution();
+  useExecutionStore.setState({ byId: {} });
 });
 
 describe("projectExecution (fold)", () => {
@@ -328,8 +329,11 @@ describe("elapsedMs (task duration)", () => {
 
 describe("execution store", () => {
   it("startExecution seeds the plan and resets the stream", () => {
-    store().recordFrame({ t: 0, kind: "run_progress", completed: 1, total: 2 });
-    store().startExecution(plan);
+    store().recordFrame(
+      { t: 0, kind: "run_progress", completed: 1, total: 2 },
+      MID,
+    );
+    store().startExecution(plan, MID);
     expect(rt().plan?.id).toBe("exec-1");
     expect(rt().frames).toEqual([]);
     expect(rt().playhead).toBeNull();
@@ -337,32 +341,129 @@ describe("execution store", () => {
   });
 
   it("recordFrame is a no-op without an active plan", () => {
-    store().recordFrame({ t: 1, kind: "run_progress", completed: 1, total: 2 });
+    store().recordFrame(
+      { t: 1, kind: "run_progress", completed: 1, total: 2 },
+      MID,
+    );
     expect(rt().frames).toEqual([]);
   });
 
   it("recordFrame appends once a plan exists", () => {
-    store().startExecution(plan);
-    store().recordFrame(started("agent-1", "run-1"));
+    store().startExecution(plan, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
     expect(rt().frames).toHaveLength(1);
   });
 
   it("setPlayhead / goLive move the scrubber", () => {
-    store().startExecution(plan);
-    store().setPlayhead(0);
+    store().startExecution(plan, MID);
+    store().setPlayhead(0, MID);
     expect(rt().playhead).toBe(0);
-    store().goLive();
+    store().goLive(MID);
     expect(rt().playhead).toBeNull();
   });
 
   it("clearExecution wipes plan, frames and playhead", () => {
-    store().startExecution(plan);
-    store().recordFrame(started("agent-1", "run-1"));
-    store().clearExecution();
+    store().startExecution(plan, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
+    store().clearExecution(MID);
     expect(rt().plan).toBeNull();
     expect(rt().frames).toEqual([]);
     expect(rt().playhead).toBeNull();
     expect(rt().status).toBe("planning");
+  });
+
+  it("keeps each message's execution isolated (§9.3)", () => {
+    // Two turns stream concurrently into their own slots; neither sees the other.
+    store().startExecution(plan, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
+    store().startExecution({ ...plan, id: "exec-2" }, "msg-2");
+    expect(execRuntime(store(), MID).plan?.id).toBe("exec-1");
+    expect(execRuntime(store(), MID).frames).toHaveLength(1);
+    expect(execRuntime(store(), "msg-2").plan?.id).toBe("exec-2");
+    expect(execRuntime(store(), "msg-2").frames).toEqual([]);
+    // Clearing one leaves the other intact.
+    store().clearExecution("msg-2");
+    expect(execRuntime(store(), MID).plan?.id).toBe("exec-1");
+  });
+});
+
+describe("hydrateFromJournal (reload replay, §9.3)", () => {
+  // A persisted turn's journal: the raw run/tool SSE events (run_plan folds into
+  // the plan; the rest become frames) plus the turn's finish_reason.
+  const journal: ExecutionJournal = {
+    finishReason: "stop",
+    events: [
+      {
+        type: "run_plan",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        payload: {
+          execution_id: "exec-1",
+          plan_type: "multi_agent",
+          task_summary: "分析对比 React 和 Vue",
+          agents: [
+            { id: "agent-1", role: "React 研究员", model_preference: "strong" },
+          ],
+          runs: [
+            {
+              id: "run-1",
+              agent_id: "agent-1",
+              task: "研究 React",
+              depends_on: [],
+            },
+          ],
+        },
+      },
+      {
+        type: "run_started",
+        timestamp: "2026-01-01T00:00:01.000Z",
+        payload: {
+          agent_id: "agent-1",
+          run_id: "run-1",
+          parent_run_id: null,
+          kind: "agent",
+        },
+      },
+      {
+        type: "run_completed",
+        timestamp: "2026-01-01T00:00:02.000Z",
+        payload: {
+          run_id: "run-1",
+          agent_id: "agent-1",
+          output_summary: "done",
+          duration_ms: 1000,
+        },
+      },
+    ],
+  };
+
+  it("rebuilds the plan + frame stream from a persisted journal", () => {
+    store().hydrateFromJournal(MID, journal);
+    const r = rt();
+    expect(r.plan?.id).toBe("exec-1");
+    expect(r.plan?.runs).toHaveLength(1);
+    // run_plan folds into the plan; the two run frames make the stream.
+    expect(r.frames).toHaveLength(2);
+    expect(r.status).toBe("completed");
+    // Replays through the same fold as the live stream.
+    const p = r.plan;
+    if (p) {
+      const exec = projectExecution(p, r.frames, r.status);
+      expect(exec.runs.find((s) => s.id === "run-1")?.status).toBe("completed");
+    }
+  });
+
+  it("is idempotent — never clobbers an already-built (live) slot", () => {
+    store().startExecution(plan, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
+    store().hydrateFromJournal(MID, journal);
+    // The live slot wins; hydrate is a no-op when a plan already exists.
+    expect(rt().plan?.id).toBe("exec-1");
+    expect(rt().frames).toHaveLength(1);
+  });
+
+  it("draws nothing when the journal has no run_plan", () => {
+    store().hydrateFromJournal(MID, { finishReason: "stop", events: [] });
+    expect(rt().plan).toBeNull();
   });
 });
 
@@ -381,16 +482,16 @@ describe("ingestPlan (multi-batch delegate merge)", () => {
   };
 
   it("starts a fresh execution for the first batch of a turn", () => {
-    store().ingestPlan(plan);
+    store().ingestPlan(plan, MID);
     expect(rt().plan?.id).toBe("exec-1");
     expect(rt().plan?.runs).toHaveLength(3);
     expect(rt().status).toBe("running");
   });
 
   it("appends a later same-turn batch instead of resetting the graph", () => {
-    store().ingestPlan(plan);
-    store().recordFrame(started("agent-1", "run-1"));
-    store().ingestPlan(batch2);
+    store().ingestPlan(plan, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
+    store().ingestPlan(batch2, MID);
     // New agent + run are appended; batch-1 nodes survive (the old bug wiped
     // them — only the last batch used to stay visible).
     expect(rt().plan?.agents.map((a) => a.id)).toEqual([
@@ -409,62 +510,47 @@ describe("ingestPlan (multi-batch delegate merge)", () => {
   });
 
   it("dedupes agents/runs already on the graph", () => {
-    store().ingestPlan(plan);
-    store().ingestPlan(plan);
+    store().ingestPlan(plan, MID);
+    store().ingestPlan(plan, MID);
     expect(rt().plan?.agents).toHaveLength(2);
     expect(rt().plan?.runs).toHaveLength(3);
   });
 
   it("resets the graph when a new turn's execution id differs", () => {
-    store().ingestPlan(plan);
-    store().recordFrame(started("agent-1", "run-1"));
-    store().ingestPlan({ ...plan, id: "exec-2" });
+    store().ingestPlan(plan, MID);
+    store().recordFrame(started("agent-1", "run-1"), MID);
+    store().ingestPlan({ ...plan, id: "exec-2" }, MID);
     expect(rt().plan?.id).toBe("exec-2");
     expect(rt().frames).toEqual([]);
   });
 
-  it("keeps the active focus across a same-turn merge", () => {
-    store().ingestPlan(plan);
-    store().focusRun("run-1");
-    store().ingestPlan(batch2);
-    expect(rt().focusedRunId).toBe("run-1");
-    expect(rt().focusedAgentId).toBe("agent-1");
+  it("keeps the active selection across a same-turn merge", () => {
+    store().ingestPlan(plan, MID);
+    store().selectRun("run-1", MID);
+    store().ingestPlan(batch2, MID);
+    expect(rt().selectedRunId).toBe("run-1");
   });
 });
 
-describe("cross-view focus", () => {
-  it("focusRun also resolves the owning agent via the plan", () => {
-    store().startExecution(plan);
-    store().focusRun("run-3");
-    expect(rt().focusedRunId).toBe("run-3");
-    expect(rt().focusedAgentId).toBe("agent-1");
+describe("cross-view selection", () => {
+  it("selectRun pins the run for drill-down", () => {
+    store().startExecution(plan, MID);
+    store().selectRun("run-3", MID);
+    expect(rt().selectedRunId).toBe("run-3");
   });
 
-  it("focusAgent highlights the agent but pins no single run", () => {
-    store().startExecution(plan);
-    store().focusAgent("agent-2");
-    expect(rt().focusedAgentId).toBe("agent-2");
-    expect(rt().focusedRunId).toBeNull();
+  it("selectRun(null) clears the selection", () => {
+    store().startExecution(plan, MID);
+    store().selectRun("run-1", MID);
+    store().selectRun(null, MID);
+    expect(rt().selectedRunId).toBeNull();
   });
 
-  it("focusRun(null) and clearFocus reset both keys", () => {
-    store().startExecution(plan);
-    store().focusRun("run-1");
-    store().focusRun(null);
-    expect(rt().focusedRunId).toBeNull();
-    expect(rt().focusedAgentId).toBeNull();
-
-    store().focusAgent("agent-1");
-    store().clearFocus();
-    expect(rt().focusedAgentId).toBeNull();
-  });
-
-  it("startExecution clears any prior focus", () => {
-    store().startExecution(plan);
-    store().focusRun("run-1");
-    store().startExecution(plan);
-    expect(rt().focusedRunId).toBeNull();
-    expect(rt().focusedAgentId).toBeNull();
+  it("startExecution clears any prior selection", () => {
+    store().startExecution(plan, MID);
+    store().selectRun("run-1", MID);
+    store().startExecution(plan, MID);
+    expect(rt().selectedRunId).toBeNull();
   });
 });
 

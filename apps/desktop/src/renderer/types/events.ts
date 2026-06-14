@@ -17,7 +17,8 @@ export type SSEEventType =
   | "error"
   | "title_generated"
   | "turn_saved"
-  | "citations";
+  | "citations"
+  | "workspace_op_required";
 
 export interface SSEEvent<T = unknown> {
   type: SSEEventType;
@@ -218,6 +219,19 @@ export interface CitationsPayload {
   citations: Citation[];
 }
 
+/** A server-side `LocalWorkspace` op (双模式工作区 P2) that the bound desktop must
+ * run against the real local directory, then POST the result to the ops resolve
+ * endpoint keyed by `request_id`. `root_id` names which authorized FS root to use;
+ * `args` is the full op payload (NOT a preview — the client actually executes it).
+ * Emitted only in local mode; in cloud mode no such event ever arrives. */
+export interface WorkspaceOpRequiredPayload {
+  request_id: string;
+  conversation_id: string;
+  root_id: string;
+  op: string;
+  args: Record<string, unknown>;
+}
+
 export type SSEPayloadMap = {
   message_start: MessageStartPayload;
   content_delta: ContentDeltaPayload;
@@ -238,4 +252,5 @@ export type SSEPayloadMap = {
   title_generated: TitleGeneratedPayload;
   turn_saved: TurnSavedPayload;
   citations: CitationsPayload;
+  workspace_op_required: WorkspaceOpRequiredPayload;
 };

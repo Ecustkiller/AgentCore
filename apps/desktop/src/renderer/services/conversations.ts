@@ -8,6 +8,7 @@ interface BackendConversation {
   updated_at: string;
   created_at: string;
   folder_id?: string | null;
+  local_root_id?: string | null;
 }
 
 interface ConversationListResponse {
@@ -21,6 +22,7 @@ interface BackendFolderGroup {
   id: string;
   name: string;
   local_dir: string | null;
+  local_root_id?: string | null;
   conversations: BackendConversation[];
 }
 
@@ -42,6 +44,7 @@ function toConversation(c: BackendConversation): Conversation {
     messageCount: 0,
     lastMessagePreview: null,
     folderId: c.folder_id ?? null,
+    localRootId: c.local_root_id ?? null,
   };
 }
 
@@ -70,6 +73,7 @@ export async function listGrouped(): Promise<{
       id: f.id,
       name: f.name,
       local_dir: f.local_dir,
+      local_root_id: f.local_root_id ?? null,
       created_at: "",
       updated_at: "",
     }),

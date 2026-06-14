@@ -1,5 +1,9 @@
 import { useApprovalStore } from "@/stores/approvals";
-import { activeExec, useExecutionStore } from "@/stores/execution";
+import {
+  type ExecutionJournal,
+  execRuntime,
+  useExecutionStore,
+} from "@/stores/execution";
 import type { Citation, CostBreakdown } from "@/types/events";
 import { create } from "zustand";
 
@@ -11,6 +15,10 @@ export interface Conversation {
   lastMessagePreview: string | null;
   /** Folder membership for the sidebar grouping (§七). Absent/null = ungrouped. */
   folderId?: string | null;
+  /** Desktop FS root this conversation is bound to when ungrouped + local mode
+   * (§七双模式). Foldered chats inherit their mode from the folder, so this is
+   * only authoritative for ungrouped ones; null/absent = cloud mode. */
+  localRootId?: string | null;
 }
 
 /** 附件在消息气泡上的展示元信息（不含正文，正文仅发送时携带）。 */
@@ -43,6 +51,12 @@ export interface Message {
    * `cny_total` — the client converts via the single FX rate). All-zero `total`
    * renders as「—」, not「¥0.00」(§7.5). */
   cost?: CostBreakdown;
+  /** Persisted multi-agent execution journal (the turn's ordered run/tool
+   * events), set only on a *reloaded* assistant message so its team graph
+   * replays on demand (the inline graph hydrates the execution slot from this).
+   * Absent for user / single-agent turns and for the live turn (which streams
+   * straight into the execution store). */
+  runs?: ExecutionJournal;
 }
 
 /**
@@ -60,6 +74,20 @@ export const selectLastAssistantCostTotal = (
   }
   return null;
 };
+
+/**
+ * Id of the last assistant message in a list (the live turn's bubble), or null.
+ * The execution store keys each turn's graph by its assistant message id, so the
+ * SSE dispatch routes run/tool frames here and {@link stopGeneration} cancels
+ * the right message's graph — a turn's events all belong to the message opened
+ * just before they stream.
+ */
+export function lastAssistantMessageId(messages: Message[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") return messages[i].id;
+  }
+  return null;
+}
 
 /**
  * Per-conversation turn runtime — the live state of one conversation's stream.
@@ -125,6 +153,10 @@ interface ConversationState {
   /** Set a conversation's folder (optimistic move; null = ungrouped). No-op if
    * the id isn't in the list. */
   setConversationFolder: (id: string, folderId: string | null) => void;
+  /** Reflect a workspace bind/unbind onto an ungrouped conversation so its
+   * sidebar mode badge updates without a reload (null = back to cloud). No-op if
+   * the id isn't in the list. */
+  setConversationLocalRoot: (id: string, rootId: string | null) => void;
   setMessages: (messages: Message[]) => void;
   // Turn-stream mutators take an optional `conversationId`: SSE dispatch passes
   // the turn's id so a background turn writes to its own slice even while the
@@ -169,6 +201,16 @@ interface ConversationState {
   setGenerating: (v: boolean, conversationId?: string | null) => void;
   clearMessages: () => void;
   switchConversation: (id: string | null) => void;
+  /** Release a finished background turn's buffer. When a turn completes while
+   * the user is on *another* conversation, the slice it streamed into is now
+   * idle, but no switch event will reclaim it — so the turn pipeline calls this
+   * on its terminal events (`message_end` / inline `error`). Drops the slice
+   * only when `conversationId` is **not** the active conversation and is idle
+   * (no live turn, no pending approval), mirroring {@link switchConversation}'s
+   * release-on-leave so the memory bound stays "active + N *running* background
+   * turns"; the page load guard reloads it from the server on return. No-op for
+   * the active or a still-busy conversation. */
+  releaseBackgroundSlice: (conversationId: string) => void;
   renameConversation: (id: string, title: string) => void;
   /** Move a conversation to the top of the list and stamp `updatedAt` = now, so
    * a turn (send / regenerate) bumps it into the "今天" group like the backend
@@ -242,6 +284,13 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       set((state) => ({
         conversations: state.conversations.map((c) =>
           c.id === id ? { ...c, folderId } : c,
+        ),
+      })),
+
+    setConversationLocalRoot: (id, rootId) =>
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === id ? { ...c, localRootId: rootId } : c,
         ),
       })),
 
@@ -407,6 +456,27 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       });
     },
 
+    releaseBackgroundSlice: (conversationId) =>
+      set((state) => {
+        // Never release what is on screen — it would blank the view.
+        const activeKey = state.currentConversationId ?? DRAFT_KEY;
+        if (conversationId === activeKey) return {};
+        const slice = state.byId[conversationId];
+        if (!slice) return {};
+        // Same "busy" test as switchConversation's release-on-leave, kept here so
+        // the single idle predicate (no live turn AND no pending approval) does
+        // not drift between the two release sites.
+        const busy =
+          slice.isGenerating ||
+          useApprovalStore
+            .getState()
+            .pending.some((p) => p.conversationId === conversationId);
+        if (busy) return {};
+        const byId = { ...state.byId };
+        delete byId[conversationId];
+        return { byId };
+      }),
+
     renameConversation: (id, title) =>
       set((state) => ({
         conversations: state.conversations.map((c) =>
@@ -457,11 +527,16 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         .getState()
         .clear(get().currentConversationId ?? DRAFT_KEY);
       // The abort skips message_end, so a multi-agent execution would otherwise
-      // stay "running" forever — mark this conversation's graph cancelled so the
-      // task card leaves its live state and offers a re-run.
-      const exec = useExecutionStore.getState();
-      const rt = activeExec(exec);
-      if (rt.plan && rt.status === "running") exec.setStatus("cancelled");
+      // stay "running" forever — mark this turn's graph cancelled (by its live
+      // assistant message id) so the task card leaves its live state and offers
+      // a re-run.
+      const mid = lastAssistantMessageId(activeRuntime(get()).messages);
+      if (mid) {
+        const exec = useExecutionStore.getState();
+        const rt = execRuntime(exec, mid);
+        if (rt.plan && rt.status === "running")
+          exec.setStatus("cancelled", mid);
+      }
     },
 
     setError: (message, retry, conversationId) =>
@@ -489,6 +564,13 @@ export const useActiveMessages = (): Message[] =>
 /** Whether the active conversation has an in-flight turn. */
 export const useActiveGenerating = (): boolean =>
   useConversationStore((s) => activeRuntime(s).isGenerating);
+
+/** Whether a *specific* conversation has an in-flight turn. The sidebar status
+ * dot reads this (not {@link useActiveGenerating}) so a background turn that
+ * keeps streaming after the user switches away still lights up — a released
+ * idle slice reports false, which is correct (no live turn). */
+export const useConversationGenerating = (conversationId: string): boolean =>
+  useConversationStore((s) => runtimeOf(s, conversationId).isGenerating);
 
 /** The active conversation's last-turn error banner text, if any. */
 export const useActiveError = (): string | null =>

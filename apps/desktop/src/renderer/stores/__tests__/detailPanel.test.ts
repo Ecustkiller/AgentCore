@@ -9,14 +9,17 @@ import {
 } from "../detailPanel";
 import {
   type ExecutionPlan,
-  activeExec,
+  execRuntime,
   useExecutionStore,
 } from "../execution";
 
 const panel = () => useDetailPanelStore.getState();
 const exec = () => useExecutionStore.getState();
-// The focus now lives on the active conversation's execution slice.
-const execRt = () => activeExec(exec());
+// Each turn's execution + focus lives in its own message slot (§9.3); this suite
+// drives one message.
+const MID = "msg-1";
+const execRt = () => execRuntime(exec(), MID);
+const tabId = (runId: string) => runDetailTabId(MID, runId);
 
 const plan: ExecutionPlan = {
   id: "exec-1",
@@ -27,8 +30,9 @@ const plan: ExecutionPlan = {
 };
 
 const runDetail = (runId: string): DetailTab => ({
-  id: runDetailTabId(runId),
+  id: runDetailTabId(MID, runId),
   title: runId,
+  messageId: MID,
   runId,
 });
 
@@ -41,7 +45,7 @@ beforeEach(() => {
     tabs: [],
     activeTabId: null,
   });
-  exec().clearExecution();
+  useExecutionStore.setState({ byId: {} });
 });
 
 describe("setWidth", () => {
@@ -65,8 +69,8 @@ describe("openTab", () => {
   it("opens the panel, appends and activates the tab", () => {
     panel().openTab(runDetail("run-1"));
     expect(panel().open).toBe(true);
-    expect(panel().tabs.map((t) => t.id)).toEqual([runDetailTabId("run-1")]);
-    expect(panel().activeTabId).toBe(runDetailTabId("run-1"));
+    expect(panel().tabs.map((t) => t.id)).toEqual([tabId("run-1")]);
+    expect(panel().activeTabId).toBe(tabId("run-1"));
   });
 
   it("dedups by id and updates the title in place", () => {
@@ -80,7 +84,7 @@ describe("openTab", () => {
     panel().openTab(runDetail("run-1"));
     panel().openTab(runDetail("run-2"), { activate: false });
     expect(panel().tabs).toHaveLength(2);
-    expect(panel().activeTabId).toBe(runDetailTabId("run-1"));
+    expect(panel().activeTabId).toBe(tabId("run-1"));
   });
 
   it("caps the strip at the maximum, dropping the oldest", () => {
@@ -89,7 +93,7 @@ describe("openTab", () => {
     }
     expect(panel().tabs).toHaveLength(DETAIL_PANEL_MAX_TABS);
     // run-0 and run-1 were pushed out; run-2 is now the oldest.
-    expect(panel().tabs[0].id).toBe(runDetailTabId("run-2"));
+    expect(panel().tabs[0].id).toBe(tabId("run-2"));
   });
 });
 
@@ -97,15 +101,15 @@ describe("closeTab", () => {
   it("removes the tab and falls back to the last remaining one", () => {
     panel().openTab(runDetail("run-1"));
     panel().openTab(runDetail("run-2"));
-    panel().setActiveTab(runDetailTabId("run-1"));
-    panel().closeTab(runDetailTabId("run-1"));
-    expect(panel().tabs.map((t) => t.id)).toEqual([runDetailTabId("run-2")]);
-    expect(panel().activeTabId).toBe(runDetailTabId("run-2"));
+    panel().setActiveTab(tabId("run-1"));
+    panel().closeTab(tabId("run-1"));
+    expect(panel().tabs.map((t) => t.id)).toEqual([tabId("run-2")]);
+    expect(panel().activeTabId).toBe(tabId("run-2"));
   });
 
   it("hides the panel when the last tab is closed", () => {
     panel().openTab(runDetail("run-1"));
-    panel().closeTab(runDetailTabId("run-1"));
+    panel().closeTab(tabId("run-1"));
     expect(panel().tabs).toHaveLength(0);
     expect(panel().open).toBe(false);
     expect(panel().activeTabId).toBeNull();
@@ -123,13 +127,12 @@ describe("togglePanel", () => {
 
 describe("showRunDetail", () => {
   it("opens a run-detail tab and pins the run in the execution store", () => {
-    exec().startExecution(plan);
-    panel().showRunDetail("run-1", "研究员");
+    exec().startExecution(plan, MID);
+    panel().showRunDetail(MID, "run-1", "研究员");
     expect(panel().open).toBe(true);
-    expect(panel().activeTabId).toBe(runDetailTabId("run-1"));
+    expect(panel().activeTabId).toBe(tabId("run-1"));
     expect(panel().tabs[0].title).toBe("研究员");
-    // Focus lives in the execution store (shared with the inline graph).
-    expect(execRt().focusedRunId).toBe("run-1");
-    expect(execRt().focusedAgentId).toBe("agent-1");
+    // Selection lives in the execution store (shared with the inline graph).
+    expect(execRt().selectedRunId).toBe("run-1");
   });
 });

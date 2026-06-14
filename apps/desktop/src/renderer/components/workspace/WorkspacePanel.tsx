@@ -50,6 +50,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { WorkspaceModeBar } from "./WorkspaceModeBar";
 
 type Section = "files" | "snapshots";
 
@@ -161,6 +162,7 @@ export function WorkspacePanel() {
         />
       ) : (
         <>
+          <WorkspaceModeBar conversationId={conversationId} />
           <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
             <SectionTab
               active={section === "files"}

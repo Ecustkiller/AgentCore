@@ -13,10 +13,12 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
+    get_cost_event_repo,
     get_folder_repo,
     get_message_repo,
 )
 from agentcore.api.schemas import (
+    BindLocalWorkspaceRequest,
     CloneRepoRequest,
     CloneRepoResponse,
     ConversationListResponse,
@@ -32,28 +34,33 @@ from agentcore.api.schemas import (
     MoveFileRequest,
     RegenerateMessageRequest,
     ResolveApprovalRequest,
+    ResolveWorkspaceOpRequest,
     SendMessageRequest,
     SnapshotListResponse,
     SnapshotSummary,
     StatusResponse,
     UpdateConversationRequest,
     UploadFileResponse,
+    WorkspaceBindingResponse,
     WorkspaceFileEntry,
     WorkspaceFileListResponse,
 )
 from agentcore.api.sse import sse_response
 from agentcore.config import settings
+from agentcore.conversation.quota import enforce_quota
 from agentcore.conversation.service import regenerate_chat, stream_chat
 from agentcore.core.errors import NotFoundError, ValidationError
 from agentcore.db.models import Conversation
 from agentcore.db.repositories import (
     ConversationRepository,
+    CostEventRepository,
     FolderRepository,
     MessageRepository,
 )
 from agentcore.runtime.approvals import default_approval_registry
 from agentcore.runtime.events import EventSink
 from agentcore.storage import SnapshotNotFound
+from agentcore.workspace.channel import default_workspace_op_registry
 from agentcore.workspace.files import (
     create_dir,
     delete_file,
@@ -63,7 +70,7 @@ from agentcore.workspace.files import (
     upload_file,
 )
 from agentcore.workspace.git import CloneError, clone_repo
-from agentcore.workspace.locate import workspace_storage_key
+from agentcore.workspace.locate import resolve_local_binding, workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.protocol import (
     AlreadyExists,
@@ -102,6 +109,26 @@ async def _get_owned_conversation(
     if not conv:
         raise NotFoundError("Conversation not found")
     return conv
+
+
+def _binding_response(
+    conv: Conversation, folder: object | None
+) -> WorkspaceBindingResponse:
+    """Render a conversation's resolved workspace mode (§七) as the API response.
+
+    ``scope`` reports where the binding lives — the folder for a filed
+    conversation (shared by its siblings), the conversation itself otherwise — so
+    the client knows whether unbinding would affect other chats.
+    """
+    scope = "folder" if conv.folder_id else "conversation"
+    binding = resolve_local_binding(
+        folder_id=conv.folder_id,
+        folder_local_root_id=getattr(folder, "local_root_id", None),
+        conversation_local_root_id=conv.local_root_id,
+    )
+    if binding is None:
+        return WorkspaceBindingResponse(mode="cloud", scope=scope, root_id=None)
+    return WorkspaceBindingResponse(mode="local", scope=scope, root_id=binding.root_id)
 
 
 @router.post("", response_model=ConversationSummary, status_code=201)
@@ -162,6 +189,7 @@ async def list_conversations_grouped(
                 id=f.id,
                 name=f.name,
                 local_dir=f.local_dir,
+                local_root_id=f.local_root_id,
                 conversations=buckets[f.id],
             )
             for f in folders
@@ -263,14 +291,19 @@ async def send_message(
     body: SendMessageRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    cost_repo: CostEventRepository = Depends(get_cost_event_repo),
 ):
     """Send a user message and get a streaming AI response via SSE.
 
     The pipeline runs as a detached task feeding ``sink``; its handle is passed
     to ``sse_response`` so a client disconnect (e.g. the user hits stop) cancels
     it server-side rather than letting it run to completion unobserved.
+
+    Quota is enforced here, before the stream starts, so an exhausted account
+    gets a clean 429 instead of a half-opened SSE (成本配额与计费.md §一).
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    await enforce_quota(cost_repo, user.user_id)
 
     sink = EventSink()
 
@@ -311,6 +344,125 @@ async def resolve_approval(
     return StatusResponse()
 
 
+@router.post(
+    "/{conversation_id}/workspace/ops/{request_id}", response_model=StatusResponse
+)
+async def resolve_workspace_op(
+    conversation_id: str,
+    request_id: str,
+    body: ResolveWorkspaceOpRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Deliver a desktop's result for a paused local-workspace op (双模式工作区 P2).
+
+    The bound desktop client ran the op (read / list / grep / …) against the real
+    local directory and posts the structured result here; the ``LocalWorkspace``
+    awaiting it in the live ``send_message`` SSE turn resumes. 404 if the request
+    is unknown, already settled, timed out, or belongs to another conversation —
+    the channel fails any op left unanswered, so a stale post resolves as "not
+    found".
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    resolved = default_workspace_op_registry().resolve(
+        request_id,
+        body.model_dump(),
+        conversation_id=conversation_id,
+    )
+    if not resolved:
+        raise NotFoundError("Workspace op request not found or already resolved")
+    return StatusResponse()
+
+
+# --- Local-mode binding (双模式工作区 §七: 模式跟着文件在哪自动走) ---
+
+
+@router.get(
+    "/{conversation_id}/workspace/binding", response_model=WorkspaceBindingResponse
+)
+async def get_workspace_binding(
+    conversation_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
+):
+    """Report a conversation's resolved workspace mode (local vs cloud).
+
+    Backs the desktop's mode badge: cloud by default, local once its governing
+    scope (folder when filed, else the conversation) is bound to a desktop root.
+    """
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    folder = (
+        await folder_repo.get_by_id(conv.folder_id, user_id=user.user_id)
+        if conv.folder_id
+        else None
+    )
+    return _binding_response(conv, folder)
+
+
+@router.put(
+    "/{conversation_id}/workspace/binding", response_model=WorkspaceBindingResponse
+)
+async def bind_workspace(
+    conversation_id: str,
+    body: BindLocalWorkspaceRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
+):
+    """Bind the conversation's workspace to a desktop FS root (switch to local).
+
+    Writes at the governing scope (§七): a filed conversation binds its *folder*
+    (so every sibling switches to local against the same root), an ungrouped one
+    binds itself. Idempotent — re-binding just overwrites the stored root id.
+    """
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    if conv.folder_id:
+        folder = await folder_repo.set_local_root_id(
+            conv.folder_id, body.root_id, user_id=user.user_id
+        )
+        if not folder:
+            raise NotFoundError("Folder not found")
+        return WorkspaceBindingResponse(
+            mode="local", scope="folder", root_id=body.root_id
+        )
+    await conv_repo.set_local_root_id(
+        conversation_id, body.root_id, user_id=user.user_id
+    )
+    return WorkspaceBindingResponse(
+        mode="local", scope="conversation", root_id=body.root_id
+    )
+
+
+@router.delete(
+    "/{conversation_id}/workspace/binding", response_model=WorkspaceBindingResponse
+)
+async def unbind_workspace(
+    conversation_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
+):
+    """Unbind the conversation's workspace (fall back to cloud).
+
+    Clears the binding at the same governing scope binding does: clearing a
+    *folder* binding returns every conversation in it to cloud (it is the shared
+    project space), which the ``folder`` scope in the response signals.
+    """
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    if conv.folder_id:
+        folder = await folder_repo.set_local_root_id(
+            conv.folder_id, None, user_id=user.user_id
+        )
+        if not folder:
+            raise NotFoundError("Folder not found")
+        return WorkspaceBindingResponse(mode="cloud", scope="folder", root_id=None)
+    await conv_repo.set_local_root_id(conversation_id, None, user_id=user.user_id)
+    return WorkspaceBindingResponse(
+        mode="cloud", scope="conversation", root_id=None
+    )
+
+
 @router.post("/{conversation_id}/messages/{message_id}/regenerate")
 async def regenerate_message(
     conversation_id: str,
@@ -318,6 +470,7 @@ async def regenerate_message(
     body: RegenerateMessageRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    cost_repo: CostEventRepository = Depends(get_cost_event_repo),
 ):
     """Re-run a turn from an existing user message via SSE.
 
@@ -325,9 +478,11 @@ async def regenerate_message(
     "edit & resend" (``content`` set — edit the user message first). The target
     ``message_id`` must be a user message; the superseded assistant reply and any
     later turns are dropped before re-running. Like ``send_message``, the pipeline
-    runs as a detached task so a client disconnect cancels it server-side.
+    runs as a detached task so a client disconnect cancels it server-side. A
+    re-run is a fresh turn, so it passes the same quota gate.
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    await enforce_quota(cost_repo, user.user_id)
 
     sink = EventSink()
 

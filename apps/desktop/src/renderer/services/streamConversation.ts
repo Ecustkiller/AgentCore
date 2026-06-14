@@ -1,7 +1,17 @@
 import { notifyUnauthorized, tryRefresh } from "@/services/api";
+import { performWorkspaceOp } from "@/services/workspaceOps";
 import { useApprovalStore } from "@/stores/approvals";
-import { getRuntime, useConversationStore } from "@/stores/conversation";
-import { execRuntime, useExecutionStore } from "@/stores/execution";
+import {
+  getRuntime,
+  lastAssistantMessageId,
+  useConversationStore,
+} from "@/stores/conversation";
+import {
+  execRuntime,
+  frameFromEvent,
+  planFromRunPlan,
+  useExecutionStore,
+} from "@/stores/execution";
 import { useUsageStore } from "@/stores/usage";
 import type {
   ApprovalRequiredPayload,
@@ -11,18 +21,11 @@ import type {
   ErrorPayload,
   MessageEndPayload,
   ReasoningDeltaPayload,
-  RunCompletedPayload,
-  RunFailedPayload,
-  RunOutputDeltaPayload,
   RunPlanPayload,
-  RunProgressPayload,
-  RunReasoningDeltaPayload,
-  RunStartedPayload,
   SSEEvent,
   TitleGeneratedPayload,
-  ToolUseEndPayload,
-  ToolUseStartPayload,
   TurnSavedPayload,
+  WorkspaceOpRequiredPayload,
 } from "@/types/events";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -58,12 +61,6 @@ export function describeStreamError(err: unknown): string | null {
   return "发送失败，请重试";
 }
 
-/** Wall-clock time of an event, used to label timeline frames. */
-function frameTime(event: SSEEvent): number {
-  const parsed = Date.parse(event.timestamp);
-  return Number.isNaN(parsed) ? Date.now() : parsed;
-}
-
 /**
  * Ensure the streamed conversation's last message is a streaming assistant
  * message.
@@ -90,6 +87,13 @@ function ensureStreamingAssistant(conversationId: string): void {
  * backend starts emitting them, with zero further frontend wiring.
  */
 export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
+  // The execution store keys each turn's graph by the assistant message it
+  // produced (§9.3). Every run/tool fact of a turn belongs to the bubble opened
+  // by `message_start`, so resolve that id from the conversation's live slice
+  // and route execution mutations to it (live + replay then share one slot).
+  const execMessageId = (): string | null =>
+    lastAssistantMessageId(getRuntime(ctx.conversationId).messages);
+
   switch (event.type) {
     // ---- single-agent conversation stream ----
     case "message_start": {
@@ -139,10 +143,20 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       // The turn is over — any approval still on screen is moot (all were
       // resolved to get here; this just guards a degraded/edge end).
       useApprovalStore.getState().clear(ctx.conversationId);
-      const rt = execRuntime(useExecutionStore.getState(), ctx.conversationId);
-      if (rt.plan && rt.status !== "failed") {
-        useExecutionStore.getState().setStatus("completed", ctx.conversationId);
+      // Settle this turn's graph (keyed by its assistant message) to its final
+      // state; resolve the id before releasing the slice below.
+      const mid = execMessageId();
+      if (mid) {
+        const rt = execRuntime(useExecutionStore.getState(), mid);
+        if (rt.plan && rt.status !== "failed") {
+          useExecutionStore.getState().setStatus("completed", mid);
+        }
       }
+      // A turn that finished while the user is on another conversation leaves an
+      // idle background slice that no switch will reclaim; release it now so the
+      // memory bound holds (no-op for the active conversation — it reloads from
+      // the server on return).
+      conv.releaseBackgroundSlice(ctx.conversationId);
       break;
     }
     case "error": {
@@ -154,10 +168,14 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       );
       store.finalizeLastMessage(ctx.conversationId);
       useApprovalStore.getState().clear(ctx.conversationId);
-      const rt = execRuntime(useExecutionStore.getState(), ctx.conversationId);
-      if (rt.plan) {
-        useExecutionStore.getState().setStatus("failed", ctx.conversationId);
+      const mid = execMessageId();
+      if (mid && execRuntime(useExecutionStore.getState(), mid).plan) {
+        useExecutionStore.getState().setStatus("failed", mid);
       }
+      // Failed turn in the background → same idle-slice reclaim as message_end
+      // (a transport failure instead routes through turns.ts, which keeps the
+      // slice so its retry banner survives).
+      store.releaseBackgroundSlice(ctx.conversationId);
       break;
     }
 
@@ -198,37 +216,31 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       break;
     }
 
+    // ---- local-workspace op channel (双模式工作区 P2) ----
+    // In local mode the server-side LocalWorkspace asks us to run a file op
+    // against the bound FS root; perform it and POST the result back (fire and
+    // forget — it settles the paused op in this same SSE turn). No-op in cloud
+    // mode, where this event never arrives.
+    case "workspace_op_required": {
+      void performWorkspaceOp(
+        event.payload as WorkspaceOpRequiredPayload,
+        ctx.conversationId,
+      );
+      break;
+    }
+
     // ---- multi-agent execution stream ----
     // Each run/tool fact is appended to the journal; the graph is a projection
     // of that frame stream (see stores/execution.ts), so live + replay share
     // one fold and there is no per-event UI wiring beyond recording the fact.
     case "run_plan": {
       const payload = event.payload as RunPlanPayload;
+      const mid = execMessageId();
+      if (!mid) break;
       // ingestPlan (not startExecution): a second delegate batch in the same
       // turn shares the execution id and is merged into the live graph instead
       // of resetting it (see stores/execution.ts).
-      useExecutionStore.getState().ingestPlan(
-        {
-          id: payload.execution_id,
-          planType: payload.plan_type,
-          taskSummary: payload.task_summary,
-          agents: payload.agents.map((a) => ({
-            id: a.id,
-            role: a.role,
-            modelPreference: a.model_preference,
-            thinking: a.thinking,
-            reasoningEffort: a.reasoning_effort,
-          })),
-          runs: payload.runs.map((s) => ({
-            id: s.id,
-            agentId: s.agent_id,
-            task: s.task,
-            dependsOn: s.depends_on,
-            kind: s.kind,
-          })),
-        },
-        ctx.conversationId,
-      );
+      useExecutionStore.getState().ingestPlan(planFromRunPlan(payload), mid);
       // Mark the assistant turn as team-driven: its bubble renders the inline
       // collaboration graph (统一团队展示草案) and defers the cost row to the
       // graph's status strip (§7.3A). Single-agent turns emit no run_plan, so
@@ -245,121 +257,20 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       }
       break;
     }
-    case "run_started": {
-      const payload = event.payload as RunStartedPayload;
-      useExecutionStore.getState().recordFrame(
-        {
-          t: frameTime(event),
-          kind: "run_started",
-          agentId: payload.agent_id,
-          runId: payload.run_id,
-          parentRunId: payload.parent_run_id,
-          runKind: payload.kind,
-        },
-        ctx.conversationId,
-      );
-      break;
-    }
-    case "run_output_delta": {
-      const payload = event.payload as RunOutputDeltaPayload;
-      useExecutionStore.getState().recordFrame(
-        {
-          t: frameTime(event),
-          kind: "run_output_delta",
-          agentId: payload.agent_id,
-          delta: payload.delta,
-        },
-        ctx.conversationId,
-      );
-      break;
-    }
-    case "run_reasoning_delta": {
-      const payload = event.payload as RunReasoningDeltaPayload;
-      useExecutionStore.getState().recordFrame(
-        {
-          t: frameTime(event),
-          kind: "run_reasoning_delta",
-          agentId: payload.agent_id,
-          delta: payload.delta,
-        },
-        ctx.conversationId,
-      );
-      break;
-    }
-    case "run_completed": {
-      const payload = event.payload as RunCompletedPayload;
-      useExecutionStore.getState().recordFrame(
-        {
-          t: frameTime(event),
-          kind: "run_completed",
-          runId: payload.run_id,
-          agentId: payload.agent_id,
-          outputSummary: payload.output_summary,
-          durationMs: payload.duration_ms,
-          // Carry the priced cost onto the frame so the projected run lights up
-          // the team payroll (§7.3B) live, with no separate cost wiring.
-          role: payload.role,
-          model: payload.model,
-          usage: payload.usage,
-          cost: payload.cost,
-        },
-        ctx.conversationId,
-      );
-      break;
-    }
-    case "run_failed": {
-      const payload = event.payload as RunFailedPayload;
-      useExecutionStore.getState().recordFrame(
-        {
-          t: frameTime(event),
-          kind: "run_failed",
-          runId: payload.run_id,
-          agentId: payload.agent_id,
-          error: payload.error,
-        },
-        ctx.conversationId,
-      );
-      break;
-    }
-    case "run_progress": {
-      const payload = event.payload as RunProgressPayload;
-      useExecutionStore.getState().recordFrame(
-        {
-          t: frameTime(event),
-          kind: "run_progress",
-          completed: payload.completed,
-          total: payload.total,
-        },
-        ctx.conversationId,
-      );
-      break;
-    }
-    case "tool_use_start": {
-      const payload = event.payload as ToolUseStartPayload;
-      useExecutionStore.getState().recordFrame(
-        {
-          t: frameTime(event),
-          kind: "tool_use_start",
-          toolCallId: payload.tool_call_id,
-          toolName: payload.tool_name,
-          arguments: payload.arguments,
-        },
-        ctx.conversationId,
-      );
-      break;
-    }
+    // All run/tool facts fold the same way: map the event to a RunFrame and
+    // append it to this turn's journal (a no-op slot has no plan, so stray
+    // single-agent facts are ignored downstream). One path for every frame kind.
+    case "run_started":
+    case "run_output_delta":
+    case "run_reasoning_delta":
+    case "run_completed":
+    case "run_failed":
+    case "run_progress":
+    case "tool_use_start":
     case "tool_use_end": {
-      const payload = event.payload as ToolUseEndPayload;
-      useExecutionStore.getState().recordFrame(
-        {
-          t: frameTime(event),
-          kind: "tool_use_end",
-          toolCallId: payload.tool_call_id,
-          result: payload.result,
-          status: payload.status,
-        },
-        ctx.conversationId,
-      );
+      const mid = execMessageId();
+      const frame = frameFromEvent(event);
+      if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
       break;
     }
 
@@ -393,11 +304,10 @@ async function runMessageStream(
   conversationId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  // Each turn is replanned: drop this conversation's prior execution graph so
-  // the UI reflects only the current turn (run_plan repopulates for
-  // multi-agent). Likewise drop any stale approval prompt so a new turn always
-  // starts from a clean gate.
-  useExecutionStore.getState().clearExecution(conversationId);
+  // Each turn streams into its own assistant message's execution slot (keyed by
+  // message id, §9.3), so there is no prior graph to clear here — a fresh turn
+  // gets a fresh slot on its first run_plan. Just drop any stale approval prompt
+  // so the new turn starts from a clean gate.
   useApprovalStore.getState().clear(conversationId);
 
   const doFetch = () =>

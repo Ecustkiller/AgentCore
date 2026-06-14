@@ -17,10 +17,13 @@ import {
 import { useDetailPanelStore } from "@/stores/detailPanel";
 import {
   type Execution,
+  type ExecutionJournal,
+  ExecutionScopeContext,
   elapsedMs,
   useActiveExecField,
+  useExecutionScope,
   useExecutionStore,
-  useProjectedExecution,
+  useMessageExecution,
 } from "@/stores/execution";
 import { useUsageStore } from "@/stores/usage";
 import {
@@ -52,19 +55,39 @@ import { useEffect, useRef, useState } from "react";
  * The strip can collapse the graph away (the answer stays right below), and the
  * canvas height adapts to team size so a small team does not float in a big box.
  *
- * Live-only for now (P0): it reads the single live execution store, so it renders
- * only on the message whose turn is the one currently projected; reloaded
- * (historical) multi-agent turns fall back to a plain bubble until per-message
- * runs land (P2). Node clicks drill into the passive right-side panel; the
- * maximize button opens the temporary full-screen graph (timeline replay).
+ * Per-message (§9.3): keyed by the assistant message id, so live and reloaded
+ * (historical) multi-agent turns render identically — the live turn streams into
+ * the slot, a reloaded turn hydrates it from the persisted journal (`runs`), and
+ * both project through the same fold. Node clicks drill into the passive
+ * right-side panel; the maximize button opens the full-screen graph (replay).
  */
-export function InlineTeamGraph({ executionId }: { executionId: string }) {
-  const execution = useProjectedExecution();
+export function InlineTeamGraph({
+  messageId,
+  executionId,
+  journal,
+}: {
+  messageId: string;
+  executionId: string;
+  journal?: ExecutionJournal;
+}) {
   const [expanded, setExpanded] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
-  // Gate on the live turn: a different (historical) message carries an
-  // executionId that does not match the one projection in the store, and a
-  // single-agent turn has no team to draw.
+
+  // Reload path: rebuild this message's execution slot from its persisted
+  // journal so the team graph replays on demand. Idempotent and a no-op for the
+  // live turn (which already streamed into the slot + has no `journal`), so it is
+  // safe on every mount.
+  const hydrateFromJournal = useExecutionStore((s) => s.hydrateFromJournal);
+  useEffect(() => {
+    if (journal) hydrateFromJournal(messageId, journal);
+  }, [journal, messageId, hydrateFromJournal]);
+
+  // Project THIS message's slot (not a single live slot), so a historical turn
+  // draws its own graph exactly like the live one.
+  const execution = useMessageExecution(messageId);
+
+  // Nothing to draw until the slot exists (live: first `run_plan`; reload: after
+  // the hydrate effect commits) and only for a real team turn.
   if (
     !execution ||
     execution.id !== executionId ||
@@ -81,31 +104,43 @@ export function InlineTeamGraph({ executionId }: { executionId: string }) {
     Math.max(240, 150 + execution.runs.length * 78),
   );
 
-  // Stable wrapper so the entrance animation plays once when the block first
-  // mounts on `run_plan`; inner status swaps (running→done) reuse this element.
+  // Scope every descendant graph hook (status strip, canvas, timeline, node
+  // detail — even through the full-screen portal) to this message's slot, so
+  // each graph reads/writes the right turn through one keyed path.
   return (
-    <div className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card">
-      <StatusStrip
-        execution={execution}
-        expanded={expanded}
-        onToggle={() => setExpanded((v) => !v)}
-        onMaximize={() => setFullscreen(true)}
-      />
-      {expanded && <GraphArea execution={execution} height={graphHeight} />}
-      {fullscreen && (
-        <TeamGraphFullscreen onClose={() => setFullscreen(false)} />
-      )}
-    </div>
+    <ExecutionScopeContext.Provider value={messageId}>
+      <div className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card">
+        <StatusStrip
+          execution={execution}
+          expanded={expanded}
+          onToggle={() => setExpanded((v) => !v)}
+          onMaximize={() => setFullscreen(true)}
+        />
+        {expanded && (
+          <GraphArea
+            execution={execution}
+            messageId={messageId}
+            height={graphHeight}
+          />
+        )}
+        {fullscreen && (
+          <TeamGraphFullscreen onClose={() => setFullscreen(false)} />
+        )}
+      </div>
+    </ExecutionScopeContext.Provider>
   );
 }
 
-/** The embedded live graph + its drill-down wiring. Node clicks open the passive
- * right-side run detail; the strip's maximize button owns full-screen. */
+/** The embedded graph + its drill-down wiring. Node clicks open the passive
+ * right-side run detail for this message; the strip's maximize button owns
+ * full-screen. */
 function GraphArea({
   execution,
+  messageId,
   height,
 }: {
   execution: Execution;
+  messageId: string;
   height: number;
 }) {
   const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
@@ -113,7 +148,7 @@ function GraphArea({
   const onNodeSelect = (runId: string) => {
     const run = execution.runs.find((r) => r.id === runId);
     const role = execution.agents.find((a) => a.id === run?.agentId)?.role;
-    showRunDetail(runId, role);
+    showRunDetail(messageId, runId, role);
   };
 
   return (
@@ -132,7 +167,12 @@ interface StripProps {
 }
 
 /** Lifecycle-specific header row above the graph. */
-function StatusStrip({ execution, expanded, onToggle, onMaximize }: StripProps) {
+function StatusStrip({
+  execution,
+  expanded,
+  onToggle,
+  onMaximize,
+}: StripProps) {
   const ctrl = { expanded, onToggle, onMaximize };
   switch (execution.status) {
     case "completed":
@@ -467,6 +507,7 @@ function FailureStrip({
  */
 function RecoveryActions({ abandonLabel = "放弃" }: { abandonLabel?: string }) {
   const isGenerating = useActiveGenerating();
+  const messageId = useExecutionScope();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -503,7 +544,9 @@ function RecoveryActions({ abandonLabel = "放弃" }: { abandonLabel?: string })
     void runRegenerate(m.id, text);
   };
 
-  const onAbandon = () => useExecutionStore.getState().clearExecution();
+  const onAbandon = () => {
+    if (messageId) useExecutionStore.getState().clearExecution(messageId);
+  };
 
   if (editing) {
     return (

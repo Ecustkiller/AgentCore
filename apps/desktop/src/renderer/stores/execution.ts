@@ -1,7 +1,20 @@
-import type { CostBreakdown, RunKind, UsageBreakdown } from "@/types/events";
-import { useMemo } from "react";
+import type {
+  CostBreakdown,
+  RunCompletedPayload,
+  RunFailedPayload,
+  RunKind,
+  RunOutputDeltaPayload,
+  RunPlanPayload,
+  RunProgressPayload,
+  RunReasoningDeltaPayload,
+  RunStartedPayload,
+  SSEEvent,
+  ToolUseEndPayload,
+  ToolUseStartPayload,
+  UsageBreakdown,
+} from "@/types/events";
+import { createContext, useContext, useMemo } from "react";
 import { create } from "zustand";
-import { useConversationStore } from "./conversation";
 
 export type RunStatus =
   | "pending"
@@ -427,10 +440,177 @@ export function elapsedMs(frames: RunFrame[]): number {
 }
 
 /**
- * The live execution state of a single conversation's current turn — plan,
- * frame stream, playhead and cross-view focus. Each conversation owns its own
- * runtime so background turns keep streaming into their own graph while the
- * user looks at another conversation.
+ * A persisted multi-agent execution journal for one assistant message
+ * (`messages.runs`): the turn's ordered run/tool SSE events plus its finish
+ * reason. Replayed client-side through the same fold as the live stream to
+ * rebuild a past turn's team graph on reload. Carried on {@link Message.runs};
+ * absent for user / single-agent messages (no delegation).
+ */
+export interface ExecutionJournal {
+  events: SSEEvent[];
+  finishReason: string;
+}
+
+/** Wall-clock time of a wire event (ms), used to label timeline frames. The
+ * journal stores the same ISO timestamp the live stream carried, so replay and
+ * live label frames identically. */
+function frameTimeOf(event: SSEEvent): number {
+  const parsed = Date.parse(event.timestamp);
+  return Number.isNaN(parsed) ? Date.now() : parsed;
+}
+
+/** Map a `run_plan` wire payload to the immutable plan skeleton. */
+export function planFromRunPlan(p: RunPlanPayload): ExecutionPlan {
+  return {
+    id: p.execution_id,
+    planType: p.plan_type,
+    taskSummary: p.task_summary,
+    agents: p.agents.map((a) => ({
+      id: a.id,
+      role: a.role,
+      modelPreference: a.model_preference,
+      thinking: a.thinking,
+      reasoningEffort: a.reasoning_effort,
+    })),
+    runs: p.runs.map((s) => ({
+      id: s.id,
+      agentId: s.agent_id,
+      task: s.task,
+      dependsOn: s.depends_on,
+      kind: s.kind,
+    })),
+  };
+}
+
+/** Map a journaled run/tool SSE event to a {@link RunFrame}, or null for events
+ * that are not frames (e.g. `run_plan`). The single event→frame mapping shared
+ * by the live SSE dispatch and journal replay, so there is one fold, not two. */
+export function frameFromEvent(event: SSEEvent): RunFrame | null {
+  const t = frameTimeOf(event);
+  switch (event.type) {
+    case "run_started": {
+      const p = event.payload as RunStartedPayload;
+      return {
+        t,
+        kind: "run_started",
+        agentId: p.agent_id,
+        runId: p.run_id,
+        parentRunId: p.parent_run_id,
+        runKind: p.kind,
+      };
+    }
+    case "run_output_delta": {
+      const p = event.payload as RunOutputDeltaPayload;
+      return {
+        t,
+        kind: "run_output_delta",
+        agentId: p.agent_id,
+        delta: p.delta,
+      };
+    }
+    case "run_reasoning_delta": {
+      const p = event.payload as RunReasoningDeltaPayload;
+      return {
+        t,
+        kind: "run_reasoning_delta",
+        agentId: p.agent_id,
+        delta: p.delta,
+      };
+    }
+    case "run_completed": {
+      const p = event.payload as RunCompletedPayload;
+      return {
+        t,
+        kind: "run_completed",
+        runId: p.run_id,
+        agentId: p.agent_id,
+        outputSummary: p.output_summary,
+        durationMs: p.duration_ms,
+        role: p.role,
+        model: p.model,
+        usage: p.usage,
+        cost: p.cost,
+      };
+    }
+    case "run_failed": {
+      const p = event.payload as RunFailedPayload;
+      return {
+        t,
+        kind: "run_failed",
+        runId: p.run_id,
+        agentId: p.agent_id,
+        error: p.error,
+      };
+    }
+    case "run_progress": {
+      const p = event.payload as RunProgressPayload;
+      return {
+        t,
+        kind: "run_progress",
+        completed: p.completed,
+        total: p.total,
+      };
+    }
+    case "tool_use_start": {
+      const p = event.payload as ToolUseStartPayload;
+      return {
+        t,
+        kind: "tool_use_start",
+        toolCallId: p.tool_call_id,
+        toolName: p.tool_name,
+        arguments: p.arguments,
+      };
+    }
+    case "tool_use_end": {
+      const p = event.payload as ToolUseEndPayload;
+      return {
+        t,
+        kind: "tool_use_end",
+        toolCallId: p.tool_call_id,
+        result: p.result,
+        status: p.status,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+/** Merge a later same-turn delegate batch into the current plan: append unseen
+ * agents/runs (ids are namespaced per delegate call), keep the first batch's
+ * task summary unless the new one is non-empty. Shared by {@link ingestPlan}
+ * (live) and journal replay (history). */
+function mergePlanInto(cur: ExecutionPlan, next: ExecutionPlan): ExecutionPlan {
+  const agents = [...cur.agents];
+  for (const a of next.agents) {
+    if (!agents.some((x) => x.id === a.id)) agents.push(a);
+  }
+  const runs = [...cur.runs];
+  for (const s of next.runs) {
+    if (!runs.some((x) => x.id === s.id)) runs.push(s);
+  }
+  return {
+    ...cur,
+    agents,
+    runs,
+    taskSummary: next.taskSummary || cur.taskSummary,
+  };
+}
+
+/** Map a persisted turn's `finish_reason` to the terminal execution status the
+ * fold needs (a journal is only stored for finished turns). */
+function statusFromFinish(finishReason: string): ExecutionStatus {
+  if (finishReason === "error") return "failed";
+  if (finishReason === "cancelled") return "cancelled";
+  return "completed";
+}
+
+/**
+ * The execution state of a single assistant message's turn — plan, frame
+ * stream, playhead and cross-view focus. Keyed by assistant message id so every
+ * past multi-agent turn in a conversation keeps its own graph: the live turn
+ * streams frames into its message's slot, and a reloaded turn hydrates its slot
+ * once from the persisted journal.
  */
 export interface ExecutionRuntime {
   plan: ExecutionPlan | null;
@@ -440,43 +620,50 @@ export interface ExecutionRuntime {
   status: ExecutionStatus;
 
   /**
-   * Cross-view selection shared by the graph and the in-chat task card. A
-   * run focus pins one node (and its agent); an agent focus highlights every
-   * node that agent owns. Bridged through {@link ExecutionPlan} so either view
-   * can drive the other even though they are never on screen at once.
+   * The run selected in the *full-screen* team-graph overlay — its highlighted
+   * node + side `NodeDetail`. Also seeded by a panel pin (`showRunDetail`) so
+   * maximizing lands on the last-viewed run. The embedded inline graph does NOT
+   * read this: it mirrors the conversation panel's active run-detail tab, so
+   * there is one highlight source per surface and no cross-store syncing. Null
+   * when nothing is selected; scoped per message (each turn owns its selection).
    */
-  focusedRunId: string | null;
-  focusedAgentId: string | null;
+  selectedRunId: string | null;
 }
 
 /**
- * Every mutator targets one conversation's {@link ExecutionRuntime}. The
- * `conversationId` is optional and defaults to the *active* conversation
- * (resolved from the conversation store): SSE dispatch passes the turn's id
- * explicitly so background turns route to their own slice, while view
- * interactions (focus/playhead) omit it and act on whatever is on screen.
+ * Every mutator targets one assistant message's {@link ExecutionRuntime} by id.
+ * SSE dispatch resolves the live turn's assistant message id and routes frames
+ * there; view interactions (focus / playhead) pass the message id of the graph
+ * subtree they belong to ({@link useExecutionScope}).
  */
 interface ExecutionState {
   byId: Record<string, ExecutionRuntime>;
 
-  startExecution: (plan: ExecutionPlan, conversationId?: string | null) => void;
+  startExecution: (plan: ExecutionPlan, messageId: string) => void;
   /**
    * Ingest a `run_plan` batch. The first batch of a turn starts a fresh
    * execution; a later batch with the *same* execution id (the adaptive D1′
    * case where the CEO delegates again) is merged in — new agents/runs are
    * appended and the frame stream is kept — so every batch stays on the graph
-   * and timeline. `clearExecution` between turns still gives each turn a fresh
-   * graph, so cross-turn batches never merge.
+   * and timeline. A new turn produces a new assistant message (new slot), so
+   * cross-turn batches never merge.
    */
-  ingestPlan: (plan: ExecutionPlan, conversationId?: string | null) => void;
-  clearExecution: (conversationId?: string | null) => void;
-  recordFrame: (frame: RunFrame, conversationId?: string | null) => void;
-  setStatus: (status: ExecutionStatus, conversationId?: string | null) => void;
-  setPlayhead: (index: number | null, conversationId?: string | null) => void;
-  goLive: (conversationId?: string | null) => void;
-  focusRun: (runId: string | null, conversationId?: string | null) => void;
-  focusAgent: (agentId: string | null, conversationId?: string | null) => void;
-  clearFocus: (conversationId?: string | null) => void;
+  ingestPlan: (plan: ExecutionPlan, messageId: string) => void;
+  clearExecution: (messageId: string) => void;
+  recordFrame: (frame: RunFrame, messageId: string) => void;
+  setStatus: (status: ExecutionStatus, messageId: string) => void;
+  setPlayhead: (index: number | null, messageId: string) => void;
+  goLive: (messageId: string) => void;
+  /** Select a run for drill-down (null clears), scoped to one message's graph. */
+  selectRun: (runId: string | null, messageId: string) => void;
+  /**
+   * Fold a persisted execution journal (`messages.runs`) into a message's slot,
+   * reproducing the team graph a past multi-agent turn had — replayed through
+   * the same fold as the live stream. Idempotent: a slot that already holds a
+   * plan (a live turn, or an earlier hydrate) is left untouched, so a re-render
+   * or a late history fetch never clobbers live frames.
+   */
+  hydrateFromJournal: (messageId: string, journal: ExecutionJournal) => void;
 }
 
 const EMPTY_EXEC: ExecutionRuntime = {
@@ -484,168 +671,162 @@ const EMPTY_EXEC: ExecutionRuntime = {
   frames: [],
   playhead: null,
   status: "planning",
-  focusedRunId: null,
-  focusedAgentId: null,
+  selectedRunId: null,
 };
 
 /**
- * Resolve the target conversation key — an explicit id (SSE dispatch) or, when
- * omitted, the conversation currently on screen (view interactions). The draft
- * conversation maps to `""` and never carries an execution.
- */
-function execKey(conversationId?: string | null): string {
-  return (
-    conversationId ??
-    useConversationStore.getState().currentConversationId ??
-    ""
-  );
-}
-
-/**
- * The execution runtime of a conversation, never undefined (empty default).
- * Pass an id for a specific conversation, or omit for the active one. Use this
- * for imperative reads (`getState`, tests); components should subscribe via
- * {@link useActiveExecField} / {@link useProjectedExecution} so a conversation
- * switch re-renders the view.
+ * The execution runtime of an assistant message, never undefined (empty
+ * default). Use this for imperative reads (`getState`, tests); components
+ * subscribe via {@link useProjectedExecution} / {@link useActiveExecField}
+ * (scoped to the in-context message) so a conversation switch re-renders.
  */
 export function execRuntime(
   state: ExecutionState,
-  conversationId?: string | null,
+  messageId: string | null | undefined,
 ): ExecutionRuntime {
-  return state.byId[execKey(conversationId)] ?? EMPTY_EXEC;
-}
-
-/** The execution runtime of the conversation currently on screen. */
-export function activeExec(state: ExecutionState): ExecutionRuntime {
-  return execRuntime(state);
+  return (messageId ? state.byId[messageId] : undefined) ?? EMPTY_EXEC;
 }
 
 export const useExecutionStore = create<ExecutionState>((set, get) => {
-  /** Patch one conversation's runtime slice, lazily created from empty. */
+  /** Patch one message's runtime slice, lazily created from empty. */
   const patchExec = (
-    conversationId: string | null | undefined,
+    messageId: string,
     update: (cur: ExecutionRuntime) => Partial<ExecutionRuntime> | null,
   ) =>
     set((state) => {
-      const key = execKey(conversationId);
-      const cur = state.byId[key] ?? EMPTY_EXEC;
+      const cur = state.byId[messageId] ?? EMPTY_EXEC;
       const patch = update(cur);
       if (patch === null) return {};
-      return { byId: { ...state.byId, [key]: { ...cur, ...patch } } };
+      return { byId: { ...state.byId, [messageId]: { ...cur, ...patch } } };
     });
 
   return {
     byId: {},
 
-    startExecution: (plan, conversationId) =>
-      patchExec(conversationId, () => ({
+    startExecution: (plan, messageId) =>
+      patchExec(messageId, () => ({
         plan,
         frames: [],
         playhead: null,
         status: "running",
-        focusedRunId: null,
-        focusedAgentId: null,
+        selectedRunId: null,
       })),
 
-    ingestPlan: (plan, conversationId) => {
-      const cur = execRuntime(get(), conversationId).plan;
+    ingestPlan: (plan, messageId) => {
+      const cur = execRuntime(get(), messageId).plan;
       // Different turn / first batch → fresh start (resets frames + focus).
       if (!cur || cur.id !== plan.id) {
-        get().startExecution(plan, conversationId);
+        get().startExecution(plan, messageId);
         return;
       }
-      // Same execution → an incremental delegate batch. Append unseen agents and
-      // runs (run-ids are namespaced per delegate call, so no collisions) while
-      // preserving the existing frame stream, playhead and focus.
-      const agents = [...cur.agents];
-      for (const a of plan.agents) {
-        if (!agents.some((x) => x.id === a.id)) agents.push(a);
-      }
-      const runs = [...cur.runs];
-      for (const s of plan.runs) {
-        if (!runs.some((x) => x.id === s.id)) runs.push(s);
-      }
-      patchExec(conversationId, () => ({
-        plan: {
-          ...cur,
-          agents,
-          runs,
-          taskSummary: plan.taskSummary || cur.taskSummary,
-        },
+      // Same execution → an incremental delegate batch: merge in unseen
+      // agents/runs while keeping the existing frame stream, playhead and focus.
+      patchExec(messageId, () => ({
+        plan: mergePlanInto(cur, plan),
         status: "running",
       }));
     },
 
-    clearExecution: (conversationId) =>
-      patchExec(conversationId, () => ({ ...EMPTY_EXEC })),
+    clearExecution: (messageId) =>
+      patchExec(messageId, () => ({ ...EMPTY_EXEC })),
 
     // Frames only carry meaning inside an execution; ignore stray run/tool facts
     // from the single-agent path (no plan declared).
-    recordFrame: (frame, conversationId) =>
-      patchExec(conversationId, (cur) =>
+    recordFrame: (frame, messageId) =>
+      patchExec(messageId, (cur) =>
         cur.plan ? { frames: [...cur.frames, frame] } : null,
       ),
 
-    setStatus: (status, conversationId) =>
-      patchExec(conversationId, () => ({ status })),
+    setStatus: (status, messageId) => patchExec(messageId, () => ({ status })),
 
-    setPlayhead: (index, conversationId) =>
-      patchExec(conversationId, () => ({ playhead: index })),
+    setPlayhead: (index, messageId) =>
+      patchExec(messageId, () => ({ playhead: index })),
 
-    goLive: (conversationId) =>
-      patchExec(conversationId, () => ({ playhead: null })),
+    goLive: (messageId) => patchExec(messageId, () => ({ playhead: null })),
 
-    focusRun: (runId, conversationId) =>
-      patchExec(conversationId, (cur) => {
-        if (runId === null) {
-          return { focusedRunId: null, focusedAgentId: null };
+    selectRun: (runId, messageId) =>
+      patchExec(messageId, () => ({ selectedRunId: runId })),
+
+    hydrateFromJournal: (messageId, journal) =>
+      set((state) => {
+        // Idempotent: never clobber a live turn's slot or an earlier hydrate.
+        if (state.byId[messageId]?.plan) return {};
+        let plan: ExecutionPlan | null = null;
+        const frames: RunFrame[] = [];
+        for (const event of journal.events) {
+          if (event.type === "run_plan") {
+            const next = planFromRunPlan(event.payload as RunPlanPayload);
+            plan = plan ? mergePlanInto(plan, next) : next;
+          } else {
+            const frame = frameFromEvent(event);
+            if (frame) frames.push(frame);
+          }
         }
-        const agentId =
-          cur.plan?.runs.find((s) => s.id === runId)?.agentId ?? null;
-        return { focusedRunId: runId, focusedAgentId: agentId };
+        // No run_plan in the journal → nothing to draw (single-agent / stray).
+        if (!plan) return {};
+        return {
+          byId: {
+            ...state.byId,
+            [messageId]: {
+              plan,
+              frames,
+              playhead: null,
+              status: statusFromFinish(journal.finishReason),
+              selectedRunId: null,
+            },
+          },
+        };
       }),
-
-    focusAgent: (agentId, conversationId) =>
-      patchExec(conversationId, () => ({
-        focusedAgentId: agentId,
-        focusedRunId: null,
-      })),
-
-    clearFocus: (conversationId) =>
-      patchExec(conversationId, () => ({
-        focusedRunId: null,
-        focusedAgentId: null,
-      })),
   };
 });
 
 /**
- * Subscribe to one field of the *active* conversation's execution runtime.
- * Reacts both to that field changing and to a conversation switch (the active
- * key lives in the conversation store), so views always reflect what is on
- * screen. Prefer this over reading the store directly.
+ * The assistant message id whose team graph the current subtree renders.
+ * Provided by {@link InlineTeamGraph} (inline graph) and the detail panel
+ * (run-detail tab); the scoped hooks below read it so every graph view targets
+ * the right message's slot — live or replayed — through one code path.
  */
-export function useActiveExecField<T>(
-  selector: (rt: ExecutionRuntime) => T,
-): T {
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  return useExecutionStore((s) =>
-    selector(s.byId[conversationId ?? ""] ?? EMPTY_EXEC),
-  );
+export const ExecutionScopeContext = createContext<string | null>(null);
+
+/** The in-scope message id (see {@link ExecutionScopeContext}). */
+export function useExecutionScope(): string | null {
+  return useContext(ExecutionScopeContext);
 }
 
-/**
- * The execution snapshot at the current playhead. Returns the live state while
- * following the tail, or the historical projection while scrubbing. Tracks the
- * active conversation, so switching conversations re-projects that one's graph.
- */
-export function useProjectedExecution(): Execution | null {
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  const rt = useExecutionStore((s) => s.byId[conversationId ?? ""]);
-
+/** Project a specific message's execution at its current playhead — live tail
+ * or replay. Used where the message id is explicit (the inline graph + panel). */
+export function useMessageExecution(
+  messageId: string | null,
+): Execution | null {
+  const rt = useExecutionStore((s) =>
+    messageId ? s.byId[messageId] : undefined,
+  );
   return useMemo(() => {
     if (!rt?.plan) return null;
     const upto = rt.playhead ?? rt.frames.length;
     return projectExecution(rt.plan, rt.frames.slice(0, upto), rt.status);
   }, [rt]);
+}
+
+/**
+ * Subscribe to one field of the in-scope message's execution runtime
+ * ({@link ExecutionScopeContext}). Re-renders when that field changes or the
+ * scope switches. Prefer this over reading the store directly.
+ */
+export function useActiveExecField<T>(
+  selector: (rt: ExecutionRuntime) => T,
+): T {
+  const messageId = useContext(ExecutionScopeContext);
+  return useExecutionStore((s) =>
+    selector((messageId ? s.byId[messageId] : undefined) ?? EMPTY_EXEC),
+  );
+}
+
+/**
+ * The in-scope message's execution snapshot at the current playhead — live
+ * while following the tail, historical while scrubbing. Reads the scope from
+ * {@link ExecutionScopeContext}.
+ */
+export function useProjectedExecution(): Execution | null {
+  return useMessageExecution(useContext(ExecutionScopeContext));
 }

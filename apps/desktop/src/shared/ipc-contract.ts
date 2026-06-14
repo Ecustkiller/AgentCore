@@ -45,6 +45,34 @@ export type FsResult<T = void> =
 
 export type FsCreateKind = "file" | "dir";
 
+/**
+ * 本地工作区 op 名（双模式工作区 P2）—— 与服务端 `WorkspaceOp` 一一对应。
+ *
+ * 服务端 `LocalWorkspace` 把每个 backend 方法序列化成一条 op 经 SSE 下发，主进程
+ * 在授权根上执行后回填。P2a 先打通只读三件套（read/list/grep）。
+ */
+export type WorkspaceOpName =
+  | "read"
+  | "write"
+  | "read_bytes"
+  | "write_bytes"
+  | "list"
+  | "mkdir"
+  | "delete"
+  | "move"
+  | "replace"
+  | "grep"
+  | "execute";
+
+/**
+ * 一次本地 op 的执行结果信封 —— 形状与服务端回填端点 `ResolveWorkspaceOpRequest`
+ * 对齐：成功带 `value`（op 相关）；失败带类型化 `error`，其 `kind` 直接映射回服务端
+ * 的 `WorkspaceError` 子类（如 `PathNotFound`），从而工具层报错文案与云模式一致。
+ */
+export type WorkspaceOpResult =
+  | { ok: true; value: unknown }
+  | { ok: false; error: { kind: string; detail: string; count?: number } };
+
 /** 主进程 → renderer 的目录变更事件（watch 命中后发出）。 */
 export interface FsChangedEvent {
   rootId: string;
@@ -66,6 +94,7 @@ export const FS_CHANNELS = {
   watch: "fs:watch",
   unwatch: "fs:unwatch",
   changed: "fs:changed",
+  workspaceOp: "fs:workspaceOp",
 } as const;
 
 /**
@@ -97,4 +126,15 @@ export interface FsApi {
   unwatch(rootId: string, relPath: string): Promise<void>;
   /** 订阅目录变更；返回取消订阅函数。 */
   onChanged(cb: (e: FsChangedEvent) => void): () => void;
+  /**
+   * 在某授权根上执行一次本地工作区 op（供本地模式下 AI 工具调用回填）。
+   *
+   * `args` 为该 op 的相对路径载荷（如 `{ path }` / `{ directory, pattern }`）；
+   * 失败不抛异常，统一以 `WorkspaceOpResult` 的类型化 `error` 返回。
+   */
+  workspaceOp(
+    rootId: string,
+    op: WorkspaceOpName,
+    args: Record<string, unknown>,
+  ): Promise<WorkspaceOpResult>;
 }

@@ -6,26 +6,11 @@
 
 ## 一、详情面板（DetailPanel）
 
-**布局**：对话页右侧可开关/可拖拽面板；简单任务关闭（体验同 ChatGPT），多 Agent 自动展开。
+> **已落地并退役为现状**：`DetailPanel` 现为**纯 run-detail 下钻面板**（点内嵌协作图节点钉住该 run），原 `task-progress` / `task-graph` 双 tab 已删（进度/协作图折进内嵌图）；多 `run-detail` 可并存对比、可拖拽宽度（280–560px）、仅持久化 `open` + `width`、按 `messageId` 投影。现状与关键决策见 [`前端UX设计.md` §十](../04-前端/前端UX设计.md) + [`前端技术与架构.md` §9.2 / §9.4](../04-前端/前端技术与架构.md)。下列为仍具参考价值的信息层级模型与 run-detail 区段构成。
 
-**信息层次**（Layer 0–4）：默认只见输出 + 任务进度；面板承担 Agent 活动及以下层级。详见 [`前端UX设计.md` §一](../04-前端/前端UX设计.md)。
+**信息层次**（Layer 0–4，设计模型）：单 Agent 回合默认只见输出（Layer 0）；多 Agent 回合的状态/进度/协作由内嵌图承担（Layer 1–3）；点节点把单 run 全文下钻到面板（Layer 4）。
 
-**关键决策**：
-
-| 决策 | 取值 | 理由 |
-|------|------|------|
-| Tab 管理 | 动态开/关，非固定 Tab 栏 | 用户只看关心的 |
-| 标签上限 | 6，超出淘汰最旧 | 防堆积 |
-| 持久化 | 仅 `open` + `width`；Tab 集会话级 | Tab 是临时工作态 |
-| 多 `run-detail` | 可并存对比 | 否决每次覆盖 |
-| 数据源 | Tab 存引用，详情从 run 树现取 | 单一数据源 |
-| 自动打开 | 多 Agent 开 task-progress；单 Agent 不开 | 零噪音 |
-
-**Tab 类型**（触发 → 内容）：`task-progress`（团队总进度，✅）/ `run-detail`（单 run 下钻，✅）/ `task-graph`（缩略 DAG，✅）/ `conversation-artifacts`（对话产物，⏳ 需产物系统，`DetailTabKind` 暂三类）。→ 类型定义见 `stores/detailPanel.ts`。独立 `reasoning` Tab 已否决：思考全文本质 per-run，落地于 `run-detail`「思考过程」区段而非全局 Tab（否则需反向追问「哪个 run」）。
-
-**run-detail 区段**：头部 / 任务 / 错误 / 思考过程（worker 思考全文，✅ `run_reasoning_delta` 流式，流式时自动展开、完成自动收起）/ 输出 / 工具 / 协作关系（依赖+后续，✅）/ 资源消耗（power 粒度全量数字，✅）。「子任务」原拟按嵌套呈现，但阶段1 worker 扁平（`parentRunId` 恒空），故落地为按方向诚实展示的「协作关系」（`dependsOn` 上游/下游）；真正的嵌套子任务留待阶段2 `parentRunId`。→ 见代码 `RunDetailBody.tsx`。
-
-**数据**：实时 `useRunsStore.byMessage` 优先，回落 `message.runs` 快照；`message_end` 时快照持久化并释放实时槽。→ 见 [`前端技术与架构.md` §九](../04-前端/前端技术与架构.md)。
+**run-detail 区段**：头部 / 任务 / 错误 / 思考过程（worker 思考全文，✅ `run_reasoning_delta` 流式，流式时自动展开、完成自动收起）/ 输出 / 工具 / 协作关系（依赖+后续，✅）/ 资源消耗（power 粒度全量数字，✅）。「子任务」原拟按嵌套呈现，但阶段1 worker 扁平（`parentRunId` 恒空），故落地为按方向诚实展示的「协作关系」（`dependsOn` 上游/下游）；真正的嵌套子任务留待阶段2 `parentRunId`。→ 见代码 `RunDetailBody.tsx`。独立 `reasoning` Tab 已否决：思考全文本质 per-run，落地于 run-detail「思考过程」区段而非全局 Tab。
 
 ---
 
@@ -33,23 +18,23 @@
 
 已落地项见 [`前端UX设计.md` §二](../04-前端/前端UX设计.md)。
 
-**未落地**：Agent/Team 选择器、Slash 命令、拖拽附件、文件夹/产物 Pill；气泡内工具卡、内嵌协作图、时间戳；快捷键 `Cmd+N` / `Cmd+\` / `Cmd+B` / `F`（适应画布）。
+**未落地**：Agent/Team 选择器、Slash 命令、拖拽附件、文件夹/产物 Pill；气泡内工具卡、时间戳。
 
 ---
 
-## 三、任务卡片
+## 三、团队状态条（原「任务卡片」）
 
-三态（执行中/已完成/失败）+ 救火行 + `[···]` 菜单已落地，见 [`前端UX设计.md` §三](../04-前端/前端UX设计.md)。
+任务卡片已退役——其职责（三态 + 救火行 + `[···]` 菜单）折进**内嵌协作图的状态条**（`InlineTeamGraph`），现状见 [`前端UX设计.md` §三](../04-前端/前端UX设计.md)。
 
-**为何无「规划中」卡态**（决策，2026-06）：CEO + `delegate` 架构下 `run_plan` 同步到达，无独立规划空窗；「系统在思考」由 CEO reasoning 气泡覆盖；`tool_use_start(delegate)` 前无法预知是否组团。→ 见代码 `delegate.py`、`engine.py`。
+**为何无「规划中」态**（决策，2026-06）：CEO + `delegate` 架构下 `run_plan` 同步到达，无独立规划空窗；「系统在思考」由 CEO reasoning 气泡覆盖；`tool_use_start(delegate)` 前无法预知是否组团。→ 见代码 `delegate.py`、`engine.py`。
 
-**未落地**：独立检查点卡片（继续/调整/停止，不并入 TaskCard）；Agent 行补全（实时输出流、token/耗时）。
+**未落地**：独立检查点卡片（继续/调整/停止，不并入状态条）。
 
 ---
 
 ## 四、辩论/审查范式 UX
 
-辩论是 MVP Day1 范式，但 TaskCard 当前不区分并行/辩论。
+辩论是 MVP Day1 范式，但当前内嵌图状态条不区分并行/辩论。
 
 | 维度 | 并行 | 辩论 |
 |------|------|------|
@@ -77,17 +62,6 @@
 
 ## 六、侧栏文件夹分组
 
-**已落地**：用户文件夹 + 未分组分组（`GET /v1/conversations/grouped`、`useFoldersStore`、`FolderGroup`）、右键菜单（重命名 / 移动到文件夹 / 归档 / 删除，复用 `ContextMenu`）。→ 见代码 `components/sidebar/`、`stores/folders.ts`。
+**已落地**：用户文件夹 + 未分组分组（`GET /v1/conversations/grouped`、`useFoldersStore`、`FolderGroup`）、右键菜单（重命名 / 移到文件夹 / 移出 / 新建文件夹 / 删除，复用 `ContextMenu`）、状态指示器（🟢 执行中 / 🟡 待审批：每项读自身会话切片 `useConversationGenerating(id)` + 审批项按 `conversationId` 标签，故后台 turn 切走后仍亮点，呼应「会话运行时按 conversationId 分片」见 [`前端技术与架构.md` §9.6](../04-前端/前端技术与架构.md)）。→ 见代码 `components/sidebar/ConversationItem.tsx`、`stores/folders.ts`。
 
-**未落地**：拖拽移动对话到文件夹（⏳ 复用已有 `moveConversation`，缺 HTML5 drag 手势）；状态指示器（🟢 执行中 / 🟡 待审批，⏳ 需 per-conversation 运行态）。
-
----
-
-## 七、工具箱卡片网格
-
-现状：单页 `BuiltinToolCatalog`。目标：横向磁贴网格（`auto-fill minmax(260px,1fr)`，磁贴 ~72px：图标居左 + 标题/副文 + 右侧 `›`/「即将上线」），按两组轻量小标题（非 Tab）排布：
-
-- **创作工具**：文档 / 思维导图 / 多维表格 / 画布 / 幻灯片 / 可运行产物 / 流程图 / 表单——各为一种产物类型，点击进「该类型产物列表 + 新建」。
-- **能力**：AI 工具（目录卡，点开 = 内置动作工具只读目录，**已落地**子页 `/toolbox/ai-tools`）/ 集成连接器（MCP & 第三方）/ 工作流（编排工具 + Agent）。
-
-除「AI 工具」外均为占位（即将上线）。模型见 [`工具与能力系统.md` §8.4](../03-AI核心/工具与能力系统.md)；创作工具产物归 `file`/`table` 体系，多为 Post-MVP。
+**未落地**：拖拽移动对话到文件夹（⏳ 复用已有 `moveConversation`，缺 HTML5 drag 手势）。

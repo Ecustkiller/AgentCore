@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   Folder as FolderIcon,
+  HardDrive,
   Inbox,
   MoreHorizontal,
   Pencil,
@@ -180,6 +181,13 @@ export function FolderGroup({ folder, collapseKey, items, forceOpen }: Props) {
             <Inbox size={13} className="shrink-0" />
           )}
           <span className="truncate">{folder ? folder.name : "未分组"}</span>
+          {folder?.localRootId && (
+            <HardDrive
+              size={11}
+              className="shrink-0 text-primary"
+              aria-label="本地工作区"
+            />
+          )}
           <span className="shrink-0 text-sidebar-foreground/30">
             {items.length}
           </span>
