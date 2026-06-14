@@ -5,7 +5,12 @@ import {
   streamConversation,
 } from "@/services/streamConversation";
 import { useApprovalStore } from "@/stores/approvals";
-import { type Message, useConversationStore } from "@/stores/conversation";
+import {
+  type Message,
+  getActiveRuntime,
+  getRuntime,
+  useConversationStore,
+} from "@/stores/conversation";
 
 /** The user's explicit stop (abort button) — never surfaced as an error. */
 function isAbort(err: unknown): boolean {
@@ -15,7 +20,7 @@ function isAbort(err: unknown): boolean {
 /** The most recent user message in the open conversation, or null. Backs the
  * task card's retry / adjust-instruction / replan actions. */
 export function lastUserMessage(): Message | null {
-  const msgs = useConversationStore.getState().messages;
+  const msgs = getActiveRuntime().messages;
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role === "user") return msgs[i];
   }
@@ -42,15 +47,18 @@ export async function runRegenerate(
 ): Promise<void> {
   const store = useConversationStore.getState();
   const conversationId = store.currentConversationId;
-  if (!conversationId || store.isGenerating) return;
+  if (!conversationId || getRuntime(conversationId).isGenerating) return;
 
-  store.clearError();
+  // Route every turn write to this conversation's slice by id, not the active
+  // key — the user may switch away mid-stream and the turn keeps running in the
+  // background (switchConversation no longer aborts it).
+  store.clearError(conversationId);
   store.bumpConversation(conversationId);
-  store.truncateAfter(userMessageId);
-  store.createAssistantMessage();
+  store.truncateAfter(userMessageId, conversationId);
+  store.createAssistantMessage(conversationId);
 
   const ac = new AbortController();
-  store.setAbort(ac);
+  store.setAbort(ac, conversationId);
   try {
     await regenerateConversation({
       conversationId,
@@ -61,13 +69,22 @@ export async function runRegenerate(
   } catch (err) {
     if (isAbort(err)) return;
     const s = useConversationStore.getState();
-    if (s.isGenerating) s.finalizeLastMessage();
-    // A failed turn never delivers `approval_resolved`; drop any paused prompt.
-    useApprovalStore.getState().clear();
+    if (getRuntime(conversationId).isGenerating) {
+      s.finalizeLastMessage(conversationId);
+    }
+    // A failed turn never delivers `approval_resolved`; drop this conversation's
+    // paused prompt (other conversations keep theirs).
+    useApprovalStore.getState().clear(conversationId);
     const msg = describeStreamError(err);
-    if (msg) s.setError(msg, () => void runRegenerate(userMessageId, content));
+    if (msg) {
+      s.setError(
+        msg,
+        () => void runRegenerate(userMessageId, content),
+        conversationId,
+      );
+    }
   } finally {
-    useConversationStore.getState().setAbort(null);
+    useConversationStore.getState().setAbort(null, conversationId);
   }
 }
 
@@ -93,7 +110,10 @@ export interface SendTurnSpec {
 export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   const { conversationId, content, attachments, optimisticUserId } = spec;
   const store = useConversationStore.getState();
-  store.clearError();
+  // Every turn write routes to this conversation's slice by id (not the active
+  // key), so a turn keeps streaming into its own bubble after the user switches
+  // away to another conversation.
+  store.clearError(conversationId);
 
   // Snapshot the pre-bump position so we can undo the optimistic bump if the
   // send fails before the server ever persisted the turn.
@@ -104,9 +124,11 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
 
   // Persisted already? Then the optimistic id was swapped out — regenerate from
   // the saved user message rather than resending (which would duplicate it).
-  const stillOptimistic = store.messages.some((m) => m.id === optimisticUserId);
+  const stillOptimistic = getRuntime(conversationId).messages.some(
+    (m) => m.id === optimisticUserId,
+  );
   if (!stillOptimistic) {
-    const lastUser = [...store.messages]
+    const lastUser = [...getRuntime(conversationId).messages]
       .reverse()
       .find((m) => m.role === "user");
     if (lastUser) {
@@ -117,10 +139,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
 
   // Fresh attempt: drop any partial assistant bubble left by a failed try
   // (no-op on the first send, where the user bubble is already last).
-  store.truncateAfter(optimisticUserId);
+  store.truncateAfter(optimisticUserId, conversationId);
 
   const ac = new AbortController();
-  store.setAbort(ac);
+  store.setAbort(ac, conversationId);
   try {
     await streamConversation({
       conversationId,
@@ -131,18 +153,23 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   } catch (err) {
     if (isAbort(err)) return;
     const s = useConversationStore.getState();
-    if (s.isGenerating) s.finalizeLastMessage();
-    // A failed turn never delivers `approval_resolved`; drop any paused prompt.
-    useApprovalStore.getState().clear();
+    if (getRuntime(conversationId).isGenerating) {
+      s.finalizeLastMessage(conversationId);
+    }
+    // A failed turn never delivers `approval_resolved`; drop this conversation's
+    // paused prompt (other conversations keep theirs).
+    useApprovalStore.getState().clear(conversationId);
     // If the turn never persisted (no `turn_saved` reconciled the optimistic
     // id), the server order never changed — undo the optimistic bump.
-    const notPersisted = s.messages.some((m) => m.id === optimisticUserId);
+    const notPersisted = getRuntime(conversationId).messages.some(
+      (m) => m.id === optimisticUserId,
+    );
     if (notPersisted && origIndex >= 0 && origUpdatedAt !== null) {
       s.restoreConversation(conversationId, origIndex, origUpdatedAt);
     }
     const msg = describeStreamError(err);
-    if (msg) s.setError(msg, () => void sendTurn(spec));
+    if (msg) s.setError(msg, () => void sendTurn(spec), conversationId);
   } finally {
-    useConversationStore.getState().setAbort(null);
+    useConversationStore.getState().setAbort(null, conversationId);
   }
 }

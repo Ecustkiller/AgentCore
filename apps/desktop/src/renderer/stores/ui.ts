@@ -22,7 +22,6 @@ function persistUsageDetail(v: boolean): void {
 }
 
 interface UIState {
-  graphOpen: boolean;
   searchOpen: boolean;
   theme: "light" | "dark" | "system";
   /** 大众/power 用量明细开关 (§7.1). When true, compact surfaces reveal raw
@@ -31,8 +30,6 @@ interface UIState {
    * `localStorage: agentcore:usage-detail`. */
   usageDetail: boolean;
 
-  openGraph: () => void;
-  closeGraph: () => void;
   openSearch: () => void;
   closeSearch: () => void;
   toggleSearch: () => void;
@@ -42,13 +39,10 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set) => ({
-  graphOpen: false,
   searchOpen: false,
   theme: "system",
   usageDetail: loadUsageDetail(),
 
-  openGraph: () => set({ graphOpen: true }),
-  closeGraph: () => set({ graphOpen: false }),
   openSearch: () => set({ searchOpen: true }),
   closeSearch: () => set({ searchOpen: false }),
   toggleSearch: () => set((s) => ({ searchOpen: !s.searchOpen })),

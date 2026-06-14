@@ -42,14 +42,28 @@ def _workspace_relpath(*, user_id: str, folder_id: str | None, conversation_id: 
     return f"{user_id}/conv/{conversation_id}"
 
 
+def workspace_root_path(
+    *, user_id: str, folder_id: str | None, conversation_id: str
+) -> Path:
+    """The workspace directory path for a conversation — without creating it.
+
+    The pure path helper behind :func:`resolve_workspace_root`; retention cleanup
+    (决策⑦) needs the location to delete it, where creating-on-resolve would be
+    wrong (and would resurrect a dir we are about to purge).
+    """
+    relpath = _workspace_relpath(
+        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    )
+    return _workspaces_base() / relpath
+
+
 def resolve_workspace_root(
     *, user_id: str, folder_id: str | None, conversation_id: str
 ) -> Path:
     """Return (creating if needed) the workspace directory for a conversation."""
-    relpath = _workspace_relpath(
+    root = workspace_root_path(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    root = _workspaces_base() / relpath
     root.mkdir(parents=True, exist_ok=True)
     return root
 

@@ -1,3 +1,5 @@
+import { GraphView } from "@/components/graph/GraphView";
+import { TeamGraphFullscreen } from "@/components/graph/TeamGraphFullscreen";
 import { copyText } from "@/lib/clipboard";
 import { resolveTurnCost } from "@/lib/cost";
 import { formatCost, formatDuration } from "@/lib/format";
@@ -6,69 +8,145 @@ import {
   lastUserMessageId,
   runRegenerate,
 } from "@/services/turns";
-import { useConversationStore } from "@/stores/conversation";
+import {
+  activeRuntime,
+  selectLastAssistantCostTotal,
+  useActiveGenerating,
+  useConversationStore,
+} from "@/stores/conversation";
 import { useDetailPanelStore } from "@/stores/detailPanel";
 import {
   type Execution,
   elapsedMs,
+  useActiveExecField,
   useExecutionStore,
   useProjectedExecution,
 } from "@/stores/execution";
-import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import {
   AlertTriangle,
   Ban,
   Check,
   CheckCircle2,
-  ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Loader2,
+  Maximize2,
   MoreHorizontal,
   Pencil,
   RotateCcw,
   RotateCw,
   Square,
-  Workflow,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 /**
- * The in-chat "team dashboard" — the core visual difference from a plain chat
- * AI. Renders the task lifecycle as a compact signal (running progress /
- * completed scorecard / failure recovery); the roomy Layer-2 view (roster +
- * per-run drill-down) lives in the {@link DetailPanel}, reached via the entry
- * row. Single-agent turns carry no plan and never show a card.
+ * The multi-agent turn's primary surface, embedded in the assistant message
+ * above its answer: a compact status strip (lifecycle + cost + recovery) over
+ * the live collaboration graph. It is the in-chat "team界面" that replaced the
+ * old free-floating `TaskCard` + auto-opening detail panel + permanent graph
+ * overlay — one graph, one place (统一团队展示设计草案).
+ *
+ * The strip can collapse the graph away (the answer stays right below), and the
+ * canvas height adapts to team size so a small team does not float in a big box.
+ *
+ * Live-only for now (P0): it reads the single live execution store, so it renders
+ * only on the message whose turn is the one currently projected; reloaded
+ * (historical) multi-agent turns fall back to a plain bubble until per-message
+ * runs land (P2). Node clicks drill into the passive right-side panel; the
+ * maximize button opens the temporary full-screen graph (timeline replay).
  */
-export function TaskCard() {
+export function InlineTeamGraph({ executionId }: { executionId: string }) {
   const execution = useProjectedExecution();
-  if (!execution || execution.planType === "single_agent") return null;
+  const [expanded, setExpanded] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
+  // Gate on the live turn: a different (historical) message carries an
+  // executionId that does not match the one projection in the store, and a
+  // single-agent turn has no team to draw.
+  if (
+    !execution ||
+    execution.id !== executionId ||
+    execution.planType === "single_agent"
+  ) {
+    return null;
+  }
 
-  // Stable wrapper so the entrance animation plays once when the card first
-  // mounts on `run_plan`; inner status swaps (running→completed/failed) reuse
-  // this element and never re-trigger it.
+  // Adaptive height: reserve only as much canvas as the team needs (a 2-agent
+  // team would otherwise float in a half-empty box), clamped so a big DAG still
+  // fits the message column. React Flow's fitView fills whatever height we give.
+  const graphHeight = Math.min(
+    460,
+    Math.max(240, 150 + execution.runs.length * 78),
+  );
+
+  // Stable wrapper so the entrance animation plays once when the block first
+  // mounts on `run_plan`; inner status swaps (running→done) reuse this element.
   return (
-    <div className="animate-task-card-enter">
-      <TaskCardBody execution={execution} />
+    <div className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card">
+      <StatusStrip
+        execution={execution}
+        expanded={expanded}
+        onToggle={() => setExpanded((v) => !v)}
+        onMaximize={() => setFullscreen(true)}
+      />
+      {expanded && <GraphArea execution={execution} height={graphHeight} />}
+      {fullscreen && (
+        <TeamGraphFullscreen onClose={() => setFullscreen(false)} />
+      )}
     </div>
   );
 }
 
-function TaskCardBody({ execution }: { execution: Execution }) {
+/** The embedded live graph + its drill-down wiring. Node clicks open the passive
+ * right-side run detail; the strip's maximize button owns full-screen. */
+function GraphArea({
+  execution,
+  height,
+}: {
+  execution: Execution;
+  height: number;
+}) {
+  const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
+
+  const onNodeSelect = (runId: string) => {
+    const run = execution.runs.find((r) => r.id === runId);
+    const role = execution.agents.find((a) => a.id === run?.agentId)?.role;
+    showRunDetail(runId, role);
+  };
+
+  return (
+    <div className="w-full border-t border-border" style={{ height }}>
+      <GraphView embedded onNodeSelect={onNodeSelect} />
+    </div>
+  );
+}
+
+/** Props every lifecycle strip shares: the projection + the collapse toggle. */
+interface StripProps {
+  execution: Execution;
+  expanded: boolean;
+  onToggle: () => void;
+  onMaximize: () => void;
+}
+
+/** Lifecycle-specific header row above the graph. */
+function StatusStrip({ execution, expanded, onToggle, onMaximize }: StripProps) {
+  const ctrl = { expanded, onToggle, onMaximize };
   switch (execution.status) {
     case "completed":
-      return <CompletedCard execution={execution} />;
+      return <CompletedStrip execution={execution} {...ctrl} />;
     case "cancelled":
-      return <CompletedCard execution={execution} stopped />;
+      return <CompletedStrip execution={execution} stopped {...ctrl} />;
     case "failed":
-      return <FailureCard execution={execution} />;
+      return <FailureStrip execution={execution} {...ctrl} />;
     default:
-      return <RunningCard execution={execution} />;
+      return <RunningStrip execution={execution} {...ctrl} />;
   }
 }
 
-/** Circular icon button used across the card headers. */
+/** Circular icon button used in the strip's trailing controls. */
 function IconButton({
   icon,
   title,
@@ -90,24 +168,28 @@ function IconButton({
   );
 }
 
-/**
- * Entry into the detail panel's roomy team view. The single bridge from the
- * inline card to Layer 2 — the card itself stays a compact signal.
- */
-function TeamDetailEntry({ agentCount }: { agentCount: number }) {
-  const openProgress = useDetailPanelStore((s) => s.openProgress);
+/** Trailing controls shared by every strip: collapse the graph, maximize it,
+ * and the overflow menu. */
+function StripControls({
+  execution,
+  expanded,
+  onToggle,
+  onMaximize,
+}: StripProps) {
   return (
-    <button
-      type="button"
-      onClick={() => openProgress()}
-      className="mt-3 flex w-full items-center justify-between rounded-lg bg-muted/50 px-3 py-2 text-left text-sm hover:bg-accent"
-    >
-      <span className="text-muted-foreground">{agentCount} 个 Agent 协作</span>
-      <span className="flex items-center gap-0.5 text-primary">
-        查看团队详情
-        <ChevronRight size={14} />
-      </span>
-    </button>
+    <>
+      <IconButton
+        icon={expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+        title={expanded ? "收起协作图" : "展开协作图"}
+        onClick={onToggle}
+      />
+      <IconButton
+        icon={<Maximize2 size={15} />}
+        title="全屏查看协作图"
+        onClick={onMaximize}
+      />
+      <TaskMenu execution={execution} />
+    </>
   );
 }
 
@@ -191,13 +273,17 @@ function MenuItem({
   );
 }
 
-/** Active execution: live progress bar + entry into the team detail panel. */
-function RunningCard({ execution }: { execution: Execution }) {
-  const openGraph = useUIStore((s) => s.openGraph);
+/** Active execution: live progress bar in the strip. */
+function RunningStrip({
+  execution,
+  expanded,
+  onToggle,
+  onMaximize,
+}: StripProps) {
   const { completed, total } = execution.progress;
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="px-4 py-3">
       <div className="flex items-center gap-2">
         <Loader2 size={15} className="shrink-0 animate-spin text-primary" />
         <span className="flex-1 truncate text-sm font-medium text-foreground">
@@ -206,47 +292,43 @@ function RunningCard({ execution }: { execution: Execution }) {
         <span className="shrink-0 text-xs text-muted-foreground">
           {completed}/{total}
         </span>
-        <IconButton
-          icon={<Workflow size={15} />}
-          title="查看协作图"
-          onClick={openGraph}
+        <StripControls
+          execution={execution}
+          expanded={expanded}
+          onToggle={onToggle}
+          onMaximize={onMaximize}
         />
-        <TaskMenu execution={execution} />
       </div>
-
-      <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-muted">
+      <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
         <div
           className="h-full rounded-full bg-primary transition-all duration-300"
           style={{ width: total > 0 ? `${(completed / total) * 100}%` : "0%" }}
         />
       </div>
-
-      <TeamDetailEntry agentCount={execution.agents.length} />
     </div>
   );
 }
 
 /**
  * Finished execution: a one-line "team scorecard". Doubles as the **stopped**
- * card (`stopped` — status=cancelled): same shape, "已停止" header and the
+ * strip (`stopped` — status=cancelled): same shape, "已停止" header and the
  * recovery row always offered (re-run).
  */
-function CompletedCard({
+function CompletedStrip({
   execution,
   stopped,
-}: {
-  execution: Execution;
-  stopped?: boolean;
-}) {
-  const openGraph = useUIStore((s) => s.openGraph);
-  const frames = useExecutionStore((s) => s.frames);
+  expanded,
+  onToggle,
+  onMaximize,
+}: StripProps & { stopped?: boolean }) {
+  const frames = useActiveExecField((rt) => rt.frames);
   const { completed, total } = execution.progress;
   const ms = elapsedMs(frames);
   const duration = ms > 0 ? formatDuration(ms) : "";
 
   // Partial failure: the CEO finished the turn (status=completed) but ≥1 worker
-  // failed. That's not a crash, so we keep the scorecard yet surface an amber
-  // notice + the shared recovery row, so the failure stays visible + actionable.
+  // failed. Not a crash, so keep the scorecard yet surface an amber notice + the
+  // shared recovery row, so the failure stays visible + actionable.
   const failedRuns = execution.runs.filter((s) => s.status === "failed");
   const failedRoles = failedRuns
     .map((s) => execution.agents.find((a) => a.id === s.agentId)?.role)
@@ -256,30 +338,26 @@ function CompletedCard({
   const failureNotice = `${failedRuns.length} 个子任务失败${failedRolesText}，可重试，或调整指令后重发。`;
   const showRecovery = stopped || failedRuns.length > 0;
 
-  // 回合成本 (§7.3A): the authoritative turn total is `message_end.cost` on the
-  // last assistant message (captain + members), null until then. The run-sum
-  // fallback for a stopped turn (no message_end) lives in `resolveTurnCost`.
-  const turnCostTotal = useConversationStore((s) => {
-    for (let i = s.messages.length - 1; i >= 0; i--) {
-      if (s.messages[i].role === "assistant")
-        return s.messages[i].cost?.total ?? null;
-    }
-    return null;
-  });
+  // 回合成本 (§7.3A): authoritative turn total is `message_end.cost` on the last
+  // assistant message (captain + members), null until then; the run-sum fallback
+  // for a stopped turn (no message_end) lives in `resolveTurnCost`.
+  const turnCostTotal = useConversationStore((s) =>
+    selectLastAssistantCostTotal(activeRuntime(s).messages),
+  );
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const costTotal = resolveTurnCost(
     turnCostTotal,
     execution.runs.map((r) => r.cost?.total ?? 0),
   );
-  // Only append the segment when there is real spend (0 / unknown shows nothing,
-  // never「¥0.00」, §7.5); a stopped card prefixes「已花」.
+  // Append only on real spend (0 / unknown shows nothing, never「¥0.00」, §7.5);
+  // a stopped strip prefixes「已花」.
   const costSegment =
     costTotal && costTotal > 0
       ? ` · ${stopped ? "已花 " : ""}${formatCost(costTotal, cnyPerUsd)}`
       : "";
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="px-4 py-3">
       <div className="flex items-center gap-2">
         {stopped ? (
           <Square size={15} className="shrink-0 text-muted-foreground" />
@@ -294,12 +372,12 @@ function CompletedCard({
             }${costSegment}`}
           </span>
         </span>
-        <IconButton
-          icon={<Workflow size={15} />}
-          title="查看协作图"
-          onClick={openGraph}
+        <StripControls
+          execution={execution}
+          expanded={expanded}
+          onToggle={onToggle}
+          onMaximize={onMaximize}
         />
-        <TaskMenu execution={execution} />
       </div>
 
       {showRecovery && (
@@ -313,20 +391,82 @@ function CompletedCard({
           <RecoveryActions abandonLabel="忽略" />
         </>
       )}
+    </div>
+  );
+}
 
-      <TeamDetailEntry agentCount={execution.agents.length} />
+/** Failed execution (turn-level crash): failing agent/run + recovery actions. */
+function FailureStrip({
+  execution,
+  expanded,
+  onToggle,
+  onMaximize,
+}: StripProps) {
+  const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
+
+  const failedRun = execution.runs.find((s) => s.status === "failed") ?? null;
+  const failedAgent = failedRun
+    ? (execution.agents.find((a) => a.id === failedRun.agentId) ?? null)
+    : null;
+
+  // A crash gets no message_end, so surface what the team已花 from the worker runs
+  // that completed before it failed (§7.3A). resolveTurnCost(null, …) returns null
+  // when nothing real was spent, so we render「已花」only when there is.
+  const spent = resolveTurnCost(
+    null,
+    execution.runs.map((r) => r.cost?.total ?? 0),
+  );
+  const spentText = spent != null ? formatCost(spent, cnyPerUsd) : null;
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center gap-2">
+        <AlertTriangle size={15} className="shrink-0 text-destructive" />
+        <span className="flex-1 text-sm text-foreground">
+          <span className="font-medium">任务失败</span>
+          {spentText && (
+            <span className="text-muted-foreground">{` · 已花 ${spentText}`}</span>
+          )}
+        </span>
+        <StripControls
+          execution={execution}
+          expanded={expanded}
+          onToggle={onToggle}
+          onMaximize={onMaximize}
+        />
+      </div>
+
+      <div className="mt-2 rounded-lg bg-muted/40 px-3 py-2 text-sm">
+        {failedAgent || failedRun ? (
+          <p className="text-foreground">
+            {failedAgent && (
+              <span className="font-medium">{failedAgent.role}</span>
+            )}
+            {failedRun && (
+              <span className="text-muted-foreground"> · {failedRun.task}</span>
+            )}
+          </p>
+        ) : (
+          <p className="text-foreground">执行过程中出现错误</p>
+        )}
+        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-destructive">
+          {failedRun?.error ?? "未获取到具体错误信息，可重试或调整指令后继续。"}
+        </p>
+      </div>
+
+      <RecoveryActions />
     </div>
   );
 }
 
 /**
  * Shared failure-recovery row: 重试 / 调整指令 (inline edit) / 放弃. Reused by the
- * turn-crash {@link FailureCard} and the partial-failure {@link CompletedCard} so
- * both surface the same actions. Owns its own inline-edit state; every action
+ * turn-crash {@link FailureStrip} and the partial-failure {@link CompletedStrip}
+ * so both surface the same actions. Owns its inline-edit state; every action
  * re-runs the turn from the last user message (whole-turn retry).
  */
 function RecoveryActions({ abandonLabel = "放弃" }: { abandonLabel?: string }) {
-  const isGenerating = useConversationStore((s) => s.isGenerating);
+  const isGenerating = useActiveGenerating();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -427,68 +567,6 @@ function RecoveryActions({ abandonLabel = "放弃" }: { abandonLabel?: string })
         label={abandonLabel}
         onClick={onAbandon}
       />
-    </div>
-  );
-}
-
-/** Failed execution (turn-level crash): failing agent/run + recovery actions. */
-function FailureCard({ execution }: { execution: Execution }) {
-  const openGraph = useUIStore((s) => s.openGraph);
-  const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
-
-  const failedRun = execution.runs.find((s) => s.status === "failed") ?? null;
-  const failedAgent = failedRun
-    ? (execution.agents.find((a) => a.id === failedRun.agentId) ?? null)
-    : null;
-
-  // A crash gets no message_end, so surface what the team已花 from the worker runs
-  // that completed before it failed (§7.3A). resolveTurnCost(null, …) returns null
-  // when nothing real was spent, so we render「已花」only when there is.
-  const spent = resolveTurnCost(
-    null,
-    execution.runs.map((r) => r.cost?.total ?? 0),
-  );
-  const spentText = spent != null ? formatCost(spent, cnyPerUsd) : null;
-
-  return (
-    <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-      <div className="flex items-center gap-2">
-        <AlertTriangle size={15} className="shrink-0 text-destructive" />
-        <span className="flex-1 text-sm text-foreground">
-          <span className="font-medium">任务失败</span>
-          {spentText && (
-            <span className="text-muted-foreground">{` · 已花 ${spentText}`}</span>
-          )}
-        </span>
-        <IconButton
-          icon={<Workflow size={15} />}
-          title="查看协作图"
-          onClick={openGraph}
-        />
-        <TaskMenu execution={execution} />
-      </div>
-
-      <div className="mt-2 rounded-lg bg-card/60 px-3 py-2 text-sm">
-        {failedAgent || failedRun ? (
-          <p className="text-foreground">
-            {failedAgent && (
-              <span className="font-medium">{failedAgent.role}</span>
-            )}
-            {failedRun && (
-              <span className="text-muted-foreground"> · {failedRun.task}</span>
-            )}
-          </p>
-        ) : (
-          <p className="text-foreground">执行过程中出现错误</p>
-        )}
-        <p className="mt-1 whitespace-pre-wrap break-words text-xs text-destructive">
-          {failedRun?.error ?? "未获取到具体错误信息，可重试或调整指令后继续。"}
-        </p>
-      </div>
-
-      <RecoveryActions />
-
-      <TeamDetailEntry agentCount={execution.agents.length} />
     </div>
   );
 }

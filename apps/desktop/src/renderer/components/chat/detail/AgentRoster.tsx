@@ -1,10 +1,15 @@
 import { splitPayroll } from "@/lib/cost";
 import { formatCost } from "@/lib/format";
-import { useConversationStore } from "@/stores/conversation";
+import {
+  activeRuntime,
+  selectLastAssistantCostTotal,
+  useConversationStore,
+} from "@/stores/conversation";
 import { useDetailPanelStore } from "@/stores/detailPanel";
 import {
   type AgentState,
   type Execution,
+  useActiveExecField,
   useExecutionStore,
 } from "@/stores/execution";
 import { useUIStore } from "@/stores/ui";
@@ -22,26 +27,30 @@ import { useEffect, useRef } from "react";
  * 别人只能说「这次花了 ¥X」；这里说「CEO ¥0.03 / 调研员 ¥0.05 / 写作 ¥0.04」。
  */
 export function AgentRoster({ execution }: { execution: Execution }) {
-  const focusedAgentId = useExecutionStore((s) => s.focusedAgentId);
+  const focusedAgentId = useActiveExecField((rt) => rt.focusedAgentId);
   const focusAgent = useExecutionStore((s) => s.focusAgent);
   const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
   const openGraph = useUIStore((s) => s.openGraph);
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   // 合计 = the turn total on the last assistant message (captain + members), the
   // authoritative aggregate from message_end; null until the turn ends.
-  const turnTotal = useConversationStore((s) => {
-    for (let i = s.messages.length - 1; i >= 0; i--) {
-      if (s.messages[i].role === "assistant")
-        return s.messages[i].cost?.total ?? null;
-    }
-    return null;
-  });
+  const turnTotal = useConversationStore((s) =>
+    selectLastAssistantCostTotal(activeRuntime(s).messages),
+  );
 
+  // The CEO synthesis run (Phase B) is the captain's own work surfaced as a real
+  // run. It is NOT a worker — exclude its agent from the worker rows so the CEO
+  // isn't listed twice, and back the captain row with it so that row drills into
+  // the 汇总过程 (its own cost is 0 / rolled into the captain split below).
+  const synthesisRun =
+    execution.runs.find((r) => r.kind === "synthesis") ?? null;
   // One payroll row per worker (its priced run); cost lights up as runs finish.
-  const workerRows = execution.agents.map((agent) => {
-    const run = execution.runs.find((s) => s.agentId === agent.id);
-    return { agent, run, cost: run?.cost?.total ?? 0 };
-  });
+  const workerRows = execution.agents
+    .filter((agent) => agent.id !== synthesisRun?.agentId)
+    .map((agent) => {
+      const run = execution.runs.find((s) => s.agentId === agent.id);
+      return { agent, run, cost: run?.cost?.total ?? 0 };
+    });
   // CEO split + bar normalisation live in a pure helper (`lib/cost.ts`) so the
   // money math is unit-tested: the captain has no scheduled run, so its spend is
   // the turn total minus the workers (exact — same per-run prices), shown only
@@ -70,6 +79,12 @@ export function AgentRoster({ execution }: { execution: Execution }) {
             cost={captainCost}
             maxCost={maxCost}
             cnyPerUsd={cnyPerUsd}
+            focused={!!synthesisRun && focusedAgentId === synthesisRun.agentId}
+            onSelect={
+              synthesisRun
+                ? () => showRunDetail(synthesisRun.id, "CEO")
+                : undefined
+            }
           />
         )}
         {workerRows.map(({ agent, run, cost }) => (
@@ -126,23 +141,51 @@ function CostMeter({
 }
 
 /** The CEO's own payroll line (captain spend), derived as the turn total minus
- * the workers. Static (no run to drill into) — the captain is the pipeline. */
+ * the workers. When a synthesis run backs it (Phase B), the label becomes a
+ * button that drills into the 汇总过程; otherwise it stays a static line (the
+ * captain is the pipeline, with no single run to open). */
 function CaptainRow({
   cost,
   maxCost,
   cnyPerUsd,
+  focused = false,
+  onSelect,
 }: {
   cost: number;
   maxCost: number;
   cnyPerUsd: number;
+  focused?: boolean;
+  onSelect?: () => void;
 }) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focused) {
+      rowRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [focused]);
+
   return (
-    <div className="rounded-lg bg-muted/50">
+    <div
+      ref={rowRef}
+      className={`rounded-lg transition-colors ${
+        focused ? "bg-primary/10 ring-1 ring-primary" : "bg-muted/50"
+      }`}
+    >
       <div className="flex items-center gap-2 px-3 py-2">
         <div className="size-3 shrink-0 rounded-full bg-success" />
-        <span className="flex-1 truncate text-sm text-foreground">
-          CEO <span className="text-muted-foreground">· 编排</span>
-        </span>
+        {onSelect ? (
+          <button
+            type="button"
+            onClick={onSelect}
+            className="flex-1 truncate text-left text-sm text-foreground"
+          >
+            CEO <span className="text-muted-foreground">· 编排·汇总</span>
+          </button>
+        ) : (
+          <span className="flex-1 truncate text-sm text-foreground">
+            CEO <span className="text-muted-foreground">· 编排</span>
+          </span>
+        )}
         <CostMeter cost={cost} maxCost={maxCost} cnyPerUsd={cnyPerUsd} />
       </div>
     </div>

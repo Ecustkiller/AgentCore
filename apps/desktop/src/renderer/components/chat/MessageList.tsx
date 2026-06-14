@@ -1,9 +1,9 @@
-import { useConversationStore } from "@/stores/conversation";
+import { useActiveMessages } from "@/stores/conversation";
 import { useEffect, useRef } from "react";
 import { MessageBubble } from "./MessageBubble";
 
 export function MessageList() {
-  const messages = useConversationStore((s) => s.messages);
+  const messages = useActiveMessages();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const lastMessage = messages[messages.length - 1];

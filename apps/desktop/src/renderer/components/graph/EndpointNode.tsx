@@ -29,6 +29,9 @@ interface EndpointNodeData {
   /** Synthesis only: keyboard/mouse activation — jumps to the final answer.
    * Absent on the input node, which stays a passive label. */
   onActivate?: () => void;
+  /** Synthesis only: a11y verb for the activation (e.g. 查看最终回答 for the
+   * synthetic node, 查看汇总过程 for the real run). Defaults to 查看最终回答. */
+  actionLabel?: string;
   [key: string]: unknown;
 }
 
@@ -84,7 +87,7 @@ export function EndpointNode({ data, selected }: NodeProps) {
         tabIndex: 0,
         "aria-label": isInput
           ? "你的任务，对话发起，查看完整提问"
-          : `CEO 汇总，${synthLabel(d.status)}${preview ? "，查看最终回答" : ""}`,
+          : `CEO 汇总，${synthLabel(d.status)}，${d.actionLabel ?? "查看最终回答"}`,
         onKeyDown: (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();

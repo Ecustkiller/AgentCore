@@ -5,7 +5,11 @@ import {
 } from "@/services/conversations";
 import { createFolder } from "@/services/folders";
 import { useApprovalStore } from "@/stores/approvals";
-import { type Conversation, useConversationStore } from "@/stores/conversation";
+import {
+  type Conversation,
+  useActiveGenerating,
+  useConversationStore,
+} from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import {
   Check,
@@ -40,7 +44,7 @@ export function ConversationItem({ conversation }: Props) {
     (s) => s.setConversationFolder,
   );
   const folders = useFoldersStore((s) => s.folders);
-  const isGenerating = useConversationStore((s) => s.isGenerating);
+  const isGenerating = useActiveGenerating();
   const awaitingApproval = useApprovalStore((s) =>
     s.pending.some((p) => p.conversationId === conversation.id),
   );

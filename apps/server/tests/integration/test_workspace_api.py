@@ -9,6 +9,9 @@ never write under the real ./data tree; the lru-cached storage factory is
 cleared around each test so the redirect takes effect.
 """
 
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -18,6 +21,22 @@ from agentcore.config import settings
 from agentcore.storage.factory import build_storage_provider
 
 _PW = "password123"
+
+
+def _init_source_repo(path: Path) -> None:
+    """Create a one-commit git repo at ``path`` (cloneable over file://)."""
+    path.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+    def run(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=path, check=True, capture_output=True, env=env)
+
+    run("init")
+    run("config", "user.email", "tester@example.com")
+    run("config", "user.name", "Tester")
+    (path / "README.md").write_text("hello clone\n", encoding="utf-8")
+    run("add", "README.md")
+    run("commit", "-m", "init")
 
 
 @pytest.fixture
@@ -82,6 +101,83 @@ async def test_upload_list_download_roundtrip(client, make_invite, _fs_data_dir)
     assert r.status_code == 404
 
 
+async def test_delete_and_move_workspace_files(client, make_invite, _fs_data_dir):
+    code = await make_invite("INV-WS-MV")
+    await _register_and_login(client, code, "wsmover")
+    conv_id = await _new_conversation(client)
+
+    await client.put(f"/v1/conversations/{conv_id}/workspace/files/a.txt", content=b"A")
+    await client.put(
+        f"/v1/conversations/{conv_id}/workspace/files/keep.txt", content=b"K"
+    )
+
+    # Rename a.txt -> docs/b.txt (move creates the parent dir).
+    r = await client.post(
+        f"/v1/conversations/{conv_id}/workspace/move",
+        json={"src": "a.txt", "dst": "docs/b.txt"},
+    )
+    assert r.status_code == 200, r.text
+    assert (
+        await client.get(f"/v1/conversations/{conv_id}/workspace/files/a.txt")
+    ).status_code == 404
+    r = await client.get(f"/v1/conversations/{conv_id}/workspace/files/docs/b.txt")
+    assert r.status_code == 200 and r.content == b"A"
+
+    # Moving onto an existing path is refused (422), leaving the target intact.
+    r = await client.post(
+        f"/v1/conversations/{conv_id}/workspace/move",
+        json={"src": "docs/b.txt", "dst": "keep.txt"},
+    )
+    assert r.status_code == 422, r.text
+    assert (
+        await client.get(f"/v1/conversations/{conv_id}/workspace/files/keep.txt")
+    ).content == b"K"
+
+    # Delete the file; deleting a missing path is a 404.
+    r = await client.delete(f"/v1/conversations/{conv_id}/workspace/files/docs/b.txt")
+    assert r.status_code == 200, r.text
+    assert (
+        await client.get(f"/v1/conversations/{conv_id}/workspace/files/docs/b.txt")
+    ).status_code == 404
+    assert (
+        await client.delete(f"/v1/conversations/{conv_id}/workspace/files/ghost.txt")
+    ).status_code == 404
+
+
+async def test_create_workspace_dir(client, make_invite, _fs_data_dir):
+    code = await make_invite("INV-WS-MKDIR")
+    await _register_and_login(client, code, "wsmkdir")
+    conv_id = await _new_conversation(client)
+
+    # Create a nested folder (parents are created).
+    r = await client.post(
+        f"/v1/conversations/{conv_id}/workspace/dirs", json={"path": "src/lib"}
+    )
+    assert r.status_code == 200, r.text
+
+    r = await client.get(
+        f"/v1/conversations/{conv_id}/workspace/files", params={"recursive": "true"}
+    )
+    dirs = {e["path"] for e in r.json()["data"] if e["is_dir"]}
+    assert {"src", "src/lib"} <= dirs
+
+    # Recreating an existing folder is refused (422).
+    r = await client.post(
+        f"/v1/conversations/{conv_id}/workspace/dirs", json={"path": "src/lib"}
+    )
+    assert r.status_code == 422, r.text
+
+    # A freshly made folder is a valid move destination.
+    await client.put(f"/v1/conversations/{conv_id}/workspace/files/x.txt", content=b"X")
+    r = await client.post(
+        f"/v1/conversations/{conv_id}/workspace/move",
+        json={"src": "x.txt", "dst": "src/lib/x.txt"},
+    )
+    assert r.status_code == 200, r.text
+    r = await client.get(f"/v1/conversations/{conv_id}/workspace/files/src/lib/x.txt")
+    assert r.status_code == 200 and r.content == b"X"
+
+
 async def test_snapshot_create_list_restore_download(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WS-2")
     await _register_and_login(client, code, "wsuser2")
@@ -128,6 +224,46 @@ async def test_snapshot_create_list_restore_download(client, make_invite, _fs_da
     ).status_code == 404
 
 
+async def test_clone_repo_into_workspace(
+    client, make_invite, _fs_data_dir, tmp_path, monkeypatch
+):
+    if shutil.which("git") is None:
+        pytest.skip("git not installed")
+    src = tmp_path / "source-repo"
+    _init_source_repo(src)
+
+    # URL policy (http-only) is unit-tested; stub it so the local file:// source
+    # can drive the route end-to-end without a network repo.
+    from agentcore.workspace import git as gitmod
+
+    monkeypatch.setattr(gitmod, "_validate_url", lambda url: None)
+
+    code = await make_invite("INV-WS-CLONE")
+    await _register_and_login(client, code, "wscloner")
+    conv_id = await _new_conversation(client)
+
+    r = await client.post(
+        f"/v1/conversations/{conv_id}/workspace/clone",
+        json={"repo_url": src.as_uri(), "dest": "imported"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["path"] == "imported"
+
+    r = await client.get(
+        f"/v1/conversations/{conv_id}/workspace/files/imported/README.md"
+    )
+    assert r.status_code == 200
+    # Normalize EOL: git on Windows may apply autocrlf on checkout.
+    assert r.content.replace(b"\r\n", b"\n") == b"hello clone\n"
+
+    # Cloning again into the same non-empty dest is refused (422).
+    r = await client.post(
+        f"/v1/conversations/{conv_id}/workspace/clone",
+        json={"repo_url": src.as_uri(), "dest": "imported"},
+    )
+    assert r.status_code == 422, r.text
+
+
 async def test_other_user_cannot_touch_workspace(
     client, new_client, make_invite, _fs_data_dir
 ):
@@ -152,4 +288,16 @@ async def test_other_user_cannot_touch_workspace(
         ).status_code == 404
         assert (
             await other.get(f"/v1/conversations/{conv_id}/snapshots")
+        ).status_code == 404
+        # Mutating routes are owner-scoped too (404, not a silent delete/move).
+        assert (
+            await other.delete(
+                f"/v1/conversations/{conv_id}/workspace/files/secret.txt"
+            )
+        ).status_code == 404
+        assert (
+            await other.post(
+                f"/v1/conversations/{conv_id}/workspace/move",
+                json={"src": "secret.txt", "dst": "stolen.txt"},
+            )
         ).status_code == 404

@@ -1,7 +1,7 @@
 import { notifyUnauthorized, tryRefresh } from "@/services/api";
 import { useApprovalStore } from "@/stores/approvals";
-import { useConversationStore } from "@/stores/conversation";
-import { useExecutionStore } from "@/stores/execution";
+import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { execRuntime, useExecutionStore } from "@/stores/execution";
 import { useUsageStore } from "@/stores/usage";
 import type {
   ApprovalRequiredPayload,
@@ -65,16 +65,19 @@ function frameTime(event: SSEEvent): number {
 }
 
 /**
- * Ensure the last message is a streaming assistant message.
+ * Ensure the streamed conversation's last message is a streaming assistant
+ * message.
  *
  * Backend always emits `message_start` before content, but this stays
- * defensive so a stray `content_delta` never lands on the user bubble.
+ * defensive so a stray `content_delta` never lands on the user bubble. Targets
+ * the turn's conversation by id so a background turn opens its bubble on its own
+ * slice, not whatever conversation is on screen.
  */
-function ensureStreamingAssistant(): void {
-  const store = useConversationStore.getState();
-  const last = store.messages[store.messages.length - 1];
+function ensureStreamingAssistant(conversationId: string): void {
+  const messages = getRuntime(conversationId).messages;
+  const last = messages[messages.length - 1];
   if (!last || last.role !== "assistant" || !last.isStreaming) {
-    store.createAssistantMessage();
+    useConversationStore.getState().createAssistantMessage(conversationId);
   }
 }
 
@@ -90,23 +93,27 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
   switch (event.type) {
     // ---- single-agent conversation stream ----
     case "message_start": {
-      ensureStreamingAssistant();
-      useConversationStore.getState().setGenerating(true);
+      ensureStreamingAssistant(ctx.conversationId);
+      useConversationStore.getState().setGenerating(true, ctx.conversationId);
       break;
     }
     case "content_delta": {
-      ensureStreamingAssistant();
+      ensureStreamingAssistant(ctx.conversationId);
       useConversationStore
         .getState()
-        .appendToLastMessage((event.payload as ContentDeltaPayload).delta);
+        .appendToLastMessage(
+          (event.payload as ContentDeltaPayload).delta,
+          ctx.conversationId,
+        );
       break;
     }
     case "reasoning_delta": {
-      ensureStreamingAssistant();
+      ensureStreamingAssistant(ctx.conversationId);
       useConversationStore
         .getState()
         .appendReasoningToLastMessage(
           (event.payload as ReasoningDeltaPayload).delta,
+          ctx.conversationId,
         );
       break;
     }
@@ -117,7 +124,7 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       // finalizing, so the per-turn cost row (§7.3A) renders from state; null on
       // the error / not-found paths where no turn ran.
       if (payload.cost) {
-        conv.attachCostToLastMessage(payload.cost);
+        conv.attachCostToLastMessage(payload.cost, ctx.conversationId);
         // Fold this turn into the conversation total so the 对话累计 chip (§7.3C)
         // updates live; the turn is persisted too, so a later reload re-seeds the
         // same sum from the ledger. `message_end.usage` uses the legacy *_tokens
@@ -128,26 +135,29 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
           .getState()
           .addTurnCost(ctx.conversationId, payload.cost.total, tokens);
       }
-      conv.finalizeLastMessage();
+      conv.finalizeLastMessage(ctx.conversationId);
       // The turn is over — any approval still on screen is moot (all were
       // resolved to get here; this just guards a degraded/edge end).
-      useApprovalStore.getState().clear();
-      const exec = useExecutionStore.getState();
-      if (exec.plan && exec.status !== "failed") {
-        exec.setStatus("completed");
+      useApprovalStore.getState().clear(ctx.conversationId);
+      const rt = execRuntime(useExecutionStore.getState(), ctx.conversationId);
+      if (rt.plan && rt.status !== "failed") {
+        useExecutionStore.getState().setStatus("completed", ctx.conversationId);
       }
       break;
     }
     case "error": {
-      ensureStreamingAssistant();
+      ensureStreamingAssistant(ctx.conversationId);
       const store = useConversationStore.getState();
       store.appendToLastMessage(
         `\n\n**Error**: ${(event.payload as ErrorPayload).message}`,
+        ctx.conversationId,
       );
-      store.finalizeLastMessage();
-      useApprovalStore.getState().clear();
-      const exec = useExecutionStore.getState();
-      if (exec.plan) exec.setStatus("failed");
+      store.finalizeLastMessage(ctx.conversationId);
+      useApprovalStore.getState().clear(ctx.conversationId);
+      const rt = execRuntime(useExecutionStore.getState(), ctx.conversationId);
+      if (rt.plan) {
+        useExecutionStore.getState().setStatus("failed", ctx.conversationId);
+      }
       break;
     }
 
@@ -177,14 +187,14 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       const payload = event.payload as TurnSavedPayload;
       useConversationStore
         .getState()
-        .reconcileLastTurn(payload.user_message_id);
+        .reconcileLastTurn(payload.user_message_id, ctx.conversationId);
       break;
     }
     case "citations": {
       const payload = event.payload as CitationsPayload;
       useConversationStore
         .getState()
-        .attachCitationsToLastMessage(payload.citations);
+        .attachCitationsToLastMessage(payload.citations, ctx.conversationId);
       break;
     }
 
@@ -197,24 +207,28 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       // ingestPlan (not startExecution): a second delegate batch in the same
       // turn shares the execution id and is merged into the live graph instead
       // of resetting it (see stores/execution.ts).
-      useExecutionStore.getState().ingestPlan({
-        id: payload.execution_id,
-        planType: payload.plan_type,
-        taskSummary: payload.task_summary,
-        agents: payload.agents.map((a) => ({
-          id: a.id,
-          role: a.role,
-          modelPreference: a.model_preference,
-          thinking: a.thinking,
-          reasoningEffort: a.reasoning_effort,
-        })),
-        runs: payload.runs.map((s) => ({
-          id: s.id,
-          agentId: s.agent_id,
-          task: s.task,
-          dependsOn: s.depends_on,
-        })),
-      });
+      useExecutionStore.getState().ingestPlan(
+        {
+          id: payload.execution_id,
+          planType: payload.plan_type,
+          taskSummary: payload.task_summary,
+          agents: payload.agents.map((a) => ({
+            id: a.id,
+            role: a.role,
+            modelPreference: a.model_preference,
+            thinking: a.thinking,
+            reasoningEffort: a.reasoning_effort,
+          })),
+          runs: payload.runs.map((s) => ({
+            id: s.id,
+            agentId: s.agent_id,
+            task: s.task,
+            dependsOn: s.depends_on,
+            kind: s.kind,
+          })),
+        },
+        ctx.conversationId,
+      );
       // Mark the assistant turn as team-driven: its bubble renders the inline
       // collaboration graph (统一团队展示草案) and defers the cost row to the
       // graph's status strip (§7.3A). Single-agent turns emit no run_plan, so
@@ -224,101 +238,128 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       if (payload.plan_type === "multi_agent") {
         useConversationStore
           .getState()
-          .setLastAssistantExecutionId(payload.execution_id);
+          .setLastAssistantExecutionId(
+            payload.execution_id,
+            ctx.conversationId,
+          );
       }
       break;
     }
     case "run_started": {
       const payload = event.payload as RunStartedPayload;
-      useExecutionStore.getState().recordFrame({
-        t: frameTime(event),
-        kind: "run_started",
-        agentId: payload.agent_id,
-        runId: payload.run_id,
-        parentRunId: payload.parent_run_id,
-        runKind: payload.kind,
-      });
+      useExecutionStore.getState().recordFrame(
+        {
+          t: frameTime(event),
+          kind: "run_started",
+          agentId: payload.agent_id,
+          runId: payload.run_id,
+          parentRunId: payload.parent_run_id,
+          runKind: payload.kind,
+        },
+        ctx.conversationId,
+      );
       break;
     }
     case "run_output_delta": {
       const payload = event.payload as RunOutputDeltaPayload;
-      useExecutionStore.getState().recordFrame({
-        t: frameTime(event),
-        kind: "run_output_delta",
-        agentId: payload.agent_id,
-        delta: payload.delta,
-      });
+      useExecutionStore.getState().recordFrame(
+        {
+          t: frameTime(event),
+          kind: "run_output_delta",
+          agentId: payload.agent_id,
+          delta: payload.delta,
+        },
+        ctx.conversationId,
+      );
       break;
     }
     case "run_reasoning_delta": {
       const payload = event.payload as RunReasoningDeltaPayload;
-      useExecutionStore.getState().recordFrame({
-        t: frameTime(event),
-        kind: "run_reasoning_delta",
-        agentId: payload.agent_id,
-        delta: payload.delta,
-      });
+      useExecutionStore.getState().recordFrame(
+        {
+          t: frameTime(event),
+          kind: "run_reasoning_delta",
+          agentId: payload.agent_id,
+          delta: payload.delta,
+        },
+        ctx.conversationId,
+      );
       break;
     }
     case "run_completed": {
       const payload = event.payload as RunCompletedPayload;
-      useExecutionStore.getState().recordFrame({
-        t: frameTime(event),
-        kind: "run_completed",
-        runId: payload.run_id,
-        agentId: payload.agent_id,
-        outputSummary: payload.output_summary,
-        durationMs: payload.duration_ms,
-        // Carry the priced cost onto the frame so the projected run lights up the
-        // team payroll (§7.3B) live, with no separate cost wiring.
-        role: payload.role,
-        model: payload.model,
-        usage: payload.usage,
-        cost: payload.cost,
-      });
+      useExecutionStore.getState().recordFrame(
+        {
+          t: frameTime(event),
+          kind: "run_completed",
+          runId: payload.run_id,
+          agentId: payload.agent_id,
+          outputSummary: payload.output_summary,
+          durationMs: payload.duration_ms,
+          // Carry the priced cost onto the frame so the projected run lights up
+          // the team payroll (§7.3B) live, with no separate cost wiring.
+          role: payload.role,
+          model: payload.model,
+          usage: payload.usage,
+          cost: payload.cost,
+        },
+        ctx.conversationId,
+      );
       break;
     }
     case "run_failed": {
       const payload = event.payload as RunFailedPayload;
-      useExecutionStore.getState().recordFrame({
-        t: frameTime(event),
-        kind: "run_failed",
-        runId: payload.run_id,
-        agentId: payload.agent_id,
-        error: payload.error,
-      });
+      useExecutionStore.getState().recordFrame(
+        {
+          t: frameTime(event),
+          kind: "run_failed",
+          runId: payload.run_id,
+          agentId: payload.agent_id,
+          error: payload.error,
+        },
+        ctx.conversationId,
+      );
       break;
     }
     case "run_progress": {
       const payload = event.payload as RunProgressPayload;
-      useExecutionStore.getState().recordFrame({
-        t: frameTime(event),
-        kind: "run_progress",
-        completed: payload.completed,
-        total: payload.total,
-      });
+      useExecutionStore.getState().recordFrame(
+        {
+          t: frameTime(event),
+          kind: "run_progress",
+          completed: payload.completed,
+          total: payload.total,
+        },
+        ctx.conversationId,
+      );
       break;
     }
     case "tool_use_start": {
       const payload = event.payload as ToolUseStartPayload;
-      useExecutionStore.getState().recordFrame({
-        t: frameTime(event),
-        kind: "tool_use_start",
-        toolCallId: payload.tool_call_id,
-        toolName: payload.tool_name,
-        arguments: payload.arguments,
-      });
+      useExecutionStore.getState().recordFrame(
+        {
+          t: frameTime(event),
+          kind: "tool_use_start",
+          toolCallId: payload.tool_call_id,
+          toolName: payload.tool_name,
+          arguments: payload.arguments,
+        },
+        ctx.conversationId,
+      );
       break;
     }
     case "tool_use_end": {
       const payload = event.payload as ToolUseEndPayload;
-      useExecutionStore.getState().recordFrame({
-        t: frameTime(event),
-        kind: "tool_use_end",
-        toolCallId: payload.tool_call_id,
-        result: payload.result,
-        status: payload.status,
-      });
+      useExecutionStore.getState().recordFrame(
+        {
+          t: frameTime(event),
+          kind: "tool_use_end",
+          toolCallId: payload.tool_call_id,
+          result: payload.result,
+          status: payload.status,
+        },
+        ctx.conversationId,
+      );
       break;
     }
 
@@ -352,11 +393,12 @@ async function runMessageStream(
   conversationId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  // Each turn is replanned: drop any prior execution graph so the UI reflects
-  // only the current turn (run_plan repopulates for multi-agent). Likewise drop
-  // any stale approval prompt so a new turn always starts from a clean gate.
-  useExecutionStore.getState().clearExecution();
-  useApprovalStore.getState().clear();
+  // Each turn is replanned: drop this conversation's prior execution graph so
+  // the UI reflects only the current turn (run_plan repopulates for
+  // multi-agent). Likewise drop any stale approval prompt so a new turn always
+  // starts from a clean gate.
+  useExecutionStore.getState().clearExecution(conversationId);
+  useApprovalStore.getState().clear(conversationId);
 
   const doFetch = () =>
     fetch(`${BASE_URL}${path}`, {

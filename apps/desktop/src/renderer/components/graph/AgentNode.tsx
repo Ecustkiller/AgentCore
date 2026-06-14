@@ -34,6 +34,10 @@ interface AgentNodeData {
   durationMs?: number | null;
   /** Real billed tokens (input+output) once metered; 0 while streaming. */
   realTokens?: number;
+  /** Pre-formatted ¥ run cost (e.g.「¥0.05」); undefined until priced or when
+   * zero. Computed in GraphView (it owns the single FX rate) so the node stays a
+   * dumb renderer — the product-differentiator「调研员 ¥0.05」shown on the node. */
+  costText?: string;
   /** Edge anchor orientation, driven by the active graph layout. */
   handleDirection?: "vertical" | "horizontal";
   /** Position in the plan, used to stagger the entrance animation. */
@@ -113,8 +117,10 @@ export function AgentNode({ data, selected }: NodeProps) {
   // The same facts power the screen-reader label, since the visual tooltip is
   // aria-hidden (it is a pointer/keyboard affordance, not its own a11y node).
   const ariaLabel = `${d.role}，${statusLabel(d.status)}，模型 ${modelText}，Token ${tokenText}${
-    durationText ? `，用时 ${durationText}` : ""
-  }${d.toolCount > 0 ? `，工具 ${d.toolCount} 次` : ""}`;
+    d.costText ? `，成本 ${d.costText}` : ""
+  }${durationText ? `，用时 ${durationText}` : ""}${
+    d.toolCount > 0 ? `，工具 ${d.toolCount} 次` : ""
+  }`;
 
   return (
     <>
@@ -195,12 +201,19 @@ export function AgentNode({ data, selected }: NodeProps) {
             </p>
           )}
 
-          {d.toolCount > 0 && (
-            <div className="mt-1.5 flex items-center gap-2">
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Wrench size={11} />
-                <span className="tabular-nums">{d.toolCount}</span>
-              </div>
+          {(d.costText || d.toolCount > 0) && (
+            <div className="mt-1.5 flex items-center gap-2.5 text-xs">
+              {d.costText && (
+                <span className="font-medium tabular-nums text-primary">
+                  {d.costText}
+                </span>
+              )}
+              {d.toolCount > 0 && (
+                <span className="flex items-center gap-1 text-muted-foreground">
+                  <Wrench size={11} />
+                  <span className="tabular-nums">{d.toolCount}</span>
+                </span>
+              )}
             </div>
           )}
 
@@ -221,6 +234,14 @@ export function AgentNode({ data, selected }: NodeProps) {
                   {tokenText}
                 </dd>
               </div>
+              {d.costText && (
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="text-muted-foreground">成本</dt>
+                  <dd className="font-medium tabular-nums text-primary">
+                    {d.costText}
+                  </dd>
+                </div>
+              )}
               {durationText && (
                 <div className="flex items-center justify-between gap-4">
                   <dt className="text-muted-foreground">用时</dt>

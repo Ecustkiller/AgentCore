@@ -147,6 +147,43 @@ class ConversationRepository:
             return True
         return False
 
+    async def list_purgeable(
+        self, *, before: datetime, limit: int
+    ) -> Sequence[Conversation]:
+        """Soft-deleted conversations whose ``deleted_at`` is at/older than ``before``.
+
+        Backs retention cleanup (决策⑦): these have outlived the grace period and
+        are ready for physical removal. Oldest-deleted first, capped by ``limit``.
+        """
+        result = await self._session.execute(
+            select(Conversation)
+            .where(
+                Conversation.deleted_at.is_not(None),
+                Conversation.deleted_at <= before,
+            )
+            .order_by(Conversation.deleted_at.asc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def hard_delete(self, conversation_id: str) -> None:
+        """Physically remove a conversation and all its rows (messages + cost ledger).
+
+        App-level cascade (no DB FK, per repo convention). Used only by retention
+        after the grace period — distinct from ``soft_delete`` (the user-facing
+        recoverable delete).
+        """
+        await self._session.execute(
+            delete(Message).where(Message.conversation_id == conversation_id)
+        )
+        await self._session.execute(
+            delete(CostEvent).where(CostEvent.conversation_id == conversation_id)
+        )
+        await self._session.execute(
+            delete(Conversation).where(Conversation.id == conversation_id)
+        )
+        await self._session.commit()
+
     async def list_all_by_user(self, user_id: str) -> Sequence[Conversation]:
         """Every non-deleted conversation for a user, newest activity first.
 
@@ -252,6 +289,28 @@ class FolderRepository:
         )
         await self._session.commit()
         return True
+
+    async def list_purgeable(
+        self, *, before: datetime, limit: int
+    ) -> Sequence[Folder]:
+        """Soft-deleted folders whose ``deleted_at`` is at/older than ``before``.
+
+        Backs retention cleanup (决策⑦). A deleted folder's conversations were
+        already re-parented to ungrouped at soft-delete, so only the folder's own
+        (orphaned) project workspace + record remain to purge.
+        """
+        result = await self._session.execute(
+            select(Folder)
+            .where(Folder.deleted_at.is_not(None), Folder.deleted_at <= before)
+            .order_by(Folder.deleted_at.asc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def hard_delete(self, folder_id: str) -> None:
+        """Physically remove a folder record (its conversations are already detached)."""
+        await self._session.execute(delete(Folder).where(Folder.id == folder_id))
+        await self._session.commit()
 
 
 class MessageRepository:

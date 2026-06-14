@@ -1,5 +1,6 @@
 import { decideApproval } from "@/services/approvals";
 import { type PendingApproval, useApprovalStore } from "@/stores/approvals";
+import { useConversationStore } from "@/stores/conversation";
 import type { ApprovalDecision } from "@/types/events";
 import {
   Check,
@@ -43,12 +44,16 @@ function primaryArg(args: Record<string, unknown>): string | null {
  * resolve endpoint and the backend resumes the tool. Renders nothing when idle.
  */
 export function ApprovalPrompt() {
+  // Only the conversation on screen owns the composer, so only its paused calls
+  // belong above it — other conversations' prompts wait until you switch back.
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   const pending = useApprovalStore((s) => s.pending);
-  if (pending.length === 0) return null;
+  const visible = pending.filter((p) => p.conversationId === conversationId);
+  if (visible.length === 0) return null;
 
   return (
     <div className="mx-4 mb-2 space-y-2">
-      {pending.map((approval) => (
+      {visible.map((approval) => (
         <ApprovalCard key={approval.approvalId} approval={approval} />
       ))}
     </div>

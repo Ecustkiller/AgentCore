@@ -1,4 +1,9 @@
-import { describeFrame, useExecutionStore } from "@/stores/execution";
+import {
+  activeExec,
+  describeFrame,
+  useActiveExecField,
+  useExecutionStore,
+} from "@/stores/execution";
 import { Pause, Play, Radio } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -12,9 +17,9 @@ const STEP_INTERVAL_MS = 450;
  * tail (`playhead === null`) is live; any earlier index is replay.
  */
 export function Timeline() {
-  const plan = useExecutionStore((s) => s.plan);
-  const frames = useExecutionStore((s) => s.frames);
-  const playhead = useExecutionStore((s) => s.playhead);
+  const plan = useActiveExecField((rt) => rt.plan);
+  const frames = useActiveExecField((rt) => rt.frames);
+  const playhead = useActiveExecField((rt) => rt.playhead);
   const setPlayhead = useExecutionStore((s) => s.setPlayhead);
   const goLive = useExecutionStore((s) => s.goLive);
   const [playing, setPlaying] = useState(false);
@@ -27,8 +32,9 @@ export function Timeline() {
     if (!playing) return;
     const id = setInterval(() => {
       const state = useExecutionStore.getState();
-      const count = state.frames.length;
-      const cur = state.playhead ?? count;
+      const rt = activeExec(state);
+      const count = rt.frames.length;
+      const cur = rt.playhead ?? count;
       const next = cur + 1;
       if (next >= count) {
         state.goLive();

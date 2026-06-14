@@ -49,26 +49,37 @@ def _build_attachment_context(attachments: list[dict] | None) -> str | None:
     """Render user-referenced files/directories into a system-prompt block.
 
     Files carry pre-extracted text; directories carry a recursive file listing
-    (paths only, no file bodies). Both are truncated client-side. Returns None
-    when there is nothing to inject so the base prompt stays unchanged.
+    (paths only, no file bodies). Both are truncated client-side. A file with a
+    ``workspace_path`` was persisted into the workspace (附件驻留), so the header
+    points the agent at that durable path — it can re-read or edit the file with
+    the file tools instead of relying only on the inlined (possibly truncated)
+    copy. Returns None when there is nothing to inject so the base prompt stays
+    unchanged.
     """
     if not attachments:
         return None
 
     blocks: list[str] = []
+    resident = False
     for att in attachments:
         text = (att.get("text") or "").strip()
         if not text:
             continue
         name = att.get("name") or "untitled"
-        path = att.get("path") or name
         if att.get("kind") == "dir":
+            path = att.get("path") or name
             note = " (partial listing)" if att.get("truncated") else ""
             blocks.append(
                 f"--- Directory: {name} ({path}){note} ---\n"
                 f"File paths (contents not included):\n{text}"
             )
         else:
+            # Prefer the durable in-workspace path so the model can act on the
+            # real file; fall back to the original (local) path when un-resident.
+            ws_path = att.get("workspace_path")
+            path = ws_path or att.get("path") or name
+            if ws_path:
+                resident = True
             note = " (truncated)" if att.get("truncated") else ""
             blocks.append(f"--- File: {name} ({path}){note} ---\n{text}")
 
@@ -76,12 +87,19 @@ def _build_attachment_context(attachments: list[dict] | None) -> str | None:
         return None
 
     body = "\n\n".join(blocks)
+    resident_note = (
+        " Files shown with an in-workspace path have been saved into your "
+        "workspace — read or edit them with the file tools by that path rather "
+        "than trusting only the (possibly truncated) text below."
+        if resident
+        else ""
+    )
     return (
         "<attached_files>\n"
         "The user attached the following files and directories as context for "
         "this message. Treat them as reference material the user provided; cite "
         "them by name when relevant. Directory entries list file paths only "
-        "(file contents are not included).\n\n"
+        f"(file contents are not included).{resident_note}\n\n"
         f"{body}\n"
         "</attached_files>"
     )
@@ -204,13 +222,15 @@ async def run_chat_pipeline(
         # synthesis spend is NOT priced here: it is part of the captain's own loop
         # usage (turn_usage below) and billed once on the captain row, so this node
         # carries zero cost/usage and never enters cost_runs (no double count).
-        synthesis_state: dict[str, float | bool] = {"started": False, "start": 0.0}
+        synthesis_started = False
+        synthesis_start = 0.0
 
         def _begin_synthesis() -> None:
-            if synthesis_state["started"]:
+            nonlocal synthesis_started, synthesis_start
+            if synthesis_started:
                 return
-            synthesis_state["started"] = True
-            synthesis_state["start"] = time.monotonic()
+            synthesis_started = True
+            synthesis_start = time.monotonic()
             sink.emit(
                 run_plan(
                     execution_id=base_tool_context.execution_id,
@@ -256,8 +276,8 @@ async def run_chat_pipeline(
         # Close the synthesis node (if the CEO delegated). Cost-neutral by design:
         # output_summary labels the collapsed node; usage/cost stay at the zeroed
         # default (rendered as「—」), since the spend is on the captain row.
-        if synthesis_state["started"]:
-            synth_duration_ms = int((time.monotonic() - synthesis_state["start"]) * 1000)
+        if synthesis_started:
+            synth_duration_ms = int((time.monotonic() - synthesis_start) * 1000)
             sink.emit(
                 run_completed(
                     synthesis_run_id,

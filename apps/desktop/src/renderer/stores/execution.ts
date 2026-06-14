@@ -1,6 +1,7 @@
 import type { CostBreakdown, RunKind, UsageBreakdown } from "@/types/events";
 import { useMemo } from "react";
 import { create } from "zustand";
+import { useConversationStore } from "./conversation";
 
 export type RunStatus =
   | "pending"
@@ -155,7 +156,15 @@ export interface ExecutionPlan {
     thinking?: boolean;
     reasoningEffort?: ReasoningEffort;
   }[];
-  runs: { id: string; agentId: string; task: string; dependsOn: string[] }[];
+  runs: {
+    id: string;
+    agentId: string;
+    task: string;
+    dependsOn: string[];
+    /** Declared node kind (default `agent`). `synthesis` marks the CEO 汇聚点
+     * (Phase B / D3); also re-confirmed by the run_started frame. */
+    kind?: RunKind;
+  }[];
 }
 
 /**
@@ -249,7 +258,9 @@ export function projectExecution(
     durationMs: null,
     error: null,
     parentRunId: null,
-    kind: "agent",
+    // Plan-declared kind so the synthesis 汇聚点 is identifiable before its
+    // run_started frame folds in (the frame re-confirms it).
+    kind: s.kind ?? "agent",
     role: null,
     model: null,
     usage: null,
@@ -415,7 +426,13 @@ export function elapsedMs(frames: RunFrame[]): number {
   return Math.max(0, frames[frames.length - 1].t - frames[0].t);
 }
 
-interface ExecutionState {
+/**
+ * The live execution state of a single conversation's current turn — plan,
+ * frame stream, playhead and cross-view focus. Each conversation owns its own
+ * runtime so background turns keep streaming into their own graph while the
+ * user looks at another conversation.
+ */
+export interface ExecutionRuntime {
   plan: ExecutionPlan | null;
   frames: RunFrame[];
   /** Number of frames to project. `null` = follow the live tail. */
@@ -430,8 +447,19 @@ interface ExecutionState {
    */
   focusedRunId: string | null;
   focusedAgentId: string | null;
+}
 
-  startExecution: (plan: ExecutionPlan) => void;
+/**
+ * Every mutator targets one conversation's {@link ExecutionRuntime}. The
+ * `conversationId` is optional and defaults to the *active* conversation
+ * (resolved from the conversation store): SSE dispatch passes the turn's id
+ * explicitly so background turns route to their own slice, while view
+ * interactions (focus/playhead) omit it and act on whatever is on screen.
+ */
+interface ExecutionState {
+  byId: Record<string, ExecutionRuntime>;
+
+  startExecution: (plan: ExecutionPlan, conversationId?: string | null) => void;
   /**
    * Ingest a `run_plan` batch. The first batch of a turn starts a fresh
    * execution; a later batch with the *same* execution id (the adaptive D1′
@@ -440,115 +468,184 @@ interface ExecutionState {
    * and timeline. `clearExecution` between turns still gives each turn a fresh
    * graph, so cross-turn batches never merge.
    */
-  ingestPlan: (plan: ExecutionPlan) => void;
-  clearExecution: () => void;
-  recordFrame: (frame: RunFrame) => void;
-  setStatus: (status: ExecutionStatus) => void;
-  setPlayhead: (index: number | null) => void;
-  goLive: () => void;
-  focusRun: (runId: string | null) => void;
-  focusAgent: (agentId: string | null) => void;
-  clearFocus: () => void;
+  ingestPlan: (plan: ExecutionPlan, conversationId?: string | null) => void;
+  clearExecution: (conversationId?: string | null) => void;
+  recordFrame: (frame: RunFrame, conversationId?: string | null) => void;
+  setStatus: (status: ExecutionStatus, conversationId?: string | null) => void;
+  setPlayhead: (index: number | null, conversationId?: string | null) => void;
+  goLive: (conversationId?: string | null) => void;
+  focusRun: (runId: string | null, conversationId?: string | null) => void;
+  focusAgent: (agentId: string | null, conversationId?: string | null) => void;
+  clearFocus: (conversationId?: string | null) => void;
 }
 
-export const useExecutionStore = create<ExecutionState>((set, get) => ({
+const EMPTY_EXEC: ExecutionRuntime = {
   plan: null,
   frames: [],
   playhead: null,
   status: "planning",
   focusedRunId: null,
   focusedAgentId: null,
+};
 
-  startExecution: (plan) =>
-    set({
-      plan,
-      frames: [],
-      playhead: null,
-      status: "running",
-      focusedRunId: null,
-      focusedAgentId: null,
-    }),
+/**
+ * Resolve the target conversation key — an explicit id (SSE dispatch) or, when
+ * omitted, the conversation currently on screen (view interactions). The draft
+ * conversation maps to `""` and never carries an execution.
+ */
+function execKey(conversationId?: string | null): string {
+  return (
+    conversationId ??
+    useConversationStore.getState().currentConversationId ??
+    ""
+  );
+}
 
-  ingestPlan: (plan) => {
-    const cur = get().plan;
-    // Different turn / first batch → fresh start (resets frames + focus).
-    if (!cur || cur.id !== plan.id) {
-      get().startExecution(plan);
-      return;
-    }
-    // Same execution → an incremental delegate batch. Append unseen agents and
-    // runs (run-ids are namespaced per delegate call, so no collisions) while
-    // preserving the existing frame stream, playhead and focus.
-    const agents = [...cur.agents];
-    for (const a of plan.agents) {
-      if (!agents.some((x) => x.id === a.id)) agents.push(a);
-    }
-    const runs = [...cur.runs];
-    for (const s of plan.runs) {
-      if (!runs.some((x) => x.id === s.id)) runs.push(s);
-    }
-    set({
-      plan: {
-        ...cur,
-        agents,
-        runs,
-        taskSummary: plan.taskSummary || cur.taskSummary,
-      },
-      status: "running",
+/**
+ * The execution runtime of a conversation, never undefined (empty default).
+ * Pass an id for a specific conversation, or omit for the active one. Use this
+ * for imperative reads (`getState`, tests); components should subscribe via
+ * {@link useActiveExecField} / {@link useProjectedExecution} so a conversation
+ * switch re-renders the view.
+ */
+export function execRuntime(
+  state: ExecutionState,
+  conversationId?: string | null,
+): ExecutionRuntime {
+  return state.byId[execKey(conversationId)] ?? EMPTY_EXEC;
+}
+
+/** The execution runtime of the conversation currently on screen. */
+export function activeExec(state: ExecutionState): ExecutionRuntime {
+  return execRuntime(state);
+}
+
+export const useExecutionStore = create<ExecutionState>((set, get) => {
+  /** Patch one conversation's runtime slice, lazily created from empty. */
+  const patchExec = (
+    conversationId: string | null | undefined,
+    update: (cur: ExecutionRuntime) => Partial<ExecutionRuntime> | null,
+  ) =>
+    set((state) => {
+      const key = execKey(conversationId);
+      const cur = state.byId[key] ?? EMPTY_EXEC;
+      const patch = update(cur);
+      if (patch === null) return {};
+      return { byId: { ...state.byId, [key]: { ...cur, ...patch } } };
     });
-  },
 
-  clearExecution: () =>
-    set({
-      plan: null,
-      frames: [],
-      playhead: null,
-      status: "planning",
-      focusedRunId: null,
-      focusedAgentId: null,
-    }),
+  return {
+    byId: {},
 
-  // Frames only carry meaning inside an execution; ignore stray run/tool facts
-  // from the single-agent path (no plan declared).
-  recordFrame: (frame) => {
-    if (!get().plan) return;
-    set((state) => ({ frames: [...state.frames, frame] }));
-  },
+    startExecution: (plan, conversationId) =>
+      patchExec(conversationId, () => ({
+        plan,
+        frames: [],
+        playhead: null,
+        status: "running",
+        focusedRunId: null,
+        focusedAgentId: null,
+      })),
 
-  setStatus: (status) => set({ status }),
+    ingestPlan: (plan, conversationId) => {
+      const cur = execRuntime(get(), conversationId).plan;
+      // Different turn / first batch → fresh start (resets frames + focus).
+      if (!cur || cur.id !== plan.id) {
+        get().startExecution(plan, conversationId);
+        return;
+      }
+      // Same execution → an incremental delegate batch. Append unseen agents and
+      // runs (run-ids are namespaced per delegate call, so no collisions) while
+      // preserving the existing frame stream, playhead and focus.
+      const agents = [...cur.agents];
+      for (const a of plan.agents) {
+        if (!agents.some((x) => x.id === a.id)) agents.push(a);
+      }
+      const runs = [...cur.runs];
+      for (const s of plan.runs) {
+        if (!runs.some((x) => x.id === s.id)) runs.push(s);
+      }
+      patchExec(conversationId, () => ({
+        plan: {
+          ...cur,
+          agents,
+          runs,
+          taskSummary: plan.taskSummary || cur.taskSummary,
+        },
+        status: "running",
+      }));
+    },
 
-  setPlayhead: (index) => set({ playhead: index }),
+    clearExecution: (conversationId) =>
+      patchExec(conversationId, () => ({ ...EMPTY_EXEC })),
 
-  goLive: () => set({ playhead: null }),
+    // Frames only carry meaning inside an execution; ignore stray run/tool facts
+    // from the single-agent path (no plan declared).
+    recordFrame: (frame, conversationId) =>
+      patchExec(conversationId, (cur) =>
+        cur.plan ? { frames: [...cur.frames, frame] } : null,
+      ),
 
-  focusRun: (runId) => {
-    if (runId === null) {
-      set({ focusedRunId: null, focusedAgentId: null });
-      return;
-    }
-    const agentId =
-      get().plan?.runs.find((s) => s.id === runId)?.agentId ?? null;
-    set({ focusedRunId: runId, focusedAgentId: agentId });
-  },
+    setStatus: (status, conversationId) =>
+      patchExec(conversationId, () => ({ status })),
 
-  focusAgent: (agentId) => set({ focusedAgentId: agentId, focusedRunId: null }),
+    setPlayhead: (index, conversationId) =>
+      patchExec(conversationId, () => ({ playhead: index })),
 
-  clearFocus: () => set({ focusedRunId: null, focusedAgentId: null }),
-}));
+    goLive: (conversationId) =>
+      patchExec(conversationId, () => ({ playhead: null })),
+
+    focusRun: (runId, conversationId) =>
+      patchExec(conversationId, (cur) => {
+        if (runId === null) {
+          return { focusedRunId: null, focusedAgentId: null };
+        }
+        const agentId =
+          cur.plan?.runs.find((s) => s.id === runId)?.agentId ?? null;
+        return { focusedRunId: runId, focusedAgentId: agentId };
+      }),
+
+    focusAgent: (agentId, conversationId) =>
+      patchExec(conversationId, () => ({
+        focusedAgentId: agentId,
+        focusedRunId: null,
+      })),
+
+    clearFocus: (conversationId) =>
+      patchExec(conversationId, () => ({
+        focusedRunId: null,
+        focusedAgentId: null,
+      })),
+  };
+});
+
+/**
+ * Subscribe to one field of the *active* conversation's execution runtime.
+ * Reacts both to that field changing and to a conversation switch (the active
+ * key lives in the conversation store), so views always reflect what is on
+ * screen. Prefer this over reading the store directly.
+ */
+export function useActiveExecField<T>(
+  selector: (rt: ExecutionRuntime) => T,
+): T {
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  return useExecutionStore((s) =>
+    selector(s.byId[conversationId ?? ""] ?? EMPTY_EXEC),
+  );
+}
 
 /**
  * The execution snapshot at the current playhead. Returns the live state while
- * following the tail, or the historical projection while scrubbing.
+ * following the tail, or the historical projection while scrubbing. Tracks the
+ * active conversation, so switching conversations re-projects that one's graph.
  */
 export function useProjectedExecution(): Execution | null {
-  const plan = useExecutionStore((s) => s.plan);
-  const frames = useExecutionStore((s) => s.frames);
-  const playhead = useExecutionStore((s) => s.playhead);
-  const status = useExecutionStore((s) => s.status);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const rt = useExecutionStore((s) => s.byId[conversationId ?? ""]);
 
   return useMemo(() => {
-    if (!plan) return null;
-    const upto = playhead ?? frames.length;
-    return projectExecution(plan, frames.slice(0, upto), status);
-  }, [plan, frames, playhead, status]);
+    if (!rt?.plan) return null;
+    const upto = rt.playhead ?? rt.frames.length;
+    return projectExecution(rt.plan, rt.frames.slice(0, upto), rt.status);
+  }, [rt]);
 }

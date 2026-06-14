@@ -78,3 +78,12 @@ class StorageProvider(Protocol):
     async def delete_snapshot(self, storage_key: str, snapshot_id: str) -> None:
         """Delete one snapshot (idempotent: missing id is not an error)."""
         ...
+
+    async def purge(self, storage_key: str) -> None:
+        """Delete every snapshot + the manifest under ``storage_key`` (idempotent).
+
+        Used by retention cleanup (决策⑦) when a soft-deleted workspace's grace
+        period ends — the whole snapshot history for that key goes, not one id.
+        A missing key is not an error.
+        """
+        ...

@@ -33,8 +33,10 @@ from agentcore.runtime.events import (
     turn_saved,
 )
 from agentcore.runtime.pipeline import run_chat_pipeline
+from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
 from agentcore.workspace.locate import build_server_workspace, workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
+from agentcore.workspace.protocol import WorkspaceBackend
 from agentcore.workspace.snapshots import create_snapshot
 
 logger = get_logger(__name__)
@@ -85,6 +87,7 @@ async def _run_and_persist(
     sink: EventSink,
     history: list[dict],
     attachments: list[dict] | None,
+    backend: WorkspaceBackend,
     generate_title: bool,
 ) -> None:
     """Run the pipeline, persist the assistant reply, then title + memory.
@@ -93,14 +96,9 @@ async def _run_and_persist(
     `history` is the prior context (already excluding the current user turn).
     Title generation is skipped for regenerate (the conversation already has one).
     The user turn is persisted and reconciled by the caller before this runs.
+    The `backend` is built by the caller (so attachment residency writes onto the
+    same instance whose `dirty` flag drives the end-of-turn snapshot).
     """
-    # Resolve the workspace for this conversation: a folder's shared project
-    # space when grouped, else the conversation's own space (see workspace.locate).
-    backend = build_server_workspace(
-        user_id=user_id,
-        folder_id=folder_id,
-        conversation_id=conversation_id,
-    )
     result = await run_chat_pipeline(
         conversation_id=conversation_id,
         user_message=user_message,
@@ -242,66 +240,67 @@ async def stream_chat(
 
     Creates its own DB session to avoid lifecycle issues with the HTTP request.
 
-    `attachments` are user-referenced files (@-mention / paperclip); their text is
-    injected into the model context for this turn only. They are intentionally not
-    persisted (no schema column) nor fed to title/memory generation, keeping the
-    stored user message and derived title clean.
+    `attachments` are user-referenced files (@-mention / paperclip). Their text is
+    injected into the model context for this turn, and—new in 附件驻留 (决策⑤)—file
+    attachments are also written into the workspace under ``attachments/`` so they
+    persist as durable, team-readable, downloadable project files; the stored
+    message keeps only display metadata + each file's ``workspace_path`` (never the
+    raw text), and attachments are still kept out of title/memory generation.
     """
     try:
         async with async_session_factory() as session:
-            conv_repo = ConversationRepository(session)
-            msg_repo = MessageRepository(session)
-
-            conv = await conv_repo.get_by_id(conversation_id)
+            conv = await ConversationRepository(session).get_by_id(conversation_id)
             if not conv:
                 sink.emit(error_event("NOT_FOUND", "Conversation not found"))
                 sink.emit(message_end(FinishReason.ERROR))
                 return
+            folder_id = conv.folder_id
 
-            # Persist only display metadata (name/path/truncated); the extracted
-            # text is one-shot context and intentionally not stored.
-            attachment_meta = [
-                {
-                    "name": a.get("name"),
-                    "path": a.get("path"),
-                    "truncated": bool(a.get("truncated")),
-                    "kind": a.get("kind") or "file",
-                }
-                for a in (attachments or [])
-            ]
-            user_msg = await msg_repo.create(
-                conversation_id=conversation_id,
-                role="user",
-                content=user_message,
-                attachments=attachment_meta,
-            )
-
-            history = await load_history(session, conversation_id, max_messages=40)
-
-        # Reconcile the optimistic user bubble to its real row id up front, so a
-        # retry after a mid-stream failure regenerates from the saved turn rather
-        # than resending it (which would duplicate the user message).
-        sink.emit(turn_saved(user_message_id=user_msg.id))
+        # Resolve the workspace once: attachment residency writes, the pipeline
+        # run, and the end-of-turn snapshot all share this backend instance (so
+        # its `dirty` flag reflects attachments too).
+        backend = build_server_workspace(
+            user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+        )
 
         # Folder-level lock (决策④): serialize tasks that share this workspace so
         # same-folder turns never interleave file writes / the snapshot manifest.
-        # Acquired once for the whole turn (the worker team inside runs in parallel,
-        # unaffected). Queued same-folder turns wait here before streaming.
+        # Held for the whole turn — including attachment residency and persisting
+        # the user row — so a queued same-folder turn waits here. The worker team
+        # inside runs in parallel, unaffected.
         async with workspace_lock(
             workspace_storage_key(
-                user_id=user_id,
-                folder_id=conv.folder_id,
-                conversation_id=conversation_id,
+                user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
             )
         ):
+            # 附件驻留: write file attachments into the workspace; the returned
+            # list carries each persisted file's workspace_path for the context
+            # block and the stored metadata.
+            resident_attachments = await persist_attachments(backend, attachments)
+
+            async with async_session_factory() as session:
+                user_msg = await MessageRepository(session).create(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=user_message,
+                    attachments=to_stored_metadata(resident_attachments),
+                )
+                history = await load_history(session, conversation_id, max_messages=40)
+
+            # Reconcile the optimistic user bubble to its real row id, so a retry
+            # after a mid-stream failure regenerates from the saved turn rather
+            # than resending it (which would duplicate the user message).
+            sink.emit(turn_saved(user_message_id=user_msg.id))
+
             await _run_and_persist(
                 conversation_id=conversation_id,
                 user_message=user_message,
                 user_id=user_id,
-                folder_id=conv.folder_id,
+                folder_id=folder_id,
                 sink=sink,
                 history=history[:-1],
-                attachments=attachments,
+                attachments=resident_attachments,
+                backend=backend,
                 generate_title=True,
             )
 
@@ -354,6 +353,10 @@ async def regenerate_chat(
             user_message = edited_content if edited_content is not None else (target.content or "")
             history = await load_history(session, conversation_id, max_messages=40)
 
+        backend = build_server_workspace(
+            user_id=user_id, folder_id=conv.folder_id, conversation_id=conversation_id
+        )
+
         # Folder-level lock (决策④): same workspace serialization as stream_chat.
         async with workspace_lock(
             workspace_storage_key(
@@ -370,6 +373,7 @@ async def regenerate_chat(
                 sink=sink,
                 history=history[:-1],
                 attachments=None,
+                backend=backend,
                 generate_title=False,
             )
 

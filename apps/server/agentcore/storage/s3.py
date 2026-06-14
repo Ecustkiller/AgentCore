@@ -65,6 +65,15 @@ class S3StorageProvider:
         parts = [p for p in (self._prefix, storage_key.strip("/"), name) if p]
         return "/".join(parts)
 
+    def _key_prefix(self, storage_key: str) -> str:
+        """The object-key prefix for one storage key (trailing slash).
+
+        A trailing ``/`` scopes a ``list_objects_v2`` to exactly this key — never
+        a sibling that merely shares the name as a string prefix.
+        """
+        parts = [p for p in (self._prefix, storage_key.strip("/")) if p]
+        return "/".join(parts) + "/"
+
     def _get_bytes(self, key: str) -> bytes | None:
         from botocore.exceptions import ClientError
 
@@ -154,3 +163,29 @@ class S3StorageProvider:
         kept = [r for r in refs if r.snapshot_id != snapshot_id]
         if len(kept) != len(refs):
             self._put_bytes(self._key(storage_key, MANIFEST_NAME), manifest_to_bytes(kept))
+
+    async def purge(self, storage_key: str) -> None:
+        await asyncio.to_thread(self._purge_sync, storage_key)
+
+    def _purge_sync(self, storage_key: str) -> None:
+        from botocore.exceptions import ClientError
+
+        prefix = self._key_prefix(storage_key)
+        try:
+            paginator = self._client.get_paginator("list_objects_v2")
+            batch: list[dict] = []
+            for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    batch.append({"Key": obj["Key"]})
+                    # delete_objects caps at 1000 keys per request.
+                    if len(batch) == 1000:
+                        self._client.delete_objects(
+                            Bucket=self._bucket, Delete={"Objects": batch}
+                        )
+                        batch = []
+            if batch:
+                self._client.delete_objects(
+                    Bucket=self._bucket, Delete={"Objects": batch}
+                )
+        except ClientError as e:
+            raise StorageError(f"S3 purge failed: {e}") from e

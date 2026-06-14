@@ -97,6 +97,9 @@ export interface RunPlanPayload {
     agent_id: string;
     task: string;
     depends_on: string[];
+    /** Node kind (default `agent`). The CEO synthesis batch declares its run as
+     * `synthesis` so the graph can adopt it as the real 汇聚点 (Phase B / D3). */
+    kind?: RunKind;
   }>;
 }
 

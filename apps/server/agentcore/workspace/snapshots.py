@@ -9,8 +9,23 @@ storage layer; provider choice never leaks into the routes.
 
 from __future__ import annotations
 
-from agentcore.storage import SnapshotRef, build_storage_provider
+from agentcore.config import settings
+from agentcore.storage import SnapshotRef, StorageProvider, build_storage_provider
 from agentcore.workspace.locate import resolve_workspace_root, workspace_storage_key
+
+
+async def _enforce_auto_cap(provider: StorageProvider, key: str, keep: int) -> None:
+    """Prune the oldest automatic (unlabeled) snapshots beyond ``keep`` (决策⑥).
+
+    Only auto backups are capped; labeled snapshots (手动留版本) are kept forever.
+    ``list_snapshots`` returns newest-first, so the autos past ``keep`` are the
+    tail. Best-effort: a prune failure must never fail the snapshot it follows.
+    """
+    if keep <= 0:
+        return
+    autos = [s for s in await provider.list_snapshots(key) if not s.label]
+    for stale in autos[keep:]:
+        await provider.delete_snapshot(key, stale.snapshot_id)
 
 
 async def create_snapshot(
@@ -20,14 +35,33 @@ async def create_snapshot(
     conversation_id: str,
     label: str | None = None,
 ) -> SnapshotRef:
-    """Snapshot a conversation's workspace. A ``label`` marks a kept version."""
+    """Snapshot a conversation's workspace. A ``label`` marks a kept version.
+
+    Auto snapshots (no ``label``) are capped to ``workspace_auto_snapshot_max``:
+    the oldest auto backups beyond the cap are pruned so they don't grow without
+    bound (决策⑥). Kept versions (labeled) are never pruned.
+    """
     key = workspace_storage_key(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
     root = resolve_workspace_root(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    return await build_storage_provider().snapshot(root, key, label=label)
+    provider = build_storage_provider()
+    ref = await provider.snapshot(root, key, label=label)
+    if label is None:
+        await _enforce_auto_cap(provider, key, settings.workspace_auto_snapshot_max)
+    return ref
+
+
+async def purge_snapshots(
+    *, user_id: str, folder_id: str | None, conversation_id: str
+) -> None:
+    """Delete the entire snapshot history for a conversation's workspace (决策⑦)."""
+    key = workspace_storage_key(
+        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    )
+    await build_storage_provider().purge(key)
 
 
 async def list_snapshots(

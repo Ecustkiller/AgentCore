@@ -25,12 +25,14 @@ export async function resolveApproval(
 
 /**
  * Other pending cards that a "本轮内都允许" on `approval` should auto-approve:
- * same tool, not the card itself, not already in flight.
+ * same conversation, same tool, not the card itself, not already in flight.
  *
  * Implements the documented batch放行 (安全权限与治理 §三): when several same-tool
  * calls are paused in parallel, allowing one "for the rest of the turn" approves
- * the siblings too instead of prompting N times. The backend grants the tool on
- * the `approve_always`, so the siblings only need a plain `approve`.
+ * the siblings too instead of prompting N times. The grant is scoped to one
+ * conversation's turn, so another conversation's same-tool prompt is left alone.
+ * The backend grants the tool on the `approve_always`, so the siblings only need
+ * a plain `approve`.
  */
 export function autoApproveSiblings(
   pending: PendingApproval[],
@@ -39,6 +41,7 @@ export function autoApproveSiblings(
   return pending.filter(
     (p) =>
       p.approvalId !== approval.approvalId &&
+      p.conversationId === approval.conversationId &&
       p.toolName === approval.toolName &&
       !p.resolving,
   );

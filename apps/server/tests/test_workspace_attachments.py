@@ -1,0 +1,144 @@
+"""Tests for attachment residency (附件驻留·决策⑤).
+
+Hermetic: a ``ServerWorkspace`` rooted at ``tmp_path`` receives the writes, so the
+real ``write`` + traversal guard run without touching the repo. Covers the happy
+path (file written + workspace_path set), the pass-throughs (dirs, empty text),
+name sanitization / dedup, the never-break-the-turn failure path, and the stored
+metadata projection.
+"""
+
+from pathlib import Path
+
+from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+from agentcore.workspace.attachments import (
+    ATTACHMENTS_DIR,
+    _safe_attachment_name,
+    persist_attachments,
+    to_stored_metadata,
+)
+from agentcore.workspace.protocol import WorkspaceIOError
+from agentcore.workspace.server import ServerWorkspace
+
+
+def _ws(root: Path) -> ServerWorkspace:
+    return ServerWorkspace(root=root, sandbox=SubprocessSandbox())
+
+
+async def test_persist_writes_file_and_sets_workspace_path(tmp_path: Path):
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws, [{"name": "notes.md", "path": "/local/notes.md", "text": "# hi\n"}]
+    )
+
+    assert out[0]["workspace_path"] == "attachments/notes.md"
+    assert (tmp_path / "attachments" / "notes.md").read_text(encoding="utf-8") == "# hi\n"
+    assert ws.dirty is True
+    # The one-shot text is preserved on the enriched dict (for the context block).
+    assert out[0]["text"] == "# hi\n"
+
+
+async def test_persist_skips_directory(tmp_path: Path):
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws, [{"name": "src", "path": "/local/src", "text": "a.py\nb.py", "kind": "dir"}]
+    )
+
+    assert "workspace_path" not in out[0]
+    assert not (tmp_path / ATTACHMENTS_DIR).exists()
+    assert ws.dirty is False
+
+
+async def test_persist_skips_empty_text(tmp_path: Path):
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws, [{"name": "empty.txt", "path": "/local/empty.txt", "text": "   "}]
+    )
+    assert "workspace_path" not in out[0]
+    assert ws.dirty is False
+
+
+async def test_persist_dedups_same_name(tmp_path: Path):
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws,
+        [
+            {"name": "report.txt", "path": "/a/report.txt", "text": "A"},
+            {"name": "report.txt", "path": "/b/report.txt", "text": "B"},
+        ],
+    )
+    assert out[0]["workspace_path"] == "attachments/report.txt"
+    assert out[1]["workspace_path"] == "attachments/report (2).txt"
+    assert (tmp_path / "attachments" / "report.txt").read_text(encoding="utf-8") == "A"
+    assert (tmp_path / "attachments" / "report (2).txt").read_text(encoding="utf-8") == "B"
+
+
+async def test_persist_sanitizes_traversal_name(tmp_path: Path):
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws, [{"name": "../../evil.sh", "path": "/x", "text": "rm -rf"}]
+    )
+    # Directory parts are stripped: lands directly inside attachments/.
+    assert out[0]["workspace_path"] == "attachments/evil.sh"
+    assert (tmp_path / "attachments" / "evil.sh").exists()
+    assert not (tmp_path.parent / "evil.sh").exists()
+
+
+async def test_persist_none_returns_empty(tmp_path: Path):
+    assert await persist_attachments(_ws(tmp_path), None) == []
+    assert await persist_attachments(_ws(tmp_path), []) == []
+
+
+class _FailingBackend:
+    """Minimal backend whose write always fails (never-break-the-turn path)."""
+
+    dirty = False
+
+    async def write(self, path: str, content: str) -> int:
+        raise WorkspaceIOError("disk full")
+
+
+async def test_persist_write_failure_is_skipped():
+    out = await persist_attachments(
+        _FailingBackend(), [{"name": "x.txt", "path": "/x.txt", "text": "data"}]
+    )
+    # The turn proceeds: the attachment is returned un-resident, not raised.
+    assert out[0].get("workspace_path") is None
+
+
+def test_to_stored_metadata_drops_text_keeps_path():
+    stored = to_stored_metadata(
+        [
+            {
+                "name": "a.py",
+                "path": "/local/a.py",
+                "text": "secret source",
+                "truncated": True,
+                "kind": "file",
+                "workspace_path": "attachments/a.py",
+            }
+        ]
+    )
+    assert stored == [
+        {
+            "name": "a.py",
+            "path": "/local/a.py",
+            "truncated": True,
+            "kind": "file",
+            "workspace_path": "attachments/a.py",
+        }
+    ]
+    assert "text" not in stored[0]
+
+
+def test_to_stored_metadata_defaults_for_unpersisted():
+    stored = to_stored_metadata([{"name": "d", "path": "/d", "kind": "dir"}])
+    assert stored[0]["workspace_path"] is None
+    assert stored[0]["truncated"] is False
+
+
+def test_safe_attachment_name():
+    assert _safe_attachment_name("foo.py") == "foo.py"
+    assert _safe_attachment_name("src/sub/foo.py") == "foo.py"
+    assert _safe_attachment_name("..\\..\\evil.txt") == "evil.txt"
+    assert _safe_attachment_name("") == "attachment"
+    assert _safe_attachment_name("...") == "attachment"

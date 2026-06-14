@@ -94,6 +94,23 @@ class Settings(BaseSettings):
     # set false to disable automatic backups (manual snapshots still work).
     workspace_snapshot_enabled: bool = True
 
+    # Cap on automatic (unlabeled) snapshots kept per workspace (决策⑥: 非每写必
+    # 存). After each new auto snapshot the oldest auto backups beyond this count
+    # are pruned; manually kept versions (labeled, 手动留版本) are never pruned.
+    # 0 disables the cap (keep every auto snapshot).
+    workspace_auto_snapshot_max: int = 10
+
+    # Retention cleanup of soft-deleted workspaces (决策⑦: 与软删除对齐). A deleted
+    # folder / ungrouped conversation keeps its files (recoverable) until its
+    # deleted_at is older than the retention period; then a periodic background
+    # sweep physically removes the workspace directory, its snapshots, and the DB
+    # records. Set enabled=false to keep soft-deleted data indefinitely.
+    workspace_retention_enabled: bool = True
+    workspace_retention_days: int = 30
+    workspace_retention_sweep_interval_seconds: int = 6 * 3600  # every 6h
+    # Max folders / conversations purged per sweep (bounds one sweep's I/O).
+    workspace_retention_batch_limit: int = 100
+
     # Max size (bytes) for a single workspace file upload (文件进出·先上传). The
     # raw request body is read into memory, so this bounds per-request memory.
     workspace_upload_max_bytes: int = 25 * 1024 * 1024  # 25 MiB

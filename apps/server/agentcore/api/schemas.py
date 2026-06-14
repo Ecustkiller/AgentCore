@@ -148,12 +148,19 @@ class MessageAttachment(BaseModel):
 
 
 class StoredAttachment(BaseModel):
-    """Persisted attachment display metadata (no extracted text)."""
+    """Persisted attachment display metadata (no extracted text).
+
+    ``workspace_path`` is set when the attachment was written into the durable
+    project space (附件驻留): a workspace-relative path under ``attachments/`` that
+    the file-download API can serve. ``None`` for directory listings (nothing is
+    written to disk) and for legacy rows created before residency.
+    """
 
     name: str
     path: str
     truncated: bool = False
     kind: Literal["file", "dir"] = "file"
+    workspace_path: str | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -276,6 +283,33 @@ class UploadFileResponse(BaseModel):
 
     path: str
     size_bytes: int
+
+
+class MoveFileRequest(BaseModel):
+    """Move/rename a workspace file or directory (both workspace-relative)."""
+
+    src: str = Field(..., min_length=1, max_length=1000)
+    dst: str = Field(..., min_length=1, max_length=1000)
+
+
+class CreateDirRequest(BaseModel):
+    """Create a workspace directory (workspace-relative, parents created)."""
+
+    path: str = Field(..., min_length=1, max_length=1000)
+
+
+class CloneRepoRequest(BaseModel):
+    """Clone a public git repository into the conversation's workspace."""
+
+    repo_url: str = Field(..., min_length=1, max_length=2000)
+    # Optional workspace-relative target dir; defaults to the repo name.
+    dest: str | None = Field(None, max_length=500)
+
+
+class CloneRepoResponse(BaseModel):
+    """Result of a workspace clone — the relative dir the repo landed in."""
+
+    path: str
 
 
 # --- Tools ---

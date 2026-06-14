@@ -1,5 +1,7 @@
 """FastAPI application entry point."""
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -11,6 +13,7 @@ from agentcore.config import settings
 from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import setup_logging
 from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
+from agentcore.workspace.retention import retention_loop
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,21 @@ def _validate_production_security() -> None:
 async def lifespan(app: FastAPI):
     setup_logging(debug=settings.debug)
     _validate_production_security()
-    yield
+
+    # Background retention sweep (决策⑦): physically purge soft-deleted workspaces
+    # past their grace period. Best-effort and self-contained; cancelled cleanly
+    # on shutdown. Disabled config → no task.
+    retention_task: asyncio.Task | None = None
+    if settings.workspace_retention_enabled:
+        retention_task = asyncio.create_task(retention_loop())
+
+    try:
+        yield
+    finally:
+        if retention_task is not None:
+            retention_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await retention_task
 
 
 app = FastAPI(

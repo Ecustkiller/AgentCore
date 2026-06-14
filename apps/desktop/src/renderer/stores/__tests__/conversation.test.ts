@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useConversationStore } from "../conversation";
+import { getActiveRuntime, useConversationStore } from "../conversation";
 
 const store = () => useConversationStore.getState();
+/** Active conversation's runtime slice — runtime state is now keyed by id. */
+const rt = () => getActiveRuntime();
 
 beforeEach(() => {
   useConversationStore.setState({
     conversations: [],
     currentConversationId: null,
-    messages: [],
-    isGenerating: false,
+    byId: {},
   });
 });
 
@@ -28,8 +29,8 @@ describe("conversation store", () => {
       store().switchConversation("conv-new");
 
       expect(store().currentConversationId).toBe("conv-new");
-      expect(store().messages).toEqual([]);
-      expect(store().isGenerating).toBe(false);
+      expect(rt().messages).toEqual([]);
+      expect(rt().isGenerating).toBe(false);
     });
 
     it("starts a fresh draft chat when switched to null", () => {
@@ -47,8 +48,48 @@ describe("conversation store", () => {
       store().switchConversation(null);
 
       expect(store().currentConversationId).toBeNull();
-      expect(store().messages).toEqual([]);
-      expect(store().isGenerating).toBe(false);
+      expect(rt().messages).toEqual([]);
+      expect(rt().isGenerating).toBe(false);
+    });
+  });
+
+  // Step 4: switching no longer aborts the turn you leave. A live turn keeps
+  // streaming into its own slice in the background; an idle slice is released.
+  describe("switchConversation (background turns)", () => {
+    const userMsg = {
+      id: "m1",
+      role: "user" as const,
+      content: "hi",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    };
+
+    it("keeps a generating conversation's slice alive when leaving it", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage(); // byId.a: streaming, isGenerating
+      store().switchConversation("b");
+      // a's live turn survives — not aborted, not released.
+      expect(store().byId.a?.isGenerating).toBe(true);
+      expect(store().byId.a?.messages).toHaveLength(1);
+    });
+
+    it("releases an idle conversation's buffer when leaving it", () => {
+      store().switchConversation("a");
+      store().addMessage(userMsg); // byId.a: idle (no live turn)
+      store().switchConversation("b");
+      // a is idle → buffer dropped so memory stays bounded (reloads on return).
+      expect(store().byId.a).toBeUndefined();
+    });
+
+    it("returns to a live background turn without wiping its stream", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().appendToLastMessage("partial");
+      store().switchConversation("b"); // a kept (busy)
+      store().switchConversation("a"); // return to a
+      expect(store().byId.a?.messages[0].content).toBe("partial");
+      expect(store().byId.a?.isGenerating).toBe(true);
     });
   });
 
@@ -64,8 +105,8 @@ describe("conversation store", () => {
       };
 
       store().addMessage(msg);
-      expect(store().messages).toHaveLength(1);
-      expect(store().messages[0].content).toBe("test");
+      expect(rt().messages).toHaveLength(1);
+      expect(rt().messages[0].content).toBe("test");
     });
   });
 
@@ -81,12 +122,12 @@ describe("conversation store", () => {
       });
 
       store().appendToLastMessage(" world");
-      expect(store().messages[0].content).toBe("Hello world");
+      expect(rt().messages[0].content).toBe("Hello world");
     });
 
     it("does nothing when no messages", () => {
       store().appendToLastMessage("chunk");
-      expect(store().messages).toEqual([]);
+      expect(rt().messages).toEqual([]);
     });
   });
 
@@ -94,12 +135,12 @@ describe("conversation store", () => {
     it("creates an empty streaming assistant message", () => {
       const id = store().createAssistantMessage();
 
-      expect(store().messages).toHaveLength(1);
-      expect(store().messages[0].id).toBe(id);
-      expect(store().messages[0].role).toBe("assistant");
-      expect(store().messages[0].content).toBe("");
-      expect(store().messages[0].isStreaming).toBe(true);
-      expect(store().isGenerating).toBe(true);
+      expect(rt().messages).toHaveLength(1);
+      expect(rt().messages[0].id).toBe(id);
+      expect(rt().messages[0].role).toBe("assistant");
+      expect(rt().messages[0].content).toBe("");
+      expect(rt().messages[0].isStreaming).toBe(true);
+      expect(rt().isGenerating).toBe(true);
     });
   });
 
@@ -110,8 +151,8 @@ describe("conversation store", () => {
 
       store().finalizeLastMessage();
 
-      expect(store().messages[0].isStreaming).toBe(false);
-      expect(store().isGenerating).toBe(false);
+      expect(rt().messages[0].isStreaming).toBe(false);
+      expect(rt().isGenerating).toBe(false);
     });
   });
 

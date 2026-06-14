@@ -13,6 +13,7 @@ import pytest
 from agentcore.tools.sandbox.protocol import ExecutionRequest
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.protocol import (
+    AlreadyExists,
     AmbiguousMatch,
     GrepQuery,
     NoMatch,
@@ -236,3 +237,138 @@ async def test_write_bytes_escape_raises_outside_workspace(tmp_path: Path):
     ws_root.mkdir()
     with pytest.raises(OutsideWorkspace):
         await _ws(ws_root).write_bytes("../evil.bin", b"x")
+
+
+# --- delete / move (rename) ---
+
+
+async def test_delete_removes_file(tmp_path: Path):
+    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
+    ws = _ws(tmp_path)
+    await ws.delete("f.txt")
+    assert not (tmp_path / "f.txt").exists()
+    assert ws.dirty is True
+
+
+async def test_delete_removes_directory_recursively(tmp_path: Path):
+    (tmp_path / "d" / "sub").mkdir(parents=True)
+    (tmp_path / "d" / "sub" / "f.txt").write_text("x", encoding="utf-8")
+    await _ws(tmp_path).delete("d")
+    assert not (tmp_path / "d").exists()
+
+
+async def test_delete_missing_raises_path_not_found(tmp_path: Path):
+    with pytest.raises(PathNotFound):
+        await _ws(tmp_path).delete("nope.txt")
+
+
+async def test_delete_root_raises_outside_workspace(tmp_path: Path):
+    # Refuse to nuke the workspace itself, however the root is addressed.
+    with pytest.raises(OutsideWorkspace):
+        await _ws(tmp_path).delete(".")
+
+
+async def test_delete_escape_raises_outside_workspace(tmp_path: Path):
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir()
+    (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(OutsideWorkspace):
+        await _ws(ws_root).delete("../secret.txt")
+    assert (tmp_path / "secret.txt").exists()
+
+
+async def test_failed_delete_does_not_dirty(tmp_path: Path):
+    ws = _ws(tmp_path)
+    with pytest.raises(PathNotFound):
+        await ws.delete("nope.txt")
+    assert ws.dirty is False
+
+
+async def test_move_renames_file(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+    ws = _ws(tmp_path)
+    await ws.move("a.txt", "b.txt")
+    assert not (tmp_path / "a.txt").exists()
+    assert (tmp_path / "b.txt").read_text(encoding="utf-8") == "hello"
+    assert ws.dirty is True
+
+
+async def test_move_creates_destination_parents(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("hello", encoding="utf-8")
+    await _ws(tmp_path).move("a.txt", "nested/dir/b.txt")
+    assert (tmp_path / "nested" / "dir" / "b.txt").read_text(encoding="utf-8") == "hello"
+
+
+async def test_move_directory(tmp_path: Path):
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "f.txt").write_text("x", encoding="utf-8")
+    await _ws(tmp_path).move("d", "renamed")
+    assert (tmp_path / "renamed" / "f.txt").read_text(encoding="utf-8") == "x"
+
+
+async def test_move_missing_source_raises_path_not_found(tmp_path: Path):
+    with pytest.raises(PathNotFound):
+        await _ws(tmp_path).move("nope.txt", "b.txt")
+
+
+async def test_move_onto_existing_raises_already_exists(tmp_path: Path):
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("b", encoding="utf-8")
+    ws = _ws(tmp_path)
+    with pytest.raises(AlreadyExists):
+        await ws.move("a.txt", "b.txt")
+    # Both untouched, and the failed move left the workspace clean.
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "a"
+    assert ws.dirty is False
+
+
+async def test_move_escape_source_raises_outside_workspace(tmp_path: Path):
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir()
+    (tmp_path / "secret.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(OutsideWorkspace):
+        await _ws(ws_root).move("../secret.txt", "stolen.txt")
+
+
+async def test_move_escape_destination_raises_outside_workspace(tmp_path: Path):
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir()
+    (ws_root / "a.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(OutsideWorkspace):
+        await _ws(ws_root).move("a.txt", "../escape.txt")
+
+
+# --- mkdir (new folder) ---
+
+
+async def test_mkdir_creates_directory(tmp_path: Path):
+    ws = _ws(tmp_path)
+    await ws.mkdir("newdir")
+    assert (tmp_path / "newdir").is_dir()
+    assert ws.dirty is True
+
+
+async def test_mkdir_creates_parents(tmp_path: Path):
+    await _ws(tmp_path).mkdir("a/b/c")
+    assert (tmp_path / "a" / "b" / "c").is_dir()
+
+
+async def test_mkdir_existing_raises_already_exists(tmp_path: Path):
+    (tmp_path / "d").mkdir()
+    ws = _ws(tmp_path)
+    with pytest.raises(AlreadyExists):
+        await ws.mkdir("d")
+    assert ws.dirty is False
+
+
+async def test_mkdir_root_raises_outside_workspace(tmp_path: Path):
+    with pytest.raises(OutsideWorkspace):
+        await _ws(tmp_path).mkdir(".")
+
+
+async def test_mkdir_escape_raises_outside_workspace(tmp_path: Path):
+    ws_root = tmp_path / "ws"
+    ws_root.mkdir()
+    with pytest.raises(OutsideWorkspace):
+        await _ws(ws_root).mkdir("../escape")
+    assert not (tmp_path / "escape").exists()

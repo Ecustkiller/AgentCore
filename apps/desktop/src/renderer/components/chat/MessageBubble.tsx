@@ -1,7 +1,15 @@
 import { copyText } from "@/lib/clipboard";
 import { formatCost } from "@/lib/format";
 import { runRegenerate } from "@/services/turns";
-import { type Message, useConversationStore } from "@/stores/conversation";
+import { downloadWorkspaceFile } from "@/services/workspace";
+import {
+  type Message,
+  type MessageAttachmentMeta,
+  getActiveRuntime,
+  useActiveGenerating,
+  useActiveMessageFocus,
+  useConversationStore,
+} from "@/stores/conversation";
 import { useUsageStore } from "@/stores/usage";
 import {
   Bot,
@@ -10,6 +18,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Download,
   Folder,
   Paperclip,
   Pencil,
@@ -17,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { InlineTeamGraph } from "./InlineTeamGraph";
 import { Markdown } from "./Markdown";
 import { type CitationFlash, SourceCards } from "./SourceCards";
 
@@ -103,12 +113,97 @@ function ThinkingPanel({
   );
 }
 
+/**
+ * One attachment pill under a user message.
+ *
+ * A resident file attachment (附件驻留 — it carries a `workspacePath`) renders as
+ * a download button that pulls the saved copy from the workspace; directories and
+ * legacy/un-resident attachments stay as static labels.
+ */
+function AttachmentChip({
+  att,
+  conversationId,
+}: {
+  att: MessageAttachmentMeta;
+  conversationId: string | null;
+}) {
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  const downloadable =
+    att.kind !== "dir" && !!att.workspacePath && !!conversationId;
+
+  const base =
+    "inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground";
+  const icon =
+    att.kind === "dir" ? (
+      <Folder size={12} className="shrink-0" />
+    ) : (
+      <Paperclip size={12} className="shrink-0" />
+    );
+  const label = (
+    <>
+      <span className="truncate">
+        {att.name}
+        {att.kind === "dir" ? "/" : ""}
+      </span>
+      {att.truncated && (
+        <span className="shrink-0 text-muted-foreground">
+          {att.kind === "dir" ? "部分" : "已截断"}
+        </span>
+      )}
+    </>
+  );
+
+  if (!downloadable) {
+    return (
+      <span title={att.path} className={base}>
+        {icon}
+        {label}
+      </span>
+    );
+  }
+
+  const onDownload = async () => {
+    if (state === "loading") return;
+    setState("loading");
+    try {
+      await downloadWorkspaceFile(
+        conversationId as string,
+        att.workspacePath as string,
+        att.name,
+      );
+      setState("idle");
+    } catch {
+      setState("error");
+      setTimeout(() => setState("idle"), 2000);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onDownload}
+      title={state === "error" ? "下载失败，点击重试" : `下载 ${att.name}`}
+      className={`${base} transition-colors hover:bg-accent/70 ${
+        state === "error" ? "text-destructive" : ""
+      }`}
+    >
+      {icon}
+      {label}
+      <Download
+        size={12}
+        className={`shrink-0 ${state === "loading" ? "animate-pulse" : "opacity-60"}`}
+      />
+    </button>
+  );
+}
+
 function UserMessage({ message }: Props) {
-  const isGenerating = useConversationStore((s) => s.isGenerating);
+  const isGenerating = useActiveGenerating();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.content);
   const editRef = useRef<HTMLTextAreaElement>(null);
   const { copied, onCopy } = useCopyAction(() => message.content);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   const attachments = message.attachments ?? [];
 
   const startEdit = () => {
@@ -193,26 +288,11 @@ function UserMessage({ message }: Props) {
       {attachments.length > 0 && (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
           {attachments.map((a) => (
-            <span
+            <AttachmentChip
               key={a.id}
-              title={a.path}
-              className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground"
-            >
-              {a.kind === "dir" ? (
-                <Folder size={12} className="shrink-0" />
-              ) : (
-                <Paperclip size={12} className="shrink-0" />
-              )}
-              <span className="truncate">
-                {a.name}
-                {a.kind === "dir" ? "/" : ""}
-              </span>
-              {a.truncated && (
-                <span className="shrink-0 text-muted-foreground">
-                  {a.kind === "dir" ? "部分" : "已截断"}
-                </span>
-              )}
-            </span>
+              att={a}
+              conversationId={conversationId}
+            />
           ))}
         </div>
       )}
@@ -238,7 +318,7 @@ function UserMessage({ message }: Props) {
 }
 
 function AssistantMessage({ message }: Props) {
-  const isGenerating = useConversationStore((s) => s.isGenerating);
+  const isGenerating = useActiveGenerating();
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const loadMessageCost = useUsageStore((s) => s.loadMessageCost);
   // 回落快照: a reloaded turn carries no live `message.cost`; its persisted total
@@ -276,7 +356,7 @@ function AssistantMessage({ message }: Props) {
   }, []);
 
   const handleRegenerate = () => {
-    const msgs = useConversationStore.getState().messages;
+    const msgs = getActiveRuntime().messages;
     const idx = msgs.findIndex((m) => m.id === message.id);
     if (idx <= 0) return;
     let userId: string | null = null;
@@ -300,6 +380,9 @@ function AssistantMessage({ message }: Props) {
             reasoning={message.reasoning ?? ""}
             isStreaming={message.isStreaming}
           />
+        )}
+        {message.executionId && (
+          <InlineTeamGraph executionId={message.executionId} />
         )}
         <Markdown
           content={message.content}
@@ -342,7 +425,7 @@ function AssistantMessage({ message }: Props) {
 }
 
 export function MessageBubble({ message }: Props) {
-  const focus = useConversationStore((s) => s.messageFocus);
+  const focus = useActiveMessageFocus();
   const ref = useRef<HTMLDivElement>(null);
   const [flash, setFlash] = useState(false);
 
@@ -350,6 +433,7 @@ export function MessageBubble({ message }: Props) {
   // jumping to this turn's final answer): scroll this message into view and
   // flash a ring. The nonce dependency re-triggers when the same message is
   // focused again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: focus.nonce is an intentional re-run key (re-focusing the same message must re-flash); it is not read in the body.
   useEffect(() => {
     if (focus?.id !== message.id) return;
     ref.current?.scrollIntoView({ behavior: "smooth", block: "center" });

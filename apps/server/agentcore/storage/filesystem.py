@@ -9,6 +9,7 @@ thread to honor the async contract.
 from __future__ import annotations
 
 import asyncio
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -104,3 +105,12 @@ class FilesystemStorageProvider:
         kept = [r for r in refs if r.snapshot_id != snapshot_id]
         if len(kept) != len(refs):
             (key_dir / MANIFEST_NAME).write_bytes(manifest_to_bytes(kept))
+
+    async def purge(self, storage_key: str) -> None:
+        await asyncio.to_thread(self._purge_sync, storage_key)
+
+    def _purge_sync(self, storage_key: str) -> None:
+        # Remove the whole key directory (all .zip snapshots + manifest). The
+        # storage tree mirrors the workspace key, so this drops exactly one
+        # workspace's snapshot history. ignore_errors keeps it idempotent.
+        shutil.rmtree(self._key_dir(storage_key), ignore_errors=True)

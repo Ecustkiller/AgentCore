@@ -1,5 +1,10 @@
 import { formatCompact, formatCost } from "@/lib/format";
-import { useConversationStore } from "@/stores/conversation";
+import {
+  useActiveError,
+  useActiveMessages,
+  useActiveRetry,
+  useConversationStore,
+} from "@/stores/conversation";
 import { useUsageStore } from "@/stores/usage";
 import { AlertTriangle, RotateCw, X } from "lucide-react";
 import { ApprovalPrompt } from "./ApprovalPrompt";
@@ -38,8 +43,8 @@ function ConversationCostCaption() {
  * exact turn; dismissing only hides the banner.
  */
 function RetryBanner() {
-  const error = useConversationStore((s) => s.error);
-  const retry = useConversationStore((s) => s.retry);
+  const error = useActiveError();
+  const retry = useActiveRetry();
   const clearError = useConversationStore((s) => s.clearError);
   if (!error) return null;
 
@@ -59,7 +64,7 @@ function RetryBanner() {
       )}
       <button
         type="button"
-        onClick={clearError}
+        onClick={() => clearError()}
         aria-label="关闭"
         className="shrink-0 text-destructive/70 hover:text-destructive"
       >
@@ -70,7 +75,7 @@ function RetryBanner() {
 }
 
 export function ChatView() {
-  const messages = useConversationStore((s) => s.messages);
+  const messages = useActiveMessages();
   const hasMessages = messages.length > 0;
 
   return (

@@ -4,12 +4,14 @@ import {
   MenuItem,
 } from "@/components/sidebar/ContextMenu";
 import { computeLayout } from "@/lib/elk-layout";
-import { estimateTokens, tailText } from "@/lib/format";
-import { useConversationStore } from "@/stores/conversation";
+import { estimateTokens, formatCost, tailText } from "@/lib/format";
+import { useActiveMessages, useConversationStore } from "@/stores/conversation";
 import { useDetailPanelStore } from "@/stores/detailPanel";
 import {
   type Execution,
   type RunStatus,
+  activeExec,
+  useActiveExecField,
   useExecutionStore,
   useProjectedExecution,
 } from "@/stores/execution";
@@ -18,7 +20,7 @@ import {
   type GraphLayout,
   useGraphStore,
 } from "@/stores/graph";
-import { useUIStore } from "@/stores/ui";
+import { useUsageStore } from "@/stores/usage";
 import {
   Background,
   Controls,
@@ -97,14 +99,19 @@ interface GraphViewProps {
   embedded?: boolean;
   /** Node-click handler for embedded mode; falls back to in-graph focus. */
   onNodeSelect?: (runId: string) => void;
+  /** Dismiss the surrounding temporary full-screen (non-embedded only); set by
+   * the inline graph's fullscreen wrapper. Endpoint jumps + "view in panel" call
+   * it so the overlay steps aside to reveal the chat. */
+  onClose?: () => void;
 }
 
 export function GraphView({
   embedded = false,
   onNodeSelect,
+  onClose,
 }: GraphViewProps = {}) {
   const execution = useProjectedExecution();
-  const hasFrames = useExecutionStore((s) => s.frames.length > 0);
+  const hasFrames = useActiveExecField((rt) => rt.frames.length > 0);
   const positions = useGraphStore((s) => s.positions);
   const edges = useGraphStore((s) => s.edges);
   const setLayout = useGraphStore((s) => s.setLayout);
@@ -113,12 +120,14 @@ export function GraphView({
   // Left-right flow re-anchors node handles to the horizontal axis.
   const handleDirection =
     layoutKind === "leftright" ? "horizontal" : "vertical";
-  const focusedRunId = useExecutionStore((s) => s.focusedRunId);
-  const focusedAgentId = useExecutionStore((s) => s.focusedAgentId);
+  const focusedRunId = useActiveExecField((rt) => rt.focusedRunId);
+  const focusedAgentId = useActiveExecField((rt) => rt.focusedAgentId);
   const focusRun = useExecutionStore((s) => s.focusRun);
   const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
-  const closeGraph = useUIStore((s) => s.closeGraph);
-  const messages = useConversationStore((s) => s.messages);
+  // The single FX rate (§7.5) that turns each run's nano-USD total into the ¥
+  // chip on its node; one rate for the whole graph keeps the money consistent.
+  const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
+  const messages = useActiveMessages();
   const focusMessage = useConversationStore((s) => s.focusMessage);
   // The CEO synthesis has no scheduled Run (the captain is the chat loop), so
   // its "output" is this turn's assistant answer — found by the execution id the
@@ -151,6 +160,15 @@ export function GraphView({
     }
     return null;
   }, [messages, execution]);
+  // Phase B (D3): once the CEO's 汇总 is a real run (kind "synthesis"), it is the
+  // graph's actual 汇聚点 — replacing the synthetic sink. It is drillable like any
+  // run (its detail shows the 汇总过程 reasoning + overview output), so its node
+  // carries the real run id and routes through the normal activate path. Absent
+  // before the CEO resumes to synthesize → the synthetic bookend stands in.
+  const synthesisRun = useMemo(
+    () => execution?.runs.find((r) => r.kind === "synthesis") ?? null,
+    [execution],
+  );
   const [layoutReady, setLayoutReady] = useState(false);
   const rfRef = useRef<ReactFlowInstance | null>(null);
   // Right-click menu anchor. `nodeId === null` is the pane (empty-canvas) menu.
@@ -179,9 +197,14 @@ export function GraphView({
       setLayoutReady(false);
       return;
     }
-    const runs = useExecutionStore.getState().plan?.runs ?? [];
+    const runs = activeExec(useExecutionStore.getState()).plan?.runs ?? [];
+    // The CEO synthesis run (Phase B) is the real 汇聚点; the worker DAG is laid
+    // out around it. Workers wire INTO it as the sink instead of the synthetic
+    // bookend, which is dropped once the real run exists.
+    const synthId = runs.find((r) => r.kind === "synthesis")?.id ?? null;
+    const workerRuns = runs.filter((r) => r.id !== synthId);
     const nodeIds = runs.map((s) => s.id);
-    const rawEdges: GraphEdge[] = runs.flatMap((run) =>
+    const rawEdges: GraphEdge[] = workerRuns.flatMap((run) =>
       run.dependsOn.map((depId) => ({
         id: `${depId}->${run.id}`,
         source: depId,
@@ -189,15 +212,18 @@ export function GraphView({
       })),
     );
 
-    // Bookend the worker DAG with two synthetic endpoints so the graph reads as
-    // a full collaboration story: user input → team waves → CEO synthesis. They
-    // are laid out alongside the workers but carry no run — guarded everywhere a
-    // real run id is expected (clicks, run-detail, context menu).
-    if (runs.length > 0) {
+    // Bookend the worker DAG so the graph reads as a full collaboration story:
+    // user input → team waves → CEO synthesis. The input root is always synthetic
+    // (the prompt has no run); the sink is the real synthesis run when present,
+    // else a synthetic node. Synthetic ids are guarded everywhere a real run id
+    // is expected (clicks, run-detail, context menu).
+    if (workerRuns.length > 0) {
       const dependedOn = new Set<string>();
-      for (const r of runs) for (const dep of r.dependsOn) dependedOn.add(dep);
-      nodeIds.push(INPUT_ID, SYNTHESIS_ID);
-      for (const r of runs) {
+      for (const r of workerRuns) for (const dep of r.dependsOn) dependedOn.add(dep);
+      const sinkId = synthId ?? SYNTHESIS_ID;
+      nodeIds.push(INPUT_ID);
+      if (!synthId) nodeIds.push(SYNTHESIS_ID);
+      for (const r of workerRuns) {
         if (r.dependsOn.length === 0) {
           rawEdges.push({
             id: `${INPUT_ID}->${r.id}`,
@@ -207,9 +233,9 @@ export function GraphView({
         }
         if (!dependedOn.has(r.id)) {
           rawEdges.push({
-            id: `${r.id}->${SYNTHESIS_ID}`,
+            id: `${r.id}->${sinkId}`,
             source: r.id,
-            target: SYNTHESIS_ID,
+            target: sinkId,
           });
         }
       }
@@ -239,13 +265,13 @@ export function GraphView({
       if (id === INPUT_ID) {
         if (!taskMessage) return;
         focusMessage(taskMessage.id);
-        if (!embedded) closeGraph();
+        if (!embedded) onClose?.();
         return;
       }
       if (id === SYNTHESIS_ID) {
         if (!finalAnswer) return;
         focusMessage(finalAnswer.id);
-        if (!embedded) closeGraph();
+        if (!embedded) onClose?.();
         return;
       }
       // Defensive: any other endpoint id carries no run.
@@ -264,7 +290,7 @@ export function GraphView({
       taskMessage,
       focusMessage,
       embedded,
-      closeGraph,
+      onClose,
     ],
   );
 
@@ -337,7 +363,9 @@ export function GraphView({
 
   const flowNodes = useMemo<Node[]>(() => {
     if (!execution) return [];
-    const nodes: Node[] = execution.runs.map((run, i) => {
+    // The synthesis run renders as the 汇聚点 (below), not as a worker node.
+    const workerRuns = execution.runs.filter((r) => r.id !== synthesisRun?.id);
+    const nodes: Node[] = workerRuns.map((run, i) => {
       const agent = execution.agents.find((a) => a.id === run.agentId);
       const output = agent ? agent.outputChunks.join("") : "";
       const focused =
@@ -362,6 +390,10 @@ export function GraphView({
           model: run.model,
           durationMs: run.durationMs,
           realTokens: run.usage ? run.usage.input + run.usage.output : 0,
+          costText:
+            run.cost && run.cost.total > 0
+              ? formatCost(run.cost.total, cnyPerUsd)
+              : undefined,
           handleDirection,
           // Input endpoint is index 0, so workers start at 1.
           enterIndex: i + 1,
@@ -384,30 +416,58 @@ export function GraphView({
             label: execution.taskSummary,
             handleDirection,
             enterIndex: 0,
-            onActivate: taskMessage
-              ? () => activateNode(INPUT_ID)
-              : undefined,
+            onActivate: taskMessage ? () => activateNode(INPUT_ID) : undefined,
           },
         } as Node);
       }
-      const synthPos = positions[SYNTHESIS_ID];
-      if (synthPos && synthesisStatus) {
-        nodes.push({
-          id: SYNTHESIS_ID,
-          type: "synthesis",
-          position: synthPos,
-          data: {
-            variant: "synthesis",
-            status: synthesisStatus,
-            label: "",
-            preview: finalAnswer ? tailText(finalAnswer.content) : "",
-            handleDirection,
-            enterIndex: execution.runs.length + 1,
-            onActivate: finalAnswer
-              ? () => activateNode(SYNTHESIS_ID)
-              : undefined,
-          },
-        } as Node);
+      if (synthesisRun) {
+        // The real 汇聚点: a CEO run drilled into like any node (its detail shows
+        // the 汇总过程 + overview). Previews its own streamed output, falling back
+        // to the answer bubble's tail before the overview starts.
+        const synthPos = positions[synthesisRun.id];
+        const synthAgent = execution.agents.find(
+          (a) => a.id === synthesisRun.agentId,
+        );
+        const synthOutput = synthAgent ? synthAgent.outputChunks.join("") : "";
+        if (synthPos) {
+          nodes.push({
+            id: synthesisRun.id,
+            type: "synthesis",
+            position: synthPos,
+            data: {
+              variant: "synthesis",
+              status: synthesisRun.status,
+              label: "",
+              preview:
+                tailText(synthOutput) ||
+                (finalAnswer ? tailText(finalAnswer.content) : ""),
+              actionLabel: "查看汇总过程",
+              handleDirection,
+              enterIndex: workerRuns.length + 1,
+              onActivate: () => activateNode(synthesisRun.id),
+            },
+          } as Node);
+        }
+      } else {
+        const synthPos = positions[SYNTHESIS_ID];
+        if (synthPos && synthesisStatus) {
+          nodes.push({
+            id: SYNTHESIS_ID,
+            type: "synthesis",
+            position: synthPos,
+            data: {
+              variant: "synthesis",
+              status: synthesisStatus,
+              label: "",
+              preview: finalAnswer ? tailText(finalAnswer.content) : "",
+              handleDirection,
+              enterIndex: workerRuns.length + 1,
+              onActivate: finalAnswer
+                ? () => activateNode(SYNTHESIS_ID)
+                : undefined,
+            },
+          } as Node);
+        }
       }
     }
 
@@ -415,9 +475,11 @@ export function GraphView({
   }, [
     execution,
     positions,
+    cnyPerUsd,
     focusedRunId,
     focusedAgentId,
     synthesisStatus,
+    synthesisRun,
     handleDirection,
     activateNode,
     finalAnswer,
@@ -489,7 +551,11 @@ export function GraphView({
       </div>
 
       {!embedded && focusedRunId && (
-        <NodeDetail nodeId={focusedRunId} onClose={() => focusRun(null)} />
+        <NodeDetail
+          nodeId={focusedRunId}
+          onClose={() => focusRun(null)}
+          onExit={onClose}
+        />
       )}
 
       {menu && (
@@ -519,7 +585,7 @@ export function GraphView({
                           (a) => a.id === run?.agentId,
                         )?.role;
                         showRunDetail(menuNodeId, role);
-                        closeGraph();
+                        onClose?.();
                         setMenu(null);
                       }}
                     />
@@ -536,16 +602,19 @@ export function GraphView({
                   }}
                 />
               )}
-              {menuNodeId === SYNTHESIS_ID && finalAnswer && (
-                <MenuItem
-                  icon={<ScanSearch size={14} />}
-                  label="查看最终回答"
-                  onSelect={() => {
-                    activateNode(SYNTHESIS_ID);
-                    setMenu(null);
-                  }}
-                />
-              )}
+              {(menuNodeId === SYNTHESIS_ID ||
+                menuNodeId === synthesisRun?.id) &&
+                finalAnswer && (
+                  <MenuItem
+                    icon={<ScanSearch size={14} />}
+                    label="查看最终回答"
+                    onSelect={() => {
+                      focusMessage(finalAnswer.id);
+                      if (!embedded) onClose?.();
+                      setMenu(null);
+                    }}
+                  />
+                )}
               <MenuItem
                 icon={<Crosshair size={14} />}
                 label="居中此节点"

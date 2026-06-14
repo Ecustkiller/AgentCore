@@ -1,18 +1,15 @@
-import { GraphView } from "@/components/graph/GraphView";
 import { type DetailTab, useDetailPanelStore } from "@/stores/detailPanel";
-import { type Execution, useProjectedExecution } from "@/stores/execution";
-import { useUIStore } from "@/stores/ui";
-import { Maximize2, Users, X } from "lucide-react";
+import { useProjectedExecution } from "@/stores/execution";
+import { Users, X } from "lucide-react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { ProgressTab } from "./detail/ProgressTab";
 import { RunDetailBody } from "./detail/RunDetailBody";
 
 /**
- * Conversation detail panel — the docked Layer-2 surface ("manage the team")
- * that lives beside the chat. Holds a dynamic set of tabs (progress overview /
- * per-run drill-down / embedded graph) opened on demand from the task card,
- * roster and graph; reads the same execution projection as those surfaces, so
- * all of them stay in lockstep without a second data source.
+ * Conversation detail panel — the passive Layer-2 drill-down beside the chat.
+ * The inline collaboration graph is the team's primary surface; clicking one of
+ * its nodes pins that run here as a run-detail tab (统一团队展示设计草案). The panel
+ * no longer auto-opens and holds no progress / graph tabs of its own — it reads
+ * the same execution projection as the graph, so the two stay in lockstep.
  */
 export function DetailPanel() {
   const open = useDetailPanelStore((s) => s.open);
@@ -27,17 +24,12 @@ export function DetailPanel() {
 
   if (!open) return null;
 
-  const isMulti = execution != null && execution.planType === "multi_agent";
-
-  // Drop run-detail tabs whose run no longer exists in the live execution
-  // (e.g. a stale tab carried across turns); singleton tabs always apply.
-  const visibleTabs = isMulti
-    ? tabs.filter(
-        (t) =>
-          t.kind !== "run-detail" ||
-          execution.runs.some((r) => r.id === t.runId),
-      )
-    : [];
+  // Only run-detail tabs whose run still exists in the live execution survive (a
+  // stale tab carried across turns references a now-cleared run).
+  const visibleTabs =
+    execution != null && execution.planType === "multi_agent"
+      ? tabs.filter((t) => execution.runs.some((r) => r.id === t.runId))
+      : [];
 
   const activeTab =
     visibleTabs.find((t) => t.id === activeTabId) ??
@@ -95,8 +87,10 @@ export function DetailPanel() {
       </div>
 
       <div className="min-h-0 flex-1">
-        {isMulti && activeTab ? (
-          <TabBody tab={activeTab} execution={execution} />
+        {activeTab ? (
+          <div className="h-full overflow-y-auto">
+            <RunDetailBody runId={activeTab.runId} />
+          </div>
         ) : (
           <EmptyState />
         )}
@@ -143,54 +137,13 @@ function TabChip({
   );
 }
 
-function TabBody({ tab, execution }: { tab: DetailTab; execution: Execution }) {
-  if (tab.kind === "task-graph") return <PanelGraph execution={execution} />;
-
-  return (
-    <div className="h-full overflow-y-auto">
-      {tab.kind === "task-progress" ? (
-        <ProgressTab execution={execution} />
-      ) : tab.runId ? (
-        <RunDetailBody runId={tab.runId} />
-      ) : null}
-    </div>
-  );
-}
-
-/** Embedded collaboration graph: clicking a node opens its run-detail tab; the
- * maximise button hands off to the full-screen overlay. */
-function PanelGraph({ execution }: { execution: Execution }) {
-  const openGraph = useUIStore((s) => s.openGraph);
-  const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
-
-  const onNodeSelect = (runId: string) => {
-    const run = execution.runs.find((r) => r.id === runId);
-    const role = execution.agents.find((a) => a.id === run?.agentId)?.role;
-    showRunDetail(runId, role);
-  };
-
-  return (
-    <div className="relative h-full">
-      <GraphView embedded onNodeSelect={onNodeSelect} />
-      <button
-        type="button"
-        onClick={openGraph}
-        title="最大化"
-        className="absolute right-2 top-2 z-10 flex size-7 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
-      >
-        <Maximize2 size={14} />
-      </button>
-    </div>
-  );
-}
-
 function EmptyState() {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
       <Users size={28} className="text-muted-foreground/40" />
-      <p className="text-sm text-muted-foreground">当前回合没有多 Agent 协作</p>
+      <p className="text-sm text-muted-foreground">未选择运行详情</p>
       <p className="text-xs text-muted-foreground">
-        发起一个需要团队协作的任务后，这里会显示每个 Agent 的进度与详情。
+        在 AI 回复内的协作图中点击某个 Agent 节点，这里会显示它的运行详情。
       </p>
     </div>
   );

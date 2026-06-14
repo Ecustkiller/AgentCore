@@ -17,15 +17,19 @@ from agentcore.api.dependencies import (
     get_message_repo,
 )
 from agentcore.api.schemas import (
+    CloneRepoRequest,
+    CloneRepoResponse,
     ConversationListResponse,
     ConversationSummary,
     CreateConversationRequest,
+    CreateDirRequest,
     CreateSnapshotRequest,
     FolderGroup,
     GroupedConversationsResponse,
     MessageDetail,
     MessageListResponse,
     MoveConversationRequest,
+    MoveFileRequest,
     RegenerateMessageRequest,
     ResolveApprovalRequest,
     SendMessageRequest,
@@ -50,10 +54,23 @@ from agentcore.db.repositories import (
 from agentcore.runtime.approvals import default_approval_registry
 from agentcore.runtime.events import EventSink
 from agentcore.storage import SnapshotNotFound
-from agentcore.workspace.files import download_file, list_files, upload_file
+from agentcore.workspace.files import (
+    create_dir,
+    delete_file,
+    download_file,
+    list_files,
+    move_file,
+    upload_file,
+)
+from agentcore.workspace.git import CloneError, clone_repo
 from agentcore.workspace.locate import workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
-from agentcore.workspace.protocol import NotAFile, OutsideWorkspace, PathNotFound
+from agentcore.workspace.protocol import (
+    AlreadyExists,
+    NotAFile,
+    OutsideWorkspace,
+    PathNotFound,
+)
 from agentcore.workspace.snapshots import (
     create_snapshot,
     list_snapshots,
@@ -526,3 +543,122 @@ async def download_workspace_file(
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.delete(
+    "/{conversation_id}/workspace/files/{path:path}", response_model=StatusResponse
+)
+async def delete_workspace_file(
+    conversation_id: str,
+    path: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Delete a file or directory from the conversation's workspace."""
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    key = workspace_storage_key(
+        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
+    )
+    try:
+        # Folder lock (决策④): serialize the delete against a running same-folder turn.
+        async with workspace_lock(key):
+            await delete_file(
+                user_id=user.user_id,
+                folder_id=conv.folder_id,
+                conversation_id=conversation_id,
+                path=path,
+            )
+    except OutsideWorkspace as e:
+        raise ValidationError("Invalid path: outside the workspace") from e
+    except PathNotFound as e:
+        raise NotFoundError("File not found") from e
+    return StatusResponse()
+
+
+@router.post("/{conversation_id}/workspace/move", response_model=StatusResponse)
+async def move_workspace_file(
+    conversation_id: str,
+    body: MoveFileRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Move/rename a file or directory within the conversation's workspace."""
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    key = workspace_storage_key(
+        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
+    )
+    try:
+        # Folder lock (决策④): serialize the move against a running same-folder turn.
+        async with workspace_lock(key):
+            await move_file(
+                user_id=user.user_id,
+                folder_id=conv.folder_id,
+                conversation_id=conversation_id,
+                src=body.src,
+                dst=body.dst,
+            )
+    except OutsideWorkspace as e:
+        raise ValidationError("Invalid path: outside the workspace") from e
+    except PathNotFound as e:
+        raise NotFoundError("File not found") from e
+    except AlreadyExists as e:
+        raise ValidationError("A file with that name already exists") from e
+    return StatusResponse()
+
+
+@router.post("/{conversation_id}/workspace/dirs", response_model=StatusResponse)
+async def create_workspace_dir(
+    conversation_id: str,
+    body: CreateDirRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Create a directory in the conversation's workspace."""
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    key = workspace_storage_key(
+        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
+    )
+    try:
+        # Folder lock (决策④): serialize against a running same-folder turn.
+        async with workspace_lock(key):
+            await create_dir(
+                user_id=user.user_id,
+                folder_id=conv.folder_id,
+                conversation_id=conversation_id,
+                path=body.path,
+            )
+    except OutsideWorkspace as e:
+        raise ValidationError("Invalid path: outside the workspace") from e
+    except AlreadyExists as e:
+        raise ValidationError("A file or folder with that name already exists") from e
+    return StatusResponse()
+
+
+@router.post("/{conversation_id}/workspace/clone", response_model=CloneRepoResponse)
+async def clone_repo_into_workspace(
+    conversation_id: str,
+    body: CloneRepoRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Clone a public git repository into the conversation's workspace (决策⑤)."""
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    key = workspace_storage_key(
+        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
+    )
+    try:
+        # Folder lock (决策④): the clone writes many files; serialize it against a
+        # running same-folder turn and other workspace mutations.
+        async with workspace_lock(key):
+            dest = await clone_repo(
+                user_id=user.user_id,
+                folder_id=conv.folder_id,
+                conversation_id=conversation_id,
+                repo_url=body.repo_url,
+                dest=body.dest,
+            )
+    except ValueError as e:
+        raise ValidationError(str(e)) from e
+    except CloneError as e:
+        raise ValidationError(f"Clone failed: {e}") from e
+    return CloneRepoResponse(path=dest)

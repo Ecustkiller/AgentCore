@@ -17,6 +17,7 @@ from agentcore.workspace.locate import resolve_workspace_root
 from agentcore.workspace.snapshots import (
     create_snapshot,
     list_snapshots,
+    purge_snapshots,
     read_snapshot,
     restore_snapshot,
 )
@@ -90,3 +91,49 @@ async def test_read_unknown_snapshot_raises(fs_storage):
         await read_snapshot(
             user_id="u1", folder_id="f1", conversation_id="c1", snapshot_id="missing"
         )
+
+
+async def test_auto_snapshot_cap_prunes_oldest(fs_storage, monkeypatch):
+    monkeypatch.setattr(settings, "workspace_auto_snapshot_max", 3)
+    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="cap")
+    (root / "f.txt").write_text("x", encoding="utf-8")
+
+    refs = [
+        await create_snapshot(user_id="u1", folder_id=None, conversation_id="cap")
+        for _ in range(5)
+    ]
+    listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="cap")
+    # Only the 3 newest auto snapshots survive; the 2 oldest were pruned.
+    assert {r.snapshot_id for r in listed} == {r.snapshot_id for r in refs[-3:]}
+
+
+async def test_labeled_snapshots_survive_cap(fs_storage, monkeypatch):
+    monkeypatch.setattr(settings, "workspace_auto_snapshot_max", 1)
+    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="kept")
+    (root / "f.txt").write_text("x", encoding="utf-8")
+
+    kept = await create_snapshot(
+        user_id="u1", folder_id=None, conversation_id="kept", label="v1"
+    )
+    # Several auto snapshots that would blow past the cap of 1.
+    for _ in range(3):
+        await create_snapshot(user_id="u1", folder_id=None, conversation_id="kept")
+
+    listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="kept")
+    labels = [r.snapshot_id for r in listed if r.label == "v1"]
+    autos = [r for r in listed if not r.label]
+    assert kept.snapshot_id in labels  # the kept version is never pruned
+    assert len(autos) == 1  # autos still capped
+
+
+async def test_purge_snapshots_clears_history(fs_storage):
+    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    (root / "a.txt").write_text("x", encoding="utf-8")
+    await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1")
+    await create_snapshot(
+        user_id="u1", folder_id="f1", conversation_id="c1", label="v1"
+    )
+
+    await purge_snapshots(user_id="u1", folder_id="f1", conversation_id="c1")
+    listed = await list_snapshots(user_id="u1", folder_id="f1", conversation_id="c1")
+    assert listed == []

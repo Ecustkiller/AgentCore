@@ -4,10 +4,12 @@ import { create } from "zustand";
 /**
  * A GRANTABLE tool call paused awaiting the user's decision (CEO chat path).
  *
- * One entry per `approval_required` event. Entries are cleared on the matching
- * `approval_resolved`, on a successful/stale resolve, and at every turn boundary
- * (new turn, stop, error, conversation switch) so a blocked-then-abandoned turn
- * never leaves a dangling prompt.
+ * One entry per `approval_required` event, tagged with its `conversationId` so
+ * several conversations can hold their own pending prompts at once. Entries are
+ * cleared on the matching `approval_resolved`, on a successful/stale resolve, and
+ * at the owning conversation's turn boundary (new turn, stop, error, abandon on
+ * switch) so a blocked-then-abandoned turn never leaves a dangling prompt — while
+ * *other* conversations' prompts survive.
  */
 export interface PendingApproval {
   approvalId: string;
@@ -29,8 +31,12 @@ interface ApprovalState {
   remove: (approvalId: string) => void;
   /** Toggle the in-flight flag on one card. */
   setResolving: (approvalId: string, resolving: boolean) => void;
-  /** Forget every pending request (turn boundary). */
-  clear: () => void;
+  /**
+   * Forget pending requests at a turn boundary. Pass a `conversationId` to drop
+   * only that conversation's prompts (leaving other conversations untouched);
+   * omit it for a full reset (e.g. logout / tests).
+   */
+  clear: (conversationId?: string) => void;
 }
 
 export const useApprovalStore = create<ApprovalState>((set) => ({
@@ -68,5 +74,14 @@ export const useApprovalStore = create<ApprovalState>((set) => ({
       ),
     })),
 
-  clear: () => set({ pending: [] }),
+  clear: (conversationId) =>
+    set((state) =>
+      conversationId === undefined
+        ? { pending: [] }
+        : {
+            pending: state.pending.filter(
+              (p) => p.conversationId !== conversationId,
+            ),
+          },
+    ),
 }));

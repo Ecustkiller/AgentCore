@@ -168,7 +168,11 @@ export function RunDetailBody({ runId }: { runId: string }) {
         </Section>
       )}
 
-      {(run.usage || run.cost) && (
+      {/* Synthesis runs are cost-neutral by design — their spend is billed once
+          on the CEO/captain payroll row (§7.3B), so they carry no own 资源消耗
+          ledger. Rendering the all-zero section here would misread as a real
+          「0 token」run, so it is omitted. */}
+      {run.kind !== "synthesis" && (run.usage || run.cost) && (
         <ResourceSection
           run={run}
           cnyPerUsd={cnyPerUsd}

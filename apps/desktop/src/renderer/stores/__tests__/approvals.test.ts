@@ -54,6 +54,16 @@ describe("approval store", () => {
     store().setResolving("a1", false);
     expect(store().pending[0].resolving).toBe(false);
   });
+
+  it("clears only one conversation's cards, omitting the id wipes all", () => {
+    store().add(payload({ approval_id: "a1", conversation_id: "conv-1" }));
+    store().add(payload({ approval_id: "a2", conversation_id: "conv-2" }));
+    // A turn boundary on conv-1 must not touch conv-2's pending prompt.
+    store().clear("conv-1");
+    expect(store().pending.map((p) => p.approvalId)).toEqual(["a2"]);
+    store().clear();
+    expect(store().pending).toHaveLength(0);
+  });
 });
 
 const card = (over: Partial<PendingApproval> = {}): PendingApproval => ({
@@ -89,6 +99,20 @@ describe("autoApproveSiblings (本轮内都允许 batch放行)", () => {
     ];
     expect(autoApproveSiblings(pending, self).map((p) => p.approvalId)).toEqual(
       ["a4"],
+    );
+  });
+
+  it("excludes a same-tool card from another conversation", () => {
+    // A 本轮内都允许 grant is scoped to one conversation's turn — it must not
+    // silently approve another conversation's identical tool call.
+    const self = card({ approvalId: "a1", conversationId: "conv-1" });
+    const pending = [
+      self,
+      card({ approvalId: "a2", conversationId: "conv-1" }),
+      card({ approvalId: "a3", conversationId: "conv-2" }),
+    ];
+    expect(autoApproveSiblings(pending, self).map((p) => p.approvalId)).toEqual(
+      ["a2"],
     );
   });
 });

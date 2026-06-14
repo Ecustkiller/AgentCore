@@ -14,6 +14,7 @@ import contextlib
 import fnmatch
 import os
 import re
+import shutil
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -30,6 +31,7 @@ from agentcore.workspace._paths import (
     resolve_safe_path,
 )
 from agentcore.workspace.protocol import (
+    AlreadyExists,
     AmbiguousMatch,
     DirEntry,
     GrepHit,
@@ -168,6 +170,50 @@ class ServerWorkspace:
             ]
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
+
+    async def mkdir(self, path: str) -> None:
+        target = self._safe(path)
+        if target == self._root.resolve():
+            raise OutsideWorkspace(path)  # the root already exists
+        if target.exists():
+            raise AlreadyExists(path)
+        try:
+            target.mkdir(parents=True, exist_ok=False)
+        except OSError as e:
+            raise WorkspaceIOError(str(e)) from e
+        self._dirty = True
+
+    async def delete(self, path: str) -> None:
+        target = self._safe(path)
+        if target == self._root.resolve():
+            raise OutsideWorkspace(path)  # never delete the workspace root
+        if not target.exists():
+            raise PathNotFound(path)
+        try:
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        except OSError as e:
+            raise WorkspaceIOError(str(e)) from e
+        self._dirty = True
+
+    async def move(self, src: str, dst: str) -> None:
+        source = self._safe(src)
+        dest = self._safe(dst)
+        root = self._root.resolve()
+        if source == root or dest == root:
+            raise OutsideWorkspace(src if source == root else dst)
+        if not source.exists():
+            raise PathNotFound(src)
+        if dest.exists():
+            raise AlreadyExists(dst)
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, dest)
+        except OSError as e:
+            raise WorkspaceIOError(str(e)) from e
+        self._dirty = True
 
     async def replace(
         self, path: str, old: str, new: str, *, all_: bool

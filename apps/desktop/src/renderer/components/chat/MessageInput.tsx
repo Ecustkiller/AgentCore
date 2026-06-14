@@ -9,7 +9,11 @@ import { api } from "@/services/api";
 import { moveConversation } from "@/services/conversations";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
-import { useConversationStore } from "@/stores/conversation";
+import {
+  getActiveRuntime,
+  useActiveGenerating,
+  useConversationStore,
+} from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import { Folder, Paperclip, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -56,7 +60,7 @@ export function MessageInput() {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isGenerating = useConversationStore((s) => s.isGenerating);
+  const isGenerating = useActiveGenerating();
   const addMessage = useConversationStore((s) => s.addMessage);
   const renameConversation = useConversationStore((s) => s.renameConversation);
   const navigate = useNavigate();
@@ -264,7 +268,7 @@ export function MessageInput() {
 
     const pending = attachments;
     const store = useConversationStore.getState();
-    const isFirstMessage = store.messages.length === 0;
+    const isFirstMessage = getActiveRuntime().messages.length === 0;
 
     let conversationId = store.currentConversationId;
     let createdNew = false;
@@ -364,7 +368,7 @@ export function MessageInput() {
 
   useEffect(() => {
     return () => {
-      useConversationStore.getState().abort?.abort();
+      getActiveRuntime().abort?.abort();
     };
   }, []);
 

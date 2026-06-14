@@ -1,18 +1,19 @@
 import { RunDetailBody } from "@/components/chat/detail/RunDetailBody";
 import { useDetailPanelStore } from "@/stores/detailPanel";
 import { useProjectedExecution } from "@/stores/execution";
-import { useUIStore } from "@/stores/ui";
 import { PanelRight, X } from "lucide-react";
 
 interface Props {
   nodeId: string;
   onClose: () => void;
+  /** Exit the surrounding full-screen overlay (after handing a run to the chat
+   * panel, the overlay steps aside so the same run shows in-chat). */
+  onExit?: () => void;
 }
 
 /** Graph-side chrome around the shared {@link RunDetailBody} drill-down. */
-export function NodeDetail({ nodeId, onClose }: Props) {
+export function NodeDetail({ nodeId, onClose, onExit }: Props) {
   const execution = useProjectedExecution();
-  const closeGraph = useUIStore((s) => s.closeGraph);
 
   if (!execution?.runs.some((s) => s.id === nodeId)) return null;
 
@@ -22,7 +23,7 @@ export function NodeDetail({ nodeId, onClose }: Props) {
     const run = execution?.runs.find((r) => r.id === nodeId);
     const role = execution?.agents.find((a) => a.id === run?.agentId)?.role;
     useDetailPanelStore.getState().showRunDetail(nodeId, role);
-    closeGraph();
+    onExit?.();
   };
 
   return (

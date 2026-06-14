@@ -7,10 +7,16 @@ import {
   runDetailTabId,
   useDetailPanelStore,
 } from "../detailPanel";
-import { type ExecutionPlan, useExecutionStore } from "../execution";
+import {
+  type ExecutionPlan,
+  activeExec,
+  useExecutionStore,
+} from "../execution";
 
 const panel = () => useDetailPanelStore.getState();
 const exec = () => useExecutionStore.getState();
+// The focus now lives on the active conversation's execution slice.
+const execRt = () => activeExec(exec());
 
 const plan: ExecutionPlan = {
   id: "exec-1",
@@ -22,21 +28,18 @@ const plan: ExecutionPlan = {
 
 const runDetail = (runId: string): DetailTab => ({
   id: runDetailTabId(runId),
-  kind: "run-detail",
   title: runId,
   runId,
 });
 
 beforeEach(() => {
   // The store hydrates from localStorage at import; pin a known baseline so each
-  // test starts from a closed, default-width, tab-less, un-overridden panel.
+  // test starts from a closed, default-width, tab-less panel.
   useDetailPanelStore.setState({
     open: false,
     width: 400,
     tabs: [],
     activeTabId: null,
-    manualOverride: false,
-    boundExecutionId: null,
   });
   exec().clearExecution();
 });
@@ -59,12 +62,11 @@ describe("setWidth", () => {
 });
 
 describe("openTab", () => {
-  it("opens the panel, appends and activates the tab, records the override", () => {
-    panel().openProgress();
+  it("opens the panel, appends and activates the tab", () => {
+    panel().openTab(runDetail("run-1"));
     expect(panel().open).toBe(true);
-    expect(panel().tabs.map((t) => t.id)).toEqual(["task-progress"]);
-    expect(panel().activeTabId).toBe("task-progress");
-    expect(panel().manualOverride).toBe(true);
+    expect(panel().tabs.map((t) => t.id)).toEqual([runDetailTabId("run-1")]);
+    expect(panel().activeTabId).toBe(runDetailTabId("run-1"));
   });
 
   it("dedups by id and updates the title in place", () => {
@@ -75,10 +77,10 @@ describe("openTab", () => {
   });
 
   it("activate:false keeps the current active tab", () => {
-    panel().openProgress();
-    panel().openTab(runDetail("run-1"), { activate: false });
+    panel().openTab(runDetail("run-1"));
+    panel().openTab(runDetail("run-2"), { activate: false });
     expect(panel().tabs).toHaveLength(2);
-    expect(panel().activeTabId).toBe("task-progress");
+    expect(panel().activeTabId).toBe(runDetailTabId("run-1"));
   });
 
   it("caps the strip at the maximum, dropping the oldest", () => {
@@ -93,76 +95,29 @@ describe("openTab", () => {
 
 describe("closeTab", () => {
   it("removes the tab and falls back to the last remaining one", () => {
-    panel().openProgress();
     panel().openTab(runDetail("run-1"));
-    panel().setActiveTab("task-progress");
-    panel().closeTab("task-progress");
-    expect(panel().tabs.map((t) => t.id)).toEqual([runDetailTabId("run-1")]);
-    expect(panel().activeTabId).toBe(runDetailTabId("run-1"));
+    panel().openTab(runDetail("run-2"));
+    panel().setActiveTab(runDetailTabId("run-1"));
+    panel().closeTab(runDetailTabId("run-1"));
+    expect(panel().tabs.map((t) => t.id)).toEqual([runDetailTabId("run-2")]);
+    expect(panel().activeTabId).toBe(runDetailTabId("run-2"));
   });
 
   it("hides the panel when the last tab is closed", () => {
-    panel().openProgress();
-    panel().closeTab("task-progress");
+    panel().openTab(runDetail("run-1"));
+    panel().closeTab(runDetailTabId("run-1"));
     expect(panel().tabs).toHaveLength(0);
     expect(panel().open).toBe(false);
     expect(panel().activeTabId).toBeNull();
-    expect(panel().manualOverride).toBe(true);
   });
 });
 
 describe("togglePanel", () => {
-  it("opens with a progress tab when empty, then closes", () => {
+  it("opens, then closes", () => {
     panel().togglePanel();
     expect(panel().open).toBe(true);
-    expect(panel().tabs.map((t) => t.id)).toEqual(["task-progress"]);
     panel().togglePanel();
     expect(panel().open).toBe(false);
-  });
-});
-
-describe("autoOpenForPlan", () => {
-  it("ignores single-agent turns", () => {
-    panel().autoOpenForPlan("single_agent", "exec-1");
-    expect(panel().open).toBe(false);
-    expect(panel().tabs).toHaveLength(0);
-  });
-
-  it("opens, seeds the progress tab and binds the execution", () => {
-    panel().autoOpenForPlan("multi_agent", "exec-1");
-    expect(panel().open).toBe(true);
-    expect(panel().tabs.map((t) => t.id)).toEqual(["task-progress"]);
-    expect(panel().activeTabId).toBe("task-progress");
-    expect(panel().boundExecutionId).toBe("exec-1");
-  });
-
-  it("does not flip the manual override (auto, not a user choice)", () => {
-    panel().autoOpenForPlan("multi_agent", "exec-1");
-    expect(panel().manualOverride).toBe(false);
-  });
-
-  it("respects a manual close for the rest of the session", () => {
-    panel().closePanel(); // user closed it → manualOverride
-    panel().autoOpenForPlan("multi_agent", "exec-1");
-    expect(panel().open).toBe(false);
-  });
-
-  it("keeps existing tabs for an in-turn delegate batch (same id)", () => {
-    panel().autoOpenForPlan("multi_agent", "exec-1");
-    panel().openTab(runDetail("run-1"));
-    panel().autoOpenForPlan("multi_agent", "exec-1");
-    expect(panel().tabs.map((t) => t.id)).toEqual([
-      "task-progress",
-      runDetailTabId("run-1"),
-    ]);
-  });
-
-  it("resets tabs to the overview when a new execution starts", () => {
-    panel().autoOpenForPlan("multi_agent", "exec-1");
-    panel().openTab(runDetail("run-1"));
-    panel().autoOpenForPlan("multi_agent", "exec-2");
-    expect(panel().tabs.map((t) => t.id)).toEqual(["task-progress"]);
-    expect(panel().boundExecutionId).toBe("exec-2");
   });
 });
 
@@ -173,8 +128,8 @@ describe("showRunDetail", () => {
     expect(panel().open).toBe(true);
     expect(panel().activeTabId).toBe(runDetailTabId("run-1"));
     expect(panel().tabs[0].title).toBe("研究员");
-    // Focus lives in the execution store (shared with the graph + task card).
-    expect(exec().focusedRunId).toBe("run-1");
-    expect(exec().focusedAgentId).toBe("agent-1");
+    // Focus lives in the execution store (shared with the inline graph).
+    expect(execRt().focusedRunId).toBe("run-1");
+    expect(execRt().focusedAgentId).toBe("agent-1");
   });
 });

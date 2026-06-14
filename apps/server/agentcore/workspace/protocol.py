@@ -50,6 +50,10 @@ class NotADirectory(WorkspaceError):
     """A directory was expected but the path is not one."""
 
 
+class AlreadyExists(WorkspaceError):
+    """The destination of a ``move`` already exists (would clobber)."""
+
+
 class NotUTF8(WorkspaceError):
     """The file is binary / not valid UTF-8 and cannot be edited as text."""
 
@@ -162,6 +166,31 @@ class WorkspaceBackend(Protocol):
         """List entries under ``directory`` matching glob ``pattern`` (capped).
 
         Raises ``OutsideWorkspace`` / ``NotADirectory`` / ``WorkspaceIOError``.
+        """
+        ...
+
+    async def mkdir(self, path: str) -> None:
+        """Create directory ``path`` (with parents).
+
+        Refuses to recreate the root or an existing path. Raises
+        ``OutsideWorkspace`` / ``AlreadyExists`` / ``WorkspaceIOError``.
+        """
+        ...
+
+    async def delete(self, path: str) -> None:
+        """Delete ``path`` (a file, or a directory and its contents).
+
+        Refuses to delete the workspace root itself. Raises ``OutsideWorkspace``
+        / ``PathNotFound`` / ``WorkspaceIOError``.
+        """
+        ...
+
+    async def move(self, src: str, dst: str) -> None:
+        """Move/rename ``src`` to ``dst`` (creating ``dst``'s parents).
+
+        Refuses to move the root or to overwrite an existing ``dst``. Raises
+        ``OutsideWorkspace`` / ``PathNotFound`` / ``AlreadyExists`` /
+        ``WorkspaceIOError``.
         """
         ...
 

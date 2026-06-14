@@ -43,3 +43,33 @@ async def download_file(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
     return await backend.read_bytes(path)
+
+
+async def create_dir(
+    *, user_id: str, folder_id: str | None, conversation_id: str, path: str
+) -> None:
+    """Create directory ``path`` (with parents) in the conversation's workspace."""
+    backend = build_server_workspace(
+        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    )
+    await backend.mkdir(path)
+
+
+async def delete_file(
+    *, user_id: str, folder_id: str | None, conversation_id: str, path: str
+) -> None:
+    """Delete ``path`` (file or directory) in the conversation's workspace."""
+    backend = build_server_workspace(
+        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    )
+    await backend.delete(path)
+
+
+async def move_file(
+    *, user_id: str, folder_id: str | None, conversation_id: str, src: str, dst: str
+) -> None:
+    """Move/rename ``src`` to ``dst`` in the conversation's workspace."""
+    backend = build_server_workspace(
+        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    )
+    await backend.move(src, dst)
