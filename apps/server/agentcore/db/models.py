@@ -147,6 +147,12 @@ class Conversation(Base):
     folder_id: Mapped[str | None] = mapped_column(
         PG_UUID(as_uuid=False), index=True, nullable=True
     )
+    # Local-mode binding (双模式工作区 §七): the desktop FS root this *ungrouped*
+    # conversation is bound to. NULL = cloud. A foldered conversation binds at its
+    # folder instead (shared project space), so this is read only when ungrouped.
+    # Stored as a plain string, not PG_UUID: it is an opaque handle minted by the
+    # desktop (fs-service `randomUUID`), not a server-owned id.
+    local_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -172,7 +178,14 @@ class Folder(Base):
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     # Optional bound local directory; stored as opaque metadata (no FS coupling).
+    # This is the human-readable *path label* the user sees, distinct from the
+    # machine-addressable binding below.
     local_dir: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Local-mode binding (双模式工作区 §七): the desktop FS root id this folder (=
+    # shared project space) is bound to. NULL = cloud. Its conversations all run in
+    # local mode against this root. Opaque desktop handle → plain string, not
+    # PG_UUID (see Conversation.local_root_id).
+    local_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

@@ -4,12 +4,13 @@ import { WorkspacePanel } from "@/components/workspace/WorkspacePanel";
 import { api } from "@/services/api";
 import {
   type Message,
-  getActiveRuntime,
+  getRuntime,
   useConversationStore,
 } from "@/stores/conversation";
 import { useDetailPanelStore } from "@/stores/detailPanel";
 import { useUsageStore } from "@/stores/usage";
 import { useWorkspacePanelStore } from "@/stores/workspacePanel";
+import type { SSEEvent } from "@/types/events";
 import { FolderOpen } from "lucide-react";
 import { useEffect } from "react";
 import { useParams } from "react-router-dom";
@@ -33,6 +34,10 @@ interface BackendMessage {
     snippet?: string;
     site?: string;
   }[];
+  /** Persisted multi-agent execution journal (the turn's ordered run/tool SSE
+   * events). null for user / single-agent turns. Replayed through the same fold
+   * as the live stream to rebuild the team graph on reload (§9.3). */
+  runs?: { events: SSEEvent[]; finish_reason: string | null } | null;
   created_at: string;
 }
 
@@ -40,14 +45,31 @@ interface MessageListResponse {
   data: BackendMessage[];
 }
 
+/** The execution (plan) id of a reloaded multi-agent turn — the first
+ * `run_plan`'s id in the persisted journal. null for user / single-agent turns
+ * (no journal, or a journal with no plan), which then render as plain bubbles. */
+function executionIdOf(events: SSEEvent[]): string | null {
+  const plan = events.find((e) => e.type === "run_plan");
+  const id = (plan?.payload as { execution_id?: string } | undefined)
+    ?.execution_id;
+  return id ?? null;
+}
+
 function toMessage(m: BackendMessage): Message {
+  const events = m.runs?.events ?? [];
+  const executionId = executionIdOf(events);
   return {
     id: m.id,
     role: m.role === "assistant" ? "assistant" : "user",
     content: m.content ?? "",
     reasoning: m.reasoning_content ?? undefined,
     createdAt: m.created_at,
-    executionId: null,
+    // Stamp the plan id so the bubble renders its inline team graph; the journal
+    // below lets that graph replay the turn (both null for non-team turns).
+    executionId,
+    runs: executionId
+      ? { events, finishReason: m.runs?.finish_reason ?? "stop" }
+      : undefined,
     isStreaming: false,
     attachments: m.attachments?.length
       ? m.attachments.map((a) => ({
@@ -84,10 +106,14 @@ export function ConversationPage() {
         );
         if (cancelled) return;
         const s = useConversationStore.getState();
-        const rt = getActiveRuntime();
-        // 期间发生了会话切换 / 正在生成 / 本地已有消息（如刚发送），则不覆盖。
-        if (s.currentConversationId !== id || rt.isGenerating) return;
-        if (rt.messages.length > 0) return;
+        // Per-conversation load guard: only adopt fetched history into THIS
+        // conversation's own slice (setMessages writes the active slice, so bail
+        // if the user switched away), and never clobber a live or already-filled
+        // slice — a background turn that streamed while we fetched, or a message
+        // that was just sent locally.
+        if (s.currentConversationId !== id) return;
+        const rt = getRuntime(id);
+        if (rt.isGenerating || rt.messages.length > 0) return;
         s.setMessages(res.data.map(toMessage));
       } catch {
         /* 历史加载尽力而为，失败保持空对话 */

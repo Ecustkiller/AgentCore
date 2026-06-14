@@ -26,6 +26,11 @@ class EventType(StrEnum):
     # user's decision, then resolved.
     APPROVAL_REQUIRED = "approval_required"
     APPROVAL_RESOLVED = "approval_resolved"
+    # Local-workspace op channel (双模式工作区 P2): a server-side LocalWorkspace
+    # asks the bound desktop client to run a file/exec op against the real local
+    # directory, then awaits the result posted back to the ops resolve endpoint.
+    # Transport only — deliberately NOT journaled into the team graph.
+    WORKSPACE_OP_REQUIRED = "workspace_op_required"
     # Multi-agent execution events (CEO delegate path)
     RUN_PLAN = "run_plan"
     RUN_STARTED = "run_started"
@@ -144,6 +149,40 @@ def approval_resolved(*, approval_id: str, tool_call_id: str, decision: str) -> 
             "approval_id": approval_id,
             "tool_call_id": tool_call_id,
             "decision": decision,
+        },
+    )
+
+
+def workspace_op_required(
+    *,
+    request_id: str,
+    conversation_id: str,
+    root_id: str,
+    op: str,
+    args: dict[str, Any],
+) -> SSEEvent:
+    """A local-workspace op is paused, awaiting the desktop client to run it.
+
+    The server-side ``LocalWorkspace`` cannot touch the user's disk; it emits this
+    so the bound desktop runs ``op`` (read / list / grep / …) against the real
+    local directory and posts the structured result back to the ops resolve
+    endpoint, keyed by ``request_id``. ``root_id`` names which of the desktop's
+    authorized FS roots to operate on (the desktop's own traversal guard then
+    keeps ``args`` paths inside it).
+
+    Unlike ``approval_required`` (whose ``arguments`` is a size-bounded *preview*),
+    ``args`` is the full op payload — the client must have everything it needs to
+    actually perform the op (e.g. the bytes of a write). This event is transport,
+    not part of the multi-agent journal, so it is never persisted/replayed.
+    """
+    return SSEEvent(
+        type=EventType.WORKSPACE_OP_REQUIRED,
+        payload={
+            "request_id": request_id,
+            "conversation_id": conversation_id,
+            "root_id": root_id,
+            "op": op,
+            "args": args,
         },
     )
 

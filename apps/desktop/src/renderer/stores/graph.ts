@@ -36,26 +36,20 @@ function persistLayout(v: GraphLayout): void {
   }
 }
 
+// Per-graph layout (ELK positions + structural edges) is NOT global state: with
+// §9.3 every multi-agent message renders its own inline graph, so the layout is
+// view state owned locally by each {@link GraphView}. Only the *choice* of layout
+// algorithm is global — it is a user preference that applies to every graph and
+// persists across sessions.
 interface GraphState {
-  /** ELK-computed positions keyed by run id. Recomputed only on shape change. */
-  positions: Record<string, { x: number; y: number }>;
-  edges: GraphEdge[];
-  /** Active layout algorithm (persisted). */
+  /** Active layout algorithm — a shared, persisted user preference. */
   layoutKind: GraphLayout;
-
-  setLayout: (
-    positions: Record<string, { x: number; y: number }>,
-    edges: GraphEdge[],
-  ) => void;
   setLayoutKind: (kind: GraphLayout) => void;
 }
 
 export const useGraphStore = create<GraphState>((set) => ({
-  positions: {},
-  edges: [],
   layoutKind: loadLayout(),
 
-  setLayout: (positions, edges) => set({ positions, edges }),
   setLayoutKind: (layoutKind) => {
     persistLayout(layoutKind);
     set({ layoutKind });

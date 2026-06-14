@@ -33,6 +33,8 @@ const fsApi: FsApi = {
     ipcRenderer.on(FS_CHANNELS.changed, listener);
     return () => ipcRenderer.removeListener(FS_CHANNELS.changed, listener);
   },
+  workspaceOp: (rootId, op, args) =>
+    ipcRenderer.invoke(FS_CHANNELS.workspaceOp, { rootId, op, args }),
 };
 
 const windowApi = {

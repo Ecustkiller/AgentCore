@@ -1,10 +1,11 @@
 import { listGrouped } from "@/services/conversations";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
+import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
-import { useEffect } from "react";
-import { Outlet } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { Outlet, useNavigate } from "react-router-dom";
 import { Sidebar } from "../sidebar/Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { TitleBar } from "./TitleBar";
@@ -44,13 +45,31 @@ export function AppShell() {
     void useUsageStore.getState().fetchSummary();
   }, []);
 
-  // Global command palette shortcut (Ctrl/Cmd+K). Toggles so the same chord
-  // opens and dismisses; the palette itself owns Escape + arrow navigation.
+  // Global keyboard shortcuts (§二). Ctrl/Cmd+K toggles the command palette,
+  // Ctrl/Cmd+N starts a new draft conversation, Ctrl/Cmd+\ or Ctrl/Cmd+B toggles
+  // the sidebar. Modifier chords don't insert text, so they fire regardless of
+  // focus. getState() keeps the listener identity stable; navigate is read via a
+  // ref so the effect needn't resubscribe on every route change.
+  const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "k") {
         e.preventDefault();
         useUIStore.getState().toggleSearch();
+      } else if (key === "n") {
+        e.preventDefault();
+        // Mirror Sidebar's handleNewConversation: a draft chat (not persisted
+        // until its first message) with no pending folder target.
+        useFoldersStore.getState().setPendingNewChatFolder(null);
+        useConversationStore.getState().switchConversation(null);
+        navigateRef.current("/");
+      } else if (e.key === "\\" || key === "b") {
+        e.preventDefault();
+        useSidebarStore.getState().toggleCollapsed();
       }
     };
     window.addEventListener("keydown", onKey);

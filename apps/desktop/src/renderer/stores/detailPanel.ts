@@ -57,15 +57,20 @@ function persist(key: string, value: string): void {
  * job moved onto the inline graph itself.
  */
 export interface DetailTab {
-  /** Dedup identity: `run-detail:<runId>`. */
+  /** Dedup identity: `run-detail:<messageId>:<runId>` — scoped by message so two
+   * turns that each pin a run never collide in the strip (§9.3). */
   id: string;
   /** Label shown in the tab strip (the agent's role). */
   title: string;
+  /** The assistant message whose execution slot holds this run — the panel
+   * projects that slot to render the tab (live or replayed). */
+  messageId: string;
   /** The run this tab drills into. */
   runId: string;
 }
 
-export const runDetailTabId = (runId: string): string => `run-detail:${runId}`;
+export const runDetailTabId = (messageId: string, runId: string): string =>
+  `run-detail:${messageId}:${runId}`;
 
 interface DetailPanelState {
   /** Panel visibility (persisted). */
@@ -87,11 +92,12 @@ interface DetailPanelState {
   togglePanel: () => void;
   setWidth: (width: number) => void;
   /**
-   * Pin a run and reveal it in a run-detail tab. Selection lives in the
-   * execution store (shared with the inline graph), so the panel never holds its
-   * own copy — the graph and the panel stay in sync through one focus.
+   * Pin a run (of a specific message's turn) and reveal it in a run-detail tab.
+   * The inline graph highlights whatever this panel's active tab shows for that
+   * turn, so opening / switching / closing tabs keeps the graph in sync with no
+   * extra wiring; the call also seeds the full-screen overlay's selection (§9.3).
    */
-  showRunDetail: (runId: string, title?: string) => void;
+  showRunDetail: (messageId: string, runId: string, title?: string) => void;
 }
 
 export const useDetailPanelStore = create<DetailPanelState>((set, get) => ({
@@ -156,11 +162,14 @@ export const useDetailPanelStore = create<DetailPanelState>((set, get) => ({
     set({ width: clamped });
   },
 
-  showRunDetail: (runId, title) => {
-    useExecutionStore.getState().focusRun(runId);
+  showRunDetail: (messageId, runId, title) => {
+    // Seed the full-screen overlay's selection so maximizing lands on this run;
+    // the inline graph's own highlight derives from the active tab opened below.
+    useExecutionStore.getState().selectRun(runId, messageId);
     get().openTab({
-      id: runDetailTabId(runId),
+      id: runDetailTabId(messageId, runId),
       title: title ?? "详情",
+      messageId,
       runId,
     });
   },

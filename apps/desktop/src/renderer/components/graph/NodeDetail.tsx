@@ -1,6 +1,6 @@
 import { RunDetailBody } from "@/components/chat/detail/RunDetailBody";
 import { useDetailPanelStore } from "@/stores/detailPanel";
-import { useProjectedExecution } from "@/stores/execution";
+import { useExecutionScope, useMessageExecution } from "@/stores/execution";
 import { PanelRight, X } from "lucide-react";
 
 interface Props {
@@ -13,16 +13,18 @@ interface Props {
 
 /** Graph-side chrome around the shared {@link RunDetailBody} drill-down. */
 export function NodeDetail({ nodeId, onClose, onExit }: Props) {
-  const execution = useProjectedExecution();
+  // This graph's message slot (§9.3) — drilling stays within its own turn.
+  const messageId = useExecutionScope();
+  const execution = useMessageExecution(messageId);
 
-  if (!execution?.runs.some((s) => s.id === nodeId)) return null;
+  if (!messageId || !execution?.runs.some((s) => s.id === nodeId)) return null;
 
   // Hand the selection to the conversation detail panel, then drop the overlay
   // so the same run is shown in-chat.
   const viewInPanel = () => {
     const run = execution?.runs.find((r) => r.id === nodeId);
     const role = execution?.agents.find((a) => a.id === run?.agentId)?.role;
-    useDetailPanelStore.getState().showRunDetail(nodeId, role);
+    useDetailPanelStore.getState().showRunDetail(messageId, nodeId, role);
     onExit?.();
   };
 
@@ -47,7 +49,7 @@ export function NodeDetail({ nodeId, onClose, onExit }: Props) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <RunDetailBody runId={nodeId} />
+        <RunDetailBody messageId={messageId} runId={nodeId} />
       </div>
     </div>
   );

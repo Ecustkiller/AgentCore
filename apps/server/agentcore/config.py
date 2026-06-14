@@ -119,6 +119,14 @@ class Settings(BaseSettings):
     # The clone is shallow (--depth 1) so this bounds a slow/large public repo.
     workspace_clone_timeout_seconds: int = 120
 
+    # Timeout (seconds) for one local-workspace op routed to the desktop (双模式
+    # 工作区 P2: LocalWorkspace). The server suspends on an asyncio Future the
+    # desktop settles via the ops resolve endpoint; an op the client never
+    # answers fails (raised as a WorkspaceIOError) after this — the file tool then
+    # reports the failure rather than hanging the turn. Same in-process posture as
+    # the approval gate (front with Redis for multiple workers).
+    workspace_op_timeout_seconds: float = 60.0
+
     @property
     def cors_origins(self) -> list[str]:
         """Parsed, trimmed list of allowed CORS origins."""

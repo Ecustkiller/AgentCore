@@ -8,6 +8,7 @@ const folder = (id: string, name = id): FolderMeta => ({
   id,
   name,
   localDir: null,
+  localRootId: null,
 });
 
 beforeEach(() => {

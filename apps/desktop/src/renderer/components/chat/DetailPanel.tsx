@@ -1,5 +1,5 @@
 import { type DetailTab, useDetailPanelStore } from "@/stores/detailPanel";
-import { useProjectedExecution } from "@/stores/execution";
+import { useExecutionStore } from "@/stores/execution";
 import { Users, X } from "lucide-react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { RunDetailBody } from "./detail/RunDetailBody";
@@ -20,16 +20,17 @@ export function DetailPanel() {
   const closeTab = useDetailPanelStore((s) => s.closeTab);
   const closePanel = useDetailPanelStore((s) => s.closePanel);
   const setWidth = useDetailPanelStore((s) => s.setWidth);
-  const execution = useProjectedExecution();
+  const byId = useExecutionStore((s) => s.byId);
 
   if (!open) return null;
 
-  // Only run-detail tabs whose run still exists in the live execution survive (a
-  // stale tab carried across turns references a now-cleared run).
-  const visibleTabs =
-    execution != null && execution.planType === "multi_agent"
-      ? tabs.filter((t) => execution.runs.some((r) => r.id === t.runId))
-      : [];
+  // A tab survives as long as its own message's execution slot still holds the
+  // run. Slots are per-message and persist across turns (§9.3), so a pinned run
+  // no longer goes stale when a new turn starts — only if that slot was never
+  // built or was reclaimed (the tab can then be closed).
+  const visibleTabs = tabs.filter((t) =>
+    byId[t.messageId]?.plan?.runs.some((r) => r.id === t.runId),
+  );
 
   const activeTab =
     visibleTabs.find((t) => t.id === activeTabId) ??
@@ -89,7 +90,10 @@ export function DetailPanel() {
       <div className="min-h-0 flex-1">
         {activeTab ? (
           <div className="h-full overflow-y-auto">
-            <RunDetailBody runId={activeTab.runId} />
+            <RunDetailBody
+              messageId={activeTab.messageId}
+              runId={activeTab.runId}
+            />
           </div>
         ) : (
           <EmptyState />

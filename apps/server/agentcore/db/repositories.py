@@ -215,6 +215,22 @@ class ConversationRepository:
             await self._session.refresh(conv)
         return conv
 
+    async def set_local_root_id(
+        self, conversation_id: str, root_id: str | None, *, user_id: str
+    ) -> Conversation | None:
+        """Bind (or unbind, with ``root_id=None``) an ungrouped conversation to a
+        desktop FS root — its local-mode marker (双模式工作区 §七).
+
+        Only meaningful for an ungrouped conversation; a foldered one binds at its
+        folder instead (the caller routes by ``folder_id``).
+        """
+        conv = await self.get_by_id(conversation_id, user_id=user_id)
+        if conv:
+            conv.local_root_id = root_id
+            await self._session.commit()
+            await self._session.refresh(conv)
+        return conv
+
 
 class FolderRepository:
     def __init__(self, session: AsyncSession):
@@ -267,6 +283,22 @@ class FolderRepository:
             folder.local_dir = local_dir  # type: ignore[assignment]
         await self._session.commit()
         await self._session.refresh(folder)
+        return folder
+
+    async def set_local_root_id(
+        self, folder_id: str, root_id: str | None, *, user_id: str
+    ) -> Folder | None:
+        """Bind (or unbind, with ``root_id=None``) a folder to a desktop FS root.
+
+        The folder is the shared project space (双模式工作区 §七), so this flips
+        every conversation in it to local mode against ``root_id`` (or back to
+        cloud when cleared).
+        """
+        folder = await self.get_by_id(folder_id, user_id=user_id)
+        if folder:
+            folder.local_root_id = root_id
+            await self._session.commit()
+            await self._session.refresh(folder)
         return folder
 
     async def soft_delete(self, folder_id: str, *, user_id: str) -> bool:

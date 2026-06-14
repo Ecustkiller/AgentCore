@@ -1,0 +1,119 @@
+"""Integration tests: quota enforcement gates a new turn with HTTP 429.
+
+Auto-skips (via the shared ``client`` fixture) when no PostgreSQL is reachable.
+Seeds the ``cost_events`` ledger above a configured cap, then asserts the
+turn-starting endpoints refuse the *next* turn with 429 + ``QUOTA_EXCEEDED``
+before any SSE stream / LLM call begins (成本配额与计费.md §一). The over-quota
+spend is seeded straight into the ledger so the test never makes a real LLM call.
+"""
+
+import httpx
+
+from agentcore.core.types import new_id
+from agentcore.db.repositories import ConversationRepository, CostEventRepository
+
+_PW = "password123"
+# Above the default monthly cap (quota_monthly_cost_usd = $5 → 5e9 nano-USD).
+_OVER_MONTHLY_NANO = 6_000_000_000
+
+
+async def _register_and_login(
+    client: httpx.AsyncClient, invite_code: str, username: str
+) -> str:
+    r = await client.post(
+        "/v1/auth/register",
+        json={"username": username, "password": _PW, "invite_code": invite_code},
+    )
+    assert r.status_code == 201, r.text
+    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
+def _run(run_id: str, *, total: int) -> dict:
+    """A per-run ledger payload (runtime ``asdict(RunCost)`` shape) with small
+    token counts (well under the daily-token cap) so the *cost* cap is what trips."""
+    return {
+        "run_id": run_id,
+        "parent_run_id": None,
+        "agent_id": run_id,
+        "role": "captain",
+        "model": "deepseek-v4-pro",
+        "tokens": {"input": 100, "output": 50, "reasoning": 10, "cache_hit": 0, "cache_miss": 100},
+        "cost": {"input": 0, "cached": 0, "output": total, "total": total},
+        "cost_total_nano": total,
+        "currency": "USD",
+        "rounds": 1,
+        "duration_ms": 1,
+    }
+
+
+async def _seed_spend(session_factory, *, user_id: str, conversation_id: str, total: int) -> None:
+    async with session_factory() as session:
+        await CostEventRepository(session).record_runs(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=new_id(),
+            runs=[_run(new_id(), total=total)],
+        )
+
+
+async def _make_conversation(session_factory, *, user_id: str) -> str:
+    async with session_factory() as session:
+        conv = await ConversationRepository(session).create(user_id=user_id, title="t")
+        return conv.id
+
+
+async def test_send_message_blocked_when_over_monthly_quota(
+    client, make_invite, session_factory
+):
+    code = await make_invite("INV-QUOTA")
+    user_id = await _register_and_login(client, code, "quotauser")
+    conv_id = await _make_conversation(session_factory, user_id=user_id)
+    await _seed_spend(
+        session_factory, user_id=user_id, conversation_id=conv_id, total=_OVER_MONTHLY_NANO
+    )
+
+    r = await client.post(
+        f"/v1/conversations/{conv_id}/messages", json={"content": "hi"}
+    )
+
+    assert r.status_code == 429, r.text
+    assert r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+
+
+async def test_regenerate_blocked_when_over_monthly_quota(
+    client, make_invite, session_factory
+):
+    code = await make_invite("INV-QUOTA-REGEN")
+    user_id = await _register_and_login(client, code, "quotaregen")
+    conv_id = await _make_conversation(session_factory, user_id=user_id)
+    await _seed_spend(
+        session_factory, user_id=user_id, conversation_id=conv_id, total=_OVER_MONTHLY_NANO
+    )
+
+    # A re-run is a fresh turn, so it passes the same gate (target message need not
+    # exist — the quota check runs before the message is even loaded).
+    r = await client.post(
+        f"/v1/conversations/{conv_id}/messages/{new_id()}/regenerate", json={}
+    )
+
+    assert r.status_code == 429, r.text
+    assert r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+
+
+async def test_ownership_check_precedes_quota(client, make_invite, session_factory):
+    # Ownership (404) is checked before quota (429): posting to a conversation the
+    # user doesn't own returns 404 even when the user is over quota.
+    code = await make_invite("INV-QUOTA-OWN")
+    user_id = await _register_and_login(client, code, "quotaowner")
+    owned = await _make_conversation(session_factory, user_id=user_id)
+    await _seed_spend(
+        session_factory, user_id=user_id, conversation_id=owned, total=_OVER_MONTHLY_NANO
+    )
+
+    r = await client.post(
+        f"/v1/conversations/{new_id()}/messages", json={"content": "hi"}
+    )
+
+    assert r.status_code == 404, r.text

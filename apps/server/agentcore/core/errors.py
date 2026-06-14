@@ -97,3 +97,31 @@ class ValidationError(AgentCoreError):
 
     code = "VALIDATION_ERROR"
     status_code = 422
+
+
+class QuotaExceededError(AgentCoreError):
+    """A configured usage quota is exhausted; the next turn is refused.
+
+    Three independent dimensions (daily tokens / monthly cost / daily requests),
+    checked before a turn starts (成本配额与计费.md §一). Maps to HTTP 429 so the
+    client can surface a "quota reached" state distinct from auth (401) or
+    validation (422). ``dimension`` / ``used`` / ``limit`` ride along on the
+    exception for logging and tests.
+    """
+
+    code = "QUOTA_EXCEEDED"
+    status_code = 429
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        dimension: str = "",
+        used: int = 0,
+        limit: int = 0,
+        **kwargs,
+    ):
+        self.dimension = dimension
+        self.used = used
+        self.limit = limit
+        super().__init__(message, dimension=dimension, used=used, limit=limit, **kwargs)

@@ -70,6 +70,9 @@ class ConversationSummary(BaseModel):
     created_at: datetime
     # Folder membership; None = ungrouped (see 前端UX目标态 §七).
     folder_id: str | None = None
+    # Local-mode binding for an *ungrouped* conversation; None = cloud. A foldered
+    # conversation derives its mode from the folder's binding instead (§七).
+    local_root_id: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -108,6 +111,9 @@ class FolderSummary(BaseModel):
     id: str
     name: str
     local_dir: str | None
+    # Local-mode binding (desktop FS root id); None = cloud. Drives the mode badge
+    # for the folder and all its conversations (§七).
+    local_root_id: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -120,12 +126,38 @@ class FolderGroup(BaseModel):
     id: str
     name: str
     local_dir: str | None
+    local_root_id: str | None = None
     conversations: list[ConversationSummary]
 
 
 class GroupedConversationsResponse(BaseModel):
     folders: list[FolderGroup]
     ungrouped: list[ConversationSummary]
+
+
+# --- Workspace local-mode binding (双模式工作区 §七) ---
+
+
+class BindLocalWorkspaceRequest(BaseModel):
+    """Bind a conversation's workspace to a desktop FS root (switch to local mode).
+
+    ``root_id`` is the desktop-minted handle for an authorized local directory
+    (from the desktop ``addRoot`` flow). Binding writes at the governing scope: the
+    folder for a foldered conversation (shared by its siblings), the conversation
+    itself when ungrouped.
+    """
+
+    root_id: str = Field(..., min_length=1, max_length=200)
+
+
+class WorkspaceBindingResponse(BaseModel):
+    """A conversation's resolved workspace mode + where its binding lives."""
+
+    mode: Literal["local", "cloud"]
+    # Which record carries the binding: the shared folder, or the conversation.
+    scope: Literal["folder", "conversation"]
+    # The bound desktop root id when local; None when cloud.
+    root_id: str | None = None
 
 
 # --- Messages ---
@@ -188,6 +220,34 @@ class ResolveApprovalRequest(BaseModel):
     """
 
     decision: ApprovalDecision
+
+
+class WorkspaceOpError(BaseModel):
+    """A typed failure from a desktop-run local-workspace op (双模式工作区 P2).
+
+    ``kind`` names the ``WorkspaceError`` subclass to re-raise on the server (e.g.
+    ``PathNotFound``, ``OutsideWorkspace``) so the file tool maps it to the same
+    message as cloud mode; ``count`` carries the match count for ``AmbiguousMatch``
+    (str_replace). An unknown ``kind`` degrades to a generic I/O error.
+    """
+
+    kind: str = Field(..., max_length=64)
+    detail: str = Field("", max_length=2000)
+    count: int | None = None
+
+
+class ResolveWorkspaceOpRequest(BaseModel):
+    """Deliver a desktop's result for a paused local-workspace op.
+
+    ``ok`` true → ``value`` is the op's result (op-specific: file text, a
+    directory listing, a grep result, …; bytes are base64). ``ok`` false →
+    ``error`` describes the typed failure to re-raise. The pending op (awaiting in
+    the live SSE turn) resumes with this envelope.
+    """
+
+    ok: bool
+    value: Any | None = None
+    error: WorkspaceOpError | None = None
 
 
 class Citation(BaseModel):

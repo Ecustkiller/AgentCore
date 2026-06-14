@@ -5,7 +5,7 @@ import {
   MODEL_TIER_META,
   type RunNode,
   reasoningMeta,
-  useProjectedExecution,
+  useMessageExecution,
 } from "@/stores/execution";
 import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
@@ -17,12 +17,19 @@ import ReactMarkdown from "react-markdown";
  * Single-run detail content (task / status / model+reasoning / tools / output /
  * summary), read from the live-or-replayed execution projection by run id.
  *
- * Chrome-free on purpose: the graph's {@link NodeDetail} and the panel's
- * run-detail tab both wrap this, so the drill-down view is identical wherever
- * it appears and there is a single place to evolve it.
+ * Bound to a specific message's execution slot (§9.3) via `messageId`, so the
+ * panel can pin a run from any turn (live or historical) and the graph's
+ * {@link NodeDetail} drills into its own turn. Chrome-free on purpose: both
+ * wrappers render this, so the drill-down view is identical wherever it appears.
  */
-export function RunDetailBody({ runId }: { runId: string }) {
-  const execution = useProjectedExecution();
+export function RunDetailBody({
+  messageId,
+  runId,
+}: {
+  messageId: string;
+  runId: string;
+}) {
+  const execution = useMessageExecution(messageId);
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const usageDetail = useUIStore((s) => s.usageDetail);
   const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
@@ -153,7 +160,7 @@ export function RunDetailBody({ runId }: { runId: string }) {
                 label="依赖"
                 runs={upstream}
                 agents={execution.agents}
-                onSelect={showRunDetail}
+                onSelect={(rid, role) => showRunDetail(messageId, rid, role)}
               />
             )}
             {downstream.length > 0 && (
@@ -161,7 +168,7 @@ export function RunDetailBody({ runId }: { runId: string }) {
                 label="后续"
                 runs={downstream}
                 agents={execution.agents}
-                onSelect={showRunDetail}
+                onSelect={(rid, role) => showRunDetail(messageId, rid, role)}
               />
             )}
           </div>

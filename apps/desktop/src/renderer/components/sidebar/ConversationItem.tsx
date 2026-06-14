@@ -7,7 +7,7 @@ import { createFolder } from "@/services/folders";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   type Conversation,
-  useActiveGenerating,
+  useConversationGenerating,
   useConversationStore,
 } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
@@ -15,6 +15,7 @@ import {
   Check,
   Folder,
   FolderPlus,
+  HardDrive,
   Inbox,
   Pencil,
   Trash2,
@@ -44,7 +45,7 @@ export function ConversationItem({ conversation }: Props) {
     (s) => s.setConversationFolder,
   );
   const folders = useFoldersStore((s) => s.folders);
-  const isGenerating = useActiveGenerating();
+  const isGenerating = useConversationGenerating(conversation.id);
   const awaitingApproval = useApprovalStore((s) =>
     s.pending.some((p) => p.conversationId === conversation.id),
   );
@@ -52,11 +53,12 @@ export function ConversationItem({ conversation }: Props) {
   const isActive = conversation.id === currentId;
   const currentFolderId = conversation.folderId ?? null;
 
-  // Sidebar status dot (§七): 待审批 takes priority over 执行中; only the active
-  // conversation streams in this single-stream app, so 执行中 is gated on it.
+  // Sidebar status dot (§七): 待审批 takes priority over 执行中. Both read THIS
+  // conversation's own runtime (not the active one), so a background turn that
+  // keeps streaming after the user switches away still shows its dot.
   const status: "running" | "awaiting" | null = awaitingApproval
     ? "awaiting"
-    : isActive && isGenerating
+    : isGenerating
       ? "running"
       : null;
 
@@ -191,6 +193,13 @@ export function ConversationItem({ conversation }: Props) {
           />
         )}
         <span className="flex-1 truncate text-left">{conversation.title}</span>
+        {!conversation.folderId && conversation.localRootId && (
+          <HardDrive
+            size={11}
+            className="shrink-0 text-primary/70"
+            aria-label="本地工作区"
+          />
+        )}
         {confirmingDelete ? (
           <span className="flex shrink-0 items-center gap-0.5">
             {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}

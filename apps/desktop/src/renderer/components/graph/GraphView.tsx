@@ -10,8 +10,9 @@ import { useDetailPanelStore } from "@/stores/detailPanel";
 import {
   type Execution,
   type RunStatus,
-  activeExec,
+  execRuntime,
   useActiveExecField,
+  useExecutionScope,
   useExecutionStore,
   useProjectedExecution,
 } from "@/stores/execution";
@@ -110,20 +111,57 @@ export function GraphView({
   onNodeSelect,
   onClose,
 }: GraphViewProps = {}) {
+  // The message whose graph this is (§9.3). Threaded from the inline graph via
+  // ExecutionScopeContext (survives the full-screen portal), so focus + detail
+  // mutations target the right per-message slot — live or replayed.
+  const messageId = useExecutionScope();
   const execution = useProjectedExecution();
   const hasFrames = useActiveExecField((rt) => rt.frames.length > 0);
-  const positions = useGraphStore((s) => s.positions);
-  const edges = useGraphStore((s) => s.edges);
-  const setLayout = useGraphStore((s) => s.setLayout);
+  // Layout is per-graph view state (see stores/graph.ts): each inline graph owns
+  // its own ELK positions, so multiple message graphs never clobber one another.
+  const [positions, setPositions] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
+  const [edges, setEdges] = useState<GraphEdge[]>([]);
+  const setLayout = useCallback(
+    (
+      nextPositions: Record<string, { x: number; y: number }>,
+      nextEdges: GraphEdge[],
+    ) => {
+      setPositions(nextPositions);
+      setEdges(nextEdges);
+    },
+    [],
+  );
+  // Only the algorithm choice is global (a shared, persisted user preference).
   const layoutKind = useGraphStore((s) => s.layoutKind);
   const setLayoutKind = useGraphStore((s) => s.setLayoutKind);
   // Left-right flow re-anchors node handles to the horizontal axis.
   const handleDirection =
     layoutKind === "leftright" ? "horizontal" : "vertical";
-  const focusedRunId = useActiveExecField((rt) => rt.focusedRunId);
-  const focusedAgentId = useActiveExecField((rt) => rt.focusedAgentId);
-  const focusRun = useExecutionStore((s) => s.focusRun);
+  const selectedRunId = useActiveExecField((rt) => rt.selectedRunId);
+  const selectRun = useExecutionStore((s) => s.selectRun);
+  // All selection mutations go through this turn's slot.
+  const selectRunHere = useCallback(
+    (runId: string | null) => {
+      if (messageId) selectRun(runId, messageId);
+    },
+    [selectRun, messageId],
+  );
   const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
+  // Node highlight has one source per surface — no cross-store syncing. The
+  // embedded graph mirrors the conversation panel's active run-detail tab (the
+  // panel IS its detail surface, so the lit node is whatever the panel currently
+  // shows for THIS turn); switching / closing tabs or hiding the panel therefore
+  // moves or drops the highlight automatically. The full-screen overlay instead
+  // uses its own in-overlay selection (`selectedRunId`).
+  const panelHighlightRunId = useDetailPanelStore((s) => {
+    if (!s.open) return null;
+    const active =
+      s.tabs.find((t) => t.id === s.activeTabId) ?? s.tabs[s.tabs.length - 1];
+    return active && active.messageId === messageId ? active.runId : null;
+  });
+  const highlightRunId = embedded ? panelHighlightRunId : selectedRunId;
   // The single FX rate (§7.5) that turns each run's nano-USD total into the ¥
   // chip on its node; one rate for the whole graph keeps the money consistent.
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
@@ -197,7 +235,8 @@ export function GraphView({
       setLayoutReady(false);
       return;
     }
-    const runs = activeExec(useExecutionStore.getState()).plan?.runs ?? [];
+    const runs =
+      execRuntime(useExecutionStore.getState(), messageId).plan?.runs ?? [];
     // The CEO synthesis run (Phase B) is the real 汇聚点; the worker DAG is laid
     // out around it. Workers wire INTO it as the sink instead of the synthetic
     // bookend, which is dropped once the real run exists.
@@ -219,7 +258,8 @@ export function GraphView({
     // is expected (clicks, run-detail, context menu).
     if (workerRuns.length > 0) {
       const dependedOn = new Set<string>();
-      for (const r of workerRuns) for (const dep of r.dependsOn) dependedOn.add(dep);
+      for (const r of workerRuns)
+        for (const dep of r.dependsOn) dependedOn.add(dep);
       const sinkId = synthId ?? SYNTHESIS_ID;
       nodeIds.push(INPUT_ID);
       if (!synthId) nodeIds.push(SYNTHESIS_ID);
@@ -250,7 +290,7 @@ export function GraphView({
     return () => {
       cancelled = true;
     };
-  }, [structuralKey, layoutKind, setLayout]);
+  }, [structuralKey, layoutKind, setLayout, messageId]);
 
   // The single-node drill-in: hand off to the embedded panel, or toggle in-graph
   // focus. Shared by mouse clicks and keyboard (Enter/Space) activation.
@@ -280,12 +320,12 @@ export function GraphView({
         onNodeSelect(id);
         return;
       }
-      focusRun(id === focusedRunId ? null : id);
+      selectRunHere(id === selectedRunId ? null : id);
     },
     [
       onNodeSelect,
-      focusRun,
-      focusedRunId,
+      selectRunHere,
+      selectedRunId,
       finalAnswer,
       taskMessage,
       focusMessage,
@@ -368,9 +408,7 @@ export function GraphView({
     const nodes: Node[] = workerRuns.map((run, i) => {
       const agent = execution.agents.find((a) => a.id === run.agentId);
       const output = agent ? agent.outputChunks.join("") : "";
-      const focused =
-        focusedRunId === run.id ||
-        (focusedRunId === null && focusedAgentId === run.agentId);
+      const focused = highlightRunId === run.id;
       return {
         id: run.id,
         type: "agent",
@@ -476,8 +514,7 @@ export function GraphView({
     execution,
     positions,
     cnyPerUsd,
-    focusedRunId,
-    focusedAgentId,
+    highlightRunId,
     synthesisStatus,
     synthesisRun,
     handleDirection,
@@ -550,10 +587,10 @@ export function GraphView({
         )}
       </div>
 
-      {!embedded && focusedRunId && (
+      {!embedded && selectedRunId && (
         <NodeDetail
-          nodeId={focusedRunId}
-          onClose={() => focusRun(null)}
+          nodeId={selectedRunId}
+          onClose={() => selectRunHere(null)}
           onExit={onClose}
         />
       )}
@@ -569,7 +606,7 @@ export function GraphView({
                     label="查看详情"
                     onSelect={() => {
                       if (onNodeSelect) onNodeSelect(menuNodeId);
-                      else focusRun(menuNodeId);
+                      else selectRunHere(menuNodeId);
                       setMenu(null);
                     }}
                   />
@@ -584,7 +621,8 @@ export function GraphView({
                         const role = execution.agents.find(
                           (a) => a.id === run?.agentId,
                         )?.role;
-                        showRunDetail(menuNodeId, role);
+                        if (messageId)
+                          showRunDetail(messageId, menuNodeId, role);
                         onClose?.();
                         setMenu(null);
                       }}

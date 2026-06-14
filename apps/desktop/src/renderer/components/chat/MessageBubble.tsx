@@ -382,7 +382,11 @@ function AssistantMessage({ message }: Props) {
           />
         )}
         {message.executionId && (
-          <InlineTeamGraph executionId={message.executionId} />
+          <InlineTeamGraph
+            messageId={message.id}
+            executionId={message.executionId}
+            journal={message.runs}
+          />
         )}
         <Markdown
           content={message.content}

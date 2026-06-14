@@ -1,7 +1,8 @@
 import {
-  activeExec,
   describeFrame,
+  execRuntime,
   useActiveExecField,
+  useExecutionScope,
   useExecutionStore,
 } from "@/stores/execution";
 import { Pause, Play, Radio } from "lucide-react";
@@ -17,6 +18,9 @@ const STEP_INTERVAL_MS = 450;
  * tail (`playhead === null`) is live; any earlier index is replay.
  */
 export function Timeline() {
+  // Playback targets this graph's per-message slot (§9.3), so scrubbing one
+  // message's graph never moves another's playhead.
+  const messageId = useExecutionScope();
   const plan = useActiveExecField((rt) => rt.plan);
   const frames = useActiveExecField((rt) => rt.frames);
   const playhead = useActiveExecField((rt) => rt.playhead);
@@ -29,24 +33,24 @@ export function Timeline() {
   const isLive = playhead === null;
 
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || !messageId) return;
     const id = setInterval(() => {
       const state = useExecutionStore.getState();
-      const rt = activeExec(state);
+      const rt = execRuntime(state, messageId);
       const count = rt.frames.length;
       const cur = rt.playhead ?? count;
       const next = cur + 1;
       if (next >= count) {
-        state.goLive();
+        state.goLive(messageId);
         setPlaying(false);
       } else {
-        state.setPlayhead(next);
+        state.setPlayhead(next, messageId);
       }
     }, STEP_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [playing]);
+  }, [playing, messageId]);
 
-  if (!plan || total === 0) return null;
+  if (!plan || total === 0 || !messageId) return null;
 
   const currentFrame = pos > 0 ? frames[pos - 1] : null;
   const description = currentFrame
@@ -56,15 +60,15 @@ export function Timeline() {
   const onTogglePlay = () => {
     if (!playing && (playhead === null || pos >= total)) {
       // Restart replay from the beginning when starting from the live tail.
-      setPlayhead(0);
+      setPlayhead(0, messageId);
     }
     setPlaying((p) => !p);
   };
 
   const onScrub = (value: number) => {
     setPlaying(false);
-    if (value >= total) goLive();
-    else setPlayhead(value);
+    if (value >= total) goLive(messageId);
+    else setPlayhead(value, messageId);
   };
 
   return (
@@ -96,7 +100,7 @@ export function Timeline() {
           type="button"
           onClick={() => {
             setPlaying(false);
-            goLive();
+            goLive(messageId);
           }}
           title="回到实时"
           className={`flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-xs ${
