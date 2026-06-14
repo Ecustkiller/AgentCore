@@ -1,0 +1,54 @@
+name: Deploy Website
+
+# 官网（apps/website）静态站自动部署到 Cloudflare Pages。
+# 仅当 apps/website 改动时触发：构建 next 静态产物（out/）后用 wrangler 直传。
+# 生产分支沿用 Pages 项目的 main，自定义域 fashitianxia.xyz 跟随生产部署。
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "apps/website/**"
+      - ".github/workflows/deploy-website.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-website
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build & deploy to Cloudflare Pages
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/website
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: apps/website/.node-version
+          cache: pnpm
+          cache-dependency-path: apps/website/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build static site
+        run: pnpm build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: e784e487f8ab57882d4b24d845ccfad1
+          workingDirectory: apps/website
+          command: pages deploy out --project-name=agentcore-website --branch=main
