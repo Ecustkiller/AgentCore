@@ -14,6 +14,10 @@ env/
 # uv
 .uv/
 
+# Python tooling caches (ruff / mypy)
+.mypy_cache/
+.ruff_cache/
+
 # Node / pnpm
 node_modules/
 .pnpm-store/
@@ -21,6 +25,10 @@ node_modules/
 # Electron
 out/
 release/
+
+# TS build info / lint cache
+*.tsbuildinfo
+.eslintcache
 
 # IDE
 .idea/
