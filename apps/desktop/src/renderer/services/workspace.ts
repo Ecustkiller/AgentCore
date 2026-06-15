@@ -5,6 +5,9 @@ import {
   api,
   tryRefresh,
 } from "@/services/api";
+import type { components } from "@/types/api.generated";
+
+type Schemas = components["schemas"];
 
 /** Encode a workspace-relative path for the `{path:path}` route (keep slashes). */
 function encodePath(path: string): string {
@@ -65,7 +68,7 @@ export async function listWorkspaceFiles(
   conversationId: string,
   recursive = true,
 ): Promise<WorkspaceFile[]> {
-  const res = await api.get<{ data: { path: string; is_dir: boolean }[] }>(
+  const res = await api.get<Schemas["WorkspaceFileListResponse"]>(
     `/v1/conversations/${conversationId}/workspace/files?recursive=${recursive}`,
   );
   return res.data.map((e) => ({ path: e.path, isDir: e.is_dir }));
@@ -198,12 +201,8 @@ export interface WorkspaceSnapshot {
   sizeBytes: number;
 }
 
-interface BackendSnapshot {
-  snapshot_id: string;
-  label: string | null;
-  created_at: string;
-  size_bytes: number;
-}
+/** Server snapshot payload (`/snapshots`), generated from OpenAPI. */
+type BackendSnapshot = Schemas["SnapshotSummary"];
 
 const toSnapshot = (s: BackendSnapshot): WorkspaceSnapshot => ({
   snapshotId: s.snapshot_id,
@@ -216,7 +215,7 @@ const toSnapshot = (s: BackendSnapshot): WorkspaceSnapshot => ({
 export async function listSnapshots(
   conversationId: string,
 ): Promise<WorkspaceSnapshot[]> {
-  const res = await api.get<{ data: BackendSnapshot[] }>(
+  const res = await api.get<Schemas["SnapshotListResponse"]>(
     `/v1/conversations/${conversationId}/snapshots`,
   );
   return res.data.map(toSnapshot);

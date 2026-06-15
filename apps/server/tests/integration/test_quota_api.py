@@ -8,7 +8,9 @@ spend is seeded straight into the ledger so the test never makes a real LLM call
 """
 
 import httpx
+import pytest
 
+from agentcore.config import settings
 from agentcore.core.types import new_id
 from agentcore.db.repositories import (
     ConversationRepository,
@@ -17,6 +19,17 @@ from agentcore.db.repositories import (
 )
 
 _PW = "password123"
+
+
+@pytest.fixture(autouse=True)
+def _platform_billing():
+    """Quota is the platform-mode 防线. Force platform billing so the BYOK preflight
+    (default billing_mode="byok", which refuses a keyless turn with 402 first) does
+    not pre-empt the quota gate these tests exercise (成本配额与计费.md §一)."""
+    original = settings.billing_mode
+    settings.billing_mode = "platform"
+    yield
+    settings.billing_mode = original
 # Above the default monthly cap (quota_monthly_cost_usd = $5 → 5e9 nano-USD).
 _OVER_MONTHLY_NANO = 6_000_000_000
 # Under the global $5 cap, but enough to trip a tightened per-user override.

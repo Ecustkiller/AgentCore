@@ -7,17 +7,22 @@ receives 404 (never another user's data — IDOR-safe).
 
 import asyncio
 import mimetypes
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Query, Request, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
     get_cost_event_repo,
+    get_db,
     get_folder_repo,
     get_handoff_job_repo,
     get_message_repo,
+    get_model_mode_repo,
 )
+from agentcore.api.routes.model_modes import validate_mode_ref
 from agentcore.api.schemas import (
     ApplyHandoffRequest,
     BindLocalWorkspaceRequest,
@@ -40,8 +45,10 @@ from agentcore.api.schemas import (
     MoveConversationRequest,
     MoveFileRequest,
     RegenerateMessageRequest,
-    ResolveApprovalRequest,
-    ResolveWorkspaceOpRequest,
+    ResolveApprovalInteraction,
+    ResolveCheckpointInteraction,
+    ResolveClientToolInteraction,
+    ResolveInteractionRequest,
     SendMessageRequest,
     SnapshotListResponse,
     SnapshotSummary,
@@ -61,28 +68,32 @@ from agentcore.conversation.service import (
     regenerate_chat,
     stream_chat,
 )
-from agentcore.core.errors import ConflictError, NotFoundError, ValidationError
-from agentcore.db.models import Conversation
+from agentcore.core.errors import (
+    BYOKKeyMissingError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
+from agentcore.core.logging import get_logger
+from agentcore.db.models import Conversation, User
 from agentcore.db.repositories import (
     ConversationRepository,
     CostEventRepository,
     FolderRepository,
     HandoffJobRepository,
     MessageRepository,
+    ModelModeRepository,
 )
-from agentcore.core.logging import get_logger
-from agentcore.runtime.approvals import default_approval_registry
+from agentcore.llm.byok import LLMCredentials, resolve_user_llm_credentials
+from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import (
     EventSink,
     error_event,
     handoff_apply_done,
     handoff_snapshot_done,
 )
+from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.storage import SnapshotNotFound
-from agentcore.workspace.channel import default_workspace_op_registry
-from agentcore.workspace.handoff import snapshot_local
-from agentcore.workspace.handoff_apply import ApplySelection, apply_handoff
-from agentcore.workspace.handoff_diff import compute_handoff_diff
 from agentcore.workspace.files import (
     create_dir,
     delete_file,
@@ -92,6 +103,9 @@ from agentcore.workspace.files import (
     upload_file,
 )
 from agentcore.workspace.git import CloneError, clone_repo
+from agentcore.workspace.handoff import snapshot_local
+from agentcore.workspace.handoff_apply import ApplySelection, apply_handoff
+from agentcore.workspace.handoff_diff import compute_handoff_diff
 from agentcore.workspace.locate import (
     LocalBinding,
     build_workspace,
@@ -123,7 +137,7 @@ async def _require_owned_conversation(
     """404 unless the conversation exists and belongs to the user."""
     conv = await repo.get_by_id(conversation_id, user_id=user_id)
     if not conv:
-        raise NotFoundError("Conversation not found")
+        raise NotFoundError("对话不存在")
 
 
 def _summary_with_count(
@@ -150,7 +164,7 @@ async def _get_owned_conversation(
     """
     conv = await repo.get_by_id(conversation_id, user_id=user_id)
     if not conv:
-        raise NotFoundError("Conversation not found")
+        raise NotFoundError("对话不存在")
     return conv
 
 
@@ -180,6 +194,7 @@ async def create_conversation(
     user: AuthUser,
     repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
+    mode_repo: ModelModeRepository = Depends(get_model_mode_repo),
 ):
     # A non-null target folder must be one of the user's own live folders (else
     # 404), mirroring the move endpoint so a chat can never be born in someone
@@ -187,9 +202,15 @@ async def create_conversation(
     if body.folder_id is not None:
         folder = await folder_repo.get_by_id(body.folder_id, user_id=user.user_id)
         if not folder:
-            raise NotFoundError("Folder not found")
+            raise NotFoundError("文件夹不存在")
+    # An explicit initial 质量档 must be a known preset or one of the user's own
+    # custom modes (else 400); None inherits the default.
+    await validate_mode_ref(body.model_mode, user_id=user.user_id, repo=mode_repo)
     conv = await repo.create(
-        user_id=user.user_id, title=body.title, folder_id=body.folder_id
+        user_id=user.user_id,
+        title=body.title,
+        folder_id=body.folder_id,
+        model_mode=body.model_mode,
     )
     return ConversationSummary.model_validate(conv)
 
@@ -263,7 +284,7 @@ async def get_conversation(
 ):
     conv = await repo.get_by_id(conversation_id, user_id=user.user_id)
     if not conv:
-        raise NotFoundError("Conversation not found")
+        raise NotFoundError("对话不存在")
     return ConversationSummary.model_validate(conv)
 
 
@@ -273,13 +294,21 @@ async def update_conversation(
     body: UpdateConversationRequest,
     user: AuthUser,
     repo: ConversationRepository = Depends(get_conversation_repo),
+    mode_repo: ModelModeRepository = Depends(get_model_mode_repo),
 ):
-    if body.title is not None:
-        conv = await repo.update_title(conversation_id, body.title, user_id=user.user_id)
-    else:
-        conv = await repo.get_by_id(conversation_id, user_id=user.user_id)
+    # Patch only the fields the client sent: an omitted ``model_mode`` is left
+    # untouched, while an explicit null clears it back to「inherit default」.
+    fields = body.model_fields_set
+    conv = await repo.get_by_id(conversation_id, user_id=user.user_id)
     if not conv:
-        raise NotFoundError("Conversation not found")
+        raise NotFoundError("对话不存在")
+    if "title" in fields and body.title is not None:
+        conv = await repo.update_title(conversation_id, body.title, user_id=user.user_id)
+    if "model_mode" in fields:
+        await validate_mode_ref(body.model_mode, user_id=user.user_id, repo=mode_repo)
+        conv = await repo.set_model_mode(
+            conversation_id, body.model_mode, user_id=user.user_id
+        )
     return ConversationSummary.model_validate(conv)
 
 
@@ -306,19 +335,19 @@ async def move_conversation_to_folder(
     """
     conv = await conv_repo.get_by_id(conversation_id, user_id=user.user_id)
     if not conv:
-        raise NotFoundError("Conversation not found")
+        raise NotFoundError("对话不存在")
     if conv.folder_id != body.folder_id:
         if body.folder_id is not None:
             folder = await folder_repo.get_by_id(body.folder_id, user_id=user.user_id)
             if not folder:
-                raise NotFoundError("Folder not found")
+                raise NotFoundError("文件夹不存在")
         if await msg_repo.count_by_conversation(conversation_id) > 0:
             raise ConflictError("对话开始后不可更换工作区")
         conv = await conv_repo.set_folder(
             conversation_id, body.folder_id, user_id=user.user_id
         )
         if not conv:
-            raise NotFoundError("Conversation not found")
+            raise NotFoundError("对话不存在")
     return ConversationSummary.model_validate(conv)
 
 
@@ -330,7 +359,7 @@ async def delete_conversation(
 ):
     deleted = await repo.soft_delete(conversation_id, user_id=user.user_id)
     if not deleted:
-        raise NotFoundError("Conversation not found")
+        raise NotFoundError("对话不存在")
     return StatusResponse()
 
 
@@ -338,22 +367,86 @@ async def delete_conversation(
 async def list_messages(
     conversation_id: str,
     user: AuthUser,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    limit: int = Query(100, ge=1, le=200),
+    before: datetime | None = Query(None),
+    after: datetime | None = Query(None),
+    around: str | None = Query(None),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     repo: MessageRepository = Depends(get_message_repo),
 ):
+    """A window of a conversation's messages (cursor-windowed, chronological).
+
+    Four mutually-exclusive modes (checked in this order):
+
+    - ``around={message_id}``: a window centered on a message — the search-hit jump
+      (load-around B). 404 if the message isn't in this conversation.
+    - ``before={iso}``: the page strictly older than the cursor (scroll up).
+    - ``after={iso}``: the page strictly newer than the cursor (scroll down).
+    - none: the latest window (conversation open).
+
+    ``has_more_before`` / ``has_more_after`` drive infinite scroll; a one-sided
+    query computes only the flag for the direction it moves in (an ``around`` window
+    computes both). ``total`` is the conversation's full message count.
+    """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    offset = (page - 1) * page_size
-    messages, total = await repo.list_by_conversation(
-        conversation_id, limit=page_size, offset=offset
-    )
+    total = await repo.count_by_conversation(conversation_id)
+
+    has_more_before = False
+    has_more_after = False
+    if around is not None:
+        window = await repo.window_around(
+            conversation_id, message_id=around, before=limit, after=limit
+        )
+        if window is None:
+            raise NotFoundError("消息不存在")
+        messages, has_more_before, has_more_after = window
+    elif before is not None:
+        messages, has_more_before = await repo.list_before(
+            conversation_id, before=before, limit=limit
+        )
+    elif after is not None:
+        messages, has_more_after = await repo.list_after(
+            conversation_id, after=after, limit=limit
+        )
+    else:
+        messages, has_more_before = await repo.list_latest(
+            conversation_id, limit=limit
+        )
+
     return MessageListResponse(
         data=[MessageDetail.model_validate(m) for m in messages],
         total=total,
-        page=page,
-        page_size=page_size,
+        has_more_before=has_more_before,
+        has_more_after=has_more_after,
     )
+
+
+async def _preflight_turn_llm(
+    *,
+    session: AsyncSession,
+    user: User,
+    cost_repo: CostEventRepository,
+) -> LLMCredentials | None:
+    """Pre-turn billing gate, run before the SSE opens so a refused turn gets a
+    clean error instead of a half-opened stream.
+
+    BYOK mode (config.billing_mode): require the user's own DeepSeek key and return
+    the resolved credentials to thread through the turn — refuse with
+    ``BYOKKeyMissingError`` (→ 402 LLM_KEY_REQUIRED) when none is configured, so the
+    client routes the user to 设置·模型配置. Platform mode: keep the quota 防线 and
+    return ``None`` (the turn runs on the global server key). Resolving here and
+    threading the result down means "preflight passes" == "the turn runs on this
+    key" — the runtime never re-resolves to a different decision.
+    """
+    if settings.billing_mode == "byok":
+        credentials = await resolve_user_llm_credentials(session, user.user_id)
+        if credentials is None:
+            raise BYOKKeyMissingError(
+                "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再发起对话。"
+            )
+        return credentials
+    await enforce_quota(cost_repo, user.user_id, limits=QuotaLimits.for_user(user))
+    return None
 
 
 @router.post("/{conversation_id}/messages")
@@ -361,6 +454,7 @@ async def send_message(
     conversation_id: str,
     body: SendMessageRequest,
     user: AuthUser,
+    session: AsyncSession = Depends(get_db),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     cost_repo: CostEventRepository = Depends(get_cost_event_repo),
 ):
@@ -371,12 +465,16 @@ async def send_message(
     it server-side rather than letting it run to completion unobserved.
 
     Gated before the stream starts (成本配额与计费.md §一) so a refused turn gets a
-    clean 429 instead of a half-opened SSE: per-user rate limit first (sheds a
-    flooding account before any resource DB work), then ownership, then quota.
+    clean error instead of a half-opened SSE: per-user rate limit first (sheds a
+    flooding account before any resource DB work), then ownership, then the
+    BYOK/quota billing gate (BYOK mode requires the user's own key; platform mode
+    enforces quota). The resolved BYOK credentials thread through the whole turn.
     """
     await enforce_user_message_rate_limit(user.user_id)
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    await enforce_quota(cost_repo, user.user_id, limits=QuotaLimits.for_user(user))
+    credentials = await _preflight_turn_llm(
+        session=session, user=user, cost_repo=cost_repo
+    )
 
     sink = EventSink()
 
@@ -387,63 +485,64 @@ async def send_message(
             user_id=user.user_id,
             sink=sink,
             attachments=[a.model_dump() for a in body.attachments],
+            llm_credentials=credentials,
         )
     )
 
     return sse_response(sink, producer=task)
 
 
-@router.post("/{conversation_id}/approvals/{approval_id}", response_model=StatusResponse)
-async def resolve_approval(
-    conversation_id: str,
-    approval_id: str,
-    body: ResolveApprovalRequest,
-    user: AuthUser,
-    conv_repo: ConversationRepository = Depends(get_conversation_repo),
-):
-    """Authorize or deny a paused GRANTABLE tool call (tool approval gate).
-
-    The pending tool call (in the live ``send_message`` SSE stream) resumes with
-    the decision. 404 if the approval is unknown, already settled, timed out, or
-    belongs to another conversation — the gate auto-denies anything left
-    unanswered, so a stale prompt resolves as "not found".
-    """
-    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    resolved = default_approval_registry().resolve(
-        approval_id, body.decision, conversation_id=conversation_id
-    )
-    if not resolved:
-        raise NotFoundError("Approval request not found or already resolved")
-    return StatusResponse()
-
-
 @router.post(
-    "/{conversation_id}/workspace/ops/{request_id}", response_model=StatusResponse
+    "/{conversation_id}/interactions/{interaction_id}", response_model=StatusResponse
 )
-async def resolve_workspace_op(
+async def resolve_interaction(
     conversation_id: str,
-    request_id: str,
-    body: ResolveWorkspaceOpRequest,
+    interaction_id: str,
     user: AuthUser,
+    body: ResolveInteractionRequest = Body(discriminator="kind"),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
 ):
-    """Deliver a desktop's result for a paused local-workspace op (双模式工作区 P2).
+    """Settle any paused interaction over the unified bridge (§18.2).
 
-    The bound desktop client ran the op (read / list / grep / …) against the real
-    local directory and posts the structured result here; the ``LocalWorkspace``
-    awaiting it in the live ``send_message`` SSE turn resumes. 404 if the request
-    is unknown, already settled, timed out, or belongs to another conversation —
-    the channel fails any op left unanswered, so a stale post resolves as "not
-    found".
+    One endpoint for every suspend kind, discriminated on ``body.kind``:
+
+    - ``approval`` — authorize / deny a paused GRANTABLE tool call (the gate
+      auto-denies anything left unanswered);
+    - ``ask_user`` — the user's checkpoint answer (continue / adjust / stop);
+    - ``client_tool`` — a bound desktop's result envelope for a local-workspace op.
+
+    The pending interaction (awaiting in the live ``send_message`` SSE turn) resumes
+    with its kind-specific result. 404 if it is unknown, already settled, timed out,
+    belongs to another conversation, or its kind does not match — a stale resolve
+    falls through as "not found".
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    resolved = default_workspace_op_registry().resolve(
-        request_id,
-        body.model_dump(),
-        conversation_id=conversation_id,
-    )
-    if not resolved:
-        raise NotFoundError("Workspace op request not found or already resolved")
+
+    if isinstance(body, ResolveApprovalInteraction):
+        result: object = body.decision
+    elif isinstance(body, ResolveCheckpointInteraction):
+        result = CheckpointResponse(decision=body.decision, note=body.note)
+    elif isinstance(body, ResolveClientToolInteraction):
+        result = {
+            "ok": body.ok,
+            "value": body.value,
+            "error": body.error.model_dump() if body.error else None,
+        }
+    else:  # pragma: no cover - exhaustive over the discriminated union
+        raise NotFoundError("交互请求类型未知")
+
+    registry = default_interaction_registry()
+    pending = registry.get(interaction_id)
+    if (
+        pending is None
+        or pending.conversation_id != conversation_id
+        or pending.kind != body.kind
+    ):
+        raise NotFoundError("交互请求不存在或已处理")
+    if not registry.resolve(
+        interaction_id, result, conversation_id=conversation_id
+    ):
+        raise NotFoundError("交互请求不存在或已处理")
     return StatusResponse()
 
 
@@ -495,7 +594,7 @@ async def bind_workspace(
             conv.folder_id, body.root_id, user_id=user.user_id
         )
         if not folder:
-            raise NotFoundError("Folder not found")
+            raise NotFoundError("文件夹不存在")
         return WorkspaceBindingResponse(
             mode="local", scope="folder", root_id=body.root_id
         )
@@ -528,7 +627,7 @@ async def unbind_workspace(
             conv.folder_id, None, user_id=user.user_id
         )
         if not folder:
-            raise NotFoundError("Folder not found")
+            raise NotFoundError("文件夹不存在")
         return WorkspaceBindingResponse(mode="cloud", scope="folder", root_id=None)
     await conv_repo.set_local_root_id(conversation_id, None, user_id=user.user_id)
     return WorkspaceBindingResponse(
@@ -568,7 +667,7 @@ async def _run_handoff(
             )
         )
     except Exception as e:
-        logger.warning("handoff_failed", conversation_id=conversation_id, error=str(e))
+        logger.warning("handoff.failed", conversation_id=conversation_id, error=str(e))
         sink.emit(error_event("HANDOFF_FAILED", str(e)))
     finally:
         if not sink._closed:
@@ -605,7 +704,7 @@ async def handoff_local_workspace(
         label=folder.name if folder else None,
     )
     if binding is None:
-        raise ValidationError("Conversation is not in local mode")
+        raise ValidationError("该对话不是本地模式")
 
     sink = EventSink()
     task = asyncio.create_task(
@@ -657,7 +756,7 @@ async def dispatch_handoff_job(
         label=folder.name if folder else None,
     )
     if binding is None:
-        raise ValidationError("Conversation is not in local mode")
+        raise ValidationError("该对话不是本地模式")
 
     sink = EventSink()
     task = asyncio.create_task(
@@ -710,7 +809,7 @@ async def get_handoff_job(
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
     job = await job_repo.get_by_id(job_id, user_id=user.user_id)
     if job is None or job.source_conversation_id != conversation_id:
-        raise NotFoundError("Handoff job not found")
+        raise NotFoundError("交接任务不存在")
     return HandoffJobSummary.model_validate(job)
 
 
@@ -737,9 +836,9 @@ async def get_handoff_job_diff(
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     job = await job_repo.get_by_id(job_id, user_id=user.user_id)
     if job is None or job.source_conversation_id != conversation_id:
-        raise NotFoundError("Handoff job not found")
+        raise NotFoundError("交接任务不存在")
     if job.status != "succeeded" or not job.result_snapshot_id:
-        raise ConflictError("Handoff job has not produced a result yet")
+        raise ConflictError("交接任务尚未产出结果")
     try:
         changes = await compute_handoff_diff(
             user_id=user.user_id,
@@ -750,7 +849,7 @@ async def get_handoff_job_diff(
             result_snapshot_id=job.result_snapshot_id,
         )
     except SnapshotNotFound as e:
-        raise NotFoundError("Handoff snapshot not found") from e
+        raise NotFoundError("交接快照不存在") from e
     data = [HandoffFileChange.model_validate(c) for c in changes]
     return HandoffDiffResponse(
         job_id=job.id,
@@ -810,14 +909,14 @@ async def _run_apply(
         )
     except SnapshotNotFound as e:
         logger.warning(
-            "handoff_apply_snapshot_missing",
+            "handoff.apply_snapshot_missing",
             conversation_id=source_conversation_id,
             error=str(e),
         )
         sink.emit(error_event("HANDOFF_SNAPSHOT_NOT_FOUND", str(e)))
     except Exception as e:
         logger.warning(
-            "handoff_apply_failed",
+            "handoff.apply_failed",
             conversation_id=source_conversation_id,
             error=str(e),
         )
@@ -853,9 +952,9 @@ async def apply_handoff_job(
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     job = await job_repo.get_by_id(job_id, user_id=user.user_id)
     if job is None or job.source_conversation_id != conversation_id:
-        raise NotFoundError("Handoff job not found")
+        raise NotFoundError("交接任务不存在")
     if job.status != "succeeded" or not job.result_snapshot_id:
-        raise ConflictError("Handoff job has not produced a result yet")
+        raise ConflictError("交接任务尚未产出结果")
 
     folder = (
         await folder_repo.get_by_id(conv.folder_id, user_id=user.user_id)
@@ -869,7 +968,7 @@ async def apply_handoff_job(
         label=folder.name if folder else None,
     )
     if binding is None:
-        raise ValidationError("Conversation is not in local mode")
+        raise ValidationError("该对话不是本地模式")
 
     selections = [
         ApplySelection(
@@ -901,6 +1000,7 @@ async def regenerate_message(
     message_id: str,
     body: RegenerateMessageRequest,
     user: AuthUser,
+    session: AsyncSession = Depends(get_db),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     cost_repo: CostEventRepository = Depends(get_cost_event_repo),
 ):
@@ -912,11 +1012,13 @@ async def regenerate_message(
     later turns are dropped before re-running. Like ``send_message``, the pipeline
     runs as a detached task so a client disconnect cancels it server-side. A
     re-run is a fresh turn, so it passes the same gates (rate limit → ownership →
-    quota) as ``send_message``.
+    BYOK/quota billing gate) as ``send_message``.
     """
     await enforce_user_message_rate_limit(user.user_id)
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    await enforce_quota(cost_repo, user.user_id, limits=QuotaLimits.for_user(user))
+    credentials = await _preflight_turn_llm(
+        session=session, user=user, cost_repo=cost_repo
+    )
 
     sink = EventSink()
 
@@ -927,6 +1029,7 @@ async def regenerate_message(
             user_id=user.user_id,
             sink=sink,
             edited_content=body.content,
+            llm_credentials=credentials,
         )
     )
 
@@ -1006,7 +1109,7 @@ async def restore_conversation_snapshot(
                 snapshot_id=snapshot_id,
             )
     except SnapshotNotFound as e:
-        raise NotFoundError("Snapshot not found") from e
+        raise NotFoundError("快照不存在") from e
     return StatusResponse()
 
 
@@ -1027,7 +1130,7 @@ async def download_conversation_snapshot(
             snapshot_id=snapshot_id,
         )
     except SnapshotNotFound as e:
-        raise NotFoundError("Snapshot not found") from e
+        raise NotFoundError("快照不存在") from e
     filename = f"workspace-{snapshot_id}.zip"
     return Response(
         content=data,
@@ -1081,10 +1184,10 @@ async def upload_workspace_file(
     max_bytes = settings.workspace_upload_max_bytes
     declared = request.headers.get("content-length")
     if declared is not None and declared.isdigit() and int(declared) > max_bytes:
-        raise ValidationError(f"File exceeds the {max_bytes}-byte upload limit")
+        raise ValidationError(f"文件超出 {max_bytes} 字节的上传上限")
     data = await request.body()
     if len(data) > max_bytes:
-        raise ValidationError(f"File exceeds the {max_bytes}-byte upload limit")
+        raise ValidationError(f"文件超出 {max_bytes} 字节的上传上限")
 
     key = workspace_storage_key(
         user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
@@ -1100,7 +1203,7 @@ async def upload_workspace_file(
                 data=data,
             )
     except OutsideWorkspace as e:
-        raise ValidationError("Invalid path: outside the workspace") from e
+        raise ValidationError("路径非法：超出工作区范围") from e
     return UploadFileResponse(path=path, size_bytes=written)
 
 
@@ -1121,9 +1224,9 @@ async def download_workspace_file(
             path=path,
         )
     except OutsideWorkspace as e:
-        raise ValidationError("Invalid path: outside the workspace") from e
+        raise ValidationError("路径非法：超出工作区范围") from e
     except (PathNotFound, NotAFile) as e:
-        raise NotFoundError("File not found") from e
+        raise NotFoundError("文件不存在") from e
 
     filename = path.rsplit("/", 1)[-1] or "download"
     media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
@@ -1158,9 +1261,9 @@ async def delete_workspace_file(
                 path=path,
             )
     except OutsideWorkspace as e:
-        raise ValidationError("Invalid path: outside the workspace") from e
+        raise ValidationError("路径非法：超出工作区范围") from e
     except PathNotFound as e:
-        raise NotFoundError("File not found") from e
+        raise NotFoundError("文件不存在") from e
     return StatusResponse()
 
 
@@ -1187,11 +1290,11 @@ async def move_workspace_file(
                 dst=body.dst,
             )
     except OutsideWorkspace as e:
-        raise ValidationError("Invalid path: outside the workspace") from e
+        raise ValidationError("路径非法：超出工作区范围") from e
     except PathNotFound as e:
-        raise NotFoundError("File not found") from e
+        raise NotFoundError("文件不存在") from e
     except AlreadyExists as e:
-        raise ValidationError("A file with that name already exists") from e
+        raise ValidationError("已存在同名文件") from e
     return StatusResponse()
 
 
@@ -1217,9 +1320,9 @@ async def create_workspace_dir(
                 path=body.path,
             )
     except OutsideWorkspace as e:
-        raise ValidationError("Invalid path: outside the workspace") from e
+        raise ValidationError("路径非法：超出工作区范围") from e
     except AlreadyExists as e:
-        raise ValidationError("A file or folder with that name already exists") from e
+        raise ValidationError("已存在同名文件或文件夹") from e
     return StatusResponse()
 
 
@@ -1249,5 +1352,5 @@ async def clone_repo_into_workspace(
     except ValueError as e:
         raise ValidationError(str(e)) from e
     except CloneError as e:
-        raise ValidationError(f"Clone failed: {e}") from e
+        raise ValidationError(f"克隆失败：{e}") from e
     return CloneRepoResponse(path=dest)

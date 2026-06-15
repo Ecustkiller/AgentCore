@@ -19,7 +19,6 @@ that would fail anyway.
 """
 
 import asyncio
-import logging
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _package_version
 
@@ -27,9 +26,10 @@ from fastapi import APIRouter, Response, status
 from sqlalchemy import text
 
 from agentcore.config import settings
+from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["system"])
 
@@ -45,7 +45,7 @@ async def _database_ready() -> bool:
             await asyncio.wait_for(session.execute(text("SELECT 1")), _DB_PROBE_TIMEOUT_S)
         return True
     except Exception:  # noqa: BLE001 - any failure means "not ready", reason is logged
-        logger.warning("readiness check: database unreachable", exc_info=True)
+        logger.warning("system.readiness_db_unreachable", exc_info=True)
         return False
 
 

@@ -22,21 +22,22 @@ tool's output is otherwise not metered by the loop.
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolApproval, ToolCategory, new_id
-from agentcore.llm.config import agent_profile, apply_overrides
+from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect, new_id
+from agentcore.llm.config import apply_overrides
 from agentcore.llm.deepseek import DeepSeekProvider
+from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.runtime.citations import merge_citations
-from agentcore.runtime.events import EventSink, run_plan, run_progress
+from agentcore.runtime.events import EventSink, content_delta, run_plan, run_progress
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from agentcore.runtime.approvals import ApprovalGate
     from agentcore.runtime.costing import RunCost
+    from agentcore.runtime.sessions import SessionSaver, SessionStore
 
 logger = get_logger(__name__)
 
@@ -60,7 +61,10 @@ _DELEGATE_DESCRIPTION = (
     "重要：本工具不会替你回复用户。团队产出会作为结果回到你这里；用户可在界面"
     "查看每个成员的完整产出，因此你只需用自己的声音写一段简短概览（综述关键结论、"
     "串起整体、指引用户去看细节），不要逐字复述全文；可在看到结果后再次调用本工具"
-    "继续委派。"
+    "继续委派。\n"
+    "例外（finalize）：若本次只派一个 worker、且这次委派就是整件事的最终交付，可设"
+    " finalize=true，让该 worker 成功后的产出直接作为你的答复呈现给用户，省去你再写"
+    "一段概览（多 worker 或 worker 失败时自动回落到由你收尾）。"
 )
 
 _DELEGATE_PARAMETERS = {
@@ -106,6 +110,32 @@ _DELEGATE_PARAMETERS = {
                     "expected_output": {
                         "type": "string",
                         "description": "可选：期望产出的形态/要点。",
+                    },
+                    "stance": {
+                        "type": "string",
+                        "enum": ["pro", "con"],
+                        "description": (
+                            "可选：仅用于【辩论 / 交叉审查】这类对立任务——标记该 worker 的"
+                            "立场（pro=正方/支持，con=反方/反对）。纯前端呈现信号、执行不受"
+                            "影响（仍是普通并行）；前端据此把正反产出并排对比、并把回合标记为"
+                            "「辩论」。普通的并行分工不要设。"
+                        ),
+                    },
+                    "group": {
+                        "type": "string",
+                        "description": (
+                            "可选：与 stance 搭配，给同一组对立任务一个共同标识，把正/反"
+                            "配对（一次可有多组对比 / 多维审查）。只有一组时可省略。"
+                        ),
+                    },
+                    "round": {
+                        "type": "integer",
+                        "description": (
+                            "可选：仅用于【真·多轮辩论】——标记该 task 属于第几轮（从 1 起）。"
+                            "配合跨轮 depends_on（第 k 轮的一方依赖第 k-1 轮对方的产出）让"
+                            "交锋逐轮推进。纯前端呈现信号、执行不受影响；前端据此按轮次分层"
+                            "展示。单轮辩论 / 普通分工不要设。"
+                        ),
                     },
                     "id": {
                         "type": "string",
@@ -174,6 +204,16 @@ _DELEGATE_PARAMETERS = {
                 "required": ["role", "task"],
             },
         },
+        "finalize": {
+            "type": "boolean",
+            "description": (
+                "可选，默认 false。仅当本次只派【一个】worker、且这次委派就是整件事的"
+                "最终交付（如建一个文件、改一行、产出一段可独立阅读的内容）时设 true："
+                "该 worker 成功后，其产出会直接作为你的最终答复呈现给用户，你不必再写"
+                "概览。只要你可能在看到结果后还要继续委派 / 补充，或本次派了多个 worker，"
+                "就不要设——默认会把结果交回你来收尾；worker 失败时也会自动回落到由你收尾。"
+            ),
+        },
     },
     "required": ["tasks"],
 }
@@ -193,9 +233,12 @@ class DelegateTool:
         history: list[dict],
         tools: ToolRegistry,
         base_tool_context: ToolContext,
+        profile_set: ProfileSet | None = None,
         max_parallel: int | None = None,
         captain_run_id: str | None = None,
         approval_gate: ApprovalGate | None = None,
+        session_store: SessionStore | None = None,
+        session_saver: SessionSaver | None = None,
         depth: int = 0,
     ) -> None:
         self._llm = llm
@@ -205,6 +248,11 @@ class DelegateTool:
         self._history = history
         self._tools = tools
         self._base_tool_context = base_tool_context
+        # The turn's resolved 质量档 (llm/modes.py): which model each worker tier
+        # runs this turn. Forwarded verbatim to a nested sub-team (_make_child) so
+        # the whole tree honors the user's selection. None (standalone / tests) =
+        # the economy base set.
+        self._profile_set = profile_set or default_profile_set()
         self._max_parallel = max_parallel
         # The CEO's per-turn approval gate, forwarded to workers ONLY in local
         # mode (双模式工作区 P2d 执行门) so a delegated worker cannot run code or
@@ -215,6 +263,15 @@ class DelegateTool:
         # points its ``parent_run_id`` at the captain and the turn's run tree is
         # reconstructable. None when the tool runs standalone (e.g. tests).
         self._captain_run_id = captain_run_id
+        # The turn's live roster (留人): after a batch finishes, each COMPLETED
+        # worker is preserved here as a recoverable RunSession so the CEO can 定向
+        # 唤回 (revise) the SAME author to continue on its own draft. None when the
+        # tool runs standalone (e.g. tests) or 热修 is disabled.
+        self._session_store = session_store
+        # Optional write-through to the durable roster (P3 跨进程落盘): persists each
+        # registered session so a 唤回 still hits after a restart / eviction. None ⇒
+        # in-memory only (P2). Forwarded to nested sub-teams (_make_child).
+        self._session_saver = session_saver
         # This captain's own depth in the turn's Run tree (CEO = 0). Workers this
         # tool spawns are minted at ``depth + 1``; a worker that itself re-delegates
         # gets a child tool seeded with its own depth (阶段2 嵌套子任务).
@@ -223,8 +280,9 @@ class DelegateTool:
         # nesting worker). Their sub-team usage + cost rows are folded back into
         # this tool's totals after each call — see _absorb_children.
         self._children: list[DelegateTool] = []
-        # Run-id namespacing across multiple delegate calls in one turn, so an
-        # adaptive captain's second batch never collides with the first.
+        # How many times this tool was invoked this turn (an adaptive captain may
+        # delegate repeatedly). Telemetry only — run-id uniqueness now rides a uuid
+        # batch prefix (see execute), not this counter.
         self._calls = 0
         # Worker token usage accumulated across every delegate call this turn; the
         # pipeline folds this into the turn totals after the CEO loop returns. The
@@ -273,11 +331,17 @@ class DelegateTool:
         tasks_raw = arguments.get("tasks")
         if not isinstance(tasks_raw, list) or not tasks_raw:
             msg = "'tasks' 必须是非空数组：每个元素至少包含 role 和 task。"
-            return ToolResult(tool_call_id="", success=False, output=msg, error=msg, terminal=False)
+            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
 
         valid_tools = {s.name for s in self._tools.list_all()}
         self._calls += 1
-        prefix = f"del{self._calls}_{int(time.time() * 1000)}"
+        # Globally-unique batch prefix. The old ``del{calls}_{ms}`` collided when a
+        # parent and its nested child delegate — or two parallel re-delegating
+        # workers — fired in the same millisecond, minting duplicate run ids across
+        # the tree (a sub-worker reusing its captain worker's id). A uuid is
+        # collision-free across every delegate tool/call in the turn; ``_calls``
+        # stays for telemetry only.
+        prefix = f"del_{new_id()}"
         # Stamp every worker with its place in the turn's Run tree: parented to this
         # captain, one level deeper than this tool (CEO=0 → workers depth 1; a
         # re-delegating worker's child tool → its sub-workers depth 2).
@@ -290,12 +354,12 @@ class DelegateTool:
         )
         if errors:
             msg = "委派任务无效：" + "；".join(errors)
-            logger.info("delegate_rejected", errors=errors)
-            return ToolResult(tool_call_id="", success=False, output=msg, error=msg, terminal=False)
+            logger.info("delegate.rejected", errors=errors)
+            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
 
         execution_id = self._base_tool_context.execution_id or new_id()
         self._sink.emit(self._plan_event(execution_id, plan))
-        logger.info("delegate_started", nodes=len(plan.nodes), call=self._calls)
+        logger.info("delegate.started", nodes=len(plan.nodes), call=self._calls)
 
         # Gate workers' machine-touching tools ONLY when the workspace is local —
         # then a worker's code_execute / file_write runs on the user's real disk
@@ -313,6 +377,7 @@ class DelegateTool:
             tools=self._tools,
             sink=self._sink,
             base_tool_context=self._base_tool_context,
+            profile_set=self._profile_set,
             system_prompt=self._system_prompt,
             user_message=self._user_message,
             execution_id=execution_id,
@@ -335,13 +400,26 @@ class DelegateTool:
         call_usage = self._accumulate_usage(results)
         self._collect_ledger(plan, results)
         self._collect_citations(results)
+        registered = self._register_sessions(plan, results)
+        if self._session_saver is not None:
+            for session in registered:
+                await self._session_saver(session)
         self._absorb_children()
+
+        # 提案2a 直出：CEO 显式 finalize 且本批只有一个 worker、且它成功产出时，把该
+        # 产出直接作为本回合最终答复（HANDOFF 终态），省掉 CEO 再写一段概览的 LLM 轮次。
+        # 其余情况（多 worker、单 worker 失败或空产出）一律回落到下面的非终态路径，由
+        # CEO 照常收尾——这就是 finalize 的安全兜底。
+        if arguments.get("finalize") and len(plan.nodes) == 1:
+            only = results.get(plan.nodes[0].run_id)
+            if only and only.phase is RunPhase.COMPLETED and only.content.strip():
+                return self._direct_result(only.content)
+
         output = self._format_for_ceo(plan, results)
         return ToolResult(
             tool_call_id="",
             success=True,
             output=output,
-            terminal=False,
             output_limit=_DELEGATE_OUTPUT_LIMIT,
             metadata={
                 "input_tokens": call_usage["input"],
@@ -350,6 +428,25 @@ class DelegateTool:
                 "cache_hit_tokens": call_usage["cache_hit"],
                 "cache_miss_tokens": call_usage["cache_miss"],
             },
+        )
+
+    def _direct_result(self, content: str) -> ToolResult:
+        """提案2a：把单个成功 worker 的产出直接作为本回合最终答复（HANDOFF 终态）。
+
+        CEO 已就一个自包含的单一交付显式 finalize——于是把产出流式推到对话气泡
+        （``content_delta``，因 ``final_text`` 只持久化、不会被引擎重发），并以
+        ``ToolEffect.HANDOFF`` 结束回合，省掉一轮 CEO 合成。``metadata`` 不带 worker
+        用量：它已记在 ``self.usage`` 上、由 pipeline 折算入回合总账；若再放进 metadata，
+        引擎的终态分支会把它并入 captain 自身用量而造成双计。
+        """
+        self._sink.emit(content_delta(content))
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=content,
+            output_limit=_DELEGATE_OUTPUT_LIMIT,
+            effect=ToolEffect.HANDOFF,
+            final_text=content,
         )
 
     def _make_child(self, captain_run_id: str, captain_depth: int) -> DelegateTool:
@@ -369,9 +466,12 @@ class DelegateTool:
             history=self._history,
             tools=self._tools,
             base_tool_context=self._base_tool_context,
+            profile_set=self._profile_set,
             max_parallel=self._max_parallel,
             captain_run_id=captain_run_id,
             approval_gate=self._approval_gate,
+            session_store=self._session_store,
+            session_saver=self._session_saver,
             depth=captain_depth,
         )
         self._children.append(child)
@@ -438,6 +538,35 @@ class DelegateTool:
             if state and state.phase is RunPhase.COMPLETED and state.citations:
                 merge_citations(self.citations, state.citations)
 
+    def _register_sessions(self, plan, results: dict) -> list:
+        """Keep each COMPLETED worker alive as a recoverable RunSession (留人), and
+        return the sessions registered (so ``execute`` can write them through to the
+        durable roster, P3).
+
+        The worker's full transcript was captured on its RunState; preserve it in
+        the turn's roster so the CEO can 定向唤回 (revise) the SAME author to continue
+        on its own draft, instead of re-delegating a cold new worker. Only COMPLETED
+        runs that captured a transcript are kept — a failed / empty run has nothing
+        to continue, so it falls back to 甲 (re-delegate). No-op when 热修 is disabled
+        (standalone / tests, ``session_store is None``)."""
+        if self._session_store is None:
+            return []
+        from agentcore.runtime.runs import RunPhase, RunSession
+
+        registered = []
+        for node in plan.nodes:
+            state = results.get(node.run_id)
+            if state and state.phase is RunPhase.COMPLETED and state.transcript:
+                session = RunSession(
+                    run_id=node.run_id,
+                    spec=node,
+                    transcript=state.transcript,
+                    content=state.content,
+                )
+                self._session_store.put(session)
+                registered.append(session)
+        return registered
+
     def _format_for_ceo(self, plan, results: dict) -> str:
         """Render the workers' products as the CEO's overview input.
 
@@ -459,14 +588,45 @@ class DelegateTool:
             if state and state.warnings:
                 warns = "；".join(state.warnings)
                 body += f"\n\n> 质检提醒（未完全达标，请判断是否需要返工）：{warns}"
-            lines.append(f"\n### {label}（{status}）\n{body}")
+            lines.append(f"\n### {label}（{status}） · run_id: `{node.run_id}`\n{body}")
         lines.append(
             "\n---\n以上为各 worker 的完整产出（用户可在界面逐个展开查看）。"
             "请用你自己的声音写一段【简短概览】：综述各成员的关键结论、串起整体、"
             "指引用户去看细节即可——不要逐字复述每个 worker 的全文，也不要罗列内部"
-            "步骤或 Agent。如仍需补充工作，可再次调用 delegate。"
+            "步骤或 Agent。如仍需补充工作，可再次调用 delegate；若用户希望对其中某个产物"
+            "做小改 / 增补、且仍由原角色来改，可用 revise（传该产物上面的 run_id + 修改"
+            "意见）唤回原作者在原稿基础上续写，而不必从零重派。"
         )
         return "\n".join(lines)
+
+    def _run_payload(self, node) -> dict[str, Any]:
+        """One worker's plan-time descriptor for the graph: identity + topology,
+        plus the optional 辩论/审查 display tags when the CEO marked an opposing batch.
+
+        ``stance``/``group``/``round`` (前端UX目标态 §四) ride here display-only: the
+        frontend reads them to render an opposing batch side-by-side under a「辩论」
+        title and lay multi-round debates out round-by-round, while the scheduler/
+        executor ignore them (执行仍是普通并行 DAG). Omitted when empty/0, so an
+        ordinary parallel/DAG batch's payload is byte-for-byte unchanged.
+        """
+        payload: dict[str, Any] = {
+            "id": node.run_id,
+            "agent_id": node.agent_id,
+            "task": node.task,
+            "depends_on": node.depends_on,
+            # 阶段2 grouping: a sub-worker carries its captain worker's run id (a
+            # real node on the graph) so the frontend groups it under that parent;
+            # a top-level worker carries the CEO captain run id — a real CAPTAIN
+            # node (declared in _plan_event) it hangs under.
+            "parent_run_id": node.parent_run_id,
+        }
+        if node.stance:
+            payload["stance"] = node.stance
+        if node.group:
+            payload["group"] = node.group
+        if node.round:
+            payload["round"] = node.round
+        return payload
 
     def _plan_event(self, execution_id: str, plan):
         """Pre-declare this delegate batch's roster + runs so the graph lights up.
@@ -479,20 +639,7 @@ class DelegateTool:
         """
         roles = list(dict.fromkeys(n.role for n in plan.nodes if n.role))
         agents = [self._card(n) for n in plan.nodes]
-        runs = [
-            {
-                "id": n.run_id,
-                "agent_id": n.agent_id,
-                "task": n.task,
-                "depends_on": n.depends_on,
-                # 阶段2 grouping: a sub-worker carries its captain worker's run id
-                # (a real node on the graph) so the frontend groups it under that
-                # parent; a top-level worker carries the CEO captain run id — now a
-                # real CAPTAIN node (declared just below) it hangs under.
-                "parent_run_id": n.parent_run_id,
-            }
-            for n in plan.nodes
-        ]
+        runs = [self._run_payload(n) for n in plan.nodes]
         if self._depth == 0 and self._captain_run_id:
             agents.insert(0, self._captain_card())
             runs.insert(
@@ -528,7 +675,7 @@ class DelegateTool:
     def _card(self, node) -> dict[str, Any]:
         """Roster entry with the node's *effective* (post-clamp) thinking/effort."""
         profile = apply_overrides(
-            agent_profile(node.model_preference),
+            self._profile_set.agent(node.model_preference),
             thinking=node.thinking,
             reasoning_effort=node.reasoning_effort,
         )

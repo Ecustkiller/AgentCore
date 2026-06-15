@@ -27,12 +27,9 @@ from pathlib import Path
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.runtime.events import EventSink
+from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.storage import SnapshotRef, build_storage_provider
-from agentcore.workspace.channel import (
-    WorkspaceChannel,
-    WorkspaceOp,
-    default_workspace_op_registry,
-)
+from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
 from agentcore.workspace.locate import LocalBinding, workspace_storage_key
 from agentcore.workspace.protocol import WorkspaceIOError
 
@@ -80,7 +77,7 @@ async def snapshot_local(
     channel = WorkspaceChannel(
         sink=sink,
         conversation_id=conversation_id,
-        registry=default_workspace_op_registry(),
+        registry=default_interaction_registry(),
         timeout_seconds=settings.workspace_handoff_timeout_seconds,
         root_id=binding.root_id,
     )
@@ -107,7 +104,7 @@ async def snapshot_local(
             label=label,
         )
         logger.info(
-            "handoff_snapshot_created",
+            "handoff.snapshot_created",
             conversation_id=conversation_id,
             snapshot_id=ref.snapshot_id,
             archive_bytes=archive_bytes,

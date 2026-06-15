@@ -5,12 +5,28 @@ named ``ModelProfile`` bundling the model + sampling params + the ReAct round
 budget. Call sites resolve a profile and use ``build_request`` to spread it into
 an ``LLMRequest`` — no per-site copying of model/temperature/thinking/... .
 
+Growth invariant: the profile count tracks the number of *distinct usage
+scenarios*, never the number of parameter combinations. Add a profile only for a
+genuinely new scenario — not to express a one-off knob tweak (use
+``apply_overrides`` for per-agent capability bumps). Several profiles share most
+params today (the thinking tiers differ only in ``max_rounds``; memory/title only
+in ``max_tokens``); they stay separate because their *evolution* diverges — e.g.
+质量档 lifts ``chat`` and ``agent.strong`` to Pro independently — not because
+their current values differ. Merging on present-day similarity would couple
+scenarios that are meant to move apart.
+
 The ``delegate`` worker vocabulary is the two-value ``ModelTier`` (fast/
 strong); ``agent_profile`` maps a tier to its concrete agent profile. The single
 high-frequency chat/default reply path uses its own standalone ``chat`` profile,
-kept apart from the two tiers so flipping ``strong`` up to Pro never drags
-everyday chat cost/latency along. Profiles are an internal implementation
-concern and are intentionally NOT exposed to the worker LLMs.
+kept apart from the two tiers so a mode can lift one without dragging the other.
+Profiles are an internal implementation concern and are intentionally NOT exposed
+to the worker LLMs.
+
+The ``model`` on each profile here is the **economy base** (Flash). Per-turn model
+selection — the user-facing 质量档 (经济/高质量/custom) — is layered on top in
+``llm/modes.py`` (``ProfileSet``), which swaps a profile's model per team role
+while leaving these params untouched. The retired ``_STRONG_MODEL`` flip lives on
+as the ``quality`` preset there.
 
 Derived from DeepSeek V4 API constraints documented in .cursor/rules/llm.mdc.
 """
@@ -43,10 +59,6 @@ class ModelProfile:
 DEEPSEEK_V4_FLASH = "deepseek-v4-flash"
 DEEPSEEK_V4_PRO = "deepseek-v4-pro"
 
-# 测试阶段降本:strong 档临时改走 Flash。恢复设计中的 Pro 推理，把这一行改回
-# DEEPSEEK_V4_PRO 即可（单一翻转点，影响 agent.strong 档）。
-_STRONG_MODEL = DEEPSEEK_V4_FLASH
-
 
 # Single source of truth: every LLM usage scenario is declared here. The two
 # worker tiers are keyed "agent.<tier>" so agent_profile() can map a
@@ -54,9 +66,10 @@ _STRONG_MODEL = DEEPSEEK_V4_FLASH
 # single-chat/default reply path uses the standalone "chat" profile (not a tier),
 # decoupling everyday chat cost/latency from the strong tier.
 PROFILES: dict[str, ModelProfile] = {
-    # Single-agent / default chat reply: the highest-frequency path. Held apart
-    # from the two tiers so flipping _STRONG_MODEL to Pro never inflates chat.
-    # Inherits the old "standard" sweet spot: thinking on, high effort, mid rounds.
+    # Single-agent / default chat reply: the highest-frequency path. A standalone
+    # profile (not a tier) so a mode can lift it (高质量档 → Pro) independently of
+    # the worker tiers. Base model = Flash (economy); the sweet spot stays: thinking
+    # on, high effort, mid rounds.
     "chat": ModelProfile(
         model=DEEPSEEK_V4_FLASH,
         thinking=True,
@@ -77,11 +90,12 @@ PROFILES: dict[str, ModelProfile] = {
         temperature=0.7,
         max_rounds=4,
     ),
-    # Strong tier: sub-tasks needing reasoning / quality. By design runs Pro
-    # (temporarily Flash via _STRONG_MODEL during testing). Effort stays "high";
-    # "max" is unlocked per-agent on demand (提案 B), not the tier default.
+    # Strong tier: sub-tasks needing reasoning / quality. Its BASE model is Flash
+    # (the economy default); the ``quality`` mode preset (llm/modes.py) lifts it to
+    # Pro per user/conversation/operator-default. Effort stays "high"; "max" is
+    # unlocked per-agent on demand (提案 B), not the tier default.
     "agent.strong": ModelProfile(
-        model=_STRONG_MODEL,
+        model=DEEPSEEK_V4_FLASH,
         thinking=True,
         reasoning_effort="high",
         temperature=0.7,

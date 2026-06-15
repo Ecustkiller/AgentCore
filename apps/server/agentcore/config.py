@@ -1,6 +1,14 @@
 """Application configuration loaded from environment variables."""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+# Repository root, anchored off this file (…/apps/server/agentcore/config.py →
+# parents[3]). Used to resolve relative paths (e.g. LOG_FILE → <root>/logs/...)
+# against the project root rather than the process CWD (the server runs from
+# apps/server, but logs/ live at the repo root so tooling finds them).
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
@@ -9,6 +17,22 @@ class Settings(BaseSettings):
 
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
+
+    # --- 计费模式 (BYOK 内测) ---
+    # "byok": 每个用户必须自带 DeepSeek API Key（用户自付额度）；平台不提供 key、
+    # 不计配额——发起对话前 preflight 校验用户已配置可用 key（见 api/routes/
+    # conversations.py），并以该 key 解析出的凭据贯穿整条 turn。
+    # "platform": 回到平台统一付费（用 deepseek_api_key + 配额防线）。
+    # 内测期默认 byok；平台付费路径（全局 key / 配额 / 成本账本）全部保留，仅靠此
+    # 开关休眠——日后翻回 platform + 填 deepseek_api_key 即恢复，零迁移。
+    billing_mode: str = "byok"
+
+    # AES-256-GCM 主密钥，用于把 BYOK API Key 加密后落库（security.py KeyEncryptor →
+    # user_llm_keys.api_key_enc）。64 个十六进制字符 = 32 字节；生成：
+    #   python -c "import secrets; print(secrets.token_hex(32))"
+    # 留空则禁用 BYOK key 存储——set-key 接口会拒绝存一把无法加密的 key（fail-safe，
+    # 明文永不落库）。
+    encryption_key: str = ""
 
     # Web search via a self-hosted SearXNG instance (engine set curated to
     # mainland-China-reachable engines, see deploy/searxng/settings.yml). Dev port
@@ -62,6 +86,26 @@ class Settings(BaseSettings):
     approval_gate_enabled: bool = True
     approval_timeout_seconds: float = 300.0
 
+    # User checkpoints (CEO ask_user — 前端UX目标态.md §三 / Agent协作模式.md §三).
+    # The CEO pauses the turn to ask the user a decision; the turn suspends until
+    # answered. Same single-worker in-process posture as the approval gate. The
+    # deadline is longer than approvals' — the user is making a judgement call, not
+    # a quick allow/deny — and a no-answer timeout resumes the CEO with "no
+    # response" so it wraps up rather than hanging.
+    checkpoint_gate_enabled: bool = True
+    checkpoint_timeout_seconds: float = 600.0
+
+    # Recoverable worker roster persistence (留人 跨进程落盘, 乙 热修 P3). The roster
+    # lives in-process (runtime/sessions.py); when enabled, each finished worker is
+    # also written through to the run_sessions table so a 定向唤回 (revise) still hits
+    # after a restart / memory eviction (loaded on an in-memory miss). A 7-day idle
+    # TTL sweeper prunes it (mirrors workspace retention). Disabled → P2 behaviour
+    # (in-memory only; a cross-process miss falls back to 甲 re-delegate).
+    session_roster_persist_enabled: bool = True
+    session_roster_retention_days: int = 7
+    session_roster_sweep_interval_seconds: int = 6 * 3600  # every 6h
+    session_roster_sweep_batch_limit: int = 200
+
     # Long-term memory consolidation (Agent记忆与知识系统 §1.5, 对标 Dreaming V3).
     # The user's memory file is refreshed by an OFFLINE consolidation pass — not a
     # per-turn single-exchange extract — that reads the whole recent conversation +
@@ -97,9 +141,36 @@ class Settings(BaseSettings):
     quota_monthly_cost_usd: float = 5.0
     quota_daily_requests: int = 200
 
+    # --- Model quality modes (质量档, llm/modes.py) ---
+    # `default_model_mode` is the operator-wide default 质量档 a turn falls back to
+    # when neither the conversation nor the user picked one ("economy" = all Flash;
+    # "quality" lifts CEO本体 + 主力worker to Pro). Flipping this to "quality" is the
+    # global lever that restores the design's Pro reasoning (retired _STRONG_MODEL).
+    # `user_selectable_models` is the operator CEILING: the models a user may pick
+    # in a custom mode (comma-separated). Tightening it (e.g. drop Pro during内测)
+    # both rejects new picks and clamps modes persisted before the change.
+    default_model_mode: str = "economy"
+    user_selectable_models: str = "deepseek-v4-flash,deepseek-v4-pro"
+
     host: str = "0.0.0.0"
     port: int = 8000
     debug: bool = False
+
+    # --- Logging (日志规范 / conversation-logs) ---
+    # `log_level`: debug / info / warning / error. `log_file`: when set, the
+    # runtime also writes one JSON object per line (JSONL, no ANSI) to this path —
+    # the queryable 产品AI日志 that scripts/log_*.py + the conversation-logs rule
+    # read. A relative path resolves against the repo root (see _PROJECT_ROOT);
+    # empty = stdout only (12-factor prod posture). Dev sets it to logs/dev.jsonl.
+    log_level: str = "info"
+    log_file: str = ""
+
+    # SQLAlchemy statement echo — deliberately DECOUPLED from `debug`. Turning on
+    # app-level DEBUG logging should NOT also dump every SQL statement + bound
+    # parameters to stdout: that回显 drowns the AI turn logs (产品AI日志) and makes a
+    # conversation impossible to follow. Flip this on only when diagnosing a query;
+    # it stays off even in dev by default.
+    db_echo: bool = False
 
     # Build provenance, stamped by the release/image build (env GIT_SHA / BUILT_AT)
     # and surfaced via GET /version for traceability + instant rollback (deploy doc
@@ -186,6 +257,13 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         """Parsed, trimmed list of allowed CORS origins."""
         return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
+
+    @property
+    def selectable_models(self) -> frozenset[str]:
+        """Operator ceiling: the set of models a user may pick in a custom mode."""
+        return frozenset(
+            m.strip() for m in self.user_selectable_models.split(",") if m.strip()
+        )
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

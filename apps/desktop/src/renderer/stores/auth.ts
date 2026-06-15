@@ -6,6 +6,9 @@ export interface AuthUser {
   displayName: string;
   email: string | null;
   role: string;
+  /** The user's account-default 质量档 (D2); null = inherit the operator default.
+   * The settings page reads/writes this; the modes store carries the resolved one. */
+  defaultModelMode: string | null;
 }
 
 /**
@@ -37,8 +40,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   reason: null,
   setLoading: () => set({ status: "loading", reason: null }),
-  setAuthenticated: (user) => set({ status: "authenticated", user, reason: null }),
+  setAuthenticated: (user) =>
+    set({ status: "authenticated", user, reason: null }),
   setUnauthenticated: () =>
     set({ status: "unauthenticated", user: null, reason: null }),
-  setUnavailable: (reason) => set({ status: "unavailable", user: null, reason }),
+  setUnavailable: (reason) =>
+    set({ status: "unavailable", user: null, reason }),
 }));

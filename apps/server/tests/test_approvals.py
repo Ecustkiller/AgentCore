@@ -1,7 +1,7 @@
 """Tests for the tool approval gate (CEO chat path).
 
 Covers three layers:
-  * ``ApprovalRegistry`` — the in-process bridge: unknown / double / wrong-
+  * ``InteractionRegistry`` — the in-process bridge: unknown / double / wrong-
     conversation resolves are refused; a matching resolve settles the Future.
   * ``ApprovalGate`` — per-turn suspension: approve, timeout→deny, and
     "approve for the rest of the turn" skipping the second prompt; plus the
@@ -19,13 +19,10 @@ import pytest
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.llm.config import ModelProfile
 from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
-from agentcore.runtime.approvals import (
-    ApprovalDecision,
-    ApprovalGate,
-    ApprovalRegistry,
-)
+from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
+from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -46,7 +43,7 @@ def _drain(sink: EventSink) -> list[SSEEvent]:
 
 
 async def _resolve_when_ready(
-    registry: ApprovalRegistry,
+    registry: InteractionRegistry,
     approval_id: str,
     decision: ApprovalDecision,
     conversation_id: str,
@@ -66,7 +63,7 @@ async def _resolve_when_ready(
 
 def _gate(
     sink: EventSink,
-    registry: ApprovalRegistry,
+    registry: InteractionRegistry,
     *,
     conversation_id: str = "conv-1",
     timeout_seconds: float = 5.0,
@@ -79,17 +76,17 @@ def _gate(
     )
 
 
-# --- ApprovalRegistry ------------------------------------------------------
+# --- InteractionRegistry ------------------------------------------------------
 
 
 async def test_registry_resolve_unknown_returns_false():
-    reg = ApprovalRegistry()
+    reg = InteractionRegistry()
     assert reg.resolve("nope", ApprovalDecision.APPROVE, conversation_id="c") is False
 
 
 async def test_registry_rejects_wrong_conversation():
-    reg = ApprovalRegistry()
-    fut = reg.create("a1", "conv-A")
+    reg = InteractionRegistry()
+    fut = reg.create("a1", "conv-A", kind=InteractionKind.APPROVAL)
     # A resolve claiming a different conversation must not settle the Future.
     assert reg.resolve("a1", ApprovalDecision.APPROVE, conversation_id="conv-B") is False
     assert not fut.done()
@@ -99,16 +96,16 @@ async def test_registry_rejects_wrong_conversation():
 
 
 async def test_registry_double_resolve_returns_false():
-    reg = ApprovalRegistry()
-    reg.create("a1", "c")
+    reg = InteractionRegistry()
+    reg.create("a1", "c", kind=InteractionKind.APPROVAL)
     assert reg.resolve("a1", ApprovalDecision.DENY, conversation_id="c") is True
     # Already settled → second resolve is rejected.
     assert reg.resolve("a1", ApprovalDecision.APPROVE, conversation_id="c") is False
 
 
 async def test_registry_discard_forgets_request():
-    reg = ApprovalRegistry()
-    reg.create("a1", "c")
+    reg = InteractionRegistry()
+    reg.create("a1", "c", kind=InteractionKind.APPROVAL)
     reg.discard("a1")
     assert reg.resolve("a1", ApprovalDecision.APPROVE, conversation_id="c") is False
 
@@ -117,7 +114,7 @@ async def test_registry_discard_forgets_request():
 
 
 async def test_gate_authorize_approve_emits_event_pair():
-    reg = ApprovalRegistry()
+    reg = InteractionRegistry()
     sink = EventSink()
     gate = _gate(sink, reg)
 
@@ -135,7 +132,7 @@ async def test_gate_authorize_approve_emits_event_pair():
 
 
 async def test_gate_authorize_times_out_to_deny():
-    reg = ApprovalRegistry()
+    reg = InteractionRegistry()
     sink = EventSink()
     gate = _gate(sink, reg, timeout_seconds=0.01)
 
@@ -150,7 +147,7 @@ async def test_gate_authorize_times_out_to_deny():
 
 
 async def test_gate_approve_always_skips_second_prompt():
-    reg = ApprovalRegistry()
+    reg = InteractionRegistry()
     sink = EventSink()
     gate = _gate(sink, reg)
 
@@ -173,7 +170,7 @@ async def test_gate_approve_always_skips_second_prompt():
 
 
 async def test_gate_truncates_large_argument_preview():
-    reg = ApprovalRegistry()
+    reg = InteractionRegistry()
     sink = EventSink()
     gate = _gate(sink, reg)
 
@@ -287,7 +284,7 @@ async def test_engine_gates_grantable_tool_runs_on_approve():
         [[_tool_chunk("file_write", '{"path": "a.txt"}')], [_content_chunk("done")]]
     )
     tool = _GrantableTool()
-    reg = ApprovalRegistry()
+    reg = InteractionRegistry()
     sink = EventSink()
     gate = _gate(sink, reg)
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
@@ -315,7 +312,7 @@ async def test_engine_gates_grantable_tool_skips_on_deny():
         [[_tool_chunk("file_write", '{"path": "a.txt"}')], [_content_chunk("ok")]]
     )
     tool = _GrantableTool()
-    reg = ApprovalRegistry()
+    reg = InteractionRegistry()
     sink = EventSink()
     gate = _gate(sink, reg)
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
@@ -351,7 +348,7 @@ async def test_engine_does_not_gate_non_grantable_tool():
     sink = EventSink()
     # Gate present but the SEARCH tool is not GRANTABLE → must run un-gated.
     # A tiny timeout proves we never awaited an approval (would otherwise deny).
-    gate = _gate(sink, ApprovalRegistry(), timeout_seconds=0.01)
+    gate = _gate(sink, InteractionRegistry(), timeout_seconds=0.01)
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
 
     content, *_ = await react_loop(

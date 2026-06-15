@@ -120,7 +120,7 @@ class SubprocessSandbox:
                     duration_ms=duration_ms,
                 )
             except OSError as e:
-                raise SandboxError(f"Failed to start process: {e}") from e
+                raise SandboxError(f"代码执行环境启动失败：{e}") from e
         finally:
             await _cleanup_tempdir(tmpdir)
 

@@ -1,4 +1,6 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { copyText } from "@/lib/clipboard";
+import { errorActionForCode } from "@/lib/errors";
 import { formatCost, formatMessageTime } from "@/lib/format";
 import { runRegenerate } from "@/services/turns";
 import { downloadWorkspaceFile } from "@/services/workspace";
@@ -12,6 +14,7 @@ import {
 } from "@/stores/conversation";
 import { useUsageStore } from "@/stores/usage";
 import {
+  AlertTriangle,
   Brain,
   Check,
   ChevronDown,
@@ -19,12 +22,15 @@ import {
   Copy,
   Download,
   Folder,
+  KeyRound,
   Paperclip,
   Pencil,
   RefreshCw,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { CheckpointCard } from "./CheckpointCard";
 import { InlineTeamGraph } from "./InlineTeamGraph";
 import { Markdown } from "./Markdown";
 import { type CitationFlash, SourceCards } from "./SourceCards";
@@ -60,12 +66,11 @@ function MessageTime({ iso }: { iso: string }) {
   const label = formatMessageTime(iso);
   if (!label) return null;
   return (
-    <span
-      title={new Date(iso).toLocaleString()}
-      className="ml-1 cursor-default text-xs text-muted-foreground/60"
-    >
-      {label}
-    </span>
+    <SimpleTooltip label={new Date(iso).toLocaleString()}>
+      <span className="ml-1 cursor-default text-xs text-muted-foreground/60">
+        {label}
+      </span>
+    </SimpleTooltip>
   );
 }
 
@@ -168,10 +173,12 @@ function AttachmentChip({
 
   if (!downloadable) {
     return (
-      <span title={att.path} className={base}>
-        {icon}
-        {label}
-      </span>
+      <SimpleTooltip label={att.path}>
+        <span className={base}>
+          {icon}
+          {label}
+        </span>
+      </SimpleTooltip>
     );
   }
 
@@ -192,21 +199,24 @@ function AttachmentChip({
   };
 
   return (
-    <button
-      type="button"
-      onClick={onDownload}
-      title={state === "error" ? "下载失败，点击重试" : `下载 ${att.name}`}
-      className={`${base} transition-colors hover:bg-accent/70 ${
-        state === "error" ? "text-destructive" : ""
-      }`}
+    <SimpleTooltip
+      label={state === "error" ? "下载失败，点击重试" : `下载 ${att.name}`}
     >
-      {icon}
-      {label}
-      <Download
-        size={12}
-        className={`shrink-0 ${state === "loading" ? "animate-pulse" : "opacity-60"}`}
-      />
-    </button>
+      <button
+        type="button"
+        onClick={onDownload}
+        className={`${base} transition-colors hover:bg-accent/70 ${
+          state === "error" ? "text-destructive" : ""
+        }`}
+      >
+        {icon}
+        {label}
+        <Download
+          size={12}
+          className={`shrink-0 ${state === "loading" ? "animate-pulse" : "opacity-60"}`}
+        />
+      </button>
+    </SimpleTooltip>
   );
 }
 
@@ -341,9 +351,17 @@ function AssistantMessage({ message }: Props) {
     (s) => s.messageCosts[message.id]?.cost.total ?? null,
   );
   const { copied, onCopy } = useCopyAction(() => message.content);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const navigate = useNavigate();
+  // A config remedy for a mid-stream failure (e.g. an invalid key → 去配置); null
+  // for errors whose only remedy is regenerating (or topping up off-app).
+  const errorAction = message.error
+    ? errorActionForCode(message.error.code)
+    : null;
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
   const citations = message.citations ?? [];
+  const checkpoints = message.checkpoints ?? [];
   // 回合成本 caption (§7.3A) — single-agent turns only. A multi-agent turn stamps
   // `executionId`, so its cost shows on the team card instead (avoids double
   // display). Live cost wins; a reloaded turn falls back to the ledger snapshot.
@@ -409,9 +427,45 @@ function AssistantMessage({ message }: Props) {
           style={{ animation: "blink-cursor 0.8s step-end infinite" }}
         />
       )}
+      {message.error && (
+        <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+          <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+            {message.error.message}
+          </p>
+          {errorAction && (
+            <button
+              type="button"
+              onClick={() => navigate(errorAction.href)}
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg bg-destructive px-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
+            >
+              <KeyRound size={13} />
+              {errorAction.label}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleRegenerate}
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-destructive/40 px-2 text-xs font-medium text-destructive hover:bg-destructive/10"
+          >
+            <RefreshCw size={13} />
+            重新生成
+          </button>
+        </div>
+      )}
       {citations.length > 0 && (
         <SourceCards citations={citations} flash={citeFlash} />
       )}
+      {/* Checkpoints the CEO raised this turn (ask_user) — interactive only while
+          this bubble is the live, suspended turn; otherwise a replayed record. */}
+      {checkpoints.map((cp) => (
+        <CheckpointCard
+          key={cp.id}
+          checkpoint={cp}
+          conversationId={conversationId}
+          interactive={message.isStreaming}
+        />
+      ))}
       {!message.isStreaming && !isGenerating && message.content.length > 0 && (
         <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <MessageAction
@@ -441,7 +495,7 @@ export function MessageBubble({ message }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [flash, setFlash] = useState(false);
 
-  // Cross-component focus (e.g. the collaboration graph's CEO synthesis node
+  // Cross-component focus (e.g. the collaboration graph's CEO captain 汇聚点 node
   // jumping to this turn's final answer): scroll this message into view and
   // flash a ring. The nonce dependency re-triggers when the same message is
   // focused again.

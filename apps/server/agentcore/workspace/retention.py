@@ -95,7 +95,7 @@ async def run_retention_sweep() -> dict[str, int]:
             await _purge_folder_space(user_id=folder.user_id, folder_id=folder.id)
         except Exception as e:
             logger.warning(
-                "retention_folder_purge_failed", folder_id=folder.id, error=str(e)
+                "retention.folder_purge_failed", folder_id=folder.id, error=str(e)
             )
             continue
         async with async_session_factory() as session:
@@ -117,7 +117,7 @@ async def run_retention_sweep() -> dict[str, int]:
                 )
         except Exception as e:
             logger.warning(
-                "retention_conversation_purge_failed",
+                "retention.conversation_purge_failed",
                 conversation_id=conv.id,
                 error=str(e),
             )
@@ -140,9 +140,12 @@ async def retention_loop() -> None:
         try:
             result = await run_retention_sweep()
             if result["folders"] or result["conversations"]:
-                logger.info("retention_sweep_purged", **result)
+                logger.info("retention.sweep_purged", **result)
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning("retention_sweep_failed", error=str(e), exc_info=True)
+            # Best-effort periodic sweep: an operational failure (DB blip, etc.) is not
+            # a code bug — concise one-line cause, no full traceback, so a recurring
+            # transient (retries every interval) can't flood the AI logs.
+            logger.warning("retention.sweep_failed", error=str(e))
         await asyncio.sleep(interval)

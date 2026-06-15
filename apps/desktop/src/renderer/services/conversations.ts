@@ -29,6 +29,7 @@ function toConversation(c: BackendConversation): Conversation {
     lastMessagePreview: null,
     folderId: c.folder_id ?? null,
     localRootId: c.local_root_id ?? null,
+    modelMode: c.model_mode ?? null,
   };
 }
 
@@ -42,8 +43,9 @@ export async function listConversations(): Promise<Conversation[]> {
 
 /**
  * Load folders + every conversation (each tagged with its `folderId`) in one
- * round trip, for the folder-grouped sidebar (§七). The flat conversation list
- * stays the store's source of truth; `ConversationList` derives the groups.
+ * round trip (§七). The flat conversation list stays the store's source of
+ * truth; the sidebar shows the recent few and the /conversations page derives
+ * the folder groups.
  */
 export async function listGrouped(): Promise<{
   folders: FolderMeta[];

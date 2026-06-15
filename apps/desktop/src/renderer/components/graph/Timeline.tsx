@@ -1,3 +1,4 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   describeFrame,
   execRuntime,
@@ -85,14 +86,16 @@ export function Timeline({ autoPlay = false }: { autoPlay?: boolean } = {}) {
   return (
     <div className="pointer-events-auto w-full max-w-[560px] rounded-xl border border-border bg-card/95 px-3 py-2.5 shadow-lg backdrop-blur">
       <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={onTogglePlay}
-          title={playing ? "暂停回放" : "回放"}
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          {playing ? <Pause size={15} /> : <Play size={15} />}
-        </button>
+        <SimpleTooltip label={playing ? "暂停回放" : "回放"}>
+          <button
+            type="button"
+            onClick={onTogglePlay}
+            aria-label={playing ? "暂停回放" : "回放"}
+            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            {playing ? <Pause size={15} /> : <Play size={15} />}
+          </button>
+        </SimpleTooltip>
 
         <input
           type="range"
@@ -107,22 +110,23 @@ export function Timeline({ autoPlay = false }: { autoPlay?: boolean } = {}) {
           {pos}/{total}
         </span>
 
-        <button
-          type="button"
-          onClick={() => {
-            setPlaying(false);
-            goLive(messageId);
-          }}
-          title="回到实时"
-          className={`flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-xs ${
-            isLive
-              ? "bg-primary/10 text-primary"
-              : "text-muted-foreground hover:bg-accent hover:text-foreground"
-          }`}
-        >
-          <Radio size={13} />
-          实时
-        </button>
+        <SimpleTooltip label="回到实时">
+          <button
+            type="button"
+            onClick={() => {
+              setPlaying(false);
+              goLive(messageId);
+            }}
+            className={`flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-xs ${
+              isLive
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            }`}
+          >
+            <Radio size={13} />
+            实时
+          </button>
+        </SimpleTooltip>
       </div>
 
       <p className="mt-1.5 truncate text-xs text-muted-foreground">

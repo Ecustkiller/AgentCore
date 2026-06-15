@@ -1,3 +1,4 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useChats, useMessagingStore } from "@/stores/messaging";
 import { Search, SquarePen, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -34,15 +35,16 @@ export function ChatList({ activeChatId, onSelect, onNewChat }: Props) {
     <aside className="flex w-72 shrink-0 flex-col border-r border-border">
       <div className="flex items-center justify-between px-4 py-3">
         <span className="text-base font-medium text-foreground">消息</span>
-        <button
-          type="button"
-          title="发起会话"
-          aria-label="发起会话"
-          onClick={onNewChat}
-          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground [-webkit-app-region:no-drag]"
-        >
-          <SquarePen size={16} />
-        </button>
+        <SimpleTooltip label="发起会话">
+          <button
+            type="button"
+            aria-label="发起会话"
+            onClick={onNewChat}
+            className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground [-webkit-app-region:no-drag]"
+          >
+            <SquarePen size={16} />
+          </button>
+        </SimpleTooltip>
       </div>
 
       {chats.length > 0 && (

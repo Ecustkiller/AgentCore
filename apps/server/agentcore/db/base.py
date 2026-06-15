@@ -16,7 +16,9 @@ class Base(DeclarativeBase):
 
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.debug,
+    # SQL echo is governed by its own switch (NOT `debug`) so DEBUG app logs don't
+    # drown the AI turn logs under every statement + parameters (see config.py).
+    echo=settings.db_echo,
     pool_size=10,
     max_overflow=20,
 )

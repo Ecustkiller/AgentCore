@@ -16,7 +16,6 @@ and an optional realtime publisher (a seam — see ``events.py``) it calls to fa
 new message out to every member's live connections.
 """
 
-import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -26,6 +25,7 @@ from agentcore.core.errors import (
     NotFoundError,
     ValidationError,
 )
+from agentcore.core.logging import get_logger
 from agentcore.db.models import Chat, ChatMember, ChatMessage, User
 from agentcore.db.repositories import (
     ChatRepository,
@@ -35,7 +35,7 @@ from agentcore.db.repositories import (
 )
 from agentcore.messaging.events import ChatEventPublisher, NullChatEventPublisher
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _MAX_PAGE_SIZE = 100
 _DEFAULT_PAGE_SIZE = 50
@@ -142,7 +142,7 @@ class MessagingService:
         chat = await self._chats.create_dm(creator_id=requester_id, peer_id=peer_id)
         member = await self._chats.get_member(chat.id, requester_id)
         assert member is not None
-        logger.debug("dm opened chat=%s by=%s peer=%s", chat.id, requester_id, peer_id)
+        logger.debug("dm.opened", chat=chat.id, by=requester_id, peer=peer_id)
         return ChatView(chat=chat, member=member, peer=peer, unread=0)
 
     async def list_chats(self, *, user_id: str) -> list[ChatView]:
@@ -263,7 +263,7 @@ class MessagingService:
         if target is None:
             raise NotFoundError("用户不存在")
         await self._blocks.block(user_id, target_id)
-        logger.info("user %s blocked %s", user_id, target_id)
+        logger.info("dm.user_blocked", user=user_id, target=target_id)
 
     async def unblock_user(self, *, user_id: str, target_id: str) -> None:
         await self._blocks.unblock(user_id, target_id)

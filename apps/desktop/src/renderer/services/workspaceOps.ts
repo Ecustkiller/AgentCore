@@ -1,4 +1,5 @@
-import { ApiError, api } from "@/services/api";
+import { ApiError } from "@/services/api";
+import { resolveInteraction } from "@/services/interaction";
 import type { WorkspaceOpRequiredPayload } from "@/types/events";
 import type { WorkspaceOpName, WorkspaceOpResult } from "@shared/ipc-contract";
 
@@ -7,9 +8,9 @@ import type { WorkspaceOpName, WorkspaceOpResult } from "@shared/ipc-contract";
  *
  * When the server-side `LocalWorkspace` needs to touch the user's disk it streams
  * a `workspace_op_required` event; this runs the op against the bound FS root (via
- * the main process) and POSTs the structured result to the ops resolve endpoint,
- * so the paused op in the live SSE turn resumes. The result envelope is shaped to
- * match the backend `ResolveWorkspaceOpRequest` exactly, so it is posted verbatim.
+ * the main process) and settles the paused op over the unified interaction bridge
+ * (kind `client_tool`), so the live SSE turn resumes. The result envelope matches
+ * `ResolveClientToolInteraction` (sans `kind`), so it is posted with `kind` added.
  *
  * Failure policy: the channel must always answer (or the server-side op only ends
  * on its timeout). A stale request (404) is a no-op; any other POST failure is
@@ -23,10 +24,10 @@ export async function performWorkspaceOp(
 ): Promise<void> {
   const result = await runLocalOp(payload);
   try {
-    await api.post(
-      `/v1/conversations/${conversationId}/workspace/ops/${payload.request_id}`,
-      result,
-    );
+    await resolveInteraction(conversationId, payload.request_id, {
+      kind: "client_tool",
+      ...result,
+    });
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) return; // stale — no-op
     console.error("[workspaceOps] 回填失败", err);

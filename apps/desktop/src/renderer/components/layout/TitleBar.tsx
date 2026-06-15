@@ -45,7 +45,7 @@ export function TitleBar() {
           className="mr-2 flex h-7 items-center gap-2 rounded-lg border border-sidebar-border px-3 text-sm text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent"
         >
           <Search size={13} className="shrink-0" />
-          <span>搜索对话…</span>
+          <span>搜索…</span>
           <kbd className="text-xs text-sidebar-foreground/40">Ctrl+K</kbd>
         </button>
 

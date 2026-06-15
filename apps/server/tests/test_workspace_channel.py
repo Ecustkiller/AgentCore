@@ -3,7 +3,7 @@
 Covers the three pieces that make "one agent loop, two execution platforms" work
 for local mode, without an actual desktop:
 
-  * ``WorkspaceOpRegistry`` — the in-process bridge: unknown / double / wrong-
+  * ``InteractionRegistry`` — the in-process bridge: unknown / double / wrong-
     conversation resolves are refused; a matching resolve settles the Future.
   * ``WorkspaceChannel`` — suspends an op on a Future, emits a
     ``workspace_op_required`` event carrying the *full* args, and returns the
@@ -21,12 +21,9 @@ import asyncio
 import pytest
 
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
+from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
 from agentcore.tools.sandbox.protocol import ExecutionRequest
-from agentcore.workspace.channel import (
-    WorkspaceChannel,
-    WorkspaceOp,
-    WorkspaceOpRegistry,
-)
+from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.protocol import (
     AmbiguousMatch,
@@ -49,9 +46,9 @@ ROOT_ID = "root-abc"
 
 def _make(
     timeout: float = 5.0, *, execute_slack: float = 15.0
-) -> tuple[LocalWorkspace, WorkspaceOpRegistry, EventSink]:
+) -> tuple[LocalWorkspace, InteractionRegistry, EventSink]:
     sink = EventSink()
-    registry = WorkspaceOpRegistry()
+    registry = InteractionRegistry()
     channel = WorkspaceChannel(
         sink=sink,
         conversation_id=CONV,
@@ -75,7 +72,7 @@ async def _await_request(sink: EventSink) -> SSEEvent:
     raise AssertionError("no workspace_op_required event emitted")
 
 
-async def _round_trip(coro, sink: EventSink, registry: WorkspaceOpRegistry, response: dict):
+async def _round_trip(coro, sink: EventSink, registry: InteractionRegistry, response: dict):
     """Drive one op: start it, answer it as the desktop would, return (result, event)."""
     task = asyncio.create_task(coro)
     event = await _await_request(sink)
@@ -270,8 +267,8 @@ async def test_execute_extends_transport_deadline_past_code_timeout(monkeypatch)
 
 
 async def test_registry_refuses_unknown_and_double_and_wrong_conversation():
-    registry = WorkspaceOpRegistry()
-    fut = registry.create("req-1", CONV)
+    registry = InteractionRegistry()
+    fut = registry.create("req-1", CONV, kind=InteractionKind.CLIENT_TOOL)
 
     assert registry.resolve("nope", {"ok": True}, conversation_id=CONV) is False
     assert registry.resolve("req-1", {"ok": True}, conversation_id="other") is False

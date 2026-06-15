@@ -1,6 +1,15 @@
+import { DebateCompare } from "@/components/chat/DebateCompare";
+import { RevisionCompare } from "@/components/chat/RevisionCompare";
 import { GraphView } from "@/components/graph/GraphView";
 import { TeamGraphFullscreen } from "@/components/graph/TeamGraphFullscreen";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { resolveTurnCost } from "@/lib/cost";
+import {
+  EMBED_DEFAULT_COL_WIDTH,
+  estimateBbox,
+  fitWidthBox,
+  workerGraphShape,
+} from "@/lib/elk-layout";
 import { formatCost, formatDuration } from "@/lib/format";
 import {
   lastUserMessage,
@@ -13,17 +22,20 @@ import {
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
-import { useDetailPanelStore } from "@/stores/detailPanel";
 import {
   type Execution,
   type ExecutionJournal,
   ExecutionScopeContext,
   elapsedMs,
+  hasRevisions,
+  isDebate,
   useActiveExecField,
   useExecutionScope,
   useExecutionStore,
   useMessageExecution,
 } from "@/stores/execution";
+import { useGraphStore } from "@/stores/graph";
+import { useSidePanelStore } from "@/stores/sidePanel";
 import { useUsageStore } from "@/stores/usage";
 import {
   AlertTriangle,
@@ -40,7 +52,7 @@ import {
   Square,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * The multi-agent turn's primary surface, embedded in the assistant message
@@ -97,16 +109,31 @@ export function InlineTeamGraph({
     return null;
   }
 
-  // Adaptive height: reserve only as much canvas as the team needs (a 2-agent
-  // team would otherwise float in a half-empty box), clamped so a big DAG still
-  // fits the message column. React Flow's fitView fills whatever height we give.
-  // The default left-right flow stacks parallel workers vertically, so it needs
-  // more height than the old top-down default to keep fitView from shrinking the
-  // graph in the narrow message column — hence the taller base/step and ceiling.
-  const graphHeight = Math.min(
-    540,
-    Math.max(260, 180 + execution.runs.length * 90),
+  // Adaptive height (方案 D): the embedded canvas measures its own fit-to-width
+  // footprint and reports the height it wants, so the box matches each graph's
+  // real shape (a serial chain stays short, a parallel fan grows) and node size
+  // stays consistent across messages. Until that first measurement arrives we use
+  // a topology-aware estimate (below) through the same formula, so the initial
+  // paint is already close and the box barely shifts when the real bbox lands.
+  const [measured, setMeasured] = useState<{
+    height: number;
+    overflowing: boolean;
+  } | null>(null);
+  const onMeasure = useCallback(
+    (m: { height: number; overflowing: boolean }) => setMeasured(m),
+    [],
   );
+  // First-paint estimate: run the SAME fit-to-width math the canvas will use,
+  // but on a bbox guessed from the DAG shape (no ELK yet) and the default column
+  // width — so the initial box is already topology-aware (serial short / parallel
+  // tall) and the jump to the real measurement is small. `layoutKind` is read so
+  // the estimate matches the active flow direction.
+  const layoutKind = useGraphStore((s) => s.layoutKind);
+  const fallbackHeight = useMemo(() => {
+    const est = estimateBbox(workerGraphShape(execution.runs), layoutKind);
+    return fitWidthBox(est.width, est.height, EMBED_DEFAULT_COL_WIDTH).height;
+  }, [execution.runs, layoutKind]);
+  const graphHeight = measured?.height ?? fallbackHeight;
 
   // Scope every descendant graph hook (status strip, canvas, timeline, node
   // detail — even through the full-screen portal) to this message's slot, so
@@ -126,6 +153,7 @@ export function InlineTeamGraph({
             execution={execution}
             messageId={messageId}
             height={graphHeight}
+            onMeasure={onMeasure}
           />
         )}
         {fullscreen && (
@@ -135,6 +163,18 @@ export function InlineTeamGraph({
           />
         )}
       </div>
+      {/* 辩论/审查「左右并排对比」(前端UX目标态 §四④): a separate card below the graph
+          so正/反 outputs sit side by side in the reading column. Debate-only — an
+          ordinary team turn renders just the graph above. */}
+      {isDebate(execution) && (
+        <DebateCompare execution={execution} messageId={messageId} />
+      )}
+      {/* 定向唤回「版本对比」(乙 热修 P4): a separate card below the graph so a revised
+          worker's versions (v1 原始 → v2 → …) sit side by side. Only when a worker
+          was revised — an unrevised turn renders just the graph above. */}
+      {hasRevisions(execution) && (
+        <RevisionCompare execution={execution} messageId={messageId} />
+      )}
     </ExecutionScopeContext.Provider>
   );
 }
@@ -146,12 +186,14 @@ function GraphArea({
   execution,
   messageId,
   height,
+  onMeasure,
 }: {
   execution: Execution;
   messageId: string;
   height: number;
+  onMeasure: (m: { height: number; overflowing: boolean }) => void;
 }) {
-  const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
+  const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
 
   const onNodeSelect = (runId: string) => {
     const run = execution.runs.find((r) => r.id === runId);
@@ -160,8 +202,11 @@ function GraphArea({
   };
 
   return (
-    <div className="w-full border-t border-border" style={{ height }}>
-      <GraphView embedded onNodeSelect={onNodeSelect} />
+    <div
+      className="w-full border-t border-border transition-[height] duration-200 motion-reduce:transition-none"
+      style={{ height }}
+    >
+      <GraphView embedded onNodeSelect={onNodeSelect} onMeasure={onMeasure} />
     </div>
   );
 }
@@ -197,6 +242,18 @@ function StatusStrip({
   }
 }
 
+/** The 辩论 paradigm tag (前端UX目标态 §四范式标题): a small pill that marks a turn
+ * as a debate/review in the status strip, so the user reads「这是一场辩论」at a
+ * glance — the differentiation普通并行 lacks. Uses the neutral `info` token (a
+ * classification, not a run-status color). */
+function DebateTag() {
+  return (
+    <span className="mr-1.5 inline-flex shrink-0 items-center rounded-full bg-info/10 px-1.5 py-0.5 align-middle text-xs font-medium text-info">
+      辩论
+    </span>
+  );
+}
+
 /** Circular icon button used in the strip's trailing controls. */
 function IconButton({
   icon,
@@ -208,14 +265,15 @@ function IconButton({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-    >
-      {icon}
-    </button>
+    <SimpleTooltip label={title}>
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        {icon}
+      </button>
+    </SimpleTooltip>
   );
 }
 
@@ -277,8 +335,9 @@ function RunningStrip({
     <div className="px-4 py-3">
       <div className="flex items-center gap-2">
         <Loader2 size={15} className="shrink-0 animate-spin text-primary" />
-        <span className="flex-1 truncate text-sm font-medium text-foreground">
-          {execution.taskSummary}
+        <span className="flex flex-1 items-center truncate text-sm font-medium text-foreground">
+          {isDebate(execution) && <DebateTag />}
+          <span className="truncate">{execution.taskSummary}</span>
         </span>
         <span className="shrink-0 text-xs text-muted-foreground">
           {completed}/{total}
@@ -358,7 +417,10 @@ function CompletedStrip({
           <CheckCircle2 size={15} className="shrink-0 text-success" />
         )}
         <span className="flex-1 text-sm text-foreground">
-          <span className="font-medium">{stopped ? "已停止" : "团队完成"}</span>
+          {!stopped && isDebate(execution) && <DebateTag />}
+          <span className="font-medium">
+            {stopped ? "已停止" : isDebate(execution) ? "辩论完成" : "团队完成"}
+          </span>
           <span className="text-muted-foreground">
             {` · ${execution.agents.length} 个 Agent · ${completed}/${total} 子任务${
               duration ? ` · 用时 ${duration}` : ""

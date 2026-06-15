@@ -10,8 +10,9 @@ from pathlib import Path
 
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.llm.protocol import LLMChunk, TokenUsage, ToolCallDelta
-from agentcore.runtime.approvals import ApprovalGate, ApprovalRegistry
+from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink, EventType
+from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import _is_hard_failure, build_agent_executor
 from agentcore.runtime.runs.plan import RunPlan
@@ -25,15 +26,21 @@ from agentcore.workspace.server import ServerWorkspace
 
 class _ContentProvider:
     """Fake LLM: yields one scripted content chunk per call (no tool calls) and
-    records each request's user message so dep-injection can be asserted."""
+    records each request's user message so dep-injection can be asserted.
+
+    ``requests`` keeps the FULL (role, content) list per call so a continuation /
+    auto-rework test can prove the worker sees its own prior draft + the appended
+    instruction (统一「续写」原语)."""
 
     def __init__(self, contents: list[str]) -> None:
         self._contents = contents
         self.calls = 0
         self.user_messages: list[str] = []
         self.system_messages: list[str] = []
+        self.requests: list[list[tuple[str, str]]] = []
 
     async def stream(self, request):
+        self.requests.append([(m.role, m.content or "") for m in request.messages])
         user = next((m.content for m in request.messages if m.role == "user"), "")
         self.user_messages.append(user or "")
         system = next((m.content for m in request.messages if m.role == "system"), "")
@@ -250,14 +257,40 @@ async def test_contract_retry_then_pass():
     assert res["t_1"].usage["input"] >= 0
 
 
-async def test_contract_retry_feeds_shortfall_into_second_prompt():
+async def test_contract_retry_continues_on_same_transcript_seeing_old_draft():
+    # 统一「续写」: auto-rework no longer rebuilds the prompt from scratch — it
+    # CONTINUES on the same transcript, so the worker sees its own prior draft
+    # (assistant turn) with the shortfall appended as the last user turn (修隐患).
     plan, _ = build_run_plan(
         [{"role": "A", "task": "做A", "contract": {"must_contain": ["风险"]}}], id_prefix="t"
     )
     provider = _ContentProvider(["没有那个词", "已包含风险二字"])
     await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
-    assert "修正" in provider.user_messages[1]
-    assert "风险" in provider.user_messages[1]
+    second = provider.requests[1]
+    # the worker's own prior draft is in context now (was invisible before)
+    assert any(role == "assistant" and content == "没有那个词" for role, content in second)
+    # the shortfall is the LAST turn, a fresh user message (not folded into the task)
+    last_role, last_content = second[-1]
+    assert last_role == "user"
+    assert "修正" in last_content
+    assert "风险" in last_content
+
+
+async def test_completed_run_captures_full_transcript():
+    # T1/T2: a finished worker's full transcript is captured on RunState so the run
+    # is recoverable (留人). It ends with the worker's final answer (react_loop omits
+    # that append; the executor adds it) — the starting point for a 续写.
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    provider = _ContentProvider(["最终产出"])
+    res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
+    transcript = res["t_1"].transcript
+    assert transcript  # captured, not discarded
+    assert transcript[0].role == "system"
+    assert transcript[1].role == "user"
+    assert "做A" in (transcript[1].content or "")
+    # the final assistant answer is appended, so the transcript is replayable
+    assert transcript[-1].role == "assistant"
+    assert transcript[-1].content == "最终产出"
 
 
 async def test_contract_requirements_stated_in_first_prompt():
@@ -364,7 +397,7 @@ def _gate(timeout_seconds: float) -> ApprovalGate:
     return ApprovalGate(
         sink=EventSink(),
         conversation_id="conv-1",
-        registry=ApprovalRegistry(),
+        registry=InteractionRegistry(),
         timeout_seconds=timeout_seconds,
     )
 
@@ -506,7 +539,7 @@ class _StubDelegate:
         )
 
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
-        return ToolResult(tool_call_id="", success=True, output="", terminal=False)
+        return ToolResult(tool_call_id="", success=True, output="")
 
 
 def _spec(run_id: str, *, depth: int, can_delegate: bool):

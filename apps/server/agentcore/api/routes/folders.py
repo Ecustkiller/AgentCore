@@ -58,7 +58,7 @@ async def update_folder(
         kwargs["local_dir"] = body.local_dir
     folder = await repo.update(folder_id, user_id=user.user_id, **kwargs)
     if not folder:
-        raise NotFoundError("Folder not found")
+        raise NotFoundError("文件夹不存在")
     return FolderSummary.model_validate(folder)
 
 
@@ -70,5 +70,5 @@ async def delete_folder(
 ):
     deleted = await repo.soft_delete(folder_id, user_id=user.user_id)
     if not deleted:
-        raise NotFoundError("Folder not found")
+        raise NotFoundError("文件夹不存在")
     return StatusResponse()

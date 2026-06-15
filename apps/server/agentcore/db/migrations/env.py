@@ -15,7 +15,9 @@ from agentcore.db.models import (  # noqa: F401 - ensure all models are imported
     Credentials,
     Invite,
     Message,
+    ModelMode,
     RefreshToken,
+    RunSessionRow,
     User,
 )
 

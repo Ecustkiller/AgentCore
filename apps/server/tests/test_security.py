@@ -6,6 +6,7 @@ import pytest
 
 from agentcore.core.errors import AuthenticationError
 from agentcore.security import (
+    KeyEncryptor,
     create_access_token,
     decode_access_token,
     generate_refresh_token,
@@ -13,6 +14,9 @@ from agentcore.security import (
     hash_refresh_token,
     verify_password,
 )
+
+# A valid 64-hex (32-byte) AES-256 master key for the encryptor tests.
+_MASTER_KEY = "a" * 64
 
 # --- passwords ---
 
@@ -74,3 +78,50 @@ def test_refresh_tokens_are_unique():
     raw1, _ = generate_refresh_token()
     raw2, _ = generate_refresh_token()
     assert raw1 != raw2
+
+
+# --- at-rest encryption (BYOK keys, AES-256-GCM) ---
+
+
+def test_key_encryptor_roundtrip():
+    enc = KeyEncryptor(_MASTER_KEY)
+    secret = b"sk-deepseek-abcdef123456"
+    assert enc.decrypt(enc.encrypt(secret)) == secret
+
+
+def test_key_encryptor_uses_fresh_nonce_each_call():
+    # Same plaintext must yield different ciphertext (random per-call nonce), so
+    # the wire format never leaks equality of two stored keys.
+    enc = KeyEncryptor(_MASTER_KEY)
+    assert enc.encrypt(b"same") != enc.encrypt(b"same")
+
+
+def test_key_encryptor_rejects_tampered_ciphertext():
+    enc = KeyEncryptor(_MASTER_KEY)
+    blob = bytearray(enc.encrypt(b"secret"))
+    blob[-1] ^= 0x01  # flip a tag bit
+    with pytest.raises(Exception):
+        enc.decrypt(bytes(blob))
+
+
+def test_key_encryptor_rejects_too_short_ciphertext():
+    enc = KeyEncryptor(_MASTER_KEY)
+    with pytest.raises(ValueError):
+        enc.decrypt(b"short")
+
+
+def test_key_encryptor_rejects_wrong_length_key():
+    with pytest.raises(ValueError):
+        KeyEncryptor("ab" * 8)  # 8 bytes, not 32
+
+
+def test_key_encryptor_rejects_non_hex_key():
+    with pytest.raises(ValueError):
+        KeyEncryptor("z" * 64)  # right length, not hex
+
+
+def test_key_encryptor_decrypt_fails_with_different_master_key():
+    blob = KeyEncryptor(_MASTER_KEY).encrypt(b"secret")
+    other = KeyEncryptor("b" * 64)
+    with pytest.raises(Exception):
+        other.decrypt(blob)

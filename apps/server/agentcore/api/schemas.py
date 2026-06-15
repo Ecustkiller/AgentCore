@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.approvals import ApprovalDecision
+from agentcore.runtime.checkpoints import CheckpointDecision
 
 # --- Auth ---
 
@@ -33,6 +34,10 @@ class UserResponse(BaseModel):
     email: str | None
     role: str
     created_at: datetime
+    # The user's default 质量档 (llm/modes.py): a preset name or custom mode id;
+    # None = inherit the operator default. Surfaced so the client knows the default
+    # at login without a second call.
+    default_model_mode: str | None = None
 
 
 class CreateInviteRequest(BaseModel):
@@ -66,6 +71,9 @@ class CreateConversationRequest(BaseModel):
     # (which would race the workspace-lock guard once the first turn lands — see
     # 双模式工作区 §九 ⑩). None = ungrouped.
     folder_id: str | None = None
+    # Initial 质量档 (llm/modes.py): a preset name or custom mode id; None = inherit
+    # the user's default → operator default.
+    model_mode: str | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -83,6 +91,8 @@ class ConversationSummary(BaseModel):
     # Local-mode binding for an *ungrouped* conversation; None = cloud. A foldered
     # conversation derives its mode from the folder's binding instead (§七).
     local_root_id: str | None = None
+    # Selected 质量档 (llm/modes.py); None = inherit user default → operator default.
+    model_mode: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -96,12 +106,100 @@ class ConversationListResponse(BaseModel):
 
 class UpdateConversationRequest(BaseModel):
     title: str | None = None
+    # Selected 质量档 (llm/modes.py); explicit null clears back to「inherit default」.
+    # Optional: omit to leave unchanged (the route reads ``model_fields_set``).
+    model_mode: str | None = None
 
 
 class MoveConversationRequest(BaseModel):
     """Move a conversation into a folder, or out of one with ``folder_id=null``."""
 
     folder_id: str | None = None
+
+
+# --- Model quality modes (质量档, llm/modes.py D2) ---
+
+
+class ModelModeSummary(BaseModel):
+    """A user-defined custom 质量档."""
+
+    id: str
+    name: str
+    # Team-role → model id (e.g. {"ceo": "deepseek-v4-pro"}). Roles absent inherit
+    # the base profile's model.
+    assignments: dict[str, str]
+
+    model_config = {"from_attributes": True}
+
+
+class CreateModelModeRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    assignments: dict[str, str] = Field(default_factory=dict)
+
+
+class UpdateModelModeRequest(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=100)
+    assignments: dict[str, str] | None = None
+
+
+class ModelModePreset(BaseModel):
+    """A built-in, read-only 质量档 (economy / quality)."""
+
+    key: str
+    assignments: dict[str, str]
+
+
+class ModelModesResponse(BaseModel):
+    """Everything the picker needs: built-in presets + the user's custom modes + the
+    user's resolved default ref."""
+
+    presets: list[ModelModePreset]
+    custom: list[ModelModeSummary]
+    default_mode: str
+
+
+class ModelRoleOption(BaseModel):
+    """A team role the user may configure in a custom mode (catalog)."""
+
+    role: str
+    configurable: bool
+    # When not configurable (经济worker), the model it is locked to (display only).
+    locked_model: str | None = None
+
+
+class ModelModeCatalog(BaseModel):
+    """The operator-bounded option space for building a custom mode: which team roles
+    exist (and whether each is user-configurable) and which models may be picked."""
+
+    roles: list[ModelRoleOption]
+    models: list[str]
+
+
+class SetDefaultModeRequest(BaseModel):
+    """Set (or clear with null) the user's default 质量档."""
+
+    mode: str | None = None
+
+
+# --- BYOK LLM key (用户自带 DeepSeek key, llm/key_service.py) ---
+
+
+class SetLlmKeyRequest(BaseModel):
+    """Store the user's own DeepSeek API key (BYOK)."""
+
+    api_key: str = Field(..., min_length=1, max_length=400)
+
+
+class LlmKeyStatusResponse(BaseModel):
+    """Settings view of a user's BYOK key — never the plaintext key."""
+
+    configured: bool
+    # unconfigured | unchecked | active | error
+    status: str
+    # Last 4 chars only (e.g. "••••cdef"), for recognition.
+    masked_key: str | None = None
+    # Connectivity-test failure reason (POST .../test), surfaced when status="error".
+    message: str | None = None
 
 
 # --- Folders (sidebar grouping) ---
@@ -222,14 +320,36 @@ class RegenerateMessageRequest(BaseModel):
     content: str | None = Field(None, min_length=1, max_length=32000)
 
 
-class ResolveApprovalRequest(BaseModel):
-    """Settle a paused GRANTABLE tool call (tool approval gate).
+# --- Interaction resolve (§18.2 unified suspend-resume bridge) ---
+# One ``POST /conversations/{id}/interactions/{interaction_id}`` settles any paused
+# interaction; the body is discriminated on ``kind`` (approval / ask_user /
+# client_tool), each carrying its kind-specific answer. Replaces the three former
+# per-kind resolve endpoints + schemas.
+
+
+class ResolveApprovalInteraction(BaseModel):
+    """Settle a paused GRANTABLE tool call (``approval`` interaction).
 
     ``decision`` is one of ``approve`` (allow this one call), ``approve_always``
     (allow this tool for the rest of the turn), or ``deny`` (refuse).
     """
 
+    kind: Literal["approval"] = "approval"
     decision: ApprovalDecision
+
+
+class ResolveCheckpointInteraction(BaseModel):
+    """Settle a paused checkpoint the CEO raised (``ask_user`` interaction).
+
+    ``decision`` is ``continue`` (proceed with the CEO's direction), ``adjust``
+    (steer the CEO with ``note``, then continue), or ``stop`` (end the turn). The
+    engine-only ``timeout`` value is never sent by a client. ``note`` carries the
+    user's steer for ``adjust`` (and an optional closing remark for ``stop``).
+    """
+
+    kind: Literal["ask_user"] = "ask_user"
+    decision: CheckpointDecision
+    note: str = Field("", max_length=4000)
 
 
 class WorkspaceOpError(BaseModel):
@@ -246,18 +366,25 @@ class WorkspaceOpError(BaseModel):
     count: int | None = None
 
 
-class ResolveWorkspaceOpRequest(BaseModel):
-    """Deliver a desktop's result for a paused local-workspace op.
+class ResolveClientToolInteraction(BaseModel):
+    """Deliver a bound desktop's result for a paused local-workspace op (``client_tool``).
 
-    ``ok`` true → ``value`` is the op's result (op-specific: file text, a
-    directory listing, a grep result, …; bytes are base64). ``ok`` false →
-    ``error`` describes the typed failure to re-raise. The pending op (awaiting in
-    the live SSE turn) resumes with this envelope.
+    ``ok`` true → ``value`` is the op's result (op-specific: file text, a directory
+    listing, a grep result, …; bytes are base64). ``ok`` false → ``error`` describes
+    the typed failure to re-raise. The pending op (awaiting in the live SSE turn)
+    resumes with this envelope.
     """
 
+    kind: Literal["client_tool"] = "client_tool"
     ok: bool
     value: Any | None = None
     error: WorkspaceOpError | None = None
+
+
+# Discriminated union body for the unified resolve endpoint.
+ResolveInteractionRequest = (
+    ResolveApprovalInteraction | ResolveCheckpointInteraction | ResolveClientToolInteraction
+)
 
 
 class Citation(BaseModel):
@@ -296,10 +423,60 @@ class MessageDetail(BaseModel):
 
 
 class MessageListResponse(BaseModel):
+    """A window of a conversation's messages (chronological, oldest-first).
+
+    Cursor-windowed rather than page-numbered: the client loads the latest window
+    on open, then scrolls up (``before``) / down (``after``), or jumps to a window
+    centered on a message (``around``) for a search hit. ``has_more_before`` /
+    ``has_more_after`` tell the client whether to keep fetching in that direction.
+    Only the direction-relevant flag is computed for a one-sided query (a
+    ``before`` page sets ``has_more_after=False``; the client already holds the
+    newer side); an ``around`` window computes both.
+    """
+
     data: list[MessageDetail]
     total: int
-    page: int
-    page_size: int
+    has_more_before: bool = False
+    has_more_after: bool = False
+
+
+# --- Global search (全局搜索 Tier 1: 跨对话/消息/文件夹关键词检索) ---
+# One keyword query fans out over the user's own conversations (title), messages
+# (content) and folders (name) — see 前端技术与架构.md §9.8. Backed by ILIKE
+# (no tsvector — stock PG doesn't segment Chinese); results are owner-scoped.
+
+
+class SearchItem(BaseModel):
+    """One hit in a section. Field meaning depends on the section ``type``:
+
+    - conversation: ``id`` = conversation id, ``title`` = its title.
+    - message: ``id`` = message id, ``conversation_id`` = where to jump,
+      ``title`` = the owning conversation's title (list-row context), ``role`` =
+      user/assistant, ``snippet`` = match window with ``match_start``/``match_end``
+      offsets into the snippet for client-side highlighting.
+    - folder: ``id`` = folder id, ``title`` = its name.
+    """
+
+    id: str
+    title: str | None = None
+    conversation_id: str | None = None
+    role: str | None = None
+    snippet: str | None = None
+    match_start: int | None = None
+    match_end: int | None = None
+    updated_at: datetime | None = None
+
+
+class SearchSection(BaseModel):
+    """Hits of one entity type, recency-ordered (newest first)."""
+
+    type: Literal["conversation", "message", "folder"]
+    items: list[SearchItem]
+
+
+class SearchResponse(BaseModel):
+    query: str
+    sections: list[SearchSection]
 
 
 # --- Workspace snapshots ---
@@ -628,6 +805,10 @@ class UsageSummary(BaseModel):
     recent_daily_cost: list[DailyCost]
     quota: QuotaStatus
     cny_per_usd: float
+    # Billing mode (config.billing_mode). In "byok" the platform quota is dormant
+    # (the turn runs on the user's own key), so the client reframes the quota meters
+    # as「自带 Key 不限额」and presents cost as the user's own DeepSeek spend.
+    billing_mode: str
 
 
 # --- Messaging (消息页 = 找人 IM; 消息IM.md) ---

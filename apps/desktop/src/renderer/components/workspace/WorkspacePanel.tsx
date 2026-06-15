@@ -1,4 +1,6 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatBytes } from "@/lib/format";
+import { notifyError } from "@/lib/toast";
 import { ApiError } from "@/services/api";
 import {
   type FilePreview,
@@ -17,7 +19,7 @@ import {
   uploadWorkspaceFile,
 } from "@/services/workspace";
 import { useConversationStore } from "@/stores/conversation";
-import { useWorkspacePanelStore } from "@/stores/workspacePanel";
+import { useSidePanelStore } from "@/stores/sidePanel";
 import {
   Camera,
   ChevronDown,
@@ -43,18 +45,9 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import {
-  type PointerEvent as ReactPointerEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HandoffSection } from "./HandoffSection";
 import { WorkspaceModeBar } from "./WorkspaceModeBar";
-
-type Section = "files" | "snapshots" | "handoff";
 
 // Tree fold state is per-conversation (paths differ per workspace) and persisted
 // so a switch away and back keeps the same folders open/closed.
@@ -93,111 +86,66 @@ function startPathDrag(e: React.DragEvent, path: string): void {
 }
 
 /**
- * Workspace panel — the file-in/out + persistence surface for a conversation's
- * project space (双模式工作区). It strings the already-landed cloud-mode backend
- * together: browse/download/upload the live workspace files (文件进出) and
- * manage snapshots (axis-3 — backup / kept versions / restore / zip download).
+ * Workspace mode of the conversation side panel — the file-in/out + persistence
+ * surface for a conversation's project space (双模式工作区). It strings the
+ * already-landed cloud-mode backend together: browse/download/upload the live
+ * workspace files (文件进出) and manage snapshots (axis-3 — backup / kept
+ * versions / restore / zip download). The shell (SidePanel) owns the frame /
+ * resize / close; this renders the mode bar + sections.
  *
- * Docked on the right like the run-detail panel; opened from the chat toggle or
- * Ctrl/Cmd+J. A draft conversation (no id yet) has no server workspace, so the
- * panel shows an empty hint until the first turn persists it.
+ * A draft conversation (no id yet) has no server workspace, so it shows an empty
+ * hint until the first turn persists it.
  */
-export function WorkspacePanel() {
-  const open = useWorkspacePanelStore((s) => s.open);
-  const width = useWorkspacePanelStore((s) => s.width);
-  const setWidth = useWorkspacePanelStore((s) => s.setWidth);
-  const closePanel = useWorkspacePanelStore((s) => s.closePanel);
+export function WorkspaceMode() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
+  const section = useSidePanelStore((s) => s.section);
+  const setSection = useSidePanelStore((s) => s.setSection);
 
-  const [section, setSection] = useState<Section>("files");
-
-  // Drag the left edge to resize (same handwritten pointer tracking as the
-  // detail panel; setWidth clamps + persists so the value is correct mid-drag).
-  const onResizeStart = (e: ReactPointerEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = width;
-    const onMove = (ev: PointerEvent) =>
-      setWidth(startWidth + (startX - ev.clientX));
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  };
-
-  if (!open) return null;
+  if (!conversationId) {
+    return (
+      <EmptyHint
+        inline
+        icon={<FolderOpen size={26} className="text-muted-foreground/40" />}
+        title="尚无工作区"
+        hint="发送第一条消息后，这个对话的项目空间就会出现在这里。"
+      />
+    );
+  }
 
   return (
-    <aside
-      className="relative flex shrink-0 flex-col border-l border-border bg-card"
-      style={{ width }}
-    >
-      <button
-        type="button"
-        aria-label="拖拽调整面板宽度"
-        onPointerDown={onResizeStart}
-        className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent hover:bg-primary/40"
-      />
-
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1">
-        <FolderOpen size={15} className="shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">
-          工作区
-        </span>
-        <button
-          type="button"
-          onClick={closePanel}
-          title="关闭面板"
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <X size={15} />
-        </button>
+    <div className="flex h-full flex-col">
+      <WorkspaceModeBar conversationId={conversationId} />
+      <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
+        <SectionTab
+          active={section === "files"}
+          onClick={() => setSection("files")}
+          icon={<Files size={13} />}
+          label="文件"
+        />
+        <SectionTab
+          active={section === "snapshots"}
+          onClick={() => setSection("snapshots")}
+          icon={<History size={13} />}
+          label="快照"
+        />
+        <SectionTab
+          active={section === "handoff"}
+          onClick={() => setSection("handoff")}
+          icon={<GitPullRequest size={13} />}
+          label="交接"
+        />
       </div>
 
-      {!conversationId ? (
-        <EmptyHint
-          icon={<FolderOpen size={26} className="text-muted-foreground/40" />}
-          title="尚无工作区"
-          hint="发送第一条消息后，这个对话的项目空间就会出现在这里。"
-        />
-      ) : (
-        <>
-          <WorkspaceModeBar conversationId={conversationId} />
-          <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
-            <SectionTab
-              active={section === "files"}
-              onClick={() => setSection("files")}
-              icon={<Files size={13} />}
-              label="文件"
-            />
-            <SectionTab
-              active={section === "snapshots"}
-              onClick={() => setSection("snapshots")}
-              icon={<History size={13} />}
-              label="快照"
-            />
-            <SectionTab
-              active={section === "handoff"}
-              onClick={() => setSection("handoff")}
-              icon={<GitPullRequest size={13} />}
-              label="交接"
-            />
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {section === "files" ? (
-              <FilesSection conversationId={conversationId} />
-            ) : section === "snapshots" ? (
-              <SnapshotsSection conversationId={conversationId} />
-            ) : (
-              <HandoffSection conversationId={conversationId} />
-            )}
-          </div>
-        </>
-      )}
-    </aside>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {section === "files" ? (
+          <FilesSection conversationId={conversationId} />
+        ) : section === "snapshots" ? (
+          <SnapshotsSection conversationId={conversationId} />
+        ) : (
+          <HandoffSection conversationId={conversationId} />
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -297,7 +245,7 @@ function FilesSection({ conversationId }: { conversationId: string }) {
         await moveWorkspaceFile(conversationId, srcPath, dst);
         await reload();
       } catch (err) {
-        window.alert(
+        notifyError(
           err instanceof ApiError && err.status === 422
             ? "目标位置已存在同名文件"
             : "移动失败",
@@ -316,7 +264,7 @@ function FilesSection({ conversationId }: { conversationId: string }) {
       await createWorkspaceDir(conversationId, name);
       await reload();
     } catch (err) {
-      window.alert(
+      notifyError(
         err instanceof ApiError && err.status === 422
           ? "已存在同名文件或文件夹"
           : "新建文件夹失败",
@@ -332,7 +280,7 @@ function FilesSection({ conversationId }: { conversationId: string }) {
     const name = input.trim().replace(/^\/+|\/+$/g, "");
     if (!name) return;
     if (files?.some((f) => f.path === name)) {
-      window.alert("已存在同名文件或文件夹");
+      notifyError("已存在同名文件或文件夹");
       return;
     }
     try {
@@ -340,7 +288,7 @@ function FilesSection({ conversationId }: { conversationId: string }) {
       await reload();
       setPreview({ path: name, name: name.slice(name.lastIndexOf("/") + 1) });
     } catch {
-      window.alert("新建文件失败");
+      notifyError("新建文件失败");
     }
   }, [conversationId, files, reload]);
 
@@ -645,27 +593,34 @@ function TreeRow({
           isTarget ? "bg-accent ring-1 ring-inset ring-primary" : ""
         }`}
       >
-        <button
-          type="button"
-          onClick={() => onToggle(node.path)}
-          title={node.path}
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
-        >
-          {open ? (
-            <ChevronDown size={13} className="shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight
-              size={13}
-              className="shrink-0 text-muted-foreground"
-            />
-          )}
-          {open ? (
-            <FolderOpen size={13} className="shrink-0 text-muted-foreground" />
-          ) : (
-            <Folder size={13} className="shrink-0 text-muted-foreground" />
-          )}
-          <span className="min-w-0 flex-1 truncate">{node.name}</span>
-        </button>
+        <SimpleTooltip label={node.path}>
+          <button
+            type="button"
+            onClick={() => onToggle(node.path)}
+            className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+          >
+            {open ? (
+              <ChevronDown
+                size={13}
+                className="shrink-0 text-muted-foreground"
+              />
+            ) : (
+              <ChevronRight
+                size={13}
+                className="shrink-0 text-muted-foreground"
+              />
+            )}
+            {open ? (
+              <FolderOpen
+                size={13}
+                className="shrink-0 text-muted-foreground"
+              />
+            ) : (
+              <Folder size={13} className="shrink-0 text-muted-foreground" />
+            )}
+            <span className="min-w-0 flex-1 truncate">{node.name}</span>
+          </button>
+        </SimpleTooltip>
         <RowActions
           conversationId={conversationId}
           node={node}
@@ -735,31 +690,35 @@ function FileLeaf({
         onDragStart={(e) => startPathDrag(e, node.path)}
         className="group flex items-center rounded-md pr-1 text-xs hover:bg-accent"
       >
-        <button
-          type="button"
-          onClick={() => onPreview(node.path, node.name)}
-          title={`预览 ${node.path}`}
-          className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+        <SimpleTooltip label={`预览 ${node.path}`}>
+          <button
+            type="button"
+            onClick={() => onPreview(node.path, node.name)}
+            className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+          >
+            {/* spacer aligns the file icon under the folder icon (past the chevron) */}
+            <span className="w-[13px] shrink-0" aria-hidden="true" />
+            <FileText size={13} className="shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate">{node.name}</span>
+          </button>
+        </SimpleTooltip>
+        <SimpleTooltip
+          label={state === "error" ? "下载失败，点击重试" : `下载 ${node.name}`}
         >
-          {/* spacer aligns the file icon under the folder icon (past the chevron) */}
-          <span className="w-[13px] shrink-0" aria-hidden="true" />
-          <FileText size={13} className="shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate">{node.name}</span>
-        </button>
-        <button
-          type="button"
-          onClick={onDownload}
-          title={state === "error" ? "下载失败，点击重试" : `下载 ${node.name}`}
-          className={`flex size-6 shrink-0 items-center justify-center rounded opacity-0 hover:bg-muted group-hover:opacity-100 ${
-            state === "error" ? "text-destructive" : "text-muted-foreground"
-          }`}
-        >
-          {state === "loading" ? (
-            <Loader2 size={13} className="animate-spin" />
-          ) : (
-            <Download size={13} />
-          )}
-        </button>
+          <button
+            type="button"
+            onClick={onDownload}
+            className={`flex size-6 shrink-0 items-center justify-center rounded opacity-0 hover:bg-muted group-hover:opacity-100 ${
+              state === "error" ? "text-destructive" : "text-muted-foreground"
+            }`}
+          >
+            {state === "loading" ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <Download size={13} />
+            )}
+          </button>
+        </SimpleTooltip>
         <RowActions
           conversationId={conversationId}
           node={node}
@@ -793,7 +752,7 @@ function RowActions({
     const next = input.trim();
     if (!next || next === node.name) return;
     if (next.includes("/")) {
-      window.alert("名称不能包含「/」");
+      notifyError("名称不能包含「/」");
       return;
     }
     const slash = node.path.lastIndexOf("/");
@@ -803,7 +762,7 @@ function RowActions({
       await moveWorkspaceFile(conversationId, node.path, dst);
       onChanged();
     } catch (err) {
-      window.alert(
+      notifyError(
         err instanceof ApiError && err.status === 422
           ? "已存在同名文件"
           : "重命名失败",
@@ -824,7 +783,7 @@ function RowActions({
       await deleteWorkspaceFile(conversationId, node.path);
       onChanged();
     } catch {
-      window.alert("删除失败");
+      notifyError("删除失败");
     } finally {
       setBusy(null);
     }
@@ -833,32 +792,34 @@ function RowActions({
   const visible = busy ? "opacity-100" : "opacity-0 group-hover:opacity-100";
   return (
     <>
-      <button
-        type="button"
-        onClick={onRename}
-        disabled={busy !== null}
-        title="重命名"
-        className={`flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted ${visible}`}
-      >
-        {busy === "rename" ? (
-          <Loader2 size={13} className="animate-spin" />
-        ) : (
-          <Pencil size={12} />
-        )}
-      </button>
-      <button
-        type="button"
-        onClick={onDelete}
-        disabled={busy !== null}
-        title="删除"
-        className={`flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive ${visible}`}
-      >
-        {busy === "delete" ? (
-          <Loader2 size={13} className="animate-spin" />
-        ) : (
-          <Trash2 size={12} />
-        )}
-      </button>
+      <SimpleTooltip label="重命名">
+        <button
+          type="button"
+          onClick={onRename}
+          disabled={busy !== null}
+          className={`flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted ${visible}`}
+        >
+          {busy === "rename" ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <Pencil size={12} />
+          )}
+        </button>
+      </SimpleTooltip>
+      <SimpleTooltip label="删除">
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={busy !== null}
+          className={`flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive ${visible}`}
+        >
+          {busy === "delete" ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <Trash2 size={12} />
+          )}
+        </button>
+      </SimpleTooltip>
     </>
   );
 }
@@ -934,7 +895,7 @@ function FilePreviewView({
       setResult({ kind: "text", text: draft, truncated: false });
       setEditing(false);
     } catch {
-      window.alert("保存失败");
+      notifyError("保存失败");
     } finally {
       setSaving(false);
     }
@@ -966,33 +927,28 @@ function FilePreviewView({
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-1 pr-1">
-        <button
-          type="button"
-          onClick={requestClose}
-          title="返回文件列表"
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <ChevronLeft size={16} />
-        </button>
+        <SimpleTooltip label="返回文件列表">
+          <button
+            type="button"
+            onClick={requestClose}
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <ChevronLeft size={16} />
+          </button>
+        </SimpleTooltip>
         <FileText size={13} className="shrink-0 text-muted-foreground" />
-        <span
-          className="min-w-0 flex-1 truncate text-xs font-medium"
-          title={path}
-        >
-          {dirty && (
-            <span className="text-primary" title="有未保存的改动">
-              ●{" "}
-            </span>
-          )}
-          {name}
-        </span>
+        <SimpleTooltip label={path}>
+          <span className="min-w-0 flex-1 truncate text-xs font-medium">
+            {dirty && <span className="text-primary">● </span>}
+            {name}
+          </span>
+        </SimpleTooltip>
         {editing ? (
           <>
             <button
               type="button"
               onClick={() => void onSave()}
               disabled={saving}
-              title="保存"
               className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
             >
               {saving ? (
@@ -1121,20 +1077,21 @@ function SnapshotsSection({ conversationId }: { conversationId: string }) {
           maxLength={200}
           className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-primary"
         />
-        <button
-          type="button"
-          onClick={() => void onCreate()}
-          disabled={creating}
-          title="为当前工作区留一个快照版本"
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-        >
-          {creating ? (
-            <Loader2 size={13} className="animate-spin" />
-          ) : (
-            <Camera size={13} />
-          )}
-          留版本
-        </button>
+        <SimpleTooltip label="为当前工作区留一个快照版本">
+          <button
+            type="button"
+            onClick={() => void onCreate()}
+            disabled={creating}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+          >
+            {creating ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <Camera size={13} />
+            )}
+            留版本
+          </button>
+        </SimpleTooltip>
         <IconButton
           title="刷新"
           onClick={() => void reload()}
@@ -1220,14 +1177,17 @@ function SnapshotRow({
   return (
     <li className="rounded-md border border-border px-2.5 py-2">
       <div className="flex items-center gap-2">
-        <span
-          className="min-w-0 flex-1 truncate text-xs font-medium"
-          title={snap.label ?? ""}
-        >
-          {snap.label || (
-            <span className="text-muted-foreground">自动备份</span>
-          )}
-        </span>
+        {snap.label ? (
+          <SimpleTooltip label={snap.label}>
+            <span className="min-w-0 flex-1 truncate text-xs font-medium">
+              {snap.label}
+            </span>
+          </SimpleTooltip>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
+            自动备份
+          </span>
+        )}
         <IconButton
           title="下载快照 (zip)"
           onClick={() => void onDownload()}
@@ -1266,15 +1226,16 @@ function IconButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      disabled={spinning}
-      className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
-    >
-      {spinning ? <Loader2 size={14} className="animate-spin" /> : children}
-    </button>
+    <SimpleTooltip label={title}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={spinning}
+        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
+      >
+        {spinning ? <Loader2 size={14} className="animate-spin" /> : children}
+      </button>
+    </SimpleTooltip>
   );
 }
 

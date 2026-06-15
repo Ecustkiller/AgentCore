@@ -160,7 +160,7 @@ async def apply_handoff(
                 await backend.write_bytes(sel.path, result_entries.get(sel.path, b""))
         except WorkspaceError as e:
             logger.warning(
-                "handoff_apply_file_failed",
+                "handoff.apply_file_failed",
                 source_conversation_id=source_conversation_id,
                 path=sel.path,
                 error=str(e),

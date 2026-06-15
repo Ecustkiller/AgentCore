@@ -1,11 +1,11 @@
 import {
   type ChatMessageDetail,
   type ChatSummary,
+  sendMessage as apiSendMessage,
   listChats,
   listMessages,
   markRead,
   messagingErrorMessage,
-  sendMessage as apiSendMessage,
 } from "@/services/messaging";
 import { useAuthStore } from "@/stores/auth";
 import { create } from "zustand";
@@ -156,12 +156,21 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
         ...s.messagesByChat,
         [chatId]: [...(s.messagesByChat[chatId] ?? []), optimistic],
       },
-      chats: bumpChat(s.chats, chatId, previewOf(optimistic), optimistic.created_at, 0),
+      chats: bumpChat(
+        s.chats,
+        chatId,
+        previewOf(optimistic),
+        optimistic.created_at,
+        0,
+      ),
       sendError: null,
     }));
 
     try {
-      const saved = await apiSendMessage(chatId, { content: text, clientMsgId });
+      const saved = await apiSendMessage(chatId, {
+        content: text,
+        clientMsgId,
+      });
       // Swap the optimistic twin for the stored message. The firehose also
       // delivers this same message (sender included, multi-device) — dedupe by
       // id keeps it from doubling up.
@@ -251,8 +260,7 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
 
 // --- Selectors ---
 
-export const useChats = (): ChatSummary[] =>
-  useMessagingStore((s) => s.chats);
+export const useChats = (): ChatSummary[] => useMessagingStore((s) => s.chats);
 
 export function useActiveMessages(): ChatMessageDetail[] {
   return useMessagingStore((s) =>

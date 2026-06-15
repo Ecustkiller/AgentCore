@@ -2,8 +2,8 @@
 and executor build on.
 
 A turn holds one *tree* of Runs: the ``CAPTAIN`` root is the CEO chat loop (the
-reply engine); every delegated worker / DAG node is an ``AGENT`` child, and (阶段2)
-candidate-selection is an ``ARENA`` child. This module fixes the *shape* of a Run
+reply engine); every delegated worker / DAG node is an ``AGENT`` child. This module
+fixes the *shape* of a Run
 — its spec (:class:`RunSpec`) +
 node policy (:class:`RunPolicy`) + live state (:class:`RunState`) — and the phases
 it moves through (:class:`RunPhase`). The plan that holds nodes lives in
@@ -11,8 +11,8 @@ it moves through (:class:`RunPhase`). The plan that holds nodes lives in
 
 第一阶段范围：worker 以「内联角色」声明（无独立 Agent 实体），因此 ``RunSpec`` 直接携带
 角色/目标/工具/模型档位等执行所需字段；``agent_id`` 在本阶段即等于 ``run_id``（事件与图
-节点标识沿用），``agent_name`` 取角色名做展示。ARENA kind 与 RunPolicy 中的审计/契约/
-best-of-n 等槽位先声明、暂不启用，留给阶段2。
+节点标识沿用），``agent_name`` 取角色名做展示。RunPolicy 中的审计/契约/best-of-N 择优
+（``candidates``）等槽位先声明、暂不启用，留给阶段2。
 
 → 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
 """
@@ -21,7 +21,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from agentcore.llm.protocol import LLMMessage
 
 
 class RunKind(StrEnum):
@@ -31,12 +34,15 @@ class RunKind(StrEnum):
     executor and policy defaults apply when the node runs. A turn is one Run tree:
     the ``CAPTAIN`` root is the CEO chat loop itself (it owns the conversation
     voice and may ``delegate``); every delegated worker / DAG step is an ``AGENT``
-    child. ARENA 预留给阶段2。
+    child.
+
+    无独立 ARENA / debate kind：多轮辩论是带 stance/round 展示标记的普通 AGENT DAG，
+    best-of-N 择优是 ``RunPolicy.candidates`` 策略位——均守「形状是数据不是模式」，不另
+    立节点种类。
     """
 
     CAPTAIN = "captain"  # the turn's root run: the CEO chat loop (owns the reply)
     AGENT = "agent"  # a delegated / DAG-step worker run
-    ARENA = "arena"  # 阶段2: multi-candidate (best-of-n) run
 
 
 class RunPhase(StrEnum):
@@ -112,6 +118,8 @@ class RunPolicy:
     autosave_artifact: bool = False
     preflight: bool = True
     audit: bool = False
+    # best-of-N 择优策略位（阶段2）：candidates>1 = 同一任务并行跑 N 个候选, 按
+    # selection_criteria 择优。是「策略」不是「节点种类」——无独立 ARENA kind。
     candidates: int = 1
     selection_criteria: str = ""
 
@@ -141,6 +149,18 @@ class RunSpec:
     thinking: bool | None = None
     reasoning_effort: str | None = None
     expected_output: str = ""
+    # ── 辩论/审查 呈现标记（前端UX目标态 §四，display-only） ──
+    # An opposing-batch's display tags: ``stance`` is this node's side (pro/con),
+    # ``group`` pairs opposing nodes into one comparison, and ``round`` is its
+    # multi-round-debate turn number (1-based; 0 = not a multi-round debate). The
+    # scheduler/executor NEVER read these — they ride RunSpec → run_plan → the
+    # frontend, which renders tagged runs side-by-side under a「辩论」title and lays
+    # multi-round debates out round-by-round. Empty/0 for ordinary parallel/DAG
+    # work, so 守住「形状是数据不是模式」: a debate is普通并行 DAG + presentation hints.
+    # (Note: ``round`` ≠ ``rounds`` below — the latter counts thinking-text segments.)
+    stance: str = ""
+    group: str = ""
+    round: int = 0
     # ── topology / governance ──
     depends_on: list[str] = field(default_factory=list)
     parent_run_id: str | None = None
@@ -196,6 +216,13 @@ class RunState:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=dict)
     cost: dict[str, int] = field(default_factory=dict)
+    # The run's full message transcript (system + task + every assistant/tool turn
+    # + the final answer), captured so the run is RECOVERABLE: a 定向唤回 (revise)
+    # appends an instruction to this and re-runs the loop — the same author
+    # continuing on its own draft (统一「续写」原语, 见 runs/session.py). Empty for a
+    # run that never produced one (skipped, or failed before any LLM answer). Typed
+    # under TYPE_CHECKING so this module stays import-light.
+    transcript: list[LLMMessage] = field(default_factory=list)
 
     @property
     def is_terminal(self) -> bool:

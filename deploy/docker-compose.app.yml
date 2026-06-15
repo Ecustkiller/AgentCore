@@ -17,6 +17,13 @@
 # 进程内 asyncio 协程，无独立 worker 入口；贸然起第二个 `python -m agentcore`
 # 会重复跑后台循环（如 retention sweep），是 bug 而非扩容。待有专用 worker 入口再加。
 
+# 日志：json-file 驱动 + 轮转，封顶单容器 10m×5=50MB（部署与运维.md §7.8「可观测·日志」）。
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   api:
     image: ${IMAGE_REGISTRY:-agentcore}/api:${IMAGE_TAG:-latest}
@@ -28,6 +35,7 @@ services:
         GIT_SHA: ${GIT_SHA:-unknown}
         BUILT_AT: ${BUILT_AT:-unknown}
     restart: unless-stopped
+    logging: *default-logging
     mem_limit: 1024m
     mem_reservation: 256m
     # 应用配置（JWT / DeepSeek Key / CORS / 配额…）从同一 env 文件注入。

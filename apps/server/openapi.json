@@ -430,6 +430,17 @@
         "title": "ChatSummary",
         "type": "object"
       },
+      "CheckpointDecision": {
+        "description": "How the user (or a timeout) settled a checkpoint the CEO raised.",
+        "enum": [
+          "continue",
+          "adjust",
+          "stop",
+          "timeout"
+        ],
+        "title": "CheckpointDecision",
+        "type": "string"
+      },
       "Citation": {
         "description": "A web source consulted for an assistant message (source-card data).",
         "properties": {
@@ -597,6 +608,17 @@
             "title": "Message Count",
             "type": "integer"
           },
+          "model_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Mode"
+          },
           "title": {
             "anyOf": [
               {
@@ -675,6 +697,17 @@
             ],
             "title": "Folder Id"
           },
+          "model_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Mode"
+          },
           "title": {
             "anyOf": [
               {
@@ -747,6 +780,28 @@
           }
         },
         "title": "CreateInviteRequest",
+        "type": "object"
+      },
+      "CreateModelModeRequest": {
+        "properties": {
+          "assignments": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Assignments",
+            "type": "object"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateModelModeRequest",
         "type": "object"
       },
       "CreateSnapshotRequest": {
@@ -1333,6 +1388,47 @@
         "title": "InviteResponse",
         "type": "object"
       },
+      "LlmKeyStatusResponse": {
+        "description": "Settings view of a user's BYOK key — never the plaintext key.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "masked_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Masked Key"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "configured",
+          "status"
+        ],
+        "title": "LlmKeyStatusResponse",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "password": {
@@ -1490,6 +1586,7 @@
         "type": "object"
       },
       "MessageListResponse": {
+        "description": "A window of a conversation's messages (chronological, oldest-first).\n\nCursor-windowed rather than page-numbered: the client loads the latest window\non open, then scrolls up (``before``) / down (``after``), or jumps to a window\ncentered on a message (``around``) for a search hit. ``has_more_before`` /\n``has_more_after`` tell the client whether to keep fetching in that direction.\nOnly the direction-relevant flag is computed for a one-sided query (a\n``before`` page sets ``has_more_after=False``; the client already holds the\nnewer side); an ``around`` window computes both.",
         "properties": {
           "data": {
             "items": {
@@ -1498,13 +1595,15 @@
             "title": "Data",
             "type": "array"
           },
-          "page": {
-            "title": "Page",
-            "type": "integer"
+          "has_more_after": {
+            "default": false,
+            "title": "Has More After",
+            "type": "boolean"
           },
-          "page_size": {
-            "title": "Page Size",
-            "type": "integer"
+          "has_more_before": {
+            "default": false,
+            "title": "Has More Before",
+            "type": "boolean"
           },
           "total": {
             "title": "Total",
@@ -1513,11 +1612,143 @@
         },
         "required": [
           "data",
-          "total",
-          "page",
-          "page_size"
+          "total"
         ],
         "title": "MessageListResponse",
+        "type": "object"
+      },
+      "ModelModeCatalog": {
+        "description": "The operator-bounded option space for building a custom mode: which team roles\nexist (and whether each is user-configurable) and which models may be picked.",
+        "properties": {
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/ModelRoleOption"
+            },
+            "title": "Roles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "roles",
+          "models"
+        ],
+        "title": "ModelModeCatalog",
+        "type": "object"
+      },
+      "ModelModePreset": {
+        "description": "A built-in, read-only 质量档 (economy / quality).",
+        "properties": {
+          "assignments": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Assignments",
+            "type": "object"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "assignments"
+        ],
+        "title": "ModelModePreset",
+        "type": "object"
+      },
+      "ModelModeSummary": {
+        "description": "A user-defined custom 质量档.",
+        "properties": {
+          "assignments": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Assignments",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "assignments"
+        ],
+        "title": "ModelModeSummary",
+        "type": "object"
+      },
+      "ModelModesResponse": {
+        "description": "Everything the picker needs: built-in presets + the user's custom modes + the\nuser's resolved default ref.",
+        "properties": {
+          "custom": {
+            "items": {
+              "$ref": "#/components/schemas/ModelModeSummary"
+            },
+            "title": "Custom",
+            "type": "array"
+          },
+          "default_mode": {
+            "title": "Default Mode",
+            "type": "string"
+          },
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/ModelModePreset"
+            },
+            "title": "Presets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "presets",
+          "custom",
+          "default_mode"
+        ],
+        "title": "ModelModesResponse",
+        "type": "object"
+      },
+      "ModelRoleOption": {
+        "description": "A team role the user may configure in a custom mode (catalog).",
+        "properties": {
+          "configurable": {
+            "title": "Configurable",
+            "type": "boolean"
+          },
+          "locked_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked Model"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "configurable"
+        ],
+        "title": "ModelRoleOption",
         "type": "object"
       },
       "MoveConversationRequest": {
@@ -1658,21 +1889,52 @@
         "title": "RegisterRequest",
         "type": "object"
       },
-      "ResolveApprovalRequest": {
-        "description": "Settle a paused GRANTABLE tool call (tool approval gate).\n\n``decision`` is one of ``approve`` (allow this one call), ``approve_always``\n(allow this tool for the rest of the turn), or ``deny`` (refuse).",
+      "ResolveApprovalInteraction": {
+        "description": "Settle a paused GRANTABLE tool call (``approval`` interaction).\n\n``decision`` is one of ``approve`` (allow this one call), ``approve_always``\n(allow this tool for the rest of the turn), or ``deny`` (refuse).",
         "properties": {
           "decision": {
             "$ref": "#/components/schemas/ApprovalDecision"
+          },
+          "kind": {
+            "const": "approval",
+            "default": "approval",
+            "title": "Kind",
+            "type": "string"
           }
         },
         "required": [
           "decision"
         ],
-        "title": "ResolveApprovalRequest",
+        "title": "ResolveApprovalInteraction",
         "type": "object"
       },
-      "ResolveWorkspaceOpRequest": {
-        "description": "Deliver a desktop's result for a paused local-workspace op.\n\n``ok`` true → ``value`` is the op's result (op-specific: file text, a\ndirectory listing, a grep result, …; bytes are base64). ``ok`` false →\n``error`` describes the typed failure to re-raise. The pending op (awaiting in\nthe live SSE turn) resumes with this envelope.",
+      "ResolveCheckpointInteraction": {
+        "description": "Settle a paused checkpoint the CEO raised (``ask_user`` interaction).\n\n``decision`` is ``continue`` (proceed with the CEO's direction), ``adjust``\n(steer the CEO with ``note``, then continue), or ``stop`` (end the turn). The\nengine-only ``timeout`` value is never sent by a client. ``note`` carries the\nuser's steer for ``adjust`` (and an optional closing remark for ``stop``).",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/CheckpointDecision"
+          },
+          "kind": {
+            "const": "ask_user",
+            "default": "ask_user",
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ResolveCheckpointInteraction",
+        "type": "object"
+      },
+      "ResolveClientToolInteraction": {
+        "description": "Deliver a bound desktop's result for a paused local-workspace op (``client_tool``).\n\n``ok`` true → ``value`` is the op's result (op-specific: file text, a directory\nlisting, a grep result, …; bytes are base64). ``ok`` false → ``error`` describes\nthe typed failure to re-raise. The pending op (awaiting in the live SSE turn)\nresumes with this envelope.",
         "properties": {
           "error": {
             "anyOf": [
@@ -1683,6 +1945,12 @@
                 "type": "null"
               }
             ]
+          },
+          "kind": {
+            "const": "client_tool",
+            "default": "client_tool",
+            "title": "Kind",
+            "type": "string"
           },
           "ok": {
             "title": "Ok",
@@ -1701,7 +1969,7 @@
         "required": [
           "ok"
         ],
-        "title": "ResolveWorkspaceOpRequest",
+        "title": "ResolveClientToolInteraction",
         "type": "object"
       },
       "RoleCostLine": {
@@ -1752,6 +2020,146 @@
           }
         },
         "title": "RunsPayload",
+        "type": "object"
+      },
+      "SearchItem": {
+        "description": "One hit in a section. Field meaning depends on the section ``type``:\n\n- conversation: ``id`` = conversation id, ``title`` = its title.\n- message: ``id`` = message id, ``conversation_id`` = where to jump,\n  ``title`` = the owning conversation's title (list-row context), ``role`` =\n  user/assistant, ``snippet`` = match window with ``match_start``/``match_end``\n  offsets into the snippet for client-side highlighting.\n- folder: ``id`` = folder id, ``title`` = its name.",
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "match_end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match End"
+          },
+          "match_start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Start"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SearchItem",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "properties": {
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/SearchSection"
+            },
+            "title": "Sections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query",
+          "sections"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SearchSection": {
+        "description": "Hits of one entity type, recency-ordered (newest first).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "conversation",
+              "message",
+              "folder"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "items"
+        ],
+        "title": "SearchSection",
         "type": "object"
       },
       "SendChatMessageRequest": {
@@ -1814,6 +2222,40 @@
           "content"
         ],
         "title": "SendMessageRequest",
+        "type": "object"
+      },
+      "SetDefaultModeRequest": {
+        "description": "Set (or clear with null) the user's default 质量档.",
+        "properties": {
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          }
+        },
+        "title": "SetDefaultModeRequest",
+        "type": "object"
+      },
+      "SetLlmKeyRequest": {
+        "description": "Store the user's own DeepSeek API key (BYOK).",
+        "properties": {
+          "api_key": {
+            "maxLength": 400,
+            "minLength": 1,
+            "title": "Api Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_key"
+        ],
+        "title": "SetLlmKeyRequest",
         "type": "object"
       },
       "SnapshotListResponse": {
@@ -1961,7 +2403,8 @@
           "search",
           "execution",
           "research",
-          "orchestration"
+          "orchestration",
+          "interaction"
         ],
         "title": "ToolCategory",
         "type": "string"
@@ -2057,6 +2500,17 @@
       },
       "UpdateConversationRequest": {
         "properties": {
+          "model_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Mode"
+          },
           "title": {
             "anyOf": [
               {
@@ -2132,6 +2586,39 @@
         "title": "UpdateFolderRequest",
         "type": "object"
       },
+      "UpdateModelModeRequest": {
+        "properties": {
+          "assignments": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignments"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "UpdateModelModeRequest",
+        "type": "object"
+      },
       "UploadFileResponse": {
         "description": "Result of a workspace file upload.",
         "properties": {
@@ -2188,6 +2675,10 @@
       "UsageSummary": {
         "description": "Account dashboard payload (``GET /usage/summary``).\n\nAlso carries ``cny_per_usd`` so the client formats money from a single\nserver-owned rate (it never hard-codes the FX rate).",
         "properties": {
+          "billing_mode": {
+            "title": "Billing Mode",
+            "type": "string"
+          },
           "cny_per_usd": {
             "title": "Cny Per Usd",
             "type": "number"
@@ -2222,7 +2713,8 @@
           "month_by_role",
           "recent_daily_cost",
           "quota",
-          "cny_per_usd"
+          "cny_per_usd",
+          "billing_mode"
         ],
         "title": "UsageSummary",
         "type": "object"
@@ -2255,6 +2747,17 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "default_model_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model Mode"
           },
           "display_name": {
             "title": "Display Name",
@@ -3250,84 +3753,6 @@
         ]
       }
     },
-    "/v1/conversations/{conversation_id}/approvals/{approval_id}": {
-      "post": {
-        "description": "Authorize or deny a paused GRANTABLE tool call (tool approval gate).\n\nThe pending tool call (in the live ``send_message`` SSE stream) resumes with\nthe decision. 404 if the approval is unknown, already settled, timed out, or\nbelongs to another conversation — the gate auto-denies anything left\nunanswered, so a stale prompt resolves as \"not found\".",
-        "operationId": "resolve_approval_v1_conversations__conversation_id__approvals__approval_id__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "conversation_id",
-            "required": true,
-            "schema": {
-              "title": "Conversation Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "approval_id",
-            "required": true,
-            "schema": {
-              "title": "Approval Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResolveApprovalRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Resolve Approval",
-        "tags": [
-          "conversations"
-        ]
-      }
-    },
     "/v1/conversations/{conversation_id}/cost": {
       "get": {
         "description": "A conversation's cumulative spend (对话累计 — the conversation-header chip).\n\n404 for a non-owner, consistent with the other conversation reads.",
@@ -3727,8 +4152,106 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/interactions/{interaction_id}": {
+      "post": {
+        "description": "Settle any paused interaction over the unified bridge (§18.2).\n\nOne endpoint for every suspend kind, discriminated on ``body.kind``:\n\n- ``approval`` — authorize / deny a paused GRANTABLE tool call (the gate\n  auto-denies anything left unanswered);\n- ``ask_user`` — the user's checkpoint answer (continue / adjust / stop);\n- ``client_tool`` — a bound desktop's result envelope for a local-workspace op.\n\nThe pending interaction (awaiting in the live ``send_message`` SSE turn) resumes\nwith its kind-specific result. 404 if it is unknown, already settled, timed out,\nbelongs to another conversation, or its kind does not match — a stale resolve\nfalls through as \"not found\".",
+        "operationId": "resolve_interaction_v1_conversations__conversation_id__interactions__interaction_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "interaction_id",
+            "required": true,
+            "schema": {
+              "title": "Interaction Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "discriminator": {
+                  "mapping": {
+                    "approval": "#/components/schemas/ResolveApprovalInteraction",
+                    "ask_user": "#/components/schemas/ResolveCheckpointInteraction",
+                    "client_tool": "#/components/schemas/ResolveClientToolInteraction"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/ResolveApprovalInteraction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ResolveCheckpointInteraction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ResolveClientToolInteraction"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Interaction",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/messages": {
       "get": {
+        "description": "A window of a conversation's messages (cursor-windowed, chronological).\n\nFour mutually-exclusive modes (checked in this order):\n\n- ``around={message_id}``: a window centered on a message — the search-hit jump\n  (load-around B). 404 if the message isn't in this conversation.\n- ``before={iso}``: the page strictly older than the cursor (scroll up).\n- ``after={iso}``: the page strictly newer than the cursor (scroll down).\n- none: the latest window (conversation open).\n\n``has_more_before`` / ``has_more_after`` drive infinite scroll; a one-sided\nquery computes only the flag for the direction it moves in (an ``around`` window\ncomputes both). ``total`` is the conversation's full message count.",
         "operationId": "list_messages_v1_conversations__conversation_id__messages_get",
         "parameters": [
           {
@@ -3742,25 +4265,64 @@
           },
           {
             "in": "query",
-            "name": "page",
+            "name": "limit",
             "required": false,
             "schema": {
-              "default": 1,
+              "default": 100,
+              "maximum": 200,
               "minimum": 1,
-              "title": "Page",
+              "title": "Limit",
               "type": "integer"
             }
           },
           {
             "in": "query",
-            "name": "page_size",
+            "name": "before",
             "required": false,
             "schema": {
-              "default": 50,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "around",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Around"
             }
           },
           {
@@ -3808,7 +4370,7 @@
         ]
       },
       "post": {
-        "description": "Send a user message and get a streaming AI response via SSE.\n\nThe pipeline runs as a detached task feeding ``sink``; its handle is passed\nto ``sse_response`` so a client disconnect (e.g. the user hits stop) cancels\nit server-side rather than letting it run to completion unobserved.\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean 429 instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then quota.",
+        "description": "Send a user message and get a streaming AI response via SSE.\n\nThe pipeline runs as a detached task feeding ``sink``; its handle is passed\nto ``sse_response`` so a client disconnect (e.g. the user hits stop) cancels\nit server-side rather than letting it run to completion unobserved.\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.",
         "operationId": "send_message_v1_conversations__conversation_id__messages_post",
         "parameters": [
           {
@@ -3875,7 +4437,7 @@
     },
     "/v1/conversations/{conversation_id}/messages/{message_id}/regenerate": {
       "post": {
-        "description": "Re-run a turn from an existing user message via SSE.\n\nServes both \"regenerate\" (no body content — reuse the stored user text) and\n\"edit & resend\" (``content`` set — edit the user message first). The target\n``message_id`` must be a user message; the superseded assistant reply and any\nlater turns are dropped before re-running. Like ``send_message``, the pipeline\nruns as a detached task so a client disconnect cancels it server-side. A\nre-run is a fresh turn, so it passes the same gates (rate limit → ownership →\nquota) as ``send_message``.",
+        "description": "Re-run a turn from an existing user message via SSE.\n\nServes both \"regenerate\" (no body content — reuse the stored user text) and\n\"edit & resend\" (``content`` set — edit the user message first). The target\n``message_id`` must be a user message; the superseded assistant reply and any\nlater turns are dropped before re-running. Like ``send_message``, the pipeline\nruns as a detached task so a client disconnect cancels it server-side. A\nre-run is a fresh turn, so it passes the same gates (rate limit → ownership →\nBYOK/quota billing gate) as ``send_message``.",
         "operationId": "regenerate_message_v1_conversations__conversation_id__messages__message_id__regenerate_post",
         "parameters": [
           {
@@ -4990,84 +5552,6 @@
         ]
       }
     },
-    "/v1/conversations/{conversation_id}/workspace/ops/{request_id}": {
-      "post": {
-        "description": "Deliver a desktop's result for a paused local-workspace op (双模式工作区 P2).\n\nThe bound desktop client ran the op (read / list / grep / …) against the real\nlocal directory and posts the structured result here; the ``LocalWorkspace``\nawaiting it in the live ``send_message`` SSE turn resumes. 404 if the request\nis unknown, already settled, timed out, or belongs to another conversation —\nthe channel fails any op left unanswered, so a stale post resolves as \"not\nfound\".",
-        "operationId": "resolve_workspace_op_v1_conversations__conversation_id__workspace_ops__request_id__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "conversation_id",
-            "required": true,
-            "schema": {
-              "title": "Conversation Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "request_id",
-            "required": true,
-            "schema": {
-              "title": "Request Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResolveWorkspaceOpRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Resolve Workspace Op",
-        "tags": [
-          "conversations"
-        ]
-      }
-    },
     "/v1/folders": {
       "get": {
         "operationId": "list_folders_v1_folders_get",
@@ -6037,6 +6521,347 @@
         ]
       }
     },
+    "/v1/model-modes": {
+      "get": {
+        "description": "Built-in presets + the user's custom modes + the user's resolved default ref.",
+        "operationId": "list_model_modes_v1_model_modes_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelModesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Model Modes",
+        "tags": [
+          "model-modes"
+        ]
+      },
+      "post": {
+        "operationId": "create_model_mode_v1_model_modes_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateModelModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelModeSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Model Mode",
+        "tags": [
+          "model-modes"
+        ]
+      }
+    },
+    "/v1/model-modes/catalog": {
+      "get": {
+        "description": "The option space for building a custom mode: configurable team roles + the\noperator-allowed models. 经济worker is shown read-only (locked to its base model).",
+        "operationId": "model_mode_catalog_v1_model_modes_catalog_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelModeCatalog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Model Mode Catalog",
+        "tags": [
+          "model-modes"
+        ]
+      }
+    },
+    "/v1/model-modes/default": {
+      "put": {
+        "description": "Set (or clear with null) the user's account-default 质量档.",
+        "operationId": "set_default_model_mode_v1_model_modes_default_put",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDefaultModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Default Model Mode",
+        "tags": [
+          "model-modes"
+        ]
+      }
+    },
+    "/v1/model-modes/{mode_id}": {
+      "delete": {
+        "operationId": "delete_model_mode_v1_model_modes__mode_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mode_id",
+            "required": true,
+            "schema": {
+              "title": "Mode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Model Mode",
+        "tags": [
+          "model-modes"
+        ]
+      },
+      "patch": {
+        "operationId": "update_model_mode_v1_model_modes__mode_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mode_id",
+            "required": true,
+            "schema": {
+              "title": "Mode Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateModelModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelModeSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Model Mode",
+        "tags": [
+          "model-modes"
+        ]
+      }
+    },
     "/v1/realtime": {
       "get": {
         "description": "Open this user's realtime firehose (server→client SSE).\n\nSubscribes the connection to the in-process hub; a new message in any chat the\nuser belongs to arrives as a ``chat_message`` event. Heartbeat comments keep\nthe stream warm, and the subscription is released when the client disconnects.",
@@ -6082,6 +6907,95 @@
         "summary": "Realtime Firehose",
         "tags": [
           "realtime"
+        ]
+      }
+    },
+    "/v1/search": {
+      "get": {
+        "description": "Keyword search across the user's conversations, messages and folders.\n\n``limit`` caps each section independently; ``types`` (CSV of\n``conversation,message,folder``) narrows which sections are searched. Empty\nsections are omitted. Every result is owner-scoped — a non-owner's data never\nappears.",
+        "operationId": "search_v1_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 8,
+              "maximum": 20,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Types"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "search"
         ]
       }
     },
@@ -6182,6 +7096,212 @@
         "summary": "Get Usage Summary",
         "tags": [
           "usage"
+        ]
+      }
+    },
+    "/v1/users/me/llm-key": {
+      "delete": {
+        "description": "Remove the user's stored key (BYOK turns then refuse until one is set again).",
+        "operationId": "delete_llm_key_v1_users_me_llm_key_delete",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Llm Key",
+        "tags": [
+          "llm-key"
+        ]
+      },
+      "get": {
+        "description": "Current BYOK key status (configured? last-4? last connectivity result?).",
+        "operationId": "get_llm_key_v1_users_me_llm_key_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmKeyStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Llm Key",
+        "tags": [
+          "llm-key"
+        ]
+      },
+      "put": {
+        "description": "Store or replace the user's DeepSeek key (encrypted at rest; status reset).",
+        "operationId": "set_llm_key_v1_users_me_llm_key_put",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetLlmKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmKeyStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Llm Key",
+        "tags": [
+          "llm-key"
+        ]
+      }
+    },
+    "/v1/users/me/llm-key/test": {
+      "post": {
+        "description": "Probe DeepSeek with the stored key and persist 'active' / 'error'.",
+        "operationId": "test_llm_key_v1_users_me_llm_key_test_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmKeyStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Llm Key",
+        "tags": [
+          "llm-key"
         ]
       }
     },

@@ -38,15 +38,30 @@ from agentcore.db.models import (
     HandoffJob,
     Invite,
     Message,
+    ModelMode,
     RefreshToken,
+    RunSessionRow,
     User,
     UserBlock,
     UserDirectorySettings,
+    UserLlmKey,
 )
 
 # Sentinel for "field not provided" in partial updates, distinct from an explicit
 # None (which clears a nullable column, e.g. unbinding a folder's local_dir).
 _UNSET: object = object()
+
+
+def _ilike_pattern(query: str) -> str:
+    """Wrap a user query as a substring ILIKE pattern, escaping LIKE wildcards.
+
+    The user's raw text is matched literally: ``%`` ``_`` and the escape char
+    ``\\`` are neutralized so a query like ``50%`` can't turn into a match-all
+    wildcard. Used by the global-search repos (ILIKE over title/content/name —
+    前端技术与架构.md §9.8).
+    """
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 class UserRepository:
@@ -122,6 +137,21 @@ class UserRepository:
         )
         await self._session.commit()
 
+    async def set_default_model_mode(
+        self, user_id: str, mode: str | None
+    ) -> None:
+        """Set (or clear, with ``None``) a user's default 质量档 (llm/modes.py).
+
+        ``None`` clears it back to「inherit the operator default」. The value is an
+        opaque mode ref (preset name or custom ModelMode id); validity is enforced
+        softly at resolve time (an unknown ref falls back to default), so this only
+        persists the selection.
+        """
+        await self._session.execute(
+            update(User).where(User.user_id == user_id).values(default_model_mode=mode)
+        )
+        await self._session.commit()
+
     async def set_quota(
         self,
         user_id: str,
@@ -166,6 +196,7 @@ class ConversationRepository:
         title: str | None = None,
         folder_id: str | None = None,
         mode: str = "chat",
+        model_mode: str | None = None,
     ) -> Conversation:
         # Omit title when not provided so the DB server_default ('') applies.
         # The live `conversations.title` column is NOT NULL; passing an explicit
@@ -187,6 +218,8 @@ class ConversationRepository:
             conv.folder_id = folder_id
         if mode != "chat":
             conv.mode = mode
+        if model_mode is not None:
+            conv.model_mode = model_mode
         self._session.add(conv)
         await self._session.commit()
         await self._session.refresh(conv)
@@ -228,12 +261,50 @@ class ConversationRepository:
         )
         return result.scalars().all(), total
 
+    async def search(
+        self, user_id: str, query: str, *, limit: int
+    ) -> Sequence[Conversation]:
+        """Owner-scoped title substring search (全局搜索 Tier 1).
+
+        ILIKE over ``title``, newest-activity first, capped at ``limit``. Excludes
+        soft-deleted and hidden handoff-host conversations — the same visibility as
+        the sidebar list, so a hit is always something the user can actually open.
+        """
+        result = await self._session.execute(
+            select(Conversation)
+            .where(
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+                Conversation.mode != "handoff",
+                Conversation.title.ilike(_ilike_pattern(query)),
+            )
+            .order_by(Conversation.updated_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
     async def update_title(
         self, conversation_id: str, title: str, *, user_id: str | None = None
     ) -> Conversation | None:
         conv = await self.get_by_id(conversation_id, user_id=user_id)
         if conv:
             conv.title = title
+            await self._session.commit()
+            await self._session.refresh(conv)
+        return conv
+
+    async def set_model_mode(
+        self, conversation_id: str, mode: str | None, *, user_id: str
+    ) -> Conversation | None:
+        """Set (or clear, with ``None``) a conversation's 质量档 override (llm/modes.py).
+
+        ``None`` falls back to the user's default → operator default. The value is an
+        opaque mode ref (preset name or custom ModelMode id); an unknown ref resolves
+        safely to default at turn time, so this only persists the selection.
+        """
+        conv = await self.get_by_id(conversation_id, user_id=user_id)
+        if conv:
+            conv.model_mode = mode
             await self._session.commit()
             await self._session.refresh(conv)
         return conv
@@ -417,6 +488,26 @@ class FolderRepository:
         )
         return result.scalars().all()
 
+    async def search(
+        self, user_id: str, query: str, *, limit: int
+    ) -> Sequence[Folder]:
+        """Owner-scoped folder-name substring search (全局搜索 Tier 1).
+
+        ILIKE over ``name``, most-recently-updated first, capped at ``limit``;
+        soft-deleted folders are excluded.
+        """
+        result = await self._session.execute(
+            select(Folder)
+            .where(
+                Folder.user_id == user_id,
+                Folder.deleted_at.is_(None),
+                Folder.name.ilike(_ilike_pattern(query)),
+            )
+            .order_by(Folder.updated_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
     async def update(
         self,
         folder_id: str,
@@ -497,6 +588,78 @@ class FolderRepository:
         await self._session.commit()
 
 
+class ModelModeRepository:
+    """User-defined custom 质量档 (llm/modes.py D2). System presets are code-defined."""
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def create(
+        self, *, user_id: str, name: str, assignments: dict[str, str]
+    ) -> ModelMode:
+        mode = ModelMode(
+            id=new_id(), user_id=user_id, name=name, assignments=assignments
+        )
+        self._session.add(mode)
+        await self._session.commit()
+        await self._session.refresh(mode)
+        return mode
+
+    async def get_by_id(
+        self, mode_id: str, *, user_id: str | None = None
+    ) -> ModelMode | None:
+        conditions = [ModelMode.id == mode_id, ModelMode.deleted_at.is_(None)]
+        if user_id is not None:
+            conditions.append(ModelMode.user_id == user_id)
+        result = await self._session.execute(select(ModelMode).where(*conditions))
+        return result.scalar_one_or_none()
+
+    async def list_by_user(self, user_id: str) -> Sequence[ModelMode]:
+        """A user's live custom modes, in creation order."""
+        result = await self._session.execute(
+            select(ModelMode)
+            .where(ModelMode.user_id == user_id, ModelMode.deleted_at.is_(None))
+            .order_by(ModelMode.created_at.asc())
+        )
+        return result.scalars().all()
+
+    async def assignments_by_user(self, user_id: str) -> dict[str, dict[str, str]]:
+        """``{mode_id: assignments}`` for the turn resolver (llm/modes.py).
+
+        Loaded once per turn so a conversation/user referencing a custom mode can be
+        resolved without the resolver touching the DB (keeps it pure).
+        """
+        modes = await self.list_by_user(user_id)
+        return {m.id: dict(m.assignments or {}) for m in modes}
+
+    async def update(
+        self,
+        mode_id: str,
+        *,
+        user_id: str,
+        name: str | None = None,
+        assignments: dict[str, str] | None = None,
+    ) -> ModelMode | None:
+        mode = await self.get_by_id(mode_id, user_id=user_id)
+        if not mode:
+            return None
+        if name is not None:
+            mode.name = name
+        if assignments is not None:
+            mode.assignments = assignments
+        await self._session.commit()
+        await self._session.refresh(mode)
+        return mode
+
+    async def soft_delete(self, mode_id: str, *, user_id: str) -> bool:
+        mode = await self.get_by_id(mode_id, user_id=user_id)
+        if not mode:
+            return False
+        mode.deleted_at = datetime.now()
+        await self._session.commit()
+        return True
+
+
 class MessageRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
@@ -567,6 +730,33 @@ class MessageRepository:
         )
         return {row[0]: row[1] for row in result.all()}
 
+    async def search(
+        self, user_id: str, query: str, *, limit: int
+    ) -> Sequence[tuple[Message, str]]:
+        """Owner-scoped message-content substring search (全局搜索 Tier 1).
+
+        ``messages`` carries no ``user_id``, so this JOINs ``conversations`` to scope
+        by owner (never another user's content — IDOR-safe) and to exclude
+        soft-deleted and hidden handoff-host conversations. ILIKE over ``content``,
+        newest-first, capped at ``limit``. Returns ``(message, conversation_title)``
+        pairs so the route can render the owning conversation as list-row context
+        without an N+1.
+        """
+        result = await self._session.execute(
+            select(Message, Conversation.title)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+                Conversation.mode != "handoff",
+                Message.content.is_not(None),
+                Message.content.ilike(_ilike_pattern(query)),
+            )
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        return [(row[0], row[1]) for row in result.all()]
+
     async def list_by_conversation(
         self, conversation_id: str, *, limit: int = 100, offset: int = 0
     ) -> tuple[Sequence[Message], int]:
@@ -598,6 +788,93 @@ class MessageRepository:
             .limit(limit)
         )
         return list(reversed(result.scalars().all()))
+
+    # --- Cursor windows (载入模型: 最新窗口 + 上下滚动 + 命中定位, load-around B) ---
+    # The client opens on the latest window, then scrolls up (``list_before``) /
+    # down (``list_after``), or jumps to a window centered on a message
+    # (``window_around``) for a search hit. Each fetches ``limit + 1`` rows so the
+    # extra row exactly answers "is there more in this direction?" without a second
+    # count query. All return messages chronological (oldest-first) to match render
+    # order. Cursors are ``created_at`` (strict ``<`` / ``>``): a tie at the
+    # boundary is a tolerated MVP simplification — conversation turns are inserted
+    # seconds apart, unlike rapid IM.
+
+    async def list_latest(
+        self, conversation_id: str, *, limit: int
+    ) -> tuple[Sequence[Message], bool]:
+        """The newest ``limit`` messages, chronological. ``(messages, has_more_before)``."""
+        rows = (
+            await self._session.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.created_at.desc())
+                .limit(limit + 1)
+            )
+        ).scalars().all()
+        has_more_before = len(rows) > limit
+        return list(reversed(rows[:limit])), has_more_before
+
+    async def list_before(
+        self, conversation_id: str, *, before: datetime, limit: int
+    ) -> tuple[Sequence[Message], bool]:
+        """``limit`` messages strictly older than ``before``, chronological (scroll up).
+
+        ``(messages, has_more_before)`` — whether even older messages remain.
+        """
+        rows = (
+            await self._session.execute(
+                select(Message)
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.created_at < before,
+                )
+                .order_by(Message.created_at.desc())
+                .limit(limit + 1)
+            )
+        ).scalars().all()
+        has_more_before = len(rows) > limit
+        return list(reversed(rows[:limit])), has_more_before
+
+    async def list_after(
+        self, conversation_id: str, *, after: datetime, limit: int
+    ) -> tuple[Sequence[Message], bool]:
+        """``limit`` messages strictly newer than ``after``, chronological (scroll down).
+
+        ``(messages, has_more_after)`` — whether even newer messages remain.
+        """
+        rows = (
+            await self._session.execute(
+                select(Message)
+                .where(
+                    Message.conversation_id == conversation_id,
+                    Message.created_at > after,
+                )
+                .order_by(Message.created_at.asc())
+                .limit(limit + 1)
+            )
+        ).scalars().all()
+        has_more_after = len(rows) > limit
+        return rows[:limit], has_more_after
+
+    async def window_around(
+        self, conversation_id: str, *, message_id: str, before: int, after: int
+    ) -> tuple[Sequence[Message], bool, bool] | None:
+        """A window centered on a message (search-hit jump, load-around B).
+
+        ``before`` older + the target + ``after`` newer, chronological. Returns
+        ``(messages, has_more_before, has_more_after)``, or ``None`` if the message
+        is not in this conversation (the route 404s).
+        """
+        target = await self.get_by_id(message_id, conversation_id=conversation_id)
+        if target is None:
+            return None
+        older, has_more_before = await self.list_before(
+            conversation_id, before=target.created_at, limit=before
+        )
+        newer, has_more_after = await self.list_after(
+            conversation_id, after=target.created_at, limit=after
+        )
+        return [*older, target, *newer], has_more_before, has_more_after
 
     async def latest_created_at(self, conversation_id: str) -> datetime | None:
         """created_at of the newest message (None when the conversation is empty).
@@ -972,6 +1249,51 @@ class CredentialsRepository:
             update(Credentials)
             .where(Credentials.user_id == user_id)
             .values(failed_attempts=0, locked_until=None)
+        )
+        await self._session.commit()
+
+
+class UserLlmKeyRepository:
+    """The user's single BYOK DeepSeek key (one row per user). Stores only the
+    AES-256-GCM ciphertext; encryption/decryption is the service layer's job.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def get_by_user_id(self, user_id: str) -> UserLlmKey | None:
+        result = await self._session.execute(
+            select(UserLlmKey).where(UserLlmKey.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def upsert(self, *, user_id: str, api_key_enc: bytes) -> UserLlmKey:
+        """Insert or replace the user's key, resetting status to 'unchecked' (a
+        freshly set key has not been connectivity-tested yet)."""
+        row = await self.get_by_user_id(user_id)
+        if row is not None:
+            row.api_key_enc = api_key_enc
+            row.status = "unchecked"
+            await self._session.commit()
+            await self._session.refresh(row)
+            return row
+        row = UserLlmKey(user_id=user_id, api_key_enc=api_key_enc, status="unchecked")
+        self._session.add(row)
+        await self._session.commit()
+        await self._session.refresh(row)
+        return row
+
+    async def update_status(self, user_id: str, status: str) -> None:
+        await self._session.execute(
+            update(UserLlmKey)
+            .where(UserLlmKey.user_id == user_id)
+            .values(status=status)
+        )
+        await self._session.commit()
+
+    async def delete(self, user_id: str) -> None:
+        await self._session.execute(
+            delete(UserLlmKey).where(UserLlmKey.user_id == user_id)
         )
         await self._session.commit()
 
@@ -1381,3 +1703,70 @@ class UserDirectoryRepository:
         await self._session.commit()
         await self._session.refresh(settings)
         return settings
+
+
+class RunSessionRepository:
+    """Durable store for recoverable worker runs (留人 跨进程落盘, 乙 热修 P3).
+
+    The write path is an upsert by ``run_id``: a freshly-delegated worker inserts;
+    a later ``revise`` of the same run updates its transcript / content /
+    recall_count and bumps ``updated_at`` (which the TTL sweep reads). The read path
+    rehydrates a single run on an in-memory roster miss (restart / eviction).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert(
+        self,
+        *,
+        conversation_id: str,
+        run_id: str,
+        spec: dict,
+        transcript: list,
+        content: str,
+        recall_count: int,
+    ) -> None:
+        """Insert a recoverable session, or update it in place if its ``run_id``
+        already exists (a re-revised run). Idempotent re-delegation re-writes the
+        same content; a revision advances transcript / recall_count."""
+        now = datetime.now()
+        stmt = (
+            pg_insert(RunSessionRow)
+            .values(
+                run_id=run_id,
+                conversation_id=conversation_id,
+                spec=spec,
+                transcript=transcript,
+                content=content,
+                recall_count=recall_count,
+            )
+            .on_conflict_do_update(
+                index_elements=["run_id"],
+                set_={
+                    "spec": spec,
+                    "transcript": transcript,
+                    "content": content,
+                    "recall_count": recall_count,
+                    "updated_at": now,
+                },
+            )
+        )
+        await self._session.execute(stmt)
+        await self._session.commit()
+
+    async def get(self, run_id: str) -> RunSessionRow | None:
+        result = await self._session.execute(
+            select(RunSessionRow).where(RunSessionRow.run_id == run_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def delete_stale(self, *, before: datetime, limit: int) -> int:
+        """Delete up to ``limit`` sessions idle since before ``before`` (7-day TTL).
+        Batched so a sweep never holds one huge transaction; returns rows removed."""
+        stale = select(RunSessionRow.run_id).where(RunSessionRow.updated_at < before).limit(limit)
+        result = await self._session.execute(
+            delete(RunSessionRow).where(RunSessionRow.run_id.in_(stale))
+        )
+        await self._session.commit()
+        return result.rowcount or 0

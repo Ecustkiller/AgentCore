@@ -1,8 +1,9 @@
 import { Switch } from "@/components/ui/Switch";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
 import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
-import { Loader2, RefreshCw } from "lucide-react";
+import { KeyRound, Loader2, RefreshCw } from "lucide-react";
 import { useEffect } from "react";
 
 /**
@@ -34,6 +35,9 @@ export function UsageSettings() {
   }, [fetchSummary]);
 
   const refresh = () => void fetchSummary();
+  // BYOK: platform quota is dormant (the turn runs on the user's own key), so the
+  // page reframes额度 as「自带 Key 不限额」and presents cost as the user's own spend.
+  const byok = summary?.billing_mode === "byok";
 
   return (
     <div>
@@ -41,25 +45,29 @@ export function UsageSettings() {
         <div className="min-w-0">
           <h1 className="text-xl font-semibold">用量</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            本月额度与今日用量。成本按团队角色拆分，以人民币展示。
+            {byok
+              ? "自带 Key 模式：对话按你的 DeepSeek 额度计费、平台不限额。下方为你的用量与花费，成本以人民币估算。"
+              : "本月额度与今日用量。成本按团队角色拆分，以人民币展示。"}
           </p>
         </div>
         {/* Manual refresh once data exists — numbers go stale after running tasks
             elsewhere (mount-only fetch otherwise). First load / first-load failure
             are handled by the dedicated states below, so the button shows here. */}
         {summary && (
-          <button
-            type="button"
-            title="刷新"
-            onClick={refresh}
-            disabled={loading}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
-          >
-            <RefreshCw
-              size={16}
-              className={loading ? "animate-spin" : undefined}
-            />
-          </button>
+          <SimpleTooltip label="刷新">
+            <button
+              type="button"
+              aria-label="刷新"
+              onClick={refresh}
+              disabled={loading}
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
+            >
+              <RefreshCw
+                size={16}
+                className={loading ? "animate-spin" : undefined}
+              />
+            </button>
+          </SimpleTooltip>
         )}
       </div>
 
@@ -73,6 +81,7 @@ export function UsageSettings() {
             summary={summary}
             cnyPerUsd={cnyPerUsd}
             showDetail={usageDetail}
+            byok={byok}
           />
         </>
       ) : error ? (
@@ -175,14 +184,34 @@ type Summary = NonNullable<
   ReturnType<typeof useUsageStore.getState>["summary"]
 >;
 
+/**
+ * BYOK reframe of the quota block: the platform额度 is dormant (the turn runs on
+ * the user's own DeepSeek key), so instead of meters we explain that spend below
+ * is the user's own estimated DeepSeek cost and there is no platform cap.
+ */
+function ByokNote() {
+  return (
+    <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/30 px-4 py-3">
+      <KeyRound size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+      <p className="text-xs text-muted-foreground">
+        当前为「自带 Key」模式：对话按你自己的 DeepSeek
+        额度计费，平台不设上限。下方花费为按官方价格估算的你的 DeepSeek
+        用量，可在「模型配置」中管理你的 Key。
+      </p>
+    </div>
+  );
+}
+
 function Dashboard({
   summary,
   cnyPerUsd,
   showDetail,
+  byok,
 }: {
   summary: Summary;
   cnyPerUsd: number;
   showDetail: boolean;
+  byok: boolean;
 }) {
   const { today, month, quota } = summary;
   const monthLimit = quota.monthly_cost_nano;
@@ -212,29 +241,35 @@ function Dashboard({
 
   return (
     <div className="mt-6 space-y-5">
-      <QuotaMeter
-        label="本月额度"
-        used={monthUsed}
-        limit={monthLimit}
-        caption={moneyCaption}
-      />
-      {monthNear && (
-        <p className="-mt-3 text-xs text-warning">
-          接近本月额度，超出将暂停服务。
-        </p>
+      {byok ? (
+        <ByokNote />
+      ) : (
+        <>
+          <QuotaMeter
+            label="本月额度"
+            used={monthUsed}
+            limit={monthLimit}
+            caption={moneyCaption}
+          />
+          {monthNear && (
+            <p className="-mt-3 text-xs text-warning">
+              接近本月额度，超出将暂停服务。
+            </p>
+          )}
+          <QuotaMeter
+            label="今日 tokens"
+            used={dayTokensUsed}
+            limit={dayTokenLimit}
+            caption={tokenCaption}
+          />
+          <QuotaMeter
+            label="今日请求"
+            used={dayReqUsed}
+            limit={dayReqLimit}
+            caption={reqCaption}
+          />
+        </>
       )}
-      <QuotaMeter
-        label="今日 tokens"
-        used={dayTokensUsed}
-        limit={dayTokenLimit}
-        caption={tokenCaption}
-      />
-      <QuotaMeter
-        label="今日请求"
-        used={dayReqUsed}
-        limit={dayReqLimit}
-        caption={reqCaption}
-      />
 
       {/* 近 7 日成本趋势 (§7.3D) — ¥ over time, 大众-visible. Hidden when the whole
           window had no spend (a flat zero trend tells the user nothing). */}
@@ -351,21 +386,22 @@ function CostTrend({
           // Min 2% so a zero / tiny day still shows a sliver baseline.
           const h = max > 0 ? Math.max((p.cost_total / max) * 100, 2) : 2;
           return (
-            <div
+            <SimpleTooltip
               key={p.date}
-              className="flex flex-1 flex-col items-center gap-1"
-              title={`${weekdayLabel(p.date)} · ${formatCost(p.cost_total, cnyPerUsd)}`}
+              label={`${weekdayLabel(p.date)} · ${formatCost(p.cost_total, cnyPerUsd)}`}
             >
-              <div className="flex w-full flex-1 items-end">
-                <div
-                  className="w-full rounded-full bg-primary"
-                  style={{ height: `${h}%` }}
-                />
+              <div className="flex flex-1 flex-col items-center gap-1">
+                <div className="flex w-full flex-1 items-end">
+                  <div
+                    className="w-full rounded-full bg-primary"
+                    style={{ height: `${h}%` }}
+                  />
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {weekdayLabel(p.date)}
+                </span>
               </div>
-              <span className="text-xs text-muted-foreground">
-                {weekdayLabel(p.date)}
-              </span>
-            </div>
+            </SimpleTooltip>
           );
         })}
       </div>
@@ -377,7 +413,6 @@ function CostTrend({
 const ROLE_LABELS: Record<string, string> = {
   captain: "CEO",
   member: "队员",
-  synthesis: "汇总",
   arena: "辩论",
   title: "标题生成",
   memory: "记忆整理",

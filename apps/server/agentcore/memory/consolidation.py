@@ -36,6 +36,7 @@ from agentcore.conversation.history import load_recent_history
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import ConversationRepository, MessageRepository
+from agentcore.llm.byok import resolve_user_llm_credentials
 from agentcore.llm.factory import build_provider
 from agentcore.memory.locks import user_memory_lock
 from agentcore.memory.maintenance import maintain_user_memory
@@ -76,10 +77,20 @@ async def consolidate_conversation(
                     conversation_id,
                     max_messages=settings.memory_consolidation_window_messages,
                 )
+                # Offline pass runs on the conversation owner's own DeepSeek key
+                # (BYOK). None → platform key (platform mode); in the BYOK beta it
+                # means the user has no usable key — handled by the skip just below.
+                credentials = await resolve_user_llm_credentials(session, user_id)
+
+            # BYOK with no usable key: skip this pass WITHOUT advancing the watermark,
+            # so it retries once a key is configured — rather than making a doomed LLM
+            # call on an empty platform key. (Platform mode keeps None = global key.)
+            if window and settings.billing_mode == "byok" and credentials is None:
+                return False
 
             changed = False
             if window:
-                provider = build_provider()
+                provider = build_provider(credentials)
                 try:
                     changed = await maintain_user_memory(
                         user_id=user_id,
@@ -97,7 +108,7 @@ async def consolidate_conversation(
                     conversation_id, latest
                 )
             logger.info(
-                "memory_consolidated",
+                "memory.consolidated",
                 conversation_id=conversation_id,
                 user_id=user_id,
                 changed=changed,
@@ -105,7 +116,7 @@ async def consolidate_conversation(
             return changed
     except Exception as e:
         logger.warning(
-            "memory_consolidation_failed", conversation_id=conversation_id, error=str(e)
+            "memory.consolidation_failed", conversation_id=conversation_id, error=str(e)
         )
         return False
 
@@ -190,7 +201,7 @@ class MemoryConsolidationScheduler:
             await self._runner(conversation_id)
         except Exception as e:  # the runner is already best-effort; belt and braces
             logger.warning(
-                "memory_consolidation_run_failed",
+                "memory.consolidation_run_failed",
                 conversation_id=conversation_id,
                 error=str(e),
             )
@@ -268,8 +279,8 @@ async def consolidation_loop() -> None:
             await asyncio.sleep(interval)
             count = await consolidation_sweep_once()
             if count:
-                logger.info("memory_consolidation_swept", count=count)
+                logger.info("memory.consolidation_swept", count=count)
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning("memory_consolidation_sweep_failed", error=str(e))
+            logger.warning("memory.consolidation_sweep_failed", error=str(e))

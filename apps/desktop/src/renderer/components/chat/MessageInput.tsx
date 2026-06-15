@@ -1,3 +1,8 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import {
+  patchConversationCache,
+  upsertConversationFront,
+} from "@/hooks/useConversations";
 import {
   type EntryKind,
   type IndexedEntry,
@@ -6,6 +11,7 @@ import {
   loadFileIndex,
 } from "@/lib/fileIndex";
 import { api } from "@/services/api";
+import { loadLatestWindow } from "@/services/messages";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import {
@@ -14,10 +20,12 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
+import { useModelModesStore } from "@/stores/modelModes";
 import { Folder, Paperclip, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MentionMenu } from "./MentionMenu";
+import { ModeSelector } from "./ModeSelector";
 
 /** 已选附件（含正文，仅发送时携带；气泡只展示元信息）。 */
 interface PendingAttachment {
@@ -93,7 +101,6 @@ export function MessageInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isGenerating = useActiveGenerating();
   const addMessage = useConversationStore((s) => s.addMessage);
-  const renameConversation = useConversationStore((s) => s.renameConversation);
   const navigate = useNavigate();
 
   // ---- @ 提及 / 文件浏览菜单 ----
@@ -389,30 +396,44 @@ export function MessageInput() {
       // workspace-lock guard, which rejects a move once a chat has any messages
       // (双模式工作区 §九 ⑩).
       const targetFolderId = useFoldersStore.getState().pendingNewChatFolderId;
+      // The 质量档 chosen on the draft (composer picker) is applied at creation so
+      // the chat is born on the selected mode; then the draft selection resets.
+      const draftMode = useModelModesStore.getState().draftMode;
       try {
         const conv = await api.post<{ id: string }>("/v1/conversations", {
           title: null,
           folder_id: targetFolderId,
+          model_mode: draftMode,
         });
         conversationId = conv.id;
-        useConversationStore.getState().setConversations([
-          {
-            id: conv.id,
-            title: "新对话",
-            updatedAt: new Date().toISOString(),
-            messageCount: 0,
-            lastMessagePreview: null,
-            folderId: targetFolderId,
-          },
-          ...useConversationStore.getState().conversations,
-        ]);
+        upsertConversationFront({
+          id: conv.id,
+          title: "新对话",
+          updatedAt: new Date().toISOString(),
+          messageCount: 0,
+          lastMessagePreview: null,
+          folderId: targetFolderId,
+          modelMode: draftMode,
+        });
         useConversationStore.getState().setCurrentConversation(conv.id);
         createdNew = true;
+        useModelModesStore.getState().setDraftMode(null);
         if (targetFolderId) {
           useFoldersStore.getState().setPendingNewChatFolder(null);
         }
       } catch {
         return;
+      }
+    }
+
+    // Reading history (a search-hit jump left newer messages unloaded)? Snap back
+    // to the live head before appending, so the turn lands at the true tail rather
+    // than into a mid-conversation gap (live-head invariant, 载入模型 B).
+    if (!isFirstMessage && getActiveRuntime().hasMoreAfter) {
+      try {
+        await loadLatestWindow(conversationId);
+      } catch {
+        /* best-effort: fall through and append at the current tail */
       }
     }
 
@@ -440,7 +461,7 @@ export function MessageInput() {
 
     if (isFirstMessage) {
       const title = trimmed.length > 20 ? `${trimmed.slice(0, 20)}…` : trimmed;
-      renameConversation(conversationId, title);
+      patchConversationCache(conversationId, { title });
     }
 
     // 新建会话发送后切到带 id 的路由，保证「刚建会话直接刷新」也能从历史恢复。
@@ -464,15 +485,7 @@ export function MessageInput() {
       attachments: outgoing,
       optimisticUserId: userMsgId,
     });
-  }, [
-    value,
-    attachments,
-    isGenerating,
-    addMessage,
-    renameConversation,
-    navigate,
-    closeMenu,
-  ]);
+  }, [value, attachments, isGenerating, addMessage, navigate, closeMenu]);
 
   useEffect(() => {
     return () => {
@@ -583,7 +596,6 @@ export function MessageInput() {
             {attachments.map((a) => (
               <span
                 key={a.id}
-                title={a.path}
                 className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground"
               >
                 {a.kind === "dir" ? (
@@ -591,10 +603,12 @@ export function MessageInput() {
                 ) : (
                   <Paperclip size={12} className="shrink-0" />
                 )}
-                <span className="truncate">
-                  {a.name}
-                  {a.kind === "dir" ? "/" : ""}
-                </span>
+                <SimpleTooltip label={a.path}>
+                  <span className="truncate">
+                    {a.name}
+                    {a.kind === "dir" ? "/" : ""}
+                  </span>
+                </SimpleTooltip>
                 {a.truncated && (
                   <span className="shrink-0 text-muted-foreground">
                     {a.kind === "dir" ? "部分" : "已截断"}
@@ -630,19 +644,22 @@ export function MessageInput() {
           rows={1}
         />
         <div className="flex items-center justify-between px-4 pb-3">
-          <button
-            type="button"
-            onClick={openBrowse}
-            disabled={isGenerating}
-            aria-label="附加文件"
-            className={`flex size-8 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-40 ${
-              menuMode === "browse"
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground"
-            }`}
-          >
-            <Paperclip size={16} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={openBrowse}
+              disabled={isGenerating}
+              aria-label="附加文件"
+              className={`flex size-8 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-40 ${
+                menuMode === "browse"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground"
+              }`}
+            >
+              <Paperclip size={16} />
+            </button>
+            <ModeSelector disabled={isGenerating} />
+          </div>
           <div className="flex items-center gap-3">
             {charCount > 0 && (
               <span className="text-xs text-muted-foreground">

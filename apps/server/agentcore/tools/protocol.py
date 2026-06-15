@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
-from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect
 
 if TYPE_CHECKING:
     from agentcore.workspace.protocol import WorkspaceBackend
@@ -41,19 +41,23 @@ class ToolContext:
 class ToolResult:
     """Result of a tool execution.
 
-    ``terminal`` marks a *handoff* tool: one that has already produced and
-    streamed the turn's final user-facing answer itself, so the ReAct loop must
-    stop immediately instead of letting the calling model generate a second,
-    duplicate reply. ``terminal_content`` carries that already-streamed answer
-    back up the stack so it can be persisted (it is NOT re-emitted and is exempt
-    from ``output`` truncation, which only guards the model-facing ``output``
-    string). (No built-in tool sets this today — the CEO ``delegate`` primitive is
-    non-terminal — but the loop still honors the handoff contract.)
+    ``effect`` steers the ReAct loop and is the ONLY signal the engine acts on to
+    decide whether the turn continues — never the tool's name or category (引擎纯化,
+    设计 §18.5). The default ``ToolEffect.CONTINUE`` feeds ``output`` back to the
+    model and loops; a terminal effect (``HANDOFF`` / ``INTERACT``) stops the loop
+    because the tool already produced the turn's final user-facing answer, carried
+    in ``final_text`` (so the model does not generate a second, duplicate reply).
+    The CEO ``ask_user`` checkpoint sets ``INTERACT`` on a "stop" decision — its
+    closing note is the ``final_text`` — so the turn ends gracefully in-band rather
+    than via an SSE abort; ``delegate`` stays ``CONTINUE`` (its workers' products
+    return to the CEO loop). ``final_text`` is persisted but NOT re-emitted and is
+    exempt from ``output`` truncation (which only guards the model-facing
+    ``output`` string).
 
     ``output_limit`` overrides the default model-facing truncation budget for the
     ``output`` string. Most tools leave it ``None`` (4000 chars); read-heavy tools
     (e.g. ``read_url``) raise it so a full page body is not truncated into invalid
-    JSON. ``terminal_content`` is never subject to this cap.
+    JSON. ``final_text`` is never subject to this cap.
 
     ``citations`` carries structured web sources a tool consulted (each a
     ``{url, title, snippet, site}`` dict). Research tools (``web_search`` /
@@ -71,12 +75,17 @@ class ToolResult:
     error: str | None = None
     duration_ms: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
-    terminal: bool = False
-    terminal_content: str | None = None
+    effect: ToolEffect = ToolEffect.CONTINUE
+    final_text: str | None = None
     output_limit: int | None = None
     citations: list[dict[str, Any]] | None = None
 
     _MAX_OUTPUT_LEN = 4000
+
+    @property
+    def is_terminal(self) -> bool:
+        """Whether this result ends the turn (any non-``CONTINUE`` effect)."""
+        return self.effect is not ToolEffect.CONTINUE
 
     def __post_init__(self):
         limit = self.output_limit if self.output_limit is not None else self._MAX_OUTPUT_LEN

@@ -109,6 +109,85 @@ def test_invalid_reasoning_effort_cleared():
     assert plan.nodes[0].reasoning_effort is None
 
 
+# --- 辩论/审查 呈现标记 (前端UX目标态 §四: stance/group, display-only) -----------
+
+
+def test_stance_and_group_parsed_onto_spec():
+    plan, _ = build_run_plan(
+        [
+            {"role": "正方", "task": "支持", "stance": "pro", "group": "g1"},
+            {"role": "反方", "task": "反对", "stance": "con", "group": "g1"},
+        ],
+        id_prefix="t",
+    )
+    a, b = plan.nodes
+    assert (a.stance, a.group) == ("pro", "g1")
+    assert (b.stance, b.group) == ("con", "g1")
+
+
+def test_invalid_stance_dropped():
+    # Lenient like tier/effort: an unknown side leaves no tag (no debate signal).
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "a", "stance": "maybe"}], id_prefix="t"
+    )
+    assert plan.nodes[0].stance == ""
+
+
+def test_group_trimmed_and_tags_default_blank():
+    plan, _ = build_run_plan(
+        [
+            {"role": "A", "task": "a", "stance": "pro", "group": "  g  "},
+            {"role": "B", "task": "b"},
+        ],
+        id_prefix="t",
+    )
+    assert plan.nodes[0].group == "g"
+    # An ordinary task carries no tags (守住「形状是数据不是模式」: a debate is just
+    # 普通并行 + a presentation hint, so an untagged batch is byte-identical to before).
+    assert plan.nodes[1].stance == "" and plan.nodes[1].group == ""
+
+
+def test_stance_parsed_on_dag_step():
+    tasks = [
+        {"id": "s1", "role": "正方", "task": "支持", "stance": "pro"},
+        {"id": "s2", "role": "反方", "task": "反对", "stance": "con", "depends_on": ["s1"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs == []
+    assert plan.by_id("t_s1").stance == "pro"
+    assert plan.by_id("t_s2").stance == "con"
+
+
+def test_round_parsed_onto_spec():
+    # 真·多轮辩论 (前端UX目标态 §四): round 标轮次, display-only, 与 stance/group 正交.
+    plan, _ = build_run_plan(
+        [
+            {"role": "正方", "task": "r1", "stance": "pro", "round": 1},
+            {"role": "正方", "task": "r2", "stance": "pro", "round": 2},
+        ],
+        id_prefix="t",
+    )
+    a, b = plan.nodes
+    assert a.round == 1
+    assert b.round == 2
+
+
+def test_invalid_round_dropped():
+    # Lenient like stance: 非正整数 / 非 int / None 都落 0 (无多轮信号). bool 尤其要挡——
+    # True 是 int 子类, 不可被当成「第 1 轮」.
+    plan, _ = build_run_plan(
+        [
+            {"role": "A", "task": "zero", "round": 0},
+            {"role": "B", "task": "neg", "round": -2},
+            {"role": "C", "task": "str", "round": "2"},
+            {"role": "D", "task": "boolean", "round": True},
+            {"role": "E", "task": "none"},
+        ],
+        id_prefix="t",
+    )
+    assert [n.round for n in plan.nodes] == [0, 0, 0, 0, 0]
+
+
 def test_dag_invalid_on_failure_falls_back_to_degrade():
     tasks = [
         {"id": "s1", "role": "A", "task": "a"},

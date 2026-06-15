@@ -1,5 +1,4 @@
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
-import { useDetailPanelStore } from "@/stores/detailPanel";
 import {
   type AgentState,
   MODEL_TIER_META,
@@ -7,6 +6,7 @@ import {
   reasoningMeta,
   useMessageExecution,
 } from "@/stores/execution";
+import { useSidePanelStore } from "@/stores/sidePanel";
 import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import {
@@ -40,7 +40,7 @@ export function RunDetailBody({
   const execution = useMessageExecution(messageId);
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const usageDetail = useUIStore((s) => s.usageDetail);
-  const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
+  const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
 
   const run = execution?.runs.find((s) => s.id === runId);
   const agent = run
@@ -221,11 +221,11 @@ export function RunDetailBody({
         </Section>
       )}
 
-      {/* Synthesis runs are cost-neutral by design — their spend is billed once
-          on the CEO/captain payroll row (§7.3B), so they carry no own 资源消耗
-          ledger. Rendering the all-zero section here would misread as a real
-          「0 token」run, so it is omitted. */}
-      {run.kind !== "synthesis" && (run.usage || run.cost) && (
+      {/* Every drillable run carries its own priced spend (§7.3B): a delegated
+          worker and the CEO captain root are each metered once in the executor.
+          Shown only when usage/cost are present (a run that never hit the LLM is
+          unmetered → no ledger to render). */}
+      {(run.usage || run.cost) && (
         <ResourceSection
           run={run}
           cnyPerUsd={cnyPerUsd}

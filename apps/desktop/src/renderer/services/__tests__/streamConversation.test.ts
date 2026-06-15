@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   StreamError,
   describeStreamError,
+  errorActionForCode,
   isRetriableStreamError,
-  streamConversation,
-} from "../streamConversation";
+  streamErrorAction,
+} from "@/lib/errors";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { streamConversation } from "../streamConversation";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -36,6 +38,23 @@ describe("describeStreamError", () => {
     );
   });
 
+  it("surfaces the backend's actionable message for a 402 missing BYOK key", () => {
+    const err = new StreamError("http", 402, {
+      code: "LLM_KEY_REQUIRED",
+      serverMessage:
+        "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再发起对话。",
+    });
+    expect(describeStreamError(err)).toBe(
+      "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再发起对话。",
+    );
+  });
+
+  it("falls back to a config hint for a 402 with no server message", () => {
+    const err = new StreamError("http", 402, { code: "LLM_KEY_REQUIRED" });
+    expect(describeStreamError(err)).toContain("模型配置");
+    expect(describeStreamError(err)).not.toContain("服务暂时不可用");
+  });
+
   it("phrases other http errors as a temporary outage", () => {
     expect(describeStreamError(new StreamError("http", 503))).toContain(
       "服务暂时不可用",
@@ -54,6 +73,11 @@ describe("isRetriableStreamError", () => {
     expect(isRetriableStreamError(err)).toBe(false);
   });
 
+  it("does not offer retry for a missing BYOK key (needs configuration)", () => {
+    const err = new StreamError("http", 402, { code: "LLM_KEY_REQUIRED" });
+    expect(isRetriableStreamError(err)).toBe(false);
+  });
+
   it("offers retry for rate-limit, transport, and unknown errors", () => {
     expect(
       isRetriableStreamError(
@@ -62,6 +86,34 @@ describe("isRetriableStreamError", () => {
     ).toBe(true);
     expect(isRetriableStreamError(new StreamError("network"))).toBe(true);
     expect(isRetriableStreamError(new Error("boom"))).toBe(true);
+  });
+});
+
+describe("errorActionForCode", () => {
+  it("routes missing and invalid keys to the model-config page", () => {
+    expect(errorActionForCode("LLM_KEY_REQUIRED")).toEqual({
+      label: "去配置",
+      href: "/more/model",
+    });
+    expect(errorActionForCode("LLM_KEY_INVALID")).toEqual({
+      label: "去配置",
+      href: "/more/model",
+    });
+  });
+
+  it("offers no config action for codes fixed by retry / off-app", () => {
+    expect(errorActionForCode("LLM_INSUFFICIENT_BALANCE")).toBeNull();
+    expect(errorActionForCode("QUOTA_EXCEEDED")).toBeNull();
+    expect(errorActionForCode(undefined)).toBeNull();
+  });
+
+  it("streamErrorAction delegates to the code map for a StreamError", () => {
+    expect(
+      streamErrorAction(
+        new StreamError("http", 402, { code: "LLM_KEY_REQUIRED" }),
+      ),
+    ).toEqual({ label: "去配置", href: "/more/model" });
+    expect(streamErrorAction(new Error("boom"))).toBeNull();
   });
 });
 

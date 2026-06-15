@@ -1,13 +1,39 @@
-export const BASE_URL =
-  import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+export const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 export class ApiError extends Error {
+  /** Backend error code from the `{error:{code,message}}` contract (main.py's
+   * global handler over the AgentCoreError hierarchy), when the body parses. Lets
+   * callers branch on the cause without string-matching the message. */
+  readonly code?: string;
+  /** The backend's user-facing message from the same contract — often a ready-to
+   * -show zh string. Distinct from {@link body}, which is the raw (possibly
+   * non-JSON) response text kept for logging. */
+  readonly serverMessage?: string;
+  /** Seconds to wait before retrying, from a `Retry-After` header (e.g. 429s). */
+  readonly retryAfter?: number;
+
   constructor(
     public status: number,
     public body: string,
+    headers?: Headers,
   ) {
     super(`API ${status}: ${body}`);
     this.name = "ApiError";
+    // Every backend error is `{error:{code,message}}`; parse it so the shared
+    // error map (lib/errors) can phrase REST failures the same way it phrases
+    // SSE-turn failures. A non-JSON body (e.g. a proxy error page) just leaves
+    // code/serverMessage undefined and callers fall back to status phrasing.
+    try {
+      const parsed = JSON.parse(body) as {
+        error?: { code?: string; message?: string };
+      };
+      this.code = parsed.error?.code;
+      this.serverMessage = parsed.error?.message;
+    } catch {
+      /* non-JSON body — keep the raw text only */
+    }
+    const ra = Number(headers?.get("Retry-After"));
+    this.retryAfter = Number.isFinite(ra) && ra > 0 ? ra : undefined;
   }
 }
 
@@ -113,7 +139,7 @@ async function request<T>(
     onServiceUnavailable?.();
   }
 
-  throw new ApiError(response.status, await response.text());
+  throw new ApiError(response.status, await response.text(), response.headers);
 }
 
 export const api = {

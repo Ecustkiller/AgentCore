@@ -14,7 +14,9 @@ from agentcore.db.models import CostEvent
 from agentcore.db.repositories import CostEventRepository
 
 
-def _run(run_id: str, *, role: str = "member", parent: str | None = None, total: int = 1000) -> dict:
+def _run(
+    run_id: str, *, role: str = "member", parent: str | None = None, total: int = 1000
+) -> dict:
     """A per-run ledger payload in the runtime's ``asdict(RunCost)`` shape."""
     return {
         "run_id": run_id,
@@ -72,6 +74,43 @@ async def test_record_runs_persists_with_envelope(session_factory):
     assert member.cost_total_nano == 1200
     assert member.cost == {"input": 800, "cached": 100, "output": 200, "total": 1200}
     assert member.tokens["cache_hit"] == 60
+
+
+async def test_record_runs_persists_namespaced_worker_ids(session_factory):
+    # Regression: a real multi-agent turn's member/revision ids are NOT uuids —
+    # delegated workers are ``del_<uuid>_N`` and revisions ``<run>_rev2``. The
+    # ledger columns were once native uuid, so this single multi-row INSERT aborted
+    # whole (DataError), silently dropping the turn's entire ledger — captain too.
+    user_id, conv_id, msg_id = new_id(), new_id(), new_id()
+    cap_id = new_id()  # captain root is a real uuid
+    worker_id = f"del_{new_id()}_1"  # delegated worker — namespaced, not a uuid
+    revision_id = f"{worker_id}_rev2"  # 定向唤回 续写 of that worker
+
+    async with session_factory() as session:
+        written = await CostEventRepository(session).record_runs(
+            user_id=user_id,
+            conversation_id=conv_id,
+            message_id=msg_id,
+            runs=[
+                _run(cap_id, role="captain", total=300),
+                _run(worker_id, parent=cap_id, total=1200),
+                _run(revision_id, parent=worker_id, total=400),
+            ],
+        )
+    assert written == 3
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(CostEvent).where(CostEvent.message_id == msg_id)
+            )
+        ).scalars().all()
+    by_id = {r.run_id: r for r in rows}
+    assert set(by_id) == {cap_id, worker_id, revision_id}
+    # the revision row hangs off its original worker (version chain reconstructable)
+    assert by_id[revision_id].parent_run_id == worker_id
+    assert by_id[worker_id].parent_run_id == cap_id
+    assert by_id[revision_id].agent_id == revision_id
 
 
 async def test_record_runs_is_idempotent_by_run_id(session_factory):

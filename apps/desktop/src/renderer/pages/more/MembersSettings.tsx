@@ -1,3 +1,4 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { type Invite, createInvite, listInvites } from "@/services/invites";
 import { useAuthStore } from "@/stores/auth";
 import { Check, Copy, Plus } from "lucide-react";
@@ -121,20 +122,21 @@ export function MembersSettings() {
               >
                 {STATUS_LABEL[invite.status]}
               </span>
-              <button
-                type="button"
-                onClick={() => void handleCopy(invite.code)}
-                disabled={invite.status !== "active"}
-                title="复制邀请码"
-                aria-label="复制邀请码"
-                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
-              >
-                {copied === invite.code ? (
-                  <Check size={14} />
-                ) : (
-                  <Copy size={14} />
-                )}
-              </button>
+              <SimpleTooltip label="复制邀请码">
+                <button
+                  type="button"
+                  onClick={() => void handleCopy(invite.code)}
+                  disabled={invite.status !== "active"}
+                  aria-label="复制邀请码"
+                  className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+                >
+                  {copied === invite.code ? (
+                    <Check size={14} />
+                  ) : (
+                    <Copy size={14} />
+                  )}
+                </button>
+              </SimpleTooltip>
             </div>
           ))
         )}

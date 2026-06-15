@@ -1,10 +1,24 @@
 import {
-  type FolderMeta,
-  deleteFolder,
-  updateFolder,
-} from "@/services/folders";
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useDeleteFolder, useUpdateFolder } from "@/hooks/useFolders";
+import { notifyError } from "@/lib/toast";
+import type { FolderMeta } from "@/services/folders";
 import { type Conversation, useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
+import { useSidebarStore } from "@/stores/sidebar";
 import {
   Check,
   ChevronDown,
@@ -20,7 +34,6 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ContextMenu, MenuDivider, MenuItem } from "./ContextMenu";
 import { ConversationItem } from "./ConversationItem";
 
 interface Props {
@@ -28,34 +41,29 @@ interface Props {
   folder: FolderMeta | null;
   collapseKey: string;
   items: Conversation[];
-  /** Force-expanded regardless of stored collapse state (active search). */
-  forceOpen?: boolean;
 }
 
-export function FolderGroup({ folder, collapseKey, items, forceOpen }: Props) {
-  const collapsed = useFoldersStore((s) => s.collapsed[collapseKey] ?? false);
-  const toggleCollapsed = useFoldersStore((s) => s.toggleCollapsed);
-  const updateFolderMeta = useFoldersStore((s) => s.updateFolderMeta);
-  const removeFolder = useFoldersStore((s) => s.removeFolder);
+export function FolderGroup({ folder, collapseKey, items }: Props) {
+  // Section collapse lives in the sidebar store (expandedSections/toggleSection).
+  // Default to open so conversations stay visible on first load.
+  const open = useSidebarStore((s) => s.expandedSections[collapseKey] ?? true);
+  const toggleSection = useSidebarStore((s) => s.toggleSection);
+  const updateFolderMutation = useUpdateFolder();
+  const deleteFolderMutation = useDeleteFolder();
   const pendingRenameId = useFoldersStore((s) => s.pendingRenameId);
   const setPendingRename = useFoldersStore((s) => s.setPendingRename);
   const setPendingNewChatFolder = useFoldersStore(
     (s) => s.setPendingNewChatFolder,
   );
   const switchConversation = useConversationStore((s) => s.switchConversation);
-  const setConversationFolder = useConversationStore(
-    (s) => s.setConversationFolder,
-  );
   const navigate = useNavigate();
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(folder?.name ?? "");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const skipBlurRef = useRef(false);
 
-  const open = forceOpen || !collapsed;
   const isReal = folder !== null;
 
   // A folder just created via "新建文件夹…" opens straight into rename mode.
@@ -79,28 +87,28 @@ export function FolderGroup({ folder, collapseKey, items, forceOpen }: Props) {
     if (!folder) return;
     const name = draft.trim();
     if (!name || name === folder.name) return;
-    updateFolderMeta(folder.id, { name });
-    void updateFolder(folder.id, { name }).catch(() => {
-      updateFolderMeta(folder.id, { name: folder.name });
-    });
+    // Optimistic rename + rollback live in the mutation; the toast is the only
+    // view-specific bit, so it rides along as a call-level onError.
+    updateFolderMutation.mutate(
+      { id: folder.id, patch: { name } },
+      { onError: (err) => notifyError(err, "重命名失败") },
+    );
   };
 
   const handleDelete = async () => {
     setConfirmingDelete(false);
     if (!folder) return;
+    // The mutation deletes server-side, then drops this folder's conversations
+    // into 未分组 and removes the folder from the cache (so both delete sites
+    // share that unbind logic).
     try {
-      await deleteFolder(folder.id);
-    } catch {
-      return;
+      await deleteFolderMutation.mutateAsync(folder.id);
+    } catch (err) {
+      notifyError(err, "删除文件夹失败");
     }
-    // The server unbinds this folder's conversations; reflect that locally so
-    // they drop into 未分组 without needing a reload.
-    for (const c of items) setConversationFolder(c.id, null);
-    removeFolder(folder.id);
   };
 
   const newChatHere = () => {
-    setMenuPos(null);
     if (!folder) return;
     // Start a draft and remember the target folder; MessageInput files the
     // conversation here when the first message creates it server-side.
@@ -110,7 +118,6 @@ export function FolderGroup({ folder, collapseKey, items, forceOpen }: Props) {
   };
 
   const startRename = () => {
-    setMenuPos(null);
     if (!folder) return;
     setDraft(folder.name);
     setEditing(true);
@@ -155,81 +162,123 @@ export function FolderGroup({ folder, collapseKey, items, forceOpen }: Props) {
 
   const Chevron = open ? ChevronDown : ChevronRight;
 
-  return (
-    <div className="mb-1">
-      <div
-        className="group/header flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-sidebar-foreground/50 hover:bg-sidebar-accent/40"
-        onContextMenu={
-          isReal
-            ? (e) => {
-                e.preventDefault();
-                setConfirmingDelete(false);
-                setMenuPos({ x: e.clientX, y: e.clientY });
-              }
-            : undefined
-        }
+  const header = (
+    <div className="group/header flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium text-sidebar-foreground/50 hover:bg-sidebar-accent/40">
+      <button
+        type="button"
+        onClick={() => toggleSection(collapseKey)}
+        className="flex min-w-0 flex-1 items-center gap-1 text-left"
       >
-        <button
-          type="button"
-          onClick={() => toggleCollapsed(collapseKey)}
-          className="flex min-w-0 flex-1 items-center gap-1 text-left"
-        >
-          <Chevron size={13} className="shrink-0" />
-          {isReal ? (
-            <FolderIcon size={13} className="shrink-0" />
-          ) : (
-            <Inbox size={13} className="shrink-0" />
-          )}
-          <span className="truncate">{folder ? folder.name : "未分组"}</span>
-          {folder?.localRootId && (
-            <HardDrive
-              size={11}
-              className="shrink-0 text-primary"
-              aria-label="本地工作区"
-            />
-          )}
-          <span className="shrink-0 text-sidebar-foreground/30">
-            {items.length}
-          </span>
-        </button>
+        <Chevron size={13} className="shrink-0" />
+        {isReal ? (
+          <FolderIcon size={13} className="shrink-0" />
+        ) : (
+          <Inbox size={13} className="shrink-0" />
+        )}
+        <span className="truncate">{folder ? folder.name : "未分组"}</span>
+        {folder?.localRootId && (
+          <HardDrive
+            size={11}
+            className="shrink-0 text-primary"
+            aria-label="本地工作区"
+          />
+        )}
+        <span className="shrink-0 text-sidebar-foreground/30">
+          {items.length}
+        </span>
+      </button>
 
-        {isReal &&
-          (confirmingDelete ? (
-            <span className="flex shrink-0 items-center gap-0.5">
+      {isReal &&
+        (confirmingDelete ? (
+          <span className="flex shrink-0 items-center gap-0.5">
+            <SimpleTooltip label="确认删除（对话保留）">
               <button
                 type="button"
                 aria-label="确认删除文件夹"
-                title="确认删除（对话保留）"
                 onClick={() => void handleDelete()}
                 className="flex size-5 items-center justify-center rounded text-destructive hover:bg-destructive/10"
               >
                 <Check size={12} />
               </button>
+            </SimpleTooltip>
+            <SimpleTooltip label="取消">
               <button
                 type="button"
                 aria-label="取消删除"
-                title="取消"
                 onClick={() => setConfirmingDelete(false)}
                 className="flex size-5 items-center justify-center rounded text-sidebar-foreground/40 hover:text-sidebar-foreground"
               >
                 <X size={12} />
               </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              aria-label="文件夹操作"
-              title="更多"
-              onClick={(e) => {
-                const r = e.currentTarget.getBoundingClientRect();
-                setMenuPos({ x: r.right, y: r.bottom });
-              }}
-              className="flex size-5 shrink-0 items-center justify-center rounded text-sidebar-foreground/0 transition-colors group-hover/header:text-sidebar-foreground/50 hover:!text-sidebar-foreground"
+            </SimpleTooltip>
+          </span>
+        ) : (
+          <DropdownMenu>
+            <SimpleTooltip label="更多">
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="文件夹操作"
+                  className="flex size-5 shrink-0 items-center justify-center rounded text-sidebar-foreground/0 transition-colors group-hover/header:text-sidebar-foreground/50 hover:!text-sidebar-foreground data-[state=open]:text-sidebar-foreground/50"
+                >
+                  <MoreHorizontal size={14} />
+                </button>
+              </DropdownMenuTrigger>
+            </SimpleTooltip>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={startRename}>
+                <Pencil size={14} className="shrink-0" />
+                <span className="flex-1 truncate">重命名</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={newChatHere}>
+                <Plus size={14} className="shrink-0" />
+                <span className="flex-1 truncate">新建对话</span>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="danger"
+                onSelect={() => setConfirmingDelete(true)}
+              >
+                <Trash2 size={14} className="shrink-0" />
+                <span className="flex-1 truncate">删除文件夹</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ))}
+    </div>
+  );
+
+  return (
+    <div className="mb-1 rounded-lg">
+      {isReal && folder ? (
+        <ContextMenu
+          onOpenChange={(o) => {
+            if (o) setConfirmingDelete(false);
+          }}
+        >
+          <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem onSelect={startRename}>
+              <Pencil size={14} className="shrink-0" />
+              <span className="flex-1 truncate">重命名</span>
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={newChatHere}>
+              <Plus size={14} className="shrink-0" />
+              <span className="flex-1 truncate">新建对话</span>
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              variant="danger"
+              onSelect={() => setConfirmingDelete(true)}
             >
-              <MoreHorizontal size={14} />
-            </button>
-          ))}
-      </div>
+              <Trash2 size={14} className="shrink-0" />
+              <span className="flex-1 truncate">删除文件夹</span>
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      ) : (
+        header
+      )}
 
       {open && (
         <div className="space-y-0.5 pl-1">
@@ -242,35 +291,6 @@ export function FolderGroup({ folder, collapseKey, items, forceOpen }: Props) {
             </p>
           )}
         </div>
-      )}
-
-      {menuPos && folder && (
-        <ContextMenu
-          x={menuPos.x}
-          y={menuPos.y}
-          onClose={() => setMenuPos(null)}
-        >
-          <MenuItem
-            icon={<Pencil size={14} />}
-            label="重命名"
-            onSelect={startRename}
-          />
-          <MenuItem
-            icon={<Plus size={14} />}
-            label="新建对话"
-            onSelect={newChatHere}
-          />
-          <MenuDivider />
-          <MenuItem
-            icon={<Trash2 size={14} />}
-            label="删除文件夹"
-            danger
-            onSelect={() => {
-              setMenuPos(null);
-              setConfirmingDelete(true);
-            }}
-          />
-        </ContextMenu>
       )}
     </div>
   );

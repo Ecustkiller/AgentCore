@@ -1,5 +1,8 @@
 import { api } from "@/services/api";
+import type { components } from "@/types/api.generated";
 import type { FsRoot } from "@shared/ipc-contract";
+
+type Schemas = components["schemas"];
 
 /**
  * Local-mode workspace binding (双模式工作区 §七) — the desktop half of "模式跟着
@@ -10,8 +13,10 @@ import type { FsRoot } from "@shared/ipc-contract";
  * so every sibling flips too (the server decides the scope and reports it back).
  */
 
-export type WorkspaceMode = "local" | "cloud";
-export type BindingScope = "folder" | "conversation";
+/** Workspace mode (generated from backend `WorkspaceBindingResponse.mode`). */
+export type WorkspaceMode = Schemas["WorkspaceBindingResponse"]["mode"];
+/** Binding scope (generated from backend `WorkspaceBindingResponse.scope`). */
+export type BindingScope = Schemas["WorkspaceBindingResponse"]["scope"];
 
 export interface WorkspaceBinding {
   mode: WorkspaceMode;
@@ -21,14 +26,11 @@ export interface WorkspaceBinding {
   rootId: string | null;
 }
 
-interface BackendBinding {
-  mode: WorkspaceMode;
-  scope: BindingScope;
-  root_id: string | null;
-}
+/** Server binding payload (`/workspace/binding`), generated from OpenAPI. */
+type BackendBinding = Schemas["WorkspaceBindingResponse"];
 
 function toBinding(b: BackendBinding): WorkspaceBinding {
-  return { mode: b.mode, scope: b.scope, rootId: b.root_id };
+  return { mode: b.mode, scope: b.scope, rootId: b.root_id ?? null };
 }
 
 /** Resolve a conversation's current workspace mode (cloud vs local). */

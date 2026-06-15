@@ -1,3 +1,5 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import { notifyError } from "@/lib/toast";
 import { decideApproval } from "@/services/approvals";
 import { type PendingApproval, useApprovalStore } from "@/stores/approvals";
 import { useConversationStore } from "@/stores/conversation";
@@ -72,8 +74,10 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
 
   const onDecide = (decision: ApprovalDecision) => {
     setClicked(decision);
-    void decideApproval(approval, decision).catch(() => {
-      /* settleOne re-enables the card on a transient failure; let the user retry */
+    void decideApproval(approval, decision).catch((err) => {
+      // settleOne re-enables the card on a transient failure; toast so the user
+      // knows the click didn't land (the card going live again alone is subtle).
+      notifyError(err, "操作失败");
     });
   };
 
@@ -95,12 +99,11 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
             <span className="font-medium">{toolLabel(approval.toolName)}</span>
           </p>
           {headline && (
-            <p
-              className="mt-0.5 truncate font-mono text-xs text-muted-foreground"
-              title={headline}
-            >
-              {headline}
-            </p>
+            <SimpleTooltip label={headline}>
+              <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                {headline}
+              </p>
+            </SimpleTooltip>
           )}
           {argEntries.length > 0 && (
             <button

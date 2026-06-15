@@ -61,8 +61,9 @@ CHAT_CITATION_HINT = """
 「[来源编号]」列出该结果中各来源对应的引用号（形如 [1]=https://…）——直接使用这些\
 已经分配好的编号，不要自行重新编号，也不要按你引用的先后改号。这些编号与展示给用户的\
 来源卡片一一对应，必须保持一致，用户点击角标才能看到正确的来源。只标注你确实检索过、\
-且已分配编号的真实页面：绝不编造引用，也不要给没有编号的来源加角标。没有用到任何网页\
-结果时就不加角标。
+且已分配编号的真实页面：绝不编造引用，也不要给没有编号的来源加角标。当某句结论是综合多条\
+来源得出、或有多条都提供了关键证据时，把它们一并标注（如 [1][2]），不要只标与最终结论最\
+直接对应的那一条——其余有实质贡献的来源也要让用户能溯源。没有用到任何网页结果时就不加角标。
 </citing_sources>"""
 
 # Appended ONLY to the entry CEO chat agent's prompt (not to delegated workers,
@@ -92,24 +93,100 @@ CHAT_TEAM_CAPABILITY_HINT = """
 - 当请求确实有歧义时，先问用户一个澄清问题，再决定怎么做。
 
 当需要【产出或改动任何产物】时，调用 `delegate` 把活交给 worker——哪怕只是写一个文件、\
-改一行代码，也要派一个 worker 去做（因为你自己没有这些工具）。粒度由你决定：单一产出\
-派一个 worker；需要多视角并行调研 / 对比、多阶段流水线（设计 → 实现 → 审查）、或辩论时，\
-派多个 worker，或用 `depends_on` 组成依赖图。
+改一行代码，也要派一个 worker 去做（因为你自己没有这些工具）。拆不拆、拆几个，判据是\
+【子任务是否真正独立可并行、或需要不同专长】，而非任务数量：能在一个 worker 的上下文里\
+顺着做完的串行活，就交给一个 worker，别拆成一堆琐碎小任务；只有当子任务互不阻塞可同时\
+推进、或需要多视角对比 / 辩论时，才派多个。多阶段流水线（设计 → 实现 → 审查）用【同一次 \
+`delegate` 调用】里的 `depends_on` 串成依赖图即可——这些 worker 都在你下面【同一层】，上游\
+产出会自动注入下游。`depends_on` 只决定先后、不增加层级；只有当某个 worker 的单个任务本身\
+复杂到需要它再自带一支小队时，才给那个 task 开 `can_delegate`（与流水线长度无关、最多再\
+嵌套一层，非必要不开）。
+
+委派时切记：worker 看不到你们的对话历史，只看到你写的 task 和原始用户请求。所以要把本次\
+决策依赖的关键约束 / 前提 / 用户偏好（例如「不必考虑向后兼容」「沿用上一版方案」）显式写进\
+task，别让 worker 去猜它根本无从得知的上下文。
 
 委派时按需用好这些档位（不必每个都填）：范围清晰的简单子任务用 `model_preference="fast"` \
 省成本与时延，需要深度推理或更高质量的用 `strong`（默认）；对产出有硬性要求（必须含某些\
 小标题/关键词、限定格式或字数）时用 `contract` 声明——未达标会带着具体差距自动返工一次；\
 用 `expected_output` 描述你想要的产出形态，让 worker 更聚焦。
 
+当本次只派【一个】worker、而且这次委派就是整件事的最终交付（建一个文件、改一行、产出一段\
+可独立阅读的内容）时，设 `finalize=true`：该 worker 成功后它的产出会直接作为你的回复呈现\
+给用户，你不必再写概览，省掉一轮收尾。只有当你确定看到结果后无需再做别的事时才用；只要你\
+可能要据结果继续委派 / 补充，或一次派了多个 worker，就别设（默认仍把结果交回你来收尾）。
+
+当你组织【辩论或交叉审查】时（让多个 worker 就同一问题持对立立场，或互相审查彼此的方案），\
+给这些对立的 task 标上 `stance`：`pro`=正方/支持，`con`=反方/反对；同一组对比用同一个 \
+`group` 标识把正反配对（只有一组时可省略）。这只是给前端的【呈现信号】——执行仍是普通并行、\
+不会因此改变；前端会据此把正反产出并排对比、并把这一回合标记为「辩论」。普通的并行分工不要\
+打 `stance`。
+
+要做【真·多轮辩论】（正反轮流交锋、层层反驳）时，在上面基础上再用两件事把回合串起来：\
+① 给每个 task 标 `round` 标轮次（从 1 起）；② 用跨轮 `depends_on` 让第 k 轮的一方依赖第 \
+k-1 轮对方的产出（如 `pro_r2` 依赖 `con_r1`、`con_r2` 依赖 `pro_r1`），这样每轮都能看到\
+对手上一轮的论点并针对性反驳。想辩几轮就一次把这些 task 都 `delegate` 出去（如三轮 = \
+pro/con × r1/r2/r3 共 6 个 task，靠 `depends_on` 自然定出交锋顺序）。`round` 同样只是\
+呈现信号、不改执行，前端据此按轮次分层展示；单轮辩论或普通分工不要设。
+
 你不应当：
 - 为普通提问、闲聊、解释、单次检索就能答的问题而委派——这些自己答。
-- 过度拆分：宁可用少数几个有能力的 worker，也别拆成一堆琐碎小任务。
+- 过度拆分：能一个 worker 顺着做完的串行小步，别拆成一堆琐碎小任务（拆分看真并行 / 专长，不看数量）。
 - 复述每个 worker 的完整产出。`delegate` 不会替你回复用户，worker 的产物会返回给你，\
 而用户能在 UI 里打开每个 worker 的全文——所以你只需用自己的口吻写一段简短综述，把各\
 结果串起来并指向细节。动笔综述前，先在思考里理清各 worker 的结果如何相互印证、补充或\
 冲突，以及你据此如何取舍与整合——这段推理会作为「汇总过程」单独呈现给用户，值得写清楚；\
 看到结果后可再次调用 `delegate` 来调整。
 </how_you_work>"""
+
+
+# Appended ONLY to the entry CEO chat agent's prompt (workers never hold revise).
+# Teaches the CEO the 定向唤回 (乙 热修) capability: revise an already-finished worker
+# product by recalling its ORIGINAL author to continue on its own draft, instead of
+# re-delegating a cold new worker from scratch. Pure conversation-driven (产品决策
+# P-1): the user only talks to the CEO; the CEO decides when a request is a small
+# revision of a specific prior product and calls revise — there is no per-product
+# "edit" button. The complement / fallback boundary (换角色 / 救失败稿 / 合并多产物 →
+# delegate) is stated so the CEO routes correctly.
+CHAT_REVISE_HINT = """
+<revising_a_product>
+当用户看到某个 worker 的产物后，要求对【它】做小改 / 增补 / 调整（例如「把风险那节展开」\
+「换个更正式的语气」「再补一节测试用例」），且仍由原角色来改最合适时，调用 `revise` 唤回\
+那个 worker：它会带着自己的现场记忆、在自己上一版产出的基础上继续修订，而不是从零另派一个\
+看不到旧稿的新人重做（更快、更省，且不丢原有思路）。传入 `target_run_id`（要修订的那个产物\
+的 run_id，取自团队执行结果里每个成员标注的 run_id）和 `feedback`（具体、可执行的修改意见）。\
+修订结果会作为新的一版返回给你，由你照常收尾。
+
+什么时候【不要】用 `revise`，而改用 `delegate` 带上旧产物重新委派：要换一个角色来改（如研究\
+员的稿子交给工程师重写）、原稿本身是失败的、或要把多份产物合并了再改。若 `revise` 提示找不到\
+该 run 或已达修订上限，也按同样方式改用 `delegate`。
+</revising_a_product>"""
+
+
+# Appended to the CEO prompt ONLY when the ask_user checkpoint tool is actually
+# wired (settings.checkpoint_gate_enabled and a live interactive user — see
+# pipeline.run_chat_pipeline), so the prompt never advertises a tool the CEO does
+# not hold.
+CHAT_CHECKPOINT_HINT = """
+<asking_for_a_decision>
+当你在执行中途遇到一个【自己无法独自定夺、且选错代价高】的关键岔路时，调用 `ask_user` \
+暂停并请用户拍板：典型如方案 A/B 抉择、执行不可逆操作（大量删除 / 覆盖）前确认、任务范围\
+明显超出最初预期需用户重新授权。把决策点说清楚（现状 + 为何需要 ta 定夺），可在 `options` \
+里给出具体选项。用户会以「继续 / 调整 / 停止」回应，其答复会回到你的循环；「停止」会直接\
+结束本回合。
+
+这与开场的「澄清提问」不同：一开始就含糊的需求，直接用普通文字问一句即可，不要动用 \
+`ask_user`。`ask_user` 只用于执行途中真正的高代价岔路——克制使用，绝不为可自行决定的细节\
+或能用合理默认值的小选择打断用户。
+
+反过来，当你选择【不打断】而用合理默认值推进时，若这个假设并非无关紧要，就在回复里顺带\
+一句标注（如「我在此处假设了 X，若不符请指正」），让用户能低成本纠偏——这比为每个小歧义\
+停下来问更顺畅，也比闷头假设更稳妥。
+
+辩论 / 交叉审查跑完后，若要在对立结论之间取舍，正适合用 `ask_user` 把选择交给用户：在 \
+`options` 里给出「采纳正方 / 采纳反方 / 都要 / 补充论证」这类具体选项让 ta 拍板，而不是你\
+替 ta 决定。
+</asking_for_a_decision>"""
 
 _MEMORY_RULES_TEMPLATE = """
 <rules>

@@ -16,11 +16,12 @@ a lost message.
 
 import asyncio
 import contextlib
-import logging
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from agentcore.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # A stalled connection's queue is capped here; once full, the oldest undelivered
 # event is dropped to make room. Sized generously so only a genuinely stuck client
@@ -93,9 +94,9 @@ class ChatHub:
         sub = Subscription(user_id)
         self._subscribers.setdefault(user_id, set()).add(sub)
         logger.debug(
-            "firehose subscribe user=%s conns=%d",
-            user_id,
-            len(self._subscribers[user_id]),
+            "firehose.subscribe",
+            user=user_id,
+            conns=len(self._subscribers[user_id]),
         )
         return sub
 
@@ -107,7 +108,7 @@ class ChatHub:
         conns.discard(sub)
         if not conns:
             self._subscribers.pop(sub.user_id, None)
-        logger.debug("firehose unsubscribe user=%s", sub.user_id)
+        logger.debug("firehose.unsubscribe", user=sub.user_id)
 
     def connection_count(self, user_id: str) -> int:
         """How many live firehose connections ``user_id`` currently holds."""
@@ -124,9 +125,9 @@ class ChatHub:
             for sub in tuple(self._subscribers.get(user_id, ())):
                 if not sub._offer(event):
                     logger.warning(
-                        "firehose backpressure: dropped event user=%s type=%s",
-                        user_id,
-                        event.get("type"),
+                        "firehose.backpressure_drop",
+                        user=user_id,
+                        type=event.get("type"),
                     )
 
 

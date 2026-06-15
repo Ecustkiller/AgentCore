@@ -23,7 +23,7 @@ const payload = (
 const stubFsApi = (workspaceOp: unknown) =>
   vi.stubGlobal("window", { fsApi: { workspaceOp } });
 
-const OPS_URL = `${BASE_URL}/v1/conversations/c1/workspace/ops/r1`;
+const OPS_URL = `${BASE_URL}/v1/conversations/c1/interactions/r1`;
 
 // Minimal Response stand-ins for the two outcomes request() cares about.
 const okResponse = () => ({ ok: true, status: 200, json: async () => ({}) });
@@ -45,18 +45,24 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("performWorkspaceOp (本地工作区 op 回填)", () => {
-  it("runs the op on the bound root and posts the ok result verbatim", async () => {
+  it("runs the op on the bound root and posts the ok result (client_tool kind)", async () => {
     const workspaceOp = vi.fn().mockResolvedValue({ ok: true, value: "hello" });
     stubFsApi(workspaceOp);
 
     await performWorkspaceOp(payload(), "c1");
 
-    expect(workspaceOp).toHaveBeenCalledWith("root-1", "read", { path: "a.txt" });
+    expect(workspaceOp).toHaveBeenCalledWith("root-1", "read", {
+      path: "a.txt",
+    });
     expect(fetchMock.mock.calls[0][0]).toBe(OPS_URL);
-    expect(postedBody(fetchMock)).toEqual({ ok: true, value: "hello" });
+    expect(postedBody(fetchMock)).toEqual({
+      kind: "client_tool",
+      ok: true,
+      value: "hello",
+    });
   });
 
-  it("posts a typed error envelope verbatim (kind survives for the tool layer)", async () => {
+  it("posts a typed error envelope (kind survives for the tool layer)", async () => {
     stubFsApi(
       vi.fn().mockResolvedValue({
         ok: false,
@@ -67,6 +73,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
     await performWorkspaceOp(payload(), "c1");
 
     expect(postedBody(fetchMock)).toEqual({
+      kind: "client_tool",
       ok: false,
       error: { kind: "PathNotFound", detail: "x" },
     });
@@ -77,7 +84,10 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
 
     await performWorkspaceOp(payload(), "c1");
 
-    const body = postedBody(fetchMock) as { ok: boolean; error: { kind: string } };
+    const body = postedBody(fetchMock) as {
+      ok: boolean;
+      error: { kind: string };
+    };
     expect(body.ok).toBe(false);
     expect(body.error.kind).toBe("WorkspaceIOError");
   });

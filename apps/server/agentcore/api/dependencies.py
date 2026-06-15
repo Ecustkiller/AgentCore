@@ -19,6 +19,7 @@ from agentcore.db.repositories import (
     HandoffJobRepository,
     InviteRepository,
     MessageRepository,
+    ModelModeRepository,
     RefreshTokenRepository,
     UserBlockRepository,
     UserDirectoryRepository,
@@ -48,6 +49,10 @@ def get_conversation_repo(session: AsyncSession = Depends(get_db)) -> Conversati
 
 def get_folder_repo(session: AsyncSession = Depends(get_db)) -> FolderRepository:
     return FolderRepository(session)
+
+
+def get_model_mode_repo(session: AsyncSession = Depends(get_db)) -> ModelModeRepository:
+    return ModelModeRepository(session)
 
 
 def get_message_repo(session: AsyncSession = Depends(get_db)) -> MessageRepository:

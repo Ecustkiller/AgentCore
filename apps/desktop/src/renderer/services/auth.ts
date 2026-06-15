@@ -12,6 +12,7 @@ function toUser(u: BackendUser): AuthUser {
     displayName: u.display_name,
     email: u.email,
     role: u.role,
+    defaultModelMode: u.default_model_mode ?? null,
   };
 }
 

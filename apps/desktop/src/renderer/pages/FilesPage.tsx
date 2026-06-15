@@ -1,5 +1,6 @@
 import { FilePreview } from "@/components/files/FilePreview";
 import { FileTree } from "@/components/files/FileTree";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFilesStore } from "@/stores/files";
 import { FolderPlus } from "lucide-react";
 import { useEffect } from "react";
@@ -23,14 +24,16 @@ export function FilesPage() {
       <aside className="flex w-72 shrink-0 flex-col border-r border-border">
         <div className="flex items-center justify-between px-4 py-3">
           <span className="text-base font-medium text-foreground">文件</span>
-          <button
-            type="button"
-            title="添加文件夹"
-            onClick={handleAddFolder}
-            className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground [-webkit-app-region:no-drag]"
-          >
-            <FolderPlus size={16} />
-          </button>
+          <SimpleTooltip label="添加文件夹">
+            <button
+              type="button"
+              aria-label="添加文件夹"
+              onClick={handleAddFolder}
+              className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground [-webkit-app-region:no-drag]"
+            >
+              <FolderPlus size={16} />
+            </button>
+          </SimpleTooltip>
         </div>
 
         {roots.length === 0 ? (

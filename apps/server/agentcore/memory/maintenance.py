@@ -60,8 +60,8 @@ async def maintain_user_memory(
         if updated == current:
             return False
         await store.save(user_id, updated)
-        logger.info("user_memory_updated", user_id=user_id, ops=len(ops))
+        logger.info("memory.user_updated", user_id=user_id, ops=len(ops))
         return True
     except Exception as e:
-        logger.warning("user_memory_maintain_failed", user_id=user_id, error=str(e))
+        logger.warning("memory.user_maintain_failed", user_id=user_id, error=str(e))
         return False

@@ -1,4 +1,4 @@
-import { listGrouped } from "@/services/conversations";
+import { useGroupedConversations } from "@/hooks/useConversations";
 import { startRealtime, stopRealtime } from "@/services/realtime";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
@@ -12,32 +12,12 @@ import { CommandPalette } from "./CommandPalette";
 import { TitleBar } from "./TitleBar";
 
 export function AppShell() {
-  // Hydrate the sidebar (folders + conversations) from the backend once on mount
-  // so they survive a restart. Best-effort: an unauthenticated 401 or a network
-  // error just leaves the sidebar with whatever the stores already have.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const { folders, conversations } = await listGrouped();
-        if (cancelled) return;
-        useFoldersStore.getState().setFolders(folders);
-        const store = useConversationStore.getState();
-        // Keep any conversation created optimistically before this resolved
-        // (e.g. a brand-new one prepended by the composer), then append the rest.
-        const known = new Set(store.conversations.map((c) => c.id));
-        store.setConversations([
-          ...store.conversations,
-          ...conversations.filter((c) => !known.has(c.id)),
-        ]);
-      } catch {
-        /* best-effort hydration; sidebar falls back to session state */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Warm the grouped query (folders + conversations) at the shell on mount so
+  // the sidebar list is ready before it renders — even if the sidebar starts
+  // collapsed, the route hasn't mounted a list yet, etc. React Query owns both
+  // halves now (folders via useFolders, conversations via useConversations), so
+  // there's no store to hydrate here; this call only kicks off the shared fetch.
+  useGroupedConversations();
 
   // Load the account usage summary once on mount so the FX rate (cnyPerUsd) every
   // cost row formats with is the authoritative server value, not the default

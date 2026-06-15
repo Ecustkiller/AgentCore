@@ -5,7 +5,10 @@ import {
   getSmoothStepPath,
 } from "@xyflow/react";
 
-type StepEdgeData = Edge<{ animated: boolean; kind?: "dep" | "delegate" }>;
+type StepEdgeData = Edge<{
+  animated: boolean;
+  kind?: "dep" | "delegate" | "revision";
+}>;
 
 // Three particles, evenly phased, ride the edge toward a running node to convey
 // "data flowing downstream" (replaces the old dashed stroke, whose `dash`
@@ -44,6 +47,10 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
   // a sub-team reads as grouped under its parent, distinct from the solid DAG
   // dependency / bookend flow.
   const isDelegate = data?.kind === "delegate";
+  // A revision edge (original → its「修订 vN」续写, 乙 热修 P4) is dotted so a re-do
+  // reads as a version of the same node, distinct from both the solid DAG flow and
+  // the dashed delegation grouping.
+  const isRevision = data?.kind === "revision";
 
   return (
     <>
@@ -53,8 +60,8 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
           ...style,
           stroke: isAnimated ? "var(--primary)" : "var(--muted-foreground)",
           strokeWidth: 2,
-          opacity: isAnimated ? 1 : isDelegate ? 0.45 : 0.6,
-          strokeDasharray: isDelegate ? "5 4" : undefined,
+          opacity: isAnimated ? 1 : isDelegate || isRevision ? 0.45 : 0.6,
+          strokeDasharray: isRevision ? "2 4" : isDelegate ? "5 4" : undefined,
         }}
       />
       {isAnimated &&

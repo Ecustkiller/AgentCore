@@ -137,7 +137,10 @@ function ToolboxCard({ entry }: { entry: ToolboxEntry }) {
             {title}
           </h3>
           {available ? (
-            <ChevronRight size={16} className="shrink-0 text-muted-foreground" />
+            <ChevronRight
+              size={16}
+              className="shrink-0 text-muted-foreground"
+            />
           ) : (
             <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
               即将上线

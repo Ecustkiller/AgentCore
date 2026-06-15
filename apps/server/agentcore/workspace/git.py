@@ -39,9 +39,9 @@ class CloneError(Exception):
 def _validate_url(repo_url: str) -> None:
     parsed = urlparse(repo_url.strip())
     if parsed.scheme not in _ALLOWED_SCHEMES:
-        raise ValueError("Only http(s) repository URLs are supported")
+        raise ValueError("仅支持 http(s) 协议的仓库地址")
     if not parsed.netloc:
-        raise ValueError("Invalid repository URL")
+        raise ValueError("仓库地址无效")
 
 
 def _derive_dest_name(repo_url: str) -> str:
@@ -74,9 +74,9 @@ async def clone_repo(
     dest_rel = dest.strip() if dest and dest.strip() else _derive_dest_name(repo_url)
     target = resolve_safe_path(root, dest_rel)
     if target is None:
-        raise ValueError("Invalid destination path")
+        raise ValueError("目标路径无效")
     if target.exists() and any(target.iterdir()):
-        raise ValueError("Destination already exists and is not empty")
+        raise ValueError("目标目录已存在且非空")
 
     await _git_clone(
         repo_url, target, depth=depth, timeout=settings.workspace_clone_timeout_seconds
@@ -110,15 +110,15 @@ async def _git_clone(repo_url: str, dest: Path, *, depth: int, timeout: int) -> 
             env=env,
         )
     except OSError as e:  # git not installed / not on PATH
-        raise CloneError(f"could not start git: {e}") from e
+        raise CloneError(f"无法启动 git：{e}") from e
 
     try:
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
         proc.kill()
         await proc.wait()
-        raise CloneError(f"git clone timed out after {timeout}s") from None
+        raise CloneError(f"git clone 超时（{timeout} 秒）") from None
 
     if proc.returncode != 0:
-        detail = stderr.decode(errors="replace").strip() or "git clone failed"
+        detail = stderr.decode(errors="replace").strip() or "git clone 失败"
         raise CloneError(detail)
