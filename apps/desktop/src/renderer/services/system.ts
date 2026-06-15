@@ -6,6 +6,8 @@ export interface VersionInfo {
   builtAt: string;
 }
 
+// Hand-written on purpose: `/version` has no response_model, so the generated
+// type is an untyped `{ [k]: string }` dict — this local shape is the precise contract.
 interface BackendVersion {
   version: string;
   git_sha: string;

@@ -6,10 +6,10 @@ ledger row, so the delegate tool (members) and the pipeline (captain root) build
 rows the *same* way and the repository persists them uniformly.
 
 Money stays integer nano-USD throughout; pricing happens exactly once via
-:func:`agentcore.llm.pricing.calculate_cost` — the executor already priced each
-worker onto its :class:`RunState`, so member rows are read off, never re-priced;
-only the captain (which is the pipeline's own ReAct loop, not a scheduled run) is
-priced here, at that same single function.
+:func:`agentcore.llm.pricing.calculate_cost` in the run executor, which stamps
+both the captain root and every delegated worker onto their :class:`RunState`.
+This module only *reshapes* those priced states into ledger rows — it never
+re-prices.
 """
 
 from __future__ import annotations
@@ -17,13 +17,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import TokenUsage
 from agentcore.runtime.runs.types import RunSpec, RunState
 
 # cost_events.role categories (mirror the DB CheckConstraint). 阶段1 only ever
-# produces captain + member; synthesis / arena / title / memory are reserved for
-# later run kinds and background LLM calls.
+# produces captain + member; arena / title / memory are reserved for later run
+# kinds and background LLM calls.
 ROLE_CAPTAIN = "captain"
 ROLE_MEMBER = "member"
 
@@ -131,43 +129,3 @@ def aggregate_cost(cost_runs: Sequence[dict]) -> dict[str, int | str]:
         agg["output"] += int(cost.get("output", 0))
         agg["total"] += int(row.get("cost_total_nano", cost.get("total", 0)) or 0)
     return {**agg, "currency": "USD"}
-
-
-def captain_run_cost(
-    *,
-    run_id: str,
-    model: str,
-    usage: TokenUsage,
-    rounds: int,
-    duration_ms: int,
-) -> RunCost:
-    """The CEO root run's ledger row.
-
-    The captain is the pipeline's own ReAct loop (it has no scheduled
-    :class:`RunState`), so its usage is metered by the pipeline and priced here —
-    the one place a captain's cost is computed. ``usage`` must already exclude the
-    delegated workers' tokens (they get their own member rows).
-    """
-    cost = calculate_cost(model, usage)
-    body, total, currency = _split_cost(
-        {
-            "input": cost.input,
-            "cached": cost.cached,
-            "output": cost.output,
-            "total": cost.total,
-            "currency": cost.currency,
-        }
-    )
-    return RunCost(
-        run_id=run_id,
-        parent_run_id=None,
-        agent_id=None,
-        role=ROLE_CAPTAIN,
-        model=model,
-        tokens=usage.as_dict(),
-        cost=body,
-        cost_total_nano=total,
-        currency=currency,
-        rounds=rounds,
-        duration_ms=duration_ms,
-    )
