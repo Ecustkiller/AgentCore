@@ -1,29 +1,16 @@
 import { api } from "@/services/api";
+import type { components } from "@/types/api.generated";
 
-/** Tool governance level (mirrors backend ``ToolApproval``). */
-export type ToolApproval = "never" | "grantable" | "always";
+type Schemas = components["schemas"];
 
-/** Tool grouping (mirrors backend ``ToolCategory``). */
-export type ToolCategory =
-  | "filesystem"
-  | "search"
-  | "execution"
-  | "research"
-  | "orchestration";
+/** Tool governance level (generated from backend `ToolApproval`). */
+export type ToolApproval = Schemas["ToolApproval"];
+/** Tool grouping (generated from backend `ToolCategory`). */
+export type ToolCategory = Schemas["ToolCategory"];
+/** A built-in tool's public catalog entry; `parameters` is the call JSON Schema. */
+export type ToolInfo = Schemas["ToolInfo"];
 
-export interface ToolInfo {
-  name: string;
-  description: string;
-  category: ToolCategory;
-  approval: ToolApproval;
-  /** JSON Schema the model fills to call the tool. */
-  parameters: Record<string, unknown>;
-}
-
-interface ToolListResponse {
-  data: ToolInfo[];
-  total: number;
-}
+type ToolListResponse = Schemas["ToolListResponse"];
 
 /** Load the platform's built-in tool catalog (read-only). */
 export async function listTools(): Promise<ToolInfo[]> {

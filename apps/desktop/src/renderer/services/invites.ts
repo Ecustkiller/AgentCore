@@ -1,7 +1,12 @@
 import { api } from "@/services/api";
+import type { components } from "@/types/api.generated";
 
-export type InviteStatus = "active" | "used" | "expired";
+type Schemas = components["schemas"];
 
+/** Invite lifecycle state (generated from backend `InviteResponse.status`). */
+export type InviteStatus = Schemas["InviteResponse"]["status"];
+
+/** Client-facing invite (camelCase) for the admin invite list. */
 export interface Invite {
   id: string;
   code: string;
@@ -11,16 +16,8 @@ export interface Invite {
   usedAt: string | null;
 }
 
-interface BackendInvite {
-  id: string;
-  code: string;
-  status: InviteStatus;
-  created_by: string | null;
-  used_by: string | null;
-  created_at: string;
-  expires_at: string | null;
-  used_at: string | null;
-}
+/** Server invite payload (`/auth/invites`), generated from OpenAPI. */
+type BackendInvite = Schemas["InviteResponse"];
 
 function toInvite(i: BackendInvite): Invite {
   return {
@@ -42,10 +39,7 @@ export async function createInvite(expiresInDays?: number): Promise<Invite> {
   );
 }
 
-interface InviteListResponse {
-  data: BackendInvite[];
-  total: number;
-}
+type InviteListResponse = Schemas["InviteListResponse"];
 
 /** List recently issued invite codes (admin only). */
 export async function listInvites(): Promise<Invite[]> {
