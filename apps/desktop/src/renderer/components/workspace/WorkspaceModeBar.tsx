@@ -1,3 +1,9 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import {
+  getConversations,
+  patchConversationCache,
+} from "@/hooks/useConversations";
+import { patchFolderCache } from "@/hooks/useFolders";
 import { ApiError } from "@/services/api";
 import { runHandoff } from "@/services/handoff";
 import {
@@ -7,9 +13,7 @@ import {
   isBoundRootMissing,
   unbindWorkspace,
 } from "@/services/workspaceBinding";
-import { useConversationStore } from "@/stores/conversation";
 import { useFilesStore } from "@/stores/files";
-import { useFoldersStore } from "@/stores/folders";
 import type { FsRoot } from "@shared/ipc-contract";
 import {
   AlertTriangle,
@@ -80,17 +84,12 @@ export function WorkspaceModeBar({
   // sibling flips), an ungrouped one writes itself.
   const syncStores = (b: WorkspaceBinding) => {
     if (b.scope === "folder") {
-      const folderId = useConversationStore
-        .getState()
-        .conversations.find((c) => c.id === conversationId)?.folderId;
-      if (folderId)
-        useFoldersStore
-          .getState()
-          .updateFolderMeta(folderId, { localRootId: b.rootId });
+      const folderId = getConversations().find(
+        (c) => c.id === conversationId,
+      )?.folderId;
+      if (folderId) patchFolderCache(folderId, { localRootId: b.rootId });
     } else {
-      useConversationStore
-        .getState()
-        .setConversationLocalRoot(conversationId, b.rootId);
+      patchConversationCache(conversationId, { localRootId: b.rootId });
     }
   };
 
@@ -237,29 +236,33 @@ export function WorkspaceModeBar({
                     已备份
                   </span>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => void backup()}
-                    title="把本地工作区快照备份到云端（可在快照列表恢复 / 下载）"
-                    className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <UploadCloud size={13} />
-                    备份到云
-                  </button>
+                  <SimpleTooltip label="把本地工作区快照备份到云端（可在快照列表恢复 / 下载）">
+                    <button
+                      type="button"
+                      onClick={() => void backup()}
+                      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                    >
+                      <UploadCloud size={13} />
+                      备份到云
+                    </button>
+                  </SimpleTooltip>
                 ))}
-              <button
-                type="button"
-                onClick={onDisconnectClick}
-                disabled={backingUp}
-                title={
+              <SimpleTooltip
+                label={
                   binding.scope === "folder"
                     ? "该文件夹下所有对话都会切回云端"
                     : "切回云端工作区"
                 }
-                className="rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
               >
-                断开
-              </button>
+                <button
+                  type="button"
+                  onClick={onDisconnectClick}
+                  disabled={backingUp}
+                  className="rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                >
+                  断开
+                </button>
+              </SimpleTooltip>
             </span>
           )
         ) : (

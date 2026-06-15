@@ -106,10 +106,13 @@ function scheduleReconnect(): void {
   if (!running || reconnectTimer !== null) return;
   const delay = Math.min(RECONNECT_BASE_MS * 2 ** attempts, RECONNECT_MAX_MS);
   attempts += 1;
-  reconnectTimer = window.setTimeout(() => {
-    reconnectTimer = null;
-    void connect();
-  }, delay + Math.random() * 500);
+  reconnectTimer = window.setTimeout(
+    () => {
+      reconnectTimer = null;
+      void connect();
+    },
+    delay + Math.random() * 500,
+  );
 }
 
 async function connect(): Promise<void> {

@@ -25,13 +25,7 @@ AgentCore 以多 Agent 协作为默认范式，而非将其视为单 Agent 之�
 
 所有对话（单 Agent / Team）走同一条代码路径，差异仅在委派工具的注入和编排策略的选择：
 
-```
-用户消息 → 解析 Agent/Team → 组装工具（含 delegate 工具）→ RuntimeEngine.execute()
-                                    ↑
-                      单 Agent: 仅 delegate tool
-                      Team pipeline/fan_out: 编排前置 → Captain 综合
-                      Team adaptive: Captain 自主调度（delegate tool 指向成员）
-```
+单/Team 同一执行路径，差异在 delegate 注入与编排策略（见 `/docs/03-AI核心/编排器与CEO主Agent.md`）。
 
 ### 开发指导
 
@@ -59,14 +53,12 @@ MVP 支持四种范式，**均由 `delegate` 的 DAG（`depends_on`）+ CEO 收�
 
 Agent 间不直接通信——上游产物经调度器中转注入下游。
 
-```
-worker A 产出（RunState.content）→ WaveScheduler 暂存 → 按 depends_on 注入 worker B
-```
+数据流见 `/docs/03-AI核心/执行引擎架构设计.md` §一 Agent 间产物传递。
 
 | 设计点 | 决策 |
 |--------|------|
 | Agent 间通信 | 不直接通信，靠上游产物间接协作 |
-| 中转载体 | `WaveScheduler.completed[run_id]` 持有各 worker 产物；下游按 `depends_on` 取上游 `RunState.content`（`result_handling`：全文 / 摘要）。→ 见代码 `runtime/runs/executor.py` |
+| 中转载体 | `WaveScheduler` 按 `depends_on` 注入上游产物（`result_handling`：全文 / 摘要）。→ 见代码 `apps/server/agentcore/runtime/runs/executor.py` |
 | 可观测性 | 所有产物对用户透明可查（前端 run 详情） |
 
 ### 为什么不要 Agent 直接通信
@@ -86,15 +78,15 @@ CEO 是唯一裁决者，用户裁决仅在置信度低时触发。
 | 意见冲突 | CEO 读取各 worker 产物后裁决（收尾时综合） |
 | 资源冲突 | DAG 依赖关系避免并发写入 |
 | 优先级冲突 | CEO 负责任务排序（`delegate` 的 `depends_on`） |
-| 置信度低 | CEO 升级给用户决策（⏳ `ask_user` 规划态，当前路径无挂起） |
+| 置信度低 | CEO 调内置 `ask_user` 升级给用户拍板（继续/调整/停止），暂停回合待答复后回流 ReAct 循环 → 见代码 `tools/builtin/ask_user.py`、`runtime/checkpoints.py` ✅ |
 
 ---
 
 ## 四、任务编排 ✅ 已确定
 
 编排架构和实现方案已确定，详见：
-- [`编排器与CEO主Agent.md`](编排器与CEO主Agent.md) — CEO 主 Agent 定位、`delegate` 按需委派、自研（不依赖 LangGraph）、统一入口与自适应规模
-- [`执行引擎架构设计.md`](执行引擎架构设计.md) — DAG 波次调度、Agent 管理、事件流
+- [`编排器与CEO主Agent.md`](/docs/03-AI核心/编排器与CEO主Agent.md) — CEO 主 Agent 定位、`delegate` 按需委派、自研（不依赖 LangGraph）、统一入口与自适应规模
+- [`执行引擎架构设计.md`](/docs/03-AI核心/执行引擎架构设计.md) — DAG 波次调度、Agent 管理、事件流
 
 ---
 
@@ -110,7 +102,7 @@ CEO 是唯一裁决者，用户裁决仅在置信度低时触发。
 | 4 | **上下文最小传递** | 子 Agent 只收到它声明需要的上下文，非父 Agent 全量历史 | 避免无关上下文无差别传递 |
 | 5 | **分层熔断** | 单 Agent 失败不拖垮整个 DAG（5 层×3 重试 = 243× 放大） | Google SRE Book（⏳ Redis 熔断 fail-open 未实现） |
 | 6 | **幂等性执行** | 有副作用的操作携带幂等 key，重试不产生双重执行 | Cycles.io: 写操作必须 idempotency key |
-| 7 | **模型分级** | CEO（规划大脑）走思考档；Worker 简单/叶子任务用 Flash 非思考，复杂任务用 Pro 思考模式(high) | CEO 规划质量 + Worker 按复杂度分级，成本与质量平衡 |
+| 7 | **模型分级** | CEO（规划大脑）走思考档；Worker 走 Flash 思考 high、按回合预算分轻 / 重档，重档经质量档可升 Pro | CEO 规划质量 + Worker 按复杂度分级，成本与质量平衡 |
 
 ### 约束 1 判断标准
 
@@ -144,10 +136,10 @@ CEO 是唯一裁决者，用户裁决仅在置信度低时触发。
 
 | 角色 | 默认模型档 | 思考强度 |
 |------|----------|---------|
-| CEO（规划大脑） | V4-Flash | 思考模式 (max) |
-| Worker Agent（简单 / 叶子任务） | V4-Flash | 非思考（提速省钱） |
-| Worker Agent（复杂任务） | V4-Pro（暂走 Flash）| 思考模式 (high) |
-| Standalone 直答 | 系统默认 | 默认 |
+| CEO（规划大脑，`chat`） | V4-Flash | 思考 high（`max` 由 per-agent 按需解锁） |
+| Worker（复杂子任务，`strong`） | V4-Flash 基座 | 思考 high；高质量档 / 自定义档升 Pro |
+| Worker（简单 / 叶子任务，`fast`） | V4-Flash（锁定） | 思考 high、小回合预算 |
+| Standalone 直答（`chat`） | V4-Flash | 思考 high |
 
 **关键原则**：分级跟「行为」不跟「位置」——判据是该 Agent 是否还有下游调度任务，而非它被谁调用。
 
@@ -200,20 +192,10 @@ CEO 是唯一裁决者，用户裁决仅在置信度低时触发。
 
 ### 7.1 委派（Delegation）✅ 已落地
 
-CEO 通过统一的 `delegate` 工具把子任务交给内联 worker。执行链经过**规划（纯函数）→ 调度**两阶段：
+CEO 经 `delegate` 调 `build_run_plan` → `WaveScheduler` 执行（→ 见代码 `runtime/runs/`）；execute 流程见 `/docs/03-AI核心/编排器与CEO主Agent.md`。
 
-1. `build_run_plan` 把 tasks 参数变成一个 `RunPlan`——执行形状不再是离散「模式」而是数据，由 `depends_on` 边自然落定（1 task 无 deps = 单跑；N 无 deps = 并行；有 depends_on = DAG；某节点 `candidates>1` = ARENA best-of-n，⏳ 声明位未激活）
-2. 唯一的 `WaveScheduler` 逐波次驱动执行（→ 见代码 `runtime/runs/wave.py`）
-
-委派 / 团队 / 异步三条多 Agent 路径已收敛为「一个 RunPlan + 一个 WaveScheduler」。
-
-| 机制 | 说明 | 状态 |
-|------|------|------|
-| 上下文传递 | 有依赖的下游节点注入上游 `RunState.content`；并行兄弟节点注入彼此任务摘录（分工感知） | ✅ |
-| 树级并发 | 树级并发上限 10，经 contextvar 预算防嵌套相乘（`runs/concurrency.py`） | ✅ |
-| 内联角色 | Phase 1 worker 以内联角色声明（无 Agent 实体）；worker 不持 `delegate`，不可再委派 | ✅ |
-| 白名单控制 | Agent 版本定义可委派目标、各层级独立白名单 | ⏳ Phase 2（接 Agent 实体） |
-| 路由引擎 | embedding 语义匹配，供委派动态扩展 + Agent 发现端点消费 | ⏳ Phase 2 |
+- **白名单控制** ⏳ Phase 2（Agent 版本定义可委派目标、各层级独立白名单）
+- **路由引擎** ⏳ Phase 2（embedding 语义匹配，供委派动态扩展 + Agent 发现端点消费）
 
 ### 7.2 委派预审（Preflight Audit）⏳ 未实现
 
@@ -240,23 +222,9 @@ CEO 通过统一的 `delegate` 工具把子任务交给内联 worker。执行链
 
 ### 7.3 Team 编排（Orchestration）⏳ 未实现
 
-Team 的 `orchestration` 字段决定执行模式：
+Team 实体 + `orchestration` 字段为 Phase 2；模式语义见 `/docs/03-AI核心/执行引擎架构设计.md` §18.4。
 
-| 模式 | 行为 |
-|------|------|
-| `pipeline` / `sequential` | 成员按序执行，每步接收前一步输出。铺成线性链 + SYNTHESIS 终点 |
-| `fan_out` | 所有成员并行执行，各自接收原始任务。铺成单波 + SYNTHESIS 终点 |
-| `adaptive` | Captain 作为直接 RuntimeEngine 运行，团队成员作为委派目标注入，LLM 自主调度 |
-
-#### TeamMember 字段语义
-
-| 字段 | 用途 |
-|------|------|
-| `trigger_condition` | pipeline 下作为 instruction 注入；adaptive 下作为成员描述供 Captain 参考 |
-| `context_strategy` | `previous`（仅前一步）/ `all`（所有已完成步骤）/ `none`（仅原始任务）|
-| `result_handling` | 下游保真度：`pass_through`/`direct`=全文（默认）、`summarize`=摘要 |
-| `timeout_ms` | 单步超时，默认 60s |
-| `on_failure` | `skip` / `abort` / `retry`，默认 skip |
+TeamMember 字段为 Phase 2 schema（未落地）。
 
 **依赖传递保真默认全文**：分析/检索→写作链路必须保留金额、法条编号等细节，「一律摘要」会丢失关键信息。`summarize` 仅用于大扇入合成省 token 的场景。
 
@@ -267,6 +235,8 @@ Team 的 `orchestration` 字段决定执行模式：
 - 固定阶段轮转，按 `respond_to_phase` 过滤历史
 - 各角色从 Agent 版本加载 system_prompt 和 model
 - 独立 SSE 事件族
+
+> **与现有轻量辩论的关系 + 为何排 Phase 2 最后**（决策理由，代码看不出来）：MVP 的「辩论/审查」已由 §一 的 **stance/group 数据标记**覆盖——`A(pro) ∥ B(con) → CEO 综合`，普通并行 DAG + 前端差异化呈现，零架构代价（见 [`../04-前端/前端UX设计.md` §四](/docs/04-前端/前端UX设计.md)）。Arena **唯一独有的是「多轮来回交锋」**（`respond_to_phase` 让角色互相反驳）；而「方案对比/代码审查」多是一次性 pro/con + CEO 综合，多轮属边际收益，真正非多轮不可的「辩论/法庭/谈判」对大众消费场景**小众**。**架构上要清醒**：Arena 是「独立 SSE + 状态机 + 阶段轮转」的**辩论专用执行路径**，与 §一「形状是数据不是模式、否决专用路径」的收敛方向**相逆**——轻量版用数据标记拿到 ~80% 体验，Arena 是为那 ~20%（真交锋）才长出的独立子系统，故仅当其 niche 需求确立才值得做。**依赖最重**：除自身阶段轮转引擎，还叠加几乎所有其他 Phase 2 地基（持久 Agent 实体加载角色、`paused`/suspend-resume 状态机、Turn Journal 终态回放），故排 Phase 2 **最后**。当前后端无 arena 相关执行逻辑，亦不再预留 `RunKind` 枚举值——落地时再按需引入（best-of-N 择优已归 `RunPolicy.candidates` 策略位，与本节多轮辩论是两回事，勿混）。→ 见代码 `runtime/runs/types.py`。
 
 #### 状态机
 
@@ -282,25 +252,13 @@ setup → running ⇄ paused → completed | cancelled | error
 
 ### 7.5 Agent 通信协议 (v1)⏳ 未实现
 
-委派从进程内函数调用升级为标准化协议交互，内外部 Agent 走同一接口：
-
-| 抽象 | 用途 |
-|------|------|
-| `AgentCard` | Agent 能力声明（capabilities, input/output_modes, endpoint） |
-| `TaskRequest` | 标准化委派信封（instruction, context, constraints） |
-| `TaskResponse` | 标准化响应（status, content, structured_output, usage） |
+委派从进程内函数调用升级为标准化协议交互，内外部 Agent 走同一接口（⏳ A2A 风格：`AgentCard` / `TaskRequest` / `TaskResponse`，参考 Google A2A）。
 
 协议参考 A2A 但更轻量，面向内部 Agent 间通信。远程委派作为协议扩展位保留。
 
 ### 7.6 运行时基础设施
 
-| 机制 | 说明 |
-|------|------|
-| CancellationToken | 协作式取消令牌，SSE 断开时沿委派树向下传播 |
-| UsageAggregator | 全委派树的 token 用量聚合器 |
-| 并发预算 | 树级并发上限经 contextvar 传播、按扇出细分预算，嵌套 fan-out 从 10→100→1000 收敛到整树 ≤10 |
-| Session 隔离 | 并行委派每个子任务用独立 DB session |
-| Prompt 缓存 | PromptAssembler 同实例内按 agent_id 缓存 |
+→ 见代码 `runtime/runs/`；机制详述见 `/docs/03-AI核心/执行引擎架构设计.md` §十四、§十八。
 
 **并发预算被否决方案**：树级共享 Semaphore——父持槽 await 子、子又抢同一信号量 → 必然死锁。
 

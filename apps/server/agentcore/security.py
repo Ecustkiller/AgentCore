@@ -1,13 +1,18 @@
-"""Security primitives: password hashing, JWT access tokens, refresh tokens.
+"""Security primitives: password hashing, JWT access tokens, refresh tokens,
+at-rest secret encryption (BYOK API keys).
 
-Pure functions with no DB or framework coupling, so they are trivially
-unit-testable. Higher layers (auth service, dependencies) compose these.
+Pure functions / DB-free primitives with no framework coupling, so they are
+trivially unit-testable. Higher layers (auth service, dependencies, the BYOK
+key service) compose these.
 """
 
 import hashlib
+import os
 import secrets
+from binascii import unhexlify
 from datetime import UTC, datetime, timedelta
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from jose import JWTError, jwt
 from pwdlib import PasswordHash
 
@@ -100,3 +105,42 @@ def generate_refresh_token() -> tuple[str, str]:
 def generate_invite_code() -> str:
     """Return a high-entropy, URL-safe invite code for admin-issued invites."""
     return secrets.token_urlsafe(12)
+
+
+# --- Symmetric encryption (at-rest secrets: BYOK provider keys) ---
+# AES-256-GCM for encrypting user-supplied API keys before they touch the DB
+# (db/models.py UserLlmKey.api_key_enc). The plaintext key never lands on disk;
+# the 32-byte master key comes from settings.encryption_key (64 hex chars) and
+# lives only in server config. Wire format: nonce(12B) ‖ ciphertext+tag.
+
+
+class KeyEncryptor:
+    """AES-256-GCM encryptor for at-rest secrets (BYOK API keys).
+
+    Constructed from a 64-hex-char (32-byte) master key so it stays a pure,
+    DB-free primitive (the caller reads ``settings.encryption_key``). Raises
+    ``ValueError`` on a malformed key, so a misconfigured server fails loudly
+    rather than silently storing unreadable ciphertext.
+    """
+
+    _NONCE_SIZE = 12
+
+    def __init__(self, hex_key: str) -> None:
+        raw = unhexlify(hex_key)
+        if len(raw) != 32:
+            raise ValueError(
+                f"encryption_key must be 32 bytes (64 hex chars), got {len(raw)} bytes"
+            )
+        self._gcm = AESGCM(raw)
+
+    def encrypt(self, plaintext: bytes) -> bytes:
+        """Return ``nonce ‖ ciphertext+tag`` (a fresh random nonce each call)."""
+        nonce = os.urandom(self._NONCE_SIZE)
+        return nonce + self._gcm.encrypt(nonce, plaintext, None)
+
+    def decrypt(self, ciphertext: bytes) -> bytes:
+        """Inverse of :meth:`encrypt`; raises on a too-short or tampered input."""
+        if len(ciphertext) < self._NONCE_SIZE:
+            raise ValueError("ciphertext too short")
+        nonce = ciphertext[: self._NONCE_SIZE]
+        return self._gcm.decrypt(nonce, ciphertext[self._NONCE_SIZE :], None)

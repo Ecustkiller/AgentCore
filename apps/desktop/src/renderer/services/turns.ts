@@ -1,7 +1,15 @@
 import {
-  type OutgoingAttachment,
+  bumpConversationCache,
+  getConversations,
+  restoreConversationCache,
+} from "@/hooks/useConversations";
+import {
   describeStreamError,
   isRetriableStreamError,
+  streamErrorAction,
+} from "@/lib/errors";
+import {
+  type OutgoingAttachment,
   regenerateConversation,
   streamConversation,
 } from "@/services/streamConversation";
@@ -54,7 +62,7 @@ export async function runRegenerate(
   // key — the user may switch away mid-stream and the turn keeps running in the
   // background (switchConversation no longer aborts it).
   store.clearError(conversationId);
-  store.bumpConversation(conversationId);
+  bumpConversationCache(conversationId);
   store.truncateAfter(userMessageId, conversationId);
   store.createAssistantMessage(conversationId);
 
@@ -81,7 +89,7 @@ export async function runRegenerate(
       const retry = isRetriableStreamError(err)
         ? () => void runRegenerate(userMessageId, content)
         : null;
-      s.setError(msg, retry, conversationId);
+      s.setError(msg, retry, conversationId, streamErrorAction(err));
     }
   } finally {
     useConversationStore.getState().setAbort(null, conversationId);
@@ -117,10 +125,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
 
   // Snapshot the pre-bump position so we can undo the optimistic bump if the
   // send fails before the server ever persisted the turn.
-  const beforeBump = store.conversations;
+  const beforeBump = getConversations();
   const origIndex = beforeBump.findIndex((c) => c.id === conversationId);
   const origUpdatedAt = origIndex >= 0 ? beforeBump[origIndex].updatedAt : null;
-  store.bumpConversation(conversationId);
+  bumpConversationCache(conversationId);
 
   // Persisted already? Then the optimistic id was swapped out — regenerate from
   // the saved user message rather than resending (which would duplicate it).
@@ -165,14 +173,14 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
       (m) => m.id === optimisticUserId,
     );
     if (notPersisted && origIndex >= 0 && origUpdatedAt !== null) {
-      s.restoreConversation(conversationId, origIndex, origUpdatedAt);
+      restoreConversationCache(conversationId, origIndex, origUpdatedAt);
     }
     const msg = describeStreamError(err);
     if (msg) {
       const retry = isRetriableStreamError(err)
         ? () => void sendTurn(spec)
         : null;
-      s.setError(msg, retry, conversationId);
+      s.setError(msg, retry, conversationId, streamErrorAction(err));
     }
   } finally {
     useConversationStore.getState().setAbort(null, conversationId);

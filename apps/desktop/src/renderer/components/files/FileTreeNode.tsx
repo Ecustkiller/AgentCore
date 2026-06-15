@@ -1,3 +1,11 @@
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFilesStore } from "@/stores/files";
 import type { FsCreateKind, FsEntry, FsResult } from "@shared/ipc-contract";
 import {
@@ -35,11 +43,6 @@ interface FileTreeNodeProps {
   onRemoveRoot?: () => void;
 }
 
-interface MenuPos {
-  x: number;
-  y: number;
-}
-
 export function FileTreeNode({
   rootId,
   name,
@@ -60,7 +63,6 @@ export function FileTreeNode({
 
   const [renaming, setRenaming] = useState(false);
   const [creating, setCreating] = useState<FsCreateKind | null>(null);
-  const [menu, setMenu] = useState<MenuPos | null>(null);
   const [opError, setOpError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -118,7 +120,6 @@ export function FileTreeNode({
   };
 
   const startCreate = (kind: FsCreateKind) => {
-    setMenu(null);
     setExpanded(true);
     setCreating(kind);
   };
@@ -140,7 +141,6 @@ export function FileTreeNode({
   };
 
   const handleDelete = async () => {
-    setMenu(null);
     if (!window.confirm(`删除 “${name}”？此操作不可撤销。`)) return;
     const ok = await runOp(window.fsApi.delete(rootId, relPath));
     if (ok && isSelected) select(null);
@@ -191,70 +191,109 @@ export function FileTreeNode({
 
   return (
     <div>
-      {/** biome-ignore lint/a11y/useKeyWithClickEvents: 树节点以原生 button 子元素承载键盘语义，行容器仅为视觉/拖拽载体 */}
-      <div
-        className={`group flex h-7 cursor-pointer items-center gap-1 rounded-md pr-2 text-sm transition-colors ${
-          isSelected
-            ? "bg-accent text-accent-foreground"
-            : "text-foreground hover:bg-accent/60"
-        } ${dragOver ? "ring-1 ring-inset ring-primary/60" : ""}`}
-        style={{ paddingLeft: indent }}
-        draggable={!isRoot && !renaming}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={handleDrop}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setMenu({ x: e.clientX, y: e.clientY });
-        }}
-        onClick={renaming ? undefined : handleRowClick}
-      >
-        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-          {isDir ? (
-            expanded ? (
-              <ChevronDown size={14} />
-            ) : (
-              <ChevronRight size={14} />
-            )
-          ) : null}
-        </span>
-        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-          {isDir ? (
-            expanded ? (
-              <FolderOpen size={14} />
-            ) : (
-              <FolderClosed size={14} />
-            )
-          ) : (
-            <FileIcon size={14} />
-          )}
-        </span>
-
-        {renaming ? (
-          <InlineInput
-            initial={name}
-            onSubmit={submitRename}
-            onCancel={() => setRenaming(false)}
-          />
-        ) : (
-          <span className="flex-1 truncate">{name}</span>
-        )}
-
-        {isRoot && !renaming && (
-          <button
-            type="button"
-            title="移除该文件夹"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemoveRoot?.();
-            }}
-            className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/0 transition-colors hover:bg-background hover:text-foreground group-hover:text-muted-foreground"
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          {/** biome-ignore lint/a11y/useKeyWithClickEvents: 树节点以原生 button 子元素承载键盘语义，行容器仅为视觉/拖拽载体 */}
+          <div
+            className={`group flex h-7 cursor-pointer items-center gap-1 rounded-md pr-2 text-sm transition-colors ${
+              isSelected
+                ? "bg-accent text-accent-foreground"
+                : "text-foreground hover:bg-accent/60"
+            } ${dragOver ? "ring-1 ring-inset ring-primary/60" : ""}`}
+            style={{ paddingLeft: indent }}
+            draggable={!isRoot && !renaming}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={renaming ? undefined : handleRowClick}
           >
-            <X size={13} />
-          </button>
-        )}
-      </div>
+            <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+              {isDir ? (
+                expanded ? (
+                  <ChevronDown size={14} />
+                ) : (
+                  <ChevronRight size={14} />
+                )
+              ) : null}
+            </span>
+            <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+              {isDir ? (
+                expanded ? (
+                  <FolderOpen size={14} />
+                ) : (
+                  <FolderClosed size={14} />
+                )
+              ) : (
+                <FileIcon size={14} />
+              )}
+            </span>
+
+            {renaming ? (
+              <InlineInput
+                initial={name}
+                onSubmit={submitRename}
+                onCancel={() => setRenaming(false)}
+              />
+            ) : (
+              <span className="flex-1 truncate">{name}</span>
+            )}
+
+            {isRoot && !renaming && (
+              <SimpleTooltip label="移除该文件夹">
+                <button
+                  type="button"
+                  aria-label="移除该文件夹"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveRoot?.();
+                  }}
+                  className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/0 transition-colors hover:bg-background hover:text-foreground group-hover:text-muted-foreground"
+                >
+                  <X size={13} />
+                </button>
+              </SimpleTooltip>
+            )}
+          </div>
+        </ContextMenuTrigger>
+
+        <ContextMenuContent className="min-w-36">
+          {isDir && (
+            <>
+              <ContextMenuItem onSelect={() => startCreate("file")}>
+                <FilePlus size={14} className="shrink-0" />
+                <span className="flex-1 truncate">新建文件</span>
+              </ContextMenuItem>
+              <ContextMenuItem onSelect={() => startCreate("dir")}>
+                <FolderPlus size={14} className="shrink-0" />
+                <span className="flex-1 truncate">新建文件夹</span>
+              </ContextMenuItem>
+              {(!isRoot || onRemoveRoot) && <ContextMenuSeparator />}
+            </>
+          )}
+          {!isRoot && (
+            <ContextMenuItem onSelect={() => setRenaming(true)}>
+              <Pencil size={14} className="shrink-0" />
+              <span className="flex-1 truncate">重命名</span>
+            </ContextMenuItem>
+          )}
+          {!isRoot && (
+            <ContextMenuItem
+              variant="danger"
+              onSelect={() => void handleDelete()}
+            >
+              <Trash2 size={14} className="shrink-0" />
+              <span className="flex-1 truncate">删除</span>
+            </ContextMenuItem>
+          )}
+          {isRoot && onRemoveRoot && (
+            <ContextMenuItem onSelect={() => onRemoveRoot()}>
+              <X size={14} className="shrink-0" />
+              <span className="flex-1 truncate">移除该文件夹</span>
+            </ContextMenuItem>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
 
       {opError && (
         <div
@@ -323,30 +362,6 @@ export function FileTreeNode({
           ))}
         </div>
       )}
-
-      {menu && (
-        <ContextMenu
-          pos={menu}
-          isDir={isDir}
-          isRoot={isRoot}
-          onClose={() => setMenu(null)}
-          onNewFile={() => startCreate("file")}
-          onNewDir={() => startCreate("dir")}
-          onRename={() => {
-            setMenu(null);
-            setRenaming(true);
-          }}
-          onDelete={handleDelete}
-          onRemoveRoot={
-            isRoot && onRemoveRoot
-              ? () => {
-                  setMenu(null);
-                  onRemoveRoot();
-                }
-              : undefined
-          }
-        />
-      )}
     </div>
   );
 }
@@ -406,125 +421,4 @@ function InlineCreateRow({
       <InlineInput initial="" onSubmit={onSubmit} onCancel={onCancel} />
     </div>
   );
-}
-
-interface ContextMenuProps {
-  pos: MenuPos;
-  isDir: boolean;
-  isRoot: boolean;
-  onClose: () => void;
-  onNewFile: () => void;
-  onNewDir: () => void;
-  onRename: () => void;
-  onDelete: () => void;
-  onRemoveRoot?: () => void;
-}
-
-function ContextMenu({
-  pos,
-  isDir,
-  isRoot,
-  onClose,
-  onNewFile,
-  onNewDir,
-  onRename,
-  onDelete,
-  onRemoveRoot,
-}: ContextMenuProps) {
-  useEffect(() => {
-    const close = () => onClose();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("click", close);
-    window.addEventListener("contextmenu", close);
-    window.addEventListener("resize", close);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("contextmenu", close);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: 菜单容器仅阻止冒泡，可操作项均为 button
-    <div
-      className="fixed z-50 min-w-36 overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
-      style={{ top: pos.y, left: pos.x }}
-      onClick={(e) => e.stopPropagation()}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-    >
-      {isDir && (
-        <>
-          <MenuItem
-            icon={<FilePlus size={14} />}
-            label="新建文件"
-            onClick={onNewFile}
-          />
-          <MenuItem
-            icon={<FolderPlus size={14} />}
-            label="新建文件夹"
-            onClick={onNewDir}
-          />
-          {(!isRoot || onRemoveRoot) && <Divider />}
-        </>
-      )}
-      {!isRoot && (
-        <MenuItem
-          icon={<Pencil size={14} />}
-          label="重命名"
-          onClick={onRename}
-        />
-      )}
-      {!isRoot && (
-        <MenuItem
-          icon={<Trash2 size={14} />}
-          label="删除"
-          onClick={onDelete}
-          danger
-        />
-      )}
-      {isRoot && onRemoveRoot && (
-        <MenuItem
-          icon={<X size={14} />}
-          label="移除该文件夹"
-          onClick={onRemoveRoot}
-        />
-      )}
-    </div>
-  );
-}
-
-function MenuItem({
-  icon,
-  label,
-  onClick,
-  danger,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-accent ${
-        danger ? "text-destructive" : "text-foreground"
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function Divider() {
-  return <div className="my-1 h-px bg-border" />;
 }

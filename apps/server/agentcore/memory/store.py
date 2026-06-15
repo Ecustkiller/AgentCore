@@ -51,7 +51,7 @@ class FileMemoryStore:
         try:
             return path.read_text(encoding="utf-8") if path.exists() else ""
         except OSError as e:
-            logger.warning("memory_load_failed", user_id=user_id, error=str(e))
+            logger.warning("memory.load_failed", user_id=user_id, error=str(e))
             return ""
 
     async def save(self, user_id: str, markdown: str) -> None:
@@ -60,7 +60,7 @@ class FileMemoryStore:
             self._base.mkdir(parents=True, exist_ok=True)
             path.write_text(markdown, encoding="utf-8")
         except OSError as e:
-            logger.warning("memory_save_failed", user_id=user_id, error=str(e))
+            logger.warning("memory.save_failed", user_id=user_id, error=str(e))
 
 
 def default_memory_store() -> FileMemoryStore:

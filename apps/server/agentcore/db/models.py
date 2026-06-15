@@ -15,6 +15,7 @@ from sqlalchemy import (
     Float,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     text,
@@ -72,6 +73,10 @@ class User(Base):
     quota_daily_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     quota_monthly_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     quota_daily_requests: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Per-user default 质量档 (llm/modes.py): a preset name ("economy"/"quality") or
+    # a custom ModelMode id. NULL = inherit the operator default
+    # (settings.default_model_mode → economy). A conversation may override it.
+    default_model_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -95,6 +100,39 @@ class Credentials(Base):
     )
     locked_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    )
+
+
+# --- User LLM keys (BYOK) ---
+# 用户自带 DeepSeek API Key（内测期唯一计费路径，见 config.billing_mode）。一人
+# 一行：endpoint / model 由服务端固定（DeepSeek-only），故此处只存「加密后的 key
+# + 连通状态」，不存 endpoint / model。明文永不落库——api_key_enc 是 AES-256-GCM
+# 密文（security.KeyEncryptor 加密，解析见 llm/byok.py）。
+
+
+class UserLlmKey(Base):
+    __tablename__ = "user_llm_keys"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('unchecked', 'active', 'error')",
+            name="ck_user_llm_keys_status",
+        ),
+    )
+
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
+    # AES-256-GCM ciphertext (nonce ‖ ct+tag); never the plaintext key.
+    api_key_enc: Mapped[bytes] = mapped_column(LargeBinary)
+    # Last connectivity-test outcome surfaced in 设置·模型配置 ('测试连接'):
+    # 'unchecked' until tested, then 'active'/'error'. Reset to 'unchecked' on
+    # every key change (a new key hasn't been verified yet).
+    status: Mapped[str] = mapped_column(
+        String(20), default="unchecked", server_default=text("'unchecked'")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
@@ -166,6 +204,9 @@ class Conversation(Base):
     # Stored as a plain string, not PG_UUID: it is an opaque handle minted by the
     # desktop (fs-service `randomUUID`), not a server-owned id.
     local_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Per-conversation 质量档 override (llm/modes.py): a preset name or custom
+    # ModelMode id. NULL = inherit the user's default_model_mode → operator default.
+    model_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Long-term memory consolidation watermark (Agent记忆与知识系统 §1.5): the
     # created_at of the last message folded into the user's memory file by the
     # offline consolidation pass. NULL = never consolidated. The runner skips when
@@ -173,6 +214,38 @@ class Conversation(Base):
     # whose latest message is newer than it (有未整合的新内容) yet has settled.
     memory_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+# --- Model modes ---
+# User-defined 质量档 (custom modes, llm/modes.py D2): a named set of team-role →
+# model assignments the user can pick per conversation. System presets
+# (economy/quality) are code-defined, NOT rows. Soft-deleted so a conversation/user
+# still referencing a removed mode resolves safely (falls back to default).
+
+
+class ModelMode(Base):
+    __tablename__ = "model_modes"
+
+    id: Mapped[str] = mapped_column(
+        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
+    )
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Team-role → model id (e.g. {"ceo": "deepseek-v4-pro"}). Roles not present
+    # inherit the base profile's model. Validated against the operator ceiling on
+    # write and re-clamped on resolve (llm/modes.sanitize_assignments).
+    assignments: Mapped[dict] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
@@ -265,7 +338,7 @@ class CostEvent(Base):
     __tablename__ = "cost_events"
     __table_args__ = (
         CheckConstraint(
-            "role in ('captain', 'member', 'synthesis', 'arena', 'title', 'memory')",
+            "role in ('captain', 'member', 'arena', 'title', 'memory')",
             name="ck_cost_events_role",
         ),
         # Account-window aggregation (dashboard + quota): SUM over a user's recent
@@ -284,11 +357,16 @@ class CostEvent(Base):
     message_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
     # Idempotency: a retry of the same run must not double-bill, so run_id is
     # unique and the ledger write is an upsert-by-run_id.
-    run_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), unique=True)
-    parent_run_id: Mapped[str | None] = mapped_column(
-        PG_UUID(as_uuid=False), nullable=True
-    )
-    agent_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
+    #
+    # NOT a UUID: a delegated worker's id is namespaced ``del_<uuid>_N`` and a
+    # revision's is ``<run>_rev2`` (same posture as RunSessionRow.run_id). A native
+    # uuid column here silently broke billing — record_runs writes the turn as ONE
+    # multi-row INSERT, so a single non-uuid member id aborted the whole batch
+    # (captain row included), and the caller swallows it to a warning. Plain
+    # strings, sized like RunSessionRow.
+    run_id: Mapped[str] = mapped_column(String(128), unique=True)
+    parent_run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    agent_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     role: Mapped[str] = mapped_column(String(20))
     model: Mapped[str] = mapped_column(String(50))
     # Token counts ({input, output, reasoning, cache_hit, cache_miss}).
@@ -567,6 +645,50 @@ class UserDirectorySettings(Base):
     discoverable: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     who_can_dm: Mapped[str] = mapped_column(
         String(20), default="anyone", server_default=text("'anyone'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    )
+
+
+# --- Recoverable worker runs (留人 跨进程落盘: 乙 热修 P3) ---
+# The in-memory roster (runtime/sessions.py) keeps a finished worker alive within a
+# process so the CEO can 定向唤回 (revise) it; this table is the durable backstop so
+# "改下刚才那个" still hits after a restart or memory eviction. A revise loads the
+# row on an in-memory miss, continues the run, and writes the extended transcript
+# back. Pruned by a 7-day idle TTL sweeper (runtime/session_retention.py) on
+# ``updated_at`` — independent of the message.runs graph-replay journal (different
+# lifecycle, 见 docs/07-规划/多轮编排与队员热修.md §六 T-2 / T-5).
+
+
+class RunSessionRow(Base):
+    __tablename__ = "run_sessions"
+    __table_args__ = (
+        # TTL sweep scans by last-touch: delete rows whose updated_at < cutoff.
+        Index("ix_run_sessions_updated", "updated_at"),
+    )
+
+    # The worker's namespaced run id (e.g. ``del_<uuid>_1`` / ``<run>_rev2``) — a
+    # plain string, NOT a UUID, so it is the PK directly (globally unique per turn).
+    run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    # The source RunSpec (role / model tier / allowed tools / contract) as JSON, so a
+    # cross-process continuation runs as the same author under the same policy.
+    spec: Mapped[dict] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
+    # The worker's full, replayable message transcript (list of LLMMessage dicts).
+    transcript: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
+    # The latest answer, mirrored for quick display without rehydrating the spec.
+    content: Mapped[str] = mapped_column(Text, default="", server_default=text("''"))
+    # 改次闸 counter, persisted so the revise cap holds across processes.
+    recall_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0")
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

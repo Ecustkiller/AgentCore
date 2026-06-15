@@ -20,6 +20,8 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.events import EventSink, approval_required, approval_resolved
+from agentcore.runtime.interaction import InteractionKind
+from agentcore.runtime.ports import ClientRequestBridge
 
 logger = get_logger(__name__)
 
@@ -34,69 +36,6 @@ class ApprovalDecision(StrEnum):
     APPROVE = "approve"  # allow this one call
     APPROVE_ALWAYS = "approve_always"  # allow this tool for the rest of the turn
     DENY = "deny"  # refuse; the model is told and may adapt
-
-
-@dataclass
-class _Pending:
-    """A suspended request: the Future to settle + the owning conversation."""
-
-    future: asyncio.Future[ApprovalDecision]
-    conversation_id: str
-
-
-class ApprovalRegistry:
-    """Maps a pending ``approval_id`` to the Future the engine awaits.
-
-    Bridges the engine task (producer of the request, consumer of the decision)
-    and the resolve HTTP request (which delivers the decision). Both run in the
-    same process/event loop in the MVP. Each request is tagged with its
-    ``conversation_id`` so the resolve endpoint can refuse a settle aimed at a
-    different conversation (defense-in-depth on top of the route's ownership
-    check — tool-call ids are otherwise the only key).
-    """
-
-    def __init__(self) -> None:
-        self._pending: dict[str, _Pending] = {}
-
-    def create(
-        self, approval_id: str, conversation_id: str
-    ) -> asyncio.Future[ApprovalDecision]:
-        """Register a pending request and return its Future to await."""
-        fut: asyncio.Future[ApprovalDecision] = (
-            asyncio.get_running_loop().create_future()
-        )
-        self._pending[approval_id] = _Pending(
-            future=fut, conversation_id=conversation_id
-        )
-        return fut
-
-    def resolve(
-        self, approval_id: str, decision: ApprovalDecision, *, conversation_id: str
-    ) -> bool:
-        """Settle a pending request.
-
-        Returns False if the request is unknown, already settled, or belongs to a
-        different conversation than the caller claims.
-        """
-        pending = self._pending.get(approval_id)
-        if pending is None or pending.future.done():
-            return False
-        if pending.conversation_id != conversation_id:
-            return False
-        pending.future.set_result(decision)
-        return True
-
-    def discard(self, approval_id: str) -> None:
-        """Forget a request once the engine is done awaiting it."""
-        self._pending.pop(approval_id, None)
-
-
-_registry = ApprovalRegistry()
-
-
-def default_approval_registry() -> ApprovalRegistry:
-    """The process-wide approval registry (shared by engine + resolve endpoint)."""
-    return _registry
 
 
 def _preview_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -121,7 +60,7 @@ class ApprovalGate:
 
     sink: EventSink
     conversation_id: str
-    registry: ApprovalRegistry
+    registry: ClientRequestBridge
     timeout_seconds: float
     _granted: set[str] = field(default_factory=set)
 
@@ -138,20 +77,30 @@ class ApprovalGate:
             return ApprovalDecision.APPROVE
 
         approval_id = tool_call_id
-        fut = self.registry.create(approval_id, self.conversation_id)
+        preview = _preview_arguments(arguments)
+        fut = self.registry.create(
+            approval_id,
+            self.conversation_id,
+            kind=InteractionKind.APPROVAL,
+            payload={
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "arguments": preview,
+            },
+        )
         self.sink.emit(
             approval_required(
                 approval_id=approval_id,
                 conversation_id=self.conversation_id,
                 tool_call_id=tool_call_id,
                 tool_name=tool_name,
-                arguments=_preview_arguments(arguments),
+                arguments=preview,
             )
         )
         try:
             decision = await asyncio.wait_for(fut, timeout=self.timeout_seconds)
         except TimeoutError:
-            logger.info("approval_timeout", tool=tool_name, approval_id=approval_id)
+            logger.info("approval.timeout", tool=tool_name, approval_id=approval_id)
             decision = ApprovalDecision.DENY
         finally:
             self.registry.discard(approval_id)

@@ -1,3 +1,4 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { logout } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
 import { useSidebarStore } from "@/stores/sidebar";
@@ -45,35 +46,42 @@ export function UserMenu() {
         className={`flex items-center ${collapsed ? "justify-center" : "gap-3 px-3"}`}
       >
         {collapsed ? (
-          <button
-            type="button"
-            onClick={goMore}
-            className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sidebar-accent"
-          >
-            {avatar}
-          </button>
+          <SimpleTooltip label="账户与设置" side="right">
+            <button
+              type="button"
+              onClick={goMore}
+              aria-label="账户与设置"
+              className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sidebar-accent"
+            >
+              {avatar}
+            </button>
+          </SimpleTooltip>
         ) : (
           <>
             {avatar}
             <span className="flex-1 truncate text-sm text-sidebar-foreground/80">
               {displayName}
             </span>
-            <button
-              type="button"
-              onClick={() => void handleLogout()}
-              title="登出"
-              aria-label="登出"
-              className="flex size-7 items-center justify-center rounded-lg text-sidebar-foreground/50 outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-accent"
-            >
-              <LogOut size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={goMore}
-              className="flex size-7 items-center justify-center rounded-lg text-sidebar-foreground/50 outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-accent"
-            >
-              <MoreVertical size={14} />
-            </button>
+            <SimpleTooltip label="登出">
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                aria-label="登出"
+                className="flex size-7 items-center justify-center rounded-lg text-sidebar-foreground/50 outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-accent"
+              >
+                <LogOut size={14} />
+              </button>
+            </SimpleTooltip>
+            <SimpleTooltip label="更多">
+              <button
+                type="button"
+                onClick={goMore}
+                aria-label="更多"
+                className="flex size-7 items-center justify-center rounded-lg text-sidebar-foreground/50 outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-accent"
+              >
+                <MoreVertical size={14} />
+              </button>
+            </SimpleTooltip>
           </>
         )}
       </div>

@@ -9,7 +9,10 @@ from pathlib import Path
 
 from agentcore.config import settings
 from agentcore.runtime.events import EventSink
-from agentcore.workspace.channel import WorkspaceOpRegistry, default_workspace_op_registry
+from agentcore.runtime.interaction import (
+    InteractionRegistry,
+    default_interaction_registry,
+)
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.locate import (
     LocalBinding,
@@ -67,7 +70,7 @@ def test_build_server_workspace_targets_resolved_root(tmp_path: Path, monkeypatc
 def test_build_local_workspace_wires_channel_to_bound_root():
     """A binding yields a LocalWorkspace whose channel carries the desktop root_id."""
     sink = EventSink()
-    registry = WorkspaceOpRegistry()
+    registry = InteractionRegistry()
     ws = build_local_workspace(
         binding=LocalBinding(root_id="root-xyz", root_label="myproj"),
         sink=sink,
@@ -98,7 +101,7 @@ def test_build_local_workspace_defaults_to_shared_registry_and_timeout():
         conversation_id="c1",
     )
     chan = ws._channel  # noqa: SLF001 - test-only wiring inspection
-    assert chan.registry is default_workspace_op_registry()
+    assert chan.registry is default_interaction_registry()
     assert chan.timeout_seconds == settings.workspace_op_timeout_seconds
     assert ws.root_label == "workspace"  # binding's default label
 

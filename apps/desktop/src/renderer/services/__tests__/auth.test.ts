@@ -25,7 +25,9 @@ type Handler = (url: string) => Response;
 function mockFetch(handler: Handler): void {
   vi.stubGlobal(
     "fetch",
-    vi.fn((input: RequestInfo | URL) => Promise.resolve(handler(String(input)))),
+    vi.fn((input: RequestInfo | URL) =>
+      Promise.resolve(handler(String(input))),
+    ),
   );
 }
 
@@ -59,7 +61,8 @@ describe("bootstrapAuth", () => {
   it("returns unauthenticated on 401 when the backend is ready", async () => {
     mockFetch((url) => {
       if (url.endsWith(ME)) return json({ error: "no session" }, 401);
-      if (url.endsWith(READYZ)) return json({ status: "ready", database: true });
+      if (url.endsWith(READYZ))
+        return json({ status: "ready", database: true });
       throw new Error(`unexpected fetch: ${url}`);
     });
 

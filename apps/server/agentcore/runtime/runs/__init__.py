@@ -17,9 +17,14 @@ from agentcore.runtime.runs.concurrency import (
     reset_budget,
     set_budget,
 )
-from agentcore.runtime.runs.executor import build_agent_executor, build_captain_executor
+from agentcore.runtime.runs.executor import (
+    build_agent_executor,
+    build_captain_executor,
+    continue_run,
+)
 from agentcore.runtime.runs.plan import RunPlan, RunPlanError
 from agentcore.runtime.runs.scheduler import RunExecutor, RunScheduler
+from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import (
     TERMINAL_PHASES,
     RunContract,
@@ -36,10 +41,12 @@ __all__ = [
     "build_run_plan",
     "build_agent_executor",
     "build_captain_executor",
+    "continue_run",
     "RunPlan",
     "RunPlanError",
     "RunExecutor",
     "RunScheduler",
+    "RunSession",
     "WaveScheduler",
     "DEFAULT_MAX_PARALLEL",
     "RunKind",

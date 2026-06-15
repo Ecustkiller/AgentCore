@@ -9,6 +9,7 @@ import {
   Globe,
   Loader2,
   type LucideIcon,
+  MessageCircleQuestion,
   Network,
   Search,
   Terminal,
@@ -23,6 +24,7 @@ const CATEGORY_META: Record<ToolCategory, { label: string; icon: LucideIcon }> =
     research: { label: "研究", icon: Globe },
     execution: { label: "执行", icon: Terminal },
     orchestration: { label: "编排", icon: Network },
+    interaction: { label: "交互", icon: MessageCircleQuestion },
   };
 
 // Render order; categories with no tools are skipped.
@@ -32,6 +34,7 @@ const CATEGORY_ORDER: ToolCategory[] = [
   "research",
   "execution",
   "orchestration",
+  "interaction",
 ];
 
 const APPROVAL_LABEL: Record<ToolApproval, string> = {

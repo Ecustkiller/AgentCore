@@ -13,7 +13,13 @@ from collections.abc import AsyncIterator
 
 import httpx
 
-from agentcore.core.errors import LLMError, LLMRateLimitError, LLMTimeoutError
+from agentcore.core.errors import (
+    LLMAuthError,
+    LLMError,
+    LLMInsufficientBalanceError,
+    LLMRateLimitError,
+    LLMTimeoutError,
+)
 from agentcore.core.logging import get_logger
 from agentcore.llm.protocol import (
     LLMChunk,
@@ -219,8 +225,19 @@ class DeepSeekProvider:
                     retry_after = float(response.headers.get("retry-after", backoff))
                     raise LLMRateLimitError(retry_after=retry_after)
 
+                # 401/403 = the configured key is invalid / revoked / unauthorized;
+                # 402 = valid key but the account is out of balance. Neither is fixed
+                # by retrying, so map both to non-retryable, friendly errors instead of
+                # leaking a raw HTTPStatusError.
+                if response.status_code in (401, 403):
+                    raise LLMAuthError()
+                if response.status_code == 402:
+                    raise LLMInsufficientBalanceError()
+
                 if response.status_code >= 500:
-                    raise LLMError(f"Server error: {response.status_code}")
+                    raise LLMError(
+                        f"DeepSeek 服务端错误（{response.status_code}），请稍后再试"
+                    )
 
                 response.raise_for_status()
                 return response.json()
@@ -232,7 +249,7 @@ class DeepSeekProvider:
                 retry_after = e.retry_after if isinstance(e, LLMRateLimitError) else None
                 wait = retry_after or backoff
                 logger.warning(
-                    "llm_retry",
+                    "llm.retry",
                     attempt=attempt + 1,
                     wait_seconds=wait,
                     error=str(e),
@@ -242,15 +259,15 @@ class DeepSeekProvider:
                 backoff *= _BACKOFF_MULTIPLIER
 
             except httpx.TimeoutException as e:
-                last_error = LLMTimeoutError(str(e))
+                last_error = LLMTimeoutError("连接 DeepSeek 超时，请检查网络后重试")
                 if attempt == _MAX_RETRIES - 1:
                     raise last_error from e
-                logger.warning("llm_timeout_retry", attempt=attempt + 1)
+                logger.warning("llm.timeout_retry", attempt=attempt + 1)
                 import asyncio
                 await asyncio.sleep(backoff)
                 backoff *= _BACKOFF_MULTIPLIER
 
-        raise last_error or LLMError("Unexpected retry exhaustion")
+        raise last_error or LLMError("DeepSeek 多次重试后仍失败，请稍后重试")
 
     async def _stream_with_retry(self, payload: dict) -> AsyncIterator[str]:
         """Make a streaming request, yielding SSE lines. Retries on transient errors."""
@@ -266,8 +283,18 @@ class DeepSeekProvider:
                         retry_after = float(response.headers.get("retry-after", backoff))
                         raise LLMRateLimitError(retry_after=retry_after)
 
+                    # 401/403 = invalid/unauthorized key, 402 = exhausted balance —
+                    # non-retryable, friendly errors rather than a raw HTTPStatusError
+                    # (see complete).
+                    if response.status_code in (401, 403):
+                        raise LLMAuthError()
+                    if response.status_code == 402:
+                        raise LLMInsufficientBalanceError()
+
                     if response.status_code >= 500:
-                        raise LLMError(f"Server error: {response.status_code}")
+                        raise LLMError(
+                            f"DeepSeek 服务端错误（{response.status_code}），请稍后再试"
+                        )
 
                     response.raise_for_status()
 
@@ -281,20 +308,67 @@ class DeepSeekProvider:
                     raise
                 retry_after = e.retry_after if isinstance(e, LLMRateLimitError) else None
                 wait = retry_after or backoff
-                logger.warning("llm_stream_retry", attempt=attempt + 1, wait_seconds=wait)
+                logger.warning("llm.stream_retry", attempt=attempt + 1, wait_seconds=wait)
                 import asyncio
                 await asyncio.sleep(wait)
                 backoff *= _BACKOFF_MULTIPLIER
 
             except httpx.TimeoutException as e:
-                last_error = LLMTimeoutError(str(e))
+                last_error = LLMTimeoutError("连接 DeepSeek 超时，请检查网络后重试")
                 if attempt == _MAX_RETRIES - 1:
                     raise last_error from e
                 import asyncio
                 await asyncio.sleep(backoff)
                 backoff *= _BACKOFF_MULTIPLIER
 
-        raise last_error or LLMError("Unexpected retry exhaustion")
+        raise last_error or LLMError("DeepSeek 多次重试后仍失败，请稍后重试")
+
+    async def probe(self, *, model: str) -> None:
+        """One minimal call (``max_tokens=1``) to verify the key reaches DeepSeek
+        and authenticates — the BYOK '测试连接' (llm/key_service.py).
+
+        Uses the same client / endpoint / auth header as a real turn, so a passing
+        probe means a turn can run on this key ("测试通过 == 真能跑"). No retry: a
+        connectivity test must be fast and deterministic, and retrying a 429 would
+        defeat its mapping. Maps the HTTP status to a verdict:
+
+        - 2xx / 429 → reachable + authenticated (429 = valid key, just throttled) → returns
+        - 401 / 403 → bad key (auth failed)
+        - 404 → endpoint unreachable / wrong base URL
+        - 5xx → DeepSeek upstream error
+
+        Raises ``LLMError`` (with a user-facing Chinese message) on any non-OK
+        verdict; ``LLMTimeoutError`` when the request times out.
+        """
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+            "stream": False,
+        }
+        try:
+            response = await self._client.post("/v1/chat/completions", json=payload)
+        except httpx.TimeoutException as e:
+            raise LLMTimeoutError("连接 DeepSeek 超时，请检查网络后重试") from e
+        except httpx.HTTPError as e:
+            raise LLMError(f"无法连接 DeepSeek：{e}") from e
+
+        code = response.status_code
+        if code < 300 or code == 429:
+            return
+        if code in (401, 403):
+            raise LLMError("API Key 无效或无权限（鉴权失败），请检查后重试")
+        if code == 402:
+            # Auth passed (the key is real) but the account has no balance — tell the
+            # user the key is fine and to top up, not to re-check the key.
+            raise LLMInsufficientBalanceError(
+                "API Key 有效，但 DeepSeek 账户余额不足，请充值后使用。"
+            )
+        if code == 404:
+            raise LLMError("DeepSeek 接口地址不可达（404），请检查服务端配置")
+        if code >= 500:
+            raise LLMError(f"DeepSeek 服务端错误（{code}），请稍后再试")
+        raise LLMError(f"连通测试失败（HTTP {code}）")
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""

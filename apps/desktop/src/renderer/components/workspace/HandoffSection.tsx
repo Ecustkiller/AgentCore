@@ -1,3 +1,5 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import { StreamError } from "@/lib/errors";
 import {
   type HandoffFileChange,
   type ReviewRow,
@@ -16,7 +18,6 @@ import {
   listHandoffJobs,
   readLocalShas,
 } from "@/services/handoff";
-import { StreamError } from "@/services/streamConversation";
 import {
   type WorkspaceBinding,
   getWorkspaceBinding,
@@ -191,14 +192,15 @@ export function HandoffSection({ conversationId }: { conversationId: string }) {
         <span className="flex-1 text-xs font-medium text-muted-foreground">
           交接作业
         </span>
-        <button
-          type="button"
-          title="刷新"
-          onClick={() => void loadJobs()}
-          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <RefreshCw size={14} />
-        </button>
+        <SimpleTooltip label="刷新">
+          <button
+            type="button"
+            onClick={() => void loadJobs()}
+            className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <RefreshCw size={14} />
+          </button>
+        </SimpleTooltip>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
@@ -252,9 +254,7 @@ function JobRow({
   return (
     <li className="rounded-lg border border-border px-2.5 py-2">
       <div className="flex items-start gap-2">
-        <span className="min-w-0 flex-1 break-words text-sm" title={job.task}>
-          {job.task}
-        </span>
+        <span className="min-w-0 flex-1 break-words text-sm">{job.task}</span>
         <JobStatusBadge status={job.status} />
       </div>
       <div className="mt-1 flex items-center gap-2">
@@ -436,21 +436,21 @@ function HandoffReviewView({
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-1 pr-2">
-        <button
-          type="button"
-          onClick={onBack}
-          title="返回作业列表"
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <ChevronLeft size={16} />
-        </button>
+        <SimpleTooltip label="返回作业列表">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <ChevronLeft size={16} />
+          </button>
+        </SimpleTooltip>
         <GitPullRequest size={13} className="shrink-0 text-muted-foreground" />
-        <span
-          className="min-w-0 flex-1 truncate text-xs font-medium"
-          title={job.task}
-        >
-          {job.task}
-        </span>
+        <SimpleTooltip label={job.task}>
+          <span className="min-w-0 flex-1 truncate text-xs font-medium">
+            {job.task}
+          </span>
+        </SimpleTooltip>
       </div>
 
       {counts && (
@@ -583,19 +583,26 @@ function ReviewRowItem({
   return (
     <li className="rounded-lg border border-border">
       <div className="flex items-center gap-1.5 px-2 py-1.5">
-        <button
-          type="button"
-          onClick={onToggleExpand}
-          disabled={!canPreview}
-          className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent disabled:opacity-30"
-          title={canPreview ? "展开预览云端版本" : "无可预览内容"}
-        >
-          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        </button>
+        <SimpleTooltip label={canPreview ? "展开预览云端版本" : "无可预览内容"}>
+          <span className="flex shrink-0">
+            <button
+              type="button"
+              onClick={onToggleExpand}
+              disabled={!canPreview}
+              className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent disabled:opacity-30"
+            >
+              {expanded ? (
+                <ChevronDown size={13} />
+              ) : (
+                <ChevronRight size={13} />
+              )}
+            </button>
+          </span>
+        </SimpleTooltip>
         <ChangeTypeMark type={change.changeType} />
-        <span className="min-w-0 flex-1 truncate text-xs" title={change.path}>
-          {change.path}
-        </span>
+        <SimpleTooltip label={change.path}>
+          <span className="min-w-0 flex-1 truncate text-xs">{change.path}</span>
+        </SimpleTooltip>
         {result ? (
           <ApplyResultBadge status={result.status} detail={result.detail} />
         ) : (
@@ -718,15 +725,15 @@ function ApplyResultBadge({
     },
   };
   const s = map[status] ?? map.error;
-  return (
+  const badge = (
     <span
       className={`inline-flex shrink-0 items-center gap-1 text-xs font-medium ${s.cls}`}
-      title={detail}
     >
       {s.icon}
       {s.label}
     </span>
   );
+  return detail ? <SimpleTooltip label={detail}>{badge}</SimpleTooltip> : badge;
 }
 
 function ApplySummaryBar({

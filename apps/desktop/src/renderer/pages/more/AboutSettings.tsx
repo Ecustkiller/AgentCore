@@ -13,9 +13,7 @@ function Row({
   return (
     <p className="flex gap-2">
       <span className="w-20 shrink-0 text-muted-foreground">{label}</span>
-      <span
-        className={mono ? "font-mono text-foreground" : "text-foreground"}
-      >
+      <span className={mono ? "font-mono text-foreground" : "text-foreground"}>
         {value}
       </span>
     </p>
@@ -59,7 +57,9 @@ export function AboutSettings() {
             <Row label="版本" value={info.version} />
             <Row
               label="构建版本"
-              value={info.gitSha === "unknown" ? "未标记（本地开发）" : info.gitSha}
+              value={
+                info.gitSha === "unknown" ? "未标记（本地开发）" : info.gitSha
+              }
               mono={info.gitSha !== "unknown"}
             />
             <Row

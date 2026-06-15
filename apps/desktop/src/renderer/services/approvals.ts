@@ -1,9 +1,10 @@
-import { ApiError, api } from "@/services/api";
+import { ApiError } from "@/services/api";
+import { resolveInteraction } from "@/services/interaction";
 import { type PendingApproval, useApprovalStore } from "@/stores/approvals";
 import type { ApprovalDecision } from "@/types/events";
 
 /**
- * POST the user's decision to the resolve endpoint.
+ * Settle the user's decision over the unified interaction bridge (kind `approval`).
  *
  * The paused tool call in the live `send_message` SSE stream resumes with the
  * decision, and the backend then emits `approval_resolved`. A 404 means the
@@ -15,12 +16,10 @@ export async function resolveApproval(
   approvalId: string,
   decision: ApprovalDecision,
 ): Promise<void> {
-  await api.post(
-    `/v1/conversations/${conversationId}/approvals/${approvalId}`,
-    {
-      decision,
-    },
-  );
+  await resolveInteraction(conversationId, approvalId, {
+    kind: "approval",
+    decision,
+  });
 }
 
 /**

@@ -1,9 +1,19 @@
 import {
-  deleteConversation,
-  moveConversation,
-  renameConversation,
-} from "@/services/conversations";
-import { createFolder } from "@/services/folders";
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import {
+  useDeleteConversation,
+  useMoveConversation,
+  useRenameConversation,
+} from "@/hooks/useConversations";
+import { useCreateFolder, useFolders } from "@/hooks/useFolders";
+import { notifyError } from "@/lib/toast";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   type Conversation,
@@ -25,7 +35,6 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ContextMenu, MenuDivider, MenuItem, MenuLabel } from "./ContextMenu";
 
 interface Props {
   conversation: Conversation;
@@ -36,17 +45,18 @@ export function ConversationItem({ conversation }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [draft, setDraft] = useState(conversation.title);
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const skipBlurRef = useRef(false);
   const currentId = useConversationStore((s) => s.currentConversationId);
   const switchConversation = useConversationStore((s) => s.switchConversation);
-  const removeConversation = useConversationStore((s) => s.removeConversation);
-  const renameInStore = useConversationStore((s) => s.renameConversation);
-  const setConversationFolder = useConversationStore(
-    (s) => s.setConversationFolder,
+  const dropConversationRuntime = useConversationStore(
+    (s) => s.dropConversationRuntime,
   );
-  const folders = useFoldersStore((s) => s.folders);
+  const renameMutation = useRenameConversation();
+  const moveMutation = useMoveConversation();
+  const deleteMutation = useDeleteConversation();
+  const createFolderMutation = useCreateFolder();
+  const folders = useFolders();
   const isGenerating = useConversationGenerating(conversation.id);
   // A conversation's workspace is fixed once it starts (双模式工作区 §九 ⑩): its
   // folder decides which workspace dir it runs in, so re-filing a started chat
@@ -90,49 +100,45 @@ export function ConversationItem({ conversation }: Props) {
     setEditing(false);
     const title = draft.trim();
     if (!title || title === conversation.title) return;
-    renameInStore(conversation.id, title); // optimistic; reconcile on failure
-    void renameConversation(conversation.id, title).catch(() => {
-      renameInStore(conversation.id, conversation.title);
-    });
+    // Optimistic title + rollback live in the mutation; add a toast on failure.
+    renameMutation.mutate(
+      { id: conversation.id, title },
+      { onError: (err) => notifyError(err, "重命名失败") },
+    );
   };
 
   const handleDelete = async () => {
     setConfirmingDelete(false);
+    const wasActive = conversation.id === currentId;
     // Delete server-side first so a failed delete leaves the item in place.
     try {
-      await deleteConversation(conversation.id);
+      await deleteMutation.mutateAsync(conversation.id);
     } catch {
       return;
     }
-    const wasActive = conversation.id === currentId;
-    removeConversation(conversation.id);
+    // The mutation dropped the row from the list cache; forget its live runtime
+    // (and clear the current pointer if it was open), then leave the route.
+    dropConversationRuntime(conversation.id);
     if (wasActive) navigate("/");
   };
 
-  // Move with an optimistic store update, rolling back to the previous folder if
-  // the server rejects the move.
-  const moveTo = async (folderId: string | null) => {
-    setMenuPos(null);
+  // Move with an optimistic cache update, rolling back to the previous folder if
+  // the server rejects the move (both live in the mutation).
+  const moveTo = (folderId: string | null) => {
     if (folderId === currentFolderId) return;
-    setConversationFolder(conversation.id, folderId);
-    try {
-      await moveConversation(conversation.id, folderId);
-    } catch {
-      setConversationFolder(conversation.id, currentFolderId);
-    }
+    moveMutation.mutate({ id: conversation.id, folderId });
   };
 
   const moveToNewFolder = async () => {
-    setMenuPos(null);
     try {
-      const folder = await createFolder("新建文件夹");
-      useFoldersStore.getState().addFolder(folder);
+      const folder = await createFolderMutation.mutateAsync({
+        name: "新建文件夹",
+      });
       // Open the new folder's header in rename mode so the user can name it.
       useFoldersStore.getState().setPendingRename(folder.id);
-      setConversationFolder(conversation.id, folder.id);
-      await moveConversation(conversation.id, folder.id);
+      moveMutation.mutate({ id: conversation.id, folderId: folder.id });
     } catch {
-      /* leave the conversation where it was; the folder create/move failed */
+      /* leave the conversation where it was; the folder create failed */
     }
   };
 
@@ -167,206 +173,196 @@ export function ConversationItem({ conversation }: Props) {
   }
 
   return (
-    <>
-      <button
-        type="button"
-        className={`group flex h-9 w-full items-center gap-2 rounded-lg px-3 text-sm transition-colors ${
-          isActive
-            ? "bg-sidebar-accent text-sidebar-accent-foreground"
-            : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-        }`}
-        onClick={() => {
-          switchConversation(conversation.id);
-          navigate(`/conversations/${conversation.id}`);
-        }}
-        onDoubleClick={(e) => {
-          e.preventDefault();
-          startEdit();
-        }}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setConfirmingDelete(false);
-          setMenuPos({ x: e.clientX, y: e.clientY });
-        }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => {
-          setHovered(false);
-          setConfirmingDelete(false);
-        }}
-      >
-        {status && (
-          <span
-            aria-label={status === "running" ? "执行中" : "待审批"}
-            title={status === "running" ? "执行中" : "待审批"}
-            className={`size-1.5 shrink-0 rounded-full ${
-              status === "running" ? "animate-pulse bg-primary" : "bg-warning"
-            }`}
-          />
-        )}
-        <span className="flex-1 truncate text-left">{conversation.title}</span>
-        {!conversation.folderId && conversation.localRootId && (
-          <HardDrive
-            size={11}
-            className="shrink-0 text-primary/70"
-            aria-label="本地工作区"
-          />
-        )}
-        {confirmingDelete ? (
-          <span className="flex shrink-0 items-center gap-0.5">
-            {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
-            <span
-              role="button"
-              tabIndex={-1}
-              aria-label="确认删除"
-              title="确认删除"
-              className="flex size-6 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.stopPropagation();
-                  void handleDelete();
-                }
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                void handleDelete();
-              }}
-            >
-              <Check size={13} />
-            </span>
-            {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
-            <span
-              role="button"
-              tabIndex={-1}
-              aria-label="取消删除"
-              title="取消"
-              className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.stopPropagation();
-                  setConfirmingDelete(false);
-                }
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirmingDelete(false);
-              }}
-            >
-              <X size={13} />
-            </span>
-          </span>
-        ) : (
-          hovered && (
-            <span className="flex shrink-0 items-center gap-0.5">
-              {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
-              <span
-                role="button"
-                tabIndex={-1}
-                aria-label="重命名对话"
-                title="重命名"
-                className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.stopPropagation();
-                    startEdit();
-                  }
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  startEdit();
-                }}
-              >
-                <Pencil size={13} />
-              </span>
-              {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
-              <span
-                role="button"
-                tabIndex={-1}
-                aria-label="删除对话"
-                title="删除"
-                className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-destructive"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.stopPropagation();
-                    setConfirmingDelete(true);
-                  }
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setConfirmingDelete(true);
-                }}
-              >
-                <Trash2 size={13} />
-              </span>
-            </span>
-          )
-        )}
-      </button>
-      {menuPos && (
-        <ContextMenu
-          x={menuPos.x}
-          y={menuPos.y}
-          onClose={() => setMenuPos(null)}
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (open) setConfirmingDelete(false);
+      }}
+    >
+      <ContextMenuTrigger asChild>
+        <button
+          type="button"
+          className={`group flex h-9 w-full items-center gap-2 rounded-lg px-3 text-sm transition-colors ${
+            isActive
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+          }`}
+          onClick={() => {
+            switchConversation(conversation.id);
+            navigate(`/conversations/${conversation.id}`);
+          }}
+          onDoubleClick={(e) => {
+            e.preventDefault();
+            startEdit();
+          }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => {
+            setHovered(false);
+            setConfirmingDelete(false);
+          }}
         >
-          <MenuItem
-            icon={<Pencil size={14} />}
-            label="重命名"
-            onSelect={() => {
-              setMenuPos(null);
-              startEdit();
-            }}
-          />
-          <MenuDivider />
-          {workspaceLocked ? (
-            // Started chat: its workspace is pinned to its current folder, so the
-            // move actions are replaced by an explanatory locked hint (§九 ⑩).
-            <MenuItem
-              icon={<Lock size={14} />}
-              label="开始后不可更换工作区"
-              disabled
-              onSelect={() => {}}
-            />
-          ) : (
-            <>
-              <MenuLabel>移到</MenuLabel>
-              <div className="max-h-52 overflow-y-auto">
-                {folders.map((f) => (
-                  <MenuItem
-                    key={f.id}
-                    icon={<Folder size={14} />}
-                    label={f.name}
-                    onSelect={() => void moveTo(f.id)}
-                    trailing={
-                      f.id === currentFolderId ? <Check size={13} /> : undefined
-                    }
-                  />
-                ))}
-              </div>
-              {currentFolderId && (
-                <MenuItem
-                  icon={<Inbox size={14} />}
-                  label="移出文件夹"
-                  onSelect={() => void moveTo(null)}
-                />
-              )}
-              <MenuItem
-                icon={<FolderPlus size={14} />}
-                label="新建文件夹…"
-                onSelect={() => void moveToNewFolder()}
+          {status && (
+            <SimpleTooltip label={status === "running" ? "执行中" : "待审批"}>
+              <span
+                aria-label={status === "running" ? "执行中" : "待审批"}
+                className={`size-1.5 shrink-0 rounded-full ${
+                  status === "running"
+                    ? "animate-pulse bg-primary"
+                    : "bg-warning"
+                }`}
               />
-            </>
+            </SimpleTooltip>
           )}
-          <MenuDivider />
-          <MenuItem
-            icon={<Trash2 size={14} />}
-            label="删除"
-            danger
-            onSelect={() => {
-              setMenuPos(null);
-              void handleDelete();
-            }}
-          />
-        </ContextMenu>
-      )}
-    </>
+          <span className="flex-1 truncate text-left">
+            {conversation.title}
+          </span>
+          {!conversation.folderId && conversation.localRootId && (
+            <HardDrive
+              size={11}
+              className="shrink-0 text-primary/70"
+              aria-label="本地工作区"
+            />
+          )}
+          {confirmingDelete ? (
+            <span className="flex shrink-0 items-center gap-0.5">
+              <SimpleTooltip label="确认删除">
+                {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  aria-label="确认删除"
+                  className="flex size-6 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.stopPropagation();
+                      void handleDelete();
+                    }
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleDelete();
+                  }}
+                >
+                  <Check size={13} />
+                </span>
+              </SimpleTooltip>
+              <SimpleTooltip label="取消">
+                {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  aria-label="取消删除"
+                  className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.stopPropagation();
+                      setConfirmingDelete(false);
+                    }
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmingDelete(false);
+                  }}
+                >
+                  <X size={13} />
+                </span>
+              </SimpleTooltip>
+            </span>
+          ) : (
+            hovered && (
+              <span className="flex shrink-0 items-center gap-0.5">
+                <SimpleTooltip label="重命名">
+                  {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    aria-label="重命名对话"
+                    className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.stopPropagation();
+                        startEdit();
+                      }
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startEdit();
+                    }}
+                  >
+                    <Pencil size={13} />
+                  </span>
+                </SimpleTooltip>
+                <SimpleTooltip label="删除">
+                  {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    aria-label="删除对话"
+                    className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-destructive"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.stopPropagation();
+                        setConfirmingDelete(true);
+                      }
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmingDelete(true);
+                    }}
+                  >
+                    <Trash2 size={13} />
+                  </span>
+                </SimpleTooltip>
+              </span>
+            )
+          )}
+        </button>
+      </ContextMenuTrigger>
+
+      <ContextMenuContent className="min-w-52">
+        <ContextMenuItem onSelect={() => startEdit()}>
+          <Pencil size={14} className="shrink-0" />
+          <span className="flex-1 truncate">重命名</span>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        {workspaceLocked ? (
+          // Started chat: its workspace is pinned to its current folder, so the
+          // move actions are replaced by an explanatory locked hint (§九 ⑩).
+          <ContextMenuItem disabled>
+            <Lock size={14} className="shrink-0" />
+            <span className="flex-1 truncate">开始后不可更换工作区</span>
+          </ContextMenuItem>
+        ) : (
+          <>
+            <ContextMenuLabel>移到</ContextMenuLabel>
+            <div className="max-h-52 overflow-y-auto">
+              {folders.map((f) => (
+                <ContextMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
+                  <Folder size={14} className="shrink-0" />
+                  <span className="flex-1 truncate">{f.name}</span>
+                  {f.id === currentFolderId && (
+                    <Check size={13} className="shrink-0" />
+                  )}
+                </ContextMenuItem>
+              ))}
+            </div>
+            {currentFolderId && (
+              <ContextMenuItem onSelect={() => void moveTo(null)}>
+                <Inbox size={14} className="shrink-0" />
+                <span className="flex-1 truncate">移出文件夹</span>
+              </ContextMenuItem>
+            )}
+            <ContextMenuItem onSelect={() => void moveToNewFolder()}>
+              <FolderPlus size={14} className="shrink-0" />
+              <span className="flex-1 truncate">新建文件夹…</span>
+            </ContextMenuItem>
+          </>
+        )}
+        <ContextMenuSeparator />
+        <ContextMenuItem variant="danger" onSelect={() => void handleDelete()}>
+          <Trash2 size={14} className="shrink-0" />
+          <span className="flex-1 truncate">删除</span>
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }

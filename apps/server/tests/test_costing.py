@@ -1,10 +1,10 @@
 """Unit tests for the per-run cost ledger builders (runtime/costing.py).
 
 Pure and DB-free: they pin how a finished run becomes a ``cost_events`` row.
-A delegated member reads the price the executor already stamped onto its
-``RunState`` (it is never re-priced); the captain root — the pipeline's own ReAct
-loop, which has no scheduled RunState — is priced exactly once here via the single
-:func:`calculate_cost`. Money is integer nano-USD throughout.
+Both a delegated member and the captain root read the price the executor already
+stamped onto their ``RunState`` (neither is re-priced — pricing happens once, in
+the executor, via :func:`calculate_cost`); these builders only reshape that priced
+state into a ledger row. Money is integer nano-USD throughout.
 """
 
 from dataclasses import asdict
@@ -16,7 +16,7 @@ from agentcore.runtime.costing import (
     ROLE_CAPTAIN,
     ROLE_MEMBER,
     aggregate_cost,
-    captain_run_cost,
+    captain_run_cost_from_state,
     member_run_cost,
 )
 from agentcore.runtime.runs.types import RunSpec, RunState
@@ -68,9 +68,12 @@ def test_member_run_cost_defaults_agent_id_to_run_id():
     assert row.parent_run_id is None
 
 
-def test_captain_run_cost_prices_once_via_calculate_cost():
-    # The captain has no RunState, so it is priced here — and must agree exactly
-    # with the single calculate_cost (the one place pricing happens).
+def test_captain_run_cost_from_state_reads_priced_state():
+    # The captain is now a real Run node priced once in the executor (onto
+    # state.cost); this builder reads that verbatim (no re-price) and stamps the
+    # captain role with no parent (it is the turn's root). Build the state the way
+    # the executor does — cost = the single calculate_cost — so the row must carry
+    # exactly those nano-USD.
     usage = TokenUsage(
         input_tokens=2_000_000,
         output_tokens=1_000_000,
@@ -78,24 +81,30 @@ def test_captain_run_cost_prices_once_via_calculate_cost():
         cache_hit_tokens=1_000_000,
         cache_miss_tokens=1_000_000,
     )
-
-    row = captain_run_cost(
-        run_id="cap-1", model=DEEPSEEK_V4_FLASH, usage=usage, rounds=3, duration_ms=4321
+    priced = calculate_cost(DEEPSEEK_V4_FLASH, usage)
+    state = RunState(
+        model=DEEPSEEK_V4_FLASH,
+        rounds=3,
+        duration_ms=4321,
+        usage=usage.as_dict(),
+        cost=asdict(priced),
     )
-    expected = calculate_cost(DEEPSEEK_V4_FLASH, usage)
+
+    row = captain_run_cost_from_state("cap-1", state)
 
     assert row.role == ROLE_CAPTAIN
     assert row.run_id == "cap-1"
     assert row.parent_run_id is None  # the root run
     assert row.agent_id is None
+    assert row.model == DEEPSEEK_V4_FLASH
     assert row.tokens == usage.as_dict()
     assert row.cost == {
-        "input": expected.input,
-        "cached": expected.cached,
-        "output": expected.output,
-        "total": expected.total,
+        "input": priced.input,
+        "cached": priced.cached,
+        "output": priced.output,
+        "total": priced.total,
     }
-    assert row.cost_total_nano == expected.total
+    assert row.cost_total_nano == priced.total
     # Concrete nano-USD (Flash tier): cache_hit 2.8e6 + cache_miss 1.4e8 = input,
     # output 2.8e8 — pins both the split pricing and the int coercion.
     assert row.cost["cached"] == 2_800_000
@@ -109,10 +118,15 @@ def test_captain_run_cost_prices_once_via_calculate_cost():
 def test_captain_cost_values_are_integers():
     # Money is integer nano-USD end to end — no Decimal/float may leak out.
     usage = TokenUsage(input_tokens=123, output_tokens=45, cache_miss_tokens=123)
-
-    row = captain_run_cost(
-        run_id="c", model=DEEPSEEK_V4_FLASH, usage=usage, rounds=1, duration_ms=0
+    state = RunState(
+        model=DEEPSEEK_V4_FLASH,
+        rounds=1,
+        duration_ms=0,
+        usage=usage.as_dict(),
+        cost=asdict(calculate_cost(DEEPSEEK_V4_FLASH, usage)),
     )
+
+    row = captain_run_cost_from_state("c", state)
 
     assert all(isinstance(v, int) for v in row.cost.values())
     assert isinstance(row.cost_total_nano, int)
@@ -122,13 +136,17 @@ def test_aggregate_cost_sums_priced_rows_across_tiers():
     # The turn total (message_end.cost) is the SUM of the already-priced rows, NOT
     # a re-price of the combined usage — a captain on Flash + a member on Pro must
     # add up component-wise, each at its own tier.
+    cap_usage = TokenUsage(cache_miss_tokens=1_000_000, output_tokens=1_000_000)
     captain = asdict(
-        captain_run_cost(
-            run_id="cap",
-            model=DEEPSEEK_V4_FLASH,
-            usage=TokenUsage(cache_miss_tokens=1_000_000, output_tokens=1_000_000),
-            rounds=1,
-            duration_ms=0,
+        captain_run_cost_from_state(
+            "cap",
+            RunState(
+                model=DEEPSEEK_V4_FLASH,
+                rounds=1,
+                duration_ms=0,
+                usage=cap_usage.as_dict(),
+                cost=asdict(calculate_cost(DEEPSEEK_V4_FLASH, cap_usage)),
+            ),
         )
     )
     member = {

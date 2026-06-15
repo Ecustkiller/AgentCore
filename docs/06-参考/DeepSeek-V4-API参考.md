@@ -22,9 +22,9 @@
 
 | AgentCore 角色 | 模型 | 思考模式 |
 |---------------|------|---------|
-| CEO 主 Agent（对话 + 按需 delegate + 收尾） | deepseek-v4-flash | 思考模式 (max) |
+| CEO 主 Agent（对话 + 按需 delegate + 收尾，走 `chat` 档） | deepseek-v4-flash | 思考模式 (high)（`max` 按需 per-agent 解锁） |
 | `fast` 档 worker（较简单 / 范围明确） | deepseek-v4-flash | 思考模式 (high)、回合预算小 |
-| `strong` 档 worker、单聊、合成 | deepseek-v4-flash（strong 设计本意 Pro，开发期暂走 Flash） | 思考模式 (high) |
+| `strong` 档 worker、单聊、合成 | deepseek-v4-flash（基座；高质量档提升至 Pro） | 思考模式 (high) |
 | 极复杂任务（per-agent 按需解锁） | deepseek-v4-flash | 思考模式 (max) |
 | 标题 / 记忆维护（后台机械任务） | deepseek-v4-flash | 非思考（提速省钱） |
 

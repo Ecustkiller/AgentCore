@@ -1,11 +1,73 @@
+import type { ErrorAction } from "@/lib/errors";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   type ExecutionJournal,
   execRuntime,
   useExecutionStore,
 } from "@/stores/execution";
-import type { Citation, CostBreakdown } from "@/types/events";
+import type {
+  CheckpointDecision,
+  CheckpointRequiredPayload,
+  CheckpointResolvedPayload,
+  Citation,
+  CostBreakdown,
+  SSEEvent,
+} from "@/types/events";
 import { create } from "zustand";
+
+/**
+ * A checkpoint the CEO raised mid-turn (ask_user) projected for display. Lives on
+ * the assistant message it belongs to (not a separate store like approvals) so it
+ * replays inline from the journal — the question + answer are part of the
+ * conversation, not transient gating. `status` flips `pending → resolved` on the
+ * `checkpoint_resolved` event (live) or on the journal's resolved frame (replay).
+ */
+export interface CheckpointDisplay {
+  id: string;
+  question: string;
+  options: string[];
+  context: string;
+  status: "pending" | "resolved";
+  /** The settled decision; null while pending. */
+  decision: CheckpointDecision | null;
+  /** The user's steer (adjust) or closing remark (stop); empty otherwise. */
+  note: string;
+}
+
+/**
+ * Fold a persisted turn journal's checkpoint events into display items, in the
+ * order they were raised. Shared by live dispatch (none — live builds from the
+ * SSE payloads directly) and history replay (ConversationPage.toMessage), so a
+ * reloaded turn shows the same cards the live turn did.
+ */
+export function checkpointsFromEvents(events: SSEEvent[]): CheckpointDisplay[] {
+  const byId = new Map<string, CheckpointDisplay>();
+  const order: string[] = [];
+  for (const e of events) {
+    if (e.type === "checkpoint_required") {
+      const p = e.payload as CheckpointRequiredPayload;
+      if (!byId.has(p.checkpoint_id)) order.push(p.checkpoint_id);
+      byId.set(p.checkpoint_id, {
+        id: p.checkpoint_id,
+        question: p.question,
+        options: p.options ?? [],
+        context: p.context ?? "",
+        status: "pending",
+        decision: null,
+        note: "",
+      });
+    } else if (e.type === "checkpoint_resolved") {
+      const p = e.payload as CheckpointResolvedPayload;
+      const cur = byId.get(p.checkpoint_id);
+      if (cur) {
+        cur.status = "resolved";
+        cur.decision = p.decision;
+        cur.note = p.note ?? "";
+      }
+    }
+  }
+  return order.map((id) => byId.get(id) as CheckpointDisplay);
+}
 
 export interface Conversation {
   id: string;
@@ -19,6 +81,9 @@ export interface Conversation {
    * (§七双模式). Foldered chats inherit their mode from the folder, so this is
    * only authoritative for ungrouped ones; null/absent = cloud mode. */
   localRootId?: string | null;
+  /** Selected 质量档 (D2): a preset key or custom-mode id; null/absent = inherit
+   * the user/operator default. The composer picker reads/writes this. */
+  modelMode?: string | null;
 }
 
 /** 附件在消息气泡上的展示元信息（不含正文，正文仅发送时携带）。 */
@@ -57,6 +122,16 @@ export interface Message {
    * Absent for user / single-agent turns and for the live turn (which streams
    * straight into the execution store). */
   runs?: ExecutionJournal;
+  /** Checkpoints the CEO raised this turn (ask_user). Set live as the SSE events
+   * arrive and rebuilt from the journal on reload, so the cards render inline
+   * under this assistant bubble (会话流内，不并入状态条). Absent for turns with no
+   * checkpoint. */
+  checkpoints?: CheckpointDisplay[];
+  /** A turn that failed mid-stream (an `error` SSE event), rendered as a friendly
+   * inline error card under the (possibly partial) answer instead of a raw
+   * `**Error**:` line. Live-only — the backend never persisted a partial failure,
+   * so it does not replay on reload (same as the previous text behavior). */
+  error?: { code: string; message: string };
 }
 
 /**
@@ -105,11 +180,25 @@ export interface ConversationRuntime {
   /** User-facing error for the last failed turn, with a one-click retry. */
   error: string | null;
   retry: (() => void) | null;
+  /** Optional remedy that routes the user to fix the cause (e.g. "去配置" → the
+   * model-config page for a missing BYOK key), distinct from re-running the turn. */
+  errorAction: ErrorAction | null;
   /** Cross-component "scroll to + flash" target. Set by surfaces that need to
    * jump the conversation to one message — e.g. the collaboration graph's CEO
-   * synthesis node pointing at this turn's final answer. The nonce re-triggers
+   * captain 汇聚点 node pointing at this turn's final answer. The nonce re-triggers
    * the scroll/flash when the same message is focused again. */
   messageFocus: { id: string; nonce: number } | null;
+  // ---- Cursor-window state (载入模型: 最新窗口 + 上下无限滚动 + 命中定位) ----
+  // `messages` is a contiguous window of the conversation, not the whole history.
+  // These flags say whether more exist past each edge (drive infinite scroll) and
+  // whether a page is mid-flight (collapse a burst of scroll events into one
+  // fetch). The live head invariant: a turn may stream only when `hasMoreAfter`
+  // is false (the window reaches the tail); a search-hit jump that leaves it true
+  // snaps back to latest before sending (see services/messages.ts).
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
+  loadingOlder: boolean;
+  loadingNewer: boolean;
 }
 
 /** Runtime key for a draft chat that has no conversation id yet. */
@@ -121,7 +210,12 @@ const EMPTY_RUNTIME: ConversationRuntime = {
   abort: null,
   error: null,
   retry: null,
+  errorAction: null,
   messageFocus: null,
+  hasMoreBefore: false,
+  hasMoreAfter: false,
+  loadingOlder: false,
+  loadingNewer: false,
 };
 
 /** A conversation's runtime slice, never undefined (empty default). Pass an id
@@ -142,22 +236,45 @@ export function activeRuntime(state: ConversationState): ConversationRuntime {
 }
 
 interface ConversationState {
-  conversations: Conversation[];
   currentConversationId: string | null;
   /** Live turn state per conversation id (draft chat under {@link DRAFT_KEY}). */
   byId: Record<string, ConversationRuntime>;
+  /** A search-hit jump waiting for its conversation to open + load (命中必达). The
+   * palette sets this and navigates; {@link ConversationPage} consumes it once
+   * that conversation's window is loaded, then runs the load-around jump — so a
+   * cross-conversation hit lands precisely without racing the page's own fetch. */
+  pendingFocus: { conversationId: string; messageId: string } | null;
 
-  setConversations: (conversations: Conversation[]) => void;
   setCurrentConversation: (id: string | null) => void;
-  removeConversation: (id: string) => void;
-  /** Set a conversation's folder (optimistic move; null = ungrouped). No-op if
-   * the id isn't in the list. */
-  setConversationFolder: (id: string, folderId: string | null) => void;
-  /** Reflect a workspace bind/unbind onto an ungrouped conversation so its
-   * sidebar mode badge updates without a reload (null = back to cloud). No-op if
-   * the id isn't in the list. */
-  setConversationLocalRoot: (id: string, rootId: string | null) => void;
+  /** Drop a deleted conversation's live runtime: forget its turn slice and, if
+   * it was the open one, clear the current pointer. The list row itself lives in
+   * the React Query cache now (see hooks/useConversations). */
+  dropConversationRuntime: (id: string) => void;
   setMessages: (messages: Message[]) => void;
+  /** Replace a conversation's whole window (initial load + load-around jump),
+   * resetting both edge flags. */
+  setMessageWindow: (
+    messages: Message[],
+    flags: { hasMoreBefore: boolean; hasMoreAfter: boolean },
+    conversationId?: string | null,
+  ) => void;
+  /** Prepend an older page (scroll up), updating `hasMoreBefore`. Deduped by id
+   * so an overlapping page can't double a message. */
+  prependMessages: (
+    older: Message[],
+    hasMoreBefore: boolean,
+    conversationId?: string | null,
+  ) => void;
+  /** Append a newer *history* page (scroll down after a load-around jump),
+   * updating `hasMoreAfter`. Deduped by id. Distinct from {@link addMessage},
+   * which appends a single live/optimistic message. */
+  appendNewerMessages: (
+    newer: Message[],
+    hasMoreAfter: boolean,
+    conversationId?: string | null,
+  ) => void;
+  setLoadingOlder: (v: boolean, conversationId?: string | null) => void;
+  setLoadingNewer: (v: boolean, conversationId?: string | null) => void;
   // Turn-stream mutators take an optional `conversationId`: SSE dispatch passes
   // the turn's id so a background turn writes to its own slice even while the
   // user views another conversation; UI callers omit it to target the active one.
@@ -176,6 +293,29 @@ interface ConversationState {
    * `message_end.cost`); no-op if there is no cost or no assistant to attach to. */
   attachCostToLastMessage: (
     cost: CostBreakdown,
+    conversationId?: string | null,
+  ) => void;
+  /** Mark the last assistant message as failed mid-stream (from an `error` SSE
+   * event) so its bubble renders the friendly inline error card; no-op if there is
+   * no assistant message to attach to. */
+  attachErrorToLastMessage: (
+    error: { code: string; message: string },
+    conversationId?: string | null,
+  ) => void;
+  /** Append a checkpoint the CEO just raised (`checkpoint_required`) to the live
+   * assistant message, as a pending card. Deduped by id; no-op if there is no
+   * assistant message yet. */
+  addCheckpoint: (
+    payload: CheckpointRequiredPayload,
+    conversationId?: string | null,
+  ) => void;
+  /** Flip a checkpoint to resolved (`checkpoint_resolved`, or an optimistic
+   * settle on a stale resolve). Scans the slice's messages for the id; no-op if
+   * it isn't found. */
+  settleCheckpoint: (
+    checkpointId: string,
+    decision: CheckpointDecision,
+    note: string,
     conversationId?: string | null,
   ) => void;
   createAssistantMessage: (conversationId?: string | null) => string;
@@ -211,15 +351,6 @@ interface ConversationState {
    * turns"; the page load guard reloads it from the server on return. No-op for
    * the active or a still-busy conversation. */
   releaseBackgroundSlice: (conversationId: string) => void;
-  renameConversation: (id: string, title: string) => void;
-  /** Move a conversation to the top of the list and stamp `updatedAt` = now, so
-   * a turn (send / regenerate) bumps it into the "今天" group like the backend
-   * ordering will on the next reload. No-op if the id isn't in the list. */
-  bumpConversation: (id: string) => void;
-  /** Undo an optimistic `bumpConversation`: put the conversation back at `index`
-   * and restore its `updatedAt`. Used when a send fails before the server
-   * persisted it, so the list order reflects reality. No-op if the id is gone. */
-  restoreConversation: (id: string, index: number, updatedAt: string) => void;
   /** Register the controller for the current turn (cleared when it ends). */
   setAbort: (a: AbortController | null, conversationId?: string | null) => void;
   /** Abort the in-flight turn and finalize the streaming message. */
@@ -228,12 +359,18 @@ interface ConversationState {
     message: string,
     retry: (() => void) | null,
     conversationId?: string | null,
+    action?: ErrorAction | null,
   ) => void;
   clearError: (conversationId?: string | null) => void;
   /** Scroll the conversation to a message and flash it. Bumps a nonce so
    * re-focusing the same id re-triggers the effect; no-op visuals if the id is
    * not currently rendered. */
   focusMessage: (id: string) => void;
+  /** Record a search-hit jump to honor after the target conversation loads
+   * (used when navigating in from another conversation). */
+  requestMessageFocus: (conversationId: string, messageId: string) => void;
+  /** Clear the pending search-hit jump (once consumed). */
+  clearPendingFocus: () => void;
 }
 
 export const useConversationStore = create<ConversationState>((set, get) => {
@@ -258,20 +395,17 @@ export const useConversationStore = create<ConversationState>((set, get) => {
   ): void => patchConversation(undefined, update);
 
   return {
-    conversations: [],
     currentConversationId: null,
     byId: {},
-
-    setConversations: (conversations) => set({ conversations }),
+    pendingFocus: null,
 
     setCurrentConversation: (id) => set({ currentConversationId: id }),
 
-    removeConversation: (id) =>
+    dropConversationRuntime: (id) =>
       set((state) => {
         const byId = { ...state.byId };
         delete byId[id];
         return {
-          conversations: state.conversations.filter((c) => c.id !== id),
           currentConversationId:
             state.currentConversationId === id
               ? null
@@ -280,21 +414,36 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         };
       }),
 
-    setConversationFolder: (id, folderId) =>
-      set((state) => ({
-        conversations: state.conversations.map((c) =>
-          c.id === id ? { ...c, folderId } : c,
-        ),
-      })),
-
-    setConversationLocalRoot: (id, rootId) =>
-      set((state) => ({
-        conversations: state.conversations.map((c) =>
-          c.id === id ? { ...c, localRootId: rootId } : c,
-        ),
-      })),
-
     setMessages: (messages) => patchActive(() => ({ messages })),
+
+    setMessageWindow: (messages, flags, conversationId) =>
+      patchConversation(conversationId, () => ({
+        messages,
+        hasMoreBefore: flags.hasMoreBefore,
+        hasMoreAfter: flags.hasMoreAfter,
+      })),
+
+    prependMessages: (older, hasMoreBefore, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        if (older.length === 0) return { hasMoreBefore };
+        const known = new Set(rt.messages.map((m) => m.id));
+        const fresh = older.filter((m) => !known.has(m.id));
+        return { messages: [...fresh, ...rt.messages], hasMoreBefore };
+      }),
+
+    appendNewerMessages: (newer, hasMoreAfter, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        if (newer.length === 0) return { hasMoreAfter };
+        const known = new Set(rt.messages.map((m) => m.id));
+        const fresh = newer.filter((m) => !known.has(m.id));
+        return { messages: [...rt.messages, ...fresh], hasMoreAfter };
+      }),
+
+    setLoadingOlder: (v, conversationId) =>
+      patchConversation(conversationId, () => ({ loadingOlder: v })),
+
+    setLoadingNewer: (v, conversationId) =>
+      patchConversation(conversationId, () => ({ loadingNewer: v })),
 
     addMessage: (message, conversationId) =>
       patchConversation(conversationId, (rt) => ({
@@ -336,6 +485,16 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
+    attachErrorToLastMessage: (error, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (last && last.role === "assistant") {
+          messages[messages.length - 1] = { ...last, error };
+        }
+        return { messages };
+      }),
+
     attachCostToLastMessage: (cost, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
@@ -344,6 +503,57 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           messages[messages.length - 1] = { ...last, cost };
         }
         return { messages };
+      }),
+
+    addCheckpoint: (payload, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        let idx = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "assistant") {
+            idx = i;
+            break;
+          }
+        }
+        if (idx === -1) return null;
+        const msg = messages[idx];
+        const existing = msg.checkpoints ?? [];
+        // A re-delivered event must not stack a second card for one checkpoint.
+        if (existing.some((c) => c.id === payload.checkpoint_id)) return null;
+        messages[idx] = {
+          ...msg,
+          checkpoints: [
+            ...existing,
+            {
+              id: payload.checkpoint_id,
+              question: payload.question,
+              options: payload.options ?? [],
+              context: payload.context ?? "",
+              status: "pending",
+              decision: null,
+              note: "",
+            },
+          ],
+        };
+        return { messages };
+      }),
+
+    settleCheckpoint: (checkpointId, decision, note, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        let changed = false;
+        const messages = rt.messages.map((m) => {
+          if (!m.checkpoints?.some((c) => c.id === checkpointId)) return m;
+          changed = true;
+          return {
+            ...m,
+            checkpoints: m.checkpoints.map((c) =>
+              c.id === checkpointId
+                ? { ...c, status: "resolved" as const, decision, note }
+                : c,
+            ),
+          };
+        });
+        return changed ? { messages } : null;
       }),
 
     createAssistantMessage: (conversationId) => {
@@ -386,7 +596,13 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       patchConversation(conversationId, (rt) => {
         const idx = rt.messages.findIndex((m) => m.id === id);
         if (idx === -1) return null;
-        return { messages: rt.messages.slice(0, idx + 1) };
+        // Regenerate / edit re-runs from this message: the backend drops every
+        // later row, so the window now reaches the (new) tail — clear any stale
+        // hasMoreAfter left by a search-hit jump so the turn streams at the head.
+        return {
+          messages: rt.messages.slice(0, idx + 1),
+          hasMoreAfter: false,
+        };
       }),
 
     reconcileLastTurn: (userMessageId, conversationId) =>
@@ -422,6 +638,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         messages: [],
         isGenerating: false,
         messageFocus: null,
+        hasMoreBefore: false,
+        hasMoreAfter: false,
       })),
 
     switchConversation: (id) => {
@@ -477,42 +695,6 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { byId };
       }),
 
-    renameConversation: (id, title) =>
-      set((state) => ({
-        conversations: state.conversations.map((c) =>
-          c.id === id ? { ...c, title } : c,
-        ),
-      })),
-
-    bumpConversation: (id) =>
-      set((state) => {
-        const target = state.conversations.find((c) => c.id === id);
-        if (!target) return {};
-        const bumped = { ...target, updatedAt: new Date().toISOString() };
-        return {
-          conversations: [
-            bumped,
-            ...state.conversations.filter((c) => c.id !== id),
-          ],
-        };
-      }),
-
-    restoreConversation: (id, index, updatedAt) =>
-      set((state) => {
-        const target = state.conversations.find((c) => c.id === id);
-        if (!target) return {};
-        const without = state.conversations.filter((c) => c.id !== id);
-        const at = Math.max(0, Math.min(index, without.length));
-        const restored = { ...target, updatedAt };
-        return {
-          conversations: [
-            ...without.slice(0, at),
-            restored,
-            ...without.slice(at),
-          ],
-        };
-      }),
-
     setAbort: (a, conversationId) =>
       patchConversation(conversationId, () => ({ abort: a })),
 
@@ -539,16 +721,29 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       }
     },
 
-    setError: (message, retry, conversationId) =>
-      patchConversation(conversationId, () => ({ error: message, retry })),
+    setError: (message, retry, conversationId, action) =>
+      patchConversation(conversationId, () => ({
+        error: message,
+        retry,
+        errorAction: action ?? null,
+      })),
 
     clearError: (conversationId) =>
-      patchConversation(conversationId, () => ({ error: null, retry: null })),
+      patchConversation(conversationId, () => ({
+        error: null,
+        retry: null,
+        errorAction: null,
+      })),
 
     focusMessage: (id) =>
       patchActive((rt) => ({
         messageFocus: { id, nonce: (rt.messageFocus?.nonce ?? 0) + 1 },
       })),
+
+    requestMessageFocus: (conversationId, messageId) =>
+      set({ pendingFocus: { conversationId, messageId } }),
+
+    clearPendingFocus: () => set({ pendingFocus: null }),
   };
 });
 
@@ -580,9 +775,30 @@ export const useActiveError = (): string | null =>
 export const useActiveRetry = (): (() => void) | null =>
   useConversationStore((s) => activeRuntime(s).retry);
 
+/** The active conversation's error remedy action (e.g. "去配置"), if any. */
+export const useActiveErrorAction = (): ErrorAction | null =>
+  useConversationStore((s) => activeRuntime(s).errorAction);
+
 /** The active conversation's scroll-to-and-flash target, if any. */
 export const useActiveMessageFocus = (): { id: string; nonce: number } | null =>
   useConversationStore((s) => activeRuntime(s).messageFocus);
+
+/** Whether older messages remain above the active conversation's window. */
+export const useActiveHasMoreBefore = (): boolean =>
+  useConversationStore((s) => activeRuntime(s).hasMoreBefore);
+
+/** Whether newer messages remain below the active conversation's window
+ * (true only after a search-hit jump into history). */
+export const useActiveHasMoreAfter = (): boolean =>
+  useConversationStore((s) => activeRuntime(s).hasMoreAfter);
+
+/** Whether an older-page fetch is in flight (drives the top spinner). */
+export const useActiveLoadingOlder = (): boolean =>
+  useConversationStore((s) => activeRuntime(s).loadingOlder);
+
+/** Whether a newer-page fetch is in flight (drives the bottom spinner). */
+export const useActiveLoadingNewer = (): boolean =>
+  useConversationStore((s) => activeRuntime(s).loadingNewer);
 
 /** Imperative read of the active conversation's runtime (outside React). */
 export const getActiveRuntime = (): ConversationRuntime =>

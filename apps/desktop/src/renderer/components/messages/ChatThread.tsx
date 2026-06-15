@@ -1,3 +1,4 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useStickToBottom } from "@/lib/useStickToBottom";
 import { useAuthStore } from "@/stores/auth";
 import {
@@ -72,15 +73,16 @@ export function ChatThread({ chatId }: Props) {
           )}
         </div>
         {hasMessages && !atBottom && (
-          <button
-            type="button"
-            onClick={jumpToBottom}
-            aria-label="回到底部"
-            title="回到底部"
-            className="absolute bottom-3 left-1/2 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-md transition-colors hover:text-foreground"
-          >
-            <ArrowDown size={16} />
-          </button>
+          <SimpleTooltip label="回到底部">
+            <button
+              type="button"
+              onClick={jumpToBottom}
+              aria-label="回到底部"
+              className="absolute bottom-3 left-1/2 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-md transition-colors hover:text-foreground"
+            >
+              <ArrowDown size={16} />
+            </button>
+          </SimpleTooltip>
         )}
       </div>
 

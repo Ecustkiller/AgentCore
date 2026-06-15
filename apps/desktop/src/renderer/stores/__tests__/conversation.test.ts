@@ -12,7 +12,6 @@ const rt = () => getActiveRuntime();
 
 beforeEach(() => {
   useConversationStore.setState({
-    conversations: [],
     currentConversationId: null,
     byId: {},
   });
@@ -214,6 +213,28 @@ describe("conversation store", () => {
     });
   });
 
+  describe("attachErrorToLastMessage", () => {
+    it("attaches a structured error to the last assistant message", () => {
+      store().createAssistantMessage();
+      store().appendToLastMessage("partial answer");
+
+      store().attachErrorToLastMessage({
+        code: "LLM_INSUFFICIENT_BALANCE",
+        message: "DeepSeek 账户余额不足，请前往 DeepSeek 开放平台充值后重试。",
+      });
+
+      const last = rt().messages[0];
+      expect(last.content).toBe("partial answer");
+      expect(last.error?.code).toBe("LLM_INSUFFICIENT_BALANCE");
+      expect(last.error?.message).toContain("余额不足");
+    });
+
+    it("does nothing when there is no assistant message", () => {
+      store().attachErrorToLastMessage({ code: "X", message: "boom" });
+      expect(rt().messages).toEqual([]);
+    });
+  });
+
   describe("createAssistantMessage", () => {
     it("creates an empty streaming assistant message", () => {
       const id = store().createAssistantMessage();
@@ -239,145 +260,126 @@ describe("conversation store", () => {
     });
   });
 
-  describe("removeConversation", () => {
-    it("removes conversation from list", () => {
-      store().setConversations([
-        {
-          id: "a",
-          title: "A",
-          updatedAt: "",
-          messageCount: 0,
-          lastMessagePreview: null,
-        },
-        {
-          id: "b",
-          title: "B",
-          updatedAt: "",
-          messageCount: 0,
-          lastMessagePreview: null,
-        },
-      ]);
+  describe("dropConversationRuntime", () => {
+    const userMsg = {
+      id: "m1",
+      role: "user" as const,
+      content: "hi",
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    };
 
-      store().removeConversation("a");
-      expect(store().conversations).toHaveLength(1);
-      expect(store().conversations[0].id).toBe("b");
+    it("forgets a conversation's runtime slice", () => {
+      store().switchConversation("a");
+      store().addMessage(userMsg);
+      store().dropConversationRuntime("a");
+      expect(store().byId.a).toBeUndefined();
     });
 
-    it("clears currentConversationId if removed conversation is current", () => {
-      store().setConversations([
-        {
-          id: "a",
-          title: "A",
-          updatedAt: "",
-          messageCount: 0,
-          lastMessagePreview: null,
-        },
-      ]);
+    it("clears currentConversationId when the dropped one was open", () => {
       store().switchConversation("a");
-
-      store().removeConversation("a");
+      store().dropConversationRuntime("a");
       expect(store().currentConversationId).toBeNull();
     });
-  });
 
-  describe("renameConversation", () => {
-    it("updates conversation title", () => {
-      store().setConversations([
-        {
-          id: "a",
-          title: "原标题",
-          updatedAt: "",
-          messageCount: 0,
-          lastMessagePreview: null,
-        },
-      ]);
-
-      store().renameConversation("a", "新标题");
-      expect(store().conversations[0].title).toBe("新标题");
+    it("keeps current when a different conversation is dropped", () => {
+      store().switchConversation("a");
+      store().dropConversationRuntime("b");
+      expect(store().currentConversationId).toBe("a");
     });
   });
 
-  describe("bumpConversation", () => {
-    it("moves the conversation to the front and refreshes updatedAt", () => {
-      store().setConversations([
-        {
-          id: "a",
-          title: "A",
-          updatedAt: "2020-01-01T00:00:00.000Z",
-          messageCount: 0,
-          lastMessagePreview: null,
-        },
-        {
-          id: "b",
-          title: "B",
-          updatedAt: "2020-01-01T00:00:00.000Z",
-          messageCount: 0,
-          lastMessagePreview: null,
-        },
-      ]);
+  // Cursor-window state for the latest-window + infinite-scroll + load-around
+  // model (载入模型 B): the window mutators that the message service drives.
+  describe("cursor-window (load-around B)", () => {
+    const mk = (id: string) => ({
+      id,
+      role: "user" as const,
+      content: id,
+      createdAt: id,
+      executionId: null,
+      isStreaming: false,
+    });
 
-      store().bumpConversation("b");
-
-      const list = store().conversations;
-      expect(list.map((c) => c.id)).toEqual(["b", "a"]);
-      expect(Date.parse(list[0].updatedAt)).toBeGreaterThan(
-        Date.parse("2020-01-01T00:00:00.000Z"),
+    it("setMessageWindow replaces messages and sets both edge flags", () => {
+      store().switchConversation("a");
+      store().setMessageWindow(
+        [mk("m2"), mk("m3")],
+        { hasMoreBefore: true, hasMoreAfter: true },
+        "a",
       );
+      expect(rt().messages.map((m) => m.id)).toEqual(["m2", "m3"]);
+      expect(rt().hasMoreBefore).toBe(true);
+      expect(rt().hasMoreAfter).toBe(true);
     });
 
-    it("is a no-op when the id is not in the list", () => {
-      store().setConversations([
-        {
-          id: "a",
-          title: "A",
-          updatedAt: "",
-          messageCount: 0,
-          lastMessagePreview: null,
-        },
-      ]);
-
-      store().bumpConversation("missing");
-      expect(store().conversations.map((c) => c.id)).toEqual(["a"]);
-    });
-  });
-
-  describe("restoreConversation", () => {
-    it("undoes a bump, restoring original position and updatedAt", () => {
-      const original = [
-        {
-          id: "a",
-          title: "A",
-          updatedAt: "2020-01-03T00:00:00.000Z",
-          messageCount: 0,
-          lastMessagePreview: null,
-        },
-        {
-          id: "b",
-          title: "B",
-          updatedAt: "2020-01-02T00:00:00.000Z",
-          messageCount: 0,
-          lastMessagePreview: null,
-        },
-        {
-          id: "c",
-          title: "C",
-          updatedAt: "2020-01-01T00:00:00.000Z",
-          messageCount: 0,
-          lastMessagePreview: null,
-        },
-      ];
-      store().setConversations(original);
-
-      // Bump "c" to the front (as a send would), then roll it back.
-      store().bumpConversation("c");
-      expect(store().conversations.map((x) => x.id)).toEqual(["c", "a", "b"]);
-
-      store().restoreConversation("c", 2, "2020-01-01T00:00:00.000Z");
-
-      expect(store().conversations.map((x) => x.id)).toEqual(["a", "b", "c"]);
-      expect(store().conversations[2].updatedAt).toBe(
-        "2020-01-01T00:00:00.000Z",
+    it("prependMessages adds older messages and updates hasMoreBefore", () => {
+      store().switchConversation("a");
+      store().setMessageWindow(
+        [mk("m3")],
+        { hasMoreBefore: true, hasMoreAfter: false },
+        "a",
       );
+      store().prependMessages([mk("m1"), mk("m2")], false, "a");
+      expect(rt().messages.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+      expect(rt().hasMoreBefore).toBe(false);
+    });
+
+    it("prependMessages dedupes ids already in the window", () => {
+      store().switchConversation("a");
+      store().setMessageWindow(
+        [mk("m2"), mk("m3")],
+        { hasMoreBefore: true, hasMoreAfter: false },
+        "a",
+      );
+      store().prependMessages([mk("m1"), mk("m2")], false, "a");
+      expect(rt().messages.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+    });
+
+    it("appendNewerMessages adds newer history and updates hasMoreAfter", () => {
+      store().switchConversation("a");
+      store().setMessageWindow(
+        [mk("m1")],
+        { hasMoreBefore: false, hasMoreAfter: true },
+        "a",
+      );
+      store().appendNewerMessages([mk("m2"), mk("m3")], false, "a");
+      expect(rt().messages.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+      expect(rt().hasMoreAfter).toBe(false);
+    });
+
+    it("truncateAfter clears a stale hasMoreAfter (fork from history)", () => {
+      store().switchConversation("a");
+      store().setMessageWindow(
+        [mk("m1"), mk("m2")],
+        { hasMoreBefore: false, hasMoreAfter: true },
+        "a",
+      );
+      store().truncateAfter("m1", "a");
+      expect(rt().messages.map((m) => m.id)).toEqual(["m1"]);
+      expect(rt().hasMoreAfter).toBe(false);
+    });
+
+    it("tracks per-direction loading flags", () => {
+      store().switchConversation("a");
+      store().setLoadingOlder(true, "a");
+      store().setLoadingNewer(true, "a");
+      expect(rt().loadingOlder).toBe(true);
+      expect(rt().loadingNewer).toBe(true);
+      store().setLoadingOlder(false, "a");
+      expect(rt().loadingOlder).toBe(false);
+      expect(rt().loadingNewer).toBe(true);
+    });
+
+    it("records and clears a pending cross-conversation focus", () => {
+      store().requestMessageFocus("conv-x", "msg-y");
+      expect(store().pendingFocus).toEqual({
+        conversationId: "conv-x",
+        messageId: "msg-y",
+      });
+      store().clearPendingFocus();
+      expect(store().pendingFocus).toBeNull();
     });
   });
 });

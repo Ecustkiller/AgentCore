@@ -7,12 +7,7 @@ or tools: ``ServerWorkspace`` (cloud mode, files + execution on the server) and
 user's desktop). The channel is the generalized form of the approval mechanism.
 """
 
-from agentcore.workspace.channel import (
-    WorkspaceChannel,
-    WorkspaceOp,
-    WorkspaceOpRegistry,
-    default_workspace_op_registry,
-)
+from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.protocol import (
     AmbiguousMatch,
@@ -39,8 +34,6 @@ __all__ = [
     "LocalWorkspace",
     "WorkspaceChannel",
     "WorkspaceOp",
-    "WorkspaceOpRegistry",
-    "default_workspace_op_registry",
     "WorkspaceError",
     "OutsideWorkspace",
     "PathNotFound",

@@ -1,111 +1,57 @@
 import { ApiError, NetworkError, api } from "@/services/api";
+import type { components } from "@/types/api.generated";
+
+type Schemas = components["schemas"];
 
 /**
  * 消息 page (找人 IM) REST client — mirrors `apps/server/.../api/routes/messages.py`
  * and its Pydantic schemas (消息IM.md §三).
  *
  * The 消息 page is human↔human, a domain separate from the 对话 page's AI
- * conversations, so this is its own service with its own types. Types are hand-
- * declared per the repo's current convention (each service owns its response
- * shapes; there is no OpenAPI codegen artifact yet — a separate concern). Keep
- * field names snake_case to match the wire payload verbatim.
+ * conversations, so this is its own service with its own types. The REST types
+ * below are GENERATED from the backend OpenAPI spec (`types/api.generated.ts`,
+ * via `pnpm gen:api`) and aliased here, so they track `api/schemas.py` with zero
+ * hand-written drift. Wire fields stay snake_case verbatim. Fields the backend
+ * gives a default (e.g. `unread`, `avatar_url`, `attachments`) are optional in
+ * the generated type; read sites coalesce where a concrete value is needed.
  */
 
-export type ChatType = "dm" | "group" | "official";
-export type ChatMemberState = "accepted" | "pending";
-export type ChatSenderType = "user" | "official" | "agent";
-export type MessageContentType = "text" | "image" | "file" | "system_card";
-export type WhoCanDm = "anyone" | "contacts";
+/** Chat kind (generated from backend `ChatSummary.type`). */
+export type ChatType = Schemas["ChatSummary"]["type"];
+/** This user's membership state on a chat (generated from `ChatSummary.state`). */
+export type ChatMemberState = Schemas["ChatSummary"]["state"];
+/** Message author kind (generated from `ChatMessageDetail.sender_type`). */
+export type ChatSenderType = Schemas["ChatMessageDetail"]["sender_type"];
+/** Message body kind (generated from `ChatMessageDetail.content_type`). */
+export type MessageContentType = Schemas["ChatMessageDetail"]["content_type"];
+/** Who may DM this user (generated from `DirectorySettings.who_can_dm`). */
+export type WhoCanDm = Schemas["DirectorySettings"]["who_can_dm"];
 
 /** A human shown on a chat (the peer of a dm; a member of a group). */
-export interface ChatParticipant {
-  id: string;
-  username: string;
-  display_name: string;
-}
+export type ChatParticipant = Schemas["ChatParticipant"];
 
-/** Persisted attachment display metadata (mirrors backend `StoredAttachment`). */
-export interface StoredAttachment {
-  name: string;
-  path: string;
-  truncated: boolean;
-  kind: "file" | "dir";
-  workspace_path: string | null;
-}
+/** Persisted attachment display metadata (generated from `StoredAttachment`). */
+export type StoredAttachment = Schemas["StoredAttachment"];
 
 /** One row in the IM chat list (消息页左栏), plus this user's per-chat state. */
-export interface ChatSummary {
-  id: string;
-  type: ChatType;
-  title: string | null;
-  avatar_url: string | null;
-  /** The other human in a dm (null for group/official); drives the row name. */
-  peer: ChatParticipant | null;
-  last_message_at: string | null;
-  last_message_preview: string | null;
-  unread: number;
-  pinned: boolean;
-  muted: boolean;
-  state: ChatMemberState;
-}
+export type ChatSummary = Schemas["ChatSummary"];
 
-/** One message in a chat thread (mirrors backend `ChatMessageDetail`). */
-export interface ChatMessageDetail {
-  id: string;
-  chat_id: string;
-  /** null sender = the official/system account. */
-  sender_user_id: string | null;
-  sender_type: ChatSenderType;
-  content: string | null;
-  content_type: MessageContentType;
-  attachments: StoredAttachment[];
-  /** system_card deep-link payload; null otherwise. */
-  payload: Record<string, unknown> | null;
-  reply_to_message_id: string | null;
-  created_at: string;
-}
+/** One message in a chat thread (generated from `ChatMessageDetail`). */
+export type ChatMessageDetail = Schemas["ChatMessageDetail"];
 
 /** A discoverable user surfaced by people-search (任意搜人, exact match). */
-export interface UserSearchResult {
-  id: string;
-  username: string;
-  display_name: string;
-}
+export type UserSearchResult = Schemas["UserSearchResult"];
 
 /** A user this account has blocked. */
-export interface BlockedUser {
-  id: string;
-  username: string;
-  display_name: string;
-}
+export type BlockedUser = Schemas["BlockedUser"];
 
 /** This user's discoverability + who-can-DM privacy (任意搜人 护栏). */
-export interface DirectorySettings {
-  discoverable: boolean;
-  who_can_dm: WhoCanDm;
-}
+export type DirectorySettings = Schemas["DirectorySettings"];
 
-interface ChatListResponse {
-  data: ChatSummary[];
-  total: number;
-}
-
-interface UserSearchResponse {
-  data: UserSearchResult[];
-  total: number;
-}
-
-interface ChatMessageListResponse {
-  data: ChatMessageDetail[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-interface BlockListResponse {
-  data: BlockedUser[];
-  total: number;
-}
+type ChatListResponse = Schemas["ChatListResponse"];
+type UserSearchResponse = Schemas["UserSearchResponse"];
+type ChatMessageListResponse = Schemas["ChatMessageListResponse"];
+type BlockListResponse = Schemas["BlockListResponse"];
 
 /** A page of a chat's messages (oldest first), paging echoed back. */
 export interface MessagePage {

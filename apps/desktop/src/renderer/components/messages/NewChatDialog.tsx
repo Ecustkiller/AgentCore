@@ -1,3 +1,4 @@
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   type UserSearchResult,
   messagingErrorMessage,
@@ -28,15 +29,14 @@ export function NewChatDialog({ open, onClose, onStarted }: Props) {
   const [starting, setStarting] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Each open is a fresh search.
+  // Each open is a fresh search. (Focus is handled by the Dialog's
+  // onOpenAutoFocus below, once the content has mounted.)
   useEffect(() => {
     if (!open) return;
     setQuery("");
     setResults([]);
     setError(null);
     setStarting(null);
-    const raf = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => cancelAnimationFrame(raf);
   }, [open]);
 
   // Debounced exact-match search; the empty query clears results.
@@ -75,8 +75,6 @@ export function NewChatDialog({ open, onClose, onStarted }: Props) {
     };
   }, [query, open]);
 
-  if (!open) return null;
-
   const handleStart = async (user: UserSearchResult) => {
     setStarting(user.id);
     setError(null);
@@ -92,26 +90,24 @@ export function NewChatDialog({ open, onClose, onStarted }: Props) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-overlay px-4 pt-[15vh]"
-      onMouseDown={onClose}
-    >
-      <div
-        className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg"
-        onMouseDown={(e) => e.stopPropagation()}
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent
+        position="top"
+        showClose={false}
+        className="max-w-md"
+        aria-describedby={undefined}
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          inputRef.current?.focus();
+        }}
       >
+        <DialogTitle className="sr-only">新建会话</DialogTitle>
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <Search size={16} className="shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.preventDefault();
-                onClose();
-              }
-            }}
             placeholder="按用户名或 ID 精确搜索…"
             className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
@@ -126,7 +122,9 @@ export function NewChatDialog({ open, onClose, onStarted }: Props) {
         </div>
 
         <div className="max-h-80 overflow-y-auto">
-          {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
+          {error && (
+            <p className="px-4 py-3 text-sm text-destructive">{error}</p>
+          )}
           {!error && loading && (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
               搜索中…
@@ -174,7 +172,7 @@ export function NewChatDialog({ open, onClose, onStarted }: Props) {
             </ul>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

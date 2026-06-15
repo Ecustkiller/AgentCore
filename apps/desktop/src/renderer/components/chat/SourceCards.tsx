@@ -1,3 +1,4 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { Citation } from "@/types/events";
 import { Globe } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -68,35 +69,35 @@ export function SourceCards({
       </div>
       <div className="flex flex-wrap gap-2">
         {visible.map((c, i) => (
-          <a
-            key={`${c.url}-${i}`}
-            ref={(el) => {
-              refs.current[i] = el;
-            }}
-            href={c.url}
-            target="_blank"
-            rel="noreferrer"
-            title={`${c.title || c.url}\n${c.url}`}
-            className={`flex max-w-[260px] items-center gap-2 rounded-lg border bg-card px-2.5 py-1.5 transition-colors hover:bg-accent ${
-              highlight === i + 1
-                ? "border-primary ring-2 ring-primary"
-                : "border-border"
-            }`}
-          >
-            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">
-              {i + 1}
-            </span>
-            <span className="min-w-0">
-              <span className="block truncate text-xs font-medium text-foreground">
-                {c.title || c.site || c.url}
+          <SimpleTooltip key={`${c.url}-${i}`} label={c.url}>
+            <a
+              ref={(el) => {
+                refs.current[i] = el;
+              }}
+              href={c.url}
+              target="_blank"
+              rel="noreferrer"
+              className={`flex max-w-[260px] items-center gap-2 rounded-lg border bg-card px-2.5 py-1.5 transition-colors hover:bg-accent ${
+                highlight === i + 1
+                  ? "border-primary ring-2 ring-primary"
+                  : "border-border"
+              }`}
+            >
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">
+                {i + 1}
               </span>
-              {c.site && (
-                <span className="block truncate text-xs text-muted-foreground">
-                  {c.site}
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-medium text-foreground">
+                  {c.title || c.site || c.url}
                 </span>
-              )}
-            </span>
-          </a>
+                {c.site && (
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {c.site}
+                  </span>
+                )}
+              </span>
+            </a>
+          </SimpleTooltip>
         ))}
         {hidden > 0 && !expanded && (
           <button

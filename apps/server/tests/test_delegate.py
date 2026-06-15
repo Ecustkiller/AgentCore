@@ -10,9 +10,11 @@ worker token accumulation, and the graph lifecycle events.
 import json
 from pathlib import Path
 
+from agentcore.core.types import ToolEffect
 from agentcore.llm.protocol import LLMChunk, TokenUsage, ToolCallDelta
-from agentcore.runtime.approvals import ApprovalGate, ApprovalRegistry
+from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink, EventType
+from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.protocol import ToolContext
@@ -65,7 +67,7 @@ async def test_parallel_delegate_returns_products_non_terminal():
         {"tasks": [{"role": "研究员", "task": "做A"}, {"role": "写手", "task": "做B"}]}, _ctx()
     )
     assert result.success is True
-    assert result.terminal is False
+    assert result.is_terminal is False
     assert "AOUT" in result.output
     assert "BOUT" in result.output
     assert "研究员" in result.output
@@ -87,16 +89,87 @@ async def test_dag_delegate_completes_with_both_products():
     tool = _tool(_Provider(["UPSTREAM", "FINAL"]))
     result = await tool.execute({"tasks": tasks}, _ctx())
     assert result.success is True
-    assert result.terminal is False
+    assert result.is_terminal is False
     assert "UPSTREAM" in result.output
     assert "FINAL" in result.output
+
+
+async def test_finalize_single_worker_surfaces_directly_as_terminal():
+    # 提案2a: a single self-contained deliverable the CEO finalized is surfaced
+    # directly — HANDOFF terminal (no CEO synthesis round), the worker's product is
+    # the final_text, and it is streamed to the chat bubble (content_delta).
+    usage = TokenUsage(
+        input_tokens=10,
+        output_tokens=5,
+        reasoning_tokens=0,
+        cache_hit_tokens=6,
+        cache_miss_tokens=4,
+    )
+    sink = EventSink()
+    tool = _tool(_Provider(["DIRECT"], usage=usage), sink=sink)
+    result = await tool.execute(
+        {"tasks": [{"role": "工程师", "task": "建文件"}], "finalize": True}, _ctx()
+    )
+    assert result.success is True
+    assert result.is_terminal is True
+    assert result.effect is ToolEffect.HANDOFF
+    assert result.final_text == "DIRECT"
+    # Worker usage is tracked on the instance (the pipeline folds it into the turn
+    # total) but NOT echoed in metadata — otherwise the engine's terminal path would
+    # double-count it into the captain's own spend.
+    assert tool.usage["input"] == 10
+    assert "input_tokens" not in result.metadata
+    # final_text is persisted but not re-emitted by the engine, so the product is
+    # streamed to the chat bubble here (the only content_delta — worker output rides
+    # run_output_delta, not the bubble).
+    sink.close()
+    deltas = [
+        e.payload["delta"] async for e in sink if e.type == EventType.CONTENT_DELTA
+    ]
+    assert deltas == ["DIRECT"]
+
+
+async def test_finalize_ignored_for_multi_worker_batch():
+    # finalize only collapses a single-worker delivery; a multi-worker batch still
+    # needs the CEO to weave the products, so it stays non-terminal.
+    tool = _tool(_Provider(["A", "B"]))
+    result = await tool.execute(
+        {
+            "tasks": [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}],
+            "finalize": True,
+        },
+        _ctx(),
+    )
+    assert result.is_terminal is False
+    assert "A" in result.output and "B" in result.output
+
+
+async def test_finalize_falls_back_to_synthesis_when_worker_fails():
+    # finalize is safe: if the single worker hard-fails its contract, we do NOT
+    # surface a failure as the final answer — fall back to the non-terminal path so
+    # the CEO can react and wrap up.
+    tool = _tool(_Provider(["X"]))  # length 1, fails the min_length contract below
+    result = await tool.execute(
+        {
+            "tasks": [
+                {
+                    "role": "A",
+                    "task": "a",
+                    "contract": {"min_length": 100, "strict": True},
+                }
+            ],
+            "finalize": True,
+        },
+        _ctx(),
+    )
+    assert result.is_terminal is False
 
 
 async def test_empty_tasks_rejected():
     tool = _tool(_Provider([]))
     result = await tool.execute({"tasks": []}, _ctx())
     assert result.success is False
-    assert result.terminal is False
+    assert result.is_terminal is False
     assert result.error
 
 
@@ -148,6 +221,82 @@ async def test_emits_plan_and_lifecycle_events():
     assert EventType.RUN_STARTED in types
     assert EventType.RUN_COMPLETED in types
     assert EventType.RUN_PROGRESS in types
+
+
+async def test_run_plan_carries_stance_and_group_tags():
+    # 辩论/审查 (前端UX目标态 §四②): the CEO marks an opposing batch; the tags ride the
+    # run_plan payload display-only so the frontend can render正反 side-by-side. The
+    # execution stays a普通并行 DAG (守住「形状是数据不是模式」) — only the wire grew.
+    sink = EventSink()
+    tool = _tool(_Provider(["PRO", "CON"]), sink=sink)
+    await tool.execute(
+        {
+            "tasks": [
+                {"role": "正方", "task": "支持", "stance": "pro", "group": "g1"},
+                {"role": "反方", "task": "反对", "stance": "con", "group": "g1"},
+            ]
+        },
+        _ctx(),
+    )
+    sink.close()
+    plan_runs = [
+        r async for e in sink if e.type == EventType.RUN_PLAN for r in e.payload["runs"]
+    ]
+    by_task = {r["task"]: r for r in plan_runs}
+    assert by_task["支持"]["stance"] == "pro"
+    assert by_task["支持"]["group"] == "g1"
+    assert by_task["反对"]["stance"] == "con"
+    assert by_task["反对"]["group"] == "g1"
+
+
+async def test_run_plan_carries_round_tag():
+    # 真·多轮辩论 (前端UX目标态 §四): round rides run_plan display-only alongside
+    # stance/group so the frontend can lay rounds out 逐轮. 跨轮交锋全靠 depends_on —
+    # round 只是呈现信号, 不改执行 (守住「形状是数据不是模式」).
+    sink = EventSink()
+    tool = _tool(_Provider(["R1", "R2"]), sink=sink)
+    await tool.execute(
+        {
+            "tasks": [
+                {"id": "p1", "role": "正方", "task": "首轮", "stance": "pro", "round": 1},
+                {
+                    "id": "p2",
+                    "role": "正方",
+                    "task": "次轮",
+                    "stance": "pro",
+                    "round": 2,
+                    "depends_on": ["p1"],
+                },
+            ]
+        },
+        _ctx(),
+    )
+    sink.close()
+    plan_runs = [
+        r async for e in sink if e.type == EventType.RUN_PLAN for r in e.payload["runs"]
+    ]
+    by_task = {r["task"]: r for r in plan_runs}
+    assert by_task["首轮"]["round"] == 1
+    assert by_task["次轮"]["round"] == 2
+
+
+async def test_run_plan_omits_tags_for_ordinary_batch():
+    # An untagged batch must not grow new keys — the common parallel/DAG path stays
+    # byte-identical, so only a real debate carries the presentation hint.
+    sink = EventSink()
+    tool = _tool(_Provider(["X", "Y"]), sink=sink)
+    await tool.execute(
+        {"tasks": [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}]}, _ctx()
+    )
+    sink.close()
+    plan_runs = [
+        r async for e in sink if e.type == EventType.RUN_PLAN for r in e.payload["runs"]
+    ]
+    assert plan_runs  # sanity: the batch was declared
+    assert all(
+        "stance" not in r and "group" not in r and "round" not in r
+        for r in plan_runs
+    )
 
 
 def test_task_description_matches_what_worker_actually_receives():
@@ -225,7 +374,7 @@ def _gate() -> ApprovalGate:
     return ApprovalGate(
         sink=EventSink(),
         conversation_id="c",
-        registry=ApprovalRegistry(),
+        registry=InteractionRegistry(),
         timeout_seconds=1.0,
     )
 
@@ -356,7 +505,7 @@ async def test_nested_delegation_runs_subteam_links_tree_and_rolls_up():
     )
 
     assert result.success is True
-    assert result.terminal is False
+    assert result.is_terminal is False
     # The captain worker delegated exactly one nested sub-team.
     assert provider.delegate_calls == 1
     # The CEO sees the captain worker's integrated answer; the sub-workers' raw

@@ -1,3 +1,4 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { remarkCitations } from "@/lib/remarkCitations";
 import { memo, useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
@@ -17,14 +18,15 @@ const components: Components = { pre: CodeBlock };
 /** A clickable inline citation marker that maps to a source card. */
 function CitationChip({ n, onClick }: { n: number; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={`来源 ${n}`}
-      className="mx-0.5 inline-flex items-center rounded-full bg-primary/10 px-1.5 align-super text-xs font-medium leading-none text-primary transition-colors hover:bg-primary/20"
-    >
-      {n}
-    </button>
+    <SimpleTooltip label={`来源 ${n}`}>
+      <button
+        type="button"
+        onClick={onClick}
+        className="mx-0.5 inline-flex items-center rounded-full bg-primary/10 px-1.5 align-super text-xs font-medium leading-none text-primary transition-colors hover:bg-primary/20"
+      >
+        {n}
+      </button>
+    </SimpleTooltip>
   );
 }
 

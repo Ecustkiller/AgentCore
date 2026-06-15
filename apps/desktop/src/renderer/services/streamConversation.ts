@@ -1,3 +1,5 @@
+import { patchConversationCache } from "@/hooks/useConversations";
+import { StreamError } from "@/lib/errors";
 import { notifyUnauthorized, tryRefresh } from "@/services/api";
 import { performWorkspaceOp } from "@/services/workspaceOps";
 import { useApprovalStore } from "@/stores/approvals";
@@ -15,6 +17,8 @@ import {
 import type {
   ApprovalRequiredPayload,
   ApprovalResolvedPayload,
+  CheckpointRequiredPayload,
+  CheckpointResolvedPayload,
   CitationsPayload,
   ContentDeltaPayload,
   ErrorPayload,
@@ -31,30 +35,6 @@ const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 interface DispatchContext {
   conversationId: string;
-}
-
-export type StreamErrorKind = "network" | "http" | "auth";
-
-/** A transport-level failure of the SSE turn (distinct from a backend `error`
- * event, which is delivered inline). Carries a kind so the UI can phrase it, plus
- * the backend's error `code` / `message` / `Retry-After` when the turn was refused
- * with a plain JSON 4xx (quota or rate limit) rather than an event stream. */
-export class StreamError extends Error {
-  code?: string;
-  serverMessage?: string;
-  retryAfter?: number;
-
-  constructor(
-    public kind: StreamErrorKind,
-    public status?: number,
-    extra?: { code?: string; serverMessage?: string; retryAfter?: number },
-  ) {
-    super(`stream ${kind}${status ? ` ${status}` : ""}`);
-    this.name = "StreamError";
-    this.code = extra?.code;
-    this.serverMessage = extra?.serverMessage;
-    this.retryAfter = extra?.retryAfter;
-  }
 }
 
 /** Build a {@link StreamError} from a non-OK response. A refused turn (e.g. 429
@@ -81,35 +61,6 @@ async function streamErrorFromResponse(
     serverMessage,
     retryAfter: Number.isFinite(header) && header > 0 ? header : undefined,
   });
-}
-
-/** A user-facing zh message for a failed turn, or null when no banner should
- * show (auth failures already redirect to the login screen). */
-export function describeStreamError(err: unknown): string | null {
-  if (err instanceof StreamError) {
-    if (err.kind === "auth") return null;
-    if (err.kind === "http") {
-      // A 429 is a deliberate refusal (quota used up, or sending too fast), not an
-      // outage. The backend ships a precise zh message (quota reset time, or a
-      // cool-down), so surface it verbatim to keep the wording single-sourced.
-      if (err.status === 429) {
-        if (err.serverMessage) return err.serverMessage;
-        if (err.retryAfter)
-          return `操作过于频繁，请约 ${err.retryAfter} 秒后再试`;
-        return "操作过于频繁或额度已用尽，请稍后再试";
-      }
-      return `服务暂时不可用（${err.status ?? "?"}），请重试`;
-    }
-    return "网络连接中断，请检查网络后重试";
-  }
-  return "发送失败，请重试";
-}
-
-/** Whether a failed turn should offer a retry. Quota refusals reset on a schedule
- * (an immediate retry just re-fails), so they don't; transport and rate-limit
- * errors do. */
-export function isRetriableStreamError(err: unknown): boolean {
-  return !(err instanceof StreamError && err.code === "QUOTA_EXCEEDED");
 }
 
 /**
@@ -204,8 +155,11 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
     case "error": {
       ensureStreamingAssistant(ctx.conversationId);
       const store = useConversationStore.getState();
-      store.appendToLastMessage(
-        `\n\n**Error**: ${(event.payload as ErrorPayload).message}`,
+      const payload = event.payload as ErrorPayload;
+      // Attach a structured error to the bubble (rendered as a friendly inline
+      // card) rather than splicing a raw `**Error**:` line into the answer text.
+      store.attachErrorToLastMessage(
+        { code: payload.code, message: payload.message },
         ctx.conversationId,
       );
       store.finalizeLastMessage(ctx.conversationId);
@@ -234,13 +188,33 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
         .remove((event.payload as ApprovalResolvedPayload).approval_id);
       break;
     }
-    case "title_generated": {
+    case "checkpoint_required": {
+      // Unlike approvals (a transient store), a checkpoint lives on its assistant
+      // message so it replays inline; attach a pending card to the live bubble.
       useConversationStore
         .getState()
-        .renameConversation(
+        .addCheckpoint(
+          event.payload as CheckpointRequiredPayload,
           ctx.conversationId,
-          (event.payload as TitleGeneratedPayload).title,
         );
+      break;
+    }
+    case "checkpoint_resolved": {
+      const p = event.payload as CheckpointResolvedPayload;
+      useConversationStore
+        .getState()
+        .settleCheckpoint(
+          p.checkpoint_id,
+          p.decision,
+          p.note ?? "",
+          ctx.conversationId,
+        );
+      break;
+    }
+    case "title_generated": {
+      patchConversationCache(ctx.conversationId, {
+        title: (event.payload as TitleGeneratedPayload).title,
+      });
       break;
     }
     case "turn_saved": {

@@ -11,9 +11,11 @@ All intermediate events are emitted to an EventSink for SSE delivery.
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
 from typing import Any
 
+from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval
 from agentcore.llm.config import ModelProfile, build_request, get_profile
@@ -120,6 +122,7 @@ async def react_loop(
     controller = LoopController()
 
     for round_idx in range(profile.max_rounds):
+        logger.debug("react.round_start", round=round_idx, messages=len(messages))
         request = build_request(
             profile,
             messages,
@@ -132,10 +135,17 @@ async def react_loop(
                 await _stream_llm_round(llm, request, emit_content, emit_reasoning)
             )
         except Exception as e:
-            logger.error("llm_call_failed", round=round_idx, error=str(e))
+            logger.error("llm.call_failed", round=round_idx, error=str(e))
             if raise_on_error:
                 raise
-            sink.emit(error_event("LLM_ERROR", str(e)))
+            # AgentCoreError carries a curated, user-facing (zh) message + specific
+            # code (e.g. LLM_INSUFFICIENT_BALANCE), so surface those; any other
+            # exception is a raw technical string, so show a generic friendly line
+            # instead of leaking it into the chat.
+            if isinstance(e, AgentCoreError):
+                sink.emit(error_event(e.code, e.message))
+            else:
+                sink.emit(error_event("LLM_ERROR", "出了点问题，请稍后重试。"))
             return final_content, final_reasoning, total_usage, round_idx + 1
 
         if usage:
@@ -146,6 +156,20 @@ async def react_loop(
 
         if round_reasoning:
             final_reasoning += round_reasoning
+
+        # Per-round trace: tools requested this round + the round's own token split
+        # (reasoning_tokens is the key "how hard did it think" signal). `done=True`
+        # marks the no-tool round that ends the loop. Inherits the worker's
+        # run_id/agent_id/depth (executor log_context) so rounds split per worker.
+        logger.info(
+            "react.round_end",
+            round=round_idx,
+            tools=len(round_tool_calls) if round_tool_calls else 0,
+            input_tokens=usage.input_tokens if usage else 0,
+            output_tokens=usage.output_tokens if usage else 0,
+            reasoning_tokens=usage.reasoning_tokens if usage else 0,
+            done=not round_tool_calls,
+        )
 
         if not round_tool_calls:
             return final_content, final_reasoning, total_usage, round_idx + 1
@@ -172,9 +196,9 @@ async def react_loop(
         )
         messages.extend(tool_results)
 
-        # A handoff tool (a terminal tool) already streamed the turn's final
-        # answer itself. Stop here so the model does not produce a second reply;
-        # surface the streamed answer (prefixed by any pre-tool content) for
+        # A terminal-effect tool (handoff / ask_user-stop) already produced the
+        # turn's final answer itself. Stop here so the model does not produce a
+        # second reply; surface that answer (prefixed by any pre-tool content) for
         # persistence and fold the delegated run's token usage into the totals.
         if terminal is not None:
             usage_meta = terminal.metadata or {}
@@ -185,7 +209,7 @@ async def react_loop(
                 cache_hit_tokens=usage_meta.get("cache_hit_tokens", 0),
                 cache_miss_tokens=usage_meta.get("cache_miss_tokens", 0),
             )
-            handoff_content = terminal.terminal_content or ""
+            handoff_content = terminal.final_text or ""
             combined = (
                 f"{final_content}{handoff_content}" if final_content else handoff_content
             )
@@ -199,7 +223,7 @@ async def react_loop(
         action = controller.decide(signal)
         if signal is not None and action is Intervention.NUDGE:
             logger.info(
-                "loop_nudge",
+                "engine.loop_nudge",
                 reason=signal.reason.value,
                 tool=signal.tool_name,
                 count=signal.count,
@@ -209,7 +233,7 @@ async def react_loop(
             continue
         if signal is not None and action is Intervention.FINALIZE:
             logger.warning(
-                "loop_finalize",
+                "engine.loop_finalize",
                 reason=signal.reason.value,
                 tool=signal.tool_name,
                 count=signal.count,
@@ -231,7 +255,7 @@ async def react_loop(
     # Round budget exhausted while still tool-calling: force a tool-free answer
     # rather than returning the empty/partial content accumulated so far (which
     # would surface as a blank reply — a loop with no designed exit).
-    logger.warning("max_rounds_exhausted", rounds=profile.max_rounds)
+    logger.warning("engine.max_rounds_exhausted", rounds=profile.max_rounds)
     return await _force_finalize(
         messages=messages,
         llm=llm,
@@ -273,7 +297,7 @@ async def _force_finalize(
             llm, request, emit_content, emit_reasoning
         )
     except Exception as e:
-        logger.error("force_finalize_failed", reason=reason, error=str(e))
+        logger.error("engine.force_finalize_failed", reason=reason, error=str(e))
         return final_content, final_reasoning, total_usage, rounds
 
     if usage:
@@ -362,9 +386,10 @@ async def _execute_tools(
     """Execute tool calls (parallel, capped).
 
     Returns ``(tool_messages, terminal, attempts)`` where ``terminal`` is the
-    first handoff ToolResult (a tool that already produced the turn's final
-    answer) or ``None``, and ``attempts`` carries the per-call fingerprint +
-    success used by convergence governance to detect mechanical loops.
+    first terminal-effect ToolResult (a tool that already produced the turn's
+    final answer — handoff / ask_user-stop) or ``None``, and ``attempts`` carries
+    the per-call fingerprint + success used by convergence governance to detect
+    mechanical loops.
 
     When ``citation_sink`` is provided, web sources surfaced by successful research
     tools are merged into it (arrival order, deduped, capped). With
@@ -387,11 +412,13 @@ async def _execute_tools(
             args = {}
 
         sink.emit(tool_use_start(tc.id, name, args))
+        logger.debug("tool.execute_start", tool=name)
 
         tool = registry.get_optional(name)
         if tool is None:
             error_msg = f"Tool '{name}' not found"
             sink.emit(tool_use_end(tc.id, name, success=False, output=error_msg))
+            logger.info("tool.execute_end", tool=name, status="not_found", duration_ms=0)
             return (
                 LLMMessage(role="tool", content=error_msg, tool_call_id=tc.id),
                 None,
@@ -412,6 +439,7 @@ async def _execute_tools(
                     "不要重试它——请调整方案或询问如何继续。"
                 )
                 sink.emit(tool_use_end(tc.id, name, success=False, output=denial))
+                logger.info("tool.execute_end", tool=name, status="denied", duration_ms=0)
                 return (
                     LLMMessage(role="tool", content=denial, tool_call_id=tc.id),
                     None,
@@ -419,17 +447,24 @@ async def _execute_tools(
                     [],
                 )
 
+        started = time.monotonic()
         result = await tool.execute(args, context)
         result.tool_call_id = tc.id
 
         output = result.output if result.success else (result.error or "Unknown error")
         sink.emit(tool_use_end(tc.id, name, success=result.success, output=output))
+        logger.info(
+            "tool.execute_end",
+            tool=name,
+            status="ok" if result.success else "error",
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
 
         citations = result.citations if (result.success and result.citations) else []
         message = LLMMessage(role="tool", content=output, tool_call_id=tc.id)
         return (
             message,
-            (result if result.terminal else None),
+            (result if result.is_terminal else None),
             ToolAttempt(fingerprint, name, success=result.success),
             citations,
         )

@@ -21,7 +21,7 @@
 
 ## 二、数据模型（✅ 已落地，5 表）
 
-遵循项目建模约定（UUID 主键、**无 ForeignKey**、`server_default`、按查询维度建索引；见 [`核心接口定义.md` §6.2](../02-架构/核心接口定义.md)）。字段细节 → 见代码 `db/models.py`。
+遵循项目建模约定（UUID 主键、**无 ForeignKey**、`server_default`、按查询维度建索引；见 [`核心接口定义.md` §6.2](/docs/02-架构/核心接口定义.md)）。字段细节 → 见代码 `db/models.py`。
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
@@ -48,7 +48,7 @@
 
 ## 四、实时通道（✅ 进程内；⏳ 多 worker）
 
-- **传输**：`GET /v1/realtime` 每用户一条长连 SSE firehose（server→client），发送走上面的 POST。鉴权复用 Cookie；此流自带 401→刷新→重连（[认证与会话 §六](认证与会话.md)），前端客户端见 `renderer/services/realtime.ts`（§六）。
+- **传输**：`GET /v1/realtime` 每用户一条长连 SSE firehose（server→client），发送走上面的 POST。鉴权复用 Cookie；此流自带 401→刷新→重连（[认证与会话 §六](/docs/05-平台与运维/认证与会话.md)），前端客户端见 `renderer/services/realtime.ts`（§六）。
 - **fan-out**：A 发 → 落库 `chat_messages` → 经 `HubChatEventPublisher`（`messaging/hub.py` 进程内 pub/sub）推送给在线成员的 firehose。
 - **离线补偿**：不另建表，上线时按 `last_read_message_id` 拉 `chat_messages` 增量。
 - **多 worker（⏳）**：换 Redis / NATS pub-sub——`ChatEventPublisher` Protocol 已抽象（`events.py`），届时为 seam 局部替换，不动业务逻辑（同限流 / 审批门的多机化路径）。
@@ -64,7 +64,7 @@
 | 防骚扰 | 陌生人首条进「消息请求」（`chat_members.state=pending`），对方回信前受限 |
 | 拉黑 | `user_blocks` 对称，断 DM + 互隐搜索 |
 | 限流 | 发消息复用按用户限流（`conversation/rate_limit.py`） |
-| IDOR | 会话操作先校验 `chat_members` 归属，非成员 404（[认证与会话 §八](认证与会话.md)） |
+| IDOR | 会话操作先校验 `chat_members` 归属，非成员 404（[认证与会话 §八](/docs/05-平台与运维/认证与会话.md)） |
 
 ## 六、前端 MessagesPage（✅ 已落地）
 

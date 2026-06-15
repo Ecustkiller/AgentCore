@@ -136,7 +136,7 @@ async def get_conversation_cost(
     """
     conv = await conv_repo.get_by_id(conversation_id, user_id=user.user_id)
     if not conv:
-        raise NotFoundError("Conversation not found")
+        raise NotFoundError("对话不存在")
     agg = await repo.aggregate_for_conversation(conversation_id, user_id=user.user_id)
     return ConversationCost(
         conversation_id=conversation_id,
@@ -208,4 +208,5 @@ async def get_usage_summary(
             daily_requests=settings.quota_daily_requests,
         ),
         cny_per_usd=settings.cny_per_usd,
+        billing_mode=settings.billing_mode,
     )

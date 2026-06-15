@@ -12,11 +12,12 @@ from dataclasses import asdict
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.llm.config import get_profile
+from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.factory import build_provider
+from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.protocol import TokenUsage
 from agentcore.memory import default_memory_store
-from agentcore.runtime.approvals import ApprovalGate, default_approval_registry
+from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.citations import merge_citations
 from agentcore.runtime.costing import aggregate_cost, captain_run_cost_from_state
 from agentcore.runtime.events import (
@@ -27,14 +28,24 @@ from agentcore.runtime.events import (
     message_end,
     message_start,
 )
+from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.prompt import (
+    CHAT_CHECKPOINT_HINT,
     CHAT_CITATION_HINT,
+    CHAT_REVISE_HINT,
     CHAT_TEAM_CAPABILITY_HINT,
     assemble_system_prompt,
 )
 from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_executor
+from agentcore.runtime.sessions import (
+    SessionLoader,
+    SessionSaver,
+    default_session_registry,
+)
 from agentcore.tools.builtin import build_builtin_registry, build_ceo_tool_registry
+from agentcore.tools.builtin.ask_user import AskUserTool
 from agentcore.tools.builtin.delegate import DelegateTool
+from agentcore.tools.builtin.revise import ReviseTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.workspace.protocol import WorkspaceBackend
 
@@ -111,6 +122,10 @@ async def run_chat_pipeline(
     backend: WorkspaceBackend,
     attachments: list[dict] | None = None,
     approvals_enabled: bool = True,
+    profile_set: ProfileSet | None = None,
+    llm_credentials: LLMCredentials | None = None,
+    session_saver: SessionSaver | None = None,
+    session_loader: SessionLoader | None = None,
 ) -> dict:
     """Run the full chat pipeline for a single user message.
 
@@ -122,7 +137,18 @@ async def run_chat_pipeline(
     job (双模式工作区 P2e / e2): that run has no live client to answer prompts and
     operates on an isolated server sandbox, so — like cloud-mode workers — it needs
     no gate; leaving it on would deadlock every file/exec tool on a timeout-deny.
+
+    ``profile_set`` carries the turn's resolved 质量档 (经济/高质量/custom): which
+    model each scenario (chat/agent.strong/...) runs this turn, resolved by the
+    caller from the conversation/user/operator default (llm/modes.py). ``None``
+    (e.g. the autonomous handoff job) falls back to the economy base set.
+
+    ``llm_credentials`` are the turn's resolved BYOK key + endpoint (config.
+    billing_mode); the caller resolves them once (route preflight) and threads them
+    here so the whole turn runs on the user's own DeepSeek quota. ``None`` falls
+    back to the global server key (platform mode).
     """
+    profiles = profile_set or default_profile_set()
     message_id = new_id()
     # The CEO captain is the turn's root Run node (kind=captain): it owns the reply
     # voice and may delegate. Its run id parents every delegated member's ledger row
@@ -139,7 +165,7 @@ async def run_chat_pipeline(
             extra_context=_build_attachment_context(attachments),
         )
         worker_tools = build_builtin_registry()
-        llm = build_provider()
+        llm = build_provider(llm_credentials)
 
         # The workspace backend is resolved per conversation by the caller
         # (folder space vs. its own conversation space) and injected here. The
@@ -179,12 +205,19 @@ async def run_chat_pipeline(
             ApprovalGate(
                 sink=sink,
                 conversation_id=conversation_id,
-                registry=default_approval_registry(),
+                registry=default_interaction_registry(),
                 timeout_seconds=settings.approval_timeout_seconds,
             )
             if (settings.approval_gate_enabled and approvals_enabled)
             else None
         )
+        # The conversation's live roster (留人, 乙 热修): delegate registers each
+        # COMPLETED worker here as a recoverable RunSession, and revise recalls one to
+        # continue on its own draft. Conversation-scoped (P2) — fetched from the
+        # process-wide registry so it SURVIVES across turns ("改下刚才那个" works next
+        # turn); bounded by TTL + count + byte caps, idle conversations reaped. An
+        # expiry / miss falls back to 甲 (re-delegate). Cross-process persistence: P3.
+        session_store = default_session_registry().get_or_create(conversation_id)
         # The delegate tool gets the CLEAN base prompt — it is reused verbatim by
         # the workers (runs/executor.py), which must not be told about a delegate
         # tool they do not hold.
@@ -198,20 +231,61 @@ async def run_chat_pipeline(
             base_tool_context=base_tool_context,
             captain_run_id=captain_run_id,
             approval_gate=approval_gate,
+            profile_set=profiles,
+            session_store=session_store,
+            session_saver=session_saver,
         )
         chat_tools = build_ceo_tool_registry()
         chat_tools.register(delegate_tool)
+        # 定向唤回 (revise): recall a finished worker to revise its own draft. Shares
+        # the turn roster with delegate; gated like delegate's workers — the SAME
+        # per-turn gate, forwarded only in local mode so a recalled worker can't run
+        # code / mutate the user's real machine without consent (cloud = un-gated).
+        revise_gate = approval_gate if backend.location == "local" else None
+        revise_tool = ReviseTool(
+            llm=llm,
+            sink=sink,
+            session_store=session_store,
+            tools=worker_tools,
+            base_tool_context=base_tool_context,
+            profile_set=profiles,
+            captain_run_id=captain_run_id,
+            approval_gate=revise_gate,
+            session_saver=session_saver,
+            session_loader=session_loader,
+        )
+        chat_tools.register(revise_tool)
+        # The CEO may also pause the turn to ask the user a decision (ask_user
+        # checkpoint). Gated on the SAME "is there a live interactive user" signal
+        # as approvals: an autonomous handoff job (approvals_enabled=False) has no
+        # client to answer, so it is not given the tool (a checkpoint there would
+        # only ever time out). CEO-only — workers never get it.
+        checkpoint_enabled = settings.checkpoint_gate_enabled and approvals_enabled
+        if checkpoint_enabled:
+            chat_tools.register(
+                AskUserTool(
+                    sink=sink,
+                    conversation_id=conversation_id,
+                    registry=default_interaction_registry(),
+                    timeout_seconds=settings.checkpoint_timeout_seconds,
+                )
+            )
 
         # The entry chat agent additionally learns it may escalate to a team and
         # how to cite web sources inline (single-agent path only — see prompt.py).
+        # The checkpoint hint is appended only when ask_user is actually wired, so
+        # the prompt never advertises a tool the CEO does not hold.
         chat_system_prompt = (
-            f"{system_prompt}\n{CHAT_TEAM_CAPABILITY_HINT}\n{CHAT_CITATION_HINT}"
+            f"{system_prompt}\n{CHAT_TEAM_CAPABILITY_HINT}\n{CHAT_REVISE_HINT}"
+            f"\n{CHAT_CITATION_HINT}"
         )
+        if checkpoint_enabled:
+            chat_system_prompt = f"{chat_system_prompt}\n{CHAT_CHECKPOINT_HINT}"
 
         # --- Phase 3: Execute ---
         sink.emit(message_start(message_id, conversation_id=conversation_id))
 
-        profile = get_profile("chat")
+        profile = profiles.get("chat")
         # Web sources the chat agent consults this turn (web_search / read_url),
         # aggregated + de-duped by the loop for source cards + persistence.
         citations: list[dict] = []
@@ -263,22 +337,33 @@ async def run_chat_pipeline(
         rounds = captain_state.rounds
 
         # Turn usage = the captain run's own spend (priced once in the executor onto
-        # captain_state.cost/.usage) + the delegated workers' usage accumulated on
-        # the tool instance across every delegate call this turn. ``delegate`` is
-        # non-terminal, so the captain loop never metered the workers' tokens; the
-        # cache split rides along so the folded total stays priceable.
-        turn_usage = TokenUsage(
-            input_tokens=captain_state.usage.get("input", 0),
-            output_tokens=captain_state.usage.get("output", 0),
-            reasoning_tokens=captain_state.usage.get("reasoning", 0),
-            cache_hit_tokens=captain_state.usage.get("cache_hit", 0),
-            cache_miss_tokens=captain_state.usage.get("cache_miss", 0),
-        ) + TokenUsage(
-            input_tokens=delegate_tool.usage["input"],
-            output_tokens=delegate_tool.usage["output"],
-            reasoning_tokens=delegate_tool.usage["reasoning"],
-            cache_hit_tokens=delegate_tool.usage["cache_hit"],
-            cache_miss_tokens=delegate_tool.usage["cache_miss"],
+        # captain_state.cost/.usage) + the delegated workers' usage + every 定向唤回
+        # (revise) continuation's usage, both accumulated on their tool instances
+        # across the turn. ``delegate`` / ``revise`` are non-terminal, so the captain
+        # loop never metered their tokens; the cache split rides along so the folded
+        # total stays priceable.
+        turn_usage = (
+            TokenUsage(
+                input_tokens=captain_state.usage.get("input", 0),
+                output_tokens=captain_state.usage.get("output", 0),
+                reasoning_tokens=captain_state.usage.get("reasoning", 0),
+                cache_hit_tokens=captain_state.usage.get("cache_hit", 0),
+                cache_miss_tokens=captain_state.usage.get("cache_miss", 0),
+            )
+            + TokenUsage(
+                input_tokens=delegate_tool.usage["input"],
+                output_tokens=delegate_tool.usage["output"],
+                reasoning_tokens=delegate_tool.usage["reasoning"],
+                cache_hit_tokens=delegate_tool.usage["cache_hit"],
+                cache_miss_tokens=delegate_tool.usage["cache_miss"],
+            )
+            + TokenUsage(
+                input_tokens=revise_tool.usage["input"],
+                output_tokens=revise_tool.usage["output"],
+                reasoning_tokens=revise_tool.usage["reasoning"],
+                cache_hit_tokens=revise_tool.usage["cache_hit"],
+                cache_miss_tokens=revise_tool.usage["cache_miss"],
+            )
         )
         finish = (
             FinishReason.END_TURN
@@ -294,7 +379,13 @@ async def run_chat_pipeline(
         # then attaches the user/conversation/message envelope and persists the
         # rows (warning-only on failure).
         captain_cost = captain_run_cost_from_state(captain_run_id, captain_state)
-        cost_runs = [asdict(captain_cost), *(asdict(r) for r in delegate_tool.run_ledger)]
+        cost_runs = [
+            asdict(captain_cost),
+            *(asdict(r) for r in delegate_tool.run_ledger),
+            # Each 定向唤回 (revise) continuation is its own member run row, parented
+            # to the original worker so the version chain is reconstructable (决策②).
+            *(asdict(r) for r in revise_tool.run_ledger),
+        ]
         turn_cost = aggregate_cost(cost_runs)
 
         # Fold the delegated workers' web sources into the turn's shared card
@@ -304,6 +395,7 @@ async def run_chat_pipeline(
         # still surfaces the WHOLE team's research to the user. Mirrors how worker
         # usage/cost are folded back off the delegate tool instance above.
         merge_citations(citations, delegate_tool.citations)
+        merge_citations(citations, revise_tool.citations)
 
         # Emit before message_end so the client attaches source cards to the
         # assistant message while it is still the live streaming bubble.
@@ -344,7 +436,7 @@ async def run_chat_pipeline(
         }
 
     except Exception as e:
-        logger.error("pipeline_error", error=str(e), exc_info=True)
+        logger.error("pipeline.error", error=str(e), exc_info=True)
         sink.emit(error_event("PIPELINE_ERROR", str(e)))
         sink.emit(message_end(FinishReason.ERROR))
         return {

@@ -1,3 +1,4 @@
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatMessageTime } from "@/lib/format";
 import type { ChatMessageDetail } from "@/services/messaging";
 import { Folder, Paperclip } from "lucide-react";
@@ -38,9 +39,12 @@ export function ChatBubble({ message, mine }: Props) {
         ? "[文件]"
         : "";
   const body = message.content ?? placeholder;
+  const attachments = message.attachments ?? [];
 
   return (
-    <div className={`group flex flex-col ${mine ? "items-end" : "items-start"}`}>
+    <div
+      className={`group flex flex-col ${mine ? "items-end" : "items-start"}`}
+    >
       <div
         className={`max-w-[75%] whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm ${
           mine
@@ -49,12 +53,11 @@ export function ChatBubble({ message, mine }: Props) {
         }`}
       >
         {body}
-        {message.attachments.length > 0 && (
+        {attachments.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {message.attachments.map((a) => (
+            {attachments.map((a) => (
               <span
                 key={a.path}
-                title={a.path}
                 className={`inline-flex max-w-[200px] items-center gap-1.5 rounded-lg px-2 py-1 text-xs ${
                   mine
                     ? "bg-primary-foreground/15"
@@ -66,10 +69,12 @@ export function ChatBubble({ message, mine }: Props) {
                 ) : (
                   <Paperclip size={12} className="shrink-0" />
                 )}
-                <span className="truncate">
-                  {a.name}
-                  {a.kind === "dir" ? "/" : ""}
-                </span>
+                <SimpleTooltip label={a.path}>
+                  <span className="truncate">
+                    {a.name}
+                    {a.kind === "dir" ? "/" : ""}
+                  </span>
+                </SimpleTooltip>
               </span>
             ))}
           </div>

@@ -38,11 +38,20 @@ export function formatCompact(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-/** 取文本末尾若干字符并折行成单段预览（用于节点上的实时输出片段）。 */
+/** 取文本末尾若干字符并折行成单段预览（用于 worker 节点的实时输出片段：运行中
+ * 最新内容在末尾，tail 才是「正在写什么」）。 */
 export function tailText(text: string, max = 80): string {
   const flat = text.replace(/\s+/g, " ").trim();
   if (flat.length <= max) return flat;
   return `…${flat.slice(flat.length - max)}`;
+}
+
+/** 取文本开头若干字符并折行成单段预览（用于 CEO 汇总节点：成稿答案的开头通常即
+ * 结论/主旨，比取末尾片段更能代表内容，避免长答案截出半句结尾乱码）。 */
+export function headText(text: string, max = 80): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  return `${flat.slice(0, max)}…`;
 }
 
 /**

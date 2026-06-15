@@ -26,7 +26,7 @@ class ToolRegistry:
         """Get a tool by name. Raises ToolNotFoundError if not found."""
         tool = self._tools.get(name)
         if tool is None:
-            raise ToolNotFoundError(f"Tool '{name}' not found")
+            raise ToolNotFoundError(f"工具 '{name}' 不存在")
         return tool
 
     def get_optional(self, name: str) -> Tool | None:

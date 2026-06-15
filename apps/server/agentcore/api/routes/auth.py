@@ -47,6 +47,7 @@ def _user_response(user: User) -> UserResponse:
         email=user.email,
         role=user.role,
         created_at=user.created_at,
+        default_model_mode=user.default_model_mode,
     )
 
 

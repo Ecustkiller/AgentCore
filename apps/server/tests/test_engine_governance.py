@@ -13,7 +13,7 @@ model cites by a number that always lines up with the card).
 
 from pathlib import Path
 
-from agentcore.core.types import ToolCategory
+from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.config import ModelProfile
 from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.engine import react_loop
@@ -103,8 +103,8 @@ class _StubTool:
             success=True,
             output="result",
             citations=citations,
-            terminal=self._terminal,
-            terminal_content="streamed answer" if self._terminal else None,
+            effect=ToolEffect.HANDOFF if self._terminal else ToolEffect.CONTINUE,
+            final_text="streamed answer" if self._terminal else None,
         )
 
 
@@ -245,7 +245,7 @@ async def test_terminal_tool_citations_collected_before_handoff():
         citation_sink=sink_list,
     )
 
-    assert content == "streamed answer"  # terminal_content surfaced as the reply
+    assert content == "streamed answer"  # final_text surfaced as the reply
     assert sink_list == cites
 
 

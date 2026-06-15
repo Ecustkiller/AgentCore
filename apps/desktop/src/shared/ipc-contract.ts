@@ -69,7 +69,7 @@ export type WorkspaceOpName =
   | "archive";
 
 /**
- * 一次本地 op 的执行结果信封 —— 形状与服务端回填端点 `ResolveWorkspaceOpRequest`
+ * 一次本地 op 的执行结果信封 —— 形状与服务端回填端点 `ResolveClientToolInteraction.result`
  * 对齐：成功带 `value`（op 相关）；失败带类型化 `error`，其 `kind` 直接映射回服务端
  * 的 `WorkspaceError` 子类（如 `PathNotFound`），从而工具层报错文案与云模式一致。
  */

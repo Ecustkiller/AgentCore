@@ -41,10 +41,12 @@ CEO 的工具面**只保留只读 / 检索**（`web_search`、`read_url`、`file
 **为什么是档2（被否决：档1「全能 CEO」、档3「纯编排 CEO」）：**
 
 - **档1（CEO 持全套工具，仅复杂任务才委派）**——现状起点。问题：CEO 上下文会被大块工具输出（代码执行日志、整文件内容）污染，长会话越来越贵；"团队协作"心智被弱化。
-- **档3（CEO 只剩 `delegate`，连检索都过 worker）——已评估否决**：把超高频的检索（"搜一下 X 告诉我"）也压上 worker 往返，单次检索 LLM 调用 2→4、串行思考轮 2→4（≈ **2× 延迟**）、Flash 成本约 **1.7×**；更糟的是三条结构性放大——① worker 是缓存冷的新上下文，首调吃未命中（$0.14 vs 续轮 $0.0028，50×）；② 推理被重复算（worker 作答 + CEO 再合成，输出 token 翻倍）；③ 把最高频操作绑到 worker 档，一旦 `strong` 翻回 Pro 即 ~3× 贵，而 `chat` 档本就是为解耦它而独立的。其唯一好处（检索大输出不进 CEO 上下文）又已被**历史重建原则**（工具 I/O 不跨轮回放，见 [`执行引擎架构设计.md` §Prepare](执行引擎架构设计.md)）基本实现，故否决。
+- **档3（CEO 只剩 `delegate`，连检索都过 worker）——已评估否决**：把超高频的检索（"搜一下 X 告诉我"）也压上 worker 往返，单次检索 LLM 调用 2→4、串行思考轮 2→4（≈ **2× 延迟**）、Flash 成本约 **1.7×**；更糟的是三条结构性放大——① worker 是缓存冷的新上下文，首调吃未命中（$0.14 vs 续轮 $0.0028，50×）；② 推理被重复算（worker 作答 + CEO 再合成，输出 token 翻倍）；③ 把最高频操作绑到 worker 档，一旦 `strong` 翻回 Pro 即 ~3× 贵，而 `chat` 档本就是为解耦它而独立的。其唯一好处（检索大输出不进 CEO 上下文）又已被**历史重建原则**（工具 I/O 不跨轮回放，见 [`执行引擎架构设计.md` §Prepare](/docs/03-AI核心/执行引擎架构设计.md)）基本实现，故否决。
 - **档2 取中**：拿走瘦身最大的两份收益（团队心智 + CEO 上下文洁净），又把"委派税"约束在"只有真正产出 / 变更时才付"，不碰高频只读路径。
 
-> **待优化（落地注意点）**：当前即便单 worker 也要走完整 worker ReAct 循环 + CEO 合成，对"建个文件 / 改一行"这类琐碎委派偏重；后续可加一条轻量路径（单 worker 直出、CEO 免合成）。本地模式对标 Cursor 的即时小改，是否给 CEO 留轻量"快速编辑"后门，留待 Phase 2 评估。
+> **轻量直出（finalize）✅ 已落地**：单 worker 仍跑完整 worker 循环，但当 CEO 判断"本次只派一个 worker、且这次委派即整件事的最终交付"（建个文件 / 改一行）时，可在 `delegate` 设 `finalize=true`——该 worker 成功后其产出**直接作为回合答复**（`ToolEffect.HANDOFF` 终态），省掉 CEO 再写一段概览的合成轮；多 worker 或 worker 失败时自动回落到 CEO 收尾（安全兜底）。worker 用量仍记在工具实例上由 pipeline 折算，终态返回不带 token 以免双计。→ 见代码：`tools/builtin/delegate.py`（`finalize` 参数 + `_direct_result`）。
+>
+> **仍待评估**：是否再给 CEO 一条"快速编辑"后门（本地模式对标 Cursor 即时小改），需与"协调者只读边界"权衡——这是另一回事（给 CEO 自己装写工具，已否决的档1方向），留待后续单独决策。
 
 ### 实现方案：自研编排，不依赖第三方框架 ✅ 已确定
 
@@ -89,7 +91,7 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 
 ### 终态语义：非终态，CEO 收尾（D3 + 决策①）
 
-`delegate` 是**非终态工具**：worker 跑完后，结果交回 CEO 的 ReAct 循环，CEO **用自己的声音**写最终答案（`content_delta`）。
+`delegate` **默认是非终态工具**：worker 跑完后，结果交回 CEO 的 ReAct 循环，CEO **用自己的声音**写最终答案（`content_delta`）。**例外（finalize，提案2a ✅）**：当 CEO 对一个单 worker 的最终交付设 `finalize=true` 且该 worker 成功时，`delegate` 转为**终态**（`ToolEffect.HANDOFF`）——把 worker 产出直接推到气泡作为回合答复，不再触发 CEO 合成轮；多 worker / 失败时仍按非终态由 CEO 收尾。见上文 §协调者工具边界「轻量直出」。
 
 > **决策①**：CEO 只写**一段简短概览**（综述关键结论、串起整体、指引用户看细节），**不复述各 worker 全文**——每个 worker 的完整产出由前端单独展示（run 详情 / 图视图）。这消解了「CEO 重读全文合稿」的开销。
 >
@@ -108,7 +110,7 @@ delegate(tasks)
   → 非终态返回给 CEO → CEO 收尾（content_delta）
 ```
 
-→ 见代码：`runtime/runs/builder.py`、`runs/wave.py`、`runs/executor.py`（worker 执行器包 `react_loop`）。运行时机制（波次调度、上下文注入、树级并发、取消、用量聚合）详见 [`Agent协作模式.md` §七](Agent协作模式.md) 与 [`执行引擎架构设计.md`](执行引擎架构设计.md)。
+→ 见代码：`runtime/runs/builder.py`、`runs/wave.py`、`runs/executor.py`（worker 执行器包 `react_loop`）。运行时机制（波次调度、上下文注入、树级并发、取消、用量聚合）详见 [`Agent协作模式.md` §七](/docs/03-AI核心/Agent协作模式.md) 与 [`执行引擎架构设计.md`](/docs/03-AI核心/执行引擎架构设计.md)。
 
 ---
 
@@ -120,14 +122,24 @@ delegate(tasks)
 
 CEO 不指定具体模型，只表达能力需求，由运行时映射（fast/strong 两档抽象 → DeepSeek V4）：
 
-| 值 | 含义 | 运行时映射示例 |
+| 值 | 含义 | 运行时映射（基座 = 经济模型） |
 |---|---|---|
-| `fast` | 速度/成本优先，简单机械子任务 | DeepSeek V4 Flash（非思考） |
-| `strong` | 质量优先，复杂子任务 | DeepSeek V4 Pro（thinking；暂走 Flash） |
+| `fast` | 速度/成本优先，简单机械子任务 | DeepSeek V4 Flash（思考 high，小轮数预算） |
+| `strong` | 质量优先，复杂子任务 | 基座 Flash；高质量档 / 自定义档可提升至 Pro |
 
-> 现状：`strong` 当前临时映射为 Flash（thinking，测试期降本，单点翻转）。→ 见代码 `llm/config.py`（`_STRONG_MODEL`、`apply_overrides`）。
+> 现状：两 worker 档基座均为 Flash（思考 high，靠轮数预算区分，开发期降本）；把 `strong` 提到 Pro 由**质量档**（下文）按用户 / 对话 / 运营默认开启，已取代原 `_STRONG_MODEL` 全局单点翻转（路线图 P1-7）。运行参数单一真相源 `llm/config.py`（`PROFILES`、`agent_profile`、`apply_overrides`）。
 
-设计理由：① 解耦委派与具体模型，模型更新不改委派逻辑；② 用户可覆盖映射；③ 未来可做智能路由。
+设计理由：① 解耦委派与具体模型，模型更新不改委派逻辑；② 用户可覆盖映射（即下文质量档）；③ 未来可做智能路由。
+
+**质量档（用户可选模型层，决策② 的落地）** ✅：在 `delegate` 的 fast/strong 抽象之上，用户以**团队语言**为团队选模型——一个「质量档」= 团队角色 → 模型映射，叠加在 `PROFILES` 基座上，**只换 model、不动思考 / 温度 / 轮数**（调参是工程关注点，非用户旋钮）。
+
+- **角色**：CEO 本体（`chat`）/ 主力 worker（`agent.strong`）可配；**经济 worker（`agent.fast`）锁定 Flash**（决策：经济档「按定义就便宜」，升 Pro 自相矛盾）。
+- **预设（只读）**：`经济档` = 全程 Flash = 系统默认；`高质量档` = CEO 本体 + 主力 worker 升 Pro。用户可在运营 ceiling 内建自定义档。
+- **两层合成**：运营 `selectable_models` 设可选模型上限（写入校验 + 解析时 `_clamp_to_ceiling` **双重**钳制，旧档在 ceiling 收紧后仍安全）；用户档在其内取值。
+- **解析优先级**：对话 → 用户默认 → 运营默认 → 系统默认（经济）；未知 / 已删档回落经济——模型配置问题**绝不打断回合**（同 `pricing_for` / `get_profile` 的 fail-safe）。
+- **纯函数 + 注入**：`resolve_profile_set` 每回合解析出 `ProfileSet` 显式注入流水线（无模块级可变全局），并发回合互不串档。
+
+→ 见代码 `llm/modes.py`（`ProfileSet` / `resolve_profile_set` / `SYSTEM_PRESETS` / `CONFIGURABLE_ROLES`）、`api/routes/model_modes.py`（REST + catalog）、`llm/config.py`（`PROFILES` 基座）。前端设置页 UX 见 [`../04-前端/前端UX设计.md` §十三](/docs/04-前端/前端UX设计.md)。
 
 ### 2.2 `depends_on` — 依赖关系（并行/串行的唯一开关）
 
@@ -177,9 +189,13 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 
 ---
 
-## 四、检查点与团队预审 ⏳ Phase 2
+## 四、检查点与团队预审
 
-当前路径不含团队预审（plan_review）与 DAG 检查点审视；Phase 2 以 **preflight 审计 / 契约闸门 / `ask_user` 挂起**回归（统一交互原语）。落地边界见 §五 待定事项与 [`执行引擎架构设计.md` §十八](执行引擎架构设计.md)。
+**CEO `ask_user` 检查点（✅ 已落地）**：CEO 执行中途遇到自己无法独自定夺、且选错代价高的关键岔路时，调内置工具 `ask_user` 暂停回合、请用户拍板（继续/调整/停止）。这是 CEO 主动发起的交互原语（区别于结构化 DAG 检查点），经统一挂起-恢复 `InteractionRegistry`（§18.2）等用户答复回流 ReAct 循环。System prompt 以 `CHAT_CHECKPOINT_HINT` 约束「仅用于高代价岔路、克制使用」。→ 见代码 `tools/builtin/ask_user.py`、`runtime/checkpoints.py`、`runtime/prompt.py`，语义见 [`执行引擎架构设计.md` §检查点决策语义](/docs/03-AI核心/执行引擎架构设计.md)。
+
+**团队预审 / DAG 检查点（⏳ Phase 2）**：当前路径不含团队预审（plan_review）与 DAG `checkpoint_after` 结构化审视；Phase 2 以 **preflight 审计 / 契约闸门**回归（与 `ask_user` 共用统一交互原语）。落地边界见 §五 待定事项与 [`执行引擎架构设计.md` §十八](/docs/03-AI核心/执行引擎架构设计.md)。
+
+> **与 `ask_user` 的边界 + 为何 defer**（决策理由，代码看不出来）：两者形似而本质不同——`ask_user` 是**运行时模型自决**的工具效应（CEO 在 ReAct 循环里临场决定停不停），`checkpoint_after` 是**计划期声明的调度器结构挂起**（DAG 标记即必停、与模型无关）。**现状已覆盖大部分**：CEO 的 `delegate` 自选粒度（D1′）能把「在逻辑边界征询」拆成「`delegate`(批1) → 返回 → `ask_user` → `delegate`(批2)」，故串行边界征询乃至轻量 plan_review（委派前先 `ask_user` 报方案）`ask_user` 已能表达。**`checkpoint_after` 真正独有的只有两点**：① **波间结构挂起**——单个 `delegate` 跨多波时 `WaveScheduler.run` 跑完整子 DAG 才返回，delegate 对 CEO 原子，CEO 拿不到波间控制权、ask_user 插不进；② **治理保证闸门**——声明即必停（如高危步骤前强制人审），不靠模型自觉、可审计。这两点都压在尚未落地的运行时地基上（`WaveScheduler` 波间挂起 + `paused` 第三终态 + 统一 Interaction `kind=plan_review` 的跨进程等待，§十八），代价大而独有价值小众，故 defer 而非现做；可复用面仅 `InteractionRegistry` / `CheckpointResponse` / 前端 `CheckpointCard`，调度器挂起为全新。
 
 ---
 
@@ -190,5 +206,5 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 | CEO / worker system prompt 内容调试 | 「身份 + 边界」结构已落地（CEO `CHAT_TEAM_CAPABILITY_HINT`、worker 自我认知段）；剩余为内容调试：CEO 升级判据、worker 角色模板 |
 | Agent 实体化 | Phase 1 worker 为内联角色（`agent_id == run_id`）；Phase 2 收敛到 `agent_id` + `AgentResolver` + 委派白名单 |
 | 增量声明优化 | 批次预声明（`run_plan` 带 `parent_run_id`，供图在 run 开跑前成组）+ `run_started` 带 `parent_run_id`/`kind` + **嵌套委派一层均已落地**（见 §2.4）；剩余为更细粒度的增量重声明 / 跨波动态重排（未定） |
-| 交互原语回归 | `ask_user` 挂起 / preflight / 契约闸门 |
-| 多轮编排 | 后续消息是否沿用/修改之前的委派结果 |
+| 交互原语回归 | `ask_user` 挂起 ✅ 已落地（见 §四）；剩余 preflight / 契约闸门 / plan_review ⏳ |
+| 多轮编排 | **✅ 已落地**：后续消息沿用 / 修改之前的委派结果——CEO 经 `revise` 唤回原队员带现场记忆续写（内存 + 跨进程落盘留人，双 miss 回落重派），图上挂「修订 vN」版本链。详见 [`多轮编排与队员热修.md`](/docs/03-AI核心/多轮编排与队员热修.md) |

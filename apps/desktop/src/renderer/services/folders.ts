@@ -1,4 +1,7 @@
 import { api } from "@/services/api";
+import type { components } from "@/types/api.generated";
+
+type Schemas = components["schemas"];
 
 /** Sidebar folder metadata (§七). `localDir` is an optional bound directory;
  * `localRootId` is the desktop FS root the folder is bound to (local mode marker
@@ -10,14 +13,8 @@ export interface FolderMeta {
   localRootId: string | null;
 }
 
-interface BackendFolder {
-  id: string;
-  name: string;
-  local_dir: string | null;
-  local_root_id?: string | null;
-  created_at: string;
-  updated_at: string;
-}
+/** Server folder payload (`/folders`), generated from OpenAPI. */
+type BackendFolder = Schemas["FolderSummary"];
 
 export function toFolder(f: BackendFolder): FolderMeta {
   return {

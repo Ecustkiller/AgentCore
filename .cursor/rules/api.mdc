@@ -30,7 +30,7 @@ alwaysApply: false
 - 列表响应包含 `data`、`total`、`page`、`page_size`
 - 时间字段序列化为 ISO 8601
 - **前端 TS 类型从 OpenAPI 生成，禁止手写**（单一真相源 = `schemas.py`）。改 schema 后两步刷新：① 后端 `uv run python scripts/dump_openapi.py` 更新 committed `apps/server/openapi.json` → ② 前端 `pnpm gen:api` 生成 `types/api.generated.ts`（生成产物，已 gitignore + `*.generated.ts` 免 lint；`postinstall` 会自动重生成）；service 文件用 `type X = components["schemas"]["X"]` 取别名引用。
-- ⏳ 迁移中：`services/usage.ts`/`conversations.ts`/`auth.ts` 等已用生成类型（样板），其余 service 仍是手写镜像，**按改动逐个迁移**，勿新增手写 REST 类型。例外：端点无 `response_model`（如 `/readyz`）时生成类型为无类型字典，保留手写并加注。
+- ✅ 已迁移：所有 service 的 REST 类型均用生成类型别名（`type X = components["schemas"]["X"]`）；新增/改动一律走生成类型，**勿新增手写 REST 类型**。纯 SSE/事件载荷与客户端域模型（camelCase，经 `toX` 映射）不受此约束。例外：端点无 `response_model`（如 `/readyz`、`/version`）时生成类型为无类型字典，保留手写并加注。带默认值的字段在生成类型里是可选（`?`），读取处按需 `?? 兜底`。
 
 ## 认证 & 权限
 

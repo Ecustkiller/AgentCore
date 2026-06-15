@@ -32,6 +32,10 @@ from agentcore.runtime.runs.types import RunContract, RunKind, RunOrigin, RunPol
 
 _VALID_TIERS = frozenset({"fast", "strong"})
 _VALID_EFFORTS = frozenset({"high", "max"})
+# Debate/review opposition markers (前端UX目标态 §四): a display-only side tag the
+# frontend pairs into a side-by-side comparison; anything else is dropped (lenient,
+# mirroring tier/effort) so a stray value never leaks onto the graph.
+_VALID_STANCES = frozenset({"pro", "con"})
 _VALID_OUTPUT_FORMATS = frozenset({"text", "json"})
 _DEFAULT_TIMEOUT_MS = 120_000
 _DEFAULT_RETRY_DELAY_MS = 5_000
@@ -177,6 +181,9 @@ def _inline_spec(
     thinking_raw = item.get("thinking")
     effort_raw = item.get("reasoning_effort")
     pref = item.get("model_preference", "strong")
+    stance_raw = item.get("stance")
+    group_raw = item.get("group")
+    round_raw = item.get("round")
     return RunSpec(
         run_id=run_id,
         agent_id=run_id,
@@ -191,6 +198,18 @@ def _inline_spec(
         thinking=thinking_raw if isinstance(thinking_raw, bool) else None,
         reasoning_effort=effort_raw if effort_raw in _VALID_EFFORTS else None,
         expected_output=item.get("expected_output", "") or "",
+        # 辩论/审查 呈现标记（display-only）：宽松解析，非法 stance 丢弃、group 取整后
+        # 字符串、round 仅收正整数（bool 不算，否则 0）。执行器从不读它们，仅透传给
+        # run_plan 供前端识别辩论 → 并排渲染 / 按轮次分层。
+        stance=stance_raw if stance_raw in _VALID_STANCES else "",
+        group=group_raw.strip() if isinstance(group_raw, str) else "",
+        round=(
+            round_raw
+            if isinstance(round_raw, int)
+            and not isinstance(round_raw, bool)
+            and round_raw > 0
+            else 0
+        ),
         depends_on=depends_on or [],
         parent_run_id=parent_run_id,
         depth=depth,

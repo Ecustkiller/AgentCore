@@ -13,8 +13,11 @@ from agentcore.api.routes import (
     auth,
     conversations,
     folders,
+    llm_key,
     messages,
+    model_modes,
     realtime,
+    search,
     system,
     tools,
     usage,
@@ -24,6 +27,8 @@ from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import setup_logging
 from agentcore.memory.consolidation import consolidation_loop, shutdown_scheduler
 from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
+from agentcore.runtime.session_retention import session_retention_loop
+from agentcore.security import KeyEncryptor
 from agentcore.workspace.retention import retention_loop
 
 logger = logging.getLogger(__name__)
@@ -45,10 +50,29 @@ def _validate_production_security() -> None:
             "JWT_SECRET_KEY is unset or still a default placeholder. Set a strong, "
             "random secret before running in production (DEBUG=false)."
         )
+    # byok makes a per-user API key mandatory, so a usable master key is required
+    # to store it. Without one the model-config page can't save a key and every
+    # turn is blocked — fail closed at boot rather than ship a server that looks
+    # healthy (livez/readyz green) but can't chat (安全权限与治理.md §七).
+    if settings.billing_mode == "byok":
+        if not settings.encryption_key:
+            raise RuntimeError(
+                "ENCRYPTION_KEY is unset but billing_mode=byok requires it (users "
+                "store their own API key, encrypted at rest). Generate one: "
+                'python -c "import secrets; print(secrets.token_hex(32))".'
+            )
+        try:
+            KeyEncryptor(settings.encryption_key)
+        except ValueError as exc:
+            raise RuntimeError(
+                "ENCRYPTION_KEY is malformed (must be 64 hex chars = 32 bytes); "
+                "byok billing cannot encrypt user keys without a valid master key."
+            ) from exc
     if not settings.cookie_secure:
         logger.warning(
-            "COOKIE_SECURE is false in a non-debug run: auth cookies may travel over "
-            "plain HTTP. Set COOKIE_SECURE=true when serving over HTTPS."
+            "security.cookie_insecure",
+            detail="COOKIE_SECURE is false in a non-debug run: auth cookies may "
+            "travel over plain HTTP; set COOKIE_SECURE=true when serving over HTTPS",
         )
     # SameSite=None is required for the cross-site desktop (app://) → API cookie to
     # ride credentialed requests, but browsers silently drop a None cookie that
@@ -62,7 +86,7 @@ def _validate_production_security() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    setup_logging(debug=settings.debug)
+    setup_logging()
     _validate_production_security()
 
     # Background retention sweep (决策⑦): physically purge soft-deleted workspaces
@@ -80,6 +104,12 @@ async def lifespan(app: FastAPI):
     if settings.memory_consolidation_enabled:
         consolidation_task = asyncio.create_task(consolidation_loop())
 
+    # Recoverable-worker roster TTL sweep (留人 跨进程落盘 P3): prune run_sessions
+    # rows idle past the 7-day window so the durable roster stays bounded.
+    session_retention_task: asyncio.Task | None = None
+    if settings.session_roster_persist_enabled:
+        session_retention_task = asyncio.create_task(session_retention_loop())
+
     try:
         yield
     finally:
@@ -91,6 +121,10 @@ async def lifespan(app: FastAPI):
             consolidation_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await consolidation_task
+        if session_retention_task is not None:
+            session_retention_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await session_retention_task
         # Flush in-flight debounced passes and cancel pending timers.
         await shutdown_scheduler()
 
@@ -136,7 +170,10 @@ app.include_router(system.router)
 app.include_router(auth.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
 app.include_router(folders.router, prefix="/v1")
+app.include_router(llm_key.router, prefix="/v1")
 app.include_router(messages.router, prefix="/v1")
+app.include_router(model_modes.router, prefix="/v1")
 app.include_router(realtime.router, prefix="/v1")
+app.include_router(search.router, prefix="/v1")
 app.include_router(tools.router, prefix="/v1")
 app.include_router(usage.router, prefix="/v1")

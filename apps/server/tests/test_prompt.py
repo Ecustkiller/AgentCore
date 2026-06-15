@@ -9,6 +9,8 @@ memory / attachment-context sections being layered on top.
 """
 
 from agentcore.runtime.prompt import (
+    CHAT_CHECKPOINT_HINT,
+    CHAT_CITATION_HINT,
     CHAT_TEAM_CAPABILITY_HINT,
     assemble_system_prompt,
 )
@@ -92,3 +94,74 @@ def test_team_hint_states_coordinator_tool_boundary():
     assert "delegate" in hint
     # The hint must steer production/mutation to a worker, not the CEO's own hands.
     assert "交给 worker" in hint
+
+
+def test_team_hint_teaches_finalize_for_single_delivery():
+    # 提案2a: the CEO learns it can finalize a single self-contained delivery, so a
+    # one-worker job is surfaced directly without a redundant synthesis round.
+    assert "finalize" in CHAT_TEAM_CAPABILITY_HINT
+
+
+def test_team_hint_teaches_debate_stance_tagging():
+    # 辩论/审查 (前端UX目标态 §四③): the CEO tags opposing tasks with stance so the
+    # frontend can tell a debate from普通并行 — the only signal, since执行 is identical
+    # (守住「形状是数据不是模式」). Pin it so the always-on hint keeps teaching it.
+    hint = CHAT_TEAM_CAPABILITY_HINT
+    assert "stance" in hint
+    assert "pro" in hint and "con" in hint
+    assert "辩论" in hint
+
+
+def test_checkpoint_hint_teaches_debate_closing_with_options():
+    # ⑤: a debate closes by handing the采纳 A/B choice to the user via ask_user
+    # options — no new checkpoint type (复用现有机制). It must live in the checkpoint
+    # hint (shown only when ask_user is actually wired), not the always-on team hint.
+    assert "采纳正方" in CHAT_CHECKPOINT_HINT
+    assert "options" in CHAT_CHECKPOINT_HINT
+    assert "采纳正方" not in CHAT_TEAM_CAPABILITY_HINT
+
+
+def test_citation_hint_teaches_multi_source_anchoring():
+    # When several sources back one claim, the CEO anchors all of them ([1][2]), not
+    # only the source tied to the final conclusion — every contributing source must
+    # stay traceable from the prose (UI 引用卡 already lists them; this adds the
+    # inline anchor).
+    hint = CHAT_CITATION_HINT
+    assert "一并标注" in hint
+    assert "[1][2]" in hint
+
+
+def test_team_hint_teaches_split_criterion_over_count():
+    # 拆分判据 = 子任务是否真正独立可并行 / 需不同专长, NOT 任务数量 — replaces the
+    # vague「少数几个」the CEO itself flagged as un-actionable.
+    hint = CHAT_TEAM_CAPABILITY_HINT
+    assert "独立" in hint and "并行" in hint and "专长" in hint
+    assert "不看数量" in hint
+
+
+def test_team_hint_distinguishes_dag_depth_from_nesting():
+    # A multi-stage pipeline is a DAG within ONE delegate call (depends_on, same
+    # layer, depth 1) — NOT nesting. can_delegate is the other axis, only for a
+    # single task that needs its own sub-team. Pin the distinction so the CEO stops
+    # conflating pipeline length with delegation depth.
+    hint = CHAT_TEAM_CAPABILITY_HINT
+    assert "depends_on" in hint
+    assert "can_delegate" in hint
+    assert "同一层" in hint
+
+
+def test_team_hint_reminds_pass_hidden_context_to_worker():
+    # A worker never sees the conversation history, so the CEO must write the
+    # decision's key assumptions / constraints into the task itself.
+    hint = CHAT_TEAM_CAPABILITY_HINT
+    assert "看不到" in hint
+    assert "对话历史" in hint
+
+
+def test_checkpoint_hint_teaches_proceed_and_annotate_assumption():
+    # The non-interrupt branch: when proceeding on a non-trivial default, the CEO
+    # flags the assumption inline so the user can cheaply correct it — the adopted
+    # half of the「置信度」idea, without a (miscalibrated) numeric threshold.
+    hint = CHAT_CHECKPOINT_HINT
+    assert "假设" in hint
+    assert "若不符请指正" in hint

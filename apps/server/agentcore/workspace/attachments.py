@@ -85,7 +85,7 @@ async def persist_attachments(
                 item["workspace_path"] = rel
             except WorkspaceError as e:
                 logger.warning(
-                    "attachment_persist_failed",
+                    "attachment.persist_failed",
                     name=att.get("name"),
                     error=str(e),
                 )

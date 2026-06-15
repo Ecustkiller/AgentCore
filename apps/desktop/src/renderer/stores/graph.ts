@@ -2,15 +2,17 @@ import { create } from "zustand";
 
 /** Structural edge. Visual state (animated) is derived live.
  *
- * `dep` (default) is a DAG dependency / input·synthesis bookend flow; `delegate`
+ * `dep` (default) is a DAG dependency / input·captain bookend flow; `delegate`
  * is a captain worker → its nested sub-worker (阶段2 父子分组), drawn distinctly
  * (dashed) so a sub-team reads as grouped under the parent rather than as another
- * top-level branch. */
+ * top-level branch; `revision` is an original worker → its「修订 vN」续写 child
+ * (乙 热修 P4), drawn distinctly (dotted) so a re-do reads as a version of the same
+ * node, not a new branch. */
 export interface GraphEdge {
   id: string;
   source: string;
   target: string;
-  kind?: "dep" | "delegate";
+  kind?: "dep" | "delegate" | "revision";
 }
 
 /**

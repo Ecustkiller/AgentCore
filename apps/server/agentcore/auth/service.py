@@ -78,18 +78,18 @@ class AuthService:
     ) -> User:
         username = username.strip()
         if not username:
-            raise ValidationError("Username is required")
+            raise ValidationError("请输入用户名")
         if len(password) < _MIN_PASSWORD_LENGTH:
             raise ValidationError(
-                f"Password must be at least {_MIN_PASSWORD_LENGTH} characters"
+                f"密码至少需要 {_MIN_PASSWORD_LENGTH} 个字符"
             )
 
         invite = await self._invites.get_by_code(invite_code.strip())
         if not _invite_is_valid(invite, datetime.now(UTC)):
-            raise ValidationError("Invalid or already-used invite code")
+            raise ValidationError("邀请码无效或已被使用")
 
         if await self._users.get_by_username(username) is not None:
-            raise ValidationError("Username already taken")
+            raise ValidationError("该用户名已被占用")
 
         user = await self._users.create(
             username=username, display_name=display_name or username, email=email
@@ -107,15 +107,15 @@ class AuthService:
         )
         # Uniform failure: never reveal whether the username exists.
         if user is None or creds is None:
-            raise AuthenticationError("Invalid username or password")
+            raise AuthenticationError("用户名或密码错误")
 
         now = datetime.now(UTC)
         if creds.locked_until is not None and creds.locked_until > now:
-            raise AuthenticationError("Account temporarily locked. Try again later.")
+            raise AuthenticationError("账户已临时锁定，请稍后再试")
 
         if not verify_password(password, creds.password_hash):
             await self._register_failure(creds.user_id, creds.failed_attempts, now)
-            raise AuthenticationError("Invalid username or password")
+            raise AuthenticationError("用户名或密码错误")
 
         if creds.failed_attempts or creds.locked_until is not None:
             await self._credentials.reset_failure_state(user.user_id)

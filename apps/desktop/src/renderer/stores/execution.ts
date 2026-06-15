@@ -9,12 +9,17 @@ import type {
   RunReasoningDeltaPayload,
   RunStartedPayload,
   SSEEvent,
+  Stance,
   ToolUseEndPayload,
   ToolUseStartPayload,
   UsageBreakdown,
 } from "@/types/events";
 import { createContext, useContext, useMemo } from "react";
 import { create } from "zustand";
+
+// Re-exported so graph/detail components import the debate display contract from
+// the store (alongside MODEL_TIER_META) without reaching into the wire types.
+export type { Stance } from "@/types/events";
 
 export type RunStatus =
   | "pending"
@@ -56,6 +61,13 @@ export const MODEL_TIER_META: Record<
     description:
       "思考·high、回合预算大，面向需要判断或对质量有要求的子任务；可经「深度」升 max。",
   },
+};
+
+/** Display labels for a 辩论/审查 side (前端UX目标态 §四) — the single source the
+ * graph node badge and the strip title share, so正/反 read consistently. */
+export const STANCE_META: Record<Stance, { label: string; short: string }> = {
+  pro: { label: "正方", short: "正" },
+  con: { label: "反方", short: "反" },
 };
 
 /**
@@ -128,8 +140,8 @@ export interface RunNode {
   /** Delegating run id (`run_started` slot). 阶段1 always null (flat workers
    * under the CEO); set for 阶段2 nested delegation. */
   parentRunId: string | null;
-  /** Node kind from `run_started`. 阶段1 always `agent`; `synthesis` / `arena`
-   * are 阶段2 slots, carried here so the graph can later style them. */
+  /** Node kind from `run_started` / the plan: `captain` is the CEO root 汇聚点,
+   * `agent` a delegated worker. Drives how the graph styles the node. */
   kind: RunKind;
   /** Cost-ledger role of the run (member/captain/…) from `run_completed`; null
    * until the run completes. 阶段1 scheduled runs are always "member". */
@@ -142,6 +154,23 @@ export interface RunNode {
   /** This run's priced cost in nano-USD (lights up one payroll row, §7.3B);
    * null until completed / unmetered. All-zero `total` renders as「—」(§7.5). */
   cost: CostBreakdown | null;
+  /** 辩论/审查 呈现标记 (前端UX目标态 §四, display-only): this run's side in an
+   * opposing batch (`pro`/`con`), the `group` it is paired in, and its `round`
+   * (真·多轮辩论 turn, 1-based; 0 = not multi-round); null/0 for ordinary parallel/
+   * DAG work. The only client signal that differentiates a debate from普通并行 — the
+   * DAG shape + SSE are identical (守住「形状是数据不是模式」). Drives the node side
+   * badge, the「辩论」strip title, the graph 分列, and the逐轮 layout. */
+  stance: Stance | null;
+  group: string | null;
+  round: number;
+  /** 定向唤回 续写 (乙 热修 P4): the ORIGINAL run id this node revises, or null for a
+   * first-time run. A revision is NOT in the run_plan — it is synthesized into the
+   * projection from its `run_started` frame and hung off the original as a
+   *「修订 vN」child (distinct from a 阶段2 delegation, which is plan-declared). */
+  revisionOf: string | null;
+  /** Version number of a revision (original = v1, first revision = v2…); 0 for a
+   * first-time run. From the wire `revision` flag. */
+  revision: number;
 }
 
 export interface Execution {
@@ -180,9 +209,16 @@ export interface ExecutionPlan {
      * node here) or is null. Declared at plan time so the *structural* graph
      * layout can group without waiting for the run_started frame. */
     parentRunId?: string | null;
-    /** Declared node kind (default `agent`). `synthesis` marks the CEO 汇聚点
-     * (Phase B / D3); also re-confirmed by the run_started frame. */
+    /** Declared node kind (default `agent`). `captain` marks the CEO root 汇聚点;
+     * also re-confirmed by the run_started frame. */
     kind?: RunKind;
+    /** 辩论/审查 呈现标记 (前端UX目标态 §四, display-only): opposing-side tag,
+     * pairing group, and 真·多轮辩论 turn (`round`). Declared at plan time so the
+     * strip can show a「辩论」title and the graph can band正/反 + 逐轮 from the plan
+     * alone, before any run frame folds in. */
+    stance?: Stance;
+    group?: string;
+    round?: number;
   }[];
 }
 
@@ -200,9 +236,12 @@ export type RunFrame =
       agentId: string;
       runId: string;
       // `runKind` (not `kind`) because `kind` is this union's discriminant; it
-      // carries the wire `kind` (agent/synthesis/arena). 阶段2 declaration slots.
+      // carries the wire `kind` (captain/agent).
       parentRunId: string | null;
       runKind: RunKind;
+      // 续写 version (乙 热修 P4): 0 for an ordinary run, >=2 for a revision (then
+      // parentRunId is the original run it revises).
+      revision: number;
     }
   | { t: number; kind: "run_output_delta"; agentId: string; delta: string }
   | { t: number; kind: "run_reasoning_delta"; agentId: string; delta: string }
@@ -280,13 +319,21 @@ export function projectExecution(
     // run_started frame folds in (the frame re-confirms it). 阶段1 flat workers
     // resolve to a CEO-captain id with no node, treated as "no parent here".
     parentRunId: s.parentRunId ?? null,
-    // Plan-declared kind so the synthesis 汇聚点 is identifiable before its
+    // Plan-declared kind so the captain 汇聚点 is identifiable before its
     // run_started frame folds in (the frame re-confirms it).
     kind: s.kind ?? "agent",
     role: null,
     model: null,
     usage: null,
     cost: null,
+    // 辩论/审查 display tags ride straight from the plan (no run frame mutates
+    // them — they are declared once and immutable).
+    stance: s.stance ?? null,
+    group: s.group ?? null,
+    round: s.round ?? 0,
+    // Plan runs are never revisions; a revision is synthesized from its frame.
+    revisionOf: null,
+    revision: 0,
   }));
 
   const agentById = (id: string) => agents.find((a) => a.id === id);
@@ -295,7 +342,53 @@ export function projectExecution(
   for (const f of frames) {
     switch (f.kind) {
       case "run_started": {
-        const run = runById(f.runId);
+        let run = runById(f.runId);
+        // 定向唤回 续写 (乙 热修 P4): a revision (`revision >= 2`) is NOT in the plan —
+        // it is born from this frame. Synthesize its run + agent, inheriting the
+        // ORIGINAL's display identity (role / tier / task), and hang it off the
+        // original as a「修订 vN」child so its output / cost / status fold in just
+        // like a planned worker. Guarded on the original existing, so a stray
+        // revision frame (parent not on this graph) is ignored, not mis-drawn.
+        if (!run && f.revision > 0 && f.parentRunId) {
+          const original = runById(f.parentRunId);
+          if (original) {
+            const originAgent = agentById(original.agentId);
+            agents.push({
+              id: f.agentId,
+              role: originAgent?.role ?? original.agentId,
+              modelPreference: originAgent?.modelPreference ?? "strong",
+              thinking: originAgent?.thinking ?? true,
+              reasoningEffort: originAgent?.reasoningEffort ?? "high",
+              status: "idle",
+              currentRunId: null,
+              outputChunks: [],
+              reasoningChunks: [],
+              toolCalls: [],
+            });
+            run = {
+              id: f.runId,
+              agentId: f.agentId,
+              task: original.task,
+              status: "pending",
+              dependsOn: [],
+              outputSummary: null,
+              durationMs: null,
+              error: null,
+              parentRunId: f.parentRunId,
+              kind: f.runKind,
+              role: null,
+              model: null,
+              usage: null,
+              cost: null,
+              stance: null,
+              group: null,
+              round: 0,
+              revisionOf: f.parentRunId,
+              revision: f.revision,
+            };
+            runs.push(run);
+          }
+        }
         if (run) {
           run.status = "running";
           // Capture the 阶段2 declaration slots onto the node so a later graph
@@ -449,6 +542,138 @@ export function elapsedMs(frames: RunFrame[]): number {
 }
 
 /**
+ * Whether a turn is a 辩论/审查 (前端UX目标态 §四): any run carries a stance tag.
+ *
+ * This is the single client-side signal that differentiates a debate from an
+ * ordinary parallel batch — the DAG shape and SSE are identical (守住「形状是数据
+ * 不是模式」), so the strip title / node badge / graph 分列 all key off it.
+ */
+export function isDebate(execution: Execution): boolean {
+  return execution.runs.some((r) => r.stance != null);
+}
+
+/**
+ * The debate roster split by side (前端UX目标态 §四), in plan order. Empty lists
+ * for a non-debate turn. Used by the strip title now and the「左右并排对比」next.
+ */
+export function debateSides(execution: Execution): {
+  pro: RunNode[];
+  con: RunNode[];
+} {
+  return {
+    pro: execution.runs.filter((r) => r.stance === "pro"),
+    con: execution.runs.filter((r) => r.stance === "con"),
+  };
+}
+
+/** One round's 正/反 within a comparison group (真·多轮辩论, 前端UX目标态 §四).
+ * `round` is the 1-based turn; 0 means the group carries no round tags (即单轮辩论). */
+export interface DebateRound {
+  round: number;
+  pro: RunNode[];
+  con: RunNode[];
+}
+
+/** One comparison group: its full 正/反 rosters plus the same runs re-bucketed by
+ * `round` (升序). A single-round group yields one bucket at round 0. */
+export interface DebateGroup {
+  key: string;
+  pro: RunNode[];
+  con: RunNode[];
+  rounds: DebateRound[];
+}
+
+/**
+ * The debate split into comparison groups (前端UX目标态 §四), one per `group` tag
+ * (an untagged stance falls into the default `""` group), in first-seen order.
+ * Powers the「左右并排对比」card: a turn can hold several opposing pairs (multi-
+ * dimension review), each rendered as its own 正方 vs 反方 row. Empty for非辩论.
+ *
+ * Each group also carries its `rounds` — the same runs re-bucketed by `round`
+ * (真·多轮辩论) in ascending turn order. The card lays a multi-round group out 逐轮
+ * and a single-round one (all round 0) as a flat 正/反 pair, both off this one
+ * projection — no second source of truth.
+ */
+export function debateGroups(execution: Execution): DebateGroup[] {
+  const groups: DebateGroup[] = [];
+  for (const run of execution.runs) {
+    if (run.stance == null) continue;
+    const key = run.group ?? "";
+    let group = groups.find((g) => g.key === key);
+    if (!group) {
+      group = { key, pro: [], con: [], rounds: [] };
+      groups.push(group);
+    }
+    (run.stance === "pro" ? group.pro : group.con).push(run);
+    let bucket = group.rounds.find((r) => r.round === run.round);
+    if (!bucket) {
+      bucket = { round: run.round, pro: [], con: [] };
+      group.rounds.push(bucket);
+    }
+    (run.stance === "pro" ? bucket.pro : bucket.con).push(run);
+  }
+  for (const group of groups) {
+    group.rounds.sort((a, b) => a.round - b.round);
+  }
+  return groups;
+}
+
+/** One version in a revision chain (乙 热修 P4): the original is `version` 1, each
+ * 续写 carries its own `version` (2, 3…). `run` is the projected node for that
+ * version, so the compare card reads its output / status / role straight off it. */
+export interface RevisionVersion {
+  version: number;
+  run: RunNode;
+}
+
+/** A revised worker's full version chain (乙 热修 P4): the original plus every
+ *「修订 vN」续写 of it, in version order (v1 first). */
+export interface RevisionChain {
+  originalId: string;
+  versions: RevisionVersion[];
+}
+
+/** Whether any worker in the turn was 定向唤回 revised — the single signal that
+ * gates the「版本对比」card + the graph's revision styling (mirrors {@link isDebate}
+ * for debates). */
+export function hasRevisions(execution: Execution): boolean {
+  return execution.runs.some((r) => r.revisionOf != null);
+}
+
+/**
+ * Group the turn's runs into revision chains (乙 热修 P4), one per revised original
+ * (in first-seen original order). Each chain is the original (v1) followed by its
+ * 续写 versions in ascending version order — the projection the「版本对比」card lays
+ * out side by side. Originals with no revision are omitted (a chain needs ≥2
+ * versions to compare); a stray revision whose original is absent is dropped.
+ */
+export function revisionChains(execution: Execution): RevisionChain[] {
+  const revisionsByOriginal = new Map<string, RunNode[]>();
+  for (const run of execution.runs) {
+    if (run.revisionOf == null) continue;
+    const list = revisionsByOriginal.get(run.revisionOf) ?? [];
+    list.push(run);
+    revisionsByOriginal.set(run.revisionOf, list);
+  }
+  const chains: RevisionChain[] = [];
+  for (const run of execution.runs) {
+    const revisions = revisionsByOriginal.get(run.id);
+    // Iterate originals (revisionOf == null) so each chain is built once, in
+    // graph order; a revision node itself is skipped here.
+    if (run.revisionOf != null || !revisions) continue;
+    const versions: RevisionVersion[] = [
+      { version: 1, run },
+      ...revisions
+        .slice()
+        .sort((a, b) => a.revision - b.revision)
+        .map((r) => ({ version: r.revision, run: r })),
+    ];
+    chains.push({ originalId: run.id, versions });
+  }
+  return chains;
+}
+
+/**
  * A persisted multi-agent execution journal for one assistant message
  * (`messages.runs`): the turn's ordered run/tool SSE events plus its finish
  * reason. Replayed client-side through the same fold as the live stream to
@@ -488,6 +713,9 @@ export function planFromRunPlan(p: RunPlanPayload): ExecutionPlan {
       dependsOn: s.depends_on,
       parentRunId: s.parent_run_id ?? null,
       kind: s.kind,
+      stance: s.stance,
+      group: s.group,
+      round: s.round,
     })),
   };
 }
@@ -507,6 +735,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         runId: p.run_id,
         parentRunId: p.parent_run_id,
         runKind: p.kind,
+        revision: p.revision ?? 0,
       };
     }
     case "run_output_delta": {

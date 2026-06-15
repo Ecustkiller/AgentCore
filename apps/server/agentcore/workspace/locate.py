@@ -24,13 +24,11 @@ from pathlib import Path
 
 from agentcore.config import settings
 from agentcore.runtime.events import EventSink
+from agentcore.runtime.interaction import default_interaction_registry
+from agentcore.runtime.ports import ClientRequestBridge
 from agentcore.tools.sandbox.protocol import SandboxProvider
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
-from agentcore.workspace.channel import (
-    WorkspaceChannel,
-    WorkspaceOpRegistry,
-    default_workspace_op_registry,
-)
+from agentcore.workspace.channel import WorkspaceChannel
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.protocol import WorkspaceBackend
 from agentcore.workspace.server import ServerWorkspace
@@ -129,7 +127,7 @@ def build_local_workspace(
     binding: LocalBinding,
     sink: EventSink,
     conversation_id: str,
-    registry: WorkspaceOpRegistry | None = None,
+    registry: ClientRequestBridge | None = None,
     timeout_seconds: float | None = None,
 ) -> LocalWorkspace:
     """Construct the ``LocalWorkspace`` for a conversation bound to a desktop root.
@@ -145,7 +143,7 @@ def build_local_workspace(
     channel = WorkspaceChannel(
         sink=sink,
         conversation_id=conversation_id,
-        registry=registry or default_workspace_op_registry(),
+        registry=registry or default_interaction_registry(),
         timeout_seconds=(
             settings.workspace_op_timeout_seconds
             if timeout_seconds is None

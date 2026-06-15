@@ -26,6 +26,13 @@ class EventType(StrEnum):
     # user's decision, then resolved.
     APPROVAL_REQUIRED = "approval_required"
     APPROVAL_RESOLVED = "approval_resolved"
+    # User checkpoint (CEO ask_user): the CEO paused the turn to ask the user a
+    # decision (continue / adjust / stop), then resolved. UNLIKE approvals (pure
+    # transport), these two are journaled (see _JOURNAL_EVENT_TYPES) so the
+    # question + answer replay inline on reload — the exchange is conversation, not
+    # just gating.
+    CHECKPOINT_REQUIRED = "checkpoint_required"
+    CHECKPOINT_RESOLVED = "checkpoint_resolved"
     # Local-workspace op channel (双模式工作区 P2): a server-side LocalWorkspace
     # asks the bound desktop client to run a file/exec op against the real local
     # directory, then awaits the result posted back to the ops resolve endpoint.
@@ -162,6 +169,50 @@ def approval_resolved(*, approval_id: str, tool_call_id: str, decision: str) -> 
             "approval_id": approval_id,
             "tool_call_id": tool_call_id,
             "decision": decision,
+        },
+    )
+
+
+def checkpoint_required(
+    *,
+    checkpoint_id: str,
+    conversation_id: str,
+    question: str,
+    options: list[str],
+    context: str = "",
+) -> SSEEvent:
+    """The CEO paused the turn to ask the user a decision (ask_user checkpoint).
+
+    ``checkpoint_id`` is the key the client echoes back to the resolve endpoint.
+    ``question`` is the CEO-authored decision point; ``options`` are optional
+    concrete choices to offer; ``context`` is optional supporting background.
+    Journaled (see ``_JOURNAL_EVENT_TYPES``) so a reload replays the prompt inline.
+    """
+    return SSEEvent(
+        type=EventType.CHECKPOINT_REQUIRED,
+        payload={
+            "checkpoint_id": checkpoint_id,
+            "conversation_id": conversation_id,
+            "question": question,
+            "options": options,
+            "context": context,
+        },
+    )
+
+
+def checkpoint_resolved(*, checkpoint_id: str, decision: str, note: str = "") -> SSEEvent:
+    """A pending checkpoint was settled (continue / adjust / stop / timeout).
+
+    Lets the client flip the inline card to its resolved state; ``note`` carries
+    the user's steer for ``adjust`` (or a closing remark for ``stop``). Journaled
+    alongside ``checkpoint_required`` so the settled outcome replays on reload.
+    """
+    return SSEEvent(
+        type=EventType.CHECKPOINT_RESOLVED,
+        payload={
+            "checkpoint_id": checkpoint_id,
+            "decision": decision,
+            "note": note,
         },
     )
 
@@ -363,13 +414,23 @@ def run_started(
     *,
     parent_run_id: str | None = None,
     kind: str = "agent",
+    revision: int = 0,
 ) -> SSEEvent:
     """A Run node entered RUNNING.
 
-    ``parent_run_id`` (the delegating run, ``None`` at the turn root) and ``kind``
-    (agent / arena / synthesis) are 阶段2 声明位: every 阶段1 worker is a flat
-    ``agent`` under the CEO, so these are constant for now, but the contract is
-    pre-wired so nested delegation + synthesis nodes need no further event change.
+    ``kind`` is the node type: ``captain`` for the CEO chat-loop root (the turn's
+    汇聚点, ``parent_run_id is None``), ``agent`` for a delegated / DAG worker. (No
+    arena/debate kind — 多轮辩论 rides an ``agent`` DAG with stance/round tags.)
+    ``parent_run_id`` is the delegating run — the CEO
+    captain for a top-level worker, the captain worker itself for a 阶段2 nested
+    sub-worker — so the graph groups the tree without waiting for the run frame.
+
+    ``revision`` (乙 热修 P4) is the version number of a 定向唤回 续写: ``0`` for an
+    ordinary first-time run, ``≥2`` for a revision (the original is v1, so the first
+    revision is v2). For a revision ``parent_run_id`` is the ORIGINAL run it
+    revises, so the frontend hangs a「修订 vN」child node off it and builds the
+    version chain — without this flag a revision is indistinguishable from a 阶段2
+    nested sub-worker (which also carries a worker ``parent_run_id``).
     """
     return SSEEvent(
         type=EventType.RUN_STARTED,
@@ -378,6 +439,7 @@ def run_started(
             "agent_id": agent_id,
             "parent_run_id": parent_run_id,
             "kind": kind,
+            "revision": revision,
         },
     )
 
@@ -468,7 +530,20 @@ _JOURNAL_EVENT_TYPES = frozenset(
         EventType.RUN_PROGRESS,
         EventType.TOOL_USE_START,
         EventType.TOOL_USE_END,
+        # User checkpoints (ask_user): journaled so the question + answer replay
+        # inline on reload, unlike the (transport-only) approval / workspace-op
+        # events.
+        EventType.CHECKPOINT_REQUIRED,
+        EventType.CHECKPOINT_RESOLVED,
     }
+)
+
+# Event types whose presence alone is enough to persist the journal — a turn that
+# never delegated (no run_plan) but did raise a checkpoint still has a journal
+# worth replaying. (Tool calls on their own do not: a single-agent turn's own
+# tool I/O is not replayed — see ``execution_journal``.)
+_JOURNAL_SURFACE_TYPES = frozenset(
+    {EventType.RUN_PLAN.value, EventType.CHECKPOINT_REQUIRED.value}
 )
 
 
@@ -500,14 +575,18 @@ class EventSink:
             self._queue.put_nowait(event)
 
     def execution_journal(self) -> list[dict[str, Any]] | None:
-        """This turn's ordered run/tool events, or None if it never delegated.
+        """This turn's ordered run/tool events, or None if there is nothing to replay.
 
-        Returns None unless a ``run_plan`` was emitted, so a single-agent turn
-        (whose only journalled events would be the CEO's own tool calls) persists
-        no runs payload.
+        Returns None unless the turn either delegated (``run_plan``) or raised a
+        checkpoint (``checkpoint_required``) — a plain single-agent turn (whose
+        only journalled events would be the CEO's own tool calls) persists no runs
+        payload, but a single-agent turn that paused to ask the user does (so the
+        exchange replays).
         """
-        has_plan = any(e["type"] == EventType.RUN_PLAN.value for e in self._journal)
-        return self._journal if has_plan else None
+        has_surface = any(
+            e["type"] in _JOURNAL_SURFACE_TYPES for e in self._journal
+        )
+        return self._journal if has_surface else None
 
     def close(self) -> None:
         """Signal end-of-stream to consumer."""

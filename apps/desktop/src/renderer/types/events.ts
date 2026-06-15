@@ -6,6 +6,8 @@ export type SSEEventType =
   | "tool_use_end"
   | "approval_required"
   | "approval_resolved"
+  | "checkpoint_required"
+  | "checkpoint_resolved"
   | "run_plan"
   | "run_started"
   | "run_output_delta"
@@ -80,6 +82,33 @@ export interface ApprovalResolvedPayload {
   decision: ApprovalDecision;
 }
 
+/** The user's settlement of a checkpoint the CEO raised (ask_user); mirrors the
+ * backend `CheckpointDecision`. `continue` proceeds with the CEO's direction,
+ * `adjust` steers it with a note then continues, `stop` ends the turn; `timeout`
+ * is engine-set only (a no-answer deadline) and never sent by the client. */
+export type CheckpointDecision = "continue" | "adjust" | "stop" | "timeout";
+
+/** The CEO paused the turn to ask the user a decision (ask_user checkpoint).
+ * `checkpoint_id` is echoed back to the resolve endpoint; `options` are optional
+ * concrete choices; `context` is optional supporting background. Journaled (unlike
+ * approvals), so it replays inline on reload. */
+export interface CheckpointRequiredPayload {
+  checkpoint_id: string;
+  conversation_id: string;
+  question: string;
+  options: string[];
+  context: string;
+}
+
+/** A pending checkpoint was settled (continue / adjust / stop / timeout). `note`
+ * carries the user's steer for `adjust` (or a closing remark for `stop`).
+ * Journaled alongside `checkpoint_required` so the outcome replays on reload. */
+export interface CheckpointResolvedPayload {
+  checkpoint_id: string;
+  decision: CheckpointDecision;
+  note: string;
+}
+
 /** Roster entry used by run_plan. `thinking` / `reasoning_effort` are the
  * *effective* values (tier default folded with any per-agent override), so the
  * graph shows exactly what will run. */
@@ -108,23 +137,46 @@ export interface RunPlanPayload {
      * graph layout can group without waiting for run_started. Optional: a
      * single-batch / older stream may omit it. */
     parent_run_id?: string | null;
-    /** Node kind (default `agent`). The CEO synthesis batch declares its run as
-     * `synthesis` so the graph can adopt it as the real 汇聚点 (Phase B / D3). */
+    /** Node kind (default `agent`). The top-level delegate batch declares the
+     * CEO chat loop as the `captain` root so the graph adopts it as the real
+     * 汇聚点 every worker hangs under. */
     kind?: RunKind;
+    /** 辩论/审查 呈现标记 (前端UX目标态 §四, display-only): this run's side in an
+     * opposing batch (`pro`/`con`), the `group` it is paired in, and its `round`
+     * (真·多轮辩论 turn, 1-based; absent/0 = not multi-round). Present only when the
+     * CEO marked a debate/review; ordinary parallel/DAG runs omit them. Ride here
+     * purely so the frontend can render正反 side-by-side under a「辩论」title and lay
+     * rounds out 逐轮 — the executor ignores them. */
+    stance?: Stance;
+    group?: string;
+    round?: number;
   }>;
 }
 
-/** What a run node *is*. 阶段1 only ever emits `agent`; `arena` / `synthesis`
- * are 阶段2 declaration slots, pre-wired so nested/synthesis nodes need no
- * later contract change. */
-export type RunKind = "agent" | "arena" | "synthesis";
+/** What a run node *is*. The CEO chat loop is the turn's `captain` root (the
+ * 汇聚点 every worker hangs under); a delegated / DAG worker is an `agent`.
+ * No arena/debate kind: a multi-round debate is an ordinary `agent` DAG carrying
+ * stance/round display tags, and best-of-N is the backend `RunPolicy.candidates`
+ * slot — 形状是数据不是模式. Mirrors the backend `RunKind` enum. */
+export type RunKind = "agent" | "captain";
+
+/** A 辩论/审查 node's side (前端UX目标态 §四): the display-only opposition tag the
+ * CEO sets via delegate's `stance`. The frontend pairs `pro`/`con` into a
+ * side-by-side comparison under a「辩论」title; the backend executor never reads
+ * it (执行 stays普通并行 — 守住「形状是数据不是模式」). Mirrors the backend enum. */
+export type Stance = "pro" | "con";
 
 export interface RunStartedPayload {
   run_id: string;
   agent_id: string;
-  /** Delegating run; `null` at the turn root (阶段2 nesting slot). */
+  /** Delegating run; `null` at the turn root (阶段2 nesting slot). For a revision
+   * (`revision >= 2`) this is the ORIGINAL run being revised. */
   parent_run_id: string | null;
   kind: RunKind;
+  /** 定向唤回 续写 version (乙 热修 P4): 0 for an ordinary run, `>= 2` for a revision
+   * (original = v1, first revision = v2). Drives the「修订 vN」child node + version
+   * chain. Optional so an older journal (no revisions) still maps (→ 0). */
+  revision?: number;
 }
 
 export interface RunOutputDeltaPayload {
@@ -300,6 +352,8 @@ export type SSEPayloadMap = {
   tool_use_end: ToolUseEndPayload;
   approval_required: ApprovalRequiredPayload;
   approval_resolved: ApprovalResolvedPayload;
+  checkpoint_required: CheckpointRequiredPayload;
+  checkpoint_resolved: CheckpointResolvedPayload;
   run_plan: RunPlanPayload;
   run_started: RunStartedPayload;
   run_output_delta: RunOutputDeltaPayload;

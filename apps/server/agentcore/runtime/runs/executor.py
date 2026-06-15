@@ -21,9 +21,11 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, replace
 
+from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
-from agentcore.llm.config import ModelProfile, agent_profile, apply_overrides
+from agentcore.llm.config import ModelProfile, apply_overrides
 from agentcore.llm.deepseek import DeepSeekProvider
+from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
@@ -49,6 +51,7 @@ from agentcore.runtime.runs.contract import (
 )
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
+from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import RunContract, RunPhase, RunSpec, RunState
 from agentcore.runtime.workspace import summarize
 from agentcore.tools.protocol import Tool, ToolContext
@@ -105,6 +108,7 @@ def build_agent_executor(
     tools: ToolRegistry,
     sink: EventSink,
     base_tool_context: ToolContext,
+    profile_set: ProfileSet | None = None,
     system_prompt: str,
     user_message: str,
     execution_id: str,
@@ -116,6 +120,10 @@ def build_agent_executor(
     Closes over ``plan`` so a node can resolve a dependency's display role when
     labelling injected upstream context; the scheduler passes only the terminal
     ``completed`` states per call.
+
+    ``profile_set`` is the turn's resolved 质量档 (llm/modes.py): a worker's tier
+    (fast/strong) is mapped to its model through it, so the user's selection reaches
+    every delegated worker.
 
     ``approval_gate`` gates this team's GRANTABLE tool calls (``code_execute`` /
     ``file_write`` / ``str_replace``). It is the *same* per-turn gate the CEO uses,
@@ -132,9 +140,13 @@ def build_agent_executor(
     depth-capped workers never receive it, so the tree can never nest past
     CEO → worker → sub-worker.
     """
+    # None (standalone / tests) = the economy base set; production passes the
+    # turn's resolved 质量档 from the delegate tool.
+    profiles = profile_set or default_profile_set()
 
-    async def execute(spec: RunSpec, completed: Mapping[str, RunState]) -> RunState:
-        agent_id = spec.agent_id or spec.run_id
+    async def _execute_node(
+        spec: RunSpec, completed: Mapping[str, RunState], agent_id: str
+    ) -> RunState:
         sink.emit(
             run_started(
                 spec.run_id,
@@ -147,7 +159,7 @@ def build_agent_executor(
         contract = spec.policy.contract
         try:
             profile = apply_overrides(
-                agent_profile(spec.model_preference),
+                profiles.agent(spec.model_preference),
                 thinking=spec.thinking,
                 reasoning_effort=spec.reasoning_effort,
             )
@@ -181,42 +193,33 @@ def build_agent_executor(
             run_rounds = 0
             content = ""
             verdict = ContractVerdict(ok=True)
-            feedback = ""
             # Web sources this worker consults, de-duped across contract retries.
             # Collect-only (annotate_citations=False): the worker text stays
             # un-numbered; the DelegateTool folds these into the turn's shared
             # source card so the user sees the WHOLE team's research, not just the
             # CEO's own searches.
             worker_citations: list[dict] = []
+            # Build the worker's opening (system + task) ONCE; auto-rework then
+            # CONTINUES on this SAME transcript (append the shortfall, re-run)
+            # instead of rebuilding from scratch — so the worker sees its own prior
+            # draft when correcting (修隐患), and the finished transcript is captured
+            # as a recoverable RunSession for 定向唤回 (统一「续写」原语, 见 §三).
+            messages = _build_messages(
+                plan, spec, completed, system_prompt, user_message, contract, identity=identity
+            )
             attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
             for attempt in range(attempts):
-                messages = _build_messages(
-                    plan,
-                    spec,
-                    completed,
-                    system_prompt,
-                    user_message,
-                    contract,
-                    feedback,
-                    identity=identity,
-                )
-                content, _reasoning, round_usage, round_rounds = await react_loop(
-                    messages=messages,
+                content, round_usage, round_rounds = await _react_and_capture(
+                    messages,
                     llm=llm,
                     tools=worker_tools,
                     sink=sink,
-                    tool_context=tool_ctx,
+                    tool_ctx=tool_ctx,
                     profile=profile,
-                    allowed_tool_names=allowed_tools,
-                    on_content=lambda d, rid=spec.run_id, aid=agent_id: sink.emit(
-                        run_output_delta(rid, aid, d)
-                    ),
-                    on_reasoning=lambda d, rid=spec.run_id, aid=agent_id: sink.emit(
-                        run_reasoning_delta(rid, aid, d)
-                    ),
-                    raise_on_error=True,
+                    allowed_tools=allowed_tools,
+                    run_id=spec.run_id,
+                    agent_id=agent_id,
                     citation_sink=worker_citations,
-                    annotate_citations=False,
                     approval_gate=approval_gate,
                 )
                 run_usage = run_usage + round_usage
@@ -224,9 +227,9 @@ def build_agent_executor(
                 verdict = check_contract(content, contract)
                 if verdict.ok or attempt == attempts - 1:
                     break
-                feedback = format_feedback(verdict)
+                messages.append(_retry_message(format_feedback(verdict)))
                 logger.info(
-                    "contract_retry",
+                    "contract.retry",
                     run_id=spec.run_id,
                     attempt=attempt + 1,
                     failures=verdict.failures,
@@ -241,7 +244,7 @@ def build_agent_executor(
             cost = asdict(calculate_cost(profile.model, run_usage))
             if not verdict.ok and _is_hard_failure(content, contract):
                 reason = "；".join(verdict.failures)
-                logger.info("contract_failed", run_id=spec.run_id, failures=verdict.failures)
+                logger.info("contract.failed", run_id=spec.run_id, failures=verdict.failures)
                 sink.emit(run_failed(spec.run_id, agent_id, reason))
                 return RunState(
                     phase=RunPhase.FAILED,
@@ -253,6 +256,7 @@ def build_agent_executor(
                     rounds=run_rounds,
                     usage=usage,
                     cost=cost,
+                    transcript=messages,
                 )
             sink.emit(
                 run_completed(
@@ -278,12 +282,23 @@ def build_agent_executor(
                 rounds=run_rounds,
                 usage=usage,
                 cost=cost,
+                transcript=messages,
             )
         except Exception as e:  # noqa: BLE001 — surface any run failure to UI/state
             duration_ms = int((time.monotonic() - start) * 1000)
-            logger.error("run_failed", run_id=spec.run_id, error=str(e), exc_info=True)
+            logger.error("run.failed", run_id=spec.run_id, error=str(e), exc_info=True)
             sink.emit(run_failed(spec.run_id, agent_id, str(e)))
             return RunState(phase=RunPhase.FAILED, error=str(e), duration_ms=duration_ms)
+
+    async def execute(spec: RunSpec, completed: Mapping[str, RunState]) -> RunState:
+        # Bind this worker's identity so EVERY log emitted under it (tool.execute_end,
+        # contract.*, run.*, llm.*, react_loop internals) carries run_id/agent_id/
+        # depth — analysis can then split tool quality + events by worker. The scope
+        # auto-clears on exit; contextvars are task-local, so concurrent workers in a
+        # wave never bleed identities into one another.
+        agent_id = spec.agent_id or spec.run_id
+        with log_context(run_id=spec.run_id, agent_id=agent_id, depth=spec.depth):
+            return await _execute_node(spec, completed, agent_id)
 
     return execute
 
@@ -372,7 +387,7 @@ def build_captain_executor(
             )
         except Exception as e:  # noqa: BLE001 — surface any captain failure to UI/state
             duration_ms = int((time.monotonic() - start) * 1000)
-            logger.error("captain_run_failed", run_id=spec.run_id, error=str(e), exc_info=True)
+            logger.error("run.captain_failed", run_id=spec.run_id, error=str(e), exc_info=True)
             sink.emit(run_failed(spec.run_id, agent_id, str(e)))
             return RunState(phase=RunPhase.FAILED, error=str(e), duration_ms=duration_ms)
 
@@ -407,17 +422,18 @@ def _build_messages(
     system_prompt: str,
     user_message: str,
     contract: RunContract | None = None,
-    feedback: str = "",
     identity: str = _WORKER_IDENTITY,
 ) -> list[LLMMessage]:
-    """Assemble the worker's (system, user) messages from its inline role, the
-    original request, its upstream dependency products, and its task.
+    """Assemble the worker's OPENING (system, user) messages from its inline role,
+    the original request, its upstream dependency products, and its task.
 
     ``contract`` (when present) is stated up front as hard requirements so the
-    worker aims to meet it on the first pass; ``feedback`` carries the prior
-    attempt's specific shortfalls on a contract retry. ``identity`` is the worker's
-    self-awareness preamble — the leaf-worker default, or the captain variant for a
-    worker authorized to lead one nested sub-team."""
+    worker aims to meet it on the first pass. This builds only the opening turn; a
+    contract retry no longer rebuilds from scratch — the executor CONTINUES on this
+    same transcript by appending the shortfall (:func:`_retry_message`), so the
+    worker sees its own prior draft. ``identity`` is the worker's self-awareness
+    preamble — the leaf-worker default, or the captain variant for a worker
+    authorized to lead one nested sub-team."""
     sys_parts = [system_prompt, identity]
     if spec.role or spec.objective:
         sys_parts.append(f"你的角色：{spec.role}\n你的目标：{spec.objective}")
@@ -441,8 +457,6 @@ def _build_messages(
     requirements = describe_contract(contract)
     if requirements:
         user_parts.append(f"## 产出要求（必须满足）\n{requirements}")
-    if feedback:
-        user_parts.append(f"## 上一次未达标，请修正后重做\n{feedback}")
 
     return [
         LLMMessage(role="system", content=system_content),
@@ -458,3 +472,205 @@ def _dep_body(dep_spec: RunSpec | None, content: str) -> str:
     if len(content) > _DEP_PASS_THROUGH_CAP:
         return content[:_DEP_PASS_THROUGH_CAP].rstrip() + "…"
     return content
+
+
+async def _react_and_capture(
+    messages: list[LLMMessage],
+    *,
+    llm: DeepSeekProvider,
+    tools: ToolRegistry,
+    sink: EventSink,
+    tool_ctx: ToolContext,
+    profile: ModelProfile,
+    allowed_tools: list[str],
+    run_id: str,
+    agent_id: str,
+    citation_sink: list[dict],
+    approval_gate: ApprovalGate | None,
+) -> tuple[str, TokenUsage, int]:
+    """Run one ReAct pass over ``messages`` (mutated in place — the loop appends
+    each assistant tool-call turn + tool results), then append the final assistant
+    answer so the transcript ends with the worker's product.
+
+    This is the shared core of both the initial worker run and a 续写 (auto-rework /
+    revise): ``react_loop`` returns the final no-tool answer WITHOUT appending it
+    (engine returns before the append), so we add it here — making ``messages`` a
+    complete, replayable transcript for capture and continuation."""
+    content, _reasoning, usage, rounds = await react_loop(
+        messages=messages,
+        llm=llm,
+        tools=tools,
+        sink=sink,
+        tool_context=tool_ctx,
+        profile=profile,
+        allowed_tool_names=allowed_tools,
+        on_content=lambda d: sink.emit(run_output_delta(run_id, agent_id, d)),
+        on_reasoning=lambda d: sink.emit(run_reasoning_delta(run_id, agent_id, d)),
+        raise_on_error=True,
+        citation_sink=citation_sink,
+        annotate_citations=False,
+        approval_gate=approval_gate,
+    )
+    messages.append(LLMMessage(role="assistant", content=content))
+    return content, usage, rounds
+
+
+def _retry_message(feedback: str) -> LLMMessage:
+    """The auto-rework turn appended to a worker's transcript when its product
+    misses the contract. The worker now sees its own prior draft above this, so the
+    feedback ("补齐差距、其余保持原样") is finally coherent (修隐患)."""
+    return LLMMessage(role="user", content=feedback)
+
+
+def _revision_message(feedback: str) -> LLMMessage:
+    """The CEO's 热修 instruction appended to a worker's saved transcript on a
+    定向唤回 (revise) — the same author continues on its own draft."""
+    return LLMMessage(
+        role="user",
+        content=(
+            f"## 修改要求（请在你上一版产出的基础上修订）\n{feedback}\n\n"
+            "直接输出修订后的【完整最终产出】，未提及之处保持原样，"
+            "不要解释、不要复述改动清单。"
+        ),
+    )
+
+
+async def continue_run(
+    *,
+    session: RunSession,
+    feedback: str,
+    revision_run_id: str,
+    llm: DeepSeekProvider,
+    tools: ToolRegistry,
+    sink: EventSink,
+    base_tool_context: ToolContext,
+    execution_id: str,
+    profile_set: ProfileSet | None = None,
+    approval_gate: ApprovalGate | None = None,
+) -> RunState:
+    """续写 a saved worker session under the revision's log scope: binds
+    run_id/agent_id/depth so all of the 热修's logs (tool.execute_end, run.*, llm.*)
+    split by worker like any delegated run. Delegates to :func:`_continue_run_scoped`
+    (see it for the full behavior); the scope auto-clears and is task-local."""
+    with log_context(
+        run_id=revision_run_id,
+        agent_id=revision_run_id,
+        depth=session.spec.depth,
+    ):
+        return await _continue_run_scoped(
+            session=session,
+            feedback=feedback,
+            revision_run_id=revision_run_id,
+            llm=llm,
+            tools=tools,
+            sink=sink,
+            base_tool_context=base_tool_context,
+            execution_id=execution_id,
+            profile_set=profile_set,
+            approval_gate=approval_gate,
+        )
+
+
+async def _continue_run_scoped(
+    *,
+    session: RunSession,
+    feedback: str,
+    revision_run_id: str,
+    llm: DeepSeekProvider,
+    tools: ToolRegistry,
+    sink: EventSink,
+    base_tool_context: ToolContext,
+    execution_id: str,
+    profile_set: ProfileSet | None = None,
+    approval_gate: ApprovalGate | None = None,
+) -> RunState:
+    """续写 a saved worker session: recall the SAME author to revise its own draft.
+
+    Appends the CEO's revision instruction to the worker's preserved transcript and
+    re-runs the ReAct loop under the original spec's profile / allowed tools — the
+    乙 热修 path (faster, cheaper, keeps the original train of thought) vs. re-
+    delegating a cold new worker (甲). Emits ``run_*`` events under
+    ``revision_run_id`` parented to the original run (the graph's「修订」child node,
+    P-2 版本链), prices the continuation once onto the returned RunState, and
+    carries the EXTENDED transcript so the next revision continues from here. The
+    contract gate is re-checked as warnings (a revision is content-quality, not a
+    hard gate)."""
+    profiles = profile_set or default_profile_set()
+    spec = session.spec
+    agent_id = revision_run_id
+    # Version number for the graph's「修订 vN」child node (P4 版本链): the original is
+    # v1, so the first revision (recall_count 0 here, pre-increment) is v2.
+    revision = session.recall_count + 2
+    sink.emit(
+        run_started(
+            revision_run_id,
+            agent_id,
+            parent_run_id=session.run_id,
+            kind=spec.kind,
+            revision=revision,
+        )
+    )
+    start = time.monotonic()
+    try:
+        profile = apply_overrides(
+            profiles.agent(spec.model_preference),
+            thinking=spec.thinking,
+            reasoning_effort=spec.reasoning_effort,
+        )
+        tool_ctx = replace(
+            base_tool_context,
+            run_id=revision_run_id,
+            agent_id=agent_id,
+            execution_id=execution_id,
+        )
+        # Continue on a COPY so a failed continuation leaves the stored session
+        # intact (the caller only commits the extended transcript on success).
+        messages = list(session.transcript)
+        messages.append(_revision_message(feedback))
+        citations: list[dict] = []
+        content, round_usage, round_rounds = await _react_and_capture(
+            messages,
+            llm=llm,
+            tools=tools,
+            sink=sink,
+            tool_ctx=tool_ctx,
+            profile=profile,
+            allowed_tools=spec.tools,
+            run_id=revision_run_id,
+            agent_id=agent_id,
+            citation_sink=citations,
+            approval_gate=approval_gate,
+        )
+        duration_ms = int((time.monotonic() - start) * 1000)
+        usage = round_usage.as_dict()
+        cost = asdict(calculate_cost(profile.model, round_usage))
+        verdict = check_contract(content, spec.policy.contract)
+        sink.emit(
+            run_completed(
+                revision_run_id,
+                agent_id,
+                output_summary=summarize(content),
+                duration_ms=duration_ms,
+                role="member",
+                model=profile.model,
+                usage=usage,
+                cost=cost,
+            )
+        )
+        return RunState(
+            phase=RunPhase.COMPLETED,
+            content=content,
+            warnings=[] if verdict.ok else list(verdict.failures),
+            citations=citations,
+            model=profile.model,
+            duration_ms=duration_ms,
+            rounds=round_rounds,
+            usage=usage,
+            cost=cost,
+            transcript=messages,
+        )
+    except Exception as e:  # noqa: BLE001 — surface any revision failure to UI/state
+        duration_ms = int((time.monotonic() - start) * 1000)
+        logger.error("run.revise_failed", run_id=revision_run_id, error=str(e), exc_info=True)
+        sink.emit(run_failed(revision_run_id, agent_id, str(e)))
+        return RunState(phase=RunPhase.FAILED, error=str(e), duration_ms=duration_ms)

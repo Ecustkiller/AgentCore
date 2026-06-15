@@ -34,6 +34,8 @@ from typing import Any, NoReturn
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.runtime.events import EventSink, workspace_op_required
+from agentcore.runtime.interaction import InteractionKind
+from agentcore.runtime.ports import ClientRequestBridge
 from agentcore.workspace.protocol import (
     AlreadyExists,
     AmbiguousMatch,
@@ -110,68 +112,6 @@ def raise_op_error(error: dict[str, Any]) -> NoReturn:
 
 
 @dataclass
-class _Pending:
-    """A suspended op: the Future to settle + the owning conversation."""
-
-    future: asyncio.Future[dict[str, Any]]
-    conversation_id: str
-
-
-class WorkspaceOpRegistry:
-    """Maps a pending ``request_id`` to the Future the LocalWorkspace awaits.
-
-    Bridges the engine task (which issues the op) and the resolve HTTP request
-    (which delivers the desktop's result); both run in the same process/event loop
-    in the MVP. Each request is tagged with its ``conversation_id`` so the resolve
-    endpoint can refuse a settle aimed at a different conversation (defense in
-    depth on top of the route's ownership check). Mirrors ``ApprovalRegistry``.
-    """
-
-    def __init__(self) -> None:
-        self._pending: dict[str, _Pending] = {}
-
-    def create(
-        self, request_id: str, conversation_id: str
-    ) -> asyncio.Future[dict[str, Any]]:
-        """Register a pending op and return its Future to await."""
-        fut: asyncio.Future[dict[str, Any]] = (
-            asyncio.get_running_loop().create_future()
-        )
-        self._pending[request_id] = _Pending(
-            future=fut, conversation_id=conversation_id
-        )
-        return fut
-
-    def resolve(
-        self, request_id: str, result: dict[str, Any], *, conversation_id: str
-    ) -> bool:
-        """Settle a pending op with the desktop's result envelope.
-
-        Returns False if the request is unknown, already settled, or belongs to a
-        different conversation than the caller claims.
-        """
-        pending = self._pending.get(request_id)
-        if pending is None or pending.future.done():
-            return False
-        if pending.conversation_id != conversation_id:
-            return False
-        pending.future.set_result(result)
-        return True
-
-    def discard(self, request_id: str) -> None:
-        """Forget a request once the LocalWorkspace is done awaiting it."""
-        self._pending.pop(request_id, None)
-
-
-_registry = WorkspaceOpRegistry()
-
-
-def default_workspace_op_registry() -> WorkspaceOpRegistry:
-    """The process-wide op registry (shared by LocalWorkspace + resolve endpoint)."""
-    return _registry
-
-
-@dataclass
 class WorkspaceChannel:
     """Suspends one LocalWorkspace op until the bound desktop runs it.
 
@@ -183,7 +123,7 @@ class WorkspaceChannel:
 
     sink: EventSink
     conversation_id: str
-    registry: WorkspaceOpRegistry
+    registry: ClientRequestBridge
     timeout_seconds: float
     root_id: str = ""  # which desktop FS root this workspace is bound to (P2d)
 
@@ -209,7 +149,12 @@ class WorkspaceChannel:
         op_name = str(op)
         request_id = new_id()
         deadline = self.timeout_seconds if timeout is None else timeout
-        fut = self.registry.create(request_id, self.conversation_id)
+        fut = self.registry.create(
+            request_id,
+            self.conversation_id,
+            kind=InteractionKind.CLIENT_TOOL,
+            payload={"root_id": self.root_id, "op": op_name, "args": args},
+        )
         self.sink.emit(
             workspace_op_required(
                 request_id=request_id,
@@ -222,7 +167,7 @@ class WorkspaceChannel:
         try:
             result = await asyncio.wait_for(fut, timeout=deadline)
         except TimeoutError as e:
-            logger.info("workspace_op_timeout", op=op_name, request_id=request_id)
+            logger.info("workspace.op_timeout", op=op_name, request_id=request_id)
             raise WorkspaceIOError(
                 f"local workspace op '{op_name}' timed out"
             ) from e

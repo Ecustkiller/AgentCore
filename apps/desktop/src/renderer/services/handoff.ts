@@ -1,3 +1,4 @@
+import { StreamError } from "@/lib/errors";
 import {
   type ChangeType,
   type HandoffApplySelection,
@@ -5,8 +6,8 @@ import {
   sha256HexFromBase64,
 } from "@/lib/handoff-review";
 import { BASE_URL, api, notifyUnauthorized, tryRefresh } from "@/services/api";
-import { StreamError } from "@/services/streamConversation";
 import { performWorkspaceOp } from "@/services/workspaceOps";
+import type { components } from "@/types/api.generated";
 import type {
   HandoffApplyDonePayload,
   HandoffJobStartedPayload,
@@ -15,6 +16,8 @@ import type {
   WorkspaceOpRequiredPayload,
 } from "@/types/events";
 import type { WorkspaceOpName } from "@shared/ipc-contract";
+
+type Schemas = components["schemas"];
 
 export interface HandoffResult {
   snapshotId: string;
@@ -70,38 +73,14 @@ export interface HandoffApplySummary {
   errors: number;
 }
 
-interface BackendJob {
-  id: string;
-  source_conversation_id: string;
-  job_conversation_id: string;
-  base_snapshot_id: string;
-  result_snapshot_id: string | null;
-  task: string;
-  status: HandoffJob["status"];
-  error: string | null;
-  created_at: string;
-  updated_at: string;
-  finished_at: string | null;
-}
+/** Server handoff-job payload (`/handoff/jobs`), generated from OpenAPI. */
+type BackendJob = Schemas["HandoffJobSummary"];
 
-interface BackendFileChange {
-  path: string;
-  change_type: ChangeType;
-  base_sha: string | null;
-  result_sha: string | null;
-  is_binary: boolean;
-  content: string | null;
-  size_bytes: number;
-}
+/** Server diff file-change row (`/handoff/jobs/{id}/diff`), generated from OpenAPI. */
+type BackendFileChange = Schemas["HandoffFileChange"];
 
-interface BackendDiff {
-  job_id: string;
-  data: BackendFileChange[];
-  total: number;
-  added: number;
-  modified: number;
-  deleted: number;
-}
+/** Server diff payload (`/handoff/jobs/{id}/diff`), generated from OpenAPI. */
+type BackendDiff = Schemas["HandoffDiffResponse"];
 
 function toJob(b: BackendJob): HandoffJob {
   return {
@@ -280,7 +259,7 @@ export async function dispatchHandoffJob(
 export async function listHandoffJobs(
   conversationId: string,
 ): Promise<HandoffJob[]> {
-  const res = await api.get<{ data: BackendJob[]; total: number }>(
+  const res = await api.get<Schemas["HandoffJobListResponse"]>(
     `/v1/conversations/${conversationId}/handoff/jobs`,
   );
   return res.data.map(toJob);

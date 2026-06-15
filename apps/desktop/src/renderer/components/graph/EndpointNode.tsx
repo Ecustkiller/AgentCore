@@ -9,16 +9,17 @@ import {
 } from "lucide-react";
 import { useTerminalFlash } from "./useTerminalFlash";
 
-/** Which bookend this synthetic node is. */
-export type EndpointVariant = "input" | "synthesis";
+/** Which bookend this node is: the synthetic user-input source, or the CEO
+ * captain root 汇聚点 (the turn's reply engine, drawn as the team's climax). */
+export type EndpointVariant = "input" | "captain";
 
 interface EndpointNodeData {
   variant: EndpointVariant;
-  /** Derived synthesis status (ignored for the input node). */
+  /** Derived captain (汇聚点) status (ignored for the input node). */
   status: RunStatus;
   /** Task summary (input) — kept short, the node clamps to two lines. */
   label: string;
-  /** Synthesis only: tail of the CEO's final answer, clamped to two lines, so
+  /** Captain only: tail of the CEO's final answer, clamped to two lines, so
    * the climax node previews the team's deliverable like a worker previews its
    * output. Empty until the captain starts writing the answer. */
   preview?: string;
@@ -26,17 +27,16 @@ interface EndpointNodeData {
   handleDirection?: "vertical" | "horizontal";
   /** Position in the plan, used to stagger the entrance animation. */
   enterIndex?: number;
-  /** Synthesis only: keyboard/mouse activation — jumps to the final answer.
+  /** Captain only: keyboard/mouse activation — jumps to the final answer.
    * Absent on the input node, which stays a passive label. */
   onActivate?: () => void;
-  /** Synthesis only: a11y verb for the activation (e.g. 查看最终回答 for the
-   * synthetic node, 查看汇总过程 for the real run). Defaults to 查看最终回答. */
+  /** Captain only: a11y verb for the activation. Defaults to 查看最终回答. */
   actionLabel?: string;
   [key: string]: unknown;
 }
 
-/** Synthesis ring + icon by derived status (mirrors AgentNode's mapping). */
-const SYNTH_STYLES: Record<string, { ring: string; icon: React.ReactNode }> = {
+/** 汇聚点 ring + icon by derived status (mirrors AgentNode's mapping). */
+const SINK_STYLES: Record<string, { ring: string; icon: React.ReactNode }> = {
   pending: {
     ring: "ring-muted-foreground/30",
     icon: <Sparkles size={15} className="text-muted-foreground" />,
@@ -66,7 +66,7 @@ const SYNTH_STYLES: Record<string, { ring: string; icon: React.ReactNode }> = {
 export function EndpointNode({ data, selected }: NodeProps) {
   const d = data as EndpointNodeData;
   const isInput = d.variant === "input";
-  const style = SYNTH_STYLES[d.status] ?? SYNTH_STYLES.pending;
+  const style = SINK_STYLES[d.status] ?? SINK_STYLES.pending;
   const running = !isInput && d.status === "running";
   const horizontal = d.handleDirection === "horizontal";
   // Both bookends are interactive when given an activation handler: clicking
@@ -74,7 +74,7 @@ export function EndpointNode({ data, selected }: NodeProps) {
   // prompt / the CEO's answer).
   const interactive = !!d.onActivate;
   const preview = isInput ? d.label : d.preview;
-  // Only the synthesis node owns a live status; the input node is static, so it
+  // Only the captain node owns a live status; the input node is static, so it
   // never flashes (the hook also self-guards its already-terminal first mount).
   const flashing = useTerminalFlash(d.status) && !isInput;
   const flashColor =
@@ -87,7 +87,7 @@ export function EndpointNode({ data, selected }: NodeProps) {
         tabIndex: 0,
         "aria-label": isInput
           ? "你的任务，对话发起，查看完整提问"
-          : `CEO 汇总，${synthLabel(d.status)}，${d.actionLabel ?? "查看最终回答"}`,
+          : `CEO 汇总，${sinkLabel(d.status)}，${d.actionLabel ?? "查看最终回答"}`,
         onKeyDown: (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
@@ -137,14 +137,25 @@ export function EndpointNode({ data, selected }: NodeProps) {
               <p className="truncate text-sm font-medium text-foreground">
                 {isInput ? "你的任务" : "CEO 汇总"}
               </p>
-              <p className="truncate text-xs text-muted-foreground">
-                {isInput ? "对话发起" : synthLabel(d.status)}
+              {/* 端点副标题是描述/汇聚状态（非冗余状态文字）：输入端「对话发起」恒显，
+                  CEO 汇总端保留「汇总中…/已汇总」叙事（前端UX设计 §五约定的例外）。
+                  与 AgentNode 第二行同节奏（mt-0.5）。 */}
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                {isInput ? "对话发起" : sinkLabel(d.status)}
               </p>
             </div>
           </div>
 
+          {/* 预览取向与 AgentNode 对齐：输入端=任务摘要（task 语义，/70）、CEO 汇总端=
+              答案开头（output 语义，/80；headText 取开头，见 GraphView）。 */}
           {preview && (
-            <p className="mt-2 line-clamp-2 text-xs leading-snug text-muted-foreground/80">
+            <p
+              className={`mt-2 line-clamp-2 text-xs leading-snug ${
+                isInput
+                  ? "text-muted-foreground/70"
+                  : "text-muted-foreground/80"
+              }`}
+            >
               {preview}
             </p>
           )}
@@ -159,7 +170,7 @@ export function EndpointNode({ data, selected }: NodeProps) {
   );
 }
 
-function synthLabel(status: RunStatus): string {
+function sinkLabel(status: RunStatus): string {
   const labels: Record<RunStatus, string> = {
     pending: "待汇总",
     ready: "待汇总",

@@ -33,6 +33,25 @@ MAX_RUN_RETRIES = 3
 DEFAULT_CONTRACT_RETRIES = 1
 MAX_CONTRACT_RETRIES = 3
 
+# 定向唤回（乙 热修）改次闸：一个 worker run 累计可被 ``revise`` 续写的次数上限，防无限
+# 打磨。参照 contract 的「一次自动返工」给人工热修略宽到 3；超限后 revise 拒绝并提示
+# 回落甲（带旧产物重新 delegate 换人重做）。
+# → 见设计: docs/07-规划/多轮编排与队员热修.md §六 T-3
+DEFAULT_RECALL_LIMIT = 3
+
+# 留人 roster（乙 热修）内存治理 (P2)：进程内留住 worker session 供【跨回合】定向唤回，
+# 对齐 approvals / channel / locks 的单机 posture（多进程扩展时换 Redis）。三道闸防内存
+# 无界增长 + 一道闸防跨会话泄漏：
+# → 见设计: docs/07-规划/多轮编排与队员热修.md §六 T-4
+# 单个 conversation 的 roster 最多留多少个可恢复 session（超出按 LRU 淘汰最久未访问的）。
+DEFAULT_ROSTER_MAX_SESSIONS = 32
+# 单个 conversation 的 roster transcript 总字节上限，防一个长会话的留存吃爆内存。
+DEFAULT_ROSTER_MAX_BYTES = 8 * 1024 * 1024  # 8 MiB
+# session / conversation roster 的空闲存活时长：超过即视为过期，定向唤回 落空回落甲。
+DEFAULT_ROSTER_TTL_SECONDS = 30 * 60.0  # 30 min
+# 进程内最多同时留多少个 conversation 的 roster（超出按 LRU 淘汰最久未访问的会话）。
+DEFAULT_ROSTER_MAX_CONVERSATIONS = 256
+
 # Default per-node failure strategy (see RunPolicy.on_failure).
 DEFAULT_ON_FAILURE = "degrade"
 

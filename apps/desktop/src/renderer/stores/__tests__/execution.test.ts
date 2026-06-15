@@ -3,10 +3,16 @@ import {
   type ExecutionJournal,
   type ExecutionPlan,
   type RunFrame,
+  debateGroups,
+  debateSides,
   elapsedMs,
   execRuntime,
+  hasRevisions,
+  isDebate,
+  planFromRunPlan,
   projectExecution,
   reasoningMeta,
+  revisionChains,
   useExecutionStore,
 } from "../execution";
 
@@ -45,6 +51,26 @@ function started(agentId: string, runId: string, t = 1): RunFrame {
     runId,
     parentRunId: null,
     runKind: "agent",
+    revision: 0,
+  };
+}
+
+/** A 定向唤回 续写 (乙 热修 P4) run_started frame: a revision of `parentRunId`, born
+ * outside the plan, carrying its version number (original = v1, so first rev = v2). */
+function revised(
+  runId: string,
+  parentRunId: string,
+  revision: number,
+  t = 1,
+): RunFrame {
+  return {
+    t,
+    kind: "run_started",
+    agentId: runId,
+    runId,
+    parentRunId,
+    runKind: "agent",
+    revision,
   };
 }
 
@@ -61,24 +87,25 @@ describe("projectExecution (fold)", () => {
     expect(exec.taskSummary).toBe("分析对比 React 和 Vue");
   });
 
-  it("threads a plan-declared synthesis kind onto the run (Phase B)", () => {
+  it("threads a plan-declared captain kind onto the run", () => {
     // The CEO 汇聚点 is identifiable from the plan alone — before its run_started
     // frame folds in — so the graph can adopt it as the real sink immediately.
-    const withSynth: ExecutionPlan = {
+    const withCaptain: ExecutionPlan = {
       ...plan,
       runs: [
-        ...plan.runs,
         {
-          id: "syn",
+          id: "cap",
           agentId: "ceo",
-          task: "汇总团队产出",
+          task: "",
           dependsOn: [],
-          kind: "synthesis",
+          parentRunId: null,
+          kind: "captain",
         },
+        ...plan.runs,
       ],
     };
-    const exec = projectExecution(withSynth, [], "running");
-    expect(exec.runs.find((s) => s.id === "syn")?.kind).toBe("synthesis");
+    const exec = projectExecution(withCaptain, [], "running");
+    expect(exec.runs.find((s) => s.id === "cap")?.kind).toBe("captain");
     // Ordinary runs keep the default agent kind.
     expect(exec.runs.find((s) => s.id === "run-1")?.kind).toBe("agent");
   });
@@ -209,7 +236,7 @@ describe("projectExecution (fold)", () => {
     expect(base.parentRunId).toBeNull();
     expect(base.kind).toBe("agent");
     // run_started carries whatever the wire declared onto the node, so a later
-    // graph can style nested / synthesis runs without another fold change.
+    // graph can style nested / captain runs without another fold change.
     const frames: RunFrame[] = [
       {
         t: 1,
@@ -217,14 +244,15 @@ describe("projectExecution (fold)", () => {
         agentId: "agent-1",
         runId: "run-1",
         parentRunId: "del0_root",
-        runKind: "synthesis",
+        runKind: "captain",
+        revision: 0,
       },
     ];
     const run = projectExecution(plan, frames, "running").runs.find(
       (s) => s.id === "run-1",
     );
     expect(run?.parentRunId).toBe("del0_root");
-    expect(run?.kind).toBe("synthesis");
+    expect(run?.kind).toBe("captain");
   });
 
   it("derives progress from completed runs (run_progress is a marker)", () => {
@@ -555,5 +583,386 @@ describe("agent reasoning effort (effective knobs)", () => {
     };
     const agent = projectExecution(withMax, [], "running").agents[0];
     expect(agent).toMatchObject({ thinking: true, reasoningEffort: "max" });
+  });
+});
+
+describe("辩论/审查 display tags (前端UX目标态 §四)", () => {
+  const debatePlan: ExecutionPlan = {
+    id: "exec-d",
+    planType: "multi_agent",
+    taskSummary: "该不该上微服务",
+    agents: [
+      { id: "a-pro", role: "正方", modelPreference: "strong" },
+      { id: "a-con", role: "反方", modelPreference: "strong" },
+    ],
+    runs: [
+      {
+        id: "r-pro",
+        agentId: "a-pro",
+        task: "支持",
+        dependsOn: [],
+        stance: "pro",
+        group: "g",
+      },
+      {
+        id: "r-con",
+        agentId: "a-con",
+        task: "反对",
+        dependsOn: [],
+        stance: "con",
+        group: "g",
+      },
+    ],
+  };
+
+  it("projectExecution carries stance/group onto the run nodes", () => {
+    const exec = projectExecution(debatePlan, [], "running");
+    expect(exec.runs.find((r) => r.id === "r-pro")).toMatchObject({
+      stance: "pro",
+      group: "g",
+    });
+    expect(exec.runs.find((r) => r.id === "r-con")).toMatchObject({
+      stance: "con",
+      group: "g",
+    });
+  });
+
+  it("ordinary runs default to null tags (守住「形状是数据不是模式」)", () => {
+    // The普通并行 plan declares no stance — a debate is the only thing that tags
+    // runs, so an untagged turn must project null (not a stray side).
+    const exec = projectExecution(plan, [], "running");
+    expect(exec.runs.every((r) => r.stance === null && r.group === null)).toBe(
+      true,
+    );
+  });
+
+  it("isDebate is true only when a run carries a stance", () => {
+    expect(isDebate(projectExecution(debatePlan, [], "running"))).toBe(true);
+    expect(isDebate(projectExecution(plan, [], "running"))).toBe(false);
+  });
+
+  it("debateSides splits the roster by side in plan order", () => {
+    const sides = debateSides(projectExecution(debatePlan, [], "running"));
+    expect(sides.pro.map((r) => r.id)).toEqual(["r-pro"]);
+    expect(sides.con.map((r) => r.id)).toEqual(["r-con"]);
+  });
+
+  it("debateGroups buckets opposing runs by group tag (multi-dimension review)", () => {
+    const multi: ExecutionPlan = {
+      id: "exec-m",
+      planType: "multi_agent",
+      taskSummary: "多维审查",
+      agents: [
+        { id: "a1", role: "架构正", modelPreference: "strong" },
+        { id: "a2", role: "架构反", modelPreference: "strong" },
+        { id: "a3", role: "选型正", modelPreference: "strong" },
+      ],
+      runs: [
+        {
+          id: "r1",
+          agentId: "a1",
+          task: "t",
+          dependsOn: [],
+          stance: "pro",
+          group: "架构",
+        },
+        {
+          id: "r2",
+          agentId: "a2",
+          task: "t",
+          dependsOn: [],
+          stance: "con",
+          group: "架构",
+        },
+        // An asymmetric second group (only one side) still forms its own row.
+        {
+          id: "r3",
+          agentId: "a3",
+          task: "t",
+          dependsOn: [],
+          stance: "pro",
+          group: "选型",
+        },
+      ],
+    };
+    const groups = debateGroups(projectExecution(multi, [], "running"));
+    expect(groups.map((g) => g.key)).toEqual(["架构", "选型"]);
+    expect(groups[0].pro.map((r) => r.id)).toEqual(["r1"]);
+    expect(groups[0].con.map((r) => r.id)).toEqual(["r2"]);
+    expect(groups[1].pro.map((r) => r.id)).toEqual(["r3"]);
+    expect(groups[1].con).toEqual([]);
+  });
+
+  it("debateGroups collapses untagged stances into one default group", () => {
+    const noGroup: ExecutionPlan = {
+      ...debatePlan,
+      runs: debatePlan.runs.map(({ group: _g, ...r }) => r),
+    };
+    const groups = debateGroups(projectExecution(noGroup, [], "running"));
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe("");
+    expect(groups[0].pro).toHaveLength(1);
+    expect(groups[0].con).toHaveLength(1);
+  });
+
+  it("planFromRunPlan maps the wire stance/group through to the plan", () => {
+    const wirePlan = planFromRunPlan({
+      execution_id: "exec-d",
+      plan_type: "multi_agent",
+      task_summary: "t",
+      agents: [
+        {
+          id: "a-pro",
+          role: "正方",
+          model_preference: "strong",
+          thinking: true,
+          reasoning_effort: "high",
+        },
+      ],
+      runs: [
+        {
+          id: "r-pro",
+          agent_id: "a-pro",
+          task: "支持",
+          depends_on: [],
+          stance: "pro",
+          group: "g",
+        },
+      ],
+    });
+    expect(wirePlan.runs[0]).toMatchObject({ stance: "pro", group: "g" });
+  });
+
+  it("projectExecution defaults round to 0 and carries an explicit round", () => {
+    // round is display-only (真·多轮辩论): absent ⇒ 0 (single-round), present ⇒ the
+    // 1-based turn, projected onto the node the immutable way stance/group are.
+    const exec = projectExecution(debatePlan, [], "running");
+    expect(exec.runs.every((r) => r.round === 0)).toBe(true);
+
+    const roundedPlan: ExecutionPlan = {
+      ...debatePlan,
+      runs: debatePlan.runs.map((r, i) => ({ ...r, round: i + 1 })),
+    };
+    const rounded = projectExecution(roundedPlan, [], "running");
+    expect(rounded.runs.find((r) => r.id === "r-pro")?.round).toBe(1);
+    expect(rounded.runs.find((r) => r.id === "r-con")?.round).toBe(2);
+  });
+
+  it("debateGroups buckets a group's runs by round (真·多轮辩论, 升序)", () => {
+    // Two rounds of pro/con in one group: cross-round depends_on wires the exchange,
+    // round tags let the card lay it out 逐轮. Buckets come back round-ascending,
+    // while the flat pro/con rosters stay whole for the single-round layout.
+    const debate3: ExecutionPlan = {
+      id: "exec-3",
+      planType: "multi_agent",
+      taskSummary: "多轮辩论",
+      agents: [
+        { id: "a-pro", role: "正方", modelPreference: "strong" },
+        { id: "a-con", role: "反方", modelPreference: "strong" },
+      ],
+      runs: [
+        {
+          id: "p1",
+          agentId: "a-pro",
+          task: "t",
+          dependsOn: [],
+          stance: "pro",
+          group: "g",
+          round: 1,
+        },
+        {
+          id: "c1",
+          agentId: "a-con",
+          task: "t",
+          dependsOn: [],
+          stance: "con",
+          group: "g",
+          round: 1,
+        },
+        {
+          id: "p2",
+          agentId: "a-pro",
+          task: "t",
+          dependsOn: ["c1"],
+          stance: "pro",
+          group: "g",
+          round: 2,
+        },
+        {
+          id: "c2",
+          agentId: "a-con",
+          task: "t",
+          dependsOn: ["p1"],
+          stance: "con",
+          group: "g",
+          round: 2,
+        },
+      ],
+    };
+    const groups = debateGroups(projectExecution(debate3, [], "running"));
+    expect(groups).toHaveLength(1);
+    expect(groups[0].rounds.map((r) => r.round)).toEqual([1, 2]);
+    expect(groups[0].rounds[0].pro.map((r) => r.id)).toEqual(["p1"]);
+    expect(groups[0].rounds[0].con.map((r) => r.id)).toEqual(["c1"]);
+    expect(groups[0].rounds[1].pro.map((r) => r.id)).toEqual(["p2"]);
+    expect(groups[0].rounds[1].con.map((r) => r.id)).toEqual(["c2"]);
+    expect(groups[0].pro.map((r) => r.id)).toEqual(["p1", "p2"]);
+  });
+
+  it("debateGroups yields one round-0 bucket for a single-round debate", () => {
+    // No round tags ⇒ a lone round-0 bucket, so the card keeps the flat 正/反 grid.
+    const groups = debateGroups(projectExecution(debatePlan, [], "running"));
+    expect(groups[0].rounds.map((r) => r.round)).toEqual([0]);
+    expect(groups[0].rounds.some((r) => r.round > 0)).toBe(false);
+  });
+
+  it("planFromRunPlan maps the wire round through to the plan", () => {
+    const wirePlan = planFromRunPlan({
+      execution_id: "exec-r",
+      plan_type: "multi_agent",
+      task_summary: "t",
+      agents: [
+        {
+          id: "a-pro",
+          role: "正方",
+          model_preference: "strong",
+          thinking: true,
+          reasoning_effort: "high",
+        },
+      ],
+      runs: [
+        {
+          id: "r-pro",
+          agent_id: "a-pro",
+          task: "支持",
+          depends_on: [],
+          stance: "pro",
+          group: "g",
+          round: 2,
+        },
+      ],
+    });
+    expect(wirePlan.runs[0]).toMatchObject({
+      stance: "pro",
+      group: "g",
+      round: 2,
+    });
+  });
+});
+
+describe("定向唤回 版本链 (乙 热修 P4)", () => {
+  function completed(runId: string, agentId: string, t: number): RunFrame {
+    return {
+      t,
+      kind: "run_completed",
+      runId,
+      agentId,
+      outputSummary: "done",
+      durationMs: 1,
+    };
+  }
+
+  it("ordinary runs default to no revision (revisionOf null, revision 0)", () => {
+    // 续写 is the only thing that marks a run as a revision; a plain plan must
+    // project null/0 (not a stray version).
+    const exec = projectExecution(plan, [], "running");
+    expect(
+      exec.runs.every((r) => r.revisionOf === null && r.revision === 0),
+    ).toBe(true);
+    expect(hasRevisions(exec)).toBe(false);
+    expect(revisionChains(exec)).toEqual([]);
+  });
+
+  it("synthesizes a 修订 node + agent from a revision run_started (not in plan)", () => {
+    // A revision is born from its frame, NOT the plan — so without synthesis it
+    // would be dropped. It must materialize, hang off the original, and fold its
+    // own output through the inherited (original) display identity.
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      completed("run-1", "agent-1", 2),
+      revised("run-1_rev1", "run-1", 2, 3),
+      { t: 4, kind: "run_output_delta", agentId: "run-1_rev1", delta: "改后" },
+      { t: 5, kind: "run_output_delta", agentId: "run-1_rev1", delta: "内容" },
+      completed("run-1_rev1", "run-1_rev1", 6),
+    ];
+    const exec = projectExecution(plan, frames, "completed");
+
+    const rev = exec.runs.find((r) => r.id === "run-1_rev1");
+    expect(rev).toBeTruthy();
+    expect(rev?.revisionOf).toBe("run-1");
+    expect(rev?.revision).toBe(2);
+    expect(rev?.parentRunId).toBe("run-1");
+    expect(rev?.status).toBe("completed");
+    // inherits the original worker's display role (not the raw run id)
+    const revAgent = exec.agents.find((a) => a.id === "run-1_rev1");
+    expect(revAgent?.role).toBe("React 研究员");
+    expect(revAgent?.modelPreference).toBe("strong");
+    expect(revAgent?.outputChunks.join("")).toBe("改后内容");
+    // the original keeps its own output (the version chain preserves每版)
+    expect(exec.runs.find((r) => r.id === "run-1")?.status).toBe("completed");
+  });
+
+  it("ignores a revision whose original is not on the graph (no mis-draw)", () => {
+    const frames: RunFrame[] = [revised("ghost_rev1", "ghost", 2)];
+    const exec = projectExecution(plan, frames, "running");
+    expect(exec.runs.find((r) => r.id === "ghost_rev1")).toBeUndefined();
+    expect(exec.runs).toHaveLength(3); // only the plan's own runs
+  });
+
+  it("revisionChains builds v1 原始 + 续写 in ascending version order", () => {
+    // rev2 (v3) arrives BEFORE rev1 (v2) to prove the chain sorts by version, not
+    // arrival — every version is kept (P-2 保留版本链), original first.
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      completed("run-1", "agent-1", 2),
+      revised("run-1_rev2", "run-1", 3, 3),
+      completed("run-1_rev2", "run-1_rev2", 4),
+      revised("run-1_rev1", "run-1", 2, 5),
+      completed("run-1_rev1", "run-1_rev1", 6),
+    ];
+    const exec = projectExecution(plan, frames, "completed");
+
+    expect(hasRevisions(exec)).toBe(true);
+    const chains = revisionChains(exec);
+    expect(chains).toHaveLength(1);
+    expect(chains[0].originalId).toBe("run-1");
+    expect(chains[0].versions.map((v) => v.version)).toEqual([1, 2, 3]);
+    expect(chains[0].versions.map((v) => v.run.id)).toEqual([
+      "run-1",
+      "run-1_rev1",
+      "run-1_rev2",
+    ]);
+  });
+
+  it("revisionChains yields one chain per revised worker, in graph order", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      completed("run-1", "agent-1", 2),
+      started("agent-2", "run-2"),
+      completed("run-2", "agent-2", 3),
+      // revise run-2 first, then run-1 — chains still follow graph (run) order.
+      revised("run-2_rev1", "run-2", 2, 4),
+      completed("run-2_rev1", "run-2_rev1", 5),
+      revised("run-1_rev1", "run-1", 2, 6),
+      completed("run-1_rev1", "run-1_rev1", 7),
+    ];
+    const exec = projectExecution(plan, frames, "completed");
+    const chains = revisionChains(exec);
+    expect(chains.map((c) => c.originalId)).toEqual(["run-1", "run-2"]);
+  });
+
+  it("is a pure prefix fold — a revision appears only past its run_started", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      completed("run-1", "agent-1", 2),
+      revised("run-1_rev1", "run-1", 2, 3),
+      completed("run-1_rev1", "run-1_rev1", 4),
+    ];
+    // playhead before the revision frame → no revision node yet.
+    const before = projectExecution(plan, frames.slice(0, 2), "running");
+    expect(hasRevisions(before)).toBe(false);
+    // full stream → the revision is present.
+    const after = projectExecution(plan, frames, "completed");
+    expect(hasRevisions(after)).toBe(true);
   });
 });

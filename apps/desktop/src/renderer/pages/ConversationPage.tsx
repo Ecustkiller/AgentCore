@@ -1,94 +1,18 @@
 import { ChatView } from "@/components/chat/ChatView";
-import { DetailPanel } from "@/components/chat/DetailPanel";
-import { WorkspacePanel } from "@/components/workspace/WorkspacePanel";
-import { api } from "@/services/api";
-import {
-  type Message,
-  getRuntime,
-  useConversationStore,
-} from "@/stores/conversation";
-import { useDetailPanelStore } from "@/stores/detailPanel";
-import { useWorkspacePanelStore } from "@/stores/workspacePanel";
-import type { SSEEvent } from "@/types/events";
-import { FolderOpen } from "lucide-react";
+import { SidePanel } from "@/components/layout/SidePanel";
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import { fetchMessageWindow, jumpToMessage } from "@/services/messages";
+import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
+import { PanelRight } from "lucide-react";
 import { useEffect } from "react";
 import { useParams } from "react-router-dom";
-
-interface BackendMessage {
-  id: string;
-  conversation_id: string;
-  role: string;
-  content: string | null;
-  reasoning_content: string | null;
-  attachments?: {
-    name: string;
-    path: string;
-    truncated: boolean;
-    kind?: "file" | "dir";
-    workspace_path?: string | null;
-  }[];
-  citations?: {
-    url: string;
-    title: string;
-    snippet?: string;
-    site?: string;
-  }[];
-  /** Persisted multi-agent execution journal (the turn's ordered run/tool SSE
-   * events). null for user / single-agent turns. Replayed through the same fold
-   * as the live stream to rebuild the team graph on reload (§9.3). */
-  runs?: { events: SSEEvent[]; finish_reason: string | null } | null;
-  created_at: string;
-}
-
-interface MessageListResponse {
-  data: BackendMessage[];
-}
-
-/** The execution (plan) id of a reloaded multi-agent turn — the first
- * `run_plan`'s id in the persisted journal. null for user / single-agent turns
- * (no journal, or a journal with no plan), which then render as plain bubbles. */
-function executionIdOf(events: SSEEvent[]): string | null {
-  const plan = events.find((e) => e.type === "run_plan");
-  const id = (plan?.payload as { execution_id?: string } | undefined)
-    ?.execution_id;
-  return id ?? null;
-}
-
-function toMessage(m: BackendMessage): Message {
-  const events = m.runs?.events ?? [];
-  const executionId = executionIdOf(events);
-  return {
-    id: m.id,
-    role: m.role === "assistant" ? "assistant" : "user",
-    content: m.content ?? "",
-    reasoning: m.reasoning_content ?? undefined,
-    createdAt: m.created_at,
-    // Stamp the plan id so the bubble renders its inline team graph; the journal
-    // below lets that graph replay the turn (both null for non-team turns).
-    executionId,
-    runs: executionId
-      ? { events, finishReason: m.runs?.finish_reason ?? "stop" }
-      : undefined,
-    isStreaming: false,
-    attachments: m.attachments?.length
-      ? m.attachments.map((a) => ({
-          id: crypto.randomUUID(),
-          name: a.name,
-          path: a.path,
-          truncated: a.truncated,
-          kind: a.kind ?? "file",
-          workspacePath: a.workspace_path ?? undefined,
-        }))
-      : undefined,
-    citations: m.citations?.length ? m.citations : undefined,
-  };
-}
 
 export function ConversationPage() {
   const { id } = useParams<{ id: string }>();
 
   // 路由参数是 conversation 的真相来源（刷新/前进后退/直达链接时同步到 store），
-  // 并从后端拉取历史消息（含附件元信息）以恢复对话。
+  // 并从后端拉取最新一窗消息（含附件元信息）以恢复对话；更早的历史按需上滚加载。
   useEffect(() => {
     if (!id) return;
     const store = useConversationStore.getState();
@@ -97,22 +21,39 @@ export function ConversationPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await api.get<MessageListResponse>(
-          `/v1/conversations/${id}/messages?page_size=100`,
-        );
+        const win = await fetchMessageWindow(id);
         if (cancelled) return;
         const s = useConversationStore.getState();
         // Per-conversation load guard: only adopt fetched history into THIS
-        // conversation's own slice (setMessages writes the active slice, so bail
-        // if the user switched away), and never clobber a live or already-filled
-        // slice — a background turn that streamed while we fetched, or a message
-        // that was just sent locally.
-        if (s.currentConversationId !== id) return;
-        const rt = getRuntime(id);
-        if (rt.isGenerating || rt.messages.length > 0) return;
-        s.setMessages(res.data.map(toMessage));
+        // conversation's own slice (setMessageWindow writes by id, so bail if the
+        // user switched away), and never clobber a live or already-filled slice —
+        // a background turn that streamed while we fetched, or a message that was
+        // just sent locally.
+        if (s.currentConversationId === id) {
+          const rt = getRuntime(id);
+          if (!(rt.isGenerating || rt.messages.length > 0)) {
+            s.setMessageWindow(
+              win.messages,
+              {
+                hasMoreBefore: win.hasMoreBefore,
+                hasMoreAfter: win.hasMoreAfter,
+              },
+              id,
+            );
+          }
+        }
       } catch {
         /* 历史加载尽力而为，失败保持空对话 */
+      }
+      // Honor a search-hit jump that navigated in from elsewhere: now that this
+      // conversation's window is loaded, land on the hit (in-window → scroll+flash;
+      // outside → load-around). Runs after the load so it sees real messages.
+      if (cancelled) return;
+      const store = useConversationStore.getState();
+      const pending = store.pendingFocus;
+      if (pending && pending.conversationId === id) {
+        store.clearPendingFocus();
+        void jumpToMessage(id, pending.messageId);
       }
     })();
     return () => {
@@ -120,45 +61,61 @@ export function ConversationPage() {
     };
   }, [id]);
 
-  // Page-scoped shortcuts: Ctrl/Cmd+B toggles the run-detail panel, Ctrl/Cmd+J
-  // the workspace panel. Scoped here (not the global shell) as both are only
-  // meaningful on the conversation page.
+  // Page-scoped shortcuts for the single side panel: Ctrl/Cmd+I shows / hides it
+  // (keeping the active tab), Ctrl/Cmd+J reveals it straight on the 工作区 home
+  // tab. Scoped here (not the global shell) as both are only meaningful on the
+  // conversation page. (Ctrl/Cmd+B is reserved by the shell for the left sidebar
+  // collapse, so the panel takes I to avoid the double-fire.)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
-      if (e.key === "b" || e.key === "B") {
+      if (e.key === "i" || e.key === "I") {
         e.preventDefault();
-        useDetailPanelStore.getState().togglePanel();
+        useSidePanelStore.getState().togglePanel();
       } else if (e.key === "j" || e.key === "J") {
         e.preventDefault();
-        useWorkspacePanelStore.getState().togglePanel();
+        // Smart toggle: reveal the 工作区 home tab, or dismiss the panel if it's
+        // already there (press again to close, like the old dedicated dock).
+        const s = useSidePanelStore.getState();
+        if (s.open && s.activeTabId === WORKSPACE_TAB_ID) s.closePanel();
+        else s.showWorkspace();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const workspaceOpen = useWorkspacePanelStore((s) => s.open);
-  const openWorkspace = useWorkspacePanelStore((s) => s.openPanel);
+  const panelOpen = useSidePanelStore((s) => s.open);
+  const togglePanel = useSidePanelStore((s) => s.togglePanel);
 
   return (
     <>
       <ChatView />
-      {/* Workspace toggle — the panel has no graph node to open it from, so a
-          discoverable affordance lives at the chat's top-right (hidden while
-          open; the panel carries its own close). */}
-      {id && !workspaceOpen && (
-        <button
-          type="button"
-          onClick={openWorkspace}
-          title="工作区文件 (Ctrl/Cmd+J)"
-          className="absolute right-3 top-2 z-20 flex size-8 items-center justify-center rounded-lg border border-border bg-card/80 text-muted-foreground backdrop-blur hover:bg-accent hover:text-foreground"
+      {/* Side-panel toggle — run detail opens by clicking a graph node, but the
+          panel still needs a discoverable show/hide control, so it lives at the
+          chat's top-right and mirrors Ctrl/Cmd+I. Opening restores the active tab
+          (the 工作区 home by default), so a manual open lands on the project
+          files. Stays visible while open (active state) as the close affordance. */}
+      {id && (
+        <SimpleTooltip
+          label={panelOpen ? "隐藏侧面板 (Ctrl/Cmd+I)" : "侧面板 (Ctrl/Cmd+I)"}
         >
-          <FolderOpen size={16} />
-        </button>
+          <button
+            type="button"
+            onClick={togglePanel}
+            aria-pressed={panelOpen}
+            aria-label={panelOpen ? "隐藏侧面板" : "侧面板"}
+            className={`absolute right-3 top-2 z-20 flex size-8 items-center justify-center rounded-lg border border-border backdrop-blur ${
+              panelOpen
+                ? "bg-accent text-foreground"
+                : "bg-card/80 text-muted-foreground hover:bg-accent hover:text-foreground"
+            }`}
+          >
+            <PanelRight size={16} />
+          </button>
+        </SimpleTooltip>
       )}
-      <DetailPanel />
-      <WorkspacePanel />
+      <SidePanel />
     </>
   );
 }
