@@ -1,35 +1,18 @@
 import { api } from "@/services/api";
 import { type FolderMeta, toFolder } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
+import type { components } from "@/types/api.generated";
 
-interface BackendConversation {
-  id: string;
-  title: string | null;
-  updated_at: string;
-  created_at: string;
-  folder_id?: string | null;
-  local_root_id?: string | null;
-}
+// REST DTOs generated from the backend OpenAPI spec (`pnpm gen:api`), aliased to
+// the local names so the mappers below read unchanged (API 开发规范, 渐进迁移).
+type Schemas = components["schemas"];
 
-interface ConversationListResponse {
-  data: BackendConversation[];
-  total: number;
-  page: number;
-  page_size: number;
-}
-
-interface BackendFolderGroup {
-  id: string;
-  name: string;
-  local_dir: string | null;
-  local_root_id?: string | null;
-  conversations: BackendConversation[];
-}
-
-interface GroupedConversationsResponse {
-  folders: BackendFolderGroup[];
-  ungrouped: BackendConversation[];
-}
+/** A conversation row from the list/detail endpoints (server-shaped). */
+type BackendConversation = Schemas["ConversationSummary"];
+/** Paginated conversation list (`GET /v1/conversations`). */
+type ConversationListResponse = Schemas["ConversationListResponse"];
+/** Folders + ungrouped conversations in one trip (`/v1/conversations/grouped`). */
+type GroupedConversationsResponse = Schemas["GroupedConversationsResponse"];
 
 /** Placeholder shown until the backend generates a title (or for empty ones). */
 const UNTITLED = "新对话";
@@ -39,9 +22,10 @@ function toConversation(c: BackendConversation): Conversation {
     id: c.id,
     title: c.title?.trim() || UNTITLED,
     updatedAt: c.updated_at,
-    // The list endpoint returns summaries only; counts/previews are not part of
-    // the contract yet, so default them rather than guess.
-    messageCount: 0,
+    // The list/grouped endpoints carry message_count (0 for an unsent chat); the
+    // sidebar uses it to lock workspace-changing folder moves once a chat has
+    // started (双模式工作区 §九 ⑩). Previews are not in the contract yet.
+    messageCount: c.message_count ?? 0,
     lastMessagePreview: null,
     folderId: c.folder_id ?? null,
     localRootId: c.local_root_id ?? null,

@@ -8,14 +8,16 @@ the ``run_*`` graph events.
 
 from pathlib import Path
 
-from agentcore.llm.protocol import LLMChunk, TokenUsage
+from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.llm.protocol import LLMChunk, TokenUsage, ToolCallDelta
+from agentcore.runtime.approvals import ApprovalGate, ApprovalRegistry
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import _is_hard_failure, build_agent_executor
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunContract, RunPhase
 from agentcore.runtime.runs.wave import WaveScheduler
-from agentcore.tools.protocol import ToolContext
+from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -29,10 +31,13 @@ class _ContentProvider:
         self._contents = contents
         self.calls = 0
         self.user_messages: list[str] = []
+        self.system_messages: list[str] = []
 
     async def stream(self, request):
         user = next((m.content for m in request.messages if m.role == "user"), "")
         self.user_messages.append(user or "")
+        system = next((m.content for m in request.messages if m.role == "system"), "")
+        self.system_messages.append(system or "")
         text = self._contents[self.calls] if self.calls < len(self._contents) else "done"
         self.calls += 1
         yield LLMChunk(delta_content=text)
@@ -133,6 +138,18 @@ async def test_worker_prompt_carries_role_and_task():
     user = provider.user_messages[0]
     assert "原始请求" in user
     assert "拆解需求" in user
+
+
+async def test_worker_identity_states_output_is_user_visible():
+    """The worker's system prompt tells it the product is shown to the user directly
+    (drillable in the UI) and flows back to the CEO — P2, to motivate self-contained,
+    user-ready quality rather than writing only for the CEO."""
+    plan, _ = build_run_plan([{"role": "分析师", "task": "拆解需求"}], id_prefix="t")
+    provider = _ContentProvider(["X"])
+    await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
+    system = provider.system_messages[0]
+    assert "直接展示给用户" in system
+    assert "可独立阅读" in system
 
 
 async def test_run_lifecycle_events_emitted():
@@ -288,6 +305,174 @@ async def test_no_contract_passes_first_try_without_extra_call():
     assert res["t_1"].phase is RunPhase.COMPLETED
 
 
+# --- worker approval gate (双模式工作区 P2d 执行门) -------------------------
+#
+# build_agent_executor forwards an approval_gate into each worker's react_loop, so
+# a delegated worker's GRANTABLE tool (e.g. code_execute) is gated exactly like the
+# CEO's. The DelegateTool only passes a gate in LOCAL mode; these tests pin the
+# executor half (gate present → gated; absent → un-gated, the cloud default).
+
+
+class _ToolCallThenContent:
+    """Fake LLM: round 1 calls a tool, round 2 returns content (no network)."""
+
+    def __init__(self, tool_name: str, args: str, content: str) -> None:
+        self._rounds = [
+            [
+                LLMChunk(
+                    delta_tool_calls=[
+                        ToolCallDelta(
+                            index=0, id="c1", function_name=tool_name, arguments_delta=args
+                        )
+                    ]
+                )
+            ],
+            [LLMChunk(delta_content=content)],
+        ]
+        self.calls = 0
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        chunks = self._rounds[self.calls] if self.calls < len(self._rounds) else []
+        self.calls += 1
+        for chunk in chunks:
+            yield chunk
+
+
+class _GrantableTool:
+    """A GRANTABLE stub recording whether it actually executed."""
+
+    def __init__(self, name: str = "code_execute") -> None:
+        self._name = name
+        self.calls = 0
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name=self._name,
+            description="stub grantable",
+            parameters={"type": "object", "properties": {}},
+            category=ToolCategory.EXECUTION,
+            approval=ToolApproval.GRANTABLE,
+        )
+
+    async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
+        self.calls += 1
+        return ToolResult(tool_call_id="", success=True, output="ran")
+
+
+def _gate(timeout_seconds: float) -> ApprovalGate:
+    return ApprovalGate(
+        sink=EventSink(),
+        conversation_id="conv-1",
+        registry=ApprovalRegistry(),
+        timeout_seconds=timeout_seconds,
+    )
+
+
+async def test_worker_grantable_tool_gated_when_gate_denies():
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    tool = _GrantableTool()
+    reg = ToolRegistry()
+    reg.register(tool)
+    provider = _ToolCallThenContent("code_execute", "{}", "done")
+    # A 0.01s gate that nobody answers auto-denies — the worker must NOT run the
+    # tool on the user's machine, and adapts to a denial tool-message.
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+        approval_gate=_gate(0.01),
+    )
+    res = await WaveScheduler().run(plan, executor)
+    assert res["t_1"].phase is RunPhase.COMPLETED
+    assert tool.calls == 0  # denied → never executed
+
+
+async def test_worker_grantable_tool_runs_without_gate():
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    tool = _GrantableTool()
+    reg = ToolRegistry()
+    reg.register(tool)
+    provider = _ToolCallThenContent("code_execute", "{}", "done")
+    # No gate (the cloud default): the worker runs the tool un-gated, as before.
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    assert res["t_1"].phase is RunPhase.COMPLETED
+    assert tool.calls == 1  # un-gated → executed
+
+
+# --- worker web sources → RunState (方案 B) ---------------------------------
+#
+# The executor passes each worker's react_loop a per-run citation sink with
+# annotate_citations=False, then stores the collected sources on RunState. The
+# DelegateTool later folds these into the turn's shared source card, so the user
+# sees the WHOLE team's research — not just the CEO's own searches.
+
+
+class _ResearchTool:
+    """A SEARCH stub returning fixed citations (proves the executor collects a
+    worker's web sources onto RunState)."""
+
+    def __init__(self, name: str = "search", citations=None) -> None:  # noqa: ANN001
+        self._name = name
+        self._citations = citations or []
+        self.calls = 0
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name=self._name,
+            description="stub search",
+            parameters={"type": "object", "properties": {}},
+            category=ToolCategory.SEARCH,
+        )
+
+    async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
+        self.calls += 1
+        return ToolResult(
+            tool_call_id="", success=True, output="result", citations=self._citations
+        )
+
+
+async def test_worker_collects_web_citations_onto_runstate():
+    cites = [{"url": "https://a.com", "title": "A", "snippet": "", "site": "a.com"}]
+    plan, _ = build_run_plan([{"role": "研究员", "task": "调研"}], id_prefix="t")
+    reg = ToolRegistry()
+    reg.register(_ResearchTool(citations=cites))
+    provider = _ToolCallThenContent("search", "{}", "FINAL")
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    state = res["t_1"]
+    assert state.phase is RunPhase.COMPLETED
+    # the worker's sources are aggregated onto RunState for the shared card
+    assert state.citations == cites
+    # the worker's own answer text is clean (un-numbered — annotation is CEO-only)
+    assert state.content == "FINAL"
+
+
 def test_is_hard_failure_empty_always_hard():
     assert _is_hard_failure("   ", None) is True
     assert _is_hard_failure("", RunContract(strict=False)) is True
@@ -297,3 +482,107 @@ def test_is_hard_failure_nonempty_depends_on_strict():
     assert _is_hard_failure("x", None) is False
     assert _is_hard_failure("x", RunContract(strict=False)) is False
     assert _is_hard_failure("x", RunContract(strict=True)) is True
+
+
+# --- 阶段2 嵌套子任务: the executor's depth-cap gate on handing a delegate tool --
+#
+# The executor mints a worker's nested delegate (via the injected factory) ONLY
+# when the worker opted in AND is still above the depth cap. These pin that gate
+# without driving a real nested run (the end-to-end path lives in test_delegate).
+
+
+class _StubDelegate:
+    """A minimal ORCHESTRATION tool named 'delegate' — never executed here; the
+    fake LLM emits no tool call, so we only assert it was (or wasn't) minted."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="delegate",
+            description="stub",
+            parameters={"type": "object", "properties": {}},
+            category=ToolCategory.ORCHESTRATION,
+            approval=ToolApproval.NEVER,
+        )
+
+    async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
+        return ToolResult(tool_call_id="", success=True, output="", terminal=False)
+
+
+def _spec(run_id: str, *, depth: int, can_delegate: bool):
+    from agentcore.runtime.runs.types import RunSpec
+
+    return RunSpec(
+        run_id=run_id,
+        agent_id=run_id,
+        role="W",
+        task="t",
+        depth=depth,
+        can_delegate=can_delegate,
+    )
+
+
+def _nesting_executor(plan: RunPlan, provider, factory):
+    return build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=ToolRegistry(),
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+        delegate_factory=factory,
+    )
+
+
+async def test_nested_delegate_offered_only_within_depth_cap():
+    calls: list[tuple[str, int]] = []
+
+    def factory(captain_run_id: str, captain_depth: int):
+        calls.append((captain_run_id, captain_depth))
+        return _StubDelegate()
+
+    plan = RunPlan()
+    plan.add(_spec("d1", depth=1, can_delegate=True))
+    plan.add(_spec("d2", depth=2, can_delegate=True))  # at the cap
+    executor = _nesting_executor(plan, _ContentProvider(["X", "Y"]), factory)
+    await executor(plan.by_id("d1"), {})
+    await executor(plan.by_id("d2"), {})
+    # The depth-1 worker (above the cap) is handed a delegate tool bound to itself;
+    # the depth-2 worker (at the cap) never is, even though it also opted in.
+    assert calls == [("d1", 1)]
+
+
+async def test_nested_delegate_withheld_without_opt_in():
+    calls: list[str] = []
+
+    def factory(captain_run_id: str, captain_depth: int):
+        calls.append(captain_run_id)
+        return _StubDelegate()
+
+    plan = RunPlan()
+    plan.add(_spec("d1", depth=1, can_delegate=False))
+    executor = _nesting_executor(plan, _ContentProvider(["X"]), factory)
+    await executor(plan.by_id("d1"), {})
+    assert calls == []  # no opt-in → leaf worker, no delegate tool
+
+
+async def test_captain_worker_gets_captain_identity_and_delegate_tool():
+    provider = _ContentProvider(["X"])
+    plan = RunPlan()
+    plan.add(_spec("d1", depth=1, can_delegate=True))
+    executor = _nesting_executor(plan, provider, lambda rid, d: _StubDelegate())
+    await executor(plan.by_id("d1"), {})
+    # The opted-in, above-cap worker is told it may lead one nested sub-team.
+    assert "再向下委派一层子团队" in provider.system_messages[0]
+
+
+async def test_leaf_worker_keeps_no_nesting_identity():
+    provider = _ContentProvider(["X"])
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    # A factory is available, but the leaf worker did not opt in → leaf identity.
+    executor = _nesting_executor(plan, provider, lambda rid, d: _StubDelegate())
+    await executor(plan.by_id("t_1"), {})
+    assert "不能再向下委派" in provider.system_messages[0]
+    assert "再向下委派一层子团队" not in provider.system_messages[0]

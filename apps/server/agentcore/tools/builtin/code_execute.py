@@ -21,25 +21,27 @@ class CodeExecuteTool:
         return ToolSchema(
             name="code_execute",
             description=(
-                "Execute code in a sandboxed environment. "
-                "Supports Python, JavaScript, and Bash."
+                "在工作区目录中执行代码（支持 Python、JavaScript、Bash），可访问"
+                "工作区内的文件。视工作区模式而定，它可能【直接运行在用户自己的"
+                "机器上】（本地模式），而非服务器沙箱；因此除非确有必要，避免执行"
+                "破坏性或不可逆的命令。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "code": {
                         "type": "string",
-                        "description": "The code to execute",
+                        "description": "要执行的代码",
                     },
                     "language": {
                         "type": "string",
                         "enum": ["python", "javascript", "bash"],
-                        "description": "Programming language",
+                        "description": "编程语言",
                         "default": "python",
                     },
                     "timeout_seconds": {
                         "type": "integer",
-                        "description": "Maximum execution time in seconds",
+                        "description": "最长执行时间（秒）",
                         "default": 30,
                     },
                 },
@@ -60,7 +62,7 @@ class CodeExecuteTool:
                 tool_call_id="",
                 success=False,
                 output="",
-                error="Code parameter is required",
+                error="缺少必填参数：code",
                 duration_ms=0,
             )
 
@@ -79,16 +81,16 @@ class CodeExecuteTool:
         if result.stderr:
             output_parts.append(f"stderr:\n{result.stderr}")
         if not output_parts:
-            output_parts.append("(no output)")
+            output_parts.append("（无输出）")
 
         output = "\n".join(output_parts)
         if result.exit_code != 0:
-            output += f"\n\nExit code: {result.exit_code}"
+            output += f"\n\n退出码：{result.exit_code}"
 
         return ToolResult(
             tool_call_id="",
             success=result.success,
             output=output,
-            error=None if result.success else f"Exit code {result.exit_code}",
+            error=None if result.success else f"退出码 {result.exit_code}",
             duration_ms=duration_ms,
         )

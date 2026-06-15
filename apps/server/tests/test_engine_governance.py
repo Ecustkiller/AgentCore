@@ -5,6 +5,10 @@ behaviors added to ``engine.react_loop``:
   * a repeated identical tool call → fact-anchored NUDGE, then FINALIZE
   * a repeated failing tool call → failure-flavored NUDGE
   * round-budget exhaustion mid-tool-call → forced tool-free answer (never blank)
+
+The same harness also covers per-turn citation aggregation and the A2 citation
+numbering (engine-assigned card numbers folded back into the tool output so the
+model cites by a number that always lines up with the card).
 """
 
 from pathlib import Path
@@ -60,11 +64,15 @@ class _StubTool:
         *,
         success: bool = True,
         citations: list[dict] | None = None,
+        citation_script: list[list[dict]] | None = None,
         terminal: bool = False,
     ) -> None:
         self._name = name
         self._success = success
         self._citations = citations
+        # Per-call citation lists (i-th call returns the i-th list); lets a test
+        # drive multi-round dedup/numbering. Overrides ``citations`` when set.
+        self._citation_script = citation_script
         self._terminal = terminal
         self.calls = 0
 
@@ -78,14 +86,23 @@ class _StubTool:
         )
 
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
+        call_index = self.calls
         self.calls += 1
         if not self._success:
             return ToolResult(tool_call_id="", success=False, output="", error="boom")
+        if self._citation_script is not None:
+            citations = (
+                self._citation_script[call_index]
+                if call_index < len(self._citation_script)
+                else None
+            )
+        else:
+            citations = self._citations
         return ToolResult(
             tool_call_id="",
             success=True,
             output="result",
-            citations=self._citations,
+            citations=citations,
             terminal=self._terminal,
             terminal_content="streamed answer" if self._terminal else None,
         )
@@ -113,6 +130,7 @@ async def _run(
     *,
     max_rounds: int,
     citation_sink: list[dict] | None = None,
+    annotate_citations: bool = True,
 ):
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
     profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=max_rounds)
@@ -124,6 +142,7 @@ async def _run(
         tool_context=_context(),
         profile=profile,
         citation_sink=citation_sink,
+        annotate_citations=annotate_citations,
     )
     return result, messages
 
@@ -228,3 +247,104 @@ async def test_terminal_tool_citations_collected_before_handoff():
 
     assert content == "streamed answer"  # terminal_content surfaced as the reply
     assert sink_list == cites
+
+
+async def test_citation_numbers_injected_into_tool_output():
+    # A2: the engine annotates the tool's model-facing output with the canonical
+    # numbers it assigned each source, so the model cites by a card-aligned number
+    # instead of guessing one.
+    cites = [
+        {"url": "https://a.com", "title": "A", "snippet": "", "site": "a.com"},
+        {"url": "https://b.com", "title": "B", "snippet": "", "site": "b.com"},
+    ]
+    provider = _ScriptedProvider(
+        [[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]]
+    )
+    sink_list: list[dict] = []
+    (content, *_), messages = await _run(
+        provider, _StubTool(citations=cites), max_rounds=20, citation_sink=sink_list
+    )
+
+    assert content == "done"
+    # cards aggregated in arrival order
+    assert [c["url"] for c in sink_list] == ["https://a.com", "https://b.com"]
+    # the tool message now carries the source→number annotation (number == card)
+    tool_msg = next(m for m in messages if m.role == "tool")
+    assert "[来源编号]" in (tool_msg.content or "")
+    assert "[1]=https://a.com" in tool_msg.content
+    assert "[2]=https://b.com" in tool_msg.content
+
+
+async def test_citation_numbers_stable_across_rounds_with_dedup():
+    # Round 1 surfaces A,B; round 2 re-surfaces B (dedup) and adds C. B's card
+    # must keep number 2 and C must get the next free number (3) — and each
+    # round's annotation tells the model exactly that, so multi-search + dedup
+    # never drifts the body [n] ↔ card mapping.
+    round1 = [
+        {"url": "https://a.com", "title": "A", "snippet": "", "site": "a.com"},
+        {"url": "https://b.com", "title": "B", "snippet": "", "site": "b.com"},
+    ]
+    round2 = [
+        {"url": "https://b.com/#x", "title": "B again", "snippet": "", "site": "b.com"},
+        {"url": "https://c.com", "title": "C", "snippet": "", "site": "c.com"},
+    ]
+    provider = _ScriptedProvider(
+        [
+            [_tool_chunk("search", '{"q": "1"}', call_id="c1")],
+            [_tool_chunk("search", '{"q": "2"}', call_id="c2")],
+            [_content_chunk("done")],
+        ]
+    )
+    sink_list: list[dict] = []
+    (content, *_), messages = await _run(
+        provider,
+        _StubTool(citation_script=[round1, round2]),
+        max_rounds=20,
+        citation_sink=sink_list,
+    )
+
+    assert content == "done"
+    # dedup: B appears once; cards are A,B,C in arrival order
+    assert [c["url"] for c in sink_list] == [
+        "https://a.com",
+        "https://b.com",
+        "https://c.com",
+    ]
+    tool_msgs = [m for m in messages if m.role == "tool"]
+    assert len(tool_msgs) == 2
+    # round 1 annotation: A=1, B=2
+    assert "[1]=https://a.com" in (tool_msgs[0].content or "")
+    assert "[2]=https://b.com" in tool_msgs[0].content
+    # round 2 annotation: B reuses 2 (dedup), C gets 3 — numbers stay card-aligned
+    assert "[2]=https://b.com/#x" in (tool_msgs[1].content or "")
+    assert "[3]=https://c.com" in tool_msgs[1].content
+
+
+async def test_worker_path_collects_citations_without_annotating():
+    # Worker path (annotate_citations=False, 方案 B): the worker's sources are still
+    # aggregated into the sink (so the DelegateTool can fold them into the turn's
+    # shared card) but the worker's tool output is left un-numbered — its local
+    # numbering would be re-ordered when merged into the turn card and would mislead.
+    cites = [
+        {"url": "https://a.com", "title": "A", "snippet": "", "site": "a.com"},
+        {"url": "https://b.com", "title": "B", "snippet": "", "site": "b.com"},
+    ]
+    provider = _ScriptedProvider(
+        [[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]]
+    )
+    sink_list: list[dict] = []
+    (content, *_), messages = await _run(
+        provider,
+        _StubTool(citations=cites),
+        max_rounds=20,
+        citation_sink=sink_list,
+        annotate_citations=False,
+    )
+
+    assert content == "done"
+    # collected for the shared card, in arrival order
+    assert [c["url"] for c in sink_list] == ["https://a.com", "https://b.com"]
+    # but the worker's tool message is NOT annotated with [n]=url numbers
+    tool_msg = next(m for m in messages if m.role == "tool")
+    assert tool_msg.content == "result"
+    assert "[来源编号]" not in (tool_msg.content or "")

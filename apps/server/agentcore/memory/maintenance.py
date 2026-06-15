@@ -1,9 +1,10 @@
-"""Long-term memory maintenance: tie extraction + application + storage.
+"""Long-term memory maintenance: tie consolidation + application + storage.
 
-Called once per turn at finalize (see conversation/service.py). Best-effort:
-any failure is logged and swallowed so memory maintenance never breaks a turn.
-The "LLM decides, code applies" split lives in user_memory.py; this module just
-orchestrates load -> extract -> apply -> save.
+Driven by the offline consolidation pass (see memory/consolidation.py), which
+feeds the recent conversation window — not a single turn. Best-effort: any failure
+is logged and swallowed so memory maintenance never breaks a turn. The "LLM
+decides, code applies" split lives in user_memory.py; this module just orchestrates
+load -> consolidate -> apply -> save.
 """
 
 from collections.abc import Sequence
@@ -28,19 +29,30 @@ async def maintain_user_memory(
     extractor: MemoryExtractor,
     store: MemoryStore,
     applier: MemoryApplier | None = None,
+    today: str = "",
+    section_cap: int | None = None,
 ) -> bool:
-    """Merge durable facts extracted from `messages` into the user's memory file.
+    """Consolidate durable facts from `messages` into the user's memory file.
+
+    `messages` is the recent conversation window (the consolidation reconciles it
+    against the existing memory). `today` (ISO date) enables temporal refresh;
+    `section_cap` bounds bullets per section when no explicit `applier` is given.
 
     Returns True iff the memory file changed. No extracted ops (or a no-op apply)
     skips the write. Never raises — failures are logged and swallowed.
     """
     if not messages:
         return False
-    applier = applier or MarkdownMemoryApplier()
+    applier = applier or MarkdownMemoryApplier(section_cap=section_cap)
     try:
         current = await store.load(user_id)
         ops = await extractor.extract(
-            MemoryExtractInput(user_id=user_id, current_memory=current, messages=messages)
+            MemoryExtractInput(
+                user_id=user_id,
+                current_memory=current,
+                messages=messages,
+                today=today,
+            )
         )
         if not ops:
             return False

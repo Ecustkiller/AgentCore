@@ -1,6 +1,7 @@
 import { createFolder } from "@/services/folders";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
+import { useUnreadTotal } from "@/stores/messaging";
 import { useSidebarStore } from "@/stores/sidebar";
 import {
   Compass,
@@ -30,6 +31,7 @@ export function Sidebar() {
   const collapsed = useSidebarStore((s) => s.collapsed);
   const switchConversation = useConversationStore((s) => s.switchConversation);
   const conversations = useConversationStore((s) => s.conversations);
+  const unread = useUnreadTotal();
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -69,19 +71,33 @@ export function Sidebar() {
       <nav className="space-y-0.5 px-2 pt-2 pb-2">
         {NAV_ITEMS.map((item) => {
           const active = isNavActive(item.route);
+          const showBadge = item.route === "/messages" && unread > 0;
           return (
             <button
               key={item.route}
               type="button"
               onClick={() => navigate(item.route)}
-              className={`flex h-9 w-full items-center gap-3 rounded-lg text-base ${collapsed ? "justify-center px-0" : "px-3"} ${
+              className={`relative flex h-9 w-full items-center gap-3 rounded-lg text-base ${collapsed ? "justify-center px-0" : "px-3"} ${
                 active
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"
                   : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               }`}
             >
               <item.icon size={18} className="shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
+              {!collapsed && (
+                <span className="flex-1 text-left">{item.label}</span>
+              )}
+              {showBadge &&
+                (collapsed ? (
+                  <span
+                    aria-label={`${unread} 条未读`}
+                    className="absolute right-2 top-1.5 size-2 rounded-full bg-primary"
+                  />
+                ) : (
+                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-xs font-medium text-primary-foreground">
+                    {unread > 99 ? "99+" : unread}
+                  </span>
+                ))}
             </button>
           );
         })}

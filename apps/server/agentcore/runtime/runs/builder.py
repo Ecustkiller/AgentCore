@@ -46,6 +46,8 @@ def build_run_plan(
     id_prefix: str = "",
     counter_start: int = 0,
     max_tasks: int = MAX_DELEGATION_TASKS,
+    parent_run_id: str | None = None,
+    depth: int = 1,
 ) -> tuple[RunPlan, list[str]]:
     """Build a RunPlan from raw delegate-tool task args.
 
@@ -54,13 +56,21 @@ def build_run_plan(
     old planner. Returns the plan plus a list of validation errors; a non-empty
     error list means the batch is rejected and the plan must not be run
     (reject-on-error for a DAG, reject-when-none-valid for a flat batch).
+
+    ``parent_run_id`` / ``depth`` stamp every node with its place in the turn's Run
+    tree (阶段2 嵌套子任务): the CEO's direct workers are ``depth=1`` parented to the
+    captain root; a worker that re-delegates passes its own run id + depth so its
+    sub-workers come out one level deeper. The executor reads ``depth`` to enforce
+    the nesting cap.
     """
     if not tasks_raw:
         return RunPlan(), ["'tasks' array is required and cannot be empty"]
     prefix = id_prefix or f"del_{int(time.time() * 1000)}"
     if any(item.get("depends_on") for item in tasks_raw):
-        return _dag_plan(tasks_raw, valid_tools, prefix, max_tasks)
-    return _flat_plan(tasks_raw, valid_tools, prefix, counter_start, max_tasks)
+        return _dag_plan(tasks_raw, valid_tools, prefix, max_tasks, parent_run_id, depth)
+    return _flat_plan(
+        tasks_raw, valid_tools, prefix, counter_start, max_tasks, parent_run_id, depth
+    )
 
 
 def _flat_plan(
@@ -69,6 +79,8 @@ def _flat_plan(
     prefix: str,
     counter_start: int,
     max_tasks: int,
+    parent_run_id: str | None,
+    depth: int,
 ) -> tuple[RunPlan, list[str]]:
     """Single / parallel batch (no deps). Invalid items (missing role or task)
     are skipped silently — the legacy flat behaviour — and only an all-invalid
@@ -93,6 +105,8 @@ def _flat_plan(
                     contract=_parse_contract(item),
                 ),
                 valid_tools=valid_tools,
+                parent_run_id=parent_run_id,
+                depth=depth,
             )
         )
     if not plan.nodes:
@@ -105,6 +119,8 @@ def _dag_plan(
     valid_tools: set[str] | None,
     prefix: str,
     max_tasks: int,
+    parent_run_id: str | None,
+    depth: int,
 ) -> tuple[RunPlan, list[str]]:
     """DAG batch (has deps). Per-run validation collects errors; topology
     (cycle / unknown edge) is checked via ``RunPlan.waves``."""
@@ -131,6 +147,8 @@ def _dag_plan(
                 depends_on=[_nsid(d) for d in item.get("depends_on", [])],
                 policy=_dag_policy(item),
                 valid_tools=valid_tools,
+                parent_run_id=parent_run_id,
+                depth=depth,
             )
         )
 
@@ -151,6 +169,8 @@ def _inline_spec(
     sibling_summary: str = "",
     policy: RunPolicy,
     valid_tools: set[str] | None = None,
+    parent_run_id: str | None = None,
+    depth: int = 1,
 ) -> RunSpec:
     """Assemble one RunSpec from a task item's inline-role fields (阶段1)."""
     role = item["role"]
@@ -172,6 +192,9 @@ def _inline_spec(
         reasoning_effort=effort_raw if effort_raw in _VALID_EFFORTS else None,
         expected_output=item.get("expected_output", "") or "",
         depends_on=depends_on or [],
+        parent_run_id=parent_run_id,
+        depth=depth,
+        can_delegate=bool(item.get("can_delegate")),
         sibling_summary=sibling_summary,
         policy=policy,
     )

@@ -1,4 +1,5 @@
 import { ApiError } from "@/services/api";
+import { runHandoff } from "@/services/handoff";
 import {
   type WorkspaceBinding,
   bindLocalWorkspace,
@@ -12,10 +13,12 @@ import { useFoldersStore } from "@/stores/folders";
 import type { FsRoot } from "@shared/ipc-contract";
 import {
   AlertTriangle,
+  Check,
   Cloud,
   FolderOpen,
   HardDrive,
   Loader2,
+  UploadCloud,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -40,6 +43,10 @@ export function WorkspaceModeBar({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  // Local→云 handoff (P2e / e1): a separate state from `busy` so the bar keeps
+  // showing the workspace context while the (potentially slow) archive runs.
+  const [backingUp, setBackingUp] = useState(false);
+  const [backupDone, setBackupDone] = useState(false);
 
   // Desktop-only: a web build has no fsApi, so local mode can't be entered there.
   const fsApi = typeof window !== "undefined" ? window.fsApi : undefined;
@@ -128,6 +135,25 @@ export function WorkspaceModeBar({
     }
   };
 
+  // Snapshot the bound local workspace up to the cloud (双模式工作区 P2e / e1):
+  // backup + cross-device. The desktop packs the root over the channel and the
+  // server snapshots it into the same list as cloud-mode versions. Best-effort
+  // and off the chat path; surfaces a brief "已备份" then clears.
+  const backup = async () => {
+    setBackingUp(true);
+    setError(null);
+    setBackupDone(false);
+    try {
+      await runHandoff(conversationId);
+      setBackupDone(true);
+      setTimeout(() => setBackupDone(false), 4000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "备份失败，请重试");
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
   // Folder-scoped unbinds flip every sibling chat, so they take a confirm tap;
   // a conversation-scoped one only affects this chat and unbinds directly.
   const onDisconnectClick = () => {
@@ -198,18 +224,43 @@ export function WorkspaceModeBar({
               </button>
             </span>
           ) : (
-            <button
-              type="button"
-              onClick={onDisconnectClick}
-              title={
-                binding.scope === "folder"
-                  ? "该文件夹下所有对话都会切回云端"
-                  : "切回云端工作区"
-              }
-              className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              断开
-            </button>
+            <span className="flex shrink-0 items-center gap-1">
+              {!rootMissing &&
+                (backingUp ? (
+                  <span className="flex items-center gap-1 px-2 py-1 text-[11px] text-muted-foreground">
+                    <Loader2 size={13} className="animate-spin" />
+                    备份中…
+                  </span>
+                ) : backupDone ? (
+                  <span className="flex items-center gap-1 px-2 py-1 text-[11px] text-success">
+                    <Check size={13} />
+                    已备份
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void backup()}
+                    title="把本地工作区快照备份到云端（可在快照列表恢复 / 下载）"
+                    className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <UploadCloud size={13} />
+                    备份到云
+                  </button>
+                ))}
+              <button
+                type="button"
+                onClick={onDisconnectClick}
+                disabled={backingUp}
+                title={
+                  binding.scope === "folder"
+                    ? "该文件夹下所有对话都会切回云端"
+                    : "切回云端工作区"
+                }
+                className="rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+              >
+                断开
+              </button>
+            </span>
           )
         ) : (
           fsApi && (

@@ -59,7 +59,10 @@ class ToolResult:
     ``{url, title, snippet, site}`` dict). Research tools (``web_search`` /
     ``read_url``) populate it so the engine can aggregate per-turn sources and the
     client can render source cards under the answer; non-web tools leave it
-    ``None``. It is metadata for the UI only — never fed back to the model.
+    ``None``. The dicts themselves are UI metadata; the engine additionally
+    assigns each source a canonical number (its card index) and folds *that
+    number* back into the tool's model-facing output, so the model can cite by a
+    card-aligned number (see ``engine._annotate_tool_citations``).
     """
 
     tool_call_id: str

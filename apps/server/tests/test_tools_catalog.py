@@ -8,7 +8,7 @@ primitive never leaks into the general catalog.
 """
 
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.tools.builtin import build_builtin_registry
+from agentcore.tools.builtin import build_builtin_registry, build_ceo_tool_registry
 
 _EXPECTED_NAMES = {
     "web_search",
@@ -17,7 +17,20 @@ _EXPECTED_NAMES = {
     "file_write",
     "str_replace",
     "file_list",
+    "file_delete",
+    "file_move",
     "grep",
+    "code_execute",
+}
+
+# The CEO chat agent is a COORDINATOR: it directly holds only the read/retrieval
+# tools and delegates every production/mutation tool to a worker (协调者 CEO).
+_CEO_READONLY_NAMES = {"web_search", "read_url", "file_read", "file_list", "grep"}
+_DELEGATED_MUTATION_NAMES = {
+    "file_write",
+    "str_replace",
+    "file_delete",
+    "file_move",
     "code_execute",
 }
 
@@ -37,9 +50,63 @@ def test_write_and_exec_tools_are_grantable():
     assert approvals["file_write"] is ToolApproval.GRANTABLE
     assert approvals["str_replace"] is ToolApproval.GRANTABLE
     assert approvals["code_execute"] is ToolApproval.GRANTABLE
+    # Destructive / mutating file ops require the same consent as writes.
+    assert approvals["file_delete"] is ToolApproval.GRANTABLE
+    assert approvals["file_move"] is ToolApproval.GRANTABLE
     # Read-only tools auto-run (no approval prompt).
     assert approvals["file_read"] is ToolApproval.NEVER
     assert approvals["web_search"] is ToolApproval.NEVER
+
+
+def test_code_execute_description_does_not_overpromise_sandbox():
+    # In local mode code_execute runs on the user's REAL machine (workspace/local.py
+    # forwards it to the desktop's bound directory), protected only by the approval
+    # gate (P2d 执行门) — not an isolated sandbox. The old "sandboxed environment"
+    # wording was false there; pin the honest framing so the model treats execution
+    # with appropriate care and the claim can't silently regress.
+    schemas = {s.name: s for s in build_builtin_registry().list_all()}
+    desc = schemas["code_execute"].description
+    assert "sandboxed environment" not in desc
+    assert "用户自己的机器" in desc
+
+
+def test_read_url_description_does_not_overclaim_completeness():
+    # read_url caps extracted text at max_chars (default 8000), so a long page is
+    # truncated — the description must disclose that and not promise the "complete"
+    # body, or the model may state it read the whole page when it saw only the head.
+    schemas = {s.name: s for s in build_builtin_registry().list_all()}
+    desc = schemas["read_url"].description
+    assert "max_chars" in desc  # truncation is disclosed
+    assert "完整正文" not in desc  # no blanket "complete body" claim
+
+
+def test_ceo_registry_is_read_only_subset():
+    # 协调者 CEO: it looks + answers directly, so its direct toolset is exactly the
+    # read/retrieval tools — no production/mutation tool leaks into the CEO's hands.
+    names = {schema.name for schema in build_ceo_tool_registry().list_all()}
+    assert names == _CEO_READONLY_NAMES
+
+
+def test_ceo_registry_excludes_every_mutation_tool():
+    names = {schema.name for schema in build_ceo_tool_registry().list_all()}
+    assert names.isdisjoint(_DELEGATED_MUTATION_NAMES)
+
+
+def test_ceo_registry_holds_only_auto_run_tools():
+    # The split is by approval level: the CEO keeps only NEVER tools (auto-run, no
+    # consent), while every GRANTABLE (env-mutating) tool is delegated. This pins
+    # the rule that makes a new read-only tool reach the CEO automatically while a
+    # new mutating tool stays worker-only.
+    schemas = build_ceo_tool_registry().list_all()
+    assert schemas, "CEO must retain its read/retrieval tools"
+    assert all(s.approval is ToolApproval.NEVER for s in schemas)
+
+
+def test_ceo_registry_excludes_delegate_primitive():
+    # build_ceo_tool_registry returns only the read subset; the pipeline wires the
+    # CEO-only delegate primitive separately, so it must not appear here.
+    names = {schema.name for schema in build_ceo_tool_registry().list_all()}
+    assert "delegate" not in names
 
 
 def test_every_tool_exposes_catalog_fields():

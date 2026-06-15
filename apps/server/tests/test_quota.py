@@ -9,9 +9,11 @@ them apart and letting us assert *which* window was queried.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 
+from agentcore.config import settings
 from agentcore.conversation.quota import QuotaLimits, enforce_quota
 from agentcore.core.errors import QuotaExceededError
 from agentcore.llm.pricing import NANO_PER_USD
@@ -127,9 +129,61 @@ def test_all_unlimited_property():
 
 
 def test_from_settings_converts_monthly_to_nano():
-    from agentcore.config import settings
-
     limits = QuotaLimits.from_settings()
     assert limits.daily_tokens == settings.quota_daily_tokens
     assert limits.daily_requests == settings.quota_daily_requests
     assert limits.monthly_cost_nano == int(settings.quota_monthly_cost_usd * NANO_PER_USD)
+
+
+# --- per-user resolution (QuotaLimits.for_user, 决策④) ---
+
+
+def _user(
+    *,
+    is_unlimited: bool = False,
+    daily_tokens: int | None = None,
+    monthly_cost_usd: float | None = None,
+    daily_requests: int | None = None,
+) -> SimpleNamespace:
+    """A stand-in for the User ORM row: for_user only reads these four columns."""
+    return SimpleNamespace(
+        is_unlimited=is_unlimited,
+        quota_daily_tokens=daily_tokens,
+        quota_monthly_cost_usd=monthly_cost_usd,
+        quota_daily_requests=daily_requests,
+    )
+
+
+def test_for_user_is_unlimited_collapses_to_all_unlimited():
+    # is_unlimited wins even when concrete per-dimension caps are set.
+    limits = QuotaLimits.for_user(
+        _user(is_unlimited=True, daily_tokens=1, monthly_cost_usd=1, daily_requests=1)
+    )
+    assert limits == QuotaLimits(0, 0, 0)
+    assert limits.all_unlimited
+
+
+def test_for_user_none_overrides_inherit_config():
+    # No overrides → identical to the global config limits.
+    assert QuotaLimits.for_user(_user()) == QuotaLimits.from_settings()
+
+
+def test_for_user_per_dimension_override_is_isolated():
+    # Overriding one dimension leaves the others inheriting global config.
+    limits = QuotaLimits.for_user(_user(daily_tokens=50))
+    assert limits.daily_tokens == 50
+    assert limits.daily_requests == settings.quota_daily_requests
+    assert limits.monthly_cost_nano == int(settings.quota_monthly_cost_usd * NANO_PER_USD)
+
+
+def test_for_user_explicit_zero_unlimits_that_dimension():
+    # An explicit 0 override = unlimited for that dimension (same 0-semantics as config).
+    limits = QuotaLimits.for_user(
+        _user(daily_tokens=0, monthly_cost_usd=0, daily_requests=0)
+    )
+    assert limits == QuotaLimits(0, 0, 0)
+
+
+def test_for_user_monthly_usd_override_converted_to_nano():
+    limits = QuotaLimits.for_user(_user(monthly_cost_usd=20.0))
+    assert limits.monthly_cost_nano == 20 * NANO_PER_USD

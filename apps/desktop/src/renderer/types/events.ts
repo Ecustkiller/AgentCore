@@ -18,7 +18,10 @@ export type SSEEventType =
   | "title_generated"
   | "turn_saved"
   | "citations"
-  | "workspace_op_required";
+  | "workspace_op_required"
+  | "handoff_snapshot_done"
+  | "handoff_job_started"
+  | "handoff_apply_done";
 
 export interface SSEEvent<T = unknown> {
   type: SSEEventType;
@@ -98,6 +101,13 @@ export interface RunPlanPayload {
     agent_id: string;
     task: string;
     depends_on: string[];
+    /** Delegating run id (阶段2 nested delegation). A sub-worker carries its
+     * captain worker's run id — a real node on this graph — so the frontend
+     * groups it under that parent; a top-level worker carries the CEO captain
+     * run id (no node here) or null. Declared at plan time so the structural
+     * graph layout can group without waiting for run_started. Optional: a
+     * single-batch / older stream may omit it. */
+    parent_run_id?: string | null;
     /** Node kind (default `agent`). The CEO synthesis batch declares its run as
      * `synthesis` so the graph can adopt it as the real 汇聚点 (Phase B / D3). */
     kind?: RunKind;
@@ -232,6 +242,56 @@ export interface WorkspaceOpRequiredPayload {
   args: Record<string, unknown>;
 }
 
+/** A local→云 handoff snapshot (双模式工作区 P2e / e1) completed: the bound desktop
+ * archived its local workspace over the channel and the server snapshotted it to
+ * object storage. `snapshot_id` lands in the same snapshot list as cloud versions;
+ * `size_bytes` is the stored archive size. Emitted once before the handoff SSE
+ * closes (only on the dedicated handoff stream — never the chat stream). */
+export interface HandoffSnapshotDonePayload {
+  snapshot_id: string;
+  conversation_id: string;
+  size_bytes: number;
+}
+
+/** A local→云 handoff cloud job (双模式工作区 P2e / e2) was accepted: the base
+ * snapshot of the user's local files is captured and an Agent team run is spawned
+ * detached on the server. `job_id` is what the client polls (`GET …/handoff/jobs`)
+ * for status; `job_conversation_id` is the hidden conversation hosting the team's
+ * replayable graph. Emitted once before the dispatch SSE closes — the cloud run
+ * keeps going in the background past it. */
+export interface HandoffJobStartedPayload {
+  job_id: string;
+  conversation_id: string;
+  job_conversation_id: string;
+}
+
+/** One file's outcome in a handoff apply (双模式工作区 P2e / e3). `status` mirrors
+ * the server's authoritative verdict: `applied` (cloud version written), `skipped`
+ * (kept local, or already byte-identical), `conflict` (diverged locally since the
+ * base and not forced — left untouched), `error` (the write/delete op failed).
+ * `change_type` is the diff kind (null only on an error before it was known). */
+export interface HandoffApplyResult {
+  path: string;
+  status: "applied" | "skipped" | "conflict" | "error";
+  change_type: "added" | "modified" | "deleted" | null;
+  detail: string;
+}
+
+/** A local→云 handoff apply (双模式工作区 P2e / e3) finished writing back: the
+ * selected result changes were replayed onto the local workspace over the channel
+ * (WRITE_BYTES / DELETE). Carries the per-file `results` plus rolled-up counts so
+ * the PR card can mark each row done and surface any unresolved conflicts. Emitted
+ * once, just before the apply SSE closes. */
+export interface HandoffApplyDonePayload {
+  job_id: string;
+  conversation_id: string;
+  results: HandoffApplyResult[];
+  applied: number;
+  skipped: number;
+  conflicts: number;
+  errors: number;
+}
+
 export type SSEPayloadMap = {
   message_start: MessageStartPayload;
   content_delta: ContentDeltaPayload;
@@ -253,4 +313,7 @@ export type SSEPayloadMap = {
   turn_saved: TurnSavedPayload;
   citations: CitationsPayload;
   workspace_op_required: WorkspaceOpRequiredPayload;
+  handoff_snapshot_done: HandoffSnapshotDonePayload;
+  handoff_job_started: HandoffJobStartedPayload;
+  handoff_apply_done: HandoffApplyDonePayload;
 };

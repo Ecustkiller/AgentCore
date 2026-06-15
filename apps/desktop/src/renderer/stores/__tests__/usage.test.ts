@@ -62,26 +62,6 @@ const turnBody = {
   agents: [],
 };
 
-const conversationCostBody = {
-  conversation_id: "c1",
-  usage: {
-    input: 1000,
-    output: 500,
-    reasoning: 0,
-    cache_hit: 200,
-    cache_miss: 800,
-  },
-  cost: {
-    input: 100,
-    cached: 0,
-    output: 100,
-    total: 200,
-    currency: "USD",
-    cny_total: 0,
-  },
-  turns: 3,
-};
-
 beforeEach(() => {
   useUsageStore.setState({
     cnyPerUsd: 7.2,
@@ -89,7 +69,6 @@ beforeEach(() => {
     loading: false,
     error: null,
     messageCosts: {},
-    conversationCosts: {},
   });
 });
 
@@ -158,63 +137,5 @@ describe("loadMessageCost", () => {
       useUsageStore.getState().loadMessageCost("m1"),
     ).resolves.toBeUndefined();
     expect(useUsageStore.getState().messageCosts.m1).toBeUndefined();
-  });
-});
-
-describe("fetchConversationCost", () => {
-  it("seeds the chip total/tokens/turns from the ledger snapshot", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() => Promise.resolve(json(conversationCostBody))),
-    );
-
-    await useUsageStore.getState().fetchConversationCost("c1");
-
-    // tokens = input + output (1000 + 500); total + turns verbatim.
-    expect(useUsageStore.getState().conversationCosts.c1).toEqual({
-      total: 200,
-      tokens: 1500,
-      turns: 3,
-    });
-  });
-
-  it("swallows a failed fetch (the chip just stays hidden)", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() => Promise.reject(new TypeError("offline"))),
-    );
-
-    await expect(
-      useUsageStore.getState().fetchConversationCost("c1"),
-    ).resolves.toBeUndefined();
-    expect(useUsageStore.getState().conversationCosts.c1).toBeUndefined();
-  });
-});
-
-describe("addTurnCost", () => {
-  it("initializes the running total when the conversation is unseen", () => {
-    useUsageStore.getState().addTurnCost("c1", 28, 150);
-
-    expect(useUsageStore.getState().conversationCosts.c1).toEqual({
-      total: 28,
-      tokens: 150,
-      turns: 1,
-    });
-  });
-
-  it("folds a live turn on top of the fetched snapshot (no re-fetch)", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() => Promise.resolve(json(conversationCostBody))),
-    );
-    await useUsageStore.getState().fetchConversationCost("c1");
-
-    useUsageStore.getState().addTurnCost("c1", 28, 150);
-
-    expect(useUsageStore.getState().conversationCosts.c1).toEqual({
-      total: 228,
-      tokens: 1650,
-      turns: 4,
-    });
   });
 });

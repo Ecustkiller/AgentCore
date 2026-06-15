@@ -31,7 +31,7 @@ async def test_requires_old_string(tmp_path: Path):
         {"path": "f.txt", "old_string": "", "new_string": "x"}, _ctx(tmp_path)
     )
     assert result.success is False
-    assert "old_string must not be empty" in result.error
+    assert "old_string 不能为空" in result.error
 
 
 async def test_rejects_identical_strings(tmp_path: Path):
@@ -40,7 +40,7 @@ async def test_rejects_identical_strings(tmp_path: Path):
         {"path": "f.txt", "old_string": "hi", "new_string": "hi"}, _ctx(tmp_path)
     )
     assert result.success is False
-    assert "identical" in result.error
+    assert "相同" in result.error
 
 
 async def test_rejects_path_outside_workspace(tmp_path: Path):
@@ -52,7 +52,7 @@ async def test_rejects_path_outside_workspace(tmp_path: Path):
         _ctx(ws),
     )
     assert result.success is False
-    assert "outside the workspace" in result.error
+    assert "超出了工作区范围" in result.error
     # the out-of-tree file must be untouched
     assert (tmp_path / "secret.txt").read_text(encoding="utf-8") == "top secret"
 
@@ -62,7 +62,7 @@ async def test_file_not_found(tmp_path: Path):
         {"path": "nope.txt", "old_string": "a", "new_string": "b"}, _ctx(tmp_path)
     )
     assert result.success is False
-    assert "File not found" in result.error
+    assert "文件不存在" in result.error
 
 
 async def test_rejects_directory(tmp_path: Path):
@@ -71,7 +71,7 @@ async def test_rejects_directory(tmp_path: Path):
         {"path": "d", "old_string": "a", "new_string": "b"}, _ctx(tmp_path)
     )
     assert result.success is False
-    assert "Not a file" in result.error
+    assert "不是文件" in result.error
 
 
 async def test_rejects_binary_file(tmp_path: Path):
@@ -80,7 +80,7 @@ async def test_rejects_binary_file(tmp_path: Path):
         {"path": "blob.bin", "old_string": "a", "new_string": "b"}, _ctx(tmp_path)
     )
     assert result.success is False
-    assert "non-UTF-8" in result.error
+    assert "非 UTF-8" in result.error
 
 
 async def test_old_string_not_found(tmp_path: Path):
@@ -89,7 +89,7 @@ async def test_old_string_not_found(tmp_path: Path):
         {"path": "f.txt", "old_string": "xyz", "new_string": "b"}, _ctx(tmp_path)
     )
     assert result.success is False
-    assert "not found" in result.error
+    assert "找不到" in result.error
     assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "hello world"
 
 
@@ -99,8 +99,8 @@ async def test_non_unique_without_replace_all_fails(tmp_path: Path):
         {"path": "f.txt", "old_string": "x", "new_string": "y"}, _ctx(tmp_path)
     )
     assert result.success is False
-    assert "not unique" in result.error
-    assert "2 matches" in result.error
+    assert "不唯一" in result.error
+    assert "2 处" in result.error
     # nothing changed
     assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "x = 1\nx = 2\n"
 
@@ -117,7 +117,7 @@ async def test_single_unique_replacement(tmp_path: Path):
     )
     assert result.success is True
     assert result.metadata["replacements"] == 1
-    assert "around line 2" in result.output
+    assert "约第 2 行" in result.output
     assert f.read_text(encoding="utf-8") == "def add(a, b):\n    return a + b\n"
 
 

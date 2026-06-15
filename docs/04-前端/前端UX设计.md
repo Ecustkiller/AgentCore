@@ -50,7 +50,7 @@
 
 简单任务（单 Agent）时不出图，体验同 ChatGPT。
 
-**已落地**：`MessageInput` 支持 Textarea 自动增高、`@` 引用文件 / 附件按钮浏览（`MentionMenu` + 文件索引）、附件 chips、字数统计、弹窗键盘导航（↑↓/Enter/Tab/Esc）；`MessageBubble` 富文本 Markdown（代码高亮 `rehypeHighlight`、KaTeX 数学、GFM 表格、`[n]` 来源引用 chip + `SourceCards`）、思考过程折叠条（流式时自动展开、结束自动收起）、hover 操作栏（复制 / 编辑重发 / 重新生成）；快捷键 `Ctrl/Cmd+K` 全局搜索（`CommandPalette`，MVP 客户端按标题过滤）、`Ctrl/Cmd+N` 新建对话、`Ctrl/Cmd+\` / `Ctrl/Cmd+B` 折叠/展开侧栏、Enter 发送、Ctrl/Cmd+Enter 换行、内嵌图临时全屏内 Esc 返回（→ 见代码 `components/layout/AppShell.tsx`、`components/chat/`、`components/layout/CommandPalette.tsx`）。剩余富功能（Agent/Team 选择器、Slash 命令、文件夹 / 产物 Pill、气泡内工具卡）见 [目标态 §二](../07-规划/前端UX目标态.md)。
+**已落地**：`MessageInput` 支持 Textarea 自动增高、`@` 引用文件 / 附件按钮浏览（`MentionMenu` + 文件索引）、拖拽文件入框成附件（OS 文件直读、超 256KB 截断、二进制/图片拒收、文件夹引导走 `@`）、附件 chips、字数统计、弹窗键盘导航（↑↓/Enter/Tab/Esc）；`MessageBubble` 富文本 Markdown（代码高亮 `rehypeHighlight`、KaTeX 数学、GFM 表格、`[n]` 来源引用 chip + `SourceCards`）、思考过程折叠条（流式时自动展开、结束自动收起）、hover 操作栏（复制 / 编辑重发 / 重新生成）、hover 时间戳（`formatMessageTime`：相对时间，title 悬浮显示完整时刻）；快捷键 `Ctrl/Cmd+K` 全局搜索（`CommandPalette`，MVP 客户端按标题过滤）、`Ctrl/Cmd+N` 新建对话、`Ctrl/Cmd+\` / `Ctrl/Cmd+B` 折叠/展开侧栏、Enter 发送、Ctrl/Cmd+Enter 换行、内嵌图临时全屏内 Esc 返回（→ 见代码 `components/layout/AppShell.tsx`、`components/chat/`、`components/layout/CommandPalette.tsx`）。剩余富功能（Agent/Team 选择器、Slash 命令、产物 Pill，均 P3）见 [目标态 §二](../07-规划/前端UX目标态.md)；气泡内工具卡、文件夹落点 pill 已退役（工具详情走面板、落点走 `WorkspaceModeBar`）。
 
 ---
 
@@ -58,12 +58,12 @@
 
 多 Agent 回合的团队界面是内嵌进助手消息的协作图（`InlineTeamGraph`，→ 见代码 `components/chat/InlineTeamGraph.tsx`）：图顶一条**状态条**按 `execution.status` 分四态渲染，下方是可折叠的协作图（`GraphView` 内嵌形态），右上「最大化」进临时全屏。状态条吃下了原任务卡片的全部职责（AgentCore 聊天界面与普通对话 AI 的核心视觉差异点）：
 
-- **执行中**（`RunningStrip`）：转圈 + 任务摘要 + 进度 `completed/total` + 进度条；尾部控件（折叠图 / 全屏 / `[···]` 菜单）。Agent 状态/工具/输出在下方图节点上呈现。
+- **执行中**（`RunningStrip`）：转圈 + 任务摘要 + 进度 `completed/total` + 进度条；尾部控件（停止 / 折叠图 / 全屏）。Agent 状态/工具/输出在下方图节点上呈现。
 - **已完成**（`CompletedStrip`）：一行战绩「团队完成 · N 个 Agent · M/M 子任务 · 用时 · ¥合计」（用时取帧流挂钟跨度 `elapsedMs`，¥ 取 `message_end` 回合合计 §7.3A）。**部分失败**（CEO 完成但有 worker 失败）额外显示琥珀色「N 个子任务失败」横幅 + 救火行。
 - **已停止**（`status=cancelled`）：同战绩形态，「已停止」标题，在跑节点冻结为 cancelled（不再转圈），救火行显示「已花 ¥」。
 - **失败**（整轮崩溃，`FailureStrip`）：高亮失败 Agent / run + `run_failed` 错误原因 + 救火行。
 
-救火行（`RecoveryActions`）由失败条、部分失败的已完成条、已停止条共用——重试（从最后一条用户消息整轮重跑）/ 调整指令（内联编辑后重发）/ 放弃（清空该回合执行槽）；各态共用 `[···]` 菜单（停止任务 / 重新规划 / 复制任务 ID）；内嵌图块在 `run_plan` 首次挂载时播放一次入场动画（`animate-task-card-enter`，遵循 `prefers-reduced-motion`，见 `styles/globals.css`）。
+救火行（`RecoveryActions`）由失败条、部分失败的已完成条、已停止条共用——重试（从最后一条用户消息整轮重跑）/ 调整指令（内联编辑后重发）/ 放弃（清空该回合执行槽）。状态条尾部为一级图标按钮：执行中给「停止」、已完成/已停止给「回放」（进全屏自动播放时间轴），外加常驻的折叠 / 全屏；不设 `[···]` 菜单——整轮重跑统一交给消息级「重新生成」与救火行「重试」（原菜单的「重新规划」是同一动作的重复入口、运行态还失效，与裸复制「任务 ID」一并移除）。内嵌图块在 `run_plan` 首次挂载时播放一次入场动画（`animate-task-card-enter`，遵循 `prefers-reduced-motion`，见 `styles/globals.css`）。
 
 **出现时机规则**（核心决策）：
 
@@ -74,6 +74,8 @@
 | 任务完成 | 状态条**收缩**为一行战绩摘要 |
 | 用户停止任务 | 状态条转「已停止」，在跑节点冻结，提供重试 |
 | 用户发新消息 / 刷新 | 每条回答各持自己的执行槽（按 `messageId` §9.3），历史图保留，刷新后从 `message.runs` 回放 |
+
+**为何无「规划中」态**（决策，2026-06）：CEO + `delegate` 架构下 `run_plan` 同步到达，无独立规划空窗；「系统在思考」由 CEO reasoning 气泡覆盖；`tool_use_start(delegate)` 前无法预知是否组团，故状态条不设「规划中」态。→ 见代码 `delegate.py`、`engine.py`。
 
 > 检查点卡片、Agent 节点补全（输出流 + token/用时）等剩余目标态见 [目标态 §三](../07-规划/前端UX目标态.md)。检查点 / `TeamPreviewCard` 预览 gate **均未实现**。
 
@@ -89,9 +91,13 @@
 
 ## 五、图视图（现状）
 
-内嵌于多 Agent 回合的助手消息（`InlineTeamGraph` 里 `GraphView` 的 `embedded` 形态），点状态条右上「最大化」进临时全屏（`TeamGraphFullscreen`）。`GraphView` 将 run 映射为 `agent` 节点 + 两端的端点节点（用户输入 / synthesis 收尾，`EndpointNode`），ELK 多算法布局（树形 / 左右流 / 径向 / 力导向，`lib/elk-layout.ts`；布局算法偏好持久化于 `stores/graph.ts`，位置/边为每图本地态，一页多张内嵌图互不覆盖）；节点含 6 态色环、模型档 / 深度思考徽章、token 估算、实时输出预览（运行中带流式光标）、工具数 + **¥ run 成本**（`costText`，§7.3B）+ hover tooltip（模型 / Token / 成本 / 用时 / 工具）；`StepEdge` 运行中边以 SVG 粒子流（`animateMotion`）动画；节点状态过渡为纯 CSS：按 plan 顺序错峰入场（`graph-node-enter`）、run 进入终态时一次性完成/失败闪烁（`graph-node-flash` + `useTerminalFlash`）、切换布局时位移 morph（`.react-flow__node` transform 过渡），均遵循 `prefers-reduced-motion`。内嵌形态点节点 → 右侧 `DetailPanel` 下钻该 run；临时全屏额外叠加 `NodeDetail` 侧栏 + 帧流时间轴回放（`Timeline`：播放 / 拖动 / 回到实时）+ 节点/画布右键菜单（查看详情 / 在面板查看 / 居中此节点 / 适应画布 / 布局切换，复用 `sidebar/ContextMenu`）+ `F` 适应画布 + Esc 退出（→ 见代码 `components/graph/`）。
+内嵌于多 Agent 回合的助手消息（`InlineTeamGraph` 里 `GraphView` 的 `embedded` 形态），点状态条右上「最大化」进临时全屏（`TeamGraphFullscreen`）。`GraphView` 将 run 映射为 `agent` 节点 + 两端的端点节点（用户输入 / synthesis 收尾，`EndpointNode`），ELK 布局两种（默认左右流 / 树形——默认取左右流契合横屏、内嵌↔全屏方向一致，`lib/elk-layout.ts`；布局算法偏好持久化于 `stores/graph.ts`，位置/边为每图本地态，一页多张内嵌图互不覆盖）；节点含 6 态色环、模型档 / 深度思考徽章、token（运行中 ≈ 估算、完成后真实计费数）、实时输出预览（运行中带流式光标）、工具数 + **¥ run 成本**（`costText`，§7.3B）；`StepEdge` 运行中边以 SVG 粒子流（`animateMotion`）动画；节点状态过渡为纯 CSS：按 plan 顺序错峰入场（`graph-node-enter`）、run 进入终态时一次性完成/失败闪烁（`graph-node-flash` + `useTerminalFlash`）、切换布局时位移 morph（`.react-flow__node` transform 过渡），均遵循 `prefers-reduced-motion`。**run 详情单一出口**：内嵌与全屏点节点都下钻到右侧 `DetailPanel`（全屏点完即退出，露出身后对话）；临时全屏额外提供画布右上布局切换工具栏 + 帧流时间轴回放（`Timeline`：播放 / 拖动 / 回到实时，亦可从完成 / 已停止态状态条「回放」直接进全屏自动播放）+ 节点/画布右键菜单（查看详情 / 居中此节点 / 适应画布，复用 `sidebar/ContextMenu`）+ `F` 适应画布 + Esc 退出（→ 见代码 `components/graph/`）。
 
-> 仍在目标态的增量（arena / 检查点 / 工具点节点、工具栏）见 [目标态 §五](../07-规划/前端UX目标态.md)。
+**嵌套子团队父子分组**（阶段2 嵌套委派）：某 worker 经 `can_delegate` 再向下带一层小队时，其子 worker **不接入**「用户输入 / synthesis」端点 bookend（只有顶层 worker 参与端点接线），而由 captain worker 画一条**虚线委派边**指向每个子 worker（`StepEdge` 按 `kind:"delegate"` 渲染虚线，区别于实线 DAG 依赖与运行中粒子流），子 worker 节点带「子任务」徽章（`AgentNode`）。分组键取 `run_plan` 预声明的 `parent_run_id`，故布局在 `run_started` 之前即成组、分层布局把子 worker 紧贴其 captain 聚拢。**否决容器嵌套盒**：父子关系用「委派边 + 徽章」表达而非 ELK compound 容器——后者重构布局风险高、收益小（嵌套委派少见且最多一层）。→ 见代码 `GraphView.tsx`。
+
+**可达性与多选**：节点 `role=button` + `tabIndex` 键盘 focus + Enter/Space 激活 + `aria-label` 播报角色/状态/模型/Token/成本/用时/工具；支持多选（修饰键加选 / 框选，`selected` 与面板下钻高亮共用 outline）。**动画 / 布局选型理由**：状态过渡用纯 CSS（**否决 Framer Motion**——零依赖、与 React Flow 定位 transform 无冲突）；ELK 仅留左右流 / 树形（径向 / 力导向曾实现、小团队下无价值已移除）；右键菜单复用 `sidebar/ContextMenu`（无需 Radix）。
+
+> 仍在目标态的增量（arena / 检查点 / 工具点节点）见 [目标态 §五](../07-规划/前端UX目标态.md)。
 
 ---
 
@@ -176,7 +182,11 @@
 | 打开方式 | 点内嵌图节点下钻该 run（无自动进度 tab） | 按需、零噪音 |
 | 节点高亮 | 内嵌图高亮**派生自**面板当前激活 tab（切/关 tab、关面板自动跟随）；全屏图用自身选中 | 一面一个高亮源，**否决**反向 `selectRun` 跨 store 对账 |
 
+**run-detail 区段构成**：头部（角色 / 状态 / 用时）、任务、错误（失败强制展开）、**思考过程**（worker 思考全文，`run_reasoning_delta` 流式；流式时自动展开、完成自动收起）、输出、工具调用、**协作关系**（`dependsOn` 依赖 + 后续）、**委派关系**（上级 + 子任务树，详见下段）、**资源消耗**（power 粒度全量 token + ¥ 明细；默认折叠，开「用量明细」时展开，¥ 总额不受该开关影响）。**独立 `reasoning` Tab 已否决**——思考全文本质 per-run，归 run-detail「思考过程」区段而非全局 Tab。→ 见代码 `RunDetailBody.tsx`。
+
 **委派展示统一**：单一可视化（`GraphView` 一张图同表委派树与 `depends_on` 依赖）+ 单一数据模型（`AgentRun`：编排步骤与委派子 Agent 共用同一节点类型）+ `run_*` 事件族（前端不拼接两路流）。**被否决**：前端按 N 隐藏其一（状态仍分叉）；保留双协议只在前端合并（双写漂移）。
+
+**run-detail「委派关系」区段**（阶段2 嵌套委派）：worker 详情在「协作关系」（`dependsOn` 上游 依赖 / 下游 后续，横向同波次）之外另设「委派关系」区段——「上级」是委派它的 captain worker（仅当父 run 是本回合图上的真实节点才显；顶层 worker 的父是 CEO captain、图上无节点，故为空），「子任务」按 `parentRunId` 递归缩进成树、点行下钻该子 run。两者**并列而非混淆**：DAG 边横向（同波次依赖），委派边纵向（嵌套层级）。→ 见代码 `RunDetailBody.tsx`。
 
 **聊天紧凑化原则**：inline 只做信号展示（思考折叠条/状态条/内嵌协作图）；面板承担完整详情（思考全文/run 全文 + 工具 IO + 用量）；失败/运行中强制展开（错误绝不藏）；协作图内嵌于回合（非面板 Tab），大图 / 回放进临时全屏。
 

@@ -60,14 +60,14 @@ async def test_grep_rejects_path_outside_workspace(tmp_path: Path):
     ws.mkdir()
     result = await GrepTool().execute({"pattern": "x", "path": "../"}, _ctx(ws))
     assert result.success is False
-    assert "outside the workspace" in result.error
+    assert "超出了工作区范围" in result.error
 
 
 async def test_grep_rejects_non_directory(tmp_path: Path):
     (tmp_path / "f.txt").write_text("hi", encoding="utf-8")
     result = await GrepTool().execute({"pattern": "x", "path": "f.txt"}, _ctx(tmp_path))
     assert result.success is False
-    assert "Not a directory" in result.error
+    assert "不是目录" in result.error
 
 
 # --- core search behavior ---
@@ -133,7 +133,7 @@ async def test_grep_files_only_lists_files_with_counts(tmp_path: Path):
         {"pattern": "TODO", "files_only": True}, _ctx(tmp_path)
     )
     assert result.success is True
-    assert "file(s) matched" in result.output
+    assert "个文件匹配" in result.output
     assert "app.py: 1" in result.output
     # files_only must not emit individual line bodies
     assert "return a + b" not in result.output
@@ -143,7 +143,7 @@ async def test_grep_no_matches(tmp_path: Path):
     _seed(tmp_path)
     result = await GrepTool().execute({"pattern": "zzz_nope"}, _ctx(tmp_path))
     assert result.success is True
-    assert "No matches" in result.output
+    assert "没有匹配" in result.output
     assert result.metadata["match_count"] == 0
 
 
@@ -160,7 +160,7 @@ async def test_grep_truncates_at_max_results(tmp_path: Path):
     result = await GrepTool().execute(
         {"pattern": "hit", "max_results": 3}, _ctx(tmp_path)
     )
-    assert "[results truncated" in result.output
+    assert "[结果已截断" in result.output
     # 3 matching lines + summary header + truncation note
     body_lines = [ln for ln in result.output.splitlines() if ln.startswith("many.txt:")]
     assert len(body_lines) == 3

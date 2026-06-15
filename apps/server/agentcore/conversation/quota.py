@@ -16,19 +16,27 @@ its *next* turn rather than having an in-flight reply cut off (不腰斩进行�
 Spend is read from the ``cost_events`` ledger (the money truth source, 不变量
 #1), so the limit reflects 真实记账 rather than an estimate.
 
-Per-user overrides / admin ``is_unlimited`` (决策④) are a later refinement; today
-the thresholds are the global config values.
+Limits resolve per user (决策④): ``QuotaLimits.for_user`` reads the override columns
+on the ``users`` row (NULL = inherit the global config for that dimension; an
+explicit ``0`` = unlimited for that dimension), and ``is_unlimited`` collapses to
+all-unlimited so a trusted/operator account is never gated. Because the
+authenticated ``User`` is already loaded for the request, this resolution costs no
+extra query.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from agentcore.config import settings
 from agentcore.core.errors import QuotaExceededError
 from agentcore.db.repositories import CostEventRepository
 from agentcore.llm.pricing import NANO_PER_USD, nano_usd_to_cny
+
+if TYPE_CHECKING:
+    from agentcore.db.models import User
 
 
 @dataclass(frozen=True)
@@ -49,6 +57,38 @@ class QuotaLimits:
             daily_tokens=settings.quota_daily_tokens,
             monthly_cost_nano=int(settings.quota_monthly_cost_usd * NANO_PER_USD),
             daily_requests=settings.quota_daily_requests,
+        )
+
+    @classmethod
+    def for_user(cls, user: User) -> QuotaLimits:
+        """Resolve limits for ``user``: each dimension uses the user's override when
+        set, else the global config (决策④).
+
+        ``is_unlimited`` short-circuits to all-unlimited. For the three dimensions a
+        ``None`` override inherits the config threshold, while an explicit ``0``
+        means that dimension is unlimited *for this user* (same 0-semantics as the
+        global config). The monthly override is float USD (mirroring config),
+        converted to nano-USD here.
+        """
+        if user.is_unlimited:
+            return cls(0, 0, 0)
+        monthly_usd = (
+            user.quota_monthly_cost_usd
+            if user.quota_monthly_cost_usd is not None
+            else settings.quota_monthly_cost_usd
+        )
+        return cls(
+            daily_tokens=(
+                user.quota_daily_tokens
+                if user.quota_daily_tokens is not None
+                else settings.quota_daily_tokens
+            ),
+            monthly_cost_nano=int(monthly_usd * NANO_PER_USD),
+            daily_requests=(
+                user.quota_daily_requests
+                if user.quota_daily_requests is not None
+                else settings.quota_daily_requests
+            ),
         )
 
     @property

@@ -10,7 +10,7 @@ existence. The ledger (``cost_events``) is the truth source for real money spent
 (不变量 #1); ``Message.usage`` is only a display snapshot.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 
@@ -23,7 +23,9 @@ from agentcore.api.schemas import (
     AgentCostLine,
     ConversationCost,
     CostBreakdown,
+    DailyCost,
     QuotaStatus,
+    RoleCostLine,
     TurnCost,
     UsageBreakdown,
     UsageSummary,
@@ -36,6 +38,10 @@ from agentcore.db.repositories import ConversationRepository, CostEventRepositor
 from agentcore.llm.pricing import NANO_PER_USD, nano_usd_to_cny
 
 router = APIRouter(tags=["usage"])
+
+# Account dashboard trend window: the last N UTC days (incl today) shown as a
+# spend sparkline (§7.3D). Fixed length so the series is zero-filled and stable.
+_TREND_DAYS = 7
 
 
 def _cost_breakdown(cost: dict) -> CostBreakdown:
@@ -145,10 +151,14 @@ async def get_usage_summary(
     user: AuthUser,
     repo: CostEventRepository = Depends(get_cost_event_repo),
 ) -> UsageSummary:
-    """Account dashboard: today's tokens/cost, the month's cost, and the quota.
+    """Account dashboard: today's tokens/cost, the month's cost + per-role payroll,
+    the recent daily-cost trend, and the quota.
 
     Windows are bounded at the current UTC day / month start (MVP — a per-user
-    timezone is a later refinement). Also carries ``cny_per_usd`` so the client
+    timezone is a later refinement). ``month_by_role`` splits this month's spend by
+    role (团队工资单, spend-desc) — the multi-agent differentiator;
+    ``recent_daily_cost`` is the last ``_TREND_DAYS`` UTC days (zero-filled,
+    oldest-first) for the sparkline. Also carries ``cny_per_usd`` so the client
     formats money from the single server-owned rate.
     """
     now = datetime.now(UTC)
@@ -157,6 +167,20 @@ async def get_usage_summary(
 
     today = await repo.aggregate_for_window(user_id=user.user_id, since=day_start)
     month = await repo.aggregate_for_window(user_id=user.user_id, since=month_start)
+    month_by_role = await repo.aggregate_by_role_for_window(
+        user_id=user.user_id, since=month_start
+    )
+
+    # 近 7 日趋势: zero-fill the daily map into a fixed, oldest-first series ending
+    # today, so the sparkline is a stable length even for sparse spend.
+    trend_start = day_start - timedelta(days=_TREND_DAYS - 1)
+    daily = await repo.aggregate_daily_for_window(
+        user_id=user.user_id, since=trend_start
+    )
+    recent_daily_cost = []
+    for i in range(_TREND_DAYS):
+        iso = (trend_start + timedelta(days=i)).date().isoformat()
+        recent_daily_cost.append(DailyCost(date=iso, cost_total=daily.get(iso, 0)))
 
     return UsageSummary(
         today=UsageWindow(
@@ -169,6 +193,15 @@ async def get_usage_summary(
             cost=_cost_breakdown(month["cost"]),
             requests=month["turns"],
         ),
+        month_by_role=[
+            RoleCostLine(
+                role=row["role"],
+                cost_total=int(row["cost_total"]),
+                turns=int(row["turns"]),
+            )
+            for row in month_by_role
+        ],
+        recent_daily_cost=recent_daily_cost,
         quota=QuotaStatus(
             daily_tokens=settings.quota_daily_tokens,
             monthly_cost_nano=int(settings.quota_monthly_cost_usd * NANO_PER_USD),

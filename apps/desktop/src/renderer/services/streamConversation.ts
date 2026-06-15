@@ -12,7 +12,6 @@ import {
   planFromRunPlan,
   useExecutionStore,
 } from "@/stores/execution";
-import { useUsageStore } from "@/stores/usage";
 import type {
   ApprovalRequiredPayload,
   ApprovalResolvedPayload,
@@ -37,15 +36,51 @@ interface DispatchContext {
 export type StreamErrorKind = "network" | "http" | "auth";
 
 /** A transport-level failure of the SSE turn (distinct from a backend `error`
- * event, which is delivered inline). Carries a kind so the UI can phrase it. */
+ * event, which is delivered inline). Carries a kind so the UI can phrase it, plus
+ * the backend's error `code` / `message` / `Retry-After` when the turn was refused
+ * with a plain JSON 4xx (quota or rate limit) rather than an event stream. */
 export class StreamError extends Error {
+  code?: string;
+  serverMessage?: string;
+  retryAfter?: number;
+
   constructor(
     public kind: StreamErrorKind,
     public status?: number,
+    extra?: { code?: string; serverMessage?: string; retryAfter?: number },
   ) {
     super(`stream ${kind}${status ? ` ${status}` : ""}`);
     this.name = "StreamError";
+    this.code = extra?.code;
+    this.serverMessage = extra?.serverMessage;
+    this.retryAfter = extra?.retryAfter;
   }
+}
+
+/** Build a {@link StreamError} from a non-OK response. A refused turn (e.g. 429
+ * for quota / rate limit) arrives as a plain JSON `{error:{code,message}}` body
+ * with a `Retry-After` header — not an SSE stream — so pull those out for precise
+ * UI phrasing. Falls back to status-only when the body isn't the expected shape. */
+async function streamErrorFromResponse(
+  response: Response,
+): Promise<StreamError> {
+  let code: string | undefined;
+  let serverMessage: string | undefined;
+  try {
+    const body = (await response.json()) as {
+      error?: { code?: string; message?: string };
+    };
+    code = body.error?.code;
+    serverMessage = body.error?.message;
+  } catch {
+    /* non-JSON body — keep status-only phrasing */
+  }
+  const header = Number(response.headers.get("Retry-After"));
+  return new StreamError("http", response.status, {
+    code,
+    serverMessage,
+    retryAfter: Number.isFinite(header) && header > 0 ? header : undefined,
+  });
 }
 
 /** A user-facing zh message for a failed turn, or null when no banner should
@@ -54,11 +89,27 @@ export function describeStreamError(err: unknown): string | null {
   if (err instanceof StreamError) {
     if (err.kind === "auth") return null;
     if (err.kind === "http") {
+      // A 429 is a deliberate refusal (quota used up, or sending too fast), not an
+      // outage. The backend ships a precise zh message (quota reset time, or a
+      // cool-down), so surface it verbatim to keep the wording single-sourced.
+      if (err.status === 429) {
+        if (err.serverMessage) return err.serverMessage;
+        if (err.retryAfter)
+          return `操作过于频繁，请约 ${err.retryAfter} 秒后再试`;
+        return "操作过于频繁或额度已用尽，请稍后再试";
+      }
       return `服务暂时不可用（${err.status ?? "?"}），请重试`;
     }
     return "网络连接中断，请检查网络后重试";
   }
   return "发送失败，请重试";
+}
+
+/** Whether a failed turn should offer a retry. Quota refusals reset on a schedule
+ * (an immediate retry just re-fails), so they don't; transport and rate-limit
+ * errors do. */
+export function isRetriableStreamError(err: unknown): boolean {
+  return !(err instanceof StreamError && err.code === "QUOTA_EXCEEDED");
 }
 
 /**
@@ -129,15 +180,6 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       // the error / not-found paths where no turn ran.
       if (payload.cost) {
         conv.attachCostToLastMessage(payload.cost, ctx.conversationId);
-        // Fold this turn into the conversation total so the 对话累计 chip (§7.3C)
-        // updates live; the turn is persisted too, so a later reload re-seeds the
-        // same sum from the ledger. `message_end.usage` uses the legacy *_tokens
-        // keys (see MessageEndPayload).
-        const u = payload.usage;
-        const tokens = u ? u.input_tokens + u.output_tokens : 0;
-        useUsageStore
-          .getState()
-          .addTurnCost(ctx.conversationId, payload.cost.total, tokens);
       }
       conv.finalizeLastMessage(ctx.conversationId);
       // The turn is over — any approval still on screen is moot (all were
@@ -335,7 +377,7 @@ async function runMessageStream(
     }
 
     if (!response.ok) {
-      throw new StreamError("http", response.status);
+      throw await streamErrorFromResponse(response);
     }
 
     const reader = response.body?.getReader();

@@ -47,7 +47,9 @@ CONV = "conv-1"
 ROOT_ID = "root-abc"
 
 
-def _make(timeout: float = 5.0) -> tuple[LocalWorkspace, WorkspaceOpRegistry, EventSink]:
+def _make(
+    timeout: float = 5.0, *, execute_slack: float = 15.0
+) -> tuple[LocalWorkspace, WorkspaceOpRegistry, EventSink]:
     sink = EventSink()
     registry = WorkspaceOpRegistry()
     channel = WorkspaceChannel(
@@ -57,7 +59,11 @@ def _make(timeout: float = 5.0) -> tuple[LocalWorkspace, WorkspaceOpRegistry, Ev
         timeout_seconds=timeout,
         root_id=ROOT_ID,
     )
-    return LocalWorkspace(channel), registry, sink
+    return (
+        LocalWorkspace(channel, execute_timeout_slack=execute_slack),
+        registry,
+        sink,
+    )
 
 
 async def _await_request(sink: EventSink) -> SSEEvent:
@@ -210,6 +216,54 @@ async def test_timeout_raises_io_error():
     # No desktop answers, so the op times out and surfaces as a WorkspaceIOError.
     with pytest.raises(WorkspaceIOError):
         await local.read("never-answered.txt")
+
+
+# --- per-op transport deadline (执行门 timeout policy) ----------------------
+#
+# A code execution must NOT be cut off by the flat file-op deadline: its transport
+# deadline is (the code's own timeout + slack), so the desktop's execution limit
+# stays authoritative. File ops keep the flat channel deadline. We assert the exact
+# deadline handed to asyncio.wait_for (spying on it inside the channel module).
+
+
+def _spy_wait_for(monkeypatch) -> list[float]:
+    """Record every timeout asyncio.wait_for is called with inside the channel."""
+    captured: list[float] = []
+    real_wait_for = asyncio.wait_for
+
+    async def spy(fut, timeout):  # noqa: ANN001 - duck-typed shim
+        captured.append(timeout)
+        return await real_wait_for(fut, timeout)
+
+    monkeypatch.setattr("agentcore.workspace.channel.asyncio.wait_for", spy)
+    return captured
+
+
+async def test_file_op_uses_flat_transport_deadline(monkeypatch):
+    captured = _spy_wait_for(monkeypatch)
+    local, registry, sink = _make(timeout=30.0, execute_slack=15.0)
+    await _round_trip(local.read("a.txt"), sink, registry, {"ok": True, "value": "x"})
+    # A read rides the channel-wide deadline, untouched by the execute slack.
+    assert captured[-1] == 30.0
+
+
+async def test_execute_extends_transport_deadline_past_code_timeout(monkeypatch):
+    captured = _spy_wait_for(monkeypatch)
+    local, registry, sink = _make(timeout=30.0, execute_slack=15.0)
+    req = ExecutionRequest(code="print(1)", language="python", timeout_seconds=10)
+    response = {
+        "ok": True,
+        "value": {
+            "success": True,
+            "stdout": "",
+            "stderr": "",
+            "exit_code": 0,
+            "duration_ms": 1,
+        },
+    }
+    await _round_trip(local.execute(req), sink, registry, response)
+    # code timeout (10) + slack (15) — NOT the flat 30s file-op deadline.
+    assert captured[-1] == 25.0
 
 
 # --- registry guards (defense in depth on the resolve endpoint) ------------

@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from agentcore.runtime.engine import _merge_citations
+from agentcore.runtime.citations import annotate_tool_citations, merge_citations
 from agentcore.tools.builtin.web import _net
 from agentcore.tools.builtin.web import search as search_mod
 from agentcore.tools.builtin.web._net import (
@@ -21,7 +21,6 @@ from agentcore.tools.builtin.web._net import (
     note_success,
     site_of,
 )
-from agentcore.tools.builtin.web.search_backend import SearchResult
 from agentcore.tools.builtin.web.read_url import (
     ReadUrlTool,
     _classify_url,
@@ -30,7 +29,7 @@ from agentcore.tools.builtin.web.read_url import (
     _URLBlock,
 )
 from agentcore.tools.builtin.web.search import WebSearchTool
-from agentcore.tools.builtin.web.search_backend import _parse_results
+from agentcore.tools.builtin.web.search_backend import SearchResult, _parse_results
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -251,9 +250,12 @@ async def test_web_search_emits_structured_citations(monkeypatch):
 
 def test_merge_citations_dedups_across_rounds_by_normalized_url():
     sink: list[dict] = []
-    _merge_citations(sink, [{"url": "https://a.com/p", "title": "A", "site": "a.com"}])
+    first = merge_citations(
+        sink, [{"url": "https://a.com/p", "title": "A", "site": "a.com"}]
+    )
+    assert first == {"https://a.com/p": 1}
     # same page (trailing slash + fragment) from a later round + a fresh source
-    _merge_citations(
+    second = merge_citations(
         sink,
         [
             {"url": "https://a.com/p/#sec", "title": "A again", "site": "a.com"},
@@ -261,13 +263,51 @@ def test_merge_citations_dedups_across_rounds_by_normalized_url():
         ],
     )
     assert [c["url"] for c in sink] == ["https://a.com/p", "https://b.com"]
+    # A2: the dup reuses source #1's number; the fresh source gets the next card
+    # index — numbers stay stable across rounds so body [n] keeps pointing right.
+    assert second == {"https://a.com/p": 1, "https://b.com": 2}
 
 
 def test_merge_citations_skips_blank_url_and_caps():
     sink: list[dict] = []
-    _merge_citations(sink, [{"url": "", "title": "blank"}])
+    blank = merge_citations(sink, [{"url": "", "title": "blank"}])
     assert sink == []
-    _merge_citations(
+    assert blank == {}  # a blank URL yields no card and no number
+    numbers = merge_citations(
         sink, [{"url": f"https://s{i}.com", "title": str(i)} for i in range(50)]
     )
     assert len(sink) == 24  # _CITATION_CAP
+    # only the 24 that fit the cap get a number; the rest are uncitable (no card)
+    assert len(numbers) == 24
+    assert numbers["https://s0.com"] == 1
+    assert numbers["https://s23.com"] == 24
+    assert "https://s24.com" not in numbers
+
+
+def test_annotate_tool_citations_appends_assigned_numbers():
+    cites = [
+        {"url": "https://a.com", "title": "A"},
+        {"url": "https://b.com", "title": "B"},
+    ]
+    numbers = {"https://a.com": 1, "https://b.com": 2}
+    out = annotate_tool_citations("RESULT", cites, numbers)
+    assert out.startswith("RESULT")
+    assert "[来源编号]" in out
+    assert "[1]=https://a.com" in out
+    assert "[2]=https://b.com" in out
+
+
+def test_annotate_tool_citations_omits_capped_and_dedups_by_number():
+    cites = [
+        {"url": "https://a.com", "title": "A"},
+        {"url": "https://a.com/#frag", "title": "A dup"},  # same card → one entry
+        {"url": "https://x.com", "title": "X"},  # dropped by cap → no number
+    ]
+    numbers = {"https://a.com": 1}
+    out = annotate_tool_citations("R", cites, numbers)
+    assert out.count("[1]=") == 1
+    assert "x.com" not in out
+
+
+def test_annotate_tool_citations_no_numbers_leaves_content_unchanged():
+    assert annotate_tool_citations("R", [{"url": "https://a.com"}], {}) == "R"

@@ -7,18 +7,13 @@ import {
   runDetailTabId,
   useDetailPanelStore,
 } from "../detailPanel";
-import {
-  type ExecutionPlan,
-  execRuntime,
-  useExecutionStore,
-} from "../execution";
+import { type ExecutionPlan, useExecutionStore } from "../execution";
 
 const panel = () => useDetailPanelStore.getState();
 const exec = () => useExecutionStore.getState();
 // Each turn's execution + focus lives in its own message slot (§9.3); this suite
 // drives one message.
 const MID = "msg-1";
-const execRt = () => execRuntime(exec(), MID);
 const tabId = (runId: string) => runDetailTabId(MID, runId);
 
 const plan: ExecutionPlan = {
@@ -126,13 +121,11 @@ describe("togglePanel", () => {
 });
 
 describe("showRunDetail", () => {
-  it("opens a run-detail tab and pins the run in the execution store", () => {
+  it("opens a run-detail tab for the run", () => {
     exec().startExecution(plan, MID);
     panel().showRunDetail(MID, "run-1", "研究员");
     expect(panel().open).toBe(true);
     expect(panel().activeTabId).toBe(tabId("run-1"));
     expect(panel().tabs[0].title).toBe("研究员");
-    // Selection lives in the execution store (shared with the inline graph).
-    expect(execRt().selectedRunId).toBe("run-1");
   });
 });

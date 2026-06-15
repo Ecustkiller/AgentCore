@@ -7,7 +7,6 @@ Orchestrates a single user message through the full lifecycle:
 """
 
 import contextlib
-import time
 from dataclasses import asdict
 
 from agentcore.config import settings
@@ -15,31 +14,28 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.llm.config import get_profile
 from agentcore.llm.factory import build_provider
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.protocol import TokenUsage
 from agentcore.memory import default_memory_store
 from agentcore.runtime.approvals import ApprovalGate, default_approval_registry
-from agentcore.runtime.costing import aggregate_cost, captain_run_cost
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.citations import merge_citations
+from agentcore.runtime.costing import aggregate_cost, captain_run_cost_from_state
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
     citations_event,
+    error_event,
     message_end,
     message_start,
-    run_completed,
-    run_plan,
-    run_started,
 )
 from agentcore.runtime.prompt import (
     CHAT_CITATION_HINT,
     CHAT_TEAM_CAPABILITY_HINT,
     assemble_system_prompt,
 )
-from agentcore.runtime.workspace import summarize
-from agentcore.tools.builtin import build_builtin_registry
+from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_executor
+from agentcore.tools.builtin import build_builtin_registry, build_ceo_tool_registry
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.protocol import ToolContext
-from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
@@ -114,24 +110,26 @@ async def run_chat_pipeline(
     user_id: str,
     backend: WorkspaceBackend,
     attachments: list[dict] | None = None,
+    approvals_enabled: bool = True,
 ) -> dict:
     """Run the full chat pipeline for a single user message.
 
     Returns a dict with final_content, usage, and metadata.
     The sink receives all SSE events during execution.
+
+    ``approvals_enabled`` gates GRANTABLE tools behind the user's consent (the
+    default interactive path). It is set False for an autonomous local→云 handoff
+    job (双模式工作区 P2e / e2): that run has no live client to answer prompts and
+    operates on an isolated server sandbox, so — like cloud-mode workers — it needs
+    no gate; leaving it on would deadlock every file/exec tool on a timeout-deny.
     """
     message_id = new_id()
-    # The CEO's own run gets a synthetic root id (it is this pipeline's ReAct
-    # loop, not a scheduled Run): it parents every delegated member's ledger row
-    # and labels the captain row in the cost ledger.
+    # The CEO captain is the turn's root Run node (kind=captain): it owns the reply
+    # voice and may delegate. Its run id parents every delegated member's ledger row
+    # and labels the captain cost row; agent_id == run_id (阶段1 convention). When
+    # the CEO delegates, this id is declared as the graph's CAPTAIN 汇聚点 the
+    # workers hang under (see DelegateTool._plan_event).
     captain_run_id = new_id()
-    # Phase B (D3): the CEO's post-delegation 「汇总」 is surfaced as its own run
-    # node — a real, drillable 汇聚点 symmetric with the workers, replacing the
-    # synthetic placeholder. Pre-allocated so the engine can stream the synthesis
-    # round to it; only actually emitted (via begin_synthesis) if the CEO delegates
-    # this turn, and kept cost-neutral (the spend stays on the captain row).
-    synthesis_run_id = new_id()
-    synthesis_agent_id = new_id()
 
     try:
         # --- Phase 1: Prepare ---
@@ -154,17 +152,39 @@ async def run_chat_pipeline(
             user_id=user_id,
         )
 
-        # --- Phase 2: Assemble the CEO chat agent's toolset (chat-first) ---
-        # The CEO owns the conversation and replies directly. It carries the
-        # built-in tools plus a single on-demand orchestration primitive,
-        # ``delegate``, which spins up a worker team ONLY when the model judges a
-        # request truly needs one. There is no mandatory pre-turn orchestrator
-        # pass — the CEO itself decides when/at what granularity to delegate.
-        # ``delegate`` is NON-terminal: workers' products return to the CEO's own
-        # ReAct loop, which writes a short user-facing overview in its own voice
-        # (D3 / 决策①: per-worker detail is shown separately in the UI).
-        # Workers get ``worker_tools`` (no nested delegate tool), so a worker can
-        # never recursively delegate another team.
+        # --- Phase 2: Assemble the CEO chat agent's toolset (coordinator) ---
+        # The CEO owns the conversation and replies directly, but it is a
+        # COORDINATOR: it carries only the read / retrieval built-ins
+        # (``build_ceo_tool_registry`` — web_search/read_url/file_read/file_list/
+        # grep) plus the on-demand orchestration primitive ``delegate``. It holds
+        # NONE of the production / mutation tools (file_write/str_replace/
+        # file_delete/file_move/code_execute); any work that produces or changes an
+        # artifact is handed to a worker. There is no mandatory pre-turn
+        # orchestrator pass — the CEO itself decides when/at what granularity to
+        # delegate. ``delegate`` is NON-terminal: workers' products return to the
+        # CEO's own ReAct loop, which writes a short user-facing overview in its own
+        # voice (D3 / 决策①: per-worker detail is shown separately in the UI).
+        # Workers get the FULL ``worker_tools`` (no nested delegate tool), so a
+        # worker can do the actual writing/editing/running but can never recursively
+        # delegate another team.
+        # Approval gate (one per turn so an "allow for the rest of this turn" grant
+        # is scoped to this message and does not leak across turns). It is wired into
+        # the CEO's loop, but with the coordinator boundary the CEO holds no
+        # GRANTABLE tools — so approvals now bite at the WORKER layer: the SAME
+        # instance is handed to the delegate tool, which forwards it to workers ONLY
+        # in local mode (双模式工作区 P2d 执行门) — so a delegated worker can't run
+        # code / mutate files on the user's real machine without consent, while a
+        # cloud team stays un-gated (isolated sandbox).
+        approval_gate = (
+            ApprovalGate(
+                sink=sink,
+                conversation_id=conversation_id,
+                registry=default_approval_registry(),
+                timeout_seconds=settings.approval_timeout_seconds,
+            )
+            if (settings.approval_gate_enabled and approvals_enabled)
+            else None
+        )
         # The delegate tool gets the CLEAN base prompt — it is reused verbatim by
         # the workers (runs/executor.py), which must not be told about a delegate
         # tool they do not hold.
@@ -177,10 +197,9 @@ async def run_chat_pipeline(
             tools=worker_tools,
             base_tool_context=base_tool_context,
             captain_run_id=captain_run_id,
+            approval_gate=approval_gate,
         )
-        chat_tools = ToolRegistry()
-        for schema in worker_tools.list_all():
-            chat_tools.register(worker_tools.get(schema.name))
+        chat_tools = build_ceo_tool_registry()
         chat_tools.register(delegate_tool)
 
         # The entry chat agent additionally learns it may escalate to a team and
@@ -192,112 +211,69 @@ async def run_chat_pipeline(
         # --- Phase 3: Execute ---
         sink.emit(message_start(message_id, conversation_id=conversation_id))
 
-        messages: list[LLMMessage] = [LLMMessage(role="system", content=chat_system_prompt)]
-        for msg in history:
-            messages.append(LLMMessage(role=msg["role"], content=msg["content"]))
-        messages.append(LLMMessage(role="user", content=user_message))
-
         profile = get_profile("chat")
         # Web sources the chat agent consults this turn (web_search / read_url),
         # aggregated + de-duped by the loop for source cards + persistence.
         citations: list[dict] = []
-        # Approval gate (CEO chat path only). One gate per turn so an
-        # "allow for the rest of this turn" grant is scoped to this message and
-        # does not leak across turns. Delegated workers run un-gated (the gate is
-        # not threaded into runs/executor.py) — see docs.
-        approval_gate = (
-            ApprovalGate(
-                sink=sink,
-                conversation_id=conversation_id,
-                registry=default_approval_registry(),
-                timeout_seconds=settings.approval_timeout_seconds,
-            )
-            if settings.approval_gate_enabled
-            else None
+
+        # The CEO captain runs through the run executor as the turn's ROOT Run node
+        # — the same react_loop assembly the workers use — instead of the pipeline
+        # driving react_loop itself. It owns the reply voice (content/reasoning
+        # stream to the chat bubble), runs the chat profile, holds the
+        # read/retrieval tools + delegate, and writes the user-facing answer,
+        # delegating mid-loop when a team is needed. When it delegates, its run id
+        # is the graph's CAPTAIN 汇聚点 the workers hang under.
+        captain_spec = RunSpec(
+            run_id=captain_run_id,
+            agent_id=captain_run_id,
+            agent_name="CEO",
+            kind=RunKind.CAPTAIN,
+            task=user_message,
+            role="CEO",
+            depth=0,
+            parent_run_id=None,
         )
-        # Synthesis run lifecycle (Phase B). The engine flips into synthesis mode
-        # the first time the captain resumes after a non-terminal delegate and
-        # calls this once — declaring a CEO roster card + a synthesis-kind run so
-        # the graph gets a real 汇聚点. We close run_completed after the loop. The
-        # synthesis spend is NOT priced here: it is part of the captain's own loop
-        # usage (turn_usage below) and billed once on the captain row, so this node
-        # carries zero cost/usage and never enters cost_runs (no double count).
-        synthesis_started = False
-        synthesis_start = 0.0
-
-        def _begin_synthesis() -> None:
-            nonlocal synthesis_started, synthesis_start
-            if synthesis_started:
-                return
-            synthesis_started = True
-            synthesis_start = time.monotonic()
-            sink.emit(
-                run_plan(
-                    execution_id=base_tool_context.execution_id,
-                    plan_type="multi_agent",
-                    task_summary="",
-                    agents=[
-                        {
-                            "id": synthesis_agent_id,
-                            "role": "CEO",
-                            "model_preference": "strong",
-                            "thinking": profile.thinking,
-                            "reasoning_effort": profile.reasoning_effort,
-                        }
-                    ],
-                    runs=[
-                        {
-                            "id": synthesis_run_id,
-                            "agent_id": synthesis_agent_id,
-                            "task": "汇总团队产出",
-                            "depends_on": [],
-                            "kind": "synthesis",
-                        }
-                    ],
-                )
-            )
-            sink.emit(run_started(synthesis_run_id, synthesis_agent_id, kind="synthesis"))
-
-        captain_start = time.monotonic()
-        final_content, final_reasoning, turn_usage, rounds = await react_loop(
-            messages=messages,
+        run_captain = build_captain_executor(
             llm=llm,
             tools=chat_tools,
             sink=sink,
-            tool_context=base_tool_context,
+            base_tool_context=base_tool_context,
+            chat_system_prompt=chat_system_prompt,
+            history=history,
+            user_message=user_message,
             profile=profile,
             citation_sink=citations,
             approval_gate=approval_gate,
-            synthesis_run_id=synthesis_run_id,
-            synthesis_agent_id=synthesis_agent_id,
-            begin_synthesis=_begin_synthesis,
         )
-        captain_duration_ms = int((time.monotonic() - captain_start) * 1000)
-        # Close the synthesis node (if the CEO delegated). Cost-neutral by design:
-        # output_summary labels the collapsed node; usage/cost stay at the zeroed
-        # default (rendered as「—」), since the spend is on the captain row.
-        if synthesis_started:
-            synth_duration_ms = int((time.monotonic() - synthesis_start) * 1000)
-            sink.emit(
-                run_completed(
-                    synthesis_run_id,
-                    synthesis_agent_id,
-                    output_summary=summarize(final_content),
-                    duration_ms=synth_duration_ms,
-                    role="captain",
-                    model=profile.model,
-                )
-            )
-        # The CEO's own spend, captured before folding in the delegated workers
-        # (they get their own per-member ledger rows). This is the captain root
-        # run's usage for the cost ledger.
-        captain_usage = turn_usage
-        # ``delegate`` is non-terminal, so the loop does not meter its workers'
-        # tokens (only terminal handoffs fold ToolResult metadata into the
-        # totals). Add the delegated worker usage accumulated on the tool
-        # instance across every delegate call this turn (cache split included so
-        # the turn total stays priceable).
-        turn_usage = turn_usage + TokenUsage(
+        captain_state = await run_captain(captain_spec)
+
+        if captain_state.phase is RunPhase.FAILED:
+            err = captain_state.error or "captain run failed"
+            sink.emit(error_event("PIPELINE_ERROR", err))
+            sink.emit(message_end(FinishReason.ERROR))
+            return {
+                "message_id": message_id,
+                "content": "",
+                "error": err,
+                "finish_reason": FinishReason.ERROR,
+            }
+
+        final_content = captain_state.content
+        final_reasoning = captain_state.reasoning
+        rounds = captain_state.rounds
+
+        # Turn usage = the captain run's own spend (priced once in the executor onto
+        # captain_state.cost/.usage) + the delegated workers' usage accumulated on
+        # the tool instance across every delegate call this turn. ``delegate`` is
+        # non-terminal, so the captain loop never metered the workers' tokens; the
+        # cache split rides along so the folded total stays priceable.
+        turn_usage = TokenUsage(
+            input_tokens=captain_state.usage.get("input", 0),
+            output_tokens=captain_state.usage.get("output", 0),
+            reasoning_tokens=captain_state.usage.get("reasoning", 0),
+            cache_hit_tokens=captain_state.usage.get("cache_hit", 0),
+            cache_miss_tokens=captain_state.usage.get("cache_miss", 0),
+        ) + TokenUsage(
             input_tokens=delegate_tool.usage["input"],
             output_tokens=delegate_tool.usage["output"],
             reasoning_tokens=delegate_tool.usage["reasoning"],
@@ -311,20 +287,23 @@ async def run_chat_pipeline(
         )
 
         # Per-run cost ledger for 落账 (决策②: captain root + one row per member).
-        # The captain is this loop itself, priced here from its own usage; the
-        # members were priced onto their RunState in the executor and collected on
-        # the delegate tool. Built before message_end so the turn total can ride
-        # on it (回合总账实时); the service then attaches the user/conversation/
-        # message envelope and persists the rows (warning-only on failure).
-        captain_cost = captain_run_cost(
-            run_id=captain_run_id,
-            model=profile.model,
-            usage=captain_usage,
-            rounds=rounds,
-            duration_ms=captain_duration_ms,
-        )
+        # The captain was priced once in the executor (captain_state.cost); read it
+        # into the captain ledger row (no re-price). Members were priced onto their
+        # RunState in the executor and collected on the delegate tool. Built before
+        # message_end so the turn total can ride on it (回合总账实时); the service
+        # then attaches the user/conversation/message envelope and persists the
+        # rows (warning-only on failure).
+        captain_cost = captain_run_cost_from_state(captain_run_id, captain_state)
         cost_runs = [asdict(captain_cost), *(asdict(r) for r in delegate_tool.run_ledger)]
         turn_cost = aggregate_cost(cost_runs)
+
+        # Fold the delegated workers' web sources into the turn's shared card
+        # (deduped/capped against the CEO's own searches). The CEO collected its
+        # sources live during the loop (numbered + cited inline); workers collected
+        # theirs un-numbered, so appending them here keeps the CEO's [n] stable and
+        # still surfaces the WHOLE team's research to the user. Mirrors how worker
+        # usage/cost are folded back off the delegate tool instance above.
+        merge_citations(citations, delegate_tool.citations)
 
         # Emit before message_end so the client attaches source cards to the
         # assistant message while it is still the live streaming bubble.
@@ -366,8 +345,6 @@ async def run_chat_pipeline(
 
     except Exception as e:
         logger.error("pipeline_error", error=str(e), exc_info=True)
-        from agentcore.runtime.events import error_event
-
         sink.emit(error_event("PIPELINE_ERROR", str(e)))
         sink.emit(message_end(FinishReason.ERROR))
         return {

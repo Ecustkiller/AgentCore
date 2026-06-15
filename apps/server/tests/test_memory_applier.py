@@ -112,3 +112,70 @@ def test_output_has_trailing_newline_and_section_spacing():
     out = apply(SAMPLE)
     assert out.endswith("\n")
     assert "\n\n## 技术栈与工具" in out  # blank line between sections
+
+
+# --- containment dedup (near-duplicate ADDs collapse to the more specific one) ---
+
+
+def test_add_substring_of_existing_is_dropped():
+    # The new bullet is fully contained in an existing one → keep the existing
+    # (more specific) wording, do not add a vaguer near-duplicate.
+    out = apply(SAMPLE, MemoryOp(MemoryAction.ADD, "技术栈与工具", content="后端 Python"))
+    assert out.count("- 后端") == 1
+    assert "后端 Python + FastAPI" in out  # the longer original survived
+
+
+def test_add_superset_replaces_existing_in_place():
+    # The new bullet contains an existing one → upgrade to the more specific
+    # wording, replacing in place rather than appending a duplicate.
+    out = apply(
+        SAMPLE,
+        MemoryOp(MemoryAction.ADD, "技术栈与工具", content="后端 Python + FastAPI + SQLAlchemy"),
+    )
+    assert out.count("- 后端") == 1
+    assert "后端 Python + FastAPI + SQLAlchemy" in out
+
+
+def test_add_unrelated_bullet_is_not_merged():
+    # No containment either way → the bullet is appended, nothing is merged.
+    out = apply(SAMPLE, MemoryOp(MemoryAction.ADD, "技术栈与工具", content="前端 React"))
+    assert "后端 Python + FastAPI" in out
+    assert "- 前端 React" in out
+
+
+# --- section_cap (deterministic backstop that bounds section growth) ---
+
+
+def test_section_cap_trims_to_most_recent():
+    applier = MarkdownMemoryApplier(section_cap=2)
+    # 沟通偏好 starts with 2 bullets; adding a 3rd overflows the cap of 2.
+    out = applier.apply(SAMPLE, [MemoryOp(MemoryAction.ADD, "沟通偏好", content="多用例子说明")])
+    assert "多用例子说明" in out  # newest kept
+    assert "先给结论，再给细节" in out  # second-newest kept
+    assert "用简体中文回复" not in out  # oldest dropped from the front
+
+
+def test_section_cap_only_trims_overflowing_section():
+    applier = MarkdownMemoryApplier(section_cap=2)
+    out = applier.apply(
+        SAMPLE, [MemoryOp(MemoryAction.ADD, "关于用户的事实", content="在做 AgentCore")]
+    )
+    # 技术栈与工具 has a single bullet — under cap, untouched.
+    assert "后端 Python + FastAPI" in out
+    assert "在做 AgentCore" in out
+
+
+def test_non_positive_section_cap_means_no_cap():
+    applier = MarkdownMemoryApplier(section_cap=0)
+    out = applier.apply(
+        SAMPLE,
+        [
+            MemoryOp(MemoryAction.ADD, "沟通偏好", content="第三条"),
+            MemoryOp(MemoryAction.ADD, "沟通偏好", content="第四条"),
+        ],
+    )
+    # 0 is treated as "no cap" so a misconfig can never wipe a section.
+    assert "用简体中文回复" in out
+    assert "先给结论，再给细节" in out
+    assert "第三条" in out
+    assert "第四条" in out

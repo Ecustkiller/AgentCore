@@ -1,14 +1,9 @@
 import { ApiError, BASE_URL, NetworkError, api } from "@/services/api";
 import type { AuthUser } from "@/stores/auth";
+import type { components } from "@/types/api.generated";
 
-interface BackendUser {
-  id: string;
-  username: string;
-  display_name: string;
-  email: string | null;
-  role: string;
-  created_at: string;
-}
+/** Server user payload (`/auth/me|login|register`), generated from OpenAPI. */
+type BackendUser = components["schemas"]["UserResponse"];
 
 function toUser(u: BackendUser): AuthUser {
   return {
@@ -63,10 +58,13 @@ export async function logout(): Promise<void> {
  */
 function isOutage(err: unknown): boolean {
   return (
-    err instanceof NetworkError || (err instanceof ApiError && err.status >= 500)
+    err instanceof NetworkError ||
+    (err instanceof ApiError && err.status >= 500)
   );
 }
 
+// Hand-written on purpose: `/readyz` has no response_model, so the generated
+// type is an untyped dict — this local shape stays the precise contract.
 interface ReadinessResponse {
   status: "ready" | "not_ready";
   database: boolean;

@@ -11,15 +11,21 @@ from agentcore.core.errors import AuthenticationError, AuthorizationError
 from agentcore.db.base import get_session
 from agentcore.db.models import User
 from agentcore.db.repositories import (
+    ChatRepository,
     ConversationRepository,
     CostEventRepository,
     CredentialsRepository,
     FolderRepository,
+    HandoffJobRepository,
     InviteRepository,
     MessageRepository,
     RefreshTokenRepository,
+    UserBlockRepository,
+    UserDirectoryRepository,
     UserRepository,
 )
+from agentcore.messaging import MessagingService
+from agentcore.messaging.hub import HubChatEventPublisher, default_chat_hub
 from agentcore.security import decode_access_token
 
 # Cookie name carrying the access JWT (set by the auth routes).
@@ -50,6 +56,29 @@ def get_message_repo(session: AsyncSession = Depends(get_db)) -> MessageReposito
 
 def get_cost_event_repo(session: AsyncSession = Depends(get_db)) -> CostEventRepository:
     return CostEventRepository(session)
+
+
+def get_handoff_job_repo(session: AsyncSession = Depends(get_db)) -> HandoffJobRepository:
+    return HandoffJobRepository(session)
+
+
+def get_messaging_service(
+    session: AsyncSession = Depends(get_db),
+) -> MessagingService:
+    """Build MessagingService (消息页 找人 IM) with its four repos on one session.
+
+    The realtime publisher fans a persisted message out to recipients' SSE
+    firehoses through the process-wide in-process hub (消息IM.md §四); swap it
+    for a Redis / NATS publisher behind the ``ChatEventPublisher`` seam to scale
+    past one worker.
+    """
+    return MessagingService(
+        users=UserRepository(session),
+        chats=ChatRepository(session),
+        blocks=UserBlockRepository(session),
+        directory=UserDirectoryRepository(session),
+        events=HubChatEventPublisher(default_chat_hub()),
+    )
 
 
 def get_auth_service(session: AsyncSession = Depends(get_db)) -> AuthService:

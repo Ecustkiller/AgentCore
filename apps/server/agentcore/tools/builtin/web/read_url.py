@@ -208,8 +208,9 @@ class ReadUrlTool:
         return ToolSchema(
             name="read_url",
             description=(
-                "获取指定网页的完整正文文本，用于在 web_search 摘要不足、确需深读某条结果时。"
-                "优先用 web_search 的摘要作答；仅在需要完整正文时才调用本工具。"
+                "获取指定网页的正文文本（比 web_search 摘要更完整，但长页面会按 "
+                "max_chars 截断），用于在 web_search 摘要不足、确需深读某条结果时。"
+                "优先用 web_search 的摘要作答；仅在需要正文细节时才调用本工具。"
                 "注意：部分大型站点（如百度百科、知乎等）有反爬保护，可能返回 403/失败——"
                 "此时改用 web_search 摘要或换其他来源，不要对同一被拒站点反复重试。"
             ),

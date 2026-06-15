@@ -2,6 +2,7 @@ import { Switch } from "@/components/ui/Switch";
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
 import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
+import { Loader2, RefreshCw } from "lucide-react";
 import { useEffect } from "react";
 
 /**
@@ -17,6 +18,7 @@ import { useEffect } from "react";
  */
 export function UsageSettings() {
   const summary = useUsageStore((s) => s.summary);
+  const loading = useUsageStore((s) => s.loading);
   const error = useUsageStore((s) => s.error);
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const fetchSummary = useUsageStore((s) => s.fetchSummary);
@@ -31,26 +33,110 @@ export function UsageSettings() {
     void fetchSummary();
   }, [fetchSummary]);
 
+  const refresh = () => void fetchSummary();
+
   return (
     <div>
-      <h1 className="text-xl font-semibold">用量</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        本月额度与今日用量。成本按团队（每个 Agent）累计，以人民币展示。
-      </p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold">用量</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            本月额度与今日用量。成本按团队角色拆分，以人民币展示。
+          </p>
+        </div>
+        {/* Manual refresh once data exists — numbers go stale after running tasks
+            elsewhere (mount-only fetch otherwise). First load / first-load failure
+            are handled by the dedicated states below, so the button shows here. */}
+        {summary && (
+          <button
+            type="button"
+            title="刷新"
+            onClick={refresh}
+            disabled={loading}
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
+          >
+            <RefreshCw
+              size={16}
+              className={loading ? "animate-spin" : undefined}
+            />
+          </button>
+        )}
+      </div>
 
       <PowerModeToggle enabled={usageDetail} onChange={setUsageDetail} />
 
-      {!summary ? (
-        <p className="mt-6 text-sm text-muted-foreground">
-          {error ?? "加载中…"}
-        </p>
+      {/* 三态分离：已有数据（含刷新失败的软告警）/ 首屏失败 / 首屏加载中。 */}
+      {summary ? (
+        <>
+          {error && <RefreshErrorBanner message={error} onRetry={refresh} />}
+          <Dashboard
+            summary={summary}
+            cnyPerUsd={cnyPerUsd}
+            showDetail={usageDetail}
+          />
+        </>
+      ) : error ? (
+        <ErrorState message={error} onRetry={refresh} />
       ) : (
-        <Dashboard
-          summary={summary}
-          cnyPerUsd={cnyPerUsd}
-          showDetail={usageDetail}
-        />
+        <LoadingState />
       )}
+    </div>
+  );
+}
+
+/** First-load spinner — distinct from the error state (P1: 加载/错误分离). */
+function LoadingState() {
+  return (
+    <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
+      <Loader2 size={16} className="animate-spin" />
+      加载中…
+    </div>
+  );
+}
+
+/** First-load failure: no data to show, so a prominent centered retry (P1). */
+function ErrorState({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="mt-6 flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
+      <p className="text-sm text-muted-foreground">{message}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
+      >
+        重试
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Refresh failed but stale data exists: a soft amber banner above the dashboard
+ * with an inline retry. 用量是附属呈现——刷新失败不清空已有数字 (P1)，只提示可能过期。
+ */
+function RefreshErrorBanner({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="mt-6 flex items-center justify-between gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-2.5">
+      <p className="text-xs text-warning">{message}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="shrink-0 rounded-lg border border-border px-2.5 py-1 text-xs hover:bg-accent"
+      >
+        重试
+      </button>
     </div>
   );
 }
@@ -72,7 +158,8 @@ function PowerModeToggle({
       <div className="min-w-0">
         <p className="text-sm text-foreground">用量明细（Power 模式）</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          显示 token、缓存率等技术明细，并默认展开各 Agent 的资源消耗。成本（¥）始终可见。
+          显示 token、缓存率等技术明细，并默认展开各 Agent
+          的资源消耗。成本（¥）始终可见。
         </p>
       </div>
       <Switch
@@ -102,20 +189,26 @@ function Dashboard({
   const monthUsed = month.cost.total;
   const dayTokenLimit = quota.daily_tokens;
   const dayTokensUsed = today.usage.input + today.usage.output;
+  const dayReqLimit = quota.daily_requests;
+  const dayReqUsed = today.requests;
   const monthNear = monthLimit > 0 && monthUsed / monthLimit >= 0.8;
 
-  const now = new Date();
-  const reset = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const resetText = `${reset.getMonth() + 1} 月 ${reset.getDate()} 日重置`;
+  // Reset captions derive from the backend's UTC window boundaries (usage.py /
+  // quota.py) rendered in local time — see resetTexts() for why.
+  const { dailyResetText, monthlyResetText } = resetTexts();
 
   const moneyCaption =
     monthLimit > 0
-      ? `已用 ${formatCost(monthUsed, cnyPerUsd)} / ${formatCost(monthLimit, cnyPerUsd)} · ${resetText}`
+      ? `已用 ${formatCost(monthUsed, cnyPerUsd)} / ${formatCost(monthLimit, cnyPerUsd)} · ${monthlyResetText}`
       : `已用 ${formatCost(monthUsed, cnyPerUsd)} · 不限`;
   const tokenCaption =
     dayTokenLimit > 0
-      ? `${formatCompact(dayTokensUsed)} / ${formatCompact(dayTokenLimit)}`
+      ? `${formatCompact(dayTokensUsed)} / ${formatCompact(dayTokenLimit)} · ${dailyResetText}`
       : `${formatCompact(dayTokensUsed)} · 不限`;
+  const reqCaption =
+    dayReqLimit > 0
+      ? `${dayReqUsed} / ${dayReqLimit} 次 · ${dailyResetText}`
+      : `${dayReqUsed} 次 · 不限`;
 
   return (
     <div className="mt-6 space-y-5">
@@ -136,11 +229,56 @@ function Dashboard({
         limit={dayTokenLimit}
         caption={tokenCaption}
       />
+      <QuotaMeter
+        label="今日请求"
+        used={dayReqUsed}
+        limit={dayReqLimit}
+        caption={reqCaption}
+      />
+
+      {/* 近 7 日成本趋势 (§7.3D) — ¥ over time, 大众-visible. Hidden when the whole
+          window had no spend (a flat zero trend tells the user nothing). */}
+      {summary.recent_daily_cost.some((p) => p.cost_total > 0) && (
+        <CostTrend points={summary.recent_daily_cost} cnyPerUsd={cnyPerUsd} />
+      )}
+
+      {/* 本月各角色花销 (§7.3D, 团队工资单 by role) — ¥ is 大众-visible (§7.1),
+          so this lands for everyone, not just Power. Empty until the month has spend. */}
+      {summary.month_by_role.length > 0 && (
+        <RolePayroll lines={summary.month_by_role} cnyPerUsd={cnyPerUsd} />
+      )}
 
       {/* 明细 default-collapses; the global 用量明细 switch above reveals it (§7.1). */}
       {showDetail && <UsageDetail summary={summary} cnyPerUsd={cnyPerUsd} />}
     </div>
   );
+}
+
+/**
+ * Reset captions for the quota meters, derived from the backend's UTC window
+ * boundaries (usage.py / quota.py) and rendered in the user's LOCAL time.
+ *
+ * Daily windows reset at the next UTC midnight, the monthly window at the next UTC
+ * month start — both the same instant-of-day in local time (the UTC offset). So the
+ * daily caption is that recurring local time and the monthly caption is the local
+ * date + that time. Building the date from the UTC boundary (not a local-midnight
+ * `new Date(y, m+1, 1)`) is what fixes the prior reset label drifting by the offset
+ * (per-user timezone windows are a later backend refinement).
+ */
+function resetTexts(): { dailyResetText: string; monthlyResetText: string } {
+  const now = new Date();
+  const dailyReset = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1),
+  );
+  const monthlyReset = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+  );
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hhmm = `${pad(dailyReset.getHours())}:${pad(dailyReset.getMinutes())}`;
+  return {
+    dailyResetText: `每日 ${hhmm} 重置`,
+    monthlyResetText: `${monthlyReset.getMonth() + 1} 月 ${monthlyReset.getDate()} 日 ${hhmm} 重置`,
+  };
 }
 
 /** A semantic quota bar: % filled, amber past 80%, no bar when unlimited (§7.3D). */
@@ -176,6 +314,117 @@ function QuotaMeter({
         )}
       </div>
       <p className="mt-1 text-xs text-muted-foreground">{caption}</p>
+    </div>
+  );
+}
+
+/** Zh weekday for an ISO UTC date — read in UTC so the label matches the day key
+ * (the backend buckets by UTC calendar day), tz-offset-proof. */
+function weekdayLabel(isoDate: string): string {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  return `周${["日", "一", "二", "三", "四", "五", "六"][d.getUTCDay()]}`;
+}
+
+/**
+ * 近 7 日成本趋势 (§7.3D) — a compact daily-spend bar sparkline. Bars scale to the
+ * window's max day; ¥ per day on hover. Money over time is 大众-visible (§7.1).
+ */
+function CostTrend({
+  points,
+  cnyPerUsd,
+}: {
+  points: Summary["recent_daily_cost"];
+  cnyPerUsd: number;
+}) {
+  const max = points.reduce((m, p) => Math.max(m, p.cost_total), 0);
+  const total = points.reduce((s, p) => s + p.cost_total, 0);
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <p className="text-sm text-foreground">近 7 日成本</p>
+        <span className="text-xs text-muted-foreground">
+          合计 {formatCost(total, cnyPerUsd)}
+        </span>
+      </div>
+      <div className="mt-3 flex h-16 items-end gap-1.5">
+        {points.map((p) => {
+          // Min 2% so a zero / tiny day still shows a sliver baseline.
+          const h = max > 0 ? Math.max((p.cost_total / max) * 100, 2) : 2;
+          return (
+            <div
+              key={p.date}
+              className="flex flex-1 flex-col items-center gap-1"
+              title={`${weekdayLabel(p.date)} · ${formatCost(p.cost_total, cnyPerUsd)}`}
+            >
+              <div className="flex w-full flex-1 items-end">
+                <div
+                  className="w-full rounded-full bg-primary"
+                  style={{ height: `${h}%` }}
+                />
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {weekdayLabel(p.date)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Ledger system roles → 大众-facing zh labels. Unknown roles fall back to raw. */
+const ROLE_LABELS: Record<string, string> = {
+  captain: "CEO",
+  member: "队员",
+  synthesis: "汇总",
+  arena: "辩论",
+  title: "标题生成",
+  memory: "记忆整理",
+};
+
+function roleLabel(role: string): string {
+  return ROLE_LABELS[role] ?? role;
+}
+
+/**
+ * 本月各角色花销 (§7.3D) — the team payroll grouped by role, the multi-agent
+ * differentiator a single-agent tool can't show. ¥ per role is 大众-visible
+ * (money is never gated, §7.1); rows arrive spend-desc from the server.
+ */
+function RolePayroll({
+  lines,
+  cnyPerUsd,
+}: {
+  lines: Summary["month_by_role"];
+  cnyPerUsd: number;
+}) {
+  return (
+    <div>
+      <p className="text-sm text-foreground">本月各角色花销</p>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        多 Agent 团队按角色拆分的花销，竞品的单 Agent 做不到。
+      </p>
+      <div className="mt-3 rounded-xl border border-border bg-card">
+        {lines.map((line, i) => (
+          <div
+            key={line.role}
+            className={`flex items-center justify-between px-4 py-2.5 text-sm ${
+              i > 0 ? "border-t border-border" : ""
+            }`}
+          >
+            <span className="text-foreground">
+              {roleLabel(line.role)}
+              <span className="ml-2 text-xs text-muted-foreground">
+                {line.turns} 回合
+              </span>
+            </span>
+            <span className="tabular-nums text-foreground">
+              {formatCost(line.cost_total, cnyPerUsd)}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

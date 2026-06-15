@@ -1,6 +1,7 @@
 import {
   type OutgoingAttachment,
   describeStreamError,
+  isRetriableStreamError,
   regenerateConversation,
   streamConversation,
 } from "@/services/streamConversation";
@@ -77,11 +78,10 @@ export async function runRegenerate(
     useApprovalStore.getState().clear(conversationId);
     const msg = describeStreamError(err);
     if (msg) {
-      s.setError(
-        msg,
-        () => void runRegenerate(userMessageId, content),
-        conversationId,
-      );
+      const retry = isRetriableStreamError(err)
+        ? () => void runRegenerate(userMessageId, content)
+        : null;
+      s.setError(msg, retry, conversationId);
     }
   } finally {
     useConversationStore.getState().setAbort(null, conversationId);
@@ -168,7 +168,12 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
       s.restoreConversation(conversationId, origIndex, origUpdatedAt);
     }
     const msg = describeStreamError(err);
-    if (msg) s.setError(msg, () => void sendTurn(spec), conversationId);
+    if (msg) {
+      const retry = isRetriableStreamError(err)
+        ? () => void sendTurn(spec)
+        : null;
+      s.setError(msg, retry, conversationId);
+    }
   } finally {
     useConversationStore.getState().setAbort(null, conversationId);
   }

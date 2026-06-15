@@ -153,7 +153,11 @@ def build_local_workspace(
         ),
         root_id=binding.root_id,
     )
-    return LocalWorkspace(channel, root_label=binding.root_label)
+    return LocalWorkspace(
+        channel,
+        root_label=binding.root_label,
+        execute_timeout_slack=settings.workspace_execute_timeout_slack_seconds,
+    )
 
 
 def resolve_local_binding(

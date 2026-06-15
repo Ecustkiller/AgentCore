@@ -1,0 +1,6215 @@
+{
+  "components": {
+    "schemas": {
+      "AgentCostLine": {
+        "description": "One participant's row in the team payroll (one Run = one Agent).",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/CostBreakdown"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageBreakdown"
+          }
+        },
+        "required": [
+          "run_id",
+          "agent_id",
+          "role",
+          "model",
+          "usage",
+          "cost",
+          "duration_ms"
+        ],
+        "title": "AgentCostLine",
+        "type": "object"
+      },
+      "ApplyHandoffRequest": {
+        "description": "Apply selected result changes from a finished handoff back to local files.\n\n``selections`` carries one entry per file the user decided on; files not listed\nare left untouched locally. The apply streams SSE (it drives WRITE_BYTES / DELETE\nops the bound desktop fulfils) and ends with a ``handoff_apply_done`` event.",
+        "properties": {
+          "selections": {
+            "items": {
+              "$ref": "#/components/schemas/HandoffApplySelection"
+            },
+            "title": "Selections",
+            "type": "array"
+          }
+        },
+        "required": [
+          "selections"
+        ],
+        "title": "ApplyHandoffRequest",
+        "type": "object"
+      },
+      "ApprovalDecision": {
+        "description": "How the user (or a timeout) settled a tool-approval request.",
+        "enum": [
+          "approve",
+          "approve_always",
+          "deny"
+        ],
+        "title": "ApprovalDecision",
+        "type": "string"
+      },
+      "BindLocalWorkspaceRequest": {
+        "description": "Bind a conversation's workspace to a desktop FS root (switch to local mode).\n\n``root_id`` is the desktop-minted handle for an authorized local directory\n(from the desktop ``addRoot`` flow). Binding writes at the governing scope: the\nfolder for a foldered conversation (shared by its siblings), the conversation\nitself when ungrouped.",
+        "properties": {
+          "root_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Root Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "root_id"
+        ],
+        "title": "BindLocalWorkspaceRequest",
+        "type": "object"
+      },
+      "BlockListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BlockedUser"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "BlockListResponse",
+        "type": "object"
+      },
+      "BlockUserRequest": {
+        "properties": {
+          "user_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "BlockUserRequest",
+        "type": "object"
+      },
+      "BlockedUser": {
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name"
+        ],
+        "title": "BlockedUser",
+        "type": "object"
+      },
+      "ChatListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ChatSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "ChatListResponse",
+        "type": "object"
+      },
+      "ChatMessageDetail": {
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAttachment"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
+          "chat_id": {
+            "title": "Chat Id",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "content_type": {
+            "enum": [
+              "text",
+              "image",
+              "file",
+              "system_card"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "reply_to_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply To Message Id"
+          },
+          "sender_type": {
+            "enum": [
+              "user",
+              "official",
+              "agent"
+            ],
+            "title": "Sender Type",
+            "type": "string"
+          },
+          "sender_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender User Id"
+          }
+        },
+        "required": [
+          "id",
+          "chat_id",
+          "sender_user_id",
+          "sender_type",
+          "content",
+          "content_type",
+          "created_at"
+        ],
+        "title": "ChatMessageDetail",
+        "type": "object"
+      },
+      "ChatMessageListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageDetail"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "ChatMessageListResponse",
+        "type": "object"
+      },
+      "ChatParticipant": {
+        "description": "A human shown on a chat (the peer of a dm; members of a group).",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name"
+        ],
+        "title": "ChatParticipant",
+        "type": "object"
+      },
+      "ChatSummary": {
+        "description": "One row in the IM chat list (消息页左栏), plus this user's per-chat state.",
+        "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_message_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message At"
+          },
+          "last_message_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message Preview"
+          },
+          "muted": {
+            "default": false,
+            "title": "Muted",
+            "type": "boolean"
+          },
+          "peer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatParticipant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pinned": {
+            "default": false,
+            "title": "Pinned",
+            "type": "boolean"
+          },
+          "state": {
+            "default": "accepted",
+            "enum": [
+              "accepted",
+              "pending"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "type": {
+            "enum": [
+              "dm",
+              "group",
+              "official"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "unread": {
+            "default": 0,
+            "title": "Unread",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "title": "ChatSummary",
+        "type": "object"
+      },
+      "Citation": {
+        "description": "A web source consulted for an assistant message (source-card data).",
+        "properties": {
+          "site": {
+            "default": "",
+            "title": "Site",
+            "type": "string"
+          },
+          "snippet": {
+            "default": "",
+            "title": "Snippet",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "Citation",
+        "type": "object"
+      },
+      "CloneRepoRequest": {
+        "description": "Clone a public git repository into the conversation's workspace.",
+        "properties": {
+          "dest": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dest"
+          },
+          "repo_url": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Repo Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repo_url"
+        ],
+        "title": "CloneRepoRequest",
+        "type": "object"
+      },
+      "CloneRepoResponse": {
+        "description": "Result of a workspace clone — the relative dir the repo landed in.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "CloneRepoResponse",
+        "type": "object"
+      },
+      "ConversationCost": {
+        "description": "A conversation's cumulative spend (``GET /conversations/{id}/cost``).",
+        "properties": {
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/CostBreakdown"
+          },
+          "turns": {
+            "title": "Turns",
+            "type": "integer"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageBreakdown"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "usage",
+          "cost",
+          "turns"
+        ],
+        "title": "ConversationCost",
+        "type": "object"
+      },
+      "ConversationListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "ConversationListResponse",
+        "type": "object"
+      },
+      "ConversationSummary": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "local_root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Root Id"
+          },
+          "message_count": {
+            "default": 0,
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "updated_at",
+          "created_at"
+        ],
+        "title": "ConversationSummary",
+        "type": "object"
+      },
+      "CostBreakdown": {
+        "description": "A run's / turn's / window's cost in integer nano-USD (canonical).",
+        "properties": {
+          "cached": {
+            "title": "Cached",
+            "type": "integer"
+          },
+          "cny_total": {
+            "title": "Cny Total",
+            "type": "number"
+          },
+          "currency": {
+            "default": "USD",
+            "title": "Currency",
+            "type": "string"
+          },
+          "input": {
+            "title": "Input",
+            "type": "integer"
+          },
+          "output": {
+            "title": "Output",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input",
+          "cached",
+          "output",
+          "total",
+          "cny_total"
+        ],
+        "title": "CostBreakdown",
+        "type": "object"
+      },
+      "CreateConversationRequest": {
+        "properties": {
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "CreateConversationRequest",
+        "type": "object"
+      },
+      "CreateDirRequest": {
+        "description": "Create a workspace directory (workspace-relative, parents created).",
+        "properties": {
+          "path": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "CreateDirRequest",
+        "type": "object"
+      },
+      "CreateFolderRequest": {
+        "properties": {
+          "local_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Dir"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateFolderRequest",
+        "type": "object"
+      },
+      "CreateInviteRequest": {
+        "properties": {
+          "expires_in_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Days"
+          }
+        },
+        "title": "CreateInviteRequest",
+        "type": "object"
+      },
+      "CreateSnapshotRequest": {
+        "description": "Take a manual snapshot of a conversation's workspace.\n\nA non-empty ``label`` marks a kept version (手动留版本) — a name the user\npins — vs. the automatic post-turn backups.",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "title": "CreateSnapshotRequest",
+        "type": "object"
+      },
+      "DailyCost": {
+        "description": "One UTC day's total spend — a point in the dashboard 7-day trend (§7.3D).",
+        "properties": {
+          "cost_total": {
+            "title": "Cost Total",
+            "type": "integer"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "cost_total"
+        ],
+        "title": "DailyCost",
+        "type": "object"
+      },
+      "DirectorySettings": {
+        "description": "A user's discoverability + who-can-DM privacy (任意搜人 护栏).",
+        "properties": {
+          "discoverable": {
+            "default": true,
+            "title": "Discoverable",
+            "type": "boolean"
+          },
+          "who_can_dm": {
+            "default": "anyone",
+            "enum": [
+              "anyone",
+              "contacts"
+            ],
+            "title": "Who Can Dm",
+            "type": "string"
+          }
+        },
+        "title": "DirectorySettings",
+        "type": "object"
+      },
+      "DispatchHandoffRequest": {
+        "description": "Hand a task off to a cloud team seeded from the local workspace snapshot.",
+        "properties": {
+          "task": {
+            "title": "Task",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task"
+        ],
+        "title": "DispatchHandoffRequest",
+        "type": "object"
+      },
+      "FolderGroup": {
+        "description": "A folder plus the conversations it holds (grouped sidebar payload).",
+        "properties": {
+          "conversations": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationSummary"
+            },
+            "title": "Conversations",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "local_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Dir"
+          },
+          "local_root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Root Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "local_dir",
+          "conversations"
+        ],
+        "title": "FolderGroup",
+        "type": "object"
+      },
+      "FolderSummary": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "local_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Dir"
+          },
+          "local_root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Root Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "local_dir",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "FolderSummary",
+        "type": "object"
+      },
+      "GroupedConversationsResponse": {
+        "properties": {
+          "folders": {
+            "items": {
+              "$ref": "#/components/schemas/FolderGroup"
+            },
+            "title": "Folders",
+            "type": "array"
+          },
+          "ungrouped": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationSummary"
+            },
+            "title": "Ungrouped",
+            "type": "array"
+          }
+        },
+        "required": [
+          "folders",
+          "ungrouped"
+        ],
+        "title": "GroupedConversationsResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HandoffApplySelection": {
+        "description": "One file's apply decision in a handoff PR review (双模式工作区 P2e / e3).\n\n``decision`` is ``cloud`` (take the team's version) or ``local`` (keep the\nuser's). ``local_sha`` is the hash the desktop currently sees for the file — the\nthird input to the server's authoritative three-way conflict check (null when\nthe file is absent locally). ``force`` applies the cloud version even when the\nserver judges a conflict (the user's explicit override after seeing it flagged).",
+        "properties": {
+          "decision": {
+            "default": "cloud",
+            "enum": [
+              "cloud",
+              "local"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "local_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Sha"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "HandoffApplySelection",
+        "type": "object"
+      },
+      "HandoffDiffResponse": {
+        "description": "A finished handoff's result diff: the change set to apply back to local files.\n\n``data`` is the per-file change set (sorted by path); ``added`` / ``modified`` /\n``deleted`` are counts for the PR-card header.",
+        "properties": {
+          "added": {
+            "title": "Added",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/HandoffFileChange"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "deleted": {
+            "title": "Deleted",
+            "type": "integer"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "modified": {
+            "title": "Modified",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "data",
+          "total",
+          "added",
+          "modified",
+          "deleted"
+        ],
+        "title": "HandoffDiffResponse",
+        "type": "object"
+      },
+      "HandoffFileChange": {
+        "description": "One file's base→result delta in a finished handoff (双模式工作区 P2e / e3).\n\n``base_sha`` / ``result_sha`` are sha256 hex on each side (null when absent:\nbase for an add, result for a delete). ``content`` is the result's UTF-8 text\nfor an add/modify (null for a delete, or for a binary result — ``is_binary``\nflags the latter, fetched via snapshot download). The desktop hashes its current\nlocal copy and three-way-classifies each entry against ``base_sha`` before\napplying (clean / already-applied / conflict).",
+        "properties": {
+          "base_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Sha"
+          },
+          "change_type": {
+            "enum": [
+              "added",
+              "modified",
+              "deleted"
+            ],
+            "title": "Change Type",
+            "type": "string"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "is_binary": {
+            "title": "Is Binary",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "result_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Sha"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "change_type",
+          "base_sha",
+          "result_sha",
+          "is_binary",
+          "content",
+          "size_bytes"
+        ],
+        "title": "HandoffFileChange",
+        "type": "object"
+      },
+      "HandoffJobListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/HandoffJobSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "HandoffJobListResponse",
+        "type": "object"
+      },
+      "HandoffJobSummary": {
+        "description": "One local→云 handoff job: its lifecycle + the snapshots bracketing it.\n\n``base_snapshot_id`` is the user's local files the cloud team ran on (the e3\ndiff base, under the source conversation's storage key); ``result_snapshot_id``\nis the team's output (under the hidden job conversation's key), NULL until the\nrun succeeds. ``job_conversation_id`` hosts the team's replayable graph.",
+        "properties": {
+          "base_snapshot_id": {
+            "title": "Base Snapshot Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "job_conversation_id": {
+            "title": "Job Conversation Id",
+            "type": "string"
+          },
+          "result_snapshot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Snapshot Id"
+          },
+          "source_conversation_id": {
+            "title": "Source Conversation Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task": {
+            "title": "Task",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source_conversation_id",
+          "job_conversation_id",
+          "base_snapshot_id",
+          "result_snapshot_id",
+          "task",
+          "status",
+          "error",
+          "created_at",
+          "updated_at",
+          "finished_at"
+        ],
+        "title": "HandoffJobSummary",
+        "type": "object"
+      },
+      "InviteListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/InviteResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "InviteListResponse",
+        "type": "object"
+      },
+      "InviteResponse": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "used",
+              "expired"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used At"
+          },
+          "used_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used By"
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "status",
+          "created_by",
+          "used_by",
+          "created_at",
+          "expires_at",
+          "used_at"
+        ],
+        "title": "InviteResponse",
+        "type": "object"
+      },
+      "LoginRequest": {
+        "properties": {
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest",
+        "type": "object"
+      },
+      "MarkReadRequest": {
+        "description": "Advance this user's read cursor (drives unread counts + read receipts).",
+        "properties": {
+          "last_read_message_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Last Read Message Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "last_read_message_id"
+        ],
+        "title": "MarkReadRequest",
+        "type": "object"
+      },
+      "MessageAttachment": {
+        "description": "A file the user referenced (@-mention or paperclip) as message context.\n\nText is extracted client-side from an authorized local root; this MVP carries\nonly text-extractable files (images are out of scope until a vision model).",
+        "properties": {
+          "kind": {
+            "default": "file",
+            "enum": [
+              "file",
+              "dir"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 4000,
+            "title": "Path",
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 300000,
+            "title": "Text",
+            "type": "string"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "text"
+        ],
+        "title": "MessageAttachment",
+        "type": "object"
+      },
+      "MessageDetail": {
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAttachment"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "reasoning_content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Content"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "runs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunsPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "role",
+          "content",
+          "created_at"
+        ],
+        "title": "MessageDetail",
+        "type": "object"
+      },
+      "MessageListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/MessageDetail"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "MessageListResponse",
+        "type": "object"
+      },
+      "MoveConversationRequest": {
+        "description": "Move a conversation into a folder, or out of one with ``folder_id=null``.",
+        "properties": {
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          }
+        },
+        "title": "MoveConversationRequest",
+        "type": "object"
+      },
+      "MoveFileRequest": {
+        "description": "Move/rename a workspace file or directory (both workspace-relative).",
+        "properties": {
+          "dst": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Dst",
+            "type": "string"
+          },
+          "src": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Src",
+            "type": "string"
+          }
+        },
+        "required": [
+          "src",
+          "dst"
+        ],
+        "title": "MoveFileRequest",
+        "type": "object"
+      },
+      "QuotaStatus": {
+        "description": "Free-tier limits (决策④); 0 = unlimited. Money is USD nano internally.",
+        "properties": {
+          "daily_requests": {
+            "title": "Daily Requests",
+            "type": "integer"
+          },
+          "daily_tokens": {
+            "title": "Daily Tokens",
+            "type": "integer"
+          },
+          "monthly_cost_nano": {
+            "title": "Monthly Cost Nano",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "daily_tokens",
+          "monthly_cost_nano",
+          "daily_requests"
+        ],
+        "title": "QuotaStatus",
+        "type": "object"
+      },
+      "RegenerateMessageRequest": {
+        "description": "Re-run a turn from an existing user message.\n\nThe path's ``message_id`` must be a user message. When ``content`` is set the\nuser message is edited in place first (edit-and-resend); otherwise the stored\ntext is reused as-is (plain regenerate). Either way, every message after that\nuser turn is dropped and the assistant reply is produced anew.",
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "maxLength": 32000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          }
+        },
+        "title": "RegenerateMessageRequest",
+        "type": "object"
+      },
+      "RegisterRequest": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "invite_code": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Invite Code",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 256,
+            "minLength": 8,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 100,
+            "minLength": 3,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password",
+          "invite_code"
+        ],
+        "title": "RegisterRequest",
+        "type": "object"
+      },
+      "ResolveApprovalRequest": {
+        "description": "Settle a paused GRANTABLE tool call (tool approval gate).\n\n``decision`` is one of ``approve`` (allow this one call), ``approve_always``\n(allow this tool for the rest of the turn), or ``deny`` (refuse).",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ApprovalDecision"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ResolveApprovalRequest",
+        "type": "object"
+      },
+      "ResolveWorkspaceOpRequest": {
+        "description": "Deliver a desktop's result for a paused local-workspace op.\n\n``ok`` true → ``value`` is the op's result (op-specific: file text, a\ndirectory listing, a grep result, …; bytes are base64). ``ok`` false →\n``error`` describes the typed failure to re-raise. The pending op (awaiting in\nthe live SSE turn) resumes with this envelope.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceOpError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "ResolveWorkspaceOpRequest",
+        "type": "object"
+      },
+      "RoleCostLine": {
+        "description": "One role's spend over a window — the team payroll grouped by role.\n\nThe account dashboard's product differentiator (§7.3D): multi-agent spend\nsplits by the ledger ``role`` (CEO / 队员 / 汇总 / …), which a single-agent\ncompetitor can't show. Money is integer nano-USD; the client formats ¥ from\nthe summary's single ``cny_per_usd`` (no per-row re-pricing here).",
+        "properties": {
+          "cost_total": {
+            "title": "Cost Total",
+            "type": "integer"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "turns": {
+            "title": "Turns",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "role",
+          "cost_total",
+          "turns"
+        ],
+        "title": "RoleCostLine",
+        "type": "object"
+      },
+      "RunsPayload": {
+        "description": "Persisted multi-agent execution journal for an assistant message.\n\n``events`` is the turn's ordered run/tool SSE events; the client replays them\nthrough the same fold as the live stream to reproduce the team graph exactly\non reload. ``null`` on messages with no delegation (user / single-agent).",
+        "properties": {
+          "events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finish Reason"
+          }
+        },
+        "title": "RunsPayload",
+        "type": "object"
+      },
+      "SendChatMessageRequest": {
+        "properties": {
+          "client_msg_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Msg Id"
+          },
+          "content": {
+            "maxLength": 32000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "reply_to_message_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply To Message Id"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "SendChatMessageRequest",
+        "type": "object"
+      },
+      "SendMessageRequest": {
+        "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/MessageAttachment"
+            },
+            "maxItems": 20,
+            "title": "Attachments",
+            "type": "array"
+          },
+          "content": {
+            "maxLength": 32000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "SendMessageRequest",
+        "type": "object"
+      },
+      "SnapshotListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SnapshotSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "SnapshotListResponse",
+        "type": "object"
+      },
+      "SnapshotSummary": {
+        "description": "One persisted workspace snapshot (kept version or automatic backup).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "snapshot_id": {
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "label",
+          "created_at",
+          "size_bytes"
+        ],
+        "title": "SnapshotSummary",
+        "type": "object"
+      },
+      "StartDmRequest": {
+        "description": "Open (or reuse) a 1:1 chat with another user (by their user id).",
+        "properties": {
+          "user_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "StartDmRequest",
+        "type": "object"
+      },
+      "StatusResponse": {
+        "properties": {
+          "status": {
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "StatusResponse",
+        "type": "object"
+      },
+      "StoredAttachment": {
+        "description": "Persisted attachment display metadata (no extracted text).\n\n``workspace_path`` is set when the attachment was written into the durable\nproject space (附件驻留): a workspace-relative path under ``attachments/`` that\nthe file-download API can serve. ``None`` for directory listings (nothing is\nwritten to disk) and for legacy rows created before residency.",
+        "properties": {
+          "kind": {
+            "default": "file",
+            "enum": [
+              "file",
+              "dir"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "workspace_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Path"
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "title": "StoredAttachment",
+        "type": "object"
+      },
+      "ToolApproval": {
+        "description": "Tool approval requirement levels.",
+        "enum": [
+          "never",
+          "grantable",
+          "always"
+        ],
+        "title": "ToolApproval",
+        "type": "string"
+      },
+      "ToolCategory": {
+        "enum": [
+          "filesystem",
+          "search",
+          "execution",
+          "research",
+          "orchestration"
+        ],
+        "title": "ToolCategory",
+        "type": "string"
+      },
+      "ToolInfo": {
+        "description": "A built-in tool's public catalog entry (read-only).\n\n``approval`` is the tool's governance level (``never`` / ``grantable`` /\n``always``); ``parameters`` is the JSON Schema the model fills to call it.",
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/ToolApproval"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ToolCategory"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "title": "Parameters",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "category",
+          "approval",
+          "parameters"
+        ],
+        "title": "ToolInfo",
+        "type": "object"
+      },
+      "ToolListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ToolInfo"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "ToolListResponse",
+        "type": "object"
+      },
+      "TurnCost": {
+        "description": "A turn's cost + per-Agent payroll (``GET /messages/{id}/cost``).\n\nRebuilt from the ``cost_events`` ledger by message_id, so it replays a past\nturn's payroll on reload. ``agents`` is empty when the turn has no ledger\nrows (e.g. unknown / non-owned message — never leaks existence).",
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/AgentCostLine"
+            },
+            "title": "Agents",
+            "type": "array"
+          },
+          "cost": {
+            "$ref": "#/components/schemas/CostBreakdown"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageBreakdown"
+          }
+        },
+        "required": [
+          "message_id",
+          "usage",
+          "cost",
+          "rounds",
+          "agents"
+        ],
+        "title": "TurnCost",
+        "type": "object"
+      },
+      "UpdateConversationRequest": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "UpdateConversationRequest",
+        "type": "object"
+      },
+      "UpdateDirectorySettingsRequest": {
+        "properties": {
+          "discoverable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discoverable"
+          },
+          "who_can_dm": {
+            "anyOf": [
+              {
+                "enum": [
+                  "anyone",
+                  "contacts"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Who Can Dm"
+          }
+        },
+        "title": "UpdateDirectorySettingsRequest",
+        "type": "object"
+      },
+      "UpdateFolderRequest": {
+        "properties": {
+          "local_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Dir"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "UpdateFolderRequest",
+        "type": "object"
+      },
+      "UploadFileResponse": {
+        "description": "Result of a workspace file upload.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "size_bytes"
+        ],
+        "title": "UploadFileResponse",
+        "type": "object"
+      },
+      "UsageBreakdown": {
+        "description": "Token counts (cache_hit + cache_miss == input; reasoning ⊆ output).",
+        "properties": {
+          "cache_hit": {
+            "title": "Cache Hit",
+            "type": "integer"
+          },
+          "cache_miss": {
+            "title": "Cache Miss",
+            "type": "integer"
+          },
+          "input": {
+            "title": "Input",
+            "type": "integer"
+          },
+          "output": {
+            "title": "Output",
+            "type": "integer"
+          },
+          "reasoning": {
+            "title": "Reasoning",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input",
+          "output",
+          "reasoning",
+          "cache_hit",
+          "cache_miss"
+        ],
+        "title": "UsageBreakdown",
+        "type": "object"
+      },
+      "UsageSummary": {
+        "description": "Account dashboard payload (``GET /usage/summary``).\n\nAlso carries ``cny_per_usd`` so the client formats money from a single\nserver-owned rate (it never hard-codes the FX rate).",
+        "properties": {
+          "cny_per_usd": {
+            "title": "Cny Per Usd",
+            "type": "number"
+          },
+          "month": {
+            "$ref": "#/components/schemas/UsageWindow"
+          },
+          "month_by_role": {
+            "items": {
+              "$ref": "#/components/schemas/RoleCostLine"
+            },
+            "title": "Month By Role",
+            "type": "array"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/QuotaStatus"
+          },
+          "recent_daily_cost": {
+            "items": {
+              "$ref": "#/components/schemas/DailyCost"
+            },
+            "title": "Recent Daily Cost",
+            "type": "array"
+          },
+          "today": {
+            "$ref": "#/components/schemas/UsageWindow"
+          }
+        },
+        "required": [
+          "today",
+          "month",
+          "month_by_role",
+          "recent_daily_cost",
+          "quota",
+          "cny_per_usd"
+        ],
+        "title": "UsageSummary",
+        "type": "object"
+      },
+      "UsageWindow": {
+        "description": "Aggregated usage over a time window (today / month).",
+        "properties": {
+          "cost": {
+            "$ref": "#/components/schemas/CostBreakdown"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageBreakdown"
+          }
+        },
+        "required": [
+          "usage",
+          "cost",
+          "requests"
+        ],
+        "title": "UsageWindow",
+        "type": "object"
+      },
+      "UserResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name",
+          "email",
+          "role",
+          "created_at"
+        ],
+        "title": "UserResponse",
+        "type": "object"
+      },
+      "UserSearchResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/UserSearchResult"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "UserSearchResponse",
+        "type": "object"
+      },
+      "UserSearchResult": {
+        "description": "A discoverable user surfaced by people-search (任意搜人, exact match).",
+        "properties": {
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name"
+        ],
+        "title": "UserSearchResult",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkspaceBindingResponse": {
+        "description": "A conversation's resolved workspace mode + where its binding lives.",
+        "properties": {
+          "mode": {
+            "enum": [
+              "local",
+              "cloud"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Id"
+          },
+          "scope": {
+            "enum": [
+              "folder",
+              "conversation"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "scope"
+        ],
+        "title": "WorkspaceBindingResponse",
+        "type": "object"
+      },
+      "WorkspaceFileEntry": {
+        "description": "One entry in a workspace listing — relative POSIX path + kind.",
+        "properties": {
+          "is_dir": {
+            "title": "Is Dir",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "is_dir"
+        ],
+        "title": "WorkspaceFileEntry",
+        "type": "object"
+      },
+      "WorkspaceFileListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceFileEntry"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "WorkspaceFileListResponse",
+        "type": "object"
+      },
+      "WorkspaceOpError": {
+        "description": "A typed failure from a desktop-run local-workspace op (双模式工作区 P2).\n\n``kind`` names the ``WorkspaceError`` subclass to re-raise on the server (e.g.\n``PathNotFound``, ``OutsideWorkspace``) so the file tool maps it to the same\nmessage as cloud mode; ``count`` carries the match count for ``AmbiguousMatch``\n(str_replace). An unknown ``kind`` degrades to a generic I/O error.",
+        "properties": {
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "detail": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Detail",
+            "type": "string"
+          },
+          "kind": {
+            "maxLength": 64,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "WorkspaceOpError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Multi-Agent AI Workspace API",
+    "title": "AgentCore",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/livez": {
+      "get": {
+        "description": "Liveness probe: the process is up. Deliberately checks no dependencies.",
+        "operationId": "liveness_livez_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Liveness Livez Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "description": "Readiness probe: 200 when every hard dependency is reachable, else 503.",
+        "operationId": "readiness_readyz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Readiness Readyz Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/v1/auth/invites": {
+      "get": {
+        "operationId": "list_invites_v1_auth_invites_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Invites",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "operationId": "create_invite_v1_auth_invites_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateInviteRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Invite",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "operationId": "login_v1_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "operationId": "logout_v1_auth_logout_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "refresh_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Refresh Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/me": {
+      "get": {
+        "operationId": "me_v1_auth_me_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/refresh": {
+      "post": {
+        "operationId": "refresh_v1_auth_refresh_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "refresh_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Refresh Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/register": {
+      "post": {
+        "operationId": "register_v1_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/conversations": {
+      "get": {
+        "operationId": "list_conversations_v1_conversations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Conversations",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "post": {
+        "operationId": "create_conversation_v1_conversations_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Conversation",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/grouped": {
+      "get": {
+        "description": "Folders + their conversations + the ungrouped remainder (sidebar).\n\nDeclared before ``/{conversation_id}`` so \"grouped\" isn't captured as an id.\nA conversation whose folder is missing/deleted falls back to ungrouped.",
+        "operationId": "list_conversations_grouped_v1_conversations_grouped_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupedConversationsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Conversations Grouped",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}": {
+      "delete": {
+        "operationId": "delete_conversation_v1_conversations__conversation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Conversation",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "get": {
+        "operationId": "get_conversation_v1_conversations__conversation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Conversation",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "patch": {
+        "operationId": "update_conversation_v1_conversations__conversation_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Conversation",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/approvals/{approval_id}": {
+      "post": {
+        "description": "Authorize or deny a paused GRANTABLE tool call (tool approval gate).\n\nThe pending tool call (in the live ``send_message`` SSE stream) resumes with\nthe decision. 404 if the approval is unknown, already settled, timed out, or\nbelongs to another conversation — the gate auto-denies anything left\nunanswered, so a stale prompt resolves as \"not found\".",
+        "operationId": "resolve_approval_v1_conversations__conversation_id__approvals__approval_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "title": "Approval Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Approval",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/cost": {
+      "get": {
+        "description": "A conversation's cumulative spend (对话累计 — the conversation-header chip).\n\n404 for a non-owner, consistent with the other conversation reads.",
+        "operationId": "get_conversation_cost_v1_conversations__conversation_id__cost_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationCost"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Conversation Cost",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/folder": {
+      "patch": {
+        "description": "Move a conversation into a folder, or out of one (``folder_id=null``).\n\nA non-null target must be one of the user's own live folders (else 404), so\na chat can never be filed into someone else's or a deleted folder.\n\nA conversation's workspace is fixed once it starts (双模式工作区 §九 ⑩): its\nfolder decides which workspace directory it runs in — and whether cloud or\nlocal — so moving a *started* chat across folders would silently re-point it at\na different directory and orphan its accumulated files. Such a move is refused\nwith 409; only an unsent (zero-message) chat is freely fileable. A no-op move\n(already in the target) never changes the workspace, so it is always allowed.",
+        "operationId": "move_conversation_to_folder_v1_conversations__conversation_id__folder_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Move Conversation To Folder",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/handoff/jobs": {
+      "get": {
+        "description": "A conversation's local→云 handoff jobs, newest first (双模式工作区 P2e / e2).\n\nBacks the client's job badge / PR list: poll this to learn when a dispatched\ncloud run finishes (status succeeded / failed). 404 if the conversation is not\nowned.",
+        "operationId": "list_handoff_jobs_v1_conversations__conversation_id__handoff_jobs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoffJobListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Handoff Jobs",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/handoff/jobs/{job_id}": {
+      "get": {
+        "description": "One handoff job's status + result snapshots (双模式工作区 P2e / e2).\n\n404 if the conversation is not owned, or the job is unknown / belongs to a\ndifferent source conversation.",
+        "operationId": "get_handoff_job_v1_conversations__conversation_id__handoff_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoffJobSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Handoff Job",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/handoff/jobs/{job_id}/apply": {
+      "post": {
+        "description": "Apply a finished handoff's selected changes back to the local workspace (P2e / e3).\n\nThe last leg of the 本地→云 round trip: the user's per-file decisions (take cloud /\nkeep local, with the locally-observed hash) are replayed onto their machine over\nthe channel. Streams SSE: ``workspace_op_required`` (WRITE_BYTES / DELETE) the\nbound desktop fulfils, then a ``handoff_apply_done`` with the per-file outcomes.\nThe conflict gate is server-authoritative — a file that diverged locally since the\nbase is refused (status ``conflict``) unless its selection ``force``\\s it.\n\n404 if the conversation is not owned or the job is unknown / from another source;\n409 while the job has not succeeded yet; 422 when the conversation is not in local\nmode (nothing local to apply onto).",
+        "operationId": "apply_handoff_job_v1_conversations__conversation_id__handoff_jobs__job_id__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyHandoffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Handoff Job",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/handoff/jobs/{job_id}/diff": {
+      "get": {
+        "description": "A finished handoff's result diff — the change set for the local apply (P2e / e3).\n\nCompares the team's result snapshot against the base it ran on and returns the\nper-file change set (added / modified / deleted) the desktop replays onto the\nuser's local files; each entry carries the base hash for the client's three-way\nconflict check (clean / already-applied / conflict). 404 if the conversation is\nnot owned or the job is unknown / from another source conversation; 409 while the\njob has not succeeded yet (no result to diff).",
+        "operationId": "get_handoff_job_diff_v1_conversations__conversation_id__handoff_jobs__job_id__diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoffDiffResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Handoff Job Diff",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/messages": {
+      "get": {
+        "operationId": "list_messages_v1_conversations__conversation_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Messages",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "post": {
+        "description": "Send a user message and get a streaming AI response via SSE.\n\nThe pipeline runs as a detached task feeding ``sink``; its handle is passed\nto ``sse_response`` so a client disconnect (e.g. the user hits stop) cancels\nit server-side rather than letting it run to completion unobserved.\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean 429 instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then quota.",
+        "operationId": "send_message_v1_conversations__conversation_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send Message",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/messages/{message_id}/regenerate": {
+      "post": {
+        "description": "Re-run a turn from an existing user message via SSE.\n\nServes both \"regenerate\" (no body content — reuse the stored user text) and\n\"edit & resend\" (``content`` set — edit the user message first). The target\n``message_id`` must be a user message; the superseded assistant reply and any\nlater turns are dropped before re-running. Like ``send_message``, the pipeline\nruns as a detached task so a client disconnect cancels it server-side. A\nre-run is a fresh turn, so it passes the same gates (rate limit → ownership →\nquota) as ``send_message``.",
+        "operationId": "regenerate_message_v1_conversations__conversation_id__messages__message_id__regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegenerateMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Regenerate Message",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/snapshots": {
+      "get": {
+        "description": "List the conversation's workspace snapshots (newest first).",
+        "operationId": "list_conversation_snapshots_v1_conversations__conversation_id__snapshots_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Conversation Snapshots",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "post": {
+        "description": "Take a manual snapshot of the workspace (a ``label`` keeps it as a version).",
+        "operationId": "create_conversation_snapshot_v1_conversations__conversation_id__snapshots_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Conversation Snapshot",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/snapshots/{snapshot_id}/download": {
+      "get": {
+        "description": "Download a snapshot archive (zip) of the workspace at that point in time.",
+        "operationId": "download_conversation_snapshot_v1_conversations__conversation_id__snapshots__snapshot_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Conversation Snapshot",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/snapshots/{snapshot_id}/restore": {
+      "post": {
+        "description": "Restore the workspace to a snapshot (overwrites current files).",
+        "operationId": "restore_conversation_snapshot_v1_conversations__conversation_id__snapshots__snapshot_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Conversation Snapshot",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/binding": {
+      "delete": {
+        "description": "Unbind the conversation's workspace (fall back to cloud).\n\nClears the binding at the same governing scope binding does: clearing a\n*folder* binding returns every conversation in it to cloud (it is the shared\nproject space), which the ``folder`` scope in the response signals.",
+        "operationId": "unbind_workspace_v1_conversations__conversation_id__workspace_binding_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceBindingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unbind Workspace",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "get": {
+        "description": "Report a conversation's resolved workspace mode (local vs cloud).\n\nBacks the desktop's mode badge: cloud by default, local once its governing\nscope (folder when filed, else the conversation) is bound to a desktop root.",
+        "operationId": "get_workspace_binding_v1_conversations__conversation_id__workspace_binding_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceBindingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workspace Binding",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "put": {
+        "description": "Bind the conversation's workspace to a desktop FS root (switch to local).\n\nWrites at the governing scope (§七): a filed conversation binds its *folder*\n(so every sibling switches to local against the same root), an ungrouped one\nbinds itself. Idempotent — re-binding just overwrites the stored root id.",
+        "operationId": "bind_workspace_v1_conversations__conversation_id__workspace_binding_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindLocalWorkspaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceBindingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bind Workspace",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/clone": {
+      "post": {
+        "description": "Clone a public git repository into the conversation's workspace (决策⑤).",
+        "operationId": "clone_repo_into_workspace_v1_conversations__conversation_id__workspace_clone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloneRepoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloneRepoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clone Repo Into Workspace",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/dirs": {
+      "post": {
+        "description": "Create a directory in the conversation's workspace.",
+        "operationId": "create_workspace_dir_v1_conversations__conversation_id__workspace_dirs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDirRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Workspace Dir",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/files": {
+      "get": {
+        "description": "List the files in the conversation's workspace (top level or recursive).",
+        "operationId": "list_workspace_files_v1_conversations__conversation_id__workspace_files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recursive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Recursive",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceFileListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workspace Files",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/files/{path}": {
+      "delete": {
+        "description": "Delete a file or directory from the conversation's workspace.",
+        "operationId": "delete_workspace_file_v1_conversations__conversation_id__workspace_files__path__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Workspace File",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "get": {
+        "description": "Download a single file from the conversation's workspace.",
+        "operationId": "download_workspace_file_v1_conversations__conversation_id__workspace_files__path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Workspace File",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "put": {
+        "description": "Upload (create/overwrite) a workspace file from the raw request body.\n\nThe body is the file bytes (no multipart); ``path`` is the workspace-relative\ntarget. Bounded by ``workspace_upload_max_bytes`` so one request can't exhaust\nmemory. A path that escapes the workspace is rejected (422).",
+        "operationId": "upload_workspace_file_v1_conversations__conversation_id__workspace_files__path__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadFileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Workspace File",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/handoff": {
+      "post": {
+        "description": "Snapshot a local-mode workspace to the cloud over the channel (双模式工作区 P2e / e1).\n\nLocal-mode files live on the user's machine, so the post-turn OSS backup skips\nthem; this is the explicit, on-demand 本地→云 snapshot (§四). Streams SSE: a\n``workspace_op_required`` (the ARCHIVE op) the bound desktop fulfils, then a\n``handoff_snapshot_done`` carrying the new snapshot id (it lands in the same\nsnapshot list / restore / download as cloud-mode versions). 422 when the\nconversation is not in local mode — a cloud workspace already snapshots itself,\nand there is nothing on the user's disk to fetch.",
+        "operationId": "handoff_local_workspace_v1_conversations__conversation_id__workspace_handoff_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Handoff Local Workspace",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/handoff/dispatch": {
+      "post": {
+        "description": "Hand a task off to a cloud team seeded from the local workspace (P2e / e2).\n\nThe 本地→云 交接 (§四): snapshot the user's local files, then run an Agent team on\nthat snapshot in the cloud — autonomously, in the background — so a parallel team\nis not bottlenecked by the single desktop channel. Streams SSE: a\n``workspace_op_required`` (the ARCHIVE op) the bound desktop fulfils, then a\n``handoff_job_started`` carrying the job id; the cloud run continues detached\nafter the stream closes (poll ``GET …/handoff/jobs`` for its status). 422 when\nthe conversation is not in local mode (nothing local to hand off).\n\nGated like ``send_message`` (it spends tokens): rate limit → ownership → quota.",
+        "operationId": "dispatch_handoff_job_v1_conversations__conversation_id__workspace_handoff_dispatch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchHandoffRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dispatch Handoff Job",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/move": {
+      "post": {
+        "description": "Move/rename a file or directory within the conversation's workspace.",
+        "operationId": "move_workspace_file_v1_conversations__conversation_id__workspace_move_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Move Workspace File",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/ops/{request_id}": {
+      "post": {
+        "description": "Deliver a desktop's result for a paused local-workspace op (双模式工作区 P2).\n\nThe bound desktop client ran the op (read / list / grep / …) against the real\nlocal directory and posts the structured result here; the ``LocalWorkspace``\nawaiting it in the live ``send_message`` SSE turn resumes. 404 if the request\nis unknown, already settled, timed out, or belongs to another conversation —\nthe channel fails any op left unanswered, so a stale post resolves as \"not\nfound\".",
+        "operationId": "resolve_workspace_op_v1_conversations__conversation_id__workspace_ops__request_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveWorkspaceOpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Workspace Op",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/folders": {
+      "get": {
+        "operationId": "list_folders_v1_folders_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FolderSummary"
+                  },
+                  "title": "Response List Folders V1 Folders Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Folders",
+        "tags": [
+          "folders"
+        ]
+      },
+      "post": {
+        "operationId": "create_folder_v1_folders_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Folder",
+        "tags": [
+          "folders"
+        ]
+      }
+    },
+    "/v1/folders/{folder_id}": {
+      "delete": {
+        "operationId": "delete_folder_v1_folders__folder_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "title": "Folder Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Folder",
+        "tags": [
+          "folders"
+        ]
+      },
+      "patch": {
+        "operationId": "update_folder_v1_folders__folder_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "title": "Folder Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateFolderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Folder",
+        "tags": [
+          "folders"
+        ]
+      }
+    },
+    "/v1/messages/blocks": {
+      "get": {
+        "description": "The users this user has blocked.",
+        "operationId": "list_blocks_v1_messages_blocks_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Blocks",
+        "tags": [
+          "messages"
+        ]
+      },
+      "post": {
+        "description": "Block a user (symmetric: severs DMs and hides each from the other's search).\n\n422 self-block; 404 unknown target.",
+        "operationId": "block_user_v1_messages_blocks_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlockUserRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Block User",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/blocks/{target_id}": {
+      "delete": {
+        "description": "Remove a user from the block list (idempotent).",
+        "operationId": "unblock_user_v1_messages_blocks__target_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unblock User",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats": {
+      "get": {
+        "description": "This user's chat list (recent first), with unread counts and dm peers.",
+        "operationId": "list_chats_v1_messages_chats_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Chats",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats/dm": {
+      "post": {
+        "description": "Open (or reuse) a 1:1 chat with another user (by their user id).\n\n422 self-dm; 404 unknown/disabled peer; 403 when blocked or the peer only\naccepts contacts. The peer joins as a pending message request until they reply.",
+        "operationId": "start_dm_v1_messages_chats_dm_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartDmRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Dm",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats/{chat_id}/messages": {
+      "get": {
+        "description": "A page of a chat's messages (oldest first). 404 if not a member.",
+        "operationId": "list_chat_messages_v1_messages_chats__chat_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessageListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Chat Messages",
+        "tags": [
+          "messages"
+        ]
+      },
+      "post": {
+        "description": "Send a message into a chat the user belongs to.\n\nPer-user send rate limit first (sheds a flooding account before DB work), then\nthe service gates membership (404) and dm blocks (403). Idempotent on\n``client_msg_id`` — a retry returns the already-stored message.",
+        "operationId": "send_chat_message_v1_messages_chats__chat_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendChatMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessageDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Send Chat Message",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats/{chat_id}/read": {
+      "post": {
+        "description": "Advance this user's read cursor (drives unread counts). 404 if not a member.",
+        "operationId": "mark_chat_read_v1_messages_chats__chat_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkReadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Chat Read",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/directory": {
+      "get": {
+        "description": "This user's discoverability + who-can-DM privacy (defaults when unset).",
+        "operationId": "get_directory_settings_v1_messages_directory_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectorySettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Directory Settings",
+        "tags": [
+          "messages"
+        ]
+      },
+      "patch": {
+        "description": "Patch privacy settings; an omitted/null field is left unchanged.",
+        "operationId": "update_directory_settings_v1_messages_directory_patch",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDirectorySettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectorySettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Directory Settings",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/users/search": {
+      "get": {
+        "description": "Exact-match people-search for starting a chat (任意搜人 + 可见性护栏).\n\nReturns at most ``limit`` discoverable users; self, blocked pairs, and users\nwho opted out of discovery are filtered out by the service.",
+        "operationId": "search_users_v1_messages_users_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Users",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/{message_id}/cost": {
+      "get": {
+        "description": "The team payroll for one assistant turn (per-Agent cost + the turn total).\n\nRebuilt from the ledger by ``message_id`` (scoped to the caller), so a past\nturn's payroll replays on reload. An unknown / non-owned message yields zeros\n+ an empty roster rather than 404 — it never leaks whether the id exists.",
+        "operationId": "get_message_cost_v1_messages__message_id__cost_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnCost"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Message Cost",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/realtime": {
+      "get": {
+        "description": "Open this user's realtime firehose (server→client SSE).\n\nSubscribes the connection to the in-process hub; a new message in any chat the\nuser belongs to arrives as a ``chat_message`` event. Heartbeat comments keep\nthe stream warm, and the subscription is released when the client disconnects.",
+        "operationId": "realtime_firehose_v1_realtime_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Realtime Firehose",
+        "tags": [
+          "realtime"
+        ]
+      }
+    },
+    "/v1/tools": {
+      "get": {
+        "description": "List the platform's built-in tools (name, description, category, approval).\n\nSerializes the same registry the chat pipeline equips workers with, minus the\nCEO-only ``delegate`` primitive. The catalog is static platform metadata (not\nuser-scoped); auth is required only to match the app's authenticated posture.",
+        "operationId": "list_tools_v1_tools_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tools",
+        "tags": [
+          "tools"
+        ]
+      }
+    },
+    "/v1/usage/summary": {
+      "get": {
+        "description": "Account dashboard: today's tokens/cost, the month's cost + per-role payroll,\nthe recent daily-cost trend, and the quota.\n\nWindows are bounded at the current UTC day / month start (MVP — a per-user\ntimezone is a later refinement). ``month_by_role`` splits this month's spend by\nrole (团队工资单, spend-desc) — the multi-agent differentiator;\n``recent_daily_cost`` is the last ``_TREND_DAYS`` UTC days (zero-filled,\noldest-first) for the sparkline. Also carries ``cny_per_usd`` so the client\nformats money from the single server-owned rate.",
+        "operationId": "get_usage_summary_v1_usage_summary_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Usage Summary",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/version": {
+      "get": {
+        "description": "Build provenance for traceability: semantic version + git SHA + build time.",
+        "operationId": "version_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Version Version Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Version",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  }
+}

@@ -29,11 +29,13 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory, new_id
 from agentcore.llm.config import agent_profile, apply_overrides
 from agentcore.llm.deepseek import DeepSeekProvider
+from agentcore.runtime.citations import merge_citations
 from agentcore.runtime.events import EventSink, run_plan, run_progress
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
+    from agentcore.runtime.approvals import ApprovalGate
     from agentcore.runtime.costing import RunCost
 
 logger = get_logger(__name__)
@@ -50,7 +52,11 @@ _DELEGATE_DESCRIPTION = (
     "声明 depends_on（引用其它任务的 id）=按依赖图分波执行，上游产出会自动注入"
     "下游。\n"
     "适用：需要多视角并行调研/对比、多阶段流水线（设计→实现→测试）、需要交叉"
-    "审阅的复杂任务。普通问答/闲聊/单点搜索等简单请求不要委派，直接自己回答。\n"
+    "审阅的复杂任务；以及任何会产出或改动产物的工作（写/改文件、删除/移动、运行"
+    "代码）——这些工具只有 worker 持有，必须经本工具交给 worker 执行，哪怕只派一个。"
+    "普通问答/闲聊/单点检索等简单请求不要委派，直接自己回答。\n"
+    "若某个子任务本身还很复杂、需要它自己再带一支小队，可给该任务设 can_delegate=true，"
+    "允许这名 worker 再向下委派一层（最多一层，其子成员不能继续委派）；非必要不要开。\n"
     "重要：本工具不会替你回复用户。团队产出会作为结果回到你这里；用户可在界面"
     "查看每个成员的完整产出，因此你只需用自己的声音写一段简短概览（综述关键结论、"
     "串起整体、指引用户去看细节），不要逐字复述全文；可在看到结果后再次调用本工具"
@@ -73,8 +79,9 @@ _DELEGATE_PARAMETERS = {
                     "task": {
                         "type": "string",
                         "description": (
-                            "交给该 worker 的子任务，须完整自包含"
-                            "（worker 看不到完整对话，只收到这段）。"
+                            "交给该 worker 的子任务。worker 会另外收到「原始用户请求」，"
+                            "但看不到完整对话历史、也看不到你的思考；因此这里要把完成该"
+                            "任务所需、原始请求之外的上下文写全，做到自包含。"
                         ),
                     },
                     "objective": {
@@ -114,11 +121,20 @@ _DELEGATE_PARAMETERS = {
                         "enum": ["pass_through", "summarize"],
                         "description": "可选：该产出注入下游时是原样还是摘要，默认原样。",
                     },
+                    "can_delegate": {
+                        "type": "boolean",
+                        "description": (
+                            "可选：是否允许该 worker 自己再向下委派一层子团队（默认否）。"
+                            "仅当这个子任务本身复杂到还需二次拆分时才开；最多再嵌套一层，"
+                            "其子成员不能继续委派。简单子任务不要开。"
+                        ),
+                    },
                     "contract": {
                         "type": "object",
                         "description": (
                             "可选：对该 worker 产出的质量要求（机械校验）。不达标会带着"
-                            "具体差距自动返工一次；默认仅标记提醒，strict=true 则必须达标。"
+                            "具体差距自动返工一次；返工后仍不达标时，默认仅附质检提醒"
+                            "（软），strict=true 则判该 worker 失败（硬退）。"
                         ),
                         "properties": {
                             "required_sections": {
@@ -147,7 +163,9 @@ _DELEGATE_PARAMETERS = {
                             "strict": {
                                 "type": "boolean",
                                 "description": (
-                                    "true=不达标必须返工（硬）；false=仅提醒（软，默认）。"
+                                    "决定返工后仍不达标时的处置（返工一次与本字段无关、"
+                                    "总会先发生）：true=判该 worker 失败（硬退）；"
+                                    "false=仍接受产出、仅附质检提醒（软，默认）。"
                                 ),
                             },
                         },
@@ -177,6 +195,8 @@ class DelegateTool:
         base_tool_context: ToolContext,
         max_parallel: int | None = None,
         captain_run_id: str | None = None,
+        approval_gate: ApprovalGate | None = None,
+        depth: int = 0,
     ) -> None:
         self._llm = llm
         self._sink = sink
@@ -186,10 +206,23 @@ class DelegateTool:
         self._tools = tools
         self._base_tool_context = base_tool_context
         self._max_parallel = max_parallel
+        # The CEO's per-turn approval gate, forwarded to workers ONLY in local
+        # mode (双模式工作区 P2d 执行门) so a delegated worker cannot run code or
+        # mutate files on the user's real machine without consent; None in cloud
+        # (workers stay un-gated — the server sandbox is isolated). See execute().
+        self._approval_gate = approval_gate
         # The delegating CEO's synthetic root run id, so every member's ledger row
         # points its ``parent_run_id`` at the captain and the turn's run tree is
         # reconstructable. None when the tool runs standalone (e.g. tests).
         self._captain_run_id = captain_run_id
+        # This captain's own depth in the turn's Run tree (CEO = 0). Workers this
+        # tool spawns are minted at ``depth + 1``; a worker that itself re-delegates
+        # gets a child tool seeded with its own depth (阶段2 嵌套子任务).
+        self._depth = depth
+        # Child delegate tools minted for re-delegating workers this turn (one per
+        # nesting worker). Their sub-team usage + cost rows are folded back into
+        # this tool's totals after each call — see _absorb_children.
+        self._children: list[DelegateTool] = []
         # Run-id namespacing across multiple delegate calls in one turn, so an
         # adaptive captain's second batch never collides with the first.
         self._calls = 0
@@ -208,6 +241,12 @@ class DelegateTool:
         # turn (决策②: one row per worker run). The pipeline reads this, appends
         # the captain root row, and hands the lot to the service for 落账.
         self.run_ledger: list[RunCost] = []
+        # Web sources the workers consulted, accumulated (de-duped, capped) across
+        # every delegate call this turn. The pipeline folds these into the turn's
+        # shared source card so the user sees the WHOLE team's research, not just
+        # the CEO's own searches. Only COMPLETED runs contribute (a hard-failed
+        # worker's output is discarded, so its sources don't back the answer).
+        self.citations: list[dict[str, Any]] = []
 
     @property
     def schema(self) -> ToolSchema:
@@ -239,7 +278,16 @@ class DelegateTool:
         valid_tools = {s.name for s in self._tools.list_all()}
         self._calls += 1
         prefix = f"del{self._calls}_{int(time.time() * 1000)}"
-        plan, errors = build_run_plan(tasks_raw, valid_tools=valid_tools, id_prefix=prefix)
+        # Stamp every worker with its place in the turn's Run tree: parented to this
+        # captain, one level deeper than this tool (CEO=0 → workers depth 1; a
+        # re-delegating worker's child tool → its sub-workers depth 2).
+        plan, errors = build_run_plan(
+            tasks_raw,
+            valid_tools=valid_tools,
+            id_prefix=prefix,
+            parent_run_id=self._captain_run_id,
+            depth=self._depth + 1,
+        )
         if errors:
             msg = "委派任务无效：" + "；".join(errors)
             logger.info("delegate_rejected", errors=errors)
@@ -248,6 +296,16 @@ class DelegateTool:
         execution_id = self._base_tool_context.execution_id or new_id()
         self._sink.emit(self._plan_event(execution_id, plan))
         logger.info("delegate_started", nodes=len(plan.nodes), call=self._calls)
+
+        # Gate workers' machine-touching tools ONLY when the workspace is local —
+        # then a worker's code_execute / file_write runs on the user's real disk
+        # and needs the same consent the CEO already gives. In cloud the backend is
+        # an isolated server sandbox, so workers stay un-gated (unchanged behavior).
+        worker_gate = (
+            self._approval_gate
+            if self._base_tool_context.backend.location == "local"
+            else None
+        )
 
         executor = build_agent_executor(
             plan=plan,
@@ -258,6 +316,10 @@ class DelegateTool:
             system_prompt=self._system_prompt,
             user_message=self._user_message,
             execution_id=execution_id,
+            approval_gate=worker_gate,
+            # Lets a worker that opted in (can_delegate) lead one nested sub-team;
+            # the executor enforces the depth cap, so this is inert below it.
+            delegate_factory=self._make_child,
         )
 
         total = len(plan.nodes)
@@ -272,6 +334,8 @@ class DelegateTool:
 
         call_usage = self._accumulate_usage(results)
         self._collect_ledger(plan, results)
+        self._collect_citations(results)
+        self._absorb_children()
         output = self._format_for_ceo(plan, results)
         return ToolResult(
             tool_call_id="",
@@ -287,6 +351,50 @@ class DelegateTool:
                 "cache_miss_tokens": call_usage["cache_miss"],
             },
         )
+
+    def _make_child(self, captain_run_id: str, captain_depth: int) -> DelegateTool:
+        """Mint a delegate tool for a worker that leads one nested sub-team (阶段2).
+
+        Same wiring as this tool, re-pointed: the worker becomes the sub-team's
+        captain (``captain_run_id`` parents the sub-workers' ledger rows) and
+        ``captain_depth`` is the worker's own depth, so its sub-workers come out at
+        ``depth + 1``. Tracked in ``self._children`` so :meth:`_absorb_children`
+        folds the sub-team's usage + cost back into the turn totals.
+        """
+        child = DelegateTool(
+            llm=self._llm,
+            sink=self._sink,
+            system_prompt=self._system_prompt,
+            user_message=self._user_message,
+            history=self._history,
+            tools=self._tools,
+            base_tool_context=self._base_tool_context,
+            max_parallel=self._max_parallel,
+            captain_run_id=captain_run_id,
+            approval_gate=self._approval_gate,
+            depth=captain_depth,
+        )
+        self._children.append(child)
+        return child
+
+    def _absorb_children(self) -> None:
+        """Fold every nested sub-team spawned this call into the turn totals.
+
+        A worker that re-delegated ran its sub-team through a child tool (from
+        :meth:`_make_child`); the child accumulated its sub-workers' token usage and
+        per-run cost rows (parented to that worker). Roll them up so the top-level
+        tool the pipeline reads carries the WHOLE tree's usage + ledger. Cleared
+        after folding so an adaptive captain's next call can't double-count.
+        """
+        for child in self._children:
+            for key in self.usage:
+                self.usage[key] += child.usage[key]
+            self.run_ledger.extend(child.run_ledger)
+            # Sub-team sources roll up into this captain's card too (deduped/capped
+            # against what's already collected), so a nested worker's research is
+            # not lost at the next level up.
+            merge_citations(self.citations, child.citations)
+        self._children.clear()
 
     def _accumulate_usage(self, results: dict) -> dict[str, int]:
         """Sum this call's worker token usage and fold it into the turn total."""
@@ -314,6 +422,21 @@ class DelegateTool:
                 self.run_ledger.append(
                     member_run_cost(node, state, parent_run_id=self._captain_run_id)
                 )
+
+    def _collect_citations(self, results: dict) -> None:
+        """Fold COMPLETED workers' web sources into this call's source list.
+
+        Merged in plan order, de-duped and capped (:func:`merge_citations`), so a
+        page two workers both found collapses to one card. Only COMPLETED runs
+        contribute — a hard-failed worker's output is discarded by the CEO, so its
+        sources don't back the answer. The pipeline later merges this into the
+        turn's shared card alongside the CEO's own searches.
+        """
+        from agentcore.runtime.runs import RunPhase
+
+        for state in results.values():
+            if state and state.phase is RunPhase.COMPLETED and state.citations:
+                merge_citations(self.citations, state.citations)
 
     def _format_for_ceo(self, plan, results: dict) -> str:
         """Render the workers' products as the CEO's overview input.
@@ -346,23 +469,61 @@ class DelegateTool:
         return "\n".join(lines)
 
     def _plan_event(self, execution_id: str, plan):
-        """Pre-declare this delegate batch's roster + runs so the graph lights up."""
+        """Pre-declare this delegate batch's roster + runs so the graph lights up.
+
+        The top-level CEO batch (``depth == 0``) also declares the CAPTAIN root
+        node — the CEO chat loop itself — so the graph has a real 汇聚点 the workers
+        hang under (their ``parent_run_id`` points at it). The client dedupes it
+        across an adaptive captain's repeated batches. A nested sub-team's captain
+        is a worker that is already a node, so it is not re-declared.
+        """
         roles = list(dict.fromkeys(n.role for n in plan.nodes if n.role))
+        agents = [self._card(n) for n in plan.nodes]
+        runs = [
+            {
+                "id": n.run_id,
+                "agent_id": n.agent_id,
+                "task": n.task,
+                "depends_on": n.depends_on,
+                # 阶段2 grouping: a sub-worker carries its captain worker's run id
+                # (a real node on the graph) so the frontend groups it under that
+                # parent; a top-level worker carries the CEO captain run id — now a
+                # real CAPTAIN node (declared just below) it hangs under.
+                "parent_run_id": n.parent_run_id,
+            }
+            for n in plan.nodes
+        ]
+        if self._depth == 0 and self._captain_run_id:
+            agents.insert(0, self._captain_card())
+            runs.insert(
+                0,
+                {
+                    "id": self._captain_run_id,
+                    "agent_id": self._captain_run_id,
+                    "task": "",
+                    "depends_on": [],
+                    "parent_run_id": None,
+                    "kind": "captain",
+                },
+            )
         return run_plan(
             execution_id=execution_id,
             plan_type="multi_agent",
             task_summary=f"{len(plan.nodes)} 个 worker：{'、'.join(roles)}" if roles else "",
-            agents=[self._card(n) for n in plan.nodes],
-            runs=[
-                {
-                    "id": n.run_id,
-                    "agent_id": n.agent_id,
-                    "task": n.task,
-                    "depends_on": n.depends_on,
-                }
-                for n in plan.nodes
-            ],
+            agents=agents,
+            runs=runs,
         )
+
+    def _captain_card(self) -> dict[str, Any]:
+        """Roster card for the CEO captain root node (display only — the captain
+        runs the ``chat`` profile: thinking·high, surfaced as the 强 tier)."""
+        return {
+            "id": self._captain_run_id,
+            "role": "CEO",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        }
 
     def _card(self, node) -> dict[str, Any]:
         """Roster entry with the node's *effective* (post-clamp) thinking/effort."""

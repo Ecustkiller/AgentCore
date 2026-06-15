@@ -6,7 +6,7 @@ import {
   useExecutionStore,
 } from "@/stores/execution";
 import { Pause, Play, Radio } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const STEP_INTERVAL_MS = 450;
 
@@ -17,7 +17,7 @@ const STEP_INTERVAL_MS = 450;
  * just moving the playhead over that stream and re-projecting. Following the
  * tail (`playhead === null`) is live; any earlier index is replay.
  */
-export function Timeline() {
+export function Timeline({ autoPlay = false }: { autoPlay?: boolean } = {}) {
   // Playback targets this graph's per-message slot (§9.3), so scrubbing one
   // message's graph never moves another's playhead.
   const messageId = useExecutionScope();
@@ -49,6 +49,17 @@ export function Timeline() {
     }, STEP_INTERVAL_MS);
     return () => clearInterval(id);
   }, [playing, messageId]);
+
+  // Full-screen「回放」entry (autoPlay): rewind to the first frame and start
+  // playing once on mount. Guarded so a later manual pause never re-triggers it.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!autoPlay || autoStartedRef.current || !messageId) return;
+    if (frames.length === 0) return;
+    autoStartedRef.current = true;
+    setPlayhead(0, messageId);
+    setPlaying(true);
+  }, [autoPlay, messageId, frames.length, setPlayhead]);
 
   if (!plan || total === 0 || !messageId) return null;
 

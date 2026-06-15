@@ -9,6 +9,7 @@ import { Handle, type NodeProps, Position } from "@xyflow/react";
 import {
   Bot,
   CheckCircle2,
+  CornerDownRight,
   Loader2,
   Sparkles,
   Wrench,
@@ -40,6 +41,9 @@ interface AgentNodeData {
   costText?: string;
   /** Edge anchor orientation, driven by the active graph layout. */
   handleDirection?: "vertical" | "horizontal";
+  /** 阶段2: this run is a nested sub-worker (delegated by another worker), so the
+   * card carries a 子任务 badge to set it apart from a top-level teammate. */
+  isSubtask?: boolean;
   /** Position in the plan, used to stagger the entrance animation. */
   enterIndex?: number;
   /** Keyboard activation (Enter/Space) — mirrors a plain node click. */
@@ -102,8 +106,9 @@ export function AgentNode({ data, selected }: NodeProps) {
   const showPreview =
     (isRunning || d.status === "completed") && !!d.outputPreview;
 
-  // Tooltip facts: prefer the real metered numbers once the run finishes, fall
-  // back to the streaming estimate / tier label while it is still running.
+  // Shared facts for the card chip and the a11y label: prefer the real metered
+  // numbers once the run finishes, fall back to the streaming estimate / tier
+  // label while it is still running.
   const modelText =
     d.model ??
     (d.modelPreference ? MODEL_TIER_META[d.modelPreference].label : "—");
@@ -114,8 +119,9 @@ export function AgentNode({ data, selected }: NodeProps) {
         ? `≈${formatCompact(d.tokenCount)}`
         : "—";
   const durationText = d.durationMs ? formatDuration(d.durationMs) : null;
-  // The same facts power the screen-reader label, since the visual tooltip is
-  // aria-hidden (it is a pointer/keyboard affordance, not its own a11y node).
+  // model + duration are not drawn on the card (the tier badge and the status
+  // strip already cover them, full values live in the run detail panel) — they
+  // survive here only to feed the screen-reader label below.
   const ariaLabel = `${d.role}，${statusLabel(d.status)}，模型 ${modelText}，Token ${tokenText}${
     d.costText ? `，成本 ${d.costText}` : ""
   }${durationText ? `，用时 ${durationText}` : ""}${
@@ -136,7 +142,7 @@ export function AgentNode({ data, selected }: NodeProps) {
         className="animate-graph-node-enter"
         style={{ animationDelay: `${enterDelay}ms` }}
       >
-        {/* biome-ignore lint/a11y/useSemanticElements: a graph node is a composite (icon + multi-line text + badges + nested tooltip) that a native <button> may not contain; it is keyboard-activable via role + onKeyDown. */}
+        {/* biome-ignore lint/a11y/useSemanticElements: a graph node is a composite (icon + multi-line text + badges) that a native <button> may not contain; it is keyboard-activable via role + onKeyDown. */}
         <div
           role="button"
           tabIndex={0}
@@ -148,7 +154,7 @@ export function AgentNode({ data, selected }: NodeProps) {
             }
           }}
           style={{ "--graph-flash-color": flashColor } as React.CSSProperties}
-          className={`group relative w-[210px] cursor-default rounded-xl border px-3 py-2.5 text-left shadow-sm outline-none ring-2 ${style.bg} ${style.ring} ${isRunning ? "animate-pulse" : ""} ${flashing ? "animate-graph-node-flash" : ""} ${
+          className={`relative w-[210px] cursor-default rounded-xl border px-3 py-2.5 text-left shadow-sm outline-none ring-2 ${style.bg} ${style.ring} ${isRunning ? "animate-pulse" : ""} ${flashing ? "animate-graph-node-flash" : ""} ${
             highlighted
               ? "outline outline-2 outline-offset-2 outline-primary"
               : "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
@@ -162,8 +168,18 @@ export function AgentNode({ data, selected }: NodeProps) {
               <p className="truncate text-sm font-medium text-foreground">
                 {d.role}
               </p>
-              <p className="truncate text-xs text-muted-foreground">
-                {statusLabel(d.status)}
+              <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                {d.isSubtask && (
+                  <>
+                    <CornerDownRight
+                      size={10}
+                      className="shrink-0 text-primary/70"
+                    />
+                    <span className="shrink-0">子任务</span>
+                    <span className="shrink-0 text-muted-foreground/50">·</span>
+                  </>
+                )}
+                <span className="truncate">{statusLabel(d.status)}</span>
               </p>
             </div>
             {d.modelPreference && (
@@ -183,9 +199,9 @@ export function AgentNode({ data, selected }: NodeProps) {
                 深度
               </span>
             )}
-            {d.tokenCount > 0 && (
+            {((d.realTokens && d.realTokens > 0) || d.tokenCount > 0) && (
               <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs tabular-nums text-muted-foreground">
-                ≈{formatCompact(d.tokenCount)}
+                {tokenText}
               </span>
             )}
           </div>
@@ -216,50 +232,6 @@ export function AgentNode({ data, selected }: NodeProps) {
               )}
             </div>
           )}
-
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute top-full left-1/2 z-20 mt-2 hidden w-max max-w-[220px] -translate-x-1/2 rounded-lg border border-border bg-popover px-2.5 py-2 text-popover-foreground shadow-md group-hover:block group-focus-visible:block"
-          >
-            <dl className="flex flex-col gap-1 text-xs">
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-muted-foreground">模型</dt>
-                <dd className="truncate font-medium text-foreground">
-                  {modelText}
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-muted-foreground">Token</dt>
-                <dd className="font-medium tabular-nums text-foreground">
-                  {tokenText}
-                </dd>
-              </div>
-              {d.costText && (
-                <div className="flex items-center justify-between gap-4">
-                  <dt className="text-muted-foreground">成本</dt>
-                  <dd className="font-medium tabular-nums text-primary">
-                    {d.costText}
-                  </dd>
-                </div>
-              )}
-              {durationText && (
-                <div className="flex items-center justify-between gap-4">
-                  <dt className="text-muted-foreground">用时</dt>
-                  <dd className="font-medium tabular-nums text-foreground">
-                    {durationText}
-                  </dd>
-                </div>
-              )}
-              {d.toolCount > 0 && (
-                <div className="flex items-center justify-between gap-4">
-                  <dt className="text-muted-foreground">工具</dt>
-                  <dd className="font-medium tabular-nums text-foreground">
-                    {d.toolCount} 次
-                  </dd>
-                </div>
-              )}
-            </dl>
-          </div>
         </div>
       </div>
       <Handle

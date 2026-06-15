@@ -61,6 +61,11 @@ class InviteListResponse(BaseModel):
 
 class CreateConversationRequest(BaseModel):
     title: str | None = None
+    # File the new chat into a folder at creation (a "新建对话 from a folder"), so
+    # it is born in that folder's workspace instead of being created-then-moved
+    # (which would race the workspace-lock guard once the first turn lands — see
+    # 双模式工作区 §九 ⑩). None = ungrouped.
+    folder_id: str | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -68,6 +73,11 @@ class ConversationSummary(BaseModel):
     title: str | None
     updated_at: datetime
     created_at: datetime
+    # Number of messages; 0 for a brand-new, unsent chat. The sidebar uses this to
+    # lock workspace-changing folder moves once a conversation has started (双模式
+    # 工作区 §九 ⑩). Populated by the list/grouped endpoints; defaults to 0 on the
+    # single-conversation responses where the count isn't needed.
+    message_count: int = 0
     # Folder membership; None = ungrouped (see 前端UX目标态 §七).
     folder_id: str | None = None
     # Local-mode binding for an *ungrouped* conversation; None = cloud. A foldered
@@ -321,6 +331,108 @@ class SnapshotListResponse(BaseModel):
     total: int
 
 
+# --- Handoff jobs (本地→云交接: 云端在快照上跑团队, 双模式工作区 P2e / e2) ---
+
+
+class DispatchHandoffRequest(BaseModel):
+    """Hand a task off to a cloud team seeded from the local workspace snapshot."""
+
+    task: str
+
+
+class HandoffJobSummary(BaseModel):
+    """One local→云 handoff job: its lifecycle + the snapshots bracketing it.
+
+    ``base_snapshot_id`` is the user's local files the cloud team ran on (the e3
+    diff base, under the source conversation's storage key); ``result_snapshot_id``
+    is the team's output (under the hidden job conversation's key), NULL until the
+    run succeeds. ``job_conversation_id`` hosts the team's replayable graph.
+    """
+
+    id: str
+    source_conversation_id: str
+    job_conversation_id: str
+    base_snapshot_id: str
+    result_snapshot_id: str | None
+    task: str
+    status: Literal["pending", "running", "succeeded", "failed"]
+    error: str | None
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class HandoffJobListResponse(BaseModel):
+    data: list[HandoffJobSummary]
+    total: int
+
+
+class HandoffFileChange(BaseModel):
+    """One file's base→result delta in a finished handoff (双模式工作区 P2e / e3).
+
+    ``base_sha`` / ``result_sha`` are sha256 hex on each side (null when absent:
+    base for an add, result for a delete). ``content`` is the result's UTF-8 text
+    for an add/modify (null for a delete, or for a binary result — ``is_binary``
+    flags the latter, fetched via snapshot download). The desktop hashes its current
+    local copy and three-way-classifies each entry against ``base_sha`` before
+    applying (clean / already-applied / conflict).
+    """
+
+    path: str
+    change_type: Literal["added", "modified", "deleted"]
+    base_sha: str | None
+    result_sha: str | None
+    is_binary: bool
+    content: str | None
+    size_bytes: int
+
+    model_config = {"from_attributes": True}
+
+
+class HandoffDiffResponse(BaseModel):
+    """A finished handoff's result diff: the change set to apply back to local files.
+
+    ``data`` is the per-file change set (sorted by path); ``added`` / ``modified`` /
+    ``deleted`` are counts for the PR-card header.
+    """
+
+    job_id: str
+    data: list[HandoffFileChange]
+    total: int
+    added: int
+    modified: int
+    deleted: int
+
+
+class HandoffApplySelection(BaseModel):
+    """One file's apply decision in a handoff PR review (双模式工作区 P2e / e3).
+
+    ``decision`` is ``cloud`` (take the team's version) or ``local`` (keep the
+    user's). ``local_sha`` is the hash the desktop currently sees for the file — the
+    third input to the server's authoritative three-way conflict check (null when
+    the file is absent locally). ``force`` applies the cloud version even when the
+    server judges a conflict (the user's explicit override after seeing it flagged).
+    """
+
+    path: str
+    decision: Literal["cloud", "local"] = "cloud"
+    local_sha: str | None = None
+    force: bool = False
+
+
+class ApplyHandoffRequest(BaseModel):
+    """Apply selected result changes from a finished handoff back to local files.
+
+    ``selections`` carries one entry per file the user decided on; files not listed
+    are left untouched locally. The apply streams SSE (it drives WRITE_BYTES / DELETE
+    ops the bound desktop fulfils) and ends with a ``handoff_apply_done`` event.
+    """
+
+    selections: list[HandoffApplySelection]
+
+
 # --- Workspace files (bring files in / take results out) ---
 
 
@@ -478,6 +590,29 @@ class QuotaStatus(BaseModel):
     daily_requests: int
 
 
+class RoleCostLine(BaseModel):
+    """One role's spend over a window — the team payroll grouped by role.
+
+    The account dashboard's product differentiator (§7.3D): multi-agent spend
+    splits by the ledger ``role`` (CEO / 队员 / 汇总 / …), which a single-agent
+    competitor can't show. Money is integer nano-USD; the client formats ¥ from
+    the summary's single ``cny_per_usd`` (no per-row re-pricing here).
+    """
+
+    role: str
+    cost_total: int
+    # Distinct assistant turns this role took part in over the window.
+    turns: int
+
+
+class DailyCost(BaseModel):
+    """One UTC day's total spend — a point in the dashboard 7-day trend (§7.3D)."""
+
+    # ISO date (YYYY-MM-DD) of the UTC calendar day.
+    date: str
+    cost_total: int
+
+
 class UsageSummary(BaseModel):
     """Account dashboard payload (``GET /usage/summary``).
 
@@ -487,8 +622,139 @@ class UsageSummary(BaseModel):
 
     today: UsageWindow
     month: UsageWindow
+    # This month's spend split by role (团队工资单 by role), spend-desc, >0 only.
+    month_by_role: list[RoleCostLine]
+    # Last 7 UTC days incl today, oldest-first, zero-filled — the trend sparkline.
+    recent_daily_cost: list[DailyCost]
     quota: QuotaStatus
     cny_per_usd: float
+
+
+# --- Messaging (消息页 = 找人 IM; 消息IM.md) ---
+# A separate surface from the AI 对话 page: human↔human chat + an official account.
+# Shares the frontend chat core, not the AI conversation/messages schemas.
+
+
+class UserSearchResult(BaseModel):
+    """A discoverable user surfaced by people-search (任意搜人, exact match)."""
+
+    id: str
+    username: str
+    display_name: str
+
+    model_config = {"from_attributes": True}
+
+
+class UserSearchResponse(BaseModel):
+    data: list[UserSearchResult]
+    total: int
+
+
+class ChatParticipant(BaseModel):
+    """A human shown on a chat (the peer of a dm; members of a group)."""
+
+    id: str
+    username: str
+    display_name: str
+
+    model_config = {"from_attributes": True}
+
+
+class ChatSummary(BaseModel):
+    """One row in the IM chat list (消息页左栏), plus this user's per-chat state."""
+
+    id: str
+    type: Literal["dm", "group", "official"]
+    title: str | None = None
+    avatar_url: str | None = None
+    # The other human in a dm (None for group/official); drives the list-row name.
+    peer: ChatParticipant | None = None
+    last_message_at: datetime | None = None
+    last_message_preview: str | None = None
+    unread: int = 0
+    pinned: bool = False
+    muted: bool = False
+    # 'pending' = a stranger message request awaiting this user's accept (消息请求).
+    state: Literal["accepted", "pending"] = "accepted"
+
+
+class ChatListResponse(BaseModel):
+    data: list[ChatSummary]
+    total: int
+
+
+class StartDmRequest(BaseModel):
+    """Open (or reuse) a 1:1 chat with another user (by their user id)."""
+
+    user_id: str = Field(..., min_length=1, max_length=64)
+
+
+class ChatMessageDetail(BaseModel):
+    id: str
+    chat_id: str
+    # NULL sender = the official/system account.
+    sender_user_id: str | None
+    sender_type: Literal["user", "official", "agent"]
+    content: str | None
+    content_type: Literal["text", "image", "file", "system_card"]
+    attachments: list[StoredAttachment] = Field(default_factory=list)
+    # system_card deep-link payload (e.g. {kind, conversation_id}); None otherwise.
+    payload: dict[str, Any] | None = None
+    reply_to_message_id: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ChatMessageListResponse(BaseModel):
+    data: list[ChatMessageDetail]
+    total: int
+    page: int
+    page_size: int
+
+
+class SendChatMessageRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=32000)
+    # Client-minted id for retry-safe idempotent send (dedup at the unique index).
+    client_msg_id: str | None = Field(None, max_length=100)
+    reply_to_message_id: str | None = Field(None, max_length=64)
+
+
+class MarkReadRequest(BaseModel):
+    """Advance this user's read cursor (drives unread counts + read receipts)."""
+
+    last_read_message_id: str = Field(..., min_length=1, max_length=64)
+
+
+class DirectorySettings(BaseModel):
+    """A user's discoverability + who-can-DM privacy (任意搜人 护栏)."""
+
+    discoverable: bool = True
+    who_can_dm: Literal["anyone", "contacts"] = "anyone"
+
+    model_config = {"from_attributes": True}
+
+
+class UpdateDirectorySettingsRequest(BaseModel):
+    discoverable: bool | None = None
+    who_can_dm: Literal["anyone", "contacts"] | None = None
+
+
+class BlockUserRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, max_length=64)
+
+
+class BlockedUser(BaseModel):
+    id: str
+    username: str
+    display_name: str
+
+    model_config = {"from_attributes": True}
+
+
+class BlockListResponse(BaseModel):
+    data: list[BlockedUser]
+    total: int
 
 
 # --- Generic ---

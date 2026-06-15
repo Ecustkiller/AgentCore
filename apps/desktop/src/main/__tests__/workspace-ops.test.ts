@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import JSZip from "jszip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // fs-service imports electron at module load (for IPC wiring it doesn't run
@@ -287,6 +288,54 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
       expect(r.success).toBe(false);
       expect(r.stderr).toContain("Unsupported language");
       expect(r.exit_code).toBe(1);
+    });
+  });
+
+  // 本地→云交接打包（双模式工作区 P2e / e1）：把整棵绑定根打成单个 zip 交服务端暂存。
+  describe("archive (本地→云交接打包, P2e/e1)", () => {
+    const archiveNames = async (b64: string): Promise<string[]> => {
+      const zip = await JSZip.loadAsync(b64, { base64: true });
+      return Object.keys(zip.files)
+        .filter((n) => !zip.files[n].dir)
+        .sort();
+    };
+
+    it("packs the tree, honoring default skips + .gitignore", async () => {
+      await run("write", { path: "a.txt", content: "A" });
+      await run("write", { path: "sub/b.txt", content: "B" });
+      await run("write", { path: "keep.txt", content: "K" });
+      await run("write", { path: ".gitignore", content: "secret.txt\n" });
+      await run("write", { path: "secret.txt", content: "S" }); // gitignored
+      await run("write", { path: "node_modules/junk.js", content: "J" }); // default skip
+
+      const res = valOf(await run("archive", {})) as {
+        archive: string;
+        file_count: number;
+        total_bytes: number;
+        truncated: boolean;
+      };
+      expect(await archiveNames(res.archive)).toEqual([
+        ".gitignore",
+        "a.txt",
+        "keep.txt",
+        "sub/b.txt",
+      ]);
+      const zip = await JSZip.loadAsync(res.archive, { base64: true });
+      expect(await zip.file("sub/b.txt")?.async("string")).toBe("B");
+      expect(res.file_count).toBe(4);
+      expect(res.truncated).toBe(false);
+    });
+
+    it("with ignore:false packs everything (node_modules + gitignored)", async () => {
+      await run("write", { path: ".gitignore", content: "secret.txt\n" });
+      await run("write", { path: "secret.txt", content: "S" });
+      await run("write", { path: "node_modules/junk.js", content: "J" });
+      const res = valOf(await run("archive", { ignore: false })) as {
+        archive: string;
+      };
+      const names = await archiveNames(res.archive);
+      expect(names).toContain("node_modules/junk.js");
+      expect(names).toContain("secret.txt");
     });
   });
 });

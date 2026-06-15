@@ -8,7 +8,6 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useDetailPanelStore } from "@/stores/detailPanel";
-import { useUsageStore } from "@/stores/usage";
 import { useWorkspacePanelStore } from "@/stores/workspacePanel";
 import type { SSEEvent } from "@/types/events";
 import { FolderOpen } from "lucide-react";
@@ -94,9 +93,6 @@ export function ConversationPage() {
     if (!id) return;
     const store = useConversationStore.getState();
     if (id !== store.currentConversationId) store.switchConversation(id);
-
-    // Seed the 对话累计 chip (§7.3C) from the ledger; live turns bump it after.
-    void useUsageStore.getState().fetchConversationCost(id);
 
     let cancelled = false;
     void (async () => {

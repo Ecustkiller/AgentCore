@@ -95,3 +95,35 @@ async def read_snapshot(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
     return await build_storage_provider().read_snapshot(key, snapshot_id)
+
+
+async def restore_into_workspace(
+    *,
+    source_user_id: str,
+    source_folder_id: str | None,
+    source_conversation_id: str,
+    snapshot_id: str,
+    dest_user_id: str,
+    dest_folder_id: str | None,
+    dest_conversation_id: str,
+) -> None:
+    """Restore one conversation's snapshot into *another* conversation's workspace.
+
+    The seeding step of a local→云 handoff (双模式工作区 P2e / e2): the source
+    (local) conversation's base snapshot is extracted into the destination (hidden
+    cloud job) conversation's freshly-resolved workspace root, so the cloud team
+    runs on the user's real files. Distinct from :func:`restore_snapshot`, which
+    restores a conversation over its *own* root. Raises ``SnapshotNotFound`` if the
+    snapshot id is missing under the source key.
+    """
+    source_key = workspace_storage_key(
+        user_id=source_user_id,
+        folder_id=source_folder_id,
+        conversation_id=source_conversation_id,
+    )
+    dest_root = resolve_workspace_root(
+        user_id=dest_user_id,
+        folder_id=dest_folder_id,
+        conversation_id=dest_conversation_id,
+    )
+    await build_storage_provider().restore(source_key, snapshot_id, dest_root)

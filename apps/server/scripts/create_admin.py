@@ -46,6 +46,13 @@ async def _create_admin(username: str, password: str) -> None:
         else:
             print(f"{username!r} is already an admin (id={user.user_id})")
 
+        # The bootstrap operator account should never be cost-capped (决策④):
+        # mark it is_unlimited so it can run/triage freely. Revoke later with
+        # scripts/set_quota.py --no-unlimited if you want it metered.
+        if not user.is_unlimited:
+            await users.set_quota(user.user_id, is_unlimited=True)
+            print(f"marked {username!r} is_unlimited (no quota cap)")
+
         if await creds.get_by_user_id(user.user_id) is None:
             await creds.create(
                 user_id=user.user_id, password_hash=hash_password(password)

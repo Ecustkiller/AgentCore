@@ -6,7 +6,6 @@ import {
   loadFileIndex,
 } from "@/lib/fileIndex";
 import { api } from "@/services/api";
-import { moveConversation } from "@/services/conversations";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import {
@@ -36,6 +35,34 @@ interface PendingAttachment {
 
 type MenuMode = "mention" | "browse" | null;
 
+// 镜像主进程 fs-service 的 TEXT_PREVIEW_CAP（256KB）：拖入文件在 renderer 直读，
+// 故同步同一截断阈值，保证「@ 引用」与「拖入」两条路径行为一致。
+const TEXT_PREVIEW_CAP = 256 * 1024;
+
+/**
+ * 读取拖入的 OS 文件为文本附件。拖拽本身即用户的显式授权，故绕过「授权根」直读
+ * 内容；与主进程 `readFile` 同策略：超 256KB 截断、含 NUL 字节视为二进制、图片
+ * 暂不支持（模型无视觉能力）。
+ */
+async function readDroppedFile(
+  file: File,
+): Promise<
+  { ok: true; text: string; truncated: boolean } | { ok: false; reason: string }
+> {
+  if (file.type.startsWith("image/")) {
+    return { ok: false, reason: "暂不支持图片附件（模型尚无视觉能力）" };
+  }
+  const head = await file.slice(0, TEXT_PREVIEW_CAP + 1).arrayBuffer();
+  const bytes = new Uint8Array(head);
+  if (bytes.includes(0)) {
+    return { ok: false, reason: "二进制文件无法作为文本附件" };
+  }
+  const text = new TextDecoder("utf-8").decode(
+    bytes.subarray(0, Math.min(bytes.length, TEXT_PREVIEW_CAP)),
+  );
+  return { ok: true, text, truncated: file.size > TEXT_PREVIEW_CAP };
+}
+
 /** 从光标向前回溯定位 `@token`：要求 `@` 在行首或空白后，且其后无空白。 */
 function detectMention(
   text: string,
@@ -59,6 +86,10 @@ function detectMention(
 export function MessageInput() {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  // 拖入文件：dragOver 驱动放置区高亮，dropError 临时提示被拒原因（图片/二进制/文件夹）。
+  const [dragOver, setDragOver] = useState(false);
+  const [dropError, setDropError] = useState<string | null>(null);
+  const dropErrorTimer = useRef<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isGenerating = useActiveGenerating();
   const addMessage = useConversationStore((s) => s.addMessage);
@@ -251,6 +282,85 @@ export function MessageInput() {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
+  const flashDropError = useCallback((msg: string) => {
+    setDropError(msg);
+    if (dropErrorTimer.current) window.clearTimeout(dropErrorTimer.current);
+    dropErrorTimer.current = window.setTimeout(() => setDropError(null), 3000);
+  }, []);
+
+  const attachDroppedFile = useCallback(
+    async (file: File) => {
+      // Dropped files carry no rootId/relPath, so key on name+size to dedupe.
+      const key = `dropped:${file.name}:${file.size}`;
+      if (attachments.some((a) => a.key === key)) return;
+      const res = await readDroppedFile(file);
+      if (!res.ok) {
+        flashDropError(res.reason);
+        return;
+      }
+      setAttachments((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          key,
+          name: file.name,
+          path: file.name,
+          text: res.text,
+          truncated: res.truncated,
+          kind: "file",
+        },
+      ]);
+    },
+    [attachments, flashDropError],
+  );
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      // Only react to OS file drags — ignore text drags within the textarea.
+      if (isGenerating || !e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault();
+      setDragOver(true);
+    },
+    [isGenerating],
+  );
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    // Leaving into a descendant still counts as inside — only clear on true exit.
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes("Files")) return;
+      e.preventDefault();
+      setDragOver(false);
+      if (isGenerating) return;
+      // Prefer the items API so directories can be detected (and skipped — dirs
+      // go through the @ browser, which attaches a file listing); fall back to
+      // the flat file list when items is unavailable.
+      const dropped: File[] = [];
+      let sawDir = false;
+      const items = Array.from(e.dataTransfer.items ?? []);
+      if (items.length) {
+        for (const item of items) {
+          if (item.kind !== "file") continue;
+          if (item.webkitGetAsEntry?.()?.isDirectory) {
+            sawDir = true;
+            continue;
+          }
+          const f = item.getAsFile();
+          if (f) dropped.push(f);
+        }
+      } else {
+        dropped.push(...Array.from(e.dataTransfer.files));
+      }
+      for (const f of dropped) await attachDroppedFile(f);
+      if (sawDir) flashDropError("文件夹请用 @ 引用，拖拽仅支持文件");
+    },
+    [isGenerating, attachDroppedFile, flashDropError],
+  );
+
   const handleAddRoot = useCallback(async () => {
     const root = await window.fsApi.addRoot();
     if (!root) return;
@@ -273,11 +383,16 @@ export function MessageInput() {
     let conversationId = store.currentConversationId;
     let createdNew = false;
     if (!conversationId) {
-      // A draft started from a folder header files itself into that folder.
+      // A draft started from a folder header is born *in* that folder (folder_id
+      // at creation), so it shares the folder's workspace from its first turn.
+      // Filing at creation — rather than a follow-up move — avoids racing the
+      // workspace-lock guard, which rejects a move once a chat has any messages
+      // (双模式工作区 §九 ⑩).
       const targetFolderId = useFoldersStore.getState().pendingNewChatFolderId;
       try {
         const conv = await api.post<{ id: string }>("/v1/conversations", {
           title: null,
+          folder_id: targetFolderId,
         });
         conversationId = conv.id;
         useConversationStore.getState().setConversations([
@@ -295,13 +410,6 @@ export function MessageInput() {
         createdNew = true;
         if (targetFolderId) {
           useFoldersStore.getState().setPendingNewChatFolder(null);
-          void moveConversation(conv.id, targetFolderId).catch(() => {
-            // Membership is cosmetic for an empty new chat; on failure it just
-            // stays ungrouped until the next reload reconciles it.
-            useConversationStore
-              .getState()
-              .setConversationFolder(conv.id, null);
-          });
         }
       } catch {
         return;
@@ -369,6 +477,7 @@ export function MessageInput() {
   useEffect(() => {
     return () => {
       getActiveRuntime().abort?.abort();
+      if (dropErrorTimer.current) window.clearTimeout(dropErrorTimer.current);
     };
   }, []);
 
@@ -433,7 +542,22 @@ export function MessageInput() {
 
   return (
     <div className="px-4 pb-4 pt-2">
-      <div className="relative rounded-xl border border-border bg-card shadow-sm">
+      <div
+        className={`relative rounded-xl border bg-card shadow-sm transition-colors ${
+          dragOver ? "border-primary ring-2 ring-primary/40" : "border-border"
+        }`}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-card/80 text-sm font-medium text-primary">
+            拖放文件以添加为附件
+          </div>
+        )}
+        {dropError && (
+          <div className="px-3 pt-2 text-xs text-destructive">{dropError}</div>
+        )}
         {menuOpen && (
           <MentionMenu
             items={items}

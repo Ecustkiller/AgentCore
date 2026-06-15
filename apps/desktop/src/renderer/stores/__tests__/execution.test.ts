@@ -523,37 +523,7 @@ describe("ingestPlan (multi-batch delegate merge)", () => {
     expect(rt().plan?.id).toBe("exec-2");
     expect(rt().frames).toEqual([]);
   });
-
-  it("keeps the active selection across a same-turn merge", () => {
-    store().ingestPlan(plan, MID);
-    store().selectRun("run-1", MID);
-    store().ingestPlan(batch2, MID);
-    expect(rt().selectedRunId).toBe("run-1");
-  });
 });
-
-describe("cross-view selection", () => {
-  it("selectRun pins the run for drill-down", () => {
-    store().startExecution(plan, MID);
-    store().selectRun("run-3", MID);
-    expect(rt().selectedRunId).toBe("run-3");
-  });
-
-  it("selectRun(null) clears the selection", () => {
-    store().startExecution(plan, MID);
-    store().selectRun("run-1", MID);
-    store().selectRun(null, MID);
-    expect(rt().selectedRunId).toBeNull();
-  });
-
-  it("startExecution clears any prior selection", () => {
-    store().startExecution(plan, MID);
-    store().selectRun("run-1", MID);
-    store().startExecution(plan, MID);
-    expect(rt().selectedRunId).toBeNull();
-  });
-});
-
 describe("agent reasoning effort (effective knobs)", () => {
   it("reasoningMeta labels the three effective states", () => {
     expect(reasoningMeta(false, null).short).toBe("非思考");

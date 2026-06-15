@@ -2,7 +2,8 @@ name: Deploy Website
 
 # 官网（apps/website）静态站自动部署到 Cloudflare Pages。
 # 仅当 apps/website 改动时触发：构建 next 静态产物（out/）后用 wrangler 直传。
-# 生产分支沿用 Pages 项目的 main，自定义域 fashitianxia.xyz 跟随生产部署。
+# git 触发分支 = 仓库主干 master；wrangler 直传须 --branch=main 钉到 Pages 生产分支（Pages 侧名为 main，与 git 分支无关），
+# 自定义域 fashitianxia.xyz 才跟随更新（落到其他分支名会成 preview、域名不更新）。
 
 on:
   push:

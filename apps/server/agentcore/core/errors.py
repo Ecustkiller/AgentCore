@@ -92,11 +92,48 @@ class NotFoundError(AgentCoreError):
     status_code = 404
 
 
+class ConflictError(AgentCoreError):
+    """Request conflicts with the resource's current state (HTTP 409).
+
+    e.g. moving a *started* conversation between folders: its folder decides which
+    workspace directory it runs in — and whether cloud or local (双模式工作区 §七:
+    folder = project = workspace) — so re-filing a chat that has already
+    accumulated files would silently re-point it at a different directory. The
+    workspace is fixed once a conversation has any messages, so the move is refused
+    rather than quietly switching it.
+    """
+
+    code = "CONFLICT"
+    status_code = 409
+
+
 class ValidationError(AgentCoreError):
     """Input validation failure."""
 
     code = "VALIDATION_ERROR"
     status_code = 422
+
+
+class RateLimitedError(AgentCoreError):
+    """Too many requests in a rolling window; this one is refused (HTTP 429).
+
+    The 速率 line of defense (成本配额与计费.md §一), orthogonal to 配额 (总量):
+    rate limiting caps requests-per-window, quota caps cumulative usage. Per-user
+    message-send throttling is enforced at the route layer against the authenticated
+    user. ``retry_after`` (seconds) rides along so the API layer can emit a
+    ``Retry-After`` header and the client can show a friendly cool-down. Reuses the
+    ``RATE_LIMITED`` code shared with the auth-endpoint limiter so the client handles
+    one rate-limit shape regardless of which layer tripped.
+    """
+
+    code = "RATE_LIMITED"
+    status_code = 429
+
+    def __init__(
+        self, message: str = "", *, retry_after: float | None = None, **kwargs
+    ):
+        self.retry_after = retry_after
+        super().__init__(message, retry_after=retry_after, **kwargs)
 
 
 class QuotaExceededError(AgentCoreError):

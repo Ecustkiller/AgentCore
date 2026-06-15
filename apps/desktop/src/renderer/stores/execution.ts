@@ -174,6 +174,12 @@ export interface ExecutionPlan {
     agentId: string;
     task: string;
     dependsOn: string[];
+    /** Delegating run id (阶段2 nested delegation). A sub-worker points at its
+     * captain worker's run id (a real node) so the graph + detail tree group it
+     * under that parent; a top-level worker points at the CEO captain run (no
+     * node here) or is null. Declared at plan time so the *structural* graph
+     * layout can group without waiting for the run_started frame. */
+    parentRunId?: string | null;
     /** Declared node kind (default `agent`). `synthesis` marks the CEO 汇聚点
      * (Phase B / D3); also re-confirmed by the run_started frame. */
     kind?: RunKind;
@@ -270,7 +276,10 @@ export function projectExecution(
     outputSummary: null,
     durationMs: null,
     error: null,
-    parentRunId: null,
+    // Plan-declared parent so the 子任务 tree + graph grouping work before the
+    // run_started frame folds in (the frame re-confirms it). 阶段1 flat workers
+    // resolve to a CEO-captain id with no node, treated as "no parent here".
+    parentRunId: s.parentRunId ?? null,
     // Plan-declared kind so the synthesis 汇聚点 is identifiable before its
     // run_started frame folds in (the frame re-confirms it).
     kind: s.kind ?? "agent",
@@ -477,6 +486,7 @@ export function planFromRunPlan(p: RunPlanPayload): ExecutionPlan {
       agentId: s.agent_id,
       task: s.task,
       dependsOn: s.depends_on,
+      parentRunId: s.parent_run_id ?? null,
       kind: s.kind,
     })),
   };
@@ -618,16 +628,6 @@ export interface ExecutionRuntime {
   /** Number of frames to project. `null` = follow the live tail. */
   playhead: number | null;
   status: ExecutionStatus;
-
-  /**
-   * The run selected in the *full-screen* team-graph overlay — its highlighted
-   * node + side `NodeDetail`. Also seeded by a panel pin (`showRunDetail`) so
-   * maximizing lands on the last-viewed run. The embedded inline graph does NOT
-   * read this: it mirrors the conversation panel's active run-detail tab, so
-   * there is one highlight source per surface and no cross-store syncing. Null
-   * when nothing is selected; scoped per message (each turn owns its selection).
-   */
-  selectedRunId: string | null;
 }
 
 /**
@@ -654,8 +654,6 @@ interface ExecutionState {
   setStatus: (status: ExecutionStatus, messageId: string) => void;
   setPlayhead: (index: number | null, messageId: string) => void;
   goLive: (messageId: string) => void;
-  /** Select a run for drill-down (null clears), scoped to one message's graph. */
-  selectRun: (runId: string | null, messageId: string) => void;
   /**
    * Fold a persisted execution journal (`messages.runs`) into a message's slot,
    * reproducing the team graph a past multi-agent turn had — replayed through
@@ -671,7 +669,6 @@ const EMPTY_EXEC: ExecutionRuntime = {
   frames: [],
   playhead: null,
   status: "planning",
-  selectedRunId: null,
 };
 
 /**
@@ -709,18 +706,17 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         frames: [],
         playhead: null,
         status: "running",
-        selectedRunId: null,
       })),
 
     ingestPlan: (plan, messageId) => {
       const cur = execRuntime(get(), messageId).plan;
-      // Different turn / first batch → fresh start (resets frames + focus).
+      // Different turn / first batch → fresh start (resets frames).
       if (!cur || cur.id !== plan.id) {
         get().startExecution(plan, messageId);
         return;
       }
       // Same execution → an incremental delegate batch: merge in unseen
-      // agents/runs while keeping the existing frame stream, playhead and focus.
+      // agents/runs while keeping the existing frame stream and playhead.
       patchExec(messageId, () => ({
         plan: mergePlanInto(cur, plan),
         status: "running",
@@ -743,9 +739,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
       patchExec(messageId, () => ({ playhead: index })),
 
     goLive: (messageId) => patchExec(messageId, () => ({ playhead: null })),
-
-    selectRun: (runId, messageId) =>
-      patchExec(messageId, () => ({ selectedRunId: runId })),
 
     hydrateFromJournal: (messageId, journal) =>
       set((state) => {
@@ -772,7 +765,6 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               frames,
               playhead: null,
               status: statusFromFinish(journal.finishReason),
-              selectedRunId: null,
             },
           },
         };
