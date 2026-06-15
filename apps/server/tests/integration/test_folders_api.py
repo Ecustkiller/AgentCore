@@ -7,6 +7,8 @@ delete-keeps-conversations contract, and IDOR isolation between users.
 
 import httpx
 
+from agentcore.db.repositories import MessageRepository
+
 _PW = "password123"
 
 
@@ -28,6 +30,15 @@ async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
     r = await client.post("/v1/conversations", json={"title": title})
     assert r.status_code == 201, r.text
     return r.json()["id"]
+
+
+async def _seed_message(session_factory, conversation_id: str) -> None:
+    """Insert a message straight into the DB so a conversation reads as "started"
+    (双模式工作区 §九 ⑩) without running the LLM pipeline."""
+    async with session_factory() as session:
+        await MessageRepository(session).create(
+            conversation_id=conversation_id, role="user", content="hi"
+        )
 
 
 async def test_folders_require_auth(client):
@@ -86,6 +97,85 @@ async def test_grouped_reflects_membership(client, make_invite):
     body = (await client.get("/v1/conversations/grouped")).json()
     assert body["folders"][0]["conversations"] == []
     assert {c["id"] for c in body["ungrouped"]} == {grouped_conv, loose_conv}
+
+
+async def test_started_conversation_cannot_change_folder(
+    client, make_invite, session_factory
+):
+    """A chat with messages has a pinned workspace, so filing it is refused (§九 ⑩)."""
+    code = await make_invite("INV-F7")
+    await _register_and_login(client, code, "folderuser7")
+    folder_id = (await client.post("/v1/folders", json={"name": "Proj"})).json()["id"]
+    conv = await _new_conversation(client, "started")
+    await _seed_message(session_factory, conv)
+
+    r = await client.patch(
+        f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id}
+    )
+    assert r.status_code == 409, r.text
+
+    # It stays exactly where it was — ungrouped, folder empty.
+    body = (await client.get("/v1/conversations/grouped")).json()
+    assert [c["id"] for c in body["ungrouped"]] == [conv]
+    assert body["folders"][0]["conversations"] == []
+
+
+async def test_started_conversation_noop_move_allowed(
+    client, make_invite, session_factory
+):
+    """Re-sending the *current* membership never switches the workspace, so it is
+    allowed even for a started chat (idempotent no-op)."""
+    code = await make_invite("INV-F8")
+    await _register_and_login(client, code, "folderuser8")
+    conv = await _new_conversation(client, "started loose")
+    await _seed_message(session_factory, conv)
+
+    r = await client.patch(
+        f"/v1/conversations/{conv}/folder", json={"folder_id": None}
+    )
+    assert r.status_code == 200, r.text
+
+
+async def test_create_in_folder_files_at_creation(client, make_invite):
+    """A "新建对话 from a folder" is born in that folder (no follow-up move)."""
+    code = await make_invite("INV-F9")
+    await _register_and_login(client, code, "folderuser9")
+    folder_id = (await client.post("/v1/folders", json={"name": "Born"})).json()["id"]
+
+    r = await client.post(
+        "/v1/conversations", json={"title": "in folder", "folder_id": folder_id}
+    )
+    assert r.status_code == 201, r.text
+    conv_id = r.json()["id"]
+    assert r.json()["folder_id"] == folder_id
+
+    body = (await client.get("/v1/conversations/grouped")).json()
+    assert [c["id"] for c in body["folders"][0]["conversations"]] == [conv_id]
+
+
+async def test_create_in_missing_folder_404(client, make_invite):
+    code = await make_invite("INV-F10")
+    await _register_and_login(client, code, "folderuser10")
+    r = await client.post(
+        "/v1/conversations",
+        json={"title": "x", "folder_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_grouped_reports_message_count(client, make_invite, session_factory):
+    code = await make_invite("INV-F11")
+    await _register_and_login(client, code, "folderuser11")
+    conv = await _new_conversation(client, "counts")
+
+    body = (await client.get("/v1/conversations/grouped")).json()
+    assert body["ungrouped"][0]["message_count"] == 0
+
+    await _seed_message(session_factory, conv)
+    await _seed_message(session_factory, conv)
+
+    body = (await client.get("/v1/conversations/grouped")).json()
+    assert body["ungrouped"][0]["message_count"] == 2
 
 
 async def test_move_to_missing_folder_404(client, make_invite):

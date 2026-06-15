@@ -1,7 +1,6 @@
 import {
   type TurnCost,
   type UsageSummary,
-  getConversationCost,
   getMessageCost,
   getUsageSummary,
 } from "@/services/usage";
@@ -25,17 +24,6 @@ const DEFAULT_CNY_PER_USD = 7.2;
 // of hovers can't fire duplicate requests (and this churn never re-renders).
 const inflightMessageCosts = new Set<string>();
 
-/** The 对话累计 chip's data (§7.3C) — only what the caption + its tooltip need,
- * so it sidesteps the REST/SSE cost-shape split: `total` is cumulative nano-USD
- * (the ¥ caption), `tokens` is cumulative input+output (the power tooltip), and
- * `turns` is the assistant-turn count. Seeded from the REST snapshot on open,
- * then folded forward by each turn's `message_end` so the chip stays live. */
-export interface ConversationCostSummary {
-  total: number;
-  tokens: number;
-  turns: number;
-}
-
 interface UsageState {
   /** USD→CNY display rate; single source for every `formatCost` call. */
   cnyPerUsd: number;
@@ -48,10 +36,6 @@ interface UsageState {
    * 回放/回落快照 source for a reloaded turn's cost (live turns carry their own
    * `message.cost`, so they never land here). */
   messageCosts: Record<string, TurnCost>;
-  /** Cumulative spend per conversation (对话累计 chip), keyed by conversation id.
-   * Seeded from `/conversations/{id}/cost` on open, then bumped live by each
-   * turn's `message_end` so the chip updates without a re-fetch. */
-  conversationCosts: Record<string, ConversationCostSummary>;
 
   /** Fetch the account-dashboard summary and refresh the FX rate from it. */
   fetchSummary: () => Promise<void>;
@@ -59,13 +43,6 @@ interface UsageState {
    * No-op if already cached or in flight; failures are swallowed (cost is
    * supplementary and must never break the chat). */
   loadMessageCost: (messageId: string) => Promise<void>;
-  /** Seed a conversation's cumulative spend from the ledger snapshot (对话累计).
-   * Overwrites any prior value with the authoritative server total; failures are
-   * swallowed (the chip just stays hidden / shows the last value). */
-  fetchConversationCost: (conversationId: string) => Promise<void>;
-  /** Fold a just-finished turn into a conversation's running total so the chip
-   * updates live (回合结束即累加). Initializes the entry if absent. */
-  addTurnCost: (conversationId: string, total: number, tokens: number) => void;
 }
 
 export const useUsageStore = create<UsageState>((set, get) => ({
@@ -74,7 +51,6 @@ export const useUsageStore = create<UsageState>((set, get) => ({
   loading: false,
   error: null,
   messageCosts: {},
-  conversationCosts: {},
 
   fetchSummary: async () => {
     set({ loading: true, error: null });
@@ -102,45 +78,5 @@ export const useUsageStore = create<UsageState>((set, get) => ({
     } finally {
       inflightMessageCosts.delete(messageId);
     }
-  },
-
-  fetchConversationCost: async (conversationId) => {
-    if (!conversationId) return;
-    try {
-      const c = await getConversationCost(conversationId);
-      set((s) => ({
-        conversationCosts: {
-          ...s.conversationCosts,
-          [conversationId]: {
-            total: c.cost.total,
-            tokens: c.usage.input + c.usage.output,
-            turns: c.turns,
-          },
-        },
-      }));
-    } catch {
-      /* supplementary — a missing snapshot just keeps the chip hidden */
-    }
-  },
-
-  addTurnCost: (conversationId, total, tokens) => {
-    if (!conversationId) return;
-    set((s) => {
-      const prev = s.conversationCosts[conversationId] ?? {
-        total: 0,
-        tokens: 0,
-        turns: 0,
-      };
-      return {
-        conversationCosts: {
-          ...s.conversationCosts,
-          [conversationId]: {
-            total: prev.total + total,
-            tokens: prev.tokens + tokens,
-            turns: prev.turns + 1,
-          },
-        },
-      };
-    });
   },
 }));

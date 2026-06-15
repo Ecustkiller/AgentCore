@@ -27,7 +27,7 @@ desktop never hangs the turn.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, NoReturn
 
@@ -68,6 +68,11 @@ class WorkspaceOp(StrEnum):
     REPLACE = "replace"
     GREP = "grep"
     EXECUTE = "execute"
+    # Local→云 handoff (双模式工作区 P2e / e1): pack the whole bound local root into
+    # one archive (respecting ignore rules) so the server can stage + snapshot it.
+    # NOT a WorkspaceBackend method — issued directly by the handoff orchestrator
+    # (workspace/handoff.py), not by the engine/tools.
+    ARCHIVE = "archive"
 
 
 # Map a serialized error ``kind`` back to its WorkspaceError subclass, so a remote
@@ -181,18 +186,29 @@ class WorkspaceChannel:
     registry: WorkspaceOpRegistry
     timeout_seconds: float
     root_id: str = ""  # which desktop FS root this workspace is bound to (P2d)
-    _granted: dict[str, Any] = field(default_factory=dict)  # reserved for P2c
 
-    async def request(self, op: WorkspaceOp | str, args: dict[str, Any]) -> Any:
+    async def request(
+        self,
+        op: WorkspaceOp | str,
+        args: dict[str, Any],
+        *,
+        timeout: float | None = None,
+    ) -> Any:
         """Emit the op, await the desktop's result, and return it (or raise).
 
         Returns the op's ``value`` on success. Raises the typed ``WorkspaceError``
         the desktop reported on failure, or ``WorkspaceIOError`` on timeout / a
         malformed result envelope — never hangs and never leaks an untyped error,
         so the tool layer's existing ``except WorkspaceError`` keeps working.
+
+        ``timeout`` overrides the channel-wide ``timeout_seconds`` for this one op.
+        A long-running ``execute`` passes its own (code timeout + slack) so the
+        desktop's execution limit stays authoritative and a legal long run is not
+        cut off by the flat file-op deadline (双模式工作区 P2d 执行门).
         """
         op_name = str(op)
         request_id = new_id()
+        deadline = self.timeout_seconds if timeout is None else timeout
         fut = self.registry.create(request_id, self.conversation_id)
         self.sink.emit(
             workspace_op_required(
@@ -204,7 +220,7 @@ class WorkspaceChannel:
             )
         )
         try:
-            result = await asyncio.wait_for(fut, timeout=self.timeout_seconds)
+            result = await asyncio.wait_for(fut, timeout=deadline)
         except TimeoutError as e:
             logger.info("workspace_op_timeout", op=op_name, request_id=request_id)
             raise WorkspaceIOError(

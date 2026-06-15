@@ -1,4 +1,4 @@
-"""File operations tools (read, write, list, precise str_replace edit).
+"""File operations tools (read, write, list, precise str_replace edit, delete, move).
 
 Thin shells over ``ToolContext.backend``: each tool parses arguments, calls the
 workspace backend, maps typed ``WorkspaceError`` failures back to user-facing
@@ -13,6 +13,7 @@ from typing import Any
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.workspace.protocol import (
+    AlreadyExists,
     AmbiguousMatch,
     NoMatch,
     NotADirectory,
@@ -42,13 +43,13 @@ class FileReadTool:
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="file_read",
-            description="Read the contents of a file. Path must be relative to the workspace.",
+            description="读取工作区内某个文件的内容。路径必须是相对于工作区的相对路径。",
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative file path within the workspace",
+                        "description": "工作区内的相对文件路径",
                     },
                 },
                 "required": ["path"],
@@ -64,13 +65,13 @@ class FileReadTool:
         try:
             content = await context.backend.read(rel_path)
         except OutsideWorkspace:
-            return _error(f"Path '{rel_path}' is outside the workspace", start)
+            return _error(f"路径 '{rel_path}' 超出了工作区范围", start)
         except PathNotFound:
-            return _error(f"File not found: {rel_path}", start)
+            return _error(f"文件不存在：{rel_path}", start)
         except NotAFile:
-            return _error(f"Not a file: {rel_path}", start)
+            return _error(f"不是文件：{rel_path}", start)
         except WorkspaceError as e:
-            return _error(f"Failed to read file: {e}", start)
+            return _error(f"读取文件失败：{e}", start)
 
         return ToolResult(
             tool_call_id="",
@@ -88,22 +89,21 @@ class FileWriteTool:
         return ToolSchema(
             name="file_write",
             description=(
-                "Write content to a file, creating it (and any parent directories) "
-                "or OVERWRITING it wholesale. Use this to create new files. To change "
-                "part of an existing file, prefer str_replace, which edits only the "
-                "matched span instead of rewriting everything. Path must be relative "
-                "to the workspace."
+                "把内容写入文件：会创建该文件（含所有上级目录），或【整体覆盖】"
+                "已有文件。用它来新建文件；若只想改已有文件的一部分，优先用 "
+                "str_replace（它只编辑匹配到的片段，而不是重写整个文件）。路径"
+                "必须是相对于工作区的相对路径。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative file path within the workspace",
+                        "description": "工作区内的相对文件路径",
                     },
                     "content": {
                         "type": "string",
-                        "description": "Content to write to the file",
+                        "description": "要写入文件的内容",
                     },
                 },
                 "required": ["path", "content"],
@@ -120,14 +120,14 @@ class FileWriteTool:
         try:
             written = await context.backend.write(rel_path, content)
         except OutsideWorkspace:
-            return _error(f"Path '{rel_path}' is outside the workspace", start)
+            return _error(f"路径 '{rel_path}' 超出了工作区范围", start)
         except WorkspaceError as e:
-            return _error(f"Failed to write file: {e}", start)
+            return _error(f"写入文件失败：{e}", start)
 
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=f"Written {written} bytes to {rel_path}",
+            output=f"已写入 {written} 字节到 {rel_path}",
             duration_ms=int((time.monotonic() - start) * 1000),
         )
 
@@ -139,18 +139,18 @@ class FileListTool:
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="file_list",
-            description="List files and directories. Path must be relative to workspace.",
+            description="列出某个目录下的文件与子目录。路径必须是相对于工作区的相对路径。",
             parameters={
                 "type": "object",
                 "properties": {
                     "directory": {
                         "type": "string",
-                        "description": "Relative directory path (default: workspace root)",
+                        "description": "相对目录路径（默认：工作区根目录）",
                         "default": ".",
                     },
                     "pattern": {
                         "type": "string",
-                        "description": "Glob pattern to filter results (e.g. '*.py')",
+                        "description": "用于过滤结果的 glob 模式（如 '*.py'）",
                         "default": "*",
                     },
                 },
@@ -168,14 +168,14 @@ class FileListTool:
         try:
             entries = await context.backend.list(directory, pattern)
         except OutsideWorkspace:
-            return _error(f"Path '{directory}' is outside the workspace", start)
+            return _error(f"路径 '{directory}' 超出了工作区范围", start)
         except NotADirectory:
-            return _error(f"Not a directory: {directory}", start)
+            return _error(f"不是目录：{directory}", start)
         except WorkspaceError as e:
-            return _error(f"Failed to list directory: {e}", start)
+            return _error(f"列目录失败：{e}", start)
 
         lines = [f"{'d ' if entry.is_dir else 'f '}{entry.path}" for entry in entries]
-        output = "\n".join(lines) if lines else "(empty directory)"
+        output = "\n".join(lines) if lines else "（空目录）"
         return ToolResult(
             tool_call_id="",
             success=True,
@@ -192,37 +192,34 @@ class StrReplaceTool:
         return ToolSchema(
             name="str_replace",
             description=(
-                "Edit an existing file by replacing an EXACT text span. Prefer this "
-                "over file_write when changing a file: it rewrites only the matched "
-                "span, so it is safe for large files and won't clobber unrelated "
-                "content. Put enough surrounding context in old_string to match "
-                "EXACTLY ONCE, including whitespace, indentation, and line breaks. "
-                "Fails if old_string is absent, or matches more than once unless "
-                "replace_all is true. To create a new file, use file_write instead."
+                "通过替换【完全精确匹配的文本片段】来编辑已有文件。改文件时优先"
+                "用它而非 file_write：它只重写匹配到的片段，因此对大文件安全、也"
+                "不会误伤无关内容。在 old_string 里放足够的上下文，确保在文件中"
+                "【唯一匹配一次】（包括空白、缩进与换行）。若 old_string 不存在、"
+                "或匹配多于一次（除非 replace_all=true），则失败。要新建文件请改"
+                "用 file_write。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative file path within the workspace",
+                        "description": "工作区内的相对文件路径",
                     },
                     "old_string": {
                         "type": "string",
                         "description": (
-                            "Exact text to replace, with enough surrounding context "
-                            "to be unique in the file."
+                            "要替换的精确文本，需带足够的上下文以在文件中唯一。"
                         ),
                     },
                     "new_string": {
                         "type": "string",
-                        "description": "Replacement text (must differ from old_string).",
+                        "description": "替换后的文本（必须与 old_string 不同）。",
                     },
                     "replace_all": {
                         "type": "boolean",
                         "description": (
-                            "Replace every occurrence instead of requiring a single "
-                            "unique match (default false)."
+                            "替换所有出现处，而非要求唯一匹配（默认 false）。"
                         ),
                         "default": False,
                     },
@@ -241,10 +238,10 @@ class StrReplaceTool:
         replace_all = bool(arguments.get("replace_all", False))
 
         if not old_string:
-            return _error("old_string must not be empty", start)
+            return _error("old_string 不能为空", start)
         if old_string == new_string:
             return _error(
-                "old_string and new_string are identical; nothing to change", start
+                "old_string 与 new_string 相同，没有需要改动的内容", start
             )
 
         try:
@@ -252,34 +249,145 @@ class StrReplaceTool:
                 rel_path, old_string, new_string, all_=replace_all
             )
         except OutsideWorkspace:
-            return _error(f"Path '{rel_path}' is outside the workspace", start)
+            return _error(f"路径 '{rel_path}' 超出了工作区范围", start)
         except PathNotFound:
-            return _error(f"File not found: {rel_path}", start)
+            return _error(f"文件不存在：{rel_path}", start)
         except NotAFile:
-            return _error(f"Not a file: {rel_path}", start)
+            return _error(f"不是文件：{rel_path}", start)
         except NotUTF8:
-            return _error(f"Cannot edit a binary / non-UTF-8 file: {rel_path}", start)
+            return _error(f"无法编辑二进制 / 非 UTF-8 文件：{rel_path}", start)
         except NoMatch:
             return _error(
-                f"old_string not found in {rel_path}; it must match the file "
-                "exactly, including whitespace and indentation.",
+                f"在 {rel_path} 中找不到 old_string；它必须与文件完全一致，"
+                "包括空白与缩进。",
                 start,
             )
         except AmbiguousMatch as e:
             return _error(
-                f"old_string is not unique in {rel_path} ({e.count} matches). Add "
-                "more surrounding context to target a single span, or set "
-                "replace_all=true.",
+                f"old_string 在 {rel_path} 中不唯一（匹配 {e.count} 处）。请补充"
+                "更多上下文以锁定单一片段，或设置 replace_all=true。",
                 start,
             )
         except WorkspaceError as e:
-            return _error(f"Failed to write file: {e}", start)
+            return _error(f"写入文件失败：{e}", start)
 
-        loc = "" if outcome.first_line is None else f" (around line {outcome.first_line})"
+        loc = "" if outcome.first_line is None else f"（约第 {outcome.first_line} 行）"
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=f"Replaced {outcome.count} occurrence(s) in {rel_path}{loc}",
+            output=f"已在 {rel_path} 替换 {outcome.count} 处{loc}",
             duration_ms=int((time.monotonic() - start) * 1000),
             metadata={"replacements": outcome.count},
+        )
+
+
+class FileDeleteTool:
+    """Delete a file, or a directory and all its contents, within the workspace."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="file_delete",
+            description=(
+                "删除一个文件，或一个目录【及其全部内容】（递归）。此操作不可逆，"
+                "请只删除你确定不再需要的路径。工作区根目录本身不可删除。路径必须"
+                "是相对于工作区的相对路径。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "要删除的文件或目录的相对路径",
+                    },
+                },
+                "required": ["path"],
+            },
+            category=ToolCategory.FILESYSTEM,
+            approval=ToolApproval.GRANTABLE,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        start = time.monotonic()
+        rel_path = arguments.get("path", "")
+
+        try:
+            await context.backend.delete(rel_path)
+        except OutsideWorkspace:
+            return _error(f"路径 '{rel_path}' 超出了工作区范围", start)
+        except PathNotFound:
+            return _error(f"路径不存在：{rel_path}", start)
+        except WorkspaceError as e:
+            return _error(f"删除失败：{e}", start)
+
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=f"已删除 {rel_path}",
+            duration_ms=int((time.monotonic() - start) * 1000),
+        )
+
+
+class FileMoveTool:
+    """Move or rename a file or directory within the workspace."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="file_move",
+            description=(
+                "在工作区内移动或重命名文件 / 目录。可用于重命名（在同一目录内"
+                "移动）或把路径迁到新位置；目标路径缺失的上级目录会自动创建。若"
+                "目标已存在则失败——【不会覆盖】。两个路径都必须是相对于工作区的"
+                "相对路径。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "要移动的已有文件 / 目录的相对路径",
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "目标相对路径（必须尚不存在）",
+                    },
+                },
+                "required": ["source", "destination"],
+            },
+            category=ToolCategory.FILESYSTEM,
+            approval=ToolApproval.GRANTABLE,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        start = time.monotonic()
+        source = arguments.get("source", "")
+        destination = arguments.get("destination", "")
+
+        if not source or not destination:
+            return _error("'source' 与 'destination' 均为必填", start)
+        if source == destination:
+            return _error(
+                "source 与 destination 相同，无需移动", start
+            )
+
+        try:
+            await context.backend.move(source, destination)
+        except OutsideWorkspace as e:
+            return _error(f"路径 '{e}' 超出了工作区范围", start)
+        except PathNotFound:
+            return _error(f"源路径不存在：{source}", start)
+        except AlreadyExists:
+            return _error(
+                f"目标已存在：{destination}。请换一个不存在的路径，或先删除它。",
+                start,
+            )
+        except WorkspaceError as e:
+            return _error(f"移动失败：{e}", start)
+
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=f"已把 {source} 移动到 {destination}",
+            duration_ms=int((time.monotonic() - start) * 1000),
         )

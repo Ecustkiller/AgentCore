@@ -1,5 +1,5 @@
 import { copyText } from "@/lib/clipboard";
-import { formatCost } from "@/lib/format";
+import { formatCost, formatMessageTime } from "@/lib/format";
 import { runRegenerate } from "@/services/turns";
 import { downloadWorkspaceFile } from "@/services/workspace";
 import {
@@ -12,7 +12,6 @@ import {
 } from "@/stores/conversation";
 import { useUsageStore } from "@/stores/usage";
 import {
-  Bot,
   Brain,
   Check,
   ChevronDown,
@@ -53,6 +52,20 @@ function MessageAction({
       {icon}
       <span>{label}</span>
     </button>
+  );
+}
+
+/** Subtle, hover-revealed message timestamp (§二); full datetime on hover. */
+function MessageTime({ iso }: { iso: string }) {
+  const label = formatMessageTime(iso);
+  if (!label) return null;
+  return (
+    <span
+      title={new Date(iso).toLocaleString()}
+      className="ml-1 cursor-default text-xs text-muted-foreground/60"
+    >
+      {label}
+    </span>
   );
 }
 
@@ -237,7 +250,7 @@ function UserMessage({ message }: Props) {
   if (editing) {
     return (
       <div className="flex flex-col items-end gap-2">
-        <div className="w-full max-w-[80%] rounded-xl border border-border bg-card p-2">
+        <div className="w-full max-w-[80%] rounded-xl rounded-br-none border border-border bg-card p-2">
           <textarea
             ref={editRef}
             value={draft}
@@ -296,7 +309,7 @@ function UserMessage({ message }: Props) {
           ))}
         </div>
       )}
-      <div className="max-w-[80%] rounded-xl bg-primary px-4 py-3 text-sm text-primary-foreground">
+      <div className="max-w-[80%] rounded-xl rounded-br-none bg-secondary px-4 py-3 text-sm text-secondary-foreground">
         <p className="whitespace-pre-wrap">{message.content}</p>
       </div>
       {!isGenerating && (
@@ -311,6 +324,7 @@ function UserMessage({ message }: Props) {
             label="编辑"
             onClick={startEdit}
           />
+          <MessageTime iso={message.createdAt} />
         </div>
       )}
     </div>
@@ -370,60 +384,54 @@ function AssistantMessage({ message }: Props) {
   };
 
   return (
-    <div className="group flex gap-3" onMouseEnter={onPeekCost}>
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
-        <Bot size={16} />
-      </div>
-      <div className="min-w-0 flex-1">
-        {hasReasoning && (
-          <ThinkingPanel
-            reasoning={message.reasoning ?? ""}
-            isStreaming={message.isStreaming}
-          />
-        )}
-        {message.executionId && (
-          <InlineTeamGraph
-            messageId={message.id}
-            executionId={message.executionId}
-            journal={message.runs}
-          />
-        )}
-        <Markdown
-          content={message.content}
-          citationCount={citations.length}
-          onCitationClick={onCitationClick}
+    <div className="group min-w-0" onMouseEnter={onPeekCost}>
+      {hasReasoning && (
+        <ThinkingPanel
+          reasoning={message.reasoning ?? ""}
+          isStreaming={message.isStreaming}
         />
-        {message.isStreaming && (
-          <span
-            className="mt-1 inline-block h-4 w-1.5 rounded-full bg-foreground/60"
-            style={{ animation: "blink-cursor 0.8s step-end infinite" }}
+      )}
+      {message.executionId && (
+        <InlineTeamGraph
+          messageId={message.id}
+          executionId={message.executionId}
+          journal={message.runs}
+        />
+      )}
+      <Markdown
+        content={message.content}
+        citationCount={citations.length}
+        onCitationClick={onCitationClick}
+      />
+      {message.isStreaming && (
+        <span
+          className="mt-1 inline-block h-4 w-1.5 rounded-full bg-foreground/60"
+          style={{ animation: "blink-cursor 0.8s step-end infinite" }}
+        />
+      )}
+      {citations.length > 0 && (
+        <SourceCards citations={citations} flash={citeFlash} />
+      )}
+      {!message.isStreaming && !isGenerating && message.content.length > 0 && (
+        <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <MessageAction
+            icon={copied ? <Check size={13} /> : <Copy size={13} />}
+            label={copied ? "已复制" : "复制"}
+            onClick={onCopy}
           />
-        )}
-        {citations.length > 0 && (
-          <SourceCards citations={citations} flash={citeFlash} />
-        )}
-        {!message.isStreaming &&
-          !isGenerating &&
-          message.content.length > 0 && (
-            <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-              <MessageAction
-                icon={copied ? <Check size={13} /> : <Copy size={13} />}
-                label={copied ? "已复制" : "复制"}
-                onClick={onCopy}
-              />
-              <MessageAction
-                icon={<RefreshCw size={13} />}
-                label="重新生成"
-                onClick={handleRegenerate}
-              />
-              {costText && (
-                <span className="ml-1 text-xs text-muted-foreground/70">
-                  {costText}
-                </span>
-              )}
-            </div>
+          <MessageAction
+            icon={<RefreshCw size={13} />}
+            label="重新生成"
+            onClick={handleRegenerate}
+          />
+          {costText && (
+            <span className="ml-1 text-xs text-muted-foreground/70">
+              {costText}
+            </span>
           )}
-      </div>
+          <MessageTime iso={message.createdAt} />
+        </div>
+      )}
     </div>
   );
 }

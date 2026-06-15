@@ -338,7 +338,7 @@ async def test_engine_gates_grantable_tool_skips_on_deny():
     assert tool.calls == 0  # denied → never executed
     # The model was told, via a tool message, that the call was not authorized.
     denial = [
-        m for m in messages if m.role == "tool" and "not authorized" in (m.content or "")
+        m for m in messages if m.role == "tool" and "未获用户授权" in (m.content or "")
     ]
     assert len(denial) == 1
 

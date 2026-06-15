@@ -71,6 +71,8 @@ interface MenuItemProps {
   label: string;
   onSelect: () => void;
   danger?: boolean;
+  /** Non-interactive, greyed-out row — e.g. an explanatory "locked" hint. */
+  disabled?: boolean;
   /** Trailing adornment (e.g. a check for the current selection). */
   trailing?: React.ReactNode;
 }
@@ -80,20 +82,25 @@ export function MenuItem({
   label,
   onSelect,
   danger,
+  disabled,
   trailing,
 }: MenuItemProps) {
   return (
     <button
       type="button"
       role="menuitem"
+      disabled={disabled}
       onClick={(e) => {
         e.stopPropagation();
+        if (disabled) return;
         onSelect();
       }}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-accent ${
-        danger
-          ? "text-destructive hover:text-destructive"
-          : "text-popover-foreground hover:text-accent-foreground"
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors ${
+        disabled
+          ? "cursor-default text-muted-foreground/60"
+          : danger
+            ? "text-destructive hover:bg-accent hover:text-destructive"
+            : "text-popover-foreground hover:bg-accent hover:text-accent-foreground"
       }`}
     >
       {icon && <span className="shrink-0">{icon}</span>}

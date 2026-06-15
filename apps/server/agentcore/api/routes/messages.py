@@ -1,0 +1,255 @@
+"""消息 page (找人 IM) routes: people-search, dms, messages, read, blocks, privacy.
+
+The 消息 page is "找人" (human↔human), a separate domain from the 对话 page's AI
+conversations — see ``docs/05-平台与运维/消息IM.md``. Every route resolves the
+authenticated user and scopes through ``MessagingService``: a non-member of a chat
+gets 404 (IDOR-safe), block/discoverability/who-can-DM gates live in the service.
+The service returns ORM/domain objects; this layer owns the Pydantic conversion
+(notably ``User.user_id`` → the API's ``id``).
+"""
+
+from fastapi import APIRouter, Depends, Query
+
+from agentcore.api.dependencies import AuthUser, get_messaging_service
+from agentcore.api.schemas import (
+    BlockedUser,
+    BlockListResponse,
+    BlockUserRequest,
+    ChatListResponse,
+    ChatMessageDetail,
+    ChatMessageListResponse,
+    ChatParticipant,
+    ChatSummary,
+    DirectorySettings,
+    MarkReadRequest,
+    SendChatMessageRequest,
+    StartDmRequest,
+    StatusResponse,
+    UpdateDirectorySettingsRequest,
+    UserSearchResponse,
+    UserSearchResult,
+)
+from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
+from agentcore.messaging import ChatView, DirectoryView, MessagingService
+
+router = APIRouter(prefix="/messages", tags=["messages"])
+
+
+# --- ORM/domain → schema conversion (kept in the route, per repo convention) ---
+
+
+def _participant(user) -> ChatParticipant:
+    return ChatParticipant(
+        id=user.user_id, username=user.username, display_name=user.display_name
+    )
+
+
+def _search_result(user) -> UserSearchResult:
+    return UserSearchResult(
+        id=user.user_id, username=user.username, display_name=user.display_name
+    )
+
+
+def _blocked_user(user) -> BlockedUser:
+    return BlockedUser(
+        id=user.user_id, username=user.username, display_name=user.display_name
+    )
+
+
+def _chat_summary(view: ChatView) -> ChatSummary:
+    chat, member = view.chat, view.member
+    return ChatSummary(
+        id=chat.id,
+        type=chat.type,
+        title=chat.title,
+        avatar_url=chat.avatar_url,
+        peer=_participant(view.peer) if view.peer else None,
+        last_message_at=chat.last_message_at,
+        last_message_preview=chat.last_message_preview,
+        unread=view.unread,
+        pinned=member.pinned,
+        muted=member.muted,
+        state=member.state,
+    )
+
+
+def _directory_settings(view: DirectoryView) -> DirectorySettings:
+    return DirectorySettings(discoverable=view.discoverable, who_can_dm=view.who_can_dm)
+
+
+# --- People search (任意搜人) ---
+
+
+@router.get("/users/search", response_model=UserSearchResponse)
+async def search_users(
+    user: AuthUser,
+    q: str = Query(..., min_length=1, max_length=100),
+    limit: int = Query(20, ge=1, le=50),
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Exact-match people-search for starting a chat (任意搜人 + 可见性护栏).
+
+    Returns at most ``limit`` discoverable users; self, blocked pairs, and users
+    who opted out of discovery are filtered out by the service.
+    """
+    users = await svc.search_users(requester_id=user.user_id, query=q, limit=limit)
+    data = [_search_result(u) for u in users]
+    return UserSearchResponse(data=data, total=len(data))
+
+
+# --- Chats ---
+
+
+@router.get("/chats", response_model=ChatListResponse)
+async def list_chats(
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """This user's chat list (recent first), with unread counts and dm peers."""
+    views = await svc.list_chats(user_id=user.user_id)
+    data = [_chat_summary(v) for v in views]
+    return ChatListResponse(data=data, total=len(data))
+
+
+@router.post("/chats/dm", response_model=ChatSummary, status_code=201)
+async def start_dm(
+    body: StartDmRequest,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Open (or reuse) a 1:1 chat with another user (by their user id).
+
+    422 self-dm; 404 unknown/disabled peer; 403 when blocked or the peer only
+    accepts contacts. The peer joins as a pending message request until they reply.
+    """
+    view = await svc.start_dm(requester_id=user.user_id, peer_id=body.user_id)
+    return _chat_summary(view)
+
+
+@router.get("/chats/{chat_id}/messages", response_model=ChatMessageListResponse)
+async def list_chat_messages(
+    chat_id: str,
+    user: AuthUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """A page of a chat's messages (oldest first). 404 if not a member."""
+    result = await svc.list_messages(
+        chat_id=chat_id, user_id=user.user_id, page=page, page_size=page_size
+    )
+    return ChatMessageListResponse(
+        data=[ChatMessageDetail.model_validate(m) for m in result.messages],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+    )
+
+
+@router.post(
+    "/chats/{chat_id}/messages", response_model=ChatMessageDetail, status_code=201
+)
+async def send_chat_message(
+    chat_id: str,
+    body: SendChatMessageRequest,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Send a message into a chat the user belongs to.
+
+    Per-user send rate limit first (sheds a flooding account before DB work), then
+    the service gates membership (404) and dm blocks (403). Idempotent on
+    ``client_msg_id`` — a retry returns the already-stored message.
+    """
+    await enforce_user_message_rate_limit(user.user_id)
+    message = await svc.send_message(
+        chat_id=chat_id,
+        sender_id=user.user_id,
+        content=body.content,
+        reply_to_message_id=body.reply_to_message_id,
+        client_msg_id=body.client_msg_id,
+    )
+    return ChatMessageDetail.model_validate(message)
+
+
+@router.post("/chats/{chat_id}/read", response_model=StatusResponse)
+async def mark_chat_read(
+    chat_id: str,
+    body: MarkReadRequest,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Advance this user's read cursor (drives unread counts). 404 if not a member."""
+    await svc.mark_read(
+        chat_id=chat_id,
+        user_id=user.user_id,
+        last_read_message_id=body.last_read_message_id,
+    )
+    return StatusResponse()
+
+
+# --- Directory settings (discoverability + who-can-DM, 任意搜人 护栏) ---
+
+
+@router.get("/directory", response_model=DirectorySettings)
+async def get_directory_settings(
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """This user's discoverability + who-can-DM privacy (defaults when unset)."""
+    view = await svc.get_directory_settings(user_id=user.user_id)
+    return _directory_settings(view)
+
+
+@router.patch("/directory", response_model=DirectorySettings)
+async def update_directory_settings(
+    body: UpdateDirectorySettingsRequest,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Patch privacy settings; an omitted/null field is left unchanged."""
+    view = await svc.update_directory_settings(
+        user_id=user.user_id,
+        discoverable=body.discoverable,
+        who_can_dm=body.who_can_dm,
+    )
+    return _directory_settings(view)
+
+
+# --- Blocking (任意搜人 护栏) ---
+
+
+@router.get("/blocks", response_model=BlockListResponse)
+async def list_blocks(
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """The users this user has blocked."""
+    users = await svc.list_blocked(user_id=user.user_id)
+    data = [_blocked_user(u) for u in users]
+    return BlockListResponse(data=data, total=len(data))
+
+
+@router.post("/blocks", response_model=StatusResponse)
+async def block_user(
+    body: BlockUserRequest,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Block a user (symmetric: severs DMs and hides each from the other's search).
+
+    422 self-block; 404 unknown target.
+    """
+    await svc.block_user(user_id=user.user_id, target_id=body.user_id)
+    return StatusResponse()
+
+
+@router.delete("/blocks/{target_id}", response_model=StatusResponse)
+async def unblock_user(
+    target_id: str,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Remove a user from the block list (idempotent)."""
+    await svc.unblock_user(user_id=user.user_id, target_id=target_id)
+    return StatusResponse()

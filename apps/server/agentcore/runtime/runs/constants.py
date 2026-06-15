@@ -15,6 +15,13 @@ MAX_PARALLEL_DELEGATIONS = 6
 # Most worker tasks one delegate call may spawn. Excess tasks are dropped.
 MAX_DELEGATION_TASKS = 10
 
+# Hard ceiling on delegation nesting across one turn's Run tree. The CEO's direct
+# workers are depth 1; a worker may itself delegate (开一层子团队) ONLY while its own
+# depth < this cap, so the tree can never nest past CEO → worker → sub-worker.
+# depth-2 sub-workers never receive a delegate tool. Bounds recursion (cost /
+# latency / fan-out) on top of the tree-wide width budget (MAX_PARALLEL_DELEGATIONS).
+MAX_DELEGATION_DEPTH = 2
+
 # Hard ceiling on per-node retries regardless of what a task declares.
 MAX_RUN_RETRIES = 3
 

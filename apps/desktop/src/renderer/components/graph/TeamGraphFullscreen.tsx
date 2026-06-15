@@ -12,12 +12,20 @@ import { GraphView } from "./GraphView";
  *
  * Portaled to <body> so it escapes the message card's `overflow-hidden` (and any
  * transformed/animated ancestor that would otherwise clip a fixed child) and
- * covers the viewport. It hosts the full (non-embedded) `GraphView` — toolbar,
- * node-detail sidebar, context menu. `onClose` is threaded into `GraphView` so
- * endpoint jumps and "在对话面板中查看" step the overlay aside to reveal the chat;
- * Esc and the 返回 button close it too.
+ * covers the viewport. It hosts the full (non-embedded) `GraphView` — layout
+ * toolbar, replay timeline, context menu. `onClose` is threaded into `GraphView`
+ * so node drill-ins and endpoint jumps step the overlay aside to reveal the chat
+ * (run detail opens in the conversation panel behind it); Esc and the 返回 button
+ * close it too. `autoplay` starts the replay timeline on mount — the inline
+ * card's 回放 entry.
  */
-export function TeamGraphFullscreen({ onClose }: { onClose: () => void }) {
+export function TeamGraphFullscreen({
+  autoplay = false,
+  onClose,
+}: {
+  autoplay?: boolean;
+  onClose: () => void;
+}) {
   const taskSummary = useActiveExecField((rt) => rt.plan?.taskSummary);
   const [entered, setEntered] = useState(false);
 
@@ -58,7 +66,7 @@ export function TeamGraphFullscreen({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="min-h-0 flex-1">
-        <GraphView onClose={onClose} />
+        <GraphView autoplay={autoplay} onClose={onClose} />
       </div>
     </div>,
     document.body,

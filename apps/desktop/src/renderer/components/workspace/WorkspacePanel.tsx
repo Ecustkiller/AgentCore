@@ -32,6 +32,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  GitPullRequest,
   History,
   Loader2,
   Pencil,
@@ -50,9 +51,10 @@ import {
   useRef,
   useState,
 } from "react";
+import { HandoffSection } from "./HandoffSection";
 import { WorkspaceModeBar } from "./WorkspaceModeBar";
 
-type Section = "files" | "snapshots";
+type Section = "files" | "snapshots" | "handoff";
 
 // Tree fold state is per-conversation (paths differ per workspace) and persisted
 // so a switch away and back keeps the same folders open/closed.
@@ -176,13 +178,21 @@ export function WorkspacePanel() {
               icon={<History size={13} />}
               label="快照"
             />
+            <SectionTab
+              active={section === "handoff"}
+              onClick={() => setSection("handoff")}
+              icon={<GitPullRequest size={13} />}
+              label="交接"
+            />
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {section === "files" ? (
               <FilesSection conversationId={conversationId} />
-            ) : (
+            ) : section === "snapshots" ? (
               <SnapshotsSection conversationId={conversationId} />
+            ) : (
+              <HandoffSection conversationId={conversationId} />
             )}
           </div>
         </>

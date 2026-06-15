@@ -44,6 +44,16 @@ def test_must_contain_failure_and_pass():
     assert check_contract("既有风险也有结论", contract).ok
 
 
+def test_must_contain_case_insensitive():
+    # Mirrors required_sections' casefold match: casing must not flip the verdict.
+    contract = RunContract(must_contain=["API", "ROI"])
+    assert check_contract("本方案的 api 设计与 roi 测算如下", contract).ok
+    # A genuinely missing keyword still fails, and the reason shows原始大小写.
+    v = check_contract("只提到了 api 设计", contract)
+    assert not v.ok
+    assert any("ROI" in f for f in v.failures)
+
+
 def test_required_section_heading_shapes_detected():
     contract = RunContract(required_sections=["结论"])
     assert check_contract("# 结论\n内容", contract).ok
@@ -86,6 +96,15 @@ def test_format_feedback_lists_reasons():
     assert "少于" in fb
     assert "X" in fb
     assert fb.startswith("你上一次")
+
+
+def test_format_feedback_steers_worker_to_skip_meta_commentary():
+    # The worker has a single rework shot — spend it on the corrected product,
+    # not on apologies or explanations.
+    fb = format_feedback(check_contract("短", RunContract(min_length=10)))
+    assert "完整最终产出" in fb
+    assert "不要解释" in fb
+    assert "不要道歉" in fb
 
 
 def test_format_feedback_empty_when_ok():

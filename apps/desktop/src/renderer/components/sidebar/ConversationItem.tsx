@@ -7,6 +7,7 @@ import { createFolder } from "@/services/folders";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   type Conversation,
+  runtimeOf,
   useConversationGenerating,
   useConversationStore,
 } from "@/stores/conversation";
@@ -17,6 +18,7 @@ import {
   FolderPlus,
   HardDrive,
   Inbox,
+  Lock,
   Pencil,
   Trash2,
   X,
@@ -46,6 +48,15 @@ export function ConversationItem({ conversation }: Props) {
   );
   const folders = useFoldersStore((s) => s.folders);
   const isGenerating = useConversationGenerating(conversation.id);
+  // A conversation's workspace is fixed once it starts (双模式工作区 §九 ⑩): its
+  // folder decides which workspace dir it runs in, so re-filing a started chat
+  // would silently switch its workspace. Lock the folder-move actions once it has
+  // any messages — the server count (live after a reload) plus this session's live
+  // runtime cover both a reloaded chat and one just sent in this session.
+  const hasLiveMessages = useConversationStore(
+    (s) => runtimeOf(s, conversation.id).messages.length > 0,
+  );
+  const workspaceLocked = conversation.messageCount > 0 || hasLiveMessages;
   const awaitingApproval = useApprovalStore((s) =>
     s.pending.some((p) => p.conversationId === conversation.id),
   );
@@ -305,32 +316,45 @@ export function ConversationItem({ conversation }: Props) {
             }}
           />
           <MenuDivider />
-          <MenuLabel>移到</MenuLabel>
-          <div className="max-h-52 overflow-y-auto">
-            {folders.map((f) => (
-              <MenuItem
-                key={f.id}
-                icon={<Folder size={14} />}
-                label={f.name}
-                onSelect={() => void moveTo(f.id)}
-                trailing={
-                  f.id === currentFolderId ? <Check size={13} /> : undefined
-                }
-              />
-            ))}
-          </div>
-          {currentFolderId && (
+          {workspaceLocked ? (
+            // Started chat: its workspace is pinned to its current folder, so the
+            // move actions are replaced by an explanatory locked hint (§九 ⑩).
             <MenuItem
-              icon={<Inbox size={14} />}
-              label="移出文件夹"
-              onSelect={() => void moveTo(null)}
+              icon={<Lock size={14} />}
+              label="开始后不可更换工作区"
+              disabled
+              onSelect={() => {}}
             />
+          ) : (
+            <>
+              <MenuLabel>移到</MenuLabel>
+              <div className="max-h-52 overflow-y-auto">
+                {folders.map((f) => (
+                  <MenuItem
+                    key={f.id}
+                    icon={<Folder size={14} />}
+                    label={f.name}
+                    onSelect={() => void moveTo(f.id)}
+                    trailing={
+                      f.id === currentFolderId ? <Check size={13} /> : undefined
+                    }
+                  />
+                ))}
+              </div>
+              {currentFolderId && (
+                <MenuItem
+                  icon={<Inbox size={14} />}
+                  label="移出文件夹"
+                  onSelect={() => void moveTo(null)}
+                />
+              )}
+              <MenuItem
+                icon={<FolderPlus size={14} />}
+                label="新建文件夹…"
+                onSelect={() => void moveToNewFolder()}
+              />
+            </>
           )}
-          <MenuItem
-            icon={<FolderPlus size={14} />}
-            label="新建文件夹…"
-            onSelect={() => void moveToNewFolder()}
-          />
           <MenuDivider />
           <MenuItem
             icon={<Trash2 size={14} />}

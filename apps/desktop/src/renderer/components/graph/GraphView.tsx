@@ -31,20 +31,15 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import {
-  Check,
   Crosshair,
   ListTree,
   Maximize2,
   MoveHorizontal,
-  PanelRight,
-  Radar,
   ScanSearch,
-  Waypoints,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentNode } from "./AgentNode";
 import { EndpointNode } from "./EndpointNode";
-import { NodeDetail } from "./NodeDetail";
 import { StepEdge } from "./StepEdge";
 import { Timeline } from "./Timeline";
 
@@ -62,17 +57,16 @@ const SYNTHESIS_ID = "__synthesis__";
 const isEndpointId = (id: string): boolean =>
   id === INPUT_ID || id === SYNTHESIS_ID;
 
-// Right-click layout choices. Each maps to a distinct ELK algorithm in
-// `computeLayout`; the active one is checked in the menu and persisted.
+// Layout choices for the canvas toolbar (default left-right first). Each maps to
+// a distinct ELK algorithm in `computeLayout`; the active one is highlighted and
+// persisted.
 const LAYOUT_OPTIONS: {
   kind: GraphLayout;
   label: string;
   icon: React.ReactNode;
 }[] = [
-  { kind: "tree", label: "树形布局", icon: <ListTree size={14} /> },
   { kind: "leftright", label: "左右流", icon: <MoveHorizontal size={14} /> },
-  { kind: "radial", label: "径向布局", icon: <Radar size={14} /> },
-  { kind: "force", label: "力导向", icon: <Waypoints size={14} /> },
+  { kind: "tree", label: "树形布局", icon: <ListTree size={14} /> },
 ];
 
 /**
@@ -92,24 +86,29 @@ function deriveSynthesisStatus(execution: Execution): RunStatus {
 
 interface GraphViewProps {
   /**
-   * Embedded in the detail panel (vs. the full-screen overlay). Drops the
-   * replay timeline and the inline node-detail sidebar — in the panel a node
-   * click hands off to {@link onNodeSelect} (opens a run-detail tab) so the
-   * narrow column is not split by a second pane.
+   * Embedded in the message (vs. the full-screen overlay). Drops the replay
+   * timeline and the layout toolbar — in the message column a node click hands
+   * off to {@link onNodeSelect} (opens a run-detail tab in the conversation
+   * panel) so the narrow column is not split by a second pane.
    */
   embedded?: boolean;
   /** Node-click handler for embedded mode; falls back to in-graph focus. */
   onNodeSelect?: (runId: string) => void;
   /** Dismiss the surrounding temporary full-screen (non-embedded only); set by
-   * the inline graph's fullscreen wrapper. Endpoint jumps + "view in panel" call
-   * it so the overlay steps aside to reveal the chat. */
+   * the inline graph's fullscreen wrapper. Endpoint jumps + node drill-ins call
+   * it so the overlay steps aside to reveal the chat (where the run detail and
+   * the jumped-to bubble live). */
   onClose?: () => void;
+  /** Start the replay timeline playing on mount — the full-screen "回放" entry
+   * (non-embedded only). */
+  autoplay?: boolean;
 }
 
 export function GraphView({
   embedded = false,
   onNodeSelect,
   onClose,
+  autoplay = false,
 }: GraphViewProps = {}) {
   // The message whose graph this is (§9.3). Threaded from the inline graph via
   // ExecutionScopeContext (survives the full-screen portal), so focus + detail
@@ -139,29 +138,31 @@ export function GraphView({
   // Left-right flow re-anchors node handles to the horizontal axis.
   const handleDirection =
     layoutKind === "leftright" ? "horizontal" : "vertical";
-  const selectedRunId = useActiveExecField((rt) => rt.selectedRunId);
-  const selectRun = useExecutionStore((s) => s.selectRun);
-  // All selection mutations go through this turn's slot.
-  const selectRunHere = useCallback(
-    (runId: string | null) => {
-      if (messageId) selectRun(runId, messageId);
-    },
-    [selectRun, messageId],
-  );
   const showRunDetail = useDetailPanelStore((s) => s.showRunDetail);
-  // Node highlight has one source per surface — no cross-store syncing. The
-  // embedded graph mirrors the conversation panel's active run-detail tab (the
-  // panel IS its detail surface, so the lit node is whatever the panel currently
-  // shows for THIS turn); switching / closing tabs or hiding the panel therefore
-  // moves or drops the highlight automatically. The full-screen overlay instead
-  // uses its own in-overlay selection (`selectedRunId`).
-  const panelHighlightRunId = useDetailPanelStore((s) => {
+  // Drill into a run through the conversation's right-side detail panel — the
+  // single home for run detail. The embedded graph hands off via `onNodeSelect`
+  // (also a `showRunDetail`); the full-screen overlay calls this directly and
+  // then steps aside (`onClose`) so the panel shows behind it.
+  const showRunDetailHere = useCallback(
+    (runId: string) => {
+      if (!messageId) return;
+      const run = execution?.runs.find((r) => r.id === runId);
+      const role = execution?.agents.find((a) => a.id === run?.agentId)?.role;
+      showRunDetail(messageId, runId, role);
+    },
+    [execution, messageId, showRunDetail],
+  );
+  // Node highlight has one source: the conversation panel's active run-detail
+  // tab for THIS turn. Both the embedded graph and the full-screen overlay drill
+  // into that single panel (the overlay then steps aside), so the lit node is
+  // whatever the panel currently shows — switching / closing tabs or hiding the
+  // panel moves or drops the highlight automatically.
+  const highlightRunId = useDetailPanelStore((s) => {
     if (!s.open) return null;
     const active =
       s.tabs.find((t) => t.id === s.activeTabId) ?? s.tabs[s.tabs.length - 1];
     return active && active.messageId === messageId ? active.runId : null;
   });
-  const highlightRunId = embedded ? panelHighlightRunId : selectedRunId;
   // The single FX rate (§7.5) that turns each run's nano-USD total into the ¥
   // chip on its node; one rate for the whole graph keeps the money consistent.
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
@@ -223,7 +224,9 @@ export function GraphView({
     () =>
       execution
         ? execution.runs
-            .map((s) => `${s.id}:${s.dependsOn.join(",")}`)
+            .map(
+              (s) => `${s.id}:${s.dependsOn.join(",")}:${s.parentRunId ?? ""}`,
+            )
             .join("|")
         : "",
     [execution],
@@ -241,34 +244,59 @@ export function GraphView({
     // out around it. Workers wire INTO it as the sink instead of the synthetic
     // bookend, which is dropped once the real run exists.
     const synthId = runs.find((r) => r.kind === "synthesis")?.id ?? null;
+    const runIds = new Set(runs.map((r) => r.id));
+    // A sub-worker's parent is another run on THIS graph (its captain worker,
+    // 阶段2 nested delegation); a top-level worker's "parent" is the CEO captain
+    // run, which has no node here (parentRunId ∉ runIds) or is null. Only real
+    // sub-workers are grouped under a parent — the rest are the main wave DAG.
+    const isSub = (r: { id: string; parentRunId?: string | null }): boolean =>
+      !!r.parentRunId && r.parentRunId !== r.id && runIds.has(r.parentRunId);
     const workerRuns = runs.filter((r) => r.id !== synthId);
+    const topWorkers = workerRuns.filter((r) => !isSub(r));
     const nodeIds = runs.map((s) => s.id);
     const rawEdges: GraphEdge[] = workerRuns.flatMap((run) =>
       run.dependsOn.map((depId) => ({
         id: `${depId}->${run.id}`,
         source: depId,
         target: run.id,
+        kind: "dep" as const,
       })),
     );
 
-    // Bookend the worker DAG so the graph reads as a full collaboration story:
-    // user input → team waves → CEO synthesis. The input root is always synthetic
-    // (the prompt has no run); the sink is the real synthesis run when present,
-    // else a synthetic node. Synthetic ids are guarded everywhere a real run id
-    // is expected (clicks, run-detail, context menu).
-    if (workerRuns.length > 0) {
+    // Delegation edges (阶段2 父子分组): a captain worker → each of its nested
+    // sub-workers. Drawn distinctly (dashed, see StepEdge) so a sub-team reads as
+    // grouped under its parent; the layered layout then clusters the sub-workers
+    // right after the captain. Sub-workers never touch the bookends below.
+    for (const r of workerRuns) {
+      if (isSub(r)) {
+        rawEdges.push({
+          id: `${r.parentRunId}=>${r.id}`,
+          source: r.parentRunId as string,
+          target: r.id,
+          kind: "delegate",
+        });
+      }
+    }
+
+    // Bookend ONLY the top-level worker DAG so the graph reads as a full
+    // collaboration story: user input → team waves → CEO synthesis. The input
+    // root is always synthetic (the prompt has no run); the sink is the real
+    // synthesis run when present, else a synthetic node. Synthetic ids are guarded
+    // everywhere a real run id is expected (clicks, run-detail, context menu).
+    if (topWorkers.length > 0) {
       const dependedOn = new Set<string>();
-      for (const r of workerRuns)
+      for (const r of topWorkers)
         for (const dep of r.dependsOn) dependedOn.add(dep);
       const sinkId = synthId ?? SYNTHESIS_ID;
       nodeIds.push(INPUT_ID);
       if (!synthId) nodeIds.push(SYNTHESIS_ID);
-      for (const r of workerRuns) {
+      for (const r of topWorkers) {
         if (r.dependsOn.length === 0) {
           rawEdges.push({
             id: `${INPUT_ID}->${r.id}`,
             source: INPUT_ID,
             target: r.id,
+            kind: "dep",
           });
         }
         if (!dependedOn.has(r.id)) {
@@ -276,6 +304,7 @@ export function GraphView({
             id: `${r.id}->${sinkId}`,
             source: r.id,
             target: sinkId,
+            kind: "dep",
           });
         }
       }
@@ -320,12 +349,14 @@ export function GraphView({
         onNodeSelect(id);
         return;
       }
-      selectRunHere(id === selectedRunId ? null : id);
+      // Full-screen overlay: open the run in the conversation detail panel, then
+      // step aside so it shows behind the overlay (one home for run detail).
+      showRunDetailHere(id);
+      onClose?.();
     },
     [
       onNodeSelect,
-      selectRunHere,
-      selectedRunId,
+      showRunDetailHere,
       finalAnswer,
       taskMessage,
       focusMessage,
@@ -405,10 +436,17 @@ export function GraphView({
     if (!execution) return [];
     // The synthesis run renders as the 汇聚点 (below), not as a worker node.
     const workerRuns = execution.runs.filter((r) => r.id !== synthesisRun?.id);
+    const runIdSet = new Set(execution.runs.map((r) => r.id));
     const nodes: Node[] = workerRuns.map((run, i) => {
       const agent = execution.agents.find((a) => a.id === run.agentId);
       const output = agent ? agent.outputChunks.join("") : "";
       const focused = highlightRunId === run.id;
+      // 阶段2: a nested sub-worker (its parent is another run on this graph) is
+      // badged so it reads as a delegated sub-task, not a top-level teammate.
+      const isSubtask =
+        !!run.parentRunId &&
+        run.parentRunId !== run.id &&
+        runIdSet.has(run.parentRunId);
       return {
         id: run.id,
         type: "agent",
@@ -433,6 +471,7 @@ export function GraphView({
               ? formatCost(run.cost.total, cnyPerUsd)
               : undefined,
           handleDirection,
+          isSubtask,
           // Input endpoint is index 0, so workers start at 1.
           enterIndex: i + 1,
           onActivate: () => activateNode(run.id),
@@ -536,7 +575,7 @@ export function GraphView({
         target: e.target,
         type: "step",
         animated,
-        data: { animated },
+        data: { animated, kind: e.kind ?? "dep" },
       } as Edge;
     });
   }, [edges, execution, synthesisStatus]);
@@ -580,55 +619,52 @@ export function GraphView({
           </ReactFlow>
         )}
 
+        {!embedded && (
+          <div className="absolute right-3 top-3 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-card/95 p-1 shadow-sm backdrop-blur">
+            {LAYOUT_OPTIONS.map((opt) => (
+              <button
+                key={opt.kind}
+                type="button"
+                onClick={() => setLayoutKind(opt.kind)}
+                title={opt.label}
+                aria-label={opt.label}
+                aria-pressed={layoutKind === opt.kind}
+                className={`flex size-7 items-center justify-center rounded-lg ${
+                  layoutKind === opt.kind
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                }`}
+              >
+                {opt.icon}
+              </button>
+            ))}
+          </div>
+        )}
+
         {!embedded && hasFrames && (
           <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
-            <Timeline />
+            <Timeline autoPlay={autoplay} />
           </div>
         )}
       </div>
-
-      {!embedded && selectedRunId && (
-        <NodeDetail
-          nodeId={selectedRunId}
-          onClose={() => selectRunHere(null)}
-          onExit={onClose}
-        />
-      )}
 
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)}>
           {menuNodeId !== null && (
             <>
               {!isEndpointId(menuNodeId) && (
-                <>
-                  <MenuItem
-                    icon={<ScanSearch size={14} />}
-                    label="查看详情"
-                    onSelect={() => {
-                      if (onNodeSelect) onNodeSelect(menuNodeId);
-                      else selectRunHere(menuNodeId);
-                      setMenu(null);
-                    }}
-                  />
-                  {!embedded && (
-                    <MenuItem
-                      icon={<PanelRight size={14} />}
-                      label="在对话面板中查看"
-                      onSelect={() => {
-                        const run = execution.runs.find(
-                          (r) => r.id === menuNodeId,
-                        );
-                        const role = execution.agents.find(
-                          (a) => a.id === run?.agentId,
-                        )?.role;
-                        if (messageId)
-                          showRunDetail(messageId, menuNodeId, role);
-                        onClose?.();
-                        setMenu(null);
-                      }}
-                    />
-                  )}
-                </>
+                <MenuItem
+                  icon={<ScanSearch size={14} />}
+                  label="查看详情"
+                  onSelect={() => {
+                    if (onNodeSelect) onNodeSelect(menuNodeId);
+                    else {
+                      showRunDetailHere(menuNodeId);
+                      onClose?.();
+                    }
+                    setMenu(null);
+                  }}
+                />
               )}
               {menuNodeId === INPUT_ID && taskMessage && (
                 <MenuItem
@@ -664,21 +700,6 @@ export function GraphView({
               <MenuDivider />
             </>
           )}
-          {LAYOUT_OPTIONS.map((opt) => (
-            <MenuItem
-              key={opt.kind}
-              icon={opt.icon}
-              label={opt.label}
-              trailing={
-                layoutKind === opt.kind ? <Check size={14} /> : undefined
-              }
-              onSelect={() => {
-                setLayoutKind(opt.kind);
-                setMenu(null);
-              }}
-            />
-          ))}
-          <MenuDivider />
           <MenuItem
             icon={<Maximize2 size={14} />}
             label="适应画布"

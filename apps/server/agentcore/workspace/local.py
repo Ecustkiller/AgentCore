@@ -8,12 +8,18 @@ backend then returns the same typed values / raises the same ``WorkspaceError``
 subclasses as ``ServerWorkspace`` — so the file tools and the engine run against
 it **unchanged** (the whole point of the P0 seam).
 
-P2a scope: ``read`` / ``list`` / ``grep`` are wired end-to-end through the channel
-(read-only, low-risk). The mutating ops and ``execute`` already route through the
-same channel here (the server side is complete and symmetric); their desktop
-handlers + the local-execution approval posture land in P2b / P2c. Until then a
-desktop that does not yet implement an op answers with an ``unsupported`` error,
-which surfaces as a normal ``WorkspaceIOError`` rather than a hang.
+All ops (read / list / grep / the mutating ops / ``execute``) are wired end-to-end
+through the channel and handled by the desktop. Two policies make ``execute`` safe
+on the user's real machine (双模式工作区 P2d 执行门):
+
+* **Approval** is enforced *upstream* at the engine's ``ApprovalGate`` (before the
+  op is ever issued), for the CEO and — in local mode — for delegated workers too,
+  so no code runs on the user's machine without consent. The channel itself adds
+  no gate (that would double-prompt the CEO).
+* **Timeout**: ``execute`` extends the channel's transport deadline to the code's
+  own ``timeout_seconds`` plus a slack, so the desktop's execution limit stays
+  authoritative and a long but legal run is not cut off by the flat file-op
+  deadline. A dropped desktop still fails as a ``WorkspaceIOError`` (never hangs).
 """
 
 from __future__ import annotations
@@ -31,6 +37,12 @@ from agentcore.workspace.protocol import (
     ReplaceOutcome,
 )
 
+# Default extra transport budget (seconds) over a code execution's own timeout
+# (see Settings.workspace_execute_timeout_slack_seconds). Used when a LocalWorkspace
+# is built without an explicit slack (e.g. tests); locate.py injects the configured
+# value for real turns.
+_DEFAULT_EXECUTE_TIMEOUT_SLACK = 30.0
+
 
 class LocalWorkspace:
     """``WorkspaceBackend`` backed by the desktop, reached over a channel."""
@@ -42,9 +54,13 @@ class LocalWorkspace:
         channel: WorkspaceChannel,
         *,
         root_label: str = "workspace",
+        execute_timeout_slack: float = _DEFAULT_EXECUTE_TIMEOUT_SLACK,
     ) -> None:
         self._channel = channel
         self.root_label = root_label
+        # Added to an execute's own timeout to form its transport deadline, so the
+        # desktop's execution limit (not the channel) decides when code is killed.
+        self._execute_timeout_slack = execute_timeout_slack
         # Flips True on the first mutating op so the service snapshots only
         # workspaces a turn actually changed (see WorkspaceBackend.dirty). For
         # local mode the snapshot is the 本地→云 handoff bridge (§四 / P2e).
@@ -152,6 +168,10 @@ class LocalWorkspace:
                 "memory_limit_mb": req.memory_limit_mb,
                 "stdin": req.stdin,
             },
+            # Outlive the desktop's own execution timeout (the authoritative kill)
+            # by the slack, so a long but legal run is not cut off by the flat
+            # file-op deadline — only a truly gone desktop trips the transport.
+            timeout=float(req.timeout_seconds) + self._execute_timeout_slack,
         )
         return ExecutionResult(
             success=bool(value["success"]),

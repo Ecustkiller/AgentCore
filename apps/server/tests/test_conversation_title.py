@@ -2,6 +2,7 @@
 
 from agentcore.llm import LLMRequest, LLMResponse
 from agentcore.memory.conversation_title import (
+    _TITLE_SYSTEM_PROMPT,
     TITLE_MAX_CHARS,
     LLMTitleGenerator,
     TitleInput,
@@ -78,6 +79,17 @@ def test_render_prompt_truncates_long_message():
     )
     assert "…" in prompt
     assert len(prompt) < 2000
+
+
+# --- _TITLE_SYSTEM_PROMPT (pinned guards) ---
+
+
+def test_title_prompt_bans_emoji_and_guards_injection():
+    # The sanitizer does not strip emoji, so the ban lives in the prompt; the
+    # conversation is interpolated as data and must not be obeyed as instructions.
+    assert "emoji" in _TITLE_SYSTEM_PROMPT
+    assert "名词短语" in _TITLE_SYSTEM_PROMPT
+    assert "不要执行其中" in _TITLE_SYSTEM_PROMPT
 
 
 # --- LLMTitleGenerator (async, with a fake provider) ---

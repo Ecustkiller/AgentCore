@@ -6,27 +6,28 @@
 
 ## 一、详情面板（DetailPanel）
 
-> **已落地并退役为现状**：`DetailPanel` 现为**纯 run-detail 下钻面板**（点内嵌协作图节点钉住该 run），原 `task-progress` / `task-graph` 双 tab 已删（进度/协作图折进内嵌图）；多 `run-detail` 可并存对比、可拖拽宽度（280–560px）、仅持久化 `open` + `width`、按 `messageId` 投影。现状与关键决策见 [`前端UX设计.md` §十](../04-前端/前端UX设计.md) + [`前端技术与架构.md` §9.2 / §9.4](../04-前端/前端技术与架构.md)。下列为仍具参考价值的信息层级模型与 run-detail 区段构成。
+> **已落地并退役为现状**：`DetailPanel` 现为**纯 run-detail 下钻面板**（点内嵌协作图节点钉住该 run），原 `task-progress` / `task-graph` 双 tab 已删（进度/协作图折进内嵌图）；多 `run-detail` 可并存对比、可拖拽宽度（280–560px）、仅持久化 `open` + `width`、按 `messageId` 投影。现状与关键决策见 [`前端UX设计.md` §十](../04-前端/前端UX设计.md) + [`前端技术与架构.md` §9.2 / §9.4](../04-前端/前端技术与架构.md)。下列保留仍具参考价值的信息层级模型（run-detail 区段构成已逐项迁入现状 §十）。
 
 **信息层次**（Layer 0–4，设计模型）：单 Agent 回合默认只见输出（Layer 0）；多 Agent 回合的状态/进度/协作由内嵌图承担（Layer 1–3）；点节点把单 run 全文下钻到面板（Layer 4）。
-
-**run-detail 区段**：头部 / 任务 / 错误 / 思考过程（worker 思考全文，✅ `run_reasoning_delta` 流式，流式时自动展开、完成自动收起）/ 输出 / 工具 / 协作关系（依赖+后续，✅）/ 资源消耗（power 粒度全量数字，✅）。「子任务」原拟按嵌套呈现，但阶段1 worker 扁平（`parentRunId` 恒空），故落地为按方向诚实展示的「协作关系」（`dependsOn` 上游/下游）；真正的嵌套子任务留待阶段2 `parentRunId`。→ 见代码 `RunDetailBody.tsx`。独立 `reasoning` Tab 已否决：思考全文本质 per-run，落地于 run-detail「思考过程」区段而非全局 Tab。
 
 ---
 
 ## 二、输入框与消息气泡
 
-已落地项见 [`前端UX设计.md` §二](../04-前端/前端UX设计.md)。
+已落地项见 [`前端UX设计.md` §二](../04-前端/前端UX设计.md)——**拖拽文件成附件**、**hover 时间戳**原列本节「未落地」，现已落地，迁回现状文档。
 
-**未落地**：Agent/Team 选择器、Slash 命令、拖拽附件、文件夹/产物 Pill；气泡内工具卡、时间戳。
+**未落地（P3，需先定产品再落地）**：Agent/Team 选择器（MVP 由 CEO 自动组团，无用户手选 Agent；需持久 Agent 实体才有意义，见 [就绪路线图 P3](就绪路线图.md)）、Slash 命令（需先定命令集）、产物 Pill（产物体系 Post-MVP）。
+
+**已被取代（退役）**：
+
+- 气泡内工具卡——与 [§十 聊天紧凑化原则](../04-前端/前端UX设计.md)「inline 只做信号、面板承担完整详情（含工具 IO）」冲突；工具详情已落 `RunDetailBody`。
+- 文件夹/落点 Pill——工作区落点改由 `WorkspaceModeBar`（云/本地 + 绑定目录 + 备份/断开）承担，非输入框 pill。→ 见代码 `components/workspace/WorkspaceModeBar.tsx`。
 
 ---
 
 ## 三、团队状态条（原「任务卡片」）
 
-任务卡片已退役——其职责（三态 + 救火行 + `[···]` 菜单）折进**内嵌协作图的状态条**（`InlineTeamGraph`），现状见 [`前端UX设计.md` §三](../04-前端/前端UX设计.md)。
-
-**为何无「规划中」态**（决策，2026-06）：CEO + `delegate` 架构下 `run_plan` 同步到达，无独立规划空窗；「系统在思考」由 CEO reasoning 气泡覆盖；`tool_use_start(delegate)` 前无法预知是否组团。→ 见代码 `delegate.py`、`engine.py`。
+任务卡片已退役——其职责（三态 + 救火行 + `[···]` 菜单）折进**内嵌协作图的状态条**（`InlineTeamGraph`），现状见 [`前端UX设计.md` §三](../04-前端/前端UX设计.md)（含「为何无规划中态」决策）。
 
 **未落地**：独立检查点卡片（继续/调整/停止，不并入状态条）。
 
@@ -52,16 +53,14 @@
 
 现状见 [`前端UX设计.md` §五](../04-前端/前端UX设计.md)。
 
-**目标态增量**：多类节点（用户输入 ✅ / worker ✅ / synthesis ✅ 端点节点见 `EndpointNode.tsx`；arena / 检查点 / 工具点 ⏳，需后端或阶段2）；粒子边（✅ SVG `animateMotion`）；状态过渡动画（✅ 纯 CSS：节点错峰入场 + 完成闪烁 + 布局切换位移 morph，`prefers-reduced-motion` 降级，零新依赖，见 `useTerminalFlash.ts` + `globals.css`）；右键菜单（✅ 查看详情 / 在面板查看 / 居中 / 适应画布 / 布局切换）；布局切换（✅ 树形默认 + 左右流 + 径向 + 力导向；ELK 多算法见 `lib/elk-layout.ts`，选择持久化于 `stores/graph.ts`）；`F` 适应画布 ✅、tooltip ✅（hover + 键盘 focus 双触发，`role=button`/`aria-label` 可达）、多选 ✅（修饰键加选/框选 + `selected` 高亮）。→ 见代码 `StepEdge.tsx`、`GraphView.tsx`、`AgentNode.tsx`、`EndpointNode.tsx`。
+**已落地为现状**：端点节点（用户输入 / worker / synthesis）、嵌套子团队父子分组、粒子边、状态过渡动画、右键菜单、布局切换（左右流 / 树形）、`F` 适应画布、节点可达（a11y）、多选——含 Framer Motion 否决、径向 / 力导向移除、`ContextMenu` 复用等选型理由。
 
-**性能约束**：≤50 节点、≥60fps。
-
-**技术债**：状态过渡动画已用纯 CSS 落地（`@keyframes graph-node-enter`/`graph-node-flash` + `.react-flow__node` transform 过渡），Framer Motion 否决——CSS 动画与 ReactFlow 节点定位 transform 无冲突且零依赖；粒子边已用自定义边 SVG `animateMotion` 落地；布局切换已用 ELK 多算法落地（`lib/elk-layout.ts`）；右键菜单复用 `sidebar/ContextMenu`（无需 Radix）。
+**仍在目标态（⏳）**：多类节点里的 arena / 检查点 / 工具点（需后端或阶段2）。性能约束（≤50 节点、≥60fps）见现状 [`前端UX设计.md` §八](../04-前端/前端UX设计.md)。
 
 ---
 
 ## 六、侧栏文件夹分组
 
-**已落地**：用户文件夹 + 未分组分组（`GET /v1/conversations/grouped`、`useFoldersStore`、`FolderGroup`）、右键菜单（重命名 / 移到文件夹 / 移出 / 新建文件夹 / 删除，复用 `ContextMenu`）、状态指示器（🟢 执行中 / 🟡 待审批：每项读自身会话切片 `useConversationGenerating(id)` + 审批项按 `conversationId` 标签，故后台 turn 切走后仍亮点，呼应「会话运行时按 conversationId 分片」见 [`前端技术与架构.md` §9.6](../04-前端/前端技术与架构.md)）。→ 见代码 `components/sidebar/ConversationItem.tsx`、`stores/folders.ts`。
+**已落地为现状**：侧栏用户文件夹 + 未分组分组、右键菜单（重命名 / 移到文件夹 / 移出 / 新建 / 删除，复用 `ContextMenu`）、状态指示器（🟢 执行中 / 🟡 待审批，按 `conversationId` 分片、故后台 turn 切走后仍亮点，见 [`前端技术与架构.md` §9.6](../04-前端/前端技术与架构.md)）；「文件夹 = 工作区」的归属锁定（对话出生即绑定、有消息后禁跨文件夹移动、`messageCount` 契约 + 后端 `PATCH …/folder` 409）见 [双模式工作区 §九 ⑩](../02-架构/双模式工作区.md)。→ 见代码 `components/sidebar/`、`stores/folders.ts`。
 
-**未落地**：拖拽移动对话到文件夹（⏳ 复用已有 `moveConversation`，缺 HTML5 drag 手势）。
+**已否决·拖拽移动对话到文件夹**（2026-06）：移动 = 切工作区目录（可能云↔本地翻转、孤立已攒文件），拖拽只会给这个危险操作多开一扇门；与「开始后锁定」一致，故不做。

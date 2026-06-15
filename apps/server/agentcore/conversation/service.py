@@ -4,6 +4,11 @@ Coordinates message persistence, history loading, pipeline execution,
 and title generation for a conversation turn.
 """
 
+import asyncio
+import time
+from collections.abc import Coroutine
+from typing import Any
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.config import settings
@@ -15,6 +20,7 @@ from agentcore.db.repositories import (
     ConversationRepository,
     CostEventRepository,
     FolderRepository,
+    HandoffJobRepository,
     MessageRepository,
 )
 from agentcore.llm.deepseek import DeepSeekProvider
@@ -22,31 +28,32 @@ from agentcore.llm.factory import build_provider
 from agentcore.memory import (
     TITLE_MAX_CHARS,
     ChatMessage,
-    LLMMemoryExtractor,
     LLMTitleGenerator,
     TitleInput,
-    default_memory_store,
-    maintain_user_memory,
 )
+from agentcore.memory.consolidation import schedule_consolidation
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
     error_event,
+    handoff_job_started,
     message_end,
     title_generated,
     turn_saved,
 )
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
+from agentcore.workspace.handoff import snapshot_local
 from agentcore.workspace.locate import (
     LocalBinding,
+    build_server_workspace,
     build_workspace,
     resolve_local_binding,
     workspace_storage_key,
 )
 from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.protocol import WorkspaceBackend
-from agentcore.workspace.snapshots import create_snapshot
+from agentcore.workspace.snapshots import create_snapshot, restore_into_workspace
 
 logger = get_logger(__name__)
 
@@ -87,8 +94,8 @@ async def _generate_title(
 ) -> str:
     """Best-effort one-line title via the fast model; falls back to truncation.
 
-    Any failure degrades to the naive truncated title. The provider is shared by
-    the caller (also used for memory maintenance) and closed there.
+    Any failure degrades to the naive truncated title. The provider is owned and
+    closed by the caller.
     """
     fallback = _fallback_title(user_message)
     if not user_message.strip():
@@ -197,39 +204,32 @@ async def _run_and_persist(
         conv = await conv_repo.get_by_id(conversation_id)
         needs_title = bool(generate_title and conv and not conv.title)
 
-    # Title + long-term memory both hit the network and run after the pipeline
-    # already emitted message_end, so this latency is not user-visible. They
-    # share one provider. The title_generated event is emitted before the sink
-    # closes, so the sidebar updates live.
-    provider = build_provider()
-    try:
-        if needs_title:
+    # Title generation hits the network after the pipeline already emitted
+    # message_end, so this latency is not user-visible. The title_generated event is
+    # emitted before the sink closes, so the sidebar updates live.
+    if needs_title:
+        provider = build_provider()
+        try:
             title = await _generate_title(
                 provider=provider,
                 conversation_id=conversation_id,
                 user_message=user_message,
                 assistant_reply=assistant_reply,
             )
-            if title:
-                async with async_session_factory() as session:
-                    conv_repo = ConversationRepository(session)
-                    await conv_repo.update_title(conversation_id, title)
-                sink.emit(title_generated(title, conversation_id=conversation_id))
+        finally:
+            await provider.close()
+        if title:
+            async with async_session_factory() as session:
+                conv_repo = ConversationRepository(session)
+                await conv_repo.update_title(conversation_id, title)
+            sink.emit(title_generated(title, conversation_id=conversation_id))
 
-        # Per-turn long-term memory maintenance from this exchange. Skips the
-        # write when nothing durable changed; never raises.
-        if user_message.strip():
-            turn: list[ChatMessage] = [{"role": "user", "content": user_message}]
-            if assistant_reply.strip():
-                turn.append({"role": "assistant", "content": assistant_reply})
-            await maintain_user_memory(
-                user_id=user_id,
-                messages=turn,
-                extractor=LLMMemoryExtractor(provider),
-                store=default_memory_store(),
-            )
-    finally:
-        await provider.close()
+    # Long-term memory is refreshed OFF the turn by the offline consolidation pass
+    # (memory/consolidation.py): arm its idle debounce for this conversation so a
+    # burst of turns consolidates ONCE — over the whole window, against the existing
+    # memory — when the user pauses (水位线+锁 / 防抖+sweeper). Non-blocking; a
+    # missed debounce (restart / closed client) is caught by the periodic sweeper.
+    schedule_consolidation(conversation_id)
 
     # Best-effort workspace backup (决策⑥): if this turn changed files, snapshot
     # the workspace to object storage. It runs after message_end (and the title
@@ -428,6 +428,217 @@ async def regenerate_chat(
 
     except Exception as e:
         logger.error("regenerate_chat_error", error=str(e), exc_info=True)
+    finally:
+        if not sink._closed:
+            sink.close()
+
+
+# --- Local→云 handoff: dispatch a cloud team run (双模式工作区 P2e / e2) ---
+
+# Detached background tasks (handoff cloud runs) kept referenced so the event loop
+# does not garbage-collect them mid-flight; each removes itself when done. State is
+# in-process (single-worker posture, as approvals / channel / locks); a process
+# restart drops in-flight jobs (they stay "running" — acceptable for the MVP, front
+# with a durable queue to survive restarts).
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_background(coro: Coroutine[Any, Any, None]) -> asyncio.Task:
+    """Fire-and-forget a coroutine, holding a reference until it completes."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
+async def _persist_job_turn(
+    *, user_id: str, conversation_id: str, result: dict
+) -> None:
+    """Persist a handoff job's assistant reply + cost ledger under the job conv.
+
+    Same shape as the interactive turn's persistence (message + 落账), minus title
+    / memory / auto-snapshot: the job is headless, doesn't touch the user's
+    long-term memory, and its result is snapshotted explicitly by the caller. So
+    opening the hidden job conversation replays the team graph + payroll exactly
+    like a normal multi-agent turn. A ledger failure is warning-only (文档铁律).
+    """
+    assistant_reply = result.get("content") or ""
+    cost_runs = result.get("cost_runs") or []
+    async with async_session_factory() as session:
+        if assistant_reply:
+            await MessageRepository(session).create(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=assistant_reply,
+                reasoning_content=result.get("reasoning_content") or None,
+                citations=result.get("citations") or None,
+                runs=result.get("runs") or None,
+                message_id=result.get("message_id"),
+                metadata={
+                    "input_tokens": result.get("input_tokens", 0),
+                    "output_tokens": result.get("output_tokens", 0),
+                    "rounds": result.get("rounds", 0),
+                },
+            )
+        if cost_runs:
+            try:
+                await CostEventRepository(session).record_runs(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message_id=result.get("message_id"),
+                    runs=cost_runs,
+                )
+            except Exception as e:
+                await session.rollback()
+                logger.warning(
+                    "handoff_job_cost_ledger_failed",
+                    conversation_id=conversation_id,
+                    error=str(e),
+                )
+
+
+async def run_handoff_job(
+    *,
+    job_id: str,
+    user_id: str,
+    source_folder_id: str | None,
+    source_conversation_id: str,
+    job_conversation_id: str,
+    base_snapshot_id: str,
+    task: str,
+) -> None:
+    """Run a dispatched cloud team on the local snapshot, detached (P2e / e2).
+
+    Owns its DB sessions (it outlives the dispatch request). Restores the source's
+    base snapshot into the hidden job conversation's server workspace, runs the team
+    there **un-gated** (autonomous, isolated sandbox — no client to answer
+    approvals), persists its task + reply + cost ledger under the job conversation
+    (so the run replays), snapshots the result, and marks the job succeeded. Any
+    failure marks the job failed with the error — the run is fully self-contained,
+    so a crash never escapes onto the event loop.
+    """
+    async with async_session_factory() as session:
+        await HandoffJobRepository(session).mark_running(job_id)
+        # The task as the job conversation's user turn, so the replay reads
+        # [user task] → [team output] like any conversation.
+        await MessageRepository(session).create(
+            conversation_id=job_conversation_id, role="user", content=task
+        )
+
+    sink = EventSink()
+    try:
+        await restore_into_workspace(
+            source_user_id=user_id,
+            source_folder_id=source_folder_id,
+            source_conversation_id=source_conversation_id,
+            snapshot_id=base_snapshot_id,
+            dest_user_id=user_id,
+            dest_folder_id=None,
+            dest_conversation_id=job_conversation_id,
+        )
+        backend = build_server_workspace(
+            user_id=user_id, folder_id=None, conversation_id=job_conversation_id
+        )
+        result = await run_chat_pipeline(
+            conversation_id=job_conversation_id,
+            user_message=task,
+            history=[],
+            sink=sink,
+            user_id=user_id,
+            backend=backend,
+            approvals_enabled=False,
+        )
+        await _persist_job_turn(
+            user_id=user_id, conversation_id=job_conversation_id, result=result
+        )
+        result_ref = await create_snapshot(
+            user_id=user_id,
+            folder_id=None,
+            conversation_id=job_conversation_id,
+            label=f"result:{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
+        )
+        async with async_session_factory() as session:
+            await HandoffJobRepository(session).mark_succeeded(
+                job_id, result_snapshot_id=result_ref.snapshot_id
+            )
+        logger.info(
+            "handoff_job_succeeded",
+            job_id=job_id,
+            job_conversation_id=job_conversation_id,
+            result_snapshot_id=result_ref.snapshot_id,
+        )
+    except Exception as e:
+        logger.error("handoff_job_failed", job_id=job_id, error=str(e), exc_info=True)
+        async with async_session_factory() as session:
+            await HandoffJobRepository(session).mark_failed(job_id, error=str(e))
+    finally:
+        if not sink._closed:
+            sink.close()
+
+
+async def dispatch_handoff(
+    *,
+    conversation_id: str,
+    user_id: str,
+    folder_id: str | None,
+    binding: LocalBinding,
+    task: str,
+    sink: EventSink,
+) -> None:
+    """Snapshot the local workspace, then spawn the cloud team run (P2e / e2).
+
+    Runs over the dispatch SSE ``sink``: first the e1 ARCHIVE → base snapshot (the
+    bound desktop fulfils the op), then a hidden ``mode="handoff"`` job conversation
+    and a ``HandoffJob`` row are created and the autonomous team run is spawned as a
+    detached background task that outlives this request. A ``handoff_job_started``
+    is emitted so the client can poll the job; any failure before spawn surfaces as
+    an inline ``error`` event. The SSE then closes — the cloud run continues past it.
+    """
+    try:
+        base_ref = await snapshot_local(
+            user_id=user_id,
+            folder_id=folder_id,
+            conversation_id=conversation_id,
+            binding=binding,
+            sink=sink,
+        )
+        async with async_session_factory() as session:
+            job_conv = await ConversationRepository(session).create(
+                user_id=user_id,
+                title=_fallback_title(task) or "云端作业",
+                mode="handoff",
+            )
+            job = await HandoffJobRepository(session).create(
+                user_id=user_id,
+                source_conversation_id=conversation_id,
+                job_conversation_id=job_conv.id,
+                base_snapshot_id=base_ref.snapshot_id,
+                task=task,
+            )
+
+        _spawn_background(
+            run_handoff_job(
+                job_id=job.id,
+                user_id=user_id,
+                source_folder_id=folder_id,
+                source_conversation_id=conversation_id,
+                job_conversation_id=job_conv.id,
+                base_snapshot_id=base_ref.snapshot_id,
+                task=task,
+            )
+        )
+        sink.emit(
+            handoff_job_started(
+                job_id=job.id,
+                conversation_id=conversation_id,
+                job_conversation_id=job_conv.id,
+            )
+        )
+    except Exception as e:
+        logger.warning(
+            "handoff_dispatch_failed", conversation_id=conversation_id, error=str(e)
+        )
+        sink.emit(error_event("HANDOFF_DISPATCH_FAILED", str(e)))
     finally:
         if not sink._closed:
             sink.close()

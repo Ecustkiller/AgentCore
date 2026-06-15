@@ -7,7 +7,7 @@ import { RunDetailBody } from "./detail/RunDetailBody";
 /**
  * Conversation detail panel — the passive Layer-2 drill-down beside the chat.
  * The inline collaboration graph is the team's primary surface; clicking one of
- * its nodes pins that run here as a run-detail tab (统一团队展示设计草案). The panel
+ * its nodes pins that run here as a run-detail tab (前端UX设计.md §三). The panel
  * no longer auto-opens and holds no progress / graph tabs of its own — it reads
  * the same execution projection as the graph, so the two stay in lockstep.
  */

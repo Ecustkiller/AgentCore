@@ -32,7 +32,7 @@ interface ToolboxGroup {
 }
 
 // 卡片网格按「创作工具 / 能力」轻量分组（小标题，非 Tab）。
-// 模型见 docs/03-AI核心/工具与能力系统.md §8.4，IA 见 docs/07-规划/前端UX目标态.md §七。
+// 模型见 docs/03-AI核心/工具与能力系统.md §8.4，IA 见 docs/04-前端/前端UX设计.md §十二。
 const GROUPS: ToolboxGroup[] = [
   {
     id: "creation",

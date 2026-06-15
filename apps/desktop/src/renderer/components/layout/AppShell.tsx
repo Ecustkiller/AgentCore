@@ -1,4 +1,5 @@
 import { listGrouped } from "@/services/conversations";
+import { startRealtime, stopRealtime } from "@/services/realtime";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import { useSidebarStore } from "@/stores/sidebar";
@@ -43,6 +44,15 @@ export function AppShell() {
   // fallback. Best-effort: the store keeps the default rate on failure.
   useEffect(() => {
     void useUsageStore.getState().fetchSummary();
+  }, []);
+
+  // Open the per-user realtime firehose for the whole authenticated session
+  // (消息IM.md §四). It lives at the shell — not the 消息 page — so unread badges
+  // and incoming messages update even while the user is elsewhere; it
+  // self-manages 401→refresh→reconnect and re-syncs on each (re)connect.
+  useEffect(() => {
+    startRealtime();
+    return () => stopRealtime();
   }, []);
 
   // Global keyboard shortcuts (§二). Ctrl/Cmd+K toggles the command palette,

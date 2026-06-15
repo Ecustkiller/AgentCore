@@ -10,11 +10,17 @@ spend is seeded straight into the ledger so the test never makes a real LLM call
 import httpx
 
 from agentcore.core.types import new_id
-from agentcore.db.repositories import ConversationRepository, CostEventRepository
+from agentcore.db.repositories import (
+    ConversationRepository,
+    CostEventRepository,
+    UserRepository,
+)
 
 _PW = "password123"
 # Above the default monthly cap (quota_monthly_cost_usd = $5 → 5e9 nano-USD).
 _OVER_MONTHLY_NANO = 6_000_000_000
+# Under the global $5 cap, but enough to trip a tightened per-user override.
+_UNDER_GLOBAL_NANO = 3_000_000_000
 
 
 async def _register_and_login(
@@ -96,6 +102,27 @@ async def test_regenerate_blocked_when_over_monthly_quota(
     # exist — the quota check runs before the message is even loaded).
     r = await client.post(
         f"/v1/conversations/{conv_id}/messages/{new_id()}/regenerate", json={}
+    )
+
+    assert r.status_code == 429, r.text
+    assert r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+
+
+async def test_per_user_override_tightens_cap(client, make_invite, session_factory):
+    # Spend ($3) is UNDER the global $5 cap, so default config would let the turn
+    # through — but the user's own $2 monthly override trips 429. Proves the turn
+    # gate resolves limits via QuotaLimits.for_user (per-user), not just config.
+    code = await make_invite("INV-QUOTA-OVR")
+    user_id = await _register_and_login(client, code, "quotaovr")
+    conv_id = await _make_conversation(session_factory, user_id=user_id)
+    await _seed_spend(
+        session_factory, user_id=user_id, conversation_id=conv_id, total=_UNDER_GLOBAL_NANO
+    )
+    async with session_factory() as session:
+        await UserRepository(session).set_quota(user_id, monthly_cost_usd=2.0)
+
+    r = await client.post(
+        f"/v1/conversations/{conv_id}/messages", json={"content": "hi"}
     )
 
     assert r.status_code == 429, r.text

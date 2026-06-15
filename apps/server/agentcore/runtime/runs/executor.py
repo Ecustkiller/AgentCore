@@ -18,14 +18,15 @@ real time, exactly as the legacy path did.
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, replace
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.config import agent_profile, apply_overrides
+from agentcore.llm.config import ModelProfile, agent_profile, apply_overrides
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import (
     EventSink,
@@ -35,7 +36,11 @@ from agentcore.runtime.events import (
     run_reasoning_delta,
     run_started,
 )
-from agentcore.runtime.runs.constants import DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES
+from agentcore.runtime.runs.constants import (
+    DEFAULT_CONTRACT_RETRIES,
+    MAX_CONTRACT_RETRIES,
+    MAX_DELEGATION_DEPTH,
+)
 from agentcore.runtime.runs.contract import (
     ContractVerdict,
     check_contract,
@@ -46,8 +51,14 @@ from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.types import RunContract, RunPhase, RunSpec, RunState
 from agentcore.runtime.workspace import summarize
-from agentcore.tools.protocol import ToolContext
+from agentcore.tools.protocol import Tool, ToolContext
 from agentcore.tools.registry import ToolRegistry
+
+# A worker's nested-delegate factory: given (captain_run_id, captain_depth) — the
+# worker's own run id + depth — it mints a ``delegate`` tool bound to that worker
+# as the sub-team's captain. Owned by the DelegateTool (which can import the tools
+# package), passed in here so ``runs`` stays free of a tools dependency.
+DelegateFactory = Callable[[str, int], Tool]
 
 logger = get_logger(__name__)
 
@@ -61,12 +72,30 @@ _DEP_PASS_THROUGH_CAP = 4000
 # base). A worker runs in an isolated context with one scoped task, no chance to
 # ask follow-ups, and no `delegate` tool — stated explicitly so it makes a
 # reasonable assumption and delivers, instead of punting with a clarifying
-# question it can never get answered.
+# question it can never get answered. It is also told its product is shown to the
+# user directly (drillable in the UI) and flows back to the CEO, to motivate
+# self-contained, user-ready quality rather than writing only for the CEO.
 _WORKER_IDENTITY = """\
 你是团队中的一名专家 worker。你只负责一个划定好的任务，外加完成它所需的上下文；\
 你不会有机会追问澄清，也不能再向下委派。如果某处信息不足，就做出最合理的假设、\
 简短说明，然后照常交付你的最佳结果。直接以任务要求的产出开头，保持自包含，不要写\
-“我是一个 agent”之类的元叙述。"""
+“我是一个 agent”之类的元叙述。你的完整产出会在界面上直接展示给用户、也会回流给\
+主 Agent 整合，因此要完整、准确、可独立阅读；若任务附带了产出要求，逐条满足。"""
+
+# Variant identity for a worker that opted into one nested delegation level
+# (``can_delegate`` and still above the depth cap). Unlike the leaf worker it MAY
+# call ``delegate`` once to split its task across a small sub-team it commands —
+# but only when the work genuinely needs it, and its own sub-workers cannot
+# delegate further (the executor withholds the tool from them).
+_WORKER_CAPTAIN_IDENTITY = """\
+你是团队中的一名专家 worker，并且被额外授权可以再向下委派一层子团队。你负责一个划定\
+好的任务，外加完成它所需的上下文；你不会有机会追问澄清。如果这个任务复杂到需要进一步\
+拆分，你可以调用 delegate 把它拆给一支由你指挥的子团队（只能再嵌套这一层，你的子成员\
+不能再向下委派），看到他们的产出后由你整合；若任务并不需要拆分，就自己直接完成，不要\
+为委派而委派。信息不足时做出最合理的假设、简短说明，然后照常交付。直接以任务要求的产\
+出开头，保持自包含，不要写“我是一个 agent”之类的元叙述。你的完整产出会在界面上直接\
+展示给用户、也会回流给主 Agent 整合，因此要完整、准确、可独立阅读；若任务附带了产出\
+要求，逐条满足。"""
 
 
 def build_agent_executor(
@@ -79,12 +108,29 @@ def build_agent_executor(
     system_prompt: str,
     user_message: str,
     execution_id: str,
+    approval_gate: ApprovalGate | None = None,
+    delegate_factory: DelegateFactory | None = None,
 ) -> RunExecutor:
     """Build a :class:`RunExecutor` bound to one turn's wiring.
 
     Closes over ``plan`` so a node can resolve a dependency's display role when
     labelling injected upstream context; the scheduler passes only the terminal
     ``completed`` states per call.
+
+    ``approval_gate`` gates this team's GRANTABLE tool calls (``code_execute`` /
+    ``file_write`` / ``str_replace``). It is the *same* per-turn gate the CEO uses,
+    passed only in **local mode** (双模式工作区 P2d 执行门) so a delegated worker
+    can never run code or mutate files on the user's real machine without consent;
+    in cloud mode it is ``None`` (workers stay un-gated — the server sandbox is
+    isolated). A shared gate means one "allow for the rest of this turn" covers the
+    whole team.
+
+    ``delegate_factory`` (when given) enables one nested delegation level (阶段2
+    嵌套子任务): a worker that opted in (``spec.can_delegate``) and is still above
+    the depth cap (``spec.depth < MAX_DELEGATION_DEPTH``) is handed its OWN
+    ``delegate`` tool, bound to itself as the sub-team's captain. Leaf workers and
+    depth-capped workers never receive it, so the tree can never nest past
+    CEO → worker → sub-worker.
     """
 
     async def execute(spec: RunSpec, completed: Mapping[str, RunState]) -> RunState:
@@ -111,6 +157,22 @@ def build_agent_executor(
                 agent_id=agent_id,
                 execution_id=execution_id,
             )
+            # 阶段2 嵌套子任务: hand this worker its own delegate tool only when it
+            # opted in and is still above the depth cap — then it leads a sub-team
+            # (one extra level) and is told so via the captain identity. Otherwise
+            # it is a leaf worker on the shared registry with no delegate.
+            worker_tools = tools
+            allowed_tools = spec.tools
+            identity = _WORKER_IDENTITY
+            if (
+                delegate_factory is not None
+                and spec.can_delegate
+                and spec.depth < MAX_DELEGATION_DEPTH
+            ):
+                child_delegate = delegate_factory(spec.run_id, spec.depth)
+                worker_tools = _registry_with(tools, child_delegate)
+                allowed_tools = [*spec.tools, child_delegate.schema.name]
+                identity = _WORKER_CAPTAIN_IDENTITY
             # Produce → check contract → re-prompt with the specific shortfalls.
             # This content-quality retry is intentionally separate from the
             # scheduler's infra-failure retry (RunPolicy.on_failure): they answer
@@ -120,19 +182,32 @@ def build_agent_executor(
             content = ""
             verdict = ContractVerdict(ok=True)
             feedback = ""
+            # Web sources this worker consults, de-duped across contract retries.
+            # Collect-only (annotate_citations=False): the worker text stays
+            # un-numbered; the DelegateTool folds these into the turn's shared
+            # source card so the user sees the WHOLE team's research, not just the
+            # CEO's own searches.
+            worker_citations: list[dict] = []
             attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
             for attempt in range(attempts):
                 messages = _build_messages(
-                    plan, spec, completed, system_prompt, user_message, contract, feedback
+                    plan,
+                    spec,
+                    completed,
+                    system_prompt,
+                    user_message,
+                    contract,
+                    feedback,
+                    identity=identity,
                 )
                 content, _reasoning, round_usage, round_rounds = await react_loop(
                     messages=messages,
                     llm=llm,
-                    tools=tools,
+                    tools=worker_tools,
                     sink=sink,
                     tool_context=tool_ctx,
                     profile=profile,
-                    allowed_tool_names=spec.tools,
+                    allowed_tool_names=allowed_tools,
                     on_content=lambda d, rid=spec.run_id, aid=agent_id: sink.emit(
                         run_output_delta(rid, aid, d)
                     ),
@@ -140,6 +215,9 @@ def build_agent_executor(
                         run_reasoning_delta(rid, aid, d)
                     ),
                     raise_on_error=True,
+                    citation_sink=worker_citations,
+                    annotate_citations=False,
+                    approval_gate=approval_gate,
                 )
                 run_usage = run_usage + round_usage
                 run_rounds += round_rounds
@@ -169,6 +247,7 @@ def build_agent_executor(
                     phase=RunPhase.FAILED,
                     content=content,
                     error=reason,
+                    citations=worker_citations,
                     model=profile.model,
                     duration_ms=duration_ms,
                     rounds=run_rounds,
@@ -193,6 +272,7 @@ def build_agent_executor(
                 phase=RunPhase.COMPLETED,
                 content=content,
                 warnings=[] if verdict.ok else list(verdict.failures),
+                citations=worker_citations,
                 model=profile.model,
                 duration_ms=duration_ms,
                 rounds=run_rounds,
@@ -206,6 +286,108 @@ def build_agent_executor(
             return RunState(phase=RunPhase.FAILED, error=str(e), duration_ms=duration_ms)
 
     return execute
+
+
+def build_captain_executor(
+    *,
+    llm: DeepSeekProvider,
+    tools: ToolRegistry,
+    sink: EventSink,
+    base_tool_context: ToolContext,
+    chat_system_prompt: str,
+    history: list[dict],
+    user_message: str,
+    profile: ModelProfile,
+    citation_sink: list[dict],
+    approval_gate: ApprovalGate | None = None,
+) -> Callable[[RunSpec], Awaitable[RunState]]:
+    """Build the executor for the turn's CAPTAIN root run — the CEO chat loop.
+
+    The captain is the turn's root Run node: unlike a delegated worker it owns the
+    conversation voice (its content/reasoning stream to the chat bubble via the
+    engine's default ``content_delta`` / ``reasoning_delta``, NOT run-scoped), runs
+    the ``chat`` profile, holds the read/retrieval tools + ``delegate``, and writes
+    the user-facing reply (possibly after delegating). It shares the one
+    ``react_loop`` assembly with workers; only the message build + output routing +
+    cost role differ. It runs directly (not via the WaveScheduler — it is the root
+    that *calls* delegate, which schedules the children), so it takes no
+    ``completed`` deps map.
+
+    The captain's run lifecycle (``run_started`` / ``run_completed`` role=captain)
+    is emitted so the graph has a real root 汇聚点 (declared in the delegate batch's
+    ``run_plan``); a non-delegating turn emits them too but, lacking a ``run_plan``,
+    they are dropped client-side and never journaled into a graph. Priced once here
+    (``state.cost``) so the captain payroll row shows real cost; the pipeline reads
+    that into the captain ledger row (no re-price).
+    """
+
+    async def execute(spec: RunSpec) -> RunState:
+        agent_id = spec.agent_id or spec.run_id
+        sink.emit(run_started(spec.run_id, agent_id, parent_run_id=None, kind=spec.kind))
+        start = time.monotonic()
+        try:
+            tool_ctx = replace(
+                base_tool_context, run_id=spec.run_id, agent_id=agent_id
+            )
+            messages = [LLMMessage(role="system", content=chat_system_prompt)]
+            for msg in history:
+                messages.append(LLMMessage(role=msg["role"], content=msg["content"]))
+            messages.append(LLMMessage(role="user", content=user_message))
+
+            content, reasoning, usage, rounds = await react_loop(
+                messages=messages,
+                llm=llm,
+                tools=tools,
+                sink=sink,
+                tool_context=tool_ctx,
+                profile=profile,
+                citation_sink=citation_sink,
+                annotate_citations=True,
+                approval_gate=approval_gate,
+            )
+            duration_ms = int((time.monotonic() - start) * 1000)
+            usage_dict = usage.as_dict()
+            cost = asdict(calculate_cost(profile.model, usage))
+            sink.emit(
+                run_completed(
+                    spec.run_id,
+                    agent_id,
+                    output_summary=summarize(content),
+                    duration_ms=duration_ms,
+                    role="captain",
+                    model=profile.model,
+                    usage=usage_dict,
+                    cost=cost,
+                )
+            )
+            return RunState(
+                phase=RunPhase.COMPLETED,
+                content=content,
+                reasoning=reasoning,
+                model=profile.model,
+                duration_ms=duration_ms,
+                rounds=rounds,
+                usage=usage_dict,
+                cost=cost,
+            )
+        except Exception as e:  # noqa: BLE001 — surface any captain failure to UI/state
+            duration_ms = int((time.monotonic() - start) * 1000)
+            logger.error("captain_run_failed", run_id=spec.run_id, error=str(e), exc_info=True)
+            sink.emit(run_failed(spec.run_id, agent_id, str(e)))
+            return RunState(phase=RunPhase.FAILED, error=str(e), duration_ms=duration_ms)
+
+    return execute
+
+
+def _registry_with(base: ToolRegistry, extra: Tool) -> ToolRegistry:
+    """A per-worker registry = the shared team tools + one extra tool (its nested
+    delegate). Returns a fresh registry; the shared ``base`` is never mutated (it
+    backs every worker in the team and must stay delegate-free for leaf workers)."""
+    registry = ToolRegistry()
+    for schema in base.list_all():
+        registry.register(base.get(schema.name))
+    registry.register(extra)
+    return registry
 
 
 def _is_hard_failure(content: str, contract: RunContract | None) -> bool:
@@ -226,14 +408,17 @@ def _build_messages(
     user_message: str,
     contract: RunContract | None = None,
     feedback: str = "",
+    identity: str = _WORKER_IDENTITY,
 ) -> list[LLMMessage]:
     """Assemble the worker's (system, user) messages from its inline role, the
     original request, its upstream dependency products, and its task.
 
     ``contract`` (when present) is stated up front as hard requirements so the
     worker aims to meet it on the first pass; ``feedback`` carries the prior
-    attempt's specific shortfalls on a contract retry."""
-    sys_parts = [system_prompt, _WORKER_IDENTITY]
+    attempt's specific shortfalls on a contract retry. ``identity`` is the worker's
+    self-awareness preamble — the leaf-worker default, or the captain variant for a
+    worker authorized to lead one nested sub-team."""
+    sys_parts = [system_prompt, identity]
     if spec.role or spec.objective:
         sys_parts.append(f"你的角色：{spec.role}\n你的目标：{spec.objective}")
     if spec.system_prompt_supplement:

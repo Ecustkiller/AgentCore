@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.core.types import ToolApproval
 from agentcore.llm.config import ModelProfile, build_request, get_profile
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.protocol import (
@@ -26,13 +26,12 @@ from agentcore.llm.protocol import (
     ToolCallFunction,
 )
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
+from agentcore.runtime.citations import annotate_tool_citations, merge_citations
 from agentcore.runtime.events import (
     EventSink,
     content_delta,
     error_event,
     reasoning_delta,
-    run_output_delta,
-    run_reasoning_delta,
     tool_use_end,
     tool_use_start,
 )
@@ -49,32 +48,6 @@ logger = get_logger(__name__)
 
 _MAX_PARALLEL_TOOLS = 5
 
-# Upper bound on sources surfaced per turn — enough to back any answer without
-# turning the card strip into a wall.
-_CITATION_CAP = 24
-
-
-def _citation_key(citation: dict[str, Any]) -> str:
-    """Normalized dedup key for a citation (same page from search + read_url, or
-    from several engines, collapses): drop ``#fragment`` and trailing ``/``."""
-    return (citation.get("url") or "").split("#", 1)[0].rstrip("/")
-
-
-def _merge_citations(sink: list[dict[str, Any]], new: list[dict[str, Any]]) -> None:
-    """Append unseen citations to ``sink`` in arrival order, capped.
-
-    De-dups by normalized URL against everything already collected this turn, so
-    a page the agent both searched up and read through is cited once.
-    """
-    seen = {_citation_key(c) for c in sink}
-    for c in new:
-        key = _citation_key(c)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        sink.append(c)
-        if len(sink) >= _CITATION_CAP:
-            return
 
 # Injected when convergence governance forces a tool-free answer (a stuck loop
 # trips a hard finalize, or the round budget is exhausted mid-tool-call).
@@ -96,10 +69,8 @@ async def react_loop(
     on_reasoning: Callable[[str], None] | None = None,
     raise_on_error: bool = False,
     citation_sink: list[dict[str, Any]] | None = None,
+    annotate_citations: bool = True,
     approval_gate: ApprovalGate | None = None,
-    synthesis_run_id: str | None = None,
-    synthesis_agent_id: str | None = None,
-    begin_synthesis: Callable[[], None] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run the ReAct loop.
 
@@ -119,19 +90,15 @@ async def react_loop(
     ``[]`` = none). Tool execution events always go to the sink. When
     ``citation_sink`` is provided, web sources consulted by research tools are
     aggregated into it (de-duped, capped) for the caller to surface/persist.
+    ``annotate_citations`` (default True, CEO chat path) also folds each source's
+    assigned number back into the tool output so the model cites by a card-aligned
+    number (A2). Delegated workers pass ``annotate_citations=False``: their sources
+    are still collected (for the turn's shared source card — see DelegateTool /
+    pipeline) but NOT numbered into the worker's text, since a worker's local
+    numbering would be re-ordered when merged into the turn card and would mislead.
     ``approval_gate`` (CEO chat path only; ``None`` for delegated workers) pauses
     GRANTABLE tool calls until the user authorizes them — a denial is fed back to
     the model as a tool result so it can adapt.
-
-    ``synthesis_run_id`` / ``synthesis_agent_id`` / ``begin_synthesis`` wire the
-    CEO's 「汇总过程」(D3 / Phase B): when supplied (CEO chat path only) and the
-    captain resumes after a non-terminal ORCHESTRATION tool (``delegate``)
-    returns, the loop flips into synthesis mode for the remaining rounds —
-    ``begin_synthesis`` is invoked once (the caller declares + starts the
-    synthesis run), that phase's reasoning streams run-scoped as the synthesis
-    node's 思考过程 (and is NOT folded into the chat bubble's thinking), and its
-    content streams to the chat bubble AND mirrors to the node's output. Absent
-    (workers / non-delegating turns) the loop behaves exactly as before.
     """
     profile = profile or get_profile("chat")
 
@@ -145,24 +112,6 @@ async def react_loop(
     emit_content = on_content or (lambda delta: sink.emit(content_delta(delta)))
     emit_reasoning = on_reasoning or (lambda delta: sink.emit(reasoning_delta(delta)))
 
-    # CEO synthesis phase (D3 / Phase B). Once the captain resumes after a
-    # non-terminal orchestration tool returns, the integration round's reasoning
-    # is the team's 「汇总过程」 — streamed run-scoped to the synthesis node — and
-    # its content is the user-facing overview, which still streams to the chat
-    # bubble AND mirrors to the node's output. Gated on a synthesis_run_id being
-    # supplied (CEO pipeline only); zero-overhead and inert for workers.
-    synthesis_enabled = (
-        synthesis_run_id is not None and synthesis_agent_id is not None
-    )
-    synthesizing = False
-
-    def _synth_content(delta: str) -> None:
-        emit_content(delta)
-        sink.emit(run_output_delta(synthesis_run_id, synthesis_agent_id, delta))
-
-    def _synth_reasoning(delta: str) -> None:
-        sink.emit(run_reasoning_delta(synthesis_run_id, synthesis_agent_id, delta))
-
     total_usage = TokenUsage()
     final_content = ""
     final_reasoning = ""
@@ -171,11 +120,6 @@ async def react_loop(
     controller = LoopController()
 
     for round_idx in range(profile.max_rounds):
-        # Once in synthesis mode, this round's reasoning/content stream to the
-        # synthesis node; otherwise they take the normal chat/worker path.
-        round_emit_content = _synth_content if synthesizing else emit_content
-        round_emit_reasoning = _synth_reasoning if synthesizing else emit_reasoning
-
         request = build_request(
             profile,
             messages,
@@ -185,7 +129,7 @@ async def react_loop(
 
         try:
             round_content, round_reasoning, round_tool_calls, usage = (
-                await _stream_llm_round(llm, request, round_emit_content, round_emit_reasoning)
+                await _stream_llm_round(llm, request, emit_content, emit_reasoning)
             )
         except Exception as e:
             logger.error("llm_call_failed", round=round_idx, error=str(e))
@@ -200,10 +144,7 @@ async def react_loop(
         if round_content:
             final_content += round_content
 
-        if round_reasoning and not synthesizing:
-            # Synthesis-phase reasoning is the team's 「汇总过程」, journaled
-            # run-scoped to the synthesis node (run_reasoning_delta) rather than
-            # folded into the chat bubble's thinking — so the two stay distinct.
+        if round_reasoning:
             final_reasoning += round_reasoning
 
         if not round_tool_calls:
@@ -220,31 +161,16 @@ async def react_loop(
         )
         messages.append(assistant_msg)
 
-        tool_results, terminal, attempts, round_citations = await _execute_tools(
-            round_tool_calls, tools, tool_context, sink, approval_gate=approval_gate
+        tool_results, terminal, attempts = await _execute_tools(
+            round_tool_calls,
+            tools,
+            tool_context,
+            sink,
+            approval_gate=approval_gate,
+            citation_sink=citation_sink,
+            annotate_citations=annotate_citations,
         )
         messages.extend(tool_results)
-
-        if citation_sink is not None and round_citations:
-            _merge_citations(citation_sink, round_citations)
-
-        # CEO synthesis boundary (D3 / Phase B): the captain just got a
-        # non-terminal ORCHESTRATION tool's results (delegate) back — the next
-        # round integrates them into the user-facing answer. Flip into synthesis
-        # mode so that round streams to the synthesis node; begin_synthesis
-        # (caller-provided) declares + starts the synthesis run exactly once.
-        if (
-            synthesis_enabled
-            and not synthesizing
-            and begin_synthesis is not None
-            and any(
-                (tool := tools.get_optional(tc.function.name)) is not None
-                and tool.schema.category is ToolCategory.ORCHESTRATION
-                for tc in round_tool_calls
-            )
-        ):
-            begin_synthesis()
-            synthesizing = True
 
         # A handoff tool (a terminal tool) already streamed the turn's final
         # answer itself. Stop here so the model does not produce a second reply;
@@ -430,15 +356,24 @@ async def _execute_tools(
     sink: EventSink,
     *,
     approval_gate: ApprovalGate | None = None,
-) -> tuple[list[LLMMessage], ToolResult | None, list[ToolAttempt], list[dict[str, Any]]]:
+    citation_sink: list[dict[str, Any]] | None = None,
+    annotate_citations: bool = True,
+) -> tuple[list[LLMMessage], ToolResult | None, list[ToolAttempt]]:
     """Execute tool calls (parallel, capped).
 
-    Returns ``(tool_messages, terminal, attempts, citations)`` where ``terminal``
-    is the first handoff ToolResult (a tool that already produced the turn's final
-    answer) or ``None``, ``attempts`` carries the per-call fingerprint + success
-    used by convergence governance to detect mechanical loops, and ``citations``
-    are the web sources surfaced by successful research tools this round (in call
-    order; de-dup happens upstream across the whole turn).
+    Returns ``(tool_messages, terminal, attempts)`` where ``terminal`` is the
+    first handoff ToolResult (a tool that already produced the turn's final
+    answer) or ``None``, and ``attempts`` carries the per-call fingerprint +
+    success used by convergence governance to detect mechanical loops.
+
+    When ``citation_sink`` is provided, web sources surfaced by successful research
+    tools are merged into it (arrival order, deduped, capped). With
+    ``annotate_citations`` (CEO chat path) each source's assigned canonical number
+    is also folded back into that tool message's model-facing output (A2); merge
+    happens in deterministic call order, not completion order, so card numbering is
+    reproducible. Workers pass ``annotate_citations=False`` — sources are collected
+    but the worker text is left un-numbered (its local numbers would be re-ordered
+    when merged into the turn card).
     """
 
     async def _run_one(
@@ -473,8 +408,8 @@ async def _execute_tools(
             )
             if decision is ApprovalDecision.DENY:
                 denial = (
-                    f"Tool '{name}' was not authorized by the user; the action was "
-                    "not performed. Do not retry it — adapt or ask how to proceed."
+                    f"工具 '{name}' 未获用户授权，该操作未执行。"
+                    "不要重试它——请调整方案或询问如何继续。"
                 )
                 sink.emit(tool_use_end(tc.id, name, success=False, output=denial))
                 return (
@@ -511,5 +446,22 @@ async def _execute_tools(
     messages = [m for m, _, _, _ in quads]
     terminal = next((t for _, t, _, _ in quads if t is not None), None)
     attempts = [a for _, _, a, _ in quads]
-    citations = [c for _, _, _, cs in quads for c in cs]
-    return messages, terminal, attempts, citations
+
+    # Merge web sources into the sink in deterministic call order (not completion
+    # order) so card numbering is reproducible. With annotate_citations (CEO chat
+    # path) the assigned canonical number (= source-card index) is also folded into
+    # each tool message's model-facing output so the model cites a number that
+    # lines up with the card (A2). Workers collect-only (annotate_citations=False):
+    # their sources still reach the turn card via the executor → DelegateTool →
+    # pipeline, but the worker text stays un-numbered.
+    if citation_sink is not None:
+        for message, _terminal, _attempt, message_citations in quads:
+            if not message_citations:
+                continue
+            numbers = merge_citations(citation_sink, message_citations)
+            if annotate_citations:
+                message.content = annotate_tool_citations(
+                    message.content or "", message_citations, numbers
+                )
+
+    return messages, terminal, attempts

@@ -45,6 +45,29 @@ export function tailText(text: string, max = 80): string {
   return `…${flat.slice(flat.length - max)}`;
 }
 
+/**
+ * 消息时间戳展示串（气泡 hover 揭示，§二）：今天显 "HH:MM"，昨天 "昨天 HH:MM"，
+ * 同年 "M月D日 HH:MM"，跨年 "YYYY年M月D日 HH:MM"。非法输入返回空串。
+ */
+export function formatMessageTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const now = new Date();
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  if (sameDay(d, now)) return hhmm;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameDay(d, yesterday)) return `昨天 ${hhmm}`;
+  const md = `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (d.getFullYear() === now.getFullYear()) return `${md} ${hhmm}`;
+  return `${d.getFullYear()}年${md} ${hhmm}`;
+}
+
 /** 毫秒时长 → 人类可读："45s" / "2m34s" / "1h2m"（用于任务用时摘要）。 */
 export function formatDuration(ms: number): string {
   const totalSec = Math.round(ms / 1000);

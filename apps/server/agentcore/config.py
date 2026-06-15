@@ -20,15 +20,19 @@ class Settings(BaseSettings):
     jwt_refresh_token_expire_days: int = 7
 
     # Auth cookies. `secure` requires HTTPS (keep False for local http dev).
-    # `samesite` "lax" is a compatibility-friendly default that still blocks
-    # cross-site POST CSRF; tighten to "strict" once the client origin is fixed.
+    # `samesite` "lax" suits same-site dev (renderer + API both on localhost). The
+    # packaged desktop renderer (app://agentcore) is cross-site to the cloud API,
+    # so production must set COOKIE_SAMESITE=none + COOKIE_SECURE=true or the auth
+    # cookies won't ride credentialed cross-origin requests (部署与运维.md §8.2).
     cookie_secure: bool = False
     cookie_samesite: str = "lax"
 
     # CORS: browser/desktop origins allowed to call the API with credentials.
     # Credentialed CORS forbids "*", so each origin must be listed. Comma-separated
-    # in the env var; read as a list via the `cors_origins` property.
-    cors_allow_origins: str = "http://localhost:5173,http://localhost:3000"
+    # in the env var; read as a list via the `cors_origins` property. The packaged
+    # desktop renderer is served from app://agentcore (前端技术与架构.md §7.2), so
+    # that fixed origin ships in the default alongside the dev Vite/preview ports.
+    cors_allow_origins: str = "http://localhost:5173,http://localhost:3000,app://agentcore"
 
     # Auth-endpoint rate limiting (per client IP, fixed window). Blunts
     # credential-stuffing / registration spam on top of per-account lockout.
@@ -37,6 +41,14 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     auth_rate_limit_max: int = 10
     auth_rate_limit_window_seconds: int = 60
+    # Per-user message-send rate limit (sliding window, enforced in the conversation
+    # routes). Caps how fast one account can fire turns; resolved against the
+    # authenticated user, so it lives at the route layer (next to quota) rather than
+    # middleware, which only sees the client IP. <=0 disables this dimension; the
+    # shared `rate_limit_enabled` toggle gates it too. Same in-process posture —
+    # front with a Redis ZSET sliding window for multiple workers (成本配额与计费.md §一).
+    user_message_rate_limit_max: int = 20
+    user_message_rate_limit_window_seconds: int = 60
     # Trust the first hop of X-Forwarded-For as the client IP. Enable ONLY behind
     # a trusted reverse proxy that sets it; otherwise clients can spoof their IP.
     trust_proxy: bool = False
@@ -49,6 +61,31 @@ class Settings(BaseSettings):
     # user never answers is auto-denied after the timeout (never silently run).
     approval_gate_enabled: bool = True
     approval_timeout_seconds: float = 300.0
+
+    # Long-term memory consolidation (Agent记忆与知识系统 §1.5, 对标 Dreaming V3).
+    # The user's memory file is refreshed by an OFFLINE consolidation pass — not a
+    # per-turn single-exchange extract — that reads the whole recent conversation +
+    # the current memory and merges / dedups / temporally-refreshes it (LLM decides
+    # structured ops, deterministic code applies). It is triggered by an idle
+    # debounce after a turn (reset on each new message, so it fires once the user
+    # pauses), a turn-count safety cap for marathon chats, and a periodic sweeper
+    # backstop (for restarts / closed clients). All best-effort, off the
+    # user-visible path; state is in-process (single-server posture, like approvals).
+    memory_consolidation_enabled: bool = True
+    # Run consolidation this long after a conversation's last turn (each new message
+    # resets the timer, so it consolidates the whole conversation once the user pauses).
+    memory_consolidation_idle_seconds: float = 90.0
+    # Force a consolidation every N turns even if the chat never idles (marathon guard).
+    memory_consolidation_turn_cap: int = 8
+    # Recent messages fed to one consolidation pass (the window reconciled against
+    # the existing memory). The 1M model window makes a generous window cheap.
+    memory_consolidation_window_messages: int = 40
+    # Periodic sweeper backstop: scan for settled conversations with un-consolidated
+    # messages and consolidate them (covers a dropped debounce / closed client).
+    memory_consolidation_sweep_interval_seconds: int = 300  # every 5 min
+    memory_consolidation_sweep_batch_limit: int = 100
+    # Max bullets kept per memory section (合并/去重: bounds growth, forces merge).
+    memory_section_bullet_cap: int = 20
 
     # Cost display + free-tier quotas (成本与用量可观测 §六). Money flows and is
     # stored as integer nano-USD; `cny_per_usd` converts to CNY at the display
@@ -126,6 +163,24 @@ class Settings(BaseSettings):
     # reports the failure rather than hanging the turn. Same in-process posture as
     # the approval gate (front with Redis for multiple workers).
     workspace_op_timeout_seconds: float = 60.0
+
+    # Extra transport budget (seconds) added on top of a code execution's OWN
+    # timeout when routing an ``execute`` op to the desktop (双模式工作区 P2d 执行门).
+    # The desktop kills runaway code at the request's ``timeout_seconds`` (the
+    # authoritative limit); the channel must outlive that by enough to cover SSE
+    # delivery + process spawn + SIGKILL + the result POST round-trip, or a long
+    # but legal run would lose its result to a premature transport timeout. So an
+    # execute's channel deadline = ``timeout_seconds`` + this slack (NOT the flat
+    # ``workspace_op_timeout_seconds``, which still bounds the quick file ops).
+    workspace_execute_timeout_slack_seconds: float = 30.0
+
+    # Transport deadline (seconds) for a local→云 handoff archive op (双模式工作区
+    # P2e / e1). Packing a whole local repo into one archive over the channel is far
+    # slower than a single file op, so the handoff gets its own wide budget instead
+    # of the flat ``workspace_op_timeout_seconds``. The desktop caps the archive
+    # size; this only bounds how long the server waits before failing the handoff as
+    # a transport error (a dropped desktop still fails cleanly, never hangs).
+    workspace_handoff_timeout_seconds: float = 300.0
 
     @property
     def cors_origins(self) -> list[str]:

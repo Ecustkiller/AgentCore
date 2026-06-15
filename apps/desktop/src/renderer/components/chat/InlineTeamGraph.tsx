@@ -1,6 +1,5 @@
 import { GraphView } from "@/components/graph/GraphView";
 import { TeamGraphFullscreen } from "@/components/graph/TeamGraphFullscreen";
-import { copyText } from "@/lib/clipboard";
 import { resolveTurnCost } from "@/lib/cost";
 import { formatCost, formatDuration } from "@/lib/format";
 import {
@@ -33,12 +32,10 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Copy,
   Loader2,
   Maximize2,
-  MoreHorizontal,
   Pencil,
-  RotateCcw,
+  Play,
   RotateCw,
   Square,
   X,
@@ -50,7 +47,7 @@ import { useEffect, useRef, useState } from "react";
  * above its answer: a compact status strip (lifecycle + cost + recovery) over
  * the live collaboration graph. It is the in-chat "team界面" that replaced the
  * old free-floating `TaskCard` + auto-opening detail panel + permanent graph
- * overlay — one graph, one place (统一团队展示设计草案).
+ * overlay — one graph, one place (前端UX设计.md §三).
  *
  * The strip can collapse the graph away (the answer stays right below), and the
  * canvas height adapts to team size so a small team does not float in a big box.
@@ -71,7 +68,11 @@ export function InlineTeamGraph({
   journal?: ExecutionJournal;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const [fullscreen, setFullscreen] = useState(false);
+  // false = closed; "view" = full-screen graph; "replay" = full-screen with the
+  // timeline auto-playing (the inline card's 回放 entry).
+  const [fullscreen, setFullscreen] = useState<false | "view" | "replay">(
+    false,
+  );
 
   // Reload path: rebuild this message's execution slot from its persisted
   // journal so the team graph replays on demand. Idempotent and a no-op for the
@@ -99,9 +100,12 @@ export function InlineTeamGraph({
   // Adaptive height: reserve only as much canvas as the team needs (a 2-agent
   // team would otherwise float in a half-empty box), clamped so a big DAG still
   // fits the message column. React Flow's fitView fills whatever height we give.
+  // The default left-right flow stacks parallel workers vertically, so it needs
+  // more height than the old top-down default to keep fitView from shrinking the
+  // graph in the narrow message column — hence the taller base/step and ceiling.
   const graphHeight = Math.min(
-    460,
-    Math.max(240, 150 + execution.runs.length * 78),
+    540,
+    Math.max(260, 180 + execution.runs.length * 90),
   );
 
   // Scope every descendant graph hook (status strip, canvas, timeline, node
@@ -114,7 +118,8 @@ export function InlineTeamGraph({
           execution={execution}
           expanded={expanded}
           onToggle={() => setExpanded((v) => !v)}
-          onMaximize={() => setFullscreen(true)}
+          onMaximize={() => setFullscreen("view")}
+          onReplay={() => setFullscreen("replay")}
         />
         {expanded && (
           <GraphArea
@@ -124,7 +129,10 @@ export function InlineTeamGraph({
           />
         )}
         {fullscreen && (
-          <TeamGraphFullscreen onClose={() => setFullscreen(false)} />
+          <TeamGraphFullscreen
+            autoplay={fullscreen === "replay"}
+            onClose={() => setFullscreen(false)}
+          />
         )}
       </div>
     </ExecutionScopeContext.Provider>
@@ -158,12 +166,14 @@ function GraphArea({
   );
 }
 
-/** Props every lifecycle strip shares: the projection + the collapse toggle. */
+/** Props every lifecycle strip shares: the projection + the strip controls
+ * (collapse, full-screen, replay). */
 interface StripProps {
   execution: Execution;
   expanded: boolean;
   onToggle: () => void;
   onMaximize: () => void;
+  onReplay: () => void;
 }
 
 /** Lifecycle-specific header row above the graph. */
@@ -172,8 +182,9 @@ function StatusStrip({
   expanded,
   onToggle,
   onMaximize,
+  onReplay,
 }: StripProps) {
-  const ctrl = { expanded, onToggle, onMaximize };
+  const ctrl = { expanded, onToggle, onMaximize, onReplay };
   switch (execution.status) {
     case "completed":
       return <CompletedStrip execution={execution} {...ctrl} />;
@@ -208,16 +219,36 @@ function IconButton({
   );
 }
 
-/** Trailing controls shared by every strip: collapse the graph, maximize it,
- * and the overflow menu. */
+/** Trailing controls shared by every strip: stop (while running), replay (once
+ * finished), collapse the graph, and full-screen. Whole-turn re-runs live with
+ * the message ("重新生成") and the failure card ("重试"), so the graph itself
+ * carries no re-run control. */
 function StripControls({
   execution,
   expanded,
   onToggle,
   onMaximize,
+  onReplay,
 }: StripProps) {
+  const isRunning = execution.status === "running";
+  const canReplay =
+    execution.status === "completed" || execution.status === "cancelled";
   return (
     <>
+      {isRunning && (
+        <IconButton
+          icon={<Square size={15} />}
+          title="停止任务"
+          onClick={() => useConversationStore.getState().stopGeneration()}
+        />
+      )}
+      {canReplay && (
+        <IconButton
+          icon={<Play size={15} />}
+          title="回放协作过程"
+          onClick={onReplay}
+        />
+      )}
       <IconButton
         icon={expanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
         title={expanded ? "收起协作图" : "展开协作图"}
@@ -228,88 +259,7 @@ function StripControls({
         title="全屏查看协作图"
         onClick={onMaximize}
       />
-      <TaskMenu execution={execution} />
     </>
-  );
-}
-
-/** Overflow menu — the manager's controls over the running/finished team. */
-function TaskMenu({ execution }: { execution: Execution }) {
-  const [open, setOpen] = useState(false);
-  const isRunning = execution.status === "running";
-
-  const onStop = () => {
-    useConversationStore.getState().stopGeneration();
-    setOpen(false);
-  };
-  const onReplan = () => {
-    const id = lastUserMessageId();
-    if (id) void runRegenerate(id);
-    setOpen(false);
-  };
-  const onCopyId = () => {
-    void copyText(execution.id);
-    setOpen(false);
-  };
-
-  return (
-    <div className="relative">
-      <IconButton
-        icon={<MoreHorizontal size={15} />}
-        title="更多"
-        onClick={() => setOpen((v) => !v)}
-      />
-      {open && (
-        <>
-          <button
-            type="button"
-            aria-label="关闭菜单"
-            className="fixed inset-0 z-10 cursor-default"
-            onClick={() => setOpen(false)}
-          />
-          <div className="absolute right-0 top-8 z-20 min-w-36 overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg">
-            {isRunning && (
-              <MenuItem
-                icon={<Square size={13} />}
-                label="停止任务"
-                onClick={onStop}
-              />
-            )}
-            <MenuItem
-              icon={<RotateCcw size={13} />}
-              label="重新规划"
-              onClick={onReplan}
-            />
-            <MenuItem
-              icon={<Copy size={13} />}
-              label="复制任务 ID"
-              onClick={onCopyId}
-            />
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function MenuItem({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-popover-foreground hover:bg-accent"
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
   );
 }
 
@@ -319,6 +269,7 @@ function RunningStrip({
   expanded,
   onToggle,
   onMaximize,
+  onReplay,
 }: StripProps) {
   const { completed, total } = execution.progress;
 
@@ -337,6 +288,7 @@ function RunningStrip({
           expanded={expanded}
           onToggle={onToggle}
           onMaximize={onMaximize}
+          onReplay={onReplay}
         />
       </div>
       <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
@@ -360,6 +312,7 @@ function CompletedStrip({
   expanded,
   onToggle,
   onMaximize,
+  onReplay,
 }: StripProps & { stopped?: boolean }) {
   const frames = useActiveExecField((rt) => rt.frames);
   const { completed, total } = execution.progress;
@@ -417,6 +370,7 @@ function CompletedStrip({
           expanded={expanded}
           onToggle={onToggle}
           onMaximize={onMaximize}
+          onReplay={onReplay}
         />
       </div>
 
@@ -441,6 +395,7 @@ function FailureStrip({
   expanded,
   onToggle,
   onMaximize,
+  onReplay,
 }: StripProps) {
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
 
@@ -473,6 +428,7 @@ function FailureStrip({
           expanded={expanded}
           onToggle={onToggle}
           onMaximize={onMaximize}
+          onReplay={onReplay}
         />
       </div>
 

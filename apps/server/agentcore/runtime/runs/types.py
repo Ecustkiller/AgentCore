@@ -1,17 +1,18 @@
 """Run model type core (统一 Run 模型 第一阶段) — the typed substrate the scheduler
 and executor build on.
 
-A turn holds one *tree* of Runs: the root is the main reply engine; every
-delegated worker, DAG node, and (阶段2) synthesis / candidate-selection is a child
-Run node. This module fixes the *shape* of a Run — its spec (:class:`RunSpec`) +
+A turn holds one *tree* of Runs: the ``CAPTAIN`` root is the CEO chat loop (the
+reply engine); every delegated worker / DAG node is an ``AGENT`` child, and (阶段2)
+candidate-selection is an ``ARENA`` child. This module fixes the *shape* of a Run
+— its spec (:class:`RunSpec`) +
 node policy (:class:`RunPolicy`) + live state (:class:`RunState`) — and the phases
 it moves through (:class:`RunPhase`). The plan that holds nodes lives in
 ``runs.plan``; the scheduler that drives them in ``runs.wave``.
 
 第一阶段范围：worker 以「内联角色」声明（无独立 Agent 实体），因此 ``RunSpec`` 直接携带
 角色/目标/工具/模型档位等执行所需字段；``agent_id`` 在本阶段即等于 ``run_id``（事件与图
-节点标识沿用），``agent_name`` 取角色名做展示。ARENA / SYNTHESIS 两种 kind 与 RunPolicy
-中的审计/契约/best-of-n 等槽位先声明、暂不启用，留给阶段2。
+节点标识沿用），``agent_name`` 取角色名做展示。ARENA kind 与 RunPolicy 中的审计/契约/
+best-of-n 等槽位先声明、暂不启用，留给阶段2。
 
 → 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
 """
@@ -27,13 +28,15 @@ class RunKind(StrEnum):
     """What a Run node *is*.
 
     The scheduler treats every kind uniformly; the kind only selects which
-    executor and policy defaults apply when the node runs. 第一阶段只产出 AGENT；
-    ARENA / SYNTHESIS 预留给阶段2。
+    executor and policy defaults apply when the node runs. A turn is one Run tree:
+    the ``CAPTAIN`` root is the CEO chat loop itself (it owns the conversation
+    voice and may ``delegate``); every delegated worker / DAG step is an ``AGENT``
+    child. ARENA 预留给阶段2。
     """
 
+    CAPTAIN = "captain"  # the turn's root run: the CEO chat loop (owns the reply)
     AGENT = "agent"  # a delegated / DAG-step worker run
     ARENA = "arena"  # 阶段2: multi-candidate (best-of-n) run
-    SYNTHESIS = "synthesis"  # 阶段2: a captain's 合稿 over its children's outputs
 
 
 class RunPhase(StrEnum):
@@ -142,6 +145,11 @@ class RunSpec:
     depends_on: list[str] = field(default_factory=list)
     parent_run_id: str | None = None
     depth: int = 0
+    # Whether this worker may itself delegate one nested level of sub-workers
+    # (阶段2 嵌套子任务). Default off — only a CEO task that explicitly opts in gets
+    # the delegate tool, and only while ``depth < MAX_DELEGATION_DEPTH`` (executor
+    # enforces the cap). depth-2 sub-workers never delegate regardless of this flag.
+    can_delegate: bool = False
     policy: RunPolicy = field(default_factory=RunPolicy)
     # Fan-out awareness: a concise list of the *other* nodes running in parallel
     # (no dependency relationship), injected into this node's child context so
@@ -168,11 +176,20 @@ class RunState:
     attempt: int = 0
     wave: int = 0
     content: str = ""
+    # The run's thinking text (concatenated across rounds). Carried so the CAPTAIN
+    # root run can hand its reasoning back to the pipeline for persistence; worker
+    # reasoning streams run-scoped (run_reasoning_delta) and is left empty here.
+    reasoning: str = ""
     error: str = ""
     # Soft contract shortfalls on a COMPLETED run: the output was accepted (a
     # non-strict contract failed after retries) but carries these caveats, which
     # the captain sees in the aggregated result so it can judge / re-delegate.
     warnings: list[str] = field(default_factory=list)
+    # Web sources this worker consulted (web_search / read_url), de-duped across
+    # contract retries. Collected un-numbered (the worker text is not annotated):
+    # the DelegateTool folds these into the turn's shared source card so the user
+    # sees what the WHOLE team researched, not just the CEO's own searches.
+    citations: list[dict[str, Any]] = field(default_factory=list)
     model: str = ""
     duration_ms: int = 0
     rounds: int = 0

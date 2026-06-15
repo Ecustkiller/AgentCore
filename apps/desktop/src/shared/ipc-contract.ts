@@ -50,6 +50,9 @@ export type FsCreateKind = "file" | "dir";
  *
  * 服务端 `LocalWorkspace` 把每个 backend 方法序列化成一条 op 经 SSE 下发，主进程
  * 在授权根上执行后回填。P2a 先打通只读三件套（read/list/grep）。
+ *
+ * `archive` 不对应任何 backend 方法——它是本地→云交接（P2e / e1）专用 op：把整个绑定
+ * 根打包成单个归档（套用忽略规则）交服务端暂存并快照，由 handoff 编排直接下发。
  */
 export type WorkspaceOpName =
   | "read"
@@ -62,7 +65,8 @@ export type WorkspaceOpName =
   | "move"
   | "replace"
   | "grep"
-  | "execute";
+  | "execute"
+  | "archive";
 
 /**
  * 一次本地 op 的执行结果信封 —— 形状与服务端回填端点 `ResolveWorkspaceOpRequest`

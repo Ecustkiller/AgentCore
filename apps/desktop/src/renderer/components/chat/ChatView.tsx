@@ -1,41 +1,14 @@
-import { formatCompact, formatCost } from "@/lib/format";
+import { useStickToBottom } from "@/lib/useStickToBottom";
 import {
   useActiveError,
   useActiveMessages,
   useActiveRetry,
   useConversationStore,
 } from "@/stores/conversation";
-import { useUsageStore } from "@/stores/usage";
-import { AlertTriangle, RotateCw, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, RotateCw, X } from "lucide-react";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
-
-/**
- * 对话累计 (§7.3C) — a very faint caption at the top of the conversation showing
- * its cumulative spend, with a hover tooltip for the power detail (token 合计 +
- * 回合数). Seeded from the ledger on open and bumped live by each turn, so it is
- * always current. Renders nothing until there is real spend (§7.5: 无花销不显).
- */
-function ConversationCostCaption() {
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
-  const summary = useUsageStore((s) =>
-    conversationId ? s.conversationCosts[conversationId] : undefined,
-  );
-  if (!summary || summary.total <= 0) return null;
-
-  return (
-    <div className="mx-auto flex w-full max-w-4xl justify-end px-6 pt-2">
-      <span
-        title={`token ${formatCompact(summary.tokens)} · ${summary.turns} 回合`}
-        className="cursor-default text-xs text-muted-foreground/60"
-      >
-        本对话 {formatCost(summary.total, cnyPerUsd)}
-      </span>
-    </div>
-  );
-}
 
 /**
  * Banner for a failed turn (send / regenerate transport error), shown just above
@@ -76,31 +49,57 @@ function RetryBanner() {
 
 export function ChatView() {
   const messages = useActiveMessages();
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   const hasMessages = messages.length > 0;
+
+  // Re-run the auto-follow whenever the newest turn grows — both its answer and
+  // its live reasoning stream — so the view tracks the model while it thinks.
+  const last = messages[messages.length - 1];
+  const contentKey = last
+    ? `${last.id}-${last.content.length}-${last.reasoning?.length ?? 0}`
+    : "";
+  const { scrollRef, atBottom, jumpToBottom } = useStickToBottom(
+    contentKey,
+    conversationId,
+  );
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <ConversationCostCaption />
-      {/* Scrollable message area (scrollbar at container edge, content centered) */}
-      <div className="flex-1 overflow-y-auto">
-        {hasMessages ? (
-          <div className="mx-auto w-full max-w-4xl space-y-4 px-6 py-4">
-            <MessageList />
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <h2 className="text-xl font-semibold text-foreground">
-                AgentCore
-              </h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Multi-Agent AI 工作台
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                输入消息开始对话
-              </p>
+      {/* Scrollable message area (scrollbar at container edge, content centered).
+          The relative wrapper anchors the floating 回到底部 button to the viewport
+          so it stays put instead of scrolling away with the messages. */}
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollRef} className="h-full overflow-y-auto">
+          {hasMessages ? (
+            <div className="mx-auto w-full max-w-4xl space-y-4 px-6 py-4">
+              <MessageList />
             </div>
-          </div>
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center">
+                <h2 className="text-xl font-semibold text-foreground">
+                  AgentCore
+                </h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Multi-Agent AI 工作台
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  输入消息开始对话
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+        {hasMessages && !atBottom && (
+          <button
+            type="button"
+            onClick={jumpToBottom}
+            aria-label="回到底部"
+            title="回到底部"
+            className="absolute bottom-3 left-1/2 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-md transition-colors hover:text-foreground"
+          >
+            <ArrowDown size={16} />
+          </button>
         )}
       </div>
 

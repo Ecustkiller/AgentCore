@@ -31,6 +31,19 @@ class EventType(StrEnum):
     # directory, then awaits the result posted back to the ops resolve endpoint.
     # Transport only — deliberately NOT journaled into the team graph.
     WORKSPACE_OP_REQUIRED = "workspace_op_required"
+    # Local→云 handoff (双模式工作区 P2e / e1): a local workspace was archived over
+    # the channel and snapshotted to object storage; carries the new snapshot id.
+    # One-shot completion signal — not journaled into the team graph.
+    HANDOFF_SNAPSHOT_DONE = "handoff_snapshot_done"
+    # Local→云 handoff dispatch (双模式工作区 P2e / e2): the base snapshot was taken
+    # and a cloud job accepted; carries the job id so the client can start polling
+    # its status. The team run continues detached after this SSE closes.
+    HANDOFF_JOB_STARTED = "handoff_job_started"
+    # Local→云 handoff apply (双模式工作区 P2e / e3): the selected result changes were
+    # written back to the local workspace over the channel; carries the per-file
+    # outcome (applied / skipped / conflict / error) + counts. One-shot completion
+    # signal emitted just before the apply SSE closes — not journaled.
+    HANDOFF_APPLY_DONE = "handoff_apply_done"
     # Multi-agent execution events (CEO delegate path)
     RUN_PLAN = "run_plan"
     RUN_STARTED = "run_started"
@@ -183,6 +196,77 @@ def workspace_op_required(
             "root_id": root_id,
             "op": op,
             "args": args,
+        },
+    )
+
+
+def handoff_snapshot_done(
+    *, snapshot_id: str, conversation_id: str, size_bytes: int
+) -> SSEEvent:
+    """A local→云 handoff snapshot (双模式工作区 P2e / e1) completed.
+
+    The bound desktop archived its local workspace over the channel; the server
+    staged it and snapshotted it to object storage. Carries the new ``snapshot_id``
+    (and its ``size_bytes``) so the client can refresh the snapshot list and
+    confirm the backup. Emitted once, just before the handoff SSE closes.
+    """
+    return SSEEvent(
+        type=EventType.HANDOFF_SNAPSHOT_DONE,
+        payload={
+            "snapshot_id": snapshot_id,
+            "conversation_id": conversation_id,
+            "size_bytes": size_bytes,
+        },
+    )
+
+
+def handoff_job_started(
+    *, job_id: str, conversation_id: str, job_conversation_id: str
+) -> SSEEvent:
+    """A local→云 handoff cloud job (双模式工作区 P2e / e2) was accepted.
+
+    The base snapshot of the user's local files is captured and the team run is
+    spawned detached on the server. Carries the ``job_id`` (so the client polls
+    its status) and the hidden ``job_conversation_id`` that hosts the team's
+    messages / cost / run graph for later replay. Emitted once, just before the
+    dispatch SSE closes — the cloud run continues in the background past it.
+    """
+    return SSEEvent(
+        type=EventType.HANDOFF_JOB_STARTED,
+        payload={
+            "job_id": job_id,
+            "conversation_id": conversation_id,
+            "job_conversation_id": job_conversation_id,
+        },
+    )
+
+
+def handoff_apply_done(
+    *, job_id: str, conversation_id: str, results: list[dict[str, Any]]
+) -> SSEEvent:
+    """A local→云 handoff apply (双模式工作区 P2e / e3) finished writing back.
+
+    The user's selected result changes were replayed onto the local workspace over
+    the channel (WRITE_BYTES / DELETE). Carries the per-file ``results`` (each
+    ``path`` + ``status`` + ``change_type`` + ``detail``) and the rolled-up counts,
+    so the PR card can mark each row done and surface any unresolved conflicts.
+    Emitted once, just before the apply SSE closes.
+    """
+    counts = {"applied": 0, "skipped": 0, "conflict": 0, "error": 0}
+    for r in results:
+        status = str(r.get("status", ""))
+        if status in counts:
+            counts[status] += 1
+    return SSEEvent(
+        type=EventType.HANDOFF_APPLY_DONE,
+        payload={
+            "job_id": job_id,
+            "conversation_id": conversation_id,
+            "results": results,
+            "applied": counts["applied"],
+            "skipped": counts["skipped"],
+            "conflicts": counts["conflict"],
+            "errors": counts["error"],
         },
     )
 

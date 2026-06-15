@@ -88,6 +88,31 @@ def member_run_cost(spec: RunSpec, state: RunState, *, parent_run_id: str | None
     )
 
 
+def captain_run_cost_from_state(run_id: str, state: RunState) -> RunCost:
+    """The CEO root run's ledger row, read off its terminal :class:`RunState`.
+
+    The captain is now a real Run node executed through the run executor (it owns
+    the turn's reply and may ``delegate``), so its cost is priced exactly once —
+    onto ``state.cost`` by the executor — and this only reshapes it into the
+    captain ledger row (role=captain, no parent: it is the turn's root). The
+    delegated workers get their own member rows via :func:`member_run_cost`.
+    """
+    body, total, currency = _split_cost(state.cost)
+    return RunCost(
+        run_id=run_id,
+        parent_run_id=None,
+        agent_id=None,
+        role=ROLE_CAPTAIN,
+        model=state.model,
+        tokens=dict(state.usage),
+        cost=body,
+        cost_total_nano=total,
+        currency=currency,
+        rounds=state.rounds,
+        duration_ms=state.duration_ms,
+    )
+
+
 def aggregate_cost(cost_runs: Sequence[dict]) -> dict[str, int | str]:
     """Sum per-run cost rows into the turn total carried on ``message_end.cost``.
 

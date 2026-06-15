@@ -11,21 +11,37 @@ Each repository handles CRUD for a single model.
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import BigInteger, cast, delete, distinct, func, select, update
+from sqlalchemy import (
+    BigInteger,
+    and_,
+    cast,
+    delete,
+    distinct,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from agentcore.core.types import new_id
 from agentcore.db.models import (
+    Chat,
+    ChatMember,
+    ChatMessage,
     Conversation,
     CostEvent,
     Credentials,
     Folder,
+    HandoffJob,
     Invite,
     Message,
     RefreshToken,
     User,
+    UserBlock,
+    UserDirectorySettings,
 )
 
 # Sentinel for "field not provided" in partial updates, distinct from an explicit
@@ -48,6 +64,35 @@ class UserRepository:
             select(User).where(User.username == username)
         )
         return result.scalar_one_or_none()
+
+    async def get_by_ids(self, user_ids: Sequence[str]) -> dict[str, User]:
+        """Fetch users by id, keyed by id — batch lookup for the chat list (avoids
+        an N+1 when resolving dm peers / message senders).
+        """
+        if not user_ids:
+            return {}
+        result = await self._session.execute(
+            select(User).where(User.user_id.in_(user_ids))
+        )
+        return {u.user_id: u for u in result.scalars().all()}
+
+    async def search(self, query: str, *, limit: int = 20) -> Sequence[User]:
+        """People-search for the 消息 page (任意搜人).
+
+        Exact, case-insensitive username match only — no fuzzy prefix — so the
+        directory cannot be enumerated by scanning. Disabled (status != active)
+        accounts are excluded; discoverability (``user_directory_settings``) is
+        enforced one layer up in the service.
+        """
+        q = query.strip()
+        if not q:
+            return []
+        result = await self._session.execute(
+            select(User)
+            .where(func.lower(User.username) == q.lower(), User.status == "active")
+            .limit(limit)
+        )
+        return result.scalars().all()
 
     async def create(
         self,
@@ -77,18 +122,71 @@ class UserRepository:
         )
         await self._session.commit()
 
+    async def set_quota(
+        self,
+        user_id: str,
+        *,
+        is_unlimited: bool | object = _UNSET,
+        daily_tokens: int | None | object = _UNSET,
+        monthly_cost_usd: float | None | object = _UNSET,
+        daily_requests: int | None | object = _UNSET,
+    ) -> None:
+        """Patch a user's per-user quota overrides (成本配额与计费.md §一, 决策④).
+
+        Only the fields actually passed are written, so callers can flip one knob
+        without disturbing the others. For the three override dimensions an explicit
+        ``None`` clears the override back to「inherit global config」, while ``0``
+        means「unlimited for this user」(distinct from ``_UNSET`` = leave unchanged).
+        """
+        values: dict[str, object] = {}
+        if is_unlimited is not _UNSET:
+            values["is_unlimited"] = is_unlimited
+        if daily_tokens is not _UNSET:
+            values["quota_daily_tokens"] = daily_tokens
+        if monthly_cost_usd is not _UNSET:
+            values["quota_monthly_cost_usd"] = monthly_cost_usd
+        if daily_requests is not _UNSET:
+            values["quota_daily_requests"] = daily_requests
+        if not values:
+            return
+        await self._session.execute(
+            update(User).where(User.user_id == user_id).values(**values)
+        )
+        await self._session.commit()
+
 
 class ConversationRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
-    async def create(self, *, user_id: str, title: str | None = None) -> Conversation:
+    async def create(
+        self,
+        *,
+        user_id: str,
+        title: str | None = None,
+        folder_id: str | None = None,
+        mode: str = "chat",
+    ) -> Conversation:
         # Omit title when not provided so the DB server_default ('') applies.
         # The live `conversations.title` column is NOT NULL; passing an explicit
         # None would emit `INSERT ... title=NULL` and violate the constraint.
+        #
+        # ``folder_id`` files the chat at creation (a "新建对话 from a folder"):
+        # filing it here, rather than with a follow-up move, keeps a chat born in a
+        # folder in its folder's workspace from its very first turn — and avoids
+        # racing the workspace-lock guard, which would otherwise reject the move
+        # once that first turn has landed a message (双模式工作区 §九 ⑩).
+        #
+        # ``mode`` is "chat" for a normal conversation; a "handoff" conversation is
+        # the hidden host for a local→云 cloud job's team run (双模式工作区 P2e /
+        # e2), kept out of the sidebar by the list filters below.
         conv = Conversation(id=new_id(), user_id=user_id)
         if title is not None:
             conv.title = title
+        if folder_id is not None:
+            conv.folder_id = folder_id
+        if mode != "chat":
+            conv.mode = mode
         self._session.add(conv)
         await self._session.commit()
         await self._session.refresh(conv)
@@ -112,9 +210,12 @@ class ConversationRepository:
     async def list_by_user(
         self, user_id: str, *, limit: int = 50, offset: int = 0
     ) -> tuple[Sequence[Conversation], int]:
+        # Hidden handoff-job conversations (双模式工作区 P2e / e2) never show in the
+        # sidebar — they exist only to host a cloud run's messages/cost/journal.
         base_query = select(Conversation).where(
             Conversation.user_id == user_id,
             Conversation.deleted_at.is_(None),
+            Conversation.mode != "handoff",
         )
 
         count_result = await self._session.execute(
@@ -184,6 +285,55 @@ class ConversationRepository:
         )
         await self._session.commit()
 
+    async def set_memory_synced_at(
+        self, conversation_id: str, synced_at: datetime
+    ) -> None:
+        """Advance the long-term-memory consolidation watermark (Agent记忆 §1.5).
+
+        ``synced_at`` is the created_at of the last message folded into the user's
+        memory. The runner stamps it after each pass (even a no-op one) so neither
+        the debounce nor the sweeper reprocesses already-consolidated messages.
+        """
+        await self._session.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(memory_synced_at=synced_at)
+        )
+        await self._session.commit()
+
+    async def list_pending_memory_consolidation(
+        self, *, idle_before: datetime, limit: int
+    ) -> Sequence[str]:
+        """Ids of settled chats that have un-consolidated messages (sweeper work list).
+
+        A conversation qualifies when its latest message is newer than its
+        ``memory_synced_at`` watermark (有未整合的新内容) yet is at/older than
+        ``idle_before`` (已静默, the debounce window has elapsed). Restricted to
+        normal chats — hidden handoff hosts (P2e) carry agent runs, not user talk.
+        Oldest-settled first, capped by ``limit``. Backs the periodic backstop that
+        covers a debounce dropped by a restart / closed client.
+        """
+        epoch = datetime(1970, 1, 1, tzinfo=UTC)
+        last_msg = func.max(Message.created_at)
+        result = await self._session.execute(
+            select(Conversation.id)
+            .join(Message, Message.conversation_id == Conversation.id)
+            .where(
+                Conversation.deleted_at.is_(None),
+                Conversation.mode == "chat",
+            )
+            .group_by(Conversation.id, Conversation.memory_synced_at)
+            .having(
+                and_(
+                    last_msg > func.coalesce(Conversation.memory_synced_at, epoch),
+                    last_msg <= idle_before,
+                )
+            )
+            .order_by(last_msg.asc())
+            .limit(limit)
+        )
+        return [row[0] for row in result.all()]
+
     async def list_all_by_user(self, user_id: str) -> Sequence[Conversation]:
         """Every non-deleted conversation for a user, newest activity first.
 
@@ -195,6 +345,8 @@ class ConversationRepository:
             .where(
                 Conversation.user_id == user_id,
                 Conversation.deleted_at.is_(None),
+                # Hidden handoff-job conversations (P2e / e2) are not sidebar chats.
+                Conversation.mode != "handoff",
             )
             .order_by(Conversation.updated_at.desc())
         )
@@ -384,6 +536,37 @@ class MessageRepository:
         await self._session.refresh(msg)
         return msg
 
+    async def count_by_conversation(self, conversation_id: str) -> int:
+        """Number of messages in a conversation (0 for a brand-new, unsent one).
+
+        Backs the "started?" check the move guard uses to lock a conversation's
+        workspace once it has begun (双模式工作区 §九 ⑩).
+        """
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(Message)
+            .where(Message.conversation_id == conversation_id)
+        )
+        return result.scalar_one()
+
+    async def counts_for_conversations(
+        self, conversation_ids: Sequence[str]
+    ) -> dict[str, int]:
+        """Message counts keyed by conversation id, for the ids given.
+
+        One GROUP BY for the whole sidebar so per-conversation counts don't fan out
+        into an N+1. Ids with no messages are simply absent from the map (callers
+        default them to 0).
+        """
+        if not conversation_ids:
+            return {}
+        result = await self._session.execute(
+            select(Message.conversation_id, func.count())
+            .where(Message.conversation_id.in_(conversation_ids))
+            .group_by(Message.conversation_id)
+        )
+        return {row[0]: row[1] for row in result.all()}
+
     async def list_by_conversation(
         self, conversation_id: str, *, limit: int = 100, offset: int = 0
     ) -> tuple[Sequence[Message], int]:
@@ -398,6 +581,36 @@ class MessageRepository:
             base_query.order_by(Message.created_at.asc()).limit(limit).offset(offset)
         )
         return result.scalars().all(), total
+
+    async def list_recent(
+        self, conversation_id: str, *, limit: int
+    ) -> Sequence[Message]:
+        """The most recent ``limit`` messages, returned in chronological order.
+
+        Unlike ``list_by_conversation`` (oldest-first page), this tails the
+        conversation — the window the offline memory consolidation reconciles
+        against the existing memory (memory/consolidation.py).
+        """
+        result = await self._session.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        return list(reversed(result.scalars().all()))
+
+    async def latest_created_at(self, conversation_id: str) -> datetime | None:
+        """created_at of the newest message (None when the conversation is empty).
+
+        The memory consolidation watermark: the runner skips when this is not newer
+        than the stored watermark, and stamps the watermark to it after a pass.
+        """
+        result = await self._session.execute(
+            select(func.max(Message.created_at)).where(
+                Message.conversation_id == conversation_id
+            )
+        )
+        return result.scalar_one_or_none()
 
     async def get_by_id(
         self, message_id: str, *, conversation_id: str
@@ -587,6 +800,145 @@ class CostEventRepository:
             CostEvent.created_at >= since,
         )
 
+    async def aggregate_by_role_for_window(
+        self, *, user_id: str, since: datetime
+    ) -> list[dict]:
+        """Per-role spend for a user since a cutoff (本月各角色花销 — 团队工资单 by role).
+
+        Groups the window by the ledger ``role`` and SUMs the scalar
+        ``cost_total_nano`` (the money truth, index-friendly) plus a distinct-turn
+        count per role. Only roles that actually spent (>0) are returned, ordered
+        by spend desc so the dashboard leads with the biggest spender (Top 花销) —
+        the multi-agent product differentiator a single-agent tool can't show.
+        Filters on ``ix_cost_events_user_created`` then groups.
+        """
+        total = _sum_int(CostEvent.cost_total_nano)
+        stmt = (
+            select(
+                CostEvent.role.label("role"),
+                total.label("c_total"),
+                func.count(distinct(CostEvent.message_id)).label("turns"),
+            )
+            .where(CostEvent.user_id == user_id, CostEvent.created_at >= since)
+            .group_by(CostEvent.role)
+            .having(total > 0)
+            .order_by(total.desc())
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            {"role": row.role, "cost_total": int(row.c_total), "turns": int(row.turns)}
+            for row in rows
+        ]
+
+    async def aggregate_daily_for_window(
+        self, *, user_id: str, since: datetime
+    ) -> dict[str, int]:
+        """Daily spend (UTC days) since a cutoff — the dashboard 7-day trend sparkline.
+
+        Groups the window into UTC calendar days and SUMs ``cost_total_nano`` per
+        day, returning an ``{iso_date: nano_total}`` map (only days that had rows).
+        The caller zero-fills the absent days so the series is a fixed length. The
+        day key is computed in UTC (``created_at AT TIME ZONE 'UTC'``) to match the
+        account window boundaries. Filters on ``ix_cost_events_user_created``.
+        """
+        day = func.date_trunc("day", func.timezone("UTC", CostEvent.created_at))
+        stmt = (
+            select(
+                day.label("day"),
+                _sum_int(CostEvent.cost_total_nano).label("c_total"),
+            )
+            .where(CostEvent.user_id == user_id, CostEvent.created_at >= since)
+            .group_by(day)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {row.day.date().isoformat(): int(row.c_total) for row in rows}
+
+
+class HandoffJobRepository:
+    """Local→云 handoff jobs (双模式工作区 P2e / e2): a dispatched cloud team run.
+
+    Tracks one job's lifecycle (pending → running → succeeded/failed) and the two
+    snapshot ids that bracket it (the base it ran on, the result it produced). All
+    reads are owner-scoped so a non-owner gets nothing (IDOR-safe), mirroring the
+    conversation repo.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        user_id: str,
+        source_conversation_id: str,
+        job_conversation_id: str,
+        base_snapshot_id: str,
+        task: str,
+    ) -> HandoffJob:
+        job = HandoffJob(
+            id=new_id(),
+            user_id=user_id,
+            source_conversation_id=source_conversation_id,
+            job_conversation_id=job_conversation_id,
+            base_snapshot_id=base_snapshot_id,
+            task=task,
+        )
+        self._session.add(job)
+        await self._session.commit()
+        await self._session.refresh(job)
+        return job
+
+    async def get_by_id(
+        self, job_id: str, *, user_id: str | None = None
+    ) -> HandoffJob | None:
+        conditions = [HandoffJob.id == job_id]
+        if user_id is not None:
+            conditions.append(HandoffJob.user_id == user_id)
+        result = await self._session.execute(select(HandoffJob).where(*conditions))
+        return result.scalar_one_or_none()
+
+    async def list_for_source(
+        self, source_conversation_id: str, *, user_id: str
+    ) -> Sequence[HandoffJob]:
+        """A source conversation's handoff jobs, newest first (owner-scoped)."""
+        result = await self._session.execute(
+            select(HandoffJob)
+            .where(
+                HandoffJob.source_conversation_id == source_conversation_id,
+                HandoffJob.user_id == user_id,
+            )
+            .order_by(HandoffJob.created_at.desc())
+        )
+        return result.scalars().all()
+
+    async def mark_running(self, job_id: str) -> None:
+        await self._session.execute(
+            update(HandoffJob)
+            .where(HandoffJob.id == job_id)
+            .values(status="running")
+        )
+        await self._session.commit()
+
+    async def mark_succeeded(self, job_id: str, *, result_snapshot_id: str) -> None:
+        await self._session.execute(
+            update(HandoffJob)
+            .where(HandoffJob.id == job_id)
+            .values(
+                status="succeeded",
+                result_snapshot_id=result_snapshot_id,
+                finished_at=datetime.now(UTC),
+            )
+        )
+        await self._session.commit()
+
+    async def mark_failed(self, job_id: str, *, error: str) -> None:
+        await self._session.execute(
+            update(HandoffJob)
+            .where(HandoffJob.id == job_id)
+            .values(status="failed", error=error, finished_at=datetime.now(UTC))
+        )
+        await self._session.commit()
+
 
 class CredentialsRepository:
     def __init__(self, session: AsyncSession):
@@ -726,3 +1078,306 @@ class InviteRepository:
             .values(used_by=used_by, used_at=datetime.now(UTC))
         )
         await self._session.commit()
+
+
+class ChatRepository:
+    """IM chat domain (消息页 = 找人): chats, members and their messages.
+
+    Separate from the AI conversation/message repos — the 消息 page is human↔human
+    plus an official account, sharing the frontend chat core, not these tables.
+    All membership-scoped reads let the service 404 a non-member (IDOR-safe).
+    """
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    @staticmethod
+    def dm_key(user_a: str, user_b: str) -> str:
+        """Canonical pair key (sorted) so a dm is one row regardless of who opens it."""
+        return ":".join(sorted([user_a, user_b]))
+
+    async def get_dm(self, user_a: str, user_b: str) -> Chat | None:
+        result = await self._session.execute(
+            select(Chat).where(Chat.dm_key == self.dm_key(user_a, user_b))
+        )
+        return result.scalar_one_or_none()
+
+    async def create_dm(
+        self, *, creator_id: str, peer_id: str, peer_state: str = "pending"
+    ) -> Chat:
+        """Open a 1:1 chat. The opener joins accepted; the peer starts ``pending``
+        (the stranger message-request gate) until they accept/reply.
+        """
+        chat = Chat(
+            id=new_id(),
+            type="dm",
+            created_by=creator_id,
+            dm_key=self.dm_key(creator_id, peer_id),
+        )
+        self._session.add(chat)
+        self._session.add(
+            ChatMember(chat_id=chat.id, user_id=creator_id, state="accepted")
+        )
+        self._session.add(
+            ChatMember(chat_id=chat.id, user_id=peer_id, state=peer_state)
+        )
+        await self._session.commit()
+        await self._session.refresh(chat)
+        return chat
+
+    async def get_chat(self, chat_id: str) -> Chat | None:
+        result = await self._session.execute(select(Chat).where(Chat.id == chat_id))
+        return result.scalar_one_or_none()
+
+    async def get_member(self, chat_id: str, user_id: str) -> ChatMember | None:
+        result = await self._session.execute(
+            select(ChatMember).where(
+                ChatMember.chat_id == chat_id, ChatMember.user_id == user_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_members(self, chat_id: str) -> Sequence[ChatMember]:
+        result = await self._session.execute(
+            select(ChatMember).where(ChatMember.chat_id == chat_id)
+        )
+        return result.scalars().all()
+
+    async def list_memberships(self, user_id: str) -> Sequence[tuple[Chat, ChatMember]]:
+        """A user's chats joined with their per-chat state, recent activity first."""
+        result = await self._session.execute(
+            select(Chat, ChatMember)
+            .join(ChatMember, ChatMember.chat_id == Chat.id)
+            .where(ChatMember.user_id == user_id)
+            .order_by(Chat.last_message_at.desc().nullslast())
+        )
+        return [(row[0], row[1]) for row in result.all()]
+
+    async def peer_ids_for(
+        self, chat_ids: Sequence[str], *, exclude_user_id: str
+    ) -> dict[str, str]:
+        """Map each chat id → one other member's id (the dm peer). Batch lookup to
+        resolve list-row names without an N+1.
+        """
+        if not chat_ids:
+            return {}
+        result = await self._session.execute(
+            select(ChatMember.chat_id, ChatMember.user_id).where(
+                ChatMember.chat_id.in_(chat_ids),
+                ChatMember.user_id != exclude_user_id,
+            )
+        )
+        out: dict[str, str] = {}
+        for chat_id, uid in result.all():
+            out.setdefault(chat_id, uid)
+        return out
+
+    async def add_message(
+        self,
+        *,
+        chat_id: str,
+        sender_user_id: str | None,
+        content: str,
+        sender_type: str = "user",
+        content_type: str = "text",
+        attachments: list | None = None,
+        payload: dict | None = None,
+        reply_to_message_id: str | None = None,
+        client_msg_id: str | None = None,
+    ) -> ChatMessage:
+        """Append a message and refresh the chat's list-row preview.
+
+        Idempotent for human sends: a retry with the same ``client_msg_id`` returns
+        the already-stored row instead of duplicating (the unique index is the
+        backstop). The chat's ``last_message_*`` are bumped so the list re-sorts.
+        """
+        if client_msg_id is not None and sender_user_id is not None:
+            existing = await self._session.execute(
+                select(ChatMessage).where(
+                    ChatMessage.chat_id == chat_id,
+                    ChatMessage.sender_user_id == sender_user_id,
+                    ChatMessage.client_msg_id == client_msg_id,
+                )
+            )
+            row = existing.scalar_one_or_none()
+            if row is not None:
+                return row
+        msg = ChatMessage(
+            id=new_id(),
+            chat_id=chat_id,
+            sender_user_id=sender_user_id,
+            sender_type=sender_type,
+            content=content,
+            content_type=content_type,
+            reply_to_message_id=reply_to_message_id,
+            client_msg_id=client_msg_id,
+        )
+        if attachments is not None:
+            msg.attachments = attachments
+        if payload is not None:
+            msg.payload = payload
+        self._session.add(msg)
+        await self._session.execute(
+            update(Chat)
+            .where(Chat.id == chat_id)
+            .values(
+                last_message_at=datetime.now(UTC),
+                last_message_preview=(content or "")[:200],
+            )
+        )
+        await self._session.commit()
+        await self._session.refresh(msg)
+        return msg
+
+    async def list_messages(
+        self, chat_id: str, *, limit: int = 50, offset: int = 0
+    ) -> tuple[Sequence[ChatMessage], int]:
+        base_query = select(ChatMessage).where(ChatMessage.chat_id == chat_id)
+        count_result = await self._session.execute(
+            select(func.count()).select_from(base_query.subquery())
+        )
+        total = count_result.scalar_one()
+        result = await self._session.execute(
+            base_query.order_by(ChatMessage.created_at.asc()).limit(limit).offset(offset)
+        )
+        return result.scalars().all(), total
+
+    async def mark_read(
+        self,
+        chat_id: str,
+        user_id: str,
+        *,
+        last_read_message_id: str,
+        last_read_at: datetime | None = None,
+    ) -> None:
+        await self._session.execute(
+            update(ChatMember)
+            .where(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id)
+            .values(
+                last_read_message_id=last_read_message_id,
+                last_read_at=last_read_at or datetime.now(UTC),
+            )
+        )
+        await self._session.commit()
+
+    async def accept_request(self, chat_id: str, user_id: str) -> None:
+        """Clear a recipient's pending message-request gate (they accepted/replied)."""
+        await self._session.execute(
+            update(ChatMember)
+            .where(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id)
+            .values(state="accepted")
+        )
+        await self._session.commit()
+
+    async def unread_counts(self, user_id: str) -> dict[str, int]:
+        """Per-chat unread message counts for a user, keyed by chat id.
+
+        Unread = messages this user did not send, created after their read cursor
+        (``last_read_at``; NULL = never read → all count). Official (NULL sender)
+        messages count too — ``is_distinct_from`` treats NULL as "not me". One
+        GROUP BY for the whole list (no per-chat round-trips).
+        """
+        result = await self._session.execute(
+            select(ChatMessage.chat_id, func.count())
+            .select_from(ChatMessage)
+            .join(ChatMember, ChatMember.chat_id == ChatMessage.chat_id)
+            .where(
+                ChatMember.user_id == user_id,
+                ChatMessage.sender_user_id.is_distinct_from(user_id),
+                or_(
+                    ChatMember.last_read_at.is_(None),
+                    ChatMessage.created_at > ChatMember.last_read_at,
+                ),
+            )
+            .group_by(ChatMessage.chat_id)
+        )
+        return {row[0]: row[1] for row in result.all()}
+
+
+class UserBlockRepository:
+    """Block list for the 消息 page (任意搜人 护栏): symmetric DM denial + report."""
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def is_blocked_between(self, user_a: str, user_b: str) -> bool:
+        """True if either user blocked the other (blocks gate DMs both ways)."""
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(UserBlock)
+            .where(
+                or_(
+                    and_(
+                        UserBlock.user_id == user_a,
+                        UserBlock.blocked_user_id == user_b,
+                    ),
+                    and_(
+                        UserBlock.user_id == user_b,
+                        UserBlock.blocked_user_id == user_a,
+                    ),
+                )
+            )
+        )
+        return result.scalar_one() > 0
+
+    async def block(self, user_id: str, blocked_user_id: str) -> None:
+        stmt = (
+            pg_insert(UserBlock)
+            .values(user_id=user_id, blocked_user_id=blocked_user_id)
+            .on_conflict_do_nothing(index_elements=["user_id", "blocked_user_id"])
+        )
+        await self._session.execute(stmt)
+        await self._session.commit()
+
+    async def unblock(self, user_id: str, blocked_user_id: str) -> None:
+        await self._session.execute(
+            delete(UserBlock).where(
+                UserBlock.user_id == user_id,
+                UserBlock.blocked_user_id == blocked_user_id,
+            )
+        )
+        await self._session.commit()
+
+    async def list_blocked(self, user_id: str) -> Sequence[str]:
+        result = await self._session.execute(
+            select(UserBlock.blocked_user_id).where(UserBlock.user_id == user_id)
+        )
+        return [row[0] for row in result.all()]
+
+
+class UserDirectoryRepository:
+    """Per-user discoverability + who-can-DM privacy (任意搜人 护栏).
+
+    A missing row means defaults (discoverable, anyone can DM) — open search is
+    the product default; users opt out by writing a row.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def get(self, user_id: str) -> UserDirectorySettings | None:
+        result = await self._session.execute(
+            select(UserDirectorySettings).where(
+                UserDirectorySettings.user_id == user_id
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def upsert(
+        self,
+        user_id: str,
+        *,
+        discoverable: bool | object = _UNSET,
+        who_can_dm: str | object = _UNSET,
+    ) -> UserDirectorySettings:
+        settings = await self.get(user_id)
+        if settings is None:
+            settings = UserDirectorySettings(user_id=user_id)
+            self._session.add(settings)
+        if discoverable is not _UNSET:
+            settings.discoverable = discoverable  # type: ignore[assignment]
+        if who_can_dm is not _UNSET:
+            settings.who_can_dm = who_can_dm  # type: ignore[assignment]
+        await self._session.commit()
+        await self._session.refresh(settings)
+        return settings

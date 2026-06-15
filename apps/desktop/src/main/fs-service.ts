@@ -20,6 +20,8 @@ import {
   relative,
   resolve,
 } from "node:path";
+import ignore, { type Ignore } from "ignore";
+import JSZip from "jszip";
 import {
   FS_CHANNELS,
   type FilePreview,
@@ -80,6 +82,10 @@ const WORKSPACE_LIST_MAX = 100; // 与 ServerWorkspace.list 的 _MAX_LIST_ENTRIE
 const GREP_MAX_LINE = 300; // 截断超长命中行（如压缩产物），与服务端对齐
 const GREP_MAX_FILES = 5000; // 单次 grep 最多打开文件数
 const GREP_MAX_RESULTS_CAP = 200; // 结果硬上限
+
+// 本地→云交接打包（双模式工作区 P2e / e1）上限：防超大仓把整树读入内存/撑爆通道回填。
+const ARCHIVE_MAX_FILES = 20000; // 最多打包文件数
+const ARCHIVE_MAX_BYTES = 100 * 1024 * 1024; // 原始字节上限（zip 前）100 MiB
 
 // 本地代码执行（P2c）：镜像服务端 SubprocessSandbox。命令/扩展名/超时上限一一对齐；
 // 进程 cwd = 绑定的本地根（让代码与文件工具同目录，呼应服务端 cwd=workspace）。
@@ -761,7 +767,9 @@ async function opGrep(
 // PathNotFound / NotAFile / AlreadyExists / NotUTF8 / NoMatch / AmbiguousMatch /
 // WorkspaceIOError）、同样的「建父目录」「拒绝根」「不覆盖已存在」规则，从而工具层
 // 报错与返回值在两种模式下完全一致。execute（P2c）镜像 SubprocessSandbox：在绑定根
-// 内跑代码，审批沿用工具层 code_execute 的 GRANTABLE 门（CEO 路径），无需通道再设门。
+// 内跑代码。审批沿用服务端引擎层的 GRANTABLE 门——本地模式下 CEO 与被委派的 worker
+// 都过门（P2d 执行门），代码到达桌面前已获用户同意，故通道本身不再设门、桌面只管执行。
+// 超时由服务端按「代码自身超时 + 余量」放宽传输期限，桌面的执行超时才是真正的强杀线。
 
 /** 原子写：同目录临时文件 + rename，避免进程中断在用户真实磁盘上留下半截文件。 */
 async function atomicWrite(abs: string, data: Buffer): Promise<void> {
@@ -1162,6 +1170,95 @@ async function opExecute(
   }
 }
 
+// --- 本地→云交接打包 op（双模式工作区 P2e / e1）---
+//
+// 把整个绑定根打包成单个 zip（base64 回填），供服务端解包暂存并快照。套用忽略规则：
+// 默认跳过集（与 @ 提及列举一致的依赖/构建/VCS 噪音）+ 根 .gitignore，避免把 node_modules
+// 之类塞进交接。设文件数/字节上限防超大仓 OOM 或撑爆通道，超限置 truncated（部分交接好过
+// 整体失败）。只在根内 walk 且不跟随符号链接，故越界天然不可能。
+
+/** 载入忽略规则：默认跳过集 + 根 `.gitignore`（缺失则仅默认集）。 */
+async function loadIgnore(rootAbs: string): Promise<Ignore> {
+  const ig = ignore();
+  // 默认跳过集按目录规则加入（"name/" 匹配整棵子树）。
+  ig.add([...LIST_FILES_SKIP_DIRS].map((d) => `${d}/`));
+  try {
+    ig.add(await fs.readFile(join(rootAbs, ".gitignore"), "utf-8"));
+  } catch {
+    // 无 .gitignore —— 仅用默认集
+  }
+  return ig;
+}
+
+async function opArchive(
+  root: StoredRoot,
+  args: Record<string, unknown>,
+): Promise<WorkspaceOpResult> {
+  const useIgnore = args.ignore !== false; // 默认 true
+  const ig = useIgnore ? await loadIgnore(root.absPath) : null;
+  const zip = new JSZip();
+  let fileCount = 0;
+  let totalBytes = 0;
+  let truncated = false;
+  let stop = false;
+
+  const walk = async (absDir: string, relFromRoot: string): Promise<void> => {
+    if (stop) return;
+    let dirents: import("node:fs").Dirent[];
+    try {
+      dirents = await fs.readdir(absDir, { withFileTypes: true });
+    } catch {
+      return; // 单个子目录不可读不影响整体
+    }
+    for (const d of dirents) {
+      if (stop) break;
+      if (d.isSymbolicLink()) continue; // 不跟随链接，防逃逸/环路
+      const childRel = relFromRoot ? `${relFromRoot}/${d.name}` : d.name;
+      if (d.isDirectory()) {
+        if (ig?.ignores(`${childRel}/`)) continue; // 命中目录规则 → 跳整棵子树
+        await walk(join(absDir, d.name), childRel);
+      } else if (d.isFile()) {
+        if (ig?.ignores(childRel)) continue;
+        if (fileCount >= ARCHIVE_MAX_FILES) {
+          truncated = true;
+          stop = true;
+          break;
+        }
+        let buf: Buffer;
+        try {
+          buf = await fs.readFile(join(absDir, d.name));
+        } catch {
+          continue; // 单文件读失败跳过
+        }
+        if (totalBytes + buf.length > ARCHIVE_MAX_BYTES) {
+          truncated = true;
+          stop = true;
+          break;
+        }
+        zip.file(childRel, buf);
+        fileCount++;
+        totalBytes += buf.length;
+      }
+    }
+  };
+
+  try {
+    await walk(root.absPath, "");
+    const archive = await zip.generateAsync({
+      type: "base64",
+      compression: "DEFLATE",
+    });
+    return opOk({
+      archive,
+      file_count: fileCount,
+      total_bytes: totalBytes,
+      truncated,
+    });
+  } catch (e) {
+    return opErr("WorkspaceIOError", toReason(e));
+  }
+}
+
 async function workspaceOp(req: {
   rootId: string;
   op: WorkspaceOpName;
@@ -1231,6 +1328,8 @@ export async function executeWorkspaceOp(
         return await opGrep(root, args);
       case "execute":
         return await opExecute(root, args);
+      case "archive":
+        return await opArchive(root, args);
       default:
         return opErr("WorkspaceIOError", `本地工作区未知的操作：${op}`);
     }

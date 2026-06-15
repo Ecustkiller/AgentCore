@@ -2,6 +2,12 @@ import CollaborationNetwork from "@/components/CollaborationNetwork";
 import FlowDiagram from "@/components/FlowDiagram";
 import Reveal from "@/components/Reveal";
 
+// 桌面安装包下载去向（electron-builder.yml publish / 部署与运维.md §7.6）：
+// 公开发布仓 Lawofall/AgentCore-releases；/releases/latest 跳转最新正式 release。
+// ⚠️ 需该仓存在并已发布（非草稿）release 后链接才有效（P2-5 人工前置）。
+const DOWNLOAD_URL =
+  "https://github.com/Lawofall/AgentCore-releases/releases/latest";
+
 const NAV = [
   { href: "#value", label: "能力" },
   { href: "#how", label: "如何协作" },
@@ -110,6 +116,29 @@ function Dot() {
   return <span className="inline-block h-1.5 w-1.5 rounded-full bg-brand-2" />;
 }
 
+function DownloadIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M8 1.8v8.2m0 0L4.6 6.6M8 10 11.4 6.6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2.6 10.8v2.2a1 1 0 0 0 1 1h8.8a1 1 0 0 0 1-1v-2.2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function Home() {
   return (
     <div className="relative">
@@ -135,8 +164,14 @@ export default function Home() {
               </li>
             ))}
           </ul>
-          <a href="#how" className="btn btn-ghost px-4 py-2 text-sm">
-            看团队协作
+          <a
+            href={DOWNLOAD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-primary px-4 py-2 text-sm"
+          >
+            <DownloadIcon />
+            下载客户端
           </a>
         </nav>
       </header>
@@ -193,13 +228,22 @@ export default function Home() {
               </figure>
 
               <div className="mt-9 flex flex-wrap items-center gap-3">
-                <a href="#how" className="btn btn-primary">
+                <a
+                  href={DOWNLOAD_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary"
+                >
+                  <DownloadIcon />
+                  下载客户端
+                </a>
+                <a href="#how" className="btn btn-ghost">
                   看团队如何协作
                 </a>
-                <a href="#value" className="btn btn-ghost">
-                  了解核心能力
-                </a>
               </div>
+              <p className="mt-3 text-sm text-muted-foreground">
+                支持 Windows · macOS · Linux
+              </p>
             </div>
           </div>
           {/* 首屏底部渐隐，平滑过渡到下一区块。 */}
@@ -532,6 +576,20 @@ export default function Home() {
               <p className="mx-auto mt-6 max-w-xl text-lg text-muted-foreground">
                 AgentCore —— 让 AI 像团队一样工作。
               </p>
+              <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
+                <a
+                  href={DOWNLOAD_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary"
+                >
+                  <DownloadIcon />
+                  下载客户端
+                </a>
+                <a href="#how" className="btn btn-ghost">
+                  看团队如何协作
+                </a>
+              </div>
             </Reveal>
           </div>
         </section>
@@ -553,6 +611,16 @@ export default function Home() {
             <div>
               <p className="font-semibold">产品</p>
               <ul className="mt-3 space-y-2 text-muted-foreground">
+                <li>
+                  <a
+                    href={DOWNLOAD_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-foreground"
+                  >
+                    下载客户端
+                  </a>
+                </li>
                 <li>
                   <a href="#value" className="hover:text-foreground">
                     核心能力

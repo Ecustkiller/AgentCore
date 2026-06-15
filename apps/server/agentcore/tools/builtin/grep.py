@@ -41,55 +41,52 @@ class GrepTool:
         return ToolSchema(
             name="grep",
             description=(
-                "Search file CONTENTS across the workspace using a regular "
-                "expression (Python `re` syntax, like ripgrep). Use this to find "
-                "WHERE a symbol, function, string, or any text appears — it returns "
-                "matching lines as `path:line: text`. Then open the surrounding "
-                "code with `file_read`. To find files BY NAME use `file_list` "
-                "instead. Skips binary files and noise dirs (.git, node_modules, "
-                "caches). Narrow with `path` and/or `glob` for faster, sharper hits."
+                "用正则表达式搜索工作区内文件的【内容】（Python `re` 语法，类似 "
+                "ripgrep）。用它来定位某个符号、函数、字符串或任意文本【出现在"
+                "哪里】——返回形如 `path:line: text` 的匹配行，再用 `file_read` "
+                "打开周边代码。要按【文件名】找文件请改用 `file_list`。会跳过"
+                "二进制文件与噪音目录（.git、node_modules、缓存）。用 `path` 和/或 "
+                "`glob` 收窄范围可更快更准。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "pattern": {
                         "type": "string",
-                        "description": "Regular expression to search for (Python re syntax).",
+                        "description": "要搜索的正则表达式（Python re 语法）。",
                     },
                     "path": {
                         "type": "string",
                         "description": (
-                            "Relative directory to search within "
-                            "(default: workspace root)."
+                            "搜索的相对目录（默认：工作区根目录）。"
                         ),
                         "default": ".",
                     },
                     "glob": {
                         "type": "string",
                         "description": (
-                            "Optional filter on file NAME, e.g. '*.py' or '*.ts'. "
-                            "A leading '**/' or directory prefix is ignored; only "
-                            "the file name is matched."
+                            "可选：按【文件名】过滤，如 '*.py' 或 '*.ts'。开头的 "
+                            "'**/' 或目录前缀会被忽略，只匹配文件名。"
                         ),
                     },
                     "case_insensitive": {
                         "type": "boolean",
-                        "description": "Case-insensitive match (default false).",
+                        "description": "不区分大小写匹配（默认 false）。",
                         "default": False,
                     },
                     "files_only": {
                         "type": "boolean",
                         "description": (
-                            "Return only the list of matching files with per-file "
-                            "match counts, not the matching lines (default false)."
+                            "只返回匹配到的文件列表及每个文件的匹配数，而非匹配行"
+                            "（默认 false）。"
                         ),
                         "default": False,
                     },
                     "max_results": {
                         "type": "integer",
                         "description": (
-                            "Max matching lines (or files, in files_only mode) to "
-                            "return. Default 50, max 200."
+                            "返回的最大匹配行数（files_only 模式下为文件数）。"
+                            "默认 50，最多 200。"
                         ),
                     },
                 },
@@ -132,13 +129,13 @@ class GrepTool:
         try:
             result = await context.backend.grep(query)
         except OutsideWorkspace:
-            return _fail(f"Path '{rel_dir}' is outside the workspace", start)
+            return _fail(f"路径 '{rel_dir}' 超出了工作区范围", start)
         except PathNotFound:
-            return _fail(f"Directory not found: {rel_dir}", start)
+            return _fail(f"目录不存在：{rel_dir}", start)
         except NotADirectory:
-            return _fail(f"Not a directory: {rel_dir}", start)
+            return _fail(f"不是目录：{rel_dir}", start)
         except WorkspaceError as e:
-            return _fail(f"Failed to search: {e}", start)
+            return _fail(f"搜索失败：{e}", start)
 
         output = _render(
             pattern=pattern,
@@ -180,20 +177,20 @@ def _render(
 ) -> str:
     if files_only:
         lines = [f"{rel}: {count}" for rel, count in result.file_counts]
-        summary = f"{len(result.file_counts)} file(s) matched /{pattern}/"
+        summary = f"{len(result.file_counts)} 个文件匹配 /{pattern}/"
     else:
         lines = [f"{h.path}:{h.line_no}: {h.text}" for h in result.hits]
         summary = (
-            f"{result.total_matches} match(es) in "
-            f"{len(result.file_counts)} file(s) for /{pattern}/"
+            f"{result.total_matches} 处匹配，分布在 "
+            f"{len(result.file_counts)} 个文件中（/{pattern}/）"
         )
 
     if not lines:
-        scope = "" if rel_dir in ("", ".") else f" under '{rel_dir}'"
-        glob_note = f" in files matching '{glob}'" if glob else ""
-        return f"No matches for /{pattern}/{scope}{glob_note}."
+        scope = "" if rel_dir in ("", ".") else f"（在 '{rel_dir}' 下）"
+        glob_note = f"（文件名匹配 '{glob}'）" if glob else ""
+        return f"没有匹配 /{pattern}/{scope}{glob_note}。"
 
     body = "\n".join(lines)
     if result.truncated:
-        body += "\n[results truncated — narrow the path/glob or refine the pattern]"
+        body += "\n[结果已截断——请收窄 path/glob 或细化 pattern]"
     return f"{summary}\n{body}"

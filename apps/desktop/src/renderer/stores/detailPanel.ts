@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { useExecutionStore } from "./execution";
 
 /** Resize bounds for the conversation detail panel (see 前端UX目标态 §一). */
 const MIN_WIDTH = 280;
@@ -53,7 +52,7 @@ function persist(key: string, value: string): void {
  * A run-detail tab — the only kind the panel holds. The panel is a passive
  * drill-down target: the inline collaboration graph is the team's primary
  * surface, and clicking one of its nodes pins that run here
- * (统一团队展示设计草案). The old progress / embedded-graph tabs are gone — that
+ * (前端UX设计.md §三). The old progress / embedded-graph tabs are gone — that
  * job moved onto the inline graph itself.
  */
 export interface DetailTab {
@@ -163,9 +162,6 @@ export const useDetailPanelStore = create<DetailPanelState>((set, get) => ({
   },
 
   showRunDetail: (messageId, runId, title) => {
-    // Seed the full-screen overlay's selection so maximizing lands on this run;
-    // the inline graph's own highlight derives from the active tab opened below.
-    useExecutionStore.getState().selectRun(runId, messageId);
     get().openTab({
       id: runDetailTabId(messageId, runId),
       title: title ?? "详情",

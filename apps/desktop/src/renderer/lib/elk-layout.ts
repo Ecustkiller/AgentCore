@@ -6,30 +6,28 @@ const elk = new ELK();
 const NODE_WIDTH = 210;
 const NODE_HEIGHT = 110;
 
-/** Per-layout ELK options. Padding is shared and applied on top in computeLayout. */
+/**
+ * Per-layout ELK options. Padding is shared and applied on top in computeLayout.
+ *
+ * NETWORK_SIMPLEX node placement centers a lone source/sink node on its branch
+ * midline, so a 1→N fan-out (用户输入) and an N→1 fan-in (synthesis) stay
+ * symmetric. The ELK default (BRANDES_KOEPF) packs the lone node onto the topmost
+ * branch instead — that is why the input endpoint used to sit above center.
+ */
 const LAYOUT_OPTIONS: Record<GraphLayout, Record<string, string>> = {
   tree: {
     "elk.algorithm": "layered",
     "elk.direction": "DOWN",
     "elk.spacing.nodeNode": "50",
     "elk.layered.spacing.nodeNodeBetweenLayers": "90",
+    "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
   },
   leftright: {
     "elk.algorithm": "layered",
     "elk.direction": "RIGHT",
     "elk.spacing.nodeNode": "50",
     "elk.layered.spacing.nodeNodeBetweenLayers": "110",
-  },
-  radial: {
-    "elk.algorithm": "radial",
-    "elk.spacing.nodeNode": "60",
-  },
-  force: {
-    "elk.algorithm": "force",
-    // Wide nodes (210px) need generous repulsion or they overlap; iterations
-    // are bounded so the simulation stays snappy for the ≤50-node target.
-    "elk.spacing.nodeNode": "120",
-    "elk.force.iterations": "300",
+    "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
   },
 };
 

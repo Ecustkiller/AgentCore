@@ -175,3 +175,48 @@ def test_contract_invalid_output_format_falls_back_to_text():
         id_prefix="t",
     )
     assert plan.nodes[0].policy.contract.output_format == "text"
+
+
+# --- 阶段2 嵌套子任务: tree-position stamping + can_delegate opt-in -------------
+
+
+def test_defaults_top_level_depth_one_parent_none_no_delegate():
+    # The common caller (CEO delegate) makes depth-1 workers parented to the root;
+    # absent an explicit can_delegate they are leaf workers.
+    plan, _ = build_run_plan([{"role": "A", "task": "a"}], id_prefix="t")
+    n = plan.nodes[0]
+    assert n.depth == 1
+    assert n.parent_run_id is None
+    assert n.can_delegate is False
+
+
+def test_stamps_parent_and_depth_on_flat_batch():
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}],
+        id_prefix="t",
+        parent_run_id="cap",
+        depth=2,
+    )
+    assert all(n.parent_run_id == "cap" and n.depth == 2 for n in plan.nodes)
+
+
+def test_stamps_parent_and_depth_on_dag_batch():
+    tasks = [
+        {"id": "s1", "role": "A", "task": "a"},
+        {"id": "s2", "role": "B", "task": "b", "depends_on": ["s1"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t", parent_run_id="cap", depth=2)
+    assert errs == []
+    assert all(n.parent_run_id == "cap" and n.depth == 2 for n in plan.nodes)
+
+
+def test_can_delegate_opt_in_parsed_per_task():
+    plan, _ = build_run_plan(
+        [
+            {"role": "队长", "task": "a", "can_delegate": True},
+            {"role": "助手", "task": "b"},
+        ],
+        id_prefix="t",
+    )
+    assert plan.nodes[0].can_delegate is True
+    assert plan.nodes[1].can_delegate is False

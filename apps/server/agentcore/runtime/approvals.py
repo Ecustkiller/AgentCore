@@ -6,8 +6,11 @@ endpoint) sets that Future. State is in-process — the same single-worker postu
 the rate limiter already takes (see ``config.py``); front with Redis to scale to
 multiple workers.
 
-Scope: the CEO chat path only. Delegated workers run without a gate (they are
-never handed an ``ApprovalGate``), so their tool calls are not yet gated.
+Scope: the CEO chat path always. Delegated workers share this SAME per-turn gate
+ONLY in local mode (双模式工作区 P2d 执行门) — a worker must not run code or
+mutate files on the user's real machine without the same consent the CEO gives.
+In cloud mode workers stay un-gated (the server sandbox is isolated) and are
+handed no gate.
 """
 
 import asyncio

@@ -9,7 +9,14 @@ import {
 } from "@/stores/execution";
 import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
-import { Brain, ChevronDown, ChevronRight, Cpu, Wrench } from "lucide-react";
+import {
+  Brain,
+  ChevronDown,
+  ChevronRight,
+  CornerDownRight,
+  Cpu,
+  Wrench,
+} from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 
@@ -18,9 +25,10 @@ import ReactMarkdown from "react-markdown";
  * summary), read from the live-or-replayed execution projection by run id.
  *
  * Bound to a specific message's execution slot (§9.3) via `messageId`, so the
- * panel can pin a run from any turn (live or historical) and the graph's
- * {@link NodeDetail} drills into its own turn. Chrome-free on purpose: both
- * wrappers render this, so the drill-down view is identical wherever it appears.
+ * conversation's right-side detail panel can pin a run from any turn (live or
+ * historical) — the single home for run detail, reached from both the embedded
+ * graph and the full-screen overlay. Chrome-free on purpose, so the drill-down
+ * view is identical wherever it appears.
  */
 export function RunDetailBody({
   messageId,
@@ -49,13 +57,22 @@ export function RunDetailBody({
   const thinkingLive = agent.status === "working" && output.length === 0;
   // This run's neighbours in the collaboration DAG, shown honestly by direction:
   // 依赖 (upstream — runs this one consumed, from `dependsOn`) and 后续
-  // (downstream — runs that consume this one's output). Avoids mislabelling a
-  // sibling successor as a "子任务" (阶段1 workers are flat — there is no real
-  // nesting; that arrives with 阶段2 `parentRunId`).
+  // (downstream — runs that consume this one's output). Kept distinct from the
+  // delegation tree below (上级 / 子任务, from `parentRunId`): DAG edges are
+  // horizontal (same wave), delegation edges are vertical (阶段2 nesting).
   const upstream = run.dependsOn
     .map((id) => execution.runs.find((r) => r.id === id))
     .filter((r): r is RunNode => r != null);
   const downstream = execution.runs.filter((r) => r.dependsOn.includes(run.id));
+  // Delegation tree (阶段2 嵌套子任务): 上级 is the captain that delegated this run
+  // — only when its parent is a real run on this turn's graph (a top-level
+  // worker's parent is the CEO captain, which has no node here, so this is null);
+  // 子任务 are the runs THIS one delegated, rendered as an indented tree below.
+  const parent =
+    run.parentRunId != null
+      ? (execution.runs.find((r) => r.id === run.parentRunId) ?? null)
+      : null;
+  const childCount = countDescendants(execution.runs, run.id);
 
   return (
     <div className="p-4">
@@ -175,6 +192,35 @@ export function RunDetailBody({
         </Section>
       )}
 
+      {(parent || childCount > 0) && (
+        <Section title="委派关系">
+          <div className="space-y-3">
+            {parent && (
+              <RunRefGroup
+                label="上级"
+                runs={[parent]}
+                agents={execution.agents}
+                onSelect={(rid, role) => showRunDetail(messageId, rid, role)}
+              />
+            )}
+            {childCount > 0 && (
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">
+                  子任务（{childCount}）
+                </p>
+                <SubtaskTree
+                  parentId={run.id}
+                  runs={execution.runs}
+                  agents={execution.agents}
+                  depth={0}
+                  onSelect={(rid, role) => showRunDetail(messageId, rid, role)}
+                />
+              </div>
+            )}
+          </div>
+        </Section>
+      )}
+
       {/* Synthesis runs are cost-neutral by design — their spend is billed once
           on the CEO/captain payroll row (§7.3B), so they carry no own 资源消耗
           ledger. Rendering the all-zero section here would misread as a real
@@ -250,8 +296,80 @@ function RunStatusDot({ status }: { status: RunNode["status"] }) {
   );
 }
 
-/** A labelled list of related runs (依赖 / 后续) — each row drills into that run,
- * reusing the shared run-detail focus so the panel and graph stay in sync. */
+/** Total nested runs under a run (direct children + their descendants). 阶段2
+ * caps nesting at CEO → worker → sub-worker, so this stays shallow, but it is
+ * written generally to match the indented tree it labels. */
+function countDescendants(runs: RunNode[], parentId: string): number {
+  return runs
+    .filter((r) => r.parentRunId === parentId)
+    .reduce((n, r) => n + 1 + countDescendants(runs, r.id), 0);
+}
+
+/**
+ * The delegated sub-task tree under a run (阶段2 嵌套子任务), rendered as an
+ * indented list: each row drills into that sub-worker's detail, and its own
+ * children nest one level deeper behind a guide rail. Reuses the shared
+ * run-detail focus so the panel and graph stay in sync.
+ */
+function SubtaskTree({
+  parentId,
+  runs,
+  agents,
+  depth,
+  onSelect,
+}: {
+  parentId: string;
+  runs: RunNode[];
+  agents: AgentState[];
+  depth: number;
+  onSelect: (runId: string, title?: string) => void;
+}) {
+  const children = runs.filter((r) => r.parentRunId === parentId);
+  if (children.length === 0) return null;
+  return (
+    <div
+      className={
+        depth > 0 ? "ml-2 space-y-1 border-l border-border pl-2" : "space-y-1"
+      }
+    >
+      {children.map((r) => {
+        const role = agents.find((a) => a.id === r.agentId)?.role ?? r.agentId;
+        return (
+          <div key={r.id} className="space-y-1">
+            <button
+              type="button"
+              onClick={() => onSelect(r.id, role)}
+              className="flex w-full items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-left text-xs hover:bg-accent"
+            >
+              <CornerDownRight
+                size={12}
+                className="shrink-0 text-muted-foreground/60"
+              />
+              <RunStatusDot status={r.status} />
+              <span className="shrink-0 font-medium text-foreground">
+                {role}
+              </span>
+              <span className="flex-1 truncate text-muted-foreground">
+                {r.task}
+              </span>
+            </button>
+            <SubtaskTree
+              parentId={r.id}
+              runs={runs}
+              agents={agents}
+              depth={depth + 1}
+              onSelect={onSelect}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A labelled list of related runs (依赖 / 后续 / 上级) — each row drills into
+ * that run, reusing the shared run-detail focus so the panel and graph stay in
+ * sync. */
 function RunRefGroup({
   label,
   runs,

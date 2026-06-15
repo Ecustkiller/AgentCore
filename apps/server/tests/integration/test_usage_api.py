@@ -7,9 +7,12 @@ test_cost_ledger.py) and exercises the three reads end-to-end: the team payroll
 and the account dashboard (``/usage/summary``) — including auth + IDOR scoping.
 """
 
+from datetime import UTC, datetime, timedelta
+
 import httpx
 
 from agentcore.core.types import new_id
+from agentcore.db.models import CostEvent
 from agentcore.db.repositories import ConversationRepository, CostEventRepository
 
 _PW = "password123"
@@ -186,11 +189,114 @@ async def test_usage_summary_windows_and_quota(client, make_invite, session_fact
     assert body["month"]["cost"]["total"] == 2500
     assert body["today"]["requests"] == 1
     assert body["today"]["usage"]["input"] == 100
+    # The single captain row also lands in this month's per-role payroll.
+    assert body["month_by_role"] == [
+        {"role": "captain", "cost_total": 2500, "turns": 1}
+    ]
+    # The 7-day trend is a fixed-length series; today's spend is its last point.
+    trend = body["recent_daily_cost"]
+    assert len(trend) == 7
+    assert trend[-1]["cost_total"] == 2500
+    assert sum(p["cost_total"] for p in trend) == 2500
     # Quota defaults (决策④) + the single display FX rate are surfaced.
     assert body["quota"]["daily_tokens"] == 2_000_000
     assert body["quota"]["monthly_cost_nano"] == 5 * 1_000_000_000
     assert body["quota"]["daily_requests"] == 200
     assert body["cny_per_usd"] == 7.2
+
+
+async def test_usage_summary_groups_month_by_role(client, make_invite, session_factory):
+    # 本月各角色花销 (团队工资单 by role): the month window groups by the ledger role
+    # and ranks by spend desc; only roles that actually spent (>0) appear.
+    code = await make_invite("INV-ROLES")
+    user_id = await _register_and_login(client, code, "rolesuser")
+
+    async with session_factory() as session:
+        repo = CostEventRepository(session)
+        # Turn 1: a captain + two members (one message_id).
+        msg1 = new_id()
+        await repo.record_runs(
+            user_id=user_id,
+            conversation_id=new_id(),
+            message_id=msg1,
+            runs=[
+                _run(new_id(), role="captain", total=400),
+                _run(new_id(), role="member", total=900),
+                _run(new_id(), role="member", total=600),
+            ],
+        )
+        # Turn 2: another captain (second distinct message_id) + a free title run.
+        msg2 = new_id()
+        await repo.record_runs(
+            user_id=user_id,
+            conversation_id=new_id(),
+            message_id=msg2,
+            runs=[
+                _run(new_id(), role="captain", total=200),
+                _run(new_id(), role="title", total=0),  # 0 spend → excluded
+            ],
+        )
+
+    r = await client.get("/v1/usage/summary")
+    assert r.status_code == 200, r.text
+    rows = r.json()["month_by_role"]
+
+    # Ranked by spend desc: member (1500) > captain (600); the 0-spend title is out.
+    assert rows == [
+        {"role": "member", "cost_total": 1500, "turns": 1},
+        {"role": "captain", "cost_total": 600, "turns": 2},
+    ]
+
+
+async def test_usage_summary_recent_daily_cost_buckets_by_utc_day(
+    client, make_invite, session_factory
+):
+    # 近 7 日趋势: spend is bucketed into UTC days and zero-filled to a 7-point,
+    # oldest-first series ending today; rows older than the window are excluded.
+    code = await make_invite("INV-TREND")
+    user_id = await _register_and_login(client, code, "trenduser")
+
+    now = datetime.now(UTC)
+    today = now.replace(hour=12, minute=0, second=0, microsecond=0)
+    three_ago = today - timedelta(days=3)
+    six_ago = today - timedelta(days=6)
+    eight_ago = today - timedelta(days=8)  # outside the 7-day window
+
+    async with session_factory() as session:
+        for created, total in [
+            (today, 500),
+            (three_ago, 300),
+            (six_ago, 100),
+            (eight_ago, 9999),  # must be excluded
+        ]:
+            session.add(
+                CostEvent(
+                    user_id=user_id,
+                    conversation_id=new_id(),
+                    message_id=new_id(),
+                    run_id=new_id(),
+                    role="captain",
+                    model="deepseek-v4-pro",
+                    cost_total_nano=total,
+                    created_at=created,
+                )
+            )
+        await session.commit()
+
+    r = await client.get("/v1/usage/summary")
+    assert r.status_code == 200, r.text
+    points = r.json()["recent_daily_cost"]
+
+    assert len(points) == 7
+    # Oldest-first, ending today.
+    assert points[-1]["date"] == today.date().isoformat()
+    assert points[0]["date"] == six_ago.date().isoformat()
+    by_date = {p["date"]: p["cost_total"] for p in points}
+    assert by_date[today.date().isoformat()] == 500
+    assert by_date[three_ago.date().isoformat()] == 300
+    assert by_date[six_ago.date().isoformat()] == 100
+    # The 8-days-ago row is outside the window, so the series total excludes it.
+    assert sum(p["cost_total"] for p in points) == 900
 
 
 async def test_usage_summary_empty_is_zero(client, make_invite):
@@ -203,3 +309,6 @@ async def test_usage_summary_empty_is_zero(client, make_invite):
     assert body["today"]["cost"]["total"] == 0
     assert body["today"]["requests"] == 0
     assert body["month"]["usage"]["input"] == 0
+    assert body["month_by_role"] == []
+    # The trend is still a fixed 7-point series, all zero.
+    assert [p["cost_total"] for p in body["recent_daily_cost"]] == [0] * 7

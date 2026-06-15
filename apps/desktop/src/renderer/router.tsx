@@ -22,6 +22,7 @@ export const router = createHashRouter([
       { index: true, element: <ConversationPage /> },
       { path: "conversations/:id", element: <ConversationPage /> },
       { path: "messages", element: <MessagesPage /> },
+      { path: "messages/:chatId", element: <MessagesPage /> },
       { path: "files", element: <FilesPage /> },
       { path: "toolbox", element: <ToolboxPage /> },
       { path: "toolbox/ai-tools", element: <AiToolsPage /> },

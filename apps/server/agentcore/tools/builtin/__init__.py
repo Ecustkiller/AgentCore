@@ -1,8 +1,11 @@
 """Built-in tool implementations."""
 
+from agentcore.core.types import ToolApproval
 from agentcore.tools.builtin.code_execute import CodeExecuteTool
 from agentcore.tools.builtin.file_ops import (
+    FileDeleteTool,
     FileListTool,
+    FileMoveTool,
     FileReadTool,
     FileWriteTool,
     StrReplaceTool,
@@ -28,6 +31,34 @@ def build_builtin_registry() -> ToolRegistry:
     registry.register(FileWriteTool())
     registry.register(StrReplaceTool())
     registry.register(FileListTool())
+    registry.register(FileDeleteTool())
+    registry.register(FileMoveTool())
     registry.register(GrepTool())
     registry.register(CodeExecuteTool())
+    return registry
+
+
+def build_ceo_tool_registry() -> ToolRegistry:
+    """The CEO chat agent's DIRECT toolset: read / retrieval only (协调者 CEO).
+
+    The CEO is a coordinator — it *looks* (web_search, read_url, file_read,
+    file_list, grep) and answers simple requests directly, but it holds NONE of
+    the production / mutation tools (file_write, str_replace, file_delete,
+    file_move, code_execute). Any work that produces or changes an artifact is
+    handed to a worker via ``delegate``; workers carry the FULL toolset
+    (``build_builtin_registry``).
+
+    The split is by approval level: a ``GRANTABLE`` tool mutates the environment
+    (and is exactly the work that belongs to the team), while a ``NEVER`` tool is
+    safe to read with. Deriving the CEO subset from the single builtin registry
+    keeps one source of truth — a new read-only tool reaches the CEO
+    automatically; a new mutating tool stays worker-only.
+
+    → 见设计: docs/03-AI核心/编排器与CEO主Agent.md §核心定位（协调者 CEO 工具边界）
+    """
+    full = build_builtin_registry()
+    registry = ToolRegistry()
+    for schema in full.list_all():
+        if schema.approval is ToolApproval.NEVER:
+            registry.register(full.get(schema.name))
     return registry

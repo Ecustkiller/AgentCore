@@ -48,9 +48,14 @@ def check_contract(content: str, contract: RunContract | None) -> ContractVerdic
         failures.append(f"产出 {length} 字，少于要求的 {contract.min_length} 字")
     if contract.max_length and length > contract.max_length:
         failures.append(f"产出 {length} 字，超过上限 {contract.max_length} 字")
-    for keyword in contract.must_contain:
-        if keyword and keyword not in content:
-            failures.append(f"缺少必须包含的内容：{keyword}")
+    if contract.must_contain:
+        # Case-insensitive, mirroring required_sections' casefold match — the keyword
+        # is a content requirement, not a literal-byte check, so casing must not flip
+        # the verdict. The failure message still shows the operator's original text.
+        haystack = content.casefold()
+        for keyword in contract.must_contain:
+            if keyword and keyword.casefold() not in haystack:
+                failures.append(f"缺少必须包含的内容：{keyword}")
     for section in contract.required_sections:
         if section and not _has_section(content, section):
             failures.append(f"缺少必备章节：{section}")
@@ -60,11 +65,20 @@ def check_contract(content: str, contract: RunContract | None) -> ContractVerdic
 
 
 def format_feedback(verdict: ContractVerdict) -> str:
-    """Render a verdict's failures as a correction instruction for the retry."""
+    """Render a verdict's failures as a correction instruction for the retry.
+
+    This is the worker's single rework shot, so it's told to spend it on the
+    product itself — emit the complete corrected output, no meta-commentary —
+    rather than burning the turn on an apology or an explanation.
+    """
     if verdict.ok or not verdict.failures:
         return ""
     items = "\n".join(f"- {f}" for f in verdict.failures)
-    return f"你上一次的产出未达到以下要求，请逐条修正后输出完整的最终结果：\n{items}"
+    return (
+        f"你上一次的产出未达到以下要求：\n{items}\n"
+        "请直接输出修正后的【完整最终产出】（补齐上述差距，其余内容保持原样），"
+        "不要解释、不要道歉、不要附带任何说明文字。"
+    )
 
 
 def describe_contract(contract: RunContract | None) -> str:
