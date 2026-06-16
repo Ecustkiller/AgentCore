@@ -130,6 +130,15 @@ class WaveScheduler:
         # Materialise the skip results for nodes the cascade dropped (never run).
         for run_id in skipped:
             completed.setdefault(run_id, RunState(phase=RunPhase.SKIPPED))
+        # 结构化挂起 polish: a graceful abort (on_failure=abort, or a plan_review
+        # stop via on_checkpoint) ends scheduling with an unrun tail. Materialise
+        # that tail as SKIPPED — the same shape as a cascade skip — so the CEO
+        # overview / graph shows "未执行" cleanly instead of a silently absent node.
+        # (A soft should_stop pause is the resume substrate, not an abort, so its
+        # tail is left out of ``completed`` to re-run on resume.)
+        if aborted:
+            for node in plan.nodes:
+                completed.setdefault(node.run_id, RunState(phase=RunPhase.SKIPPED))
         return completed
 
     async def _run_wave(

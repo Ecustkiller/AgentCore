@@ -85,7 +85,8 @@ async def test_abort_stops_later_waves():
 
     res = await WaveScheduler().run(plan, ex)
     assert res["a"].phase is RunPhase.FAILED
-    assert "b" not in res
+    # The unrun tail materialises as SKIPPED (graceful abort), not absent.
+    assert res["b"].phase is RunPhase.SKIPPED
 
 
 async def test_degrade_lets_dependents_proceed():
@@ -213,7 +214,8 @@ async def test_on_checkpoint_stop_halts_downstream():
 
     res = await WaveScheduler().run(plan, _ok, on_checkpoint=hook)
     assert res["a"].phase is RunPhase.COMPLETED
-    assert "b" not in res
+    # The gated downstream is materialised as SKIPPED (clean graph/overview).
+    assert res["b"].phase is RunPhase.SKIPPED
 
 
 async def test_on_checkpoint_not_fired_on_last_wave():
