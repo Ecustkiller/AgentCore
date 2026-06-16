@@ -14,13 +14,20 @@ A continue / adjust answer is ``ToolEffect.CONTINUE`` (the CEO resumes); a stop 
 (its closing note rides as ``ToolResult.final_text``), not an SSE abort. The tool
 is :class:`ToolCategory.INTERACTION` — a declarative classification; the engine
 acts on the ToolResult's effect, not on the tool's category.
+
+结构化挂起 2b (turn 级落盘 + ``POST .../resume``): like the ``delegate`` checkpoint
+hook, the suspend is backed by a durable frame — an :class:`AskUserSuspension` is
+saved to ``paused_turns`` BEFORE the wait and dropped after a live in-process
+resolve / timeout. A disconnect / restart during the wait leaves the frame so
+``POST .../resume`` can map the user's answer back to this tool's result and
+continue the CEO loop. The answer→result mapping is the module-level
+:func:`ask_user_tool_result` so the live path and resume share one source of truth.
 """
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect, new_id
@@ -38,6 +45,9 @@ from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
+if TYPE_CHECKING:
+    from agentcore.runtime.suspension import SuspensionDeleter, SuspensionSaver
+
 logger = get_logger(__name__)
 
 # Cap how many concrete choices the CEO can offer, so a runaway prompt can't bloat
@@ -52,12 +62,25 @@ class AskUserTool:
     Constructed per turn where the sink is available (mirrors ``ApprovalGate`` /
     ``DelegateTool``): ``sink`` carries the prompt + resolution to the client,
     ``registry`` bridges the resolve endpoint, ``timeout_seconds`` bounds the wait.
+
+    结构化挂起 2b: when ``message_id`` + the suspension closures are wired (always, on
+    the live CEO path), the pause is also persisted to ``paused_turns`` so a
+    disconnect / restart is recoverable via ``POST .../resume``. The frame needs the
+    turn-level constants (``captain_run_id`` / ``base_system_prompt`` /
+    ``user_message``) to re-wire the CEO toolset on resume. Left ``None`` / empty
+    (standalone / tests) ⇒ 2a in-memory only (the live resolve still works).
     """
 
     sink: EventSink
     conversation_id: str
     registry: ClientRequestBridge
     timeout_seconds: float
+    captain_run_id: str | None = None
+    base_system_prompt: str = ""
+    user_message: str = ""
+    message_id: str | None = None
+    suspension_saver: SuspensionSaver | None = None
+    suspension_deleter: SuspensionDeleter | None = None
 
     @property
     def schema(self) -> ToolSchema:
@@ -123,34 +146,41 @@ class AskUserTool:
         multiple = bool(arguments.get("multiple") or False)
 
         checkpoint_id = new_id()
-        fut = self.registry.create(
-            checkpoint_id,
-            self.conversation_id,
-            kind=InteractionKind.ASK_USER,
-            payload={
-                "question": question,
-                "options": options,
-                "context": ctx_text,
-                "multiple": multiple,
-            },
+        required = checkpoint_required(
+            checkpoint_id=checkpoint_id,
+            conversation_id=self.conversation_id,
+            question=question,
+            options=options,
+            context=ctx_text,
+            multiple=multiple,
         )
-        self.sink.emit(
-            checkpoint_required(
-                checkpoint_id=checkpoint_id,
-                conversation_id=self.conversation_id,
-                question=question,
-                options=options,
-                context=ctx_text,
-                multiple=multiple,
-            )
+        # 结构化挂起 2b: durable backstop BEFORE the wait (best-effort). A cancel
+        # (disconnect) / crash during the wait propagates past the drop below, leaving
+        # the frame for ``POST .../resume``; the in-memory resolve still settles a
+        # live turn even if the save failed.
+        await self._persist_suspension(
+            checkpoint_id, context, question, options, ctx_text, multiple, required
         )
         try:
-            response = await asyncio.wait_for(fut, timeout=self.timeout_seconds)
+            response = await self.registry.suspend(
+                checkpoint_id,
+                self.conversation_id,
+                kind=InteractionKind.ASK_USER,
+                payload={
+                    "question": question,
+                    "options": options,
+                    "context": ctx_text,
+                    "multiple": multiple,
+                },
+                timeout=self.timeout_seconds,
+                on_suspended=lambda: self.sink.emit(required),
+            )
         except TimeoutError:
             logger.info("checkpoint.timeout", checkpoint_id=checkpoint_id)
             response = CheckpointResponse(decision=CheckpointDecision.TIMEOUT)
-        finally:
-            self.registry.discard(checkpoint_id)
+        # Reached only on a live resolve / timeout — a cancel raises CancelledError,
+        # which propagates PAST this and leaves the frame for /resume.
+        await self._drop_suspension()
 
         # Keep only picks that were actually on the menu — a resolve can't inject
         # arbitrary strings into the CEO's context, and a stale option is dropped.
@@ -164,58 +194,131 @@ class AskUserTool:
                 selected=response.selected,
             )
         )
-        return self._to_result(response)
+        result = ask_user_tool_result(response)
+        # A stop's closing note rides as ``final_text`` (persist-only); stream it so
+        # the user sees it live too (the engine won't re-emit it). Resume does the same.
+        if result.effect is ToolEffect.INTERACT and result.final_text:
+            self.sink.emit(content_delta(result.final_text))
+        return result
 
-    def _to_result(self, response: CheckpointResponse) -> ToolResult:
-        """Map the user's answer to a tool result the CEO loop consumes.
+    def _can_persist_suspension(self) -> bool:
+        """Whether this ask_user pause should be durably persisted (结构化挂起 2b).
 
-        continue / adjust feed back as ``CONTINUE`` results (the CEO resumes); stop
-        returns an ``INTERACT`` (terminal) result so the engine ends the turn
-        gracefully (its closing note is also streamed to the bubble so the user
-        sees it live and a reload renders the same persisted text); a timeout hands
-        control back to the CEO to wrap up on its own.
+        The turn's ``message_id`` + the persist closure must be wired (the live CEO
+        path) — a standalone / un-wired construction (tests) keeps 2a in-memory only."""
+        return bool(
+            self.message_id and self.suspension_saver is not None and self.conversation_id
+        )
+
+    async def _persist_suspension(
+        self, checkpoint_id, context, question, options, ctx_text, multiple, required_event
+    ) -> None:
+        """Capture + persist the durable suspension frame for this ask_user pause (2b).
+
+        Reads the CEO transcript off the ``captain_transcript`` contextvar (published
+        by the captain executor) — without it a faithful resume is impossible, so
+        capture is skipped (the live resolve still works). Folds the about-to-emit
+        ``checkpoint_required`` into the frame's journal so a resume replays the
+        prompt+resolution as a pair. Best-effort: the saver swallows its own errors.
         """
-        decision = response.decision
-        picks = "、".join(response.selected)
-        if decision is CheckpointDecision.CONTINUE:
-            # 提交：the merged 继续+调整 answer — picks and/or a free-form note both
-            # ride here, so continue now honors the note too (it used to ignore it).
-            note = response.note.strip()
-            if picks and note:
-                output = f"用户选择：{picks}；并补充：{note}\n请据此继续。"
-            elif picks:
-                output = f"用户选择：{picks}。请按此继续。"
-            elif note:
-                output = f"用户补充：{note}\n请据此继续。"
-            else:
-                output = "用户确认：按你提出的方向继续。"
-            return ToolResult(tool_call_id="", success=True, output=output)
-        # ADJUST is no longer raised by the desktop (the card merged it into 提交 /
-        # CONTINUE) but stays mapped for any other client + old journaled turns.
-        if decision is CheckpointDecision.ADJUST:
-            note = response.note.strip()
-            if picks and note:
-                output = f"用户选择：{picks}；并调整：{note}\n请据此调整后再继续。"
-            elif picks:
-                output = f"用户选择：{picks}。\n请据此继续。"
-            elif note:
-                output = f"用户调整指令：{note}\n请据此调整后再继续。"
-            else:
-                output = "用户未填写具体调整说明，请据上下文稳妥推进。"
-            return ToolResult(tool_call_id="", success=True, output=output)
-        if decision is CheckpointDecision.STOP:
-            closing = response.note.strip() or "好的，已按你的要求停止本回合。"
-            self.sink.emit(content_delta(closing))
-            return ToolResult(
-                tool_call_id="",
-                success=True,
-                output="用户选择停止本回合。",
-                effect=ToolEffect.INTERACT,
-                final_text=closing,
-            )
-        # TIMEOUT — never silently picked a branch; let the CEO decide how to close.
+        if not self._can_persist_suspension():
+            return
+        from agentcore.core.log_context import get_log_value
+        from agentcore.runtime.suspension import (
+            AskUserSuspension,
+            captain_transcript,
+            find_tool_call_id,
+        )
+
+        transcript = captain_transcript.get()
+        if not transcript:
+            logger.info("suspension.no_transcript", checkpoint_id=checkpoint_id)
+            return
+        journal = list(self.sink.execution_journal() or [])
+        journal.append(
+            {
+                "type": required_event.type.value,
+                "payload": required_event.payload,
+                "timestamp": required_event.timestamp,
+            }
+        )
+        frame = AskUserSuspension(
+            message_id=self.message_id or "",
+            conversation_id=self.conversation_id,
+            user_id=context.user_id,
+            captain_run_id=self.captain_run_id or "",
+            checkpoint_id=checkpoint_id,
+            tool_call_id=find_tool_call_id(transcript, "ask_user"),
+            base_system_prompt=self.base_system_prompt,
+            user_message=self.user_message,
+            transcript=list(transcript),
+            question=question,
+            options=options,
+            context=ctx_text,
+            multiple=multiple,
+            journal=journal,
+            trace_id=get_log_value("trace_id"),
+        )
+        await self.suspension_saver(frame)  # type: ignore[misc]
+
+    async def _drop_suspension(self) -> None:
+        """Delete the durable frame after a live in-process resolve / timeout (2b)."""
+        if self._can_persist_suspension() and self.suspension_deleter is not None:
+            await self.suspension_deleter(self.message_id or "")
+
+
+def ask_user_tool_result(response: CheckpointResponse) -> ToolResult:
+    """Map the user's ask_user answer to the tool result the CEO loop consumes.
+
+    The single source of truth for both the live tool (``AskUserTool.execute``) and
+    a durable resume (``runtime/pipeline.resume_chat_pipeline``): continue / adjust
+    feed back as ``CONTINUE`` results (the CEO resumes); stop returns an ``INTERACT``
+    (terminal) result whose closing note rides as ``final_text`` so the engine — or
+    the resume — ends the turn gracefully with that text; a timeout hands control
+    back to the CEO to wrap up on its own. Pure (no SSE side-effect): the caller
+    streams the stop's ``final_text`` via ``content_delta`` (it is persist-only, the
+    engine never re-emits it).
+    """
+    decision = response.decision
+    picks = "、".join(response.selected)
+    if decision is CheckpointDecision.CONTINUE:
+        # 提交：the merged 继续+调整 answer — picks and/or a free-form note both
+        # ride here, so continue now honors the note too (it used to ignore it).
+        note = response.note.strip()
+        if picks and note:
+            output = f"用户选择：{picks}；并补充：{note}\n请据此继续。"
+        elif picks:
+            output = f"用户选择：{picks}。请按此继续。"
+        elif note:
+            output = f"用户补充：{note}\n请据此继续。"
+        else:
+            output = "用户确认：按你提出的方向继续。"
+        return ToolResult(tool_call_id="", success=True, output=output)
+    # ADJUST is no longer raised by the desktop (the card merged it into 提交 /
+    # CONTINUE) but stays mapped for any other client + old journaled turns.
+    if decision is CheckpointDecision.ADJUST:
+        note = response.note.strip()
+        if picks and note:
+            output = f"用户选择：{picks}；并调整：{note}\n请据此调整后再继续。"
+        elif picks:
+            output = f"用户选择：{picks}。\n请据此继续。"
+        elif note:
+            output = f"用户调整指令：{note}\n请据此调整后再继续。"
+        else:
+            output = "用户未填写具体调整说明，请据上下文稳妥推进。"
+        return ToolResult(tool_call_id="", success=True, output=output)
+    if decision is CheckpointDecision.STOP:
+        closing = response.note.strip() or "好的，已按你的要求停止本回合。"
         return ToolResult(
             tool_call_id="",
             success=True,
-            output="用户未在时限内回应。请基于目前已掌握的信息，自行决定如何稳妥收尾。",
+            output="用户选择停止本回合。",
+            effect=ToolEffect.INTERACT,
+            final_text=closing,
         )
+    # TIMEOUT — never silently picked a branch; let the CEO decide how to close.
+    return ToolResult(
+        tool_call_id="",
+        success=True,
+        output="用户未在时限内回应。请基于目前已掌握的信息，自行决定如何稳妥收尾。",
+    )

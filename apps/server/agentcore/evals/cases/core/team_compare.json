@@ -1,0 +1,13 @@
+{
+  "id": "team_energy_compare",
+  "category": "team",
+  "user_message": "请组建一个小团队来完成这个任务：先调研太阳能和风能各自的优缺点，再把结论整理成一段清晰的对比短文给我。",
+  "path": "team",
+  "mode": "economy",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "Delegated" },
+    { "name": "NonEmpty", "args": { "min_len": 40 } }
+  ],
+  "rubric": "最终回答是否整合了各 worker 的产出、对太阳能与风能给出清晰对比。"
+}

@@ -1,16 +1,15 @@
 """Workspace as a first-class, addressable resource (文件中枢统一 Step 1).
 
-The file hub browses *projects*, not conversations — so a workspace needs its own
-id (``folder:<id>`` / ``conv:<id>``, see ``workspace.locate``) instead of being
-reachable only "through a conversation". This router is that surface: enumerate a
-user's workspaces, then read/CRUD/snapshot any one by id.
+文件夹即工作区: a workspace **is** a folder, addressed by its own id
+(``folder:<id>``, see ``workspace.locate``) rather than only "through a
+conversation". This router is that surface: enumerate a user's workspaces, then
+read/CRUD/snapshot any one by id.
 
 Addressing is the only thing new here — the actual file/snapshot/clone logic stays
 single-sourced in the ``workspace.*`` service layer that the per-conversation
 routes also call (those remain the thin per-conversation alias). Every route is
-owner-scoped: the ``ident`` in a ws id is resolved against the user's own folders
-/ conversations, so a non-owner (or a bad id) gets 404 — never another user's
-data.
+owner-scoped: the ``ident`` in a ws id is resolved against the user's own folders,
+so a non-owner (or a bad id) gets 404 — never another user's data.
 
 Cloud vs local (§五 边界): a **local** workspace's files live on the user's
 machine and are reached over desktop IPC, not here; its server-side dir is not the
@@ -43,6 +42,7 @@ from agentcore.api.schemas import (
     StatusResponse,
     UploadFileResponse,
     WorkspaceFileEntry,
+    WorkspaceFileIndexResponse,
     WorkspaceFileListResponse,
     WorkspaceListResponse,
     WorkspaceSummary,
@@ -55,6 +55,7 @@ from agentcore.workspace.files import (
     create_dir,
     delete_file,
     download_file,
+    list_file_index,
     list_files,
     move_file,
     upload_file,
@@ -101,41 +102,30 @@ async def _resolve_owned_workspace(
     conv_repo: ConversationRepository,
     folder_repo: FolderRepository,
 ) -> _WsTarget:
-    """Resolve a ws id to an owned workspace, or 404.
+    """Resolve a ws id to an owned folder workspace, or 404.
 
-    A folder id maps to that folder's shared space; a conv id maps to an
-    *ungrouped* conversation's own space. A conv that is filed in a folder is
-    rejected (404): its canonical id is the folder's, so addressing it as
-    ``conv:<id>`` would point at the wrong (unused) directory.
+    文件夹即工作区: a workspace **is** a folder (``folder:<id>``), so only that kind
+    resolves. A conversation no longer owns a standalone space — a 裸聊 has none until
+    it is promoted into a folder — so a ``conv:<id>`` (or any non-folder id) is 404.
+    ``conv_repo`` is kept in the signature for call-site symmetry across the routes.
     """
     try:
         parsed = parse_workspace_id(ws_id)
     except ValueError as e:
         raise NotFoundError("工作区不存在") from e
 
-    if parsed.kind == "folder":
-        folder = await folder_repo.get_by_id(parsed.ident, user_id=user_id)
-        if not folder:
-            raise NotFoundError("工作区不存在")
-        return _WsTarget(
-            ws_id=ws_id,
-            folder_id=folder.id,
-            conversation_id="",
-            name=folder.name,
-            location="local" if folder.local_root_id else "cloud",
-            root_id=folder.local_root_id,
-        )
-
-    conv = await conv_repo.get_by_id(parsed.ident, user_id=user_id)
-    if not conv or conv.folder_id is not None:
+    if parsed.kind != "folder":
+        raise NotFoundError("工作区不存在")
+    folder = await folder_repo.get_by_id(parsed.ident, user_id=user_id)
+    if not folder:
         raise NotFoundError("工作区不存在")
     return _WsTarget(
         ws_id=ws_id,
-        folder_id=None,
-        conversation_id=conv.id,
-        name=conv.title,
-        location="local" if conv.local_root_id else "cloud",
-        root_id=conv.local_root_id,
+        folder_id=folder.id,
+        conversation_id="",
+        name=folder.name,
+        location="local" if folder.local_root_id else "cloud",
+        root_id=folder.local_root_id,
     )
 
 
@@ -161,19 +151,17 @@ def _storage_key(user_id: str, target: _WsTarget) -> str:
 @router.get("", response_model=WorkspaceListResponse)
 async def list_workspaces(
     user: AuthUser,
-    conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
-    """Enumerate the user's workspaces for the hub (文件中枢统一 §四 F1).
+    """Enumerate the user's workspaces (文件夹即工作区: a workspace **is** a folder).
 
-    Every folder is a project (always listed). Ungrouped conversations list only
-    when their space actually holds files — so chats that never touched the
-    workspace don't clutter the hub. Local spaces always list (the server can't
-    see their files, and a binding is an explicit user intent, not noise).
+    Every folder is a project, always listed — local ones unconditionally (the
+    server can't see their files, and a binding is explicit intent, not noise),
+    cloud ones carrying a ``has_files`` flag. Conversations are not workspaces: a
+    裸聊 has no space until it is promoted into a folder, after which it appears here
+    as that folder.
     """
     folders = await folder_repo.list_by_user(user.user_id)
-    conversations = await conv_repo.list_all_by_user(user.user_id)
-
     items: list[WorkspaceSummary] = []
     for f in folders:
         local = f.local_root_id is not None
@@ -190,33 +178,6 @@ async def list_workspaces(
                 ),
             )
         )
-
-    folder_ids = {f.id for f in folders}
-    for c in conversations:
-        # A folder-filed conversation is part of its folder's space (already
-        # listed above), never its own. Only ungrouped chats get a conv space.
-        if c.folder_id in folder_ids:
-            continue
-        local = c.local_root_id is not None
-        has_files = (
-            True
-            if local
-            else workspace_has_entries(
-                user_id=user.user_id, folder_id=None, conversation_id=c.id
-            )
-        )
-        if not has_files:
-            continue
-        items.append(
-            WorkspaceSummary(
-                ws_id=f"conv:{c.id}",
-                name=c.title,
-                location="local" if local else "cloud",
-                root_id=c.local_root_id,
-                has_files=True,
-            )
-        )
-
     return WorkspaceListResponse(data=items, total=len(items))
 
 
@@ -244,6 +205,29 @@ async def list_workspace_files(
         data=[WorkspaceFileEntry.model_validate(e) for e in entries],
         total=len(entries),
     )
+
+
+@router.get("/{ws_id}/file-index", response_model=WorkspaceFileIndexResponse)
+async def list_workspace_file_index(
+    ws_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
+):
+    """Flat file-path list for @ mentions over a cloud workspace (文件中枢统一 F4).
+
+    Files only, ignore-pruned, capped — so cloud workspace files feed the same @
+    index local roots already do. Local workspaces are reached over desktop IPC
+    (their files aren't here), so they are refused with 409 like other file ops.
+    """
+    target = await _resolve_owned_workspace(ws_id, user.user_id, conv_repo, folder_repo)
+    _require_cloud(target)
+    paths, truncated = await list_file_index(
+        user_id=user.user_id,
+        folder_id=target.folder_id,
+        conversation_id=target.conversation_id,
+    )
+    return WorkspaceFileIndexResponse(data=paths, total=len(paths), truncated=truncated)
 
 
 @router.put("/{ws_id}/files/{path:path}", response_model=UploadFileResponse)

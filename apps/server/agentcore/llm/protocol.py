@@ -4,7 +4,7 @@ Defines the unified abstraction for LLM calls. MVP only implements DeepSeekProvi
 All orchestrator, agent runtime, and memory modules depend on this protocol.
 """
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
@@ -107,6 +107,23 @@ class TokenUsage:
             "cache_hit": self.cache_hit_tokens,
             "cache_miss": self.cache_miss_tokens,
         }
+
+    @classmethod
+    def from_usage_dict(cls, usage: Mapping[str, int]) -> "TokenUsage":
+        """Inverse of :meth:`as_dict` — rebuild a TokenUsage from the short-key
+        ledger form ({input, output, reasoning, cache_hit, cache_miss}) carried on
+        ``RunState.usage`` and accumulated on the delegate / revise tools. Missing
+        keys default to 0, so a partial dict (or ``{}``) is safe. The single seam
+        for "short-key usage dict → TokenUsage", so the pipeline folds the captain
+        / delegated / revised usage without hand-rebuilding the struct three times.
+        """
+        return cls(
+            input_tokens=usage.get("input", 0),
+            output_tokens=usage.get("output", 0),
+            reasoning_tokens=usage.get("reasoning", 0),
+            cache_hit_tokens=usage.get("cache_hit", 0),
+            cache_miss_tokens=usage.get("cache_miss", 0),
+        )
 
 
 @dataclass

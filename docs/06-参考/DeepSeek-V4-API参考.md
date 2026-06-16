@@ -4,6 +4,8 @@
 > **数据来源**：DeepSeek 官方 API 文档（api-docs.deepseek.com），截至 2026-06-14。
 > **官方文档**：https://api-docs.deepseek.com
 
+→ AgentCore 角色映射见 [/docs/03-AI核心/执行引擎架构设计.md §十六](/docs/03-AI核心/执行引擎架构设计.md) 与 [/docs/01-产品/术语表.md](/docs/01-产品/术语表.md)
+
 ---
 
 ## 一、模型概览
@@ -170,7 +172,7 @@ messages.append({
 
 1. **reasoning_content 必须回传**：这是 V4 与其他模型最大的 API 差异。在 tool call 场景中，如果前一轮有 reasoning_content 且该轮包含 tool_calls，后续所有请求都必须包含它。
 
-2. **思考模式默认启用**：如果不需要思考（如标题生成 / 记忆维护 / fast 档 worker），必须显式设置 `{"thinking": {"type": "disabled"}}`。
+2. **思考模式默认启用**：如果不需要思考（如标题生成 / 记忆维护等后台机械任务），必须显式设置 `{"thinking": {"type": "disabled"}}`。
 
 3. **缓存命中**：DeepSeek 服务端自动做 prompt prefix caching，相同前缀的请求会命中缓存，输入价格大幅降低（Flash: $0.14 → $0.0028）。多轮对话场景天然受益。
 

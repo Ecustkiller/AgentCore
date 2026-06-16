@@ -16,8 +16,17 @@ from dataclasses import asdict, fields
 from typing import Any
 
 from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.session import RunSession
-from agentcore.runtime.runs.types import RunContract, RunKind, RunPolicy, RunSpec
+from agentcore.runtime.runs.types import (
+    RunContract,
+    RunKind,
+    RunOrigin,
+    RunPhase,
+    RunPolicy,
+    RunSpec,
+    RunState,
+)
 
 
 def _tool_call_to_dict(tc: ToolCall) -> dict[str, Any]:
@@ -99,6 +108,83 @@ def spec_from_json(data: dict[str, Any]) -> RunSpec:
     if isinstance(kind, str):
         kwargs["kind"] = RunKind(kind)
     return RunSpec(**kwargs)
+
+
+def state_to_json(state: RunState) -> dict[str, Any]:
+    """A RunState → compact JSON for a paused-turn seed (结构化挂起 durable resume).
+
+    Carries exactly what a resume needs to treat a node as already-finished: its
+    ``phase`` + product (downstream reads ``content``) plus the priced
+    ``usage``/``cost``/``citations`` so the resumed turn bills the pre-pause work
+    ONCE (it was never billed — the turn paused before persistence) and folds its
+    tokens/sources into the totals. The heavy ``transcript`` is intentionally
+    dropped: a seed_completed node is never re-run or revised, downstream reads only
+    its ``content`` — so the frame stays light.
+    """
+    return {
+        "phase": state.phase.value,
+        "content": state.content,
+        "reasoning": state.reasoning,
+        "error": state.error,
+        "warnings": list(state.warnings),
+        "citations": list(state.citations),
+        "model": state.model,
+        "duration_ms": state.duration_ms,
+        "rounds": state.rounds,
+        "usage": dict(state.usage),
+        "cost": dict(state.cost),
+    }
+
+
+def state_from_json(data: dict[str, Any]) -> RunState:
+    """Rebuild a (seed) RunState from :func:`state_to_json`; tolerates missing keys
+    so an older/newer frame still loads."""
+    data = dict(data or {})
+    phase = data.get("phase")
+    return RunState(
+        phase=RunPhase(phase) if isinstance(phase, str) else RunPhase.COMPLETED,
+        content=data.get("content", "") or "",
+        reasoning=data.get("reasoning", "") or "",
+        error=data.get("error", "") or "",
+        warnings=list(data.get("warnings") or []),
+        citations=list(data.get("citations") or []),
+        model=data.get("model", "") or "",
+        duration_ms=int(data.get("duration_ms", 0) or 0),
+        rounds=int(data.get("rounds", 0) or 0),
+        usage=dict(data.get("usage") or {}),
+        cost=dict(data.get("cost") or {}),
+    )
+
+
+def plan_to_json(plan: RunPlan) -> dict[str, Any]:
+    """A RunPlan → JSON ({nodes, origin}) so a paused turn rebuilds the EXACT graph
+    — with its already-minted run_ids — on resume. Re-deriving from the delegate
+    args would mint fresh ids (``del_<uuid>_N``) that no longer match the
+    seed_completed map keyed by the original ids."""
+    return {
+        "nodes": [spec_to_json(n) for n in plan.nodes],
+        "origin": plan.origin.value,
+    }
+
+
+def plan_from_json(data: dict[str, Any]) -> RunPlan:
+    """Rebuild a RunPlan from :func:`plan_to_json`."""
+    data = dict(data or {})
+    origin = data.get("origin")
+    plan = RunPlan(nodes=[spec_from_json(n) for n in (data.get("nodes") or [])])
+    if isinstance(origin, str):
+        plan.origin = RunOrigin(origin)
+    return plan
+
+
+def state_map_to_json(completed: dict[str, RunState]) -> dict[str, dict[str, Any]]:
+    """The scheduler's completed map (run_id → RunState) → JSON for a paused frame."""
+    return {run_id: state_to_json(state) for run_id, state in completed.items()}
+
+
+def state_map_from_json(data: dict[str, Any] | None) -> dict[str, RunState]:
+    """Rebuild the completed map (seed_completed) from :func:`state_map_to_json`."""
+    return {run_id: state_from_json(raw) for run_id, raw in (data or {}).items()}
 
 
 def session_to_row(session: RunSession) -> dict[str, Any]:

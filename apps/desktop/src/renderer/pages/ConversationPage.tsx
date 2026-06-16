@@ -2,6 +2,7 @@ import { ChatView } from "@/components/chat/ChatView";
 import { SidePanel } from "@/components/layout/SidePanel";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { fetchMessageWindow, jumpToMessage } from "@/services/messages";
+import { loadPausedTurns } from "@/services/resume";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
 import { PanelRight } from "lucide-react";
@@ -24,6 +25,11 @@ export function ConversationPage() {
       return;
     }
     if (id !== store.currentConversationId) store.switchConversation(id);
+
+    // Surface any turn that paused at a plan_review checkpoint then disconnected
+    // (结构化挂起 2b) as a resume card above the composer. Best-effort + independent
+    // of the history load, so it never blocks rendering the conversation.
+    void loadPausedTurns(id);
 
     let cancelled = false;
     void (async () => {

@@ -44,12 +44,15 @@ from agentcore.api.schemas import (
     MessageListResponse,
     MoveConversationRequest,
     MoveFileRequest,
+    PausedTurnListResponse,
+    PausedTurnSummary,
     RegenerateMessageRequest,
     ResolveApprovalInteraction,
     ResolveCheckpointInteraction,
     ResolveClientToolInteraction,
     ResolveInteractionRequest,
     ResolvePlanReviewInteraction,
+    ResumeTurnRequest,
     SendMessageRequest,
     SnapshotListResponse,
     SnapshotSummary,
@@ -67,6 +70,7 @@ from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import (
     dispatch_handoff,
     regenerate_chat,
+    resume_chat,
     stream_chat,
 )
 from agentcore.core.errors import (
@@ -94,6 +98,10 @@ from agentcore.runtime.events import (
     handoff_snapshot_done,
 )
 from agentcore.runtime.interaction import default_interaction_registry
+from agentcore.runtime.suspension_persistence import (
+    claim_paused_turn,
+    list_paused_turns,
+)
 from agentcore.storage import SnapshotNotFound
 from agentcore.workspace.files import (
     create_dir,
@@ -110,6 +118,7 @@ from agentcore.workspace.handoff_diff import compute_handoff_diff
 from agentcore.workspace.locate import (
     LocalBinding,
     build_workspace,
+    default_workspace_name,
     resolve_local_binding,
     workspace_storage_key,
 )
@@ -174,15 +183,15 @@ def _binding_response(
 ) -> WorkspaceBindingResponse:
     """Render a conversation's resolved workspace mode (§七) as the API response.
 
-    ``scope`` reports where the binding lives — the folder for a filed
-    conversation (shared by its siblings), the conversation itself otherwise — so
-    the client knows whether unbinding would affect other chats.
+    文件夹即工作区: a binding lives on the folder (shared by its siblings), so a filed
+    conversation reports ``scope="folder"`` — unbinding affects every chat in it. A
+    裸聊 has no folder/workspace, so it is always cloud and reports
+    ``scope="conversation"`` (only itself).
     """
     scope = "folder" if conv.folder_id else "conversation"
     binding = resolve_local_binding(
         folder_id=conv.folder_id,
         folder_local_root_id=getattr(folder, "local_root_id", None),
-        conversation_local_root_id=conv.local_root_id,
     )
     if binding is None:
         return WorkspaceBindingResponse(mode="cloud", scope=scope, root_id=None)
@@ -221,12 +230,15 @@ async def list_conversations(
     user: AuthUser,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    archived: bool = Query(
+        False, description="True 返回已归档对话（「已归档」视图）；默认仅返回未归档"
+    ),
     repo: ConversationRepository = Depends(get_conversation_repo),
     msg_repo: MessageRepository = Depends(get_message_repo),
 ):
     offset = (page - 1) * page_size
     conversations, total = await repo.list_by_user(
-        user.user_id, limit=page_size, offset=offset
+        user.user_id, limit=page_size, offset=offset, archived=archived
     )
     counts = await msg_repo.counts_for_conversations([c.id for c in conversations])
     return ConversationListResponse(
@@ -309,6 +321,15 @@ async def update_conversation(
         await validate_mode_ref(body.model_mode, user_id=user.user_id, repo=mode_repo)
         conv = await repo.set_model_mode(
             conversation_id, body.model_mode, user_id=user.user_id
+        )
+    # Sidebar housekeeping toggles (对话基础功能补齐): pin floats the row to the top,
+    # archive hides it from the live list (both reversible, no tri-state → a null is
+    # ignored as「unchanged」).
+    if "pinned" in fields and body.pinned is not None:
+        conv = await repo.set_pinned(conversation_id, body.pinned, user_id=user.user_id)
+    if "archived" in fields and body.archived is not None:
+        conv = await repo.set_archived(
+            conversation_id, body.archived, user_id=user.user_id
         )
     return ConversationSummary.model_validate(conv)
 
@@ -420,6 +441,29 @@ async def list_messages(
         has_more_before=has_more_before,
         has_more_after=has_more_after,
     )
+
+
+@router.delete("/{conversation_id}/messages/{message_id}", response_model=StatusResponse)
+async def delete_message(
+    conversation_id: str,
+    message_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    repo: MessageRepository = Depends(get_message_repo),
+):
+    """Delete a single message (单条消息删除).
+
+    Owner-scoped: proving ownership of the conversation first, then deleting only
+    within it, means a guessed ``message_id`` from another user's chat can't be
+    removed (404 on a foreign/absent conversation; no-op-then-404 on an absent
+    message). Append-only ``cost_events`` are intentionally preserved — deleting a
+    message never rewrites real spend (不变量 #1).
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    deleted = await repo.delete_by_id(message_id, conversation_id=conversation_id)
+    if not deleted:
+        raise NotFoundError("消息不存在")
+    return StatusResponse()
 
 
 async def _preflight_turn_llm(
@@ -592,26 +636,29 @@ async def bind_workspace(
 ):
     """Bind the conversation's workspace to a desktop FS root (switch to local).
 
-    Writes at the governing scope (§七): a filed conversation binds its *folder*
-    (so every sibling switches to local against the same root), an ungrouped one
-    binds itself. Idempotent — re-binding just overwrites the stored root id.
+    文件夹即工作区: a binding lives on the folder (= 工作区), shared by its siblings.
+    A 裸聊 has no folder yet, so "打开本地文件夹" lazily mints one (named after the
+    chat) and files the conversation into it before binding — the explicit-promote
+    counterpart to writing a file (§懒建). Idempotent — re-binding overwrites the
+    stored root id.
     """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
-    if conv.folder_id:
-        folder = await folder_repo.set_local_root_id(
-            conv.folder_id, body.root_id, user_id=user.user_id
+    if not conv.folder_id:
+        folder = await folder_repo.create(
+            user_id=user.user_id,
+            name=default_workspace_name(conv.title),
+            local_root_id=body.root_id,
         )
-        if not folder:
-            raise NotFoundError("文件夹不存在")
+        await conv_repo.set_folder(conversation_id, folder.id, user_id=user.user_id)
         return WorkspaceBindingResponse(
             mode="local", scope="folder", root_id=body.root_id
         )
-    await conv_repo.set_local_root_id(
-        conversation_id, body.root_id, user_id=user.user_id
+    folder = await folder_repo.set_local_root_id(
+        conv.folder_id, body.root_id, user_id=user.user_id
     )
-    return WorkspaceBindingResponse(
-        mode="local", scope="conversation", root_id=body.root_id
-    )
+    if not folder:
+        raise NotFoundError("文件夹不存在")
+    return WorkspaceBindingResponse(mode="local", scope="folder", root_id=body.root_id)
 
 
 @router.delete(
@@ -625,22 +672,21 @@ async def unbind_workspace(
 ):
     """Unbind the conversation's workspace (fall back to cloud).
 
-    Clears the binding at the same governing scope binding does: clearing a
-    *folder* binding returns every conversation in it to cloud (it is the shared
-    project space), which the ``folder`` scope in the response signals.
+    Clears the binding on the folder (= 工作区), returning every conversation in it
+    to cloud — which the ``folder`` scope in the response signals. A 裸聊 has no
+    workspace to unbind, so it is already cloud (a no-op).
     """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
-    if conv.folder_id:
-        folder = await folder_repo.set_local_root_id(
-            conv.folder_id, None, user_id=user.user_id
+    if not conv.folder_id:
+        return WorkspaceBindingResponse(
+            mode="cloud", scope="conversation", root_id=None
         )
-        if not folder:
-            raise NotFoundError("文件夹不存在")
-        return WorkspaceBindingResponse(mode="cloud", scope="folder", root_id=None)
-    await conv_repo.set_local_root_id(conversation_id, None, user_id=user.user_id)
-    return WorkspaceBindingResponse(
-        mode="cloud", scope="conversation", root_id=None
+    folder = await folder_repo.set_local_root_id(
+        conv.folder_id, None, user_id=user.user_id
     )
+    if not folder:
+        raise NotFoundError("文件夹不存在")
+    return WorkspaceBindingResponse(mode="cloud", scope="folder", root_id=None)
 
 
 async def _run_handoff(
@@ -708,7 +754,6 @@ async def handoff_local_workspace(
     binding = resolve_local_binding(
         folder_id=conv.folder_id,
         folder_local_root_id=folder.local_root_id if folder else None,
-        conversation_local_root_id=conv.local_root_id,
         label=folder.name if folder else None,
     )
     if binding is None:
@@ -760,7 +805,6 @@ async def dispatch_handoff_job(
     binding = resolve_local_binding(
         folder_id=conv.folder_id,
         folder_local_root_id=folder.local_root_id if folder else None,
-        conversation_local_root_id=conv.local_root_id,
         label=folder.name if folder else None,
     )
     if binding is None:
@@ -972,7 +1016,6 @@ async def apply_handoff_job(
     binding = resolve_local_binding(
         folder_id=conv.folder_id,
         folder_local_root_id=folder.local_root_id if folder else None,
-        conversation_local_root_id=conv.local_root_id,
         label=folder.name if folder else None,
     )
     if binding is None:
@@ -1041,6 +1084,86 @@ async def regenerate_message(
         )
     )
 
+    return sse_response(sink, producer=task)
+
+
+@router.get("/{conversation_id}/paused", response_model=PausedTurnListResponse)
+async def list_conversation_paused_turns(
+    conversation_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """List turns awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).
+
+    Called on conversation reopen: a turn that paused then lost its live SSE
+    (disconnect / restart) has no assistant message yet — only a persisted frame.
+    The client renders each as a resume card by ``kind`` (plan_review from ``steps`` /
+    ``pending``; ask_user from ``question`` / ``options``) offering continue / adjust /
+    stop → the resume endpoint. Oldest-first. 404 if not owned.
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    frames = await list_paused_turns(conversation_id)
+    data = [
+        PausedTurnSummary(
+            message_id=f.message_id,
+            kind=f.kind,
+            checkpoint_id=f.checkpoint_id,
+            user_message=f.user_message,
+            # plan_review fields (empty on an ask_user frame) ...
+            steps=getattr(f, "steps", []),
+            pending=getattr(f, "pending", []),
+            # ... and ask_user fields (empty on a plan_review frame).
+            question=getattr(f, "question", ""),
+            options=getattr(f, "options", []),
+            context=getattr(f, "context", ""),
+            multiple=getattr(f, "multiple", False),
+        )
+        for f in frames
+    ]
+    return PausedTurnListResponse(data=data, total=len(data))
+
+
+@router.post("/{conversation_id}/messages/{message_id}/resume")
+async def resume_message(
+    conversation_id: str,
+    message_id: str,
+    body: ResumeTurnRequest,
+    user: AuthUser,
+    session: AsyncSession = Depends(get_db),
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    cost_repo: CostEventRepository = Depends(get_cost_event_repo),
+):
+    """Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).
+
+    The turn paused at a plan_review / ask_user checkpoint and lost its live stream
+    (disconnect / restart); only its persisted frame survived. Claims the frame
+    (atomic read-and-delete, so a turn is never resumed twice — a second / stale call
+    404s), then drives the rest of the turn on a fresh SSE just like a send.
+    ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
+    Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
+    — all BEFORE the claim, so a refused turn keeps its resumable frame.
+    """
+    await enforce_user_message_rate_limit(user.user_id)
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    credentials = await _preflight_turn_llm(
+        session=session, user=user, cost_repo=cost_repo
+    )
+
+    suspension = await claim_paused_turn(message_id, conversation_id=conversation_id)
+    if suspension is None:
+        raise NotFoundError("挂起的回合不存在或已处理")
+
+    sink = EventSink()
+    task = asyncio.create_task(
+        resume_chat(
+            suspension=suspension,
+            response=CheckpointResponse(
+                decision=body.decision, note=body.note, selected=body.selected
+            ),
+            sink=sink,
+            llm_credentials=credentials,
+        )
+    )
     return sse_response(sink, producer=task)
 
 
@@ -1150,6 +1273,29 @@ async def download_conversation_snapshot(
 # --- Workspace files (bring files in / take results out: 文件进出·先上传) ---
 
 
+async def _conv_write_folder(
+    conv: Conversation,
+    *,
+    conv_repo: ConversationRepository,
+    folder_repo: FolderRepository,
+    user_id: str,
+) -> str:
+    """Folder id for a *write* to a conversation's workspace, promoting if 裸聊.
+
+    文件夹即工作区: files live in a folder. A filed conversation writes to its folder;
+    a 裸聊 (no folder) has no workspace, so a creating op lazily mints one named after
+    the chat and files the conversation into it (§懒建) — the explicit-promote sibling
+    of the team's first write. Returns the folder id addressing that workspace.
+    """
+    if conv.folder_id:
+        return conv.folder_id
+    folder = await folder_repo.create(
+        user_id=user_id, name=default_workspace_name(conv.title)
+    )
+    await conv_repo.set_folder(conv.id, folder.id, user_id=user_id)
+    return folder.id
+
+
 @router.get("/{conversation_id}/workspace/files", response_model=WorkspaceFileListResponse)
 async def list_workspace_files(
     conversation_id: str,
@@ -1159,6 +1305,10 @@ async def list_workspace_files(
 ):
     """List the files in the conversation's workspace (top level or recursive)."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    if conv.folder_id is None:
+        # 裸聊 has no workspace until promoted into a folder (文件夹即工作区): nothing
+        # to list, and a read must never materialize a phantom directory on disk.
+        return WorkspaceFileListResponse(data=[], total=0)
     entries = await list_files(
         user_id=user.user_id,
         folder_id=conv.folder_id,
@@ -1180,12 +1330,14 @@ async def upload_workspace_file(
     request: Request,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
     """Upload (create/overwrite) a workspace file from the raw request body.
 
     The body is the file bytes (no multipart); ``path`` is the workspace-relative
     target. Bounded by ``workspace_upload_max_bytes`` so one request can't exhaust
-    memory. A path that escapes the workspace is rejected (422).
+    memory. A path that escapes the workspace is rejected (422). Uploading to a 裸聊
+    promotes it into a folder workspace first (文件夹即工作区 §懒建).
     """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
 
@@ -1197,15 +1349,18 @@ async def upload_workspace_file(
     if len(data) > max_bytes:
         raise ValidationError(f"文件超出 {max_bytes} 字节的上传上限")
 
+    folder_id = await _conv_write_folder(
+        conv, conv_repo=conv_repo, folder_repo=folder_repo, user_id=user.user_id
+    )
     key = workspace_storage_key(
-        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
+        user_id=user.user_id, folder_id=folder_id, conversation_id=conversation_id
     )
     try:
         # Folder lock (决策④): serialize the write against a running same-folder turn.
         async with workspace_lock(key):
             written = await upload_file(
                 user_id=user.user_id,
-                folder_id=conv.folder_id,
+                folder_id=folder_id,
                 conversation_id=conversation_id,
                 path=path,
                 data=data,
@@ -1224,6 +1379,8 @@ async def download_workspace_file(
 ):
     """Download a single file from the conversation's workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    if conv.folder_id is None:
+        raise NotFoundError("文件不存在")  # 裸聊 has no workspace files yet.
     try:
         data = await download_file(
             user_id=user.user_id,
@@ -1256,6 +1413,8 @@ async def delete_workspace_file(
 ):
     """Delete a file or directory from the conversation's workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    if conv.folder_id is None:
+        raise NotFoundError("文件不存在")  # 裸聊 has no workspace files to delete.
     key = workspace_storage_key(
         user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
     )
@@ -1284,6 +1443,8 @@ async def move_workspace_file(
 ):
     """Move/rename a file or directory within the conversation's workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    if conv.folder_id is None:
+        raise NotFoundError("文件不存在")  # 裸聊 has no workspace files to move.
     key = workspace_storage_key(
         user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
     )
@@ -1312,18 +1473,22 @@ async def create_workspace_dir(
     body: CreateDirRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
-    """Create a directory in the conversation's workspace."""
+    """Create a directory in the conversation's workspace (promotes a 裸聊 first)."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    folder_id = await _conv_write_folder(
+        conv, conv_repo=conv_repo, folder_repo=folder_repo, user_id=user.user_id
+    )
     key = workspace_storage_key(
-        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
+        user_id=user.user_id, folder_id=folder_id, conversation_id=conversation_id
     )
     try:
         # Folder lock (决策④): serialize against a running same-folder turn.
         async with workspace_lock(key):
             await create_dir(
                 user_id=user.user_id,
-                folder_id=conv.folder_id,
+                folder_id=folder_id,
                 conversation_id=conversation_id,
                 path=body.path,
             )
@@ -1340,11 +1505,17 @@ async def clone_repo_into_workspace(
     body: CloneRepoRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
-    """Clone a public git repository into the conversation's workspace (决策⑤)."""
+    """Clone a public git repository into the conversation's workspace (决策⑤).
+
+    Cloning into a 裸聊 promotes it into a folder workspace first (§懒建)."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    folder_id = await _conv_write_folder(
+        conv, conv_repo=conv_repo, folder_repo=folder_repo, user_id=user.user_id
+    )
     key = workspace_storage_key(
-        user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
+        user_id=user.user_id, folder_id=folder_id, conversation_id=conversation_id
     )
     try:
         # Folder lock (决策④): the clone writes many files; serialize it against a
@@ -1352,7 +1523,7 @@ async def clone_repo_into_workspace(
         async with workspace_lock(key):
             dest = await clone_repo(
                 user_id=user.user_id,
-                folder_id=conv.folder_id,
+                folder_id=folder_id,
                 conversation_id=conversation_id,
                 repo_url=body.repo_url,
                 dest=body.dest,

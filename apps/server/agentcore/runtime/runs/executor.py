@@ -53,6 +53,7 @@ from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import RunContract, RunPhase, RunSpec, RunState
+from agentcore.runtime.suspension import captain_transcript
 from agentcore.runtime.workspace import summarize
 from agentcore.tools.protocol import Tool, ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -337,61 +338,139 @@ def build_captain_executor(
     """
 
     async def execute(spec: RunSpec) -> RunState:
-        agent_id = spec.agent_id or spec.run_id
-        sink.emit(run_started(spec.run_id, agent_id, parent_run_id=None, kind=spec.kind))
-        start = time.monotonic()
-        try:
-            tool_ctx = replace(
-                base_tool_context, run_id=spec.run_id, agent_id=agent_id
-            )
-            messages = [LLMMessage(role="system", content=chat_system_prompt)]
-            for msg in history:
-                messages.append(LLMMessage(role=msg["role"], content=msg["content"]))
-            messages.append(LLMMessage(role="user", content=user_message))
+        tool_ctx = replace(
+            base_tool_context, run_id=spec.run_id, agent_id=spec.agent_id or spec.run_id
+        )
+        messages = [LLMMessage(role="system", content=chat_system_prompt)]
+        for msg in history:
+            messages.append(LLMMessage(role=msg["role"], content=msg["content"]))
+        messages.append(LLMMessage(role="user", content=user_message))
+        return await _drive_captain_loop(
+            spec=spec,
+            messages=messages,
+            llm=llm,
+            tools=tools,
+            sink=sink,
+            tool_ctx=tool_ctx,
+            profile=profile,
+            citation_sink=citation_sink,
+            approval_gate=approval_gate,
+        )
 
-            content, reasoning, usage, rounds = await react_loop(
-                messages=messages,
-                llm=llm,
-                tools=tools,
-                sink=sink,
-                tool_context=tool_ctx,
-                profile=profile,
-                citation_sink=citation_sink,
-                annotate_citations=True,
-                approval_gate=approval_gate,
-            )
-            duration_ms = int((time.monotonic() - start) * 1000)
-            usage_dict = usage.as_dict()
-            cost = asdict(calculate_cost(profile.model, usage))
-            sink.emit(
-                run_completed(
-                    spec.run_id,
-                    agent_id,
-                    output_summary=summarize(content),
-                    duration_ms=duration_ms,
-                    role="captain",
-                    model=profile.model,
-                    usage=usage_dict,
-                    cost=cost,
-                )
-            )
-            return RunState(
-                phase=RunPhase.COMPLETED,
-                content=content,
-                reasoning=reasoning,
-                model=profile.model,
+    return execute
+
+
+def build_captain_resumer(
+    *,
+    llm: DeepSeekProvider,
+    tools: ToolRegistry,
+    sink: EventSink,
+    base_tool_context: ToolContext,
+    profile: ModelProfile,
+    citation_sink: list[dict],
+    approval_gate: ApprovalGate | None = None,
+) -> Callable[[RunSpec, list[LLMMessage]], Awaitable[RunState]]:
+    """Build the captain executor for a RESUMED turn (结构化挂起 2b).
+
+    Same loop as :func:`build_captain_executor`, but the CEO transcript is REBUILT by
+    the caller (the stored pre-pause messages + the resumed ``delegate`` tool result)
+    and handed in, instead of assembled from system/history/user. The CEO continues
+    from exactly where it suspended — reading the workers' product as the delegate
+    tool result and writing its overview (or delegating again). Emits the captain
+    ``run_*`` lifecycle so the resumed turn's graph has its root 汇聚点 like a normal
+    turn; the client dedupes the captain node by id across the original + resumed
+    journal segments.
+    """
+
+    async def execute(spec: RunSpec, messages: list[LLMMessage]) -> RunState:
+        tool_ctx = replace(
+            base_tool_context, run_id=spec.run_id, agent_id=spec.agent_id or spec.run_id
+        )
+        return await _drive_captain_loop(
+            spec=spec,
+            messages=messages,
+            llm=llm,
+            tools=tools,
+            sink=sink,
+            tool_ctx=tool_ctx,
+            profile=profile,
+            citation_sink=citation_sink,
+            approval_gate=approval_gate,
+        )
+
+    return execute
+
+
+async def _drive_captain_loop(
+    *,
+    spec: RunSpec,
+    messages: list[LLMMessage],
+    llm: DeepSeekProvider,
+    tools: ToolRegistry,
+    sink: EventSink,
+    tool_ctx: ToolContext,
+    profile: ModelProfile,
+    citation_sink: list[dict],
+    approval_gate: ApprovalGate | None,
+) -> RunState:
+    """Run the CEO captain ReAct loop over ``messages`` and fold it into a RunState.
+
+    Shared by the first-time captain executor and the resume captain executor: emits
+    the captain ``run_started`` / ``run_completed`` (role=captain), prices the run
+    once, and PUBLISHES the live ``messages`` list on :data:`captain_transcript` for
+    the duration of the loop — so the ``delegate`` checkpoint hook, running deep inside
+    this same task, can snapshot the CEO transcript when it captures a durable
+    suspension frame (结构化挂起 2b). The contextvar is task-local and reset on exit,
+    so concurrent turns never see each other's transcript.
+    """
+    agent_id = spec.agent_id or spec.run_id
+    sink.emit(run_started(spec.run_id, agent_id, parent_run_id=None, kind=spec.kind))
+    start = time.monotonic()
+    token = captain_transcript.set(messages)
+    try:
+        content, reasoning, usage, rounds = await react_loop(
+            messages=messages,
+            llm=llm,
+            tools=tools,
+            sink=sink,
+            tool_context=tool_ctx,
+            profile=profile,
+            citation_sink=citation_sink,
+            annotate_citations=True,
+            approval_gate=approval_gate,
+        )
+        duration_ms = int((time.monotonic() - start) * 1000)
+        usage_dict = usage.as_dict()
+        cost = asdict(calculate_cost(profile.model, usage))
+        sink.emit(
+            run_completed(
+                spec.run_id,
+                agent_id,
+                output_summary=summarize(content),
                 duration_ms=duration_ms,
-                rounds=rounds,
+                role="captain",
+                model=profile.model,
                 usage=usage_dict,
                 cost=cost,
             )
-        except Exception as e:  # noqa: BLE001 — surface any captain failure to UI/state
-            duration_ms = int((time.monotonic() - start) * 1000)
-            logger.error("run.captain_failed", run_id=spec.run_id, error=str(e), exc_info=True)
-            sink.emit(run_failed(spec.run_id, agent_id, str(e)))
-            return RunState(phase=RunPhase.FAILED, error=str(e), duration_ms=duration_ms)
-
-    return execute
+        )
+        return RunState(
+            phase=RunPhase.COMPLETED,
+            content=content,
+            reasoning=reasoning,
+            model=profile.model,
+            duration_ms=duration_ms,
+            rounds=rounds,
+            usage=usage_dict,
+            cost=cost,
+        )
+    except Exception as e:  # noqa: BLE001 — surface any captain failure to UI/state
+        duration_ms = int((time.monotonic() - start) * 1000)
+        logger.error("run.captain_failed", run_id=spec.run_id, error=str(e), exc_info=True)
+        sink.emit(run_failed(spec.run_id, agent_id, str(e)))
+        return RunState(phase=RunPhase.FAILED, error=str(e), duration_ms=duration_ms)
+    finally:
+        captain_transcript.reset(token)
 
 
 def _registry_with(base: ToolRegistry, extra: Tool) -> ToolRegistry:

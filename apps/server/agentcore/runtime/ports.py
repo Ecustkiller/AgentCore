@@ -35,6 +35,7 @@ from agentcore.runtime.events import EventSink
 
 if TYPE_CHECKING:
     import asyncio
+    from collections.abc import Callable
 
     from agentcore.runtime.interaction import InteractionKind, InteractionRequest
 
@@ -62,6 +63,17 @@ class ClientRequestBridge(Protocol):
     def resolve(
         self, request_id: str, result: Any, *, conversation_id: str
     ) -> bool: ...
+
+    async def suspend(
+        self,
+        request_id: str,
+        conversation_id: str,
+        *,
+        kind: InteractionKind,
+        payload: dict[str, Any] | None = None,
+        timeout: float,
+        on_suspended: Callable[[], None] | None = None,
+    ) -> Any: ...
 
     def get(self, request_id: str) -> InteractionRequest | None: ...
 

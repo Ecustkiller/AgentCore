@@ -1,0 +1,246 @@
+"""TurnSuspension JSON round-trip + capture helpers (结构化挂起 2b turn 级落盘).
+
+Pins the inert data layer that makes a plan_review / ask_user pause durable: a
+RunState seed, a RunPlan (with its already-minted run_ids), the scheduler
+completed-map, and each TurnSuspension subclass frame must round-trip losslessly
+through ``paused_turns.frame`` — dispatched back to the right kind by
+``suspension_from_json`` — so ``POST .../resume`` rebuilds the EXACT graph + CEO
+context it paused on.
+"""
+
+from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.runtime.runs import RunPlan, RunPhase, RunSpec, RunState
+from agentcore.runtime.runs.serialize import (
+    plan_from_json,
+    plan_to_json,
+    state_from_json,
+    state_map_from_json,
+    state_map_to_json,
+    state_to_json,
+)
+from agentcore.runtime.suspension import (
+    AskUserSuspension,
+    PlanReviewSuspension,
+    SuspensionKind,
+    find_tool_call_id,
+    suspension_from_json,
+)
+
+
+def _completed_state() -> RunState:
+    return RunState(
+        phase=RunPhase.COMPLETED,
+        content="worker 产出",
+        reasoning="想了想",
+        model="deepseek-chat",
+        duration_ms=1234,
+        rounds=2,
+        usage={"input": 10, "output": 20, "reasoning": 5, "cache_hit": 0, "cache_miss": 10},
+        cost={"input": 1, "cached": 0, "output": 2, "total": 3, "currency": "USD"},
+        citations=[{"url": "https://x", "title": "X"}],
+    )
+
+
+def test_state_seed_round_trips_dropping_transcript():
+    state = _completed_state()
+    state.transcript = [LLMMessage(role="assistant", content="heavy")]
+    restored = state_from_json(state_to_json(state))
+    assert restored.phase is RunPhase.COMPLETED
+    assert restored.content == "worker 产出"
+    assert restored.usage["cache_miss"] == 10
+    assert restored.cost["total"] == 3
+    assert restored.citations == [{"url": "https://x", "title": "X"}]
+    # The heavy transcript is intentionally dropped — a seed node is never re-run.
+    assert restored.transcript == []
+
+
+def test_plan_round_trips_preserving_minted_run_ids_and_origin():
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="del_abc_1", task="研究", role="研究员", depends_on=[]),
+            RunSpec(run_id="del_abc_2", task="汇总", role="编辑", depends_on=["del_abc_1"]),
+        ]
+    )
+    restored = plan_from_json(plan_to_json(plan))
+    assert [n.run_id for n in restored.nodes] == ["del_abc_1", "del_abc_2"]
+    assert restored.nodes[1].depends_on == ["del_abc_1"]
+    # origin survives so the resumed plan keeps its provenance.
+    assert restored.origin is plan.origin
+
+
+def test_state_map_round_trips():
+    completed = {"del_abc_1": _completed_state()}
+    restored = state_map_from_json(state_map_to_json(completed))
+    assert set(restored) == {"del_abc_1"}
+    assert restored["del_abc_1"].content == "worker 产出"
+
+
+def test_turn_suspension_full_frame_round_trips():
+    transcript = [
+        LLMMessage(role="system", content="sys"),
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            reasoning_content="先派活",
+            tool_calls=[
+                ToolCall(
+                    id="call_del_1",
+                    function=ToolCallFunction(name="delegate", arguments='{"tasks":[]}'),
+                )
+            ],
+        ),
+    ]
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="del_abc_1", task="研究", role="研究员"),
+            RunSpec(run_id="del_abc_2", task="实现", role="工程师", depends_on=["del_abc_1"]),
+        ]
+    )
+    frame = PlanReviewSuspension(
+        message_id="m1",
+        conversation_id="c1",
+        user_id="u1",
+        captain_run_id="cap1",
+        checkpoint_id="ck1",
+        tool_call_id="call_del_1",
+        base_system_prompt="base sys",
+        user_message="原始请求",
+        transcript=transcript,
+        plan=plan,
+        completed={"del_abc_1": _completed_state()},
+        journal=[{"type": "run_plan", "payload": {}, "timestamp": "t"}],
+        steps=[{"run_id": "del_abc_1", "role": "研究员", "summary": "…"}],
+        pending=[{"run_id": "del_abc_2", "role": "工程师"}],
+        trace_id="trace123",
+    )
+
+    restored = suspension_from_json(frame.to_json())
+
+    # The discriminator dispatched back to the plan_review subclass.
+    assert isinstance(restored, PlanReviewSuspension)
+    assert restored.kind is SuspensionKind.PLAN_REVIEW
+    assert restored.message_id == "m1"
+    assert restored.conversation_id == "c1"
+    assert restored.user_id == "u1"
+    assert restored.captain_run_id == "cap1"
+    assert restored.checkpoint_id == "ck1"
+    assert restored.tool_call_id == "call_del_1"
+    assert restored.base_system_prompt == "base sys"
+    assert restored.user_message == "原始请求"
+    assert restored.trace_id == "trace123"
+    # transcript: the trailing assistant delegate tool-call is preserved intact.
+    assert restored.transcript[-1].tool_calls[0].id == "call_del_1"
+    assert restored.transcript[-1].reasoning_content == "先派活"
+    # plan with minted ids + the seed map line up (the WaveScheduler resume contract).
+    assert [n.run_id for n in restored.plan.nodes] == ["del_abc_1", "del_abc_2"]
+    assert set(restored.completed) == {"del_abc_1"}
+    assert restored.completed["del_abc_1"].content == "worker 产出"
+    # journal / steps / pending carried for graph replay + card re-render.
+    assert restored.journal[0]["type"] == "run_plan"
+    assert restored.steps[0]["run_id"] == "del_abc_1"
+    assert restored.pending[0]["run_id"] == "del_abc_2"
+    # the reviewed checkpoint roots an adjust steer scopes to.
+    assert restored.checkpoint_run_ids == {"del_abc_1"}
+
+
+def test_ask_user_suspension_round_trips():
+    # The ask_user frame carries the card payload (no plan tail) so resume can
+    # re-emit the prompt + validate picks — and the discriminator routes it back.
+    transcript = [
+        LLMMessage(role="system", content="sys"),
+        LLMMessage(role="user", content="帮我选"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_ask_1",
+                    function=ToolCallFunction(name="ask_user", arguments='{"question":"A 还是 B?"}'),
+                )
+            ],
+        ),
+    ]
+    frame = AskUserSuspension(
+        message_id="m2",
+        conversation_id="c2",
+        user_id="u2",
+        captain_run_id="cap2",
+        checkpoint_id="ck2",
+        tool_call_id="call_ask_1",
+        base_system_prompt="base sys",
+        user_message="帮我选",
+        transcript=transcript,
+        question="A 还是 B?",
+        options=["A", "B"],
+        context="两者代价不同",
+        multiple=True,
+        journal=[{"type": "checkpoint_required", "payload": {}, "timestamp": "t"}],
+        trace_id="trace456",
+    )
+
+    restored = suspension_from_json(frame.to_json())
+
+    assert isinstance(restored, AskUserSuspension)
+    assert restored.kind is SuspensionKind.ASK_USER
+    assert restored.message_id == "m2"
+    assert restored.tool_call_id == "call_ask_1"
+    assert restored.question == "A 还是 B?"
+    assert restored.options == ["A", "B"]
+    assert restored.context == "两者代价不同"
+    assert restored.multiple is True
+    # the suspended ask_user call is preserved so resume echoes its id.
+    assert restored.transcript[-1].tool_calls[0].id == "call_ask_1"
+    assert restored.journal[0]["type"] == "checkpoint_required"
+
+
+def test_suspension_from_json_tolerates_missing_keys():
+    # A frame written by a different build (or a partial write) must still load —
+    # absent kind defaults to plan_review, and every field falls back to a safe
+    # empty default rather than raising.
+    restored = suspension_from_json({"message_id": "m1"})
+    assert isinstance(restored, PlanReviewSuspension)
+    assert restored.message_id == "m1"
+    assert restored.transcript == []
+    assert restored.plan.nodes == []
+    assert restored.completed == {}
+    assert restored.checkpoint_run_ids == set()
+
+
+def test_suspension_from_json_tolerates_legacy_delegate_tool_call_id():
+    # A pre-union frame keyed the call id as ``delegate_tool_call_id``; it must still
+    # load into ``tool_call_id`` (no compat layer, but the rename stays free).
+    restored = suspension_from_json(
+        {"kind": "plan_review", "message_id": "m1", "delegate_tool_call_id": "call_old"}
+    )
+    assert restored.tool_call_id == "call_old"
+
+
+def test_find_tool_call_id_picks_trailing_matching_call():
+    transcript = [
+        LLMMessage(role="user", content="原始"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(id="call_search", function=ToolCallFunction(name="web_search", arguments="{}")),
+            ],
+        ),
+        LLMMessage(role="tool", content="…", tool_call_id="call_search"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(id="call_del", function=ToolCallFunction(name="delegate", arguments="{}")),
+                ToolCall(id="call_ask", function=ToolCallFunction(name="ask_user", arguments="{}")),
+            ],
+        ),
+    ]
+    # The helper is tool-agnostic — it finds the trailing call by NAME.
+    assert find_tool_call_id(transcript, "delegate") == "call_del"
+    assert find_tool_call_id(transcript, "ask_user") == "call_ask"
+
+
+def test_find_tool_call_id_empty_when_absent():
+    transcript = [LLMMessage(role="user", content="hi")]
+    assert find_tool_call_id(transcript, "delegate") == ""

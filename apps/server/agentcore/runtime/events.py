@@ -605,7 +605,8 @@ _JOURNAL_EVENT_TYPES = frozenset(
 # Event types whose presence alone is enough to persist the journal — a turn that
 # never delegated (no run_plan) but did raise a checkpoint still has a journal
 # worth replaying. (Tool calls on their own do not: a single-agent turn's own
-# tool I/O is not replayed — see ``execution_journal``.)
+# tool I/O is not replayed through the team-graph journal — it rides the separate
+# process timeline below instead.)
 _JOURNAL_SURFACE_TYPES = frozenset(
     {
         EventType.RUN_PLAN.value,
@@ -613,6 +614,12 @@ _JOURNAL_SURFACE_TYPES = frozenset(
         EventType.PLAN_REVIEW_REQUIRED.value,
     }
 )
+
+# A single tool result can be large (a read_url page, a long grep). The process
+# timeline is a display artifact (the inline「思考+工具」面板), not the source of
+# truth, so each persisted result is capped — enough for a meaningful preview
+# without bloating the message row. The live SSE still carries the full result.
+_PROCESS_RESULT_CAP = 8000
 
 
 class EventSink:
@@ -629,6 +636,16 @@ class EventSink:
         # journal), accumulated as they are emitted so the team graph can be
         # persisted and replayed. Empty for a pure single-agent turn.
         self._journal: list[dict[str, Any]] = []
+        # Single-agent process timeline: the CEO's own thinking interleaved with
+        # its tool calls, in emission order, folded into compact segments (one
+        # reasoning step coalesces consecutive deltas; one step per tool call).
+        # This is what the inline「思考过程」面板 replays for a single-agent turn —
+        # the team-graph journal above stays None there. ``_has_run_plan`` marks
+        # the turn as multi-agent (graph instead), ``_has_tool`` gates persistence
+        # (a tool-less turn replays from reasoning_content, no process payload).
+        self._process: list[dict[str, Any]] = []
+        self._has_run_plan = False
+        self._has_tool = False
 
     def emit(self, event: SSEEvent) -> None:
         if not self._closed:
@@ -640,7 +657,65 @@ class EventSink:
                         "timestamp": event.timestamp,
                     }
                 )
+            self._accumulate_process(event)
             self._queue.put_nowait(event)
+
+    def _accumulate_process(self, event: SSEEvent) -> None:
+        """Fold one event into the single-agent process timeline.
+
+        Mirrors the client-side build (streamConversation) so a live turn and its
+        reloaded twin produce the same panel: reasoning deltas coalesce into the
+        trailing reasoning step; each tool call appends a step that its matching
+        ``tool_use_end`` later resolves (result + status).
+        """
+        t = event.type
+        if t == EventType.RUN_PLAN:
+            self._has_run_plan = True
+        elif t == EventType.REASONING_DELTA:
+            delta = event.payload.get("delta") or ""
+            if not delta:
+                return
+            if self._process and self._process[-1].get("kind") == "reasoning":
+                self._process[-1]["text"] += delta
+            else:
+                self._process.append({"kind": "reasoning", "text": delta})
+        elif t == EventType.TOOL_USE_START:
+            self._has_tool = True
+            payload = event.payload
+            self._process.append(
+                {
+                    "kind": "tool",
+                    "id": payload.get("tool_call_id", ""),
+                    "tool_name": payload.get("tool_name", ""),
+                    "arguments": payload.get("arguments") or {},
+                    "result": None,
+                    "status": "running",
+                }
+            )
+        elif t == EventType.TOOL_USE_END:
+            payload = event.payload
+            call_id = payload.get("tool_call_id", "")
+            result = payload.get("result")
+            if isinstance(result, str) and len(result) > _PROCESS_RESULT_CAP:
+                result = result[:_PROCESS_RESULT_CAP] + "…"
+            for step in reversed(self._process):
+                if step.get("kind") == "tool" and step.get("id") == call_id:
+                    step["result"] = result
+                    step["status"] = payload.get("status", "success")
+                    break
+
+    def seed_journal(self, events: list[dict[str, Any]]) -> None:
+        """Pre-load the journal with a paused turn's pre-pause events (结构化挂起 2b resume).
+
+        A resumed turn runs on a FRESH sink, but its persisted ``messages.runs`` must
+        replay the WHOLE team graph — the pre-pause run_plan + finished workers + the
+        plan_review pause, then the post-resume tail. Seeding extends only the journal
+        (persistence/replay), NOT the live SSE queue: the client already saw the
+        pre-pause portion (or loads it from the persisted message), so the resume
+        stream carries only new events. A re-pause during resume then captures the
+        cumulative journal naturally.
+        """
+        self._journal.extend(events)
 
     def execution_journal(self) -> list[dict[str, Any]] | None:
         """This turn's ordered run/tool events, or None if there is nothing to replay.
@@ -655,6 +730,19 @@ class EventSink:
             e["type"] in _JOURNAL_SURFACE_TYPES for e in self._journal
         )
         return self._journal if has_surface else None
+
+    def process_timeline(self) -> list[dict[str, Any]] | None:
+        """This single-agent turn's「思考+工具」timeline, or None.
+
+        None for a multi-agent turn (``run_plan`` → the team graph carries the
+        activity instead) or a turn that used no tool (a thinking-only turn
+        replays from ``reasoning_content`` as one segment — no process payload
+        needed). Otherwise the ordered reasoning/tool steps the client folds into
+        the inline process panel and persists on ``messages.runs.process``.
+        """
+        if self._has_run_plan or not self._has_tool:
+            return None
+        return self._process or None
 
     def close(self) -> None:
         """Signal end-of-stream to consumer."""

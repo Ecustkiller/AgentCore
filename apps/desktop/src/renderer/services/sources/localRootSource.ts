@@ -54,6 +54,13 @@ export function createLocalRootSource(
         }),
       );
     },
+    async listFileIndex() {
+      // Flat file list for the @ index (文件中枢统一 F4); the IPC already prunes
+      // node_modules/.git… and caps the count, matching the cloud /file-index.
+      const res = await window.fsApi.listFiles(rootId);
+      if (!res.ok) throw new Error(res.reason);
+      return res.data.map((f) => f.relPath);
+    },
     async read(path): Promise<FilePreviewResult> {
       const res = await window.fsApi.readFile(rootId, path);
       if (!res.ok) throw new Error(res.reason);

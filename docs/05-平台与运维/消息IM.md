@@ -1,10 +1,10 @@
 # 消息 IM（找人）
 
-> **状态**：**P0（人 ↔ 人单聊）✅ 已落地（前后端全链路）**——后端 5 张 IM 表 + `MessagingService` + `/v1/messages` 全套 REST + `/v1/realtime` 每用户 SSE firehose（进程内 fan-out）+ 按用户发送限流；前端 `MessagesPage` 双栏（会话列表 + 线程 + 搜人发起 DM）+ firehose 消费 + 侧栏未读角标（§六）。⏳ 已确认未落地：官方号(C) 推送、P1（已读 UI / 在线态 / 联系人 / 隐私设置面）、P2（人群聊 / 富消息 / 人+AI 混合群）、多 worker 实时。
+> **状态**：**P0（人 ↔ 人单聊）✅ + 内测全员群 MVP & 自助管理（退群/静音/置顶/成员面板）✅ 已落地**；⏳ 官方号推送、P1（已读 UI / 在线态 / 联系人 / 隐私设置面）、P2 余项（富消息 / 人+AI 混合群 / 通用建群 + 群审核）、多 worker 实时。
 >
-> **定位**：**对话页 = 找 AI，消息页 = 找人**——两入口共用前端聊天内核 + 实时通道，但 IM 另开一套后端表，与 AI 对话热路径解耦。
->
-> 代码真相源：后端 `messaging/service.py`、`messaging/hub.py`、`messaging/events.py`、`api/routes/messages.py`、`api/routes/realtime.py`、`db/models.py`、`db/repositories.py`；前端 `renderer/services/messaging.ts`、`renderer/services/realtime.ts`、`renderer/stores/messaging.ts`、`renderer/pages/MessagesPage.tsx`、`renderer/components/messages/`。
+> **定位**：**对话页 = 找 AI，消息页 = 找人**——复用前端聊天内核 + 实时通道，IM 另开后端表。
+
+→ 见代码 `apps/server/agentcore/messaging/`、`api/routes/messages.py`、`api/routes/realtime.py`；前端 `renderer/services/messaging.ts`、`pages/MessagesPage.tsx`
 
 ---
 
@@ -33,18 +33,11 @@
 
 ## 三、后端 API（✅ `/v1/messages`）
 
-薄路由委托 `MessagingService`，权限在 service 层。**非会话成员一律 404**（IDOR 安全、不泄露存在性）。
+薄路由委托 `MessagingService`，权限在 service 层。
 
-| 端点 | 作用 | 关键策略 |
-|---|---|---|
-| `GET /messages/users/search` | 任意搜人 | 精确匹配；过滤自己 / 拉黑双方 / `discoverable=false` |
-| `POST /messages/chats/dm` | 发起（或复用）单聊 | 幂等复用已有 DM；拒自聊 / 未知禁用对端 / 拉黑 / `who_can_dm=contacts`；对端入 `pending` |
-| `GET /messages/chats` | 会话列表（近→远） | 批量解未读数 + DM 对端（无 N+1） |
-| `GET /messages/chats/{id}/messages` | 消息分页（旧→新） | 非成员 404 |
-| `POST /messages/chats/{id}/messages` | 发消息 | **先按用户发送限流**；成员 404 门 + DM 拉黑 403；`pending` 方回信即接受请求；落库后 fan-out 给全体成员（含自己，多端同步） |
-| `POST /messages/chats/{id}/read` | 推进已读游标 | 驱动未读数 |
-| `GET·PATCH /messages/directory` | 读 / 改隐私设置 | `discoverable` / `who_can_dm` |
-| `GET·POST /messages/blocks`·`DELETE /messages/blocks/{id}` | 拉黑列表 / 拉黑 / 解除 | 拒自我拉黑；解除幂等 |
+**关键决策**：**非会话成员一律 404**（IDOR 安全、不泄露存在性）；陌生人首条进 `pending` 消息请求门；发消息先按用户限流。
+
+→ 见代码 `api/routes/messages.py`
 
 ## 四、实时通道（✅ 进程内；⏳ 多 worker）
 
@@ -64,7 +57,7 @@
 | 防骚扰 | 陌生人首条进「消息请求」（`chat_members.state=pending`），对方回信前受限 |
 | 拉黑 | `user_blocks` 对称，断 DM + 互隐搜索 |
 | 限流 | 发消息复用按用户限流（`conversation/rate_limit.py`） |
-| IDOR | 会话操作先校验 `chat_members` 归属，非成员 404（[认证与会话 §八](/docs/05-平台与运维/认证与会话.md)） |
+| IDOR | → 见 [`认证与会话.md` §八](/docs/05-平台与运维/认证与会话.md) |
 
 ## 六、前端 MessagesPage（✅ 已落地）
 
@@ -86,5 +79,7 @@
 |---|---|
 | 官方号(C) 推送 | 表 / schema 已留 `type=official`·`sender_type=official`·`system_card`+`payload`；**推送路径（任务完成 / 审批 → 写官方号会话 → deep-link 跳回对话页）业务逻辑未接** |
 | P1 | 已读回执 UI、在线态 / 正在输入（走实时通道 + Redis TTL，不入库）、联系人收藏、隐私设置面板 |
-| P2 | 人群聊、富消息（图 / 文件复用工作区上传）、**人 + AI 混合群**（`@` 唤起 agent → 接 CEO 编排，消息页独有差异化形态） |
+| P2 | **人群聊：内测全员群 MVP + 自助管理 + 审核治理 ✅ 已落地**（`type=group` + `auto_join` 默认进群 + 群线程/发送者名/群标识 + 退群/静音/置顶/成员面板 + 平台 admin 踢人/禁言/公告 + system_card 系统提示，见下方设计指针）；通用建群、富消息（图 / 文件复用工作区上传）、**人 + AI 混合群**（`@` 唤起 agent → 接 CEO 编排，消息页独有差异化形态）仍 ⏳ |
 | 多 worker 实时 | firehose / pub-sub 上 Redis / NATS（见 §四） |
+
+> 🗂️ 「人群聊」首个落地形态（内测全员反馈群，含默认进群机制）落地设计 → 见 [`../07-规划/全员反馈群落地设计.md`](/docs/07-规划/全员反馈群落地设计.md)

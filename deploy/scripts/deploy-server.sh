@@ -13,7 +13,7 @@
 #
 # 配置（可经环境或 $AGENTCORE_HOME/.env 覆盖，部署与运维.md §8.2）：
 #   AGENTCORE_HOME   部署根目录            （默认 /opt/agentcore）
-#   GIT_BRANCH       latest 解析的分支      （默认 main，对齐 ci.yml）
+#   GIT_BRANCH       latest 解析的分支      （默认 master，对齐 ci.yml / 仓库主干）
 #   IMAGE_REGISTRY   ACR 仓库（含命名空间） （compose 拉取用）
 #   ACR_USERNAME/ACR_PASSWORD   ACR 登录凭据（缺省则跳过 docker login）
 #   HEALTH_URL       健康检查地址          （默认 http://127.0.0.1:8000/readyz）
@@ -49,7 +49,7 @@ fi
 REPO_DIR="${REPO_DIR:-$AGENTCORE_HOME/repo}"
 BACKUP_DIR="${BACKUP_DIR:-$AGENTCORE_HOME/backups}"
 SHA_FILE="${SHA_FILE:-$AGENTCORE_HOME/.last-deployed-sha}"
-GIT_BRANCH="${GIT_BRANCH:-main}"
+GIT_BRANCH="${GIT_BRANCH:-master}"
 ENV_FILE="${ENV_FILE:-$REPO_DIR/deploy/config/production.env}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-agentcore}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/readyz}"

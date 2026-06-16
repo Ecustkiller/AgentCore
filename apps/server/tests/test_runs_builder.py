@@ -109,7 +109,7 @@ def test_invalid_reasoning_effort_cleared():
     assert plan.nodes[0].reasoning_effort is None
 
 
-# --- 辩论/审查 呈现标记 (前端UX目标态 §四: stance/group, display-only) -----------
+# --- 辩论/审查 呈现标记 (前端UX设计.md §四: stance/group, display-only) -----------
 
 
 def test_stance_and_group_parsed_onto_spec():
@@ -159,7 +159,7 @@ def test_stance_parsed_on_dag_step():
 
 
 def test_round_parsed_onto_spec():
-    # 真·多轮辩论 (前端UX目标态 §四): round 标轮次, display-only, 与 stance/group 正交.
+    # 真·多轮辩论 (前端UX设计.md §四): round 标轮次, display-only, 与 stance/group 正交.
     plan, _ = build_run_plan(
         [
             {"role": "正方", "task": "r1", "stance": "pro", "round": 1},

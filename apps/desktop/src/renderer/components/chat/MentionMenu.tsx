@@ -83,7 +83,7 @@ export function MentionMenu({
       ) : (
         <ul ref={listRef} className="max-h-64 overflow-y-auto py-1">
           {items.map((entry, i) => (
-            <li key={`${entry.kind}:${entry.rootId}:${entry.relPath}`}>
+            <li key={`${entry.kind}:${entry.sourceId}:${entry.relPath}`}>
               <button
                 type="button"
                 onMouseDown={(e) => {

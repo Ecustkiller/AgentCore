@@ -1,5 +1,6 @@
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
+  getConversations,
   patchConversationCache,
   upsertConversationFront,
 } from "@/hooks/useConversations";
@@ -10,10 +11,14 @@ import {
   filterEntries,
   loadFileIndex,
 } from "@/lib/fileIndex";
+import type { FileSource } from "@/lib/fileSource";
 import { api } from "@/services/api";
 import { loadLatestWindow } from "@/services/messages";
+import { createLocalRootSource } from "@/services/sources/localRootSource";
+import { createCloudWorkspaceSource } from "@/services/sources/workspaceSource";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
+import { getWorkspaceBinding } from "@/services/workspaceBinding";
 import {
   getActiveRuntime,
   useActiveGenerating,
@@ -30,7 +35,7 @@ import { ModeSelector } from "./ModeSelector";
 /** 已选附件（含正文，仅发送时携带；气泡只展示元信息）。 */
 interface PendingAttachment {
   id: string;
-  /** kind:rootId:relPath，用于去重。 */
+  /** kind:sourceId:relPath，用于去重。 */
   key: string;
   name: string;
   path: string;
@@ -91,6 +96,46 @@ function detectMention(
   return { start: at, query: text.slice(at + 1, caret) };
 }
 
+/**
+ * Build the {@link FileSource}s that feed the @ index for the active conversation
+ * (文件中枢统一 F4): the conversation's **cloud** workspace (so its server-side
+ * files become @-able) plus every authorized local OS root. A *local*-mode
+ * workspace needs no extra source — it *is* one of those local roots, already
+ * indexed below. A 裸聊 (no folder) has no cloud workspace yet, so it indexes local
+ * only until it is promoted into a folder.
+ *
+ * 文件夹即工作区: the cloud workspace **is** the conversation's folder (`folder:<id>`);
+ * a folderless or local chat contributes no cloud source. Failure to resolve the
+ * binding degrades gracefully to local-only.
+ */
+async function buildMentionSources(
+  conversationId: string | null,
+): Promise<FileSource[]> {
+  const sources: FileSource[] = [];
+
+  if (conversationId) {
+    try {
+      const binding = await getWorkspaceBinding(conversationId);
+      if (binding.mode === "cloud") {
+        const folderId =
+          getConversations().find((c) => c.id === conversationId)?.folderId ??
+          null;
+        if (folderId) {
+          sources.push(
+            createCloudWorkspaceSource(`folder:${folderId}`, "工作区"),
+          );
+        }
+      }
+    } catch {
+      // Binding unknown (e.g. a never-sent draft) — index local roots only.
+    }
+  }
+
+  const roots = (await window.fsApi?.listRoots()) ?? [];
+  for (const r of roots) sources.push(createLocalRootSource(r.id, r.name));
+  return sources;
+}
+
 export function MessageInput() {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -101,6 +146,7 @@ export function MessageInput() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isGenerating = useActiveGenerating();
   const addMessage = useConversationStore((s) => s.addMessage);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   const navigate = useNavigate();
 
   // ---- @ 提及 / 文件浏览菜单 ----
@@ -110,9 +156,12 @@ export function MessageInput() {
   const [menuError, setMenuError] = useState<string | null>(null);
   const [fileIndex, setFileIndex] = useState<IndexedEntry[]>([]);
   const [dirIndex, setDirIndex] = useState<IndexedEntry[]>([]);
-  const [rootCount, setRootCount] = useState(0);
+  const [sourceCount, setSourceCount] = useState(0);
   const [indexLoading, setIndexLoading] = useState(false);
   const indexLoadedRef = useRef(false);
+  // id → source, so attachEntry reads a picked file through its own source
+  // (local IPC vs cloud REST) without branching on where the file lives.
+  const sourcesRef = useRef<Map<string, FileSource>>(new Map());
   const mentionRangeRef = useRef<{ start: number; end: number } | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -147,17 +196,30 @@ export function MessageInput() {
     if (indexLoadedRef.current) return;
     setIndexLoading(true);
     try {
-      const { files, dirs, rootCount: count } = await loadFileIndex();
+      const sources = await buildMentionSources(conversationId);
+      sourcesRef.current = new Map(sources.map((s) => [s.id, s]));
+      const { files, dirs, sourceCount } = await loadFileIndex(sources);
       setFileIndex(files);
       setDirIndex(dirs);
-      setRootCount(count);
+      setSourceCount(sourceCount);
       indexLoadedRef.current = true;
     } catch {
       setMenuError("读取文件列表失败");
     } finally {
       setIndexLoading(false);
     }
-  }, []);
+  }, [conversationId]);
+
+  // Switching conversations changes the @-able cloud workspace — invalidate the
+  // cached index so the next mention rebuilds against the new conversation.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is an intentional re-run key — invalidate the index whenever the active conversation changes.
+  useEffect(() => {
+    indexLoadedRef.current = false;
+    setFileIndex([]);
+    setDirIndex([]);
+    setSourceCount(0);
+    sourcesRef.current = new Map();
+  }, [conversationId]);
 
   const closeMenu = useCallback(() => {
     setMenuMode(null);
@@ -213,7 +275,7 @@ export function MessageInput() {
 
   const attachEntry = useCallback(
     async (entry: IndexedEntry) => {
-      const key = `${entry.kind}:${entry.rootId}:${entry.relPath}`;
+      const key = `${entry.kind}:${entry.sourceId}:${entry.relPath}`;
       if (attachments.some((a) => a.key === key)) {
         closeMenu();
         textareaRef.current?.focus();
@@ -238,16 +300,27 @@ export function MessageInput() {
           kind: "dir",
         };
       } else {
-        const res = await window.fsApi.readFile(entry.rootId, entry.relPath);
-        if (!res.ok) {
-          setMenuError(res.reason);
+        // Read through the entry's own source — local files over IPC, cloud
+        // workspace files over REST — without branching on where they live.
+        const source = sourcesRef.current.get(entry.sourceId);
+        if (!source) {
+          setMenuError("文件来源已失效，请重试");
           return;
         }
-        if (res.data.kind !== "text") {
+        let res: Awaited<ReturnType<FileSource["read"]>>;
+        try {
+          res = await source.read(entry.relPath);
+        } catch {
+          setMenuError("读取文件失败");
+          return;
+        }
+        if (res.kind !== "text") {
           setMenuError(
-            res.data.kind === "image"
+            res.kind === "image"
               ? "暂不支持图片附件（模型尚无视觉能力）"
-              : "二进制文件无法作为文本附件",
+              : res.kind === "too-large"
+                ? "文件过大，无法作为附件"
+                : "二进制文件无法作为文本附件",
           );
           return;
         }
@@ -256,8 +329,8 @@ export function MessageInput() {
           key,
           name: entry.name,
           path: entry.display,
-          text: (res.data as { content: string }).content,
-          truncated: (res.data as { truncated: boolean }).truncated,
+          text: res.text,
+          truncated: res.truncated,
           kind: "file",
         };
       }
@@ -579,7 +652,7 @@ export function MessageInput() {
             error={menuError}
             query={query}
             showSearch={menuMode === "browse"}
-            noRoots={indexLoadedRef.current && rootCount === 0}
+            noRoots={indexLoadedRef.current && sourceCount === 0}
             onQueryChange={setQuery}
             onKeyDown={(e) => {
               handleMenuNavKey(e);

@@ -25,7 +25,7 @@ class FakeUsers:
     def __init__(self) -> None:
         self._by_id: dict = {}
 
-    def add(self, username, *, status="active", display_name=None):
+    def add(self, username, *, status="active", display_name=None, role="user"):
         from types import SimpleNamespace
 
         user = SimpleNamespace(
@@ -33,6 +33,7 @@ class FakeUsers:
             username=username,
             display_name=display_name or username,
             status=status,
+            role=role,
         )
         self._by_id[user.user_id] = user
         return user
@@ -88,6 +89,7 @@ class FakeChats:
             dm_key=self.dm_key(creator_id, peer_id),
             title=None,
             avatar_url=None,
+            auto_join=False,
             last_message_at=None,
             last_message_preview=None,
         )
@@ -97,14 +99,62 @@ class FakeChats:
                 SimpleNamespace(
                     chat_id=chat.id,
                     user_id=uid,
+                    role="member",
                     state=state,
                     pinned=False,
                     muted=False,
+                    muted_by_admin=False,
                     last_read_at=None,
                     last_read_message_id=None,
+                    joined_at=self._now(),
                 )
             )
         return chat
+
+    async def create_group(self, *, title="群", auto_join=False, member_ids=()):
+        """Test helper: a group chat (the real row is created by a migration)."""
+        from types import SimpleNamespace
+
+        chat = SimpleNamespace(
+            id=new_id(),
+            type="group",
+            created_by=None,
+            dm_key=None,
+            title=title,
+            avatar_url=None,
+            auto_join=auto_join,
+            last_message_at=None,
+            last_message_preview=None,
+        )
+        self._chats[chat.id] = chat
+        for uid in member_ids:
+            await self.add_member(chat.id, uid)
+        return chat
+
+    async def list_auto_join_chats(self):
+        return [c for c in self._chats.values() if getattr(c, "auto_join", False)]
+
+    async def add_member(
+        self, chat_id, user_id, *, role="member", state="accepted", pinned=False
+    ):
+        from types import SimpleNamespace
+
+        if await self.get_member(chat_id, user_id) is not None:
+            return
+        self._members.append(
+            SimpleNamespace(
+                chat_id=chat_id,
+                user_id=user_id,
+                role=role,
+                state=state,
+                pinned=pinned,
+                muted=False,
+                muted_by_admin=False,
+                last_read_at=None,
+                last_read_message_id=None,
+                joined_at=self._now(),
+            )
+        )
 
     async def get_chat(self, chat_id):
         return self._chats.get(chat_id)
@@ -121,6 +171,27 @@ class FakeChats:
 
     async def list_members(self, chat_id):
         return [m for m in self._members if m.chat_id == chat_id]
+
+    async def remove_member(self, chat_id, user_id):
+        self._members = [
+            m
+            for m in self._members
+            if not (m.chat_id == chat_id and m.user_id == user_id)
+        ]
+
+    async def set_membership_flags(self, chat_id, user_id, *, muted=None, pinned=None):
+        member = await self.get_member(chat_id, user_id)
+        if member is None:
+            return
+        if muted is not None:
+            member.muted = muted
+        if pinned is not None:
+            member.pinned = pinned
+
+    async def set_admin_mute(self, chat_id, user_id, *, muted_by_admin):
+        member = await self.get_member(chat_id, user_id)
+        if member is not None:
+            member.muted_by_admin = muted_by_admin
 
     async def list_memberships(self, user_id):
         rows = [
@@ -602,3 +673,254 @@ async def test_update_directory_partial_preserves_other_field():
     )
     assert view.discoverable is False  # untouched by the second patch
     assert view.who_can_dm == "contacts"
+
+
+# --- auto-join (内测全员群) + group members ---
+
+
+async def test_join_auto_join_chats_enrolls_pinned():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    group = await chats.create_group(title="内测群", auto_join=True)
+    await svc.join_auto_join_chats(user_id=alice.user_id)
+    member = await chats.get_member(group.id, alice.user_id)
+    assert member is not None
+    assert member.state == "accepted"
+    assert member.pinned is True
+    # The group now shows up in the user's chat list.
+    views = await svc.list_chats(user_id=alice.user_id)
+    assert [v.chat.id for v in views] == [group.id]
+
+
+async def test_join_auto_join_is_idempotent():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    group = await chats.create_group(auto_join=True)
+    await svc.join_auto_join_chats(user_id=alice.user_id)
+    await svc.join_auto_join_chats(user_id=alice.user_id)
+    members = [m for m in await chats.list_members(group.id) if m.user_id == alice.user_id]
+    assert len(members) == 1
+
+
+async def test_join_auto_join_skips_non_auto_chats():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    regular = await chats.create_group(auto_join=False)
+    await svc.join_auto_join_chats(user_id=alice.user_id)
+    assert await chats.get_member(regular.id, alice.user_id) is None
+
+
+async def test_list_members_returns_participants():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    bob = users.add("bob")
+    group = await chats.create_group(
+        auto_join=True, member_ids=[alice.user_id, bob.user_id]
+    )
+    members = await svc.list_members(chat_id=group.id, user_id=alice.user_id)
+    assert {m.user.user_id for m in members} == {alice.user_id, bob.user_id}
+
+
+async def test_list_members_non_member_404():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    stranger = users.add("stranger")
+    group = await chats.create_group(auto_join=True, member_ids=[alice.user_id])
+    with pytest.raises(NotFoundError):
+        await svc.list_members(chat_id=group.id, user_id=stranger.user_id)
+
+
+# --- leave_chat / set_chat_flags (群自助管理) ---
+
+
+async def test_leave_chat_removes_member():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    bob = users.add("bob")
+    group = await chats.create_group(
+        auto_join=True, member_ids=[alice.user_id, bob.user_id]
+    )
+    await svc.leave_chat(chat_id=group.id, user_id=alice.user_id)
+    assert await chats.get_member(group.id, alice.user_id) is None
+    # bob is untouched; the group lives on.
+    assert await chats.get_member(group.id, bob.user_id) is not None
+    # alice no longer sees it in her list.
+    assert await svc.list_chats(user_id=alice.user_id) == []
+
+
+async def test_leave_chat_non_member_404():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    stranger = users.add("stranger")
+    group = await chats.create_group(auto_join=True, member_ids=[alice.user_id])
+    with pytest.raises(NotFoundError):
+        await svc.leave_chat(chat_id=group.id, user_id=stranger.user_id)
+
+
+async def test_leave_chat_dm_rejected():
+    svc, users, *_ = _make()
+    alice = users.add("alice")
+    bob = users.add("bob")
+    chat = (await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)).chat
+    with pytest.raises(ValidationError):
+        await svc.leave_chat(chat_id=chat.id, user_id=alice.user_id)
+
+
+async def test_set_chat_flags_updates_and_returns_view():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    group = await chats.create_group(auto_join=True, member_ids=[alice.user_id])
+    view = await svc.set_chat_flags(
+        chat_id=group.id, user_id=alice.user_id, muted=True, pinned=True
+    )
+    assert view.member.muted is True
+    assert view.member.pinned is True
+    assert view.chat.id == group.id
+    # group view resolves no dm peer
+    assert view.peer is None
+
+
+async def test_set_chat_flags_partial_preserves_other():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    group = await chats.create_group(auto_join=True, member_ids=[alice.user_id])
+    await svc.set_chat_flags(chat_id=group.id, user_id=alice.user_id, pinned=True)
+    view = await svc.set_chat_flags(
+        chat_id=group.id, user_id=alice.user_id, muted=True
+    )
+    assert view.member.pinned is True  # untouched by the second patch
+    assert view.member.muted is True
+
+
+async def test_set_chat_flags_non_member_404():
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    stranger = users.add("stranger")
+    group = await chats.create_group(auto_join=True, member_ids=[alice.user_id])
+    with pytest.raises(NotFoundError):
+        await svc.set_chat_flags(
+            chat_id=group.id, user_id=stranger.user_id, muted=True
+        )
+
+
+# --- moderation: kick / mute / announce (Stage 3 审核治理) ---
+
+
+async def test_kick_member_removes_and_posts_system_card():
+    svc, users, chats, _blocks, _directory, events = _make()
+    admin = users.add("admin", role="admin")
+    alice = users.add("alice")
+    group = await chats.create_group(member_ids=[admin.user_id, alice.user_id])
+    await svc.kick_member(
+        chat_id=group.id, actor_id=admin.user_id, target_id=alice.user_id
+    )
+    assert await chats.get_member(group.id, alice.user_id) is None
+    # the admin remains; the group lives on
+    assert await chats.get_member(group.id, admin.user_id) is not None
+    # a system_card notice (NULL sender) was fanned out to the remaining members
+    recipients, event = events.published[-1]
+    assert recipients == [admin.user_id]
+    assert event["message"]["content_type"] == "system_card"
+    assert event["message"]["sender_user_id"] is None
+    assert "alice" in event["message"]["content"]
+
+
+async def test_kick_admin_target_forbidden():
+    svc, users, chats, *_ = _make()
+    admin = users.add("admin", role="admin")
+    other_admin = users.add("root", role="admin")
+    group = await chats.create_group(
+        member_ids=[admin.user_id, other_admin.user_id]
+    )
+    with pytest.raises(AuthorizationError):
+        await svc.kick_member(
+            chat_id=group.id, actor_id=admin.user_id, target_id=other_admin.user_id
+        )
+    # the admin target is untouched
+    assert await chats.get_member(group.id, other_admin.user_id) is not None
+
+
+async def test_kick_non_member_404():
+    svc, users, chats, *_ = _make()
+    admin = users.add("admin", role="admin")
+    stranger = users.add("stranger")
+    group = await chats.create_group(member_ids=[admin.user_id])
+    with pytest.raises(NotFoundError):
+        await svc.kick_member(
+            chat_id=group.id, actor_id=admin.user_id, target_id=stranger.user_id
+        )
+
+
+async def test_kick_dm_rejected():
+    svc, users, *_ = _make()
+    admin = users.add("admin", role="admin")
+    bob = users.add("bob")
+    chat = (await svc.start_dm(requester_id=admin.user_id, peer_id=bob.user_id)).chat
+    with pytest.raises(ValidationError):
+        await svc.kick_member(
+            chat_id=chat.id, actor_id=admin.user_id, target_id=bob.user_id
+        )
+
+
+async def test_admin_mute_blocks_send_then_unmute_restores():
+    svc, users, chats, *_ = _make()
+    admin = users.add("admin", role="admin")
+    alice = users.add("alice")
+    group = await chats.create_group(member_ids=[admin.user_id, alice.user_id])
+    await svc.set_admin_mute(
+        chat_id=group.id, actor_id=admin.user_id, target_id=alice.user_id, muted=True
+    )
+    with pytest.raises(AuthorizationError):
+        await svc.send_message(
+            chat_id=group.id, sender_id=alice.user_id, content="hi"
+        )
+    # unmuting restores the ability to send
+    await svc.set_admin_mute(
+        chat_id=group.id, actor_id=admin.user_id, target_id=alice.user_id, muted=False
+    )
+    msg = await svc.send_message(
+        chat_id=group.id, sender_id=alice.user_id, content="hi again"
+    )
+    assert msg.content == "hi again"
+
+
+async def test_admin_mute_reflected_in_roster():
+    svc, users, chats, *_ = _make()
+    admin = users.add("admin", role="admin")
+    alice = users.add("alice")
+    group = await chats.create_group(member_ids=[admin.user_id, alice.user_id])
+    await svc.set_admin_mute(
+        chat_id=group.id, actor_id=admin.user_id, target_id=alice.user_id, muted=True
+    )
+    members = await svc.list_members(chat_id=group.id, user_id=admin.user_id)
+    by_id = {m.user.user_id: m for m in members}
+    assert by_id[admin.user_id].is_admin is True
+    assert by_id[alice.user_id].is_admin is False
+    assert by_id[alice.user_id].muted_by_admin is True
+    assert by_id[admin.user_id].muted_by_admin is False
+
+
+async def test_announce_posts_system_card_to_all_members():
+    svc, users, chats, _blocks, _directory, events = _make()
+    admin = users.add("admin", role="admin")
+    alice = users.add("alice")
+    group = await chats.create_group(member_ids=[admin.user_id, alice.user_id])
+    msg = await svc.post_announcement(
+        chat_id=group.id, actor_id=admin.user_id, content="维护通知"
+    )
+    assert msg.content_type == "system_card"
+    assert msg.sender_user_id is None
+    recipients, event = events.published[-1]
+    assert set(recipients) == {admin.user_id, alice.user_id}
+    assert event["message"]["content"] == "维护通知"
+
+
+async def test_announce_dm_rejected():
+    svc, users, *_ = _make()
+    admin = users.add("admin", role="admin")
+    bob = users.add("bob")
+    chat = (await svc.start_dm(requester_id=admin.user_id, peer_id=bob.user_id)).chat
+    with pytest.raises(ValidationError):
+        await svc.post_announcement(
+            chat_id=chat.id, actor_id=admin.user_id, content="hi"
+        )

@@ -26,14 +26,19 @@ from agentcore.workspace.server import ServerWorkspace
 
 
 class _Provider:
-    """Fake LLM: one scripted content chunk per call, optionally a usage chunk."""
+    """Fake LLM: one scripted content chunk per call, optionally a usage chunk.
+
+    Records each ``LLMRequest`` it is handed (``requests``) so a test can assert on
+    the assembled worker prompt (e.g. an injected steer)."""
 
     def __init__(self, contents: list[str], usage: TokenUsage | None = None) -> None:
         self._contents = contents
         self._usage = usage
         self.calls = 0
+        self.requests: list = []
 
     async def stream(self, request):
+        self.requests.append(request)
         text = self._contents[self.calls] if self.calls < len(self._contents) else "done"
         self.calls += 1
         yield LLMChunk(delta_content=text)
@@ -226,7 +231,7 @@ async def test_emits_plan_and_lifecycle_events():
 
 
 async def test_run_plan_carries_stance_and_group_tags():
-    # 辩论/审查 (前端UX目标态 §四②): the CEO marks an opposing batch; the tags ride the
+    # 辩论/审查 (前端UX设计.md §四②): the CEO marks an opposing batch; the tags ride the
     # run_plan payload display-only so the frontend can render正反 side-by-side. The
     # execution stays a普通并行 DAG (守住「形状是数据不是模式」) — only the wire grew.
     sink = EventSink()
@@ -252,7 +257,7 @@ async def test_run_plan_carries_stance_and_group_tags():
 
 
 async def test_run_plan_carries_round_tag():
-    # 真·多轮辩论 (前端UX目标态 §四): round rides run_plan display-only alongside
+    # 真·多轮辩论 (前端UX设计.md §四): round rides run_plan display-only alongside
     # stance/group so the frontend can lay rounds out 逐轮. 跨轮交锋全靠 depends_on —
     # round 只是呈现信号, 不改执行 (守住「形状是数据不是模式」).
     sink = EventSink()
@@ -655,6 +660,7 @@ async def _resolve_when_pending(
     registry: InteractionRegistry,
     conversation_id: str,
     decision: CheckpointDecision,
+    note: str = "",
 ):
     """Poll the bridge for the paused plan_review and settle it (mimics the user)."""
     for _ in range(500):
@@ -662,7 +668,7 @@ async def _resolve_when_pending(
         if pending:
             registry.resolve(
                 pending[0].id,
-                CheckpointResponse(decision=decision),
+                CheckpointResponse(decision=decision, note=note),
                 conversation_id=conversation_id,
             )
             return pending[0]
@@ -711,6 +717,67 @@ async def test_checkpoint_after_stop_halts_downstream():
     assert "S2OUT" not in result.output  # downstream halted
     # s2 shows as un-run in the CEO summary rather than a product.
     assert "写手" in result.output
+
+
+async def test_checkpoint_after_adjust_steers_downstream():
+    # Adjusting at the checkpoint injects the user's note as a steer onto the
+    # not-yet-run downstream step, then proceeds: s2 still runs AND its prompt
+    # carries the steer so the correction redirects the remaining work.
+    registry = InteractionRegistry()
+    sink = EventSink()
+    provider = _Provider(["S1OUT", "S2OUT"])
+    tool = _tool_ckpt(provider, sink, registry, "conv1", timeout=5.0)
+    exec_task = asyncio.create_task(tool.execute({"tasks": _CKPT_DAG}, _ctx()))
+    await _resolve_when_pending(
+        registry, "conv1", CheckpointDecision.ADJUST, note="把重点放在风险上"
+    )
+    result = await exec_task
+
+    assert "S2OUT" in result.output  # adjust proceeds (unlike stop)
+    # The downstream worker's prompt carries the injected steer block.
+    s2_user = next(
+        m.content
+        for req in provider.requests
+        for m in req.messages
+        if m.role == "user" and "撰写" in (m.content or "")
+    )
+    assert "把重点放在风险上" in s2_user
+    assert "用户中途调整指示" in s2_user
+
+
+_CKPT_FORK_DAG = [
+    {"id": "s1", "role": "研究员", "task": "调研", "checkpoint_after": True},
+    {"id": "s2", "role": "写手", "task": "撰写", "depends_on": ["s1"]},
+    {"id": "u1", "role": "采购", "task": "比价"},
+    {"id": "u2", "role": "出纳", "task": "付款", "depends_on": ["u1"]},
+]
+
+
+async def test_checkpoint_adjust_steers_only_dependents_not_parallel_branch():
+    # s1 (checkpoint) → s2, with an INDEPENDENT chain u1 → u2 running alongside. At the
+    # pause u2 is still pending but does NOT depend on s1, so an adjust steer must reach
+    # s2 (the reviewed output's dependent) and leave the unrelated u2 untouched
+    # (避免污染无关并行支).
+    registry = InteractionRegistry()
+    sink = EventSink()
+    provider = _Provider(["S1OUT", "U1OUT", "S2OUT", "U2OUT"])
+    tool = _tool_ckpt(provider, sink, registry, "conv1", timeout=5.0)
+    exec_task = asyncio.create_task(tool.execute({"tasks": _CKPT_FORK_DAG}, _ctx()))
+    await _resolve_when_pending(
+        registry, "conv1", CheckpointDecision.ADJUST, note="把重点放在风险上"
+    )
+    await exec_task
+
+    def _user_prompt(task_marker: str) -> str:
+        return next(
+            m.content
+            for req in provider.requests
+            for m in req.messages
+            if m.role == "user" and task_marker in (m.content or "")
+        )
+
+    assert "把重点放在风险上" in _user_prompt("撰写")  # s2 depends on checkpoint → steered
+    assert "把重点放在风险上" not in _user_prompt("付款")  # u2 unrelated → not polluted
 
 
 async def test_checkpoint_timeout_continues():
@@ -764,3 +831,195 @@ def test_plan_review_resolve_body_discriminates():
     assert isinstance(body, ResolvePlanReviewInteraction)
     assert body.decision is CheckpointDecision.STOP
     assert body.note == "halt"
+
+
+# --- 结构化挂起 2b: durable frame capture + resume_plan (turn 级落盘 + /resume) -----
+
+
+def _tool_durable(
+    provider: _Provider,
+    sink: EventSink,
+    registry: InteractionRegistry,
+    saver,
+    deleter,
+) -> DelegateTool:
+    """A top-level (depth 0) delegate wired for DURABLE checkpoints: message_id +
+    persist/drop closures, so a plan_review pause is captured to a frame."""
+    return DelegateTool(
+        llm=provider,
+        sink=sink,
+        system_prompt="SYS",
+        user_message="原始请求",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=_ctx(),
+        conversation_id="conv1",
+        registry=registry,
+        checkpoint_timeout_seconds=5.0,
+        checkpoint_enabled=True,
+        message_id="m1",
+        suspension_saver=saver,
+        suspension_deleter=deleter,
+        captain_run_id="CEO",
+    )
+
+
+async def test_durable_pause_persists_frame_then_drops_on_live_resolve():
+    # A top-level pause persists a TurnSuspension BEFORE the wait (so a disconnect
+    # leaves a resumable frame) and DROPS it after a live in-process resolve (the
+    # live turn settled, the backstop is stale). The frame captures the plan (minted
+    # ids), the reviewed/pending steps, and the CEO transcript's delegate tool-call.
+    from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+    from agentcore.runtime.suspension import TurnSuspension, captain_transcript
+
+    registry = InteractionRegistry()
+    sink = EventSink()
+    saved: list[TurnSuspension] = []
+    dropped: list[str] = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(mid):
+        dropped.append(mid)
+
+    tool = _tool_durable(_Provider(["S1OUT", "S2OUT"]), sink, registry, _save, _drop)
+    # Publish a CEO transcript ending with the delegate tool-call (as the captain
+    # executor would), so the hook can capture it off the contextvar.
+    transcript = [
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_del",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    token = captain_transcript.set(transcript)
+    try:
+        exec_task = asyncio.create_task(tool.execute({"tasks": _CKPT_DAG}, _ctx()))
+        await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
+        result = await exec_task
+    finally:
+        captain_transcript.reset(token)
+
+    assert len(saved) == 1
+    frame = saved[0]
+    assert frame.message_id == "m1"
+    assert frame.conversation_id == "conv1"
+    assert frame.captain_run_id == "CEO"
+    assert frame.tool_call_id == "call_del"
+    # the plan (with its minted ids) + completed seed line up for a WaveScheduler resume
+    assert len(frame.plan.nodes) == 2
+    assert frame.completed  # s1 finished before the pause
+    assert any(s["role"] == "研究员" for s in frame.steps)
+    assert any(p["role"] == "写手" for p in frame.pending)
+    # the pause's plan_review_required rides the frame journal so a resume replays it
+    assert any(e["type"] == "plan_review_required" for e in frame.journal)
+    # live resolve dropped the now-stale backstop
+    assert dropped == ["m1"]
+    assert "S1OUT" in result.output and "S2OUT" in result.output
+
+
+async def test_durable_capture_skipped_without_transcript():
+    # No captain transcript published (e.g. an unusual call path) ⇒ the hook can't
+    # build a faithful frame, so it skips persistence (the live resolve still works).
+    registry = InteractionRegistry()
+    saved: list = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(mid):
+        pass
+
+    tool = _tool_durable(_Provider(["S1OUT", "S2OUT"]), EventSink(), registry, _save, _drop)
+    exec_task = asyncio.create_task(tool.execute({"tasks": _CKPT_DAG}, _ctx()))
+    await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
+    await exec_task
+    assert saved == []  # nothing captured without a transcript
+
+
+def _resume_plan(prefix: str = "del_resume"):
+    """Build a 2-step checkpoint DAG plan the way ``execute`` does, for resume tests."""
+    from agentcore.runtime.runs import build_run_plan
+
+    plan, errors = build_run_plan(
+        _CKPT_DAG,
+        valid_tools=set(),
+        id_prefix=prefix,
+        parent_run_id="CEO",
+        depth=1,
+    )
+    assert not errors
+    return plan
+
+
+async def test_resume_plan_continue_runs_only_the_tail():
+    # CONTINUE: s1 is seeded (already finished pre-pause) so only s2 runs; both the
+    # seeded product and the freshly-run tail come back to the CEO.
+    plan = _resume_plan()
+    seed = {plan.nodes[0].run_id: RunState(phase=RunPhase.COMPLETED, content="S1OUT")}
+    provider = _Provider(["S2OUT"])
+    tool = _tool(provider)
+    result = await tool.resume_plan(
+        plan,
+        seed,
+        decision=CheckpointDecision.CONTINUE,
+        note="",
+        checkpoint_run_ids={plan.nodes[0].run_id},
+        execution_id="e",
+    )
+    assert "S1OUT" in result.output  # seeded product still shown
+    assert "S2OUT" in result.output  # tail ran
+    assert provider.calls == 1  # ONLY s2 ran (s1 was seeded, not re-run)
+
+
+async def test_resume_plan_stop_skips_the_tail():
+    # STOP: don't run the tail — s2 is materialised SKIPPED, s1's product is kept, and
+    # the LLM is never called (no tail). The CEO writes an overview of the partial work.
+    plan = _resume_plan()
+    seed = {plan.nodes[0].run_id: RunState(phase=RunPhase.COMPLETED, content="S1OUT")}
+    provider = _Provider(["SHOULD_NOT_RUN"])
+    tool = _tool(provider)
+    result = await tool.resume_plan(
+        plan,
+        seed,
+        decision=CheckpointDecision.STOP,
+        note="",
+        checkpoint_run_ids={plan.nodes[0].run_id},
+        execution_id="e",
+    )
+    assert "S1OUT" in result.output
+    assert "SHOULD_NOT_RUN" not in result.output
+    assert provider.calls == 0  # the tail never ran
+    assert "写手" in result.output  # s2 still shown (as un-run) in the summary
+
+
+async def test_resume_plan_adjust_steers_the_tail():
+    # ADJUST: inject the note as a steer onto the reviewed checkpoint's not-yet-run
+    # dependents, then continue — s2 runs AND its prompt carries the steer.
+    plan = _resume_plan()
+    seed = {plan.nodes[0].run_id: RunState(phase=RunPhase.COMPLETED, content="S1OUT")}
+    provider = _Provider(["S2OUT"])
+    tool = _tool(provider)
+    result = await tool.resume_plan(
+        plan,
+        seed,
+        decision=CheckpointDecision.ADJUST,
+        note="把重点放在风险上",
+        checkpoint_run_ids={plan.nodes[0].run_id},
+        execution_id="e",
+    )
+    assert "S2OUT" in result.output
+    s2_user = next(
+        m.content
+        for req in provider.requests
+        for m in req.messages
+        if m.role == "user" and "撰写" in (m.content or "")
+    )
+    assert "把重点放在风险上" in s2_user

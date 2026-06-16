@@ -61,6 +61,13 @@ export interface FileSource {
    * 逐目录 `listDir`）。
    */
   listTree?(): Promise<FileNode[]>;
+  /**
+   * 扁平**文件**路径列表，喂给 @ 提及索引（文件中枢统一 F4）。只含文件（不含目录）、
+   * 剪掉忽略目录（node_modules/.git…）、有上限——本地根经 `fsApi.listFiles`、云端
+   * 工作区经 `/file-index`，二者语义对齐，故 @ 无论源是本地还是云端表现一致。能
+   * 廉价枚举的源才提供；缺省即不参与 @ 索引。
+   */
+  listFileIndex?(): Promise<string[]>;
 
   /** 读一个文件用于面板内预览（传输失败抛异常）。 */
   read(path: string): Promise<FilePreviewResult>;

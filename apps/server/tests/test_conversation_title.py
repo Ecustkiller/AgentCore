@@ -1,5 +1,8 @@
 """Tests for conversation title generation (_sanitize_title + LLMTitleGenerator)."""
 
+import asyncio
+
+import agentcore.memory.conversation_title as title_mod
 from agentcore.llm import LLMRequest, LLMResponse
 from agentcore.memory.conversation_title import (
     _TITLE_SYSTEM_PROMPT,
@@ -149,5 +152,20 @@ async def test_generator_blank_output_returns_empty():
             conversation_id="c1",
             messages=[{"role": "user", "content": "你好"}],
         )
+    )
+    assert title == ""
+
+
+async def test_generator_times_out_returns_empty(monkeypatch):
+    """A stalled model degrades to "" (→ caller's truncated fallback), not a hang."""
+
+    class _StallProvider:
+        async def complete(self, request: LLMRequest) -> LLMResponse:
+            await asyncio.sleep(3600)  # never resolves within the timeout
+            raise AssertionError("unreachable")
+
+    monkeypatch.setattr(title_mod, "_TITLE_TIMEOUT_SECONDS", 0.01)
+    title = await LLMTitleGenerator(_StallProvider()).generate(
+        TitleInput(conversation_id="c1", messages=[{"role": "user", "content": "你好"}])
     )
     assert title == ""

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.approvals import ApprovalDecision
 from agentcore.runtime.checkpoints import CheckpointDecision
+from agentcore.runtime.suspension import SuspensionKind
 
 # --- Auth ---
 
@@ -86,13 +87,17 @@ class ConversationSummary(BaseModel):
     # 工作区 §九 ⑩). Populated by the list/grouped endpoints; defaults to 0 on the
     # single-conversation responses where the count isn't needed.
     message_count: int = 0
-    # Folder membership; None = ungrouped (see 前端UX目标态 §七).
+    # Folder membership; None = 裸聊 (ungrouped, no workspace yet). A conversation's
+    # workspace/mode is derived from its folder (文件夹即工作区); see 会话列表设计.
     folder_id: str | None = None
-    # Local-mode binding for an *ungrouped* conversation; None = cloud. A foldered
-    # conversation derives its mode from the folder's binding instead (§七).
-    local_root_id: str | None = None
     # Selected 质量档 (llm/modes.py); None = inherit user default → operator default.
     model_mode: str | None = None
+    # Sidebar housekeeping (对话基础功能补齐). ``pinned`` floats the row to the top
+    # (置顶对话); ``archived`` marks it as hidden from the live list (归档对话) — the
+    # grouped/live endpoints already exclude archived rows, so this is True only on
+    # the「已归档」view's payloads.
+    pinned: bool = False
+    archived: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -109,6 +114,10 @@ class UpdateConversationRequest(BaseModel):
     # Selected 质量档 (llm/modes.py); explicit null clears back to「inherit default」.
     # Optional: omit to leave unchanged (the route reads ``model_fields_set``).
     model_mode: str | None = None
+    # Sidebar housekeeping toggles (对话基础功能补齐). Optional — omit to leave
+    # unchanged (the route reads ``model_fields_set``); never null (no tri-state).
+    pinned: bool | None = None
+    archived: bool | None = None
 
 
 class MoveConversationRequest(BaseModel):
@@ -208,6 +217,11 @@ class LlmKeyStatusResponse(BaseModel):
 class CreateFolderRequest(BaseModel):
     name: str
     local_dir: str | None = None
+    # Bind the new folder to a desktop FS root at creation (文件中枢统一 F2:
+    # "添加文件夹 = 建本地绑定项目"). The hub turns a picked local directory into a
+    # local project in one step; present ⇒ the folder (and its conversations) run
+    # in local mode against this root (§七).
+    local_root_id: str | None = None
 
 
 class UpdateFolderRequest(BaseModel):
@@ -416,9 +430,10 @@ class ResolvePlanReviewInteraction(BaseModel):
 
     Raised when a delegate step marked ``checkpoint_after`` completed and the
     WaveScheduler paused before its dependents. ``decision`` is ``continue`` (run
-    the downstream steps) or ``stop`` (end the run here); ``adjust`` is accepted
-    over the wire but treated as ``continue`` in 2a (steer injection is deferred).
-    Reuses :class:`CheckpointResponse` (same shape as ask_user) on the engine side.
+    the downstream steps as-is), ``adjust`` (inject ``note`` as a steer onto the
+    checkpoint's not-yet-run downstream dependents, then proceed), or ``stop`` (end
+    the run here). Reuses :class:`CheckpointResponse` (same shape as ask_user) on the
+    engine side.
     """
 
     kind: Literal["plan_review"] = "plan_review"
@@ -435,6 +450,58 @@ ResolveInteractionRequest = (
 )
 
 
+class ResumeTurnRequest(BaseModel):
+    """Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).
+
+    Continues a turn that paused at a plan_review / ask_user checkpoint and was
+    DURABLY persisted (so it survived a client disconnect / server restart — the live
+    in-process resolve is the corresponding interaction instead). Same decision
+    vocabulary as the live resolve: ``continue`` (proceed — run the gated downstream
+    for plan_review / accept the CEO direction for ask_user), ``adjust`` (inject
+    ``note`` as a steer, then continue), or ``stop`` (end the turn here). ``selected``
+    carries the option(s) the user picked from an ask_user menu (ignored for
+    plan_review; the server drops any pick not actually offered). The engine-only
+    ``timeout`` is never sent by a client.
+    """
+
+    decision: CheckpointDecision
+    note: str = Field("", max_length=4000)
+    selected: list[str] = Field(default_factory=list, max_length=6)
+
+
+class PausedTurnSummary(BaseModel):
+    """A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).
+
+    Surfaced on conversation reopen so the client can re-render the right resume card
+    by ``kind`` and offer continue / adjust / stop → the resume endpoint.
+    ``message_id`` is both the pause key and the id the resumed assistant message will
+    reuse, so an optimistic bubble reconciles cleanly.
+
+    plan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the
+    gated downstream); ask_user carries ``question`` / ``options`` / ``context`` /
+    ``multiple`` (the CEO's decision prompt). The unused set is empty for the other
+    kind.
+    """
+
+    message_id: str
+    kind: SuspensionKind
+    checkpoint_id: str
+    user_message: str = ""
+    # plan_review
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    pending: list[dict[str, Any]] = Field(default_factory=list)
+    # ask_user
+    question: str = ""
+    options: list[str] = Field(default_factory=list)
+    context: str = ""
+    multiple: bool = False
+
+
+class PausedTurnListResponse(BaseModel):
+    data: list[PausedTurnSummary] = Field(default_factory=list)
+    total: int = 0
+
+
 class Citation(BaseModel):
     """A web source consulted for an assistant message (source-card data)."""
 
@@ -445,15 +512,19 @@ class Citation(BaseModel):
 
 
 class RunsPayload(BaseModel):
-    """Persisted multi-agent execution journal for an assistant message.
+    """Persisted turn replay payload for an assistant message.
 
-    ``events`` is the turn's ordered run/tool SSE events; the client replays them
-    through the same fold as the live stream to reproduce the team graph exactly
-    on reload. ``null`` on messages with no delegation (user / single-agent).
+    ``events`` is a multi-agent turn's ordered run/tool SSE events; the client
+    replays them through the same fold as the live stream to reproduce the team
+    graph exactly on reload (empty ``[]`` for a single-agent turn). ``process`` is
+    a single-agent turn's 思考+工具 timeline (ordered reasoning/tool steps) the
+    client replays into the inline process panel; ``null`` unless the turn used a
+    tool. ``null`` whole payload on messages with neither (plain chat / user).
     """
 
     events: list[dict[str, Any]] = Field(default_factory=list)
     finish_reason: str | None = None
+    process: list[dict[str, Any]] | None = None
 
 
 class MessageDetail(BaseModel):
@@ -675,6 +746,19 @@ class WorkspaceFileListResponse(BaseModel):
     total: int
 
 
+class WorkspaceFileIndexResponse(BaseModel):
+    """Flat file-path list for @ mentions (文件中枢统一 F4).
+
+    Files only (no dirs), ignore-pruned, capped — ``truncated`` is True when the
+    cap was hit. Mirrors the desktop ``fsApi.listFiles`` so cloud workspace files
+    can feed the same @ index local roots already do.
+    """
+
+    data: list[str]
+    total: int
+    truncated: bool
+
+
 class UploadFileResponse(BaseModel):
     """Result of a workspace file upload."""
 
@@ -885,6 +969,11 @@ class ChatParticipant(BaseModel):
     id: str
     username: str
     display_name: str
+    # Platform admin (创始团队 = the 内测群's moderators); lets the roster badge
+    # official accounts and hide kick/mute on them. False for the dm peer.
+    is_admin: bool = False
+    # Admin-imposed 禁言 (Stage 3): this group member can read but not send.
+    muted_by_admin: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -912,10 +1001,36 @@ class ChatListResponse(BaseModel):
     total: int
 
 
+class ChatMembersResponse(BaseModel):
+    """A chat's members (group roster: resolves sender names + the member panel)."""
+
+    data: list[ChatParticipant]
+    total: int
+
+
 class StartDmRequest(BaseModel):
     """Open (or reuse) a 1:1 chat with another user (by their user id)."""
 
     user_id: str = Field(..., min_length=1, max_length=64)
+
+
+class UpdateMembershipRequest(BaseModel):
+    """Patch this user's per-chat flags (mute / pin); omitted fields unchanged."""
+
+    muted: bool | None = None
+    pinned: bool | None = None
+
+
+class AdminMuteRequest(BaseModel):
+    """Admin 禁言 toggle for a group member (muted = can read, can't send)."""
+
+    muted: bool
+
+
+class AnnounceRequest(BaseModel):
+    """Post an admin announcement into a chat as a centered system_card (官方公告)."""
+
+    content: str = Field(..., min_length=1, max_length=2000)
 
 
 class ChatMessageDetail(BaseModel):

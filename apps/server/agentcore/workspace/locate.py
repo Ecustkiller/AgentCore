@@ -220,22 +220,31 @@ def resolve_local_binding(
     *,
     folder_id: str | None,
     folder_local_root_id: str | None,
-    conversation_local_root_id: str | None,
     label: str | None = None,
 ) -> LocalBinding | None:
-    """Resolve a conversation's local-mode binding from its stored root ids.
+    """Resolve a conversation's local-mode binding from its folder's root id.
 
-    The 双模式工作区 §七 rule, in one place: a conversation **in a folder** uses
-    *that folder's* binding — the folder is the shared project space, so its own
-    ``conversation_local_root_id`` is ignored while it is filed there; an
-    **ungrouped** conversation uses its own. The governing scope being unbound
-    (``None``) means cloud. Pure (takes the already-fetched ids) so it stays
-    DB-free and unit-testable; ``service.py`` fetches the rows and calls it.
+    The 双模式工作区 §七 rule, in one place: **文件夹 = 工作区**, so a binding lives
+    only on the folder. A conversation **in a folder** is local iff that folder is
+    bound; a **folderless (裸聊)** conversation has no workspace yet, so it is always
+    cloud. The governing scope being unbound (``None``) means cloud. Pure (takes the
+    already-fetched ids) so it stays DB-free and unit-testable; callers fetch the
+    folder row and pass its ``local_root_id``.
     """
-    root_id = folder_local_root_id if folder_id is not None else conversation_local_root_id
+    root_id = folder_local_root_id if folder_id is not None else None
     if not root_id:
         return None
     return LocalBinding(root_id=root_id, root_label=label or "workspace")
+
+
+def default_workspace_name(title: str | None) -> str:
+    """Name for an auto-created workspace when a 裸聊 first produces files (B 懒建).
+
+    Uses the conversation's title so the new folder reads as "this chat's project";
+    falls back when the title has not been generated yet (it is async, post-turn).
+    """
+    name = " ".join((title or "").split())
+    return name[:200] if name else "未命名工作区"
 
 
 def build_workspace(

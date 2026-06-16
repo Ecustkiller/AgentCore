@@ -6,7 +6,7 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import type { components } from "@/types/api.generated";
-import type { SSEEvent } from "@/types/events";
+import type { ProcessStep, SSEEvent } from "@/types/events";
 
 type Schemas = components["schemas"];
 /** A window of messages (cursor-windowed, oldest-first) from the REST endpoint. */
@@ -38,10 +38,16 @@ export interface BackendMessage {
     snippet?: string;
     site?: string;
   }[];
-  /** Persisted multi-agent execution journal (the turn's ordered run/tool SSE
-   * events). null for user / single-agent turns. Replayed through the same fold
-   * as the live stream to rebuild the team graph on reload (§9.3). */
-  runs?: { events: SSEEvent[]; finish_reason: string | null } | null;
+  /** Persisted turn replay payload. `events` is a multi-agent turn's ordered
+   * run/tool SSE events (replayed through the same fold as the live stream to
+   * rebuild the team graph on reload, §9.3); `process` is a single-agent turn's
+   * 思考+工具 timeline (前端UX设计.md §一). null for user / plain turns. (Opaque JSON
+   * in the OpenAPI — SSE/event payloads are exempt from the generated-types rule.) */
+  runs?: {
+    events: SSEEvent[];
+    finish_reason: string | null;
+    process?: ProcessStep[] | null;
+  } | null;
   created_at: string;
 }
 
@@ -76,11 +82,23 @@ export function toMessage(m: BackendMessage): Message {
   // plan_review events are journaled like ask_user checkpoints, so a reloaded turn
   // replays its structured DAG pauses inline too (结构化挂起 2a).
   const planReviews = planReviewsFromEvents(events);
+  // Single-agent 思考+工具 process timeline (前端UX设计.md §一): prefer the persisted
+  // ordered steps (a tool-using turn), else synthesize one reasoning step from
+  // reasoning_content (a thinking-only turn, or a pre-feature row), so the inline
+  // process panel replays the shape the live turn built. Multi-agent turns omit it
+  // — the team graph carries their activity instead.
+  const process: ProcessStep[] | undefined = executionId
+    ? undefined
+    : (m.runs?.process ??
+      (m.reasoning_content
+        ? [{ kind: "reasoning", text: m.reasoning_content }]
+        : undefined));
   return {
     id: m.id,
     role: m.role === "assistant" ? "assistant" : "user",
     content: m.content ?? "",
     reasoning: m.reasoning_content ?? undefined,
+    process,
     createdAt: m.created_at,
     // Stamp the plan id so the bubble renders its inline team graph; the journal
     // below lets that graph replay the turn (both null for non-team turns).
@@ -262,4 +280,18 @@ export async function jumpToMessage(
   } catch {
     /* message gone / not owned — leave the conversation as-is */
   }
+}
+
+/**
+ * Delete a single message (单条消息删除). Removes the row server-side, then drops
+ * it from the conversation's live window. Server-first so a failed delete leaves
+ * the message on screen; throws on failure so the caller can surface a toast.
+ * Append-only cost ledger is untouched server-side (real spend is never rewritten).
+ */
+export async function deleteMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  await api.delete(`/v1/conversations/${conversationId}/messages/${messageId}`);
+  useConversationStore.getState().removeMessage(messageId, conversationId);
 }

@@ -4,11 +4,14 @@ import { useAuthStore } from "@/stores/auth";
 import {
   useActiveChat,
   useActiveMessages,
+  useChatMembers,
   useMessagingStore,
 } from "@/stores/messaging";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, Info } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { ChatBubble } from "./ChatBubble";
 import { ChatComposer } from "./ChatComposer";
+import { GroupInfoDialog } from "./GroupInfoDialog";
 import { avatarInitial, chatDisplayName } from "./chatDisplay";
 
 interface Props {
@@ -19,8 +22,25 @@ interface Props {
 export function ChatThread({ chatId }: Props) {
   const chat = useActiveChat();
   const messages = useActiveMessages();
+  const members = useChatMembers(chatId);
   const loading = useMessagingStore((s) => s.loadingMessages[chatId] ?? false);
+  const loadMembers = useMessagingStore((s) => s.loadMembers);
   const myId = useAuthStore((s) => s.user?.id ?? null);
+
+  const isGroup = chat?.type === "group";
+  const [infoOpen, setInfoOpen] = useState(false);
+
+  // Group threads label each message with its sender, so they need the roster;
+  // load it when a group opens (dms render the single peer's name in the header).
+  useEffect(() => {
+    if (isGroup) void loadMembers(chatId);
+  }, [isGroup, chatId, loadMembers]);
+
+  const nameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of members) map.set(m.id, m.display_name || m.username);
+    return map;
+  }, [members]);
 
   const last = messages[messages.length - 1];
   const contentKey = last ? `${last.id}-${messages.length}` : "";
@@ -30,6 +50,7 @@ export function ChatThread({ chatId }: Props) {
   );
 
   const name = chat ? chatDisplayName(chat) : "";
+  const memberCount = isGroup && members.length > 0 ? members.length : null;
   const hasMessages = messages.length > 0;
   // viewer.state === pending means someone opened this dm with us and we have
   // not replied yet — a message request (replying accepts it, 消息IM.md §五).
@@ -41,9 +62,28 @@ export function ChatThread({ chatId }: Props) {
         <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
           {avatarInitial(name || "?")}
         </span>
-        <span className="truncate text-base font-medium text-foreground">
-          {name}
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-base font-medium text-foreground">
+            {name}
+          </span>
+          {memberCount && (
+            <span className="text-xs text-muted-foreground">
+              {memberCount} 名成员
+            </span>
+          )}
         </span>
+        {isGroup && (
+          <SimpleTooltip label="群信息">
+            <button
+              type="button"
+              onClick={() => setInfoOpen(true)}
+              aria-label="群信息"
+              className="ml-auto flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Info size={18} />
+            </button>
+          </SimpleTooltip>
+        )}
       </div>
 
       {isRequest && (
@@ -56,13 +96,22 @@ export function ChatThread({ chatId }: Props) {
         <div ref={scrollRef} className="h-full overflow-y-auto">
           {hasMessages ? (
             <div className="flex flex-col gap-2 px-4 py-4">
-              {messages.map((m) => (
-                <ChatBubble
-                  key={m.id}
-                  message={m}
-                  mine={m.sender_user_id != null && m.sender_user_id === myId}
-                />
-              ))}
+              {messages.map((m) => {
+                const mine =
+                  m.sender_user_id != null && m.sender_user_id === myId;
+                const senderName =
+                  isGroup && !mine && m.sender_user_id
+                    ? (nameById.get(m.sender_user_id) ?? "成员")
+                    : undefined;
+                return (
+                  <ChatBubble
+                    key={m.id}
+                    message={m}
+                    mine={mine}
+                    senderName={senderName}
+                  />
+                );
+              })}
             </div>
           ) : (
             <div className="flex h-full items-center justify-center">
@@ -87,6 +136,14 @@ export function ChatThread({ chatId }: Props) {
       </div>
 
       <ChatComposer chatId={chatId} />
+
+      {isGroup && (
+        <GroupInfoDialog
+          chatId={chatId}
+          open={infoOpen}
+          onClose={() => setInfoOpen(false)}
+        />
+      )}
     </div>
   );
 }

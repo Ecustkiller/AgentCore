@@ -1,7 +1,10 @@
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { referencedCitationNumbers } from "@/lib/citations";
 import { copyText } from "@/lib/clipboard";
 import { errorActionForCode } from "@/lib/errors";
 import { formatCost, formatMessageTime } from "@/lib/format";
+import { notifyError } from "@/lib/toast";
+import { deleteMessage } from "@/services/messages";
 import { runRegenerate } from "@/services/turns";
 import { downloadWorkspaceFile } from "@/services/workspace";
 import {
@@ -19,16 +22,26 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  CircleSlash,
+  Code2,
   Copy,
   Download,
+  FileText,
   Folder,
+  Globe,
   KeyRound,
+  type LucideIcon,
   Paperclip,
   Pencil,
   RefreshCw,
+  Search,
+  Terminal,
+  Trash2,
+  Wrench,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { ProcessStep } from "@/types/events";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CheckpointCard } from "./CheckpointCard";
 import { InlineTeamGraph } from "./InlineTeamGraph";
@@ -59,6 +72,60 @@ function MessageAction({
       {icon}
       <span>{label}</span>
     </button>
+  );
+}
+
+/**
+ * Hover action that deletes a single message (单条消息删除).
+ *
+ * A hard delete with no undo (the row is removed server-side, then dropped from
+ * the window), so it asks for an inline confirm first. A failed delete leaves the
+ * message on screen and toasts. The append-only cost ledger is untouched
+ * server-side — deleting a message never rewrites real spend.
+ */
+function DeleteMessageAction({ messageId }: { messageId: string }) {
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const [confirming, setConfirming] = useState(false);
+
+  const onDelete = async () => {
+    setConfirming(false);
+    if (!conversationId) return;
+    try {
+      await deleteMessage(conversationId, messageId);
+    } catch (err) {
+      notifyError(err, "删除失败");
+    }
+  };
+
+  if (confirming) {
+    return (
+      <span className="inline-flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={() => void onDelete()}
+          className="inline-flex h-7 items-center gap-1 rounded-lg px-1.5 text-xs text-destructive transition-colors hover:bg-destructive/10"
+        >
+          <Check size={13} />
+          <span>确认删除</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming(false)}
+          className="inline-flex h-7 items-center gap-1 rounded-lg px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <X size={13} />
+          <span>取消</span>
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <MessageAction
+      icon={<Trash2 size={13} />}
+      label="删除"
+      onClick={() => setConfirming(true)}
+    />
   );
 }
 
@@ -126,6 +193,223 @@ function ThinkingPanel({
       {expanded && (
         <div className="whitespace-pre-wrap border-t border-border px-3 py-2 text-sm text-muted-foreground">
           {reasoning}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Icon + 中文标签 for a builtin tool, by its backend name. Unknown tools fall
+ * back to a generic wrench + the raw name, so a newly added tool still renders. */
+const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
+  web_search: { Icon: Search, label: "搜索网页" },
+  read_url: { Icon: Globe, label: "读取网页" },
+  grep: { Icon: Code2, label: "检索代码" },
+  code_execute: { Icon: Terminal, label: "执行代码" },
+  file_read: { Icon: FileText, label: "读取文件" },
+  file_write: { Icon: FileText, label: "写入文件" },
+  file_list: { Icon: Folder, label: "列出目录" },
+  str_replace: { Icon: Pencil, label: "编辑文件" },
+  file_delete: { Icon: Trash2, label: "删除文件" },
+  file_move: { Icon: FileText, label: "移动文件" },
+};
+
+const toolMeta = (name: string): { Icon: LucideIcon; label: string } =>
+  TOOL_META[name] ?? { Icon: Wrench, label: name };
+
+/** The most descriptive argument to show beside a tool's label (its query / url /
+ * path / …); empty when the call carries no representative string arg. */
+const TOOL_DETAIL_KEYS = [
+  "query",
+  "url",
+  "pattern",
+  "path",
+  "command",
+  "code",
+  "q",
+  "text",
+];
+function toolDetail(args: Record<string, unknown>): string {
+  for (const k of TOOL_DETAIL_KEYS) {
+    const v = args[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  for (const v of Object.values(args)) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
+/** First non-empty line of a tool result, clamped — the collapsed one-line peek. */
+function resultPeek(result: string): string {
+  const line = result.split("\n").find((l) => l.trim()) ?? "";
+  return line.length > 140 ? `${line.slice(0, 140)}…` : line;
+}
+
+/** A tool step's status dot in the process timeline (running / ok / error). */
+function ProcessStatusIcon({
+  status,
+}: {
+  status: "running" | "success" | "error";
+}) {
+  if (status === "running")
+    return (
+      <span className="mt-1.5 size-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+    );
+  if (status === "error")
+    return <X size={14} className="mt-0.5 shrink-0 text-destructive" />;
+  return <Check size={14} className="mt-0.5 shrink-0 text-success" />;
+}
+
+/** One tool call in the process timeline: icon · label · arg · status, with a
+ * click-to-expand full result (capped server-side). Collapsed shows a one-line
+ * result peek so the row is informative without being noisy. */
+function ProcessToolRow({
+  step,
+}: {
+  step: Extract<ProcessStep, { kind: "tool" }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const { Icon, label } = toolMeta(step.tool_name);
+  const detail = toolDetail(step.arguments);
+  const hasResult = step.status !== "running" && !!step.result;
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        onClick={() => hasResult && setOpen((v) => !v)}
+        className={`flex w-full items-start gap-2 text-left ${
+          hasResult ? "cursor-pointer" : "cursor-default"
+        }`}
+      >
+        <Icon size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1">
+          <span className="text-sm text-foreground">
+            <span className="font-medium">{label}</span>
+            {detail && (
+              <span className="ml-1.5 break-all text-muted-foreground">
+                {detail}
+              </span>
+            )}
+          </span>
+          {hasResult && !open && (
+            <span
+              className={`block truncate text-xs ${
+                step.status === "error"
+                  ? "text-destructive/80"
+                  : "text-muted-foreground/70"
+              }`}
+            >
+              {resultPeek(step.result ?? "")}
+            </span>
+          )}
+        </span>
+        <ProcessStatusIcon status={step.status} />
+      </button>
+      {open && hasResult && (
+        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
+          {step.result}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/** One row of the process timeline (a reasoning segment or a tool call), with the
+ * connector dot + line shared by both kinds. */
+function ProcessRow({ step, last }: { step: ProcessStep; last: boolean }) {
+  const dotClass =
+    step.kind === "reasoning"
+      ? "bg-muted-foreground/40"
+      : step.status === "error"
+        ? "bg-destructive"
+        : step.status === "running"
+          ? "animate-pulse bg-primary"
+          : "bg-success";
+  return (
+    <div className="flex gap-3">
+      <div className="flex flex-col items-center">
+        <span className={`mt-1 size-2 shrink-0 rounded-full ${dotClass}`} />
+        {!last && <span className="w-px flex-1 bg-border" />}
+      </div>
+      <div className={`min-w-0 flex-1 ${last ? "" : "pb-3"}`}>
+        {step.kind === "reasoning" ? (
+          <div className="flex items-start gap-1.5">
+            <Brain size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
+            <p className="whitespace-pre-wrap text-sm italic text-muted-foreground">
+              {step.text}
+            </p>
+          </div>
+        ) : (
+          <ProcessToolRow step={step} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Collapsible「思考+工具」过程时间线 for a single-agent turn (前端UX设计.md §一).
+ *
+ * The merged successor to {@link ThinkingPanel}: the CEO's reasoning interleaved
+ * with its tool calls in turn order, on one timeline. Like ThinkingPanel it
+ * default-expands while streaming (watch it think + act live) and auto-collapses
+ * when the turn finishes (零噪音); manual toggles win. The final answer stays
+ * separate below it — the process never breaks up the reply.
+ */
+function ProcessTimeline({
+  process,
+  isStreaming,
+}: {
+  process: ProcessStep[];
+  isStreaming: boolean;
+}) {
+  const [expanded, setExpanded] = useState(isStreaming);
+  const prevStreaming = useRef(isStreaming);
+
+  useEffect(() => {
+    if (prevStreaming.current && !isStreaming) setExpanded(false);
+    prevStreaming.current = isStreaming;
+  }, [isStreaming]);
+
+  const toolCount = process.reduce(
+    (n, s) => (s.kind === "tool" ? n + 1 : n),
+    0,
+  );
+  const header = isStreaming
+    ? toolCount > 0
+      ? "正在思考并使用工具…"
+      : "正在思考…"
+    : toolCount > 0
+      ? `思考并使用了 ${toolCount} 个工具`
+      : "思考过程";
+
+  return (
+    <div className="mb-2 rounded-lg border border-border bg-muted/40">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+      >
+        <Brain size={14} className="shrink-0" />
+        <span>{header}</span>
+        {expanded ? (
+          <ChevronDown size={14} className="ml-auto shrink-0" />
+        ) : (
+          <ChevronRight size={14} className="ml-auto shrink-0" />
+        )}
+      </button>
+      {expanded && (
+        <div className="border-t border-border px-3 py-2.5">
+          {process.map((step, i) => (
+            <ProcessRow
+              // Append-only timeline: a step's index is stable for its lifetime
+              // (only the trailing step mutates), so the index is a safe key.
+              key={i}
+              step={step}
+              last={i === process.length - 1}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -335,6 +619,7 @@ function UserMessage({ message }: Props) {
             label="编辑"
             onClick={startEdit}
           />
+          <DeleteMessageAction messageId={message.id} />
           <MessageTime iso={message.createdAt} />
         </div>
       )}
@@ -361,9 +646,27 @@ function AssistantMessage({ message }: Props) {
     : null;
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
-  const citations = message.citations ?? [];
+  // Single-agent turns render the merged 思考+工具 process timeline; a multi-agent
+  // turn (executionId set) keeps the standalone ThinkingPanel — its team graph
+  // already carries the tool activity (前端UX设计.md §一).
+  const hasProcess =
+    message.executionId === null && (message.process?.length ?? 0) > 0;
+  // Stable ref so Markdown's memo holds across idle re-renders (a fresh `?? []`
+  // each render would otherwise re-render the whole body needlessly).
+  const citations = useMemo(() => message.citations ?? [], [message.citations]);
+  // Which sources the reply actually cites inline ([n]); the rest render dimmed
+  // in the source list as "retrieved but not cited".
+  const referenced = useMemo(
+    () => referencedCitationNumbers(message.content, citations.length),
+    [message.content, citations.length],
+  );
   const checkpoints = message.checkpoints ?? [];
   const planReviews = message.planReviews ?? [];
+  // A turn salvaged after a disconnect / stop (断线别白干): the backend persisted the
+  // finished team work as an incomplete message, flagged via runs.finish_reason. A
+  // quiet status chip frames the bubble as interrupted, not as a normal reply.
+  const isIncomplete =
+    !message.isStreaming && message.runs?.finishReason === "cancelled";
   // 回合成本 caption (§7.3A) — single-agent turns only. A multi-agent turn stamps
   // `executionId`, so its cost shows on the team card instead (avoids double
   // display). Live cost wins; a reloaded turn falls back to the ledger snapshot.
@@ -405,11 +708,18 @@ function AssistantMessage({ message }: Props) {
 
   return (
     <div className="group min-w-0" onMouseEnter={onPeekCost}>
-      {hasReasoning && (
-        <ThinkingPanel
-          reasoning={message.reasoning ?? ""}
+      {hasProcess ? (
+        <ProcessTimeline
+          process={message.process ?? []}
           isStreaming={message.isStreaming}
         />
+      ) : (
+        hasReasoning && (
+          <ThinkingPanel
+            reasoning={message.reasoning ?? ""}
+            isStreaming={message.isStreaming}
+          />
+        )
       )}
       {message.executionId && (
         <InlineTeamGraph
@@ -418,13 +728,20 @@ function AssistantMessage({ message }: Props) {
           journal={message.runs}
         />
       )}
+      {isIncomplete && (
+        <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          <CircleSlash size={14} />
+          已中断 · 已保存完成的部分
+        </div>
+      )}
       <Markdown
         content={message.content}
-        citationCount={citations.length}
+        citations={citations}
         onCitationClick={onCitationClick}
+        isStreaming={message.isStreaming}
       />
       {message.isStreaming &&
-        (message.content.length === 0 && !hasReasoning ? (
+        (message.content.length === 0 && !hasReasoning && !hasProcess ? (
           // Nothing streamed yet (the gap between send and the first token):
           // show an explicit "正在思考…" so the turn never looks like it stalled.
           <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -477,7 +794,11 @@ function AssistantMessage({ message }: Props) {
         </div>
       )}
       {citations.length > 0 && (
-        <SourceCards citations={citations} flash={citeFlash} />
+        <SourceCards
+          citations={citations}
+          flash={citeFlash}
+          referenced={referenced}
+        />
       )}
       {/* Checkpoints the CEO raised this turn (ask_user) — interactive only while
           this bubble is the live, suspended turn; otherwise a replayed record. */}
@@ -511,6 +832,7 @@ function AssistantMessage({ message }: Props) {
             label="重新生成"
             onClick={handleRegenerate}
           />
+          <DeleteMessageAction messageId={message.id} />
           {costText && (
             <span className="ml-1 text-xs text-muted-foreground/70">
               {costText}

@@ -9,7 +9,9 @@ import { ConversationItem } from "./ConversationItem";
  * The full list (with folders) lives on the /conversations management page. */
 const RECENT_LIMIT = 8;
 
-function byRecency(a: Conversation, b: Conversation): number {
+function byPinnedThenRecency(a: Conversation, b: Conversation): number {
+  // Pinned float to the top (置顶对话); within each group, newest activity first.
+  if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
   return (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0);
 }
 
@@ -25,7 +27,7 @@ export function RecentConversations() {
   const navigate = useNavigate();
 
   const recent = useMemo(() => {
-    const sorted = [...conversations].sort(byRecency);
+    const sorted = [...conversations].sort(byPinnedThenRecency);
     const top = sorted.slice(0, RECENT_LIMIT);
     if (currentId && !top.some((c) => c.id === currentId)) {
       const active = sorted.find((c) => c.id === currentId);

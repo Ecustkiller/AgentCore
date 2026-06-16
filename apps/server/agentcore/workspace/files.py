@@ -25,6 +25,22 @@ async def list_files(
     return await backend.list(".", pattern)
 
 
+async def list_file_index(
+    *, user_id: str, folder_id: str | None, conversation_id: str
+) -> tuple[list[str], bool]:
+    """Flat, ignore-pruned, capped file-path list for @ mentions (文件中枢统一 F4).
+
+    Returns ``(paths, truncated)``. Cloud-only by construction — the route gates
+    local workspaces with 409 (their files live on the desktop and are indexed
+    there). Mirrors the desktop ``fsApi.listFiles`` so @ behaves the same across
+    cloud and local.
+    """
+    backend = build_server_workspace(
+        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    )
+    return await backend.index_files()
+
+
 async def upload_file(
     *, user_id: str, folder_id: str | None, conversation_id: str, path: str, data: bytes
 ) -> int:

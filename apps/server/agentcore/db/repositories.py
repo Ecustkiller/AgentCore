@@ -39,6 +39,7 @@ from agentcore.db.models import (
     Invite,
     Message,
     ModelMode,
+    PausedTurnRow,
     RefreshToken,
     RunSessionRow,
     User,
@@ -241,14 +242,22 @@ class ConversationRepository:
         return result.scalar_one_or_none()
 
     async def list_by_user(
-        self, user_id: str, *, limit: int = 50, offset: int = 0
+        self,
+        user_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        archived: bool = False,
     ) -> tuple[Sequence[Conversation], int]:
         # Hidden handoff-job conversations (双模式工作区 P2e / e2) never show in the
         # sidebar — they exist only to host a cloud run's messages/cost/journal.
+        # ``archived`` selects one side of the archive split: the default (False) is
+        # the live list (sidebar / 全部对话), True backs the「已归档」view.
         base_query = select(Conversation).where(
             Conversation.user_id == user_id,
             Conversation.deleted_at.is_(None),
             Conversation.mode != "handoff",
+            Conversation.archived == archived,
         )
 
         count_result = await self._session.execute(
@@ -256,8 +265,13 @@ class ConversationRepository:
         )
         total = count_result.scalar_one()
 
+        # Pinned float to the top (置顶对话), then most-recent activity.
         result = await self._session.execute(
-            base_query.order_by(Conversation.updated_at.desc()).limit(limit).offset(offset)
+            base_query.order_by(
+                Conversation.pinned.desc(), Conversation.updated_at.desc()
+            )
+            .limit(limit)
+            .offset(offset)
         )
         return result.scalars().all(), total
 
@@ -305,6 +319,33 @@ class ConversationRepository:
         conv = await self.get_by_id(conversation_id, user_id=user_id)
         if conv:
             conv.model_mode = mode
+            await self._session.commit()
+            await self._session.refresh(conv)
+        return conv
+
+    async def set_pinned(
+        self, conversation_id: str, pinned: bool, *, user_id: str
+    ) -> Conversation | None:
+        """Pin / unpin a conversation (置顶对话). Pinned chats sort to the top of
+        the sidebar / list; this only writes the flag."""
+        conv = await self.get_by_id(conversation_id, user_id=user_id)
+        if conv:
+            conv.pinned = pinned
+            await self._session.commit()
+            await self._session.refresh(conv)
+        return conv
+
+    async def set_archived(
+        self, conversation_id: str, archived: bool, *, user_id: str
+    ) -> Conversation | None:
+        """Archive / unarchive a conversation (归档对话, reversible).
+
+        Archiving hides it from the live sidebar / grouped list (it moves to the
+        「已归档」view) without deleting it; unarchiving returns it to the list.
+        """
+        conv = await self.get_by_id(conversation_id, user_id=user_id)
+        if conv:
+            conv.archived = archived
             await self._session.commit()
             await self._session.refresh(conv)
         return conv
@@ -406,10 +447,13 @@ class ConversationRepository:
         return [row[0] for row in result.all()]
 
     async def list_all_by_user(self, user_id: str) -> Sequence[Conversation]:
-        """Every non-deleted conversation for a user, newest activity first.
+        """Every live (non-archived) conversation for a user, pinned-first then
+        newest activity.
 
         Unpaginated — backs the folder-grouped sidebar, which groups the full
-        set client-side (the flat list is small in the desktop MVP).
+        set client-side (the flat list is small in the desktop MVP). Archived
+        conversations are excluded here (they live in the separate「已归档」view);
+        pinned ones sort to the top (置顶对话).
         """
         result = await self._session.execute(
             select(Conversation)
@@ -418,8 +462,10 @@ class ConversationRepository:
                 Conversation.deleted_at.is_(None),
                 # Hidden handoff-job conversations (P2e / e2) are not sidebar chats.
                 Conversation.mode != "handoff",
+                # Archived chats are hidden from the live list (归档对话, reversible).
+                Conversation.archived.is_(False),
             )
-            .order_by(Conversation.updated_at.desc())
+            .order_by(Conversation.pinned.desc(), Conversation.updated_at.desc())
         )
         return result.scalars().all()
 
@@ -438,32 +484,28 @@ class ConversationRepository:
             await self._session.refresh(conv)
         return conv
 
-    async def set_local_root_id(
-        self, conversation_id: str, root_id: str | None, *, user_id: str
-    ) -> Conversation | None:
-        """Bind (or unbind, with ``root_id=None``) an ungrouped conversation to a
-        desktop FS root — its local-mode marker (双模式工作区 §七).
-
-        Only meaningful for an ungrouped conversation; a foldered one binds at its
-        folder instead (the caller routes by ``folder_id``).
-        """
-        conv = await self.get_by_id(conversation_id, user_id=user_id)
-        if conv:
-            conv.local_root_id = root_id
-            await self._session.commit()
-            await self._session.refresh(conv)
-        return conv
-
 
 class FolderRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
     async def create(
-        self, *, user_id: str, name: str, local_dir: str | None = None
+        self,
+        *,
+        user_id: str,
+        name: str,
+        local_dir: str | None = None,
+        local_root_id: str | None = None,
     ) -> Folder:
+        # ``local_root_id`` binds the folder to a desktop FS root at creation (文件
+        # 中枢统一 F2): the hub's "添加文件夹 = 建本地绑定项目" is one insert, not a
+        # create-then-bind round trip.
         folder = Folder(
-            id=new_id(), user_id=user_id, name=name, local_dir=local_dir
+            id=new_id(),
+            user_id=user_id,
+            name=name,
+            local_dir=local_dir,
+            local_root_id=local_root_id,
         )
         self._session.add(folder)
         await self._session.commit()
@@ -928,6 +970,26 @@ class MessageRepository:
         )
         await self._session.commit()
         return result.rowcount or 0
+
+    async def delete_by_id(
+        self, message_id: str, *, conversation_id: str
+    ) -> bool:
+        """Hard-delete one message (单条消息删除). Returns whether a row was removed.
+
+        Scoped to ``conversation_id`` so a guessed id from another conversation
+        won't match (the route has already proven ownership of this conversation —
+        IDOR-safe). Messages have no soft-delete column, so this is a physical
+        delete; the append-only ``cost_events`` ledger is intentionally left intact
+        (real spend is never rewritten — 不变量 #1). No-op (False) if absent.
+        """
+        result = await self._session.execute(
+            delete(Message).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
+        await self._session.commit()
+        return (result.rowcount or 0) > 0
 
 
 def _sum_int(expr: ColumnElement) -> ColumnElement:
@@ -1459,6 +1521,93 @@ class ChatRepository:
         result = await self._session.execute(select(Chat).where(Chat.id == chat_id))
         return result.scalar_one_or_none()
 
+    async def list_auto_join_chats(self) -> Sequence[Chat]:
+        """Chats every new user is auto-joined to (the 内测全员群 mechanism).
+
+        Queried at registration to enroll the new account; a handful of rows in
+        practice (the 内测群, later an official broadcast channel).
+        """
+        result = await self._session.execute(
+            select(Chat).where(Chat.auto_join.is_(True))
+        )
+        return result.scalars().all()
+
+    async def add_member(
+        self,
+        chat_id: str,
+        user_id: str,
+        *,
+        role: str = "member",
+        state: str = "accepted",
+        pinned: bool = False,
+    ) -> None:
+        """Add a user to a chat, idempotently.
+
+        A re-add (same chat_id+user_id) is a no-op — registration auto-join and
+        the backfill can both touch a user without duplicating or resetting their
+        per-chat state (the PK conflict is ignored).
+        """
+        stmt = (
+            pg_insert(ChatMember)
+            .values(
+                chat_id=chat_id,
+                user_id=user_id,
+                role=role,
+                state=state,
+                pinned=pinned,
+            )
+            .on_conflict_do_nothing(index_elements=["chat_id", "user_id"])
+        )
+        await self._session.execute(stmt)
+        await self._session.commit()
+
+    async def remove_member(self, chat_id: str, user_id: str) -> None:
+        """Remove a user from a chat (leave-group / admin-kick). Idempotent."""
+        await self._session.execute(
+            delete(ChatMember).where(
+                ChatMember.chat_id == chat_id, ChatMember.user_id == user_id
+            )
+        )
+        await self._session.commit()
+
+    async def set_membership_flags(
+        self,
+        chat_id: str,
+        user_id: str,
+        *,
+        muted: bool | None = None,
+        pinned: bool | None = None,
+    ) -> None:
+        """Update a member's per-chat flags (mute / pin); ``None`` leaves a field."""
+        values: dict = {}
+        if muted is not None:
+            values["muted"] = muted
+        if pinned is not None:
+            values["pinned"] = pinned
+        if not values:
+            return
+        await self._session.execute(
+            update(ChatMember)
+            .where(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id)
+            .values(**values)
+        )
+        await self._session.commit()
+
+    async def set_admin_mute(
+        self, chat_id: str, user_id: str, *, muted_by_admin: bool
+    ) -> None:
+        """Set/clear a member's admin-imposed 禁言 (Stage 3 审核治理).
+
+        Separate column from the member's own ``muted`` so moderation and
+        self-service don't clobber each other; idempotent (a no-op write is fine).
+        """
+        await self._session.execute(
+            update(ChatMember)
+            .where(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id)
+            .values(muted_by_admin=muted_by_admin)
+        )
+        await self._session.commit()
+
     async def get_member(self, chat_id: str, user_id: str) -> ChatMember | None:
         result = await self._session.execute(
             select(ChatMember).where(
@@ -1474,12 +1623,20 @@ class ChatRepository:
         return result.scalars().all()
 
     async def list_memberships(self, user_id: str) -> Sequence[tuple[Chat, ChatMember]]:
-        """A user's chats joined with their per-chat state, recent activity first."""
+        """A user's chats joined with their per-chat state.
+
+        Pinned chats first (the auto-joined 内测群 is pinned on enrollment so it
+        surfaces at the top even before it has any messages), then by recent
+        activity (``last_message_at`` desc, NULLs last).
+        """
         result = await self._session.execute(
             select(Chat, ChatMember)
             .join(ChatMember, ChatMember.chat_id == Chat.id)
             .where(ChatMember.user_id == user_id)
-            .order_by(Chat.last_message_at.desc().nullslast())
+            .order_by(
+                ChatMember.pinned.desc(),
+                Chat.last_message_at.desc().nullslast(),
+            )
         )
         return [(row[0], row[1]) for row in result.all()]
 
@@ -1779,6 +1936,108 @@ class RunSessionRepository:
         stale = select(RunSessionRow.run_id).where(RunSessionRow.updated_at < before).limit(limit)
         result = await self._session.execute(
             delete(RunSessionRow).where(RunSessionRow.run_id.in_(stale))
+        )
+        await self._session.commit()
+        return result.rowcount or 0
+
+
+class PausedTurnRepository:
+    """Durable store for turns suspended at a plan_review checkpoint (结构化挂起
+    turn 级落盘).
+
+    Write is an upsert keyed by the turn's ``message_id`` (re-pausing the same turn
+    after a resume-then-pause overwrites in place). The read path either claims one
+    row for resume (``claim`` = read-then-delete in one transaction, so two racing
+    ``/resume`` calls can't both continue the same turn) or lists a conversation's
+    pending paused turns for reopen. ``trace_id`` is set on first insert only so it
+    keeps pointing at the originating interaction.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert(
+        self,
+        *,
+        message_id: str,
+        conversation_id: str,
+        user_id: str,
+        frame: dict,
+        trace_id: str | None = None,
+    ) -> None:
+        now = datetime.now(UTC)
+        stmt = (
+            pg_insert(PausedTurnRow)
+            .values(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                frame=frame,
+                trace_id=trace_id,
+            )
+            .on_conflict_do_update(
+                index_elements=["message_id"],
+                set_={"frame": frame, "updated_at": now},
+            )
+        )
+        await self._session.execute(stmt)
+        await self._session.commit()
+
+    async def get(self, message_id: str) -> PausedTurnRow | None:
+        result = await self._session.execute(
+            select(PausedTurnRow).where(PausedTurnRow.message_id == message_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def claim(
+        self, message_id: str, *, conversation_id: str | None = None
+    ) -> PausedTurnRow | None:
+        """Atomically read-and-delete one paused turn for resume.
+
+        DELETE ... RETURNING means only ONE caller wins the row (a second concurrent
+        ``/resume`` gets ``None`` → 409), so a paused turn is never resumed twice.
+        Scoped to ``conversation_id`` when given so a frame is only ever claimed
+        within the conversation the caller has already proven it owns (IDOR-safe — a
+        guessed ``message_id`` from another conversation won't match, so it is neither
+        returned nor deleted). Returns the row (detached values) or ``None``.
+        """
+        stmt = delete(PausedTurnRow).where(PausedTurnRow.message_id == message_id)
+        if conversation_id is not None:
+            stmt = stmt.where(PausedTurnRow.conversation_id == conversation_id)
+        result = await self._session.execute(stmt.returning(PausedTurnRow))
+        row = result.scalar_one_or_none()
+        await self._session.commit()
+        return row
+
+    async def list_pending(self, conversation_id: str) -> Sequence[PausedTurnRow]:
+        """A conversation's paused turns (oldest first) for reopen-time rehydration."""
+        result = await self._session.execute(
+            select(PausedTurnRow)
+            .where(PausedTurnRow.conversation_id == conversation_id)
+            .order_by(PausedTurnRow.created_at.asc())
+        )
+        return result.scalars().all()
+
+    async def delete(self, message_id: str) -> None:
+        """Drop a paused turn (live in-process resolve / timeout settled it instead)."""
+        await self._session.execute(
+            delete(PausedTurnRow).where(PausedTurnRow.message_id == message_id)
+        )
+        await self._session.commit()
+
+    async def delete_stale(self, *, before: datetime, limit: int) -> int:
+        """Delete up to ``limit`` paused turns idle since before ``before`` (TTL sweep).
+
+        ``updated_at`` advances on re-pause (resume → pause again), so an actively
+        re-paused turn stays alive while one abandoned past the window is pruned.
+        Batched so a sweep never holds one huge transaction; returns rows removed."""
+        stale = (
+            select(PausedTurnRow.message_id)
+            .where(PausedTurnRow.updated_at < before)
+            .limit(limit)
+        )
+        result = await self._session.execute(
+            delete(PausedTurnRow).where(PausedTurnRow.message_id.in_(stale))
         )
         await self._session.commit()
         return result.rowcount or 0

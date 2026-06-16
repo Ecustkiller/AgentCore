@@ -59,6 +59,24 @@ export interface ToolUseEndPayload {
   status: "success" | "error";
 }
 
+/** One step in a single-agent turn's 思考+工具 process timeline (前端UX设计.md §一).
+ * The CEO's own reasoning interleaved with its tool calls, in turn order: a
+ * `reasoning` step coalesces consecutive thinking deltas; a `tool` step records one
+ * call, resolved (result + status) by its matching `tool_use_end`. Built live from
+ * the SSE stream (streamConversation) and persisted on `messages.runs.process`
+ * (snake_case wire shape — exempt from the generated-types rule like the rest of
+ * the runs payload) so a reloaded turn replays the same inline panel. */
+export type ProcessStep =
+  | { kind: "reasoning"; text: string }
+  | {
+      kind: "tool";
+      id: string;
+      tool_name: string;
+      arguments: Record<string, unknown>;
+      result: string | null;
+      status: "running" | "success" | "error";
+    };
+
 /** The user's settlement of a paused GRANTABLE tool call; mirrors the backend
  * `ApprovalDecision`. `approve` allows this one call, `approve_always` allows the
  * tool for the rest of the turn, `deny` refuses it. */
@@ -185,7 +203,7 @@ export interface RunPlanPayload {
      * CEO chat loop as the `captain` root so the graph adopts it as the real
      * 汇聚点 every worker hangs under. */
     kind?: RunKind;
-    /** 辩论/审查 呈现标记 (前端UX目标态 §四, display-only): this run's side in an
+    /** 辩论/审查 呈现标记 (前端UX设计.md §四, display-only): this run's side in an
      * opposing batch (`pro`/`con`), the `group` it is paired in, and its `round`
      * (真·多轮辩论 turn, 1-based; absent/0 = not multi-round). Present only when the
      * CEO marked a debate/review; ordinary parallel/DAG runs omit them. Ride here
@@ -204,7 +222,7 @@ export interface RunPlanPayload {
  * slot — 形状是数据不是模式. Mirrors the backend `RunKind` enum. */
 export type RunKind = "agent" | "captain";
 
-/** A 辩论/审查 node's side (前端UX目标态 §四): the display-only opposition tag the
+/** A 辩论/审查 node's side (前端UX设计.md §四): the display-only opposition tag the
  * CEO sets via delegate's `stance`. The frontend pairs `pro`/`con` into a
  * side-by-side comparison under a「辩论」title; the backend executor never reads
  * it (执行 stays普通并行 — 守住「形状是数据不是模式」). Mirrors the backend enum. */

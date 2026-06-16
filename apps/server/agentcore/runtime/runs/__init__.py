@@ -20,6 +20,7 @@ from agentcore.runtime.runs.concurrency import (
 from agentcore.runtime.runs.executor import (
     build_agent_executor,
     build_captain_executor,
+    build_captain_resumer,
     continue_run,
 )
 from agentcore.runtime.runs.plan import RunPlan, RunPlanError
@@ -41,6 +42,7 @@ __all__ = [
     "build_run_plan",
     "build_agent_executor",
     "build_captain_executor",
+    "build_captain_resumer",
     "continue_run",
     "RunPlan",
     "RunPlanError",

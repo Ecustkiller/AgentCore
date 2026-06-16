@@ -14,10 +14,12 @@ re-prices.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
-from agentcore.runtime.runs.types import RunSpec, RunState
+from agentcore.runtime.citations import merge_citations
+from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
 # cost_events.role categories (mirror the DB CheckConstraint). 阶段1 only ever
 # produces captain + member; arena / title / memory are reserved for later run
@@ -28,6 +30,21 @@ ROLE_MEMBER = "member"
 # The four money keys carried in cost_events.cost (integer nano-USD). The Cost
 # dataclass also exposes ``currency``, which rides in its own column instead.
 _COST_KEYS = ("input", "cached", "output", "total")
+
+# The five short-key token counts carried on RunState.usage / a tool's accumulated
+# usage (cache_hit/cache_miss split kept so the folded total stays priceable).
+_USAGE_KEYS = ("input", "output", "reasoning", "cache_hit", "cache_miss")
+
+
+def usage_metadata(usage: Mapping[str, int]) -> dict[str, int]:
+    """The ``metadata`` token block a non-terminal orchestration tool returns.
+
+    Re-keys the short-key usage form ({input, ...}) to the engine's ``*_tokens``
+    names ({input_tokens, ...}). ``delegate`` (this call's worker usage) and
+    ``revise`` (the revision's usage) both report through this single seam so the
+    shape can never drift between them.
+    """
+    return {f"{key}_tokens": int(usage.get(key, 0)) for key in _USAGE_KEYS}
 
 
 @dataclass(frozen=True)
@@ -129,3 +146,67 @@ def aggregate_cost(cost_runs: Sequence[dict]) -> dict[str, int | str]:
         agg["output"] += int(cost.get("output", 0))
         agg["total"] += int(row.get("cost_total_nano", cost.get("total", 0)) or 0)
     return {**agg, "currency": "USD"}
+
+
+class WorkerResultAccumulator:
+    """The shared「用量 + 账目 + 引用」roll-up for orchestration tools.
+
+    ``delegate`` (cold workers) and ``revise`` (a recalled author) both spin up
+    member runs whose results must fold back into the turn totals the pipeline
+    reads: token ``usage`` (summed, cache split kept), a per-run cost ``run_ledger``
+    (one row per metered run, 决策②), and the workers' ``citations`` (de-duped into
+    the turn's shared source card). Both tools used to hand-roll these three
+    identical pieces; they now share this accumulator so the fold logic lives once.
+
+    All three collections are mutated in place — a tool exposes them read-only and
+    the pipeline reads ``usage`` / ``run_ledger`` / ``citations`` after the loop.
+    """
+
+    def __init__(self) -> None:
+        self.usage: dict[str, int] = {key: 0 for key in _USAGE_KEYS}
+        self.run_ledger: list[RunCost] = []
+        self.citations: list[dict[str, Any]] = []
+
+    def add_usage(self, usage: Mapping[str, int]) -> None:
+        """Fold one run's (or sub-team's) short-key token usage into the total."""
+        for key in self.usage:
+            self.usage[key] += usage.get(key, 0)
+
+    def add_run_cost(self, spec: RunSpec, state: RunState, *, parent_run_id: str | None) -> None:
+        """Append a member ledger row for a run that metered LLM usage.
+
+        Runs that never hit the LLM (skipped / failed before any call) carry no
+        usage and are not billed, mirroring the old delegate/revise guard.
+        """
+        if state.usage:
+            self.run_ledger.append(member_run_cost(spec, state, parent_run_id=parent_run_id))
+
+    def add_citations(self, state: RunState) -> None:
+        """Merge a COMPLETED run's web sources into the shared card (de-duped/capped).
+
+        Only COMPLETED runs contribute — a hard-failed worker's output is discarded
+        by the captain, so its sources must not back the answer.
+        """
+        if state.phase is RunPhase.COMPLETED and state.citations:
+            merge_citations(self.citations, state.citations)
+
+    def add_run(self, spec: RunSpec, state: RunState, *, parent_run_id: str | None) -> None:
+        """Fold one finished member run end-to-end: usage + ledger row + citations.
+
+        The convenience the ``revise`` path uses (one run per call). ``delegate``
+        folds a batch through the granular adders so it can also stage this call's
+        usage for the result metadata.
+        """
+        self.add_usage(state.usage)
+        self.add_run_cost(spec, state, parent_run_id=parent_run_id)
+        self.add_citations(state)
+
+    def merge(self, other: WorkerResultAccumulator) -> None:
+        """Fold another accumulator into this one (a nested sub-team's roll-up).
+
+        Used by ``delegate._absorb_children`` to roll a re-delegating worker's
+        sub-team usage + ledger + sources up into this captain's totals.
+        """
+        self.add_usage(other.usage)
+        self.run_ledger.extend(other.run_ledger)
+        merge_citations(self.citations, other.citations)

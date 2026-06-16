@@ -1,11 +1,18 @@
 import {
   type ChatMessageDetail,
+  type ChatParticipant,
   type ChatSummary,
+  announce as apiAnnounce,
+  kickMember as apiKickMember,
+  leaveChat as apiLeaveChat,
+  muteMember as apiMuteMember,
   sendMessage as apiSendMessage,
   listChats,
+  listMembers,
   listMessages,
   markRead,
   messagingErrorMessage,
+  updateMembership,
 } from "@/services/messaging";
 import { useAuthStore } from "@/stores/auth";
 import { create } from "zustand";
@@ -22,6 +29,7 @@ import { create } from "zustand";
  */
 
 const EMPTY_MESSAGES: ChatMessageDetail[] = [];
+const EMPTY_MEMBERS: ChatParticipant[] = [];
 
 /** A human-readable list-row preview for a message (non-text shows a kind tag). */
 function previewOf(message: ChatMessageDetail): string {
@@ -68,6 +76,9 @@ interface MessagingState {
   /** Loaded message slices keyed by chat id (oldest first); absent until opened. */
   messagesByChat: Record<string, ChatMessageDetail[]>;
   loadingMessages: Record<string, boolean>;
+  /** Group rosters keyed by chat id — resolves per-message sender names + the
+   * member panel. Loaded lazily when a group thread opens. */
+  membersByChat: Record<string, ChatParticipant[]>;
   activeChatId: string | null;
   /** Transient zh error for the last failed send, or null. */
   sendError: string | null;
@@ -77,8 +88,28 @@ interface MessagingState {
   openChat: (chatId: string) => Promise<void>;
   setActiveChat: (chatId: string | null) => void;
   loadMessages: (chatId: string) => Promise<void>;
+  /** Load (or refresh) a chat's member roster — used by group threads. */
+  loadMembers: (chatId: string) => Promise<void>;
   sendMessage: (chatId: string, content: string) => Promise<void>;
   markChatRead: (chatId: string) => Promise<void>;
+  /** Toggle this user's per-chat flags (mute / pin); optimistic with rollback. */
+  setMembershipFlags: (
+    chatId: string,
+    flags: { muted?: boolean; pinned?: boolean },
+  ) => Promise<void>;
+  /** Leave a group; on success drops it from the list. Returns success. */
+  leaveChat: (chatId: string) => Promise<boolean>;
+  /** Admin 踢人: remove a member, then drop them from the local roster. Throws on
+   * failure so the caller can surface the precise zh refusal. */
+  kickMember: (chatId: string, userId: string) => Promise<void>;
+  /** Admin 禁言: mute/unmute a member, reflecting the flag in the local roster. */
+  setAdminMute: (
+    chatId: string,
+    userId: string,
+    muted: boolean,
+  ) => Promise<void>;
+  /** Admin 公告: post a system_card; mirror it locally (the firehose also delivers). */
+  announce: (chatId: string, content: string) => Promise<void>;
   /** Merge or prepend a chat the client just learned about (e.g. a new dm). */
   upsertChat: (chat: ChatSummary) => void;
   /** Ingest a realtime message (from the firehose): merge + unread + reorder. */
@@ -92,6 +123,7 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
   loadingChats: false,
   messagesByChat: {},
   loadingMessages: {},
+  membersByChat: {},
   activeChatId: null,
   sendError: null,
 
@@ -129,6 +161,17 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
       set((s) => ({
         loadingMessages: { ...s.loadingMessages, [chatId]: false },
       }));
+    }
+  },
+
+  loadMembers: async (chatId) => {
+    try {
+      const members = await listMembers(chatId);
+      set((s) => ({
+        membersByChat: { ...s.membersByChat, [chatId]: members },
+      }));
+    } catch {
+      /* best-effort — without a roster, group bubbles fall back to a label */
     }
   },
 
@@ -217,6 +260,82 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
     }
   },
 
+  setMembershipFlags: async (chatId, flags) => {
+    const prev = get().chats.find((c) => c.id === chatId);
+    // Optimistic: reflect the toggle immediately (drives the list pin/mute icons).
+    set((s) => ({
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, ...flags } : c)),
+    }));
+    try {
+      const updated = await updateMembership(chatId, flags);
+      set((s) => ({
+        chats: s.chats.map((c) => (c.id === chatId ? updated : c)),
+      }));
+    } catch {
+      // Roll back to the pre-toggle row so the UI never lies about persisted state.
+      if (prev) {
+        set((s) => ({
+          chats: s.chats.map((c) => (c.id === chatId ? prev : c)),
+        }));
+      }
+    }
+  },
+
+  leaveChat: async (chatId) => {
+    try {
+      await apiLeaveChat(chatId);
+    } catch (err) {
+      set({ sendError: messagingErrorMessage(err, "退出失败，请重试") });
+      return false;
+    }
+    set((s) => {
+      const messagesByChat = { ...s.messagesByChat };
+      delete messagesByChat[chatId];
+      const membersByChat = { ...s.membersByChat };
+      delete membersByChat[chatId];
+      return {
+        chats: s.chats.filter((c) => c.id !== chatId),
+        messagesByChat,
+        membersByChat,
+        activeChatId: s.activeChatId === chatId ? null : s.activeChatId,
+      };
+    });
+    return true;
+  },
+
+  kickMember: async (chatId, userId) => {
+    await apiKickMember(chatId, userId);
+    // Drop the removed member from the roster (the kick system_card arrives via
+    // the firehose and lands in the thread on its own).
+    set((s) => ({
+      membersByChat: {
+        ...s.membersByChat,
+        [chatId]: (s.membersByChat[chatId] ?? []).filter(
+          (m) => m.id !== userId,
+        ),
+      },
+    }));
+  },
+
+  setAdminMute: async (chatId, userId, muted) => {
+    await apiMuteMember(chatId, userId, muted);
+    set((s) => ({
+      membersByChat: {
+        ...s.membersByChat,
+        [chatId]: (s.membersByChat[chatId] ?? []).map((m) =>
+          m.id === userId ? { ...m, muted_by_admin: muted } : m,
+        ),
+      },
+    }));
+  },
+
+  announce: async (chatId, content) => {
+    const message = await apiAnnounce(chatId, content);
+    // Mirror it into the open thread immediately; applyIncoming dedupes by id so
+    // the firehose copy (admin is a member, so it fans back) won't double up.
+    get().applyIncoming(chatId, message);
+  },
+
   upsertChat: (chat) =>
     set((s) => {
       const idx = s.chats.findIndex((c) => c.id === chat.id);
@@ -273,6 +392,13 @@ export function useActiveMessages(): ChatMessageDetail[] {
 export function useActiveChat(): ChatSummary | null {
   return useMessagingStore(
     (s) => s.chats.find((c) => c.id === s.activeChatId) ?? null,
+  );
+}
+
+/** A chat's member roster (stable empty array until loaded). */
+export function useChatMembers(chatId: string | null): ChatParticipant[] {
+  return useMessagingStore((s) =>
+    chatId ? (s.membersByChat[chatId] ?? EMPTY_MEMBERS) : EMPTY_MEMBERS,
   );
 }
 

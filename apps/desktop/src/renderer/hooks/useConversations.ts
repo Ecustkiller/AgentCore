@@ -4,6 +4,9 @@ import {
   deleteConversation as apiDeleteConversation,
   moveConversation as apiMoveConversation,
   renameConversation as apiRenameConversation,
+  setConversationArchived as apiSetArchived,
+  setConversationPinned as apiSetPinned,
+  listConversations,
   listGrouped,
 } from "@/services/conversations";
 import type { FolderMeta } from "@/services/folders";
@@ -170,5 +173,71 @@ export function useDeleteConversation() {
   return useMutation({
     mutationFn: (id: string) => apiDeleteConversation(id),
     onSuccess: (_data, id) => removeConversationFromCache(id),
+  });
+}
+
+/** Pin / unpin a conversation (置顶对话), optimistic with rollback on failure.
+ * Lists re-sort pinned-first, so the row jumps to / from the top immediately. */
+export function useTogglePin() {
+  return useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
+      apiSetPinned(id, pinned),
+    onMutate: ({ id, pinned }) => {
+      const prev = getConversations().find((c) => c.id === id)?.pinned ?? false;
+      patchConversationCache(id, { pinned });
+      return { id, prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx) patchConversationCache(ctx.id, { pinned: ctx.prev });
+    },
+  });
+}
+
+/** Archive a conversation (归档对话): hide it from the live list. Server-first
+ * (like delete) so a failed call leaves the row in place; on success drop it from
+ * the live cache and refresh the「已归档」view. */
+export function useArchiveConversation() {
+  return useMutation({
+    mutationFn: (id: string) => apiSetArchived(id, true),
+    onSuccess: (_data, id) => {
+      removeConversationFromCache(id);
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.archived,
+      });
+    },
+  });
+}
+
+/** Unarchive a conversation (取消归档): return it to the live list. Optimistically
+ * drop it from the「已归档」view so the row leaves at once; on success put the
+ * returned (now-live) row back into the grouped cache; on failure refetch the
+ * archived list to restore the row. */
+export function useUnarchiveConversation() {
+  return useMutation({
+    mutationFn: (id: string) => apiSetArchived(id, false),
+    onMutate: (id) => {
+      queryClient.setQueryData<Conversation[]>(
+        conversationKeys.archived,
+        (old) => (old ? old.filter((c) => c.id !== id) : old),
+      );
+    },
+    onSuccess: (conv) => upsertConversationFront(conv),
+    onError: () => {
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.archived,
+      });
+    },
+  });
+}
+
+/** The「已归档」conversation list — a separate on-demand query (not the live
+ * grouped cache, which excludes archived rows). Pass `enabled` so it only fetches
+ * when the archived view is actually shown. */
+export function useArchivedConversations(enabled: boolean) {
+  return useQuery({
+    queryKey: conversationKeys.archived,
+    queryFn: () => listConversations(true),
+    enabled,
+    staleTime: 30_000,
   });
 }

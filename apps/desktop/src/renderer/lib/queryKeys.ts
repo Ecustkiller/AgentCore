@@ -8,4 +8,7 @@ export const conversationKeys = {
   all: ["conversations"] as const,
   /** Folders + conversations in one trip (`GET /v1/conversations/grouped`). */
   grouped: ["conversations", "grouped"] as const,
+  /** Archived conversations (`GET /v1/conversations?archived=true`) — the
+   * on-demand「已归档」view, separate from the live grouped cache. */
+  archived: ["conversations", "archived"] as const,
 };

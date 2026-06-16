@@ -1,8 +1,7 @@
 import { useGroupedConversations } from "@/hooks/useConversations";
-import { startNewConversation } from "@/lib/newConversation";
+import { GLOBAL_SHORTCUTS } from "@/lib/shortcuts";
+import { useApplyTheme } from "@/lib/theme";
 import { startRealtime, stopRealtime } from "@/services/realtime";
-import { useSidebarStore } from "@/stores/sidebar";
-import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import { useEffect, useRef } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
@@ -11,6 +10,10 @@ import { CommandPalette } from "./CommandPalette";
 import { TitleBar } from "./TitleBar";
 
 export function AppShell() {
+  // Apply the persisted theme to the DOM and keep it in sync with the OS while
+  // set to 跟随系统 (the store only holds the value; this is its sole applier).
+  useApplyTheme();
+
   // Warm the grouped query (folders + conversations) at the shell on mount so
   // the sidebar list is ready before it renders — even if the sidebar starts
   // collapsed, the route hasn't mounted a list yet, etc. React Query owns both
@@ -34,11 +37,11 @@ export function AppShell() {
     return () => stopRealtime();
   }, []);
 
-  // Global keyboard shortcuts (§二). Ctrl/Cmd+K toggles the command palette,
-  // Ctrl/Cmd+N starts a new draft conversation, Ctrl/Cmd+\ or Ctrl/Cmd+B toggles
-  // the sidebar. Modifier chords don't insert text, so they fire regardless of
-  // focus. getState() keeps the listener identity stable; navigate is read via a
-  // ref so the effect needn't resubscribe on every route change.
+  // Global keyboard shortcuts (§二) — dispatched off the single-source table in
+  // lib/shortcuts.ts (also rendered by the 快捷键 settings page, so behavior and
+  // the documented chord never drift). Modifier chords don't insert text, so
+  // they fire regardless of focus; navigate is read via a ref so the effect
+  // needn't resubscribe on every route change.
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
@@ -46,16 +49,10 @@ export function AppShell() {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
       const key = e.key.toLowerCase();
-      if (key === "k") {
-        e.preventDefault();
-        useUIStore.getState().toggleSearch();
-      } else if (key === "n") {
-        e.preventDefault();
-        startNewConversation(navigateRef.current);
-      } else if (e.key === "\\" || key === "b") {
-        e.preventDefault();
-        useSidebarStore.getState().toggleCollapsed();
-      }
+      const match = GLOBAL_SHORTCUTS.find((s) => s.keys.includes(key));
+      if (!match) return;
+      e.preventDefault();
+      match.run(navigateRef.current);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

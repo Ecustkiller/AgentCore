@@ -32,6 +32,16 @@ def main() -> None:
         port=settings.port,
         # Hot-reload follows debug: dev (.env DEBUG=true) reloads, prod does not.
         reload=settings.debug,
+        # Watch only the app package, not the whole cwd: apps/server also holds
+        # test artifacts (.pytmp/.pytest_*) full of .py fixtures whose churn would
+        # otherwise trigger endless reloads. (Ignored when reload is off.)
+        reload_dirs=["agentcore"],
+        # In dev, reload must not block forever draining the long-lived SSE stream
+        # ("Waiting for connections to close" → no new worker → API dead). Cap the
+        # graceful wait so a save force-closes lingering streams and the worker
+        # restarts; the desktop EventSource reconnects. Prod (reload off) keeps the
+        # default (None) and lets the deploy orchestrator own shutdown timing.
+        timeout_graceful_shutdown=2 if settings.debug else None,
     )
 
 

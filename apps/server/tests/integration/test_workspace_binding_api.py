@@ -1,9 +1,10 @@
 """Integration tests for local-mode workspace binding (双模式工作区 §七 / P2d).
 
 Auto-skips (via the shared ``client`` fixture) when no PostgreSQL is reachable.
-Covers the auth gate, the cloud→local→cloud lifecycle at both scopes (an ungrouped
-conversation binds itself; a foldered one binds its shared folder so siblings flip
-too), the derived mode surfaced on reads, validation, and IDOR isolation.
+Covers the auth gate, the cloud→local→cloud lifecycle (文件夹即工作区: a binding lives
+on the folder; binding a 裸聊 lazily promotes it into a folder first; a foldered chat
+binds its shared folder so siblings flip too), the derived mode surfaced on reads,
+validation, and IDOR isolation.
 """
 
 import httpx
@@ -45,34 +46,35 @@ async def test_binding_requires_auth(client):
     ).status_code == 401
 
 
-async def test_bind_unbind_ungrouped_conversation(client, make_invite):
+async def test_bind_promotes_bare_chat_to_folder(client, make_invite):
     code = await make_invite("INV-B1")
     await _register_and_login(client, code, "binduser1")
     conv = await _new_conversation(client, "solo")
 
-    # Default mode is cloud, bound at the conversation scope (no folder).
+    # A 裸聊 defaults to cloud, conversation-scoped (no folder/workspace yet).
     r = await client.get(f"/v1/conversations/{conv}/workspace/binding")
     assert r.status_code == 200, r.text
     assert r.json() == {"mode": "cloud", "scope": "conversation", "root_id": None}
 
-    # Bind it to a desktop root → local mode on the conversation itself.
+    # Binding a 裸聊 lazily mints a folder workspace and files the chat into it
+    # (文件夹即工作区 §懒建): the binding is folder-scoped from now on.
     r = await client.put(
         f"/v1/conversations/{conv}/workspace/binding", json={"root_id": _ROOT}
     )
     assert r.status_code == 200, r.text
-    assert r.json() == {"mode": "local", "scope": "conversation", "root_id": _ROOT}
+    assert r.json() == {"mode": "local", "scope": "folder", "root_id": _ROOT}
 
-    # The binding is durable and surfaced on the conversation read.
+    # The chat is now in a folder (promoted) and durably local.
+    detail = (await client.get(f"/v1/conversations/{conv}")).json()
+    assert detail["folder_id"] is not None
     assert (await client.get(f"/v1/conversations/{conv}/workspace/binding")).json()[
         "mode"
     ] == "local"
-    assert (await client.get(f"/v1/conversations/{conv}")).json()["local_root_id"] == _ROOT
 
-    # Unbind → back to cloud.
+    # Unbind → the folder (and so the chat) returns to cloud.
     r = await client.delete(f"/v1/conversations/{conv}/workspace/binding")
     assert r.status_code == 200, r.text
-    assert r.json() == {"mode": "cloud", "scope": "conversation", "root_id": None}
-    assert (await client.get(f"/v1/conversations/{conv}")).json()["local_root_id"] is None
+    assert r.json() == {"mode": "cloud", "scope": "folder", "root_id": None}
 
 
 async def test_bind_foldered_conversation_is_shared_by_siblings(client, make_invite):

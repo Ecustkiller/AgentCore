@@ -11,6 +11,7 @@ Splitting "decide what to change" (LLM) from "apply the change" (code) keeps
 dedup / conflict / formatting stable.
 """
 
+import asyncio
 import json
 import re
 from collections.abc import Sequence
@@ -18,9 +19,12 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
 
+from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.config import build_request, get_profile
 from agentcore.memory.conversation_title import ChatMessage
+
+logger = get_logger(__name__)
 
 
 class MemoryAction(StrEnum):
@@ -353,12 +357,18 @@ def parse_memory_ops(raw: str) -> list[MemoryOp]:
     return [op for item in payload["ops"] if (op := _coerce_op(item)) is not None]
 
 
+# Extraction reads a conversation window and emits JSON ops — heavier than the
+# title call, so a slightly longer ceiling. On timeout we yield no ops; the offline
+# pass treats it like any other extraction failure (skip this window, no retry).
+_EXTRACT_TIMEOUT_SECONDS = 30.0
+
+
 class LLMMemoryExtractor:
     """MemoryExtractor backed by an LLMProvider (fast, non-thinking model).
 
     Called once at conversation end; parses the model's JSON into ops. Robust by
-    design — any malformed output yields no ops (memory just isn't updated this
-    round) instead of raising.
+    design — malformed output, or a call-level timeout (``_EXTRACT_TIMEOUT_SECONDS``,
+    logged), yields no ops (memory just isn't updated this round) instead of raising.
     """
 
     def __init__(self, provider: LLMProvider, *, role: str = "memory") -> None:
@@ -374,5 +384,11 @@ class LLMMemoryExtractor:
             ],
             stream=False,
         )
-        response = await self._provider.complete(request)
+        try:
+            response = await asyncio.wait_for(
+                self._provider.complete(request), timeout=_EXTRACT_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            logger.warning("memory.extract_timeout", user_id=data.user_id)
+            return []
         return parse_memory_ops(response.content)

@@ -1,7 +1,9 @@
-import { SimpleTooltip } from "@/components/ui/tooltip";
+import { cleanSourceTitle } from "@/lib/citations";
 import type { Citation } from "@/types/events";
-import { Globe } from "lucide-react";
+import { ChevronDown, ChevronUp, Globe } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Favicon } from "./Favicon";
+import { SourceTooltip } from "./SourcePreview";
 
 /**
  * Source cards under an assistant reply: the web pages the agent searched /
@@ -9,12 +11,17 @@ import { useEffect, useRef, useState } from "react";
  * message). Each card opens its URL in the system browser — the Electron main
  * process routes target=_blank through shell.openExternal.
  *
- * Collapsed to a single row by default; "show all" reveals the rest so a
- * source-heavy answer never pushes the conversation down. A `flash` request
- * (from clicking an inline `[n]` citation chip) expands if needed, scrolls the
- * matching card into view, and briefly highlights it.
+ * Layout follows the Perplexity / ChatGPT pattern. Collapsed: a single row of
+ * compact favicon pills (index + favicon + domain) with a matching overflow pill
+ * that stacks the hidden sources' favicons, so a source-heavy answer stays one
+ * tidy row; the page title lives in the hover preview and the expanded list.
+ * Expanded: a borderless vertical list with a leading index, favicon, title,
+ * domain and snippet per source. A `flash` request (from clicking an inline `[n]`
+ * chip) expands if needed, scrolls the matching card into view, and highlights it.
  */
 const COLLAPSED_COUNT = 3;
+/** How many favicons to stack as a preview inside the overflow chip. */
+const STACK_PREVIEW = 3;
 
 /** Target signal from an inline citation chip; `nonce` re-triggers on re-click. */
 export interface CitationFlash {
@@ -25,9 +32,14 @@ export interface CitationFlash {
 export function SourceCards({
   citations,
   flash,
+  referenced,
 }: {
   citations: Citation[];
   flash?: CitationFlash | null;
+  /** 1-based source numbers actually cited in the reply body. Sources not in
+   * this set are dimmed as "retrieved but not cited"; empty/undefined disables
+   * dimming (e.g. a reply with sources but no inline `[n]` markers). */
+  referenced?: Set<number>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [highlight, setHighlight] = useState<number | null>(null);
@@ -59,56 +71,163 @@ export function SourceCards({
   if (citations.length === 0) return null;
 
   const hidden = citations.length - COLLAPSED_COUNT;
-  const visible = expanded ? citations : citations.slice(0, COLLAPSED_COUNT);
+  const collapsed = citations.slice(0, COLLAPSED_COUNT);
+  const stack = citations.slice(
+    COLLAPSED_COUNT,
+    COLLAPSED_COUNT + STACK_PREVIEW,
+  );
+
+  const isHighlighted = (i: number) => highlight === i + 1;
+
+  const hasRefs = !!referenced && referenced.size > 0;
+  // Dim sources the answer retrieved but never cited inline, so the cited ones
+  // stand out; hover restores full opacity so muted sources stay inspectable.
+  const dimClass = (i: number) =>
+    hasRefs && !referenced?.has(i + 1)
+      ? "opacity-55 transition-opacity hover:opacity-100"
+      : "";
 
   return (
     <div className="mt-3">
-      <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Globe size={14} className="shrink-0" />
-        <span>来源 {citations.length}</span>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {visible.map((c, i) => (
-          <SimpleTooltip key={`${c.url}-${i}`} label={c.url}>
-            <a
-              ref={(el) => {
-                refs.current[i] = el;
-              }}
-              href={c.url}
-              target="_blank"
-              rel="noreferrer"
-              className={`flex max-w-[260px] items-center gap-2 rounded-lg border bg-card px-2.5 py-1.5 transition-colors hover:bg-accent ${
-                highlight === i + 1
-                  ? "border-primary ring-2 ring-primary"
-                  : "border-border"
-              }`}
-            >
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground">
-                {i + 1}
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-foreground">
-                  {c.title || c.site || c.url}
+      {hidden > 0 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <Globe size={14} className="shrink-0" />
+          <span>来源 {citations.length}</span>
+          {hasRefs && (
+            <span className="text-muted-foreground/70">
+              · {referenced?.size} 条被引用
+            </span>
+          )}
+          {expanded ? (
+            <ChevronUp size={14} className="ml-0.5" />
+          ) : (
+            <ChevronDown size={14} className="ml-0.5" />
+          )}
+        </button>
+      ) : (
+        <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Globe size={14} className="shrink-0" />
+          <span>来源 {citations.length}</span>
+          {hasRefs && (
+            <span className="text-muted-foreground/70">
+              · {referenced?.size} 条被引用
+            </span>
+          )}
+        </div>
+      )}
+      {expanded ? (
+        // Expanded: a vertical list with each source's snippet inline, like the
+        // ChatGPT sources panel. Snippet is shown directly, so no hover preview.
+        // Height is capped with internal scroll so a source-heavy answer (up to
+        // 24) doesn't stretch the message; the 收起 button stays outside the
+        // scroll area so it's always reachable.
+        <div>
+          <div className="flex max-h-96 flex-col gap-1.5 overflow-y-auto pr-1">
+            {citations.map((c, i) => (
+              <a
+                key={`${c.url}-${i}`}
+                ref={(el) => {
+                  refs.current[i] = el;
+                }}
+                href={c.url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`来源 ${i + 1}：${cleanSourceTitle(c.title) || c.site || c.url}`}
+                className={`flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors hover:bg-accent ${isHighlighted(i) ? "bg-accent ring-2 ring-primary" : ""} ${dimClass(i)}`}
+              >
+                <span
+                  className={`mt-0.5 w-5 shrink-0 text-right text-xs tabular-nums ${isHighlighted(i) ? "font-medium text-primary" : "text-muted-foreground"}`}
+                >
+                  {i + 1}
                 </span>
-                {c.site && (
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {c.site}
+                <Favicon
+                  site={c.site}
+                  title={c.title}
+                  size={18}
+                  className="mt-0.5"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-foreground">
+                    {cleanSourceTitle(c.title) || c.site || c.url}
                   </span>
-                )}
+                  {c.site && (
+                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                      {c.site}
+                    </span>
+                  )}
+                  {c.snippet && (
+                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                      {c.snippet}
+                    </p>
+                  )}
+                </span>
+              </a>
+            ))}
+          </div>
+          {hidden > 0 && (
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              className="mt-1.5 inline-flex w-fit items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ChevronUp size={14} />
+              收起
+            </button>
+          )}
+        </div>
+      ) : (
+        // Collapsed: a single row of compact favicon pills (index + favicon +
+        // domain); hover reveals the title + snippet preview.
+        <div className="flex flex-wrap items-center gap-1.5">
+          {collapsed.map((c, i) => (
+            <SourceTooltip key={`${c.url}-${i}`} citation={c} index={i + 1}>
+              <a
+                ref={(el) => {
+                  refs.current[i] = el;
+                }}
+                href={c.url}
+                target="_blank"
+                rel="noreferrer"
+                aria-label={`来源 ${i + 1}：${cleanSourceTitle(c.title) || c.site || c.url}`}
+                className={`flex items-center gap-1.5 rounded-full border border-border bg-card py-1 pl-2 pr-2.5 transition-colors hover:bg-accent ${isHighlighted(i) ? "ring-2 ring-primary" : ""} ${dimClass(i)}`}
+              >
+                <span className="tabular-nums text-xs text-muted-foreground">
+                  {i + 1}
+                </span>
+                <Favicon site={c.site} title={c.title} size={16} />
+                <span className="max-w-[140px] truncate text-xs text-foreground">
+                  {c.site || c.url}
+                </span>
+              </a>
+            </SourceTooltip>
+          ))}
+          {hidden > 0 && (
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className="flex items-center gap-1.5 rounded-full border border-border bg-card py-1 pl-2 pr-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <span className="flex items-center -space-x-1.5">
+                {stack.map((c, i) => (
+                  <Favicon
+                    key={`${c.url}-stack-${i}`}
+                    site={c.site}
+                    title={c.title}
+                    size={16}
+                    className="ring-2 ring-card"
+                  />
+                ))}
               </span>
-            </a>
-          </SimpleTooltip>
-        ))}
-        {hidden > 0 && !expanded && (
-          <button
-            type="button"
-            onClick={() => setExpanded(true)}
-            className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            +{hidden} 更多
-          </button>
-        )}
-      </div>
+              <span className="tabular-nums">+{hidden}</span>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

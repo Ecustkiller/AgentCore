@@ -11,7 +11,7 @@ the revised product returns to the CEO's loop to wrap up.
 P1 范围：只命中【本回合】委派过的成员（同轮热修）。命中不了（run 不在本回合 / 已超改次
 上限）时拒绝并提示回落甲（带旧产物重新 ``delegate``）——这正是甲作为 miss 分支的体现。
 
-→ 见设计: docs/07-规划/多轮编排与队员热修.md §三（统一「续写」原语）
+→ 见设计: docs/03-AI核心/多轮编排与队员热修.md §二（统一「续写」原语）
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory, new_id
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet, default_profile_set
-from agentcore.runtime.citations import merge_citations
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.constants import DEFAULT_RECALL_LIMIT
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -106,18 +105,30 @@ class ReviseTool:
         # Forwarded to the continuation ONLY in local mode (by the pipeline), so a
         # recalled worker's machine-touching tools stay gated exactly like delegate.
         self._approval_gate = approval_gate
-        # Mirrors DelegateTool: a revision is another member run, so its token
-        # usage + cost row + web sources fold back into the turn totals the pipeline
-        # reads (one ledger row per revision, 决策②).
-        self.usage: dict[str, int] = {
-            "input": 0,
-            "output": 0,
-            "reasoning": 0,
-            "cache_hit": 0,
-            "cache_miss": 0,
-        }
-        self.run_ledger: list[RunCost] = []
-        self.citations: list[dict[str, Any]] = []
+        # SHARED with DelegateTool via one WorkerResultAccumulator (runtime/
+        # costing.py): a revision is another member run, so its token usage + a cost
+        # row (parented to the original, 决策②) + any web sources it consulted fold
+        # back into the turn totals the pipeline reads. Exposed read-only as
+        # ``usage`` / ``run_ledger`` / ``citations`` (properties below). Lazy import
+        # keeps the tools package free of an import-time runtime.runs dependency.
+        from agentcore.runtime.costing import WorkerResultAccumulator
+
+        self._acc = WorkerResultAccumulator()
+
+    @property
+    def usage(self) -> dict[str, int]:
+        """This revision's accumulated token usage (the pipeline folds it in)."""
+        return self._acc.usage
+
+    @property
+    def run_ledger(self) -> list[RunCost]:
+        """One member cost row per revision, parented to the original run (决策②)."""
+        return self._acc.run_ledger
+
+    @property
+    def citations(self) -> list[dict[str, Any]]:
+        """Web sources a revision consulted (folded into the turn's shared card)."""
+        return self._acc.citations
 
     @property
     def schema(self) -> ToolSchema:
@@ -130,6 +141,7 @@ class ReviseTool:
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        from agentcore.runtime.costing import usage_metadata
         from agentcore.runtime.runs import RunPhase, continue_run
 
         target = arguments.get("target_run_id")
@@ -219,31 +231,17 @@ class ReviseTool:
             success=True,
             output=output,
             output_limit=_REVISE_OUTPUT_LIMIT,
-            metadata={
-                "input_tokens": state.usage.get("input", 0),
-                "output_tokens": state.usage.get("output", 0),
-                "reasoning_tokens": state.usage.get("reasoning", 0),
-                "cache_hit_tokens": state.usage.get("cache_hit", 0),
-                "cache_miss_tokens": state.usage.get("cache_miss", 0),
-            },
+            metadata=usage_metadata(state.usage),
         )
 
     def _accumulate(self, state, *, revision_run_id: str, spec, parent_run_id: str | None) -> None:
-        """Fold a revision into the turn totals: token usage, a member ledger row,
-        and any web sources it consulted — mirroring how DelegateTool rolls up
-        workers (一 run 一行, 决策②). The row carries the revision's own ``run_id``
-        parented to the original run, so the version chain is reconstructable."""
-        from agentcore.runtime.costing import member_run_cost
-
-        for key in self.usage:
-            self.usage[key] += state.usage.get(key, 0)
-        if state.usage:
-            self.run_ledger.append(
-                member_run_cost(
-                    replace(spec, run_id=revision_run_id, agent_id=revision_run_id),
-                    state,
-                    parent_run_id=parent_run_id,
-                )
-            )
-        if state.citations:
-            merge_citations(self.citations, state.citations)
+        """Fold a revision into the turn totals via the shared accumulator: token
+        usage + one member ledger row + any web sources it consulted (一 run 一行,
+        决策②). The row carries the revision's own ``run_id`` parented to the original
+        run, so the version chain is reconstructable. ``state`` is always COMPLETED
+        here (the caller returns early otherwise), so its citations fold in."""
+        self._acc.add_run(
+            replace(spec, run_id=revision_run_id, agent_id=revision_run_id),
+            state,
+            parent_run_id=parent_run_id,
+        )

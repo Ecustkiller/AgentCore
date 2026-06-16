@@ -696,7 +696,7 @@ describe("agent reasoning effort (effective knobs)", () => {
   });
 });
 
-describe("辩论/审查 display tags (前端UX目标态 §四)", () => {
+describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
   const debatePlan: ExecutionPlan = {
     id: "exec-d",
     planType: "multi_agent",

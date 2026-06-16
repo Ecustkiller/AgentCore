@@ -188,6 +188,12 @@ class Conversation(Base):
     title: Mapped[str] = mapped_column(
         String(500), nullable=False, server_default=text("''")
     )
+    # Sidebar housekeeping (对话基础功能补齐):
+    # - ``pinned`` floats a conversation to the top of the sidebar / list (ordered
+    #   pinned-first, then by recency).
+    # - ``archived`` hides a conversation from the default sidebar / grouped list
+    #   without deleting it; surfaced only in the「已归档」view, reversible.
+    pinned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     archived: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     mode: Mapped[str] = mapped_column(
         String(20), default="chat", server_default=text("'chat'")
@@ -198,12 +204,6 @@ class Conversation(Base):
     folder_id: Mapped[str | None] = mapped_column(
         PG_UUID(as_uuid=False), index=True, nullable=True
     )
-    # Local-mode binding (双模式工作区 §七): the desktop FS root this *ungrouped*
-    # conversation is bound to. NULL = cloud. A foldered conversation binds at its
-    # folder instead (shared project space), so this is read only when ungrouped.
-    # Stored as a plain string, not PG_UUID: it is an opaque handle minted by the
-    # desktop (fs-service `randomUUID`), not a server-owned id.
-    local_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Per-conversation 质量档 override (llm/modes.py): a preset name or custom
     # ModelMode id. NULL = inherit the user's default_model_mode → operator default.
     model_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -276,9 +276,9 @@ class Folder(Base):
     # machine-addressable binding below.
     local_dir: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     # Local-mode binding (双模式工作区 §七): the desktop FS root id this folder (=
-    # shared project space) is bound to. NULL = cloud. Its conversations all run in
-    # local mode against this root. Opaque desktop handle → plain string, not
-    # PG_UUID (see Conversation.local_root_id).
+    # 工作区) is bound to. NULL = cloud. Its conversations all run in local mode
+    # against this root. Opaque desktop handle minted by the desktop (fs-service
+    # `randomUUID`), so a plain string, not PG_UUID (not a server-owned id).
     local_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
@@ -522,6 +522,11 @@ class Chat(Base):
     # and giving O(1) existing-DM lookup. NULL for group / official (Postgres
     # allows many NULLs under a unique index).
     dm_key: Mapped[str | None] = mapped_column(String(73), unique=True, nullable=True)
+    # When true, every user is auto-joined to this chat: new users at registration
+    # and existing users via a one-time backfill (the 内测全员群 mechanism — see
+    # docs/07-规划/全员反馈群落地设计.md). Generalizes to an official broadcast
+    # channel later. dm/regular group chats stay false.
+    auto_join: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     # Denormalized list-row preview, refreshed on each message.
     last_message_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -568,6 +573,10 @@ class ChatMember(Base):
         PG_UUID(as_uuid=False), nullable=True
     )
     muted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # Admin-imposed 禁言 (Stage 3 审核治理): a moderator silenced this member — they
+    # can still read but a send is refused (403). Distinct from `muted` (the
+    # member's own notification mute) so moderation and self-service stay separate.
+    muted_by_admin: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     pinned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
@@ -671,7 +680,7 @@ class UserDirectorySettings(Base):
 # row on an in-memory miss, continues the run, and writes the extended transcript
 # back. Pruned by a 7-day idle TTL sweeper (runtime/session_retention.py) on
 # ``updated_at`` — independent of the message.runs graph-replay journal (different
-# lifecycle, 见 docs/07-规划/多轮编排与队员热修.md §六 T-2 / T-5).
+# lifecycle, 见 docs/03-AI核心/多轮编排与队员热修.md §六 T-2 / T-5).
 
 
 class RunSessionRow(Base):
@@ -702,6 +711,56 @@ class RunSessionRow(Base):
     )
     # Originating turn's log trace_id, set on first persist and NOT overwritten on a
     # later revise (a revise is a new turn) — links a recoverable worker back to the
+    # interaction that spawned it. NULL when untraced. See core/log_context.py.
+    trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    )
+
+
+# --- Paused turns (结构化挂起 durable resume: turn 级落盘 + POST .../resume) ---
+# A turn that suspended at a plan_review checkpoint, persisted so it SURVIVES a
+# process restart / client disconnect — without it the whole turn (an in-memory
+# asyncio task + its completed workers) is lost. One row per paused assistant
+# turn, keyed by the pipeline's ``message_id``. The ``frame`` JSONB holds the full
+# resumable snapshot (the delegate RunPlan with its minted ids, the completed
+# workers' RunStates as seed_completed, the CEO context to rebuild the loop, and
+# the journal-so-far for graph replay) — see runtime/suspension.py. The row is the
+# AUTHORITATIVE pending state ONLY when no live in-process interaction exists (a
+# live SSE turn settles via the interaction bridge instead); ``POST .../resume``
+# claims-and-deletes it to continue on a fresh process. Deleted on resume / a
+# live in-process resolve / timeout; not a graph-replay journal (different
+# lifecycle from messages.runs).
+
+
+class PausedTurnRow(Base):
+    __tablename__ = "paused_turns"
+    __table_args__ = (
+        # A conversation's pending paused turns (resume lookup on reopen).
+        Index("ix_paused_turns_conversation", "conversation_id"),
+        # TTL sweep scans by last-touch: delete rows whose updated_at < cutoff.
+        Index("ix_paused_turns_updated", "updated_at"),
+    )
+
+    # The paused turn's assistant ``message_id`` (== the pipeline's minted id), so a
+    # resume reuses the same id when it finally persists the assistant message.
+    message_id: Mapped[str] = mapped_column(
+        PG_UUID(as_uuid=False), primary_key=True
+    )
+    # No column-level index=True: the conversation lookup is served by the explicit
+    # ix_paused_turns_conversation in __table_args__ above; a second auto-named index
+    # (ix_paused_turns_conversation_id) would drift from the migration.
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    # The full resumable snapshot (runtime/suspension.py TurnSuspension): plan +
+    # seed_completed + CEO context + journal-so-far + pending checkpoint payload.
+    frame: Mapped[dict] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
+    # Originating turn's log trace_id, so the resumed continuation joins back to the
     # interaction that spawned it. NULL when untraced. See core/log_context.py.
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

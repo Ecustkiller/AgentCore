@@ -1,0 +1,14 @@
+{
+  "id": "par_rag_survey",
+  "archetype": "parallel_research",
+  "user_message": "调研 RAG 的三个优化方向：重排序（rerank）、查询改写（query rewrite）、混合检索（hybrid search），每个方向各找 2 条代表性做法，最后说明这三者能否组合使用。",
+  "arms": ["single", "team"],
+  "baseline_arm": "single",
+  "mode": "economy",
+  "samples": 5,
+  "checks": {
+    "single": [{ "name": "FinishReason" }],
+    "team": [{ "name": "Delegated" }]
+  },
+  "rubric": "三方向是否各给出 2 条具体做法（共 6 条）+ 末尾是否给出三者能否组合的综合判断（考 CEO 对并行子结论的收尾整合）；做法是否真实存在、未编造。三方向相互独立可并行，但末尾需综合（团队杠杆）。简洁正确优先。"
+}

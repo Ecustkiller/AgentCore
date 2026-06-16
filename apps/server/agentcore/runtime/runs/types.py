@@ -149,7 +149,7 @@ class RunSpec:
     thinking: bool | None = None
     reasoning_effort: str | None = None
     expected_output: str = ""
-    # ── 辩论/审查 呈现标记（前端UX目标态 §四，display-only） ──
+    # ── 辩论/审查 呈现标记（前端UX设计.md §四，display-only） ──
     # An opposing-batch's display tags: ``stance`` is this node's side (pro/con),
     # ``group`` pairs opposing nodes into one comparison, and ``round`` is its
     # multi-round-debate turn number (1-based; 0 = not a multi-round debate). The
@@ -170,7 +170,7 @@ class RunSpec:
     # ``delegate`` is atomic to the CEO (it gets no wave-boundary control). Inert by
     # default and whenever the scheduler is driven without an ``on_checkpoint`` hook
     # (autonomous jobs / tests), so a plan with no checkpoint marks runs byte-for-
-    # byte as before. → 见设计: docs/07-规划/结构化挂起后端落地设计.md
+    # byte as before. → 见设计: docs/03-AI核心/执行引擎架构设计.md §检查点决策语义
     checkpoint_after: bool = False
     parent_run_id: str | None = None
     depth: int = 0
@@ -188,11 +188,12 @@ class RunSpec:
     sibling_summary: str = ""
     # Mid-course user steer (结构化挂起 adjust): the note the user gave at a
     # plan_review checkpoint with the ``adjust`` decision, injected by the host hook
-    # onto every not-yet-run downstream node so the steer actually redirects the
-    # remaining work (the executor renders it as a high-priority instruction block).
-    # Empty for plan-time specs and for ``continue`` / ``stop``; accumulates (one
-    # block per adjust) when a node is steered across multiple checkpoints before it
-    # runs. → 见设计: docs/07-规划/结构化挂起后端落地设计.md
+    # onto the checkpoint's not-yet-run (transitive) dependents — exactly the work
+    # building on the reviewed output, not unrelated parallel branches — so the steer
+    # redirects the remaining work (the executor renders it as a high-priority
+    # instruction block). Empty for plan-time specs and for ``continue`` / ``stop``;
+    # accumulates (one block per adjust) when a node is steered across multiple
+    # checkpoints before it runs. → 见设计: docs/03-AI核心/执行引擎架构设计.md §检查点决策语义
     steer: str = ""
 
 

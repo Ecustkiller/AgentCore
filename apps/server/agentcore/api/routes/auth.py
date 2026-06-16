@@ -15,6 +15,7 @@ from agentcore.api.dependencies import (
     AdminUser,
     AuthUser,
     get_auth_service,
+    get_messaging_service,
 )
 from agentcore.api.schemas import (
     CreateInviteRequest,
@@ -28,7 +29,11 @@ from agentcore.api.schemas import (
 from agentcore.auth import AuthService, TokenPair
 from agentcore.config import settings
 from agentcore.core.errors import AuthenticationError
+from agentcore.core.logging import get_logger
 from agentcore.db.models import Invite, User
+from agentcore.messaging import MessagingService
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -102,6 +107,7 @@ def _clear_auth_cookies(response: Response) -> None:
 async def register(
     body: RegisterRequest,
     service: AuthService = Depends(get_auth_service),
+    messaging: MessagingService = Depends(get_messaging_service),
 ):
     user = await service.register(
         username=body.username,
@@ -110,6 +116,13 @@ async def register(
         display_name=body.display_name,
         email=body.email,
     )
+    # Enroll the new account into every auto-join chat (the 内测全员群). Best-effort
+    # so a messaging hiccup never blocks account creation — a missed enrollment can
+    # be backfilled later; auto-join fires only here (not on login) so leaving sticks.
+    try:
+        await messaging.join_auto_join_chats(user_id=user.user_id)
+    except Exception:
+        logger.warning("chat.auto_join_failed", user=user.user_id, exc_info=True)
     return _user_response(user)
 
 

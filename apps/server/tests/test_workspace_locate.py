@@ -137,50 +137,26 @@ def test_build_workspace_falls_back_to_cloud_when_unbound(tmp_path: Path, monkey
     assert ws.location == "server"
 
 
-# --- resolve_local_binding: the §七 precedence rule (folder-first) -------------
+# --- resolve_local_binding: 文件夹即工作区 (binding lives only on the folder) -----
 
 
-def test_resolve_ungrouped_uses_own_binding():
-    binding = resolve_local_binding(
-        folder_id=None,
-        folder_local_root_id=None,
-        conversation_local_root_id="conv-root",
-    )
-    assert binding == LocalBinding(root_id="conv-root", root_label="workspace")
-
-
-def test_resolve_ungrouped_unbound_is_cloud():
-    assert (
-        resolve_local_binding(
-            folder_id=None,
-            folder_local_root_id=None,
-            conversation_local_root_id=None,
-        )
-        is None
-    )
+def test_resolve_ungrouped_is_always_cloud():
+    """A 裸聊 (no folder) has no workspace yet, so it can never be local."""
+    assert resolve_local_binding(folder_id=None, folder_local_root_id=None) is None
 
 
 def test_resolve_foldered_uses_folder_binding_with_label():
     binding = resolve_local_binding(
         folder_id="f1",
         folder_local_root_id="folder-root",
-        conversation_local_root_id="ignored-conv-root",
         label="MyProject",
     )
     assert binding == LocalBinding(root_id="folder-root", root_label="MyProject")
 
 
-def test_resolve_foldered_ignores_conversation_binding():
-    """A filed conversation uses the folder space only — its own (stale, set while
-    ungrouped) root id must never resurrect once it is in an unbound folder."""
-    assert (
-        resolve_local_binding(
-            folder_id="f1",
-            folder_local_root_id=None,
-            conversation_local_root_id="stale-conv-root",
-        )
-        is None
-    )
+def test_resolve_foldered_unbound_is_cloud():
+    """A filed conversation whose folder has no binding runs in the cloud."""
+    assert resolve_local_binding(folder_id="f1", folder_local_root_id=None) is None
 
 
 # --- storage key (mirrors the on-disk layout for snapshots) ---

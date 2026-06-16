@@ -341,7 +341,7 @@ export function GraphView({
     // top-level, so both stay off the input → … → captain flow.
     const topWorkers = workerRuns.filter((r) => !isSub(r) && !isRevision(r));
     const nodeIds = workerRuns.map((s) => s.id);
-    // 辩论/审查 分列对置 (前端UX目标态 §四): when the batch carries stance tags, order
+    // 辩论/审查 分列对置 (前端UX设计.md §四): when the batch carries stance tags, order
     // the worker nodes 正方 → (untagged) → 反方 so ELK (considerModelOrder) bands the
     // two sides into facing groups instead of interleaving them. Inert for非辩论.
     const debate = workerRuns.some((r) => r.stance != null);
@@ -662,7 +662,7 @@ export function GraphView({
           // 乙 热修 P4: badge a 续写 node「修订 vN」(version number from the wire flag).
           isRevision,
           revision: run.revision,
-          // 辩论/审查 side tag (前端UX目标态 §四): badges the node 正方/反方; null on
+          // 辩论/审查 side tag (前端UX设计.md §四): badges the node 正方/反方; null on
           // ordinary teammates.
           stance: run.stance,
           // 结构化挂起 2a (7.2A): a `checkpoint_after` pause that fired after this run

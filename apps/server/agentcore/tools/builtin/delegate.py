@@ -22,7 +22,6 @@ tool's output is otherwise not metered by the loop.
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
@@ -31,7 +30,6 @@ from agentcore.llm.config import apply_overrides
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
-from agentcore.runtime.citations import merge_citations
 from agentcore.runtime.events import (
     EventSink,
     content_delta,
@@ -51,6 +49,7 @@ if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunSpec, RunState
     from agentcore.runtime.sessions import SessionSaver, SessionStore
+    from agentcore.runtime.suspension import SuspensionDeleter, SuspensionSaver
 
 logger = get_logger(__name__)
 
@@ -270,6 +269,9 @@ class DelegateTool:
         registry: ClientRequestBridge | None = None,
         checkpoint_timeout_seconds: float = 0.0,
         checkpoint_enabled: bool = False,
+        message_id: str | None = None,
+        suspension_saver: SuspensionSaver | None = None,
+        suspension_deleter: SuspensionDeleter | None = None,
         depth: int = 0,
     ) -> None:
         self._llm = llm
@@ -318,6 +320,15 @@ class DelegateTool:
         self._registry = registry
         self._checkpoint_timeout_seconds = checkpoint_timeout_seconds
         self._checkpoint_enabled = checkpoint_enabled
+        # 结构化挂起 2b (turn 级落盘 + /resume): the turn's assistant ``message_id``
+        # (the frame's key) + the persist / drop closures. When all are wired and this
+        # is the TOP-LEVEL captain's delegate (``depth == 0``), a plan_review pause is
+        # persisted to ``paused_turns`` BEFORE the wait and dropped after a live
+        # in-process resolve — so a disconnect / restart during the pause leaves a
+        # frame ``POST .../resume`` can rebuild. None / nested ⇒ 2a in-memory only.
+        self._message_id = message_id
+        self._suspension_saver = suspension_saver
+        self._suspension_deleter = suspension_deleter
         # Child delegate tools minted for re-delegating workers this turn (one per
         # nesting worker). Their sub-team usage + cost rows are folded back into
         # this tool's totals after each call — see _absorb_children.
@@ -326,27 +337,32 @@ class DelegateTool:
         # delegate repeatedly). Telemetry only — run-id uniqueness now rides a uuid
         # batch prefix (see execute), not this counter.
         self._calls = 0
-        # Worker token usage accumulated across every delegate call this turn; the
-        # pipeline folds this into the turn totals after the CEO loop returns. The
-        # cache_hit/cache_miss split rides along so the folded total stays
-        # priceable (a cache hit is ~50× cheaper than a miss).
-        self.usage: dict[str, int] = {
-            "input": 0,
-            "output": 0,
-            "reasoning": 0,
-            "cache_hit": 0,
-            "cache_miss": 0,
-        }
-        # Per-run cost ledger rows accumulated across every delegate call this
-        # turn (决策②: one row per worker run). The pipeline reads this, appends
-        # the captain root row, and hands the lot to the service for 落账.
-        self.run_ledger: list[RunCost] = []
-        # Web sources the workers consulted, accumulated (de-duped, capped) across
-        # every delegate call this turn. The pipeline folds these into the turn's
-        # shared source card so the user sees the WHOLE team's research, not just
-        # the CEO's own searches. Only COMPLETED runs contribute (a hard-failed
-        # worker's output is discarded, so its sources don't back the answer).
-        self.citations: list[dict[str, Any]] = []
+        # This turn's「用量 + 账目 + 引用」roll-up, SHARED with revise via one
+        # WorkerResultAccumulator (runtime/costing.py): worker token usage (cache
+        # split kept, folded into the turn totals by the pipeline), one per-run cost
+        # ledger row per metered worker (决策②), and the workers' de-duped web
+        # sources (folded into the turn's shared source card; only COMPLETED runs
+        # contribute). Exposed read-only as ``usage`` / ``run_ledger`` / ``citations``
+        # (properties below) so the pipeline and tests read the same surface. Lazy
+        # import keeps the tools package free of an import-time runtime.runs dep.
+        from agentcore.runtime.costing import WorkerResultAccumulator
+
+        self._acc = WorkerResultAccumulator()
+
+    @property
+    def usage(self) -> dict[str, int]:
+        """This turn's accumulated worker token usage (the pipeline folds it in)."""
+        return self._acc.usage
+
+    @property
+    def run_ledger(self) -> list[RunCost]:
+        """One per-run cost row per metered worker this turn (决策②)."""
+        return self._acc.run_ledger
+
+    @property
+    def citations(self) -> list[dict[str, Any]]:
+        """The workers' de-duped web sources (folded into the turn's shared card)."""
+        return self._acc.citations
 
     @property
     def schema(self) -> ToolSchema:
@@ -362,13 +378,7 @@ class DelegateTool:
         # Lazy import: keep the tools package free of an import-time dependency on
         # the runtime.runs package (which imports the engine, which imports this
         # registry) — avoids a circular import.
-        from agentcore.runtime.runs import (
-            DEFAULT_MAX_PARALLEL,
-            RunPhase,
-            WaveScheduler,
-            build_agent_executor,
-            build_run_plan,
-        )
+        from agentcore.runtime.runs import build_run_plan
 
         tasks_raw = arguments.get("tasks")
         if not isinstance(tasks_raw, list) or not tasks_raw:
@@ -402,6 +412,37 @@ class DelegateTool:
         execution_id = self._base_tool_context.execution_id or new_id()
         self._sink.emit(self._plan_event(execution_id, plan))
         logger.info("delegate.started", nodes=len(plan.nodes), call=self._calls)
+        return await self._drive(
+            plan,
+            execution_id=execution_id,
+            seed_completed=None,
+            finalize=bool(arguments.get("finalize")),
+        )
+
+    async def _drive(
+        self,
+        plan: RunPlan,
+        *,
+        execution_id: str,
+        seed_completed: dict[str, RunState] | None,
+        finalize: bool,
+    ) -> ToolResult:
+        """Run ``plan`` through the WaveScheduler and fold the workers' products into a
+        CEO-facing ToolResult (shared by a fresh ``execute`` and a 2b ``resume_plan``).
+
+        ``seed_completed`` pre-seeds finished nodes (a resume): they are treated as
+        done, so only the unfinished tail runs; their usage/cost/citations still ride
+        in ``results`` so the (resumed) turn bills the WHOLE plan once. A downstream
+        ``checkpoint_after`` step still pauses via :meth:`_checkpoint_hook`, so a
+        resume can itself re-pause (and re-persist) at a later checkpoint.
+        """
+        from agentcore.runtime.costing import usage_metadata
+        from agentcore.runtime.runs import (
+            DEFAULT_MAX_PARALLEL,
+            RunPhase,
+            WaveScheduler,
+            build_agent_executor,
+        )
 
         # Gate workers' machine-touching tools ONLY when the workspace is local —
         # then a worker's code_execute / file_write runs on the user's real disk
@@ -435,12 +476,16 @@ class DelegateTool:
             done = sum(1 for s in completed.values() if s.phase is RunPhase.COMPLETED)
             self._sink.emit(run_progress(done, total))
 
-        # 结构化挂起 2a: hand the scheduler a plan_review hook only when checkpoints
+        # 结构化挂起: hand the scheduler a plan_review hook only when checkpoints
         # are active this turn (gate on + bridge/conversation wired). Off ⇒ None, so
         # a ``checkpoint_after`` marker stays inert and the plan runs straight through.
         on_checkpoint = self._checkpoint_hook(plan) if self._checkpoint_active() else None
         results = await WaveScheduler(self._max_parallel or DEFAULT_MAX_PARALLEL).run(
-            plan, executor, on_progress=_progress, on_checkpoint=on_checkpoint
+            plan,
+            executor,
+            seed_completed=seed_completed,
+            on_progress=_progress,
+            on_checkpoint=on_checkpoint,
         )
 
         call_usage = self._accumulate_usage(results)
@@ -456,7 +501,7 @@ class DelegateTool:
         # 产出直接作为本回合最终答复（HANDOFF 终态），省掉 CEO 再写一段概览的 LLM 轮次。
         # 其余情况（多 worker、单 worker 失败或空产出）一律回落到下面的非终态路径，由
         # CEO 照常收尾——这就是 finalize 的安全兜底。
-        if arguments.get("finalize") and len(plan.nodes) == 1:
+        if finalize and len(plan.nodes) == 1:
             only = results.get(plan.nodes[0].run_id)
             if only and only.phase is RunPhase.COMPLETED and only.content.strip():
                 return self._direct_result(only.content)
@@ -467,13 +512,60 @@ class DelegateTool:
             success=True,
             output=output,
             output_limit=_DELEGATE_OUTPUT_LIMIT,
-            metadata={
-                "input_tokens": call_usage["input"],
-                "output_tokens": call_usage["output"],
-                "reasoning_tokens": call_usage["reasoning"],
-                "cache_hit_tokens": call_usage["cache_hit"],
-                "cache_miss_tokens": call_usage["cache_miss"],
-            },
+            metadata=usage_metadata(call_usage),
+        )
+
+    async def resume_plan(
+        self,
+        plan: RunPlan,
+        seed_completed: dict[str, RunState],
+        *,
+        decision: CheckpointDecision,
+        note: str,
+        checkpoint_run_ids: set[str],
+        execution_id: str,
+    ) -> ToolResult:
+        """Continue a paused plan from a resumed turn (结构化挂起 2b ``POST .../resume``).
+
+        The plan + its finished nodes (``seed_completed``) were rebuilt from the
+        durable frame; this applies the user's plan_review decision and drives the
+        remaining tail, returning the same CEO-facing aggregate ``execute`` would:
+
+        - ``STOP``: don't run the tail — materialise the unrun downstream as SKIPPED
+          (the same shape 2a's stop produced), bill / register the seeds, and format,
+          so the CEO writes an overview of the partial work.
+        - ``ADJUST``: inject the user's note as a steer onto the reviewed checkpoint
+          nodes' not-yet-run dependents, then drive (CONTINUE's path with redirection).
+        - ``CONTINUE``: drive the tail as-is.
+
+        The plan_event is NOT re-emitted (the graph was declared pre-pause and rides in
+        the seeded journal); a downstream ``checkpoint_after`` can pause again via the
+        normal hook (re-persisting a fresh frame).
+        """
+        from agentcore.runtime.runs import RunPhase, RunState
+
+        if decision is CheckpointDecision.STOP:
+            results: dict[str, RunState] = dict(seed_completed)
+            for node in plan.nodes:
+                results.setdefault(node.run_id, RunState(phase=RunPhase.SKIPPED))
+            self._accumulate_usage(results)
+            self._collect_ledger(plan, results)
+            self._collect_citations(results)
+            registered = self._register_sessions(plan, results)
+            if self._session_saver is not None:
+                for session in registered:
+                    await self._session_saver(session)
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=self._format_for_ceo(plan, results),
+                output_limit=_DELEGATE_OUTPUT_LIMIT,
+            )
+
+        if decision is CheckpointDecision.ADJUST and note.strip():
+            self._apply_steer(plan, seed_completed, checkpoint_run_ids, note.strip())
+        return await self._drive(
+            plan, execution_id=execution_id, seed_completed=seed_completed, finalize=False
         )
 
     def _direct_result(self, content: str) -> ToolResult:
@@ -522,6 +614,10 @@ class DelegateTool:
             registry=self._registry,
             checkpoint_timeout_seconds=self._checkpoint_timeout_seconds,
             checkpoint_enabled=self._checkpoint_enabled,
+            # Durable suspension is top-level only (depth 0): a nested sub-team's
+            # checkpoint keeps 2a in-memory behaviour (no frame), since resuming a
+            # pause buried in a worker's own sub-loop is out of scope for 2b v1.
+            # message_id/savers intentionally NOT forwarded → child can't persist.
             depth=captain_depth,
         )
         self._children.append(child)
@@ -531,19 +627,17 @@ class DelegateTool:
         """Fold every nested sub-team spawned this call into the turn totals.
 
         A worker that re-delegated ran its sub-team through a child tool (from
-        :meth:`_make_child`); the child accumulated its sub-workers' token usage and
-        per-run cost rows (parented to that worker). Roll them up so the top-level
-        tool the pipeline reads carries the WHOLE tree's usage + ledger. Cleared
-        after folding so an adaptive captain's next call can't double-count.
+        :meth:`_make_child`); the child accumulated its sub-workers' token usage,
+        per-run cost rows (parented to that worker), and web sources. Roll them up so
+        the top-level tool the pipeline reads carries the WHOLE tree's usage + ledger
+        + sources. Cleared after folding so an adaptive captain's next call can't
+        double-count.
         """
+        # Roll each child's whole accumulator (usage + ledger + de-duped sources)
+        # up into this captain's — so a nested worker's research / spend is not lost
+        # at the next level up.
         for child in self._children:
-            for key in self.usage:
-                self.usage[key] += child.usage[key]
-            self.run_ledger.extend(child.run_ledger)
-            # Sub-team sources roll up into this captain's card too (deduped/capped
-            # against what's already collected), so a nested worker's research is
-            # not lost at the next level up.
-            merge_citations(self.citations, child.citations)
+            self._acc.merge(child._acc)
         self._children.clear()
 
     def _checkpoint_active(self) -> bool:
@@ -564,9 +658,16 @@ class DelegateTool:
         user's answer (timeout → continue — a soft checkpoint never silently halts),
         discard, emit the resolution. Returns whether to proceed: False only on an
         explicit ``stop``. An ``adjust`` proceeds too, but first injects the user's
-        note as a steer onto every not-yet-run downstream node (:meth:`_apply_steer`)
-        so the correction actually redirects the remaining work. The scheduler stays
-        pure; this host hook owns the user round-trip + SSE + the steer mutation.
+        note as a steer onto the checkpoint's not-yet-run (transitive) dependents
+        (:meth:`_apply_steer`) so the correction redirects exactly the work that
+        builds on the reviewed output — not unrelated parallel branches. The
+        scheduler stays pure; this host hook owns the round-trip + SSE + the steer.
+
+        结构化挂起 2b: when this is the top-level captain's delegate and the persist
+        closures are wired, a durable frame is saved to ``paused_turns`` BEFORE the
+        wait and dropped AFTER a live resolve / timeout. A cancel (client disconnect)
+        or a crash during the wait propagates past the drop, so the frame survives for
+        ``POST .../resume`` to rebuild and continue the turn on a fresh process.
         """
         registry = self._registry
         conversation_id = self._conversation_id
@@ -577,27 +678,34 @@ class DelegateTool:
             checkpoint_id = new_id()
             steps = [self._review_step(n, completed) for n in nodes]
             pending = self._pending_preview(plan, completed)
-            fut = registry.create(
-                checkpoint_id,
-                conversation_id,
-                kind=InteractionKind.PLAN_REVIEW,
-                payload={"steps": steps, "pending": pending},
+            required = plan_review_required(
+                checkpoint_id=checkpoint_id,
+                conversation_id=conversation_id,
+                steps=steps,
+                pending=pending,
             )
-            self._sink.emit(
-                plan_review_required(
-                    checkpoint_id=checkpoint_id,
-                    conversation_id=conversation_id,
-                    steps=steps,
-                    pending=pending,
-                )
+            # Durable backstop BEFORE the wait (best-effort; on failure the in-memory
+            # resolve below still settles the live turn). Includes the about-to-emit
+            # `required` in the frame's journal so a resume replays the pause.
+            await self._persist_suspension(
+                checkpoint_id, plan, completed, steps, pending, required
             )
             try:
-                response = await asyncio.wait_for(fut, timeout=timeout)
+                response = await registry.suspend(
+                    checkpoint_id,
+                    conversation_id,
+                    kind=InteractionKind.PLAN_REVIEW,
+                    payload={"steps": steps, "pending": pending},
+                    timeout=timeout,
+                    on_suspended=lambda: self._sink.emit(required),
+                )
             except TimeoutError:
                 logger.info("plan_review.timeout", checkpoint_id=checkpoint_id)
                 response = CheckpointResponse(decision=CheckpointDecision.CONTINUE)
-            finally:
-                registry.discard(checkpoint_id)
+            # Reached only on resolve / timeout — a cancel (disconnect) raises
+            # CancelledError, which propagates PAST this and leaves the frame for
+            # /resume. The live path settled in-process, so drop the stale backstop.
+            await self._drop_suspension()
             self._sink.emit(
                 plan_review_resolved(
                     checkpoint_id=checkpoint_id,
@@ -606,27 +714,127 @@ class DelegateTool:
                 )
             )
             if response.decision is CheckpointDecision.ADJUST and response.note.strip():
-                self._apply_steer(plan, completed, response.note.strip())
+                self._apply_steer(
+                    plan, completed, {n.run_id for n in nodes}, response.note.strip()
+                )
             return response.decision is not CheckpointDecision.STOP
 
         return on_checkpoint
 
-    @staticmethod
-    def _apply_steer(plan: RunPlan, completed: dict, note: str) -> None:
-        """Inject a plan_review ``adjust`` note onto every not-yet-run downstream
-        node so the steer redirects the remaining work.
+    def _can_persist_suspension(self) -> bool:
+        """Whether this checkpoint should be durably persisted (结构化挂起 2b).
 
-        The scheduler re-reads specs from ``plan.nodes`` each wave, so mutating a
-        pending node's :attr:`RunSpec.steer` here lands before it runs; the executor
-        renders it as a high-priority instruction block. Nodes already in
-        ``completed`` are done and left untouched. Accumulates (one bullet per
-        adjust) so a node steered across multiple checkpoints keeps every note.
+        Top-level captain's delegate only (``depth == 0``) and the turn's
+        ``message_id`` + persist closures wired — a nested sub-team's checkpoint and
+        any standalone / un-wired run keep 2a in-memory behaviour (no frame)."""
+        return bool(
+            self._depth == 0
+            and self._message_id
+            and self._suspension_saver is not None
+            and self._conversation_id
+        )
+
+    async def _persist_suspension(
+        self, checkpoint_id, plan, completed, steps, pending, required_event
+    ) -> None:
+        """Capture + persist the durable suspension frame for this pause (2b).
+
+        Reads the CEO transcript off the ``captain_transcript`` contextvar (published
+        by the captain executor) — without it a faithful resume is impossible, so
+        capture is skipped (the live in-memory resolve still works). Folds the
+        about-to-emit ``required_event`` into the frame's journal so a resume replays
+        the pause+resolution as a pair. Best-effort: the saver swallows its own errors.
         """
+        if not self._can_persist_suspension():
+            return
+        from agentcore.core.log_context import get_log_value
+        from agentcore.runtime.suspension import (
+            PlanReviewSuspension,
+            captain_transcript,
+            find_tool_call_id,
+        )
+
+        transcript = captain_transcript.get()
+        if not transcript:
+            logger.info("suspension.no_transcript", checkpoint_id=checkpoint_id)
+            return
+        journal = list(self._sink.execution_journal() or [])
+        journal.append(
+            {
+                "type": required_event.type.value,
+                "payload": required_event.payload,
+                "timestamp": required_event.timestamp,
+            }
+        )
+        frame = PlanReviewSuspension(
+            message_id=self._message_id or "",
+            conversation_id=self._conversation_id or "",
+            user_id=self._base_tool_context.user_id,
+            captain_run_id=self._captain_run_id or "",
+            checkpoint_id=checkpoint_id,
+            tool_call_id=find_tool_call_id(transcript, "delegate"),
+            base_system_prompt=self._system_prompt,
+            user_message=self._user_message,
+            transcript=list(transcript),
+            plan=plan,
+            completed=dict(completed),
+            journal=journal,
+            steps=steps,
+            pending=pending,
+            trace_id=get_log_value("trace_id"),
+        )
+        await self._suspension_saver(frame)  # type: ignore[misc]
+
+    async def _drop_suspension(self) -> None:
+        """Delete the durable frame after a live in-process resolve / timeout (2b)."""
+        if self._can_persist_suspension() and self._suspension_deleter is not None:
+            await self._suspension_deleter(self._message_id or "")
+
+    @staticmethod
+    def _apply_steer(
+        plan: RunPlan, completed: dict, checkpoint_ids: set[str], note: str
+    ) -> None:
+        """Inject a plan_review ``adjust`` note onto the checkpoint nodes' not-yet-run
+        *transitive dependents* — exactly the work that builds on the reviewed output.
+
+        The steer is feedback about what the checkpoint node(s) produced, so only
+        nodes that (transitively) ``depends_on`` a checkpoint node are redirected; an
+        independent branch still pending at the pause never saw the reviewed output
+        and is left untouched (避免污染无关并行支). The scheduler re-reads specs from
+        ``plan.nodes`` each wave, so mutating a pending node's :attr:`RunSpec.steer`
+        here lands before it runs; the executor renders it as a high-priority
+        instruction block. Nodes already in ``completed`` are done and skipped.
+        Accumulates (one bullet per adjust) so a node steered across multiple
+        checkpoints keeps every note.
+        """
+        targets = DelegateTool._downstream_of(plan, checkpoint_ids)
         block = f"- {note}"
         for node in plan.nodes:
-            if node.run_id in completed:
+            if node.run_id in completed or node.run_id not in targets:
                 continue
             node.steer = f"{node.steer}\n{block}" if node.steer else block
+
+    @staticmethod
+    def _downstream_of(plan: RunPlan, roots: set[str]) -> set[str]:
+        """Run ids that (transitively) ``depends_on`` any node in ``roots`` (the just-
+        completed checkpoint nodes).
+
+        Fixpoint over the dependency edges: a node is downstream if any of its deps is
+        a root or already-downstream. The roots themselves are excluded (they are
+        done). Used to scope an ``adjust`` steer to the reviewed output's dependents
+        rather than every pending node.
+        """
+        downstream: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for node in plan.nodes:
+                if node.run_id in downstream or node.run_id in roots:
+                    continue
+                if any(dep in roots or dep in downstream for dep in node.depends_on):
+                    downstream.add(node.run_id)
+                    changed = True
+        return downstream
 
     def _review_step(self, node: RunSpec, completed: dict) -> dict[str, Any]:
         """One just-completed checkpoint node's review card entry (run_id + role +
@@ -647,13 +855,17 @@ class DelegateTool:
         ]
 
     def _accumulate_usage(self, results: dict) -> dict[str, int]:
-        """Sum this call's worker token usage and fold it into the turn total."""
+        """Sum this call's worker token usage and fold it into the turn total.
+
+        Returns THIS call's usage (an adaptive captain may delegate repeatedly), so
+        the result metadata reports only this batch while the accumulator carries
+        the running turn total.
+        """
         call = {"input": 0, "output": 0, "reasoning": 0, "cache_hit": 0, "cache_miss": 0}
         for state in results.values():
             for key in call:
                 call[key] += state.usage.get(key, 0)
-        for key in call:
-            self.usage[key] += call[key]
+        self._acc.add_usage(call)
         return call
 
     def _collect_ledger(self, plan, results: dict) -> None:
@@ -662,31 +874,24 @@ class DelegateTool:
         Reads the cost the executor already priced onto each terminal RunState
         (no re-pricing) and parents the row to the captain. Runs that never hit
         the LLM (skipped, or failed before any call) carry no usage and are not
-        billed.
+        billed (the accumulator guards on ``state.usage``).
         """
-        from agentcore.runtime.costing import member_run_cost
-
         for node in plan.nodes:
             state = results.get(node.run_id)
-            if state and state.usage:
-                self.run_ledger.append(
-                    member_run_cost(node, state, parent_run_id=self._captain_run_id)
-                )
+            if state:
+                self._acc.add_run_cost(node, state, parent_run_id=self._captain_run_id)
 
     def _collect_citations(self, results: dict) -> None:
-        """Fold COMPLETED workers' web sources into this call's source list.
+        """Fold COMPLETED workers' web sources into this turn's source list.
 
-        Merged in plan order, de-duped and capped (:func:`merge_citations`), so a
-        page two workers both found collapses to one card. Only COMPLETED runs
-        contribute — a hard-failed worker's output is discarded by the CEO, so its
-        sources don't back the answer. The pipeline later merges this into the
-        turn's shared card alongside the CEO's own searches.
+        Merged in plan order, de-duped and capped, so a page two workers both found
+        collapses to one card. Only COMPLETED runs contribute — a hard-failed
+        worker's output is discarded by the CEO, so its sources don't back the
+        answer (the accumulator guards on the phase). The pipeline later merges this
+        into the turn's shared card alongside the CEO's own searches.
         """
-        from agentcore.runtime.runs import RunPhase
-
         for state in results.values():
-            if state and state.phase is RunPhase.COMPLETED and state.citations:
-                merge_citations(self.citations, state.citations)
+            self._acc.add_citations(state)
 
     def _register_sessions(self, plan, results: dict) -> list:
         """Keep each COMPLETED worker alive as a recoverable RunSession (留人), and
@@ -753,7 +958,7 @@ class DelegateTool:
         """One worker's plan-time descriptor for the graph: identity + topology,
         plus the optional 辩论/审查 display tags when the CEO marked an opposing batch.
 
-        ``stance``/``group``/``round`` (前端UX目标态 §四) ride here display-only: the
+        ``stance``/``group``/``round`` (前端UX设计.md §四) ride here display-only: the
         frontend reads them to render an opposing batch side-by-side under a「辩论」
         title and lay multi-round debates out round-by-round, while the scheduler/
         executor ignore them (执行仍是普通并行 DAG). Omitted when empty/0, so an

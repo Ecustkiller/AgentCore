@@ -24,6 +24,7 @@ otherwise the only key).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -108,6 +109,36 @@ class InteractionRegistry:
             return False
         pending.future.set_result(result)
         return True
+
+    async def suspend(
+        self,
+        request_id: str,
+        conversation_id: str,
+        *,
+        kind: InteractionKind,
+        payload: dict[str, Any] | None = None,
+        timeout: float,
+        on_suspended: Callable[[], None] | None = None,
+    ) -> Any:
+        """Register a pending interaction, signal it, and await its resolution.
+
+        The create → signal → await → discard dance every face (approval / ask_user
+        / client_tool / plan_review) used to copy verbatim. ``on_suspended`` is
+        invoked right AFTER the entry is registered and BEFORE the await, so a racing
+        resolve always finds it — each face passes its ``*_required`` SSE emit here.
+        Raises :class:`TimeoutError` when unresolved within ``timeout`` (the caller
+        maps it to its kind-specific default + log + ``*_resolved`` emit, or re-raises
+        a typed error). The entry is ALWAYS discarded on exit — resolved, timed out,
+        or cancelled — so no face can leak a pending request. Per-kind differences
+        (the result type, the resolved emit, the timeout default) stay in the faces.
+        """
+        fut = self.create(request_id, conversation_id, kind=kind, payload=payload)
+        if on_suspended is not None:
+            on_suspended()
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        finally:
+            self.discard(request_id)
 
     def get(self, request_id: str) -> InteractionRequest | None:
         """Look up a pending interaction (e.g. to verify its kind before resolving)."""
