@@ -112,6 +112,21 @@ def test_team_hint_teaches_debate_stance_tagging():
     assert "辩论" in hint
 
 
+def test_team_hint_teaches_multi_round_debate():
+    # 真·多轮辩论 (Agent协作模式 §7.4): a real back-and-forth debate is just a DAG —
+    # the CEO tags each task's `round` and wires 跨轮 depends_on (round-k 依赖对方
+    # round-(k-1)) so每轮 rebuts the last. The mechanism + 前端逐轮渲染 are already
+    # landed, so the always-on hint must keep teaching the CEO to USE them, else
+    # multi-round silently never happens. Pin round + 跨轮 so a refactor can't drop it.
+    # 同时 pin 克制约束: docs 把 multi-round 定为边际/niche, 故 hint 须先导向单轮、仅确需
+    # 层层反驳才多轮且克制轮数, 防 CEO 滥用昂贵的多轮.
+    hint = CHAT_TEAM_CAPABILITY_HINT
+    assert "多轮辩论" in hint
+    assert "round" in hint
+    assert "跨轮" in hint
+    assert "克制" in hint
+
+
 def test_checkpoint_hint_teaches_debate_closing_with_options():
     # ⑤: a debate closes by handing the采纳 A/B choice to the user via ask_user
     # options — no new checkpoint type (复用现有机制). It must live in the checkpoint

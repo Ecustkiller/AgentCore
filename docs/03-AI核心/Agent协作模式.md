@@ -78,7 +78,7 @@ CEO 是唯一裁决者，用户裁决仅在置信度低时触发。
 | 意见冲突 | CEO 读取各 worker 产物后裁决（收尾时综合） |
 | 资源冲突 | DAG 依赖关系避免并发写入 |
 | 优先级冲突 | CEO 负责任务排序（`delegate` 的 `depends_on`） |
-| 置信度低 | CEO 调内置 `ask_user` 升级给用户拍板（继续/调整/停止），暂停回合待答复后回流 ReAct 循环 → 见代码 `tools/builtin/ask_user.py`、`runtime/checkpoints.py` ✅ |
+| 置信度低 | CEO 调内置 `ask_user` 升级给用户拍板（提交/停止；选项可单/多选），暂停回合待答复后回流 ReAct 循环 → 见代码 `tools/builtin/ask_user.py`、`runtime/checkpoints.py` ✅ |
 
 ---
 
@@ -186,9 +186,9 @@ CEO 是唯一裁决者，用户裁决仅在置信度低时触发。
 
 ## 七、多 Agent 运行时机制
 
-> **实现现状**：委派地基**已落地**——CEO 经 `delegate` 工具调 `build_run_plan` → `WaveScheduler` 逐波执行（→ 见代码 `tools/builtin/delegate.py`、`runtime/runs/`）。§7.1 委派为现状；**§7.2 Preflight Audit / §7.3 Team 编排（`orchestration` 模式 + Team 实体）/ §7.4 Arena / §7.5 Agent 通信协议(A2A) 仍为 Phase 2 目标态**。
+> **实现现状**：委派地基**已落地**——CEO 经 `delegate` 工具调 `build_run_plan` → `WaveScheduler` 逐波执行（→ 见代码 `tools/builtin/delegate.py`、`runtime/runs/`）。§7.1 委派、**§7.4 多轮辩论（DAG 模式）** 为现状；**§7.2 Preflight Audit / §7.3 Team 编排（`orchestration` 模式 + Team 实体）/ §7.5 Agent 通信协议(A2A) 仍为 Phase 2 目标态**。
 
-> 三种多 Agent 交互模式（委派 / 编排 / Arena）的运行时机制，均复用同一 RuntimeEngine 内核。
+> 多 Agent 交互模式（委派 / 编排 / 多轮辩论）的运行时机制，均复用同一 RuntimeEngine 内核——辩论不是独立子系统，而是 DAG 的一种用法（§7.4）。
 
 ### 7.1 委派（Delegation）✅ 已落地
 
@@ -228,27 +228,31 @@ TeamMember 字段为 Phase 2 schema（未落地）。
 
 **依赖传递保真默认全文**：分析/检索→写作链路必须保留金额、法条编号等细节，「一律摘要」会丢失关键信息。`summarize` 仅用于大扇入合成省 token 的场景。
 
-### 7.4 Arena（对抗）⏳ 未实现
+### 7.4 多轮辩论（Arena）✅ 已落地于 DAG；独立子系统已否决
 
-独立于协作模式的结构化多 Agent 对话（辩论/法庭/谈判）：
+「Arena」= 多个 Agent 围绕同一主题**多轮来回交锋**（辩论/法庭/谈判）。它**不是独立执行子系统**，而是普通 AGENT DAG 的一种用法——守 §一「形状是数据不是模式」。要素逐一映射到现有机制：
 
-- 固定阶段轮转，按 `respond_to_phase` 过滤历史
-- 各角色从 Agent 版本加载 system_prompt 和 model
-- 独立 SSE 事件族
+| Arena 要素 | 实现 = 现有机制 |
+|------------|----------------|
+| 多轮来回交锋（唯一独有价值） | **跨轮 `depends_on`**：第 k 轮节点依赖对方第 k-1 轮节点，执行器把上游产物注入下游 prompt（「前置结果（来自 正方）」），下游据此反驳——交锋即一条 DAG 边 |
+| 按 `respond_to_phase` 过滤历史 | `depends_on` 选边 + `result_handling`（全文/摘要）控保真 |
+| 固定阶段轮转 | DAG 波次（一波 = 一轮/一阶段） |
+| 差异化呈现 | `stance`/`group`/`round` 展示标记（display-only，调度器/执行器忽略、`run_plan` 透传）+ 前端逐轮渲染 |
+| 同一辩手跨轮带记忆 | `revise`/续写原语（`run.transcript` + 定向唤回，见 [`多轮编排与队员热修.md`](/docs/03-AI核心/多轮编排与队员热修.md)） |
+| 综合裁决 | CEO 收尾（非终态 delegate 回流） |
 
-> **与现有轻量辩论的关系 + 为何排 Phase 2 最后**（决策理由，代码看不出来）：MVP 的「辩论/审查」已由 §一 的 **stance/group 数据标记**覆盖——`A(pro) ∥ B(con) → CEO 综合`，普通并行 DAG + 前端差异化呈现，零架构代价（见 [`../04-前端/前端UX设计.md` §四](/docs/04-前端/前端UX设计.md)）。Arena **唯一独有的是「多轮来回交锋」**（`respond_to_phase` 让角色互相反驳）；而「方案对比/代码审查」多是一次性 pro/con + CEO 综合，多轮属边际收益，真正非多轮不可的「辩论/法庭/谈判」对大众消费场景**小众**。**架构上要清醒**：Arena 是「独立 SSE + 状态机 + 阶段轮转」的**辩论专用执行路径**，与 §一「形状是数据不是模式、否决专用路径」的收敛方向**相逆**——轻量版用数据标记拿到 ~80% 体验，Arena 是为那 ~20%（真交锋）才长出的独立子系统，故仅当其 niche 需求确立才值得做。**依赖最重**：除自身阶段轮转引擎，还叠加几乎所有其他 Phase 2 地基（持久 Agent 实体加载角色、`paused`/suspend-resume 状态机、Turn Journal 终态回放），故排 Phase 2 **最后**。当前后端无 arena 相关执行逻辑，亦不再预留 `RunKind` 枚举值——落地时再按需引入（best-of-N 择优已归 `RunPolicy.candidates` 策略位，与本节多轮辩论是两回事，勿混）。→ 见代码 `runtime/runs/types.py`。
+→ 见代码 `tools/builtin/delegate.py`（stance/group/round schema）、`runtime/runs/builder.py`（解析）、`runtime/runs/executor.py`（上游产物注入下游 prompt）、前端 `stores/execution.ts`（`debateGroups` 按 round 分桶）、`components/chat/DebateCompare.tsx`（`RoundRow` 逐轮渲染）。
 
-#### 状态机
+> **被否决：独立 Arena 子系统（独立 SSE + 状态机 + 阶段轮转引擎 + `arena` RunKind）。** ① 其唯一独有价值「真·多轮交锋」已被「跨轮 `depends_on` + 上游产物注入」端到端覆盖，独立路径与 §一收敛方向**相逆**（重引辩论专用路径是倒退）；② 它列出的其余要素要么是**共享 Phase 2 基建**（`paused`/suspend-resume 状态机、持久 Agent 实体加载角色、Turn Journal 终态回放——**均非 arena 专属**，应一次性通用地造，见 [`执行引擎架构设计.md` §十四/§十八](/docs/03-AI核心/执行引擎架构设计.md)），要么**冗余**（独立 SSE——现有 `run_*` 事件 + 标记已能流式+区分）。代码已先行删去 `arena` RunKind 枚举（best-of-N 择优归 `RunPolicy.candidates` 策略位，与多轮辩论两回事，勿混）。→ 见代码 `runtime/runs/types.py`。
 
-```
-setup → running ⇄ paused → completed | cancelled | error
-```
-
-控制端点（pause/resume/skip/cancel）各自既落库状态、又向在跑引擎发信号（按 phase 边界生效，非轮中即停）。
-
-#### 终态重开 = 回放，不重跑
-
-重新打开终态 Arena 时回灌已落库内容、不启动 SSE——按「加载时后端状态是否终态」分流，终态走回放，非终态才续跑。
+> **独立引擎 vs DAG 复用——能力边界 + 两缺口评估**（决策理由，代码看不出来）：DAG **唯一真够不着**的是「单阶段内 token 级实时打断」——而那既非 arena 所需、独立引擎也不做（主流 multi-agent 含 arena 设计全是回合制），大众产品更不该做（cancel+重提示既脆弱又语义混乱）。曾担心的两缺口逐一拆开，都**不构成造引擎理由**：
+>
+> | 缺口 | 拆层 → 谁来解 |
+> |------|------|
+> | ① 实时插话 | (a) Agent 间 token 级抢话 → 两边都不做（伪需求/错架构）；(b) 用户轮中介入 → 共享 §二 `paused`；(c) 主持轮间重定向 → CEO 读上轮再 delegate（已覆盖） |
+> | ② 治理强保证 | (i) 阶段顺序强制 → **已是 DAG 结构保证**（`depends_on` 由 `WaveScheduler._deps_satisfied` 钉死、非模型自觉）；(ii) 策略级必停闸门 → 共享 §二 `checkpoint_after`/`paused` + 辩论格式模板（数据层，预制 DAG 形状钉强制检查点节点） |
+>
+> 独立引擎对这两缺口的「有用」部分只会**重造**共享原语、零额外能力。**增强落点（全加法、不造引擎）**：**E1 有界 auto-rounds**（`RunPolicy` 策略位，解运行期决定轮数——现状 CEO 已可经**增量 `delegate` 追加下一轮**表达〔`RunPlan.add` + `WaveScheduler` 跨波接收〕，代价仅轮间一次 CEO 往返，故 auto-rounds 属边际效率、未排期）；**E2 §二 `checkpoint_after`+`paused`+`plan_review`**（治理闸门 + 用户轮中介入的共享底座，唯一实打实后端 epic、非 arena 专属）；**E3 辩论格式模板**（数据层）；**E4 CEO 多轮 prompt hint**。**不做**：独立 RunKind/状态机/阶段轮转引擎/独立 SSE、token 级实时打断。
 
 ### 7.5 Agent 通信协议 (v1)⏳ 未实现
 

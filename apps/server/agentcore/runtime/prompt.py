@@ -122,7 +122,9 @@ task，别让 worker 去猜它根本无从得知的上下文。
 不会因此改变；前端会据此把正反产出并排对比、并把这一回合标记为「辩论」。普通的并行分工不要\
 打 `stance`。
 
-要做【真·多轮辩论】（正反轮流交锋、层层反驳）时，在上面基础上再用两件事把回合串起来：\
+要做【真·多轮辩论】（正反轮流交锋、层层反驳）时，先掂量是否真有必要：多数对比 / 代码审查用\
+【单轮 pro/con + 你综合】就够了，多轮只在确需层层反驳、一次交锋说不清的争议上才用，且克制\
+轮数（通常 2-3 轮足矣，再多往往空转）。确需多轮时，在单轮打标基础上再用两件事把回合串起来：\
 ① 给每个 task 标 `round` 标轮次（从 1 起）；② 用跨轮 `depends_on` 让第 k 轮的一方依赖第 \
 k-1 轮对方的产出（如 `pro_r2` 依赖 `con_r1`、`con_r2` 依赖 `pro_r1`），这样每轮都能看到\
 对手上一轮的论点并针对性反驳。想辩几轮就一次把这些 task 都 `delegate` 出去（如三轮 = \
@@ -172,8 +174,9 @@ CHAT_CHECKPOINT_HINT = """
 当你在执行中途遇到一个【自己无法独自定夺、且选错代价高】的关键岔路时，调用 `ask_user` \
 暂停并请用户拍板：典型如方案 A/B 抉择、执行不可逆操作（大量删除 / 覆盖）前确认、任务范围\
 明显超出最初预期需用户重新授权。把决策点说清楚（现状 + 为何需要 ta 定夺），可在 `options` \
-里给出具体选项。用户会以「继续 / 调整 / 停止」回应，其答复会回到你的循环；「停止」会直接\
-结束本回合。
+里给出具体选项；若这些选项允许同时选多个（如挑选要包含的若干功能/文件），把 `multiple` \
+设为 true，互斥的二选一/多选一则保持默认单选。用户会以「提交 / 停止」回应：提交会带上 ta \
+勾选的选项与可选补充（采纳或修正你的方向），其答复回到你的循环；「停止」会直接结束本回合。
 
 这与开场的「澄清提问」不同：一开始就含糊的需求，直接用普通文字问一句即可，不要动用 \
 `ask_user`。`ask_user` 只用于执行途中真正的高代价岔路——克制使用，绝不为可自行决定的细节\
@@ -187,6 +190,26 @@ CHAT_CHECKPOINT_HINT = """
 `options` 里给出「采纳正方 / 采纳反方 / 都要 / 补充论证」这类具体选项让 ta 拍板，而不是你\
 替 ta 决定。
 </asking_for_a_decision>"""
+
+
+# Appended to the CEO prompt ONLY when the checkpoint gate is wired (same gate as
+# CHAT_CHECKPOINT_HINT — settings.checkpoint_gate_enabled + a live interactive
+# user), so the prompt never advertises a structured checkpoint the scheduler
+# would not enforce. Teaches the plan-time ``checkpoint_after`` marker (结构化挂起
+# 2a), and pins its boundary vs the runtime ``ask_user`` so the CEO routes right.
+CHAT_CHECKPOINT_AFTER_HINT = """
+<pausing_after_a_step>
+当你在【同一次 delegate 的多步流水线（用 depends_on 串成的 DAG）】里安排了一个高危 / 不可\
+逆 / 范围可能跑偏的中间步骤，且希望它跑完后、运行其下游步骤之前先让用户把关时，给那个中间 \
+task 设 `checkpoint_after=true`：该步完成后会自动暂停，把已完成步骤的产出与待运行的下游步骤\
+一并展示给用户，由 ta 选「继续 / 停止」——选停止则就地结束、不再跑下游。
+
+这与 `ask_user` 不同：`ask_user` 是你在循环里【临场】决定要不要问；`checkpoint_after` 是你在\
+【委派时预先声明】、由调度器在波间强制执行的结构挂起——正用于「单个 delegate 跨多步、你拿不\
+到中途控制权」的场景（委派一旦发起，整张子图会一路跑到你能再开口之前）。只在确实值得让用户在\
+继续前把关的关键节点设；单步委派、或只给末步设都不会触发（其后已无下游可把关，那种取舍改用 \
+`ask_user`）。克制使用，别给每个步骤都设。
+</pausing_after_a_step>"""
 
 _MEMORY_RULES_TEMPLATE = """
 <rules>

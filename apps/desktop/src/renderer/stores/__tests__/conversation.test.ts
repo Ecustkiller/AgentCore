@@ -1,8 +1,10 @@
+import type { PlanReviewRequiredPayload, SSEEvent } from "@/types/events";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useApprovalStore } from "../approvals";
 import {
   getActiveRuntime,
   getRuntime,
+  planReviewsFromEvents,
   useConversationStore,
 } from "../conversation";
 
@@ -380,6 +382,111 @@ describe("conversation store", () => {
       });
       store().clearPendingFocus();
       expect(store().pendingFocus).toBeNull();
+    });
+  });
+});
+
+// 结构化挂起 2a (7.1): a plan_review card lives on the assistant message it paused —
+// set live (addPlanReview/settlePlanReview) and rebuilt from the journal on reload
+// (planReviewsFromEvents), exactly like an ask_user checkpoint.
+describe("plan_review cards (结构化挂起 2a)", () => {
+  const reqPayload = (
+    id: string,
+    runIds: string[],
+  ): PlanReviewRequiredPayload => ({
+    checkpoint_id: id,
+    conversation_id: "a",
+    steps: runIds.map((r) => ({
+      run_id: r,
+      role: `角色 ${r}`,
+      summary: "产出",
+    })),
+    pending: [{ run_id: "next", role: "下游" }],
+  });
+  const reqEvent = (id: string, runIds: string[]): SSEEvent => ({
+    type: "plan_review_required",
+    timestamp: "",
+    payload: reqPayload(id, runIds),
+  });
+  const resEvent = (
+    id: string,
+    decision: "continue" | "stop",
+    note = "",
+  ): SSEEvent => ({
+    type: "plan_review_resolved",
+    timestamp: "",
+    payload: { checkpoint_id: id, decision, note },
+  });
+
+  describe("planReviewsFromEvents (history replay)", () => {
+    it("folds a required→resolved pair into one resolved card", () => {
+      const cards = planReviewsFromEvents([
+        reqEvent("c1", ["run-1"]),
+        resEvent("c1", "continue", "放行"),
+      ]);
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        id: "c1",
+        status: "resolved",
+        decision: "continue",
+        note: "放行",
+      });
+      expect(cards[0].steps.map((s) => s.run_id)).toEqual(["run-1"]);
+      expect(cards[0].pending.map((p) => p.run_id)).toEqual(["next"]);
+    });
+
+    it("keeps an unresolved required as a pending card", () => {
+      const cards = planReviewsFromEvents([reqEvent("c1", ["run-1"])]);
+      expect(cards[0]).toMatchObject({ status: "pending", decision: null });
+    });
+
+    it("preserves raise order across multiple checkpoints", () => {
+      const cards = planReviewsFromEvents([
+        reqEvent("c1", ["run-1"]),
+        reqEvent("c2", ["run-2"]),
+        resEvent("c1", "stop"),
+      ]);
+      expect(cards.map((c) => c.id)).toEqual(["c1", "c2"]);
+      expect(cards[0].status).toBe("resolved");
+      expect(cards[1].status).toBe("pending");
+    });
+  });
+
+  describe("addPlanReview / settlePlanReview (live)", () => {
+    it("attaches a pending card to the live assistant message", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
+      expect(rt().messages[0].planReviews?.[0]).toMatchObject({
+        id: "c1",
+        status: "pending",
+      });
+    });
+
+    it("dedupes a re-delivered required event", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
+      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
+      expect(rt().messages[0].planReviews).toHaveLength(1);
+    });
+
+    it("is a no-op when there is no assistant message yet", () => {
+      store().switchConversation("a");
+      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
+      expect(rt().messages).toHaveLength(0);
+    });
+
+    it("settlePlanReview flips the card to resolved", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
+      store().settlePlanReview("c1", "stop", "就此打住", "a");
+      expect(rt().messages[0].planReviews?.[0]).toMatchObject({
+        status: "resolved",
+        decision: "stop",
+        note: "就此打住",
+      });
     });
   });
 });

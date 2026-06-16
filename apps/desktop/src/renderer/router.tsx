@@ -14,9 +14,9 @@ import { MembersSettings } from "@/pages/more/MembersSettings";
 import { ModelModeSettings } from "@/pages/more/ModelModeSettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
 import { ShortcutsSettings } from "@/pages/more/ShortcutsSettings";
-import { TeamMechanism } from "@/pages/more/TeamMechanism";
 import { UsageSettings } from "@/pages/more/UsageSettings";
 import { AiToolsPage } from "@/pages/toolbox/AiToolsPage";
+import { TeamMechanism } from "@/pages/toolbox/TeamMechanism";
 import { createHashRouter } from "react-router-dom";
 
 export const router = createHashRouter([
@@ -36,6 +36,7 @@ export const router = createHashRouter([
       { path: "files", element: <FilesPage /> },
       { path: "toolbox", element: <ToolboxPage /> },
       { path: "toolbox/ai-tools", element: <AiToolsPage /> },
+      { path: "toolbox/mechanism", element: <TeamMechanism /> },
       { path: "explore", element: <ExplorePage /> },
       {
         path: "more",
@@ -44,7 +45,6 @@ export const router = createHashRouter([
           { index: true, element: <GeneralSettings /> },
           { path: "model", element: <ModelSettings /> },
           { path: "model-modes", element: <ModelModeSettings /> },
-          { path: "mechanism", element: <TeamMechanism /> },
           { path: "usage", element: <UsageSettings /> },
           { path: "appearance", element: <AppearanceSettings /> },
           { path: "shortcuts", element: <ShortcutsSettings /> },

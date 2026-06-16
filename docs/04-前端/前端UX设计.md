@@ -2,7 +2,7 @@
 
 > **状态**：已确定方向
 >
-> 本文记录**已落地现状 + 关键决策（含被否决方案）**。未落地的目标态 UI 规格（信息层次模型 + `checkpoint_after` / Arena / 图增量节点，均后端先行）见 [`07-规划/前端UX目标态.md`](/docs/07-规划/前端UX目标态.md)。
+> 本文记录**已落地现状 + 关键决策（含被否决方案）**。未落地的目标态 UI 规格（信息层次模型、工作区面板 IA 重设计等）见 [`07-规划/前端UX目标态.md`](/docs/07-规划/前端UX目标态.md)。
 
 ---
 
@@ -24,7 +24,7 @@
 点图节点 → 右侧 SidePanel 新开该 run 的详情 tab（被动下钻）；面板是一条扁平 tab 栏——固定首位「工作区」tab（文件/快照/交接）+ 按需的 run 详情 tab。右上「侧面板」开关 / Ctrl+I → 显隐（冷启动落「工作区」tab），Ctrl+J → 直达「工作区」tab
 ```
 
-**侧栏对话区（IA）**：侧栏只列**最近若干对话**（扁平、按时间，当前对话恒置顶可见）+ 底部「查看全部对话」入口；完整列表、文件夹分组、文件夹增删改与「按文件夹筛选 / 页内搜索」统一收敛到独立的**对话管理页** `/conversations`（canvas 档：左侧文件夹筛选 + 右侧对话列表，点对话进 `/conversations/:id`）。**决策**：侧栏保持轻量、只承载高频的「最近 + 新建对话」，低频的归档/整理移交专门页面，避免侧栏被长列表与文件夹树占满；新建文件夹入口随之从侧栏移到管理页。→ 见代码 `components/sidebar/RecentConversations.tsx`、`pages/ConversationsPage.tsx`。
+**侧栏对话区（IA）**：侧栏只列**最近若干对话**（扁平、按时间，当前对话恒置顶可见）+ 底部「查看全部对话」入口；完整列表、文件夹分组、文件夹增删改与「按文件夹筛选 / 页内搜索」统一收敛到独立的**对话管理页** `/conversations`（canvas 档：左侧文件夹筛选 + 右侧对话列表，点对话进 `/conversations/:id`）。**决策**：侧栏保持轻量、只承载高频的「最近 + 新建对话」，低频的归档/整理移交专门页面，避免侧栏被长列表与文件夹树占满；新建文件夹入口随之从侧栏移到管理页。**「对话」导航即「新建对话」**：点顶部「对话」入口默认开一个空白草稿对话（与「+」/`Ctrl/Cmd+N` 一致），回到旧会话走「最近对话 / 全部对话」（对齐 ChatGPT/Claude：主入口=新建，列表=返回）；路由 `/`（无 `:id`）是「新草稿」的唯一真相——`ConversationPage` 在无 `:id` 时丢弃上次会话，故刷新/直达 `/` 也是新对话，「新建对话」意图统一收敛到 `startNewConversation`。→ 见代码 `lib/newConversation.ts`、`pages/ConversationPage.tsx`、`components/sidebar/RecentConversations.tsx`、`pages/ConversationsPage.tsx`。
 
 **团队展示统一到「内嵌协作图」**：多 Agent 回合的助手消息上方内嵌一张协作图（`InlineTeamGraph`），它是该回合的**主团队界面**——图顶状态条折进了原任务卡片的职责（状态 · N agents · M/M · 用时 · ¥合计 + 救火行），节点 face 只显角色 + 任务/输出 + 用时/工具（¥ / token 归 run 详情，§7.3B），点节点把详情下钻到右侧被动面板，右上「最大化」临时进全屏看大图/回放。单 Agent 回合不出图（纯气泡，零噪音）。原「对话内卡片 + 右侧常驻面板 + 全屏 overlay」三个抢戏的面已收成一面，决策与迁移源见 [`前端技术与架构.md` §9.2–9.6](/docs/04-前端/前端技术与架构.md)。
 
@@ -48,7 +48,8 @@
 |------|------|----------|
 | 内嵌协作图 | 团队 DAG + 状态条（进度/成本/救火） | 多 Agent 回合自动内嵌于助手消息 |
 | Agent 标签 | 标识当前输出来自哪个 Agent | 流式输出时 |
-| 检查点卡片 | CEO 暂停征询用户拍板（继续/调整/停止） | CEO 调 `ask_user` 时（含单 Agent 回合）|
+| 检查点卡片 | CEO 暂停征询用户拍板（提交/停止；选项可单/多选） | CEO 调 `ask_user` 时（含单 Agent 回合）|
+| 结构化挂起卡片 | 波间审视已完成步骤与待跑下游（继续/停止） | DAG step 带 `checkpoint_after` 且调度器波间挂起时 |
 
 简单任务（单 Agent）时不出图，体验同 ChatGPT。
 
@@ -81,9 +82,13 @@
 
 **为何无「规划中」态**（决策）：CEO + `delegate` 架构下 `run_plan` 同步到达，无独立规划空窗；「系统在思考」由 CEO reasoning 气泡覆盖；`tool_use_start(delegate)` 前无法预知是否组团，故状态条不设「规划中」态。→ 见代码 `delegate.py`、`engine.py`。
 
-**检查点卡片（已落地）**：CEO 执行中途遇到「自己无法独自定夺、且选错代价高」的关键岔路时，调内置工具 `ask_user` 暂停本回合并请用户拍板——区别于状态条里的团队进度，它是**会话流内、挂在该助手消息下**的独立卡片（琥珀 `warning` 令牌），刷新后随消息回放。卡片给「继续 / 调整 / 停止」三动作（CEO 可附 `options` 具体选项 + 自由文本调整方向）：**继续**＝按 CEO 方向推进，**调整**＝带用户 steer 续跑，**停止**＝优雅结束本回合（CEO 收尾语随之流式落库）。用户答复经 `POST …/interactions/{id}`（kind=ask_user，§18.2 统一挂起原语）回流进 CEO 的 ReAct 循环；超时由引擎落 `timeout`、交回 CEO 自行稳妥收尾。卡片仅在「该消息仍在流式（即本回合挂起中）」时可操作，历史/已结束回合渲染为只读记录。→ 见代码 `components/chat/CheckpointCard.tsx`、`services/checkpoint.ts`、`stores/conversation.ts`（`checkpointsFromEvents` / `addCheckpoint` / `settleCheckpoint`）、后端 `tools/builtin/ask_user.py`。SSE 契约（`checkpoint_required` / `checkpoint_resolved`）见 [执行引擎架构设计.md §SSE 事件](/docs/03-AI核心/执行引擎架构设计.md)。
+**检查点卡片（已落地）**：CEO 执行中途遇到「自己无法独自定夺、且选错代价高」的关键岔路时，调内置工具 `ask_user` 暂停本回合并请用户拍板——区别于状态条里的团队进度，它是**会话流内、挂在该助手消息下**的独立卡片（琥珀 `warning` 令牌），刷新后随消息回放。卡片给「**提交 / 停止**」两动作（CEO 可附 `options` 具体选项 + 自由文本补充）：**提交**＝采纳或修正 CEO 方向，携带勾选项（`selected`）与可选补充续跑；**停止**＝优雅结束本回合（CEO 收尾语随之流式落库）。`options` 在 `multiple=true` 时渲染为多选 checkbox（可多选）、否则单选 radio；勾选不即时定案，须点「提交」。用户答复经 `POST …/interactions/{id}`（kind=ask_user，§18.2 统一挂起原语）回流进 CEO 的 ReAct 循环；超时由引擎落 `timeout`、交回 CEO 自行稳妥收尾。卡片仅在「该消息仍在流式（即本回合挂起中）」时可操作，历史/已结束回合渲染为只读记录。→ 见代码 `components/chat/CheckpointCard.tsx`、`services/checkpoint.ts`、`stores/conversation.ts`（`checkpointsFromEvents` / `addCheckpoint` / `settleCheckpoint`）、后端 `tools/builtin/ask_user.py`。SSE 契约（`checkpoint_required` / `checkpoint_resolved`）见 [执行引擎架构设计.md §SSE 事件](/docs/03-AI核心/执行引擎架构设计.md)。
 
-> **勿与两个近邻混淆**：① **工具审批**（`approval_required`，GRANTABLE 工具授权）是另一套、渲染在输入框上方而非消息内；② **DAG `checkpoint_after`**（按 step 结构化挂起）仍为 ⏳ Phase 2，与此处 CEO 主动 `ask_user` 是不同机制。`TeamPreviewCard` 团队预审 gate（执行前预览团队 / plan_review）随 preflight 审计一并 ⏳ Phase 2，见 [`编排器与CEO主Agent.md` §四](/docs/03-AI核心/编排器与CEO主Agent.md)。
+> **为何两态而非三态**（决策理由）：原「继续/调整」效果同一（都续跑），区别已隐含在内容（勾没勾选项、填没填补充），合并为「提交」并消除多选时「该点哪个」的犹豫；保留「停止」安全阀而非表单式「跳过」，因检查点是高代价岔路而非信息收集。线路 `CheckpointDecision` 留 `adjust` 仅供老对话回放。详见 [`编排器与CEO主Agent.md` §四](/docs/03-AI核心/编排器与CEO主Agent.md)。
+
+**结构化挂起卡片 `PlanReviewCard`（✅ 已落地，Phase 2a）**：DAG step 带 `checkpoint_after` 时，`WaveScheduler` 在**波间**暂停并请用户审视——区别于 CEO 主动 `ask_user`，这是**调度器按 plan 预声明的挂起点**（`kind=plan_review`）。机制镜像 `ask_user` 全链但走**独立平行路径**（payload 为 `steps`/`pending` 而非 `question`/`options`）：卡片挂在触发它的助手消息下，展示刚完成检查点步骤（role + 产出摘要）+ 待运行下游预览；2a 仅 **继续 / 停止**（`adjust` 后端收但等同 continue，不出按钮）。三态同 `CheckpointCard`：**pending**（live 可点）/ **dormant**（reload 后非 live 的未决）/ **resolved**（已继续 / 已停止 / 超时已放行）。用户答复经 `POST …/interactions/{id}`（kind=plan_review）resolve；live 与 reload 共用 `planReviewsFromEvents` 折叠。→ 见代码 `components/chat/PlanReviewCard.tsx`、`services/planReview.ts`、`stores/conversation.ts`（`PlanReviewDisplay` / `addPlanReview` / `settlePlanReview`）、`services/streamConversation.ts`、`components/chat/MessageBubble.tsx`；后端见 `tools/builtin/delegate.py`、`runs/wave.py`、`runtime/events.py`。
+
+> **勿与两个近邻混淆**：① **工具审批**（`approval_required`，GRANTABLE 工具授权）是另一套、渲染在输入框上方而非消息内；② **CEO 主动 `ask_user`** 与 **DAG `checkpoint_after` 结构化挂起**是不同机制（前者 CEO 运行时自决，后者调度器波间闸门）——二者 UI 形态相似但数据通路与 resolve kind 分离。`TeamPreviewCard` 团队预审 gate（执行前预览团队）仍 ⏳ Phase 2 preflight，见 [`编排器与CEO主Agent.md` §四](/docs/03-AI核心/编排器与CEO主Agent.md)。
 
 ---
 
@@ -98,11 +103,11 @@
 | 范式标题 | 内嵌图状态条显「辩论」pill、完成态作「辩论完成」（普通为「团队完成」）——`InlineTeamGraph` |
 | 节点 badge | 对立节点显「正方/反方」徽章（`info` 令牌，与 6 态状态色解耦）——`AgentNode` |
 | 图分列对置 | 正/反节点按 `stance` 排序 + ELK `considerModelOrder`，分两带对置、汇聚到 CEO 收尾节点——`GraphView` / `lib/elk-layout.ts` |
-| 左右并排对比 | 图卡下方一张「辩论对比」卡片：按 `group` 分组，每组 `正方 \| 反方` 两栏并排（896px 阅读列）渲染 worker 产出，点角色行下钻右侧详情看全文——`DebateCompare` |
+| 左右并排对比 | 图卡下方一张「辩论对比」卡片：按 `group` 分组，每组 `正方 \| 反方` 两栏并排（896px 阅读列）渲染 worker 产出，点角色行下钻右侧详情看全文；**多轮辩论按 `round` 逐轮渲染**（每轮一行「第 N 轮」正/反，第 k 轮反驳对方第 k-1 轮）——`DebateCompare`（`RoundRow`） |
 
 **辩论收尾复用现有检查点**：CEO 跑完对立 run 后调 `ask_user(options=["采纳正方","采纳反方","都要","补充论证"])`，复用 §三 `ask_user` 检查点卡片（CEO prompt 教「对立任务打标」与「`ask_user` 收尾」，见 `runtime/prompt.py`），无新检查点类型。
 
-**真·结构化辩论（Arena）仍属 ⏳ Phase 2**（阶段轮转 / 独立 `arena` 节点 / 独立 SSE / 状态机，见 [`Agent协作模式.md` §7.4](/docs/03-AI核心/Agent协作模式.md) + [目标态 §三](/docs/07-规划/前端UX目标态.md)）；本节展示提示是其落地前的轻量 MVP 差异化。
+**多轮辩论（Arena）= DAG 模式，已落地**：真·多轮来回交锋靠 CEO 在 `delegate` 用**跨轮 `depends_on`**（第 k 轮依赖对方第 k-1 轮）+ `round` 标记表达，执行器注入上游产物供反驳，前端逐轮渲染（上「左右并排对比」行）。**已否决独立 Arena 子系统**（独立 SSE / 状态机 / `arena` 节点）——决策与唯一残留的「运行期决定轮数」边际项见 [`Agent协作模式.md` §7.4](/docs/03-AI核心/Agent协作模式.md)。
 
 ---
 
@@ -114,9 +119,11 @@
 
 **可达性与多选**：节点 `role=button` + `tabIndex` 键盘 focus + Enter/Space 激活 + `aria-label` 播报角色/状态/模型/Token/成本/用时/工具；支持多选（修饰键加选 / 框选，`selected` 与面板下钻高亮共用 outline）。**动画 / 布局选型理由**：状态过渡用纯 CSS（**否决 Framer Motion**——零依赖、与 React Flow 定位 transform 无冲突）；ELK 仅留左右流 / 树形（径向 / 力导向曾实现、小团队下无价值已移除）；右键菜单复用 `sidebar/ContextMenu`（无需 Radix）。
 
-> 仍在目标态的增量（arena / 检查点节点，随后端落地）见 [目标态 §四](/docs/07-规划/前端UX目标态.md)。**已否决·工具点节点**：每个工具调用单独成图节点 = 与「inline 只做信号、面板承担完整详情」+ §八 ≤50 节点性能约束冲突（一个调研 agent 调 10 次 `web_search` 即 +10 节点）；工具已被 agent 节点「工具数」+ `SidePanel` run 详情工具 IO 区段覆盖，无需独立节点。
+**结构化挂起图徽标（✅ 已落地，Phase 2a）**：`plan_review_*` 事件入 journal 后，execution fold 按 step `run_id` 折进 `RunNode`；在检查点步骤的 `AgentNode` 上挂暂停徽标（⏸ + 已继续/已停止）。**否决独立 `CheckpointNode`**（step 与下游之间插入合成节点 + ELK 重布局）——视觉更突出但代价显著，徽标已满足「图上可见检查点」；独立节点留作后续 richer 形态。→ 见代码 `stores/execution.ts`（`RunCheckpoint`）、`components/graph/AgentNode.tsx`。
 
-> **团队运行机制页（开发 / AI 自查）**：`更多 → 团队运行机制`（`/more/mechanism`）用**真实** `AgentNode`/`EndpointNode`/`StepEdge` + 真实 ELK 布局，把上述节点 / 状态色环 / 连线（实线依赖 · 虚线委派 · 点线修订）/ 徽章逐个标注为机制含义，并叠加运行时全景（Prepare→Execute→Finalize）、协作回合主线、SSE 事件族、前端执行态分片，每处配代码指针——是协作图机制的**可视化真相源**，与 `docs/03-AI核心`（文字描述）互补。→ 见代码 `pages/more/TeamMechanism.tsx`。
+> 多轮辩论用普通 agent 节点 + `stance`/`round` 标记（现状，§四），无独立 arena 节点。**已否决·工具点节点**：每个工具调用单独成图节点 = 与「inline 只做信号、面板承担完整详情」+ §八 ≤50 节点性能约束冲突（一个调研 agent 调 10 次 `web_search` 即 +10 节点）；工具已被 agent 节点「工具数」+ `SidePanel` run 详情工具 IO 区段覆盖，无需独立节点。
+
+> **团队运行机制页（用户向协作透明页）**：`工具箱 → 了解平台 → 团队运行机制`（`/toolbox/mechanism`，**真·全屏**——`fixed inset-0` 覆盖整窗含应用 TitleBar，故页顶自带窗口拖拽区 + 自绘最小化 / 最大化 / 关闭控件（复用 `window.windowApi`，否则无边框窗口无法移动 / 关闭）、自带返回 / Esc 退出）。用**真实** `AgentNode`/`EndpointNode`/`StepEdge` + 真实 ELK 布局，把节点 / 状态色环 / 连线（实线依赖 · 虚线委派 · 点线修订）/ 徽章逐个标注为机制含义，并叠加运行时全景（Prepare→Execute→Finalize）、协作回合主线、机制场景（宽屏两列）。**定位为面向用户的协作透明页**（截图口碑传播点），UI 不含任何开发者切换。**开发 / AI 价值靠源码自身**：各数据块（`PHASES` / `TURN_FLOW` / `SCENARIOS`）旁以注释保留实现入口，`SCENARIOS` 用真实节点 / 边 / 布局编码机制结构——Cursor AI 读**源码**非读 UI，无需在页面渲染开发层。SSE 事件族见 [`../03-AI核心/执行引擎架构设计.md` §十二](/docs/03-AI核心/执行引擎架构设计.md)（+ `runtime/events.py`·`types/events.ts`）、前端执行态见 [`前端技术与架构.md` §9.x](/docs/04-前端/前端技术与架构.md)，本页不再重复。**否决**「页内『开发者细节』开关 + SSE 事件族 / 前端执行态小节」——经核对其内容已被上述 docs + 代码 100% 覆盖，留在页内是三处重复且易滞后，加之 AI 读源码非读 UI，故删除开发层、收敛为纯用户向页（代码指针降级为源码注释保留 AI 直达入口）。→ 见代码 `pages/toolbox/TeamMechanism.tsx`。
 
 ---
 
@@ -218,7 +225,7 @@
 
 **设计原则**：单一谓词（一处过滤 `visibility=public` 覆盖全部发现入口）；`is_featured` 解耦（回归「编辑精选」本职，与可见性正交）；缺省 public（避免误隐藏）；组件型默认 unlisted（团队成员/队长/竞技场角色）。
 
-**被否决**：把 Arena 角色拆成独立实体——违背 Multi-Agent First，破坏 Arena 槽位可插拔。
+**被否决**：把辩论/对抗角色拆成独立实体——违背 Multi-Agent First；多轮辩论是普通 DAG 的内联角色 + `stance`/`round` 标记（§四），无独立 Arena 实体或槽位。
 
 ---
 
@@ -226,12 +233,13 @@
 
 > **已落地**：工具箱页（`/toolbox`）为卡片网格 IA（→ 见代码 `pages/ToolboxPage.tsx`）；「AI 工具」子页复用内置动作工具只读目录（`BuiltinToolCatalog`，→ 见代码 `pages/toolbox/AiToolsPage.tsx`）。本节为关键决策；工具/产物模型见 [`工具与能力系统.md` §8.4](/docs/03-AI核心/工具与能力系统.md)。
 
-工具箱页用**卡片网格**（`auto-fill minmax(260px,1fr)`，磁贴：图标居左 + 标题/副文 + 右侧 `›` 或「即将上线」徽章），按两组**轻量小标题（非 Tab）**排布：
+工具箱页用**卡片网格**（`auto-fill minmax(260px,1fr)`，磁贴：图标居左 + 标题/副文 + 右侧 `›` 或「即将上线」徽章），按三组**轻量小标题（非 Tab）**排布：
 
 - **创作工具**：文档 / 思维导图 / 多维表格 / 画布 / 幻灯片 / 可运行产物 / 流程图 / 表单——各为一种产物类型，点击进「该类型产物列表 + 新建」。
 - **能力**：AI 工具（点开 = 内置动作工具只读目录 `/toolbox/ai-tools`）/ 集成 · 连接器（MCP & 第三方）/ 工作流（编排工具 + Agent）。
+- **了解平台**：团队运行机制（`/toolbox/mechanism`，沉浸式全屏的协作透明页，详见 §五）。
 
-**关键决策**：两组用小标题而非 Tab——一屏纵览全部能力、零层级切换。**现状**：除「AI 工具」外均为占位（「即将上线」）；各创作工具的编辑器与「产物列表 + 新建」流程归 `file` / `table` 体系，多为 Post-MVP（见 [`工具与能力系统.md` §8.4](/docs/03-AI核心/工具与能力系统.md)）。
+**关键决策**：分组用小标题而非 Tab——一屏纵览全部能力、零层级切换；**「了解平台」与「能力」分立**——机制页是说明 / 透明页、既非创作工具也非「可被编排进团队」的能力，单独成组以免污染「能力」组语义（**否决**塞进「能力」组）。**现状**：「AI 工具」与「团队运行机制」已落地，其余创作工具、集成 · 连接器、工作流为占位（「即将上线」）；各创作工具的编辑器与「产物列表 + 新建」流程归 `file` / `table` 体系，多为 Post-MVP（见 [`工具与能力系统.md` §8.4](/docs/03-AI核心/工具与能力系统.md)）。
 
 ---
 
@@ -270,7 +278,7 @@
 - **状态**：加载中（输入框内 spinner）、无结果、搜索失败各有明确提示。
 - **文案**：占位符「搜索对话、消息、文件夹…」、标题栏按钮「搜索…」——**不在命令存在前过度承诺**，Tier 2 命令落地后再改「搜索与命令…」。
 
-技术契约见 [`前端技术与架构.md` §9.7–9.8](/docs/04-前端/前端技术与架构.md)。Tier 2（命令面板：搜索叠加导航 / 动作）/ Tier 3（pgvector 语义搜索）为未落地 backlog，见 [`07-规划/就绪路线图.md` §四](/docs/07-规划/就绪路线图.md)。
+技术契约见 [`前端技术与架构.md` §9.7–9.8](/docs/04-前端/前端技术与架构.md)。Tier 2（命令面板：搜索叠加导航 / 动作）/ Tier 3（pgvector 语义搜索）为未落地 backlog，见 [`07-规划/就绪路线图.md` §二](/docs/07-规划/就绪路线图.md)。
 
 ---
 

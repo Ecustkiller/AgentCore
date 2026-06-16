@@ -20,6 +20,7 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval
 from agentcore.llm.config import ModelProfile, build_request, get_profile
 from agentcore.llm.deepseek import DeepSeekProvider
+from agentcore.llm.observability import log_llm_call
 from agentcore.llm.protocol import (
     LLMMessage,
     LLMRequest,
@@ -322,6 +323,8 @@ async def _stream_llm_round(
     reasoning_parts: list[str] = []
     tc_accumulators: dict[int, dict] = {}
     usage: TokenUsage | None = None
+    finish_reason: str | None = None
+    start = time.monotonic()
 
     async for chunk in llm.stream(request):
         if chunk.delta_content:
@@ -331,6 +334,9 @@ async def _stream_llm_round(
         if chunk.delta_reasoning:
             reasoning_parts.append(chunk.delta_reasoning)
             emit_reasoning(chunk.delta_reasoning)
+
+        if chunk.finish_reason:
+            finish_reason = chunk.finish_reason
 
         if chunk.delta_tool_calls:
             for tc_delta in chunk.delta_tool_calls:
@@ -369,6 +375,22 @@ async def _stream_llm_round(
                     ),
                 )
             )
+
+    # Per-call observability (chat + worker share this streaming path). latency is
+    # the full stream duration; finish_reason falls back to tool_calls/stop when the
+    # provider omits it on the usage chunk. Attributes via request.scenario + the
+    # ambient worker contextvars (run_id/agent_id/depth).
+    log_llm_call(
+        scenario=request.scenario,
+        model=request.model,
+        usage=usage,
+        finish_reason=finish_reason or ("tool_calls" if tool_calls else "stop"),
+        latency_ms=int((time.monotonic() - start) * 1000),
+        stream=True,
+        messages=request.messages,
+        content=content,
+        reasoning=reasoning,
+    )
 
     return content, reasoning, tool_calls, usage
 

@@ -321,6 +321,12 @@ class Message(Base):
     # (no delegation), so the column is nullable with no default.
     runs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     finish_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    # Correlation key to the turn's runtime logs (logs/dev.jsonl): the assistant
+    # message joins to its interaction's full log trace (chat.turn_*/llm/tool/...)
+    # — message rows otherwise carry only UUIDs, so trace_id is what makes a turn
+    # greppable from a persisted reply. NULL on user / untraced (handoff) messages.
+    # 32-hex, minted by core/log_context.new_trace_id (not a DB-format uuid).
+    trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -390,6 +396,10 @@ class CostEvent(Base):
     duration_ms: Mapped[int] = mapped_column(
         Integer, default=0, server_default=text("0")
     )
+    # Correlation key to the turn's runtime logs: joins a spend row to its trace
+    # (per-run `run_id` already correlates to worker logs; trace_id gives the
+    # turn-level join). NULL on untraced (handoff) turns. See core/log_context.py.
+    trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -690,6 +700,10 @@ class RunSessionRow(Base):
     recall_count: Mapped[int] = mapped_column(
         Integer, default=0, server_default=text("0")
     )
+    # Originating turn's log trace_id, set on first persist and NOT overwritten on a
+    # later revise (a revise is a new turn) — links a recoverable worker back to the
+    # interaction that spawned it. NULL when untraced. See core/log_context.py.
+    trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

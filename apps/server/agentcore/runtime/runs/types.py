@@ -163,6 +163,15 @@ class RunSpec:
     round: int = 0
     # ── topology / governance ──
     depends_on: list[str] = field(default_factory=list)
+    # Plan-time structured-suspend marker (结构化挂起 2a): when True, the
+    # WaveScheduler pauses *after* this node completes and *before* its dependents
+    # run, awaiting a user plan_review (continue / stop) over the unified
+    # interaction bridge — the one thing a CEO ``ask_user`` cannot express, since a
+    # ``delegate`` is atomic to the CEO (it gets no wave-boundary control). Inert by
+    # default and whenever the scheduler is driven without an ``on_checkpoint`` hook
+    # (autonomous jobs / tests), so a plan with no checkpoint marks runs byte-for-
+    # byte as before. → 见设计: docs/07-规划/结构化挂起后端落地设计.md
+    checkpoint_after: bool = False
     parent_run_id: str | None = None
     depth: int = 0
     # Whether this worker may itself delegate one nested level of sub-workers
@@ -177,6 +186,14 @@ class RunSpec:
     # only for a flat parallel batch (a DAG node gets upstream product context
     # instead; a lone task leaves it blank).
     sibling_summary: str = ""
+    # Mid-course user steer (结构化挂起 adjust): the note the user gave at a
+    # plan_review checkpoint with the ``adjust`` decision, injected by the host hook
+    # onto every not-yet-run downstream node so the steer actually redirects the
+    # remaining work (the executor renders it as a high-priority instruction block).
+    # Empty for plan-time specs and for ``continue`` / ``stop``; accumulates (one
+    # block per adjust) when a node is steered across multiple checkpoints before it
+    # runs. → 见设计: docs/07-规划/结构化挂起后端落地设计.md
+    steer: str = ""
 
 
 @dataclass

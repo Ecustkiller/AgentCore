@@ -33,6 +33,13 @@ class EventType(StrEnum):
     # just gating.
     CHECKPOINT_REQUIRED = "checkpoint_required"
     CHECKPOINT_RESOLVED = "checkpoint_resolved"
+    # Structured DAG checkpoint (结构化挂起 2a): a delegate step marked
+    # ``checkpoint_after`` completed and the WaveScheduler paused at the wave
+    # boundary before its dependents, awaiting the user's plan_review (continue /
+    # stop). Distinct from ask_user (CEO mid-loop) — this is plan-declared and
+    # scheduler-enforced. Journaled like checkpoints so the pause replays on reload.
+    PLAN_REVIEW_REQUIRED = "plan_review_required"
+    PLAN_REVIEW_RESOLVED = "plan_review_resolved"
     # Local-workspace op channel (双模式工作区 P2): a server-side LocalWorkspace
     # asks the bound desktop client to run a file/exec op against the real local
     # directory, then awaits the result posted back to the ops resolve endpoint.
@@ -180,13 +187,16 @@ def checkpoint_required(
     question: str,
     options: list[str],
     context: str = "",
+    multiple: bool = False,
 ) -> SSEEvent:
     """The CEO paused the turn to ask the user a decision (ask_user checkpoint).
 
     ``checkpoint_id`` is the key the client echoes back to the resolve endpoint.
     ``question`` is the CEO-authored decision point; ``options`` are optional
     concrete choices to offer; ``context`` is optional supporting background.
-    Journaled (see ``_JOURNAL_EVENT_TYPES``) so a reload replays the prompt inline.
+    ``multiple`` tells the card to render the options as multi-select (checkboxes)
+    rather than single-select (radios). Journaled (see ``_JOURNAL_EVENT_TYPES``) so
+    a reload replays the prompt inline.
     """
     return SSEEvent(
         type=EventType.CHECKPOINT_REQUIRED,
@@ -196,19 +206,69 @@ def checkpoint_required(
             "question": question,
             "options": options,
             "context": context,
+            "multiple": multiple,
         },
     )
 
 
-def checkpoint_resolved(*, checkpoint_id: str, decision: str, note: str = "") -> SSEEvent:
+def checkpoint_resolved(
+    *, checkpoint_id: str, decision: str, note: str = "", selected: list[str] | None = None
+) -> SSEEvent:
     """A pending checkpoint was settled (continue / adjust / stop / timeout).
 
     Lets the client flip the inline card to its resolved state; ``note`` carries
-    the user's steer for ``adjust`` (or a closing remark for ``stop``). Journaled
-    alongside ``checkpoint_required`` so the settled outcome replays on reload.
+    the user's steer for ``adjust`` (or a closing remark for ``stop``), ``selected``
+    the option(s) the user picked. Journaled alongside ``checkpoint_required`` so
+    the settled outcome replays on reload.
     """
     return SSEEvent(
         type=EventType.CHECKPOINT_RESOLVED,
+        payload={
+            "checkpoint_id": checkpoint_id,
+            "decision": decision,
+            "note": note,
+            "selected": selected or [],
+        },
+    )
+
+
+def plan_review_required(
+    *,
+    checkpoint_id: str,
+    conversation_id: str,
+    steps: list[dict[str, Any]],
+    pending: list[dict[str, Any]],
+) -> SSEEvent:
+    """A DAG ``checkpoint_after`` step finished; the scheduler paused for the user
+    to review before its dependents run (结构化挂起 2a).
+
+    ``checkpoint_id`` is the key the client echoes back to the resolve endpoint.
+    ``steps`` are the just-completed checkpoint nodes (``{run_id, role, summary}``)
+    the user is reviewing; ``pending`` is a peek at the downstream nodes about to
+    run (``{run_id, role}``) so the card frames「看着已发生的、决定要不要放行未发生
+    的」. Journaled (see ``_JOURNAL_EVENT_TYPES``) so the pause replays inline on
+    reload.
+    """
+    return SSEEvent(
+        type=EventType.PLAN_REVIEW_REQUIRED,
+        payload={
+            "checkpoint_id": checkpoint_id,
+            "conversation_id": conversation_id,
+            "steps": steps,
+            "pending": pending,
+        },
+    )
+
+
+def plan_review_resolved(*, checkpoint_id: str, decision: str, note: str = "") -> SSEEvent:
+    """A pending plan_review was settled (continue / stop / timeout).
+
+    Lets the client flip the inline card to its resolved state; ``note`` carries an
+    optional remark. Journaled alongside ``plan_review_required`` so the settled
+    outcome replays on reload.
+    """
+    return SSEEvent(
+        type=EventType.PLAN_REVIEW_RESOLVED,
         payload={
             "checkpoint_id": checkpoint_id,
             "decision": decision,
@@ -535,6 +595,10 @@ _JOURNAL_EVENT_TYPES = frozenset(
         # events.
         EventType.CHECKPOINT_REQUIRED,
         EventType.CHECKPOINT_RESOLVED,
+        # Structured DAG checkpoints (checkpoint_after): journaled so the pause +
+        # its resolution replay inline on reload, same as ask_user checkpoints.
+        EventType.PLAN_REVIEW_REQUIRED,
+        EventType.PLAN_REVIEW_RESOLVED,
     }
 )
 
@@ -543,7 +607,11 @@ _JOURNAL_EVENT_TYPES = frozenset(
 # worth replaying. (Tool calls on their own do not: a single-agent turn's own
 # tool I/O is not replayed — see ``execution_journal``.)
 _JOURNAL_SURFACE_TYPES = frozenset(
-    {EventType.RUN_PLAN.value, EventType.CHECKPOINT_REQUIRED.value}
+    {
+        EventType.RUN_PLAN.value,
+        EventType.CHECKPOINT_REQUIRED.value,
+        EventType.PLAN_REVIEW_REQUIRED.value,
+    }
 )
 
 
@@ -593,6 +661,15 @@ class EventSink:
         if not self._closed:
             self._closed = True
             self._queue.put_nowait(None)
+
+    async def get(self) -> "SSEEvent | None":
+        """Pull the next event, or ``None`` once the stream is closed.
+
+        The SSE layer consumes via this (not ``__aiter__``) so it can race the
+        pull against a heartbeat timeout — a slow turn keeps the connection warm
+        with keep-alive frames instead of looking dead to the client.
+        """
+        return await self._queue.get()
 
     async def __aiter__(self):
         while True:

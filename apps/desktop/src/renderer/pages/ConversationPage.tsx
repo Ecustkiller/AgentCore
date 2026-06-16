@@ -14,8 +14,15 @@ export function ConversationPage() {
   // 路由参数是 conversation 的真相来源（刷新/前进后退/直达链接时同步到 store），
   // 并从后端拉取最新一窗消息（含附件元信息）以恢复对话；更早的历史按需上滚加载。
   useEffect(() => {
-    if (!id) return;
     const store = useConversationStore.getState();
+    // 索引路由 `/` = 新草稿：丢弃上一条已打开的会话，渲染空白对话。这样无论从哪个
+    // 入口落到 `/`（导航「对话」、Ctrl/Cmd+N、刷新直达），看到的都是新对话，而不是
+    // store 里残留的上次会话。pendingNewChatFolder 不在这里碰——那是「新建对话」入口
+    // 设置的落库目标（见 startNewConversation），清掉会破坏「全部对话」按文件夹新建。
+    if (!id) {
+      if (store.currentConversationId !== null) store.switchConversation(null);
+      return;
+    }
     if (id !== store.currentConversationId) store.switchConversation(id);
 
     let cancelled = false;

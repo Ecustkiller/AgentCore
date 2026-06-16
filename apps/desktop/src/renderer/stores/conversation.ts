@@ -11,6 +11,10 @@ import type {
   CheckpointResolvedPayload,
   Citation,
   CostBreakdown,
+  PlanReviewPending,
+  PlanReviewRequiredPayload,
+  PlanReviewResolvedPayload,
+  PlanReviewStep,
   SSEEvent,
 } from "@/types/events";
 import { create } from "zustand";
@@ -27,11 +31,15 @@ export interface CheckpointDisplay {
   question: string;
   options: string[];
   context: string;
+  /** Whether `options` are multi-select (checkboxes) vs single-select (radios). */
+  multiple: boolean;
   status: "pending" | "resolved";
   /** The settled decision; null while pending. */
   decision: CheckpointDecision | null;
   /** The user's steer (adjust) or closing remark (stop); empty otherwise. */
   note: string;
+  /** The option(s) the user picked; empty while pending or if none chosen. */
+  selected: string[];
 }
 
 /**
@@ -52,9 +60,11 @@ export function checkpointsFromEvents(events: SSEEvent[]): CheckpointDisplay[] {
         question: p.question,
         options: p.options ?? [],
         context: p.context ?? "",
+        multiple: p.multiple ?? false,
         status: "pending",
         decision: null,
         note: "",
+        selected: [],
       });
     } else if (e.type === "checkpoint_resolved") {
       const p = e.payload as CheckpointResolvedPayload;
@@ -63,10 +73,64 @@ export function checkpointsFromEvents(events: SSEEvent[]): CheckpointDisplay[] {
         cur.status = "resolved";
         cur.decision = p.decision;
         cur.note = p.note ?? "";
+        cur.selected = p.selected ?? [];
       }
     }
   }
   return order.map((id) => byId.get(id) as CheckpointDisplay);
+}
+
+/**
+ * A structured DAG checkpoint the WaveScheduler paused on (plan_review, 结构化挂起
+ * 2a) projected for display. Like {@link CheckpointDisplay} it lives on the
+ * assistant message it belongs to (not a separate store) so it replays inline from
+ * the journal. `steps` are the just-completed nodes under review, `pending` peeks
+ * at the gated downstream; `status` flips `pending → resolved` on the
+ * `plan_review_resolved` event (live) or the journal's resolved frame (replay).
+ */
+export interface PlanReviewDisplay {
+  id: string;
+  steps: PlanReviewStep[];
+  pending: PlanReviewPending[];
+  status: "pending" | "resolved";
+  /** The settled decision; null while pending. */
+  decision: CheckpointDecision | null;
+  /** An optional closing remark; empty otherwise. */
+  note: string;
+}
+
+/**
+ * Fold a persisted turn journal's plan_review events into display items, in the
+ * order they were raised. Mirrors {@link checkpointsFromEvents}: history replay
+ * (toMessage) rebuilds the same cards the live turn showed (live builds from the
+ * SSE payloads directly).
+ */
+export function planReviewsFromEvents(events: SSEEvent[]): PlanReviewDisplay[] {
+  const byId = new Map<string, PlanReviewDisplay>();
+  const order: string[] = [];
+  for (const e of events) {
+    if (e.type === "plan_review_required") {
+      const p = e.payload as PlanReviewRequiredPayload;
+      if (!byId.has(p.checkpoint_id)) order.push(p.checkpoint_id);
+      byId.set(p.checkpoint_id, {
+        id: p.checkpoint_id,
+        steps: p.steps ?? [],
+        pending: p.pending ?? [],
+        status: "pending",
+        decision: null,
+        note: "",
+      });
+    } else if (e.type === "plan_review_resolved") {
+      const p = e.payload as PlanReviewResolvedPayload;
+      const cur = byId.get(p.checkpoint_id);
+      if (cur) {
+        cur.status = "resolved";
+        cur.decision = p.decision;
+        cur.note = p.note ?? "";
+      }
+    }
+  }
+  return order.map((id) => byId.get(id) as PlanReviewDisplay);
 }
 
 export interface Conversation {
@@ -127,6 +191,11 @@ export interface Message {
    * under this assistant bubble (会话流内，不并入状态条). Absent for turns with no
    * checkpoint. */
   checkpoints?: CheckpointDisplay[];
+  /** Structured DAG checkpoints the WaveScheduler paused on this turn (plan_review,
+   * 结构化挂起 2a). Set live as the SSE events arrive and rebuilt from the journal on
+   * reload, so the cards render inline under this assistant bubble alongside any
+   * ask_user checkpoints. Absent for turns with no plan_review. */
+  planReviews?: PlanReviewDisplay[];
   /** A turn that failed mid-stream (an `error` SSE event), rendered as a friendly
    * inline error card under the (possibly partial) answer instead of a raw
    * `**Error**:` line. Live-only — the backend never persisted a partial failure,
@@ -313,6 +382,23 @@ interface ConversationState {
    * settle on a stale resolve). Scans the slice's messages for the id; no-op if
    * it isn't found. */
   settleCheckpoint: (
+    checkpointId: string,
+    decision: CheckpointDecision,
+    note: string,
+    selected: string[],
+    conversationId?: string | null,
+  ) => void;
+  /** Append a structured DAG checkpoint the WaveScheduler just paused on
+   * (`plan_review_required`) to the live assistant message, as a pending card.
+   * Deduped by id; no-op if there is no assistant message yet. */
+  addPlanReview: (
+    payload: PlanReviewRequiredPayload,
+    conversationId?: string | null,
+  ) => void;
+  /** Flip a plan_review to resolved (`plan_review_resolved`, or an optimistic
+   * settle on a stale resolve). Scans the slice's messages for the id; no-op if
+   * it isn't found. */
+  settlePlanReview: (
     checkpointId: string,
     decision: CheckpointDecision,
     note: string,
@@ -529,6 +615,70 @@ export const useConversationStore = create<ConversationState>((set, get) => {
               question: payload.question,
               options: payload.options ?? [],
               context: payload.context ?? "",
+              multiple: payload.multiple ?? false,
+              status: "pending",
+              decision: null,
+              note: "",
+              selected: [],
+            },
+          ],
+        };
+        return { messages };
+      }),
+
+    settleCheckpoint: (
+      checkpointId,
+      decision,
+      note,
+      selected,
+      conversationId,
+    ) =>
+      patchConversation(conversationId, (rt) => {
+        let changed = false;
+        const messages = rt.messages.map((m) => {
+          if (!m.checkpoints?.some((c) => c.id === checkpointId)) return m;
+          changed = true;
+          return {
+            ...m,
+            checkpoints: m.checkpoints.map((c) =>
+              c.id === checkpointId
+                ? {
+                    ...c,
+                    status: "resolved" as const,
+                    decision,
+                    note,
+                    selected,
+                  }
+                : c,
+            ),
+          };
+        });
+        return changed ? { messages } : null;
+      }),
+
+    addPlanReview: (payload, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        let idx = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "assistant") {
+            idx = i;
+            break;
+          }
+        }
+        if (idx === -1) return null;
+        const msg = messages[idx];
+        const existing = msg.planReviews ?? [];
+        // A re-delivered event must not stack a second card for one checkpoint.
+        if (existing.some((c) => c.id === payload.checkpoint_id)) return null;
+        messages[idx] = {
+          ...msg,
+          planReviews: [
+            ...existing,
+            {
+              id: payload.checkpoint_id,
+              steps: payload.steps ?? [],
+              pending: payload.pending ?? [],
               status: "pending",
               decision: null,
               note: "",
@@ -538,15 +688,15 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
-    settleCheckpoint: (checkpointId, decision, note, conversationId) =>
+    settlePlanReview: (checkpointId, decision, note, conversationId) =>
       patchConversation(conversationId, (rt) => {
         let changed = false;
         const messages = rt.messages.map((m) => {
-          if (!m.checkpoints?.some((c) => c.id === checkpointId)) return m;
+          if (!m.planReviews?.some((c) => c.id === checkpointId)) return m;
           changed = true;
           return {
             ...m,
-            checkpoints: m.checkpoints.map((c) =>
+            planReviews: m.planReviews.map((c) =>
               c.id === checkpointId
                 ? { ...c, status: "resolved" as const, decision, note }
                 : c,

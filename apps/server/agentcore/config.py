@@ -2,13 +2,23 @@
 
 from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Repository root, anchored off this file (…/apps/server/agentcore/config.py →
 # parents[3]). Used to resolve relative paths (e.g. LOG_FILE → <root>/logs/...)
 # against the project root rather than the process CWD (the server runs from
 # apps/server, but logs/ live at the repo root so tooling finds them).
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+# The backend's dotenv lives beside the package at apps/server/.env (parents[1]).
+# Anchor it to an ABSOLUTE path: pydantic resolves a bare relative "env_file"
+# against the *process CWD*, so launching the server from anywhere but
+# apps/server silently loaded NOTHING — DB/DEBUG still arrived via exported env
+# vars, but unexported secrets (ENCRYPTION_KEY, LOG_FILE) fell back to defaults,
+# yielding a half-configured boot that 402'd every BYOK turn and wrote no JSONL
+# logs. Anchoring makes .env load regardless of CWD. A missing file here is fine:
+# pydantic-settings ignores it and uses real env vars (12-factor prod posture).
+_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
 
 class Settings(BaseSettings):
@@ -165,6 +175,15 @@ class Settings(BaseSettings):
     log_level: str = "info"
     log_file: str = ""
 
+    # Capture LLM prompt/response bodies (the llm.request / llm.response DEBUG
+    # events) — the lever for prompt tuning. OFF by default: bodies are large and
+    # sensitive, so the metrics-only `llm.call` (model/scenario/tokens/latency/
+    # finish_reason) always logs, but the actual prompt/completion text is only
+    # captured when this is on. Even then it is TRUNCATED + secret-redacted
+    # (logging.mdc 铁律: never BYOK key / never full file content). Needs LOG_LEVEL=debug
+    # to surface (the events are debug-level). Use transiently while调 prompt.
+    log_llm_bodies: bool = False
+
     # SQLAlchemy statement echo — deliberately DECOUPLED from `debug`. Turning on
     # app-level DEBUG logging should NOT also dump every SQL statement + bound
     # parameters to stdout: that回显 drowns the AI turn logs (产品AI日志) and makes a
@@ -265,7 +284,7 @@ class Settings(BaseSettings):
             m.strip() for m in self.user_selectable_models.split(",") if m.strip()
         )
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, env_file_encoding="utf-8")
 
 
 settings = Settings()

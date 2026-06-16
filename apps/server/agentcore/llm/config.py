@@ -53,6 +53,9 @@ class ModelProfile:
     temperature: float = 0.7
     max_tokens: int | None = None
     max_rounds: int = 16
+    # Scenario tag, stamped from the PROFILES key by get_profile (the dict entries
+    # leave it ""). Flows onto LLMRequest.scenario for per-scenario observability.
+    name: str = ""
 
 
 # DeepSeek V4 model identifiers
@@ -126,8 +129,14 @@ _DEFAULT_PROFILE = "chat"
 
 
 def get_profile(name: str) -> ModelProfile:
-    """Resolve a named profile, falling back to the chat profile."""
-    return PROFILES.get(name, PROFILES[_DEFAULT_PROFILE])
+    """Resolve a named profile, falling back to the chat profile.
+
+    Stamps the resolved scenario name onto the returned copy (the PROFILES
+    entries themselves leave ``name`` blank) so build_request can carry it onto
+    ``LLMRequest.scenario`` for per-scenario observability.
+    """
+    resolved = name if name in PROFILES else _DEFAULT_PROFILE
+    return replace(PROFILES[resolved], name=resolved)
 
 
 def agent_profile(preference: ModelTier | str) -> ModelProfile:
@@ -210,4 +219,5 @@ def build_request(
         tools=tools,
         tool_choice=tool_choice if tools else "none",
         stream=stream,
+        scenario=profile.name or _DEFAULT_PROFILE,
     )

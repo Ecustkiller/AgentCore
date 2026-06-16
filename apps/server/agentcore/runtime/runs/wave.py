@@ -21,7 +21,7 @@ dependents proceed).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 
 from agentcore.runtime.runs.concurrency import gather_bounded
 from agentcore.runtime.runs.plan import RunPlan
@@ -48,6 +48,9 @@ class WaveScheduler:
         seed_completed: Mapping[str, RunState] | None = None,
         should_stop: Callable[[], bool] | None = None,
         on_progress: Callable[[Mapping[str, RunState]], None] | None = None,
+        on_checkpoint: (
+            Callable[[Sequence[RunSpec], Mapping[str, RunState]], Awaitable[bool]] | None
+        ) = None,
     ) -> dict[str, RunState]:
         """Drive ``plan`` to completion; return each node's terminal
         :class:`RunState` by ``run_id`` (cascade-skipped nodes included).
@@ -63,6 +66,16 @@ class WaveScheduler:
           in-flight wave is never interrupted by it.
         - ``on_progress`` fires after every wave with the completed-so-far map, so
           the host can snapshot progress.
+        - ``on_checkpoint`` (结构化挂起 2a) fires *after* a wave whose just-COMPLETED
+          nodes include any with ``checkpoint_after`` set, and only while work
+          remains downstream (``pending`` non-empty). It is awaited with those
+          nodes + the completed-so-far map and returns whether to proceed; False
+          ends scheduling like a graceful abort (partial map returned). The
+          scheduler stays pure — the host's hook owns the user round-trip (emit a
+          ``plan_review`` request, await the answer over the interaction bridge);
+          a node whose ``checkpoint_after`` is unset, or any run with no hook
+          injected, behaves exactly as before. A *failed* checkpoint node does not
+          pause — its ``on_failure`` already governs the cascade.
         """
         completed: dict[str, RunState] = dict(seed_completed or {})
         skipped: set[str] = set()
@@ -97,6 +110,22 @@ class WaveScheduler:
 
             if on_progress is not None:
                 on_progress(completed)
+
+            # 结构化挂起 2a: pause after this wave when a just-COMPLETED node asked
+            # for a checkpoint and downstream work remains. The host hook does the
+            # user round-trip and returns whether to proceed; a stop ends scheduling
+            # at this clean wave boundary (the unrun tail is left for the partial
+            # map, same as abort). No hook / no marked node / no pending ⇒ untouched.
+            if on_checkpoint is not None and pending:
+                paused_nodes = [
+                    spec
+                    for spec in batch
+                    if spec.checkpoint_after
+                    and (st := wave_results.get(spec.run_id)) is not None
+                    and st.phase is RunPhase.COMPLETED
+                ]
+                if paused_nodes and not await on_checkpoint(paused_nodes, completed):
+                    aborted = True
 
         # Materialise the skip results for nodes the cascade dropped (never run).
         for run_id in skipped:

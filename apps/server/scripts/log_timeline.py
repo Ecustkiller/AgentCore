@@ -12,7 +12,11 @@ Run from apps/server:
 Message bodies live in Postgres (conversations / messages); the per-turn run trace
 (chat.turn_start/complete, delegate, tool, errors) lives in logs/dev.jsonl. This
 joins them by conversation_id, or follows a single interaction by trace_id.
-See .cursor/rules/conversation-logs.mdc.
+
+Each delegated worker's react/tool events are nested into an indented block under
+its identity (agent_id · depth) so one delegation's reasoning chain reads
+top-to-bottom; the CEO/captain loop stays on the chronological spine and brackets
+the workers it delegates to. See .cursor/rules/conversation-logs.mdc.
 """
 
 import asyncio
@@ -116,15 +120,89 @@ def load_log_events(value: str, field: str = "conversation_id") -> list[dict]:
     return events
 
 
-def _fmt_log_line(item: dict) -> str:
+def _fmt_log_line(item: dict, indent: str = "  ", hide: tuple[str, ...] = ()) -> str:
     ts = item.get("timestamp", "")[:19]
     event = item.get("event", "?")
     icon = {"error": "[E]", "warning": "[W]"}.get(item.get("level", ""), "   ")
-    detail_keys = {k: v for k, v in item.items() if k not in ("type", "timestamp", "event", "level")}
+    skip = ("type", "timestamp", "event", "level", *hide)
+    detail_keys = {k: v for k, v in item.items() if k not in skip}
     detail = " ".join(f"{k}={v}" for k, v in detail_keys.items())
     if len(detail) > 120:
         detail = detail[:120] + "..."
-    return f"  {ts}  {icon} {event}  {detail}"
+    return f"{indent}{ts}  {icon} {event}  {detail}"
+
+
+# react.* / tool.* events carry a delegated worker's identity (run_id/agent_id/
+# depth), bound in runtime/runs/executor.py. We nest them into a per-worker block
+# so one delegation's reasoning chain reads top-to-bottom instead of interleaving
+# with other concurrent workers. CEO/captain events have no depth and stay on the
+# chronological spine — they bracket the workers they delegate to.
+_WORKER_EVENT_PREFIXES = ("react.", "tool.")
+_WORKER_REDUNDANT_KEYS = ("agent_id", "run_id", "depth", "trace_id")
+
+
+def _worker_key(item: dict) -> tuple[str, str] | None:
+    """Grouping key for a delegated-worker log event, or None to keep it on the spine."""
+    if item.get("type") != "log":
+        return None
+    if not item.get("event", "").startswith(_WORKER_EVENT_PREFIXES):
+        return None
+    depth = item.get("depth")
+    if not depth:  # CEO/captain loop has no depth -> stays on the spine
+        return None
+    # trace_id separates turns in a full-conversation view; it is absent (filtered)
+    # in --trace mode where every event already shares one trace.
+    return (item.get("trace_id", ""), item.get("run_id") or item.get("agent_id") or "?")
+
+
+def _partition_worker_groups(log_events: list[dict]) -> list[dict]:
+    """Pull delegated-worker react/tool events into per-worker group blocks.
+
+    Returns spine events plus synthetic ``worker_group`` items, each positioned at
+    its worker's earliest event so the block renders where the delegation began.
+    """
+    spine: list[dict] = []
+    groups: dict[tuple[str, str], dict] = {}
+    for ev in log_events:
+        key = _worker_key(ev)
+        if key is None:
+            spine.append(ev)
+            continue
+        grp = groups.get(key)
+        if grp is None:
+            grp = {
+                "type": "worker_group",
+                "agent_id": ev.get("agent_id") or ev.get("run_id") or "?",
+                "depth": ev.get("depth") or 1,
+                "timestamp": ev.get("timestamp", ""),
+                "events": [],
+            }
+            groups[key] = grp
+        grp["events"].append(ev)
+        ts = ev.get("timestamp", "")
+        if ts and (not grp["timestamp"] or ts < grp["timestamp"]):
+            grp["timestamp"] = ts
+    for grp in groups.values():
+        grp["events"].sort(key=lambda x: x.get("timestamp", ""))
+    return spine + list(groups.values())
+
+
+def _fmt_worker_group(grp: dict) -> list[str]:
+    depth = grp.get("depth", 1)
+    agent = grp.get("agent_id", "?")
+    rounds = sum(1 for e in grp["events"] if e.get("event") == "react.round_end")
+    tools = sum(1 for e in grp["events"] if e.get("event") == "tool.execute_end")
+    meta = [f"d{depth}"]
+    if rounds:
+        meta.append(f"{rounds} round{'s' if rounds != 1 else ''}")
+    if tools:
+        meta.append(f"{tools} tool{'s' if tools != 1 else ''}")
+    pad = "  " + "    " * depth
+    child_indent = pad + "│  "
+    lines = [f"{pad}┌─ worker {agent}  ({' · '.join(meta)})"]
+    for ev in grp["events"]:
+        lines.append(_fmt_log_line(ev, indent=child_indent, hide=_WORKER_REDUNDANT_KEYS))
+    return lines
 
 
 def format_trace(trace_id: str, log_events: list[dict]) -> str:
@@ -134,8 +212,12 @@ def format_trace(trace_id: str, log_events: list[dict]) -> str:
         f"  Log events: {len(log_events)}",
         "=" * 70,
     ]
-    log_events.sort(key=lambda x: x.get("timestamp", ""))
-    lines += [_fmt_log_line(it) for it in log_events]
+    items = _partition_worker_groups(log_events)
+    for item in sorted(items, key=lambda x: x.get("timestamp", "")):
+        if item["type"] == "worker_group":
+            lines += _fmt_worker_group(item)
+        else:
+            lines.append(_fmt_log_line(item))
     lines.append("")
     return "\n".join(lines)
 
@@ -149,8 +231,11 @@ def format_timeline(conv: dict, messages: list[dict], log_events: list[dict]) ->
         f"  Messages: {len(messages)}  |  Log events: {len(log_events)}",
         "=" * 70,
     ]
-    for item in sorted(messages + log_events, key=lambda x: x.get("timestamp", "")):
-        if item["type"] == "message":
+    items = messages + _partition_worker_groups(log_events)
+    for item in sorted(items, key=lambda x: x.get("timestamp", "")):
+        if item["type"] == "worker_group":
+            lines += _fmt_worker_group(item)
+        elif item["type"] == "message":
             role = item["role"]
             icon = {"user": "[user]", "assistant": "[asst]", "system": "[sys ]"}.get(role, "[?]")
             preview = item["content_preview"].replace("\n", " ")

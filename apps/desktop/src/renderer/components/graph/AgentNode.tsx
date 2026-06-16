@@ -4,6 +4,7 @@ import {
   MODEL_TIER_META,
   type ModelTier,
   type ReasoningEffort,
+  type RunCheckpoint,
   type RunStatus,
   STANCE_META,
   type Stance,
@@ -16,6 +17,7 @@ import {
   CornerDownRight,
   History,
   Loader2,
+  Pause,
   Sparkles,
   Wrench,
   XCircle,
@@ -61,6 +63,9 @@ interface AgentNodeData {
   /** 辩论/审查 side (前端UX目标态 §四): badges the node 正方/反方; null/undefined on
    * an ordinary teammate. */
   stance?: Stance | null;
+  /** 结构化挂起 2a (7.2A): a `checkpoint_after` pause that fired after this run, or
+   * null. Drives the node's「待放行 / 已放行 / 已停止」pause badge. */
+  checkpoint?: RunCheckpoint | null;
   /** Position in the plan, used to stagger the entrance animation. */
   enterIndex?: number;
   /** Keyboard activation (Enter/Space) — mirrors a plain node click. */
@@ -141,7 +146,7 @@ export function AgentNode({ data, selected }: NodeProps) {
     d.costText ? `，成本 ${d.costText}` : ""
   }${durationText ? `，用时 ${durationText}` : ""}${
     d.toolCount > 0 ? `，工具 ${d.toolCount} 次` : ""
-  }`;
+  }${d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""}`;
 
   return (
     <>
@@ -186,7 +191,7 @@ export function AgentNode({ data, selected }: NodeProps) {
               {/* 第二行仅在有「立场 / 子任务 / 修订」分类标记时出现；状态不再用文字
                   重复（图标 + 色环 + 运行脉冲已表达），普通队员只剩单行角色名，不再被
                   徽章挤到截断。 */}
-              {(d.stance || d.isSubtask || d.isRevision) && (
+              {(d.stance || d.isSubtask || d.isRevision || d.checkpoint) && (
                 <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                   {d.stance && (
                     <span className="shrink-0 rounded-full bg-info/10 px-1.5 py-0.5 font-medium text-info">
@@ -205,6 +210,18 @@ export function AgentNode({ data, selected }: NodeProps) {
                       修订 v{d.revision ?? 2}
                     </span>
                   )}
+                  {d.checkpoint &&
+                    (() => {
+                      const badge = checkpointBadge(d.checkpoint);
+                      return (
+                        <span
+                          className={`flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 font-medium ${badge.cls}`}
+                        >
+                          <Pause size={10} />
+                          {badge.label}
+                        </span>
+                      );
+                    })()}
                 </p>
               )}
             </div>
@@ -283,4 +300,17 @@ function statusLabel(status: RunStatus): string {
     cancelled: "已停止",
   };
   return labels[status] ?? status;
+}
+
+/** The pause-badge label + palette for a node's structured checkpoint (plan_review,
+ * 结构化挂起 2a): 待放行 while the user has not answered, then 已放行 (continued) or
+ * 已停止 (the run ended here). A timeout folds in as 已放行 (the engine continued). */
+function checkpointBadge(c: RunCheckpoint): { label: string; cls: string } {
+  if (c.status === "pending") {
+    return { label: "待放行", cls: "bg-warning/10 text-warning" };
+  }
+  if (c.decision === "stop") {
+    return { label: "已停止", cls: "bg-destructive/10 text-destructive" };
+  }
+  return { label: "已放行", cls: "bg-muted text-muted-foreground" };
 }

@@ -676,10 +676,13 @@ class MessageRepository:
         citations: list | None = None,
         runs: dict | None = None,
         message_id: str | None = None,
+        trace_id: str | None = None,
     ) -> Message:
         # `message_id` lets the caller pin the row id to the pipeline's id (the
         # one already sent to the client on `message_start`), so the streamed and
         # persisted assistant message agree; defaults to a fresh id otherwise.
+        # `trace_id` (the turn's log correlation key) is supplied by the caller —
+        # which owns the contextvar scope — so this row joins to its log trace.
         msg = Message(
             id=message_id or new_id(),
             conversation_id=conversation_id,
@@ -687,6 +690,7 @@ class MessageRepository:
             content=content,
             reasoning_content=reasoning_content,
             usage=metadata,
+            trace_id=trace_id,
         )
         if attachments is not None:
             msg.attachments = attachments
@@ -960,6 +964,7 @@ class CostEventRepository:
         conversation_id: str,
         message_id: str,
         runs: Sequence[dict],
+        trace_id: str | None = None,
     ) -> int:
         """Append one ledger row per run for an assistant turn; return rows written.
 
@@ -968,7 +973,9 @@ class CostEventRepository:
         envelope here so the runtime stays DB-unaware. Idempotent by ``run_id``
         (unique): a retried turn re-sending the same runs inserts nothing the
         second time, so a run is never double-billed. A row id is minted per row
-        because a Core bulk insert does not fire the ORM-level default.
+        because a Core bulk insert does not fire the ORM-level default. ``trace_id``
+        (the turn's log correlation key) stamps every row so the spend joins to its
+        log trace.
         """
         if not runs:
             return 0
@@ -989,6 +996,7 @@ class CostEventRepository:
                 "currency": r.get("currency", "USD"),
                 "rounds": int(r.get("rounds", 0)),
                 "duration_ms": int(r.get("duration_ms", 0)),
+                "trace_id": trace_id,
             }
             for r in runs
         ]
@@ -1726,10 +1734,13 @@ class RunSessionRepository:
         transcript: list,
         content: str,
         recall_count: int,
+        trace_id: str | None = None,
     ) -> None:
         """Insert a recoverable session, or update it in place if its ``run_id``
         already exists (a re-revised run). Idempotent re-delegation re-writes the
-        same content; a revision advances transcript / recall_count."""
+        same content; a revision advances transcript / recall_count. ``trace_id``
+        is set on first insert only (NOT in the update set) so it keeps pointing at
+        the interaction that originally spawned the worker, not a later revise."""
         now = datetime.now()
         stmt = (
             pg_insert(RunSessionRow)
@@ -1740,6 +1751,7 @@ class RunSessionRepository:
                 transcript=transcript,
                 content=content,
                 recall_count=recall_count,
+                trace_id=trace_id,
             )
             .on_conflict_do_update(
                 index_elements=["run_id"],

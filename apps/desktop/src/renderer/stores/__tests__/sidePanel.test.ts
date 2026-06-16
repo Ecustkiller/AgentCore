@@ -38,7 +38,6 @@ beforeEach(() => {
   useSidePanelStore.setState({
     open: false,
     width: 400,
-    section: "files",
     tabs: [],
     activeTabId: WORKSPACE_TAB_ID,
   });
@@ -164,13 +163,5 @@ describe("showRunDetail", () => {
     expect(panel().open).toBe(true);
     expect(panel().activeTabId).toBe(tabId("run-1"));
     expect(panel().tabs[0].title).toBe("研究员");
-  });
-});
-
-describe("setSection", () => {
-  it("updates the active workspace section", () => {
-    expect(panel().section).toBe("files");
-    panel().setSection("snapshots");
-    expect(panel().section).toBe("snapshots");
   });
 });

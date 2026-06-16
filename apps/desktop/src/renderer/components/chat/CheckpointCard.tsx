@@ -54,27 +54,40 @@ function PendingCheckpoint({
   checkpoint: CheckpointDisplay;
   conversationId: string | null;
 }) {
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState<CheckpointUserDecision | null>(
     null,
   );
   const busy = submitting !== null;
 
+  // Single-select replaces the pick (radio); multi-select toggles membership
+  // (checkbox). Clicking an active option clears it either way.
+  const toggle = (opt: string) => {
+    if (busy) return;
+    setSelected((cur) => {
+      if (cur.includes(opt)) return cur.filter((o) => o !== opt);
+      return checkpoint.multiple ? [...cur, opt] : [opt];
+    });
+  };
+
   const send = (decision: CheckpointUserDecision) => {
     if (busy || !conversationId) return;
-    // 调整 carries the steer: the picked option and any free-form note, combined.
-    const steer = [decision === "adjust" ? selected : null, note.trim()]
-      .filter((s): s is string => !!s && s.length > 0)
-      .join("\n");
+    // Picks are a first-class answer riding 继续/调整 (no longer folded into the
+    // note); 停止 ends the turn and carries none.
+    const picks = decision === "stop" ? [] : selected;
     setSubmitting(decision);
-    decideCheckpoint(conversationId, checkpoint.id, decision, steer).catch(
-      () => {
-        // A transient (non-404) failure re-enables the card so the user retries;
-        // a successful or stale settle flips the card via its resolved state.
-        setSubmitting(null);
-      },
-    );
+    decideCheckpoint(
+      conversationId,
+      checkpoint.id,
+      decision,
+      note.trim(),
+      picks,
+    ).catch(() => {
+      // A transient (non-404) failure re-enables the card so the user retries;
+      // a successful or stale settle flips the card via its resolved state.
+      setSubmitting(null);
+    });
   };
 
   const spinnerOr = (
@@ -104,14 +117,17 @@ function PendingCheckpoint({
 
           {checkpoint.options.length > 0 && (
             <div className="mt-2 space-y-1">
+              {checkpoint.multiple && (
+                <p className="text-xs text-muted-foreground/80">可多选</p>
+              )}
               {checkpoint.options.map((opt) => {
-                const active = selected === opt;
+                const active = selected.includes(opt);
                 return (
                   <button
                     key={opt}
                     type="button"
                     disabled={busy}
-                    onClick={() => setSelected(active ? null : opt)}
+                    onClick={() => toggle(opt)}
                     className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors disabled:opacity-40 ${
                       active
                         ? "border-warning bg-warning/15 text-foreground"
@@ -119,10 +135,18 @@ function PendingCheckpoint({
                     }`}
                   >
                     <span
-                      className={`mt-0.5 size-3 shrink-0 rounded-full border ${
-                        active ? "border-warning bg-warning" : "border-border"
+                      className={`mt-0.5 flex size-3 shrink-0 items-center justify-center border ${
+                        checkpoint.multiple ? "rounded-lg" : "rounded-full"
+                      } ${
+                        active
+                          ? "border-warning bg-warning text-warning-foreground"
+                          : "border-border"
                       }`}
-                    />
+                    >
+                      {checkpoint.multiple && active && (
+                        <Check size={10} strokeWidth={3} />
+                      )}
+                    </span>
                     <span className="min-w-0 whitespace-pre-wrap">{opt}</span>
                   </button>
                 );
@@ -135,7 +159,7 @@ function PendingCheckpoint({
             onChange={(e) => setNote(e.target.value)}
             disabled={busy}
             rows={2}
-            placeholder="可选 · 补充说明或调整方向（用于「调整」）"
+            placeholder="可选 · 补充说明或调整方向"
             className="mt-2 w-full resize-none rounded-lg border border-border bg-card/70 px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-warning/60 focus:outline-none disabled:opacity-40"
           />
         </div>
@@ -144,17 +168,10 @@ function PendingCheckpoint({
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-6">
         <DecisionButton
           icon={spinnerOr("continue", <Check size={13} />)}
-          label="继续"
+          label="提交"
           tone="primary"
           disabled={busy}
           onClick={() => send("continue")}
-        />
-        <DecisionButton
-          icon={spinnerOr("adjust", <Pencil size={13} />)}
-          label="调整"
-          tone="neutral"
-          disabled={busy}
-          onClick={() => send("adjust")}
         />
         <DecisionButton
           icon={spinnerOr("stop", <OctagonX size={13} />)}
@@ -210,6 +227,18 @@ function ResolvedCheckpoint({ checkpoint }: { checkpoint: CheckpointDisplay }) {
           <p className="whitespace-pre-wrap text-sm text-foreground">
             {checkpoint.question}
           </p>
+          {checkpoint.selected.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {checkpoint.selected.map((s) => (
+                <span
+                  key={s}
+                  className="rounded-full bg-muted px-2 py-0.5 text-xs text-foreground"
+                >
+                  {s}
+                </span>
+              ))}
+            </div>
+          )}
           <p className="mt-1 text-xs font-medium text-muted-foreground">
             {meta.label}
           </p>

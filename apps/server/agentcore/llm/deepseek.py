@@ -21,6 +21,7 @@ from agentcore.core.errors import (
     LLMTimeoutError,
 )
 from agentcore.core.logging import get_logger
+from agentcore.llm.observability import log_llm_call
 from agentcore.llm.protocol import (
     LLMChunk,
     LLMRequest,
@@ -93,7 +94,7 @@ class DeepSeekProvider:
             cache_miss_tokens=usage_data.get("prompt_cache_miss_tokens", 0),
         )
 
-        return LLMResponse(
+        response = LLMResponse(
             content=message.get("content") or "",
             reasoning_content=message.get("reasoning_content"),
             tool_calls=tool_calls,
@@ -102,6 +103,18 @@ class DeepSeekProvider:
             model=data.get("model", request.model),
             latency_ms=latency_ms,
         )
+        log_llm_call(
+            scenario=request.scenario,
+            model=response.model,
+            usage=usage,
+            finish_reason=response.finish_reason,
+            latency_ms=latency_ms,
+            stream=False,
+            messages=request.messages,
+            content=response.content,
+            reasoning=response.reasoning_content,
+        )
+        return response
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
         """Streaming LLM call. Yields chunks as they arrive from SSE."""

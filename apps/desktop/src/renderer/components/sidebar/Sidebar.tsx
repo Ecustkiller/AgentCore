@@ -1,6 +1,5 @@
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { useConversationStore } from "@/stores/conversation";
-import { useFoldersStore } from "@/stores/folders";
+import { startNewConversation } from "@/lib/newConversation";
 import { useUnreadTotal } from "@/stores/messaging";
 import { useSidebarStore } from "@/stores/sidebar";
 import {
@@ -25,7 +24,6 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const collapsed = useSidebarStore((s) => s.collapsed);
-  const switchConversation = useConversationStore((s) => s.switchConversation);
   const unread = useUnreadTotal();
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -35,13 +33,9 @@ export function Sidebar() {
       ? pathname === "/" || pathname.startsWith("/conversations")
       : pathname === route || pathname.startsWith(`${route}/`);
 
-  const handleNewConversation = () => {
-    // 新对话先以草稿态存在（不落库），首条消息发送时由 MessageInput 真正创建后端会话。
-    // A plain new chat is ungrouped: clear any folder draft target left pending.
-    useFoldersStore.getState().setPendingNewChatFolder(null);
-    switchConversation(null);
-    navigate("/");
-  };
+  // 「对话」入口默认就是新建一个空白对话（与「+」一致）；回到旧会话走下方「最近对话 /
+  // 全部对话」。
+  const handleNewConversation = () => startNewConversation(navigate);
 
   return (
     <aside
@@ -57,7 +51,11 @@ export function Sidebar() {
             <button
               key={item.route}
               type="button"
-              onClick={() => navigate(item.route)}
+              onClick={() =>
+                item.route === "/"
+                  ? handleNewConversation()
+                  : navigate(item.route)
+              }
               className={`relative flex h-9 w-full items-center gap-3 rounded-lg text-base ${collapsed ? "justify-center px-0" : "px-3"} ${
                 active
                   ? "bg-sidebar-accent text-sidebar-accent-foreground"

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.config import settings
 from agentcore.conversation.history import load_history
+from agentcore.core.errors import AgentCoreError
 from agentcore.core.log_context import log_context, new_trace_id
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
@@ -63,6 +64,27 @@ from agentcore.workspace.protocol import WorkspaceBackend
 from agentcore.workspace.snapshots import create_snapshot, restore_into_workspace
 
 logger = get_logger(__name__)
+
+
+def _log_cost_recorded(conversation_id: str, message_id: str | None, cost_runs: list[dict]) -> None:
+    """Emit ``cost.recorded`` after a turn's ledger rows persist successfully.
+
+    Pairs with the existing ``cost.ledger_write_failed`` so spend is visible in the
+    log stream (not only in the DB ``cost_events`` table): per-turn run count, total
+    spend (integer nano-USD, the storage unit, + a rounded USD view), and the model
+    mix. Lets ``log_stats`` surface a cost summary without a DB round-trip.
+    """
+    total_nano = sum(int(r.get("cost_total_nano", 0) or 0) for r in cost_runs)
+    models = sorted({str(r.get("model", "?")) for r in cost_runs})
+    logger.info(
+        "cost.recorded",
+        conversation_id=conversation_id,
+        message_id=message_id,
+        runs=len(cost_runs),
+        total_nano=total_nano,
+        total_usd=round(total_nano / 1e9, 6),
+        models=models,
+    )
 
 
 def _fallback_title(user_message: str) -> str:
@@ -195,9 +217,13 @@ async def _run_and_persist(
     # trace_id (产品AI日志). chat.turn_start / chat.turn_complete bracket it with the
     # message preview + outcome (rounds / tokens / delegated / latency).
     turn_id = new_id()
+    # Held in a local because the DB persistence below runs AFTER this log_context
+    # exits (the contextvar is cleared by then), yet must stamp the same trace_id
+    # onto the assistant message + cost rows so they join back to this turn's logs.
+    trace_id = new_trace_id()
     started = time.monotonic()
     with log_context(
-        trace_id=new_trace_id(),
+        trace_id=trace_id,
         conversation_id=conversation_id,
         user_id=user_id,
         turn_id=turn_id,
@@ -264,6 +290,7 @@ async def _run_and_persist(
                 # the streamed/persisted assistant ids agree.
                 runs=assistant_runs,
                 message_id=result.get("message_id"),
+                trace_id=trace_id,
                 metadata={
                     "input_tokens": result.get("input_tokens", 0),
                     "output_tokens": result.get("output_tokens", 0),
@@ -287,7 +314,9 @@ async def _run_and_persist(
                     conversation_id=conversation_id,
                     message_id=result.get("message_id"),
                     runs=cost_runs,
+                    trace_id=trace_id,
                 )
+                _log_cost_recorded(conversation_id, result.get("message_id"), cost_runs)
             except Exception as e:
                 await session.rollback()
                 logger.warning(
@@ -450,6 +479,17 @@ async def stream_chat(
 
     except Exception as e:
         logger.error("chat.stream_error", error=str(e), exc_info=True)
+        # A top-level failure (DB / workspace / lock) here used to die silently:
+        # the stream closed with no terminal event, so the client spun on a
+        # "thinking" bubble forever. Surface a visible, retriable error and a
+        # terminal message_end before the finally closes the sink, so the bubble
+        # settles into an inline error card (mirrors the NOT_FOUND path above).
+        if not sink._closed:
+            if isinstance(e, AgentCoreError):
+                sink.emit(error_event(e.code, e.message))
+            else:
+                sink.emit(error_event("STREAM_ERROR", "服务出错了，请稍后重试。"))
+            sink.emit(message_end(FinishReason.ERROR))
     finally:
         if not sink._closed:
             sink.close()
@@ -532,6 +572,14 @@ async def regenerate_chat(
 
     except Exception as e:
         logger.error("chat.regenerate_error", error=str(e), exc_info=True)
+        # Same silent-death guard as stream_chat: surface a visible error so the
+        # regenerate bubble settles into an inline error card instead of spinning.
+        if not sink._closed:
+            if isinstance(e, AgentCoreError):
+                sink.emit(error_event(e.code, e.message))
+            else:
+                sink.emit(error_event("STREAM_ERROR", "服务出错了，请稍后重试。"))
+            sink.emit(message_end(FinishReason.ERROR))
     finally:
         if not sink._closed:
             sink.close()
@@ -592,6 +640,7 @@ async def _persist_job_turn(
                     message_id=result.get("message_id"),
                     runs=cost_runs,
                 )
+                _log_cost_recorded(conversation_id, result.get("message_id"), cost_runs)
             except Exception as e:
                 await session.rollback()
                 logger.warning(

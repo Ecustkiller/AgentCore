@@ -1,4 +1,8 @@
-import { SimpleTooltip } from "@/components/ui/tooltip";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   getConversations,
   patchConversationCache,
@@ -18,6 +22,7 @@ import type { FsRoot } from "@shared/ipc-contract";
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   Cloud,
   FolderOpen,
   HardDrive,
@@ -51,6 +56,8 @@ export function WorkspaceModeBar({
   // showing the workspace context while the (potentially slow) archive runs.
   const [backingUp, setBackingUp] = useState(false);
   const [backupDone, setBackupDone] = useState(false);
+  // Popover open state — controlled so a completed bind / unbind can close it.
+  const [pop, setPop] = useState(false);
 
   // Desktop-only: a web build has no fsApi, so local mode can't be entered there.
   const fsApi = typeof window !== "undefined" ? window.fsApi : undefined;
@@ -112,6 +119,7 @@ export function WorkspaceModeBar({
       setBinding(b);
       setRoots(await loadRoots());
       syncStores(b);
+      setPop(false);
     } catch (e) {
       setError(describeError(e));
     } finally {
@@ -127,6 +135,7 @@ export function WorkspaceModeBar({
       const b = await unbindWorkspace(conversationId);
       setBinding(b);
       syncStores(b);
+      setPop(false);
     } catch (e) {
       setError(describeError(e));
     } finally {
@@ -172,145 +181,195 @@ export function WorkspaceModeBar({
     : null;
 
   return (
-    <div className="shrink-0 border-b border-border px-3 py-2">
-      <div className="flex items-center gap-2">
-        <span
-          className={`flex size-6 shrink-0 items-center justify-center rounded-md ${
-            isLocal
-              ? "bg-primary/10 text-primary"
-              : "bg-muted text-muted-foreground"
+    <Popover
+      open={pop}
+      onOpenChange={(o) => {
+        setPop(o);
+        if (!o) setConfirmDisconnect(false);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={`flex min-w-0 shrink items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium hover:bg-accent ${
+            isLocal && rootMissing ? "text-warning" : "text-foreground"
           }`}
         >
-          {isLocal ? <HardDrive size={14} /> : <Cloud size={14} />}
-        </span>
-
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-medium text-foreground">
-            {isLocal ? "本地工作区" : "云端工作区"}
-          </div>
-          <div className="truncate text-[11px] text-muted-foreground">
-            {isLocal
-              ? rootMissing
-                ? "目录在本机不可用"
-                : `${rootName ?? "已绑定目录"}${
-                    binding.scope === "folder" ? " · 文件夹共享" : ""
-                  }`
-              : "文件存放在团队云端"}
-          </div>
-        </div>
-
-        {busy ? (
-          <Loader2
-            size={15}
-            className="shrink-0 animate-spin text-muted-foreground"
-          />
-        ) : isLocal ? (
-          confirmDisconnect ? (
-            <span className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                onClick={() => void disconnect()}
-                className="rounded-md px-2 py-1 text-[11px] font-medium text-destructive hover:bg-destructive/10"
-              >
-                确认切回云端
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmDisconnect(false)}
-                className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent"
-              >
-                取消
-              </button>
-            </span>
+          {isLocal && rootMissing ? (
+            <AlertTriangle size={13} className="shrink-0 text-warning" />
+          ) : isLocal ? (
+            <HardDrive size={13} className="shrink-0 text-primary" />
           ) : (
-            <span className="flex shrink-0 items-center gap-1">
-              {!rootMissing &&
-                (backingUp ? (
-                  <span className="flex items-center gap-1 px-2 py-1 text-[11px] text-muted-foreground">
-                    <Loader2 size={13} className="animate-spin" />
-                    备份中…
-                  </span>
-                ) : backupDone ? (
-                  <span className="flex items-center gap-1 px-2 py-1 text-[11px] text-success">
-                    <Check size={13} />
-                    已备份
-                  </span>
-                ) : (
-                  <SimpleTooltip label="把本地工作区快照备份到云端（可在快照列表恢复 / 下载）">
-                    <button
-                      type="button"
-                      onClick={() => void backup()}
-                      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-                    >
-                      <UploadCloud size={13} />
-                      备份到云
-                    </button>
-                  </SimpleTooltip>
-                ))}
-              <SimpleTooltip
-                label={
-                  binding.scope === "folder"
-                    ? "该文件夹下所有对话都会切回云端"
-                    : "切回云端工作区"
-                }
-              >
-                <button
-                  type="button"
-                  onClick={onDisconnectClick}
-                  disabled={backingUp}
-                  className="rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                >
-                  断开
-                </button>
-              </SimpleTooltip>
-            </span>
-          )
-        ) : (
-          fsApi && (
-            <button
-              type="button"
-              onClick={() => void openFolder()}
-              className="flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-accent/70"
-            >
-              <FolderOpen size={13} />
-              打开本地文件夹
-            </button>
-          )
-        )}
-      </div>
+            <Cloud size={13} className="shrink-0 text-muted-foreground" />
+          )}
+          <span className="min-w-0 max-w-[120px] truncate">
+            {isLocal ? (rootName ?? "本地") : "云端"}
+          </span>
+          <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
+        </button>
+      </PopoverTrigger>
 
-      {/* §八 degradation: the bound root isn't on this device (removed, or bound
-          on another machine — local projects don't follow you across devices). */}
-      {isLocal && rootMissing && !busy && (
-        <div className="mt-2 flex items-start gap-2 rounded-md bg-warning/10 px-2.5 py-2 text-[11px] text-warning-foreground">
-          <AlertTriangle size={14} className="mt-px shrink-0 text-warning" />
+      <PopoverContent align="start" className="w-64 p-0">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+          <span
+            className={`flex size-7 shrink-0 items-center justify-center rounded-md ${
+              isLocal
+                ? "bg-primary/10 text-primary"
+                : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {isLocal ? <HardDrive size={15} /> : <Cloud size={15} />}
+          </span>
           <div className="min-w-0 flex-1">
-            <p className="text-foreground/80">
-              这个项目的本地目录在本机找不到了。重新选择该文件夹即可继续，或切回云端工作区。
-            </p>
-            <div className="mt-1.5 flex items-center gap-1.5">
-              {fsApi && (
-                <button
-                  type="button"
-                  onClick={() => void openFolder()}
-                  className="rounded-md bg-accent px-2 py-1 font-medium text-foreground hover:bg-accent/70"
-                >
-                  重新连接…
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => void disconnect()}
-                className="rounded-md px-2 py-1 font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                切回云端
-              </button>
+            <div className="truncate text-xs font-medium text-foreground">
+              {isLocal ? "本地工作区" : "云端工作区"}
+            </div>
+            <div className="truncate text-xs text-muted-foreground">
+              {isLocal
+                ? rootMissing
+                  ? "目录在本机不可用"
+                  : `${rootName ?? "已绑定目录"}${
+                      binding.scope === "folder" ? " · 文件夹共享" : ""
+                    }`
+                : "文件存放在团队云端"}
             </div>
           </div>
         </div>
-      )}
 
-      {error && <p className="mt-1.5 text-[11px] text-destructive">{error}</p>}
-    </div>
+        <div className="p-1.5">
+          {isLocal ? (
+            rootMissing ? (
+              <>
+                {/* §八 degradation: the bound root isn't on this device (removed,
+                    or bound on another machine — local projects don't follow you
+                    across devices). */}
+                <div className="mb-1 flex items-start gap-2 rounded-md bg-warning/10 px-2.5 py-2 text-xs text-warning-foreground">
+                  <AlertTriangle
+                    size={14}
+                    className="mt-px shrink-0 text-warning"
+                  />
+                  <p className="text-foreground/80">
+                    这个项目的本地目录在本机找不到了。重新选择该文件夹即可继续，或切回云端工作区。
+                  </p>
+                </div>
+                {fsApi && (
+                  <ModeAction
+                    icon={<FolderOpen size={14} />}
+                    label="重新连接…"
+                    onClick={() => void openFolder()}
+                    disabled={busy}
+                  />
+                )}
+                <ModeAction
+                  icon={<Cloud size={14} />}
+                  label="切回云端"
+                  onClick={() => void disconnect()}
+                  disabled={busy}
+                />
+              </>
+            ) : (
+              <>
+                {backingUp ? (
+                  <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
+                    <Loader2 size={14} className="animate-spin" />
+                    备份中…
+                  </div>
+                ) : backupDone ? (
+                  <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-success">
+                    <Check size={14} />
+                    已备份
+                  </div>
+                ) : (
+                  <ModeAction
+                    icon={<UploadCloud size={14} />}
+                    label="备份到云"
+                    onClick={() => void backup()}
+                    disabled={busy}
+                  />
+                )}
+                {confirmDisconnect ? (
+                  <div className="px-1.5 pt-1">
+                    <p className="pb-1 text-xs text-muted-foreground">
+                      {binding.scope === "folder"
+                        ? "该文件夹下所有对话都会切回云端"
+                        : "切回云端工作区"}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => void disconnect()}
+                        className="flex-1 rounded-md px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10"
+                      >
+                        确认切回云端
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDisconnect(false)}
+                        className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <ModeAction
+                    icon={<Cloud size={14} />}
+                    label="切回云端"
+                    onClick={onDisconnectClick}
+                    disabled={busy || backingUp}
+                  />
+                )}
+              </>
+            )
+          ) : fsApi ? (
+            <ModeAction
+              icon={<FolderOpen size={14} />}
+              label="打开本地文件夹"
+              onClick={() => void openFolder()}
+              disabled={busy}
+            />
+          ) : (
+            <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
+              桌面端可绑定本地文件夹
+            </p>
+          )}
+
+          {busy && (
+            <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
+              <Loader2 size={14} className="animate-spin" />
+              处理中…
+            </div>
+          )}
+          {error && (
+            <p className="px-2.5 py-1.5 text-xs text-destructive">{error}</p>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** A full-width action row inside the mode popover. */
+function ModeAction({
+  icon,
+  label,
+  onClick,
+  disabled,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
+    >
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
+      {label}
+    </button>
   );
 }

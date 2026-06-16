@@ -55,7 +55,9 @@ htmlcov/
 .coverage.*
 # pytest cache + ad-hoc --basetemp scratch dirs (test artifacts)
 .pytest_*/
+.pytmp/
 .tmp_pytest/
+.pytest_out.txt
 coverage/
 
 # Build artifacts

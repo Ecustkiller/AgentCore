@@ -10,7 +10,6 @@ import {
   Settings,
   SlidersHorizontal,
   Users,
-  Workflow,
 } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
@@ -18,7 +17,6 @@ const BASE_SECTIONS = [
   { icon: Settings, label: "通用", path: "/more" },
   { icon: KeyRound, label: "模型配置", path: "/more/model" },
   { icon: SlidersHorizontal, label: "质量档", path: "/more/model-modes" },
-  { icon: Workflow, label: "团队运行机制", path: "/more/mechanism" },
   { icon: Gauge, label: "用量", path: "/more/usage" },
   { icon: Palette, label: "外观", path: "/more/appearance" },
   { icon: Keyboard, label: "快捷键", path: "/more/shortcuts" },
