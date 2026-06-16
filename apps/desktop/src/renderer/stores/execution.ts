@@ -1,5 +1,8 @@
 import type {
+  CheckpointDecision,
   CostBreakdown,
+  PlanReviewRequiredPayload,
+  PlanReviewResolvedPayload,
   RunCompletedPayload,
   RunFailedPayload,
   RunKind,
@@ -127,6 +130,15 @@ export interface AgentState {
   toolCalls: ToolCallState[];
 }
 
+/** A structured DAG checkpoint (plan_review, 结构化挂起 2a) that paused the scheduler
+ * *after* a run completed and *before* its dependents ran. `decision` is null while
+ * the user has not answered; on resolve it records 继续/停止 (`continue`/`stop`; an
+ * engine timeout folds in as `timeout`). Drives the node's pause badge. */
+export interface RunCheckpoint {
+  status: "pending" | "resolved";
+  decision: CheckpointDecision | null;
+}
+
 export interface RunNode {
   id: string;
   agentId: string;
@@ -171,6 +183,10 @@ export interface RunNode {
   /** Version number of a revision (original = v1, first revision = v2…); 0 for a
    * first-time run. From the wire `revision` flag. */
   revision: number;
+  /** A `checkpoint_after` pause that fired *after* this run (plan_review, 结构化挂起
+   * 2a); null for a run that never gated. Surfaced as a node pause badge so the
+   * graph shows where the scheduler stopped for the user. */
+  checkpoint: RunCheckpoint | null;
 }
 
 export interface Execution {
@@ -281,6 +297,19 @@ export type RunFrame =
       toolCallId: string;
       result: string;
       status: "success" | "error";
+    }
+  | {
+      t: number;
+      kind: "plan_review_required";
+      checkpointId: string;
+      // The just-completed step run ids this pause gates on (the badge targets).
+      runIds: string[];
+    }
+  | {
+      t: number;
+      kind: "plan_review_resolved";
+      checkpointId: string;
+      decision: CheckpointDecision;
     };
 
 /**
@@ -334,10 +363,16 @@ export function projectExecution(
     // Plan runs are never revisions; a revision is synthesized from its frame.
     revisionOf: null,
     revision: 0,
+    // No checkpoint until a plan_review frame folds in (结构化挂起 2a).
+    checkpoint: null,
   }));
 
   const agentById = (id: string) => agents.find((a) => a.id === id);
   const runById = (id: string) => runs.find((s) => s.id === id);
+
+  // plan_review_resolved carries only the checkpoint id, so remember which step
+  // run ids each pause gated on (from its _required frame) to apply the decision.
+  const checkpointSteps = new Map<string, string[]>();
 
   for (const f of frames) {
     switch (f.kind) {
@@ -385,6 +420,7 @@ export function projectExecution(
               round: 0,
               revisionOf: f.parentRunId,
               revision: f.revision,
+              checkpoint: null,
             };
             runs.push(run);
           }
@@ -429,6 +465,25 @@ export function projectExecution(
         if (agent) {
           agent.status = "completed";
           agent.currentRunId = null;
+        }
+        break;
+      }
+      case "plan_review_required": {
+        // 结构化挂起 2a: the scheduler paused after these step(s) completed; mark
+        // them pending so the node shows a「待放行」badge.
+        checkpointSteps.set(f.checkpointId, f.runIds);
+        for (const id of f.runIds) {
+          const run = runById(id);
+          if (run) run.checkpoint = { status: "pending", decision: null };
+        }
+        break;
+      }
+      case "plan_review_resolved": {
+        for (const id of checkpointSteps.get(f.checkpointId) ?? []) {
+          const run = runById(id);
+          if (run) {
+            run.checkpoint = { status: "resolved", decision: f.decision };
+          }
         }
         break;
       }
@@ -526,6 +581,12 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       return `调用工具 ${frame.toolName}`;
     case "tool_use_end":
       return `工具${frame.status === "success" ? "完成" : "失败"}`;
+    case "plan_review_required":
+      return "执行暂停 · 待你放行";
+    case "plan_review_resolved":
+      return frame.decision === "stop"
+        ? "已停止 · 未运行下游"
+        : "已放行 · 继续";
   }
 }
 
@@ -808,6 +869,24 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         toolCallId: p.tool_call_id,
         result: p.result,
         status: p.status,
+      };
+    }
+    case "plan_review_required": {
+      const p = event.payload as PlanReviewRequiredPayload;
+      return {
+        t,
+        kind: "plan_review_required",
+        checkpointId: p.checkpoint_id,
+        runIds: (p.steps ?? []).map((s) => s.run_id),
+      };
+    }
+    case "plan_review_resolved": {
+      const p = event.payload as PlanReviewResolvedPayload;
+      return {
+        t,
+        kind: "plan_review_resolved",
+        checkpointId: p.checkpoint_id,
+        decision: p.decision,
       };
     }
     default:

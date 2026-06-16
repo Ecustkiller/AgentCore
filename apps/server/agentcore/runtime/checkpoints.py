@@ -17,7 +17,7 @@ with Redis to scale to multiple workers (see ``config.py``).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -32,11 +32,16 @@ class CheckpointDecision(StrEnum):
 
 @dataclass
 class CheckpointResponse:
-    """The settled outcome of a checkpoint: a decision + an optional note.
+    """The settled outcome of a checkpoint: a decision + an optional note + picks.
 
     ``note`` carries the user's steer for ``ADJUST`` (and an optional closing
-    remark for ``STOP``); it is empty for ``CONTINUE`` / ``TIMEOUT``.
+    remark for ``STOP``); it is empty for ``CONTINUE`` / ``TIMEOUT``. ``selected``
+    holds the option(s) the user picked from the CEO's ``options`` menu — one for a
+    single-select ask, several when the ask is ``multiple`` — and is a first-class
+    part of the answer (no longer folded into ``note``), so ``CONTINUE`` carries the
+    pick too. Empty when the ask offered no options or the user chose none.
     """
 
     decision: CheckpointDecision
     note: str = ""
+    selected: list[str] = field(default_factory=list)

@@ -67,8 +67,9 @@ class AskUserTool:
                 "在你（CEO）遇到自己无法独自定夺、且选错代价高的关键岔路时，暂停并征询用户。"
                 "适用场景：方案 A/B 抉择、执行不可逆操作前确认、任务范围明显超出预期需用户拍板。"
                 "不要用于：你能自行决定的细节、可用合理默认值的小选择、简单任务——滥用会打断体验。"
-                "用户会以「继续 / 调整 / 停止」回应，其答复会作为本工具的结果回到你的对话循环；"
-                "「停止」会直接结束本回合，故仅在确有必要时调用。"
+                "用户会以「提交 / 停止」回应：提交可带上 ta 勾选的选项与可选补充说明（即采纳或"
+                "修正你的方向），其答复作为本工具的结果回到你的对话循环；「停止」会直接结束本回合，"
+                "故仅在确有必要时调用。"
             ),
             parameters={
                 "type": "object",
@@ -82,7 +83,18 @@ class AskUserTool:
                     "options": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "可选：供用户挑选的具体选项（最多 6 个）。",
+                        "description": (
+                            "可选：供用户挑选的具体选项（最多 6 个）。默认单选；需要"
+                            "用户能同时选多个时，把 multiple 设为 true。"
+                        ),
+                    },
+                    "multiple": {
+                        "type": "boolean",
+                        "description": (
+                            "可选：options 是否允许多选，默认 false。互斥的二选一/多选一"
+                            "保持单选；「可同时挑多个」（如选要包含的若干功能/文件）才设 "
+                            "true。仅在给了 options 时有意义。"
+                        ),
                     },
                     "context": {
                         "type": "string",
@@ -108,6 +120,7 @@ class AskUserTool:
             )
         options = [str(o) for o in (arguments.get("options") or [])][:_MAX_OPTIONS]
         ctx_text = str(arguments.get("context") or "")
+        multiple = bool(arguments.get("multiple") or False)
 
         checkpoint_id = new_id()
         fut = self.registry.create(
@@ -118,6 +131,7 @@ class AskUserTool:
                 "question": question,
                 "options": options,
                 "context": ctx_text,
+                "multiple": multiple,
             },
         )
         self.sink.emit(
@@ -127,6 +141,7 @@ class AskUserTool:
                 question=question,
                 options=options,
                 context=ctx_text,
+                multiple=multiple,
             )
         )
         try:
@@ -137,11 +152,16 @@ class AskUserTool:
         finally:
             self.registry.discard(checkpoint_id)
 
+        # Keep only picks that were actually on the menu — a resolve can't inject
+        # arbitrary strings into the CEO's context, and a stale option is dropped.
+        response.selected = [s for s in response.selected if s in options]
+
         self.sink.emit(
             checkpoint_resolved(
                 checkpoint_id=checkpoint_id,
                 decision=response.decision.value,
                 note=response.note,
+                selected=response.selected,
             )
         )
         return self._to_result(response)
@@ -156,19 +176,33 @@ class AskUserTool:
         control back to the CEO to wrap up on its own.
         """
         decision = response.decision
+        picks = "、".join(response.selected)
         if decision is CheckpointDecision.CONTINUE:
-            return ToolResult(
-                tool_call_id="",
-                success=True,
-                output="用户确认：按你提出的方向继续。",
-            )
+            # 提交：the merged 继续+调整 answer — picks and/or a free-form note both
+            # ride here, so continue now honors the note too (it used to ignore it).
+            note = response.note.strip()
+            if picks and note:
+                output = f"用户选择：{picks}；并补充：{note}\n请据此继续。"
+            elif picks:
+                output = f"用户选择：{picks}。请按此继续。"
+            elif note:
+                output = f"用户补充：{note}\n请据此继续。"
+            else:
+                output = "用户确认：按你提出的方向继续。"
+            return ToolResult(tool_call_id="", success=True, output=output)
+        # ADJUST is no longer raised by the desktop (the card merged it into 提交 /
+        # CONTINUE) but stays mapped for any other client + old journaled turns.
         if decision is CheckpointDecision.ADJUST:
-            note = response.note.strip() or "（用户未填写具体调整说明，请据上下文稳妥推进）"
-            return ToolResult(
-                tool_call_id="",
-                success=True,
-                output=f"用户调整指令：{note}\n请据此调整后再继续。",
-            )
+            note = response.note.strip()
+            if picks and note:
+                output = f"用户选择：{picks}；并调整：{note}\n请据此调整后再继续。"
+            elif picks:
+                output = f"用户选择：{picks}。\n请据此继续。"
+            elif note:
+                output = f"用户调整指令：{note}\n请据此调整后再继续。"
+            else:
+                output = "用户未填写具体调整说明，请据上下文稳妥推进。"
+            return ToolResult(tool_call_id="", success=True, output=output)
         if decision is CheckpointDecision.STOP:
             closing = response.note.strip() or "好的，已按你的要求停止本回合。"
             self.sink.emit(content_delta(closing))

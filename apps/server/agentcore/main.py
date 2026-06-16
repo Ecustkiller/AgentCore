@@ -21,6 +21,7 @@ from agentcore.api.routes import (
     system,
     tools,
     usage,
+    workspaces,
 )
 from agentcore.config import settings
 from agentcore.core.errors import AgentCoreError
@@ -177,3 +178,4 @@ app.include_router(realtime.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 app.include_router(tools.router, prefix="/v1")
 app.include_router(usage.router, prefix="/v1")
+app.include_router(workspaces.router, prefix="/v1")

@@ -18,25 +18,35 @@ export type CheckpointUserDecision = Exclude<CheckpointDecision, "timeout">;
  * the user can retry.
  *
  * @param note the user's steer (for `adjust`) or an optional closing remark (for
- *   `stop`); ignored by the backend for `continue`.
+ *   `stop`); the backend ignores it for `continue`.
+ * @param selected the option(s) the user picked from the CEO's menu; rides
+ *   `continue` and `adjust` (the backend drops any pick not actually offered).
  */
 export async function decideCheckpoint(
   conversationId: string,
   checkpointId: string,
   decision: CheckpointUserDecision,
   note: string,
+  selected: string[],
 ): Promise<void> {
   try {
     await resolveInteraction(conversationId, checkpointId, {
       kind: "ask_user",
       decision,
       note,
+      selected,
     });
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       useConversationStore
         .getState()
-        .settleCheckpoint(checkpointId, decision, note, conversationId);
+        .settleCheckpoint(
+          checkpointId,
+          decision,
+          note,
+          selected,
+          conversationId,
+        );
       return;
     }
     throw err;

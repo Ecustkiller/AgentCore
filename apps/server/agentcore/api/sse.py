@@ -11,6 +11,13 @@ from starlette.responses import StreamingResponse
 
 from agentcore.runtime.events import EventSink, SSEEvent
 
+# Idle keep-alive cadence. When the producer is mid-thought (no events queued),
+# the generator emits a comment frame this often so the connection keeps flowing
+# bytes; the client's stall watchdog uses those bytes to tell "still working"
+# from "dead stream". Must stay well under the client idle timeout (see
+# streamConversation.ts) so a slow-but-alive turn is never mistaken for a drop.
+_HEARTBEAT_INTERVAL_S = 15.0
+
 
 def _format_sse(event: SSEEvent) -> str:
     data = json.dumps(
@@ -24,7 +31,18 @@ async def _event_generator(
     sink: EventSink, producer: asyncio.Task | None
 ) -> AsyncIterator[str]:
     try:
-        async for event in sink:
+        while True:
+            try:
+                event = await asyncio.wait_for(sink.get(), _HEARTBEAT_INTERVAL_S)
+            except TimeoutError:
+                # No event for a while — the turn is alive but thinking. Emit an
+                # SSE comment line (begins with ':'): the client ignores it at the
+                # parse layer but counts the bytes as liveness, so its watchdog
+                # holds. Cancelling the queue.get() here is loss-safe on 3.12.
+                yield ": ping\n\n"
+                continue
+            if event is None:
+                break
             yield _format_sse(event)
     except (asyncio.CancelledError, GeneratorExit):
         # The client disconnected before the stream finished (e.g. the user hit

@@ -8,6 +8,8 @@ export type SSEEventType =
   | "approval_resolved"
   | "checkpoint_required"
   | "checkpoint_resolved"
+  | "plan_review_required"
+  | "plan_review_resolved"
   | "run_plan"
   | "run_started"
   | "run_output_delta"
@@ -90,20 +92,62 @@ export type CheckpointDecision = "continue" | "adjust" | "stop" | "timeout";
 
 /** The CEO paused the turn to ask the user a decision (ask_user checkpoint).
  * `checkpoint_id` is echoed back to the resolve endpoint; `options` are optional
- * concrete choices; `context` is optional supporting background. Journaled (unlike
- * approvals), so it replays inline on reload. */
+ * concrete choices; `context` is optional supporting background; `multiple` flags
+ * the options as multi-select (checkboxes) rather than single-select (radios).
+ * Journaled (unlike approvals), so it replays inline on reload. */
 export interface CheckpointRequiredPayload {
   checkpoint_id: string;
   conversation_id: string;
   question: string;
   options: string[];
   context: string;
+  multiple?: boolean;
 }
 
 /** A pending checkpoint was settled (continue / adjust / stop / timeout). `note`
- * carries the user's steer for `adjust` (or a closing remark for `stop`).
- * Journaled alongside `checkpoint_required` so the outcome replays on reload. */
+ * carries the user's steer for `adjust` (or a closing remark for `stop`);
+ * `selected` the option(s) the user picked. Journaled alongside
+ * `checkpoint_required` so the outcome replays on reload. */
 export interface CheckpointResolvedPayload {
+  checkpoint_id: string;
+  decision: CheckpointDecision;
+  note: string;
+  selected?: string[];
+}
+
+/** One just-completed checkpoint step under review (plan_review, 结构化挂起 2a):
+ * the worker's `role` + a capped excerpt of its `summary`, so the user recognises
+ * what just finished before deciding whether to release the downstream steps. */
+export interface PlanReviewStep {
+  run_id: string;
+  role: string;
+  summary: string;
+}
+
+/** A downstream node gated behind a plan_review pause (about to run once the user
+ * proceeds): just `run_id` + `role` for a compact「待运行」preview. */
+export interface PlanReviewPending {
+  run_id: string;
+  role: string;
+}
+
+/** The WaveScheduler paused after a `checkpoint_after` step completed and before
+ * its dependents run (结构化挂起 2a). `checkpoint_id` is echoed back to the resolve
+ * endpoint; `steps` are the just-completed nodes under review, `pending` peeks at
+ * the downstream nodes being gated. Journaled (like ask_user checkpoints) so the
+ * pause replays inline on reload. */
+export interface PlanReviewRequiredPayload {
+  checkpoint_id: string;
+  conversation_id: string;
+  steps: PlanReviewStep[];
+  pending: PlanReviewPending[];
+}
+
+/** A pending plan_review was settled (continue / stop / timeout). `note` carries
+ * an optional remark. Journaled alongside `plan_review_required` so the outcome
+ * replays on reload. Reuses `CheckpointDecision` — the backend shares the enum;
+ * 2a never sends `adjust`. */
+export interface PlanReviewResolvedPayload {
   checkpoint_id: string;
   decision: CheckpointDecision;
   note: string;
@@ -354,6 +398,8 @@ export type SSEPayloadMap = {
   approval_resolved: ApprovalResolvedPayload;
   checkpoint_required: CheckpointRequiredPayload;
   checkpoint_resolved: CheckpointResolvedPayload;
+  plan_review_required: PlanReviewRequiredPayload;
+  plan_review_resolved: PlanReviewResolvedPayload;
   run_plan: RunPlanPayload;
   run_started: RunStartedPayload;
   run_output_delta: RunOutputDeltaPayload;

@@ -33,6 +33,7 @@ import { useNavigate } from "react-router-dom";
 import { CheckpointCard } from "./CheckpointCard";
 import { InlineTeamGraph } from "./InlineTeamGraph";
 import { Markdown } from "./Markdown";
+import { PlanReviewCard } from "./PlanReviewCard";
 import { type CitationFlash, SourceCards } from "./SourceCards";
 
 interface Props {
@@ -362,6 +363,7 @@ function AssistantMessage({ message }: Props) {
     !!message.reasoning && message.reasoning.trim().length > 0;
   const citations = message.citations ?? [];
   const checkpoints = message.checkpoints ?? [];
+  const planReviews = message.planReviews ?? [];
   // 回合成本 caption (§7.3A) — single-agent turns only. A multi-agent turn stamps
   // `executionId`, so its cost shows on the team card instead (avoids double
   // display). Live cost wins; a reloaded turn falls back to the ledger snapshot.
@@ -421,12 +423,33 @@ function AssistantMessage({ message }: Props) {
         citationCount={citations.length}
         onCitationClick={onCitationClick}
       />
-      {message.isStreaming && (
-        <span
-          className="mt-1 inline-block h-4 w-1.5 rounded-full bg-foreground/60"
-          style={{ animation: "blink-cursor 0.8s step-end infinite" }}
-        />
-      )}
+      {message.isStreaming &&
+        (message.content.length === 0 && !hasReasoning ? (
+          // Nothing streamed yet (the gap between send and the first token):
+          // show an explicit "正在思考…" so the turn never looks like it stalled.
+          <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="inline-flex gap-1" aria-hidden>
+              <span
+                className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
+                style={{ animationDelay: "0ms" }}
+              />
+              <span
+                className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
+                style={{ animationDelay: "150ms" }}
+              />
+              <span
+                className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
+                style={{ animationDelay: "300ms" }}
+              />
+            </span>
+            正在思考…
+          </span>
+        ) : (
+          <span
+            className="mt-1 inline-block h-4 w-1.5 rounded-full bg-foreground/60"
+            style={{ animation: "blink-cursor 0.8s step-end infinite" }}
+          />
+        ))}
       {message.error && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
@@ -462,6 +485,16 @@ function AssistantMessage({ message }: Props) {
         <CheckpointCard
           key={cp.id}
           checkpoint={cp}
+          conversationId={conversationId}
+          interactive={message.isStreaming}
+        />
+      ))}
+      {/* Structured DAG checkpoints the WaveScheduler paused on this turn
+          (plan_review, 结构化挂起 2a) — same live/replay rule as ask_user above. */}
+      {planReviews.map((pr) => (
+        <PlanReviewCard
+          key={pr.id}
+          review={pr}
           conversationId={conversationId}
           interactive={message.isStreaming}
         />

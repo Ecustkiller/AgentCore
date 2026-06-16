@@ -268,6 +268,31 @@ class WorkspaceBindingResponse(BaseModel):
     root_id: str | None = None
 
 
+class WorkspaceSummary(BaseModel):
+    """One addressable workspace in the file hub (文件中枢统一 Step 1).
+
+    A folder project (``folder:<id>``) or an ungrouped conversation space
+    (``conv:<id>``). ``location`` tells the hub how to reach its files: a cloud
+    workspace via the ``/v1/workspaces/{ws_id}/files`` REST family; a local one
+    over desktop IPC against ``root_id`` (its server-side dir is not the truth).
+    """
+
+    ws_id: str
+    name: str
+    location: Literal["cloud", "local"]
+    # The bound desktop root id when local; None when cloud.
+    root_id: str | None = None
+    # Whether the space holds files. Folders always list (a project is a project);
+    # ungrouped spaces list only when non-empty (F1) — so this is the filter that
+    # let them in. Always True for local (the server can't see local files).
+    has_files: bool
+
+
+class WorkspaceListResponse(BaseModel):
+    data: list[WorkspaceSummary]
+    total: int
+
+
 # --- Messages ---
 
 
@@ -344,12 +369,17 @@ class ResolveCheckpointInteraction(BaseModel):
     ``decision`` is ``continue`` (proceed with the CEO's direction), ``adjust``
     (steer the CEO with ``note``, then continue), or ``stop`` (end the turn). The
     engine-only ``timeout`` value is never sent by a client. ``note`` carries the
-    user's steer for ``adjust`` (and an optional closing remark for ``stop``).
+    user's steer for ``adjust`` (and an optional closing remark for ``stop``);
+    ``selected`` carries the option(s) the user picked from the CEO's menu — one
+    for a single-select ask, several for a ``multiple`` one — and rides ``continue``
+    too (the picks are the answer, not just an ``adjust`` steer). The server drops
+    any pick that was not in the offered options.
     """
 
     kind: Literal["ask_user"] = "ask_user"
     decision: CheckpointDecision
     note: str = Field("", max_length=4000)
+    selected: list[str] = Field(default_factory=list, max_length=6)
 
 
 class WorkspaceOpError(BaseModel):
@@ -381,9 +411,27 @@ class ResolveClientToolInteraction(BaseModel):
     error: WorkspaceOpError | None = None
 
 
+class ResolvePlanReviewInteraction(BaseModel):
+    """Settle a paused structured DAG checkpoint (``plan_review`` interaction, 结构化挂起 2a).
+
+    Raised when a delegate step marked ``checkpoint_after`` completed and the
+    WaveScheduler paused before its dependents. ``decision`` is ``continue`` (run
+    the downstream steps) or ``stop`` (end the run here); ``adjust`` is accepted
+    over the wire but treated as ``continue`` in 2a (steer injection is deferred).
+    Reuses :class:`CheckpointResponse` (same shape as ask_user) on the engine side.
+    """
+
+    kind: Literal["plan_review"] = "plan_review"
+    decision: CheckpointDecision
+    note: str = Field("", max_length=4000)
+
+
 # Discriminated union body for the unified resolve endpoint.
 ResolveInteractionRequest = (
-    ResolveApprovalInteraction | ResolveCheckpointInteraction | ResolveClientToolInteraction
+    ResolveApprovalInteraction
+    | ResolveCheckpointInteraction
+    | ResolveClientToolInteraction
+    | ResolvePlanReviewInteraction
 )
 
 

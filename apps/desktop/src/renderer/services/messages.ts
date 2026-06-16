@@ -2,6 +2,7 @@ import { api } from "@/services/api";
 import {
   type Message,
   checkpointsFromEvents,
+  planReviewsFromEvents,
   useConversationStore,
 } from "@/stores/conversation";
 import type { components } from "@/types/api.generated";
@@ -72,6 +73,9 @@ export function toMessage(m: BackendMessage): Message {
   // them independently of `executionId` — a turn can have a checkpoint without a
   // team graph.
   const checkpoints = checkpointsFromEvents(events);
+  // plan_review events are journaled like ask_user checkpoints, so a reloaded turn
+  // replays its structured DAG pauses inline too (结构化挂起 2a).
+  const planReviews = planReviewsFromEvents(events);
   return {
     id: m.id,
     role: m.role === "assistant" ? "assistant" : "user",
@@ -85,6 +89,7 @@ export function toMessage(m: BackendMessage): Message {
       ? { events, finishReason: m.runs?.finish_reason ?? "stop" }
       : undefined,
     checkpoints: checkpoints.length ? checkpoints : undefined,
+    planReviews: planReviews.length ? planReviews : undefined,
     isStreaming: false,
     attachments: m.attachments?.length
       ? m.attachments.map((a) => ({

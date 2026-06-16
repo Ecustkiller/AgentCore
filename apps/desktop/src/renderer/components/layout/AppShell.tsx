@@ -1,7 +1,6 @@
 import { useGroupedConversations } from "@/hooks/useConversations";
+import { startNewConversation } from "@/lib/newConversation";
 import { startRealtime, stopRealtime } from "@/services/realtime";
-import { useConversationStore } from "@/stores/conversation";
-import { useFoldersStore } from "@/stores/folders";
 import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
@@ -52,11 +51,7 @@ export function AppShell() {
         useUIStore.getState().toggleSearch();
       } else if (key === "n") {
         e.preventDefault();
-        // Mirror Sidebar's handleNewConversation: a draft chat (not persisted
-        // until its first message) with no pending folder target.
-        useFoldersStore.getState().setPendingNewChatFolder(null);
-        useConversationStore.getState().switchConversation(null);
-        navigateRef.current("/");
+        startNewConversation(navigateRef.current);
       } else if (e.key === "\\" || key === "b") {
         e.preventDefault();
         useSidebarStore.getState().toggleCollapsed();

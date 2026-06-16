@@ -10,6 +10,7 @@ import {
 } from "@/lib/elk-layout";
 import { MODEL_TIER_META, type RunStatus } from "@/stores/execution";
 import type { GraphEdge, GraphLayout } from "@/stores/graph";
+import { useUIStore } from "@/stores/ui";
 import {
   Background,
   type Edge,
@@ -19,22 +20,23 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import {
+  ArrowLeft,
   BookOpen,
   Bot,
   CheckCircle2,
   ChevronRight,
   CornerDownRight,
   History,
-  Layers,
   LayoutGrid,
   Loader2,
+  Minus,
   Network,
-  Radio,
   Sparkles,
+  Square,
   UserRound,
   Workflow,
+  X,
   XCircle,
-  Zap,
 } from "lucide-react";
 import {
   Fragment,
@@ -45,16 +47,21 @@ import {
   useRef,
   useState,
 } from "react";
+import { useNavigate } from "react-router-dom";
 
 /**
- * 团队运行机制页（`/more/mechanism`）。
+ * 团队运行机制页（`/toolbox/mechanism`，工具箱「了解平台」组）。
  *
- * 这页是「AI 团队怎么跑」的**可视化真相源**：与 `docs/03-AI核心` 的文字描述互补——
- * docs 讲为什么 / 细节，这页用图讲清「看得见的契约 + 代码指针」，让人和 AI 一眼看懂
- * 整个运行机制。内容分六层：① 运行时全景（请求管线）② 协作回合主线（图怎么活起来）
- * ③ 图例（每个符号的含义）④ SSE 事件族（驱动图的事件）⑤ 前端执行态分片 ⑥ 机制场景
- * （**真实** `AgentNode`/`EndpointNode`/`StepEdge` + **真实** ELK 布局 + 内嵌 fit-to-width，
- * 所见即聊天内嵌协作图）。
+ * 真·全屏页（`fixed inset-0` 覆盖整窗含应用 TitleBar，顶栏自带窗口拖拽区 + 自绘最小化 /
+ * 最大化 / 关闭控件，返回 / Esc 退出），面向用户的协作**透明页**（截图口碑传播点）：
+ * ① 运行时全景 ② 协作回合主线 ③ 图例 ④ 机制场景——后者是 **真实**
+ * `AgentNode`/`EndpointNode`/`StepEdge` + **真实** ELK 布局 + 内嵌 fit-to-width，所见即聊天
+ * 内嵌协作图。
+ *
+ * 开发 / AI 价值靠源码自身：各数据块（PHASES / TURN_FLOW / SCENARIOS）旁以注释保留实现入口，
+ * SCENARIOS 用真实节点 / 边 / 布局编码机制结构。SSE 事件族见
+ * `docs/03-AI核心/执行引擎架构设计.md §十二` + `runtime/events.py`·`types/events.ts`；前端执行
+ * 态见 `docs/04-前端 §9.x`。
  */
 
 // `userInput`（非 `input`）：避开 ReactFlow 保留 type 名，否则默认样式表会给节点画
@@ -69,15 +76,6 @@ const edgeTypes = { step: StepEdge };
 // ────────────────────────────────────────────────────────────────────────────
 // 通用呈现件
 // ────────────────────────────────────────────────────────────────────────────
-
-/** 代码指针：等宽小药丸，喂 AI 直达入口（这页的核心价值之一）。 */
-function CodeRef({ children }: { children: ReactNode }) {
-  return (
-    <code className="rounded-lg bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
-      {children}
-    </code>
-  );
-}
 
 function Section({
   icon,
@@ -112,21 +110,20 @@ function Section({
 // ① 运行时全景（请求管线）
 // ────────────────────────────────────────────────────────────────────────────
 
-const PHASES: { title: string; desc: string; code: string }[] = [
+// 实现入口（喂 AI，不渲染）：Prepare=runtime/pipeline.py · Execute=runtime/engine.py·runs/ ·
+// Finalize=conversation/service.py
+const PHASES: { title: string; desc: string }[] = [
   {
     title: "Prepare",
     desc: "装配 CEO 工具集（只读/检索 + delegate）、注入会话历史；历史只回放文本，工具 I/O 不进 LLM 上下文。",
-    code: "runtime/pipeline.py",
   },
   {
     title: "Execute（ReAct 循环）",
     desc: "CEO 思考 →（按需）delegate 组团 → WaveScheduler 跑 DAG → worker 执行 → CEO 收尾；收敛治理防机械循环。",
-    code: "runtime/engine.py · runs/",
   },
   {
     title: "Finalize",
     desc: "消息落库、用量计费、标题生成；断连也「能存多少存多少」，不全有或全无。",
-    code: "conversation/service.py",
   },
 ];
 
@@ -140,9 +137,6 @@ function PhaseStrip() {
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {p.desc}
             </p>
-            <div className="mt-2">
-              <CodeRef>{p.code}</CodeRef>
-            </div>
           </div>
           {i < PHASES.length - 1 && (
             <ChevronRight
@@ -160,56 +154,49 @@ function PhaseStrip() {
 // ② 协作回合主线（图怎么活起来）
 // ────────────────────────────────────────────────────────────────────────────
 
+// 实现入口（喂 AI，不渲染）：步骤 → SSE 事件 → 代码
+//  1 用户输入       turn_saved                              GraphView · INPUT_ID
+//  2 CEO 判断组团    delegate(tasks, depends_on)             tools/builtin/delegate.py
+//  3 run_plan 预声明 run_plan                                runs/builder.py
+//  4 逐波调度       run_started · run_progress              runs/wave.py
+//  5 worker 执行    run_output_delta→run_completed/failed   runs/executor.py · engine.py
+//  6 CEO 收尾       content_delta                           tools/builtin/delegate.py
+//  7 答案入气泡     message_end                             GraphView · captainRun
+// SSE 事件语义详见 docs/03-AI核心/执行引擎架构设计.md §十二。
 const TURN_FLOW: {
   title: string;
   desc: string;
-  event: string;
-  code: string;
   note?: string;
 }[] = [
   {
     title: "用户输入",
     desc: "你的提问落库；图上是「你的任务」端点（无 run 的合成节点）。",
-    event: "turn_saved",
-    code: "GraphView · INPUT_ID",
     note: "回传权威 user_message_id，前端把乐观气泡换成真实行。",
   },
   {
     title: "CEO 判断是否组团",
     desc: "chat 档直接流式作答（零编排开销）；只有需要产出 / 变更或团队时才调 delegate。",
-    event: "delegate(tasks, depends_on)",
-    code: "tools/builtin/delegate.py",
     note: "并行/串行由 depends_on 数据声明，不靠模型主动发并行调用。",
   },
   {
     title: "run_plan 预声明",
     desc: "一次性把本批 run 节点点亮为 pending，图在开跑前即成形（带 parent_run_id 成组）。",
-    event: "run_plan",
-    code: "runs/builder.py",
   },
   {
     title: "WaveScheduler 逐波调度",
     desc: "无依赖的节点同波并行起跑，有依赖的等上游齐了再解锁；asyncio 协程并发。",
-    event: "run_started · run_progress",
-    code: "runs/wave.py",
   },
   {
     title: "worker 执行",
     desc: "每个 worker 跑自己的 ReAct 循环（工具调用 + 收敛治理），答案流式推送、入边走粒子流。",
-    event: "run_output_delta → run_completed / run_failed",
-    code: "runs/executor.py · engine.py",
   },
   {
     title: "CEO 收尾汇报",
     desc: "非终态返回 CEO，用自己的声音写一段简短概览；单 worker 且 finalize 时其产出直接作答。",
-    event: "content_delta",
-    code: "tools/builtin/delegate.py",
   },
   {
     title: "答案入气泡",
     desc: "CEO 汇聚点节点 = 这段最终答案，点它跳到气泡；回合收口。",
-    event: "message_end",
-    code: "GraphView · captainRun",
     note: "含 finish_reason / usage，前端递归收口悬挂节点兜底。",
   },
 ];
@@ -232,13 +219,6 @@ function TurnFlow() {
             <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
               {s.desc}
             </p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                <Zap size={10} />
-                {s.event}
-              </span>
-              <CodeRef>{s.code}</CodeRef>
-            </div>
             {s.note && (
               <p className="mt-1 text-xs text-muted-foreground/70">{s.note}</p>
             )}
@@ -309,12 +289,10 @@ function LegendRow({
   sample,
   name,
   desc,
-  code,
 }: {
   sample: ReactNode;
   name: string;
   desc: string;
-  code?: string;
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -325,11 +303,6 @@ function LegendRow({
         <p className="text-sm text-foreground">{name}</p>
         <p className="text-xs leading-snug text-muted-foreground">{desc}</p>
       </div>
-      {code && (
-        <div className="shrink-0">
-          <CodeRef>{code}</CodeRef>
-        </div>
-      )}
     </div>
   );
 }
@@ -371,7 +344,6 @@ function Legend() {
           }
           name="你的任务"
           desc="本回合 prompt，无 run 的合成端点；点它跳回完整提问。"
-          code="EndpointNode"
         />
         <LegendRow
           sample={
@@ -381,7 +353,6 @@ function Legend() {
           }
           name="worker 节点"
           desc="一个 worker run：角色 → 在干什么 → 用时 / 工具。"
-          code="AgentNode"
         />
         <LegendRow
           sample={
@@ -391,7 +362,6 @@ function Legend() {
           }
           name="CEO 汇总"
           desc="captain 根 run（汇聚点），状态全队派生，答案入气泡。"
-          code="EndpointNode"
         />
       </LegendGroup>
 
@@ -423,25 +393,21 @@ function Legend() {
           sample={<EdgeSample variant="dep" />}
           name="依赖（实线）"
           desc="depends_on——并行 / 串行的唯一开关。"
-          code="runs/builder.py"
         />
         <LegendRow
           sample={<EdgeSample variant="delegate" />}
           name="委派（虚线）"
           desc="can_delegate：队长 worker → 子 worker（一层）。"
-          code="delegate.py"
         />
         <LegendRow
           sample={<EdgeSample variant="revision" />}
           name="修订（点线）"
           desc="原 run → 「修订 vN」续写，是版本不是新队员。"
-          code="revise.py"
         />
         <LegendRow
           sample={<EdgeSample variant="running" />}
           name="运行中（粒子流）"
           desc="run_output 流式：粒子由上游流向运行中节点。"
-          code="StepEdge"
         />
       </LegendGroup>
 
@@ -455,7 +421,6 @@ function Legend() {
           }
           name="模型档"
           desc="强力档 / 快速档（model_preference 的 fast·strong 抽象）。"
-          code="delegate.py"
         />
         <LegendRow
           sample={
@@ -502,112 +467,7 @@ function Legend() {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// ④ SSE 事件族（驱动图的事件）
-// ────────────────────────────────────────────────────────────────────────────
-
-const EVENTS: { event: string; note: string }[] = [
-  {
-    event: "run_plan",
-    note: "预声明一批 run 节点 → 图一次性点亮（pending），带 parent_run_id 成组。",
-  },
-  {
-    event: "run_started",
-    note: "某个 run 开始 → 节点转 running（脉冲 + 色环转 primary）。",
-  },
-  {
-    event: "run_output_delta",
-    note: "run 自身答案增量 → 节点中行流式预览 + 光标，入边走粒子流。",
-  },
-  {
-    event: "run_reasoning_delta",
-    note: "worker 思考链增量（run 级）→ 喂右侧 run 详情的思考全文。",
-  },
-  {
-    event: "run_completed / run_failed",
-    note: "run 终态 → 节点转 success / destructive 并闪烁一次。",
-  },
-  {
-    event: "run_progress",
-    note: "一批 run 的聚合进度 → 驱动状态条 M/M。",
-  },
-  {
-    event: "content_delta / reasoning_delta",
-    note: "CEO 气泡级正文 / 思考增量（非 run 级）→ 汇聚点答案与气泡。",
-  },
-  {
-    event: "approval_required / checkpoint_required",
-    note: "工具审批闸门 / CEO ask_user 检查点 → 内联卡片挂起待裁决。",
-  },
-];
-
-function EventTable() {
-  return (
-    <div className="overflow-hidden rounded-xl border border-border">
-      {EVENTS.map((e) => (
-        <div
-          key={e.event}
-          className="grid grid-cols-[minmax(140px,200px)_1fr] items-start gap-3 border-b border-border px-3 py-2.5 last:border-b-0"
-        >
-          <div className="pt-0.5">
-            <CodeRef>{e.event}</CodeRef>
-          </div>
-          <p className="text-sm leading-snug text-muted-foreground">{e.note}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// ⑤ 前端执行态分片
-// ────────────────────────────────────────────────────────────────────────────
-
-const FRONTEND: { name: string; desc: string; code: string }[] = [
-  {
-    name: "按 messageId 分片",
-    desc: "每条多 Agent 回答各持自己的协作图执行态；切到别的对话，回合仍在后台跑完。",
-    code: "stores/execution.ts",
-  },
-  {
-    name: "live 与 replay 同源",
-    desc: "实时回合与历史重建走同一 fold，内嵌图与全屏图共享同一份数据。",
-    code: "GraphView.tsx",
-  },
-  {
-    name: "侧面板 run tab",
-    desc: "点节点把该 run 钉为 tab（可并存对比，上限 6）；节点高亮派生自激活 tab。",
-    code: "stores/sidePanel.ts",
-  },
-  {
-    name: "fit-to-width 定高",
-    desc: "内嵌画布按列宽只缩不放，盒高随 ELK 包围盒投影 clamp（180–520px）。",
-    code: "lib/elk-layout.ts",
-  },
-];
-
-function FrontendNotes() {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      {FRONTEND.map((f) => (
-        <div
-          key={f.name}
-          className="rounded-xl border border-border bg-card p-4"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-sm font-medium text-foreground">{f.name}</p>
-            <CodeRef>{f.code}</CodeRef>
-          </div>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            {f.desc}
-          </p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// ⑥ 机制场景（真实节点 + 真实 ELK 布局）
+// ④ 机制场景（真实节点 + 真实 ELK 布局）
 // ────────────────────────────────────────────────────────────────────────────
 
 interface PreviewNode {
@@ -619,8 +479,6 @@ interface PreviewNode {
 interface Scenario {
   title: string;
   desc: string;
-  /** 主代码指针：这个机制由谁实现。 */
-  code?: string;
   /** ELK 布局；缺省走左右流（与产品默认一致）。串行链用 "tree" 自上而下读。 */
   layout?: GraphLayout;
   nodes: PreviewNode[];
@@ -673,7 +531,7 @@ const SCENARIOS: Scenario[] = [
   {
     title: "并行扇出（fan-out）",
     desc: "三个 worker 的 depends_on 均为空 → WaveScheduler 判为同一波、asyncio 并发起跑；全部完成后 CEO 汇聚点收尾。并行度是数据（depends_on）不是模式。",
-    code: "runs/wave.py",
+    // 实现：runs/wave.py
     nodes: [
       input("把这个需求拆成三块并行做"),
       agent("w1", "文件操作员", "completed", {
@@ -713,7 +571,7 @@ const SCENARIOS: Scenario[] = [
     title: "串行流水线（depends_on 链）",
     layout: "tree",
     desc: "调研 → 分析 → 撰写：每个节点 depends_on 上一个，调度器逐个解锁；上游 RunState.content 按 result_handling（默认全文）注入下游。树形布局自上而下读更顺。",
-    code: "runs/executor.py",
+    // 实现：runs/executor.py
     nodes: [
       input("调研近 7 日成本趋势并产出一段摘要"),
       agent("s1", "调研员", "completed", {
@@ -745,7 +603,7 @@ const SCENARIOS: Scenario[] = [
   {
     title: "执行中（流式输出 · 待定 · 深度思考）",
     desc: "运行中节点带脉冲 + run_output 流式预览 + 光标，入边走 primary 粒子流；未解锁节点灰显 pending；reasoning=max 的 worker 带「深度」徽章。",
-    code: "runtime/events.py",
+    // 实现：runtime/events.py
     nodes: [
       input("分析近 7 日成本趋势并产出一段摘要"),
       agent("r1", "调研员", "running", {
@@ -780,7 +638,7 @@ const SCENARIOS: Scenario[] = [
   {
     title: "辩论 / 审查（正方 · 反方）",
     desc: "带 stance 标记的普通 AGENT DAG（非独立模式）。ELK considerModelOrder 把正 / 反分带对置，再汇聚到 CEO 裁决；立场徽章用 info 令牌、与状态色解耦。",
-    code: "lib/elk-layout.ts",
+    // 实现：lib/elk-layout.ts
     nodes: [
       input("评估是否采用激进重构方案"),
       agent("pro", "架构师", "completed", {
@@ -811,7 +669,7 @@ const SCENARIOS: Scenario[] = [
   {
     title: "嵌套小队（can_delegate，一层）+ 失败",
     desc: "项目经理被标 can_delegate → 获得绑定自身的 delegate，再带一支小队（虚线委派边 + 子任务徽章）。子 worker 失败按 on_failure 处理，红环 + 红叉，不拖垮整 DAG。",
-    code: "runs/executor.py",
+    // 实现：runs/executor.py
     nodes: [
       input("实现一个新设置页，前端 + 测试分工完成"),
       agent("pm", "项目经理", "completed", {
@@ -848,7 +706,7 @@ const SCENARIOS: Scenario[] = [
   {
     title: "多层嵌套（depth ≤ 2）+ 子树整体下沉",
     desc: "CEO(0) → worker(1) → sub-worker(2)：深度 2 永不再获 delegate（硬上限封死递归）。整条委派子树作为整体下沉到主干线之下，CEO 汇聚点恒在末层、不被横穿。",
-    code: "runs/constants.py",
+    // 实现：runs/constants.py
     nodes: [
       input("拆解并实现协作图，前端再分一层小队"),
       agent("mpm", "项目经理", "completed", {
@@ -891,7 +749,7 @@ const SCENARIOS: Scenario[] = [
   {
     title: "多轮热修（修订 vN 版本链）",
     desc: "后续消息要求返工时，CEO 经 revise 唤回原队员带现场记忆续写，图上挂一条点线「修订 vN」版本链——是同一节点的新版本，不是新队员（留人双 miss 才回落重派）。",
-    code: "tools/builtin/revise.py",
+    // 实现：tools/builtin/revise.py
     nodes: [
       input("把上一版报告的第 2 章重写得更详细"),
       agent("orig", "撰写员", "completed", {
@@ -919,7 +777,7 @@ const SCENARIOS: Scenario[] = [
   {
     title: "超大团队（9 路并行 · 执行中）",
     desc: "并行度拉满（max_parallel = 10 上限内）：横向填满列宽、纵向超过内嵌高度上限(520) → 顶对齐 + 底部渐隐示意「还有更多」，看全图进全屏。也用来检验小缩放下节点是否仍可读。",
-    code: "runs/wave.py",
+    // 实现：runs/wave.py
     nodes: [
       input("把这份长报告拆成 9 块并行润色"),
       agent("b1", "润色员", "completed", {
@@ -1105,12 +963,6 @@ function ScenarioGraph({ scenario }: { scenario: Scenario }) {
       <h3 className="text-sm font-medium text-foreground">{scenario.title}</h3>
       <p className="mb-2 mt-0.5 text-xs leading-relaxed text-muted-foreground">
         {scenario.desc}
-        {scenario.code && (
-          <>
-            {" "}
-            <CodeRef>{scenario.code}</CodeRef>
-          </>
-        )}
       </p>
       <div
         ref={containerRef}
@@ -1149,66 +1001,115 @@ function ScenarioGraph({ scenario }: { scenario: Scenario }) {
 }
 
 export function TeamMechanism() {
+  const navigate = useNavigate();
+  const exit = useCallback(() => navigate("/toolbox"), [navigate]);
+
+  // Esc 退出沉浸式页面回工具箱；命令面板（Ctrl/Cmd+K）开着时让它先吃 Esc。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || useUIStore.getState().searchOpen) return;
+      exit();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [exit]);
+
   return (
-    <div>
-      <h1 className="text-xl font-medium text-foreground">团队运行机制</h1>
-      <p className="mb-8 mt-1 text-sm leading-relaxed text-muted-foreground">
-        AI 团队怎么跑的「可视化真相源」：与 <CodeRef>docs/03-AI核心</CodeRef>{" "}
-        的文字描述互补——文档讲为什么 / 细节，这页用图讲清「看得见的契约 +
-        代码指针」，让人和 AI
-        一眼看懂整个运行机制。下方机制场景为**真实**节点组件 + **真实** ELK
-        布局，所见即聊天内嵌协作图。
-      </p>
+    // 真·全屏：fixed inset-0 覆盖整窗（含应用 TitleBar）。因此本页顶栏自带窗口拖拽区
+    // （[-webkit-app-region:drag]）+ 自绘最小化/最大化/关闭控件，否则无边框窗口将无法
+    // 移动 / 关闭。返回 / Esc 退出回工具箱。
+    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+      <header className="flex h-12 shrink-0 items-center border-b border-border [-webkit-app-region:drag]">
+        <button
+          type="button"
+          onClick={exit}
+          className="ml-2 flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground [-webkit-app-region:no-drag]"
+        >
+          <ArrowLeft size={16} />
+          返回
+        </button>
+        <span className="ml-1 text-sm font-medium text-foreground">
+          团队运行机制
+        </span>
+        <div className="flex-1" />
+        {/* 自绘窗口控件：本页盖住了原生 TitleBar，故在此重建（与 TitleBar 同一 windowApi）。 */}
+        <div className="flex items-center [-webkit-app-region:no-drag]">
+          <button
+            type="button"
+            onClick={() => window.windowApi.minimize()}
+            aria-label="最小化"
+            className="flex h-12 w-12 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <Minus size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => window.windowApi.maximize()}
+            aria-label="最大化"
+            className="flex h-12 w-12 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <Square size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => window.windowApi.close()}
+            aria-label="关闭"
+            className="flex h-12 w-12 items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      </header>
 
-      <Section
-        icon={<Network size={16} />}
-        title="运行时全景（请求 → 回合 → 输出）"
-        desc="入口即 CEO 主 Agent（chat 档）：简单对话直接流式作答、零编排开销；需要产出或团队时 CEO 才调 delegate 进入多 Agent 编排。一次请求经三阶段，全程经 SSE 推到前端。"
-      >
-        <PhaseStrip />
-      </Section>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-[1400px] px-8 py-8">
+          <h1 className="text-xl font-medium text-foreground">团队运行机制</h1>
+          <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+            看懂你的 AI 团队怎么协作：一个任务进来后，CEO 主 Agent
+            如何判断要不要组团、团队怎么分工与并行、每个成员在干什么、最后如何把结果汇总成答案。下方所有图都是
+            <span className="font-medium text-foreground">真实</span>
+            的协作图组件与布局——和你在对话里看到的一模一样。
+          </p>
 
-      <Section
-        icon={<Workflow size={16} />}
-        title="协作回合主线（图怎么活起来）"
-        desc="一次多 Agent 回合从用户输入到答案入气泡的完整生命周期，以及每一步驱动图变化的 SSE 事件与代码入口。"
-      >
-        <TurnFlow />
-      </Section>
+          <div className="mt-8">
+            <Section
+              icon={<Network size={16} />}
+              title="运行时全景（请求 → 回合 → 输出）"
+              desc="入口即 CEO 主 Agent：简单对话直接流式作答、零编排开销；需要产出或组队时，CEO 才调 delegate 进入多 Agent 编排。一次请求经准备 → 执行 → 收尾三阶段。"
+            >
+              <PhaseStrip />
+            </Section>
 
-      <Section
-        icon={<BookOpen size={16} />}
-        title="图例（看懂每个符号）"
-        desc="图上每个节点 / 状态 / 连线 / 徽章对应的机制含义，样式与聊天内嵌图一字不差。"
-      >
-        <Legend />
-      </Section>
+            <Section
+              icon={<Workflow size={16} />}
+              title="协作回合主线（图怎么活起来）"
+              desc="一次多 Agent 回合从你的提问到答案落进气泡的完整生命周期：CEO 何时组团、波次如何解锁、worker 如何流式产出、最后如何收尾汇报。"
+            >
+              <TurnFlow />
+            </Section>
 
-      <Section
-        icon={<Radio size={16} />}
-        title="SSE 事件族（驱动图的事件）"
-        desc="后端 → 前端的实时事件如何驱动图上的状态流转。真相源：runtime/events.py + types/events.ts（已对齐）。"
-      >
-        <EventTable />
-      </Section>
+            <Section
+              icon={<BookOpen size={16} />}
+              title="图例（看懂每个符号）"
+              desc="图上每个节点 / 状态 / 连线 / 徽章对应的含义，样式与聊天内嵌图一字不差。"
+            >
+              <Legend />
+            </Section>
 
-      <Section
-        icon={<Layers size={16} />}
-        title="前端执行态分片（live 与 replay 同源）"
-        desc="协作图执行态怎么在前端存放、回看与下钻。"
-      >
-        <FrontendNotes />
-      </Section>
-
-      <Section
-        icon={<LayoutGrid size={16} />}
-        title="机制场景（真实节点 + 真实 ELK 布局）"
-        desc="覆盖并行 / 串行 / 流式 / 辩论 / 嵌套 / 多层 / 热修 / 超大团队各形态——既是机制示例，也是节点组件与布局的渲染自查。"
-      >
-        {SCENARIOS.map((s) => (
-          <ScenarioGraph key={s.title} scenario={s} />
-        ))}
-      </Section>
+            <Section
+              icon={<LayoutGrid size={16} />}
+              title="机制场景（真实节点 + 真实 ELK 布局）"
+              desc="覆盖并行 / 串行 / 流式 / 辩论 / 嵌套 / 多层 / 热修 / 超大团队各形态——既是机制示例，也是节点组件与布局的渲染自查。"
+            >
+              <div className="grid gap-x-8 xl:grid-cols-2">
+                {SCENARIOS.map((s) => (
+                  <ScenarioGraph key={s.title} scenario={s} />
+                ))}
+              </div>
+            </Section>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

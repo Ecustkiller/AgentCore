@@ -30,6 +30,7 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.prompt import (
+    CHAT_CHECKPOINT_AFTER_HINT,
     CHAT_CHECKPOINT_HINT,
     CHAT_CITATION_HINT,
     CHAT_REVISE_HINT,
@@ -218,6 +219,12 @@ async def run_chat_pipeline(
         # turn); bounded by TTL + count + byte caps, idle conversations reaped. An
         # expiry / miss falls back to 甲 (re-delegate). Cross-process persistence: P3.
         session_store = default_session_registry().get_or_create(conversation_id)
+        # Structured DAG checkpoints (结构化挂起 2a) share the SAME gate as ask_user
+        # (a live interactive user): an autonomous handoff job has no client to
+        # answer, so a checkpoint there would only ever time out. Computed here —
+        # before the delegate tool — because delegate consumes it too (it suspends
+        # the WaveScheduler at a wave boundary when a step is marked checkpoint_after).
+        checkpoint_enabled = settings.checkpoint_gate_enabled and approvals_enabled
         # The delegate tool gets the CLEAN base prompt — it is reused verbatim by
         # the workers (runs/executor.py), which must not be told about a delegate
         # tool they do not hold.
@@ -234,6 +241,10 @@ async def run_chat_pipeline(
             profile_set=profiles,
             session_store=session_store,
             session_saver=session_saver,
+            conversation_id=conversation_id,
+            registry=default_interaction_registry(),
+            checkpoint_timeout_seconds=settings.checkpoint_timeout_seconds,
+            checkpoint_enabled=checkpoint_enabled,
         )
         chat_tools = build_ceo_tool_registry()
         chat_tools.register(delegate_tool)
@@ -256,11 +267,9 @@ async def run_chat_pipeline(
         )
         chat_tools.register(revise_tool)
         # The CEO may also pause the turn to ask the user a decision (ask_user
-        # checkpoint). Gated on the SAME "is there a live interactive user" signal
-        # as approvals: an autonomous handoff job (approvals_enabled=False) has no
-        # client to answer, so it is not given the tool (a checkpoint there would
-        # only ever time out). CEO-only — workers never get it.
-        checkpoint_enabled = settings.checkpoint_gate_enabled and approvals_enabled
+        # checkpoint), gated on ``checkpoint_enabled`` (computed above, the SAME
+        # "is there a live interactive user" signal as approvals). CEO-only —
+        # workers never get it.
         if checkpoint_enabled:
             chat_tools.register(
                 AskUserTool(
@@ -280,7 +289,10 @@ async def run_chat_pipeline(
             f"\n{CHAT_CITATION_HINT}"
         )
         if checkpoint_enabled:
-            chat_system_prompt = f"{chat_system_prompt}\n{CHAT_CHECKPOINT_HINT}"
+            chat_system_prompt = (
+                f"{chat_system_prompt}\n{CHAT_CHECKPOINT_HINT}"
+                f"\n{CHAT_CHECKPOINT_AFTER_HINT}"
+            )
 
         # --- Phase 3: Execute ---
         sink.emit(message_start(message_id, conversation_id=conversation_id))

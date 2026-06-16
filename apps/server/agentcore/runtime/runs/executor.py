@@ -457,6 +457,13 @@ def _build_messages(
     requirements = describe_contract(contract)
     if requirements:
         user_parts.append(f"## 产出要求（必须满足）\n{requirements}")
+    if spec.steer:
+        # A mid-course user steer (plan_review adjust) injected after upstream work
+        # was reviewed: stated last + highest-priority so it overrides the task
+        # framing above when they conflict (结构化挂起 adjust).
+        user_parts.append(
+            f"## 用户中途调整指示（执行中追加，优先级最高，请据此调整工作）\n{spec.steer}"
+        )
 
     return [
         LLMMessage(role="system", content=system_content),

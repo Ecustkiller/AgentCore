@@ -7,12 +7,14 @@ synthesizes the final answer itself). Also covers rejection of bad task batches,
 worker token accumulation, and the graph lifecycle events.
 """
 
+import asyncio
 import json
 from pathlib import Path
 
 from agentcore.core.types import ToolEffect
 from agentcore.llm.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
@@ -620,3 +622,145 @@ def test_collect_citations_folds_completed_workers_deduped_excludes_failed():
     }
     tool._collect_citations(results)
     assert [c["url"] for c in tool.citations] == ["https://a.com", "https://b.com"]
+
+
+# --- 结构化挂起 2a: checkpoint_after wave-boundary suspend (end-to-end) -----------
+
+
+def _tool_ckpt(
+    provider: _Provider,
+    sink: EventSink,
+    registry: InteractionRegistry,
+    conversation_id: str,
+    *,
+    timeout: float,
+) -> DelegateTool:
+    """A delegate tool wired for structured checkpoints (gate on + bridge + conv)."""
+    return DelegateTool(
+        llm=provider,
+        sink=sink,
+        system_prompt="SYS",
+        user_message="原始请求",
+        history=[],
+        tools=ToolRegistry(),
+        base_tool_context=_ctx(),
+        conversation_id=conversation_id,
+        registry=registry,
+        checkpoint_timeout_seconds=timeout,
+        checkpoint_enabled=True,
+    )
+
+
+async def _resolve_when_pending(
+    registry: InteractionRegistry,
+    conversation_id: str,
+    decision: CheckpointDecision,
+):
+    """Poll the bridge for the paused plan_review and settle it (mimics the user)."""
+    for _ in range(500):
+        pending = registry.list_pending(conversation_id)
+        if pending:
+            registry.resolve(
+                pending[0].id,
+                CheckpointResponse(decision=decision),
+                conversation_id=conversation_id,
+            )
+            return pending[0]
+        await asyncio.sleep(0.005)
+    raise AssertionError("no pending plan_review appeared")
+
+
+_CKPT_DAG = [
+    {"id": "s1", "role": "研究员", "task": "调研", "checkpoint_after": True},
+    {"id": "s2", "role": "写手", "task": "撰写", "depends_on": ["s1"]},
+]
+
+
+async def test_checkpoint_after_pauses_then_continues():
+    # s1 (checkpoint_after) → s2: the scheduler pauses after s1, the user continues,
+    # and s2 then runs. Both products come back; the pause + resolution are emitted.
+    registry = InteractionRegistry()
+    sink = EventSink()
+    tool = _tool_ckpt(_Provider(["S1OUT", "S2OUT"]), sink, registry, "conv1", timeout=5.0)
+    exec_task = asyncio.create_task(tool.execute({"tasks": _CKPT_DAG}, _ctx()))
+    pending = await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
+    result = await exec_task
+
+    assert pending.kind.value == "plan_review"
+    # The review card framed s1 (just finished) and s2 (about to run).
+    assert any(s["role"] == "研究员" for s in pending.payload["steps"])
+    assert any(p["role"] == "写手" for p in pending.payload["pending"])
+    assert "S1OUT" in result.output
+    assert "S2OUT" in result.output
+    sink.close()
+    types = [e.type async for e in sink]
+    assert EventType.PLAN_REVIEW_REQUIRED in types
+    assert EventType.PLAN_REVIEW_RESOLVED in types
+
+
+async def test_checkpoint_after_stop_halts_downstream():
+    # Stopping at the checkpoint ends the run: s1 is kept, s2 never runs.
+    registry = InteractionRegistry()
+    sink = EventSink()
+    tool = _tool_ckpt(_Provider(["S1OUT", "S2OUT"]), sink, registry, "conv1", timeout=5.0)
+    exec_task = asyncio.create_task(tool.execute({"tasks": _CKPT_DAG}, _ctx()))
+    await _resolve_when_pending(registry, "conv1", CheckpointDecision.STOP)
+    result = await exec_task
+
+    assert "S1OUT" in result.output
+    assert "S2OUT" not in result.output  # downstream halted
+    # s2 shows as un-run in the CEO summary rather than a product.
+    assert "写手" in result.output
+
+
+async def test_checkpoint_timeout_continues():
+    # A soft checkpoint that times out proceeds (never silently halts): no resolve,
+    # tiny timeout → both steps run.
+    registry = InteractionRegistry()
+    sink = EventSink()
+    tool = _tool_ckpt(_Provider(["S1OUT", "S2OUT"]), sink, registry, "conv1", timeout=0.05)
+    result = await tool.execute({"tasks": _CKPT_DAG}, _ctx())
+    assert "S1OUT" in result.output
+    assert "S2OUT" in result.output
+    sink.close()
+    types = [e.type async for e in sink]
+    # The pause still surfaced (and resolved by timeout), even though it proceeded.
+    assert EventType.PLAN_REVIEW_REQUIRED in types
+    assert EventType.PLAN_REVIEW_RESOLVED in types
+
+
+async def test_checkpoint_inert_when_disabled():
+    # The default delegate tool (no bridge / gate off) ignores checkpoint_after:
+    # the DAG runs straight through, no plan_review is ever emitted.
+    sink = EventSink()
+    tool = _tool(_Provider(["S1OUT", "S2OUT"]), sink=sink)
+    result = await tool.execute({"tasks": _CKPT_DAG}, _ctx())
+    assert "S1OUT" in result.output
+    assert "S2OUT" in result.output
+    sink.close()
+    types = [e.type async for e in sink]
+    assert EventType.PLAN_REVIEW_REQUIRED not in types
+
+
+def test_plan_review_resolve_body_discriminates():
+    # The resolve endpoint discriminates on ``kind`` (Body(discriminator="kind")):
+    # a plan_review body must route to ResolvePlanReviewInteraction and carry the
+    # continue/stop decision the WaveScheduler hook consumes (as a CheckpointResponse).
+    from typing import Annotated
+
+    from pydantic import Field, TypeAdapter
+
+    from agentcore.api.schemas import (
+        ResolveInteractionRequest,
+        ResolvePlanReviewInteraction,
+    )
+
+    adapter = TypeAdapter(
+        Annotated[ResolveInteractionRequest, Field(discriminator="kind")]
+    )
+    body = adapter.validate_python(
+        {"kind": "plan_review", "decision": "stop", "note": "halt"}
+    )
+    assert isinstance(body, ResolvePlanReviewInteraction)
+    assert body.decision is CheckpointDecision.STOP
+    assert body.note == "halt"

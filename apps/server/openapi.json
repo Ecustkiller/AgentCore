@@ -1909,7 +1909,7 @@
         "type": "object"
       },
       "ResolveCheckpointInteraction": {
-        "description": "Settle a paused checkpoint the CEO raised (``ask_user`` interaction).\n\n``decision`` is ``continue`` (proceed with the CEO's direction), ``adjust``\n(steer the CEO with ``note``, then continue), or ``stop`` (end the turn). The\nengine-only ``timeout`` value is never sent by a client. ``note`` carries the\nuser's steer for ``adjust`` (and an optional closing remark for ``stop``).",
+        "description": "Settle a paused checkpoint the CEO raised (``ask_user`` interaction).\n\n``decision`` is ``continue`` (proceed with the CEO's direction), ``adjust``\n(steer the CEO with ``note``, then continue), or ``stop`` (end the turn). The\nengine-only ``timeout`` value is never sent by a client. ``note`` carries the\nuser's steer for ``adjust`` (and an optional closing remark for ``stop``);\n``selected`` carries the option(s) the user picked from the CEO's menu — one\nfor a single-select ask, several for a ``multiple`` one — and rides ``continue``\ntoo (the picks are the answer, not just an ``adjust`` steer). The server drops\nany pick that was not in the offered options.",
         "properties": {
           "decision": {
             "$ref": "#/components/schemas/CheckpointDecision"
@@ -1925,6 +1925,14 @@
             "maxLength": 4000,
             "title": "Note",
             "type": "string"
+          },
+          "selected": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 6,
+            "title": "Selected",
+            "type": "array"
           }
         },
         "required": [
@@ -1970,6 +1978,31 @@
           "ok"
         ],
         "title": "ResolveClientToolInteraction",
+        "type": "object"
+      },
+      "ResolvePlanReviewInteraction": {
+        "description": "Settle a paused structured DAG checkpoint (``plan_review`` interaction, 结构化挂起 2a).\n\nRaised when a delegate step marked ``checkpoint_after`` completed and the\nWaveScheduler paused before its dependents. ``decision`` is ``continue`` (run\nthe downstream steps) or ``stop`` (end the run here); ``adjust`` is accepted\nover the wire but treated as ``continue`` in 2a (steer injection is deferred).\nReuses :class:`CheckpointResponse` (same shape as ask_user) on the engine side.",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/CheckpointDecision"
+          },
+          "kind": {
+            "const": "plan_review",
+            "default": "plan_review",
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ResolvePlanReviewInteraction",
         "type": "object"
       },
       "RoleCostLine": {
@@ -2961,6 +2994,27 @@
         "title": "WorkspaceFileListResponse",
         "type": "object"
       },
+      "WorkspaceListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "WorkspaceListResponse",
+        "type": "object"
+      },
       "WorkspaceOpError": {
         "description": "A typed failure from a desktop-run local-workspace op (双模式工作区 P2).\n\n``kind`` names the ``WorkspaceError`` subclass to re-raise on the server (e.g.\n``PathNotFound``, ``OutsideWorkspace``) so the file tool maps it to the same\nmessage as cloud mode; ``count`` carries the match count for ``AmbiguousMatch``\n(str_replace). An unknown ``kind`` degrades to a generic I/O error.",
         "properties": {
@@ -2991,6 +3045,50 @@
           "kind"
         ],
         "title": "WorkspaceOpError",
+        "type": "object"
+      },
+      "WorkspaceSummary": {
+        "description": "One addressable workspace in the file hub (文件中枢统一 Step 1).\n\nA folder project (``folder:<id>``) or an ungrouped conversation space\n(``conv:<id>``). ``location`` tells the hub how to reach its files: a cloud\nworkspace via the ``/v1/workspaces/{ws_id}/files`` REST family; a local one\nover desktop IPC against ``root_id`` (its server-side dir is not the truth).",
+        "properties": {
+          "has_files": {
+            "title": "Has Files",
+            "type": "boolean"
+          },
+          "location": {
+            "enum": [
+              "cloud",
+              "local"
+            ],
+            "title": "Location",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Id"
+          },
+          "ws_id": {
+            "title": "Ws Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ws_id",
+          "name",
+          "location",
+          "has_files"
+        ],
+        "title": "WorkspaceSummary",
         "type": "object"
       }
     }
@@ -4200,7 +4298,8 @@
                   "mapping": {
                     "approval": "#/components/schemas/ResolveApprovalInteraction",
                     "ask_user": "#/components/schemas/ResolveCheckpointInteraction",
-                    "client_tool": "#/components/schemas/ResolveClientToolInteraction"
+                    "client_tool": "#/components/schemas/ResolveClientToolInteraction",
+                    "plan_review": "#/components/schemas/ResolvePlanReviewInteraction"
                   },
                   "propertyName": "kind"
                 },
@@ -4213,6 +4312,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/ResolveClientToolInteraction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ResolvePlanReviewInteraction"
                   }
                 ],
                 "title": "Body"
@@ -7302,6 +7404,790 @@
         "summary": "Test Llm Key",
         "tags": [
           "llm-key"
+        ]
+      }
+    },
+    "/v1/workspaces": {
+      "get": {
+        "description": "Enumerate the user's workspaces for the hub (文件中枢统一 §四 F1).\n\nEvery folder is a project (always listed). Ungrouped conversations list only\nwhen their space actually holds files — so chats that never touched the\nworkspace don't clutter the hub. Local spaces always list (the server can't\nsee their files, and a binding is an explicit user intent, not noise).",
+        "operationId": "list_workspaces_v1_workspaces_get",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workspaces",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/clone": {
+      "post": {
+        "description": "Clone a public git repository into a cloud workspace (决策⑤).",
+        "operationId": "clone_repo_into_workspace_v1_workspaces__ws_id__clone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloneRepoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloneRepoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clone Repo Into Workspace",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/dirs": {
+      "post": {
+        "description": "Create a directory in a cloud workspace.",
+        "operationId": "create_workspace_dir_v1_workspaces__ws_id__dirs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDirRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Workspace Dir",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/files": {
+      "get": {
+        "description": "List files in a cloud workspace (top level or recursive).",
+        "operationId": "list_workspace_files_v1_workspaces__ws_id__files_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "recursive",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Recursive",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceFileListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workspace Files",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/files/{path}": {
+      "delete": {
+        "description": "Delete a file or directory from a cloud workspace.",
+        "operationId": "delete_workspace_file_v1_workspaces__ws_id__files__path__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Workspace File",
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "get": {
+        "description": "Download a single file from a cloud workspace.",
+        "operationId": "download_workspace_file_v1_workspaces__ws_id__files__path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Workspace File",
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "put": {
+        "description": "Upload (create/overwrite) a workspace file from the raw request body.\n\nBody is the file bytes (no multipart); ``path`` is the workspace-relative\ntarget. Bounded by ``workspace_upload_max_bytes``; a path escaping the\nworkspace is rejected (422).",
+        "operationId": "upload_workspace_file_v1_workspaces__ws_id__files__path__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadFileResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Workspace File",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/move": {
+      "post": {
+        "description": "Move/rename a file or directory within a cloud workspace.",
+        "operationId": "move_workspace_file_v1_workspaces__ws_id__move_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Move Workspace File",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/snapshots": {
+      "get": {
+        "description": "List a workspace's snapshots (newest first). Allowed for local too —\nsnapshots are object-store backed and keyed by ws (§五).",
+        "operationId": "list_workspace_snapshots_v1_workspaces__ws_id__snapshots_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workspace Snapshots",
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "post": {
+        "description": "Take a manual snapshot of a cloud workspace (a ``label`` keeps it as a\nversion). Local workspaces snapshot via the desktop archive channel, not\nhere (§五), so they are rejected with 409.",
+        "operationId": "create_workspace_snapshot_v1_workspaces__ws_id__snapshots_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSnapshotRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Workspace Snapshot",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/snapshots/{snapshot_id}/download": {
+      "get": {
+        "description": "Download a snapshot archive (zip). Allowed for local too (read-only).",
+        "operationId": "download_workspace_snapshot_v1_workspaces__ws_id__snapshots__snapshot_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Workspace Snapshot",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/snapshots/{snapshot_id}/restore": {
+      "post": {
+        "description": "Restore a cloud workspace to a snapshot (overwrites current files).\n\nRefused (409) for local workspaces: it would rewrite the unused server-side\nmirror, not the user's machine.",
+        "operationId": "restore_workspace_snapshot_v1_workspaces__ws_id__snapshots__snapshot_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "snapshot_id",
+            "required": true,
+            "schema": {
+              "title": "Snapshot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Workspace Snapshot",
+        "tags": [
+          "workspaces"
         ]
       }
     },

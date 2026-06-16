@@ -30,15 +30,14 @@ from typing import Any
 
 
 class InteractionKind(StrEnum):
-    """The kinds of suspend point that share the bridge.
-
-    ``plan_review`` (§18.2) is reserved for the Phase 2 DAG plan-approval gate and
-    is intentionally not yet emitted.
-    """
+    """The kinds of suspend point that share the bridge."""
 
     APPROVAL = "approval"  # GRANTABLE tool gate → result: ApprovalDecision
     ASK_USER = "ask_user"  # CEO checkpoint → result: CheckpointResponse
     CLIENT_TOOL = "client_tool"  # desktop workspace op → result: envelope dict
+    # DAG structured checkpoint (结构化挂起 2a): the WaveScheduler paused after a
+    # ``checkpoint_after`` step → result: CheckpointResponse (continue / stop).
+    PLAN_REVIEW = "plan_review"
 
 
 @dataclass

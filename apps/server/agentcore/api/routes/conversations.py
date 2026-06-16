@@ -49,6 +49,7 @@ from agentcore.api.schemas import (
     ResolveCheckpointInteraction,
     ResolveClientToolInteraction,
     ResolveInteractionRequest,
+    ResolvePlanReviewInteraction,
     SendMessageRequest,
     SnapshotListResponse,
     SnapshotSummary,
@@ -521,6 +522,13 @@ async def resolve_interaction(
     if isinstance(body, ResolveApprovalInteraction):
         result: object = body.decision
     elif isinstance(body, ResolveCheckpointInteraction):
+        result = CheckpointResponse(
+            decision=body.decision, note=body.note, selected=body.selected
+        )
+    elif isinstance(body, ResolvePlanReviewInteraction):
+        # 结构化挂起 2a: a plan_review answers continue / stop with the same typed
+        # outcome as an ask_user checkpoint (CheckpointResponse), routed to the
+        # paused WaveScheduler hook via the kind check below.
         result = CheckpointResponse(decision=body.decision, note=body.note)
     elif isinstance(body, ResolveClientToolInteraction):
         result = {

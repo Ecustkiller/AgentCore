@@ -1,5 +1,4 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { RouterProvider } from "react-router-dom";
 import { AuthGate } from "./components/auth/AuthGate";
 import { Toaster } from "./components/ui/Toaster";
@@ -18,7 +17,6 @@ export function App() {
             and the route-error fallback) can surface a toast. */}
         <Toaster />
       </TooltipProvider>
-      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
     </QueryClientProvider>
   );
 }

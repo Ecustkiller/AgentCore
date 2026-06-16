@@ -60,6 +60,10 @@ class LLMRequest:
     stream: bool = True
     thinking: bool | None = None  # None = use model default
     reasoning_effort: Literal["high", "max"] | None = None
+    # Usage scenario (profile name: chat / agent.fast / agent.strong / memory /
+    # title), stamped by build_request. Pure observability — rides into the
+    # llm.call log so spend/latency/quality attribute per scenario, not an API field.
+    scenario: str = "chat"
 
 
 @dataclass

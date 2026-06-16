@@ -23,6 +23,8 @@ import type {
   ContentDeltaPayload,
   ErrorPayload,
   MessageEndPayload,
+  PlanReviewRequiredPayload,
+  PlanReviewResolvedPayload,
   ReasoningDeltaPayload,
   RunPlanPayload,
   SSEEvent,
@@ -207,8 +209,44 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
           p.checkpoint_id,
           p.decision,
           p.note ?? "",
+          p.selected ?? [],
           ctx.conversationId,
         );
+      break;
+    }
+    case "plan_review_required": {
+      // Like an ask_user checkpoint (and unlike a transient approval), a
+      // plan_review lives on its assistant message so it replays inline; attach a
+      // pending card to the live bubble. Also fold it into the team graph as a
+      // frame so the gated node shows a pause badge (结构化挂起 2a, 7.2A).
+      useConversationStore
+        .getState()
+        .addPlanReview(
+          event.payload as PlanReviewRequiredPayload,
+          ctx.conversationId,
+        );
+      {
+        const mid = execMessageId();
+        const frame = frameFromEvent(event);
+        if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+      }
+      break;
+    }
+    case "plan_review_resolved": {
+      const p = event.payload as PlanReviewResolvedPayload;
+      useConversationStore
+        .getState()
+        .settlePlanReview(
+          p.checkpoint_id,
+          p.decision,
+          p.note ?? "",
+          ctx.conversationId,
+        );
+      {
+        const mid = execMessageId();
+        const frame = frameFromEvent(event);
+        if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+      }
       break;
     }
     case "title_generated": {
@@ -360,8 +398,34 @@ async function runMessageStream(
     const decoder = new TextDecoder();
     let buffer = "";
 
+    // Stall watchdog. The backend sends a heartbeat comment every ~15s while a
+    // turn is thinking, so a live connection always keeps delivering bytes. If we
+    // receive nothing at all for this long the stream is dead (server/proxy
+    // dropped it) — abort and surface a retriable error instead of spinning
+    // forever. This is an *idle* timeout, never a total-duration cap: a long turn
+    // that keeps streaming (or just heart-beating) is never cut off.
+    const IDLE_TIMEOUT_MS = 60_000;
+    const readChunk = (): ReturnType<typeof reader.read> =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          // Free the dead socket so the backend sees the disconnect and stops.
+          void reader.cancel().catch(() => {});
+          reject(new StreamError("network"));
+        }, IDLE_TIMEOUT_MS);
+        reader.read().then(
+          (r) => {
+            clearTimeout(timer);
+            resolve(r);
+          },
+          (e) => {
+            clearTimeout(timer);
+            reject(e);
+          },
+        );
+      });
+
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readChunk();
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
@@ -377,6 +441,14 @@ async function runMessageStream(
           /* malformed event — skip */
         }
       }
+    }
+
+    // Stream closed without a terminal event (message_end / inline error) while
+    // the turn still reads as generating: settle it so the "正在思考…" bubble and
+    // the stop button don't hang forever. No-op on the normal paths, which have
+    // already finalized — this only catches a degraded close.
+    if (getRuntime(conversationId).isGenerating) {
+      useConversationStore.getState().finalizeLastMessage(conversationId);
     }
   } catch (err) {
     // Re-raise user aborts (stop button) and already-typed failures as-is;

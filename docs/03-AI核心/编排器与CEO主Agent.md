@@ -191,11 +191,15 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 
 ## 四、检查点与团队预审
 
-**CEO `ask_user` 检查点（✅ 已落地）**：CEO 执行中途遇到自己无法独自定夺、且选错代价高的关键岔路时，调内置工具 `ask_user` 暂停回合、请用户拍板（继续/调整/停止）。这是 CEO 主动发起的交互原语（区别于结构化 DAG 检查点），经统一挂起-恢复 `InteractionRegistry`（§18.2）等用户答复回流 ReAct 循环。System prompt 以 `CHAT_CHECKPOINT_HINT` 约束「仅用于高代价岔路、克制使用」。→ 见代码 `tools/builtin/ask_user.py`、`runtime/checkpoints.py`、`runtime/prompt.py`，语义见 [`执行引擎架构设计.md` §检查点决策语义](/docs/03-AI核心/执行引擎架构设计.md)。
+**CEO `ask_user` 检查点（✅ 已落地）**：CEO 执行中途遇到自己无法独自定夺、且选错代价高的关键岔路时，调内置工具 `ask_user` 暂停回合、请用户拍板。可在 `options` 给具体选项，`multiple=true` 时多选、否则单选（互斥抉择保持单选）；用户以**「提交 / 停止」两态**回应——提交即采纳或修正你的方向，携带勾选项（`selected`）与可选补充说明，停止则优雅结束本回合。这是 CEO 主动发起的交互原语（区别于结构化 DAG 检查点），经统一挂起-恢复 `InteractionRegistry`（§18.2）等用户答复回流 ReAct 循环。System prompt 以 `CHAT_CHECKPOINT_HINT` 约束「仅用于高代价岔路、克制使用」。→ 见代码 `tools/builtin/ask_user.py`、`runtime/checkpoints.py`、`runtime/prompt.py`，语义见 [`执行引擎架构设计.md` §检查点决策语义](/docs/03-AI核心/执行引擎架构设计.md)。
 
-**团队预审 / DAG 检查点（⏳ Phase 2）**：当前路径不含团队预审（plan_review）与 DAG `checkpoint_after` 结构化审视；Phase 2 以 **preflight 审计 / 契约闸门**回归（与 `ask_user` 共用统一交互原语）。落地边界见 §五 待定事项与 [`执行引擎架构设计.md` §十八](/docs/03-AI核心/执行引擎架构设计.md)。
+> **为何两态而非「继续/调整/停止」三态**（决策理由，代码看不出来）：原「继续」与「调整」效果同一（都回 `CONTINUE` 续跑），区别仅在内容——勾没勾选项 / 填没填补充，CEO 自能判断是原样放行还是带修正放行，故合并为单一「提交」（也消除了多选时「该点继续还是调整」的犹豫）。保留「停止」而非行业表单式「跳过」，因检查点是高代价岔路的**安全闸**而非信息收集：「跳过＝你看着办」恰是最该避免的（不问即等于此），有价值的轴是**推进 vs 中止**。线路层 `CheckpointDecision` 仍保留 `adjust`，仅供老对话回放。
 
-> **与 `ask_user` 的边界 + 为何 defer**（决策理由，代码看不出来）：两者形似而本质不同——`ask_user` 是**运行时模型自决**的工具效应（CEO 在 ReAct 循环里临场决定停不停），`checkpoint_after` 是**计划期声明的调度器结构挂起**（DAG 标记即必停、与模型无关）。**现状已覆盖大部分**：CEO 的 `delegate` 自选粒度（D1′）能把「在逻辑边界征询」拆成「`delegate`(批1) → 返回 → `ask_user` → `delegate`(批2)」，故串行边界征询乃至轻量 plan_review（委派前先 `ask_user` 报方案）`ask_user` 已能表达。**`checkpoint_after` 真正独有的只有两点**：① **波间结构挂起**——单个 `delegate` 跨多波时 `WaveScheduler.run` 跑完整子 DAG 才返回，delegate 对 CEO 原子，CEO 拿不到波间控制权、ask_user 插不进；② **治理保证闸门**——声明即必停（如高危步骤前强制人审），不靠模型自觉、可审计。这两点都压在尚未落地的运行时地基上（`WaveScheduler` 波间挂起 + `paused` 第三终态 + 统一 Interaction `kind=plan_review` 的跨进程等待，§十八），代价大而独有价值小众，故 defer 而非现做；可复用面仅 `InteractionRegistry` / `CheckpointResponse` / 前端 `CheckpointCard`，调度器挂起为全新。
+**DAG `checkpoint_after` / `plan_review` 结构化挂起（✅ Phase 2a 已落地）**：CEO 在 `delegate` 给 step 标 `checkpoint_after=true` 时，调度器在该 step 完成且仍有下游待跑时于**波间**挂起，经 `InteractionRegistry`（`kind=plan_review`）等用户 continue/stop，与 `ask_user` 共用 resolve 端点与 `CheckpointResponse` 语义。进程内 `WaveScheduler.on_checkpoint` hook + delegate 协调器已接线；事件 `plan_review_required`/`plan_review_resolved` 入 journal 可回放。前端 `PlanReviewCard` + 图节点暂停徽标已落地（→ 见 [`前端UX设计.md` §三/§五](/docs/04-前端/前端UX设计.md)）。**⏳ Phase 2b 仍未落地**：持久 `paused` 第三终态、跨进程等待（多 worker Redis BLPOP）、治理强制层（声明即必停、非 CEO 自声明）、`adjust` steer 注入下游——与 `ask_user` 共享硬化路径。
+
+**团队预审 preflight（⏳ Phase 2）**：执行前团队预览 gate 仍待 preflight 审计回归，与结构化波间挂起是不同议题。落地边界见 §五 待定事项与 [`执行引擎架构设计.md` §十八](/docs/03-AI核心/执行引擎架构设计.md)。
+
+> **与 `ask_user` 的边界**（决策理由）：`ask_user` 是 CEO **运行时自决**的工具效应；`checkpoint_after` 是**计划期声明**的调度器结构挂起（波间闸门、与模型无关）。2a 已交付①**波间结构挂起**；②**治理保证闸门**仍 ⏳（2b 治理强制层）。串行边界征询 CEO 可用「`delegate`(批1) → `ask_user` → `delegate`(批2)」表达，但单个跨波 `delegate` 内波间挂起唯 `checkpoint_after` 可覆盖——完整分阶段设计见 [`结构化挂起后端落地设计.md`](/docs/07-规划/结构化挂起后端落地设计.md)（2b 全落地后退役）。
 
 ---
 
@@ -206,5 +210,5 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 | CEO / worker system prompt 内容调试 | 「身份 + 边界」结构已落地（CEO `CHAT_TEAM_CAPABILITY_HINT`、worker 自我认知段）；剩余为内容调试：CEO 升级判据、worker 角色模板 |
 | Agent 实体化 | Phase 1 worker 为内联角色（`agent_id == run_id`）；Phase 2 收敛到 `agent_id` + `AgentResolver` + 委派白名单 |
 | 增量声明优化 | 批次预声明（`run_plan` 带 `parent_run_id`，供图在 run 开跑前成组）+ `run_started` 带 `parent_run_id`/`kind` + **嵌套委派一层均已落地**（见 §2.4）；剩余为更细粒度的增量重声明 / 跨波动态重排（未定） |
-| 交互原语回归 | `ask_user` 挂起 ✅ 已落地（见 §四）；剩余 preflight / 契约闸门 / plan_review ⏳ |
+| 交互原语回归 | `ask_user` 挂起 ✅ 已落地（见 §四）；`plan_review` / `checkpoint_after` 波间挂起 ✅ 2a 已落地（见 §四）；剩余 preflight / 契约闸门 / 2b 硬化 ⏳ |
 | 多轮编排 | **✅ 已落地**：后续消息沿用 / 修改之前的委派结果——CEO 经 `revise` 唤回原队员带现场记忆续写（内存 + 跨进程落盘留人，双 miss 回落重派），图上挂「修订 vN」版本链。详见 [`多轮编排与队员热修.md`](/docs/03-AI核心/多轮编排与队员热修.md) |

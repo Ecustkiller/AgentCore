@@ -22,6 +22,7 @@ tool's output is otherwise not metered by the loop.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
@@ -29,14 +30,26 @@ from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect, new_id
 from agentcore.llm.config import apply_overrides
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet, default_profile_set
+from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.citations import merge_citations
-from agentcore.runtime.events import EventSink, content_delta, run_plan, run_progress
+from agentcore.runtime.events import (
+    EventSink,
+    content_delta,
+    plan_review_required,
+    plan_review_resolved,
+    run_plan,
+    run_progress,
+)
+from agentcore.runtime.interaction import InteractionKind
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from agentcore.runtime.approvals import ApprovalGate
     from agentcore.runtime.costing import RunCost
+    from agentcore.runtime.ports import ClientRequestBridge
+    from agentcore.runtime.runs.plan import RunPlan
+    from agentcore.runtime.runs.types import RunSpec, RunState
     from agentcore.runtime.sessions import SessionSaver, SessionStore
 
 logger = get_logger(__name__)
@@ -45,6 +58,10 @@ logger = get_logger(__name__)
 # raise the model-facing truncation budget well above the 4000 default so a
 # multi-worker batch isn't clipped before the CEO can integrate it.
 _DELEGATE_OUTPUT_LIMIT = 16000
+
+# Per-step product excerpt cap in a plan_review card (结构化挂起 2a): enough for the
+# user to recognise what just finished without shipping the whole product over SSE.
+_PLAN_REVIEW_SUMMARY_CHARS = 280
 
 _DELEGATE_DESCRIPTION = (
     "把当前任务拆给一支由你（主 Agent）指挥的临时团队执行，并把各成员的产出"
@@ -159,6 +176,16 @@ _DELEGATE_PARAMETERS = {
                             "其子成员不能继续委派。简单子任务不要开。"
                         ),
                     },
+                    "checkpoint_after": {
+                        "type": "boolean",
+                        "description": (
+                            "可选，默认 false。仅用于【同一次 delegate 的多步 DAG】：给某个"
+                            "高危 / 不可逆 / 范围可能跑偏的中间步骤设 true，则该步完成后、其"
+                            "下游步骤运行前会自动暂停，请用户过目当前进展并决定「继续 / 停止」。"
+                            "克制使用——只在确实值得让用户在继续前把关的节点设；单步委派或"
+                            "末步设了也不会触发（其后无下游可把关，那种情况改用 ask_user）。"
+                        ),
+                    },
                     "contract": {
                         "type": "object",
                         "description": (
@@ -239,6 +266,10 @@ class DelegateTool:
         approval_gate: ApprovalGate | None = None,
         session_store: SessionStore | None = None,
         session_saver: SessionSaver | None = None,
+        conversation_id: str | None = None,
+        registry: ClientRequestBridge | None = None,
+        checkpoint_timeout_seconds: float = 0.0,
+        checkpoint_enabled: bool = False,
         depth: int = 0,
     ) -> None:
         self._llm = llm
@@ -276,6 +307,17 @@ class DelegateTool:
         # tool spawns are minted at ``depth + 1``; a worker that itself re-delegates
         # gets a child tool seeded with its own depth (阶段2 嵌套子任务).
         self._depth = depth
+        # 结构化挂起 2a: the unified interaction bridge + this turn's conversation +
+        # the plan_review wait bound, used to suspend the WaveScheduler at a wave
+        # boundary when a delegate step is marked ``checkpoint_after``.
+        # ``checkpoint_enabled`` mirrors the ask_user gate (a live interactive user);
+        # off ⇒ the marker stays inert (no ``on_checkpoint`` hook is handed to the
+        # scheduler, so a marked plan runs straight through). Forwarded verbatim to
+        # nested sub-teams (_make_child) so a sub-DAG's checkpoint also fires.
+        self._conversation_id = conversation_id
+        self._registry = registry
+        self._checkpoint_timeout_seconds = checkpoint_timeout_seconds
+        self._checkpoint_enabled = checkpoint_enabled
         # Child delegate tools minted for re-delegating workers this turn (one per
         # nesting worker). Their sub-team usage + cost rows are folded back into
         # this tool's totals after each call — see _absorb_children.
@@ -393,8 +435,12 @@ class DelegateTool:
             done = sum(1 for s in completed.values() if s.phase is RunPhase.COMPLETED)
             self._sink.emit(run_progress(done, total))
 
+        # 结构化挂起 2a: hand the scheduler a plan_review hook only when checkpoints
+        # are active this turn (gate on + bridge/conversation wired). Off ⇒ None, so
+        # a ``checkpoint_after`` marker stays inert and the plan runs straight through.
+        on_checkpoint = self._checkpoint_hook(plan) if self._checkpoint_active() else None
         results = await WaveScheduler(self._max_parallel or DEFAULT_MAX_PARALLEL).run(
-            plan, executor, on_progress=_progress
+            plan, executor, on_progress=_progress, on_checkpoint=on_checkpoint
         )
 
         call_usage = self._accumulate_usage(results)
@@ -472,6 +518,10 @@ class DelegateTool:
             approval_gate=self._approval_gate,
             session_store=self._session_store,
             session_saver=self._session_saver,
+            conversation_id=self._conversation_id,
+            registry=self._registry,
+            checkpoint_timeout_seconds=self._checkpoint_timeout_seconds,
+            checkpoint_enabled=self._checkpoint_enabled,
             depth=captain_depth,
         )
         self._children.append(child)
@@ -495,6 +545,86 @@ class DelegateTool:
             # not lost at the next level up.
             merge_citations(self.citations, child.citations)
         self._children.clear()
+
+    def _checkpoint_active(self) -> bool:
+        """Whether structured checkpoints fire this turn (结构化挂起 2a).
+
+        True only when the gate is on AND the interaction bridge + conversation are
+        wired — off / standalone / tests leave ``checkpoint_after`` inert.
+        """
+        return bool(
+            self._checkpoint_enabled and self._registry and self._conversation_id
+        )
+
+    def _checkpoint_hook(self, plan: RunPlan):
+        """Build the WaveScheduler ``on_checkpoint`` hook for ``plan`` (结构化挂起 2a).
+
+        Replays the ask_user suspend-resume shape at a wave boundary: register a
+        plan_review on the interaction bridge, emit the request card, await the
+        user's answer (timeout → continue — a soft checkpoint never silently halts),
+        discard, emit the resolution. Returns whether to proceed: False only on an
+        explicit ``stop`` (``adjust`` is treated as continue in 2a — steer injection
+        into downstream steps is deferred). The scheduler stays pure; this host hook
+        owns the user round-trip + SSE.
+        """
+        registry = self._registry
+        conversation_id = self._conversation_id
+        timeout = self._checkpoint_timeout_seconds
+        assert registry is not None and conversation_id is not None  # _checkpoint_active
+
+        async def on_checkpoint(nodes, completed) -> bool:
+            checkpoint_id = new_id()
+            steps = [self._review_step(n, completed) for n in nodes]
+            pending = self._pending_preview(plan, completed)
+            fut = registry.create(
+                checkpoint_id,
+                conversation_id,
+                kind=InteractionKind.PLAN_REVIEW,
+                payload={"steps": steps, "pending": pending},
+            )
+            self._sink.emit(
+                plan_review_required(
+                    checkpoint_id=checkpoint_id,
+                    conversation_id=conversation_id,
+                    steps=steps,
+                    pending=pending,
+                )
+            )
+            try:
+                response = await asyncio.wait_for(fut, timeout=timeout)
+            except TimeoutError:
+                logger.info("plan_review.timeout", checkpoint_id=checkpoint_id)
+                response = CheckpointResponse(decision=CheckpointDecision.CONTINUE)
+            finally:
+                registry.discard(checkpoint_id)
+            self._sink.emit(
+                plan_review_resolved(
+                    checkpoint_id=checkpoint_id,
+                    decision=response.decision.value,
+                    note=response.note,
+                )
+            )
+            return response.decision is not CheckpointDecision.STOP
+
+        return on_checkpoint
+
+    def _review_step(self, node: RunSpec, completed: dict) -> dict[str, Any]:
+        """One just-completed checkpoint node's review card entry (run_id + role +
+        a capped product excerpt the user recognises it by)."""
+        state = completed.get(node.run_id)
+        summary = (state.content if state else "") or ""
+        if len(summary) > _PLAN_REVIEW_SUMMARY_CHARS:
+            summary = summary[:_PLAN_REVIEW_SUMMARY_CHARS] + "…"
+        return {"run_id": node.run_id, "role": node.role or node.run_id, "summary": summary}
+
+    def _pending_preview(self, plan: RunPlan, completed: dict) -> list[dict[str, Any]]:
+        """The downstream nodes about to run once the user proceeds (run_id + role),
+        so the card shows what is being gated. Nodes not yet terminal at pause time."""
+        return [
+            {"run_id": n.run_id, "role": n.role or n.run_id}
+            for n in plan.nodes
+            if n.run_id not in completed
+        ]
 
     def _accumulate_usage(self, results: dict) -> dict[str, int]:
         """Sum this call's worker token usage and fold it into the turn total."""

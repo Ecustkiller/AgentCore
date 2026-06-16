@@ -4,13 +4,13 @@ import { create } from "zustand";
  * Unified conversation side panel (前端UX设计.md §十) — the chat's single
  * right-docked surface, modelled as ONE flat tab strip:
  *
- *  - a fixed, non-closable 「工作区」 home tab (files / snapshots / handoff + the
- *    cloud↔local mode bar), always first;
+ *  - a fixed, non-closable 「工作区」 home tab (the cloud↔local mode bar + the
+ *    files body, with 快照 / 交接 as on-demand overlays), always first;
  *  - a closable run-detail tab for each inline-graph node the user drills into.
  *
  * There is no separate "detail mode" — the run tabs ARE the detail, so the panel
- * never shows an empty detail placeholder. One `open` / `width` / `section` are
- * persisted; the run tabs are session-level (rebuilt from the execution slot).
+ * never shows an empty detail placeholder. `open` / `width` are persisted; the run
+ * tabs are session-level (rebuilt from the execution slot).
  */
 
 /** Resize bounds for the panel. */
@@ -23,7 +23,6 @@ const MAX_TABS = 6;
 
 const OPEN_KEY = "agentcore:side-panel-open";
 const WIDTH_KEY = "agentcore:side-panel-width";
-const SECTION_KEY = "agentcore:side-panel-section";
 
 export const SIDE_PANEL_MIN_WIDTH = MIN_WIDTH;
 export const SIDE_PANEL_MAX_WIDTH = MAX_WIDTH;
@@ -31,8 +30,6 @@ export const SIDE_PANEL_MAX_TABS = MAX_TABS;
 
 /** Reserved id of the fixed 「工作区」 home tab (always first, never closes). */
 export const WORKSPACE_TAB_ID = "workspace";
-
-export type WorkspaceSection = "files" | "snapshots" | "handoff";
 
 const clampWidth = (w: number): number =>
   Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(w)));
@@ -56,15 +53,6 @@ function loadWidth(): number {
     return Number.isFinite(n) ? clampWidth(n) : DEFAULT_WIDTH;
   } catch {
     return DEFAULT_WIDTH;
-  }
-}
-
-function loadSection(): WorkspaceSection {
-  try {
-    const raw = localStorage.getItem(SECTION_KEY);
-    return raw === "snapshots" || raw === "handoff" ? raw : "files";
-  } catch {
-    return "files";
   }
 }
 
@@ -100,8 +88,6 @@ interface SidePanelState {
   open: boolean;
   /** Docked width in px, clamped to [280, 560] (persisted). */
   width: number;
-  /** Active workspace sub-section (persisted). */
-  section: WorkspaceSection;
   /** Open run-detail tabs, left→right (session-level; stale tabs are filtered at
    * render against the live projection). The 工作区 home tab is implicit and is
    * NOT part of this array. */
@@ -125,8 +111,6 @@ interface SidePanelState {
   showRunDetail: (messageId: string, runId: string, title?: string) => void;
   /** Reveal the panel on the 工作区 home tab (the chat toggle / Ctrl+J). */
   showWorkspace: () => void;
-  /** Switch the active workspace sub-section. */
-  setSection: (section: WorkspaceSection) => void;
   closePanel: () => void;
   togglePanel: () => void;
   setWidth: (width: number) => void;
@@ -135,7 +119,6 @@ interface SidePanelState {
 export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   open: loadOpen(),
   width: loadWidth(),
-  section: loadSection(),
   tabs: [],
   // Run tabs are session-level (rebuilt from the execution slot), so a fresh
   // load always starts on the workspace home rather than a dangling run id.
@@ -187,11 +170,6 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   showWorkspace: () => {
     persist(OPEN_KEY, "true");
     set({ open: true, activeTabId: WORKSPACE_TAB_ID });
-  },
-
-  setSection: (section) => {
-    persist(SECTION_KEY, section);
-    set({ section });
   },
 
   closePanel: () => {

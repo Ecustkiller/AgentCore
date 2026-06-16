@@ -20,7 +20,7 @@ interface FilesState {
 
 /**
  * 轻量文件页 store：仅保存「授权根列表」与「当前选中文件」。
- * 目录树本身不入全局 store —— 各目录节点各自懒读子项并 watch（见 FileTreeNode）。
+ * 目录树本身不入全局 store —— 由共用 FileTree 经 useFileTreeData 懒读子项并 watch。
  */
 export const useFilesStore = create<FilesState>((set) => ({
   roots: [],

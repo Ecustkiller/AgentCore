@@ -188,6 +188,47 @@ def test_invalid_round_dropped():
     assert [n.round for n in plan.nodes] == [0, 0, 0, 0, 0]
 
 
+# --- 结构化挂起 2a (checkpoint_after, 计划期挂起标记) -------------------------------
+
+
+def test_checkpoint_after_parsed_onto_spec():
+    # 计划期挂起标记: 宽松读取 (bool(...)), WaveScheduler 据此在节点后波间挂起.
+    plan, _ = build_run_plan(
+        [
+            {"role": "A", "task": "a", "checkpoint_after": True},
+            {"role": "B", "task": "b"},
+        ],
+        id_prefix="t",
+    )
+    # An untagged node defaults False, so a plan with no checkpoint is byte-identical.
+    assert plan.nodes[0].checkpoint_after is True
+    assert plan.nodes[1].checkpoint_after is False
+
+
+def test_checkpoint_after_parsed_on_dag_step():
+    tasks = [
+        {"id": "s1", "role": "A", "task": "a", "checkpoint_after": True},
+        {"id": "s2", "role": "B", "task": "b", "depends_on": ["s1"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs == []
+    assert plan.by_id("t_s1").checkpoint_after is True
+    assert plan.by_id("t_s2").checkpoint_after is False
+
+
+def test_checkpoint_after_truthy_coerced():
+    # Lenient like the other flags: any falsy value (missing / 0 / "") → False.
+    plan, _ = build_run_plan(
+        [
+            {"role": "A", "task": "a", "checkpoint_after": 0},
+            {"role": "B", "task": "b", "checkpoint_after": ""},
+        ],
+        id_prefix="t",
+    )
+    assert plan.nodes[0].checkpoint_after is False
+    assert plan.nodes[1].checkpoint_after is False
+
+
 def test_dag_invalid_on_failure_falls_back_to_degrade():
     tasks = [
         {"id": "s1", "role": "A", "task": "a"},

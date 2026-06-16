@@ -7,8 +7,9 @@ import {
   useFolders,
   useUpdateFolder,
 } from "@/hooks/useFolders";
+import { startNewConversation } from "@/lib/newConversation";
 import type { FolderMeta } from "@/services/folders";
-import { type Conversation, useConversationStore } from "@/stores/conversation";
+import type { Conversation } from "@/stores/conversation";
 import { UNGROUPED_KEY, useFoldersStore } from "@/stores/folders";
 import {
   Check,
@@ -42,13 +43,9 @@ function byRecency(a: Conversation, b: Conversation): number {
  */
 export function ConversationsPage() {
   const conversations = useConversations();
-  const switchConversation = useConversationStore((s) => s.switchConversation);
   const folders = useFolders();
   const createFolderMutation = useCreateFolder();
   const setPendingRename = useFoldersStore((s) => s.setPendingRename);
-  const setPendingNewChatFolder = useFoldersStore(
-    (s) => s.setPendingNewChatFolder,
-  );
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -121,9 +118,7 @@ export function ConversationsPage() {
       folderIds.has(selected)
         ? selected
         : null;
-    setPendingNewChatFolder(folderTarget);
-    switchConversation(null);
-    navigate("/");
+    startNewConversation(navigate, folderTarget);
   };
 
   const handleNewFolder = async () => {
@@ -282,8 +277,7 @@ function FilterRow({
 }
 
 /** A real-folder filter row: select to filter, hover for rename/delete. Deleting
- * a folder unbinds its conversations (they drop into 未分组), mirroring the old
- * sidebar FolderGroup contract. */
+ * a folder unbinds its conversations (they drop into 未分组). */
 function FolderFilterRow({
   folder,
   count,

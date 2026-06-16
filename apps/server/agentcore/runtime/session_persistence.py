@@ -12,6 +12,7 @@ in-memory behaviour (a miss → 回落甲) rather than breaking the user's turn.
 
 from __future__ import annotations
 
+from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import RunSessionRepository
@@ -22,11 +23,20 @@ logger = get_logger(__name__)
 
 
 async def save_run_session(conversation_id: str, session: RunSession) -> None:
-    """Write-through persist one recoverable session (best-effort)."""
+    """Write-through persist one recoverable session (best-effort).
+
+    Stamps the ambient turn ``trace_id`` (this runs inside the pipeline's trace
+    scope, so contextvars carry it) so the persisted worker links back to its
+    originating interaction's logs.
+    """
     row = session_to_row(session)
     try:
         async with async_session_factory() as db:
-            await RunSessionRepository(db).upsert(conversation_id=conversation_id, **row)
+            await RunSessionRepository(db).upsert(
+                conversation_id=conversation_id,
+                trace_id=get_log_value("trace_id") or None,
+                **row,
+            )
     except Exception as e:  # noqa: BLE001 — persistence must never break the turn
         logger.warning("session.persist_failed", run_id=session.run_id, error=str(e))
 

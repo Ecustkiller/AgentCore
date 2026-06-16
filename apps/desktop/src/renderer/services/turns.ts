@@ -149,6 +149,13 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   // (no-op on the first send, where the user bubble is already last).
   store.truncateAfter(optimisticUserId, conversationId);
 
+  // Open the assistant bubble now (即时反馈), before the POST even resolves —
+  // mirrors runRegenerate. This flips `isGenerating` on immediately so the
+  // composer shows the stop button and the bubble shows a "正在思考…" indicator
+  // during the gap before the first SSE event, instead of looking like nothing
+  // happened. `message_start` reuses this same bubble (ensureStreamingAssistant).
+  store.createAssistantMessage(conversationId);
+
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
   try {

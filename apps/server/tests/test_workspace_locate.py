@@ -7,6 +7,8 @@ nothing is created under the real ./data tree.
 
 from pathlib import Path
 
+import pytest
+
 from agentcore.config import settings
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import (
@@ -16,11 +18,15 @@ from agentcore.runtime.interaction import (
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.locate import (
     LocalBinding,
+    WorkspaceId,
     build_local_workspace,
     build_server_workspace,
     build_workspace,
+    format_workspace_id,
+    parse_workspace_id,
     resolve_local_binding,
     resolve_workspace_root,
+    workspace_has_entries,
     workspace_storage_key,
 )
 from agentcore.workspace.server import ServerWorkspace
@@ -196,3 +202,57 @@ def test_storage_key_mirrors_on_disk_root(tmp_path: Path, monkeypatch):
     key = workspace_storage_key(user_id="u1", folder_id="f1", conversation_id="c1")
     # The key is exactly the workspace path relative to data_dir.
     assert root == Path(settings.data_dir) / key
+
+
+# --- public workspace id (the /v1/workspaces addressing token, 文件中枢统一 Step 1) ---
+
+
+def test_format_workspace_id_folder_space():
+    assert format_workspace_id(folder_id="f1", conversation_id="c1") == "folder:f1"
+
+
+def test_format_workspace_id_ungrouped_space():
+    assert format_workspace_id(folder_id=None, conversation_id="c1") == "conv:c1"
+
+
+def test_parse_workspace_id_round_trips_both_kinds():
+    assert parse_workspace_id("folder:f1") == WorkspaceId(kind="folder", ident="f1")
+    assert parse_workspace_id("conv:c1") == WorkspaceId(kind="conv", ident="c1")
+    # format → parse round-trips to the originating ident.
+    for folder_id, conv_id in (("f9", "c9"), (None, "c9")):
+        parsed = parse_workspace_id(
+            format_workspace_id(folder_id=folder_id, conversation_id=conv_id)
+        )
+        assert parsed.ident == (folder_id or conv_id)
+
+
+def test_parse_workspace_id_accepts_uuid_idents():
+    """UUIDs (which contain '-') survive: the ':' separator never collides."""
+    wid = "11111111-2222-3333-4444-555555555555"
+    assert parse_workspace_id(f"folder:{wid}").ident == wid
+
+
+def test_parse_workspace_id_rejects_malformed():
+    for bad in ("", "folder", "folder:", ":f1", "team:f1", "folder:a/b", "conv/c1"):
+        with pytest.raises(ValueError, match="非法工作区"):
+            parse_workspace_id(bad)
+
+
+def test_workspace_has_entries_false_when_missing(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    # Never resolved → no dir on disk → False, and crucially does not create it.
+    assert not workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c1")
+    assert not (tmp_path / "workspaces" / "u1" / "conv" / "c1").exists()
+
+
+def test_workspace_has_entries_false_when_empty(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    assert not workspace_has_entries(user_id="u1", folder_id="f1", conversation_id="c1")
+
+
+def test_workspace_has_entries_true_when_non_empty(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    (root / "note.txt").write_text("hi", encoding="utf-8")
+    assert workspace_has_entries(user_id="u1", folder_id="f1", conversation_id="c1")

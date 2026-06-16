@@ -11,6 +11,7 @@ import {
   Plug,
   Presentation,
   Table2,
+  Waypoints,
   Workflow,
   Wrench,
 } from "lucide-react";
@@ -110,6 +111,19 @@ const GROUPS: ToolboxGroup[] = [
         title: "工作流",
         description: "编排工具与 Agent 成流程",
         icon: Workflow,
+      },
+    ],
+  },
+  {
+    id: "platform",
+    label: "了解平台",
+    entries: [
+      {
+        id: "mechanism",
+        title: "团队运行机制",
+        description: "看懂 AI 团队如何分工、协作、跑完一个任务",
+        icon: Waypoints,
+        to: "/toolbox/mechanism",
       },
     ],
   },

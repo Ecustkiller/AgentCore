@@ -32,6 +32,8 @@ def main() -> None:
     turn_completes: list[dict] = []
     tool_calls: list[dict] = []
     round_ends: list[dict] = []
+    llm_calls: list[dict] = []
+    cost_records: list[dict] = []
     total = 0
     bad_lines = 0
 
@@ -56,6 +58,10 @@ def main() -> None:
                 tool_calls.append(obj)
             elif event == "react.round_end":
                 round_ends.append(obj)
+            elif event == "llm.call":
+                llm_calls.append(obj)
+            elif event == "cost.recorded":
+                cost_records.append(obj)
 
     print(f"\n{'=' * 60}")
     print(f"  Log Stats  |  {total:,} events  |  {bad_lines} bad lines")
@@ -96,6 +102,41 @@ def main() -> None:
         print(f"  Tools/round    avg={_avg(tools_per):.1f}  max={max(tools_per)}  ({spinning} rounds ≥3 tools)")
         print(f"  Reasoning tok  avg={_avg(rtok):.0f}/round   Output tok avg={_avg(otok):.0f}/round")
 
+    if llm_calls:
+        print(f"\n── LLM Calls (llm.call: {len(llm_calls)}) ──")
+        lat = [c["latency_ms"] for c in llm_calls if c.get("latency_ms")]
+        in_tok = [c.get("input_tokens", 0) for c in llm_calls]
+        out_tok = [c.get("output_tokens", 0) for c in llm_calls]
+        rea_tok = [c.get("reasoning_tokens", 0) for c in llm_calls]
+        in_sum = sum(in_tok)
+        hit_sum = sum(c.get("cache_hit_tokens", 0) for c in llm_calls)
+        if lat:
+            print(f"  Latency    avg={_avg(lat):.0f}ms  max={max(lat)}ms")
+        print(
+            f"  Tokens     in avg={_avg(in_tok):.0f}  out avg={_avg(out_tok):.0f}"
+            f"  reasoning avg={_avg(rea_tok):.0f}"
+        )
+        if in_sum:
+            print(f"  Cache      {hit_sum / in_sum * 100:.1f}% of input tokens hit cache")
+        # finish_reason mix — `length`/`content_filter` are quality red flags
+        # (truncated / filtered answers), worth surfacing even at low counts.
+        fr = Counter(c.get("finish_reason", "?") for c in llm_calls)
+        print(f"  Finish     {'  '.join(f'{k}×{v}' for k, v in fr.most_common())}")
+        # By scenario · model: which scenario (chat / agent.* / memory / title) on
+        # which model is slow / token-heavy — the per-call attribution turns/rounds
+        # can't give (a turn aggregates many calls across models).
+        by_sm: dict[tuple[str, str], list[dict]] = defaultdict(list)
+        for c in llm_calls:
+            by_sm[(c.get("scenario", "?"), c.get("model", "?"))].append(c)
+        print("  By scenario · model:")
+        for (scenario, model), calls in sorted(by_sm.items(), key=lambda kv: -len(kv[1])):
+            c_lat = [x["latency_ms"] for x in calls if x.get("latency_ms")]
+            dur = f"avg {_avg(c_lat):.0f}ms" if c_lat else "—"
+            c_in = _avg([x.get("input_tokens", 0) for x in calls])
+            c_out = _avg([x.get("output_tokens", 0) for x in calls])
+            label = f"{scenario} · {model}"
+            print(f"    {label:<34} {len(calls):>3} calls  {dur:<11} in {c_in:.0f} out {c_out:.0f}")
+
     if tool_calls:
         print(f"\n── Tool Calls ({len(tool_calls)} total) ──")
         names = Counter(t.get("tool", "?") for t in tool_calls)
@@ -131,6 +172,21 @@ def main() -> None:
                     f"{n}×{cnt}" for n, cnt in Counter(t.get("tool", "?") for t in calls).most_common(4)
                 )
                 print(f"    {label:<16} {meta:<3} {len(calls):>3} calls  {ok_pct:5.1f}% ok  {dur:<11} {top}")
+
+    if cost_records:
+        print(f"\n── Cost (cost.recorded: {len(cost_records)} turns) ──")
+        # Money is integer nano-USD (the storage unit); show the raw total + a
+        # rounded USD view. Per-turn avg is the headline "what does a turn cost".
+        total_nano = sum(int(c.get("total_nano", 0) or 0) for c in cost_records)
+        total_usd = total_nano / 1e9
+        print(f"  Total      ${total_usd:.6f}  ({total_nano:,} nano-USD)")
+        print(f"  Per turn   avg ${total_usd / len(cost_records):.6f}")
+        model_mix: Counter[str] = Counter()
+        for c in cost_records:
+            for m in c.get("models") or []:
+                model_mix[m] += 1
+        if model_mix:
+            print(f"  Models     {'  '.join(f'{m}×{n}' for m, n in model_mix.most_common())}")
 
     # Convergence governance signals (engine.py): loops nudged / force-finalized /
     # round-budget exhausted — spikes here mean the AI is spinning.
