@@ -8,9 +8,11 @@ import {
   isRetriableStreamError,
   streamErrorAction,
 } from "@/lib/errors";
+import type { PlanReviewUserDecision } from "@/services/planReview";
 import {
   type OutgoingAttachment,
   regenerateConversation,
+  resumeConversation,
   streamConversation,
 } from "@/services/streamConversation";
 import { useApprovalStore } from "@/stores/approvals";
@@ -20,6 +22,7 @@ import {
   getRuntime,
   useConversationStore,
 } from "@/stores/conversation";
+import { usePausedTurnStore } from "@/stores/pausedTurns";
 
 /** The user's explicit stop (abort button) — never surfaced as an error. */
 function isAbort(err: unknown): boolean {
@@ -88,6 +91,66 @@ export async function runRegenerate(
     if (msg) {
       const retry = isRetriableStreamError(err)
         ? () => void runRegenerate(userMessageId, content)
+        : null;
+      s.setError(msg, retry, conversationId, streamErrorAction(err));
+    }
+  } finally {
+    useConversationStore.getState().setAbort(null, conversationId);
+  }
+}
+
+/**
+ * Continue a durably-paused turn (结构化挂起 2b resume) and stream the continuation.
+ *
+ * The turn paused at a plan_review / ask_user checkpoint and was persisted, then
+ * lost its live stream (disconnect / restart). The user's decision (continue /
+ * adjust / stop) — plus any ask_user option `selected` — is POSTed to the resume
+ * endpoint, which claims the frame and drives the rest of the turn on a fresh SSE.
+ * No new user message — the paused turn's user bubble is already persisted; we just
+ * open a fresh assistant bubble for the reply (so this turn's run/tool frames have a
+ * message to attach to) and stream into it. The resume card is dropped optimistically
+ * (the server claim is atomic, so a stale / second attempt simply 404s); a transport
+ * failure raises the usual retry banner.
+ */
+export async function runResume(
+  messageId: string,
+  decision: PlanReviewUserDecision,
+  note: string,
+  selected: string[] = [],
+): Promise<void> {
+  const store = useConversationStore.getState();
+  const conversationId = store.currentConversationId;
+  if (!conversationId || getRuntime(conversationId).isGenerating) return;
+
+  store.clearError(conversationId);
+  bumpConversationCache(conversationId);
+  usePausedTurnStore.getState().remove(messageId);
+  store.createAssistantMessage(conversationId);
+
+  const ac = new AbortController();
+  store.setAbort(ac, conversationId);
+  try {
+    await resumeConversation({
+      conversationId,
+      messageId,
+      decision,
+      note,
+      selected,
+      signal: ac.signal,
+    });
+  } catch (err) {
+    if (isAbort(err)) return;
+    const s = useConversationStore.getState();
+    if (getRuntime(conversationId).isGenerating) {
+      s.finalizeLastMessage(conversationId);
+    }
+    // A failed turn never delivers `approval_resolved`; drop this conversation's
+    // paused prompt (other conversations keep theirs).
+    useApprovalStore.getState().clear(conversationId);
+    const msg = describeStreamError(err);
+    if (msg) {
+      const retry = isRetriableStreamError(err)
+        ? () => void runResume(messageId, decision, note, selected)
         : null;
       s.setError(msg, retry, conversationId, streamErrorAction(err));
     }

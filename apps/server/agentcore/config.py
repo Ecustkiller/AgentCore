@@ -124,6 +124,18 @@ class Settings(BaseSettings):
     paused_turn_sweep_interval_seconds: int = 6 * 3600  # every 6h
     paused_turn_sweep_batch_limit: int = 200
 
+    # Salvage a disconnected/stopped turn's already-completed worker output (断线别白干).
+    # When a turn is cancelled mid-flight (client disconnect / user stop / pending
+    # approval) the in-flight coroutine — and its delegated team — is torn down, so a
+    # turn that never reached its reply used to vanish, discarding workers that had
+    # ALREADY finished. When enabled, the cancel path persists those finished members'
+    # output (the execution journal) as one "incomplete" assistant message so the work
+    # is kept (zero replay risk — only what already happened is saved, no side-effect
+    # tool re-runs). A turn sitting at a DURABLE plan_review / ask_user pause is left to
+    # the resume path instead (no double handling); approval pauses — not journaled, not
+    # resumable — are exactly what this covers. Best-effort, off the user-visible path.
+    incomplete_turn_persist_enabled: bool = True
+
     # Recoverable worker roster persistence (留人 跨进程落盘, 乙 热修 P3). The roster
     # lives in-process (runtime/sessions.py); when enabled, each finished worker is
     # also written through to the run_sessions table so a 定向唤回 (revise) still hits

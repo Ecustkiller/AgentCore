@@ -12,7 +12,9 @@ import pytest
 
 from agentcore.runtime.citations import annotate_tool_citations, merge_citations
 from agentcore.tools.builtin.web import _net
+from agentcore.tools.builtin.web import read_url as read_url_mod
 from agentcore.tools.builtin.web import search as search_mod
+from agentcore.tools.builtin.web import search_backend as search_backend_mod
 from agentcore.tools.builtin.web._net import (
     EgressError,
     circuit_remaining,
@@ -24,12 +26,18 @@ from agentcore.tools.builtin.web._net import (
 from agentcore.tools.builtin.web.read_url import (
     ReadUrlTool,
     _classify_url,
+    _extract_page,
     _extract_text,
     _ip_is_safe,
+    _make_snippet,
     _URLBlock,
 )
 from agentcore.tools.builtin.web.search import WebSearchTool
-from agentcore.tools.builtin.web.search_backend import SearchResult, _parse_results
+from agentcore.tools.builtin.web.search_backend import (
+    SearchResult,
+    SearXNGBackend,
+    _parse_results,
+)
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -172,6 +180,107 @@ def test_extract_text_truncates():
     assert len(text) == 100
 
 
+def test_extract_text_drops_nav_header_footer_chrome():
+    html = (
+        "<body><nav>首页 登录 注册</nav><header>站点横幅</header>"
+        "<p>真正的正文段落</p>"
+        "<footer>版权所有 联系我们</footer><aside>相关推荐</aside></body>"
+    )
+    _title, text = _extract_text(html, max_chars=1000)
+    assert "真正的正文段落" in text
+    assert "登录" not in text
+    assert "站点横幅" not in text
+    assert "版权所有" not in text
+    assert "相关推荐" not in text
+
+
+# --- read_url: meta description seeds citation snippet ---
+
+
+def test_extract_page_reads_meta_description():
+    html = (
+        "<html><head><title>T</title>"
+        '<meta name="description" content="  Page summary here.  ">'
+        "</head><body><p>Body lead</p></body></html>"
+    )
+    title, text, description = _extract_page(html, max_chars=1000)
+    assert title == "T"
+    assert "Body lead" in text
+    assert description == "Page summary here."
+
+
+def test_extract_page_reads_og_and_twitter_description():
+    og = '<meta property="og:description" content="OG summary">'
+    assert _extract_page(f"<head>{og}</head>", 1000)[2] == "OG summary"
+    tw = '<meta name="twitter:description" content="TW summary">'
+    assert _extract_page(f"<head>{tw}</head>", 1000)[2] == "TW summary"
+
+
+def test_extract_page_no_description_is_empty():
+    html = "<html><head><title>T</title></head><body><p>x</p></body></html>"
+    assert _extract_page(html, 1000)[2] == ""
+
+
+def test_make_snippet_prefers_description_over_text():
+    assert _make_snippet("  the meta desc ", "body text lead") == "the meta desc"
+
+
+def test_make_snippet_falls_back_to_text_lead():
+    assert _make_snippet("", "  body  lead   text ") == "body lead text"
+
+
+def test_make_snippet_collapses_whitespace_and_caps_length():
+    out = _make_snippet("word " * 100, "")  # 500 chars before collapse
+    assert len(out) <= 200
+    assert "  " not in out  # whitespace collapsed to single spaces
+
+
+async def test_read_url_emits_citation_snippet_from_description(monkeypatch):
+    html = (
+        "<html><head><title>深圳天气</title>"
+        '<meta name="description" content="今天多云转晴，气温 20-28 度。">'
+        "</head><body><nav>导航</nav><p>正文内容</p></body></html>"
+    )
+
+    async def _allow(_url: str):
+        return None
+
+    async def _fake_request(_client, _method, url, **_kwargs):
+        return httpx.Response(200, html=html, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _fake_request)
+
+    result = await ReadUrlTool().execute({"url": "https://weather.example.com/sz"}, _ctx())
+
+    assert result.success is True
+    assert result.citations is not None
+    cite = result.citations[0]
+    assert cite["url"] == "https://weather.example.com/sz"
+    assert cite["title"] == "深圳天气"
+    assert cite["site"] == "weather.example.com"
+    assert cite["snippet"] == "今天多云转晴，气温 20-28 度。"
+
+
+async def test_read_url_snippet_falls_back_to_body_when_no_meta(monkeypatch):
+    html = "<html><head><title>无摘要页</title></head><body><p>正文第一段</p></body></html>"
+
+    async def _allow(_url: str):
+        return None
+
+    async def _fake_request(_client, _method, url, **_kwargs):
+        return httpx.Response(200, html=html, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _fake_request)
+
+    result = await ReadUrlTool().execute({"url": "https://x.example.com/a"}, _ctx())
+
+    assert result.success is True
+    assert result.citations is not None
+    assert result.citations[0]["snippet"] == "正文第一段"
+
+
 # --- tool execute: offline rejection paths ---
 
 
@@ -191,6 +300,59 @@ async def test_web_search_requires_query():
     result = await WebSearchTool().execute({"query": "  "}, _ctx())
     assert result.success is False
     assert "query" in result.error
+
+
+async def test_searxng_backend_trips_circuit_after_transport_failures(monkeypatch):
+    host = "localhost"
+    _net._states.pop(host, None)
+
+    class _FailClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, *args, **kwargs):
+            raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FailClient())
+
+    backend = SearXNGBackend("http://localhost:18888")
+    for _ in range(_net.WEB_HOST_FAIL_THRESHOLD):
+        with pytest.raises(httpx.ConnectError):
+            await backend.search("q")
+
+    with pytest.raises(EgressError, match="熔断"):
+        await backend.search("q")
+
+
+async def test_web_search_fast_fails_when_circuit_open(monkeypatch):
+    host = "localhost"
+    _net._states.pop(host, None)
+
+    class _FailClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, *args, **kwargs):
+            raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FailClient())
+    monkeypatch.setattr(search_backend_mod, "_backend", None)
+
+    tool = WebSearchTool()
+    for _ in range(_net.WEB_HOST_FAIL_THRESHOLD):
+        result = await tool.execute({"query": "test"}, _ctx())
+        assert result.success is False
+
+    result = await tool.execute({"query": "test"}, _ctx())
+    assert result.success is False
+    assert "熔断" in result.error
+    assert result.duration_ms < 500
 
 
 # --- ToolResult.output_limit ---

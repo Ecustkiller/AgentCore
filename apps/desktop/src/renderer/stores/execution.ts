@@ -66,7 +66,7 @@ export const MODEL_TIER_META: Record<
   },
 };
 
-/** Display labels for a 辩论/审查 side (前端UX目标态 §四) — the single source the
+/** Display labels for a 辩论/审查 side (前端UX设计.md §四) — the single source the
  * graph node badge and the strip title share, so正/反 read consistently. */
 export const STANCE_META: Record<Stance, { label: string; short: string }> = {
   pro: { label: "正方", short: "正" },
@@ -166,7 +166,7 @@ export interface RunNode {
   /** This run's priced cost in nano-USD (lights up one payroll row, §7.3B);
    * null until completed / unmetered. All-zero `total` renders as「—」(§7.5). */
   cost: CostBreakdown | null;
-  /** 辩论/审查 呈现标记 (前端UX目标态 §四, display-only): this run's side in an
+  /** 辩论/审查 呈现标记 (前端UX设计.md §四, display-only): this run's side in an
    * opposing batch (`pro`/`con`), the `group` it is paired in, and its `round`
    * (真·多轮辩论 turn, 1-based; 0 = not multi-round); null/0 for ordinary parallel/
    * DAG work. The only client signal that differentiates a debate from普通并行 — the
@@ -228,7 +228,7 @@ export interface ExecutionPlan {
     /** Declared node kind (default `agent`). `captain` marks the CEO root 汇聚点;
      * also re-confirmed by the run_started frame. */
     kind?: RunKind;
-    /** 辩论/审查 呈现标记 (前端UX目标态 §四, display-only): opposing-side tag,
+    /** 辩论/审查 呈现标记 (前端UX设计.md §四, display-only): opposing-side tag,
      * pairing group, and 真·多轮辩论 turn (`round`). Declared at plan time so the
      * strip can show a「辩论」title and the graph can band正/反 + 逐轮 from the plan
      * alone, before any run frame folds in. */
@@ -603,7 +603,7 @@ export function elapsedMs(frames: RunFrame[]): number {
 }
 
 /**
- * Whether a turn is a 辩论/审查 (前端UX目标态 §四): any run carries a stance tag.
+ * Whether a turn is a 辩论/审查 (前端UX设计.md §四): any run carries a stance tag.
  *
  * This is the single client-side signal that differentiates a debate from an
  * ordinary parallel batch — the DAG shape and SSE are identical (守住「形状是数据
@@ -614,7 +614,7 @@ export function isDebate(execution: Execution): boolean {
 }
 
 /**
- * The debate roster split by side (前端UX目标态 §四), in plan order. Empty lists
+ * The debate roster split by side (前端UX设计.md §四), in plan order. Empty lists
  * for a non-debate turn. Used by the strip title now and the「左右并排对比」next.
  */
 export function debateSides(execution: Execution): {
@@ -627,7 +627,7 @@ export function debateSides(execution: Execution): {
   };
 }
 
-/** One round's 正/反 within a comparison group (真·多轮辩论, 前端UX目标态 §四).
+/** One round's 正/反 within a comparison group (真·多轮辩论, 前端UX设计.md §四).
  * `round` is the 1-based turn; 0 means the group carries no round tags (即单轮辩论). */
 export interface DebateRound {
   round: number;
@@ -645,7 +645,7 @@ export interface DebateGroup {
 }
 
 /**
- * The debate split into comparison groups (前端UX目标态 §四), one per `group` tag
+ * The debate split into comparison groups (前端UX设计.md §四), one per `group` tag
  * (an untagged stance falls into the default `""` group), in first-seen order.
  * Powers the「左右并排对比」card: a turn can hold several opposing pairs (multi-
  * dimension review), each rendered as its own 正方 vs 反方 row. Empty for非辩论.

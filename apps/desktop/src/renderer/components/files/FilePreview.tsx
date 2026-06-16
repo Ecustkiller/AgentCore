@@ -1,10 +1,8 @@
 import { FilePreviewBody } from "@/components/files/FilePreviewBody";
-import type { FilePreviewResult } from "@/lib/fileSource";
-import { createLocalRootSource } from "@/services/sources/localRootSource";
-import { useFilesStore } from "@/stores/files";
+import type { FilePreviewResult, FileSource } from "@/lib/fileSource";
 import { AlertCircle, FileText, Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type LoadState =
   | { status: "idle" }
@@ -12,26 +10,31 @@ type LoadState =
   | { status: "ok"; result: FilePreviewResult }
   | { status: "error"; reason: string };
 
-export function FilePreview() {
-  const selected = useFilesStore((s) => s.selected);
-  // Memoize the source per selection so the read effect doesn't re-fire on every
-  // unrelated re-render (a fresh closure each render would loop the fetch).
-  const source = useMemo(
-    () =>
-      selected ? createLocalRootSource(selected.rootId, selected.name) : null,
-    [selected],
-  );
+/**
+ * Source-agnostic file preview pane for the file hub: reads the selected file
+ * through whichever {@link FileSource} the active project exposes (cloud REST or
+ * local IPC) and renders it via the shared {@link FilePreviewBody}. The parent
+ * memoizes `source` per project and `file` per click so this read effect fires
+ * only on a real selection change.
+ */
+export function FilePreview({
+  source,
+  file,
+}: {
+  source: FileSource | null;
+  file: { path: string; name: string } | null;
+}) {
   const [state, setState] = useState<LoadState>({ status: "idle" });
 
   useEffect(() => {
-    if (!selected || !source) {
+    if (!source || !file) {
       setState({ status: "idle" });
       return;
     }
     let cancelled = false;
     setState({ status: "loading" });
     source
-      .read(selected.relPath)
+      .read(file.path)
       .then((result) => {
         if (!cancelled) setState({ status: "ok", result });
       })
@@ -46,9 +49,9 @@ export function FilePreview() {
     return () => {
       cancelled = true;
     };
-  }, [selected, source]);
+  }, [source, file]);
 
-  if (!selected) {
+  if (!source || !file) {
     return (
       <Centered>
         <FileText size={28} className="text-muted-foreground/40" />
@@ -61,7 +64,7 @@ export function FilePreview() {
     <div className="flex h-full w-full flex-col">
       <header className="flex h-11 shrink-0 items-center border-b border-border px-4">
         <span className="truncate text-sm font-medium text-foreground">
-          {selected.name}
+          {file.name}
         </span>
       </header>
       <div className="min-h-0 flex-1 overflow-auto">
@@ -71,7 +74,7 @@ export function FilePreview() {
           </Centered>
         )}
         {state.status === "ok" && (
-          <FilePreviewBody result={state.result} name={selected.name} />
+          <FilePreviewBody result={state.result} name={file.name} />
         )}
         {state.status === "error" && (
           <Centered>

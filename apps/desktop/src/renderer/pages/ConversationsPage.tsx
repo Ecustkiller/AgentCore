@@ -1,6 +1,11 @@
 import { ConversationItem } from "@/components/sidebar/ConversationItem";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { useConversations } from "@/hooks/useConversations";
+import {
+  useArchivedConversations,
+  useConversations,
+  useDeleteConversation,
+  useUnarchiveConversation,
+} from "@/hooks/useConversations";
 import {
   useCreateFolder,
   useDeleteFolder,
@@ -8,12 +13,17 @@ import {
   useUpdateFolder,
 } from "@/hooks/useFolders";
 import { startNewConversation } from "@/lib/newConversation";
+import { notifyError } from "@/lib/toast";
 import type { FolderMeta } from "@/services/folders";
-import type { Conversation } from "@/stores/conversation";
+import { type Conversation, useConversationStore } from "@/stores/conversation";
 import { UNGROUPED_KEY, useFoldersStore } from "@/stores/folders";
 import {
+  Archive,
+  ArchiveRestore,
+  ArrowRight,
   Check,
   Folder as FolderIcon,
+  FolderOpen,
   FolderPlus,
   HardDrive,
   Inbox,
@@ -29,8 +39,15 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 /** Synthetic left-pane filter key for「全部对话」(not a real folder). */
 const ALL_KEY = "__all__";
+/** Synthetic left-pane filter key for the「已归档」view (归档对话). */
+const ARCHIVED_KEY = "__archived__";
 
-function byRecency(a: Conversation, b: Conversation): number {
+/** Stable empty list so the archived view keeps a constant reference until data. */
+const EMPTY_CONVERSATIONS: Conversation[] = [];
+
+function byPinnedThenRecency(a: Conversation, b: Conversation): number {
+  // Pinned float to the top (置顶对话); within each group, newest activity first.
+  if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
   return (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0);
 }
 
@@ -52,6 +69,13 @@ export function ConversationsPage() {
   const [selected, setSelected] = useState<string>(ALL_KEY);
   const [query, setQuery] = useState("");
   const [flashId, setFlashId] = useState<string | null>(null);
+
+  // The「已归档」list is a separate on-demand query (the live grouped cache excludes
+  // archived rows). Fetched on this page so its count shows in the left filter and
+  // the view is instant when opened (归档对话).
+  const isArchivedView = selected === ARCHIVED_KEY;
+  const archivedQuery = useArchivedConversations(true);
+  const archived = archivedQuery.data ?? EMPTY_CONVERSATIONS;
 
   // A folder hit from global search (CommandPalette) jumps here, passing the
   // folder id via navigation state. location.key is unique per navigation, so
@@ -82,32 +106,42 @@ export function ConversationsPage() {
   }, [conversations, folderIds]);
 
   // The selected folder may be deleted (here or by a parallel client); fall back
-  // to 全部对话 so the right pane never points at a vanished folder.
+  // to 全部对话 so the right pane never points at a vanished folder. The synthetic
+  // keys (全部 / 未分组 / 已归档) are not folders, so they're exempt.
   useEffect(() => {
-    if (selected === ALL_KEY || selected === UNGROUPED_KEY) return;
+    if (
+      selected === ALL_KEY ||
+      selected === UNGROUPED_KEY ||
+      selected === ARCHIVED_KEY
+    )
+      return;
     if (!folderIds.has(selected)) setSelected(ALL_KEY);
   }, [folderIds, selected]);
 
   const list = useMemo(() => {
-    const base = conversations.filter((c) => {
-      if (selected === ALL_KEY) return true;
-      if (selected === UNGROUPED_KEY)
-        return !c.folderId || !folderIds.has(c.folderId);
-      return c.folderId === selected;
-    });
+    const base = isArchivedView
+      ? archived
+      : conversations.filter((c) => {
+          if (selected === ALL_KEY) return true;
+          if (selected === UNGROUPED_KEY)
+            return !c.folderId || !folderIds.has(c.folderId);
+          return c.folderId === selected;
+        });
     const q = query.trim().toLowerCase();
     const filtered = q
       ? base.filter((c) => c.title.toLowerCase().includes(q))
       : base;
-    return [...filtered].sort(byRecency);
-  }, [conversations, selected, query, folderIds]);
+    return [...filtered].sort(byPinnedThenRecency);
+  }, [conversations, archived, isArchivedView, selected, query, folderIds]);
 
   const activeName =
     selected === ALL_KEY
       ? "全部对话"
       : selected === UNGROUPED_KEY
         ? "未分组"
-        : (folders.find((f) => f.id === selected)?.name ?? "全部对话");
+        : selected === ARCHIVED_KEY
+          ? "已归档"
+          : (folders.find((f) => f.id === selected)?.name ?? "全部对话");
 
   const handleNewChat = () => {
     // A real selected folder pre-files the draft (MessageInput consumes the
@@ -160,6 +194,13 @@ export function ConversationsPage() {
                 count={counts.ungrouped}
                 selected={selected === UNGROUPED_KEY}
                 onSelect={() => setSelected(UNGROUPED_KEY)}
+              />
+              <FilterRow
+                icon={<Archive size={16} />}
+                label="已归档"
+                count={archived.length}
+                selected={selected === ARCHIVED_KEY}
+                onSelect={() => setSelected(ARCHIVED_KEY)}
               />
               {folders.length > 0 && (
                 <div className="px-2 pt-3 pb-1 text-xs font-medium text-muted-foreground/70">
@@ -215,6 +256,32 @@ export function ConversationsPage() {
               </button>
             </div>
 
+            {/* 文件夹即工作区: a selected folder is a project, so offer to open its
+                workspace overview (files + chats) — the "browse a project's files
+                without entering a chat" entry. */}
+            {selected !== ALL_KEY &&
+              selected !== UNGROUPED_KEY &&
+              selected !== ARCHIVED_KEY &&
+              folderIds.has(selected) && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/folders/${selected}`)}
+                  className="mt-3 flex w-full shrink-0 items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-left text-sm text-foreground hover:border-foreground/30 hover:bg-accent/60"
+                >
+                  <FolderOpen
+                    size={16}
+                    className="shrink-0 text-muted-foreground"
+                  />
+                  <span className="min-w-0 flex-1 truncate">
+                    打开「{activeName}」工作区 · 浏览文件
+                  </span>
+                  <ArrowRight
+                    size={15}
+                    className="shrink-0 text-muted-foreground"
+                  />
+                </button>
+              )}
+
             <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
               {list.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
@@ -225,16 +292,22 @@ export function ConversationsPage() {
                   <p className="text-sm text-muted-foreground">
                     {query.trim()
                       ? "未找到匹配的对话"
-                      : conversations.length === 0
-                        ? "暂无对话"
-                        : "此文件夹暂无对话"}
+                      : isArchivedView
+                        ? "暂无已归档对话"
+                        : conversations.length === 0
+                          ? "暂无对话"
+                          : "此文件夹暂无对话"}
                   </p>
                 </div>
               ) : (
                 <div className="space-y-0.5">
-                  {list.map((c) => (
-                    <ConversationItem key={c.id} conversation={c} />
-                  ))}
+                  {list.map((c) =>
+                    isArchivedView ? (
+                      <ArchivedConversationRow key={c.id} conversation={c} />
+                    ) : (
+                      <ConversationItem key={c.id} conversation={c} />
+                    ),
+                  )}
                 </div>
               )}
             </div>
@@ -297,6 +370,7 @@ function FolderFilterRow({
   const deleteFolderMutation = useDeleteFolder();
   const pendingRenameId = useFoldersStore((s) => s.pendingRenameId);
   const setPendingRename = useFoldersStore((s) => s.setPendingRename);
+  const navigate = useNavigate();
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(folder.name);
@@ -425,6 +499,16 @@ function FolderFilterRow({
         </span>
       ) : hovered ? (
         <span className="flex shrink-0 items-center gap-0.5">
+          <SimpleTooltip label="打开工作区">
+            <button
+              type="button"
+              aria-label="打开文件夹工作区"
+              onClick={() => navigate(`/folders/${folder.id}`)}
+              className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
+            >
+              <FolderOpen size={13} />
+            </button>
+          </SimpleTooltip>
           <SimpleTooltip label="重命名">
             <button
               type="button"
@@ -452,6 +536,119 @@ function FolderFilterRow({
       ) : (
         <span className="shrink-0 text-xs text-muted-foreground/60">
           {count}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One row in the「已归档」view (归档对话). Unlike the live-list {@link ConversationItem}
+ * (folder moves + pin + archive), an archived conversation is already out of the
+ * sidebar, so its only actions are 取消归档 (restore to the live list) and 删除
+ * (permanent). Clicking the row still opens the conversation to read it.
+ */
+function ArchivedConversationRow({
+  conversation,
+}: {
+  conversation: Conversation;
+}) {
+  const navigate = useNavigate();
+  const unarchiveMutation = useUnarchiveConversation();
+  const deleteMutation = useDeleteConversation();
+  const switchConversation = useConversationStore((s) => s.switchConversation);
+  const dropConversationRuntime = useConversationStore(
+    (s) => s.dropConversationRuntime,
+  );
+  const currentId = useConversationStore((s) => s.currentConversationId);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const open = () => {
+    switchConversation(conversation.id);
+    navigate(`/conversations/${conversation.id}`);
+  };
+
+  // Restore to the live list: the mutation drops it from this archived view and
+  // puts the returned (now-live) row back into the grouped cache.
+  const handleUnarchive = () => {
+    unarchiveMutation.mutate(conversation.id, {
+      onError: (err) => notifyError(err, "取消归档失败"),
+    });
+  };
+
+  // Permanent (soft) delete, same as the live-list row. If the archived chat is
+  // the one currently open, leave the route after it is gone.
+  const handleDelete = async () => {
+    setConfirmingDelete(false);
+    const wasActive = conversation.id === currentId;
+    try {
+      await deleteMutation.mutateAsync(conversation.id);
+    } catch (err) {
+      notifyError(err, "删除失败");
+      return;
+    }
+    dropConversationRuntime(conversation.id);
+    if (wasActive) navigate("/");
+  };
+
+  return (
+    <div
+      onMouseLeave={() => setConfirmingDelete(false)}
+      className="group flex h-10 items-center gap-2 rounded-lg px-3 text-foreground/70 transition-colors hover:bg-accent/60 hover:text-foreground"
+    >
+      <button
+        type="button"
+        onClick={open}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+      >
+        <MessageSquare size={15} className="shrink-0 text-muted-foreground" />
+        <span className="truncate text-sm">{conversation.title}</span>
+      </button>
+      {confirmingDelete ? (
+        <span className="flex shrink-0 items-center gap-0.5">
+          <SimpleTooltip label="确认删除">
+            <button
+              type="button"
+              aria-label="确认删除对话"
+              onClick={() => void handleDelete()}
+              className="flex size-6 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10"
+            >
+              <Check size={13} />
+            </button>
+          </SimpleTooltip>
+          <SimpleTooltip label="取消">
+            <button
+              type="button"
+              aria-label="取消删除"
+              onClick={() => setConfirmingDelete(false)}
+              className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
+            >
+              <X size={13} />
+            </button>
+          </SimpleTooltip>
+        </span>
+      ) : (
+        <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+          <SimpleTooltip label="取消归档">
+            <button
+              type="button"
+              aria-label="取消归档"
+              onClick={handleUnarchive}
+              className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
+            >
+              <ArchiveRestore size={13} />
+            </button>
+          </SimpleTooltip>
+          <SimpleTooltip label="删除">
+            <button
+              type="button"
+              aria-label="删除对话"
+              onClick={() => setConfirmingDelete(true)}
+              className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 size={13} />
+            </button>
+          </SimpleTooltip>
         </span>
       )}
     </div>

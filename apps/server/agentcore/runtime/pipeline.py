@@ -8,25 +8,30 @@ Orchestrates a single user message through the full lifecycle:
 
 import contextlib
 from dataclasses import asdict
+from typing import Any, NamedTuple
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
-from agentcore.core.types import new_id
+from agentcore.core.types import ToolEffect, new_id
 from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.llm.modes import ProfileSet, default_profile_set
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.protocol import LLMMessage, TokenUsage
 from agentcore.memory import default_memory_store
 from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.citations import merge_citations
 from agentcore.runtime.costing import aggregate_cost, captain_run_cost_from_state
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
+    checkpoint_resolved,
     citations_event,
+    content_delta,
     error_event,
     message_end,
     message_start,
+    plan_review_resolved,
 )
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.prompt import (
@@ -37,20 +42,130 @@ from agentcore.runtime.prompt import (
     CHAT_TEAM_CAPABILITY_HINT,
     assemble_system_prompt,
 )
-from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_executor
+from agentcore.runtime.runs import (
+    RunKind,
+    RunPhase,
+    RunSpec,
+    build_captain_executor,
+    build_captain_resumer,
+)
 from agentcore.runtime.sessions import (
     SessionLoader,
     SessionSaver,
     default_session_registry,
 )
+from agentcore.runtime.suspension import (
+    AskUserSuspension,
+    PlanReviewSuspension,
+    SuspensionDeleter,
+    SuspensionSaver,
+    TurnSuspension,
+    captain_transcript,
+)
 from agentcore.tools.builtin import build_builtin_registry, build_ceo_tool_registry
-from agentcore.tools.builtin.ask_user import AskUserTool
+from agentcore.tools.builtin.ask_user import AskUserTool, ask_user_tool_result
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.revise import ReviseTool
 from agentcore.tools.protocol import ToolContext
+from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
+
+
+def _assemble_ceo_toolset(
+    *,
+    llm,
+    sink: EventSink,
+    base_system_prompt: str,
+    user_message: str,
+    history: list[dict],
+    worker_tools: ToolRegistry,
+    base_tool_context: ToolContext,
+    profiles: ProfileSet,
+    approval_gate: ApprovalGate | None,
+    session_store,
+    session_saver: SessionSaver | None,
+    session_loader: SessionLoader | None,
+    conversation_id: str,
+    captain_run_id: str,
+    checkpoint_enabled: bool,
+    message_id: str,
+    suspension_saver: SuspensionSaver | None,
+    suspension_deleter: SuspensionDeleter | None,
+    backend_location: str,
+) -> tuple[DelegateTool, ReviseTool, ToolRegistry]:
+    """Wire the CEO coordinator's toolset (delegate + revise + read/retrieval + an
+    optional ask_user), shared by a fresh turn and a 2b resume.
+
+    The CEO is a COORDINATOR: it holds only the read/retrieval built-ins plus the
+    orchestration primitives, never the mutation tools (those live with workers via
+    ``delegate``). ``base_system_prompt`` is the CLEAN prompt handed to delegate /
+    revise (reused verbatim by workers — no CEO-chat hints). ``message_id`` + the
+    suspension closures arm durable plan_review pauses (结构化挂起 2b) on the
+    top-level delegate. Returns ``(delegate_tool, revise_tool, chat_tools)`` — the
+    tools whose accumulated usage/ledger/citations the caller folds into the turn
+    totals.
+    """
+    delegate_tool = DelegateTool(
+        llm=llm,
+        sink=sink,
+        system_prompt=base_system_prompt,
+        user_message=user_message,
+        history=history,
+        tools=worker_tools,
+        base_tool_context=base_tool_context,
+        captain_run_id=captain_run_id,
+        approval_gate=approval_gate,
+        profile_set=profiles,
+        session_store=session_store,
+        session_saver=session_saver,
+        conversation_id=conversation_id,
+        registry=default_interaction_registry(),
+        checkpoint_timeout_seconds=settings.checkpoint_timeout_seconds,
+        checkpoint_enabled=checkpoint_enabled,
+        message_id=message_id,
+        suspension_saver=suspension_saver,
+        suspension_deleter=suspension_deleter,
+    )
+    chat_tools = build_ceo_tool_registry()
+    chat_tools.register(delegate_tool)
+    revise_gate = approval_gate if backend_location == "local" else None
+    revise_tool = ReviseTool(
+        llm=llm,
+        sink=sink,
+        session_store=session_store,
+        tools=worker_tools,
+        base_tool_context=base_tool_context,
+        profile_set=profiles,
+        captain_run_id=captain_run_id,
+        approval_gate=revise_gate,
+        session_saver=session_saver,
+        session_loader=session_loader,
+    )
+    chat_tools.register(revise_tool)
+    if checkpoint_enabled:
+        # 结构化挂起 2b: arm the ask_user pause with the SAME durable closures as the
+        # delegate plan_review — message_id keys the frame, the turn-level constants
+        # (captain_run_id / clean base prompt / user_message) let resume re-wire the
+        # CEO toolset, and the saver/deleter persist before the wait + drop after a
+        # live resolve. A disconnect mid-ask leaves a frame ``POST .../resume`` maps
+        # the answer back onto.
+        chat_tools.register(
+            AskUserTool(
+                sink=sink,
+                conversation_id=conversation_id,
+                registry=default_interaction_registry(),
+                timeout_seconds=settings.checkpoint_timeout_seconds,
+                captain_run_id=captain_run_id,
+                base_system_prompt=base_system_prompt,
+                user_message=user_message,
+                message_id=message_id,
+                suspension_saver=suspension_saver,
+                suspension_deleter=suspension_deleter,
+            )
+        )
+    return delegate_tool, revise_tool, chat_tools
 
 
 def _build_attachment_context(attachments: list[dict] | None) -> str | None:
@@ -113,6 +228,28 @@ def _build_attachment_context(attachments: list[dict] | None) -> str | None:
     )
 
 
+def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict | None:
+    """Assemble the assistant message's ``runs`` payload from the turn's sink.
+
+    Carries two replay artifacts on one field: the multi-agent ``events`` journal
+    (team graph) and the single-agent ``process`` timeline (inline 思考+工具面板).
+    A turn is one OR the other — the journal is None unless it delegated/checkpointed,
+    the process is None unless it was a tool-using single-agent turn — but the
+    shared shape keeps one persistence + load path. Returns None when there is
+    nothing to replay (a plain chat turn with neither)."""
+    journal = sink.execution_journal()
+    process = sink.process_timeline()
+    if journal is None and process is None:
+        return None
+    payload: dict[str, Any] = {
+        "events": journal or [],
+        "finish_reason": finish.value,
+    }
+    if process:
+        payload["process"] = process
+    return payload
+
+
 async def run_chat_pipeline(
     *,
     conversation_id: str,
@@ -127,6 +264,8 @@ async def run_chat_pipeline(
     llm_credentials: LLMCredentials | None = None,
     session_saver: SessionSaver | None = None,
     session_loader: SessionLoader | None = None,
+    suspension_saver: SuspensionSaver | None = None,
+    suspension_deleter: SuspensionDeleter | None = None,
 ) -> dict:
     """Run the full chat pipeline for a single user message.
 
@@ -227,58 +366,29 @@ async def run_chat_pipeline(
         checkpoint_enabled = settings.checkpoint_gate_enabled and approvals_enabled
         # The delegate tool gets the CLEAN base prompt — it is reused verbatim by
         # the workers (runs/executor.py), which must not be told about a delegate
-        # tool they do not hold.
-        delegate_tool = DelegateTool(
+        # tool they do not hold. message_id + the suspension closures arm durable
+        # plan_review pauses (结构化挂起 2b) on the top-level delegate.
+        delegate_tool, revise_tool, chat_tools = _assemble_ceo_toolset(
             llm=llm,
             sink=sink,
-            system_prompt=system_prompt,
+            base_system_prompt=system_prompt,
             user_message=user_message,
             history=history,
-            tools=worker_tools,
+            worker_tools=worker_tools,
             base_tool_context=base_tool_context,
-            captain_run_id=captain_run_id,
+            profiles=profiles,
             approval_gate=approval_gate,
-            profile_set=profiles,
             session_store=session_store,
-            session_saver=session_saver,
-            conversation_id=conversation_id,
-            registry=default_interaction_registry(),
-            checkpoint_timeout_seconds=settings.checkpoint_timeout_seconds,
-            checkpoint_enabled=checkpoint_enabled,
-        )
-        chat_tools = build_ceo_tool_registry()
-        chat_tools.register(delegate_tool)
-        # 定向唤回 (revise): recall a finished worker to revise its own draft. Shares
-        # the turn roster with delegate; gated like delegate's workers — the SAME
-        # per-turn gate, forwarded only in local mode so a recalled worker can't run
-        # code / mutate the user's real machine without consent (cloud = un-gated).
-        revise_gate = approval_gate if backend.location == "local" else None
-        revise_tool = ReviseTool(
-            llm=llm,
-            sink=sink,
-            session_store=session_store,
-            tools=worker_tools,
-            base_tool_context=base_tool_context,
-            profile_set=profiles,
-            captain_run_id=captain_run_id,
-            approval_gate=revise_gate,
             session_saver=session_saver,
             session_loader=session_loader,
+            conversation_id=conversation_id,
+            captain_run_id=captain_run_id,
+            checkpoint_enabled=checkpoint_enabled,
+            message_id=message_id,
+            suspension_saver=suspension_saver,
+            suspension_deleter=suspension_deleter,
+            backend_location=backend.location,
         )
-        chat_tools.register(revise_tool)
-        # The CEO may also pause the turn to ask the user a decision (ask_user
-        # checkpoint), gated on ``checkpoint_enabled`` (computed above, the SAME
-        # "is there a live interactive user" signal as approvals). CEO-only —
-        # workers never get it.
-        if checkpoint_enabled:
-            chat_tools.register(
-                AskUserTool(
-                    sink=sink,
-                    conversation_id=conversation_id,
-                    registry=default_interaction_registry(),
-                    timeout_seconds=settings.checkpoint_timeout_seconds,
-                )
-            )
 
         # The entry chat agent additionally learns it may escalate to a team and
         # how to cite web sources inline (single-agent path only — see prompt.py).
@@ -355,27 +465,9 @@ async def run_chat_pipeline(
         # loop never metered their tokens; the cache split rides along so the folded
         # total stays priceable.
         turn_usage = (
-            TokenUsage(
-                input_tokens=captain_state.usage.get("input", 0),
-                output_tokens=captain_state.usage.get("output", 0),
-                reasoning_tokens=captain_state.usage.get("reasoning", 0),
-                cache_hit_tokens=captain_state.usage.get("cache_hit", 0),
-                cache_miss_tokens=captain_state.usage.get("cache_miss", 0),
-            )
-            + TokenUsage(
-                input_tokens=delegate_tool.usage["input"],
-                output_tokens=delegate_tool.usage["output"],
-                reasoning_tokens=delegate_tool.usage["reasoning"],
-                cache_hit_tokens=delegate_tool.usage["cache_hit"],
-                cache_miss_tokens=delegate_tool.usage["cache_miss"],
-            )
-            + TokenUsage(
-                input_tokens=revise_tool.usage["input"],
-                output_tokens=revise_tool.usage["output"],
-                reasoning_tokens=revise_tool.usage["reasoning"],
-                cache_hit_tokens=revise_tool.usage["cache_hit"],
-                cache_miss_tokens=revise_tool.usage["cache_miss"],
-            )
+            TokenUsage.from_usage_dict(captain_state.usage)
+            + TokenUsage.from_usage_dict(delegate_tool.usage)
+            + TokenUsage.from_usage_dict(revise_tool.usage)
         )
         finish = (
             FinishReason.END_TURN
@@ -427,11 +519,10 @@ async def run_chat_pipeline(
             )
         )
 
-        # Multi-agent execution journal (the turn's ordered run/tool events) for
-        # persistence + later replay; None unless the CEO delegated (no team =
-        # no runs payload). Mirrors how citations are carried back on the result.
-        journal = sink.execution_journal()
-        runs = {"events": journal, "finish_reason": finish.value} if journal else None
+        # Turn replay payload: the multi-agent team-graph journal OR the
+        # single-agent 思考+工具 process timeline (or None for a plain turn).
+        # Mirrors how citations are carried back on the result.
+        runs = _build_runs_payload(sink, finish)
 
         return {
             "message_id": message_id,
@@ -461,3 +552,381 @@ async def run_chat_pipeline(
         sink.close()
         with contextlib.suppress(Exception):
             await llm.close()
+
+
+def _append_resumed_tool_results(
+    messages: list[LLMMessage], tool_call_id: str, output: str
+) -> None:
+    """Close the suspended tool-call in the rebuilt CEO transcript (结构化挂起 2b).
+
+    The transcript ends with the assistant message that issued the suspended call
+    (``delegate`` for plan_review, ``ask_user`` for ask_user — the pause happened
+    inside it). Append the settled result as that call's tool result so the loop
+    continues from a valid assistant-tool_call → tool-result pair. Any SIBLING
+    tool_calls in the same assistant turn (a rare concurrent call) get a placeholder
+    result, since every tool_call MUST have a matching result or the next request
+    400s — their work wasn't captured (the pause unwound only the suspended call).
+    """
+    last = messages[-1] if messages else None
+    if last is None or last.role != "assistant" or not last.tool_calls:
+        messages.append(
+            LLMMessage(role="tool", content=output, tool_call_id=tool_call_id)
+        )
+        return
+    target = tool_call_id or (last.tool_calls[0].id if last.tool_calls else "")
+    for tc in last.tool_calls:
+        if tc.id == target:
+            messages.append(
+                LLMMessage(role="tool", content=output, tool_call_id=tc.id)
+            )
+        else:
+            messages.append(
+                LLMMessage(
+                    role="tool",
+                    content="（该并行工具调用在本回合暂停时未保留结果，已跳过。）",
+                    tool_call_id=tc.id,
+                )
+            )
+
+
+class _SettledSuspension(NamedTuple):
+    """The outcome of applying a resume decision to a paused frame (结构化挂起 2b).
+
+    ``output`` is the suspended tool-call's result text, fed back into the rebuilt
+    CEO transcript. ``terminal_text`` is set only when the answer ended the turn
+    in-band (ask_user ``stop``) — its closing note IS the reply, so resume finishes
+    on it WITHOUT another CEO round (mirroring the engine's terminal-effect branch);
+    ``None`` means run the CEO loop to its reply (plan_review always; ask_user
+    continue / adjust / timeout).
+    """
+
+    output: str
+    terminal_text: str | None
+
+
+async def _settle_resumed_suspension(
+    suspension: TurnSuspension,
+    *,
+    decision: CheckpointDecision,
+    note: str,
+    selected: list[str],
+    sink: EventSink,
+    delegate_tool: DelegateTool,
+    execution_id: str,
+) -> _SettledSuspension:
+    """Apply the user's resume decision to the paused frame, by kind (结构化挂起 2b).
+
+    plan_review: emit the resolution, then ``delegate.resume_plan`` drives the
+    remaining tail (continue / adjust-steer / stop-skip) and returns the workers'
+    product — always fed back to the CEO loop (which writes the overview).
+
+    ask_user: emit the resolution, then map the answer to the ``ask_user`` tool
+    result via the shared :func:`ask_user_tool_result`. A ``stop`` yields a terminal
+    result whose closing note ends the turn directly (no CEO round); the picks are
+    validated against the offered options just like the live path.
+    """
+    if isinstance(suspension, AskUserSuspension):
+        response = CheckpointResponse(decision=decision, note=note, selected=list(selected))
+        # Drop any pick that was not on the offered menu (same guard as the live tool).
+        response.selected = [s for s in response.selected if s in suspension.options]
+        sink.emit(
+            checkpoint_resolved(
+                checkpoint_id=suspension.checkpoint_id,
+                decision=response.decision.value,
+                note=response.note,
+                selected=response.selected,
+            )
+        )
+        result = ask_user_tool_result(response)
+        terminal = result.final_text if result.effect is ToolEffect.INTERACT else None
+        return _SettledSuspension(result.output, terminal)
+
+    if isinstance(suspension, PlanReviewSuspension):
+        sink.emit(
+            plan_review_resolved(
+                checkpoint_id=suspension.checkpoint_id,
+                decision=decision.value,
+                note=note,
+            )
+        )
+        delegate_result = await delegate_tool.resume_plan(
+            suspension.plan,
+            suspension.completed,
+            decision=decision,
+            note=note,
+            checkpoint_run_ids=suspension.checkpoint_run_ids,
+            execution_id=execution_id,
+        )
+        return _SettledSuspension(delegate_result.output, None)
+
+    raise ValueError(f"unknown suspension kind: {suspension.kind!r}")
+
+
+async def resume_chat_pipeline(
+    *,
+    suspension: TurnSuspension,
+    decision: CheckpointDecision,
+    note: str,
+    selected: list[str] | None = None,
+    sink: EventSink,
+    backend: WorkspaceBackend,
+    llm_credentials: LLMCredentials | None = None,
+    profile_set: ProfileSet | None = None,
+    session_saver: SessionSaver | None = None,
+    session_loader: SessionLoader | None = None,
+    suspension_saver: SuspensionSaver | None = None,
+    suspension_deleter: SuspensionDeleter | None = None,
+) -> dict:
+    """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
+
+    Rebuilds the turn from the durable :class:`TurnSuspension` frame and finishes it:
+    re-wire the CEO toolset, seed the journal with the pre-pause graph, apply the
+    user's decision to the paused frame by kind (:func:`_settle_resumed_suspension`),
+    feed the settled result back as the suspended tool result, and — unless the
+    answer ended the turn in-band (ask_user ``stop``) — run the CEO loop on the
+    rebuilt transcript to its reply. The whole turn is billed ONCE here, under the
+    ORIGINAL ``message_id`` so the assistant row + ledger reuse it. A downstream
+    checkpoint can pause again — the same hooks re-persist a fresh frame, so resume
+    is fully re-entrant. ``selected`` carries the user's option picks (ask_user only).
+    Returns the same result shape as :func:`run_chat_pipeline` for the service.
+    """
+    profiles = profile_set or default_profile_set()
+    message_id = suspension.message_id
+    conversation_id = suspension.conversation_id
+    captain_run_id = suspension.captain_run_id or new_id()
+    llm = build_provider(llm_credentials)
+    try:
+        worker_tools = build_builtin_registry()
+        base_tool_context = ToolContext(
+            execution_id=new_id(),
+            run_id=new_id(),
+            agent_id="default",
+            backend=backend,
+            user_id=suspension.user_id,
+        )
+        approval_gate = (
+            ApprovalGate(
+                sink=sink,
+                conversation_id=conversation_id,
+                registry=default_interaction_registry(),
+                timeout_seconds=settings.approval_timeout_seconds,
+            )
+            if settings.approval_gate_enabled
+            else None
+        )
+        session_store = default_session_registry().get_or_create(conversation_id)
+        checkpoint_enabled = settings.checkpoint_gate_enabled
+        delegate_tool, revise_tool, chat_tools = _assemble_ceo_toolset(
+            llm=llm,
+            sink=sink,
+            base_system_prompt=suspension.base_system_prompt,
+            user_message=suspension.user_message,
+            history=[],
+            worker_tools=worker_tools,
+            base_tool_context=base_tool_context,
+            profiles=profiles,
+            approval_gate=approval_gate,
+            session_store=session_store,
+            session_saver=session_saver,
+            session_loader=session_loader,
+            conversation_id=conversation_id,
+            captain_run_id=captain_run_id,
+            checkpoint_enabled=checkpoint_enabled,
+            message_id=message_id,
+            suspension_saver=suspension_saver,
+            suspension_deleter=suspension_deleter,
+            backend_location=backend.location,
+        )
+
+        sink.emit(message_start(message_id, conversation_id=conversation_id))
+        # Continue the pre-pause exchange: seed the journal so the persisted
+        # messages.runs replays the whole graph + checkpoint, then settle the pause.
+        sink.seed_journal(suspension.journal)
+
+        # Publish the pre-pause CEO transcript so a re-pause DURING the settle (a
+        # second downstream checkpoint while resume_plan runs) captures the same
+        # transcript the CEO is still suspended on — symmetric with the original pause.
+        token = captain_transcript.set(suspension.transcript)
+        try:
+            settled = await _settle_resumed_suspension(
+                suspension,
+                decision=decision,
+                note=note,
+                selected=selected or [],
+                sink=sink,
+                delegate_tool=delegate_tool,
+                execution_id=base_tool_context.execution_id,
+            )
+        finally:
+            captain_transcript.reset(token)
+
+        # Rebuild the CEO transcript: the stored messages (ending at the assistant
+        # suspended call) + that call's settled tool result.
+        messages = list(suspension.transcript)
+        _append_resumed_tool_results(messages, suspension.tool_call_id, settled.output)
+
+        # ask_user stop: the closing note IS the reply (terminal effect) — finish
+        # without another CEO round, mirroring the engine's terminal-effect branch.
+        if settled.terminal_text is not None:
+            if settled.terminal_text:
+                sink.emit(content_delta(settled.terminal_text))
+            return _finish_terminal_resume(
+                message_id=message_id, closing=settled.terminal_text, sink=sink
+            )
+
+        # Otherwise run the CEO loop to its reply (it may delegate / ask again).
+        profile = profiles.get("chat")
+        citations: list[dict] = []
+        captain_spec = RunSpec(
+            run_id=captain_run_id,
+            agent_id=captain_run_id,
+            agent_name="CEO",
+            kind=RunKind.CAPTAIN,
+            task=suspension.user_message,
+            role="CEO",
+            depth=0,
+            parent_run_id=None,
+        )
+        run_captain = build_captain_resumer(
+            llm=llm,
+            tools=chat_tools,
+            sink=sink,
+            base_tool_context=base_tool_context,
+            profile=profile,
+            citation_sink=citations,
+            approval_gate=approval_gate,
+        )
+        captain_state = await run_captain(captain_spec, messages)
+
+        if captain_state.phase is RunPhase.FAILED:
+            err = captain_state.error or "captain resume failed"
+            sink.emit(error_event("PIPELINE_ERROR", err))
+            sink.emit(message_end(FinishReason.ERROR))
+            return {
+                "message_id": message_id,
+                "content": "",
+                "error": err,
+                "finish_reason": FinishReason.ERROR,
+            }
+
+        return _finish_resume_turn(
+            message_id=message_id,
+            captain_run_id=captain_run_id,
+            captain_state=captain_state,
+            delegate_tool=delegate_tool,
+            revise_tool=revise_tool,
+            profile=profile,
+            citations=citations,
+            sink=sink,
+        )
+
+    except Exception as e:
+        logger.error("pipeline.resume_error", error=str(e), exc_info=True)
+        sink.emit(error_event("PIPELINE_ERROR", str(e)))
+        sink.emit(message_end(FinishReason.ERROR))
+        return {
+            "message_id": message_id,
+            "content": "",
+            "error": str(e),
+            "finish_reason": FinishReason.ERROR,
+        }
+    finally:
+        sink.close()
+        with contextlib.suppress(Exception):
+            await llm.close()
+
+
+def _finish_resume_turn(
+    *,
+    message_id: str,
+    captain_run_id: str,
+    captain_state,
+    delegate_tool: DelegateTool,
+    revise_tool: ReviseTool,
+    profile,
+    citations: list[dict],
+    sink: EventSink,
+) -> dict:
+    """Bill + close a resumed turn whose CEO loop ran (plan_review / ask_user continue).
+
+    The whole turn bills once here: the captain's resume round + any delegated
+    workers' usage (seeds + tail, folded by ``resume_plan``) + any revise. Mirrors
+    :func:`run_chat_pipeline`'s tail (usage roll-up, per-run ledger, citations,
+    message_end), returning the same result shape for the service to persist.
+    """
+    final_content = captain_state.content
+    final_reasoning = captain_state.reasoning
+    rounds = captain_state.rounds
+    turn_usage = (
+        TokenUsage.from_usage_dict(captain_state.usage)
+        + TokenUsage.from_usage_dict(delegate_tool.usage)
+        + TokenUsage.from_usage_dict(revise_tool.usage)
+    )
+    finish = (
+        FinishReason.END_TURN if rounds < profile.max_rounds else FinishReason.MAX_ROUNDS
+    )
+    captain_cost = captain_run_cost_from_state(captain_run_id, captain_state)
+    cost_runs = [
+        asdict(captain_cost),
+        *(asdict(r) for r in delegate_tool.run_ledger),
+        *(asdict(r) for r in revise_tool.run_ledger),
+    ]
+    turn_cost = aggregate_cost(cost_runs)
+    merge_citations(citations, delegate_tool.citations)
+    merge_citations(citations, revise_tool.citations)
+    if citations:
+        sink.emit(citations_event(citations))
+    sink.emit(
+        message_end(
+            finish,
+            input_tokens=turn_usage.input_tokens,
+            output_tokens=turn_usage.output_tokens,
+            reasoning_tokens=turn_usage.reasoning_tokens,
+            cache_hit_tokens=turn_usage.cache_hit_tokens,
+            cache_miss_tokens=turn_usage.cache_miss_tokens,
+            rounds=rounds,
+            cost=turn_cost,
+        )
+    )
+    runs = _build_runs_payload(sink, finish)
+    return {
+        "message_id": message_id,
+        "content": final_content,
+        "reasoning_content": final_reasoning,
+        "input_tokens": turn_usage.input_tokens,
+        "output_tokens": turn_usage.output_tokens,
+        "reasoning_tokens": turn_usage.reasoning_tokens,
+        "rounds": rounds,
+        "finish_reason": finish,
+        "citations": citations,
+        "runs": runs,
+        "cost_runs": cost_runs,
+    }
+
+
+def _finish_terminal_resume(*, message_id: str, closing: str, sink: EventSink) -> dict:
+    """Close a resumed ask_user turn that the user STOPPED (结构化挂起 2b terminal).
+
+    No CEO round ran — the closing note is the whole reply (the engine's
+    terminal-effect semantics, replayed on resume). The pre-pause CEO round that
+    raised the ask_user was never billed (the turn paused before persistence), and a
+    stop runs nothing new, so this turn bills nothing — consistent with the「paused
+    before persist = never billed」model. The seeded journal (checkpoint_required) +
+    the emitted ``checkpoint_resolved`` persist so a reload replays the settled card.
+    """
+    finish = FinishReason.END_TURN
+    sink.emit(message_end(finish, rounds=0))
+    runs = _build_runs_payload(sink, finish)
+    return {
+        "message_id": message_id,
+        "content": closing,
+        "reasoning_content": None,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "rounds": 0,
+        "finish_reason": finish,
+        "citations": [],
+        "runs": runs,
+        "cost_runs": [],
+    }

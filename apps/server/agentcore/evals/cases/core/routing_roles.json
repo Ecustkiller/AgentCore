@@ -1,0 +1,14 @@
+{
+  "id": "routing_named_roles",
+  "category": "routing",
+  "user_message": "这个任务需要一个团队，请明确委派两名 worker：一名角色名叫『研究员』，负责调研一款产品的市场口碑；一名角色名叫『撰稿人』，负责把调研结论写成一段文案。",
+  "path": "team",
+  "mode": "economy",
+  "samples": 1,
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "Delegated" },
+    { "name": "RosterMatches", "args": { "expected": ["研究员", "撰稿人"] } }
+  ],
+  "rubric": "是否正确按要求委派出『研究员』与『撰稿人』两个角色并完成各自分工。"
+}

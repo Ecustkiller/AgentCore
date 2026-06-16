@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: agentcore-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: agentcore
       POSTGRES_PASSWORD: agentcore
@@ -19,6 +20,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: agentcore-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
@@ -32,6 +34,7 @@ services:
   searxng:
     image: searxng/searxng:latest
     container_name: agentcore-searxng
+    restart: unless-stopped
     ports:
       # 18888 而非 8888：Windows winnat/Hyper-V 会把 8866–8965 整段保留为排除端口，
       # 绑 8888 会报 "bind: ... forbidden by its access permissions"。18888 跨平台通用。

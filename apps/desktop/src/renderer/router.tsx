@@ -3,10 +3,10 @@ import { RouteError } from "@/components/layout/RouteError";
 import { ConversationPage } from "@/pages/ConversationPage";
 import { ConversationsPage } from "@/pages/ConversationsPage";
 import { ExplorePage } from "@/pages/ExplorePage";
-import { FilesPage } from "@/pages/FilesPage";
 import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { ToolboxPage } from "@/pages/ToolboxPage";
+import { WorkspacePage } from "@/pages/WorkspacePage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AppearanceSettings } from "@/pages/more/AppearanceSettings";
 import { GeneralSettings } from "@/pages/more/GeneralSettings";
@@ -17,6 +17,7 @@ import { ShortcutsSettings } from "@/pages/more/ShortcutsSettings";
 import { UsageSettings } from "@/pages/more/UsageSettings";
 import { AiToolsPage } from "@/pages/toolbox/AiToolsPage";
 import { TeamMechanism } from "@/pages/toolbox/TeamMechanism";
+import { ToolActivityPreview } from "@/pages/toolbox/ToolActivityPreview";
 import { createHashRouter } from "react-router-dom";
 
 export const router = createHashRouter([
@@ -31,12 +32,16 @@ export const router = createHashRouter([
       { index: true, element: <ConversationPage /> },
       { path: "conversations", element: <ConversationsPage /> },
       { path: "conversations/:id", element: <ConversationPage /> },
+      { path: "folders/:folderId", element: <WorkspacePage /> },
       { path: "messages", element: <MessagesPage /> },
       { path: "messages/:chatId", element: <MessagesPage /> },
-      { path: "files", element: <FilesPage /> },
       { path: "toolbox", element: <ToolboxPage /> },
       { path: "toolbox/ai-tools", element: <AiToolsPage /> },
       { path: "toolbox/mechanism", element: <TeamMechanism /> },
+      {
+        path: "toolbox/tool-activity-preview",
+        element: <ToolActivityPreview />,
+      },
       { path: "explore", element: <ExplorePage /> },
       {
         path: "more",

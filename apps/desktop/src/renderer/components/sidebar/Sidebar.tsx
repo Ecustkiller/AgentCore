@@ -2,14 +2,7 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { startNewConversation } from "@/lib/newConversation";
 import { useUnreadTotal } from "@/stores/messaging";
 import { useSidebarStore } from "@/stores/sidebar";
-import {
-  Compass,
-  FolderOpen,
-  Mail,
-  MessageSquare,
-  Plus,
-  Wrench,
-} from "lucide-react";
+import { Compass, Mail, MessageSquare, Plus, Wrench } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { RecentConversations } from "./RecentConversations";
 import { UserMenu } from "./UserMenu";
@@ -17,7 +10,6 @@ import { UserMenu } from "./UserMenu";
 const NAV_ITEMS = [
   { icon: MessageSquare, label: "对话", route: "/" },
   { icon: Mail, label: "消息", route: "/messages" },
-  { icon: FolderOpen, label: "文件", route: "/files" },
   { icon: Wrench, label: "工具箱", route: "/toolbox" },
   { icon: Compass, label: "探索", route: "/explore" },
 ] as const;

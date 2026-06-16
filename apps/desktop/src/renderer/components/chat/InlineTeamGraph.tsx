@@ -163,7 +163,7 @@ export function InlineTeamGraph({
           />
         )}
       </div>
-      {/* 辩论/审查「左右并排对比」(前端UX目标态 §四④): a separate card below the graph
+      {/* 辩论/审查「左右并排对比」(前端UX设计.md §四④): a separate card below the graph
           so正/反 outputs sit side by side in the reading column. Debate-only — an
           ordinary team turn renders just the graph above. */}
       {isDebate(execution) && (
@@ -242,7 +242,7 @@ function StatusStrip({
   }
 }
 
-/** The 辩论 paradigm tag (前端UX目标态 §四范式标题): a small pill that marks a turn
+/** The 辩论 paradigm tag (前端UX设计.md §四范式标题): a small pill that marks a turn
  * as a debate/review in the status strip, so the user reads「这是一场辩论」at a
  * glance — the differentiation普通并行 lacks. Uses the neutral `info` token (a
  * classification, not a run-status color). */

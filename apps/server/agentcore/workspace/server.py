@@ -51,6 +51,7 @@ _MAX_LIST_ENTRIES = 100
 _MAX_LINE_LEN = 300  # trim very long matching lines (e.g. minified bundles)
 _MAX_FILES_SCANNED = 5000  # bound total files opened per grep call
 _MAX_RESULTS_CAP = 200
+_MAX_INDEX_FILES = 5000  # @ mention flat index cap (mirrors desktop LIST_FILES_CAP)
 
 
 def _posix(rel: str) -> str:
@@ -170,6 +171,34 @@ class ServerWorkspace:
             ]
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
+
+    async def index_files(self, cap: int = _MAX_INDEX_FILES) -> tuple[list[str], bool]:
+        """Flat list of file paths for @ mentions (文件中枢统一 F4).
+
+        Files only, ``IGNORED_DIRS`` pruned, capped at ``cap`` (``truncated`` when
+        hit) — the cloud counterpart to the desktop ``fsApi.listFiles`` that indexes
+        local roots, so @ behaves the same whether a workspace is cloud or local.
+        Binary/oversized files are *not* filtered here (mirroring local): the read
+        step applies that when a file is actually attached.
+        """
+        root = self._root.resolve()
+        paths: list[str] = []
+        truncated = False
+        for dirpath, dirnames, filenames in os.walk(root):
+            # Prune noise dirs in place so os.walk never descends into them.
+            dirnames[:] = sorted(d for d in dirnames if d not in IGNORED_DIRS)
+            for fname in sorted(filenames):
+                full = Path(dirpath) / fname
+                if full.is_symlink() or not full.is_file():
+                    continue
+                paths.append(_posix(os.path.relpath(full, root)))
+                if len(paths) >= cap:
+                    truncated = True
+                    break
+            if truncated:
+                break
+        paths.sort()
+        return paths, truncated
 
     async def mkdir(self, path: str) -> None:
         target = self._safe(path)

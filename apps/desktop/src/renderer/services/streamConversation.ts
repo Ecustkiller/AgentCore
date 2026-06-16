@@ -1,6 +1,7 @@
 import { patchConversationCache } from "@/hooks/useConversations";
 import { StreamError } from "@/lib/errors";
 import { notifyUnauthorized, tryRefresh } from "@/services/api";
+import type { PlanReviewUserDecision } from "@/services/planReview";
 import { performWorkspaceOp } from "@/services/workspaceOps";
 import { useApprovalStore } from "@/stores/approvals";
 import {
@@ -29,6 +30,8 @@ import type {
   RunPlanPayload,
   SSEEvent,
   TitleGeneratedPayload,
+  ToolUseEndPayload,
+  ToolUseStartPayload,
   TurnSavedPayload,
   WorkspaceOpRequiredPayload,
 } from "@/types/events";
@@ -311,20 +314,43 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       }
       break;
     }
-    // All run/tool facts fold the same way: map the event to a RunFrame and
-    // append it to this turn's journal (a no-op slot has no plan, so stray
-    // single-agent facts are ignored downstream). One path for every frame kind.
+    // All run facts fold the same way: map the event to a RunFrame and append it
+    // to this turn's journal (a no-op slot has no plan, so stray single-agent
+    // facts are ignored downstream). One path for every frame kind.
     case "run_started":
     case "run_output_delta":
     case "run_reasoning_delta":
     case "run_completed":
     case "run_failed":
-    case "run_progress":
-    case "tool_use_start":
+    case "run_progress": {
+      const mid = execMessageId();
+      const frame = frameFromEvent(event);
+      if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+      break;
+    }
+    // Tool facts feed BOTH surfaces, so dispatch stays turn-type-agnostic: the
+    // multi-agent team graph (recordFrame — a no-plan slot ignores them) AND the
+    // single-agent 思考+工具 process timeline on the assistant bubble. A turn shows
+    // exactly one (graph when it delegated, process panel otherwise).
+    case "tool_use_start": {
+      const mid = execMessageId();
+      const frame = frameFromEvent(event);
+      if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+      useConversationStore
+        .getState()
+        .addProcessTool(
+          event.payload as ToolUseStartPayload,
+          ctx.conversationId,
+        );
+      break;
+    }
     case "tool_use_end": {
       const mid = execMessageId();
       const frame = frameFromEvent(event);
       if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+      useConversationStore
+        .getState()
+        .endProcessTool(event.payload as ToolUseEndPayload, ctx.conversationId);
       break;
     }
 
@@ -444,11 +470,14 @@ async function runMessageStream(
     }
 
     // Stream closed without a terminal event (message_end / inline error) while
-    // the turn still reads as generating: settle it so the "正在思考…" bubble and
-    // the stop button don't hang forever. No-op on the normal paths, which have
-    // already finalized — this only catches a degraded close.
+    // the turn still reads as generating: the backend never signalled completion,
+    // so the answer on screen may be truncated. Surface it as a retriable transport
+    // failure — the caller keeps the partial text and raises the retry banner —
+    // instead of silently finalizing, which would masquerade a half-streamed answer
+    // as a finished reply (体验 bug). No-op on the normal paths, which already
+    // finalized via message_end / error (so isGenerating is false here).
     if (getRuntime(conversationId).isGenerating) {
-      useConversationStore.getState().finalizeLastMessage(conversationId);
+      throw new StreamError("network");
     }
   } catch (err) {
     // Re-raise user aborts (stop button) and already-typed failures as-is;
@@ -514,6 +543,47 @@ export async function regenerateConversation({
   const body = JSON.stringify(content !== undefined ? { content } : {});
   await runMessageStream(
     `/v1/conversations/${conversationId}/messages/${messageId}/regenerate`,
+    body,
+    conversationId,
+    signal,
+  );
+}
+
+export interface ResumeConversationOptions {
+  conversationId: string;
+  /** The paused turn's assistant message_id (the durable resume key). */
+  messageId: string;
+  /** continue (proceed — run the gated downstream / accept the CEO direction) /
+   * adjust (inject `note` as a steer, then continue) / stop (end the turn here). */
+  decision: PlanReviewUserDecision;
+  /** Steer for `adjust`, a closing remark for `stop`; ignored for `continue`. */
+  note: string;
+  /** ask_user option pick(s); ignored for plan_review (the server drops any pick
+   * not actually offered). */
+  selected?: string[];
+  signal?: AbortSignal;
+}
+
+/**
+ * Continue a durably-paused turn and consume its SSE stream (结构化挂起 2b resume).
+ *
+ * The turn paused at a plan_review / ask_user checkpoint and lost its live stream
+ * (disconnect / restart). The backend claims the persisted frame (atomic
+ * read-and-delete, so a turn never resumes twice — a stale / second call 404s) and
+ * drives the rest of the turn on this fresh stream, same event shape as a send
+ * (run/tool frames, the checkpoint resolution, content deltas, `message_end`).
+ */
+export async function resumeConversation({
+  conversationId,
+  messageId,
+  decision,
+  note,
+  selected = [],
+  signal,
+}: ResumeConversationOptions): Promise<void> {
+  const body = JSON.stringify({ decision, note, selected });
+  await runMessageStream(
+    `/v1/conversations/${conversationId}/messages/${messageId}/resume`,
     body,
     conversationId,
     signal,

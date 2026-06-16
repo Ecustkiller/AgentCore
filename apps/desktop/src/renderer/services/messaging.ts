@@ -49,6 +49,7 @@ export type BlockedUser = Schemas["BlockedUser"];
 export type DirectorySettings = Schemas["DirectorySettings"];
 
 type ChatListResponse = Schemas["ChatListResponse"];
+type ChatMembersResponse = Schemas["ChatMembersResponse"];
 type UserSearchResponse = Schemas["UserSearchResponse"];
 type ChatMessageListResponse = Schemas["ChatMessageListResponse"];
 type BlockListResponse = Schemas["BlockListResponse"];
@@ -85,6 +86,62 @@ export async function listChats(): Promise<ChatSummary[]> {
 /** Open (or reuse) a 1:1 chat with another user (by their user id). */
 export async function startDm(userId: string): Promise<ChatSummary> {
   return api.post<ChatSummary>("/v1/messages/chats/dm", { user_id: userId });
+}
+
+/** A chat's members (group roster: resolves sender names + member panel). */
+export async function listMembers(chatId: string): Promise<ChatParticipant[]> {
+  const res = await api.get<ChatMembersResponse>(
+    `/v1/messages/chats/${chatId}/members`,
+  );
+  return res.data;
+}
+
+/** Patch this user's per-chat flags (mute / pin); returns the updated row. */
+export async function updateMembership(
+  chatId: string,
+  patch: { muted?: boolean; pinned?: boolean },
+): Promise<ChatSummary> {
+  return api.patch<ChatSummary>(
+    `/v1/messages/chats/${chatId}/membership`,
+    patch,
+  );
+}
+
+/** Leave a group/official chat (removes this user's membership). */
+export async function leaveChat(chatId: string): Promise<void> {
+  await api.post(`/v1/messages/chats/${chatId}/leave`, {});
+}
+
+// --- Moderation (Stage 3 审核治理: 平台 admin only; gated server-side) ---
+
+/** Remove a member from a group (admin 踢人). Posts a system notice server-side. */
+export async function kickMember(
+  chatId: string,
+  userId: string,
+): Promise<void> {
+  await api.delete(`/v1/messages/chats/${chatId}/members/${userId}`);
+}
+
+/** Mute / unmute a member (admin 禁言): a muted member can read but not send. */
+export async function muteMember(
+  chatId: string,
+  userId: string,
+  muted: boolean,
+): Promise<void> {
+  await api.post(`/v1/messages/chats/${chatId}/members/${userId}/mute`, {
+    muted,
+  });
+}
+
+/** Post an admin announcement as a centered system_card (官方公告), fanned out to
+ * every member. Returns the stored message (the firehose also delivers it). */
+export async function announce(
+  chatId: string,
+  content: string,
+): Promise<ChatMessageDetail> {
+  return api.post<ChatMessageDetail>(`/v1/messages/chats/${chatId}/announce`, {
+    content,
+  });
 }
 
 // --- Messages ---

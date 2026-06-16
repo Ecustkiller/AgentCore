@@ -7,6 +7,8 @@ interface Props {
   message: ChatMessageDetail;
   /** Sent by the viewing user → right-aligned. */
   mine: boolean;
+  /** Sender's display name, shown above the bubble in group threads (others only). */
+  senderName?: string;
 }
 
 /**
@@ -19,7 +21,7 @@ interface Props {
  * deep-link payload is not wired yet (backend business pending), so it is shown
  * but not actionable.
  */
-export function ChatBubble({ message, mine }: Props) {
+export function ChatBubble({ message, mine, senderName }: Props) {
   const time = formatMessageTime(message.created_at);
 
   if (message.content_type === "system_card") {
@@ -45,6 +47,11 @@ export function ChatBubble({ message, mine }: Props) {
     <div
       className={`group flex flex-col ${mine ? "items-end" : "items-start"}`}
     >
+      {!mine && senderName && (
+        <span className="mb-0.5 px-1 text-xs text-muted-foreground">
+          {senderName}
+        </span>
+      )}
       <div
         className={`max-w-[75%] whitespace-pre-wrap break-words rounded-xl px-3 py-2 text-sm ${
           mine

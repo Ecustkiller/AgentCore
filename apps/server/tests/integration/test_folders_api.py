@@ -1,4 +1,4 @@
-"""Integration tests for folder CRUD + conversation grouping (前端UX目标态 §七).
+"""Integration tests for folder CRUD + conversation grouping (前端技术与架构.md 会话列表设计).
 
 Auto-skips (via the shared ``client`` fixture) when no PostgreSQL is reachable.
 Covers the auth gate, the grouped sidebar payload, move-in/move-out, the
@@ -10,6 +10,7 @@ import httpx
 from agentcore.db.repositories import MessageRepository
 
 _PW = "password123"
+_ROOT = "11111111-2222-3333-4444-555555555555"
 
 
 async def _register_and_login(
@@ -62,6 +63,25 @@ async def test_create_and_list_folders(client, make_invite):
     r = await client.get("/v1/folders")
     assert r.status_code == 200, r.text
     assert [f["id"] for f in r.json()] == [folder["id"]]
+
+
+async def test_create_folder_with_local_binding(client, make_invite):
+    """F2 (文件中枢统一): 添加文件夹 = 建本地绑定项目 — a folder can be born already
+    bound to a desktop FS root (local mode) in one call, no create-then-bind."""
+    code = await make_invite("INV-F12")
+    await _register_and_login(client, code, "folderuser12")
+
+    r = await client.post(
+        "/v1/folders", json={"name": "Local Proj", "local_root_id": _ROOT}
+    )
+    assert r.status_code == 201, r.text
+    folder = r.json()
+    assert folder["name"] == "Local Proj"
+    assert folder["local_root_id"] == _ROOT
+
+    # The binding is persisted, not merely echoed back on create.
+    listed = (await client.get("/v1/folders")).json()
+    assert listed[0]["local_root_id"] == _ROOT
 
 
 async def test_grouped_reflects_membership(client, make_invite):

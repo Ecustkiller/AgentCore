@@ -10,7 +10,7 @@ import type { components } from "@/types/api.generated";
 type Schemas = components["schemas"];
 
 /** Encode a workspace-relative path for the `{path:path}` route (keep slashes). */
-function encodePath(path: string): string {
+export function encodePath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
@@ -23,7 +23,7 @@ const filesBase = (conversationId: string): string =>
  * Mirrors `api.request`'s 401→refresh→replay so a stale access token doesn't
  * surface as a spurious failure.
  */
-async function authedFetch(
+export async function authedFetch(
   url: string,
   init: RequestInit = {},
 ): Promise<Response> {
@@ -41,7 +41,7 @@ async function authedFetch(
 }
 
 /** Save a blob to disk via an object-URL anchor (Electron renderer, no IPC). */
-function saveBlob(blob: Blob, filename: string): void {
+export function saveBlob(blob: Blob, filename: string): void {
   const objectUrl = URL.createObjectURL(blob);
   try {
     const a = document.createElement("a");
@@ -152,20 +152,17 @@ export type FilePreview =
   | { kind: "too-large" };
 
 /**
- * Read a workspace file for read-only in-panel preview.
+ * Decode a raw file response into an in-panel preview result.
  *
  * The file API has no range support, so the body is fetched whole; the
  * `content-length` header short-circuits oversized files before reading. Binary
  * content is detected by a null byte or a high UTF-8 replacement-char ratio and
- * surfaced as a download-only result rather than rendering garbage.
+ * surfaced as a download-only result rather than rendering garbage. Shared by the
+ * conversation-scoped and the ws-id-scoped (`services/workspaces`) preview reads.
  */
-export async function readWorkspaceFile(
-  conversationId: string,
-  path: string,
+export async function decodePreviewResponse(
+  res: Response,
 ): Promise<FilePreview> {
-  const res = await authedFetch(
-    `${filesBase(conversationId)}/${encodePath(path)}`,
-  );
   const declared = Number(res.headers.get("content-length") ?? "0");
   if (declared > PREVIEW_HARD_BYTES) return { kind: "too-large" };
 
@@ -189,6 +186,17 @@ export async function readWorkspaceFile(
   if (scan > 0 && replacements / scan > 0.1) return { kind: "binary" };
 
   return { kind: "text", text, truncated };
+}
+
+/** Read a conversation-workspace file for read-only in-panel preview. */
+export async function readWorkspaceFile(
+  conversationId: string,
+  path: string,
+): Promise<FilePreview> {
+  const res = await authedFetch(
+    `${filesBase(conversationId)}/${encodePath(path)}`,
+  );
+  return decodePreviewResponse(res);
 }
 
 // --- Snapshots (axis-3 persistence: backup / kept versions / download) ---

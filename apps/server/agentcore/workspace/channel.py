@@ -26,7 +26,6 @@ desktop never hangs the turn.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, NoReturn
@@ -149,30 +148,28 @@ class WorkspaceChannel:
         op_name = str(op)
         request_id = new_id()
         deadline = self.timeout_seconds if timeout is None else timeout
-        fut = self.registry.create(
-            request_id,
-            self.conversation_id,
-            kind=InteractionKind.CLIENT_TOOL,
-            payload={"root_id": self.root_id, "op": op_name, "args": args},
-        )
-        self.sink.emit(
-            workspace_op_required(
-                request_id=request_id,
-                conversation_id=self.conversation_id,
-                root_id=self.root_id,
-                op=op_name,
-                args=args,
-            )
-        )
         try:
-            result = await asyncio.wait_for(fut, timeout=deadline)
+            result = await self.registry.suspend(
+                request_id,
+                self.conversation_id,
+                kind=InteractionKind.CLIENT_TOOL,
+                payload={"root_id": self.root_id, "op": op_name, "args": args},
+                timeout=deadline,
+                on_suspended=lambda: self.sink.emit(
+                    workspace_op_required(
+                        request_id=request_id,
+                        conversation_id=self.conversation_id,
+                        root_id=self.root_id,
+                        op=op_name,
+                        args=args,
+                    )
+                ),
+            )
         except TimeoutError as e:
             logger.info("workspace.op_timeout", op=op_name, request_id=request_id)
             raise WorkspaceIOError(
                 f"local workspace op '{op_name}' timed out"
             ) from e
-        finally:
-            self.registry.discard(request_id)
 
         if not isinstance(result, dict) or not result.get("ok"):
             error = result.get("error") if isinstance(result, dict) else None

@@ -224,7 +224,11 @@ async def test_timeout_raises_io_error():
 
 
 def _spy_wait_for(monkeypatch) -> list[float]:
-    """Record every timeout asyncio.wait_for is called with inside the channel."""
+    """Record every timeout asyncio.wait_for is called with for an op.
+
+    The create→emit→wait→discard suspend dance now lives in the unified
+    InteractionRegistry (runtime.interaction), so the channel forwards its per-op
+    deadline to ``registry.suspend`` which awaits there — patch that seam."""
     captured: list[float] = []
     real_wait_for = asyncio.wait_for
 
@@ -232,7 +236,7 @@ def _spy_wait_for(monkeypatch) -> list[float]:
         captured.append(timeout)
         return await real_wait_for(fut, timeout)
 
-    monkeypatch.setattr("agentcore.workspace.channel.asyncio.wait_for", spy)
+    monkeypatch.setattr("agentcore.runtime.interaction.asyncio.wait_for", spy)
     return captured
 
 

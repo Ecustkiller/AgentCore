@@ -72,10 +72,13 @@ export function useCreateFolder() {
     mutationFn: ({
       name,
       localDir,
+      localRootId,
     }: {
       name: string;
       localDir?: string | null;
-    }) => createFolder(name, localDir),
+      // Bind to a desktop FS root at creation (文件中枢统一 F2: 加文件夹 = 建本地项目).
+      localRootId?: string | null;
+    }) => createFolder(name, localDir, localRootId),
     onSuccess: (folder) => addFolderCache(folder),
   });
 }

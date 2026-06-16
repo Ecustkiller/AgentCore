@@ -13,7 +13,6 @@ In cloud mode workers stay un-gated (the server sandbox is isolated) and are
 handed no gate.
 """
 
-import asyncio
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -78,32 +77,30 @@ class ApprovalGate:
 
         approval_id = tool_call_id
         preview = _preview_arguments(arguments)
-        fut = self.registry.create(
-            approval_id,
-            self.conversation_id,
-            kind=InteractionKind.APPROVAL,
-            payload={
-                "tool_call_id": tool_call_id,
-                "tool_name": tool_name,
-                "arguments": preview,
-            },
-        )
-        self.sink.emit(
-            approval_required(
-                approval_id=approval_id,
-                conversation_id=self.conversation_id,
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                arguments=preview,
-            )
-        )
         try:
-            decision = await asyncio.wait_for(fut, timeout=self.timeout_seconds)
+            decision = await self.registry.suspend(
+                approval_id,
+                self.conversation_id,
+                kind=InteractionKind.APPROVAL,
+                payload={
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "arguments": preview,
+                },
+                timeout=self.timeout_seconds,
+                on_suspended=lambda: self.sink.emit(
+                    approval_required(
+                        approval_id=approval_id,
+                        conversation_id=self.conversation_id,
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        arguments=preview,
+                    )
+                ),
+            )
         except TimeoutError:
             logger.info("approval.timeout", tool=tool_name, approval_id=approval_id)
             decision = ApprovalDecision.DENY
-        finally:
-            self.registry.discard(approval_id)
 
         if decision is ApprovalDecision.APPROVE_ALWAYS:
             self._granted.add(tool_name)

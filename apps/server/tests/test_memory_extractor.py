@@ -1,5 +1,8 @@
 """Tests for the LLM-backed memory extractor (parse_memory_ops + LLMMemoryExtractor)."""
 
+import asyncio
+
+import agentcore.memory.user_memory as mem_mod
 from agentcore.llm import LLMRequest, LLMResponse
 from agentcore.memory.user_memory import (
     _EXTRACT_SYSTEM_PROMPT,
@@ -159,6 +162,23 @@ async def test_extractor_malformed_output_yields_no_ops():
     extractor = LLMMemoryExtractor(provider)
     ops = await extractor.extract(
         MemoryExtractInput(user_id="u1", current_memory="", messages=[])
+    )
+    assert ops == []
+
+
+async def test_extractor_times_out_yields_no_ops(monkeypatch):
+    """A stalled model degrades to no ops (window skipped), not a hang."""
+
+    class _StallProvider:
+        async def complete(self, request: LLMRequest) -> LLMResponse:
+            await asyncio.sleep(3600)  # never resolves within the timeout
+            raise AssertionError("unreachable")
+
+    monkeypatch.setattr(mem_mod, "_EXTRACT_TIMEOUT_SECONDS", 0.01)
+    ops = await LLMMemoryExtractor(_StallProvider()).extract(
+        MemoryExtractInput(
+            user_id="u1", current_memory="", messages=[{"role": "user", "content": "hi"}]
+        )
     )
     assert ops == []
 

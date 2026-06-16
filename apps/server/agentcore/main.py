@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from agentcore.api.routes import (
     auth,
     conversations,
+    favicon,
     folders,
     llm_key,
     messages,
@@ -26,10 +27,13 @@ from agentcore.api.routes import (
 from agentcore.config import settings
 from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import setup_logging
+from agentcore.db.migration_check import check_migrations
 from agentcore.memory.consolidation import consolidation_loop, shutdown_scheduler
 from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
 from agentcore.runtime.session_retention import session_retention_loop
+from agentcore.runtime.suspension_retention import paused_turn_retention_loop
 from agentcore.security import KeyEncryptor
+from agentcore.tools.builtin.web.search_backend import aclose_search_backend
 from agentcore.workspace.retention import retention_loop
 
 logger = logging.getLogger(__name__)
@@ -89,6 +93,10 @@ def _validate_production_security() -> None:
 async def lifespan(app: FastAPI):
     setup_logging()
     _validate_production_security()
+    # Schema-drift notice: warn loudly (never block) if the live DB is behind the
+    # migration head, so an unapplied migration surfaces at boot instead of as a
+    # mid-session UndefinedColumnError on a core endpoint.
+    await check_migrations()
 
     # Background retention sweep (决策⑦): physically purge soft-deleted workspaces
     # past their grace period. Best-effort and self-contained; cancelled cleanly
@@ -111,6 +119,13 @@ async def lifespan(app: FastAPI):
     if settings.session_roster_persist_enabled:
         session_retention_task = asyncio.create_task(session_retention_loop())
 
+    # Paused-turn TTL sweep (结构化挂起 2b): prune paused_turns frames abandoned past
+    # the 7-day window so durable suspensions stay bounded. The live resolve path drops
+    # connected pauses; this only catches the disconnected, never-resumed remainder.
+    paused_turn_retention_task: asyncio.Task | None = None
+    if settings.structured_suspension_persist_enabled:
+        paused_turn_retention_task = asyncio.create_task(paused_turn_retention_loop())
+
     try:
         yield
     finally:
@@ -126,8 +141,14 @@ async def lifespan(app: FastAPI):
             session_retention_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await session_retention_task
+        if paused_turn_retention_task is not None:
+            paused_turn_retention_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await paused_turn_retention_task
         # Flush in-flight debounced passes and cancel pending timers.
         await shutdown_scheduler()
+        # Release the shared SearXNG keep-alive pool.
+        await aclose_search_backend()
 
 
 app = FastAPI(
@@ -170,6 +191,7 @@ async def agentcore_error_handler(request, exc: AgentCoreError):
 app.include_router(system.router)
 app.include_router(auth.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
+app.include_router(favicon.router, prefix="/v1")
 app.include_router(folders.router, prefix="/v1")
 app.include_router(llm_key.router, prefix="/v1")
 app.include_router(messages.router, prefix="/v1")

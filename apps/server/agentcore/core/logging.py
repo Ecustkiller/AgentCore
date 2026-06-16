@@ -102,6 +102,11 @@ def setup_logging() -> None:
         "httpcore",
         "httpcore.http11",
         "httpcore.connection",
+        # The startup migration-drift check (db/migration_check.py) builds a
+        # MigrationContext, which logs two INFO lines per boot; the actionable
+        # signal is our own WARNING, not alembic's transactional-DDL chatter.
+        # (CLI `alembic upgrade` uses alembic.ini's own log config, untouched.)
+        "alembic.runtime.migration",
     ]
     # Clamp the SQL engine logger ONLY when echo is off; when db_echo=True the
     # operator explicitly wants SQL statements, so suppressing would defeat the

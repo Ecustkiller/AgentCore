@@ -71,6 +71,20 @@ class MessagePage:
     page_size: int
 
 
+@dataclass(frozen=True)
+class MemberView:
+    """A group member for the roster: their user plus moderation-relevant flags.
+
+    ``is_admin`` mirrors the platform role (创始团队 = 平台 admin, the 内测群's
+    moderators) so the client can badge official accounts and hide kick/mute on
+    them; ``muted_by_admin`` surfaces the admin-imposed 禁言 state.
+    """
+
+    user: User
+    is_admin: bool
+    muted_by_admin: bool
+
+
 class MessagingService:
     def __init__(
         self,
@@ -145,14 +159,219 @@ class MessagingService:
         logger.debug("dm.opened", chat=chat.id, by=requester_id, peer=peer_id)
         return ChatView(chat=chat, member=member, peer=peer, unread=0)
 
+    async def join_auto_join_chats(self, *, user_id: str) -> None:
+        """Enroll a user into every auto-join chat (the 内测全员群 mechanism).
+
+        Called once at registration. Idempotent per chat — a user already in a
+        chat is left untouched (so re-running never resets their state). Pinned on
+        join so the 内测群 surfaces at the top of a brand-new user's list.
+        """
+        chats = await self._chats.list_auto_join_chats()
+        for chat in chats:
+            await self._chats.add_member(chat.id, user_id, pinned=True)
+        if chats:
+            logger.info(
+                "chat.auto_join", user=user_id, chats=[c.id for c in chats]
+            )
+
+    async def list_members(self, *, chat_id: str, user_id: str) -> list[MemberView]:
+        """The members of a chat (for the group roster + member panel).
+
+        Non-members get 404 (IDOR-safe). Returns members in join order, each with
+        their platform-admin and admin-mute flags so the route can build a
+        ``ChatParticipant``. Members whose account no longer resolves are dropped.
+        """
+        if await self._chats.get_member(chat_id, user_id) is None:
+            raise NotFoundError("会话不存在")
+        members = sorted(
+            await self._chats.list_members(chat_id), key=lambda m: m.joined_at
+        )
+        users = await self._users.get_by_ids([m.user_id for m in members])
+        views: list[MemberView] = []
+        for m in members:
+            user = users.get(m.user_id)
+            if user is None:
+                continue
+            views.append(
+                MemberView(
+                    user=user,
+                    is_admin=user.role == "admin",
+                    muted_by_admin=m.muted_by_admin,
+                )
+            )
+        return views
+
+    async def leave_chat(self, *, chat_id: str, user_id: str) -> None:
+        """Leave a group/official chat (removes this user's membership).
+
+        Non-members 404. Dms can't be "left" (they're a pair, not a room) — that
+        is a hide/delete semantic, out of scope here. Auto-join fires only at
+        registration, so leaving the 内测群 sticks (no re-enrollment on login).
+        """
+        member = await self._chats.get_member(chat_id, user_id)
+        if member is None:
+            raise NotFoundError("会话不存在")
+        chat = await self._chats.get_chat(chat_id)
+        if chat is not None and chat.type == "dm":
+            raise ValidationError("单聊不支持退出")
+        await self._chats.remove_member(chat_id, user_id)
+        logger.info("chat.left", chat=chat_id, user=user_id)
+
+    async def set_chat_flags(
+        self,
+        *,
+        chat_id: str,
+        user_id: str,
+        muted: bool | None = None,
+        pinned: bool | None = None,
+    ) -> ChatView:
+        """Update this user's per-chat flags (mute / pin) and return the row."""
+        if await self._chats.get_member(chat_id, user_id) is None:
+            raise NotFoundError("会话不存在")
+        await self._chats.set_membership_flags(
+            chat_id, user_id, muted=muted, pinned=pinned
+        )
+        return await self.chat_view(chat_id=chat_id, user_id=user_id)
+
+    # --- Moderation (Stage 3 审核治理: 平台 admin kick / mute / announce) ---
+    # Platform-admin authority is gated at the route (``AdminUser``); these methods
+    # own the resource invariants (chat is a moderated group, target is a member,
+    # admins can't be moderated) and the system-card side effects.
+
+    async def kick_member(
+        self, *, chat_id: str, actor_id: str, target_id: str
+    ) -> None:
+        """Remove a member from a group (admin 踢人) and post a system notice.
+
+        404 unknown chat / target-not-a-member; 422 for a dm (a pair, not a room);
+        403 when the target is a platform admin (admins can't be moderated — no
+        civil war / self-lockout). The kicked user is dropped, then a centered
+        ``system_card`` is fanned out to the remaining members.
+        """
+        await self._require_moderatable_group(chat_id)
+        await self._assert_target_moderatable(chat_id, target_id)
+        target = await self._users.get_by_id(target_id)
+        await self._chats.remove_member(chat_id, target_id)
+        name = target.display_name if target else "成员"
+        await self._post_system_card(
+            chat_id=chat_id,
+            content=f"{name} 已被移出群聊",
+            payload={"kind": "member_removed", "user_id": target_id},
+        )
+        logger.info("chat.kicked", chat=chat_id, by=actor_id, target=target_id)
+
+    async def set_admin_mute(
+        self, *, chat_id: str, actor_id: str, target_id: str, muted: bool
+    ) -> None:
+        """Mute / unmute a member (admin 禁言): a muted member keeps reading but a
+        send is refused (403, in :meth:`send_message`).
+
+        Same gates as :meth:`kick_member`. No全群 broadcast — 禁言 is targeted, not
+        announced (Stage 3 decision); the member learns of it when a send is
+        refused, and the roster shows the state to admins.
+        """
+        await self._require_moderatable_group(chat_id)
+        await self._assert_target_moderatable(chat_id, target_id)
+        await self._chats.set_admin_mute(chat_id, target_id, muted_by_admin=muted)
+        logger.info(
+            "chat.admin_mute",
+            chat=chat_id,
+            by=actor_id,
+            target=target_id,
+            muted=muted,
+        )
+
+    async def post_announcement(
+        self, *, chat_id: str, actor_id: str, content: str
+    ) -> ChatMessage:
+        """Post an admin announcement (官方公告) as a centered ``system_card``.
+
+        Sent as the official/system account (NULL sender) so it renders as a
+        notice rather than a normal bubble, and fanned out to every member. 404
+        unknown chat; 422 for a dm.
+        """
+        await self._require_moderatable_group(chat_id)
+        message = await self._post_system_card(
+            chat_id=chat_id,
+            content=content,
+            payload={"kind": "announcement", "by": actor_id},
+        )
+        logger.info("chat.announced", chat=chat_id, by=actor_id)
+        return message
+
+    async def _require_moderatable_group(self, chat_id: str) -> Chat:
+        """Resolve a chat that supports moderation (group/official, not a dm)."""
+        chat = await self._chats.get_chat(chat_id)
+        if chat is None:
+            raise NotFoundError("会话不存在")
+        if chat.type == "dm":
+            raise ValidationError("单聊不支持该操作")
+        return chat
+
+    async def _assert_target_moderatable(self, chat_id: str, target_id: str) -> None:
+        """Guard a kick/mute target: must be a current member and not an admin.
+
+        Admins are exempt from moderation so creators can't kick/mute each other
+        (or themselves) out of the 内测群.
+        """
+        if await self._chats.get_member(chat_id, target_id) is None:
+            raise NotFoundError("该用户不在群内")
+        target = await self._users.get_by_id(target_id)
+        if target is not None and target.role == "admin":
+            raise AuthorizationError("不能对管理员执行该操作")
+
+    async def _post_system_card(
+        self, *, chat_id: str, content: str, payload: dict[str, Any] | None = None
+    ) -> ChatMessage:
+        """Append a ``system_card`` (NULL sender = official) and fan it out to the
+        chat's current members. Shared by kick notices and announcements.
+        """
+        message = await self._chats.add_message(
+            chat_id=chat_id,
+            sender_user_id=None,
+            content=content,
+            sender_type="official",
+            content_type="system_card",
+            payload=payload,
+        )
+        members = await self._chats.list_members(chat_id)
+        await self._events.publish(
+            [m.user_id for m in members], self._message_event(message)
+        )
+        return message
+
+    async def chat_view(self, *, chat_id: str, user_id: str) -> ChatView:
+        """Build one chat's view (chat + this user's state + dm peer + unread).
+
+        Single-chat counterpart to :meth:`list_chats` for endpoints that return
+        one updated row (e.g. a flags patch). Non-members 404.
+        """
+        chat = await self._chats.get_chat(chat_id)
+        member = await self._chats.get_member(chat_id, user_id)
+        if chat is None or member is None:
+            raise NotFoundError("会话不存在")
+        peer: User | None = None
+        if chat.type == "dm":
+            peer_ids = await self._chats.peer_ids_for(
+                [chat_id], exclude_user_id=user_id
+            )
+            peer_id = peer_ids.get(chat_id)
+            if peer_id:
+                peer = (await self._users.get_by_ids([peer_id])).get(peer_id)
+        unread = (await self._chats.unread_counts(user_id)).get(chat_id, 0)
+        return ChatView(chat=chat, member=member, peer=peer, unread=unread)
+
     async def list_chats(self, *, user_id: str) -> list[ChatView]:
-        """The user's chat list (recent first), with unread counts and dm peers
-        resolved in batch (no N+1).
+        """The user's chat list (pinned first, then recent), with unread counts and
+        dm peers resolved in batch (no N+1).
         """
         memberships = await self._chats.list_memberships(user_id)
-        chat_ids = [chat.id for chat, _ in memberships]
+        # Resolve "the other human" only for dms — a group/official chat has no
+        # single peer (the client renders its title), and picking an arbitrary
+        # member would leak that member as the row's identity.
+        dm_ids = [chat.id for chat, _ in memberships if chat.type == "dm"]
         unread = await self._chats.unread_counts(user_id)
-        peer_ids = await self._chats.peer_ids_for(chat_ids, exclude_user_id=user_id)
+        peer_ids = await self._chats.peer_ids_for(dm_ids, exclude_user_id=user_id)
         peers = await self._users.get_by_ids(list(peer_ids.values()))
 
         views: list[ChatView] = []
@@ -195,6 +414,8 @@ class MessagingService:
         chat = await self._chats.get_chat(chat_id)
         if chat is None:
             raise NotFoundError("会话不存在")
+        if member.muted_by_admin:
+            raise AuthorizationError("你已被管理员禁言，暂时无法发言")
 
         if chat.type == "dm":
             peer_ids = await self._chats.peer_ids_for(

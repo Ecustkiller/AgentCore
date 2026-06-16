@@ -30,13 +30,18 @@ export async function listFolders(): Promise<FolderMeta[]> {
   return res.map(toFolder);
 }
 
+/** Create a folder. `localRootId` binds it to a desktop FS root at creation —
+ * the file hub's "添加文件夹 = 建本地绑定项目" (文件中枢统一 F2): a picked local
+ * directory becomes a local project in one step. */
 export async function createFolder(
   name: string,
   localDir?: string | null,
+  localRootId?: string | null,
 ): Promise<FolderMeta> {
   const res = await api.post<BackendFolder>("/v1/folders", {
     name,
     local_dir: localDir ?? null,
+    local_root_id: localRootId ?? null,
   });
   return toFolder(res);
 }

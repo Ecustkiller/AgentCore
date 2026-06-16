@@ -1,0 +1,262 @@
+import { startNewConversation } from "@/lib/newConversation";
+import { chord } from "@/lib/shortcuts";
+import { useSidebarStore } from "@/stores/sidebar";
+import { useUIStore } from "@/stores/ui";
+import {
+  BarChart3,
+  Compass,
+  Cpu,
+  Gauge,
+  Info,
+  Keyboard,
+  type LucideIcon,
+  Mail,
+  MessagesSquare,
+  Monitor,
+  Moon,
+  Palette,
+  PanelLeft,
+  Plus,
+  Settings,
+  SlidersHorizontal,
+  Sparkles,
+  Sun,
+  Users,
+  Workflow,
+} from "lucide-react";
+import type { NavigateFunction } from "react-router-dom";
+
+/** Command palette sub-sections (Tier 2). Rendered in this fixed order, each as
+ * its own group so actions stay scannable next to the entity search results. */
+export type CommandCategory = "操作" | "前往" | "主题";
+
+export const COMMAND_CATEGORY_ORDER: CommandCategory[] = [
+  "操作",
+  "前往",
+  "主题",
+];
+
+export interface PaletteCommand {
+  id: string;
+  title: string;
+  category: CommandCategory;
+  icon: LucideIcon;
+  /** Extra match terms (English / aliases) so non-literal queries still hit. */
+  keywords?: string[];
+  /** Right-aligned key hint, rendered as a `<kbd>` (e.g. a global shortcut). */
+  shortcut?: string;
+  /** Right-aligned plain hint, e.g. the current value of a toggle. */
+  hint?: string;
+  /** Perform the action. The palette closes itself after this runs. */
+  run: () => void;
+}
+
+/** Snapshot of UI state the command list reflects (so toggle hints / the active
+ * theme stay accurate) plus the router's navigate. */
+export interface CommandContext {
+  navigate: NavigateFunction;
+  theme: "light" | "dark" | "system";
+  usageDetail: boolean;
+  sidebarCollapsed: boolean;
+}
+
+/**
+ * Build the Tier 2 command list for the global palette.
+ *
+ * Pure data (no hooks) so the palette can rebuild it cheaply whenever the
+ * reflected state changes; actions reach the stores via `getState()` / the
+ * passed `navigate`. Grouped by {@link CommandCategory} at render time.
+ */
+export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
+  const { navigate, theme, usageDetail, sidebarCollapsed } = ctx;
+  const go = (path: string) => () => navigate(path);
+
+  return [
+    // ---- 操作 (actions) ----
+    {
+      id: "new-conversation",
+      title: "新建对话",
+      category: "操作",
+      icon: Plus,
+      keywords: ["new", "chat", "compose", "xinjian", "duihua"],
+      shortcut: chord("n"),
+      run: () => startNewConversation(navigate),
+    },
+    {
+      id: "toggle-sidebar",
+      title: sidebarCollapsed ? "展开侧栏" : "收起侧栏",
+      category: "操作",
+      icon: PanelLeft,
+      keywords: ["sidebar", "toggle", "celan", "shoouqi"],
+      shortcut: chord("b"),
+      run: () => useSidebarStore.getState().toggleCollapsed(),
+    },
+    {
+      id: "toggle-usage-detail",
+      title: "用量明细（Power 模式）",
+      category: "操作",
+      icon: Gauge,
+      keywords: ["usage", "power", "token", "cost", "yongliang"],
+      hint: usageDetail ? "当前：开" : "当前：关",
+      run: () => useUIStore.getState().toggleUsageDetail(),
+    },
+
+    // ---- 前往 (navigation) ----
+    {
+      id: "nav-conversations",
+      title: "全部对话",
+      category: "前往",
+      icon: MessagesSquare,
+      keywords: ["conversations", "all", "duihua"],
+      run: go("/conversations"),
+    },
+    {
+      id: "nav-messages",
+      title: "消息",
+      category: "前往",
+      icon: Mail,
+      keywords: ["messages", "im", "xiaoxi"],
+      run: go("/messages"),
+    },
+    {
+      id: "nav-toolbox",
+      title: "工具箱",
+      category: "前往",
+      icon: Settings,
+      keywords: ["toolbox", "tools", "gongju"],
+      run: go("/toolbox"),
+    },
+    {
+      id: "nav-ai-tools",
+      title: "AI 工具",
+      category: "前往",
+      icon: Sparkles,
+      keywords: ["ai tools", "toolbox"],
+      run: go("/toolbox/ai-tools"),
+    },
+    {
+      id: "nav-mechanism",
+      title: "团队运行机制",
+      category: "前往",
+      icon: Workflow,
+      keywords: ["team", "mechanism", "graph", "tuandui"],
+      run: go("/toolbox/mechanism"),
+    },
+    {
+      id: "nav-explore",
+      title: "探索",
+      category: "前往",
+      icon: Compass,
+      keywords: ["explore", "tansuo"],
+      run: go("/explore"),
+    },
+    {
+      id: "nav-settings",
+      title: "设置 · 通用",
+      category: "前往",
+      icon: Settings,
+      keywords: ["settings", "general", "shezhi", "more"],
+      run: go("/more"),
+    },
+    {
+      id: "nav-settings-model",
+      title: "设置 · 模型",
+      category: "前往",
+      icon: Cpu,
+      keywords: ["settings", "model", "moxing"],
+      run: go("/more/model"),
+    },
+    {
+      id: "nav-settings-model-modes",
+      title: "设置 · 模型模式",
+      category: "前往",
+      icon: SlidersHorizontal,
+      keywords: ["settings", "model modes", "quality", "moshi"],
+      run: go("/more/model-modes"),
+    },
+    {
+      id: "nav-settings-usage",
+      title: "设置 · 用量",
+      category: "前往",
+      icon: BarChart3,
+      keywords: ["settings", "usage", "billing", "yongliang"],
+      run: go("/more/usage"),
+    },
+    {
+      id: "nav-settings-appearance",
+      title: "设置 · 外观",
+      category: "前往",
+      icon: Palette,
+      keywords: ["settings", "appearance", "theme", "waiguan"],
+      run: go("/more/appearance"),
+    },
+    {
+      id: "nav-settings-shortcuts",
+      title: "设置 · 快捷键",
+      category: "前往",
+      icon: Keyboard,
+      keywords: ["settings", "shortcuts", "keys", "kuaijiejian"],
+      run: go("/more/shortcuts"),
+    },
+    {
+      id: "nav-settings-members",
+      title: "设置 · 成员",
+      category: "前往",
+      icon: Users,
+      keywords: ["settings", "members", "team", "chengyuan"],
+      run: go("/more/members"),
+    },
+    {
+      id: "nav-settings-about",
+      title: "设置 · 关于",
+      category: "前往",
+      icon: Info,
+      keywords: ["settings", "about", "version", "guanyu"],
+      run: go("/more/about"),
+    },
+
+    // ---- 主题 (theme) ----
+    {
+      id: "theme-light",
+      title: "浅色主题",
+      category: "主题",
+      icon: Sun,
+      keywords: ["theme", "light", "qiansec", "qianse"],
+      hint: theme === "light" ? "当前" : undefined,
+      run: () => useUIStore.getState().setTheme("light"),
+    },
+    {
+      id: "theme-dark",
+      title: "深色主题",
+      category: "主题",
+      icon: Moon,
+      keywords: ["theme", "dark", "shense"],
+      hint: theme === "dark" ? "当前" : undefined,
+      run: () => useUIStore.getState().setTheme("dark"),
+    },
+    {
+      id: "theme-system",
+      title: "跟随系统",
+      category: "主题",
+      icon: Monitor,
+      keywords: ["theme", "system", "auto", "genxisuitong"],
+      hint: theme === "system" ? "当前" : undefined,
+      run: () => useUIStore.getState().setTheme("system"),
+    },
+  ];
+}
+
+/** Local substring matcher: every whitespace-separated token of the query must
+ * appear in the command's title / category / keywords (case-insensitive).
+ * Commands are filtered client-side — unlike entity hits, which come pre-filtered
+ * from the backend search. */
+export function commandMatches(cmd: PaletteCommand, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const hay =
+    `${cmd.title} ${cmd.category} ${(cmd.keywords ?? []).join(" ")}`.toLowerCase();
+  return q
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((token) => hay.includes(token));
+}

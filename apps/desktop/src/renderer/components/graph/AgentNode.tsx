@@ -60,7 +60,7 @@ interface AgentNodeData {
    * of the same worker rather than a new teammate. */
   isRevision?: boolean;
   revision?: number;
-  /** 辩论/审查 side (前端UX目标态 §四): badges the node 正方/反方; null/undefined on
+  /** 辩论/审查 side (前端UX设计.md §四): badges the node 正方/反方; null/undefined on
    * an ordinary teammate. */
   stance?: Stance | null;
   /** 结构化挂起 2a (7.2A): a `checkpoint_after` pause that fired after this run, or
@@ -303,14 +303,18 @@ function statusLabel(status: RunStatus): string {
 }
 
 /** The pause-badge label + palette for a node's structured checkpoint (plan_review,
- * 结构化挂起 2a): 待放行 while the user has not answered, then 已放行 (continued) or
- * 已停止 (the run ended here). A timeout folds in as 已放行 (the engine continued). */
+ * 结构化挂起): 待放行 while the user has not answered, then 已放行 (continued) / 已调整
+ * (continued with a steer injected downstream) / 已停止 (the run ended here). A
+ * timeout folds in as 已放行 (the engine continued). */
 function checkpointBadge(c: RunCheckpoint): { label: string; cls: string } {
   if (c.status === "pending") {
     return { label: "待放行", cls: "bg-warning/10 text-warning" };
   }
   if (c.decision === "stop") {
     return { label: "已停止", cls: "bg-destructive/10 text-destructive" };
+  }
+  if (c.decision === "adjust") {
+    return { label: "已调整", cls: "bg-muted text-muted-foreground" };
   }
   return { label: "已放行", cls: "bg-muted text-muted-foreground" };
 }

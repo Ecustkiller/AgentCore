@@ -1,0 +1,148 @@
+"""ask_user durable resume — answer→result mapping + frame settlement (结构化挂起 2b).
+
+Pins the pure pieces the ask_user ``POST .../resume`` path adds on top of the
+plan_review machinery:
+
+- :func:`ask_user_tool_result` is the SINGLE source of truth shared by the live tool
+  and resume — continue/adjust feed the CEO loop a ``CONTINUE`` result, stop returns
+  a terminal ``INTERACT`` whose closing note ends the turn in-band, timeout hands
+  control back to the CEO.
+- :func:`_settle_resumed_suspension` applies the user's decision to a paused frame by
+  kind: for ask_user it emits the journaled ``checkpoint_resolved``, drops off-menu
+  picks (same guard as the live tool), and reports a ``terminal_text`` ONLY for stop
+  (so resume finishes without another CEO round).
+"""
+
+from agentcore.core.types import ToolEffect
+from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
+from agentcore.runtime.events import EventSink, EventType
+from agentcore.runtime.pipeline import _settle_resumed_suspension
+from agentcore.runtime.suspension import AskUserSuspension
+from agentcore.tools.builtin.ask_user import ask_user_tool_result
+
+
+def _ask_frame(*, options: list[str] | None = None) -> AskUserSuspension:
+    return AskUserSuspension(
+        message_id="m1",
+        conversation_id="c1",
+        user_id="u1",
+        captain_run_id="cap1",
+        checkpoint_id="ck1",
+        tool_call_id="call_ask",
+        base_system_prompt="base sys",
+        user_message="A 还是 B?",
+        transcript=[],
+        question="A 还是 B?",
+        options=options if options is not None else ["A", "B"],
+        context="",
+        multiple=False,
+    )
+
+
+# --- ask_user_tool_result: the shared answer → ToolResult mapping ------------------
+
+
+def test_result_continue_folds_picks_and_note():
+    res = ask_user_tool_result(
+        CheckpointResponse(decision=CheckpointDecision.CONTINUE, note="走稳一点", selected=["A"])
+    )
+    assert res.effect is ToolEffect.CONTINUE
+    assert res.final_text is None  # non-terminal: no in-band closing reply
+    assert "A" in res.output and "走稳一点" in res.output
+
+
+def test_result_stop_is_terminal_with_closing_text():
+    res = ask_user_tool_result(
+        CheckpointResponse(decision=CheckpointDecision.STOP, note="先到这", selected=[])
+    )
+    # stop ends the turn in-band: the closing note rides as final_text (the reply),
+    # NOT as output (which is the CEO-facing breadcrumb).
+    assert res.effect is ToolEffect.INTERACT
+    assert res.final_text == "先到这"
+    assert "停止" in res.output
+
+
+def test_result_stop_defaults_closing_when_no_note():
+    res = ask_user_tool_result(
+        CheckpointResponse(decision=CheckpointDecision.STOP, note="", selected=[])
+    )
+    assert res.effect is ToolEffect.INTERACT
+    assert res.final_text  # a non-empty default closing, so the bubble is never blank
+
+
+def test_result_timeout_hands_back_to_ceo():
+    res = ask_user_tool_result(CheckpointResponse(decision=CheckpointDecision.TIMEOUT))
+    # not terminal — the CEO decides how to wrap up on the next round.
+    assert res.effect is ToolEffect.CONTINUE
+    assert res.final_text is None
+
+
+# --- _settle_resumed_suspension: ask_user branch ----------------------------------
+
+
+def _sink_with_seeded_checkpoint() -> EventSink:
+    """An EventSink pre-seeded with the pause's ``checkpoint_required`` — as
+    ``resume_chat_pipeline`` does via ``seed_journal`` before settling. Without this
+    surface event ``execution_journal`` returns None (nothing to replay)."""
+    sink = EventSink()
+    sink.seed_journal(
+        [{"type": EventType.CHECKPOINT_REQUIRED.value, "payload": {}, "timestamp": "t"}]
+    )
+    return sink
+
+
+async def test_settle_ask_user_stop_yields_terminal_text():
+    sink = _sink_with_seeded_checkpoint()
+    settled = await _settle_resumed_suspension(
+        _ask_frame(),
+        decision=CheckpointDecision.STOP,
+        note="收工",
+        selected=[],
+        sink=sink,
+        delegate_tool=None,  # unused on the ask_user branch
+        execution_id="",
+    )
+    # stop → finish WITHOUT another CEO round (the closing note is the whole reply).
+    assert settled.terminal_text == "收工"
+    assert "停止" in settled.output
+    # the resolution is journaled so a reload replays the settled card.
+    journal = sink.execution_journal() or []
+    assert any(e["type"] == EventType.CHECKPOINT_RESOLVED.value for e in journal)
+
+
+async def test_settle_ask_user_continue_feeds_loop_without_terminal():
+    sink = EventSink()
+    settled = await _settle_resumed_suspension(
+        _ask_frame(),
+        decision=CheckpointDecision.CONTINUE,
+        note="",
+        selected=["A"],
+        sink=sink,
+        delegate_tool=None,
+        execution_id="",
+    )
+    # continue → no terminal text (run the CEO loop), and the pick rides the result.
+    assert settled.terminal_text is None
+    assert "A" in settled.output
+
+
+async def test_settle_ask_user_drops_off_menu_picks():
+    # A resolve can't inject arbitrary strings into the CEO context — only offered
+    # options survive (same guard as the live AskUserTool).
+    sink = _sink_with_seeded_checkpoint()
+    settled = await _settle_resumed_suspension(
+        _ask_frame(options=["A", "B"]),
+        decision=CheckpointDecision.CONTINUE,
+        note="",
+        selected=["A", "HACK"],
+        sink=sink,
+        delegate_tool=None,
+        execution_id="",
+    )
+    assert "A" in settled.output
+    assert "HACK" not in settled.output
+    resolved = [
+        e for e in (sink.execution_journal() or [])
+        if e["type"] == EventType.CHECKPOINT_RESOLVED.value
+    ]
+    assert resolved and resolved[0]["payload"]["selected"] == ["A"]

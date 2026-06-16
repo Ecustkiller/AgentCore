@@ -488,5 +488,17 @@ describe("plan_review cards (结构化挂起 2a)", () => {
         note: "就此打住",
       });
     });
+
+    it("settlePlanReview records an adjust decision + its steer note", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().addPlanReview(reqPayload("c1", ["run-1"]), "a");
+      store().settlePlanReview("c1", "adjust", "把重点放在风险上", "a");
+      expect(rt().messages[0].planReviews?.[0]).toMatchObject({
+        status: "resolved",
+        decision: "adjust",
+        note: "把重点放在风险上",
+      });
+    });
   });
 });

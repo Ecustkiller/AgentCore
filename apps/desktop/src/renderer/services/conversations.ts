@@ -28,15 +28,20 @@ function toConversation(c: BackendConversation): Conversation {
     messageCount: c.message_count ?? 0,
     lastMessagePreview: null,
     folderId: c.folder_id ?? null,
-    localRootId: c.local_root_id ?? null,
     modelMode: c.model_mode ?? null,
+    pinned: c.pinned ?? false,
+    archived: c.archived ?? false,
   };
 }
 
-/** Load the user's conversations, most-recent first (server-ordered). */
-export async function listConversations(): Promise<Conversation[]> {
+/** Load the user's conversations, pinned-first then most-recent (server-ordered).
+ * `archived` flips to the「已归档」view (归档对话): the live list excludes archived
+ * rows, this returns only them. */
+export async function listConversations(
+  archived = false,
+): Promise<Conversation[]> {
   const res = await api.get<ConversationListResponse>(
-    "/v1/conversations?page_size=100",
+    `/v1/conversations?page_size=100&archived=${archived}`,
   );
   return res.data.map(toConversation);
 }
@@ -90,4 +95,27 @@ export async function renameConversation(
   title: string,
 ): Promise<void> {
   await api.patch(`/v1/conversations/${id}`, { title });
+}
+
+/** Pin / unpin a conversation (置顶对话). Returns the updated row. */
+export async function setConversationPinned(
+  id: string,
+  pinned: boolean,
+): Promise<Conversation> {
+  const res = await api.patch<BackendConversation>(`/v1/conversations/${id}`, {
+    pinned,
+  });
+  return toConversation(res);
+}
+
+/** Archive / unarchive a conversation (归档对话, reversible). Returns the updated
+ * row — unarchive (archived=false) yields a live-list row to put back. */
+export async function setConversationArchived(
+  id: string,
+  archived: boolean,
+): Promise<Conversation> {
+  const res = await api.patch<BackendConversation>(`/v1/conversations/${id}`, {
+    archived,
+  });
+  return toConversation(res);
 }

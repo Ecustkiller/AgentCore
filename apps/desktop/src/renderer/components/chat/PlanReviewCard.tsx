@@ -10,20 +10,21 @@ import {
   GitBranch,
   Loader2,
   OctagonX,
+  Pencil,
 } from "lucide-react";
 import { useState } from "react";
 
 /**
  * Inline plan_review card — the WaveScheduler paused after a `checkpoint_after`
- * step completed and before its dependents run (结构化挂起 2a). Rendered under the
+ * step completed and before its dependents run (结构化挂起). Rendered under the
  * assistant bubble that raised it (会话流内，alongside any ask_user checkpoints), so
  * it both gates the live turn and replays inline on reload.
  *
  * `interactive` is true only for the live, suspended turn (the owning message is
  * still streaming). A pending review on a finished/reloaded turn renders as a
- * passive record; a resolved one always renders its settled state. Unlike an
- * ask_user checkpoint, the only choices are 继续 (run the gated downstream) / 停止
- * (end the run here) — `adjust` is deferred in 2a.
+ * passive record; a resolved one always renders its settled state. Choices: 继续
+ * (run the gated downstream as-is) / 调整 (inject the note as a steer onto the
+ * downstream, then run) / 停止 (end the run here).
  */
 export function PlanReviewCard({
   review,
@@ -85,7 +86,7 @@ function PendingPreview({ review }: { review: PlanReviewDisplay }) {
 }
 
 /** The live, actionable card: reviewed step(s) + gated downstream + an optional
- * note, settled by 继续 / 停止. */
+ * note, settled by 继续 / 调整 / 停止. */
 function PendingPlanReview({
   review,
   conversationId,
@@ -140,7 +141,7 @@ function PendingPlanReview({
             onChange={(e) => setNote(e.target.value)}
             disabled={busy}
             rows={2}
-            placeholder="可选 · 补充说明（停止时作为收尾备注）"
+            placeholder="可选 · 备注（调整时作为对下游的指示；停止时作为收尾备注）"
             className="mt-2 w-full resize-none rounded-lg border border-border bg-card/70 px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-warning/60 focus:outline-none disabled:opacity-40"
           />
         </div>
@@ -153,6 +154,13 @@ function PendingPlanReview({
           tone="primary"
           disabled={busy}
           onClick={() => send("continue")}
+        />
+        <DecisionButton
+          icon={spinnerOr("adjust", <Pencil size={13} />)}
+          label="调整"
+          tone="neutral"
+          disabled={busy || !note.trim()}
+          onClick={() => send("adjust")}
         />
         <DecisionButton
           icon={spinnerOr("stop", <OctagonX size={13} />)}
@@ -191,7 +199,10 @@ function DormantPlanReview({ review }: { review: PlanReviewDisplay }) {
 function ResolvedPlanReview({ review }: { review: PlanReviewDisplay }) {
   const meta = {
     continue: { icon: <Check size={14} />, label: "已继续 · 放行下游" },
-    adjust: { icon: <Check size={14} />, label: "已继续 · 放行下游" },
+    adjust: {
+      icon: <Pencil size={14} />,
+      label: "已调整 · 指示已注入下游并继续",
+    },
     stop: { icon: <OctagonX size={14} />, label: "已停止 · 未运行下游" },
     timeout: { icon: <Clock size={14} />, label: "未及时回应，已自动放行继续" },
   }[review.decision ?? "timeout"];

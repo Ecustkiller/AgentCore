@@ -32,7 +32,7 @@ from agentcore.runtime.runs.types import RunContract, RunKind, RunOrigin, RunPol
 
 _VALID_TIERS = frozenset({"fast", "strong"})
 _VALID_EFFORTS = frozenset({"high", "max"})
-# Debate/review opposition markers (前端UX目标态 §四): a display-only side tag the
+# Debate/review opposition markers (前端UX设计.md §四): a display-only side tag the
 # frontend pairs into a side-by-side comparison; anything else is dropped (lenient,
 # mirroring tier/effort) so a stray value never leaks onto the graph.
 _VALID_STANCES = frozenset({"pro", "con"})

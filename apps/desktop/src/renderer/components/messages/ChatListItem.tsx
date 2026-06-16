@@ -1,6 +1,6 @@
 import { formatMessageTime } from "@/lib/format";
 import type { ChatSummary } from "@/services/messaging";
-import { BellOff, Pin } from "lucide-react";
+import { BellOff, Pin, Users } from "lucide-react";
 import { avatarInitial, chatDisplayName } from "./chatDisplay";
 
 interface Props {
@@ -31,6 +31,9 @@ export function ChatListItem({ chat, active, onSelect }: Props) {
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex items-center gap-1">
+          {chat.type === "group" && (
+            <Users size={12} className="shrink-0 text-muted-foreground" />
+          )}
           {chat.pinned && (
             <Pin size={11} className="shrink-0 text-muted-foreground" />
           )}

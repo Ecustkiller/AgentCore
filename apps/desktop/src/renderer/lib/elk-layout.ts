@@ -89,7 +89,7 @@ export async function computeLayout(
     layoutOptions: {
       ...LAYOUT_OPTIONS[layout],
       "elk.padding": "[top=24,left=24,bottom=24,right=24]",
-      // 辩论/审查 分列对置 (前端UX目标态 §四): bias ELK toward the caller's node
+      // 辩论/审查 分列对置 (前端UX设计.md §四): bias ELK toward the caller's node
       // order within a layer so a正→反 sorted batch bands by side (正方 above,
       // 反方 below) instead of being freely reordered by crossing-minimization.
       // Only requested for a debate; an unknown value is ignored by ELK, so the

@@ -3,10 +3,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  getConversations,
-  patchConversationCache,
-} from "@/hooks/useConversations";
+import { getConversations } from "@/hooks/useConversations";
 import { patchFolderCache } from "@/hooks/useFolders";
 import { ApiError } from "@/services/api";
 import { runHandoff } from "@/services/handoff";
@@ -17,7 +14,6 @@ import {
   isBoundRootMissing,
   unbindWorkspace,
 } from "@/services/workspaceBinding";
-import { useFilesStore } from "@/stores/files";
 import type { FsRoot } from "@shared/ipc-contract";
 import {
   AlertTriangle,
@@ -87,16 +83,16 @@ export function WorkspaceModeBar({
   }, [refresh]);
 
   // Mirror a bind/unbind onto the sidebar so its mode badge updates without a
-  // reload. The server owns the scope: a foldered chat writes the folder (every
-  // sibling flips), an ungrouped one writes itself.
+  // reload. 文件夹即工作区: a binding lives on the folder (every sibling flips), so we
+  // patch the folder cache. A 裸聊 bind promotes the chat into a folder server-side;
+  // its new membership lands on the next conversations refetch, so nothing to patch
+  // here (the folderId isn't in cache yet).
   const syncStores = (b: WorkspaceBinding) => {
     if (b.scope === "folder") {
       const folderId = getConversations().find(
         (c) => c.id === conversationId,
       )?.folderId;
       if (folderId) patchFolderCache(folderId, { localRootId: b.rootId });
-    } else {
-      patchConversationCache(conversationId, { localRootId: b.rootId });
     }
   };
 
@@ -115,7 +111,6 @@ export function WorkspaceModeBar({
       const root = await fsApi.addRoot();
       if (!root) return; // user cancelled the picker
       const b = await bindLocalWorkspace(conversationId, root.id);
-      useFilesStore.getState().addRoot(root); // surface it on the Files page too
       setBinding(b);
       setRoots(await loadRoots());
       syncStores(b);

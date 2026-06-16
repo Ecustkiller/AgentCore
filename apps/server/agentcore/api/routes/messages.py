@@ -10,12 +10,15 @@ The service returns ORM/domain objects; this layer owns the Pydantic conversion
 
 from fastapi import APIRouter, Depends, Query
 
-from agentcore.api.dependencies import AuthUser, get_messaging_service
+from agentcore.api.dependencies import AdminUser, AuthUser, get_messaging_service
 from agentcore.api.schemas import (
+    AdminMuteRequest,
+    AnnounceRequest,
     BlockedUser,
     BlockListResponse,
     BlockUserRequest,
     ChatListResponse,
+    ChatMembersResponse,
     ChatMessageDetail,
     ChatMessageListResponse,
     ChatParticipant,
@@ -26,6 +29,7 @@ from agentcore.api.schemas import (
     StartDmRequest,
     StatusResponse,
     UpdateDirectorySettingsRequest,
+    UpdateMembershipRequest,
     UserSearchResponse,
     UserSearchResult,
 )
@@ -38,9 +42,15 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 # --- ORM/domain → schema conversion (kept in the route, per repo convention) ---
 
 
-def _participant(user) -> ChatParticipant:
+def _participant(
+    user, *, is_admin: bool = False, muted_by_admin: bool = False
+) -> ChatParticipant:
     return ChatParticipant(
-        id=user.user_id, username=user.username, display_name=user.display_name
+        id=user.user_id,
+        username=user.username,
+        display_name=user.display_name,
+        is_admin=is_admin,
+        muted_by_admin=muted_by_admin,
     )
 
 
@@ -124,6 +134,114 @@ async def start_dm(
     """
     view = await svc.start_dm(requester_id=user.user_id, peer_id=body.user_id)
     return _chat_summary(view)
+
+
+@router.get("/chats/{chat_id}/members", response_model=ChatMembersResponse)
+async def list_chat_members(
+    chat_id: str,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """A chat's members — the group roster (resolves sender names + member panel).
+
+    404 if the requester is not a member (IDOR-safe, no existence leak). Each row
+    carries the member's platform-admin and admin-mute flags for the panel.
+    """
+    members = await svc.list_members(chat_id=chat_id, user_id=user.user_id)
+    data = [
+        _participant(m.user, is_admin=m.is_admin, muted_by_admin=m.muted_by_admin)
+        for m in members
+    ]
+    return ChatMembersResponse(data=data, total=len(data))
+
+
+@router.patch("/chats/{chat_id}/membership", response_model=ChatSummary)
+async def update_membership(
+    chat_id: str,
+    body: UpdateMembershipRequest,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Patch this user's per-chat flags (mute / pin). 404 if not a member."""
+    view = await svc.set_chat_flags(
+        chat_id=chat_id,
+        user_id=user.user_id,
+        muted=body.muted,
+        pinned=body.pinned,
+    )
+    return _chat_summary(view)
+
+
+@router.post("/chats/{chat_id}/leave", response_model=StatusResponse)
+async def leave_chat(
+    chat_id: str,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Leave a group/official chat. 404 if not a member; 422 for a dm (can't leave)."""
+    await svc.leave_chat(chat_id=chat_id, user_id=user.user_id)
+    return StatusResponse()
+
+
+# --- Moderation (Stage 3 审核治理: 平台 admin only, gated by AdminUser) ---
+
+
+@router.delete("/chats/{chat_id}/members/{target_id}", response_model=StatusResponse)
+async def kick_member(
+    chat_id: str,
+    target_id: str,
+    admin: AdminUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Remove a member from a group (platform-admin only); posts a system notice.
+
+    403 non-admin (AdminUser gate); 404 unknown chat or non-member target; 422 for
+    a dm; 403 when the target is an admin (admins can't be moderated).
+    """
+    await svc.kick_member(
+        chat_id=chat_id, actor_id=admin.user_id, target_id=target_id
+    )
+    return StatusResponse()
+
+
+@router.post(
+    "/chats/{chat_id}/members/{target_id}/mute", response_model=StatusResponse
+)
+async def mute_member(
+    chat_id: str,
+    target_id: str,
+    body: AdminMuteRequest,
+    admin: AdminUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Mute / unmute a member (platform-admin only): a muted member can read but
+    not send (403 on send). Same gates as kick.
+    """
+    await svc.set_admin_mute(
+        chat_id=chat_id,
+        actor_id=admin.user_id,
+        target_id=target_id,
+        muted=body.muted,
+    )
+    return StatusResponse()
+
+
+@router.post(
+    "/chats/{chat_id}/announce", response_model=ChatMessageDetail, status_code=201
+)
+async def announce(
+    chat_id: str,
+    body: AnnounceRequest,
+    admin: AdminUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Post an admin announcement as a centered system_card, fanned out to members
+    (platform-admin only). 404 unknown chat; 422 for a dm.
+    """
+    message = await svc.post_announcement(
+        chat_id=chat_id, actor_id=admin.user_id, content=body.content
+    )
+    return ChatMessageDetail.model_validate(message)
 
 
 @router.get("/chats/{chat_id}/messages", response_model=ChatMessageListResponse)

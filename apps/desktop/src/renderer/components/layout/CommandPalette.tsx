@@ -1,5 +1,11 @@
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { getConversations } from "@/hooks/useConversations";
+import {
+  COMMAND_CATEGORY_ORDER,
+  type PaletteCommand,
+  buildPaletteCommands,
+  commandMatches,
+} from "@/lib/paletteCommands";
 import { jumpToMessage } from "@/services/messages";
 import {
   type SearchItem,
@@ -7,6 +13,7 @@ import {
   searchAll,
 } from "@/services/search";
 import { useConversationStore } from "@/stores/conversation";
+import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import { Command } from "cmdk";
 import { Folder, Loader2, MessageSquare, Search } from "lucide-react";
@@ -18,17 +25,24 @@ const PER_TYPE_LIMIT = 8;
 /** Wait this long after the last keystroke before hitting the backend. */
 const DEBOUNCE_MS = 300;
 
-/** A rendered group: an entity type and its hits (reused for the empty-query
- * "recent conversations" list, which is built client-side). */
-interface UISection {
-  type: SearchSectionType;
-  items: SearchItem[];
-}
+/** Shared row styling (selected state driven by cmdk). */
+const ROW_CLASS =
+  "flex cursor-pointer items-center gap-3 px-4 py-2 text-foreground transition-colors data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground";
 
-/** A selectable row, flattened across sections for single-axis keyboard nav. */
-interface FlatEntry {
-  type: SearchSectionType;
-  item: SearchItem;
+const GROUP_CLASS =
+  "[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground/70";
+
+/** A selectable row: a Tier 2 command (local) or an entity search hit (backend). */
+type Row =
+  | { kind: "command"; cmd: PaletteCommand }
+  | { kind: "entity"; type: SearchSectionType; item: SearchItem };
+
+/** A rendered group: a heading and its rows (commands by category, or one
+ * entity type — reused for the empty-query "recent conversations" list). */
+interface RenderGroup {
+  key: string;
+  heading: string;
+  rows: Row[];
 }
 
 const SECTION_LABEL: Record<SearchSectionType, string> = {
@@ -70,24 +84,35 @@ function Snippet({ item }: { item: SearchItem }) {
 }
 
 /**
- * Global command palette (Ctrl/Cmd+K) — Tier 1 global search.
+ * Global command palette (Ctrl/Cmd+K) — Tier 2: commands + global search.
  *
- * An empty query shows recent conversations (client-side, from the store, 决策④);
- * one or more characters runs a debounced backend keyword search across the
- * user's conversations, messages and folders, grouped by type. cmdk owns the
- * ↑/↓/Enter navigation and active-item scrolling (filtering disabled — results
- * come from the backend). Jumps: conversation → open it;
- * message → open + scroll-to-message (load-around for hits outside the window,
- * 命中必达); folder → reveal it in the sidebar.
+ * Two result kinds share one list. **Commands** (新建对话 / 跳转页面 / 切换主题
+ * 等) are matched client-side from a static registry, so they appear instantly
+ * with no round-trip. **Entities** (对话 / 消息 / 文件夹) come from the debounced
+ * backend keyword search (Tier 1) for a non-empty query, or the recent
+ * conversations list (client-side, 决策④) for an empty one.
+ *
+ * Ordering: an empty query keeps 最近对话 on top (preserving the quick-switch
+ * muscle memory) with commands below; once the user types, matching commands
+ * lead and entity hits follow. cmdk owns ↑/↓/Enter navigation and active-item
+ * scrolling (its own filtering stays disabled — both kinds are pre-filtered
+ * here). Command jumps run the action and close; entity jumps:
+ * conversation → open it; message → open + scroll-to-message (load-around for
+ * hits outside the window, 命中必达); folder → reveal it on the management page.
  */
 export function CommandPalette() {
   const open = useUIStore((s) => s.searchOpen);
   const close = useUIStore((s) => s.closeSearch);
+  const theme = useUIStore((s) => s.theme);
+  const usageDetail = useUIStore((s) => s.usageDetail);
+  const sidebarCollapsed = useSidebarStore((s) => s.collapsed);
   const switchConversation = useConversationStore((s) => s.switchConversation);
   const navigate = useNavigate();
 
   const [query, setQuery] = useState("");
-  const [sections, setSections] = useState<UISection[]>([]);
+  const [sections, setSections] = useState<
+    { type: SearchSectionType; items: SearchItem[] }[]
+  >([]);
   const [loading, setLoading] = useState(false);
   const [errored, setErrored] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -102,9 +127,10 @@ export function CommandPalette() {
     setQuery("");
   }, [open]);
 
-  // Resolve the query to grouped results: empty → recent conversations (local);
-  // non-empty → debounced backend search. Gated on `open` so it recomputes the
-  // recent list each time the palette opens (and does nothing while closed).
+  // Resolve the query to grouped entity results: empty → recent conversations
+  // (local); non-empty → debounced backend search. Gated on `open` so it
+  // recomputes the recent list each time the palette opens (and does nothing
+  // while closed). Commands are resolved separately, below.
   useEffect(() => {
     if (!open) return;
     const q = query.trim();
@@ -128,7 +154,9 @@ export function CommandPalette() {
         try {
           const res = await searchAll(q, { limit: PER_TYPE_LIMIT });
           if (seq !== seqRef.current) return;
-          setSections(res.sections as UISection[]);
+          setSections(
+            res.sections as { type: SearchSectionType; items: SearchItem[] }[],
+          );
           setLoading(false);
         } catch {
           if (seq !== seqRef.current) return;
@@ -141,11 +169,62 @@ export function CommandPalette() {
     return () => clearTimeout(timer);
   }, [query, open]);
 
-  // Flattened only to detect "no results"; cmdk owns cursor/keyboard/scroll.
-  const flat = useMemo<FlatEntry[]>(
+  const isEmptyQuery = query.trim().length === 0;
+
+  // Commands reflect the live UI state (toggle hints, the active theme) and are
+  // filtered locally — no backend round-trip, so they show even while a search
+  // is in flight or the backend is down.
+  const commands = useMemo(
     () =>
-      sections.flatMap((s) => s.items.map((item) => ({ type: s.type, item }))),
-    [sections],
+      buildPaletteCommands({ navigate, theme, usageDetail, sidebarCollapsed }),
+    [navigate, theme, usageDetail, sidebarCollapsed],
+  );
+  const matchedCommands = useMemo(
+    () => commands.filter((c) => commandMatches(c, query)),
+    [commands, query],
+  );
+
+  const commandGroups = useMemo<RenderGroup[]>(
+    () =>
+      COMMAND_CATEGORY_ORDER.map((cat) => ({
+        key: `cmd:${cat}`,
+        heading: cat,
+        rows: matchedCommands
+          .filter((c) => c.category === cat)
+          .map((c) => ({ kind: "command", cmd: c }) as Row),
+      })).filter((g) => g.rows.length > 0),
+    [matchedCommands],
+  );
+
+  const entityGroups = useMemo<RenderGroup[]>(
+    () =>
+      sections
+        .filter((s) => s.items.length > 0)
+        .map((s) => ({
+          key: `ent:${s.type}`,
+          heading:
+            isEmptyQuery && s.type === "conversation"
+              ? "最近对话"
+              : SECTION_LABEL[s.type],
+          rows: s.items.map(
+            (item) => ({ kind: "entity", type: s.type, item }) as Row,
+          ),
+        })),
+    [sections, isEmptyQuery],
+  );
+
+  // Empty query → recent conversations first (quick-switch), commands after;
+  // typing → matching commands first, entity hits after.
+  const groups = useMemo<RenderGroup[]>(
+    () =>
+      isEmptyQuery
+        ? [...entityGroups, ...commandGroups]
+        : [...commandGroups, ...entityGroups],
+    [isEmptyQuery, entityGroups, commandGroups],
+  );
+  const hasRows = useMemo(
+    () => groups.some((g) => g.rows.length > 0),
+    [groups],
   );
 
   const openConversation = (id: string) => {
@@ -179,13 +258,19 @@ export function CommandPalette() {
     close();
   };
 
-  const execute = (entry: FlatEntry) => {
-    if (entry.type === "conversation") openConversation(entry.item.id);
-    else if (entry.type === "message") openMessage(entry.item);
-    else openFolder(entry.item.id);
+  const runRow = (row: Row) => {
+    if (row.kind === "command") {
+      row.cmd.run();
+      close();
+      return;
+    }
+    if (row.type === "conversation") openConversation(row.item.id);
+    else if (row.type === "message") openMessage(row.item);
+    else openFolder(row.item.id);
   };
 
-  const isEmptyQuery = query.trim().length === 0;
+  const rowValue = (row: Row) =>
+    row.kind === "command" ? `cmd:${row.cmd.id}` : `${row.type}:${row.item.id}`;
 
   return (
     <Dialog
@@ -204,9 +289,9 @@ export function CommandPalette() {
           inputRef.current?.focus();
         }}
       >
-        <DialogTitle className="sr-only">全局搜索</DialogTitle>
+        <DialogTitle className="sr-only">全局搜索与命令</DialogTitle>
         <Command
-          label="全局搜索"
+          label="全局搜索与命令"
           shouldFilter={false}
           loop
           className="flex flex-col overflow-hidden"
@@ -217,7 +302,7 @@ export function CommandPalette() {
               ref={inputRef}
               value={query}
               onValueChange={setQuery}
-              placeholder="搜索对话、消息、文件夹…"
+              placeholder="搜索对话、消息、文件夹，或运行命令…"
               className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
             />
             {loading && (
@@ -230,7 +315,7 @@ export function CommandPalette() {
           </div>
 
           <Command.List className="max-h-96 overflow-y-auto py-1.5">
-            {flat.length === 0 ? (
+            {!hasRows ? (
               <div className="px-4 py-8 text-center text-sm text-muted-foreground">
                 {errored
                   ? "搜索失败，请重试"
@@ -241,25 +326,50 @@ export function CommandPalette() {
                       : "没有匹配结果"}
               </div>
             ) : (
-              sections.map((section) => {
-                const Icon = SECTION_ICON[section.type];
-                const isMessage = section.type === "message";
-                return (
-                  <Command.Group
-                    key={section.type}
-                    heading={
-                      isEmptyQuery && section.type === "conversation"
-                        ? "最近对话"
-                        : SECTION_LABEL[section.type]
+              groups.map((group) => (
+                <Command.Group
+                  key={group.key}
+                  heading={group.heading}
+                  className={GROUP_CLASS}
+                >
+                  {group.rows.map((row) => {
+                    const value = rowValue(row);
+                    if (row.kind === "command") {
+                      const Icon = row.cmd.icon;
+                      return (
+                        <Command.Item
+                          key={value}
+                          value={value}
+                          onSelect={() => runRow(row)}
+                          className={ROW_CLASS}
+                        >
+                          <Icon
+                            size={16}
+                            className="shrink-0 text-muted-foreground"
+                          />
+                          <span className="min-w-0 flex-1 truncate text-sm">
+                            {row.cmd.title}
+                          </span>
+                          {row.cmd.shortcut ? (
+                            <kbd className="shrink-0 text-xs text-muted-foreground">
+                              {row.cmd.shortcut}
+                            </kbd>
+                          ) : row.cmd.hint ? (
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {row.cmd.hint}
+                            </span>
+                          ) : null}
+                        </Command.Item>
+                      );
                     }
-                    className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground/70"
-                  >
-                    {section.items.map((item) => (
+                    const Icon = SECTION_ICON[row.type];
+                    const isMessage = row.type === "message";
+                    return (
                       <Command.Item
-                        key={`${section.type}:${item.id}`}
-                        value={`${section.type}:${item.id}`}
-                        onSelect={() => execute({ type: section.type, item })}
-                        className="flex cursor-pointer items-center gap-3 px-4 py-2 text-foreground transition-colors data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
+                        key={value}
+                        value={value}
+                        onSelect={() => runRow(row)}
+                        className={ROW_CLASS}
                       >
                         <Icon
                           size={16}
@@ -267,19 +377,19 @@ export function CommandPalette() {
                         />
                         <span className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate text-sm">
-                            {item.title || "未命名"}
+                            {row.item.title || "未命名"}
                           </span>
-                          {isMessage && item.snippet && (
+                          {isMessage && row.item.snippet && (
                             <span className="flex text-xs">
-                              <Snippet item={item} />
+                              <Snippet item={row.item} />
                             </span>
                           )}
                         </span>
                       </Command.Item>
-                    ))}
-                  </Command.Group>
-                );
-              })
+                    );
+                  })}
+                </Command.Group>
+              ))
             )}
           </Command.List>
         </Command>

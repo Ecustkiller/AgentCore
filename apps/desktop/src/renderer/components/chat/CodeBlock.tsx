@@ -11,8 +11,10 @@ import {
  *
  * `rehype-highlight` replaces the code body with token <span>s, so the raw
  * source can't be read from a single child — it must be gathered by walking.
+ * Exported so the diagram router (Markdown.tsx) can pull the raw fence body for
+ * ```mermaid / ```markmap blocks.
  */
-function nodeText(node: ReactNode): string {
+export function nodeText(node: ReactNode): string {
   if (node == null || typeof node === "boolean") return "";
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(nodeText).join("");

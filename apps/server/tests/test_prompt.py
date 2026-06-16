@@ -103,7 +103,7 @@ def test_team_hint_teaches_finalize_for_single_delivery():
 
 
 def test_team_hint_teaches_debate_stance_tagging():
-    # 辩论/审查 (前端UX目标态 §四③): the CEO tags opposing tasks with stance so the
+    # 辩论/审查 (前端UX设计.md §四③): the CEO tags opposing tasks with stance so the
     # frontend can tell a debate from普通并行 — the only signal, since执行 is identical
     # (守住「形状是数据不是模式」). Pin it so the always-on hint keeps teaching it.
     hint = CHAT_TEAM_CAPABILITY_HINT

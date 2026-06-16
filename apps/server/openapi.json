@@ -1,6 +1,20 @@
 {
   "components": {
     "schemas": {
+      "AdminMuteRequest": {
+        "description": "Admin 禁言 toggle for a group member (muted = can read, can't send).",
+        "properties": {
+          "muted": {
+            "title": "Muted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "muted"
+        ],
+        "title": "AdminMuteRequest",
+        "type": "object"
+      },
       "AgentCostLine": {
         "description": "One participant's row in the team payroll (one Run = one Agent).",
         "properties": {
@@ -48,6 +62,22 @@
           "duration_ms"
         ],
         "title": "AgentCostLine",
+        "type": "object"
+      },
+      "AnnounceRequest": {
+        "description": "Post an admin announcement into a chat as a centered system_card (官方公告).",
+        "properties": {
+          "content": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "AnnounceRequest",
         "type": "object"
       },
       "ApplyHandoffRequest": {
@@ -171,6 +201,28 @@
           "total"
         ],
         "title": "ChatListResponse",
+        "type": "object"
+      },
+      "ChatMembersResponse": {
+        "description": "A chat's members (group roster: resolves sender names + the member panel).",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ChatParticipant"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "ChatMembersResponse",
         "type": "object"
       },
       "ChatMessageDetail": {
@@ -313,6 +365,16 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "is_admin": {
+            "default": false,
+            "title": "Is Admin",
+            "type": "boolean"
+          },
+          "muted_by_admin": {
+            "default": false,
+            "title": "Muted By Admin",
+            "type": "boolean"
           },
           "username": {
             "title": "Username",
@@ -572,6 +634,11 @@
       },
       "ConversationSummary": {
         "properties": {
+          "archived": {
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -592,17 +659,6 @@
             "title": "Id",
             "type": "string"
           },
-          "local_root_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Local Root Id"
-          },
           "message_count": {
             "default": 0,
             "title": "Message Count",
@@ -618,6 +674,11 @@
               }
             ],
             "title": "Model Mode"
+          },
+          "pinned": {
+            "default": false,
+            "title": "Pinned",
+            "type": "boolean"
           },
           "title": {
             "anyOf": [
@@ -751,6 +812,17 @@
               }
             ],
             "title": "Local Dir"
+          },
+          "local_root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Root Id"
           },
           "name": {
             "title": "Name",
@@ -1792,6 +1864,90 @@
         "title": "MoveFileRequest",
         "type": "object"
       },
+      "PausedTurnListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PausedTurnSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "PausedTurnListResponse",
+        "type": "object"
+      },
+      "PausedTurnSummary": {
+        "description": "A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer continue / adjust / stop → the resume endpoint.\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); ask_user carries ``question`` / ``options`` / ``context`` /\n``multiple`` (the CEO's decision prompt). The unused set is empty for the other\nkind.",
+        "properties": {
+          "checkpoint_id": {
+            "title": "Checkpoint Id",
+            "type": "string"
+          },
+          "context": {
+            "default": "",
+            "title": "Context",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SuspensionKind"
+          },
+          "message_id": {
+            "title": "Message Id",
+            "type": "string"
+          },
+          "multiple": {
+            "default": false,
+            "title": "Multiple",
+            "type": "boolean"
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "pending": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Pending",
+            "type": "array"
+          },
+          "question": {
+            "default": "",
+            "title": "Question",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Steps",
+            "type": "array"
+          },
+          "user_message": {
+            "default": "",
+            "title": "User Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "kind",
+          "checkpoint_id"
+        ],
+        "title": "PausedTurnSummary",
+        "type": "object"
+      },
       "QuotaStatus": {
         "description": "Free-tier limits (决策④); 0 = unlimited. Money is USD nano internally.",
         "properties": {
@@ -1981,7 +2137,7 @@
         "type": "object"
       },
       "ResolvePlanReviewInteraction": {
-        "description": "Settle a paused structured DAG checkpoint (``plan_review`` interaction, 结构化挂起 2a).\n\nRaised when a delegate step marked ``checkpoint_after`` completed and the\nWaveScheduler paused before its dependents. ``decision`` is ``continue`` (run\nthe downstream steps) or ``stop`` (end the run here); ``adjust`` is accepted\nover the wire but treated as ``continue`` in 2a (steer injection is deferred).\nReuses :class:`CheckpointResponse` (same shape as ask_user) on the engine side.",
+        "description": "Settle a paused structured DAG checkpoint (``plan_review`` interaction, 结构化挂起 2a).\n\nRaised when a delegate step marked ``checkpoint_after`` completed and the\nWaveScheduler paused before its dependents. ``decision`` is ``continue`` (run\nthe downstream steps as-is), ``adjust`` (inject ``note`` as a steer onto the\ncheckpoint's not-yet-run downstream dependents, then proceed), or ``stop`` (end\nthe run here). Reuses :class:`CheckpointResponse` (same shape as ask_user) on the\nengine side.",
         "properties": {
           "decision": {
             "$ref": "#/components/schemas/CheckpointDecision"
@@ -2003,6 +2159,33 @@
           "decision"
         ],
         "title": "ResolvePlanReviewInteraction",
+        "type": "object"
+      },
+      "ResumeTurnRequest": {
+        "description": "Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).\n\nContinues a turn that paused at a plan_review / ask_user checkpoint and was\nDURABLY persisted (so it survived a client disconnect / server restart — the live\nin-process resolve is the corresponding interaction instead). Same decision\nvocabulary as the live resolve: ``continue`` (proceed — run the gated downstream\nfor plan_review / accept the CEO direction for ask_user), ``adjust`` (inject\n``note`` as a steer, then continue), or ``stop`` (end the turn here). ``selected``\ncarries the option(s) the user picked from an ask_user menu (ignored for\nplan_review; the server drops any pick not actually offered). The engine-only\n``timeout`` is never sent by a client.",
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/CheckpointDecision"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Note",
+            "type": "string"
+          },
+          "selected": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 6,
+            "title": "Selected",
+            "type": "array"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "ResumeTurnRequest",
         "type": "object"
       },
       "RoleCostLine": {
@@ -2030,7 +2213,7 @@
         "type": "object"
       },
       "RunsPayload": {
-        "description": "Persisted multi-agent execution journal for an assistant message.\n\n``events`` is the turn's ordered run/tool SSE events; the client replays them\nthrough the same fold as the live stream to reproduce the team graph exactly\non reload. ``null`` on messages with no delegation (user / single-agent).",
+        "description": "Persisted turn replay payload for an assistant message.\n\n``events`` is a multi-agent turn's ordered run/tool SSE events; the client\nreplays them through the same fold as the live stream to reproduce the team\ngraph exactly on reload (empty ``[]`` for a single-agent turn). ``process`` is\na single-agent turn's 思考+工具 timeline (ordered reasoning/tool steps) the\nclient replays into the inline process panel; ``null`` unless the turn used a\ntool. ``null`` whole payload on messages with neither (plain chat / user).",
         "properties": {
           "events": {
             "items": {
@@ -2050,6 +2233,21 @@
               }
             ],
             "title": "Finish Reason"
+          },
+          "process": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process"
           }
         },
         "title": "RunsPayload",
@@ -2420,6 +2618,15 @@
         "title": "StoredAttachment",
         "type": "object"
       },
+      "SuspensionKind": {
+        "description": "Which suspend point a durable frame captured (the JSON discriminator).\n\nValues match the corresponding :class:`~agentcore.runtime.interaction.InteractionKind`\nso the persisted ``kind`` reads the same across the live bridge and the frame.\nOnly these two suspend points are persisted (approval / client_tool stay\nin-memory — see 设计 §4.7).",
+        "enum": [
+          "plan_review",
+          "ask_user"
+        ],
+        "title": "SuspensionKind",
+        "type": "string"
+      },
       "ToolApproval": {
         "description": "Tool approval requirement levels.",
         "enum": [
@@ -2533,6 +2740,17 @@
       },
       "UpdateConversationRequest": {
         "properties": {
+          "archived": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived"
+          },
           "model_mode": {
             "anyOf": [
               {
@@ -2543,6 +2761,17 @@
               }
             ],
             "title": "Model Mode"
+          },
+          "pinned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned"
           },
           "title": {
             "anyOf": [
@@ -2617,6 +2846,35 @@
           }
         },
         "title": "UpdateFolderRequest",
+        "type": "object"
+      },
+      "UpdateMembershipRequest": {
+        "description": "Patch this user's per-chat flags (mute / pin); omitted fields unchanged.",
+        "properties": {
+          "muted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Muted"
+          },
+          "pinned": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned"
+          }
+        },
+        "title": "UpdateMembershipRequest",
         "type": "object"
       },
       "UpdateModelModeRequest": {
@@ -2971,6 +3229,33 @@
           "is_dir"
         ],
         "title": "WorkspaceFileEntry",
+        "type": "object"
+      },
+      "WorkspaceFileIndexResponse": {
+        "description": "Flat file-path list for @ mentions (文件中枢统一 F4).\n\nFiles only (no dirs), ignore-pruned, capped — ``truncated`` is True when the\ncap was hit. Mirrors the desktop ``fsApi.listFiles`` so cloud workspace files\ncan feed the same @ index local roots already do.",
+        "properties": {
+          "data": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "truncated"
+        ],
+        "title": "WorkspaceFileIndexResponse",
         "type": "object"
       },
       "WorkspaceFileListResponse": {
@@ -3517,6 +3802,18 @@
               "minimum": 1,
               "title": "Page Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "True 返回已归档对话（「已归档」视图）；默认仅返回未归档",
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "True 返回已归档对话（「已归档」视图）；默认仅返回未归档",
+              "title": "Archived",
+              "type": "boolean"
             }
           },
           {
@@ -4537,6 +4834,74 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/messages/{message_id}": {
+      "delete": {
+        "description": "Delete a single message (单条消息删除).\n\nOwner-scoped: proving ownership of the conversation first, then deleting only\nwithin it, means a guessed ``message_id`` from another user's chat can't be\nremoved (404 on a foreign/absent conversation; no-op-then-404 on an absent\nmessage). Append-only ``cost_events`` are intentionally preserved — deleting a\nmessage never rewrites real spend (不变量 #1).",
+        "operationId": "delete_message_v1_conversations__conversation_id__messages__message_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Message",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/messages/{message_id}/regenerate": {
       "post": {
         "description": "Re-run a turn from an existing user message via SSE.\n\nServes both \"regenerate\" (no body content — reuse the stored user text) and\n\"edit & resend\" (``content`` set — edit the user message first). The target\n``message_id`` must be a user message; the superseded assistant reply and any\nlater turns are dropped before re-running. Like ``send_message``, the pipeline\nruns as a detached task so a client disconnect cancels it server-side. A\nre-run is a fresh turn, so it passes the same gates (rate limit → ownership →\nBYOK/quota billing gate) as ``send_message``.",
@@ -4608,6 +4973,141 @@
           }
         },
         "summary": "Regenerate Message",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/messages/{message_id}/resume": {
+      "post": {
+        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at a plan_review / ask_user checkpoint and lost its live stream\n(disconnect / restart); only its persisted frame survived. Claims the frame\n(atomic read-and-delete, so a turn is never resumed twice — a second / stale call\n404s), then drives the rest of the turn on a fresh SSE just like a send.\n``body.selected`` carries the user's ask_user picks (ignored for plan_review).\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE the claim, so a refused turn keeps its resumable frame.",
+        "operationId": "resume_message_v1_conversations__conversation_id__messages__message_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResumeTurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Message",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/paused": {
+      "get": {
+        "description": "List turns awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).\n\nCalled on conversation reopen: a turn that paused then lost its live SSE\n(disconnect / restart) has no assistant message yet — only a persisted frame.\nThe client renders each as a resume card by ``kind`` (plan_review from ``steps`` /\n``pending``; ask_user from ``question`` / ``options``) offering continue / adjust /\nstop → the resume endpoint. Oldest-first. 404 if not owned.",
+        "operationId": "list_conversation_paused_turns_v1_conversations__conversation_id__paused_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PausedTurnListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Conversation Paused Turns",
         "tags": [
           "conversations"
         ]
@@ -4875,7 +5375,7 @@
     },
     "/v1/conversations/{conversation_id}/workspace/binding": {
       "delete": {
-        "description": "Unbind the conversation's workspace (fall back to cloud).\n\nClears the binding at the same governing scope binding does: clearing a\n*folder* binding returns every conversation in it to cloud (it is the shared\nproject space), which the ``folder`` scope in the response signals.",
+        "description": "Unbind the conversation's workspace (fall back to cloud).\n\nClears the binding on the folder (= 工作区), returning every conversation in it\nto cloud — which the ``folder`` scope in the response signals. A 裸聊 has no\nworkspace to unbind, so it is already cloud (a no-op).",
         "operationId": "unbind_workspace_v1_conversations__conversation_id__workspace_binding_delete",
         "parameters": [
           {
@@ -4989,7 +5489,7 @@
         ]
       },
       "put": {
-        "description": "Bind the conversation's workspace to a desktop FS root (switch to local).\n\nWrites at the governing scope (§七): a filed conversation binds its *folder*\n(so every sibling switches to local against the same root), an ungrouped one\nbinds itself. Idempotent — re-binding just overwrites the stored root id.",
+        "description": "Bind the conversation's workspace to a desktop FS root (switch to local).\n\n文件夹即工作区: a binding lives on the folder (= 工作区), shared by its siblings.\nA 裸聊 has no folder yet, so \"打开本地文件夹\" lazily mints one (named after the\nchat) and files the conversation into it before binding — the explicit-promote\ncounterpart to writing a file (§懒建). Idempotent — re-binding overwrites the\nstored root id.",
         "operationId": "bind_workspace_v1_conversations__conversation_id__workspace_binding_put",
         "parameters": [
           {
@@ -5058,7 +5558,7 @@
     },
     "/v1/conversations/{conversation_id}/workspace/clone": {
       "post": {
-        "description": "Clone a public git repository into the conversation's workspace (决策⑤).",
+        "description": "Clone a public git repository into the conversation's workspace (决策⑤).\n\nCloning into a 裸聊 promotes it into a folder workspace first (§懒建).",
         "operationId": "clone_repo_into_workspace_v1_conversations__conversation_id__workspace_clone_post",
         "parameters": [
           {
@@ -5127,7 +5627,7 @@
     },
     "/v1/conversations/{conversation_id}/workspace/dirs": {
       "post": {
-        "description": "Create a directory in the conversation's workspace.",
+        "description": "Create a directory in the conversation's workspace (promotes a 裸聊 first).",
         "operationId": "create_workspace_dir_v1_conversations__conversation_id__workspace_dirs_post",
         "parameters": [
           {
@@ -5395,7 +5895,7 @@
         ]
       },
       "put": {
-        "description": "Upload (create/overwrite) a workspace file from the raw request body.\n\nThe body is the file bytes (no multipart); ``path`` is the workspace-relative\ntarget. Bounded by ``workspace_upload_max_bytes`` so one request can't exhaust\nmemory. A path that escapes the workspace is rejected (422).",
+        "description": "Upload (create/overwrite) a workspace file from the raw request body.\n\nThe body is the file bytes (no multipart); ``path`` is the workspace-relative\ntarget. Bounded by ``workspace_upload_max_bytes`` so one request can't exhaust\nmemory. A path that escapes the workspace is rejected (422). Uploading to a 裸聊\npromotes it into a folder workspace first (文件夹即工作区 §懒建).",
         "operationId": "upload_workspace_file_v1_conversations__conversation_id__workspace_files__path__put",
         "parameters": [
           {
@@ -5651,6 +6151,49 @@
         "summary": "Move Workspace File",
         "tags": [
           "conversations"
+        ]
+      }
+    },
+    "/v1/favicon": {
+      "get": {
+        "description": "Proxy a site's favicon by hostname; 404 when none can be resolved.\n\nA 404 is normal — the client ``<img>`` falls back to a letter chip / hides — so\nfailures are cached negatively to avoid re-fetching a known-bad site every render.",
+        "operationId": "get_favicon_v1_favicon_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "domain",
+            "required": true,
+            "schema": {
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Domain",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Favicon",
+        "tags": [
+          "favicon"
         ]
       }
     },
@@ -6160,6 +6703,408 @@
           }
         },
         "summary": "Start Dm",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats/{chat_id}/announce": {
+      "post": {
+        "description": "Post an admin announcement as a centered system_card, fanned out to members\n(platform-admin only). 404 unknown chat; 422 for a dm.",
+        "operationId": "announce_v1_messages_chats__chat_id__announce_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnounceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMessageDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Announce",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats/{chat_id}/leave": {
+      "post": {
+        "description": "Leave a group/official chat. 404 if not a member; 422 for a dm (can't leave).",
+        "operationId": "leave_chat_v1_messages_chats__chat_id__leave_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Leave Chat",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats/{chat_id}/members": {
+      "get": {
+        "description": "A chat's members — the group roster (resolves sender names + member panel).\n\n404 if the requester is not a member (IDOR-safe, no existence leak). Each row\ncarries the member's platform-admin and admin-mute flags for the panel.",
+        "operationId": "list_chat_members_v1_messages_chats__chat_id__members_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatMembersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Chat Members",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats/{chat_id}/members/{target_id}": {
+      "delete": {
+        "description": "Remove a member from a group (platform-admin only); posts a system notice.\n\n403 non-admin (AdminUser gate); 404 unknown chat or non-member target; 422 for\na dm; 403 when the target is an admin (admins can't be moderated).",
+        "operationId": "kick_member_v1_messages_chats__chat_id__members__target_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Kick Member",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats/{chat_id}/members/{target_id}/mute": {
+      "post": {
+        "description": "Mute / unmute a member (platform-admin only): a muted member can read but\nnot send (403 on send). Same gates as kick.",
+        "operationId": "mute_member_v1_messages_chats__chat_id__members__target_id__mute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminMuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mute Member",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats/{chat_id}/membership": {
+      "patch": {
+        "description": "Patch this user's per-chat flags (mute / pin). 404 if not a member.",
+        "operationId": "update_membership_v1_messages_chats__chat_id__membership_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMembershipRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Membership",
         "tags": [
           "messages"
         ]
@@ -7409,7 +8354,7 @@
     },
     "/v1/workspaces": {
       "get": {
-        "description": "Enumerate the user's workspaces for the hub (文件中枢统一 §四 F1).\n\nEvery folder is a project (always listed). Ungrouped conversations list only\nwhen their space actually holds files — so chats that never touched the\nworkspace don't clutter the hub. Local spaces always list (the server can't\nsee their files, and a binding is an explicit user intent, not noise).",
+        "description": "Enumerate the user's workspaces (文件夹即工作区: a workspace **is** a folder).\n\nEvery folder is a project, always listed — local ones unconditionally (the\nserver can't see their files, and a binding is explicit intent, not noise),\ncloud ones carrying a ``has_files`` flag. Conversations are not workspaces: a\n裸聊 has no space until it is promoted into a folder, after which it appears here\nas that folder.",
         "operationId": "list_workspaces_v1_workspaces_get",
         "parameters": [
           {
@@ -7590,6 +8535,65 @@
           }
         },
         "summary": "Create Workspace Dir",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/file-index": {
+      "get": {
+        "description": "Flat file-path list for @ mentions over a cloud workspace (文件中枢统一 F4).\n\nFiles only, ignore-pruned, capped — so cloud workspace files feed the same @\nindex local roots already do. Local workspaces are reached over desktop IPC\n(their files aren't here), so they are refused with 409 like other file ops.",
+        "operationId": "list_workspace_file_index_v1_workspaces__ws_id__file_index_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceFileIndexResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workspace File Index",
         "tags": [
           "workspaces"
         ]

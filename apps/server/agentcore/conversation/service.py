@@ -39,6 +39,7 @@ from agentcore.memory import (
     TitleInput,
 )
 from agentcore.memory.consolidation import schedule_consolidation
+from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
@@ -48,14 +49,21 @@ from agentcore.runtime.events import (
     title_generated,
     turn_saved,
 )
-from agentcore.runtime.pipeline import run_chat_pipeline
+from agentcore.runtime.pipeline import resume_chat_pipeline, run_chat_pipeline
 from agentcore.runtime.session_persistence import load_run_session, save_run_session
+from agentcore.runtime.suspension import TurnSuspension
+from agentcore.runtime.suspension_persistence import (
+    delete_paused_turn,
+    save_paused_turn,
+)
 from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
+from agentcore.workspace.deferred import DeferredWorkspace
 from agentcore.workspace.handoff import snapshot_local
 from agentcore.workspace.locate import (
     LocalBinding,
     build_server_workspace,
     build_workspace,
+    default_workspace_name,
     resolve_local_binding,
     workspace_storage_key,
 )
@@ -108,10 +116,10 @@ async def _resolve_local_binding(
 ) -> LocalBinding | None:
     """Resolve a turn's local-mode binding (双模式工作区 §七), or None for cloud.
 
-    Looks up the governing scope's desktop-root binding: the conversation's folder
-    when it is filed in one (the shared project space), else the conversation's
-    own. The folder is loaded only when needed; the pure ``resolve_local_binding``
-    applies the precedence rule so this stays a thin DB shim.
+    Looks up the binding on the conversation's folder (文件夹即工作区: the binding
+    lives on the folder, the shared project space). A 裸聊 (no folder) has no
+    workspace yet, so it is always cloud. The folder is loaded only when filed; the
+    pure ``resolve_local_binding`` applies the rule so this stays a thin DB shim.
     """
     folder = None
     if conv.folder_id:
@@ -119,8 +127,70 @@ async def _resolve_local_binding(
     return resolve_local_binding(
         folder_id=conv.folder_id,
         folder_local_root_id=folder.local_root_id if folder else None,
-        conversation_local_root_id=conv.local_root_id,
         label=folder.name if folder else None,
+    )
+
+
+def _bare_chat_promote(
+    *, user_id: str, conversation_id: str, title: str | None
+):
+    """Build the lazy-promotion callback for a 裸聊 turn (文件夹即工作区 §懒建).
+
+    ``DeferredWorkspace`` invokes this the first time the team (or a residency write)
+    creates a file: mint a folder named after the chat, file the conversation into
+    it, and return the folder id so the rest of the turn — and the end-of-turn
+    snapshot — target it. Runs in its own session because it fires mid-run, after the
+    turn's setup session has already closed.
+    """
+
+    async def _promote() -> str:
+        async with async_session_factory() as session:
+            folder = await FolderRepository(session).create(
+                user_id=user_id, name=default_workspace_name(title)
+            )
+            await ConversationRepository(session).set_folder(
+                conversation_id, folder.id, user_id=user_id
+            )
+        logger.info(
+            "workspace.bare_chat_promoted",
+            conversation_id=conversation_id,
+            folder_id=folder.id,
+        )
+        return folder.id
+
+    return _promote
+
+
+def _build_turn_backend(
+    *,
+    user_id: str,
+    folder_id: str | None,
+    conversation_id: str,
+    title: str | None,
+    sink: EventSink,
+    local_binding: LocalBinding | None,
+) -> WorkspaceBackend:
+    """Pick a turn's workspace backend, deferring creation for a 裸聊 (§懒建).
+
+    A folderless cloud conversation has no workspace yet, so it gets a
+    ``DeferredWorkspace`` that materializes a real folder only on the first file
+    creation (keeping casual chats zero-cost). A filed — or locally-bound —
+    conversation resolves its backend eagerly via ``build_workspace`` (cloud/local
+    fork unchanged).
+    """
+    if folder_id is None and local_binding is None:
+        return DeferredWorkspace(
+            user_id=user_id,
+            promote=_bare_chat_promote(
+                user_id=user_id, conversation_id=conversation_id, title=title
+            ),
+        )
+    return build_workspace(
+        user_id=user_id,
+        folder_id=folder_id,
+        conversation_id=conversation_id,
+        sink=sink,
+        local_binding=local_binding,
     )
 
 
@@ -173,6 +243,28 @@ async def _resolve_profile_set(
     )
 
 
+def _session_callbacks(conversation_id: str):
+    """The 留人 跨进程落盘 (P3) write-through saver + roster-miss loader, or
+    ``(None, None)`` when disabled (P2 in-memory-only). Shared by send / regenerate /
+    resume so a finished/revised worker survives a restart for 定向唤回."""
+    if not settings.session_roster_persist_enabled:
+        return None, None
+
+    async def _persist_session(session) -> None:
+        await save_run_session(conversation_id, session)
+
+    return _persist_session, load_run_session
+
+
+def _suspension_callbacks():
+    """The 结构化挂起 2b persist-before-wait / drop-after-resolve closures, or
+    ``(None, None)`` when disabled (2a in-memory-only). Threaded into the top-level
+    delegate so a plan_review pause survives a disconnect for ``POST .../resume``."""
+    if not settings.structured_suspension_persist_enabled:
+        return None, None
+    return save_paused_turn, delete_paused_turn
+
+
 async def _run_and_persist(
     *,
     conversation_id: str,
@@ -196,18 +288,8 @@ async def _run_and_persist(
     The `backend` is built by the caller (so attachment residency writes onto the
     same instance whose `dirty` flag drives the end-of-turn snapshot).
     """
-    # 留人 跨进程落盘 (P3): write-through finished / revised worker sessions and load
-    # them back on an in-memory roster miss, so 定向唤回 survives a restart / eviction.
-    # Gated off → callbacks stay None and the roster is P2 in-memory-only.
-    session_saver = None
-    session_loader = None
-    if settings.session_roster_persist_enabled:
-
-        async def _persist_session(session) -> None:
-            await save_run_session(conversation_id, session)
-
-        session_saver = _persist_session
-        session_loader = load_run_session
+    session_saver, session_loader = _session_callbacks(conversation_id)
+    suspension_saver, suspension_deleter = _suspension_callbacks()
 
     # Mint the turn's trace_id (the unique cross-everything correlation key) and
     # bind the correlation context so EVERY line emitted during the turn (here, the
@@ -237,19 +319,31 @@ async def _run_and_persist(
             attachments=len(attachments or []),
             location=backend.location,
         )
-        result = await run_chat_pipeline(
-            conversation_id=conversation_id,
-            user_message=user_message,
-            history=history,
-            sink=sink,
-            user_id=user_id,
-            backend=backend,
-            attachments=attachments,
-            llm_credentials=llm_credentials,
-            profile_set=profile_set,
-            session_saver=session_saver,
-            session_loader=session_loader,
-        )
+        try:
+            result = await run_chat_pipeline(
+                conversation_id=conversation_id,
+                user_message=user_message,
+                history=history,
+                sink=sink,
+                user_id=user_id,
+                backend=backend,
+                attachments=attachments,
+                llm_credentials=llm_credentials,
+                profile_set=profile_set,
+                session_saver=session_saver,
+                session_loader=session_loader,
+                suspension_saver=suspension_saver,
+                suspension_deleter=suspension_deleter,
+            )
+        except asyncio.CancelledError:
+            # Client disconnect / user stop tore the turn down before its reply
+            # (the SSE layer cancels this task). Salvage any finished team work into
+            # an incomplete message so it is not wasted (断线别白干), then let the
+            # cancellation propagate — never swallow it.
+            _salvage_incomplete_turn(
+                sink=sink, conversation_id=conversation_id, trace_id=trace_id
+            )
+            raise
         finish = result.get("finish_reason")
         cost_runs = result.get("cost_runs") or []
         logger.info(
@@ -268,6 +362,42 @@ async def _run_and_persist(
             error=result.get("error"),
         )
 
+    await _persist_turn_result(
+        result=result,
+        conversation_id=conversation_id,
+        user_id=user_id,
+        folder_id=folder_id,
+        backend=backend,
+        sink=sink,
+        user_message=user_message,
+        generate_title=generate_title,
+        llm_credentials=llm_credentials,
+        trace_id=trace_id,
+    )
+
+
+async def _persist_turn_result(
+    *,
+    result: dict,
+    conversation_id: str,
+    user_id: str,
+    folder_id: str | None,
+    backend: WorkspaceBackend,
+    sink: EventSink,
+    user_message: str,
+    generate_title: bool,
+    llm_credentials: LLMCredentials | None,
+    trace_id: str,
+) -> None:
+    """Persist a completed turn's reply + ledger, then title / memory / snapshot.
+
+    Shared end-of-turn tail of a fresh send, a regenerate, AND a 结构化挂起 resume —
+    each computes its own pipeline ``result`` then hands it here. A resume reuses the
+    ORIGINAL ``message_id`` / ``trace_id`` (carried on the frame), so the assistant
+    row + ledger it writes for the first time on completion join back to the turn
+    that paused. ``generate_title`` is idempotent-guarded (only fires when the
+    conversation still lacks a title).
+    """
     assistant_reply = result.get("content") or ""
     assistant_reasoning = result.get("reasoning_content") or None
     assistant_citations = result.get("citations") or None
@@ -370,9 +500,12 @@ async def _run_and_persist(
         and getattr(backend, "dirty", False)
     ):
         try:
+            # A 裸聊 that wrote files this turn was lazily promoted into a folder
+            # (DeferredWorkspace); snapshot that new folder, not the original (None).
+            snapshot_folder_id = getattr(backend, "folder_id", None) or folder_id
             ref = await create_snapshot(
                 user_id=user_id,
-                folder_id=folder_id,
+                folder_id=snapshot_folder_id,
                 conversation_id=conversation_id,
             )
             logger.info(
@@ -387,6 +520,128 @@ async def _run_and_persist(
                 conversation_id=conversation_id,
                 error=str(e),
             )
+
+
+# Journaled pause events whose presence (unresolved) means a durable frame already
+# owns this turn's continuation — so the salvage path must defer to resume, not also
+# persist an incomplete message. Approval pauses are deliberately absent: they are
+# transport-only (never journaled) and not 2b-resumable, so a turn cancelled at an
+# approval IS what salvage covers.
+_PAUSE_REQUIRED_TYPES = ("checkpoint_required", "plan_review_required")
+_PAUSE_RESOLVED_TYPES = ("checkpoint_resolved", "plan_review_resolved")
+
+
+def _has_open_durable_pause(journal: list[dict]) -> bool:
+    """True if the journal ends on an UNRESOLVED plan_review / ask_user checkpoint.
+
+    Such a turn paused at a durable suspension point: with persistence on, a
+    ``paused_turns`` frame already covers its continuation via ``POST .../resume``,
+    so salvaging an incomplete message too would double-handle it (a resume card AND
+    an incomplete bubble for one turn). A checkpoint with a matching ``*_resolved``
+    is closed (the turn moved on), so it does not count.
+    """
+    required: set[str] = set()
+    resolved: set[str] = set()
+    for event in journal:
+        cid = (event.get("payload") or {}).get("checkpoint_id")
+        if not cid:
+            continue
+        if event.get("type") in _PAUSE_REQUIRED_TYPES:
+            required.add(cid)
+        elif event.get("type") in _PAUSE_RESOLVED_TYPES:
+            resolved.add(cid)
+    return bool(required - resolved)
+
+
+async def _persist_incomplete_turn(
+    *,
+    journal: list[dict],
+    conversation_id: str,
+    trace_id: str,
+    message_id: str | None,
+) -> None:
+    """Persist a cancelled turn's already-finished work as one incomplete message (断线别白干).
+
+    The turn was torn down before its reply (disconnect / stop / pending approval),
+    but workers that had already finished live on in the execution ``journal`` (each
+    emitted ``run_completed`` as it finished). Save that team graph as an assistant
+    message marked cancelled — ``runs.finish_reason`` carries the signal the client
+    reads on reload (``MessageDetail`` does not expose ``usage``) to badge it「已中断」,
+    and a short note explains the bubble. NO cost ledger is written: the authoritative
+    per-run ledger is only collected after the wave returns (empty on a mid-wave
+    cancel), and reconstructing billing from display events would be fragile — so a
+    salvaged turn under-bills rather than risk over-billing. Best-effort: any failure
+    is warning-only and never escapes this detached task (文档铁律).
+    """
+    note = (
+        "（连接中断，本回合未完成。下面是已完成成员的产出，已为你保留；"
+        "如需继续，可重新发送消息。）"
+    )
+    try:
+        async with async_session_factory() as session:
+            await MessageRepository(session).create(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=note,
+                runs={
+                    "events": journal,
+                    "finish_reason": FinishReason.CANCELLED.value,
+                },
+                metadata={
+                    "incomplete": True,
+                    "finish_reason": FinishReason.CANCELLED.value,
+                },
+                message_id=message_id,
+                trace_id=trace_id,
+            )
+        logger.info(
+            "chat.incomplete_persisted",
+            conversation_id=conversation_id,
+            events=len(journal),
+        )
+    except Exception as e:
+        logger.warning(
+            "chat.incomplete_persist_failed",
+            conversation_id=conversation_id,
+            error=str(e),
+        )
+
+
+def _salvage_incomplete_turn(
+    *,
+    sink: EventSink,
+    conversation_id: str,
+    trace_id: str,
+    message_id: str | None = None,
+) -> None:
+    """On a turn cancel, schedule saving its finished work as an incomplete message.
+
+    Called from the ``CancelledError`` handler of a turn (disconnect / stop): reads
+    the surviving execution journal and, if it holds finished team work that is NOT
+    already owned by a durable resume frame, fires a detached task to persist it. Sync
+    + fire-and-forget on purpose — it must not ``await`` inside cancellation unwinding;
+    the detached task carries its own DB session and outlives this teardown (the loop
+    stays alive on a client disconnect). Gated by ``incomplete_turn_persist_enabled``.
+    """
+    if not settings.incomplete_turn_persist_enabled:
+        return
+    journal = sink.execution_journal()
+    # None ⇒ nothing replayable (no delegation / checkpoint) ⇒ no finished work to keep.
+    if not journal:
+        return
+    # A live durable pause is the resume path's job — don't also salvage it.
+    if settings.structured_suspension_persist_enabled and _has_open_durable_pause(
+        journal
+    ):
+        return
+    _spawn_background(
+        _persist_incomplete_turn(
+            journal=list(journal),
+            conversation_id=conversation_id,
+            trace_id=trace_id,
+            message_id=message_id,
+        )
+    )
 
 
 async def stream_chat(
@@ -417,19 +672,22 @@ async def stream_chat(
                 sink.emit(message_end(FinishReason.ERROR))
                 return
             folder_id = conv.folder_id
+            title = conv.title
             local_binding = await _resolve_local_binding(session, conv)
             profile_set = await _resolve_profile_set(session, conv, user_id)
 
         # Resolve the workspace once: attachment residency writes, the pipeline
         # run, and the end-of-turn snapshot all share this backend instance (so
-        # its `dirty` flag reflects attachments too). The cloud/local fork lives in
-        # `build_workspace`: a bound desktop root → ``LocalWorkspace`` (ops stream
-        # over this turn's `sink`), else the server backend. The folder lock + the
-        # snapshot guard below adapt to whichever it returns.
-        backend = build_workspace(
+        # its `dirty` flag reflects attachments too). The fork lives in
+        # `_build_turn_backend`: a 裸聊 gets a ``DeferredWorkspace`` (folder minted
+        # lazily on the first file write), a bound desktop root → ``LocalWorkspace``
+        # (ops stream over this turn's `sink`), else the server backend. The folder
+        # lock + the snapshot guard below adapt to whichever it returns.
+        backend = _build_turn_backend(
             user_id=user_id,
             folder_id=folder_id,
             conversation_id=conversation_id,
+            title=title,
             sink=sink,
             local_binding=local_binding,
         )
@@ -540,10 +798,11 @@ async def regenerate_chat(
             local_binding = await _resolve_local_binding(session, conv)
             profile_set = await _resolve_profile_set(session, conv, user_id)
 
-        backend = build_workspace(
+        backend = _build_turn_backend(
             user_id=user_id,
             folder_id=conv.folder_id,
             conversation_id=conversation_id,
+            title=conv.title,
             sink=sink,
             local_binding=local_binding,
         )
@@ -574,6 +833,143 @@ async def regenerate_chat(
         logger.error("chat.regenerate_error", error=str(e), exc_info=True)
         # Same silent-death guard as stream_chat: surface a visible error so the
         # regenerate bubble settles into an inline error card instead of spinning.
+        if not sink._closed:
+            if isinstance(e, AgentCoreError):
+                sink.emit(error_event(e.code, e.message))
+            else:
+                sink.emit(error_event("STREAM_ERROR", "服务出错了，请稍后重试。"))
+            sink.emit(message_end(FinishReason.ERROR))
+    finally:
+        if not sink._closed:
+            sink.close()
+
+
+async def resume_chat(
+    *,
+    suspension: TurnSuspension,
+    response: CheckpointResponse,
+    sink: EventSink,
+    llm_credentials: LLMCredentials | None = None,
+) -> None:
+    """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
+
+    The route has already CLAIMED (atomic read-and-delete) the durable frame, so this
+    drives it to completion: rebuild the turn's workspace, run the resume pipeline
+    (apply the user's decision to the paused frame by kind — re-drive the plan tail
+    for plan_review, or map the answer back to the CEO loop for ask_user — and finish
+    the reply), then persist via the shared turn tail — the assistant row + ledger are
+    written for the FIRST time here, under the original ``message_id`` / ``trace_id``
+    so they join the turn that paused. A downstream checkpoint can pause again: the
+    pipeline re-persists a fresh frame, so resume is re-entrant. Mirrors
+    ``stream_chat``'s lock / error / sink discipline.
+    """
+    conversation_id = suspension.conversation_id
+    user_id = suspension.user_id
+    try:
+        async with async_session_factory() as session:
+            conv = await ConversationRepository(session).get_by_id(conversation_id)
+            if not conv:
+                sink.emit(error_event("NOT_FOUND", "Conversation not found"))
+                sink.emit(message_end(FinishReason.ERROR))
+                return
+            folder_id = conv.folder_id
+            title = conv.title
+            local_binding = await _resolve_local_binding(session, conv)
+            profile_set = await _resolve_profile_set(session, conv, user_id)
+
+        backend = _build_turn_backend(
+            user_id=user_id,
+            folder_id=folder_id,
+            conversation_id=conversation_id,
+            title=title,
+            sink=sink,
+            local_binding=local_binding,
+        )
+        session_saver, session_loader = _session_callbacks(conversation_id)
+        suspension_saver, suspension_deleter = _suspension_callbacks()
+
+        # Folder-level lock (决策④): the resumed tail runs the team + writes files on
+        # the shared workspace, so serialize it against any same-folder turn exactly
+        # like a fresh send.
+        async with workspace_lock(
+            workspace_storage_key(
+                user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+            )
+        ):
+            # Reuse the originating turn's trace_id so the resumed continuation is
+            # greppable as ONE turn end-to-end (falls back to a fresh id if untraced).
+            trace_id = suspension.trace_id or new_trace_id()
+            started = time.monotonic()
+            with log_context(
+                trace_id=trace_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                turn_id=new_id(),
+                agent_id="CEO",
+            ):
+                logger.info(
+                    "chat.resume_start",
+                    message_id=suspension.message_id,
+                    kind=suspension.kind.value,
+                    decision=response.decision.value,
+                    # plan_review carries seeded workers; ask_user has none (0).
+                    seeded=len(getattr(suspension, "completed", {})),
+                )
+                try:
+                    result = await resume_chat_pipeline(
+                        suspension=suspension,
+                        decision=response.decision,
+                        note=response.note,
+                        selected=response.selected,
+                        sink=sink,
+                        backend=backend,
+                        llm_credentials=llm_credentials,
+                        profile_set=profile_set,
+                        session_saver=session_saver,
+                        session_loader=session_loader,
+                        suspension_saver=suspension_saver,
+                        suspension_deleter=suspension_deleter,
+                    )
+                except asyncio.CancelledError:
+                    # A resume torn down before its reply: salvage the finished work
+                    # (pre-pause graph + any new members) under the ORIGINAL message id
+                    # so it stays one turn, unless it re-paused durably (resume owns
+                    # that). Then propagate the cancellation.
+                    _salvage_incomplete_turn(
+                        sink=sink,
+                        conversation_id=conversation_id,
+                        trace_id=trace_id,
+                        message_id=suspension.message_id,
+                    )
+                    raise
+                finish = result.get("finish_reason")
+                cost_runs = result.get("cost_runs") or []
+                logger.info(
+                    "chat.resume_complete",
+                    finish_reason=getattr(finish, "value", finish),
+                    rounds=result.get("rounds", 0),
+                    reply_chars=len(result.get("content") or ""),
+                    delegated=bool(result.get("runs")),
+                    workers=max(len(cost_runs) - 1, 0),
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    error=result.get("error"),
+                )
+
+            await _persist_turn_result(
+                result=result,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                folder_id=folder_id,
+                backend=backend,
+                sink=sink,
+                user_message=suspension.user_message,
+                generate_title=True,
+                llm_credentials=llm_credentials,
+                trace_id=trace_id,
+            )
+
+    except Exception as e:
+        logger.error("chat.resume_error", error=str(e), exc_info=True)
         if not sink._closed:
             if isinstance(e, AgentCoreError):
                 sink.emit(error_event(e.code, e.message))

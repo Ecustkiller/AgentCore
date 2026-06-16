@@ -27,7 +27,10 @@ async def create_folder(
     repo: FolderRepository = Depends(get_folder_repo),
 ):
     folder = await repo.create(
-        user_id=user.user_id, name=body.name, local_dir=body.local_dir
+        user_id=user.user_id,
+        name=body.name,
+        local_dir=body.local_dir,
+        local_root_id=body.local_root_id,
     )
     return FolderSummary.model_validate(folder)
 

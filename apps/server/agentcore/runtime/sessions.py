@@ -6,7 +6,7 @@ can 定向唤回 (revise) it later: the ``delegate`` tool registers each COMPLET
 after a batch finishes, and the ``revise`` tool looks one up by ``run_id`` to
 continue it on its own draft.
 
-Two layers (P2 治理, 见 docs/07-规划/多轮编排与队员热修.md §五):
+Two layers (P2 治理, 见 docs/03-AI核心/多轮编排与队员热修.md §五):
 
 * :class:`SessionStore` — ONE conversation's roster. Bounded so an active
   conversation can't grow memory without limit: a per-session idle **TTL**, a

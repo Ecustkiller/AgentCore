@@ -15,19 +15,27 @@ falls back to truncating the first user message if the model output is empty or
 the call fails.
 """
 
+import asyncio
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, TypedDict
 
+from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.config import build_request, get_profile
+
+logger = get_logger(__name__)
 
 # Title is shown in the sidebar; keep it short. Matches the legacy truncation cap.
 TITLE_MAX_CHARS = 30
 # Each message is truncated before being sent to the title model: the opening
 # exchange is enough signal, and it caps prompt cost.
 _MSG_MAX_CHARS = 600
+# Best-effort sidebar label: cap the call so a stalled model can't hold the
+# post-turn tail for the provider's full 120s default. On timeout we degrade to
+# the truncated-first-message fallback — no worse than an empty model reply.
+_TITLE_TIMEOUT_SECONDS = 20.0
 
 
 class ChatMessage(TypedDict):
@@ -114,8 +122,9 @@ class LLMTitleGenerator:
     """TitleGenerator backed by an LLMProvider (fast, non-thinking model).
 
     Called once per conversation, when the title is still empty. Returns "" for
-    empty/whitespace model output so the caller can fall back to a naive title;
-    network/parse errors propagate and are handled at the call site.
+    empty/whitespace model output — and likewise on a call-level timeout
+    (``_TITLE_TIMEOUT_SECONDS``, logged) — so the caller can fall back to a naive
+    title; other network/parse errors propagate and are handled at the call site.
     """
 
     def __init__(self, provider: LLMProvider, *, role: str = "title") -> None:
@@ -133,5 +142,11 @@ class LLMTitleGenerator:
             ],
             stream=False,
         )
-        response = await self._provider.complete(request)
+        try:
+            response = await asyncio.wait_for(
+                self._provider.complete(request), timeout=_TITLE_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            logger.warning("title.timeout", conversation_id=data.conversation_id)
+            return ""
         return _sanitize_title(response.content)

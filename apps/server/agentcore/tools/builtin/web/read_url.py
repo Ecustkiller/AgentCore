@@ -32,6 +32,7 @@ logger = get_logger(__name__)
 _DEFAULT_MAX_CHARS = 8000
 _MAX_CHARS_CAP = 30000
 _MAX_REDIRECTS = 5
+_SNIPPET_MAX = 200  # citation preview length — a sentence or two, not the whole lead
 _BLOCKED_HOSTNAMES = {"localhost", "0.0.0.0", "metadata.google.internal"}
 
 
@@ -160,7 +161,22 @@ class _TextExtractor(HTMLParser):
     """Minimal stdlib HTML→text extractor: drops scripts/styles, keeps the title,
     and inserts newlines at block boundaries (no third-party dependency)."""
 
-    SKIP_TAGS = frozenset({"script", "style", "noscript", "svg", "head"})
+    # Drop scripts/styles plus page chrome (nav/header/footer/aside) so both the
+    # extracted body text and the fallback citation snippet skip boilerplate menus
+    # and footers instead of leading with a navigation bar.
+    SKIP_TAGS = frozenset(
+        {
+            "script",
+            "style",
+            "noscript",
+            "svg",
+            "head",
+            "nav",
+            "header",
+            "footer",
+            "aside",
+        }
+    )
 
     def __init__(self) -> None:
         super().__init__()
@@ -168,12 +184,20 @@ class _TextExtractor(HTMLParser):
         self._skip_depth = 0
         self.title = ""
         self._in_title = False
+        # First page-level description meta — a ready-made one-line summary, better
+        # for a citation preview than the (often boilerplate-led) body text.
+        self.description = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in self.SKIP_TAGS:
             self._skip_depth += 1
         if tag == "title":
             self._in_title = True
+        if tag == "meta" and not self.description:
+            a = {k.lower(): (v or "") for k, v in attrs}
+            key = a.get("name", "").lower() or a.get("property", "").lower()
+            if key in ("description", "og:description", "twitter:description"):
+                self.description = a.get("content", "").strip()
 
     def handle_endtag(self, tag: str) -> None:
         if tag in self.SKIP_TAGS and self._skip_depth > 0:
@@ -190,14 +214,34 @@ class _TextExtractor(HTMLParser):
             self.parts.append(data)
 
 
-def _extract_text(html: str, max_chars: int) -> tuple[str, str]:
-    """Return ``(title, text)`` extracted from raw HTML, text capped to max_chars."""
+def _extract_page(html: str, max_chars: int) -> tuple[str, str, str]:
+    """Return ``(title, text, description)`` from raw HTML; text capped to max_chars.
+
+    ``description`` is the page's ``<meta>`` description (empty when absent) — used to
+    seed a citation snippet so a read source still previews on hover.
+    """
     extractor = _TextExtractor()
     with contextlib.suppress(Exception):
         extractor.feed(html)
     raw = "".join(extractor.parts)
     text = re.sub(r"\n{3,}", "\n\n", raw).strip()[:max_chars]
-    return extractor.title, text
+    return extractor.title, text, extractor.description
+
+
+def _extract_text(html: str, max_chars: int) -> tuple[str, str]:
+    """Back-compat ``(title, text)`` wrapper over :func:`_extract_page`."""
+    title, text, _ = _extract_page(html, max_chars)
+    return title, text
+
+
+def _make_snippet(description: str, text: str) -> str:
+    """A short citation preview: prefer the meta description, else the text lead.
+
+    Whitespace is collapsed and the result capped to :data:`_SNIPPET_MAX` so the
+    hover card shows a clean sentence-or-two, not a wall of body text.
+    """
+    source = description.strip() or text.strip()
+    return re.sub(r"\s+", " ", source)[:_SNIPPET_MAX].strip()
 
 
 class ReadUrlTool:
@@ -277,7 +321,8 @@ class ReadUrlTool:
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
-        title, text = _extract_text(html, max_chars)
+        title, text, description = _extract_page(html, max_chars)
+        snippet = _make_snippet(description, text)
         output = json.dumps({"url": url, "title": title, "content": text}, ensure_ascii=False)
         return ToolResult(
             tool_call_id="",
@@ -286,5 +331,7 @@ class ReadUrlTool:
             duration_ms=int((time.monotonic() - start) * 1000),
             output_limit=max_chars + 1024,
             metadata={"title": title, "content_chars": len(text)},
-            citations=[{"url": url, "title": title, "snippet": "", "site": site_of(url)}],
+            citations=[
+                {"url": url, "title": title, "snippet": snippet, "site": site_of(url)}
+            ],
         )

@@ -15,7 +15,10 @@ import type {
   PlanReviewRequiredPayload,
   PlanReviewResolvedPayload,
   PlanReviewStep,
+  ProcessStep,
   SSEEvent,
+  ToolUseEndPayload,
+  ToolUseStartPayload,
 } from "@/types/events";
 import { create } from "zustand";
 
@@ -133,21 +136,82 @@ export function planReviewsFromEvents(events: SSEEvent[]): PlanReviewDisplay[] {
   return order.map((id) => byId.get(id) as PlanReviewDisplay);
 }
 
+/**
+ * Fold one reasoning delta into a single-agent process timeline: extend the
+ * trailing reasoning step when the last step is thinking, else open a new one.
+ * Coalescing consecutive deltas keeps the timeline a few segments (one per
+ * think→act boundary) rather than one node per token. Mirrors the backend sink's
+ * `_accumulate_process`, so a live turn and its reloaded twin read the same shape.
+ */
+function appendReasoningStep(
+  process: ProcessStep[] | undefined,
+  delta: string,
+): ProcessStep[] {
+  const steps = process ? [...process] : [];
+  const last = steps[steps.length - 1];
+  if (last && last.kind === "reasoning") {
+    steps[steps.length - 1] = { ...last, text: last.text + delta };
+  } else {
+    steps.push({ kind: "reasoning", text: delta });
+  }
+  return steps;
+}
+
+/** Append a started tool call as a `running` step to the process timeline. */
+function appendToolStep(
+  process: ProcessStep[] | undefined,
+  payload: ToolUseStartPayload,
+): ProcessStep[] {
+  const steps = process ? [...process] : [];
+  steps.push({
+    kind: "tool",
+    id: payload.tool_call_id,
+    tool_name: payload.tool_name,
+    arguments: payload.arguments ?? {},
+    result: null,
+    status: "running",
+  });
+  return steps;
+}
+
+/** Resolve a tool step (result + status) on its matching `tool_use_end`; returns
+ * the same array reference when no step matches (id absent), so callers can no-op. */
+function resolveToolStep(
+  process: ProcessStep[] | undefined,
+  payload: ToolUseEndPayload,
+): ProcessStep[] | undefined {
+  if (!process) return process;
+  let changed = false;
+  const steps = process.map((s) => {
+    if (!changed && s.kind === "tool" && s.id === payload.tool_call_id) {
+      changed = true;
+      return { ...s, result: payload.result, status: payload.status };
+    }
+    return s;
+  });
+  return changed ? steps : process;
+}
+
 export interface Conversation {
   id: string;
   title: string;
   updatedAt: string;
   messageCount: number;
   lastMessagePreview: string | null;
-  /** Folder membership for the sidebar grouping (§七). Absent/null = ungrouped. */
+  /** Folder membership for the sidebar grouping (§七). Absent/null = 裸聊 (no
+   * workspace yet). 文件夹即工作区: a chat's workspace/mode derives from its folder;
+   * a 裸聊 is always cloud and owns no binding of its own. */
   folderId?: string | null;
-  /** Desktop FS root this conversation is bound to when ungrouped + local mode
-   * (§七双模式). Foldered chats inherit their mode from the folder, so this is
-   * only authoritative for ungrouped ones; null/absent = cloud mode. */
-  localRootId?: string | null;
   /** Selected 质量档 (D2): a preset key or custom-mode id; null/absent = inherit
    * the user/operator default. The composer picker reads/writes this. */
   modelMode?: string | null;
+  /** Pinned to the top of the sidebar / list (置顶对话); absent = not pinned.
+   * Lists sort pinned-first, then by recency. */
+  pinned?: boolean;
+  /** Archived = hidden from the live sidebar / list, surfaced only in the
+   * 「已归档」view (归档对话, reversible). The grouped/live cache holds only
+   * non-archived rows, so this is true only on the「已归档」view's rows. */
+  archived?: boolean;
 }
 
 /** 附件在消息气泡上的展示元信息（不含正文，正文仅发送时携带）。 */
@@ -169,6 +233,12 @@ export interface Message {
   content: string;
   /** 模型思考过程（思考档位下的 reasoning_content）；流式与历史回放共用。 */
   reasoning?: string;
+  /** 单 Agent 回合的「思考+工具」过程时间线（前端UX设计.md §一）：CEO 自身的思考与
+   * 其工具调用按发生顺序交织，折叠进气泡顶部的过程面板。流式时由 SSE 增量构建
+   * （reasoning_delta 续写尾部思考段、tool_use_* 落工具步），历史回放时由
+   * `runs.process` 还原（toMessage）。仅单 Agent 用到工具的回合存在；多 Agent 回合
+   * 改由团队图呈现（不读此字段），纯对话回合无此字段。 */
+  process?: ProcessStep[];
   createdAt: string;
   executionId: string | null;
   isStreaming: boolean;
@@ -353,6 +423,20 @@ interface ConversationState {
     chunk: string,
     conversationId?: string | null,
   ) => void;
+  /** Append a started tool call as a `running` step on the live assistant
+   * message's single-agent process timeline (前端UX设计.md §一). Runs alongside the
+   * execution store's `recordFrame`: that drives the multi-agent team graph, this
+   * the single-agent inline process panel — a turn renders one or the other. */
+  addProcessTool: (
+    payload: ToolUseStartPayload,
+    conversationId?: string | null,
+  ) => void;
+  /** Resolve a process-timeline tool step (result + status) on its
+   * `tool_use_end`; no-op if the id isn't on the last assistant message. */
+  endProcessTool: (
+    payload: ToolUseEndPayload,
+    conversationId?: string | null,
+  ) => void;
   /** Attach aggregated web sources to the last assistant message (live turn). */
   attachCitationsToLastMessage: (
     citations: Citation[],
@@ -407,6 +491,9 @@ interface ConversationState {
   createAssistantMessage: (conversationId?: string | null) => string;
   finalizeLastMessage: (conversationId?: string | null) => void;
   updateMessage: (id: string, update: Partial<Message>) => void;
+  /** Remove a single message from a conversation's window (单条消息删除). No-op if
+   * the id isn't in the slice. */
+  removeMessage: (id: string, conversationId?: string | null) => void;
   /** Drop every message after `id` (exclusive). Used by regenerate / edit. */
   truncateAfter: (id: string, conversationId?: string | null) => void;
   /** Replace the optimistic id of the last user message with the backend's
@@ -553,10 +640,37 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (!last) return null;
+        // Keep the reasoning blob (multi-agent ThinkingPanel / copy / back-compat)
+        // AND fold it into the single-agent process timeline, in arrival order, so
+        // it interleaves with this turn's tool steps.
         messages[messages.length - 1] = {
           ...last,
           reasoning: (last.reasoning ?? "") + chunk,
+          process: appendReasoningStep(last.process, chunk),
         };
+        return { messages };
+      }),
+
+    addProcessTool: (payload, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") return null;
+        messages[messages.length - 1] = {
+          ...last,
+          process: appendToolStep(last.process, payload),
+        };
+        return { messages };
+      }),
+
+    endProcessTool: (payload, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") return null;
+        const process = resolveToolStep(last.process, payload);
+        if (process === last.process) return null;
+        messages[messages.length - 1] = { ...last, process };
         return { messages };
       }),
 
@@ -741,6 +855,12 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           m.id === id ? { ...m, ...update } : m,
         ),
       })),
+
+    removeMessage: (id, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        if (!rt.messages.some((m) => m.id === id)) return null;
+        return { messages: rt.messages.filter((m) => m.id !== id) };
+      }),
 
     truncateAfter: (id, conversationId) =>
       patchConversation(conversationId, (rt) => {

@@ -8,9 +8,11 @@ import {
 } from "@/components/ui/context-menu";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
+  useArchiveConversation,
   useDeleteConversation,
   useMoveConversation,
   useRenameConversation,
+  useTogglePin,
 } from "@/hooks/useConversations";
 import { useCreateFolder, useFolders } from "@/hooks/useFolders";
 import { notifyError } from "@/lib/toast";
@@ -23,13 +25,15 @@ import {
 } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import {
+  Archive,
   Check,
   Folder,
   FolderPlus,
-  HardDrive,
   Inbox,
   Lock,
   Pencil,
+  Pin,
+  PinOff,
   Trash2,
   X,
 } from "lucide-react";
@@ -55,6 +59,8 @@ export function ConversationItem({ conversation }: Props) {
   const renameMutation = useRenameConversation();
   const moveMutation = useMoveConversation();
   const deleteMutation = useDeleteConversation();
+  const pinMutation = useTogglePin();
+  const archiveMutation = useArchiveConversation();
   const createFolderMutation = useCreateFolder();
   const folders = useFolders();
   const isGenerating = useConversationGenerating(conversation.id);
@@ -118,6 +124,29 @@ export function ConversationItem({ conversation }: Props) {
     }
     // The mutation dropped the row from the list cache; forget its live runtime
     // (and clear the current pointer if it was open), then leave the route.
+    dropConversationRuntime(conversation.id);
+    if (wasActive) navigate("/");
+  };
+
+  // Pin / unpin (置顶对话): optimistic + rollback live in the mutation; lists
+  // re-sort pinned-first so the row jumps to / from the top at once.
+  const togglePin = () => {
+    pinMutation.mutate(
+      { id: conversation.id, pinned: !conversation.pinned },
+      { onError: (err) => notifyError(err, "操作失败") },
+    );
+  };
+
+  // Archive (归档对话): hide from the live list (recoverable from「已归档」). Like
+  // delete, leave the open chat when it was the archived one — the row is gone now.
+  const handleArchive = async () => {
+    const wasActive = conversation.id === currentId;
+    try {
+      await archiveMutation.mutateAsync(conversation.id);
+    } catch (err) {
+      notifyError(err, "归档失败");
+      return;
+    }
     dropConversationRuntime(conversation.id);
     if (wasActive) navigate("/");
   };
@@ -215,13 +244,6 @@ export function ConversationItem({ conversation }: Props) {
           <span className="flex-1 truncate text-left">
             {conversation.title}
           </span>
-          {!conversation.folderId && conversation.localRootId && (
-            <HardDrive
-              size={11}
-              className="shrink-0 text-primary/70"
-              aria-label="本地工作区"
-            />
-          )}
           {confirmingDelete ? (
             <span className="flex shrink-0 items-center gap-0.5">
               <SimpleTooltip label="确认删除">
@@ -267,54 +289,60 @@ export function ConversationItem({ conversation }: Props) {
                 </span>
               </SimpleTooltip>
             </span>
-          ) : (
-            hovered && (
-              <span className="flex shrink-0 items-center gap-0.5">
-                <SimpleTooltip label="重命名">
-                  {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    aria-label="重命名对话"
-                    className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.stopPropagation();
-                        startEdit();
-                      }
-                    }}
-                    onClick={(e) => {
+          ) : hovered ? (
+            <span className="flex shrink-0 items-center gap-0.5">
+              <SimpleTooltip label="重命名">
+                {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  aria-label="重命名对话"
+                  className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
                       e.stopPropagation();
                       startEdit();
-                    }}
-                  >
-                    <Pencil size={13} />
-                  </span>
-                </SimpleTooltip>
-                <SimpleTooltip label="删除">
-                  {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    aria-label="删除对话"
-                    className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-destructive"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.stopPropagation();
-                        setConfirmingDelete(true);
-                      }
-                    }}
-                    onClick={(e) => {
+                    }
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startEdit();
+                  }}
+                >
+                  <Pencil size={13} />
+                </span>
+              </SimpleTooltip>
+              <SimpleTooltip label="删除">
+                {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  aria-label="删除对话"
+                  className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-destructive"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
                       e.stopPropagation();
                       setConfirmingDelete(true);
-                    }}
-                  >
-                    <Trash2 size={13} />
-                  </span>
-                </SimpleTooltip>
-              </span>
-            )
-          )}
+                    }
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmingDelete(true);
+                  }}
+                >
+                  <Trash2 size={13} />
+                </span>
+              </SimpleTooltip>
+            </span>
+          ) : conversation.pinned ? (
+            // Idle + pinned: a quiet pin glyph marks 置顶 (the hover actions and
+            // confirm UI take precedence above).
+            <Pin
+              size={12}
+              className="shrink-0 text-sidebar-foreground/40"
+              aria-label="已置顶"
+            />
+          ) : null}
         </button>
       </ContextMenuTrigger>
 
@@ -322,6 +350,16 @@ export function ConversationItem({ conversation }: Props) {
         <ContextMenuItem onSelect={() => startEdit()}>
           <Pencil size={14} className="shrink-0" />
           <span className="flex-1 truncate">重命名</span>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => togglePin()}>
+          {conversation.pinned ? (
+            <PinOff size={14} className="shrink-0" />
+          ) : (
+            <Pin size={14} className="shrink-0" />
+          )}
+          <span className="flex-1 truncate">
+            {conversation.pinned ? "取消置顶" : "置顶"}
+          </span>
         </ContextMenuItem>
         <ContextMenuSeparator />
         {workspaceLocked ? (
@@ -358,6 +396,10 @@ export function ConversationItem({ conversation }: Props) {
           </>
         )}
         <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void handleArchive()}>
+          <Archive size={14} className="shrink-0" />
+          <span className="flex-1 truncate">归档</span>
+        </ContextMenuItem>
         <ContextMenuItem variant="danger" onSelect={() => void handleDelete()}>
           <Trash2 size={14} className="shrink-0" />
           <span className="flex-1 truncate">删除</span>

@@ -13,7 +13,7 @@ import { ChevronDown, ChevronRight, ChevronUp, Columns2 } from "lucide-react";
 import { useState } from "react";
 
 /**
- * 辩论/审查「左右并排对比」(前端UX目标态 §四④, 落点 B).
+ * 辩论/审查「左右并排对比」(前端UX设计.md §四④, 落点 B).
  *
  * Rendered below the team graph for a debate turn: each comparison group's 正方 /
  * 反方 worker outputs sit side by side in the 896px reading column, so the user
@@ -58,7 +58,7 @@ export function DebateCompare({
       {expanded && (
         <div className="space-y-4 border-t border-border p-4">
           {groups.map((group) => {
-            // 真·多轮辩论 (前端UX目标态 §四): a group whose runs carry round tags lays
+            // 真·多轮辩论 (前端UX设计.md §四): a group whose runs carry round tags lays
             // out 逐轮 (each turn its own 正/反 row); a plain single-round debate (all
             // round 0) keeps the flat 正方 vs 反方 grid — same projection, two layouts.
             const isMultiRound = group.rounds.some((r) => r.round > 0);
@@ -96,7 +96,7 @@ export function DebateCompare({
   );
 }
 
-/** One turn of a 真·多轮辩论 (前端UX目标态 §四): a「第 N 轮」label above that round's
+/** One turn of a 真·多轮辩论 (前端UX设计.md §四): a「第 N 轮」label above that round's
  * 正/反 columns, so the user reads the exchange turn by turn (第 k 轮的一方 rebuts the
  * other's 第 k-1 轮, wired by the CEO via cross-round depends_on). */
 function RoundRow({
