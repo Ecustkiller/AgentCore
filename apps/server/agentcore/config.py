@@ -8,7 +8,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # parents[3]). Used to resolve relative paths (e.g. LOG_FILE → <root>/logs/...)
 # against the project root rather than the process CWD (the server runs from
 # apps/server, but logs/ live at the repo root so tooling finds them).
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_resolved_parents = Path(__file__).resolve().parents
+# Repo layout: …/apps/server/agentcore/config.py → parents[3] is the repo root.
+# Container layout (Dockerfile COPY agentcore /app/agentcore): only 3 parents
+# exist, so fall back to /app (parents[1]) instead of IndexError-crashing on
+# import — relative LOG_FILE/data paths then resolve under the app dir.
+_PROJECT_ROOT = (
+    _resolved_parents[3] if len(_resolved_parents) > 3 else _resolved_parents[1]
+)
 
 # The backend's dotenv lives beside the package at apps/server/.env (parents[1]).
 # Anchor it to an ABSOLUTE path: pydantic resolves a bare relative "env_file"
@@ -96,7 +103,7 @@ class Settings(BaseSettings):
     approval_gate_enabled: bool = True
     approval_timeout_seconds: float = 300.0
 
-    # User checkpoints (CEO ask_user — 前端UX目标态.md §三 / Agent协作模式.md §三).
+    # User checkpoints (CEO ask_user — Agent协作模式.md §三).
     # The CEO pauses the turn to ask the user a decision; the turn suspends until
     # answered. Same single-worker in-process posture as the approval gate. The
     # deadline is longer than approvals' — the user is making a judgement call, not
@@ -104,6 +111,18 @@ class Settings(BaseSettings):
     # response" so it wraps up rather than hanging.
     checkpoint_gate_enabled: bool = True
     checkpoint_timeout_seconds: float = 600.0
+
+    # Durable structured suspension (结构化挂起 2b: turn 级落盘 + POST .../resume). When
+    # enabled, a turn that pauses at a top-level plan_review checkpoint is persisted to
+    # the paused_turns table BEFORE the in-memory wait, so a client disconnect / server
+    # restart during the pause leaves a frame the resume endpoint can rebuild and
+    # continue. The frame is dropped after a live in-process resolve, so a normally
+    # connected turn behaves exactly as 2a. Disabled → 2a in-memory-only (a pause lost
+    # on disconnect). 7-day idle TTL sweep prunes abandoned frames (mirrors the roster).
+    structured_suspension_persist_enabled: bool = True
+    paused_turn_retention_days: int = 7
+    paused_turn_sweep_interval_seconds: int = 6 * 3600  # every 6h
+    paused_turn_sweep_batch_limit: int = 200
 
     # Recoverable worker roster persistence (留人 跨进程落盘, 乙 热修 P3). The roster
     # lives in-process (runtime/sessions.py); when enabled, each finished worker is
