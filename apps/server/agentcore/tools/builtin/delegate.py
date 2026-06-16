@@ -557,15 +557,16 @@ class DelegateTool:
         )
 
     def _checkpoint_hook(self, plan: RunPlan):
-        """Build the WaveScheduler ``on_checkpoint`` hook for ``plan`` (结构化挂起 2a).
+        """Build the WaveScheduler ``on_checkpoint`` hook for ``plan`` (结构化挂起).
 
         Replays the ask_user suspend-resume shape at a wave boundary: register a
         plan_review on the interaction bridge, emit the request card, await the
         user's answer (timeout → continue — a soft checkpoint never silently halts),
         discard, emit the resolution. Returns whether to proceed: False only on an
-        explicit ``stop`` (``adjust`` is treated as continue in 2a — steer injection
-        into downstream steps is deferred). The scheduler stays pure; this host hook
-        owns the user round-trip + SSE.
+        explicit ``stop``. An ``adjust`` proceeds too, but first injects the user's
+        note as a steer onto every not-yet-run downstream node (:meth:`_apply_steer`)
+        so the correction actually redirects the remaining work. The scheduler stays
+        pure; this host hook owns the user round-trip + SSE + the steer mutation.
         """
         registry = self._registry
         conversation_id = self._conversation_id
@@ -604,9 +605,28 @@ class DelegateTool:
                     note=response.note,
                 )
             )
+            if response.decision is CheckpointDecision.ADJUST and response.note.strip():
+                self._apply_steer(plan, completed, response.note.strip())
             return response.decision is not CheckpointDecision.STOP
 
         return on_checkpoint
+
+    @staticmethod
+    def _apply_steer(plan: RunPlan, completed: dict, note: str) -> None:
+        """Inject a plan_review ``adjust`` note onto every not-yet-run downstream
+        node so the steer redirects the remaining work.
+
+        The scheduler re-reads specs from ``plan.nodes`` each wave, so mutating a
+        pending node's :attr:`RunSpec.steer` here lands before it runs; the executor
+        renders it as a high-priority instruction block. Nodes already in
+        ``completed`` are done and left untouched. Accumulates (one bullet per
+        adjust) so a node steered across multiple checkpoints keeps every note.
+        """
+        block = f"- {note}"
+        for node in plan.nodes:
+            if node.run_id in completed:
+                continue
+            node.steer = f"{node.steer}\n{block}" if node.steer else block
 
     def _review_step(self, node: RunSpec, completed: dict) -> dict[str, Any]:
         """One just-completed checkpoint node's review card entry (run_id + role +
