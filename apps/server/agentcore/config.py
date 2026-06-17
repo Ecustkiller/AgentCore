@@ -184,14 +184,15 @@ class Settings(BaseSettings):
 
     # --- Model quality modes (质量档, llm/modes.py) ---
     # `default_model_mode` is the operator-wide default 质量档 a turn falls back to
-    # when neither the conversation nor the user picked one ("economy" = all Flash;
-    # "quality" lifts CEO本体 + 主力worker to Pro). Flipping this to "quality" is the
-    # global lever that restores the design's Pro reasoning (retired _STRONG_MODEL).
-    # `user_selectable_models` is the operator CEILING: the models a user may pick
-    # in a custom mode (comma-separated). Tightening it (e.g. drop Pro during内测)
-    # both rejects new picks and clamps modes persisted before the change.
+    # when neither the conversation nor the user picked one ("economy" = all Flash).
+    # `user_selectable_models` is the operator CEILING: the models a user may pick.
+    # 内测决策 (方案 A-中+): Pro is pulled from the ceiling so every user turn runs
+    # Flash (single tier) — the `quality` preset and any custom mode clamp to Flash
+    # via `_clamp_to_ceiling`. Pro is NOT deleted (constant/pricing/judge stay): eval
+    # reaches it through its own full catalog ceiling (evals/harness.py), and adding
+    # "deepseek-v4-pro" back here restores the Pro tier with zero migration.
     default_model_mode: str = "economy"
-    user_selectable_models: str = "deepseek-v4-flash,deepseek-v4-pro"
+    user_selectable_models: str = "deepseek-v4-flash"
 
     host: str = "0.0.0.0"
     port: int = 8000

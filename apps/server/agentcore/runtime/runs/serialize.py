@@ -12,6 +12,7 @@ never breaks loading an older row.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, fields
 from typing import Any
 
@@ -73,6 +74,81 @@ def message_from_dict(d: dict[str, Any]) -> LLMMessage:
     )
 
 
+# Tools whose path argument names the file a worker creates or modifies. Used to
+# derive a run's 文件产出 manifest from its transcript. Delete / move-away are
+# intentionally excluded: the manifest answers "what did this worker produce",
+# not a full mutation audit (a deleted path is not a deliverable).
+_FILE_PRODUCT_ARG: dict[str, str] = {
+    "file_write": "path",
+    "str_replace": "path",
+    "file_move": "destination",
+}
+
+
+def files_touched_from_transcript(transcript: list[LLMMessage]) -> list[str]:
+    """Best-effort list of workspace paths a worker created/modified, first-seen order.
+
+    Parsed from the transcript's file-tool calls (file_write / str_replace /
+    file_move). Intent-level: a call with malformed args is skipped, but a path is
+    listed from the call itself (we do not cross-check the tool result) — so the CEO
+    is told to re-verify only if the manifest looks empty or incomplete. A file
+    written indirectly (e.g. by a code_execute script) is invisible here.
+    """
+    seen: list[str] = []
+    for msg in transcript:
+        if msg.role != "assistant" or not msg.tool_calls:
+            continue
+        for tc in msg.tool_calls:
+            arg = _FILE_PRODUCT_ARG.get(tc.function.name)
+            if not arg:
+                continue
+            try:
+                parsed = json.loads(tc.function.arguments or "{}")
+            except (ValueError, TypeError):
+                continue
+            path = parsed.get(arg) if isinstance(parsed, dict) else None
+            if isinstance(path, str) and path.strip() and path.strip() not in seen:
+                seen.append(path.strip())
+    return seen
+
+
+def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, Any]]:
+    """Best-effort list of a worker's escalations (``escalate`` tool calls), call order.
+
+    Each item is ``{question, assumption, blocking}`` parsed from the call's arguments
+    (assumption defaults to "", blocking to False). Mirrors
+    :func:`files_touched_from_transcript`: intent-level, read off the call itself; a call
+    with malformed args or an empty ``question`` is skipped. The DelegateTool surfaces
+    these to the CEO as「队员升级了待决问题」so it resolves them before finalizing.
+    The tool name is the literal ``"escalate"`` (= ``ESCALATE_TOOL_NAME``); kept inline
+    here to keep this serialization module dependency-light, as the file-tool names are.
+    """
+    out: list[dict[str, Any]] = []
+    for msg in transcript:
+        if msg.role != "assistant" or not msg.tool_calls:
+            continue
+        for tc in msg.tool_calls:
+            if tc.function.name != "escalate":
+                continue
+            try:
+                parsed = json.loads(tc.function.arguments or "{}")
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            question = str(parsed.get("question") or "").strip()
+            if not question:
+                continue
+            out.append(
+                {
+                    "question": question,
+                    "assumption": str(parsed.get("assumption") or "").strip(),
+                    "blocking": bool(parsed.get("blocking")),
+                }
+            )
+    return out
+
+
 def transcript_to_json(transcript: list[LLMMessage]) -> list[dict[str, Any]]:
     return [message_to_dict(m) for m in transcript]
 
@@ -127,10 +203,12 @@ def state_to_json(state: RunState) -> dict[str, Any]:
         "reasoning": state.reasoning,
         "error": state.error,
         "warnings": list(state.warnings),
+        "escalations": [dict(e) for e in state.escalations],
         "citations": list(state.citations),
         "model": state.model,
         "duration_ms": state.duration_ms,
         "rounds": state.rounds,
+        "files_touched": list(state.files_touched),
         "usage": dict(state.usage),
         "cost": dict(state.cost),
     }
@@ -147,10 +225,12 @@ def state_from_json(data: dict[str, Any]) -> RunState:
         reasoning=data.get("reasoning", "") or "",
         error=data.get("error", "") or "",
         warnings=list(data.get("warnings") or []),
+        escalations=[dict(e) for e in (data.get("escalations") or []) if isinstance(e, dict)],
         citations=list(data.get("citations") or []),
         model=data.get("model", "") or "",
         duration_ms=int(data.get("duration_ms", 0) or 0),
         rounds=int(data.get("rounds", 0) or 0),
+        files_touched=list(data.get("files_touched") or []),
         usage=dict(data.get("usage") or {}),
         cost=dict(data.get("cost") or {}),
     )

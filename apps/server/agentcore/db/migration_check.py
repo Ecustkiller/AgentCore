@@ -76,7 +76,10 @@ async def check_migrations() -> None:
         )
 
     if not current:
-        logger.warning(
+        # Root-cause, persistent until someone migrates — error (not warning) so it
+        # can't hide among routine startup noise. A schema-dependent background sweep
+        # WILL fail every interval until this is resolved.
+        logger.error(
             "db.migrations_unmanaged",
             heads=sorted(heads),
             detail=f"database has no Alembic version row; {_UPGRADE_HINT}",
@@ -84,7 +87,9 @@ async def check_migrations() -> None:
         return
 
     if current != heads:
-        logger.warning(
+        # Schema is behind code: any table added by a pending migration is missing,
+        # so dependent sweeps fail every interval. Error, not warning.
+        logger.error(
             "db.migrations_pending",
             db=sorted(current),
             heads=sorted(heads),

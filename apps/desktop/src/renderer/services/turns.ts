@@ -10,11 +10,16 @@ import {
 } from "@/lib/errors";
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import {
+  buildSidecarHistory,
+  resolveSidecarRoot,
+} from "@/services/sidecarRouting";
+import {
   type OutgoingAttachment,
   regenerateConversation,
   resumeConversation,
   streamConversation,
 } from "@/services/streamConversation";
+import { streamConversationViaSidecar } from "@/services/streamConversationViaSidecar";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   type Message,
@@ -222,12 +227,30 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
   try {
-    await streamConversation({
-      conversationId,
-      content,
-      attachments,
-      signal: ac.signal,
-    });
+    // 路由（双模式工作区 §一.1）：dev 开关开 + 会话绑定本机本地根 + 无附件 → 走本地
+    // sidecar 引擎；否则维持现状云链路（含所有 local 会话的服务端持久化/计费）。附件需
+    // 服务端上传处理，Slice 1 sidecar 不接，故有附件时退回云端不丢附件。
+    const sidecarRoot =
+      attachments.length === 0
+        ? await resolveSidecarRoot(conversationId)
+        : null;
+    if (sidecarRoot) {
+      await streamConversationViaSidecar({
+        conversationId,
+        rootId: sidecarRoot,
+        content,
+        history: buildSidecarHistory(conversationId, optimisticUserId),
+        optimisticUserId,
+        signal: ac.signal,
+      });
+    } else {
+      await streamConversation({
+        conversationId,
+        content,
+        attachments,
+        signal: ac.signal,
+      });
+    }
   } catch (err) {
     if (isAbort(err)) return;
     const s = useConversationStore.getState();

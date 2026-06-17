@@ -12,3 +12,10 @@ export const conversationKeys = {
    * on-demand「已归档」view, separate from the live grouped cache. */
   archived: ["conversations", "archived"] as const,
 };
+
+export const workspaceKeys = {
+  all: ["workspaces"] as const,
+  /** The user's workspaces (= folders, cloud + local) for the 文件 hub rail
+   * (`GET /v1/workspaces`). */
+  list: ["workspaces", "list"] as const,
+};

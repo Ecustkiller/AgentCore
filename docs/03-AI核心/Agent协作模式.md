@@ -61,7 +61,13 @@ Agent 间不直接通信——上游产物经调度器中转注入下游。
 |--------|------|
 | Agent 间通信 | 不直接通信，靠上游产物间接协作 |
 | 中转载体 | `WaveScheduler` 按 `depends_on` 注入上游 `RunState.content`（`result_handling`：全文 / 摘要） |
+| 扇出感知（被动） | 从**同一点扇出**的并行 worker（共享同一 `depends_on` 集）互相注入一句话「同时进行的其他任务」概览，让并行调研 / 分工不重复劳动、不留同样盲区。每个兄弟一行 `role + 职责(objective，缺省回退 task) + 预期产出(expected_output)`，并在表头提示「拿不到彼此产物、据此划清职责边界」——给足并行 worker 划清边界、避免漏洞重叠的信息。非「通信」（无往返、构建期一次性静态注入），是产物注入之外的第二条协作通道 → 见代码：`runtime/runs/builder.py` `_apply_sibling_summaries` / `_sibling_summary` |
+| 向上升级（worker → CEO，主动·非阻塞）✅ | worker 撞到「只有上级 / 用户能拍板」的岔路（选型分歧、需求歧义、缺关键输入）时，调 worker 专属 `escalate` 工具登记一条 `question + 暂用假设(assumption) + 是否关键阻塞(blocking)`，**随即按假设继续干到 COMPLETED**——不暂停、不等待、不额外烧一轮 LLM。升级项从 transcript 收割进 `RunState.escalations`，由 `delegate` 在交给 CEO 的汇总顶部**置顶呈现**（阻塞项优先排序、标【关键阻塞】），CEO 用自己的杠杆裁决（`ask_user` 问用户 / `revise` 热修 / 重新 `delegate`）。worker **不能直达用户**，升级一律经 CEO 中转 → 见代码：`tools/builtin/escalate.py`、`runtime/runs/serialize.py` `escalations_from_transcript`、`tools/builtin/delegate.py` `_escalation_block` |
 | 可观测性 | 所有产物对用户透明可查（前端 run 详情） |
+
+> **扇出兄弟判据：「同 `depends_on` 集」而非「同波」✅**：兄弟是「从同一汇合点扇出、奔向同一下游」的并行节点（如都无依赖、或都依赖同一上游），故共享依赖集即兄弟。**刻意窄于「同一拓扑波」**——`s2`(deps `[s1]`) 与 `u2`(deps `[u1]`) 会偶然落在同一波却分属独立链，若按「同波」互注会用无关并行工作污染彼此上下文、模糊分支独立性（与检查点 steer 只注入直接下游的隔离取向一致）。扁平并行批是退化特例（全体共享空依赖集 → 全互为兄弟）。早期实现**只给扁平批**算 sibling、DAG 节点恒空，导致 CEO 主推的「并行调研 worker + `depends_on` 汇入写手」恰好成 DAG 而集体失明、重复劳动；现统一到 `build_run_plan` 一处按依赖集分组填充。
+
+> **升级通道为何「非阻塞 + 经 CEO 中转」而非「worker 直接问用户」✅**：候选三选一——(A) worker 阻塞等用户答复；(B) worker 直连前端问用户；(C) worker 非阻塞登记假设、CEO 中转。**选 C**。否决 A：worker 在 DAG 波次里并发跑，任一节点阻塞会拖死整波、且断点续跑 / 隔离语义骤复杂，成本与延迟都不可控。否决 B：worker 是受限隔离的临时执行体（无持久会话、无前端绑定），直连用户会击穿隔离、并制造「多个 Agent 同时找用户」的嘈杂，违背产品心智「用户管的是 CEO 一个人，不是一窝 Agent」——对话的**单一负责人必须是 CEO**。这也与主流一致：Claude Code 子 Agent 只把结果回交父 Agent、不直接对话用户；Cursor 的子 Agent 同样无独立用户通道。故 worker 的唯一向上通道是 `escalate`，把「要不要打断用户」的判断权收归 CEO（高置信→自行 `revise`/重派，低置信→`ask_user`）。
 
 ### 为什么不要 Agent 直接通信
 
@@ -104,7 +110,7 @@ CEO 是唯一裁决者，用户裁决仅在置信度低时触发。
 | 4 | **上下文最小传递** | 子 Agent 只收到它声明需要的上下文，非父 Agent 全量历史 | 避免无关上下文无差别传递 |
 | 5 | **分层熔断** | 单 Agent 失败不拖垮整个 DAG（5 层×3 重试 = 243× 放大） | Google SRE Book（⏳ Redis 熔断 fail-open 未实现） |
 | 6 | **幂等性执行** | 有副作用的操作携带幂等 key，重试不产生双重执行 | Cycles.io: 写操作必须 idempotency key |
-| 7 | **模型分级** | CEO（规划大脑）走思考档；Worker 走 Flash 思考 high、按回合预算分轻 / 重档，重档经质量档可升 Pro | CEO 规划质量 + Worker 按复杂度分级，成本与质量平衡 |
+| 7 | **模型分级** | CEO（规划大脑）走思考强度档；Worker 走 Flash 思考 high、按回合预算分轻 / 重档，重档经质量档可升 Pro | CEO 规划质量 + Worker 按复杂度分级，成本与质量平衡 |
 
 ### 约束 1 判断标准
 
@@ -286,14 +292,14 @@ TeamMember 字段为 Phase 2 schema（未落地）。
 |---|---|
 | **拍平优先** | 纯路由层（不做分析的中间层）应删除，用 prompt 查找表替代 |
 | **行业参数化** | 通用 Agent 的 prompt 不含行业词汇，行业上下文由调用方 brief 传入 |
-| **双通道路由** | 队长/协调官按复杂度自动选路：简单 → 快速通道（直接委派），复杂 → 深度通道（完整 DAG） |
+| **双通道路由** | 主 Agent 按复杂度自动选路：简单 → 快速通道（直接委派），复杂 → 深度通道（完整 DAG） |
 | **读写分离** | 评判者（质检员/审计员）`analyze` 只读，绝不改码；实现者 `full` 可写 |
 
 ### 8.3 质量保证机制
 
 | 机制 | 说明 |
 |---|---|
-| **有界自动返工** | 质检员打回 → 队长自动派修 → 复跑质检，≤ 2-3 轮，超限升级用户 |
+| **有界自动返工** | 质检员打回 → 主 Agent 自动派修 → 复跑质检，≤ 2-3 轮，超限升级用户 |
 | **best-of-N 择优** | 高不确定环节并行调同一 Agent N 次，择优输出 |
 | **契约固化 SSOT** | 设计阶段产出代码级契约文件，并行实现者共读同一份 |
 | **Preflight Audit** | 提升为平台级 Agent，可被任何团队引用 |

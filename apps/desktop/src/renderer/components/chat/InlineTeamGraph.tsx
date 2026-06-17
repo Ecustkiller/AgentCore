@@ -201,9 +201,14 @@ function GraphArea({
     showRunDetail(messageId, runId, role);
   };
 
+  // `select-none`: the canvas is a diagram, not prose. Embedded, it has no drag/
+  // pan handler to swallow the native mousedown (nodesDraggable/panOnDrag off), so
+  // without this a node click would anchor a text selection that the click's
+  // scroll/panel reflow then extends into the answer below — selecting the whole
+  // reply. Marking the diagram unselectable stops the anchor from ever forming.
   return (
     <div
-      className="w-full border-t border-border transition-[height] duration-200 motion-reduce:transition-none"
+      className="w-full select-none border-t border-border transition-[height] duration-200 motion-reduce:transition-none"
       style={{ height }}
     >
       <GraphView embedded onNodeSelect={onNodeSelect} onMeasure={onMeasure} />

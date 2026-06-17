@@ -22,6 +22,7 @@ from typing import Protocol
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.config import build_request, get_profile
+from agentcore.llm.protocol import TokenUsage
 from agentcore.memory.conversation_title import ChatMessage
 
 logger = get_logger(__name__)
@@ -374,6 +375,11 @@ class LLMMemoryExtractor:
     def __init__(self, provider: LLMProvider, *, role: str = "memory") -> None:
         self._provider = provider
         self._profile = get_profile(role)
+        # The most recent extract's spend, surfaced for the cost ledger (Gap C).
+        # Stays zero until a call completes (timeout / error never bill), so the
+        # offline pass bills the consolidation iff total_tokens > 0.
+        self.last_usage: TokenUsage = TokenUsage()
+        self.last_model: str = ""
 
     async def extract(self, data: MemoryExtractInput) -> list[MemoryOp]:
         request = build_request(
@@ -391,4 +397,6 @@ class LLMMemoryExtractor:
         except TimeoutError:
             logger.warning("memory.extract_timeout", user_id=data.user_id)
             return []
+        self.last_usage = response.usage
+        self.last_model = response.model or self._profile.model
         return parse_memory_ops(response.content)

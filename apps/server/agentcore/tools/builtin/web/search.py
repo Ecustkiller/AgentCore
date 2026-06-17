@@ -87,6 +87,17 @@ class WebSearchTool:
             {"url": r.url, "title": r.title, "snippet": r.snippet, "site": site_of(r.url)}
             for r in results
         ]
+        # Render-oriented twin of ``output`` (工具结果富渲染): the client shows the
+        # hits as source-style cards (favicon · title · snippet) instead of raw
+        # JSON. Carries ``site`` (the parsed display host) so the card needs no
+        # client-side URL parsing.
+        display = {
+            "query": query,
+            "results": [
+                {"title": r.title, "url": r.url, "snippet": r.snippet, "site": site_of(r.url)}
+                for r in results
+            ],
+        }
         return ToolResult(
             tool_call_id="",
             success=True,
@@ -95,4 +106,5 @@ class WebSearchTool:
             output_limit=_OUTPUT_LIMIT,
             metadata={"result_count": len(items)},
             citations=citations or None,
+            display=display,
         )

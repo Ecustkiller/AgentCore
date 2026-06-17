@@ -16,7 +16,11 @@ import { ApiError, NetworkError } from "@/services/api";
  * fall back to generic phrasing when it is absent.
  */
 
-export type StreamErrorKind = "network" | "http" | "auth";
+// "sidecar" = a local-engine turn failure (spawn/init/engine/exit) whose precise
+// reason rides on `serverMessage` — it is neither a real network outage nor an
+// auth issue, so it falls through to the serverMessage branch in resolveMessage
+// (a generic "network" banner would mask why the local engine couldn't run).
+export type StreamErrorKind = "network" | "http" | "auth" | "sidecar";
 
 /**
  * A transport-level failure of an SSE turn (distinct from a backend `error`

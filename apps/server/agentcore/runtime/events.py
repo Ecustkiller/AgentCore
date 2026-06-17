@@ -15,6 +15,12 @@ class EventType(StrEnum):
     MESSAGE_START = "message_start"
     CONTENT_DELTA = "content_delta"
     REASONING_DELTA = "reasoning_delta"
+    # The CEO captain is composing a tool call's ARGUMENTS (e.g. the delegate 任务书).
+    # Bubble-scoped twin of run_tool_progress (which is run-scoped, for workers): the
+    # captain's voice streams to the chat bubble, and its big delegate call assembles
+    # BEFORE run_plan fires (no graph yet), so this drives a live「正在生成 {tool}…」
+    # line on the assistant bubble. Transport-only liveliness — NOT journaled.
+    TOOL_PROGRESS = "tool_progress"
     TOOL_USE_START = "tool_use_start"
     TOOL_USE_END = "tool_use_end"
     MESSAGE_END = "message_end"
@@ -26,11 +32,13 @@ class EventType(StrEnum):
     # user's decision, then resolved.
     APPROVAL_REQUIRED = "approval_required"
     APPROVAL_RESOLVED = "approval_resolved"
-    # User checkpoint (CEO ask_user): the CEO paused the turn to ask the user a
-    # decision (continue / adjust / stop), then resolved. UNLIKE approvals (pure
-    # transport), these two are journaled (see _JOURNAL_EVENT_TYPES) so the
-    # question + answer replay inline on reload — the exchange is conversation, not
-    # just gating.
+    # User checkpoint (CEO ask_user): the CEO paused the turn to ask the user —
+    # the one「向用户发问」surface, covering BOTH an opening 引导 (a producible-but-
+    # underspecified request → 起步计划 + ≤5 重点问题 + style options) and a mid-task
+    # fork (A/B / irreversible step). Either way the turn suspends and resolves
+    # (continue / stop). UNLIKE approvals (pure transport), these two are journaled
+    # (see _JOURNAL_EVENT_TYPES) so the question + answer replay inline on reload —
+    # the exchange is conversation, not just gating.
     CHECKPOINT_REQUIRED = "checkpoint_required"
     CHECKPOINT_RESOLVED = "checkpoint_resolved"
     # Structured DAG checkpoint (结构化挂起 2a): a delegate step marked
@@ -66,6 +74,14 @@ class EventType(StrEnum):
     RUN_COMPLETED = "run_completed"
     RUN_FAILED = "run_failed"
     RUN_PROGRESS = "run_progress"
+    # A worker is streaming a tool call's ARGUMENTS (e.g. the file body for
+    # file_write). Those bytes are neither content (run_output_delta) nor reasoning
+    # (run_reasoning_delta), and tool_use_start only fires once they fully assemble
+    # — so without this a file-writing worker's node sits frozen for the whole
+    # (often minute-long) write. Transport-only liveliness: throttled by argument
+    # growth and deliberately NOT journaled (a reloaded run shows the finished call
+    # via the journaled tool_use_start/end — live progress is moot by then).
+    RUN_TOOL_PROGRESS = "run_tool_progress"
 
 
 class FinishReason(StrEnum):
@@ -104,6 +120,23 @@ def reasoning_delta(delta: str) -> SSEEvent:
     return SSEEvent(type=EventType.REASONING_DELTA, payload={"delta": delta})
 
 
+def tool_progress(tool_name: str, chars: int) -> SSEEvent:
+    """The CEO captain is actively composing a tool call's arguments (bubble-scoped).
+
+    ``chars`` is the cumulative length of the streamed argument string so far — for
+    the prime case (``delegate``) that is the task book growing. The captain's voice
+    is the chat bubble (not run-scoped), and its big delegate call assembles BEFORE
+    ``run_plan`` fires (no team graph yet), so a run-scoped ``run_tool_progress``
+    would be dropped client-side. This turn-scoped twin instead drives a live
+    「正在生成 {tool}…」line on the assistant bubble. Transport-only (not journaled):
+    once the call executes, the bubble's content / the team graph takes over.
+    """
+    return SSEEvent(
+        type=EventType.TOOL_PROGRESS,
+        payload={"tool_name": tool_name, "chars": chars},
+    )
+
+
 def tool_use_start(tool_call_id: str, tool_name: str, arguments: dict[str, Any]) -> SSEEvent:
     return SSEEvent(
         type=EventType.TOOL_USE_START,
@@ -126,16 +159,51 @@ def citations_event(citations: list[dict[str, Any]]) -> SSEEvent:
     return SSEEvent(type=EventType.CITATIONS, payload={"citations": citations})
 
 
-def tool_use_end(tool_call_id: str, tool_name: str, *, success: bool, output: str) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.TOOL_USE_END,
-        payload={
-            "tool_call_id": tool_call_id,
-            "tool_name": tool_name,
-            "status": "success" if success else "error",
-            "result": output,
-        },
-    )
+# A tool's structured ``display`` payload (工具结果富渲染) is persisted in the
+# journal / process timeline, so — like the model-facing ``result`` — it is
+# size-capped before it enters them (the live SSE carries this same capped form;
+# a card needs a preview, not megabytes). Long string fields are clamped and
+# over-long lists trimmed, recursively, so a code_execute dumping a huge stdout or
+# a search returning many hits can't bloat the message row.
+_DISPLAY_STR_CAP = 6000
+_DISPLAY_LIST_CAP = 50
+
+
+def _cap_display_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return value[:_DISPLAY_STR_CAP] + "…" if len(value) > _DISPLAY_STR_CAP else value
+    if isinstance(value, list):
+        return [_cap_display_value(v) for v in value[:_DISPLAY_LIST_CAP]]
+    if isinstance(value, dict):
+        return {k: _cap_display_value(v) for k, v in value.items()}
+    return value
+
+
+def _cap_display(display: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Bound a tool's structured ``display`` before it is journaled / persisted."""
+    if not display:
+        return None
+    return {k: _cap_display_value(v) for k, v in display.items()}
+
+
+def tool_use_end(
+    tool_call_id: str,
+    tool_name: str,
+    *,
+    success: bool,
+    output: str,
+    display: dict[str, Any] | None = None,
+) -> SSEEvent:
+    payload: dict[str, Any] = {
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "status": "success" if success else "error",
+        "result": output,
+    }
+    capped = _cap_display(display)
+    if capped is not None:
+        payload["display"] = capped
+    return SSEEvent(type=EventType.TOOL_USE_END, payload=payload)
 
 
 def approval_required(
@@ -185,18 +253,24 @@ def checkpoint_required(
     checkpoint_id: str,
     conversation_id: str,
     question: str,
-    options: list[str],
     context: str = "",
-    multiple: bool = False,
+    assumptions: list[dict[str, Any]] | None = None,
+    questions: list[dict[str, Any]] | None = None,
+    style_options: list[dict[str, Any]] | None = None,
 ) -> SSEEvent:
-    """The CEO paused the turn to ask the user a decision (ask_user checkpoint).
+    """The CEO paused the turn to ask the user (ask_user — the one asking surface).
 
-    ``checkpoint_id`` is the key the client echoes back to the resolve endpoint.
-    ``question`` is the CEO-authored decision point; ``options`` are optional
-    concrete choices to offer; ``context`` is optional supporting background.
-    ``multiple`` tells the card to render the options as multi-select (checkboxes)
-    rather than single-select (radios). Journaled (see ``_JOURNAL_EVENT_TYPES``) so
-    a reload replays the prompt inline.
+    One adaptive shape for both an opening 引导 and a mid-task fork. ``checkpoint_id``
+    is the key the client echoes back to the resolve endpoint. ``question`` is the
+    CEO-authored framing / opening line (the tool's ``message`` — always shown);
+    ``context`` is optional supporting background. The rich opening content is
+    optional (empty for a compact mid-task fork): ``assumptions`` are the 起步计划
+    chips (``{id, label, value}`` — low-impact decisions the CEO made for the user,
+    read-only); ``questions`` are the ≤5 askable items (``{id, prompt, kind, options,
+    multiple, default}`` — each pre-fillable so a 想省事 user one-clicks through);
+    ``style_options`` are the optional 风格预设 (``{id, label}`` — visual products
+    only). Journaled (see ``_JOURNAL_EVENT_TYPES``) so a reload replays the prompt
+    inline.
     """
     return SSEEvent(
         type=EventType.CHECKPOINT_REQUIRED,
@@ -204,9 +278,10 @@ def checkpoint_required(
             "checkpoint_id": checkpoint_id,
             "conversation_id": conversation_id,
             "question": question,
-            "options": options,
             "context": context,
-            "multiple": multiple,
+            "assumptions": assumptions or [],
+            "questions": questions or [],
+            "style_options": style_options or [],
         },
     )
 
@@ -523,6 +598,31 @@ def run_reasoning_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
     )
 
 
+def run_tool_progress(
+    run_id: str, agent_id: str, tool_name: str, chars: int
+) -> SSEEvent:
+    """A delegated worker is actively composing a tool call's arguments.
+
+    ``chars`` is the cumulative length of the streamed argument string so far (the
+    file body for ``file_write``, the query for a search…). The team UI shows
+    「正在生成 {tool} · N 字」on the worker's node/detail so a long tool-call
+    assembly reads as live progress instead of a frozen node — the bytes surface
+    nowhere else (they are neither content nor reasoning, and ``tool_use_start``
+    fires only once the args finish). Transport-only (NOT in
+    ``_JOURNAL_EVENT_TYPES``): a reloaded run replays the finished call from the
+    journaled ``tool_use_start``/``tool_use_end`` instead.
+    """
+    return SSEEvent(
+        type=EventType.RUN_TOOL_PROGRESS,
+        payload={
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "tool_name": tool_name,
+            "chars": chars,
+        },
+    )
+
+
 def run_completed(
     run_id: str,
     agent_id: str,
@@ -576,9 +676,10 @@ def run_progress(completed: int, total: int) -> SSEEvent:
     )
 
 
-# Event types that make up the multi-agent execution journal: persisted on the
-# assistant message (messages.runs) so a past turn's team graph replays on reload
-# through the same client-side fold as the live stream.
+# Event types that make up the multi-agent execution journal: persisted to the
+# turn_journal table (唯一事实源, §18.3) and projected into the assistant message's
+# runs payload on read, so a past turn's team graph replays on reload through the
+# same client-side fold as the live stream.
 _JOURNAL_EVENT_TYPES = frozenset(
     {
         EventType.RUN_PLAN,
@@ -590,9 +691,9 @@ _JOURNAL_EVENT_TYPES = frozenset(
         EventType.RUN_PROGRESS,
         EventType.TOOL_USE_START,
         EventType.TOOL_USE_END,
-        # User checkpoints (ask_user): journaled so the question + answer replay
-        # inline on reload, unlike the (transport-only) approval / workspace-op
-        # events.
+        # User checkpoints (ask_user — opening 引导 or mid-task fork): journaled so
+        # the question + answer replay inline on reload, unlike the (transport-only)
+        # approval / workspace-op events.
         EventType.CHECKPOINT_REQUIRED,
         EventType.CHECKPOINT_RESOLVED,
         # Structured DAG checkpoints (checkpoint_after): journaled so the pause +
@@ -698,17 +799,24 @@ class EventSink:
             result = payload.get("result")
             if isinstance(result, str) and len(result) > _PROCESS_RESULT_CAP:
                 result = result[:_PROCESS_RESULT_CAP] + "…"
+            # The structured display (工具结果富渲染) is already size-capped by the
+            # event builder, so it persists onto the step as-is for the client to
+            # render the rich result on reload (alongside the text result peek).
+            display = payload.get("display")
             for step in reversed(self._process):
                 if step.get("kind") == "tool" and step.get("id") == call_id:
                     step["result"] = result
                     step["status"] = payload.get("status", "success")
+                    if display is not None:
+                        step["display"] = display
                     break
 
     def seed_journal(self, events: list[dict[str, Any]]) -> None:
         """Pre-load the journal with a paused turn's pre-pause events (结构化挂起 2b resume).
 
-        A resumed turn runs on a FRESH sink, but its persisted ``messages.runs`` must
-        replay the WHOLE team graph — the pre-pause run_plan + finished workers + the
+        A resumed turn runs on a FRESH sink, but its persisted journal (turn_journal,
+        projected as the message's runs payload) must replay the WHOLE team graph —
+        the pre-pause run_plan + finished workers + the
         plan_review pause, then the post-resume tail. Seeding extends only the journal
         (persistence/replay), NOT the live SSE queue: the client already saw the
         pre-pause portion (or loads it from the persisted message), so the resume
@@ -738,7 +846,8 @@ class EventSink:
         activity instead) or a turn that used no tool (a thinking-only turn
         replays from ``reasoning_content`` as one segment — no process payload
         needed). Otherwise the ordered reasoning/tool steps the client folds into
-        the inline process panel and persists on ``messages.runs.process``.
+        the inline process panel, persisted via the journal (projected as the
+        message's ``runs.process``).
         """
         if self._has_run_plan or not self._has_tool:
             return None

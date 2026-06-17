@@ -1,0 +1,77 @@
+import { queryClient } from "@/lib/queryClient";
+import { workspaceKeys } from "@/lib/queryKeys";
+import type { FolderMeta } from "@/services/folders";
+import { type WorkspaceInfo, listWorkspaces } from "@/services/workspaces";
+import { useQuery } from "@tanstack/react-query";
+
+/**
+ * The user's workspaces (= folders, cloud + local) as React Query data — the
+ * cross-workspace 文件 hub's rail source, backed by `GET /v1/workspaces`. The
+ * endpoint enumerates folders only (裸聊 has no workspace, so it never appears).
+ *
+ * Unlike the conversation list (loaded once, then driven optimistically), the
+ * workspace list has no client-side mutation path of its own: it changes when a
+ * folder is created / bound / deleted elsewhere, and the hub is opened on demand.
+ * A short stale window keeps it fresh on revisit without the never-refetch
+ * contract; the returned query object lets the page tell loading from empty.
+ *
+ * Folder lifecycle now lives *on* this hub (文件夹即工作区), so folder CRUD reflects
+ * into this same cache via the projection helpers below — keeping the rail and the
+ * `/conversations` folder filter (grouped cache) in step without a refetch.
+ */
+export function useWorkspaces() {
+  return useQuery({
+    queryKey: workspaceKeys.list,
+    queryFn: listWorkspaces,
+    staleTime: 30_000,
+  });
+}
+
+/** Project a folder onto its rail shape (`ws_id = folder:<id>`). A bound local
+ * root makes it a local workspace; otherwise it's cloud. `hasFiles` only gates
+ * copy elsewhere (not the rail), so a fresh cloud folder is `false` and a local
+ * one `true` (the server can't see a local folder's files). */
+function folderToWorkspace(f: FolderMeta): WorkspaceInfo {
+  const isLocal = !!f.localRootId;
+  return {
+    wsId: `folder:${f.id}`,
+    name: f.name,
+    location: isLocal ? "local" : "cloud",
+    rootId: f.localRootId,
+    hasFiles: isLocal,
+  };
+}
+
+/** Rewrite the cached workspace list *iff* it's already loaded. Folder CRUD on any
+ * surface reflects here so the 文件 rail stays in sync; if the hub was never opened
+ * the cache is absent and we skip — it fetches fresh on first open. */
+function writeWorkspaces(
+  updater: (list: WorkspaceInfo[]) => WorkspaceInfo[],
+): void {
+  const cur = queryClient.getQueryData<WorkspaceInfo[]>(workspaceKeys.list);
+  if (!cur) return;
+  queryClient.setQueryData<WorkspaceInfo[]>(workspaceKeys.list, updater(cur));
+}
+
+/** Reflect a newly created folder into the rail (newest first). */
+export function addWorkspaceFromFolder(folder: FolderMeta): void {
+  const ws = folderToWorkspace(folder);
+  writeWorkspaces((list) => [ws, ...list.filter((w) => w.wsId !== ws.wsId)]);
+}
+
+/** Reflect a folder rename onto its rail item (no-op if the rail isn't loaded). */
+export function patchWorkspaceFromFolder(
+  id: string,
+  patch: { name?: string },
+): void {
+  const wsId = `folder:${id}`;
+  writeWorkspaces((list) =>
+    list.map((w) => (w.wsId === wsId ? { ...w, ...patch } : w)),
+  );
+}
+
+/** Drop a deleted folder from the rail. */
+export function removeWorkspaceForFolder(id: string): void {
+  const wsId = `folder:${id}`;
+  writeWorkspaces((list) => list.filter((w) => w.wsId !== wsId));
+}

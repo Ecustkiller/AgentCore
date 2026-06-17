@@ -169,6 +169,107 @@ async def test_gate_approve_always_skips_second_prompt():
     assert _drain(sink) == []
 
 
+async def test_approve_always_sweeps_pending_same_tool():
+    """'本轮内都允许' on one file_write retroactively approves the OTHER file_writes
+    already suspended on the shared gate (parallel workers in local mode), so one
+    click clears every pending same-tool prompt; a different tool stays gated.
+
+    Closes the race the client's optimistic sibling-approve can miss (a sibling's
+    approval_required SSE not yet in the store at click time): the registry is the
+    authoritative pending set, so the sweep here catches it regardless.
+    """
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = _gate(sink, reg)
+
+    # Two file_writes + one code_execute suspended in parallel on the SAME gate.
+    a = asyncio.create_task(
+        gate.authorize(tool_name="file_write", tool_call_id="a", arguments={})
+    )
+    b = asyncio.create_task(
+        gate.authorize(tool_name="file_write", tool_call_id="b", arguments={})
+    )
+    c = asyncio.create_task(
+        gate.authorize(tool_name="code_execute", tool_call_id="c", arguments={})
+    )
+    # Let all three register before the grant, so the sweep can see b and c.
+    for _ in range(2000):
+        if len(reg.list_pending("conv-1")) == 3:
+            break
+        await asyncio.sleep(0)
+    assert len(reg.list_pending("conv-1")) == 3
+
+    # Grant file_write for the turn on call "a".
+    assert reg.resolve("a", ApprovalDecision.APPROVE_ALWAYS, conversation_id="conv-1")
+
+    assert await a is ApprovalDecision.APPROVE_ALWAYS
+    # b (same tool) was swept to APPROVE without ever getting its own resolve.
+    assert await b is ApprovalDecision.APPROVE
+    # c (different tool) is untouched — still pending until resolved on its own.
+    assert reg.resolve("c", ApprovalDecision.DENY, conversation_id="conv-1")
+    assert await c is ApprovalDecision.DENY
+
+
+async def test_approve_always_files_grants_whole_class():
+    """'本轮内允许所有文件改动' grants the file-mutation class for the turn (so a LATER
+    write/edit/delete/move auto-approves) and sweeps every already-suspended file-op
+    call — while code_execute, outside the class, stays separately gated."""
+    reg = InteractionRegistry()
+    sink = EventSink()
+    file_ops = frozenset({"file_write", "str_replace", "file_delete", "file_move"})
+    gate = ApprovalGate(
+        sink=sink,
+        conversation_id="conv-1",
+        registry=reg,
+        timeout_seconds=5.0,
+        file_op_tools=file_ops,
+    )
+
+    # A file_write (the clicked card), a parallel str_replace, and a code_execute.
+    w = asyncio.create_task(
+        gate.authorize(tool_name="file_write", tool_call_id="w", arguments={})
+    )
+    r = asyncio.create_task(
+        gate.authorize(tool_name="str_replace", tool_call_id="r", arguments={})
+    )
+    x = asyncio.create_task(
+        gate.authorize(tool_name="code_execute", tool_call_id="x", arguments={})
+    )
+    for _ in range(2000):
+        if len(reg.list_pending("conv-1")) == 3:
+            break
+        await asyncio.sleep(0)
+    assert len(reg.list_pending("conv-1")) == 3
+
+    # Click "allow all file edits" on the file_write card.
+    assert reg.resolve(
+        "w", ApprovalDecision.APPROVE_ALWAYS_FILES, conversation_id="conv-1"
+    )
+    assert await w is ApprovalDecision.APPROVE_ALWAYS_FILES
+    # str_replace (in the class) was swept to APPROVE without its own resolve.
+    assert await r is ApprovalDecision.APPROVE
+    # code_execute (NOT in the class) is untouched — still gated until resolved.
+    assert reg.resolve("x", ApprovalDecision.DENY, conversation_id="conv-1")
+    assert await x is ApprovalDecision.DENY
+
+    # A LATER file_delete (also in the class) is now auto-approved, no new prompt.
+    _drain(sink)
+    later = await gate.authorize(
+        tool_name="file_delete", tool_call_id="d", arguments={}
+    )
+    assert later is ApprovalDecision.APPROVE
+    assert _drain(sink) == []
+    # But a LATER code_execute still prompts (the class grant never covered it).
+    resolver = asyncio.create_task(
+        _resolve_when_ready(reg, "x2", ApprovalDecision.DENY, "conv-1")
+    )
+    later_exec = await gate.authorize(
+        tool_name="code_execute", tool_call_id="x2", arguments={}
+    )
+    await resolver
+    assert later_exec is ApprovalDecision.DENY
+
+
 async def test_gate_truncates_large_argument_preview():
     reg = InteractionRegistry()
     sink = EventSink()

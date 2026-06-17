@@ -1,4 +1,4 @@
-"""对比评估 runner（团队 vs 单体）—— 见 docs/07-规划/多Agent对比评估设计.md.
+"""对比评估 runner（团队 vs 单体）—— 见 docs/07-规划/评估体系后端落地设计.md 第二部分.
 
 零侵入复用「功能评估」地基：为每个臂合成一个 :class:`EvalCase` 喂现有 :class:`EvalHarness`
 （两条运行路径都已存在），再用 :class:`~agentcore.evals.types.PairwiseJudge` 成对裁判主臂
@@ -341,14 +341,15 @@ def build_default_pairwise_judge(mode: str = "quality") -> LLMPairwiseJudge:
     """
     import os
 
-    from agentcore.config import settings
-    from agentcore.evals.harness import _eval_credentials
+    from agentcore.evals.harness import _EVAL_CEILING, _eval_credentials
     from agentcore.llm.factory import build_provider
     from agentcore.llm.modes import resolve_profile_set
 
     provider = build_provider(_eval_credentials())
     model = os.environ.get("EVAL_JUDGE_MODEL", "").strip()
     if not model:
-        profiles = resolve_profile_set(mode, custom_modes={}, ceiling=settings.selectable_models)
+        # Resolve against the FULL eval catalog ceiling (not the user ceiling, which
+        # 内测 locked to Flash) so the default ``quality`` judge stays on Pro (§十一).
+        profiles = resolve_profile_set(mode, custom_modes={}, ceiling=_EVAL_CEILING)
         model = profiles.get("chat").model
     return LLMPairwiseJudge(provider, model)

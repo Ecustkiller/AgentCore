@@ -1,7 +1,9 @@
 import {
+  type FileEditDoc,
   type FileNode,
   type FilePreviewResult,
   type FileSource,
+  type WriteTextResult,
   baseName,
   parentDir,
 } from "@/lib/fileSource";
@@ -39,7 +41,7 @@ export function createLocalRootSource(
     caps: {
       watch: true,
       transfer: false,
-      edit: false,
+      edit: true,
       snapshots: false,
       handoff: false,
     },
@@ -65,6 +67,37 @@ export function createLocalRootSource(
       const res = await window.fsApi.readFile(rootId, path);
       if (!res.ok) throw new Error(res.reason);
       return adaptPreview(res.data);
+    },
+    async readForEdit(path): Promise<FileEditDoc> {
+      const res = await window.fsApi.readTextFile(rootId, path);
+      if (!res.ok) throw new Error(res.reason);
+      const { content, mtimeMs, encoding, eol } = res.data;
+      return { text: content, version: { mtimeMs }, encoding, eol };
+    },
+    async writeText(path, input): Promise<WriteTextResult> {
+      // GBK 只读：宿主已以只读打开，这里再兜一道，绝不静默改编码。
+      if (input.encoding === "gbk") {
+        return {
+          ok: false,
+          reason: "unsupported",
+          message: "GBK 文件回写暂未启用",
+        };
+      }
+      const res = await window.fsApi.writeFile(rootId, path, {
+        content: input.content,
+        encoding: input.encoding,
+        eol: input.eol,
+        baselineMtimeMs: input.baseline?.mtimeMs ?? 0,
+      });
+      if (res.ok) return { ok: true, version: { mtimeMs: res.mtimeMs } };
+      if (res.reason === "conflict") {
+        return {
+          ok: false,
+          reason: "conflict",
+          version: { mtimeMs: res.diskMtimeMs },
+        };
+      }
+      return { ok: false, reason: res.reason, message: res.message };
     },
     async createFile(path) {
       const res = await window.fsApi.create(rootId, path, "file");

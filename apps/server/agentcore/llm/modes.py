@@ -67,9 +67,13 @@ Assignments = dict[str, str]
 
 # --- System presets (read-only, code-defined) ---------------------------------
 # economy = all base models (Flash everywhere) = the default. quality lifts the
-# CEO本体 + 主力worker to Pro; 经济worker stays Flash (cheap tier). These subsume the
-# retired ``_STRONG_MODEL`` flip (路线图 P1-7): the design intent "strong = Pro" is
-# now simply the ``quality`` preset, opt-in per user/conversation/operator-default.
+# CEO本体 + 主力worker to Pro; 经济worker stays Flash (cheap tier).
+# 内测 (方案 A-中+): Pro is out of the *user* ceiling (config.user_selectable_models),
+# so ``quality`` is unreachable by users — a user/conversation ref to it clamps to
+# Flash via ``_clamp_to_ceiling``. The preset is kept (not deleted) because eval is
+# its only live consumer: the harness/judge resolve ``quality`` against the FULL
+# catalog ceiling (evals/harness._EVAL_CEILING) to exercise Flash-vs-Pro and the Pro
+# judge. Re-adding Pro to the user ceiling restores it for users with zero changes.
 SYSTEM_DEFAULT_MODE = "economy"
 SYSTEM_PRESETS: dict[str, Assignments] = {
     "economy": {},

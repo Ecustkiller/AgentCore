@@ -1,5 +1,6 @@
 import { type VersionInfo, fetchVersion } from "@/services/system";
 import { useEffect, useState } from "react";
+import { SettingsHeader } from "./SettingsHeader";
 
 function Row({
   label,
@@ -44,8 +45,7 @@ export function AboutSettings() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold">关于 AgentCore</h1>
-      <p className="mt-2 text-sm text-muted-foreground">版本信息与构建溯源。</p>
+      <SettingsHeader title="关于 AgentCore" description="版本信息与构建溯源。" />
 
       <div className="mt-6 space-y-2 text-sm">
         {loading ? (

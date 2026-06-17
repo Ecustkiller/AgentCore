@@ -8,7 +8,12 @@ primitive never leaks into the general catalog.
 """
 
 from agentcore.core.types import ToolApproval, ToolCategory
-from agentcore.tools.builtin import build_builtin_registry, build_ceo_tool_registry
+from agentcore.tools.builtin import (
+    build_builtin_registry,
+    build_ceo_tool_registry,
+    build_worker_registry,
+    file_mutation_tool_names,
+)
 
 _EXPECTED_NAMES = {
     "web_search",
@@ -45,6 +50,19 @@ def test_registry_excludes_ceo_only_delegate():
     assert "delegate" not in names
 
 
+def test_worker_registry_adds_escalate_without_leaking_it():
+    # escalate is the worker-only upward channel: present in the worker toolset, but
+    # NOT in the builtin catalog (GET /tools) nor the CEO's own toolset (the CEO uses
+    # ask_user, not escalate). This keeps the orchestration primitive where it belongs.
+    worker = {s.name for s in build_worker_registry().list_all()}
+    builtin = {s.name for s in build_builtin_registry().list_all()}
+    ceo = {s.name for s in build_ceo_tool_registry().list_all()}
+    assert "escalate" in worker
+    assert worker == _EXPECTED_NAMES | {"escalate"}  # builtins + escalate, nothing else
+    assert "escalate" not in builtin
+    assert "escalate" not in ceo
+
+
 def test_write_and_exec_tools_are_grantable():
     approvals = {s.name: s.approval for s in build_builtin_registry().list_all()}
     assert approvals["file_write"] is ToolApproval.GRANTABLE
@@ -56,6 +74,17 @@ def test_write_and_exec_tools_are_grantable():
     # Read-only tools auto-run (no approval prompt).
     assert approvals["file_read"] is ToolApproval.NEVER
     assert approvals["web_search"] is ToolApproval.NEVER
+
+
+def test_file_mutation_class_is_grantable_filesystem_without_code_execute():
+    # The「本轮内允许所有文件改动」class = GRANTABLE ∩ FILESYSTEM, so it covers the
+    # file-edit tools but NOT code_execute (EXECUTION, higher-risk → its own gate).
+    # Pinned so a future tool can't silently widen or narrow what one click grants.
+    names = file_mutation_tool_names()
+    assert names == {"file_write", "str_replace", "file_delete", "file_move"}
+    assert "code_execute" not in names
+    # Exactly the delegated mutation set minus code_execute (stays in lockstep).
+    assert names == _DELEGATED_MUTATION_NAMES - {"code_execute"}
 
 
 def test_code_execute_description_does_not_overpromise_sandbox():

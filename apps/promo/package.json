@@ -1,0 +1,31 @@
+{
+  "name": "agentcore-promo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentCore promotional video (Remotion)",
+  "sideEffects": ["*.css"],
+  "scripts": {
+    "dev": "remotion studio",
+    "build": "remotion render Promo out/promo.mp4",
+    "still": "remotion still PixelCheck out/pixel-check.png"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "@remotion/tailwind-v4": "^4.0.0",
+    "@xyflow/react": "^12.0.0",
+    "clsx": "^2.1.1",
+    "elkjs": "^0.9.0",
+    "lucide-react": "^0.400.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.0",
+    "katex": "^0.17.0",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -21,6 +21,7 @@ from agentcore.api.dependencies import (
     get_handoff_job_repo,
     get_message_repo,
     get_model_mode_repo,
+    get_turn_journal_repo,
 )
 from agentcore.api.routes.model_modes import validate_mode_ref
 from agentcore.api.schemas import (
@@ -46,13 +47,12 @@ from agentcore.api.schemas import (
     MoveFileRequest,
     PausedTurnListResponse,
     PausedTurnSummary,
+    RecordTurnRequest,
+    RecordTurnResponse,
     RegenerateMessageRequest,
-    ResolveApprovalInteraction,
-    ResolveCheckpointInteraction,
-    ResolveClientToolInteraction,
     ResolveInteractionRequest,
-    ResolvePlanReviewInteraction,
     ResumeTurnRequest,
+    RunsPayload,
     SendMessageRequest,
     SnapshotListResponse,
     SnapshotSummary,
@@ -60,8 +60,12 @@ from agentcore.api.schemas import (
     UpdateConversationRequest,
     UploadFileResponse,
     WorkspaceBindingResponse,
+    WorkspaceEditDoc,
     WorkspaceFileEntry,
     WorkspaceFileListResponse,
+    WorkspaceWriteRequest,
+    WorkspaceWriteResult,
+    interaction_result_from_body,
 )
 from agentcore.api.sse import sse_response
 from agentcore.config import settings
@@ -69,6 +73,7 @@ from agentcore.conversation.quota import QuotaLimits, enforce_quota
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import (
     dispatch_handoff,
+    record_local_turn,
     regenerate_chat,
     resume_chat,
     stream_chat,
@@ -88,6 +93,7 @@ from agentcore.db.repositories import (
     HandoffJobRepository,
     MessageRepository,
     ModelModeRepository,
+    TurnJournalRepository,
 )
 from agentcore.llm.byok import LLMCredentials, resolve_user_llm_credentials
 from agentcore.runtime.checkpoints import CheckpointResponse
@@ -98,6 +104,7 @@ from agentcore.runtime.events import (
     handoff_snapshot_done,
 )
 from agentcore.runtime.interaction import default_interaction_registry
+from agentcore.runtime.journal import runs_from_entries
 from agentcore.runtime.suspension_persistence import (
     claim_paused_turn,
     list_paused_turns,
@@ -109,7 +116,9 @@ from agentcore.workspace.files import (
     download_file,
     list_files,
     move_file,
+    read_file_for_edit,
     upload_file,
+    write_file_text,
 )
 from agentcore.workspace.git import CloneError, clone_repo
 from agentcore.workspace.handoff import snapshot_local
@@ -126,6 +135,7 @@ from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.protocol import (
     AlreadyExists,
     NotAFile,
+    NotUTF8,
     OutsideWorkspace,
     PathNotFound,
 )
@@ -395,6 +405,7 @@ async def list_messages(
     around: str | None = Query(None),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     repo: MessageRepository = Depends(get_message_repo),
+    journal_repo: TurnJournalRepository = Depends(get_turn_journal_repo),
 ):
     """A window of a conversation's messages (cursor-windowed, chronological).
 
@@ -435,8 +446,20 @@ async def list_messages(
             conversation_id, limit=limit
         )
 
+    # Project each assistant message's replay payload (runs) from the唯一事实源
+    # turn_journal (§18.3) — it is no longer stored on the message row. One batched
+    # query over the page's message ids (no N+1); turns with no facts stay runs=None.
+    journal_map = await journal_repo.load_map([m.id for m in messages])
+    details: list[MessageDetail] = []
+    for m in messages:
+        detail = MessageDetail.model_validate(m)
+        runs = runs_from_entries(journal_map.get(m.id))
+        if runs is not None:
+            detail.runs = RunsPayload.model_validate(runs)
+        details.append(detail)
+
     return MessageListResponse(
-        data=[MessageDetail.model_validate(m) for m in messages],
+        data=details,
         total=total,
         has_more_before=has_more_before,
         has_more_after=has_more_after,
@@ -537,6 +560,48 @@ async def send_message(
     return sse_response(sink, producer=task)
 
 
+@router.post("/{conversation_id}/local-turns", response_model=RecordTurnResponse)
+async def record_local_turn_endpoint(
+    conversation_id: str,
+    body: RecordTurnRequest,
+    user: AuthUser,
+    session: AsyncSession = Depends(get_db),
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Persist a turn that ran on the user's machine via the sidecar (双模式工作区 §一.1).
+
+    The local engine produced the reply on the user's box (no server SSE turn ran),
+    so the desktop reports the finished turn here to land it in durable history AND
+    the cost ledger (计费回写). Owner-scoped (404 for a non-owner).
+
+    Unlike ``send_message`` there is NO pre-turn billing gate — the turn already
+    happened on the user's machine; this only RECORDS its content + priced ledger.
+    The ledger write is idempotent by ``run_id`` (``record_runs``), so a retried POST
+    after a flaky response never double-bills or duplicates spend. The title is
+    generated best-effort on the user's resolved BYOK key (None → platform fallback).
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    # Best-effort credentials for the title pass — unlike send_message's preflight we
+    # never REFUSE here (the turn is already done; recording must not be blockable).
+    credentials = await resolve_user_llm_credentials(session, user.user_id)
+    result = await record_local_turn(
+        conversation_id=conversation_id,
+        user_id=user.user_id,
+        user_message=body.user_message,
+        assistant_content=body.content,
+        assistant_reasoning=body.reasoning_content,
+        citations=[c.model_dump() for c in body.citations] or None,
+        runs=body.runs.model_dump() if body.runs else None,
+        cost_runs=[r.model_dump() for r in body.cost_runs],
+        message_id=body.message_id,
+        input_tokens=body.input_tokens,
+        output_tokens=body.output_tokens,
+        rounds=body.rounds,
+        llm_credentials=credentials,
+    )
+    return RecordTurnResponse(**result)
+
+
 @router.post(
     "/{conversation_id}/interactions/{interaction_id}", response_model=StatusResponse
 )
@@ -563,25 +628,9 @@ async def resolve_interaction(
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
 
-    if isinstance(body, ResolveApprovalInteraction):
-        result: object = body.decision
-    elif isinstance(body, ResolveCheckpointInteraction):
-        result = CheckpointResponse(
-            decision=body.decision, note=body.note, selected=body.selected
-        )
-    elif isinstance(body, ResolvePlanReviewInteraction):
-        # 结构化挂起 2a: a plan_review answers continue / stop with the same typed
-        # outcome as an ask_user checkpoint (CheckpointResponse), routed to the
-        # paused WaveScheduler hook via the kind check below.
-        result = CheckpointResponse(decision=body.decision, note=body.note)
-    elif isinstance(body, ResolveClientToolInteraction):
-        result = {
-            "ok": body.ok,
-            "value": body.value,
-            "error": body.error.model_dump() if body.error else None,
-        }
-    else:  # pragma: no cover - exhaustive over the discriminated union
-        raise NotFoundError("交互请求类型未知")
+    # Per-kind result construction is shared with the sidecar's ``respond`` so cloud
+    # and local settle an interaction identically (see ``interaction_result_from_body``).
+    result = interaction_result_from_body(body)
 
     registry = default_interaction_registry()
     pending = registry.get(interaction_id)
@@ -1098,8 +1147,9 @@ async def list_conversation_paused_turns(
     Called on conversation reopen: a turn that paused then lost its live SSE
     (disconnect / restart) has no assistant message yet — only a persisted frame.
     The client renders each as a resume card by ``kind`` (plan_review from ``steps`` /
-    ``pending``; ask_user from ``question`` / ``options``) offering continue / adjust /
-    stop → the resume endpoint. Oldest-first. 404 if not owned.
+    ``pending``; ask_user from ``question`` + the optional ``assumptions`` /
+    ``questions`` / ``style_options``) offering continue / adjust / stop → the resume
+    endpoint. Oldest-first. 404 if not owned.
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
     frames = await list_paused_turns(conversation_id)
@@ -1114,9 +1164,10 @@ async def list_conversation_paused_turns(
             pending=getattr(f, "pending", []),
             # ... and ask_user fields (empty on a plan_review frame).
             question=getattr(f, "question", ""),
-            options=getattr(f, "options", []),
             context=getattr(f, "context", ""),
-            multiple=getattr(f, "multiple", False),
+            assumptions=getattr(f, "assumptions", []),
+            questions=getattr(f, "questions", []),
+            style_options=getattr(f, "style_options", []),
         )
         for f in frames
     ]
@@ -1368,6 +1419,90 @@ async def upload_workspace_file(
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     return UploadFileResponse(path=path, size_bytes=written)
+
+
+@router.get(
+    "/{conversation_id}/workspace/edit/{path:path}",
+    response_model=WorkspaceEditDoc,
+)
+async def read_workspace_file_for_edit(
+    conversation_id: str,
+    path: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Read a workspace file for in-panel editing (full text + mtime CAS baseline).
+
+    Distinct from the raw-bytes download (preview, truncated): editing needs the whole
+    file or a save would drop the tail. 裸聊 has no workspace yet, so 404.
+    """
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    if conv.folder_id is None:
+        raise NotFoundError("文件不存在")
+    try:
+        text, mtime_ms, eol = await read_file_for_edit(
+            user_id=user.user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conversation_id,
+            path=path,
+        )
+    except OutsideWorkspace as e:
+        raise ValidationError("路径非法：超出工作区范围") from e
+    except (PathNotFound, NotAFile) as e:
+        raise NotFoundError("文件不存在") from e
+    except NotUTF8 as e:
+        raise ValidationError("文件不是 UTF-8 文本，无法编辑") from e
+    return WorkspaceEditDoc(text=text, mtime_ms=mtime_ms, eol=eol)
+
+
+@router.put(
+    "/{conversation_id}/workspace/edit/{path:path}",
+    response_model=WorkspaceWriteResult,
+)
+async def write_workspace_file(
+    conversation_id: str,
+    path: str,
+    body: WorkspaceWriteRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
+):
+    """Conditionally write editor text back to a workspace file (mtime CAS).
+
+    The write-time CAS (``baseline_mtime_ms``) makes a save that raced an Agent turn
+    return ``conflict`` instead of clobbering it. Writing to a 裸聊 promotes it into a
+    folder workspace first (文件夹即工作区 §懒建), like upload.
+    """
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+
+    max_bytes = settings.workspace_upload_max_bytes
+    if len(body.content.encode("utf-8")) > max_bytes:
+        raise ValidationError(f"文件超出 {max_bytes} 字节的上传上限")
+
+    folder_id = await _conv_write_folder(
+        conv, conv_repo=conv_repo, folder_repo=folder_repo, user_id=user.user_id
+    )
+    key = workspace_storage_key(
+        user_id=user.user_id, folder_id=folder_id, conversation_id=conversation_id
+    )
+    try:
+        # Folder lock (决策④): the CAS (mtime check + write) must be atomic against a
+        # running same-folder turn, so an Agent write can't slip between check and write.
+        async with workspace_lock(key):
+            ok, mtime_ms = await write_file_text(
+                user_id=user.user_id,
+                folder_id=folder_id,
+                conversation_id=conversation_id,
+                path=path,
+                content=body.content,
+                baseline_mtime_ms=body.baseline_mtime_ms,
+                eol=body.eol,
+            )
+    except OutsideWorkspace as e:
+        raise ValidationError("路径非法：超出工作区范围") from e
+    except NotAFile as e:
+        raise ValidationError("目标是目录，无法作为文件写入") from e
+    return WorkspaceWriteResult(ok=ok, mtime_ms=mtime_ms, conflict=not ok)
 
 
 @router.get("/{conversation_id}/workspace/files/{path:path}")

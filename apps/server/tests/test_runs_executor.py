@@ -14,10 +14,17 @@ from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.builder import build_run_plan
-from agentcore.runtime.runs.executor import _is_hard_failure, build_agent_executor
+from agentcore.runtime.runs.constants import DEP_CONTEXT_BUDGET
+from agentcore.runtime.runs.executor import (
+    _allocate,
+    _is_hard_failure,
+    _truncate_head_tail,
+    build_agent_executor,
+)
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunContract, RunPhase
 from agentcore.runtime.runs.wave import WaveScheduler
+from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -242,6 +249,82 @@ async def test_executor_failure_emits_run_failed_and_state():
     assert EventType.RUN_FAILED in types
 
 
+class _MeteredRoundThenBoom:
+    """Round 0: a tool call + usage chunk (the loop meters it and continues);
+    round 1: raises. Proves a hard worker failure still bills the round that
+    completed before the crash (B-deep 失败计费), instead of dropping its tokens."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        c = self.calls
+        self.calls += 1
+        if c == 0:
+            yield LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(index=0, id="c1", function_name="noop", arguments_delta="{}")
+                ]
+            )
+            yield LLMChunk(
+                usage=TokenUsage(input_tokens=1000, cache_miss_tokens=1000, output_tokens=400)
+            )
+            return
+        raise RuntimeError("provider down")
+        yield  # pragma: no cover - makes this an async generator
+
+
+async def test_worker_hard_failure_bills_completed_rounds():
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    reg = ToolRegistry()
+    reg.register(_GrantableTool("noop"))  # un-gated here → the metered round runs
+    executor = build_agent_executor(
+        plan=plan,
+        llm=_MeteredRoundThenBoom(),
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    state = res["t_1"]
+    assert state.phase is RunPhase.FAILED
+    assert "provider down" in state.error
+    # The round that completed before the crash is billed, not silently dropped.
+    assert state.usage["cache_miss"] == 1000
+    assert state.usage["output"] == 400
+    assert state.cost["total"] > 0
+
+
+async def test_worker_failure_before_any_usage_has_no_ledger_row():
+    # A run that dies before metering any tokens carries empty usage/cost, so the
+    # per-run accumulator's `if state.usage` guard skips it — no spurious zero row.
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+
+    class _BoomFirst:
+        async def stream(self, request):  # noqa: ANN001
+            raise RuntimeError("down")
+            yield  # pragma: no cover
+
+    executor = build_agent_executor(
+        plan=plan,
+        llm=_BoomFirst(),
+        tools=ToolRegistry(),
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    state = res["t_1"]
+    assert state.phase is RunPhase.FAILED
+    assert not state.usage  # empty → accumulator skips → no ledger row
+    assert not state.cost
+
+
 async def test_contract_retry_then_pass():
     # min_length contract: first output too short → re-prompt → second passes.
     plan, _ = build_run_plan(
@@ -336,6 +419,139 @@ async def test_no_contract_passes_first_try_without_extra_call():
     res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
     assert provider.calls == 1  # no needless retry when the baseline is met
     assert res["t_1"].phase is RunPhase.COMPLETED
+
+
+# --- requires_files: the deliverable-landed gate (soft prompt rule → code门) ----
+#
+# A contract with requires_files=True fails the run when its transcript shows ZERO
+# file-writing tool calls — turning「文件交付物必须落盘、别整份粘进聊天」from a soft
+# prompt instruction into a verifiable gate that auto-reworks. The signal is the
+# deterministic files_touched (real tool-call records), not a content heuristic.
+
+
+class _ScriptedRounds:
+    """Fake LLM yielding a pre-scripted chunk list per call (one call = one ReAct
+    round), so a test can script a multi-round attempt that calls file_write."""
+
+    def __init__(self, rounds: list[list[LLMChunk]]) -> None:
+        self._rounds = rounds
+        self.calls = 0
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        chunks = self._rounds[self.calls] if self.calls < len(self._rounds) else [
+            LLMChunk(delta_content="done")
+        ]
+        self.calls += 1
+        for chunk in chunks:
+            yield chunk
+
+
+class _FileWriteTool:
+    """A stub named ``file_write`` (the name files_touched_from_transcript keys on);
+    it records calls and reports success so the gate sees a landed file."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="file_write",
+            description="stub file write",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+            },
+            category=ToolCategory.EXECUTION,
+            approval=ToolApproval.NEVER,
+        )
+
+    async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
+        self.calls += 1
+        return ToolResult(tool_call_id="", success=True, output="written")
+
+
+async def test_requires_files_reworks_when_not_written_then_passes_on_write():
+    plan, _ = build_run_plan(
+        [{"role": "前端", "task": "建页面", "contract": {"requires_files": True}}],
+        id_prefix="t",
+    )
+    reg = ToolRegistry()
+    fw = _FileWriteTool()
+    reg.register(fw)
+    rounds = [
+        # attempt 1 (one round): only pastes the file into the reply, no file_write
+        [LLMChunk(delta_content="<html>整份贴在聊天里</html>")],
+        # attempt 2 round 1: call file_write; round 2: final answer
+        [
+            LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(
+                        index=0,
+                        id="c1",
+                        function_name="file_write",
+                        arguments_delta='{"path": "index.html", "content": "<html></html>"}',
+                    )
+                ]
+            )
+        ],
+        [LLMChunk(delta_content="已写入 index.html")],
+    ]
+    provider = _ScriptedRounds(rounds)
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    state = res["t_1"]
+    assert state.phase is RunPhase.COMPLETED
+    assert fw.calls == 1  # the rework actually wrote the file
+    assert state.files_touched == ["index.html"]
+    assert state.warnings == []
+
+
+async def test_requires_files_soft_accepts_with_warning_when_never_written():
+    # Non-strict: after the one rework the worker still never writes → accepted
+    # (product isn't empty) but carries the shortfall as a warning, not a hard fail.
+    plan, _ = build_run_plan(
+        [{"role": "前端", "task": "建页面", "contract": {"requires_files": True}}],
+        id_prefix="t",
+    )
+    provider = _ContentProvider(["只有文字一", "只有文字二"])
+    res = await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
+    assert provider.calls == 2  # produced, reworked once, then soft-accepted
+    state = res["t_1"]
+    assert state.phase is RunPhase.COMPLETED
+    assert any("工作区" in w for w in state.warnings)
+    assert state.files_touched == []
+
+
+async def test_requires_files_strict_hard_fails_when_never_written():
+    plan, _ = build_run_plan(
+        [
+            {
+                "role": "前端",
+                "task": "建页面",
+                "contract": {"requires_files": True, "strict": True},
+            }
+        ],
+        id_prefix="t",
+    )
+    sink = EventSink()
+    provider = _ContentProvider(["只有文字一", "只有文字二"])
+    res = await WaveScheduler().run(plan, _executor(plan, provider, sink))
+    sink.close()
+    state = res["t_1"]
+    assert state.phase is RunPhase.FAILED
+    assert "工作区" in state.error
+    types = [e.type async for e in sink]
+    assert EventType.RUN_FAILED in types
 
 
 # --- worker approval gate (双模式工作区 P2d 执行门) -------------------------
@@ -446,6 +662,72 @@ async def test_worker_grantable_tool_runs_without_gate():
     res = await WaveScheduler().run(plan, executor)
     assert res["t_1"].phase is RunPhase.COMPLETED
     assert tool.calls == 1  # un-gated → executed
+
+
+class _OfferRecorder:
+    """Fake LLM that records the tool definitions it was OFFERED each call (proves
+    the allowed_tool_names wiring), then yields one content chunk and stops."""
+
+    def __init__(self) -> None:
+        self.offered: list[list[str]] = []
+        self.choices: list[str] = []
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        self.offered.append([t["function"]["name"] for t in (request.tools or [])])
+        self.choices.append(request.tool_choice)
+        yield LLMChunk(delta_content="DONE")
+
+
+async def test_worker_with_omitted_tools_is_offered_all_team_tools():
+    # Regression for the root bug: a delegated task that omits ``tools`` must NOT be
+    # stranded tool-less. builder._tools → None → react_loop offers the whole
+    # registry with tool_choice=auto, so a file/exec worker can actually act.
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    assert plan.nodes[0].tools is None
+    reg = ToolRegistry()
+    reg.register(_GrantableTool("code_execute"))
+    provider = _OfferRecorder()
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    assert res["t_1"].phase is RunPhase.COMPLETED
+    assert provider.offered and "code_execute" in provider.offered[0]
+    assert provider.choices[0] == "auto"
+
+
+async def test_worker_with_explicit_tools_is_restricted_to_them():
+    # The opt-in least-privilege path still works: an explicit list narrows what the
+    # worker is offered (web_search is registered but must NOT be offered).
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "做A", "tools": ["code_execute"]}],
+        id_prefix="t",
+        valid_tools={"code_execute", "web_search"},
+    )
+    assert plan.nodes[0].tools == ["code_execute"]
+    reg = ToolRegistry()
+    reg.register(_GrantableTool("code_execute"))
+    reg.register(_GrantableTool("web_search"))
+    provider = _OfferRecorder()
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    await WaveScheduler().run(plan, executor)
+    assert provider.offered[0] == ["code_execute"]
 
 
 # --- worker web sources → RunState (方案 B) ---------------------------------
@@ -619,3 +901,170 @@ async def test_leaf_worker_keeps_no_nesting_identity():
     await executor(plan.by_id("t_1"), {})
     assert "不能再向下委派" in provider.system_messages[0]
     assert "再向下委派一层子团队" not in provider.system_messages[0]
+
+
+# --- worker → CEO escalation channel (escalate tool) ---------------------------
+#
+# A worker that hits a fork only the user/上级 can settle calls ``escalate`` (its
+# only upward channel — it can't reach the user). It is NON-blocking: the worker
+# proceeds on its assumption and still COMPLETES; the escalation is harvested onto
+# RunState for the CEO to surface and resolve (ask_user / revise / re-delegate).
+
+
+async def test_worker_escalation_is_harvested_and_nonblocking():
+    plan, _ = build_run_plan([{"role": "调研", "task": "查不清楚的事"}], id_prefix="t")
+    reg = ToolRegistry()
+    reg.register(EscalateTool())
+    rounds = [
+        [
+            LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(
+                        index=0,
+                        id="c1",
+                        function_name="escalate",
+                        arguments_delta=(
+                            '{"question": "用 Postgres 还是 MySQL?", '
+                            '"assumption": "暂用 Postgres", "blocking": true}'
+                        ),
+                    )
+                ]
+            )
+        ],
+        [LLMChunk(delta_content="已按 Postgres 完成调研")],
+    ]
+    provider = _ScriptedRounds(rounds)
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    state = res["t_1"]
+    assert state.phase is RunPhase.COMPLETED  # non-blocking: it still delivered
+    assert state.content == "已按 Postgres 完成调研"
+    assert len(state.escalations) == 1
+    esc = state.escalations[0]
+    assert esc["question"] == "用 Postgres 还是 MySQL?"
+    assert esc["assumption"] == "暂用 Postgres"
+    assert esc["blocking"] is True
+
+
+async def test_worker_without_escalation_has_empty_list():
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    res = await WaveScheduler().run(
+        plan, _executor(plan, _ContentProvider(["OUT"]), EventSink())
+    )
+    assert res["t_1"].escalations == []
+
+
+async def test_escalate_tool_rejects_empty_question_and_acks_otherwise():
+    tool = EscalateTool()
+    bad = await tool.execute({"question": "  "}, _ctx())
+    assert bad.success is False and "question" in (bad.error or "")
+    # A valid escalation is acknowledged with a CONTINUE (non-terminal) result that
+    # steers the worker to keep delivering — it is not a stop.
+    ok = await tool.execute({"question": "Postgres 还是 MySQL?"}, _ctx())
+    assert ok.success is True and ok.is_terminal is False
+    assert "继续" in ok.output
+
+
+# --- upstream dependency context budget (shared, water-filled, head+tail) -------
+#
+# A downstream node's pass_through deps SHARE one budget (DEP_CONTEXT_BUDGET),
+# water-filled across them; overflow is head+tail trimmed so trailing details
+# (金额 / 法条编号) survive — replacing the old flat 4000-per-dep head-only cap.
+
+
+def test_allocate_single_dep_gets_whole_budget():
+    assert _allocate([10_000], 16_000) == [10_000]  # fits → full content
+    assert _allocate([50_000], 16_000) == [16_000]  # over → capped at the budget
+
+
+def test_allocate_water_fills_unequal_deps():
+    # The small dep takes only what it needs; the freed remainder goes to the big one
+    # (not an even split that would starve the big dep and waste the small's share).
+    out = _allocate([1_000, 50_000], 16_000)
+    assert out == [1_000, 15_000]
+    assert sum(out) == 16_000
+
+
+def test_allocate_splits_equal_large_deps_evenly():
+    assert _allocate([50_000, 50_000], 16_000) == [8_000, 8_000]
+
+
+def test_allocate_empty_is_empty():
+    assert _allocate([], 16_000) == []
+
+
+def test_truncate_head_tail_keeps_both_ends():
+    content = "HEAD起始" + ("x" * 5_000) + "TAIL尾注金额￥999"
+    out = _truncate_head_tail(content, 1_000)
+    assert out.startswith("HEAD起始")  # head kept
+    assert "TAIL尾注金额￥999" in out  # tail kept — the fidelity fix (was dropped before)
+    assert "中间省略" in out  # and the middle was elided
+    assert len(out) <= 1_000  # never exceeds the allowance
+
+
+def test_truncate_head_tail_short_content_unchanged():
+    assert _truncate_head_tail("short", 1_000) == "short"
+
+
+async def test_long_upstream_injected_with_head_and_tail_preserved():
+    # The fix end-to-end: a long upstream product (over budget) reaches the
+    # downstream writer with BOTH ends — the old 4000 head-only cap silently dropped
+    # the tail (where 金额 / 法条编号 often live).
+    long_upstream = "起始结论" + ("数" * (DEP_CONTEXT_BUDGET + 5_000)) + "关键尾注:法条第42条"
+    tasks = [
+        {"id": "s1", "role": "研究员", "task": "调研"},
+        {"id": "s2", "role": "写手", "task": "撰写", "depends_on": ["s1"]},
+    ]
+    plan, _ = build_run_plan(tasks, id_prefix="t")
+    provider = _ContentProvider([long_upstream, "FINAL"])
+    await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
+    downstream_user = provider.user_messages[1]
+    assert "起始结论" in downstream_user  # head preserved
+    assert "关键尾注:法条第42条" in downstream_user  # tail preserved (the fix)
+    assert "中间省略" in downstream_user  # it WAS trimmed, not shipped whole
+
+
+async def test_summarize_dep_is_compressed_not_passed_through():
+    # A dep that declared result_handling="summarize" is digested, not budget-passed:
+    # the full content must NOT reach the downstream prompt.
+    long_upstream = "S摘要起点" + ("数" * 3_000)
+    tasks = [
+        {"id": "s1", "role": "研究员", "task": "调研", "result_handling": "summarize"},
+        {"id": "s2", "role": "写手", "task": "撰写", "depends_on": ["s1"]},
+    ]
+    plan, _ = build_run_plan(tasks, id_prefix="t")
+    provider = _ContentProvider([long_upstream, "FINAL"])
+    await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
+    downstream_user = provider.user_messages[1]
+    assert "摘要起点" in downstream_user  # the head digest is present
+    assert long_upstream not in downstream_user  # but not the full 3000-char product
+
+
+async def test_wide_fanin_shares_budget_bounded_total():
+    # Three long upstreams fanning into one writer share the budget (≈ budget/3 each,
+    # water-filled), so the total injected upstream context stays bounded instead of
+    # multiplying to 3× a per-dep cap.
+    big = "甲" * 40_000
+    tasks = [
+        {"id": "r1", "role": "调研A", "task": "查A"},
+        {"id": "r2", "role": "调研B", "task": "查B"},
+        {"id": "r3", "role": "调研C", "task": "查C"},
+        {"id": "w", "role": "写手", "task": "汇总", "depends_on": ["r1", "r2", "r3"]},
+    ]
+    plan, _ = build_run_plan(tasks, id_prefix="t")
+    provider = _ContentProvider([big, big, big, "FINAL"])
+    await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
+    writer_user = provider.user_messages[3]
+    # The three "前置结果" blocks together stay within the shared budget (+ markers /
+    # labels slack), nowhere near 3 × 40_000.
+    assert writer_user.count("前置结果") == 3
+    assert len(writer_user) < DEP_CONTEXT_BUDGET + 2_000

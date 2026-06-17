@@ -315,11 +315,10 @@ class Message(Base):
     citations: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
-    # Multi-agent execution journal for this (assistant) message: the turn's
-    # ordered run/tool events ({events, finish_reason}), replayed client-side to
-    # reproduce the team graph on reload. NULL for user / single-agent messages
-    # (no delegation), so the column is nullable with no default.
-    runs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The turn's replay payload (team graph / single-agent 思考+工具 timeline) is NO
+    # LONGER stored here — it is the唯一事实源 ``turn_journal`` table (§18.3 Turn
+    # Journal), keyed by this message id, and PROJECTED into MessageDetail.runs on
+    # read. See agentcore.runtime.journal.
     finish_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
     # Correlation key to the turn's runtime logs (logs/dev.jsonl): the assistant
     # message joins to its interaction's full log trace (chat.turn_*/llm/tool/...)
@@ -359,8 +358,14 @@ class CostEvent(Base):
     )
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
-    # The assistant turn this run belongs to (== the persisted Message.id).
-    message_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
+    # The assistant turn this run belongs to (== the persisted Message.id), or
+    # NULL for an off-turn background LLM call (标题生成 / 记忆整合, Gap C): those
+    # belong to no turn, so they SUM into the account/conversation totals but stay
+    # out of any single turn's per-message 工资单 (queried by message_id) and do
+    # not inflate the「请求数」(COUNT(DISTINCT message_id) ignores NULL).
+    message_id: Mapped[str | None] = mapped_column(
+        PG_UUID(as_uuid=False), nullable=True
+    )
     # Idempotency: a retry of the same run must not double-bill, so run_id is
     # unique and the ledger write is an upsert-by-run_id.
     #
@@ -679,7 +684,7 @@ class UserDirectorySettings(Base):
 # "改下刚才那个" still hits after a restart or memory eviction. A revise loads the
 # row on an in-memory miss, continues the run, and writes the extended transcript
 # back. Pruned by a 7-day idle TTL sweeper (runtime/session_retention.py) on
-# ``updated_at`` — independent of the message.runs graph-replay journal (different
+# ``updated_at`` — independent of the turn_journal graph-replay facts (different
 # lifecycle, 见 docs/03-AI核心/多轮编排与队员热修.md §六 T-2 / T-5).
 
 
@@ -732,8 +737,10 @@ class RunSessionRow(Base):
 # AUTHORITATIVE pending state ONLY when no live in-process interaction exists (a
 # live SSE turn settles via the interaction bridge instead); ``POST .../resume``
 # claims-and-deletes it to continue on a fresh process. Deleted on resume / a
-# live in-process resolve / timeout; not a graph-replay journal (different
-# lifecycle from messages.runs).
+# live in-process resolve / timeout. Its journal-so-far is NOT stored here — it
+# lives in the turn_journal fact stream (唯一事实源, §18.3): the pause mirrors it
+# there and the resume re-hydrates from it, so the frame holds only resume control
+# state (plan / seed_completed / CEO context / pending payload).
 
 
 class PausedTurnRow(Base):
@@ -755,8 +762,9 @@ class PausedTurnRow(Base):
     # (ix_paused_turns_conversation_id) would drift from the migration.
     conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
-    # The full resumable snapshot (runtime/suspension.py TurnSuspension): plan +
-    # seed_completed + CEO context + journal-so-far + pending checkpoint payload.
+    # The resumable CONTROL snapshot (runtime/suspension.py TurnSuspension): plan +
+    # seed_completed + CEO context + pending checkpoint payload. The journal-so-far is
+    # NOT here — it rides turn_journal (唯一事实源, §18.3), re-hydrated on claim.
     frame: Mapped[dict] = mapped_column(
         JSONB, default=dict, server_default=text("'{}'::jsonb")
     )
@@ -768,4 +776,53 @@ class PausedTurnRow(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    )
+
+
+class TurnJournalRow(Base):
+    """One fact of a turn's append-only execution journal (§18.3 Turn Journal · 唯一事实源).
+
+    A turn's ordered execution facts (run/tool/interaction events for a multi-agent
+    turn, or reasoning/tool 步 for a single-agent turn, plus a closing ``turn_end``)
+    are stored here — one row per fact, ordered by ``seq`` within a ``turn_id`` (==
+    the assistant ``message_id``). This REPLACES the old ``messages.runs`` JSON blob:
+    the journal is the single durable source of truth, and the assistant message's
+    replay payload (``MessageDetail.runs``) is PROJECTED from these rows on read
+    (see ``agentcore.runtime.journal``). A plain single-agent chat (nothing to
+    replay) writes no rows. Append-only per turn; a re-persist (resume reusing the
+    same id) replaces the turn's rows wholesale (``Journal.record``).
+
+    **Lifecycle** (no DB FK — app-level cascade, per repo convention): cleaned with
+    its owning message/conversation on hard-delete (``MessageRepository.delete_by_id``
+    / ``delete_after``, ``ConversationRepository.hard_delete``) and by the paused-turn
+    TTL sweep for an abandoned pause (``PausedTurnRepository.delete_stale``). A paused
+    turn writes rows before any message exists (hence no FK to ``messages``).
+    """
+
+    __tablename__ = "turn_journal"
+    __table_args__ = (
+        # A conversation's facts, e.g. for future cross-turn projections / sweeps.
+        Index("ix_turn_journal_conversation", "conversation_id"),
+    )
+
+    # The owning turn == the assistant message id (the pipeline's minted id), so the
+    # projected replay rejoins its message without a separate key.
+    turn_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
+    # Monotonic position within the turn (emission order); composite PK with turn_id.
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # The fact kind: an SSE event type (run_plan / tool_use_start / checkpoint_* …),
+    # a single-agent process step (process_reasoning / process_tool), or turn_end.
+    kind: Mapped[str] = mapped_column(String(40))
+    payload: Mapped[dict] = mapped_column(
+        JSONB, default=dict, server_default=text("'{}'::jsonb")
+    )
+    # The fact's own emission timestamp (the SSE event's), preserved so the projected
+    # replay keeps the original ordering metadata. NULL for derived rows (process / end).
+    ts: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
+    # Originating turn's log trace_id (DB↔logs join), stamped on every fact. See
+    # core/log_context.py. NULL when untraced.
+    trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
     )

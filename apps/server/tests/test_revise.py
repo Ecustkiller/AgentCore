@@ -8,13 +8,14 @@ roster commit (recall_count bump, transcript extension) and member accounting.
 
 from pathlib import Path
 
-from agentcore.llm.protocol import LLMChunk, LLMMessage, TokenUsage
+from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.llm.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs import RunSession, RunSpec, build_agent_executor, build_run_plan
 from agentcore.runtime.runs.constants import DEFAULT_RECALL_LIMIT
 from agentcore.runtime.sessions import SessionStore
 from agentcore.tools.builtin.revise import ReviseTool
-from agentcore.tools.protocol import ToolContext
+from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -254,3 +255,74 @@ async def test_revise_loader_miss_falls_back_to_delegate():
     result = await tool.execute({"target_run_id": "ghost", "feedback": "改"}, _ctx())
     assert result.success is False
     assert "delegate" in result.output
+
+
+# --- B-deep 失败计费: a failed revision still bills the tokens it burned ---
+
+
+class _Noop:
+    """A stub tool so a revision can run a metered round before it crashes."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="noop",
+            description="noop",
+            parameters={"type": "object", "properties": {}},
+            category=ToolCategory.EXECUTION,
+            approval=ToolApproval.NEVER,
+        )
+
+    async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
+        return ToolResult(tool_call_id="", success=True, output="ok")
+
+
+class _ReviseMeterThenBoom:
+    """Seed call → content; revision round 0 → tool call + usage; round 1 → raise."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        c = self.calls
+        self.calls += 1
+        if c == 0:
+            yield LLMChunk(delta_content="第一版")
+            return
+        if c == 1:
+            yield LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(index=0, id="c1", function_name="noop", arguments_delta="{}")
+                ]
+            )
+            yield LLMChunk(
+                usage=TokenUsage(input_tokens=800, cache_miss_tokens=800, output_tokens=300)
+            )
+            return
+        raise RuntimeError("revise down")
+        yield  # pragma: no cover - makes this an async generator
+
+
+async def test_revise_failed_continuation_still_bills_usage():
+    store = SessionStore()
+    provider = _ReviseMeterThenBoom()
+    await _seed_session(store, provider)  # consumes call 0 ("第一版")
+    reg = ToolRegistry()
+    reg.register(_Noop())
+    tool = ReviseTool(
+        llm=provider,
+        sink=EventSink(),
+        session_store=store,
+        tools=reg,
+        base_tool_context=_ctx(),
+        captain_run_id="CEO",
+    )
+    result = await tool.execute({"target_run_id": "t_1", "feedback": "改"}, _ctx())
+    # The revision failed → falls back to 甲 (delegate), but the tokens it burned
+    # before crashing are still billed: one member row + folded usage.
+    assert result.success is False
+    assert len(tool.run_ledger) == 1
+    assert tool.run_ledger[0].run_id == "t_1_rev1"
+    assert tool.run_ledger[0].parent_run_id == "t_1"
+    assert tool.usage["cache_miss"] == 800
+    assert tool.usage["output"] == 300

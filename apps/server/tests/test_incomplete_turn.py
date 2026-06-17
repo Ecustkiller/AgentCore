@@ -145,6 +145,7 @@ def test_salvage_runs_on_pause_when_persistence_disabled(monkeypatch, capture):
 
 async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
     created: dict = {}
+    journaled: dict = {}
 
     class FakeRepo:
         def __init__(self, _session):
@@ -161,8 +162,12 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
         async def __aexit__(self, *_a):
             return False
 
+    async def fake_journal(_session, **kwargs):
+        journaled.update(kwargs)
+
     monkeypatch.setattr(service, "MessageRepository", FakeRepo)
     monkeypatch.setattr(service, "async_session_factory", lambda: FakeSessionCM())
+    monkeypatch.setattr(service, "persist_turn_journal", fake_journal)
 
     journal = [_ev("run_plan"), _ev("run_completed")]
     await service._persist_incomplete_turn(
@@ -171,12 +176,17 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
 
     assert created["role"] == "assistant"
     assert created["content"]  # a non-empty explanatory note
-    assert created["runs"]["events"] == journal
-    assert created["runs"]["finish_reason"] == FinishReason.CANCELLED.value
+    # The replay payload is no longer stored on the message — it goes to the唯一事实源
+    # turn_journal, keyed by the created assistant id (§18.3).
+    assert "runs" not in created
     assert created["metadata"]["incomplete"] is True
     assert created["metadata"]["finish_reason"] == FinishReason.CANCELLED.value
     assert created["message_id"] == "m1"
     assert created["trace_id"] == "trace"
+    # The cancelled turn's finished team work is recorded to the journal.
+    assert journaled["message_id"] == "m1"
+    assert journaled["runs"]["events"] == journal
+    assert journaled["runs"]["finish_reason"] == FinishReason.CANCELLED.value
 
 
 async def test_persist_incomplete_swallows_db_errors(monkeypatch):

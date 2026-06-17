@@ -8,7 +8,9 @@ The service returns ORM/domain objects; this layer owns the Pydantic conversion
 (notably ``User.user_id`` → the API's ``id``).
 """
 
-from fastapi import APIRouter, Depends, Query
+import mimetypes
+
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from agentcore.api.dependencies import AdminUser, AuthUser, get_messaging_service
 from agentcore.api.schemas import (
@@ -17,6 +19,7 @@ from agentcore.api.schemas import (
     BlockedUser,
     BlockListResponse,
     BlockUserRequest,
+    ChatFileUploadResponse,
     ChatListResponse,
     ChatMembersResponse,
     ChatMessageDetail,
@@ -33,7 +36,9 @@ from agentcore.api.schemas import (
     UserSearchResponse,
     UserSearchResult,
 )
+from agentcore.config import settings
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
+from agentcore.core.errors import ValidationError
 from agentcore.messaging import ChatView, DirectoryView, MessagingService
 
 router = APIRouter(prefix="/messages", tags=["messages"])
@@ -42,9 +47,7 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 # --- ORM/domain → schema conversion (kept in the route, per repo convention) ---
 
 
-def _participant(
-    user, *, is_admin: bool = False, muted_by_admin: bool = False
-) -> ChatParticipant:
+def _participant(user, *, is_admin: bool = False, muted_by_admin: bool = False) -> ChatParticipant:
     return ChatParticipant(
         id=user.user_id,
         username=user.username,
@@ -55,15 +58,11 @@ def _participant(
 
 
 def _search_result(user) -> UserSearchResult:
-    return UserSearchResult(
-        id=user.user_id, username=user.username, display_name=user.display_name
-    )
+    return UserSearchResult(id=user.user_id, username=user.username, display_name=user.display_name)
 
 
 def _blocked_user(user) -> BlockedUser:
-    return BlockedUser(
-        id=user.user_id, username=user.username, display_name=user.display_name
-    )
+    return BlockedUser(id=user.user_id, username=user.username, display_name=user.display_name)
 
 
 def _chat_summary(view: ChatView) -> ChatSummary:
@@ -149,8 +148,7 @@ async def list_chat_members(
     """
     members = await svc.list_members(chat_id=chat_id, user_id=user.user_id)
     data = [
-        _participant(m.user, is_admin=m.is_admin, muted_by_admin=m.muted_by_admin)
-        for m in members
+        _participant(m.user, is_admin=m.is_admin, muted_by_admin=m.muted_by_admin) for m in members
     ]
     return ChatMembersResponse(data=data, total=len(data))
 
@@ -198,15 +196,11 @@ async def kick_member(
     403 non-admin (AdminUser gate); 404 unknown chat or non-member target; 422 for
     a dm; 403 when the target is an admin (admins can't be moderated).
     """
-    await svc.kick_member(
-        chat_id=chat_id, actor_id=admin.user_id, target_id=target_id
-    )
+    await svc.kick_member(chat_id=chat_id, actor_id=admin.user_id, target_id=target_id)
     return StatusResponse()
 
 
-@router.post(
-    "/chats/{chat_id}/members/{target_id}/mute", response_model=StatusResponse
-)
+@router.post("/chats/{chat_id}/members/{target_id}/mute", response_model=StatusResponse)
 async def mute_member(
     chat_id: str,
     target_id: str,
@@ -226,9 +220,7 @@ async def mute_member(
     return StatusResponse()
 
 
-@router.post(
-    "/chats/{chat_id}/announce", response_model=ChatMessageDetail, status_code=201
-)
+@router.post("/chats/{chat_id}/announce", response_model=ChatMessageDetail, status_code=201)
 async def announce(
     chat_id: str,
     body: AnnounceRequest,
@@ -264,9 +256,7 @@ async def list_chat_messages(
     )
 
 
-@router.post(
-    "/chats/{chat_id}/messages", response_model=ChatMessageDetail, status_code=201
-)
+@router.post("/chats/{chat_id}/messages", response_model=ChatMessageDetail, status_code=201)
 async def send_chat_message(
     chat_id: str,
     body: SendChatMessageRequest,
@@ -284,10 +274,73 @@ async def send_chat_message(
         chat_id=chat_id,
         sender_id=user.user_id,
         content=body.content,
+        content_type=body.content_type,
+        attachments=[a.model_dump() for a in body.attachments],
         reply_to_message_id=body.reply_to_message_id,
         client_msg_id=body.client_msg_id,
     )
     return ChatMessageDetail.model_validate(message)
+
+
+# --- Attachments (Stage 4 富消息: 图/文件, 复用工作区存储) ---
+# Two-step: PUT the raw bytes into the chat's shared workspace, then reference the
+# returned path in a send_message attachment. Both are members-only (the service
+# gates membership → 404 for non-members), and the chat-scoped backend confines a
+# member to this chat's files (no cross-chat IDOR).
+
+
+@router.put("/chats/{chat_id}/files/{path:path}", response_model=ChatFileUploadResponse)
+async def upload_chat_file(
+    chat_id: str,
+    path: str,
+    request: Request,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Upload a chat attachment's bytes (members only) to reference in a send.
+
+    Body is the raw file bytes (no multipart); ``path`` is workspace-relative —
+    the client mints a unique ``attachments/...`` path. Bounded by
+    ``workspace_upload_max_bytes`` so one request can't exhaust memory; a
+    non-member gets 404, an escaping path 422. For an image, a WebP thumbnail is
+    generated and its path returned in ``thumb_path``.
+    """
+    max_bytes = settings.workspace_upload_max_bytes
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+        raise ValidationError(f"文件超出 {max_bytes} 字节的上传上限")
+    data = await request.body()
+    if len(data) > max_bytes:
+        raise ValidationError(f"文件超出 {max_bytes} 字节的上传上限")
+    result = await svc.upload_attachment(
+        chat_id=chat_id, user_id=user.user_id, path=path, data=data
+    )
+    return ChatFileUploadResponse(
+        path=path, size_bytes=result.size_bytes, thumb_path=result.thumb_path
+    )
+
+
+@router.get("/chats/{chat_id}/files/{path:path}")
+async def download_chat_file(
+    chat_id: str,
+    path: str,
+    user: AuthUser,
+    svc: MessagingService = Depends(get_messaging_service),
+):
+    """Download a chat attachment's bytes (members only; non-member 404).
+
+    Served ``inline`` with the filename so an image opens directly; the client
+    fetches it as a blob for rendering and for saving files, so it does not rely
+    on the disposition. 404 for a missing path; 422 for an illegal one.
+    """
+    data = await svc.download_attachment(chat_id=chat_id, user_id=user.user_id, path=path)
+    filename = path.rsplit("/", 1)[-1] or "download"
+    media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.post("/chats/{chat_id}/read", response_model=StatusResponse)

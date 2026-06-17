@@ -20,7 +20,6 @@ from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.workspace.protocol import (
     GrepQuery,
     GrepResult,
-    NotADirectory,
     OutsideWorkspace,
     PathNotFound,
     WorkspaceError,
@@ -58,7 +57,9 @@ class GrepTool:
                     "path": {
                         "type": "string",
                         "description": (
-                            "搜索的相对目录（默认：工作区根目录）。"
+                            "搜索范围：相对【目录】或【单个文件】（默认：工作区"
+                            "根目录）。传目录则递归其下；传单个文件则只搜该文件"
+                            "（类似 `rg PATTERN FILE`，此时 glob 被忽略）。"
                         ),
                         "default": ".",
                     },
@@ -131,9 +132,7 @@ class GrepTool:
         except OutsideWorkspace:
             return _fail(f"路径 '{rel_dir}' 超出了工作区范围", start)
         except PathNotFound:
-            return _fail(f"目录不存在：{rel_dir}", start)
-        except NotADirectory:
-            return _fail(f"不是目录：{rel_dir}", start)
+            return _fail(f"路径不存在：{rel_dir}", start)
         except WorkspaceError as e:
             return _fail(f"搜索失败：{e}", start)
 

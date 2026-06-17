@@ -5,6 +5,7 @@ import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import { KeyRound, Loader2, RefreshCw } from "lucide-react";
 import { useEffect } from "react";
+import { SettingsHeader } from "./SettingsHeader";
 
 /**
  * Account usage dashboard (§7.3D) — the manager's view of the team's spend.
@@ -41,35 +42,35 @@ export function UsageSettings() {
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold">用量</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {byok
-              ? "自带 Key 模式：对话按你的 DeepSeek 额度计费、平台不限额。下方为你的用量与花费，成本以人民币估算。"
-              : "本月额度与今日用量。成本按团队角色拆分，以人民币展示。"}
-          </p>
-        </div>
-        {/* Manual refresh once data exists — numbers go stale after running tasks
-            elsewhere (mount-only fetch otherwise). First load / first-load failure
-            are handled by the dedicated states below, so the button shows here. */}
-        {summary && (
-          <SimpleTooltip label="刷新">
-            <button
-              type="button"
-              aria-label="刷新"
-              onClick={refresh}
-              disabled={loading}
-              className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
-            >
-              <RefreshCw
-                size={16}
-                className={loading ? "animate-spin" : undefined}
-              />
-            </button>
-          </SimpleTooltip>
-        )}
-      </div>
+      <SettingsHeader
+        title="用量"
+        description={
+          byok
+            ? "自带 Key 模式：对话按你的 DeepSeek 额度计费、平台不限额。下方为你的用量与花费，成本以人民币估算。"
+            : "本月额度与今日用量。成本按团队角色拆分，以人民币展示。"
+        }
+        action={
+          // Manual refresh once data exists — numbers go stale after running tasks
+          // elsewhere (mount-only fetch otherwise). First load / first-load failure
+          // are handled by the dedicated states below, so the button shows here.
+          summary ? (
+            <SimpleTooltip label="刷新">
+              <button
+                type="button"
+                aria-label="刷新"
+                onClick={refresh}
+                disabled={loading}
+                className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
+              >
+                <RefreshCw
+                  size={16}
+                  className={loading ? "animate-spin" : undefined}
+                />
+              </button>
+            </SimpleTooltip>
+          ) : undefined
+        }
+      />
 
       <PowerModeToggle enabled={usageDetail} onChange={setUsageDetail} />
 

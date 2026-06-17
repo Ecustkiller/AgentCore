@@ -1,4 +1,5 @@
-import { ApiError, NetworkError, api } from "@/services/api";
+import { ApiError, BASE_URL, NetworkError, api } from "@/services/api";
+import { authedFetch, encodePath, saveBlob } from "@/services/workspace";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];
@@ -163,23 +164,101 @@ export async function listMessages(
   };
 }
 
+/** Body kind a sender may set (excludes `system_card`, which is server-minted). */
+export type SendContentType = Schemas["SendChatMessageRequest"]["content_type"];
+
 export interface SendMessageInput {
-  content: string;
+  /** Optional when `attachments` is non-empty (an image/file-only message). */
+  content?: string;
+  /** Render hint: `image` for an inline gallery, `file` for download chips. */
+  contentType?: SendContentType;
+  /** Pre-uploaded attachments (via {@link uploadChatFile}) to reference. */
+  attachments?: StoredAttachment[];
   /** Client-minted id for retry-safe idempotent send (server dedups). */
   clientMsgId?: string;
   replyToMessageId?: string;
 }
 
-/** Send a message into a chat the user belongs to. */
+/** Send a message into a chat the user belongs to (text and/or attachments). */
 export async function sendMessage(
   chatId: string,
   input: SendMessageInput,
 ): Promise<ChatMessageDetail> {
   return api.post<ChatMessageDetail>(`/v1/messages/chats/${chatId}/messages`, {
     content: input.content,
+    content_type: input.contentType ?? "text",
+    attachments: input.attachments ?? [],
     client_msg_id: input.clientMsgId,
     reply_to_message_id: input.replyToMessageId,
   });
+}
+
+// --- Attachments (Stage 4 富消息: 图/文件, 复用工作区存储) ---
+// Two-step like the workspace file API: PUT the raw bytes into the chat's shared
+// space, then reference the returned path in a sendMessage attachment. These
+// bypass the JSON `api` helper (raw bytes / blobs) but reuse its cookie-auth +
+// refresh-once policy via `authedFetch`.
+
+type ChatFileUploadResponse = Schemas["ChatFileUploadResponse"];
+
+const chatFilesUrl = (chatId: string, path: string): string =>
+  `${BASE_URL}/v1/messages/chats/${chatId}/files/${encodePath(path)}`;
+
+/**
+ * Upload an attachment's raw bytes into a chat's space; returns its stored path,
+ * size, and (for an image) a generated WebP `thumb_path` for cheap inline
+ * previews. The caller copies these onto the message's {@link StoredAttachment}.
+ */
+export async function uploadChatFile(
+  chatId: string,
+  path: string,
+  body: Blob,
+): Promise<ChatFileUploadResponse> {
+  const res = await authedFetch(chatFilesUrl(chatId, path), {
+    method: "PUT",
+    body,
+  });
+  return res.json() as Promise<ChatFileUploadResponse>;
+}
+
+/** Fetch an attachment as a Blob (for inline image rendering via object URL). */
+export async function fetchChatAttachmentBlob(
+  chatId: string,
+  workspacePath: string,
+): Promise<Blob> {
+  const res = await authedFetch(chatFilesUrl(chatId, workspacePath));
+  return res.blob();
+}
+
+/** Download an attachment and save it to disk via the browser. */
+export async function downloadChatAttachment(
+  chatId: string,
+  workspacePath: string,
+  filename: string,
+): Promise<void> {
+  const res = await authedFetch(chatFilesUrl(chatId, workspacePath));
+  saveBlob(await res.blob(), filename);
+}
+
+// Raster formats safe to render inline via <img src=blob>. SVG is intentionally
+// excluded (shown as a file chip) — it is a document, not just a bitmap. Used by
+// both the sender (to derive a message's content_type) and the bubble (to decide
+// per-attachment whether to inline an image or show a download chip).
+const IMAGE_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "avif",
+]);
+
+/** Whether a filename looks like an inline-renderable image (by extension). */
+export function isImageAttachment(name: string): boolean {
+  const dot = name.lastIndexOf(".");
+  if (dot === -1) return false;
+  return IMAGE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
 }
 
 /** Advance this user's read cursor (drives unread counts). */

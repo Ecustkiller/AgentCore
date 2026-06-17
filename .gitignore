@@ -25,6 +25,8 @@ node_modules/
 # Electron
 out/
 release/
+# 内置 Python 运行时（sidecar 打包产物，由 apps/desktop/scripts/bundle-sidecar.mjs 生成）
+apps/desktop/resources/sidecar/
 
 # TS build info / lint cache
 *.tsbuildinfo
@@ -56,6 +58,7 @@ htmlcov/
 # pytest cache + ad-hoc --basetemp scratch dirs (test artifacts)
 .pytest_*/
 .pytmp/
+._pytmp/
 .tmp_pytest/
 .pytest_out.txt
 coverage/
@@ -68,6 +71,8 @@ coverage/
 # Logs
 *.log
 logs/
+# Conversation timeline exports (stdout dumps from scripts/log_timeline.py)
+_*_timeline.txt
 
 # Database
 *.db

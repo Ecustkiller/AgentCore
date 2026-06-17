@@ -25,12 +25,10 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
-import { useModelModesStore } from "@/stores/modelModes";
 import { Folder, Paperclip, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MentionMenu } from "./MentionMenu";
-import { ModeSelector } from "./ModeSelector";
 
 /** 已选附件（含正文，仅发送时携带；气泡只展示元信息）。 */
 interface PendingAttachment {
@@ -469,14 +467,10 @@ export function MessageInput() {
       // workspace-lock guard, which rejects a move once a chat has any messages
       // (双模式工作区 §九 ⑩).
       const targetFolderId = useFoldersStore.getState().pendingNewChatFolderId;
-      // The 质量档 chosen on the draft (composer picker) is applied at creation so
-      // the chat is born on the selected mode; then the draft selection resets.
-      const draftMode = useModelModesStore.getState().draftMode;
       try {
         const conv = await api.post<{ id: string }>("/v1/conversations", {
           title: null,
           folder_id: targetFolderId,
-          model_mode: draftMode,
         });
         conversationId = conv.id;
         upsertConversationFront({
@@ -486,11 +480,9 @@ export function MessageInput() {
           messageCount: 0,
           lastMessagePreview: null,
           folderId: targetFolderId,
-          modelMode: draftMode,
         });
         useConversationStore.getState().setCurrentConversation(conv.id);
         createdNew = true;
-        useModelModesStore.getState().setDraftMode(null);
         if (targetFolderId) {
           useFoldersStore.getState().setPendingNewChatFolder(null);
         }
@@ -731,7 +723,6 @@ export function MessageInput() {
             >
               <Paperclip size={16} />
             </button>
-            <ModeSelector disabled={isGenerating} />
           </div>
           <div className="flex items-center gap-3">
             {charCount > 0 && (

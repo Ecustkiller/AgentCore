@@ -15,17 +15,22 @@ union (base :class:`TurnSuspension` + :class:`PlanReviewSuspension` /
   plan tail, feeds the workers' product back as the suspended ``delegate`` tool
   result, then continues the CEO loop. Carries the ``plan`` (with minted run_ids)
   + the ``completed`` seed map + the reviewed ``steps`` / gated ``pending``.
-- **ask_user** — the CEO paused mid-loop on its ``ask_user`` checkpoint. Resume
-  maps the user's answer to the ``ask_user`` tool result and continues the CEO
-  loop (no plan tail). Carries the question / options / context / multiple of the
-  card so resume can re-emit it.
+- **ask_user** — the CEO paused mid-loop on its ``ask_user`` checkpoint (the one
+  asking primitive — opening 引导 or mid-task fork). Resume maps the user's answer
+  to the ``ask_user`` tool result and continues the CEO loop (no plan tail). Carries
+  the card payload (message / context / assumptions / questions / style_options) so
+  resume can re-emit it.
 
 Every frame shares: the CEO ``transcript`` at the pause (system + history + user +
 the assistant message carrying the suspended tool_call), the ``tool_call_id`` that
 result must echo (so the rebuilt transcript stays a valid tool-call/result pair),
-the ``base_system_prompt`` + ``user_message`` (to re-wire the CEO toolset), the
-``journal`` so far (so the resumed turn's ``messages.runs`` replays the whole
-exchange), and the ``checkpoint_id`` (so resume re-emits the resolution).
+the ``base_system_prompt`` + ``user_message`` (to re-wire the CEO toolset), and the
+``checkpoint_id`` (so resume re-emits the resolution).
+
+The journal-so-far is NOT in the frame: it is the §18.3 ``turn_journal`` (唯一事实源),
+written at pause and re-hydrated onto :attr:`TurnSuspension.journal` when the resume
+claims the frame (see ``runtime/suspension_persistence.py``). The frame thus carries
+only the resume *control* state, not a second copy of the replay stream.
 
 The frame is captured by the suspending face (the ``delegate`` checkpoint hook /
 ``AskUserTool``) — both read the live CEO transcript off :data:`captain_transcript`,
@@ -86,9 +91,9 @@ class TurnSuspension:
     Keyed (in storage) by ``message_id`` (the pipeline's minted assistant id, reused
     when the resumed turn finally persists). Concrete subclasses
     (:class:`PlanReviewSuspension` / :class:`AskUserSuspension`) add their kind's
-    resume substrate and set :attr:`kind`. Everything is JSON-round-trippable
-    (:meth:`to_json` / :func:`suspension_from_json`) into the ``paused_turns.frame``
-    column.
+    resume substrate and set :attr:`kind`. Everything but :attr:`journal` (which
+    lives in ``turn_journal``) is JSON-round-trippable (:meth:`to_json` /
+    :func:`suspension_from_json`) into the ``paused_turns.frame`` column.
     """
 
     # Set by each concrete subclass; written into / read from the JSON discriminator.
@@ -110,8 +115,10 @@ class TurnSuspension:
     base_system_prompt: str
     user_message: str
     transcript: list[LLMMessage]
-    # The team-graph journal up to and including the pause's ``*_required`` event, so
-    # the resumed turn's persisted runs replay the whole graph + exchange.
+    # The team-graph journal up to and including the pause's ``*_required`` event. A
+    # transient in-memory carrier ONLY: it is persisted to the ``turn_journal`` table
+    # (唯一事实源, §18.3) — NOT into ``paused_turns.frame`` — and re-hydrated here when
+    # the resume claims the frame, so the resumed turn replays the whole graph.
     journal: list[dict[str, Any]] = field(default_factory=list)
     trace_id: str | None = None
 
@@ -130,7 +137,8 @@ class TurnSuspension:
             "base_system_prompt": self.base_system_prompt,
             "user_message": self.user_message,
             "transcript": transcript_to_json(self.transcript),
-            "journal": list(self.journal),
+            # NOTE: ``journal`` is deliberately NOT serialized — it lives in the
+            # turn_journal table (§18.3), not the frame. See module docstring.
             "trace_id": self.trace_id,
         }
 
@@ -160,7 +168,8 @@ class TurnSuspension:
             "base_system_prompt": data.get("base_system_prompt", "") or "",
             "user_message": data.get("user_message", "") or "",
             "transcript": transcript_from_json(data.get("transcript")),
-            "journal": list(data.get("journal") or []),
+            # ``journal`` is hydrated separately from turn_journal on claim, not the
+            # frame; a legacy frame's inline ``journal`` (if any) is ignored.
             "trace_id": data.get("trace_id"),
         }
 
@@ -209,25 +218,30 @@ class AskUserSuspension(TurnSuspension):
     """A turn frozen at the CEO's ``ask_user`` checkpoint — the CEO-loop resume substrate.
 
     No plan tail: resume just maps the user's answer to the ``ask_user`` tool result
-    and continues the CEO loop. Carries the card payload (``question`` / ``options`` /
-    ``context`` / ``multiple``) so resume re-emits the prompt + validates the picks
-    against the offered options.
+    and continues the CEO loop. Carries the unified card payload so resume re-emits the
+    full prompt: ``question`` (the framing / opening line — the tool's ``message``),
+    ``context`` background, plus the rich opening content ``assumptions`` (起步计划
+    chips), ``questions`` (the askable items, each with kind/options/multiple/default)
+    and ``style_options`` (visual presets). All but ``question`` are empty for a compact
+    mid-task fork.
     """
 
     kind: ClassVar[SuspensionKind] = SuspensionKind.ASK_USER
 
     question: str = ""
-    options: list[str] = field(default_factory=list)
     context: str = ""
-    multiple: bool = False
+    assumptions: list[dict[str, Any]] = field(default_factory=list)
+    questions: list[dict[str, Any]] = field(default_factory=list)
+    style_options: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         data = self._base_json()
         data.update(
             question=self.question,
-            options=list(self.options),
             context=self.context,
-            multiple=self.multiple,
+            assumptions=list(self.assumptions),
+            questions=list(self.questions),
+            style_options=list(self.style_options),
         )
         return data
 
@@ -247,9 +261,10 @@ def suspension_from_json(data: dict[str, Any]) -> TurnSuspension:
         return AskUserSuspension(
             **base,
             question=data.get("question", "") or "",
-            options=list(data.get("options") or []),
             context=data.get("context", "") or "",
-            multiple=bool(data.get("multiple") or False),
+            assumptions=list(data.get("assumptions") or []),
+            questions=list(data.get("questions") or []),
+            style_options=list(data.get("style_options") or []),
         )
     return PlanReviewSuspension(
         **base,

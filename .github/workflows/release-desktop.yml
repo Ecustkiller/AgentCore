@@ -47,6 +47,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
 
+      # 内置 Python 打包（方案 B）需 uv 拉独立 CPython + 装 agentcore（scripts/bundle-sidecar.mjs）。
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -85,6 +89,12 @@ jobs:
             gh release create "$tag" --repo "$repo" --draft --title "$ver" --notes "AgentCore $ver"
             echo "created draft $tag on $repo"
           fi
+
+      # 先把内置 Python 运行时构建到 resources/sidecar/（方案 B；electron-builder 经
+      # extraResources 拷入安装包）。每个 OS runner 各自构建自己平台的运行时（原生 wheel/
+      # 解释器不可交叉编译）。
+      - name: Bundle sidecar Python runtime
+        run: pnpm bundle:sidecar
 
       # electron-vite 产物 → electron-builder 打 NSIS 并 --publish 上传到上面预建的草稿。
       # GH_TOKEN 必须是对公开发布仓有写权的 PAT（非默认 GITHUB_TOKEN）。

@@ -13,6 +13,11 @@ Landed as Protocols here:
   kinds (approval / ask_user / client_tool), implemented by
   ``runtime.interaction.InteractionRegistry``. The engine-side faces depend on this
   port, not the concrete registry.
+- **Journal** — the engine's single durable persistence exit (§18.3 Turn Journal,
+  唯一事实源): each turn's ordered execution facts, from which the assistant
+  message's replay payload is projected on read. Postgres impl =
+  ``db.repositories.TurnJournalRepository``; the ``runs``↔facts transform lives in
+  ``runtime/journal.py``.
 
 The remaining §18.6 ports stay as their concrete implementations until the Sidecar
 work (07-规划/远期规划 §一.1) needs them swappable — Protocol-izing them now, with
@@ -24,7 +29,7 @@ no second implementation to satisfy, would be premature abstraction:
 - ArtifactStore → workspace snapshot store (``workspace/…``)
 - PauseSignal → ``runtime`` pause flag
 - DelegationTransport → ``runtime/runs`` executor (in-proc subtree)
-- Journal / SnapshotStore → Phase 2 (目标模型, not yet carried)
+- SnapshotStore → absorbed by Journal (目标模型, not yet carried)
 """
 
 from __future__ import annotations
@@ -35,11 +40,11 @@ from agentcore.runtime.events import EventSink
 
 if TYPE_CHECKING:
     import asyncio
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from agentcore.runtime.interaction import InteractionKind, InteractionRequest
 
-__all__ = ["ClientRequestBridge", "EventSink"]
+__all__ = ["ClientRequestBridge", "EventSink", "Journal"]
 
 
 @runtime_checkable
@@ -82,3 +87,32 @@ class ClientRequestBridge(Protocol):
     def list_pending(
         self, conversation_id: str | None = None
     ) -> list[InteractionRequest]: ...
+
+
+@runtime_checkable
+class Journal(Protocol):
+    """The engine's single durable persistence exit (§18.6 / §18.3 唯一事实源).
+
+    The engine records each turn's ordered execution facts (``{kind, payload, ts}``)
+    keyed by ``turn_id`` (== the assistant message id); everything replayable — the
+    message's ``runs`` payload — is a projection of these facts (see
+    ``runtime/journal.py``). ``record`` replaces a turn's facts wholesale (idempotent
+    for a resume reusing the id); ``load_map`` batch-loads for the read-time
+    projection. Postgres impl = ``db.repositories.TurnJournalRepository``; a future
+    Sidecar swaps a local (SQLite / in-proc) one without touching the engine.
+    """
+
+    async def record(
+        self,
+        *,
+        turn_id: str,
+        conversation_id: str,
+        trace_id: str | None,
+        entries: Sequence[dict[str, Any]],
+    ) -> None: ...
+
+    async def load(self, turn_id: str) -> list[dict[str, Any]]: ...
+
+    async def load_map(
+        self, turn_ids: Sequence[str]
+    ) -> dict[str, list[dict[str, Any]]]: ...

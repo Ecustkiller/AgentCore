@@ -1,8 +1,9 @@
 import { join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { is } from "@electron-toolkit/utils";
-import { BrowserWindow, app, ipcMain, net, protocol, shell } from "electron";
+import { net, BrowserWindow, app, ipcMain, protocol, shell } from "electron";
 import { registerFsIpc } from "./fs-service";
+import { registerSidecarIpc } from "./sidecar-service";
 
 // Production renderer is served from a custom app:// scheme instead of file://,
 // so it gets a real, stable origin (app://agentcore). That origin is what makes
@@ -85,6 +86,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   registerAppProtocol();
   registerFsIpc();
+  registerSidecarIpc();
   createWindow();
 
   app.on("activate", () => {

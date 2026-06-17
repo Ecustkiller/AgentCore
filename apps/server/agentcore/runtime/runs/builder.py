@@ -39,8 +39,11 @@ _VALID_STANCES = frozenset({"pro", "con"})
 _VALID_OUTPUT_FORMATS = frozenset({"text", "json"})
 _DEFAULT_TIMEOUT_MS = 120_000
 _DEFAULT_RETRY_DELAY_MS = 5_000
-# Per-sibling task excerpt cap in a fan-out awareness summary.
+# Per-sibling excerpt caps in a fan-out awareness summary: a scope line (责任/任务)
+# plus a shorter deliverable note (预期产出), kept tight so a wide fan-out's
+# awareness block stays scannable and can't blow up a worker's context.
 _SIBLING_TASK_CHARS = 150
+_SIBLING_OUTPUT_CHARS = 80
 
 
 def build_run_plan(
@@ -71,10 +74,22 @@ def build_run_plan(
         return RunPlan(), ["'tasks' array is required and cannot be empty"]
     prefix = id_prefix or f"del_{int(time.time() * 1000)}"
     if any(item.get("depends_on") for item in tasks_raw):
-        return _dag_plan(tasks_raw, valid_tools, prefix, max_tasks, parent_run_id, depth)
-    return _flat_plan(
-        tasks_raw, valid_tools, prefix, counter_start, max_tasks, parent_run_id, depth
-    )
+        plan, errors = _dag_plan(
+            tasks_raw, valid_tools, prefix, max_tasks, parent_run_id, depth
+        )
+    else:
+        plan, errors = _flat_plan(
+            tasks_raw, valid_tools, prefix, counter_start, max_tasks, parent_run_id, depth
+        )
+    # Fan-out awareness is computed ONCE here, after the shape-specific build, so a
+    # flat batch and a DAG share one definition of「sibling」= nodes that fanned out
+    # from the same point (same depends_on). The DAG case is the fix: its parallel
+    # nodes (e.g. the 调研 workers a「research → writer」fan-out spawns) used to get
+    # nothing and ran blind/overlapping. Skipped for a rejected plan (nodes may be
+    # partial).
+    if not errors:
+        _apply_sibling_summaries(plan)
+    return plan, errors
 
 
 def _flat_plan(
@@ -96,14 +111,13 @@ def _flat_plan(
         for item in tasks_raw[:max_tasks]
         if item.get("task") and item.get("role")
     ]
-    for idx, item in enumerate(valid):
+    for item in valid:
         counter += 1
         run_id = f"{prefix}_{counter}"
         plan.add(
             _inline_spec(
                 item,
                 run_id=run_id,
-                sibling_summary=_sibling_summary(valid, idx),
                 policy=RunPolicy(
                     result_handling=item.get("result_handling") or "pass_through",
                     contract=_parse_contract(item),
@@ -170,7 +184,6 @@ def _inline_spec(
     *,
     run_id: str,
     depends_on: list[str] | None = None,
-    sibling_summary: str = "",
     policy: RunPolicy,
     valid_tools: set[str] | None = None,
     parent_run_id: str | None = None,
@@ -218,36 +231,88 @@ def _inline_spec(
         parent_run_id=parent_run_id,
         depth=depth,
         can_delegate=bool(item.get("can_delegate")),
-        sibling_summary=sibling_summary,
         policy=policy,
     )
 
 
-def _tools(declared: Any, valid_tools: set[str] | None) -> list[str]:
-    """Normalise a task's declared tool names, intersected with the allow-list."""
+def _tools(declared: Any, valid_tools: set[str] | None) -> list[str] | None:
+    """Normalise a task's declared tool names → an allowed-tools restriction, or
+    ``None`` for *no restriction* (the worker is offered all team tools).
+
+    ``None`` is the fail-safe default and is returned whenever a task omits ``tools``
+    or names only unknown tools. We never return ``[]``: the engine reads an empty
+    allow-list as "offer no tools", which strands a worker that has a file/exec
+    deliverable as a text-only agent (it dumps the file content into chat and the
+    workspace stays empty). A non-empty list still restricts to the named
+    (allow-list-intersected) tools so the CEO can opt into least-privilege.
+    """
     if not isinstance(declared, list):
-        return []
+        return None
     names = [t for t in declared if isinstance(t, str) and t]
-    if valid_tools is None:
-        return names
-    return [t for t in names if t in valid_tools]
+    if valid_tools is not None:
+        names = [t for t in names if t in valid_tools]
+    return names or None
 
 
-def _sibling_summary(valid: list[dict[str, Any]], self_idx: int) -> str:
-    """Fan-out awareness body for one flat-parallel node: the *other* concurrent
-    tasks (role + a capped task excerpt). Empty for a lone task."""
-    if len(valid) < 2:
-        return ""
-    lines: list[str] = []
-    for j, other in enumerate(valid):
-        if j == self_idx:
+def _apply_sibling_summaries(plan: RunPlan) -> None:
+    """Populate each node's ``sibling_summary`` with its fan-out siblings — the
+    *other* nodes that fanned out from the SAME point (share the exact same
+    ``depends_on`` set), so they run in parallel toward the same juncture.
+
+    This is the precise「parallel sibling」notion: a「research → writer」fan-out's
+    researchers share their dependency set (both have no deps, or both wait on the
+    same upstream) and so see each other — the gap this fixes (a DAG used to give its
+    parallel nodes nothing, so they ran blind/overlapping). It is deliberately
+    NARROWER than「same wave」: two *independent* chains can land in one topological
+    wave by coincidence (``s2`` deps ``[s1]`` and ``u2`` deps ``[u1]``) yet are not
+    siblings — coupling those would bloat a worker's context with unrelated
+    concurrent work and blur branch independence (cf. the checkpoint-steer isolation
+    guarantee). A flat parallel batch is the degenerate case (every node shares the
+    empty dep set → all siblings, unchanged); a node with no same-fan-out peer (a
+    pipeline link, a lone writer) stays blank. A node never lists its own
+    upstream/downstream — those arrive separately via ``depends_on``.
+
+    Mutates specs in place; reads only ``depends_on`` so it is safe on any plan."""
+    groups: dict[frozenset[str], list[RunSpec]] = {}
+    for spec in plan.nodes:
+        groups.setdefault(frozenset(spec.depends_on), []).append(spec)
+    for group in groups.values():
+        if len(group) < 2:
             continue
-        role = other.get("role", "")
-        task = other.get("task", "")
-        if len(task) > _SIBLING_TASK_CHARS:
-            task = task[:_SIBLING_TASK_CHARS] + "…"
-        lines.append(f"- {role}：{task}")
+        for spec in group:
+            spec.sibling_summary = _sibling_summary(group, spec)
+
+
+def _sibling_summary(group: list[RunSpec], me: RunSpec) -> str:
+    """Fan-out awareness body for ``me``: one bullet per *other* node in its
+    fan-out group, carrying enough for a peer to draw its own boundary —
+
+      ``- {role}：{scope}（预期产出：{expected_output}）``
+
+    ``scope`` is the sibling's ``objective`` (its declared 责任/负责的部分) when the
+    CEO set one, else the ``task`` instruction (always present) so a peer is never
+    blank; ``expected_output`` (its declared 产出) is appended only when given. This
+    enriches the bare role+task list so parallel peers see *who owns what* and *what
+    each will hand back* — and can avoid both overlapping the same ground and leaving
+    a seam uncovered. Excerpts are capped (:func:`_excerpt`). Assumes
+    ``len(group) >= 2`` (caller skips a lone node)."""
+    lines: list[str] = []
+    for other in group:
+        if other.run_id == me.run_id:
+            continue
+        scope = _excerpt(other.objective or other.task, _SIBLING_TASK_CHARS)
+        line = f"- {other.role}：{scope}"
+        if other.expected_output:
+            line += f"（预期产出：{_excerpt(other.expected_output, _SIBLING_OUTPUT_CHARS)}）"
+        lines.append(line)
     return "\n".join(lines)
+
+
+def _excerpt(text: str, limit: int) -> str:
+    """Head excerpt of ``text`` capped at ``limit`` chars (ellipsis when over) — a
+    sibling overview only needs the gist, not the tail."""
+    text = text.strip()
+    return text if len(text) <= limit else text[:limit] + "…"
 
 
 def _dag_policy(item: dict[str, Any]) -> RunPolicy:
@@ -283,8 +348,14 @@ def _parse_contract(item: dict[str, Any]) -> RunContract | None:
     max_length = max_length if isinstance(max_length, int) and max_length > 0 else 0
     fmt = raw.get("output_format")
     output_format = fmt if fmt in _VALID_OUTPUT_FORMATS else "text"
+    requires_files = bool(raw.get("requires_files", False))
     has_rule = (
-        required_sections or must_contain or min_length or max_length or output_format == "json"
+        required_sections
+        or must_contain
+        or min_length
+        or max_length
+        or output_format == "json"
+        or requires_files
     )
     if not has_rule:
         return None
@@ -294,6 +365,7 @@ def _parse_contract(item: dict[str, Any]) -> RunContract | None:
         must_contain=must_contain,
         min_length=min_length,
         max_length=max_length,
+        requires_files=requires_files,
         strict=bool(raw.get("strict", False)),
     )
 

@@ -102,6 +102,7 @@
         "enum": [
           "approve",
           "approve_always",
+          "approve_always_files",
           "deny"
         ],
         "title": "ApprovalDecision",
@@ -180,6 +181,36 @@
           "display_name"
         ],
         "title": "BlockedUser",
+        "type": "object"
+      },
+      "ChatFileUploadResponse": {
+        "description": "Result of a chat attachment upload (Stage 4 富消息).\n\nMirrors ``UploadFileResponse`` but adds ``thumb_path``: a generated WebP\nthumbnail's workspace path for images (None otherwise), which the sender\ncopies onto the message's ``StoredAttachment`` for cheap inline previews.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "thumb_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumb Path"
+          }
+        },
+        "required": [
+          "path",
+          "size_bytes"
+        ],
+        "title": "ChatFileUploadResponse",
         "type": "object"
       },
       "ChatListResponse": {
@@ -745,6 +776,95 @@
         "title": "CostBreakdown",
         "type": "object"
       },
+      "CostRunPayload": {
+        "description": "One per-run cost ledger row the local pipeline priced (``asdict(RunCost)``).\n\nThe sidecar runs the SAME engine and prices each run once via the SAME\n``calculate_cost``, so its ledger has the identical shape the cloud turn builds\n(captain root + one row per delegated member). The desktop relays it verbatim;\nthe server records it through the shared ``CostEventRepository.record_runs``,\nwhich is idempotent by ``run_id`` (a retried write-back never double-bills).\n\nTrust boundary (计费): these counts are reported by the user's machine, so they\nare authoritative only for BYOK display (the user pays DeepSeek directly).\nPlatform-mode authoritative metering belongs at the cloud inference proxy\n(远期规划 §一 终态), not here — see ``record_local_turn``.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "cost": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Cost",
+            "type": "object"
+          },
+          "cost_total_nano": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cost Total Nano",
+            "type": "integer"
+          },
+          "currency": {
+            "default": "USD",
+            "maxLength": 8,
+            "title": "Currency",
+            "type": "string"
+          },
+          "duration_ms": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "model": {
+            "default": "",
+            "maxLength": 128,
+            "title": "Model",
+            "type": "string"
+          },
+          "parent_run_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Run Id"
+          },
+          "role": {
+            "default": "member",
+            "maxLength": 32,
+            "title": "Role",
+            "type": "string"
+          },
+          "rounds": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 64,
+            "title": "Run Id",
+            "type": "string"
+          },
+          "tokens": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Tokens",
+            "type": "object"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "CostRunPayload",
+        "type": "object"
+      },
       "CreateConversationRequest": {
         "properties": {
           "folder_id": {
@@ -852,28 +972,6 @@
           }
         },
         "title": "CreateInviteRequest",
-        "type": "object"
-      },
-      "CreateModelModeRequest": {
-        "properties": {
-          "assignments": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Assignments",
-            "type": "object"
-          },
-          "name": {
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "CreateModelModeRequest",
         "type": "object"
       },
       "CreateSnapshotRequest": {
@@ -1689,140 +1787,6 @@
         "title": "MessageListResponse",
         "type": "object"
       },
-      "ModelModeCatalog": {
-        "description": "The operator-bounded option space for building a custom mode: which team roles\nexist (and whether each is user-configurable) and which models may be picked.",
-        "properties": {
-          "models": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Models",
-            "type": "array"
-          },
-          "roles": {
-            "items": {
-              "$ref": "#/components/schemas/ModelRoleOption"
-            },
-            "title": "Roles",
-            "type": "array"
-          }
-        },
-        "required": [
-          "roles",
-          "models"
-        ],
-        "title": "ModelModeCatalog",
-        "type": "object"
-      },
-      "ModelModePreset": {
-        "description": "A built-in, read-only 质量档 (economy / quality).",
-        "properties": {
-          "assignments": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Assignments",
-            "type": "object"
-          },
-          "key": {
-            "title": "Key",
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "assignments"
-        ],
-        "title": "ModelModePreset",
-        "type": "object"
-      },
-      "ModelModeSummary": {
-        "description": "A user-defined custom 质量档.",
-        "properties": {
-          "assignments": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Assignments",
-            "type": "object"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "assignments"
-        ],
-        "title": "ModelModeSummary",
-        "type": "object"
-      },
-      "ModelModesResponse": {
-        "description": "Everything the picker needs: built-in presets + the user's custom modes + the\nuser's resolved default ref.",
-        "properties": {
-          "custom": {
-            "items": {
-              "$ref": "#/components/schemas/ModelModeSummary"
-            },
-            "title": "Custom",
-            "type": "array"
-          },
-          "default_mode": {
-            "title": "Default Mode",
-            "type": "string"
-          },
-          "presets": {
-            "items": {
-              "$ref": "#/components/schemas/ModelModePreset"
-            },
-            "title": "Presets",
-            "type": "array"
-          }
-        },
-        "required": [
-          "presets",
-          "custom",
-          "default_mode"
-        ],
-        "title": "ModelModesResponse",
-        "type": "object"
-      },
-      "ModelRoleOption": {
-        "description": "A team role the user may configure in a custom mode (catalog).",
-        "properties": {
-          "configurable": {
-            "title": "Configurable",
-            "type": "boolean"
-          },
-          "locked_model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Locked Model"
-          },
-          "role": {
-            "title": "Role",
-            "type": "string"
-          }
-        },
-        "required": [
-          "role",
-          "configurable"
-        ],
-        "title": "ModelRoleOption",
-        "type": "object"
-      },
       "MoveConversationRequest": {
         "description": "Move a conversation into a folder, or out of one with ``folder_id=null``.",
         "properties": {
@@ -1883,8 +1847,16 @@
         "type": "object"
       },
       "PausedTurnSummary": {
-        "description": "A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer continue / adjust / stop → the resume endpoint.\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); ask_user carries ``question`` / ``options`` / ``context`` /\n``multiple`` (the CEO's decision prompt). The unused set is empty for the other\nkind.",
+        "description": "A turn awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).\n\nSurfaced on conversation reopen so the client can re-render the right resume card\nby ``kind`` and offer continue / adjust / stop → the resume endpoint.\n``message_id`` is both the pause key and the id the resumed assistant message will\nreuse, so an optimistic bubble reconciles cleanly.\n\nplan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the\ngated downstream); ask_user carries the unified card payload ``question`` (the\nframing / opening line) + ``context`` + the optional opening content\n``assumptions`` / ``questions`` / ``style_options`` (empty for a compact mid-task\nfork). The unused set is empty for the other kind.",
         "properties": {
+          "assumptions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
           "checkpoint_id": {
             "title": "Checkpoint Id",
             "type": "string"
@@ -1901,18 +1873,6 @@
             "title": "Message Id",
             "type": "string"
           },
-          "multiple": {
-            "default": false,
-            "title": "Multiple",
-            "type": "boolean"
-          },
-          "options": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Options",
-            "type": "array"
-          },
           "pending": {
             "items": {
               "additionalProperties": true,
@@ -1926,12 +1886,28 @@
             "title": "Question",
             "type": "string"
           },
+          "questions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
           "steps": {
             "items": {
               "additionalProperties": true,
               "type": "object"
             },
             "title": "Steps",
+            "type": "array"
+          },
+          "style_options": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Style Options",
             "type": "array"
           },
           "user_message": {
@@ -1970,6 +1946,132 @@
           "daily_requests"
         ],
         "title": "QuotaStatus",
+        "type": "object"
+      },
+      "RecordTurnRequest": {
+        "description": "A finished local (sidecar) turn to persist: the user message + assistant reply.\n\nCarries the assistant outcome the local pipeline returned (content / reasoning /\ncitations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored\nids agree) plus its priced ``cost_runs`` ledger. The display token totals ride\non ``Message.usage``; the ``cost_runs`` ledger is the spend truth source written\nto ``cost_events`` — see :class:`CostRunPayload` for the BYOK trust boundary.",
+        "properties": {
+          "citations": {
+            "items": {
+              "$ref": "#/components/schemas/Citation"
+            },
+            "maxItems": 50,
+            "title": "Citations",
+            "type": "array"
+          },
+          "content": {
+            "default": "",
+            "maxLength": 500000,
+            "title": "Content",
+            "type": "string"
+          },
+          "cost_runs": {
+            "items": {
+              "$ref": "#/components/schemas/CostRunPayload"
+            },
+            "maxItems": 200,
+            "title": "Cost Runs",
+            "type": "array"
+          },
+          "input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          },
+          "output_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "reasoning_content": {
+            "anyOf": [
+              {
+                "maxLength": 500000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Content"
+          },
+          "rounds": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "runs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunsPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "user_message": {
+            "maxLength": 32000,
+            "minLength": 1,
+            "title": "User Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_message"
+        ],
+        "title": "RecordTurnRequest",
+        "type": "object"
+      },
+      "RecordTurnResponse": {
+        "description": "The persisted ids for a recorded local turn (the desktop reconciles its\noptimistic user/assistant bubbles against these; ``title`` is set only when this\nturn minted the conversation's first title).",
+        "properties": {
+          "assistant_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistant Message Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "user_message_id": {
+            "title": "User Message Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_message_id"
+        ],
+        "title": "RecordTurnResponse",
         "type": "object"
       },
       "RegenerateMessageRequest": {
@@ -2188,6 +2290,55 @@
         "title": "ResumeTurnRequest",
         "type": "object"
       },
+      "RewriteRequest": {
+        "description": "选区改写入参（无状态、无路径）：把选中文本按指令改写，前后文仅作语境只读。",
+        "properties": {
+          "context_after": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Context After",
+            "type": "string"
+          },
+          "context_before": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Context Before",
+            "type": "string"
+          },
+          "instruction": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Instruction",
+            "type": "string"
+          },
+          "selection": {
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Selection",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selection",
+          "instruction"
+        ],
+        "title": "RewriteRequest",
+        "type": "object"
+      },
+      "RewriteResponse": {
+        "description": "改写结果：替换选区的文本，由前端套 merge view 逐块评审（人决定接受/拒绝）。",
+        "properties": {
+          "rewritten": {
+            "title": "Rewritten",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rewritten"
+        ],
+        "title": "RewriteResponse",
+        "type": "object"
+      },
       "RoleCostLine": {
         "description": "One role's spend over a window — the team payroll grouped by role.\n\nThe account dashboard's product differentiator (§7.3D): multi-agent spend\nsplits by the ledger ``role`` (CEO / 队员 / 汇总 / …), which a single-agent\ncompetitor can't show. Money is integer nano-USD; the client formats ¥ from\nthe summary's single ``cny_per_usd`` (no per-row re-pricing here).",
         "properties": {
@@ -2394,7 +2545,16 @@
         "type": "object"
       },
       "SendChatMessageRequest": {
+        "description": "Send a message into a chat: plain text, or a 富消息 carrying attachments.\n\n``content`` is optional when ``attachments`` is non-empty (an image/file-only\nmessage has no caption); otherwise it is required. ``content_type`` tells the\nclient how to render it — ``image`` for an inline gallery, ``file`` for\ndownload chips — and is derived by the sender from what it uploaded.",
         "properties": {
+          "attachments": {
+            "items": {
+              "$ref": "#/components/schemas/StoredAttachment"
+            },
+            "maxItems": 9,
+            "title": "Attachments",
+            "type": "array"
+          },
           "client_msg_id": {
             "anyOf": [
               {
@@ -2408,9 +2568,25 @@
             "title": "Client Msg Id"
           },
           "content": {
-            "maxLength": 32000,
-            "minLength": 1,
-            "title": "Content",
+            "anyOf": [
+              {
+                "maxLength": 32000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "content_type": {
+            "default": "text",
+            "enum": [
+              "text",
+              "image",
+              "file"
+            ],
+            "title": "Content Type",
             "type": "string"
           },
           "reply_to_message_id": {
@@ -2426,9 +2602,6 @@
             "title": "Reply To Message Id"
           }
         },
-        "required": [
-          "content"
-        ],
         "title": "SendChatMessageRequest",
         "type": "object"
       },
@@ -2453,24 +2626,6 @@
           "content"
         ],
         "title": "SendMessageRequest",
-        "type": "object"
-      },
-      "SetDefaultModeRequest": {
-        "description": "Set (or clear with null) the user's default 质量档.",
-        "properties": {
-          "mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mode"
-          }
-        },
-        "title": "SetDefaultModeRequest",
         "type": "object"
       },
       "SetLlmKeyRequest": {
@@ -2594,6 +2749,28 @@
             "title": "Path",
             "type": "string"
           },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "thumb_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumb Path"
+          },
           "truncated": {
             "default": false,
             "title": "Truncated",
@@ -2644,7 +2821,8 @@
           "execution",
           "research",
           "orchestration",
-          "interaction"
+          "interaction",
+          "skill"
         ],
         "title": "ToolCategory",
         "type": "string"
@@ -2875,39 +3053,6 @@
           }
         },
         "title": "UpdateMembershipRequest",
-        "type": "object"
-      },
-      "UpdateModelModeRequest": {
-        "properties": {
-          "assignments": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Assignments"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 100,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          }
-        },
-        "title": "UpdateModelModeRequest",
         "type": "object"
       },
       "UploadFileResponse": {
@@ -3212,6 +3357,34 @@
         "title": "WorkspaceBindingResponse",
         "type": "object"
       },
+      "WorkspaceEditDoc": {
+        "description": "Full text of a cloud workspace file for in-panel editing, plus CAS baseline.\n\nUnlike the preview download (truncated at the transfer cap), this returns the\n**whole** file so a save never drops the tail. ``mtime_ms`` is the write-time CAS\nbaseline (compared on write); ``eol`` lets the editor restore the original line\nending. Cloud files are server-stored UTF-8, so there is no encoding field.",
+        "properties": {
+          "eol": {
+            "enum": [
+              "lf",
+              "crlf"
+            ],
+            "title": "Eol",
+            "type": "string"
+          },
+          "mtime_ms": {
+            "title": "Mtime Ms",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "mtime_ms",
+          "eol"
+        ],
+        "title": "WorkspaceEditDoc",
+        "type": "object"
+      },
       "WorkspaceFileEntry": {
         "description": "One entry in a workspace listing — relative POSIX path + kind.",
         "properties": {
@@ -3374,6 +3547,59 @@
           "has_files"
         ],
         "title": "WorkspaceSummary",
+        "type": "object"
+      },
+      "WorkspaceWriteRequest": {
+        "description": "Conditional write of editor text to a cloud workspace file (mtime CAS).\n\n``baseline_mtime_ms`` is the version the edit started from (``0`` = new file); a\nmismatch with the current disk mtime returns a conflict instead of clobbering an\nAgent's concurrent write. ``content`` uses ``\\n`` newlines; the server restores\n``eol`` on write. Byte size is bounded in the route (same cap as upload).",
+        "properties": {
+          "baseline_mtime_ms": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Baseline Mtime Ms",
+            "type": "integer"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "eol": {
+            "default": "lf",
+            "enum": [
+              "lf",
+              "crlf"
+            ],
+            "title": "Eol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "WorkspaceWriteRequest",
+        "type": "object"
+      },
+      "WorkspaceWriteResult": {
+        "description": "Outcome of a conditional write.\n\n``ok`` → ``mtime_ms`` is the new version (next baseline). On ``conflict`` →\n``ok`` is False and ``mtime_ms`` is the **current disk** version, so the client\ncan offer \"overwrite anyway\" by re-writing with it as the baseline.",
+        "properties": {
+          "conflict": {
+            "default": false,
+            "title": "Conflict",
+            "type": "boolean"
+          },
+          "mtime_ms": {
+            "title": "Mtime Ms",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "mtime_ms"
+        ],
+        "title": "WorkspaceWriteResult",
         "type": "object"
       }
     }
@@ -4648,6 +4874,75 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/local-turns": {
+      "post": {
+        "description": "Persist a turn that ran on the user's machine via the sidecar (双模式工作区 §一.1).\n\nThe local engine produced the reply on the user's box (no server SSE turn ran),\nso the desktop reports the finished turn here to land it in durable history AND\nthe cost ledger (计费回写). Owner-scoped (404 for a non-owner).\n\nUnlike ``send_message`` there is NO pre-turn billing gate — the turn already\nhappened on the user's machine; this only RECORDS its content + priced ledger.\nThe ledger write is idempotent by ``run_id`` (``record_runs``), so a retried POST\nafter a flaky response never double-bills or duplicates spend. The title is\ngenerated best-effort on the user's resolved BYOK key (None → platform fallback).",
+        "operationId": "record_local_turn_endpoint_v1_conversations__conversation_id__local_turns_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordTurnRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordTurnResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Local Turn Endpoint",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/messages": {
       "get": {
         "description": "A window of a conversation's messages (cursor-windowed, chronological).\n\nFour mutually-exclusive modes (checked in this order):\n\n- ``around={message_id}``: a window centered on a message — the search-hit jump\n  (load-around B). 404 if the message isn't in this conversation.\n- ``before={iso}``: the page strictly older than the cursor (scroll up).\n- ``after={iso}``: the page strictly newer than the cursor (scroll down).\n- none: the latest window (conversation open).\n\n``has_more_before`` / ``has_more_after`` drive infinite scroll; a one-sided\nquery computes only the flag for the direction it moves in (an ``around`` window\ncomputes both). ``total`` is the conversation's full message count.",
@@ -5056,7 +5351,7 @@
     },
     "/v1/conversations/{conversation_id}/paused": {
       "get": {
-        "description": "List turns awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).\n\nCalled on conversation reopen: a turn that paused then lost its live SSE\n(disconnect / restart) has no assistant message yet — only a persisted frame.\nThe client renders each as a resume card by ``kind`` (plan_review from ``steps`` /\n``pending``; ask_user from ``question`` / ``options``) offering continue / adjust /\nstop → the resume endpoint. Oldest-first. 404 if not owned.",
+        "description": "List turns awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).\n\nCalled on conversation reopen: a turn that paused then lost its live SSE\n(disconnect / restart) has no assistant message yet — only a persisted frame.\nThe client renders each as a resume card by ``kind`` (plan_review from ``steps`` /\n``pending``; ask_user from ``question`` + the optional ``assumptions`` /\n``questions`` / ``style_options``) offering continue / adjust / stop → the resume\nendpoint. Oldest-first. 404 if not owned.",
         "operationId": "list_conversation_paused_turns_v1_conversations__conversation_id__paused_get",
         "parameters": [
           {
@@ -5694,6 +5989,150 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/workspace/edit/{path}": {
+      "get": {
+        "description": "Read a workspace file for in-panel editing (full text + mtime CAS baseline).\n\nDistinct from the raw-bytes download (preview, truncated): editing needs the whole\nfile or a save would drop the tail. 裸聊 has no workspace yet, so 404.",
+        "operationId": "read_workspace_file_for_edit_v1_conversations__conversation_id__workspace_edit__path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceEditDoc"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Workspace File For Edit",
+        "tags": [
+          "conversations"
+        ]
+      },
+      "put": {
+        "description": "Conditionally write editor text back to a workspace file (mtime CAS).\n\nThe write-time CAS (``baseline_mtime_ms``) makes a save that raced an Agent turn\nreturn ``conflict`` instead of clobbering it. Writing to a 裸聊 promotes it into a\nfolder workspace first (文件夹即工作区 §懒建), like upload.",
+        "operationId": "write_workspace_file_v1_conversations__conversation_id__workspace_edit__path__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWriteResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Write Workspace File",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/workspace/files": {
       "get": {
         "description": "List the files in the conversation's workspace (top level or recursive).",
@@ -6194,6 +6633,66 @@
         "summary": "Get Favicon",
         "tags": [
           "favicon"
+        ]
+      }
+    },
+    "/v1/files/assist/rewrite": {
+      "post": {
+        "description": "按自由指令改写文档中的一段选区。\n\n无状态、无路径：入参携带选区与前后文文本，返回改写后的选区，交前端用 merge view\n逐块评审。全程不落库。",
+        "operationId": "rewrite_file_selection_v1_files_assist_rewrite_post",
+        "parameters": [
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RewriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RewriteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rewrite File Selection",
+        "tags": [
+          "files"
         ]
       }
     },
@@ -6772,6 +7271,138 @@
           }
         },
         "summary": "Announce",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/chats/{chat_id}/files/{path}": {
+      "get": {
+        "description": "Download a chat attachment's bytes (members only; non-member 404).\n\nServed ``inline`` with the filename so an image opens directly; the client\nfetches it as a blob for rendering and for saving files, so it does not rely\non the disposition. 404 for a missing path; 422 for an illegal one.",
+        "operationId": "download_chat_file_v1_messages_chats__chat_id__files__path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Chat File",
+        "tags": [
+          "messages"
+        ]
+      },
+      "put": {
+        "description": "Upload a chat attachment's bytes (members only) to reference in a send.\n\nBody is the raw file bytes (no multipart); ``path`` is workspace-relative —\nthe client mints a unique ``attachments/...`` path. Bounded by\n``workspace_upload_max_bytes`` so one request can't exhaust memory; a\nnon-member gets 404, an escaping path 422. For an image, a WebP thumbnail is\ngenerated and its path returned in ``thumb_path``.",
+        "operationId": "upload_chat_file_v1_messages_chats__chat_id__files__path__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatFileUploadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Chat File",
         "tags": [
           "messages"
         ]
@@ -7568,347 +8199,6 @@
         ]
       }
     },
-    "/v1/model-modes": {
-      "get": {
-        "description": "Built-in presets + the user's custom modes + the user's resolved default ref.",
-        "operationId": "list_model_modes_v1_model_modes_get",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelModesResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Model Modes",
-        "tags": [
-          "model-modes"
-        ]
-      },
-      "post": {
-        "operationId": "create_model_mode_v1_model_modes_post",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateModelModeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelModeSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Model Mode",
-        "tags": [
-          "model-modes"
-        ]
-      }
-    },
-    "/v1/model-modes/catalog": {
-      "get": {
-        "description": "The option space for building a custom mode: configurable team roles + the\noperator-allowed models. 经济worker is shown read-only (locked to its base model).",
-        "operationId": "model_mode_catalog_v1_model_modes_catalog_get",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelModeCatalog"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Model Mode Catalog",
-        "tags": [
-          "model-modes"
-        ]
-      }
-    },
-    "/v1/model-modes/default": {
-      "put": {
-        "description": "Set (or clear with null) the user's account-default 质量档.",
-        "operationId": "set_default_model_mode_v1_model_modes_default_put",
-        "parameters": [
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetDefaultModeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Set Default Model Mode",
-        "tags": [
-          "model-modes"
-        ]
-      }
-    },
-    "/v1/model-modes/{mode_id}": {
-      "delete": {
-        "operationId": "delete_model_mode_v1_model_modes__mode_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "mode_id",
-            "required": true,
-            "schema": {
-              "title": "Mode Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Model Mode",
-        "tags": [
-          "model-modes"
-        ]
-      },
-      "patch": {
-        "operationId": "update_model_mode_v1_model_modes__mode_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "mode_id",
-            "required": true,
-            "schema": {
-              "title": "Mode Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateModelModeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelModeSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Model Mode",
-        "tags": [
-          "model-modes"
-        ]
-      }
-    },
     "/v1/realtime": {
       "get": {
         "description": "Open this user's realtime firehose (server→client SSE).\n\nSubscribes the connection to the in-process hub; a new message in any chat the\nuser belongs to arrives as a ``chat_message`` event. Heartbeat comments keep\nthe stream warm, and the subscription is released when the client disconnects.",
@@ -8535,6 +8825,150 @@
           }
         },
         "summary": "Create Workspace Dir",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/edit/{path}": {
+      "get": {
+        "description": "Read a cloud workspace file for in-panel editing (full text + mtime baseline).\n\nThe editable counterpart of the truncated preview download — a save needs the\nwhole file. Local ids are reached over desktop IPC, so they 409 like other ops.",
+        "operationId": "read_workspace_file_for_edit_v1_workspaces__ws_id__edit__path__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceEditDoc"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Workspace File For Edit",
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "put": {
+        "description": "Conditionally write editor text back to a cloud workspace file (mtime CAS).\n\n``baseline_mtime_ms`` makes a save that raced an Agent turn return ``conflict``\ninstead of clobbering it (云端硬化 §九). Local ids 409 (desktop owns the bytes).",
+        "operationId": "write_workspace_file_text_v1_workspaces__ws_id__edit__path__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceWriteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWriteResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Write Workspace File Text",
         "tags": [
           "workspaces"
         ]

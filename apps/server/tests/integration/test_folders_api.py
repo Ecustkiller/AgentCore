@@ -1,4 +1,4 @@
-"""Integration tests for folder CRUD + conversation grouping (前端技术与架构.md 会话列表设计).
+"""Integration tests for folder CRUD + conversation grouping (前端技术与架构.md 对话列表设计).
 
 Auto-skips (via the shared ``client`` fixture) when no PostgreSQL is reachable.
 Covers the auth gate, the grouped sidebar payload, move-in/move-out, the

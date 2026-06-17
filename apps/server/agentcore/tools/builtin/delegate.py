@@ -62,25 +62,24 @@ _DELEGATE_OUTPUT_LIMIT = 16000
 # user to recognise what just finished without shipping the whole product over SSE.
 _PLAN_REVIEW_SUMMARY_CHARS = 280
 
+# Tool-doc layer (提示词瘦身 §三去重)：only the delegate MECHANICS live here — what the
+# tool does, how the tasks array maps to single/parallel/DAG, and that it is
+# non-terminal. The routing JUDGMENT (何时委派 / 怎么扇出) is owned ONCE by the CEO core
+# (prompt._CEO_CORE_HINT, always-on); the advanced knobs' HOW lives in the
+# team_orchestration_advanced skill + each param's own description. This description
+# therefore keeps only a TERSE one-line routing reminder + a pointer, instead of
+# re-teaching the criterion the core already states every turn (was a ~2x duplication).
 _DELEGATE_DESCRIPTION = (
-    "把当前任务拆给一支由你（主 Agent）指挥的临时团队执行，并把各成员的产出"
-    "返回给你。你自行决定粒度：传入一个 tasks 数组，每个元素是一个内联角色"
-    "（role + task 必填）。无依赖且仅 1 个任务=单兵；无依赖多个=并行；任一任务"
-    "声明 depends_on（引用其它任务的 id）=按依赖图分波执行，上游产出会自动注入"
-    "下游。\n"
-    "适用：需要多视角并行调研/对比、多阶段流水线（设计→实现→测试）、需要交叉"
-    "审阅的复杂任务；以及任何会产出或改动产物的工作（写/改文件、删除/移动、运行"
-    "代码）——这些工具只有 worker 持有，必须经本工具交给 worker 执行，哪怕只派一个。"
-    "普通问答/闲聊/单点检索等简单请求不要委派，直接自己回答。\n"
-    "若某个子任务本身还很复杂、需要它自己再带一支小队，可给该任务设 can_delegate=true，"
-    "允许这名 worker 再向下委派一层（最多一层，其子成员不能继续委派）；非必要不要开。\n"
-    "重要：本工具不会替你回复用户。团队产出会作为结果回到你这里；用户可在界面"
-    "查看每个成员的完整产出，因此你只需用自己的声音写一段简短概览（综述关键结论、"
-    "串起整体、指引用户去看细节），不要逐字复述全文；可在看到结果后再次调用本工具"
-    "继续委派。\n"
-    "例外（finalize）：若本次只派一个 worker、且这次委派就是整件事的最终交付，可设"
-    " finalize=true，让该 worker 成功后的产出直接作为你的答复呈现给用户，省去你再写"
-    "一段概览（多 worker 或 worker 失败时自动回落到由你收尾）。"
+    "把当前任务拆给一支由你（主 Agent）指挥的临时团队执行，并把各队员的产出返回给你。"
+    "本工具非终结：产出回到你的循环，你据此写一段简短概览（不逐字复述，用户可在界面看"
+    "各成员全文），必要时再次调用继续委派。\n"
+    "粒度由你定：传入一个 tasks 数组（每个元素一个内联角色，role + task 必填）。无依赖且"
+    "仅 1 个=单兵；无依赖多个=并行；任一任务声明 depends_on（引用其它任务的 id）=按依赖"
+    "图分波执行，上游产出自动注入下游。\n"
+    "简单问答 / 闲聊 / 检索自己答；交付物（要产出或改动产物的活——写 / 改文件、删除 / 移动、"
+    "运行代码，这些工具只 worker 持有）才用本工具，哪怕只派一个。其余进阶档位（finalize / "
+    "can_delegate / contract / 模型档位 / 流水线等）见对应参数说明与 "
+    "consult_skill(team_orchestration_advanced)。"
 )
 
 _DELEGATE_PARAMETERS = {
@@ -215,6 +214,16 @@ _DELEGATE_PARAMETERS = {
                                 "type": "string",
                                 "enum": ["text", "json"],
                                 "description": "要求的产出格式；json 会校验能否解析。",
+                            },
+                            "requires_files": {
+                                "type": "boolean",
+                                "description": (
+                                    "产出是落盘文件（可运行代码 / 网页 / 应用、脚本、配置、"
+                                    "数据文件等用户要打开 / 运行 / 保存的东西）时设 true：未调用"
+                                    " file_write 把产物写进工作区即判未达标、自动返工，杜绝把整份"
+                                    "文件内容粘在回复正文、工作区却空着。纯文字交付（分析 / 说明 /"
+                                    " 问答）不要设。"
+                                ),
                             },
                             "strict": {
                                 "type": "boolean",
@@ -922,6 +931,43 @@ class DelegateTool:
                 registered.append(session)
         return registered
 
+    def _escalation_block(self, plan, results: dict) -> str:
+        """The CEO-facing「队员升级」section, or "" when no worker escalated.
+
+        Lists every worker escalation (role + question + its暂用假设, blockers first /
+        marked) and tells the CEO to resolve them BEFORE finalizing — with its own
+        levers: ask_user (user must decide), revise (recall the author with the answer),
+        or a fresh delegate. The workers already delivered under their assumptions, so
+        this is a steer-before-收尾, not a hard stop."""
+        items: list[tuple[bool, str]] = []  # (blocking, line) — blockers sort first
+        for node in plan.nodes:
+            state = results.get(node.run_id)
+            if not state or not state.escalations:
+                continue
+            label = node.role or node.run_id
+            for e in state.escalations:
+                question = str(e.get("question") or "").strip()
+                if not question:
+                    continue
+                blocking = bool(e.get("blocking"))
+                mark = "【关键阻塞】" if blocking else ""
+                line = f"- {mark}{label}：{question}"
+                assumption = str(e.get("assumption") or "").strip()
+                if assumption:
+                    line += f"（其暂用假设：{assumption}）"
+                items.append((blocking, line))
+        if not items:
+            return ""
+        items.sort(key=lambda it: not it[0])  # blocking=True first
+        body = "\n".join(line for _, line in items)
+        return (
+            "\n### ⚠️ 队员升级了待决问题（请先处理再收尾）\n"
+            "以下是队员无法独自拍板、需要你定夺的关键岔路 / 缺失信息。它们已按各自的暂定假设"
+            "继续交付，但你应先处理这些问题：能自己答的就在概览里给出并据此判断相关产物是否需"
+            "返工；确需用户拍板的就用 ask_user 问（可把问题 near-verbatim 转给用户）；需要原"
+            "作者据答案重做的就用 revise 唤回。\n" + body
+        )
+
     def _format_for_ceo(self, plan, results: dict) -> str:
         """Render the workers' products as the CEO's overview input.
 
@@ -930,6 +976,11 @@ class DelegateTool:
         user reads each worker's full output in the UI, not in the CEO's reply.
         """
         lines = ["## 团队执行结果（据此写一段简短概览交给用户；完整详情用户自行查看）"]
+        # 队员升级（worker → 你）置顶：这些是队员无法独自拍板、需要你定夺的待决问题。它们已
+        # 按各自的暂定假设继续交付了，但你应在收尾前先处理——这是 worker 唯一的向上通道，别忽略。
+        escalation_block = self._escalation_block(plan, results)
+        if escalation_block:
+            lines.append(escalation_block)
         for node in plan.nodes:
             state = results.get(node.run_id)
             status = state.phase.value if state else "unknown"
@@ -943,9 +994,25 @@ class DelegateTool:
             if state and state.warnings:
                 warns = "；".join(state.warnings)
                 body += f"\n\n> 质检提醒（未完全达标，请判断是否需要返工）：{warns}"
+            if state and state.escalations:
+                body += (
+                    f"\n\n> 已升级 {len(state.escalations)} 项待决问题（见顶部「队员升级了"
+                    "待决问题」，请先处理再据此判断本产物是否需返工）"
+                )
+            if state and state.files_touched:
+                produced = "、".join(f"`{p}`" for p in state.files_touched)
+                body += f"\n\n> 文件产出（已写入工作区）：{produced}"
             lines.append(f"\n### {label}（{status}） · run_id: `{node.run_id}`\n{body}")
         lines.append(
-            "\n---\n以上为各 worker 的完整产出（用户可在界面逐个展开查看）。"
+            "\n---\n以上为各 worker 的完整产出（用户可在界面逐个展开查看）。各成员写入工作区的"
+            "文件已列于其「文件产出（已写入工作区）」一行——这就是本次落盘的产物清单（地面真相）："
+            "除非清单为空或明显不全，否则无需再用 file_list / file_read 去工作区核对，直接据此收尾即可。\n"
+            "⚠️ 防幻觉铁律：一个 worker 是否真把文件写进了工作区，只以它有没有「文件产出」行为准。"
+            "若某 worker 的正文声称 / 暗示自己创建或写入了文件，却没有「文件产出」行（即落盘清单为空），"
+            "则这些文件并未真正写入——你绝不能据此向用户报告文件已创建或该交付已完成；应把这类文件"
+            "交付判为【未达成】，用 revise 唤回原作者真正调用 file_write 落盘，或重新委派。"
+            "（仅产出文本结论的 worker——调研 / 分析 / 辩论 / 对比等——本就没有文件产出，属正常，"
+            "不在此列，也不必在概览里提它。）\n"
             "请用你自己的声音写一段【简短概览】：综述各成员的关键结论、串起整体、"
             "指引用户去看细节即可——不要逐字复述每个 worker 的全文，也不要罗列内部"
             "步骤或 Agent。如仍需补充工作，可再次调用 delegate；若用户希望对其中某个产物"

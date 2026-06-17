@@ -104,7 +104,7 @@ def setup_logging() -> None:
         "httpcore.connection",
         # The startup migration-drift check (db/migration_check.py) builds a
         # MigrationContext, which logs two INFO lines per boot; the actionable
-        # signal is our own WARNING, not alembic's transactional-DDL chatter.
+        # signal is our own WARNING/ERROR, not alembic's transactional-DDL chatter.
         # (CLI `alembic upgrade` uses alembic.ini's own log config, untouched.)
         "alembic.runtime.migration",
     ]

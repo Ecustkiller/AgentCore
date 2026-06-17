@@ -3,6 +3,7 @@ import { type Invite, createInvite, listInvites } from "@/services/invites";
 import { useAuthStore } from "@/stores/auth";
 import { Check, Copy, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
+import { SettingsHeader } from "./SettingsHeader";
 
 const STATUS_LABEL: Record<Invite["status"], string> = {
   active: "可用",
@@ -70,34 +71,30 @@ export function MembersSettings() {
 
   if (!isAdmin) {
     return (
-      <div>
-        <h1 className="text-xl font-semibold">成员</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          仅管理员可生成和管理邀请码。
-        </p>
-      </div>
+      <SettingsHeader
+        title="成员"
+        description="仅管理员可生成和管理邀请码。"
+      />
     );
   }
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">成员</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            生成邀请码邀请新成员注册。每个邀请码仅可使用一次。
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void handleCreate()}
-          disabled={creating}
-          className="flex h-8 shrink-0 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-        >
-          <Plus size={16} />
-          {creating ? "生成中…" : "生成邀请码"}
-        </button>
-      </div>
+      <SettingsHeader
+        title="成员"
+        description="生成邀请码邀请新成员注册。每个邀请码仅可使用一次。"
+        action={
+          <button
+            type="button"
+            onClick={() => void handleCreate()}
+            disabled={creating}
+            className="flex h-8 shrink-0 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            <Plus size={16} />
+            {creating ? "生成中…" : "生成邀请码"}
+          </button>
+        }
+      />
 
       {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
 

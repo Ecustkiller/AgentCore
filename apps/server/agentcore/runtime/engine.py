@@ -51,6 +51,25 @@ logger = get_logger(__name__)
 
 _MAX_PARALLEL_TOOLS = 5
 
+# Tool-call arguments stream as many tiny deltas (a delegate 任务书 / file body =
+# thousands of chars). Emit a progress event only when a call's accumulated args grow
+# by ≥ this many chars (plus once when the tool name is first known) — throttling the
+# tick that drives the「正在生成 {工具} · N 字」line (captain bubble via tool_progress,
+# worker node via run_tool_progress).
+#
+# Trade-off — it's a char step, so #events = args_len / STEP and the counter jumps by
+# STEP each tick, *independent of stream speed*:
+#   • smaller → 更跟手 (counter climbs smoothly, feels live) but more SSE events →
+#     more store writes / bubble re-renders, and short calls (a tiny str_replace)
+#     emit ticks they don't need;
+#   • larger → cheaper but the number lurches / lags on a long task book.
+# 64 puts a typical DeepSeek arg stream (~150–300 chars/s) at ~3–5 ticks/s — clearly
+# alive without flooding — and ≈ one text line per tick reads as "another line
+# written". Each event is a tiny {tool_name, chars} + a one-field store patch, so even
+# a 50KB write (≈800 ticks over its whole duration) is comfortably cheap; tune here if
+# the bubble ever feels jittery (raise) or laggy (lower).
+_TOOL_PROGRESS_STEP = 64
+
 
 # Injected when convergence governance forces a tool-free answer (a stuck loop
 # trips a hard finalize, or the round budget is exhausted mid-tool-call).
@@ -70,10 +89,12 @@ async def react_loop(
     allowed_tool_names: list[str] | None = None,
     on_content: Callable[[str], None] | None = None,
     on_reasoning: Callable[[str], None] | None = None,
+    on_tool_progress: Callable[[str, int], None] | None = None,
     raise_on_error: bool = False,
     citation_sink: list[dict[str, Any]] | None = None,
     annotate_citations: bool = True,
     approval_gate: ApprovalGate | None = None,
+    usage_sink: list[TokenUsage] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run the ReAct loop.
 
@@ -88,7 +109,10 @@ async def react_loop(
     (``profile.max_rounds``); it defaults to the chat profile. By
     default content/reasoning deltas are emitted as conversation events
     (single-agent path). A caller running a multi-agent run passes ``on_content``
-    /``on_reasoning`` to redirect text into ``run_output_delta`` instead.
+    /``on_reasoning`` to redirect text into ``run_output_delta`` instead, and
+    ``on_tool_progress`` to surface a worker's tool-call ARGUMENT streaming
+    (``(tool_name, cumulative_chars)``, throttled) — the only live signal during a
+    long file write, which is neither content nor reasoning.
     ``allowed_tool_names`` filters which tools the model may call (``None`` = all,
     ``[]`` = none). Tool execution events always go to the sink. When
     ``citation_sink`` is provided, web sources consulted by research tools are
@@ -102,8 +126,19 @@ async def react_loop(
     ``approval_gate`` (CEO chat path only; ``None`` for delegated workers) pauses
     GRANTABLE tool calls until the user authorizes them — a denial is fed back to
     the model as a tool result so it can adapt.
+    ``usage_sink`` (when provided) mirrors the running ``total_usage`` after each
+    completed round, so a caller that catches an exception can still bill the
+    tokens consumed before the failure (B-deep 失败计费): on ``raise_on_error`` the
+    accumulated usage is otherwise lost inside this frame when a mid-loop round
+    raises. It is cleared on entry and only ever holds the latest cumulative total
+    (a single-element list); on a normal return the caller uses the returned usage
+    instead.
     """
     profile = profile or get_profile("chat")
+    # Reset any caller-provided usage mirror so it reflects only this loop's spend
+    # (callers reuse one list across contract-retry attempts).
+    if usage_sink is not None:
+        usage_sink.clear()
 
     if allowed_tool_names is None:
         tool_defs = tools.get_openai_definitions() if tools.count > 0 else None
@@ -133,7 +168,9 @@ async def react_loop(
 
         try:
             round_content, round_reasoning, round_tool_calls, usage = (
-                await _stream_llm_round(llm, request, emit_content, emit_reasoning)
+                await _stream_llm_round(
+                    llm, request, emit_content, emit_reasoning, on_tool_progress
+                )
             )
         except Exception as e:
             logger.error("llm.call_failed", round=round_idx, error=str(e))
@@ -151,9 +188,13 @@ async def react_loop(
 
         if usage:
             total_usage = total_usage + usage
+        # Mirror the cumulative spend so a caller catching a later raise can still
+        # bill the rounds that completed (the round that raises returns no usage).
+        if usage_sink is not None:
+            usage_sink[:] = [total_usage]
 
         if round_content:
-            final_content += round_content
+            final_content = join_segments(final_content, round_content)
 
         if round_reasoning:
             final_reasoning += round_reasoning
@@ -211,9 +252,7 @@ async def react_loop(
                 cache_miss_tokens=usage_meta.get("cache_miss_tokens", 0),
             )
             handoff_content = terminal.final_text or ""
-            combined = (
-                f"{final_content}{handoff_content}" if final_content else handoff_content
-            )
+            combined = join_segments(final_content, handoff_content)
             return combined, final_reasoning, total_usage, round_idx + 1
 
         # Convergence governance: detect mechanical loops and intervene. NUDGE
@@ -271,6 +310,26 @@ async def react_loop(
     )
 
 
+def join_segments(acc: str, new: str) -> str:
+    """Append a round's text to the turn content as a separate paragraph.
+
+    Each ReAct round is a distinct thought, and the model often calls a tool — even a
+    turn-pausing ``ask_user`` — between rounds. Concatenating raw made a pre-tool
+    lead-in (e.g. one ending in "：") run straight into the post-resume continuation in
+    the flattened ``content`` (DB / LLM history / search preview). Insert a blank line
+    between non-empty segments so they read as paragraphs. The live stream still emits
+    raw deltas and the inline ask_user card rides the journal, so neither the live view
+    nor the card position is affected.
+    """
+    if not acc:
+        return new
+    if not new:
+        return acc
+    if acc[-1].isspace():
+        return acc + new
+    return f"{acc}\n\n{new}"
+
+
 async def _force_finalize(
     *,
     messages: list[LLMMessage],
@@ -304,7 +363,7 @@ async def _force_finalize(
     if usage:
         total_usage = total_usage + usage
 
-    combined_content = f"{final_content}{content}" if final_content else content
+    combined_content = join_segments(final_content, content)
     combined_reasoning = (
         f"{final_reasoning}{reasoning}" if final_reasoning else reasoning
     )
@@ -316,12 +375,15 @@ async def _stream_llm_round(
     request: LLMRequest,
     emit_content: Callable[[str], None],
     emit_reasoning: Callable[[str], None],
+    on_tool_progress: Callable[[str, int], None] | None = None,
 ) -> tuple[str, str, list[ToolCall] | None, TokenUsage | None]:
     """Stream one LLM call. Returns (content, reasoning, tool_calls, usage)."""
 
     content_parts: list[str] = []
     reasoning_parts: list[str] = []
     tc_accumulators: dict[int, dict] = {}
+    # Last arg length per tool-call index we emitted progress for (throttling).
+    tc_progress_at: dict[int, int] = {}
     usage: TokenUsage | None = None
     finish_reason: str | None = None
     start = time.monotonic()
@@ -354,6 +416,18 @@ async def _stream_llm_round(
                         tc_accumulators[idx]["name"] = tc_delta.function_name
                 if tc_delta.arguments_delta:
                     tc_accumulators[idx]["arguments"] += tc_delta.arguments_delta
+                # Surface the (throttled) argument-streaming progress so a worker
+                # writing a long file isn't invisible until tool_use_start. Fires
+                # once the tool name is known, then every +_TOOL_PROGRESS_STEP chars.
+                if on_tool_progress is not None:
+                    name = tc_accumulators[idx]["name"]
+                    chars = len(tc_accumulators[idx]["arguments"])
+                    last = tc_progress_at.get(idx)
+                    if name and (
+                        last is None or chars - last >= _TOOL_PROGRESS_STEP
+                    ):
+                        tc_progress_at[idx] = chars
+                        on_tool_progress(name, chars)
 
         if chunk.usage:
             usage = chunk.usage
@@ -473,8 +547,28 @@ async def _execute_tools(
         result = await tool.execute(args, context)
         result.tool_call_id = tc.id
 
-        output = result.output if result.success else (result.error or "Unknown error")
-        sink.emit(tool_use_end(tc.id, name, success=result.success, output=output))
+        if result.success:
+            output = result.output
+        else:
+            # Surface BOTH the terse error summary AND any diagnostic output
+            # (stdout/stderr for code_execute) so the model can self-correct
+            # instead of debugging blind: many tools put the real reason in
+            # ``output``, not the short ``error`` (e.g. code_execute's error is
+            # just "退出码 N" while the traceback / "command not found" lives in
+            # output). Either may be empty; join the non-empty parts.
+            output = (
+                "\n".join(
+                    p
+                    for p in ((result.error or "").strip(), (result.output or "").strip())
+                    if p
+                )
+                or "Unknown error"
+            )
+        sink.emit(
+            tool_use_end(
+                tc.id, name, success=result.success, output=output, display=result.display
+            )
+        )
         logger.info(
             "tool.execute_end",
             tool=name,

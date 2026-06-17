@@ -28,13 +28,21 @@ class ContractVerdict:
     failures: list[str] = field(default_factory=list)
 
 
-def check_contract(content: str, contract: RunContract | None) -> ContractVerdict:
+def check_contract(
+    content: str, contract: RunContract | None, *, files_written: int = 0
+) -> ContractVerdict:
     """Check ``content`` against ``contract``; return a verdict + human reasons.
 
     The non-empty baseline always applies — an empty product is never acceptable,
     even with no contract (系统兜底，对应决策②). When a contract is given, its
     mechanical rules layer on top. Failure order is stable so feedback reads
     predictably.
+
+    ``files_written`` is the count of file-writing tool calls the run made (from
+    ``files_touched_from_transcript``); it backs the ``requires_files`` predicate so
+    a file deliverable that was only pasted into the reply — never written to the
+    workspace — fails and auto-reworks. Stays a pure function (the caller derives the
+    count) so it remains trivially unit-testable.
     """
     text = content.strip()
     if not text:
@@ -61,6 +69,8 @@ def check_contract(content: str, contract: RunContract | None) -> ContractVerdic
             failures.append(f"缺少必备章节：{section}")
     if contract.output_format == "json" and not _is_json(content):
         failures.append("产出不是可解析的 JSON")
+    if contract.requires_files and files_written <= 0:
+        failures.append("未把产物写入工作区：交付物须用 file_write 落盘，而非粘在回复正文里")
     return ContractVerdict(ok=not failures, failures=failures)
 
 
@@ -96,6 +106,10 @@ def describe_contract(contract: RunContract | None) -> str:
         lines.append(f"- 篇幅不超过 {contract.max_length} 字")
     if contract.output_format == "json":
         lines.append("- 产出必须是可解析的 JSON")
+    if contract.requires_files:
+        lines.append(
+            "- 必须调用 file_write 把产物写进工作区（成品是落盘文件，不能只贴在回复正文里）"
+        )
     return "\n".join(lines)
 
 

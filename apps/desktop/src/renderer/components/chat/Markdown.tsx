@@ -16,12 +16,60 @@ import { CodeBlock, nodeText } from "./CodeBlock";
 import { DiagramBlock } from "./Diagram";
 import { faviconUrl } from "./Favicon";
 import { SourceTooltip } from "./SourcePreview";
+import { rehypeCodeMeta } from "./rehypeCodeMeta";
+import { splitStreamingMarkdown } from "./streamingMarkdown";
+
+type ReactMarkdownProps = ComponentPropsWithoutRef<typeof ReactMarkdown>;
 
 // Stable references so ReactMarkdown doesn't re-init plugins on every keystroke
-// of the streaming content.
+// of the streaming content. `rehypeCodeMeta` runs before highlight so a
+// `lang:path` fence still highlights (and surfaces its filename header).
 const remarkPlugins = [remarkGfm, remarkMath];
-// `ignoreMissing` keeps an unknown ```lang from throwing mid-stream.
-const rehypePlugins = [[rehypeHighlight, { ignoreMissing: true }], rehypeKatex];
+// Finished turn: `ignoreMissing` keeps an unknown ```lang from throwing.
+const rehypeHighlighted: ReactMarkdownProps["rehypePlugins"] = [
+  rehypeCodeMeta,
+  [rehypeHighlight, { ignoreMissing: true }],
+  rehypeKatex,
+];
+// While streaming we drop rehype-highlight — re-tokenizing every code block on
+// each delta is the dominant streaming cost. Code shows as plain monospace until
+// the turn finishes (same defer-while-streaming policy as the diagram blocks),
+// then highlights once on the final render below.
+const rehypeStreaming: ReactMarkdownProps["rehypePlugins"] = [
+  rehypeCodeMeta,
+  rehypeKatex,
+];
+
+/**
+ * One memoized Markdown chunk.
+ *
+ * The streaming reply is split into a frozen prefix + a live tail
+ * ({@link splitStreamingMarkdown}); rendering each as its own memoized chunk lets
+ * the prefix skip re-parsing on every delta — only the chunk whose `content`
+ * actually changed (the tail) re-renders. Plugin/component props are stable
+ * module-level / memoized refs, so `memo`'s shallow compare holds across deltas.
+ */
+const MarkdownChunk = memo(function MarkdownChunk({
+  content,
+  remarkPlugins: remarks,
+  rehypePlugins: rehype,
+  components,
+}: {
+  content: string;
+  remarkPlugins: ReactMarkdownProps["remarkPlugins"];
+  rehypePlugins: ReactMarkdownProps["rehypePlugins"];
+  components: Components;
+}) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarks}
+      rehypePlugins={rehype}
+      components={components}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+});
 
 /**
  * A tiny inline favicon for a citation chip. Unlike the card {@link Favicon}, it
@@ -88,6 +136,9 @@ interface Props {
   /** While true, defer rendering ```mermaid/```markmap blocks (a half-written
    * diagram is a syntax error) — they show source until the turn finishes. */
   isStreaming?: boolean;
+  /** Render in a muted tone for secondary content (a turn's reasoning), so the
+   * structured thinking reads as quieter than the answer body. */
+  muted?: boolean;
 }
 
 /**
@@ -101,6 +152,7 @@ export const Markdown = memo(function Markdown({
   citations,
   onCitationClick,
   isStreaming = false,
+  muted = false,
 }: Props) {
   const citationCount = citations?.length ?? 0;
   // Only enrich once sources exist (they arrive at end-of-turn), so streaming
@@ -165,16 +217,44 @@ export const Markdown = memo(function Markdown({
     };
   }, [citationCount, citations, onCitationClick, isStreaming]);
 
+  // While streaming, freeze the completed-block prefix and re-render only the
+  // live tail (块级记忆化), with highlight deferred (rehypeStreaming). The
+  // finished turn renders as one document with highlight, so any cross-block
+  // references the conservative split would miss mid-stream resolve in the end state.
+  const rehype = isStreaming ? rehypeStreaming : rehypeHighlighted;
+  const split = isStreaming ? splitStreamingMarkdown(content) : null;
+
   return (
-    <div className="markdown-body text-foreground">
-      <ReactMarkdown
-        remarkPlugins={remarks}
-        // biome-ignore lint/suspicious/noExplicitAny: plugin tuple typing is loose across unified versions.
-        rehypePlugins={rehypePlugins as any}
-        components={comps}
-      >
-        {content}
-      </ReactMarkdown>
+    <div
+      className={`markdown-body ${muted ? "text-muted-foreground" : "text-foreground"}`}
+    >
+      {split ? (
+        <>
+          {split.stable && (
+            <MarkdownChunk
+              content={split.stable}
+              remarkPlugins={remarks}
+              rehypePlugins={rehype}
+              components={comps}
+            />
+          )}
+          {split.tail && (
+            <MarkdownChunk
+              content={split.tail}
+              remarkPlugins={remarks}
+              rehypePlugins={rehype}
+              components={comps}
+            />
+          )}
+        </>
+      ) : (
+        <MarkdownChunk
+          content={content}
+          remarkPlugins={remarks}
+          rehypePlugins={rehype}
+          components={comps}
+        />
+      )}
     </div>
   );
 });

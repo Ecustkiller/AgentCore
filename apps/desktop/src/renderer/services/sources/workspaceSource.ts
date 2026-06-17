@@ -12,7 +12,9 @@ import {
   listWorkspaceFiles,
   moveWorkspaceFile,
   readWorkspaceFile,
+  readWorkspaceFileForEdit,
   uploadWorkspaceFile,
+  writeWorkspaceFileText,
 } from "@/services/workspace";
 import {
   wsCreateDir,
@@ -22,7 +24,9 @@ import {
   wsListFiles,
   wsMoveFile,
   wsReadFile,
+  wsReadFileForEdit,
   wsUploadFile,
+  wsWriteFileText,
 } from "@/services/workspaces";
 
 /** Map the server preview shape into the unified result (server has no image kind). */
@@ -70,6 +74,25 @@ export function createWorkspaceSource(
     listTree,
     listDir: (dir) => oneLevel(listTree, dir),
     read: (path) => readWorkspaceFile(conversationId, path).then(adaptPreview),
+    readForEdit: async (path) => {
+      const d = await readWorkspaceFileForEdit(conversationId, path);
+      return {
+        text: d.text,
+        version: { mtimeMs: d.mtimeMs },
+        encoding: "utf-8",
+        eol: d.eol,
+      };
+    },
+    writeText: async (path, input) => {
+      const r = await writeWorkspaceFileText(conversationId, path, {
+        content: input.content,
+        eol: input.eol,
+        baselineMtimeMs: input.baseline?.mtimeMs ?? 0,
+      });
+      return r.ok
+        ? { ok: true, version: { mtimeMs: r.mtimeMs } }
+        : { ok: false, reason: "conflict", version: { mtimeMs: r.mtimeMs } };
+    },
     createFile: (path) =>
       uploadWorkspaceFile(conversationId, path, new Blob([])),
     mkdir: (path) => createWorkspaceDir(conversationId, path),
@@ -110,6 +133,25 @@ export function createCloudWorkspaceSource(
     // Feeds the @ index (文件中枢统一 F4) — flat, files-only, server-pruned/capped.
     listFileIndex: () => wsListFileIndex(wsId),
     read: (path) => wsReadFile(wsId, path).then(adaptPreview),
+    readForEdit: async (path) => {
+      const d = await wsReadFileForEdit(wsId, path);
+      return {
+        text: d.text,
+        version: { mtimeMs: d.mtimeMs },
+        encoding: "utf-8",
+        eol: d.eol,
+      };
+    },
+    writeText: async (path, input) => {
+      const r = await wsWriteFileText(wsId, path, {
+        content: input.content,
+        eol: input.eol,
+        baselineMtimeMs: input.baseline?.mtimeMs ?? 0,
+      });
+      return r.ok
+        ? { ok: true, version: { mtimeMs: r.mtimeMs } }
+        : { ok: false, reason: "conflict", version: { mtimeMs: r.mtimeMs } };
+    },
     createFile: (path) => wsUploadFile(wsId, path, new Blob([])),
     mkdir: (path) => wsCreateDir(wsId, path),
     move: (src, dst) => wsMoveFile(wsId, src, dst),

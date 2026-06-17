@@ -1,6 +1,7 @@
 import { type Theme, resolveDark } from "@/lib/theme";
 import { useUIStore } from "@/stores/ui";
 import { Check, type LucideIcon, Monitor, Moon, Sun } from "lucide-react";
+import { SettingsHeader } from "./SettingsHeader";
 
 interface ThemeOption {
   value: Theme;
@@ -43,10 +44,10 @@ export function AppearanceSettings() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold">外观</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        选择界面主题。也可在命令面板（Ctrl/Cmd+K）中快速切换。
-      </p>
+      <SettingsHeader
+        title="外观"
+        description="选择界面主题。也可在命令面板（Ctrl/Cmd+K）中快速切换。"
+      />
 
       <section className="mt-6">
         <h2 className="text-base font-medium">主题</h2>

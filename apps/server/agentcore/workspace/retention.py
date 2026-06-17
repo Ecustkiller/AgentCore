@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
+from agentcore.db.errors import is_schema_error
 from agentcore.db.repositories import ConversationRepository, FolderRepository
 from agentcore.workspace.locate import workspace_root_path, workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
@@ -144,8 +145,10 @@ async def retention_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            # Best-effort periodic sweep: an operational failure (DB blip, etc.) is not
-            # a code bug — concise one-line cause, no full traceback, so a recurring
-            # transient (retries every interval) can't flood the AI logs.
-            logger.warning("retention.sweep_failed", error=str(e))
+            # Best-effort periodic sweep, logged on ONE line (no traceback) so a
+            # recurring transient can't flood the AI logs. A schema fault (missing
+            # table/column = pending migration) is persistent, not transient —
+            # escalate to error so a watchdog catches the sweep silently failing.
+            log = logger.error if is_schema_error(e) else logger.warning
+            log("retention.sweep_failed", error=str(e))
         await asyncio.sleep(interval)

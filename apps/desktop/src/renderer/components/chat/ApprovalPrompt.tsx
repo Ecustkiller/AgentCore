@@ -1,6 +1,6 @@
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { notifyError } from "@/lib/toast";
-import { decideApproval } from "@/services/approvals";
+import { decideApproval, isFileOpTool } from "@/services/approvals";
 import { type PendingApproval, useApprovalStore } from "@/stores/approvals";
 import { useConversationStore } from "@/stores/conversation";
 import type { ApprovalDecision } from "@/types/events";
@@ -9,6 +9,7 @@ import {
   CheckCheck,
   ChevronDown,
   ChevronRight,
+  FileCheck,
   Loader2,
   ShieldAlert,
   X,
@@ -20,6 +21,8 @@ import { useState } from "react";
 const TOOL_LABELS: Record<string, string> = {
   file_write: "写入文件",
   str_replace: "修改文件",
+  file_delete: "删除文件",
+  file_move: "移动文件",
   code_execute: "执行代码",
 };
 
@@ -71,6 +74,10 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
   const headline = primaryArg(approval.arguments);
   const argEntries = Object.entries(approval.arguments);
   const busy = approval.resolving;
+  // file_write / str_replace / file_delete / file_move share one turn-grant; their
+  // cards offer it so a multi-file or mixed-op task clears in one click. code_execute
+  // is outside the class and keeps only its own per-tool grant.
+  const isFileOp = isFileOpTool(approval.toolName);
 
   const onDecide = (decision: ApprovalDecision) => {
     setClicked(decision);
@@ -142,6 +149,15 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
           disabled={busy}
           onClick={() => onDecide("approve_always")}
         />
+        {isFileOp && (
+          <DecisionButton
+            icon={spinnerOr("approve_always_files", <FileCheck size={13} />)}
+            label="本轮内允许所有文件改动"
+            tone="neutral"
+            disabled={busy}
+            onClick={() => onDecide("approve_always_files")}
+          />
+        )}
         <DecisionButton
           icon={spinnerOr("deny", <X size={13} />)}
           label="拒绝"

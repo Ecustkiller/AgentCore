@@ -4,6 +4,11 @@ import {
   patchConversationCache,
   useGroupedConversations,
 } from "@/hooks/useConversations";
+import {
+  addWorkspaceFromFolder,
+  patchWorkspaceFromFolder,
+  removeWorkspaceForFolder,
+} from "@/hooks/useWorkspaces";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys } from "@/lib/queryKeys";
 import {
@@ -24,7 +29,7 @@ import { useMutation } from "@tanstack/react-query";
 const EMPTY_FOLDERS: FolderMeta[] = [];
 
 /** Imperative read of the cached folder list (for non-React callers). */
-function getFolders(): FolderMeta[] {
+export function getFolders(): FolderMeta[] {
   return (
     queryClient.getQueryData<GroupedConversations>(conversationKeys.grouped)
       ?.folders ?? []
@@ -79,7 +84,11 @@ export function useCreateFolder() {
       // Bind to a desktop FS root at creation (文件中枢统一 F2: 加文件夹 = 建本地项目).
       localRootId?: string | null;
     }) => createFolder(name, localDir, localRootId),
-    onSuccess: (folder) => addFolderCache(folder),
+    onSuccess: (folder) => {
+      addFolderCache(folder);
+      // 文件夹即工作区：新建文件夹随即作为一个工作区出现在 文件 hub 的 rail。
+      addWorkspaceFromFolder(folder);
+    },
   });
 }
 
@@ -99,14 +108,19 @@ export function useUpdateFolder() {
       if (patch.name !== undefined) cachePatch.name = patch.name;
       if (patch.localDir !== undefined) cachePatch.localDir = patch.localDir;
       patchFolderCache(id, cachePatch);
+      // Mirror the rename onto the 文件 hub rail (name is the only rail-visible field).
+      if (patch.name !== undefined)
+        patchWorkspaceFromFolder(id, { name: patch.name });
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev)
+      if (ctx?.prev) {
         patchFolderCache(ctx.prev.id, {
           name: ctx.prev.name,
           localDir: ctx.prev.localDir,
         });
+        patchWorkspaceFromFolder(ctx.prev.id, { name: ctx.prev.name });
+      }
     },
   });
 }
@@ -123,6 +137,7 @@ export function useDeleteFolder() {
         if (c.folderId === id) patchConversationCache(c.id, { folderId: null });
       }
       removeFolderFromCache(id);
+      removeWorkspaceForFolder(id);
     },
   });
 }

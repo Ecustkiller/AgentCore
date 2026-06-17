@@ -15,17 +15,23 @@ re-prices.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
+from agentcore.core.types import new_id
+from agentcore.llm.pricing import calculate_cost
+from agentcore.llm.protocol import TokenUsage
 from agentcore.runtime.citations import merge_citations
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
-# cost_events.role categories (mirror the DB CheckConstraint). 阶段1 only ever
-# produces captain + member; arena / title / memory are reserved for later run
-# kinds and background LLM calls.
+# cost_events.role categories (mirror the DB CheckConstraint). A turn's run tree
+# produces captain + member; ``title`` / ``memory`` tag the off-turn background
+# LLM calls (标题生成 / 记忆整合) so their spend rolls into account/conversation
+# totals without polluting the per-message team payroll. ``arena`` is reserved.
 ROLE_CAPTAIN = "captain"
 ROLE_MEMBER = "member"
+ROLE_TITLE = "title"
+ROLE_MEMORY = "memory"
 
 # The four money keys carried in cost_events.cost (integer nano-USD). The Cost
 # dataclass also exposes ``currency``, which rides in its own column instead.
@@ -125,6 +131,37 @@ def captain_run_cost_from_state(run_id: str, state: RunState) -> RunCost:
         currency=currency,
         rounds=state.rounds,
         duration_ms=state.duration_ms,
+    )
+
+
+def background_run_cost(role: str, model: str, usage: TokenUsage) -> RunCost:
+    """A ledger row for an off-turn background LLM call (标题生成 / 记忆整合).
+
+    These calls belong to no Run tree and no assistant turn, so unlike the
+    captain/member builders there is no ``RunState`` to read — the row is priced
+    straight off the call's :class:`TokenUsage` via the one ``calculate_cost``
+    (不变量 #2), under a fresh ``run_id``. The persistence layer attaches it with
+    ``message_id = NULL`` (Gap C): it then SUMs into the account/conversation
+    totals and shows as its own ``role`` line on the dashboard payroll, but never
+    lands in a single turn's per-Agent 工资单 (which is fetched by ``message_id``)
+    nor inflates the「请求数」(``COUNT(DISTINCT message_id)`` ignores NULL).
+
+    ``rounds`` is 1 (one LLM call); ``duration_ms`` is left 0 — these are
+    best-effort background passes, not user-visible turns whose latency matters.
+    """
+    body, total, currency = _split_cost(asdict(calculate_cost(model, usage)))
+    return RunCost(
+        run_id=new_id(),
+        parent_run_id=None,
+        agent_id=None,
+        role=role,
+        model=model,
+        tokens=usage.as_dict(),
+        cost=body,
+        cost_total_nano=total,
+        currency=currency,
+        rounds=1,
+        duration_ms=0,
     )
 
 

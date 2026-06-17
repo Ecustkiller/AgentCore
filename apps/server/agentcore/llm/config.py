@@ -111,6 +111,16 @@ PROFILES: dict[str, ModelProfile] = {
         temperature=0.3,
         max_rounds=1,
     ),
+    # 文件选区改写（L1，api/routes/files.py）：按指令改写一段选中文本，一次性 complete
+    # （从不 ReAct，故 max_rounds=1）。交互式编辑里用户在等，走经济档 Flash + 非思考求低
+    # 延迟；温度略低于 chat 保稳。质量不够时再按 chat/agent 的提档思路升级，不在此处叠 knob。
+    "file.rewrite": ModelProfile(
+        model=DEEPSEEK_V4_FLASH,
+        thinking=False,
+        reasoning_effort=None,
+        temperature=0.4,
+        max_rounds=1,
+    ),
     # One-line conversation title: fast, non-thinking, short output.
     # 64 tokens leaves headroom for a ~16-char CJK title without mid-title cutoff.
     "title": ModelProfile(

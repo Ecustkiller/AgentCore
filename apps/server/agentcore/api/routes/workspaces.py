@@ -41,11 +41,14 @@ from agentcore.api.schemas import (
     SnapshotSummary,
     StatusResponse,
     UploadFileResponse,
+    WorkspaceEditDoc,
     WorkspaceFileEntry,
     WorkspaceFileIndexResponse,
     WorkspaceFileListResponse,
     WorkspaceListResponse,
     WorkspaceSummary,
+    WorkspaceWriteRequest,
+    WorkspaceWriteResult,
 )
 from agentcore.config import settings
 from agentcore.core.errors import ConflictError, NotFoundError, ValidationError
@@ -58,7 +61,9 @@ from agentcore.workspace.files import (
     list_file_index,
     list_files,
     move_file,
+    read_file_for_edit,
     upload_file,
+    write_file_text,
 )
 from agentcore.workspace.git import CloneError, clone_repo
 from agentcore.workspace.locate import (
@@ -70,6 +75,7 @@ from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.protocol import (
     AlreadyExists,
     NotAFile,
+    NotUTF8,
     OutsideWorkspace,
     PathNotFound,
 )
@@ -269,6 +275,78 @@ async def upload_workspace_file(
     except OutsideWorkspace as e:
         raise ValidationError("路径非法：超出工作区范围") from e
     return UploadFileResponse(path=path, size_bytes=written)
+
+
+@router.get("/{ws_id}/edit/{path:path}", response_model=WorkspaceEditDoc)
+async def read_workspace_file_for_edit(
+    ws_id: str,
+    path: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
+):
+    """Read a cloud workspace file for in-panel editing (full text + mtime baseline).
+
+    The editable counterpart of the truncated preview download — a save needs the
+    whole file. Local ids are reached over desktop IPC, so they 409 like other ops.
+    """
+    target = await _resolve_owned_workspace(ws_id, user.user_id, conv_repo, folder_repo)
+    _require_cloud(target)
+    try:
+        text, mtime_ms, eol = await read_file_for_edit(
+            user_id=user.user_id,
+            folder_id=target.folder_id,
+            conversation_id=target.conversation_id,
+            path=path,
+        )
+    except OutsideWorkspace as e:
+        raise ValidationError("路径非法：超出工作区范围") from e
+    except (PathNotFound, NotAFile) as e:
+        raise NotFoundError("文件不存在") from e
+    except NotUTF8 as e:
+        raise ValidationError("文件不是 UTF-8 文本，无法编辑") from e
+    return WorkspaceEditDoc(text=text, mtime_ms=mtime_ms, eol=eol)
+
+
+@router.put("/{ws_id}/edit/{path:path}", response_model=WorkspaceWriteResult)
+async def write_workspace_file_text(
+    ws_id: str,
+    path: str,
+    body: WorkspaceWriteRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
+):
+    """Conditionally write editor text back to a cloud workspace file (mtime CAS).
+
+    ``baseline_mtime_ms`` makes a save that raced an Agent turn return ``conflict``
+    instead of clobbering it (云端硬化 §九). Local ids 409 (desktop owns the bytes).
+    """
+    target = await _resolve_owned_workspace(ws_id, user.user_id, conv_repo, folder_repo)
+    _require_cloud(target)
+
+    max_bytes = settings.workspace_upload_max_bytes
+    if len(body.content.encode("utf-8")) > max_bytes:
+        raise ValidationError(f"文件超出 {max_bytes} 字节的上传上限")
+
+    try:
+        # Folder lock (决策④): the CAS (mtime check + write) is atomic against a running
+        # same-space turn, so an Agent write can't slip between check and write.
+        async with workspace_lock(_storage_key(user.user_id, target)):
+            ok, mtime_ms = await write_file_text(
+                user_id=user.user_id,
+                folder_id=target.folder_id,
+                conversation_id=target.conversation_id,
+                path=path,
+                content=body.content,
+                baseline_mtime_ms=body.baseline_mtime_ms,
+                eol=body.eol,
+            )
+    except OutsideWorkspace as e:
+        raise ValidationError("路径非法：超出工作区范围") from e
+    except NotAFile as e:
+        raise ValidationError("目标是目录，无法作为文件写入") from e
+    return WorkspaceWriteResult(ok=ok, mtime_ms=mtime_ms, conflict=not ok)
 
 
 @router.get("/{ws_id}/files/{path:path}")

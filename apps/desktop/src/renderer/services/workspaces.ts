@@ -1,7 +1,9 @@
 import { BASE_URL, api } from "@/services/api";
 import {
   type FilePreview,
+  type WorkspaceEditDoc,
   type WorkspaceFile,
+  type WorkspaceWriteOutcome,
   authedFetch,
   decodePreviewResponse,
   encodePath,
@@ -119,4 +121,32 @@ export async function wsReadFile(
 ): Promise<FilePreview> {
   const res = await authedFetch(`${wsUrl(wsId)}/files/${encodePath(path)}`);
   return decodePreviewResponse(res);
+}
+
+/** Read a cloud-workspace file for **editing** (full text + mtime CAS baseline). */
+export async function wsReadFileForEdit(
+  wsId: string,
+  path: string,
+): Promise<WorkspaceEditDoc> {
+  const res = await api.get<Schemas["WorkspaceEditDoc"]>(
+    `${wsPath(wsId)}/edit/${encodePath(path)}`,
+  );
+  return { text: res.text, mtimeMs: res.mtime_ms, eol: res.eol };
+}
+
+/** Conditionally write editor text back (mtime CAS); conflict carries disk mtime. */
+export async function wsWriteFileText(
+  wsId: string,
+  path: string,
+  input: { content: string; eol: "lf" | "crlf"; baselineMtimeMs: number },
+): Promise<WorkspaceWriteOutcome> {
+  const res = await api.put<Schemas["WorkspaceWriteResult"]>(
+    `${wsPath(wsId)}/edit/${encodePath(path)}`,
+    {
+      content: input.content,
+      eol: input.eol,
+      baseline_mtime_ms: input.baselineMtimeMs,
+    } satisfies Schemas["WorkspaceWriteRequest"],
+  );
+  return { ok: res.ok, mtimeMs: res.mtime_ms, conflict: res.conflict };
 }

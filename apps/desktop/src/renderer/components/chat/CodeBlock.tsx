@@ -1,5 +1,12 @@
 import { copyText } from "@/lib/clipboard";
-import { Check, Copy } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  FileCode2,
+  WrapText,
+} from "lucide-react";
 import {
   type ComponentPropsWithoutRef,
   type ReactNode,
@@ -24,18 +31,47 @@ export function nodeText(node: ReactNode): string {
   return "";
 }
 
-/** Custom `<pre>` for markdown fenced code: language label + copy button. */
+/** Beyond this many lines a code block collapses behind a "展开全部" toggle so a
+ * long paste never dominates the bubble. */
+const COLLAPSE_LINES = 24;
+
+/** The `<code>` child's props we read: its `language-x` class, and the file path
+ * stashed by {@link rehypeCodeMeta} (read both casings — react-markdown may emit
+ * either the hast `dataFile` or the DOM `data-file`). */
+type CodeChildProps = {
+  className?: string;
+  dataFile?: string;
+  "data-file"?: string;
+};
+
+/**
+ * Custom `<pre>` for markdown fenced code: a header (filename / language + wrap
+ * toggle + copy), an aligned line-number gutter, and a collapse toggle for long
+ * blocks. The body defaults to no-wrap (horizontal scroll); the wrap toggle
+ * switches to soft-wrap and hides the gutter (line numbers can't align once
+ * lines wrap).
+ */
 export function CodeBlock({
   children,
   ...props
 }: ComponentPropsWithoutRef<"pre">) {
   const [copied, setCopied] = useState(false);
+  const [wrap, setWrap] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
-  const className = isValidElement(children)
-    ? ((children.props as { className?: string }).className ?? "")
-    : "";
-  const lang = /language-(\w+)/.exec(className)?.[1] ?? "";
+  const codeProps: CodeChildProps = isValidElement(children)
+    ? (children.props as CodeChildProps)
+    : {};
+  const className = codeProps.className ?? "";
+  const lang = /language-([\w-]+)/.exec(className)?.[1] ?? "";
+  const file = codeProps["data-file"] ?? codeProps.dataFile ?? "";
   const text = nodeText(children);
+  // Logical lines, ignoring a single trailing newline so the gutter doesn't
+  // number a phantom empty last line.
+  const lineCount = text.replace(/\n$/, "").split("\n").length;
+  const collapsible = lineCount > COLLAPSE_LINES;
+  const collapsed = collapsible && !expanded;
+  const showGutter = !wrap && lineCount > 1;
 
   const onCopy = async () => {
     if (await copyText(text)) {
@@ -47,18 +83,60 @@ export function CodeBlock({
   return (
     <div className="code-block">
       <div className="code-block-header">
-        <span className="code-block-lang">{lang || "text"}</span>
+        <span className="code-block-title">
+          {file ? (
+            <>
+              <FileCode2 size={12} className="shrink-0" />
+              <span className="code-block-file">{file}</span>
+              {lang && <span className="code-block-lang">{lang}</span>}
+            </>
+          ) : (
+            <span className="code-block-lang">{lang || "text"}</span>
+          )}
+        </span>
+        <span className="code-block-actions">
+          <button
+            type="button"
+            onClick={() => setWrap((v) => !v)}
+            className="code-block-action"
+            aria-label={wrap ? "取消自动换行" : "自动换行"}
+            aria-pressed={wrap}
+          >
+            <WrapText size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={onCopy}
+            className="code-block-action"
+            aria-label="复制代码"
+          >
+            {copied ? <Check size={13} /> : <Copy size={13} />}
+            <span>{copied ? "已复制" : "复制"}</span>
+          </button>
+        </span>
+      </div>
+      <div
+        className={`code-block-body${wrap ? " wrap" : ""}${
+          collapsed ? " collapsed" : ""
+        }`}
+      >
+        {showGutter && (
+          <span className="code-block-gutter" aria-hidden>
+            {Array.from({ length: lineCount }, (_, i) => i + 1).join("\n")}
+          </span>
+        )}
+        <pre {...props}>{children}</pre>
+      </div>
+      {collapsible && (
         <button
           type="button"
-          onClick={onCopy}
-          className="code-block-copy"
-          aria-label="复制代码"
+          onClick={() => setExpanded((v) => !v)}
+          className="code-block-expand"
         >
-          {copied ? <Check size={13} /> : <Copy size={13} />}
-          <span>{copied ? "已复制" : "复制"}</span>
+          {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          {expanded ? "收起" : `展开全部 ${lineCount} 行`}
         </button>
-      </div>
-      <pre {...props}>{children}</pre>
+      )}
     </div>
   );
 }

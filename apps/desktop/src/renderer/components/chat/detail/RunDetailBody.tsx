@@ -1,9 +1,18 @@
+import { Markdown } from "@/components/chat/Markdown";
+import {
+  type ToolResultData,
+  ToolResultView,
+  hasToolResultBody,
+  toolResultPeek,
+} from "@/components/chat/toolResult/ToolResultView";
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
 import {
   type AgentState,
   MODEL_TIER_META,
   type RunNode,
+  type ToolCallState,
   reasoningMeta,
+  toolLabel,
   useMessageExecution,
 } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
@@ -18,7 +27,64 @@ import {
   Wrench,
 } from "lucide-react";
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
+
+/** One tool call in a worker's run detail: a click-to-expand row that reveals the
+ * rich result (工具结果富渲染) — a search's cards, a code run's terminal, an edit's
+ * diff — or the text result, via the shared {@link ToolResultView}. */
+function RunToolRow({ tc }: { tc: ToolCallState }) {
+  const [open, setOpen] = useState(false);
+  const data: ToolResultData = {
+    toolName: tc.toolName,
+    args: tc.arguments,
+    result: tc.result,
+    display: tc.display,
+    status: tc.status,
+  };
+  const hasBody = hasToolResultBody(data);
+  const statusClass =
+    tc.status === "error"
+      ? "text-destructive"
+      : tc.status === "running"
+        ? "text-primary"
+        : "text-muted-foreground";
+  return (
+    <div className="rounded-lg bg-muted px-2.5 py-1.5 text-xs">
+      <button
+        type="button"
+        onClick={() => hasBody && setOpen((v) => !v)}
+        className={`flex w-full items-center gap-2 text-left ${
+          hasBody ? "cursor-pointer" : "cursor-default"
+        }`}
+      >
+        <Wrench size={12} className="shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-mono text-foreground">
+            {tc.toolName}
+          </span>
+          {hasBody && !open && (
+            <span
+              className={`block truncate ${
+                tc.status === "error"
+                  ? "text-destructive/80"
+                  : "text-muted-foreground/70"
+              }`}
+            >
+              {toolResultPeek(data)}
+            </span>
+          )}
+        </span>
+        <span className={`shrink-0 ${statusClass}`}>
+          {tc.status === "running"
+            ? "执行中"
+            : tc.status === "error"
+              ? "失败"
+              : "完成"}
+        </span>
+      </button>
+      {open && hasBody && <ToolResultView data={data} />}
+    </div>
+  );
+}
 
 /**
  * Single-run detail content (task / status / model+reasoning / tools / output /
@@ -53,8 +119,10 @@ export function RunDetailBody({
   const reasoning = agent.reasoningChunks.join("");
   // The worker is mid-think until its first output token lands (DeepSeek streams
   // the whole reasoning_content before any content), so the live thinking cursor
-  // shows only in that window.
-  const thinkingLive = agent.status === "working" && output.length === 0;
+  // shows only in that window — and not while it is actively composing a tool call
+  // (the「正在生成」row below carries that liveliness instead).
+  const thinkingLive =
+    agent.status === "working" && output.length === 0 && !agent.toolProgress;
   // This run's neighbours in the collaboration DAG, shown honestly by direction:
   // 依赖 (upstream — runs this one consumed, from `dependsOn`) and 后续
   // (downstream — runs that consume this one's output). Kept distinct from the
@@ -89,7 +157,7 @@ export function RunDetailBody({
       </div>
 
       <Section title="任务">
-        <p className="text-sm text-foreground">{run.task}</p>
+        <Markdown content={run.task} />
       </Section>
 
       <Section title="模型与推理">
@@ -122,34 +190,28 @@ export function RunDetailBody({
         </Section>
       )}
 
+      {agent.toolProgress && agent.status === "working" && (
+        <Section title="正在生成">
+          <div className="flex items-center gap-2 rounded-lg bg-primary/5 px-2.5 py-1.5 text-xs">
+            <Wrench size={12} className="shrink-0 text-primary" />
+            <span className="flex-1 truncate text-foreground">
+              {toolLabel(agent.toolProgress.toolName)}
+            </span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">
+              {agent.toolProgress.chars > 0
+                ? `${formatCompact(agent.toolProgress.chars)} 字`
+                : "…"}
+            </span>
+            <span className="inline-block animate-pulse text-primary">▋</span>
+          </div>
+        </Section>
+      )}
+
       {agent.toolCalls.length > 0 && (
         <Section title={`工具调用 (${agent.toolCalls.length})`}>
           <div className="space-y-1">
             {agent.toolCalls.map((tc) => (
-              <div
-                key={tc.id}
-                className="flex items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs"
-              >
-                <Wrench size={12} className="shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate font-mono text-foreground">
-                  {tc.toolName}
-                </span>
-                <span
-                  className={
-                    tc.status === "error"
-                      ? "text-destructive"
-                      : tc.status === "running"
-                        ? "text-primary"
-                        : "text-muted-foreground"
-                  }
-                >
-                  {tc.status === "running"
-                    ? "执行中"
-                    : tc.status === "error"
-                      ? "失败"
-                      : "完成"}
-                </span>
-              </div>
+              <RunToolRow key={tc.id} tc={tc} />
             ))}
           </div>
         </Section>
@@ -157,15 +219,18 @@ export function RunDetailBody({
 
       {output && (
         <Section title="输出">
-          <div className="markdown-body rounded-lg bg-muted p-3 text-foreground">
-            <ReactMarkdown>{output}</ReactMarkdown>
+          <div className="rounded-lg bg-muted p-3">
+            <Markdown
+              content={output}
+              isStreaming={agent.status === "working"}
+            />
           </div>
         </Section>
       )}
 
       {run.outputSummary && (
         <Section title="摘要">
-          <p className="text-sm text-foreground">{run.outputSummary}</p>
+          <Markdown content={run.outputSummary} />
         </Section>
       )}
 

@@ -45,6 +45,50 @@ export type FsResult<T = void> =
 
 export type FsCreateKind = "file" | "dir";
 
+/** 文本文件编码（读侧嗅探）；`gbk` 仅可读不可回写（未引入编码器）。 */
+export type FsEncoding = "utf-8" | "utf-8-bom" | "gbk";
+/** 换行风格——回写时按原文还原，避免整文换行 diff。 */
+export type FsEol = "lf" | "crlf";
+
+/**
+ * 「读以编辑」结果：完整正文 + 写前 CAS 基线（mtime）+ 原文编码/换行。
+ *
+ * 与预览 `readFile` 分工：预览有 256KB 截断且判别图片/二进制；编辑必须拿到**完整**正文
+ * （截断正文一旦保存会丢尾），故编辑走独立通道 `fs:readTextFile`。
+ */
+export interface FsTextFile {
+  /** 完整正文，换行已统一为 `\n`（回写时按 `eol` 还原）。 */
+  content: string;
+  /** 写前 CAS 基线：保存时与磁盘 mtime 比对，不符即冲突。 */
+  mtimeMs: number;
+  encoding: FsEncoding;
+  eol: FsEol;
+}
+
+/** 写文本文件的输入（带写前 CAS 基线）。 */
+export interface FsWriteInput {
+  /** 编辑器正文（`\n` 换行）；主进程按 `eol`/`encoding` 还原落盘。 */
+  content: string;
+  /** 来自读取基线；`gbk` 会被拒写。 */
+  encoding: FsEncoding;
+  eol: FsEol;
+  /** 写前 CAS：与磁盘 mtime 不符即 `conflict`；`0` 视为新建。 */
+  baselineMtimeMs: number;
+}
+
+/**
+ * 写盘结果（判别式）。`conflict` 带磁盘当前 `mtimeMs` 供「仍然覆盖」用其做基线再写；
+ * 其余失败原因：`denied`（越权/未授权）/`locked`（被占用）/`unsupported`（GBK 回写未启用）/`error`。
+ */
+export type FsWriteResult =
+  | { ok: true; mtimeMs: number }
+  | { ok: false; reason: "conflict"; diskMtimeMs: number }
+  | {
+      ok: false;
+      reason: "denied" | "locked" | "unsupported" | "error";
+      message?: string;
+    };
+
 /**
  * 本地工作区 op 名（双模式工作区 P2）—— 与服务端 `WorkspaceOp` 一一对应。
  *
@@ -91,6 +135,8 @@ export const FS_CHANNELS = {
   listDir: "fs:listDir",
   listFiles: "fs:listFiles",
   readFile: "fs:readFile",
+  readTextFile: "fs:readTextFile",
+  writeFile: "fs:writeFile",
   rename: "fs:rename",
   move: "fs:move",
   create: "fs:create",
@@ -114,6 +160,20 @@ export interface FsApi {
   /** 递归列出根内的全部文件（用于 @ 提及检索；忽略常见无关目录，有数量上限）。 */
   listFiles(rootId: string): Promise<FsResult<FsFileRef[]>>;
   readFile(rootId: string, relPath: string): Promise<FsResult<FilePreview>>;
+  /**
+   * 读完整文本文件用于**编辑**（正文 + 基线 mtime/编码/换行）。与预览 `readFile` 分工：
+   * 不截断、不判别图片，二进制 / 过大 / 越界以 `FsResult` 失败返回。
+   */
+  readTextFile(rootId: string, relPath: string): Promise<FsResult<FsTextFile>>;
+  /**
+   * 写文本文件，带写前 CAS（`baselineMtimeMs`）。原子写（临时文件 + rename）；
+   * 失败以判别式 `FsWriteResult` 返回（`conflict` 携磁盘当前 mtime），不抛异常。
+   */
+  writeFile(
+    rootId: string,
+    relPath: string,
+    input: FsWriteInput,
+  ): Promise<FsWriteResult>;
   rename(rootId: string, relPath: string, newName: string): Promise<FsResult>;
   move(
     rootId: string,

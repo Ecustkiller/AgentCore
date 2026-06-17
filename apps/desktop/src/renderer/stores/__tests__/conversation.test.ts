@@ -1,7 +1,12 @@
-import type { PlanReviewRequiredPayload, SSEEvent } from "@/types/events";
+import type {
+  CheckpointRequiredPayload,
+  PlanReviewRequiredPayload,
+  SSEEvent,
+} from "@/types/events";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useApprovalStore } from "../approvals";
 import {
+  checkpointsFromEvents,
   getActiveRuntime,
   getRuntime,
   planReviewsFromEvents,
@@ -498,6 +503,131 @@ describe("plan_review cards (结构化挂起 2a)", () => {
         status: "resolved",
         decision: "adjust",
         note: "把重点放在风险上",
+      });
+    });
+  });
+});
+
+// ask_user: the one asking surface (统一开场引导 + 途中拍板). A card lives on the
+// assistant message it paused — set live (addCheckpoint) and rebuilt from the
+// journal on reload (checkpointsFromEvents), then flipped to its settled twin on
+// resolve (settleCheckpoint / checkpoint_resolved). The opening flavor carries the
+// rich content the former kickoff did (assumptions / questions / style_options).
+describe("ask_user cards (统一开场引导 + 途中拍板)", () => {
+  const reqPayload = (id: string): CheckpointRequiredPayload => ({
+    checkpoint_id: id,
+    conversation_id: "a",
+    question: "我先按这个方案做这个落地页，对吗？",
+    context: "",
+    assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
+    questions: [
+      {
+        id: "q0",
+        prompt: "主要给谁看？",
+        kind: "choice",
+        options: ["潜在客户", "投资人"],
+        multiple: false,
+        default: "潜在客户",
+      },
+    ],
+    style_options: [{ id: "s0", label: "深色科技" }],
+  });
+  const reqEvent = (id: string): SSEEvent => ({
+    type: "checkpoint_required",
+    timestamp: "",
+    payload: reqPayload(id),
+  });
+  const resEvent = (
+    id: string,
+    decision: "continue" | "stop",
+    note = "",
+    selected: string[] = [],
+  ): SSEEvent => ({
+    type: "checkpoint_resolved",
+    timestamp: "",
+    payload: { checkpoint_id: id, decision, note, selected },
+  });
+
+  describe("checkpointsFromEvents (history replay)", () => {
+    it("folds a required event into one pending card (rich opening fields)", () => {
+      const cards = checkpointsFromEvents([reqEvent("c1")]);
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        id: "c1",
+        status: "pending",
+        decision: null,
+        assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
+        styleOptions: [{ id: "s0", label: "深色科技" }],
+      });
+      expect(cards[0].questions[0].default).toBe("潜在客户");
+    });
+
+    it("folds a required→resolved pair into one settled card", () => {
+      const cards = checkpointsFromEvents([
+        reqEvent("c1"),
+        resEvent("c1", "continue", "就按这个开做", ["潜在客户"]),
+      ]);
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        id: "c1",
+        status: "resolved",
+        decision: "continue",
+        note: "就按这个开做",
+        selected: ["潜在客户"],
+      });
+    });
+
+    it("preserves raise order across multiple checkpoints", () => {
+      const cards = checkpointsFromEvents([
+        reqEvent("c1"),
+        reqEvent("c2"),
+        resEvent("c1", "stop"),
+      ]);
+      expect(cards.map((c) => c.id)).toEqual(["c1", "c2"]);
+      expect(cards[0].status).toBe("resolved");
+      expect(cards[1].status).toBe("pending");
+    });
+
+    it("is empty when the journal has no checkpoint", () => {
+      expect(checkpointsFromEvents([])).toEqual([]);
+    });
+  });
+
+  describe("addCheckpoint / settleCheckpoint (live)", () => {
+    it("attaches a pending card to the live assistant message", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().addCheckpoint(reqPayload("c1"), "a");
+      expect(rt().messages[0].checkpoints?.[0]).toMatchObject({
+        id: "c1",
+        status: "pending",
+        styleOptions: [{ id: "s0", label: "深色科技" }],
+      });
+    });
+
+    it("dedupes a re-delivered required event", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().addCheckpoint(reqPayload("c1"), "a");
+      store().addCheckpoint(reqPayload("c1"), "a");
+      expect(rt().messages[0].checkpoints).toHaveLength(1);
+    });
+
+    it("is a no-op when there is no assistant message yet", () => {
+      store().switchConversation("a");
+      store().addCheckpoint(reqPayload("c1"), "a");
+      expect(rt().messages).toHaveLength(0);
+    });
+
+    it("settleCheckpoint flips the card to resolved with the composed note", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().addCheckpoint(reqPayload("c1"), "a");
+      store().settleCheckpoint("c1", "continue", "就按这个开做", [], "a");
+      expect(rt().messages[0].checkpoints?.[0]).toMatchObject({
+        status: "resolved",
+        decision: "continue",
+        note: "就按这个开做",
       });
     });
   });

@@ -34,6 +34,12 @@ class ApprovalDecision(StrEnum):
 
     APPROVE = "approve"  # allow this one call
     APPROVE_ALWAYS = "approve_always"  # allow this tool for the rest of the turn
+    # allow the whole file-mutation class (file_write / str_replace / file_delete /
+    # file_move) for the rest of the turn — one click for a multi-file or mixed-op
+    # task instead of granting each tool name separately. code_execute is NOT in the
+    # class (a higher-risk side effect) and keeps its own per-tool gate (安全权限与
+    # 治理 §三 边界2: 信任"这类操作", 不是"随便干").
+    APPROVE_ALWAYS_FILES = "approve_always_files"
     DENY = "deny"  # refuse; the model is told and may adapt
 
 
@@ -53,14 +59,27 @@ class ApprovalGate:
     """Per-turn gate suspending GRANTABLE tool calls until the user decides.
 
     One instance per chat turn. ``_granted`` remembers tools the user chose to
-    allow for the rest of the turn, so a repeat call to the same tool does not
-    re-prompt.
+    allow for the rest of the turn, so a LATER call to the same tool does not
+    re-prompt. A grant also sweeps the matching calls ALREADY suspended on this gate
+    (parallel workers share one gate in local mode), so a single "allow" clears
+    every matching pending prompt at once — not just the one the user clicked.
+
+    Two grant scopes: ``APPROVE_ALWAYS`` whitelists the ONE tool of the card;
+    ``APPROVE_ALWAYS_FILES`` whitelists the whole file-mutation class
+    (``file_op_tools``) so a multi-file / mixed-op task is unblocked with one click,
+    while ``code_execute`` stays separately gated.
     """
 
     sink: EventSink
     conversation_id: str
     registry: ClientRequestBridge
     timeout_seconds: float
+    # The file-mutation tool class an APPROVE_ALWAYS_FILES grant covers
+    # (file_write / str_replace / file_delete / file_move). Injected at construction
+    # from the builtin registry (GRANTABLE ∩ FILESYSTEM) — see
+    # tools.builtin.file_mutation_tool_names — so it is a single source of truth;
+    # empty when not wired (the class grant then degrades to granting nothing).
+    file_op_tools: frozenset[str] = frozenset()
     _granted: set[str] = field(default_factory=set)
 
     async def authorize(
@@ -68,7 +87,9 @@ class ApprovalGate:
     ) -> ApprovalDecision:
         """Block until the user authorizes (or denies) this tool call.
 
-        ``APPROVE_ALWAYS`` also whitelists ``tool_name`` for the rest of the turn.
+        ``APPROVE_ALWAYS`` also whitelists ``tool_name`` for the rest of the turn;
+        ``APPROVE_ALWAYS_FILES`` whitelists the whole ``file_op_tools`` class. Both
+        then sweep the matching calls already suspended on this gate.
         A timeout is treated as ``DENY`` — a request is never silently allowed.
         An already-granted tool returns ``APPROVE`` immediately (no prompt).
         """
@@ -104,6 +125,13 @@ class ApprovalGate:
 
         if decision is ApprovalDecision.APPROVE_ALWAYS:
             self._granted.add(tool_name)
+            self._sweep_pending_tools(frozenset({tool_name}))
+        elif decision is ApprovalDecision.APPROVE_ALWAYS_FILES:
+            # Grant the whole file-mutation class for the turn, and sweep every
+            # already-suspended file-op call — so one click clears writes, edits,
+            # deletes and moves together (code_execute is not in the class).
+            self._granted.update(self.file_op_tools)
+            self._sweep_pending_tools(self.file_op_tools)
         self.sink.emit(
             approval_resolved(
                 approval_id=approval_id,
@@ -112,3 +140,30 @@ class ApprovalGate:
             )
         )
         return decision
+
+    def _sweep_pending_tools(self, tool_names: frozenset[str]) -> None:
+        """Retroactively APPROVE every suspended call whose tool is in ``tool_names``.
+
+        A grant whitelists tools via ``_granted``, but that only short-circuits calls
+        that reach :meth:`authorize` AFTER the grant. In local mode this gate is
+        shared by parallel workers, so several matching calls can already be suspended
+        (each past the ``_granted`` check, awaiting its own Future) the instant the
+        user clicks "allow for the turn" — without this they would each still need a
+        click. The registry is the authoritative pending set, so sweeping it here
+        closes the race the client cannot (its view is eventually-consistent over
+        SSE). Resolving a sibling wakes its own ``authorize`` (which returns APPROVE
+        and emits that call's own ``approval_resolved``); ``resolve`` is a no-op on an
+        already-settled request, so this stays idempotent with the client's optimistic
+        sibling-approve. The call being resolved right now is already discarded from
+        the registry, so it is never in ``list_pending`` here.
+        """
+        if not tool_names:
+            return
+        for req in self.registry.list_pending(self.conversation_id):
+            if req.kind is not InteractionKind.APPROVAL:
+                continue
+            if req.payload.get("tool_name") not in tool_names:
+                continue
+            self.registry.resolve(
+                req.id, ApprovalDecision.APPROVE, conversation_id=self.conversation_id
+            )

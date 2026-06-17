@@ -85,6 +85,13 @@ class RunContract:
     must_contain: list[str] = field(default_factory=list)
     min_length: int = 0
     max_length: int = 0
+    # Deliverable-landed postcondition: when True, the run must have called a
+    # file-writing tool (file_write / str_replace / file_move) at least once, or the
+    # contract gate fails it and auto-reworks. Turns the soft「文件交付物必须落盘、别
+    # 粘进聊天」prompt rule into a verifiable code gate over the deterministic
+    # files_touched signal (the model declares a file deliverable; the code enforces
+    # it landed). Off by default → prose deliverables are unaffected.
+    requires_files: bool = False
     strict: bool = False
 
 
@@ -144,7 +151,14 @@ class RunSpec:
     role: str = ""
     objective: str = ""
     system_prompt_supplement: str | None = None
-    tools: list[str] = field(default_factory=list)
+    # Allowed-tools restriction for this worker, or ``None`` = no restriction (the
+    # worker is offered ALL team tools). ``None`` is the fail-safe default: a task
+    # that omits ``tools`` must not be silently stranded tool-less. The engine reads
+    # an empty list as "offer no tools", which turns a worker with a file/exec
+    # deliverable into a text-only agent (the empty-workspace + CEO-hallucinates-
+    # success bug), so builder._tools never emits ``[]``. A non-empty list opts the
+    # worker into least-privilege (the named, allow-list-intersected tools).
+    tools: list[str] | None = None
     model_preference: str = "strong"
     thinking: bool | None = None
     reasoning_effort: str | None = None
@@ -180,11 +194,17 @@ class RunSpec:
     # enforces the cap). depth-2 sub-workers never delegate regardless of this flag.
     can_delegate: bool = False
     policy: RunPolicy = field(default_factory=RunPolicy)
-    # Fan-out awareness: a concise list of the *other* nodes running in parallel
-    # (no dependency relationship), injected into this node's child context so
-    # siblings coordinate instead of overlapping. Populated by ``build_run_plan``
-    # only for a flat parallel batch (a DAG node gets upstream product context
-    # instead; a lone task leaves it blank).
+    # Fan-out awareness: a concise list of the *other* nodes that fanned out from
+    # the same point — those sharing this node's exact ``depends_on`` set, i.e. the
+    # peers it runs in parallel with toward the same juncture (never its own
+    # upstream/downstream, which arrive separately via ``depends_on``). Injected into
+    # the worker's child context so parallel siblings coordinate instead of
+    # overlapping. Populated by ``build_run_plan`` for BOTH a flat parallel batch
+    # (all share the empty dep set → all siblings) and a DAG (a「research → writer」
+    # fan-out's parallel researchers share their deps → see each other). Narrower
+    # than「same wave」on purpose: independent chains that coincidentally share a
+    # topological layer are NOT siblings. A node with no same-fan-out peer (a
+    # pipeline link, a lone writer) leaves it blank.
     sibling_summary: str = ""
     # Mid-course user steer (结构化挂起 adjust): the note the user gave at a
     # plan_review checkpoint with the ``adjust`` decision, injected by the host hook
@@ -223,6 +243,14 @@ class RunState:
     # non-strict contract failed after retries) but carries these caveats, which
     # the captain sees in the aggregated result so it can judge / re-delegate.
     warnings: list[str] = field(default_factory=list)
+    # 向上升级（worker → CEO）: decisions / blockers this worker raised via the
+    # ``escalate`` tool — each ``{question, assumption, blocking}`` — harvested from the
+    # transcript when the run finishes (mirrors ``files_touched``). The DelegateTool
+    # surfaces these PROMINENTLY in the CEO-facing aggregate so the CEO resolves them
+    # (ask_user / revise / re-delegate) before finalizing. Distinct from ``warnings``:
+    # a warning is a soft quality caveat (判断是否返工), an escalation is a worker-flagged
+    # 待决问题 it couldn't settle alone. Empty for a run that escalated nothing.
+    escalations: list[dict[str, Any]] = field(default_factory=list)
     # Web sources this worker consulted (web_search / read_url), de-duped across
     # contract retries. Collected un-numbered (the worker text is not annotated):
     # the DelegateTool folds these into the turn's shared source card so the user
@@ -231,7 +259,13 @@ class RunState:
     model: str = ""
     duration_ms: int = 0
     rounds: int = 0
-    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    # Workspace paths this worker created or modified (file_write / str_replace /
+    # file_move), derived from its transcript when the run completes. The DelegateTool
+    # surfaces these in the CEO-facing aggregate as a「文件产出」manifest so the CEO
+    # knows what landed on disk WITHOUT re-listing the workspace to verify (省掉收敛
+    # 阶段的冗余 file_list 轮). Best-effort: a file a worker wrote indirectly (e.g. via
+    # a code_execute script) is not captured — only direct file-tool calls are.
+    files_touched: list[str] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=dict)
     cost: dict[str, int] = field(default_factory=dict)
     # The run's full message transcript (system + task + every assistant/tool turn

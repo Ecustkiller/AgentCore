@@ -199,6 +199,59 @@ export async function readWorkspaceFile(
   return decodePreviewResponse(res);
 }
 
+// --- Edit (源无关编辑契约的云端实现: full text + mtime CAS) ---
+
+/** Full text + CAS baseline (mtime) for editing a cloud-workspace file. */
+export interface WorkspaceEditDoc {
+  text: string;
+  mtimeMs: number;
+  eol: "lf" | "crlf";
+}
+
+/** A conditional write's outcome: `ok` → new version; otherwise a conflict whose
+ * `mtimeMs` is the current **disk** version (re-write with it to overwrite). */
+export interface WorkspaceWriteOutcome {
+  ok: boolean;
+  mtimeMs: number;
+  conflict: boolean;
+}
+
+/**
+ * Read a conversation-workspace file for **editing** — full text (never truncated,
+ * unlike preview) + the mtime baseline a later save does its CAS against. The
+ * editable counterpart of {@link readWorkspaceFile}.
+ */
+export async function readWorkspaceFileForEdit(
+  conversationId: string,
+  path: string,
+): Promise<WorkspaceEditDoc> {
+  const res = await api.get<Schemas["WorkspaceEditDoc"]>(
+    `/v1/conversations/${conversationId}/workspace/edit/${encodePath(path)}`,
+  );
+  return { text: res.text, mtimeMs: res.mtime_ms, eol: res.eol };
+}
+
+/**
+ * Conditionally write editor text back (mtime CAS). A `conflict` (disk changed
+ * since `baselineMtimeMs`, e.g. an Agent turn wrote it) returns `ok:false` with the
+ * disk mtime instead of clobbering — never a blind overwrite.
+ */
+export async function writeWorkspaceFileText(
+  conversationId: string,
+  path: string,
+  input: { content: string; eol: "lf" | "crlf"; baselineMtimeMs: number },
+): Promise<WorkspaceWriteOutcome> {
+  const res = await api.put<Schemas["WorkspaceWriteResult"]>(
+    `/v1/conversations/${conversationId}/workspace/edit/${encodePath(path)}`,
+    {
+      content: input.content,
+      eol: input.eol,
+      baseline_mtime_ms: input.baselineMtimeMs,
+    } satisfies Schemas["WorkspaceWriteRequest"],
+  );
+  return { ok: res.ok, mtimeMs: res.mtime_ms, conflict: res.conflict };
+}
+
 // --- Snapshots (axis-3 persistence: backup / kept versions / download) ---
 
 export interface WorkspaceSnapshot {

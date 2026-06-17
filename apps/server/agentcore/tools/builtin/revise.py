@@ -8,7 +8,7 @@ has it continue on its own transcript with the CEO's feedback — faster, cheape
 and keeping the original train of thought. Non-terminal, exactly like ``delegate``:
 the revised product returns to the CEO's loop to wrap up.
 
-P1 范围：只命中【本回合】委派过的成员（同轮热修）。命中不了（run 不在本回合 / 已超改次
+P1 范围：只命中【本回合】委派过的队员（同轮热修）。命中不了（run 不在本回合 / 已超改次
 上限）时拒绝并提示回落甲（带旧产物重新 ``delegate``）——这正是甲作为 miss 分支的体现。
 
 → 见设计: docs/03-AI核心/多轮编排与队员热修.md §二（统一「续写」原语）
@@ -40,14 +40,10 @@ logger = get_logger(__name__)
 _REVISE_OUTPUT_LIMIT = 16000
 
 _REVISE_DESCRIPTION = (
-    "对【本回合内已完成】的某个 worker 产物做定向修订：唤回原作者，带着它的现场记忆在"
-    "自己上一版产出的基础上按你的意见继续改，而不是从零另派一个看不到旧稿的新人重做"
-    "（更快、更省，且不丢原有思路）。\n"
-    "何时用：用户看到某个 worker 的产物后要求小改 / 增补 / 调整（如『把风险那节展开』"
-    "『换个更正式的语气』『再补一节测试』），且仍由原角色来改最合适。\n"
-    "何时不要用、改用 delegate 带上旧产物重新委派：要换一个角色来改（研究员稿让工程师"
-    "重写）、原稿本身是失败的、或要把多份产物合并了再改。\n"
-    "本工具不会替你回复用户：修订结果会作为结果回到你这里，由你照常写简短概览或继续。"
+    "对【本回合内已完成】的某个 worker 产物做定向修订：唤回原作者，带着现场记忆在它自己"
+    "上一版产出上按你的 feedback 继续改（比另派看不到旧稿的新人从零重做更快更省、不丢"
+    "思路）。传入 target_run_id + feedback。本工具非终结：修订结果回到你的循环，由你照常"
+    "收尾。何时用、何时改用 delegate 重派，见 consult_skill(revising_a_product)。"
 )
 
 _REVISE_PARAMETERS = {
@@ -56,8 +52,8 @@ _REVISE_PARAMETERS = {
         "target_run_id": {
             "type": "string",
             "description": (
-                "要修订的那个 worker 产物的 run_id（取自团队执行结果里每个成员标注的 "
-                "run_id）。必须是本回合委派过、且成功完成的成员。"
+                "要修订的那个 worker 产物的 run_id（取自团队执行结果里每个队员标注的 "
+                "run_id）。必须是本回合委派过、且成功完成的队员。"
             ),
         },
         "feedback": {
@@ -147,7 +143,7 @@ class ReviseTool:
         target = arguments.get("target_run_id")
         feedback = arguments.get("feedback")
         if not isinstance(target, str) or not target.strip():
-            msg = "revise 需要 target_run_id（要修订的成员 run_id，取自团队执行结果）。"
+            msg = "revise 需要 target_run_id（要修订的队员 run_id，取自团队执行结果）。"
             return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
         if not isinstance(feedback, str) or not feedback.strip():
             msg = "revise 需要 feedback（具体、可执行的修改意见）。"
@@ -165,7 +161,7 @@ class ReviseTool:
         # miss 分支 = 甲：run 既不在内存、也未落盘（更早被清 / 从未委派）→ 引导回落 delegate。
         if session is None:
             msg = (
-                f"找不到 run_id 为 `{target}` 的可修订成员（可能不在本回合范围内，或来自"
+                f"找不到 run_id 为 `{target}` 的可修订队员（可能不在本回合范围内，或来自"
                 "更早的回合）。请改用 delegate：带上需要修改的旧产物内容 + 具体修改要求，"
                 "重新委派一个 worker 来改。"
             )
@@ -174,7 +170,7 @@ class ReviseTool:
         # 改次闸：超上限不再热修，回落甲，避免无限打磨。
         if session.recall_count >= DEFAULT_RECALL_LIMIT:
             msg = (
-                f"成员 `{target}` 的定向修订已达上限（{DEFAULT_RECALL_LIMIT} 次），不再"
+                f"队员 `{target}` 的定向修订已达上限（{DEFAULT_RECALL_LIMIT} 次），不再"
                 "热修以避免无限打磨。如仍需调整，请改用 delegate 带上当前产物重新委派。"
             )
             logger.info("revise.capped", target=target, recall_count=session.recall_count)
@@ -197,6 +193,18 @@ class ReviseTool:
         )
         if state.phase is not RunPhase.COMPLETED or not state.content.strip():
             reason = state.error or "修订未产出有效结果"
+            # A failed / empty revision still burned tokens (the recall ran the loop
+            # before dying) — fold them into the turn ledger before falling back to 甲
+            # (B-deep 失败计费). The accumulator guards on ``state.usage`` (a revision
+            # that died before any LLM call adds no row) and only folds a COMPLETED
+            # run's citations (a failed draft's sources are discarded), so this bills
+            # the spend without polluting the turn's source card.
+            self._accumulate(
+                state,
+                revision_run_id=revision_run_id,
+                spec=session.spec,
+                parent_run_id=session.run_id,
+            )
             msg = (
                 f"对 `{target}` 的修订未成功（{reason}）。可重试，或改用 delegate "
                 "带上当前产物重新委派。"
@@ -223,7 +231,7 @@ class ReviseTool:
         output = (
             f"## 修订结果（{role}，第 {session.recall_count} 次修订 · run_id: "
             f"`{revision_run_id}`）\n{state.content}\n\n---\n"
-            "以上为该成员在原稿基础上的修订产出（用户可在界面查看 / 对比各版本）。请据此"
+            "以上为该队员在原稿基础上的修订产出（用户可在界面查看 / 对比各版本）。请据此"
             "用你自己的声音收尾或继续；如需再次修订，仍用同一个 target_run_id。"
         )
         return ToolResult(
@@ -238,8 +246,11 @@ class ReviseTool:
         """Fold a revision into the turn totals via the shared accumulator: token
         usage + one member ledger row + any web sources it consulted (一 run 一行,
         决策②). The row carries the revision's own ``run_id`` parented to the original
-        run, so the version chain is reconstructable. ``state`` is always COMPLETED
-        here (the caller returns early otherwise), so its citations fold in."""
+        run, so the version chain is reconstructable. Called for BOTH a successful
+        revision and a failed / empty one (B-deep 失败计费): the accumulator skips a
+        never-metered run (``if state.usage``) and only folds a COMPLETED run's
+        citations, so a failed continuation bills its spend without contributing
+        sources."""
         self._acc.add_run(
             replace(spec, run_id=revision_run_id, agent_id=revision_run_id),
             state,

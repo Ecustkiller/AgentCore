@@ -48,6 +48,10 @@ class ToolCategory(StrEnum):
     # Category is declarative metadata for classification/tooling; the engine no
     # longer branches on tool category (it acts on the ToolResult, not the name).
     INTERACTION = "interaction"
+    # On-demand capability retrieval (the CEO ``consult_skill`` tool, 提示词瘦身 P2):
+    # pulls a system Skill's full guidance into the loop. Declarative metadata only —
+    # like every other category, the engine does not branch on it.
+    SKILL = "skill"
 
 
 class ToolEffect(StrEnum):
@@ -66,6 +70,8 @@ class ToolEffect(StrEnum):
     # legacy answer-streaming handoff was retired) — kept as the effect a future
     # streaming-handoff tool would declare.
     HANDOFF = "handoff"
-    # The tool drove a user interaction that ended the turn (the CEO ``ask_user``
-    # checkpoint on a "stop" decision): its closing note is the final answer.
+    # The tool drove a user interaction that ended the turn, and its text is the
+    # final answer: the CEO ``ask_user`` checkpoint on a "stop" decision (its closing
+    # note is the reply). A "submit" answer instead resumes the loop (CONTINUE), so
+    # only stop is terminal here.
     INTERACT = "interact"

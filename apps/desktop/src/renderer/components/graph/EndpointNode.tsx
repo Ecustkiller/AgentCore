@@ -63,7 +63,7 @@ const SINK_STYLES: Record<string, { ring: string; icon: React.ReactNode }> = {
   },
 };
 
-export function EndpointNode({ data, selected }: NodeProps) {
+export function EndpointNode({ data }: NodeProps) {
   const d = data as EndpointNodeData;
   const isInput = d.variant === "input";
   const style = SINK_STYLES[d.status] ?? SINK_STYLES.pending;
@@ -121,8 +121,6 @@ export function EndpointNode({ data, selected }: NodeProps) {
             interactive
               ? "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
               : ""
-          } ${
-            selected ? "outline outline-2 outline-offset-2 outline-primary" : ""
           }`}
         >
           <div className="flex items-center gap-2.5">
