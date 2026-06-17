@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from agentcore.llm.protocol import LLMMessage
+    from agentcore.runtime.events import FinishReason
 
 
 class RunKind(StrEnum):
@@ -259,6 +260,13 @@ class RunState:
     model: str = ""
     duration_ms: int = 0
     rounds: int = 0
+    # B2: a non-default terminal finish the CAPTAIN root should stamp on the turn
+    # instead of the rounds-derived END_TURN / MAX_ROUNDS — ``DEGRADED`` (empty
+    # responses even after the fallback retry) or ``UNPRODUCTIVE`` (early-stopped a
+    # run of all-tools-failed-no-content rounds). ``None`` = normal finish. Worker
+    # runs leave it None (their emptiness is handled by the contract retry / soft-fail
+    # path, not the turn finish).
+    finish_override: FinishReason | None = None
     # Workspace paths this worker created or modified (file_write / str_replace /
     # file_move), derived from its transcript when the run completes. The DelegateTool
     # surfaces these in the CEO-facing aggregate as a「文件产出」manifest so the CEO

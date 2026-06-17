@@ -10,11 +10,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from agentcore.api.routes import (
+    admin,
     auth,
     conversations,
     favicon,
     files,
     folders,
+    inference,
     llm_key,
     messages,
     realtime,
@@ -25,6 +27,7 @@ from agentcore.api.routes import (
     workspaces,
 )
 from agentcore.config import settings
+from agentcore.conversation.compaction import shutdown_compaction
 from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import setup_logging
 from agentcore.db.migration_check import check_migrations
@@ -160,6 +163,8 @@ async def lifespan(app: FastAPI):
                 await paused_turn_retention_task
         # Flush in-flight debounced passes and cancel pending timers.
         await shutdown_scheduler()
+        # Flush in-flight long-conversation compaction folds.
+        await shutdown_compaction()
         # Release the shared SearXNG keep-alive pool.
         await aclose_search_backend()
 
@@ -202,11 +207,13 @@ async def agentcore_error_handler(request, exc: AgentCoreError):
 
 
 app.include_router(system.router)
+app.include_router(admin.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
 app.include_router(favicon.router, prefix="/v1")
 app.include_router(files.router, prefix="/v1")
 app.include_router(folders.router, prefix="/v1")
+app.include_router(inference.router, prefix="/v1")
 app.include_router(llm_key.router, prefix="/v1")
 app.include_router(messages.router, prefix="/v1")
 app.include_router(realtime.router, prefix="/v1")

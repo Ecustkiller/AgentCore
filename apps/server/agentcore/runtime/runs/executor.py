@@ -17,6 +17,7 @@ real time, exactly as the legacy path did.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, replace
@@ -32,6 +33,7 @@ from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import (
     EventSink,
+    FinishReason,
     run_completed,
     run_failed,
     run_output_delta,
@@ -40,13 +42,19 @@ from agentcore.runtime.events import (
     run_tool_progress,
     tool_progress,
 )
+from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
+from agentcore.runtime.runs.serialize import run_final_fact
 from agentcore.runtime.runs.constants import (
     DEFAULT_CONTRACT_RETRIES,
     DEP_CONTEXT_BUDGET,
+    DEP_POINTER_MAX_FILES,
+    DEP_POINTER_SUMMARY_CHARS,
     DEP_SUMMARY_CHARS,
     ESCALATE_TOOL_NAME,
     MAX_CONTRACT_RETRIES,
     MAX_DELEGATION_DEPTH,
+    WORKSPACE_MANIFEST_CHAR_BUDGET,
+    WORKSPACE_MANIFEST_MAX_FILES,
 )
 from agentcore.runtime.runs.contract import (
     ContractVerdict,
@@ -95,7 +103,12 @@ file_write 把它真正写进工作区，而不是把整份内容粘在回复正
 
 直接以产出本身开头，别写「我来为你生成…」「我是一个 agent」之类开场白或元叙述。你的文字\
 产出会直接展示给用户、也回流给主 Agent 整合，故要完整、准确、可独立阅读；任务附带产出\
-要求就逐条满足。"""
+要求就逐条满足。
+
+这份交付物的【专业结构】由你这位专家定夺：task 或预期产出里若带了章节 / 模块 / 布局骨架，\
+除非【原始用户请求】中用户亲口指定要照此结构，否则只当起点建议——按你的专业判断去重组、\
+增删、优化，而不是照它填字。硬指标（篇幅 / 格式 / 范围 / 受众 / 必含要点 / 验收项）仍须\
+逐条满足；但「这份交付物怎么搭骨架、怎么展开」正是你最核心的专业产出。"""
 
 # Prepended to every delegated worker's system prompt (right after the shared
 # base). A leaf worker runs in an isolated context with one scoped task, no chance
@@ -171,6 +184,30 @@ def build_agent_executor(
     # None (standalone / tests) = the economy base set; production passes the
     # turn's resolved 质量档 from the delegate tool.
     profiles = profile_set or default_profile_set()
+
+    # Per-turn snapshot of the workspace's PRE-EXISTING files (uploads / prior turns),
+    # shared by every worker in this delegate batch. "What was already on disk when the
+    # team started" doesn't change within the turn, so walk it ONCE (newest-first,
+    # ``order="recent"``) instead of re-walking + re-stat-ing per worker — the cost the
+    # mtime sort would otherwise multiply across a wave. Teammate products stay FRESH per
+    # worker (from the completion map), so a later wave still sees earlier waves' landed
+    # files via their ``files_touched``. Lazy + lock so concurrent wave-1 workers trigger
+    # exactly one walk; best-effort (:func:`_safe_index_files` swallows failures → []).
+    # Trade-off: a file a teammate wrote INDIRECTLY (code_execute side effect, not in
+    # ``files_touched``) won't appear in a later wave's manifest — acceptable; the common
+    # cases (uploads / prior turns / file_write products) are fully covered.
+    _ambient_snapshot: dict[str, list[str]] = {}
+    _ambient_lock = asyncio.Lock()
+
+    async def _preexisting_files() -> list[str]:
+        if "paths" in _ambient_snapshot:
+            return _ambient_snapshot["paths"]
+        async with _ambient_lock:
+            if "paths" not in _ambient_snapshot:  # double-check after awaiting the lock
+                _ambient_snapshot["paths"] = await _safe_index_files(
+                    base_tool_context.backend
+                )
+            return _ambient_snapshot["paths"]
 
     async def _execute_node(
         spec: RunSpec, completed: Mapping[str, RunState], agent_id: str
@@ -251,13 +288,25 @@ def build_agent_executor(
             # source card so the user sees the WHOLE team's research, not just the
             # CEO's own searches.
             worker_citations: list[dict] = []
+            # Pre-existing workspace files (uploads / prior turns) for the worker's
+            # opening manifest — a per-turn snapshot walked once and shared by the whole
+            # batch (see ``_preexisting_files``); peer products are layered on per worker
+            # from the completion map inside ``_build_messages``.
+            index_paths = await _preexisting_files()
             # Build the worker's opening (system + task) ONCE; auto-rework then
             # CONTINUES on this SAME transcript (append the shortfall, re-run)
             # instead of rebuilding from scratch — so the worker sees its own prior
             # draft when correcting (修隐患), and the finished transcript is captured
             # as a recoverable RunSession for 定向唤回 (统一「续写」原语, 见 §三).
             messages = _build_messages(
-                plan, spec, completed, system_prompt, user_message, contract, identity=identity
+                plan,
+                spec,
+                completed,
+                system_prompt,
+                user_message,
+                contract,
+                identity=identity,
+                index_paths=index_paths,
             )
             attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
             for attempt in range(attempts):
@@ -327,6 +376,9 @@ def build_agent_executor(
                     cost=cost,
                     transcript=messages,
                 )
+            # The worker's terminal RunState is journaled at the ``execute`` choke point
+            # below (run_final_fact — covers COMPLETED *and* FAILED in one place), so resume
+            # re-seeds it from facts not the旁路 frame (执行级事件溯源 Phase 2 ⑥).
             sink.emit(
                 run_completed(
                     spec.run_id,
@@ -380,7 +432,13 @@ def build_agent_executor(
         # wave never bleed identities into one another.
         agent_id = spec.agent_id or spec.run_id
         with log_context(run_id=spec.run_id, agent_id=agent_id, depth=spec.depth):
-            return await _execute_node(spec, completed, agent_id)
+            state = await _execute_node(spec, completed, agent_id)
+            # 执行级事件溯源 Phase 2 ⑥: journal the worker's terminal RunState (the seed shape)
+            # at the SINGLE run choke point — every phase (COMPLETED / FAILED) covered once —
+            # so a resume re-seeds finished nodes from facts (completed_from_journal), not the
+            # 旁路 ``frame.completed``. The heavy transcript is dropped by ``state_to_json``.
+            record_turn_fact(run_final_fact(spec.run_id, state))
+            return state
 
     return execute
 
@@ -513,6 +571,11 @@ async def _drive_captain_loop(
     # so an LLM error RETURNS partial usage (priced on the COMPLETED path below); this
     # except only catches non-LLM crashes, where the mirror is the only record left.
     inflight: list[TokenUsage] = []
+    # B2: react_loop appends a FinishReason here when the captain loop ends on a
+    # non-default terminal path (DEGRADED — empty responses even after the fallback
+    # retry; or UNPRODUCTIVE — early-stopped on all-tools-failed-no-content rounds),
+    # so the turn finishes on that reason instead of END_TURN.
+    finish_override: list[FinishReason] = []
     try:
         content, reasoning, usage, rounds = await react_loop(
             messages=messages,
@@ -529,10 +592,20 @@ async def _drive_captain_loop(
             annotate_citations=True,
             approval_gate=approval_gate,
             usage_sink=inflight,
+            finish_override_sink=finish_override,
+            run_id=spec.run_id,
+            role="captain",
         )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage_dict = usage.as_dict()
         cost = asdict(calculate_cost(profile.model, usage))
+        # 执行级事件溯源 (§18.3): the captain's FULL reply (vs the run_completed
+        # summary) so the turn's reply is reconstructable from the journal alone.
+        record_turn_fact(
+            MessageFinalFact(
+                run_id=spec.run_id, content=content, reasoning=reasoning
+            ).to_fact()
+        )
         sink.emit(
             run_completed(
                 spec.run_id,
@@ -554,6 +627,7 @@ async def _drive_captain_loop(
             rounds=rounds,
             usage=usage_dict,
             cost=cost,
+            finish_override=finish_override[0] if finish_override else None,
         )
     except Exception as e:  # noqa: BLE001 — surface any captain failure to UI/state
         duration_ms = int((time.monotonic() - start) * 1000)
@@ -631,6 +705,7 @@ def _build_messages(
     user_message: str,
     contract: RunContract | None = None,
     identity: str = _WORKER_IDENTITY,
+    index_paths: list[str] | None = None,
 ) -> list[LLMMessage]:
     """Assemble the worker's OPENING (system, user) messages from its inline role,
     the original request, its upstream dependency products, and its task.
@@ -649,15 +724,34 @@ def _build_messages(
         sys_parts.append(spec.system_prompt_supplement)
     system_content = "\n\n".join(p for p in sys_parts if p)
 
-    user_parts: list[str] = [f"## 原始用户请求\n{user_message}"]
-    if spec.sibling_summary:
+    # 团队位置（DAG 拓扑感知）: the worker sees the team-level 原始用户请求 verbatim; on
+    # its own that reads as a personal mandate, so an UPSTREAM link — blind to the
+    # writer downstream — used to chase the final artifact itself (上游越权写整篇 + 无
+    # 文件名的空路径 file_write). The position block hands the node its TOPOLOGY (peers +
+    # where its output GOES), symmetric to _dep_context_blocks handing a downstream node
+    # its upstream PRODUCTS; the request header is reframed as a team goal only when the
+    # node is actually on a team (a solo worker IS the whole job).
+    user_parts: list[str] = []
+    position = _team_position_block(plan, spec)
+    if position:
         user_parts.append(
-            "## 同时进行的其他任务（队员正并行处理，你拿不到他们的产物；"
-            "据此划清职责边界，别与他们重复劳动，也别留下衔接空缺）\n"
-            + spec.sibling_summary
+            "## 原始用户请求（老板交给整个团队的目标，不一定全是你的活；"
+            f"你的具体职责见下方「你的任务」）\n{user_message}"
         )
+        user_parts.append(position)
+    else:
+        user_parts.append(f"## 原始用户请求\n{user_message}")
     for label, body in _dep_context_blocks(plan, spec.depends_on, completed):
         user_parts.append(f"## 前置结果（来自 {label}）\n{body}")
+    # 工作区产物清单: surface files in the shared workspace this worker can file_read —
+    # peer products (role-attributed) + pre-existing files (uploads / prior turns) —
+    # beyond its own deps (which got the richer block above). Omitted when empty.
+    manifest = _workspace_manifest(plan, completed, index_paths or [], set(spec.depends_on))
+    if manifest:
+        user_parts.append(
+            "## 工作区现有文件（就在共享工作区，可直接 file_read 取用，避免重复劳动）\n"
+            + manifest
+        )
     user_parts.append(f"## 你的任务\n{spec.task}")
     if spec.expected_output:
         user_parts.append(f"## 预期产出\n{spec.expected_output}")
@@ -678,45 +772,236 @@ def _build_messages(
     ]
 
 
+def _team_position_block(plan: RunPlan, spec: RunSpec) -> str:
+    """The worker's place on the team DAG: its parallel peers and — crucially — where
+    its output GOES. Symmetric to :func:`_dep_context_blocks` (which hands a downstream
+    node its upstream PRODUCTS): this hands a node its TOPOLOGY.
+
+    Closes the「上游越权写最终交付物」gap: an upstream link sees the team-level
+    原始用户请求 ("…保存一份报告…") but, blind to the writer downstream, used to chase the
+    final artifact itself (and, lacking a filename, fire empty-path file_write). It now
+    learns it is one link that hands off — and, when it does want to PERSIST a large
+    intermediate product for the downstream to ``file_read``, it is told to give it a
+    descriptive, role-suffixed filename (``findings-<role>.md``) instead of firing an
+    empty-path ``file_write`` (the A1 递指针 affordance: lands ONLY on the upstream branch,
+    where the residual empty-path attempts live, and reuses the node's role for a
+    collision-free name that also satisfies the sibling "别撞文件名" directive). A TERMINAL
+    node instead learns it IS the final author (reinforcing structure ownership, the
+    worker-side L3 lever). Blank for a solo single worker (no team → the request simply is
+    its whole job).
+
+    Branches on shape, in priority order:
+      - has dependents    → upstream link:  hands off, "别自己产最终交付物" + 中间产物落盘起名许可（A1）
+      - else has upstream  → terminal node:  "你是终端环，据上游产出最终交付物"
+    Parallel-peer awareness (``sibling_summary``, computed by the builder) is prepended
+    in every team shape; a node with none (a lone pipeline link) skips that line."""
+    roles = {n.run_id: (n.role or n.run_id) for n in plan.nodes}
+    dependents = [roles[n.run_id] for n in plan.nodes if spec.run_id in n.depends_on]
+    upstream = [roles[d] for d in spec.depends_on if d in roles]
+
+    parts: list[str] = []
+    if spec.sibling_summary:
+        parts.append(
+            "并行队友（正与你同时推进，各管一摊；据此划清职责边界，别与他们重复劳动、"
+            "也别留下衔接空缺；若你们都要写文件，各自用不同的文件 / 子目录，避免互相覆盖）：\n"
+            + spec.sibling_summary
+        )
+    if dependents:
+        joined = "、".join(dependents)
+        parts.append(
+            f"你的产出去向：你是这条流水线的【上游一环】，你的产出是交给下游【{joined}】的"
+            "【中间输入】，由其整合产出团队的最终交付物。做好你这一环、把发现 / 产物交给下游"
+            "即可，【不要自己产出整个最终交付物】（如完整报告 / 最终文件）。"
+            "中间产物怎么交：零散发现直接写进你的文字产出即可（会自动转交下游）；若产物较大、"
+            "值得落盘供下游 file_read 取用，就调 file_write 并【自起一个描述性文件名】"
+            "（如 `findings-<你的角色>.md`，带角色后缀以免与并行队友撞名），切勿用空路径。"
+        )
+    elif upstream:
+        joined = "、".join(upstream)
+        parts.append(
+            f"你的位置：你是这条流水线的【终端环】。上游【{joined}】的产出已在下方「前置结果」"
+            "交给你，你的职责是据此整合、产出团队交给老板的【最终交付物】。"
+        )
+    if not parts:
+        return ""
+    return "## 你在团队中的位置\n" + "\n\n".join(parts)
+
+
 def _dep_context_blocks(
     plan: RunPlan, depends_on: list[str], completed: Mapping[str, RunState]
 ) -> list[tuple[str, str]]:
     """Render each upstream dependency's product into a ``(label, body)`` block.
 
-    Two fidelity policies, by the dep's ``result_handling``:
+    Three fidelity policies, in priority order:
 
-    - ``summarize`` deps get a tight head digest (``DEP_SUMMARY_CHARS``), the
-      large-fan-in token-saving case; they don't draw on the pass_through budget.
-    - ``pass_through`` deps (the default, for 分析/检索→写作 链路 where 金额 / 法条编号
-      must survive) SHARE one per-worker total budget (``DEP_CONTEXT_BUDGET``),
-      water-filled across them (:func:`_allocate`) so a single rich upstream passes
-      through whole while a wide fan-in stays bounded instead of multiplying. A dep
-      that still overflows its share is HEAD+TAIL trimmed (:func:`_truncate_head_tail`)
-      so its tail isn't silently dropped.
+    - A dep that WROTE FILES to the workspace (``files_touched`` non-empty) becomes a
+      POINTER (:func:`_pointer_body`): a tight prose digest + the artifact paths to
+      ``file_read``. The product is already on disk and reachable, so re-shipping it
+      whole through the prompt wastes tokens and risks tail-trimming (递指针不递全文,
+      Agent协作模式.md). A pointer does NOT draw on the pass_through budget.
+    - ``summarize`` deps (no files) get a tight head digest (``DEP_SUMMARY_CHARS``),
+      the large-fan-in token-saving case; no budget draw either.
+    - ``pass_through`` PROSE deps (no file to point at — the default, for 分析/检索→写作
+      链路 where 金额 / 法条编号 must survive) SHARE one per-worker total budget
+      (``DEP_CONTEXT_BUDGET``), water-filled across them (:func:`_allocate`) so a single
+      rich upstream passes through whole while a wide fan-in stays bounded instead of
+      multiplying. A dep that still overflows its share is HEAD+TAIL trimmed
+      (:func:`_truncate_head_tail`) so its tail isn't silently dropped.
 
-    Order follows ``depends_on``; deps with no terminal content are skipped."""
-    deps: list[tuple[str, str, bool]] = []  # (label, content, summarize_it)
+    Order follows ``depends_on``; a dep with neither content nor files is skipped."""
+    # mode ∈ {"pointer", "summarize", "pass_through"}
+    deps: list[tuple[str, str, list[str], str]] = []  # (label, content, files, mode)
     for dep_id in depends_on:
         state = completed.get(dep_id)
-        if not state or not state.content:
+        if not state or (not state.content and not state.files_touched):
             continue
         dep_spec = plan.by_id(dep_id)
         label = dep_spec.role if dep_spec and dep_spec.role else dep_id
-        summarize_it = bool(dep_spec and dep_spec.policy.result_handling == "summarize")
-        deps.append((label, state.content, summarize_it))
+        if state.files_touched:
+            mode = "pointer"
+        elif dep_spec and dep_spec.policy.result_handling == "summarize":
+            mode = "summarize"
+        else:
+            mode = "pass_through"
+        deps.append((label, state.content, list(state.files_touched), mode))
 
+    # Only PROSE pass_through deps draw on the shared budget; pointer / summarize deps
+    # are already compact and sized independently.
     allowances = iter(
-        _allocate([len(c) for (_, c, s) in deps if not s], DEP_CONTEXT_BUDGET)
+        _allocate([len(c) for (_, c, _, m) in deps if m == "pass_through"], DEP_CONTEXT_BUDGET)
     )
     blocks: list[tuple[str, str]] = []
-    for label, content, summarize_it in deps:
-        body = (
-            summarize(content, limit=DEP_SUMMARY_CHARS)
-            if summarize_it
-            else _truncate_head_tail(content, next(allowances))
-        )
+    for label, content, files, mode in deps:
+        if mode == "pointer":
+            body = _pointer_body(content, files)
+        elif mode == "summarize":
+            body = summarize(content, limit=DEP_SUMMARY_CHARS)
+        else:
+            body = _truncate_head_tail(content, next(allowances))
         blocks.append((label, body))
     return blocks
+
+
+def _pointer_body(content: str, files: list[str]) -> str:
+    """A file-producing dep's POINTER block: a tight digest of its prose handoff +
+    the artifact paths to ``file_read``.
+
+    The full product lives in the shared workspace (it called file_write), so the
+    downstream pulls only what it needs rather than carrying the whole artifact in-
+    prompt (递指针不递全文). The digest keeps the worker's own orientation note (改了
+    哪些文件 / 怎么用 / 关键取舍, per the deliverable policy); the path list is the
+    pointer. Both are bounded (``DEP_POINTER_SUMMARY_CHARS`` / ``DEP_POINTER_MAX_FILES``)."""
+    parts: list[str] = []
+    digest = summarize(content, limit=DEP_POINTER_SUMMARY_CHARS) if content.strip() else ""
+    if digest:
+        parts.append(digest)
+    listed = files[:DEP_POINTER_MAX_FILES]
+    lines = "\n".join(f"- {p}" for p in listed)
+    more = f"\n……（共 {len(files)} 个文件）" if len(files) > len(listed) else ""
+    parts.append(
+        "已写入共享工作区的文件（需要完整内容请用 file_read 读取，不要凭空臆测）：\n"
+        + lines
+        + more
+    )
+    return "\n\n".join(parts)
+
+
+async def _safe_index_files(backend: object) -> list[str]:
+    """Best-effort flat file index of the shared workspace, for the worker manifest.
+
+    Wraps ``backend.index_files`` so a listing failure (a dropped desktop in local
+    mode, an I/O hiccup) degrades the manifest to teammate products instead of failing
+    the run — workspace awareness is an enhancement, never a hard dependency. Returns
+    the paths (dropping the truncation flag — the manifest caps independently)."""
+    index = getattr(backend, "index_files", None)
+    if index is None:
+        return []
+    try:
+        # newest-first: in a big workspace the manifest's budget should spend on the
+        # most-recently-touched files (uploads / latest outputs), not whatever sorts
+        # alphabetically first.
+        paths, _truncated = await index(order="recent")
+        return list(paths)
+    except Exception as e:  # noqa: BLE001 — manifest is best-effort, never fail a run
+        logger.debug("workspace.index_failed", error=str(e))
+        return []
+
+
+def _workspace_manifest(
+    plan: RunPlan,
+    completed: Mapping[str, RunState],
+    index_paths: list[str],
+    exclude_runs: set[str],
+) -> str:
+    """A compact manifest of files in the shared workspace this worker can ``file_read``.
+
+    Two sources, de-duped by path (a file is listed once, with the most specific label):
+
+    1. **Peer products** — every COMPLETED teammate's ``files_touched`` (role-attributed),
+       minus this worker's own deps (``exclude_runs``), which already got the richer
+       pointer / product block. Listed first, in completion order.
+    2. **Pre-existing files** — the rest of ``index_paths`` (the live workspace index:
+       uploads, prior-turn outputs, indirectly-written artifacts), tagged「工作区已有」.
+       Fed newest-first (``index_files(order="recent")``) so a big tree spends the
+       budget on the most-likely-relevant files, not whatever sorts alphabetically first.
+
+    Turns the shared workspace into a discoverable common context: a worker sees what is
+    on disk and can pull it, instead of staying blind outside its dep chain (or re-
+    creating something a peer / past turn already produced). Peer attribution comes from
+    the completion map the scheduler hands the executor; the pre-existing set comes from a
+    best-effort backend index (:func:`_safe_index_files`), so a backend without indexing
+    still yields the peer-products manifest. Bounded by BOTH a file count
+    (``WORKSPACE_MANIFEST_MAX_FILES``) and a char budget
+    (``WORKSPACE_MANIFEST_CHAR_BUDGET``) — whichever binds first, so long paths can't
+    bloat the prompt even under the count — with an elision line when more remain.
+    Returns "" when nothing qualifies (the caller omits the block)."""
+    # Deps' own files are surfaced in their dep block — keep them out of the manifest.
+    dep_files = {
+        p
+        for run_id in exclude_runs
+        if (st := completed.get(run_id)) is not None
+        for p in st.files_touched
+    }
+    lines: list[str] = []
+    listed: set[str] = set(dep_files)
+    used = 0  # running char count, so a long-path tail can't blow the prompt budget
+    truncated = False
+
+    def _add(path: str, label: str) -> bool:
+        """Add one entry; return False (and flag truncation) when a cap would be hit."""
+        nonlocal used, truncated
+        if path in listed:
+            return True
+        line = f"- {path}（{label}）"
+        if len(lines) >= WORKSPACE_MANIFEST_MAX_FILES or (
+            used + len(line) + 1 > WORKSPACE_MANIFEST_CHAR_BUDGET
+        ):
+            truncated = True
+            return False
+        lines.append(line)
+        listed.add(path)
+        used += len(line) + 1
+        return True
+
+    stop = False
+    for run_id, state in completed.items():
+        if stop:
+            break
+        if run_id in exclude_runs or not state.files_touched:
+            continue
+        spec = plan.by_id(run_id)
+        label = f"来自 {spec.role}" if spec and spec.role else f"来自 {run_id}"
+        for path in state.files_touched:
+            if not _add(path, label):
+                stop = True
+                break
+    if not stop:
+        for path in index_paths:  # newest-first; take what the budget allows
+            if not _add(path, "工作区已有"):
+                break
+    if truncated and lines:
+        lines.append("……（工作区还有更多文件，需要可用 `file_list` 查看）")
+    return "\n".join(lines)
 
 
 def _allocate(sizes: list[int], budget: int) -> list[int]:
@@ -804,6 +1089,8 @@ async def _react_and_capture(
         annotate_citations=False,
         approval_gate=approval_gate,
         usage_sink=usage_sink,
+        run_id=run_id,
+        role="worker",
     )
     messages.append(LLMMessage(role="assistant", content=content))
     return content, usage, rounds
@@ -952,6 +1239,11 @@ async def _continue_run_scoped(
             content,
             spec.policy.contract,
             files_written=len(files_touched_from_transcript(messages)),
+        )
+        # 执行级事件溯源 (§18.3): the revised FULL product under the revision run id,
+        # so the version chain's latest output is reconstructable from the journal.
+        record_turn_fact(
+            MessageFinalFact(run_id=revision_run_id, content=content).to_fact()
         )
         sink.emit(
             run_completed(

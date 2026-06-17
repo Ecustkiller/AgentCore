@@ -554,6 +554,7 @@ async def send_message(
             sink=sink,
             attachments=[a.model_dump() for a in body.attachments],
             llm_credentials=credentials,
+            local_container_root_id=body.local_container_root_id,
         )
     )
 
@@ -571,14 +572,17 @@ async def record_local_turn_endpoint(
     """Persist a turn that ran on the user's machine via the sidecar (双模式工作区 §一.1).
 
     The local engine produced the reply on the user's box (no server SSE turn ran),
-    so the desktop reports the finished turn here to land it in durable history AND
-    the cost ledger (计费回写). Owner-scoped (404 for a non-owner).
+    so the desktop reports the finished turn here to land it in durable history.
+    Owner-scoped (404 for a non-owner). Spend is NOT recorded here — a sidecar turn's
+    LLM calls are metered authoritatively at the cloud inference proxy (``/v1/inference``,
+    Slice 4a); this endpoint persists content only.
 
     Unlike ``send_message`` there is NO pre-turn billing gate — the turn already
-    happened on the user's machine; this only RECORDS its content + priced ledger.
-    The ledger write is idempotent by ``run_id`` (``record_runs``), so a retried POST
-    after a flaky response never double-bills or duplicates spend. The title is
-    generated best-effort on the user's resolved BYOK key (None → platform fallback).
+    happened on the user's machine; this only RECORDS its content. The write-back is
+    idempotent so the desktop can safely retry a flaky POST: messages dedupe on the
+    client-minted ``user_message_id``, so a retry after a committed-but-lost response
+    never duplicates the turn. The title is generated best-effort on the user's resolved
+    BYOK key (None → platform fallback).
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
     # Best-effort credentials for the title pass — unlike send_message's preflight we
@@ -592,7 +596,7 @@ async def record_local_turn_endpoint(
         assistant_reasoning=body.reasoning_content,
         citations=[c.model_dump() for c in body.citations] or None,
         runs=body.runs.model_dump() if body.runs else None,
-        cost_runs=[r.model_dump() for r in body.cost_runs],
+        user_message_id=body.user_message_id,
         message_id=body.message_id,
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,

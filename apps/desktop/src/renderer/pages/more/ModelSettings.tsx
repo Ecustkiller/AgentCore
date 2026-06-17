@@ -1,3 +1,4 @@
+import { Switch } from "@/components/ui/Switch";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { ApiError } from "@/services/api";
 import {
@@ -7,6 +8,7 @@ import {
   setLlmKey,
   testLlmKey,
 } from "@/services/llmKey";
+import { useUIStore } from "@/stores/ui";
 import {
   CheckCircle2,
   ExternalLink,
@@ -86,6 +88,35 @@ export function ModelSettings() {
           <InfoNote />
         </div>
       )}
+
+      <LocalEngineToggle />
+    </div>
+  );
+}
+
+/**
+ * 本地引擎（sidecar）开关（双模式工作区 §一.1）。开启后，绑定了本机本地文件夹的对话在用户
+ * 电脑上直接运行（直连本地磁盘、文件/代码不再每 op 往返云端，更快），而非云端遥控桌面；裸聊与
+ * 云端项目、带附件的回合仍走云。默认关——sidecar 暂非真离线（推理仍经云端，断网不可用）、被
+ * 委派 worker 强制走审批门，故先做成显式 opt-in 的实验能力（路由判定见 `services/sidecarRouting`）。
+ */
+function LocalEngineToggle() {
+  const enabled = useUIStore((s) => s.sidecarEnabled);
+  const setEnabled = useUIStore((s) => s.setSidecarEnabled);
+  return (
+    <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-sm text-foreground">本地引擎（实验）</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          开启后，绑定了本机本地文件夹的对话在你的电脑上运行（直连本地磁盘、更快），而非云端
+          遥控。裸聊与云端项目仍走云；推理仍经云端，断网不可用。
+        </p>
+      </div>
+      <Switch
+        checked={enabled}
+        onCheckedChange={setEnabled}
+        label="本地引擎（实验）"
+      />
     </div>
   );
 }

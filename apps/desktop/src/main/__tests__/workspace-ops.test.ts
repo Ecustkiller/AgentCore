@@ -5,6 +5,7 @@ import {
   rm,
   stat,
   symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -225,6 +226,44 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
       path: string;
     }[];
     expect(entries.some((e) => e.path === "hello.txt")).toBe(true);
+  });
+
+  it("index_files returns a flat, ignore-pruned, posix-sorted file list", async () => {
+    await run("write", { path: "a.txt", content: "A" });
+    await run("write", { path: "sub/b.md", content: "B" });
+    await run("write", { path: "node_modules/dep/index.js", content: "X" }); // pruned
+    const res = valOf(await run("index_files", {})) as {
+      paths: string[];
+      truncated: boolean;
+    };
+    expect(res.paths).toEqual(["a.txt", "sub/b.md"]); // node_modules pruned, posix sep
+    expect(res.truncated).toBe(false);
+  });
+
+  it("index_files on an empty root returns no paths", async () => {
+    const res = valOf(await run("index_files", {})) as {
+      paths: string[];
+      truncated: boolean;
+    };
+    expect(res.paths).toEqual([]);
+    expect(res.truncated).toBe(false);
+  });
+
+  it("index_files order=recent returns newest-first by mtime", async () => {
+    await run("write", { path: "a_old.txt", content: "A" });
+    await run("write", { path: "c_mid.txt", content: "C" });
+    await run("write", { path: "b_new.txt", content: "B" });
+    // Stamp distinct mtimes (seconds): a_old < c_mid < b_new.
+    await utimes(join(dir, "a_old.txt"), 100, 100);
+    await utimes(join(dir, "c_mid.txt"), 200, 200);
+    await utimes(join(dir, "b_new.txt"), 300, 300);
+    const recent = valOf(await run("index_files", { order: "recent" })) as {
+      paths: string[];
+    };
+    expect(recent.paths).toEqual(["b_new.txt", "c_mid.txt", "a_old.txt"]);
+    // Default order stays alphabetical (the @-mention view), unaffected by mtime.
+    const alpha = valOf(await run("index_files", {})) as { paths: string[] };
+    expect(alpha.paths).toEqual(["a_old.txt", "b_new.txt", "c_mid.txt"]);
   });
 
   it("answers a genuinely unknown op as a typed IO error", async () => {

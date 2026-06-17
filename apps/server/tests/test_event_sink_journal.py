@@ -12,6 +12,8 @@ from agentcore.runtime.events import (
     content_delta,
     message_end,
     message_start,
+    question_posted,
+    reasoning_delta,
     run_completed,
     run_plan,
     run_started,
@@ -77,6 +79,29 @@ def test_no_plan_means_no_runs_payload():
     assert sink.execution_journal() is None
 
 
+def test_nonblocking_ask_alone_is_a_journal_surface():
+    # A turn that never delegated / never raised a checkpoint but DID post a
+    # non-blocking ask still persists its journal — the card must replay on reload
+    # (question_posted is a surface type). It is journaled like a checkpoint.
+    sink = EventSink()
+    sink.emit(content_delta("我先按默认开做"))
+    sink.emit(
+        question_posted(
+            ask_id="ask-1",
+            conversation_id="c1",
+            question="要不要双语?",
+            questions=[
+                {"id": "q0", "prompt": "要不要双语?", "kind": "choice",
+                 "options": ["要", "不要"], "multiple": False, "default": "不要"}
+            ],
+        )
+    )
+    journal = sink.execution_journal()
+    assert journal is not None
+    assert [e["type"] for e in journal] == [EventType.QUESTION_POSTED.value]
+    assert journal[0]["payload"]["ask_id"] == "ask-1"
+
+
 def test_events_after_close_are_not_journalled():
     sink = EventSink()
     sink.emit(_plan())
@@ -127,3 +152,55 @@ def test_process_timeline_resolves_tool_display():
     tool_step = next(s for s in timeline if s.get("kind") == "tool")
     assert tool_step["status"] == "success"
     assert tool_step["display"] == {"query": "x", "results": [{"title": "A"}]}
+
+
+def test_process_timeline_interleaves_content_with_thinking_and_tools():
+    # The inline timeline (前端UX设计.md §一B) folds the CEO's reply text into the
+    # process steps in true emission order, so 思考→正文→工具→思考→正文 round-trips as
+    # ordered reasoning/content/tool steps — the trailing content step is the final
+    # answer (no separate answer block).
+    sink = EventSink()
+    sink.emit(reasoning_delta("think-1"))
+    sink.emit(content_delta("先查一下"))
+    sink.emit(tool_use_start("t1", "web_search", {"query": "x"}))
+    sink.emit(tool_use_end("t1", "web_search", success=True, output="ok"))
+    sink.emit(reasoning_delta("think-2"))
+    sink.emit(content_delta("最终答案"))
+
+    timeline = sink.process_timeline()
+    assert timeline is not None
+    assert [s["kind"] for s in timeline] == [
+        "reasoning",
+        "content",
+        "tool",
+        "reasoning",
+        "content",
+    ]
+    assert timeline[1]["text"] == "先查一下"
+    assert timeline[-1]["text"] == "最终答案"
+
+
+def test_process_content_deltas_coalesce_into_one_step():
+    # Consecutive content deltas coalesce into the trailing content step (one segment
+    # per 正文 run), mirroring the reasoning coalescing — not one node per token.
+    sink = EventSink()
+    sink.emit(tool_use_start("t1", "grep", {"pattern": "x"}))
+    sink.emit(tool_use_end("t1", "grep", success=True, output="ok"))
+    sink.emit(content_delta("答"))
+    sink.emit(content_delta("案"))
+
+    timeline = sink.process_timeline()
+    assert timeline is not None
+    content_steps = [s for s in timeline if s["kind"] == "content"]
+    assert len(content_steps) == 1
+    assert content_steps[0]["text"] == "答案"
+
+
+def test_content_only_turn_persists_no_process():
+    # A tool-less turn has no interleaving to preserve, so even though content folds
+    # into the live process list, process_timeline gates it off (the client replays
+    # from reasoning_content + the message content instead).
+    sink = EventSink()
+    sink.emit(reasoning_delta("just thinking"))
+    sink.emit(content_delta("just an answer"))
+    assert sink.process_timeline() is None

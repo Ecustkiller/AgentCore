@@ -24,6 +24,14 @@ class ToolSchema:
     parameters: dict[str, Any]  # JSON Schema format
     category: ToolCategory
     approval: ToolApproval = ToolApproval.NEVER
+    # Engine-level hard ceiling (seconds) for ONE call of this tool — a B1 backstop
+    # so a wedged tool can't stall a whole turn. ``None`` ⇒ the engine applies a
+    # per-category default (``runtime.engine.resolve_tool_timeout``); ORCHESTRATION
+    # / INTERACTION tools are exempt (they legitimately wait minutes on sub-runs or
+    # the user). Set explicitly only for a non-default ceiling. This is a coarse
+    # safety net layered ABOVE a tool's own finer timeout (e.g. ``code_execute``
+    # caps its sandbox itself), never a replacement for it.
+    timeout_seconds: float | None = None
 
 
 @dataclass

@@ -169,6 +169,25 @@ class WorkspaceBackend(Protocol):
         """
         ...
 
+    async def index_files(
+        self, cap: int | None = None, *, order: str = "path"
+    ) -> tuple[list[str], bool]:
+        """Flat, ignore-pruned, capped list of workspace-relative file paths.
+
+        Files only (no directories), ``IGNORED_DIRS`` pruned, capped at ``cap``
+        (``truncated`` True when the cap was hit; ``cap=None`` uses the backend default).
+        ``order`` picks the sort (and thus what survives truncation): ``"path"``
+        (default) is POSIX-alphabetical and stat-free — the @-mention / picker view;
+        ``"recent"`` is newest-first by mtime (one stat/file) so a worker manifest spends
+        its budget on the most-likely-relevant files in a big tree, not whatever sorts
+        first. The shared file-discovery primitive behind @ mentions (文件中枢统一 F4) and
+        the worker workspace manifest — so both see the same flat view whether the
+        workspace is cloud (``ServerWorkspace``) or local (``LocalWorkspace``, indexed on
+        the desktop). Read-only (never sets ``dirty``); an empty / not-yet-promoted
+        workspace returns ``([], False)``.
+        """
+        ...
+
     async def mkdir(self, path: str) -> None:
         """Create directory ``path`` (with parents).
 

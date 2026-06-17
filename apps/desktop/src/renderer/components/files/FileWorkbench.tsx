@@ -15,9 +15,6 @@ import { createCloudWorkspaceSource } from "@/services/sources/workspaceSource";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import { useFoldersStore } from "@/stores/folders";
 import {
-  ArrowUpRight,
-  ChevronDown,
-  ChevronRight,
   Cloud,
   FilePlus,
   FileText,
@@ -25,6 +22,7 @@ import {
   FolderPlus,
   HardDrive,
   Loader2,
+  MessageSquare,
   Pencil,
   Trash2,
   Upload,
@@ -33,14 +31,16 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 /** Build the {@link FileSource} for a workspace (cloud → REST, local → desktop IPC).
- * Local resolves only on desktop (needs `window.fsApi` + a bound root). */
+ * Local resolves only on desktop (needs `window.fsApi` + a bound root). A non-empty
+ * `ws.subpath` (工作区对称化 D1a) scopes the local source to that subtree under the
+ * shared container root. */
 function workspaceSource(
   ws: WorkspaceInfo,
   fsAvailable: boolean,
 ): FileSource | null {
   if (ws.location === "local") {
     if (!fsAvailable || !ws.rootId) return null;
-    return createLocalRootSource(ws.rootId, ws.name);
+    return createLocalRootSource(ws.rootId, ws.name, ws.subpath);
   }
   return createCloudWorkspaceSource(ws.wsId, ws.name);
 }
@@ -48,28 +48,6 @@ function workspaceSource(
 /** `ws_id = folder:<id>` → its folder id (lifecycle ops are folder ops). */
 function folderIdOf(wsId: string): string | null {
   return wsId.startsWith("folder:") ? wsId.slice("folder:".length) : null;
-}
-
-const EXPANDED_KEY = "agentcore:files-workspaces-expanded";
-
-function loadExpanded(): Set<string> {
-  try {
-    const raw = localStorage.getItem(EXPANDED_KEY);
-    if (!raw) return new Set();
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((p): p is string => typeof p === "string"));
-  } catch {
-    return new Set();
-  }
-}
-
-function saveExpanded(set: Set<string>): void {
-  try {
-    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...set]));
-  } catch {
-    /* unavailable — session-only */
-  }
 }
 
 const RAIL_KEY = "agentcore:files-rail-width";
@@ -113,17 +91,26 @@ function tabKey(wsId: string, path: string): string {
 
 /**
  * The cross-project 文件 hub's **split** file UI (VSCode 式左树右详情) — the merged
- * left rail is *one* multi-root tree: each workspace (= folder, cloud + local) is a
- * collapsible root whose files expand inline below it (其自带 {@link FileSource}); the
- * right pane is a **tab strip** — opening files stacks tabs, each {@link FileDetail}
- * stays mounted (hidden when inactive) so switching never drops editor / draft state.
- * The tree always stays visible (unlike the swap-style {@link FileBrowser} used in
- * narrow side panels).
+ * left rail stacks every workspace (= folder, cloud + local) as a **flat,
+ * non-collapsible section** ({@link WorkspaceSection}): a header (name + cloud/local
+ * badge + create buttons) over its always-shown file tree (其自带 {@link FileSource}).
+ * 全部平铺、无「home / 其他项目」分区——只靠 cloud/local 徽标区分（用户 2026-06 决定）。
+ * 工作区一视同仁（工作区对称化 D1a 起不再有置顶的「我的工作区」默认壳——裸聊产文件时由服务端
+ * 懒建一个 per 对话本地工作区，与云端裸聊同构）。The right pane is a **tab strip** — opening
+ * files stacks tabs, each {@link FileDetail} stays mounted (hidden when inactive) so
+ * switching never drops editor / draft state. The tree always stays visible (unlike
+ * the swap-style {@link FileBrowser} used in narrow side panels).
  *
- * Workspace lifecycle (rename / delete / new file·folder / open / upload) lives on
- * each root's **right-click menu** to keep the rail clean; page-level "new folder /
- * add local" sit in the rail header. Reuses {@link FileTree} in its headerless
- * `chrome={false}` form so per-source CRUD / drag / fold all come for free.
+ * Workspace lifecycle (rename / delete / new file·folder / view chats / upload)
+ * lives on each root's **right-click menu** to keep the rail clean; page-level "new
+ * folder / add local" sit in the rail header. Reuses {@link FileTree} in its
+ * headerless `chrome={false}` form so per-source CRUD / drag / fold all come for free.
+ *
+ * No longer the lens onto a *single* project's home — that page (`/folders/:id`) is
+ * gone (双模式工作区 决策 #9, 端态 I): this is purely the file lens, and chats live
+ * on `/conversations`. The two cross-link: a root's「查看对话」jumps here→there, and
+ * `/conversations`「浏览文件」jumps there→here (via `focusWsId`, which expands +
+ * highlights the target root).
  */
 export function FileWorkbench({
   workspaces,
@@ -135,7 +122,9 @@ export function FileWorkbench({
   onAddLocal,
   onRename,
   onDelete,
-  onOpen,
+  onViewConversations,
+  focusWsId,
+  focusKey,
 }: {
   workspaces: WorkspaceInfo[];
   isLoading: boolean;
@@ -146,12 +135,19 @@ export function FileWorkbench({
   onAddLocal: () => void;
   onRename: (folderId: string, name: string) => void;
   onDelete: (folderId: string) => void;
-  onOpen: (folderId: string) => void;
+  onViewConversations: (folderId: string) => void;
+  /** When navigated here with a target workspace (`/conversations`「浏览文件」),
+   * highlight + scroll to that section (全部恒展开，无需再展开)。`focusKey` (= navigation
+   * key) makes re-focusing the same project on a later jump fire again. */
+  focusWsId?: string | null;
+  focusKey?: string;
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded());
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [railWidth, setRailWidth] = useState<number>(() => loadRailWidth());
+  // 从 /conversations「浏览文件」跳来时高亮的工作区根（1.5s 后消失，呼应对话页的 flash）。
+  const [flashWsId, setFlashWsId] = useState<string | null>(null);
+  const appliedFocusRef = useRef<string | null>(null);
 
   // 拖拽分隔条调左栏宽度：拖动期用窗口级监听 + 锁 body 光标/选区（避免拖过右侧编辑器时选中文本），
   // 松手落盘最终宽度（持久化，下次进页面沿用）。
@@ -185,15 +181,6 @@ export function FileWorkbench({
     });
   };
 
-  // 首次（无持久化）默认展开第一个工作区，给个直观落点。
-  useEffect(() => {
-    if (!localStorage.getItem(EXPANDED_KEY) && workspaces.length > 0) {
-      const first = new Set([workspaces[0].wsId]);
-      setExpanded(first);
-      saveExpanded(first);
-    }
-  }, [workspaces]);
-
   // 工作区被删/消失 → 关掉它名下的标签页，并修正激活项。
   useEffect(() => {
     const live = tabs.filter((t) => workspaces.some((w) => w.wsId === t.wsId));
@@ -204,15 +191,17 @@ export function FileWorkbench({
     }
   }, [workspaces, tabs, activeKey]);
 
-  const toggle = (wsId: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(wsId)) next.delete(wsId);
-      else next.add(wsId);
-      saveExpanded(next);
-      return next;
-    });
-  };
+  // 从 /conversations「浏览文件」跳来：高亮 + 滚入目标工作区（全部恒展开，无需再展开一层）。
+  // 每个 focusKey（导航键）只应用一次，但等到工作区列表就绪后才生效（冷进入 /files 时列表可能尚未加载）。
+  useEffect(() => {
+    if (!focusWsId || !focusKey) return;
+    if (appliedFocusRef.current === focusKey) return;
+    if (!workspaces.some((w) => w.wsId === focusWsId)) return;
+    appliedFocusRef.current = focusKey;
+    setFlashWsId(focusWsId);
+    const t = setTimeout(() => setFlashWsId(null), 1500);
+    return () => clearTimeout(t);
+  }, [focusWsId, focusKey, workspaces]);
 
   // 每个工作区一个稳定的 FileSource（树与详情共用，按 ws 复用，避免重复构建/反复重载）。
   const sourceByWs = useMemo(() => {
@@ -303,19 +292,18 @@ export function FileWorkbench({
             }
           />
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
+          <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
             {workspaces.map((ws) => (
-              <WorkspaceRoot
+              <WorkspaceSection
                 key={ws.wsId}
                 ws={ws}
                 source={sourceByWs.get(ws.wsId) ?? null}
-                expanded={expanded.has(ws.wsId)}
-                onToggle={() => toggle(ws.wsId)}
                 activePath={activeTab?.wsId === ws.wsId ? activeTab.path : null}
                 onOpenFile={(path, name) => openFile(ws.wsId, path, name)}
                 onRename={onRename}
                 onDelete={onDelete}
-                onOpen={onOpen}
+                onViewConversations={onViewConversations}
+                flashing={ws.wsId === flashWsId}
               />
             ))}
           </div>
@@ -407,49 +395,54 @@ export function FileWorkbench({
 }
 
 /**
- * One workspace = a collapsible root node + (when expanded) its file tree. All
- * management lives on the right-click menu (rail stays clean); a freshly created
- * folder opens straight into inline rename via the shared `pendingRename` store.
+ * One workspace = a **flat, non-collapsible section**: a header (name + cloud/local
+ * badge + create buttons) with its file tree always shown beneath. 全部平铺、去掉
+ * 「home / 其他项目」分区——工作区之间只靠 cloud/local 徽标区分（用户 2026-06 决定），且
+ * 一视同仁（工作区对称化 D1a 起无置顶的默认壳，每个工作区都可重命名 / 删除 / 查看对话）。
+ * Lifecycle (重命名 / 删除 / 查看对话) lives on the right-click menu; 新建 / 上传 are
+ * header buttons + menu items. Tree 恒挂载，故新建直接走 {@link FileTreeHandle}、无需先
+ * 展开；一个刚建出的文件夹经共享 `pendingRename` store 直接进内联改名。空态对懒建的本地
+ * 工作区（有 `subpath`）用「AI 产物落点」文案，其余用「空文件夹」。
  */
-function WorkspaceRoot({
+function WorkspaceSection({
   ws,
   source,
-  expanded,
-  onToggle,
   activePath,
   onOpenFile,
   onRename,
   onDelete,
-  onOpen,
+  onViewConversations,
+  flashing,
 }: {
   ws: WorkspaceInfo;
   source: FileSource | null;
-  expanded: boolean;
-  onToggle: () => void;
   activePath: string | null;
   onOpenFile: (path: string, name: string) => void;
   onRename: (folderId: string, name: string) => void;
   onDelete: (folderId: string) => void;
-  onOpen: (folderId: string) => void;
+  onViewConversations: (folderId: string) => void;
+  flashing: boolean;
 }) {
   const folderId = folderIdOf(ws.wsId);
   const isLocal = ws.location === "local";
   const localUnavailable = isLocal && !source;
 
+  const rootRef = useRef<HTMLDivElement>(null);
   const treeRef = useRef<FileTreeHandle>(null);
+
+  // 被聚焦（从对话页「浏览文件」跳来）时滚入可视区。
+  useEffect(() => {
+    if (flashing) rootRef.current?.scrollIntoView({ block: "nearest" });
+  }, [flashing]);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(ws.name);
-  const [pendingCreate, setPendingCreate] = useState<{
-    kind: "file" | "dir";
-    nonce: number;
-  } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const skipBlurRef = useRef(false);
 
   const pendingRenameId = useFoldersStore((s) => s.pendingRenameId);
   const setPendingRename = useFoldersStore((s) => s.setPendingRename);
 
-  // 刚经「新建文件夹」建出的工作区：直接进入内联重命名（与旧管理页一致）。
+  // 刚经「新建文件夹」建出的工作区：直接进入内联重命名。
   useEffect(() => {
     if (folderId && pendingRenameId === folderId) {
       setDraft(ws.name);
@@ -465,24 +458,11 @@ function WorkspaceRoot({
     }
   }, [editing]);
 
-  // 右键「新建文件 / 文件夹」：先确保展开，挂载后再触发树内的内联新建。
-  useEffect(() => {
-    if (expanded && pendingCreate) {
-      treeRef.current?.startCreate(pendingCreate.kind);
-      setPendingCreate(null);
-    }
-  }, [expanded, pendingCreate]);
-
   const commitRename = () => {
     setEditing(false);
     const name = draft.trim();
     if (!folderId || !name || name === ws.name) return;
     onRename(folderId, name);
-  };
-
-  const requestCreate = (kind: "file" | "dir") => {
-    if (!expanded) onToggle();
-    setPendingCreate({ kind, nonce: Date.now() });
   };
 
   const handleDelete = () => {
@@ -530,64 +510,91 @@ function WorkspaceRoot({
     );
   }
 
+  // 平铺标题行（不可折叠）：名字 + 新建按钮（hover 显形）+ 云端/本地徽标。
+  const header = (
+    <div
+      className={cn(
+        "group flex items-center rounded-md pr-1 text-sm",
+        flashing && "ring-2 ring-inset ring-primary",
+      )}
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pl-2">
+        <FolderOpen size={14} className="shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate font-medium">{ws.name}</span>
+      </div>
+      {source && (
+        <div className="hidden shrink-0 items-center group-hover:flex">
+          <IconButton
+            title="新建文件"
+            onClick={() => treeRef.current?.startCreate("file")}
+          >
+            <FilePlus size={14} />
+          </IconButton>
+          <IconButton
+            title="新建文件夹"
+            onClick={() => treeRef.current?.startCreate("dir")}
+          >
+            <FolderPlus size={14} />
+          </IconButton>
+        </div>
+      )}
+      <span
+        className={`flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs ${
+          isLocal
+            ? "bg-primary/10 text-primary"
+            : "bg-muted text-muted-foreground"
+        }`}
+      >
+        {isLocal ? <HardDrive size={12} /> : <Cloud size={12} />}
+        {isLocal ? "本地" : "云端"}
+      </span>
+    </div>
+  );
+
+  const tree = localUnavailable ? (
+    <div className="py-1 pl-7 text-xs text-muted-foreground/70">
+      本地项目的文件在你电脑上，请在桌面端查看。
+    </div>
+  ) : source ? (
+    <FileTree
+      ref={treeRef}
+      source={source}
+      chrome={false}
+      indent={14}
+      activePath={activePath}
+      onOpenFile={onOpenFile}
+      emptyText={
+        ws.subpath ? "还没有文件——对话里 AI 产出的文件会落在这里" : "空文件夹"
+      }
+    />
+  ) : (
+    <div className="py-1 pl-7 text-xs text-muted-foreground/70">
+      无法打开此项目，文件源暂不可用。
+    </div>
+  );
+
   return (
-    <div>
+    <div ref={rootRef}>
       <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div className="group flex items-center rounded-md pr-1 text-sm hover:bg-accent">
-            <button
-              type="button"
-              onClick={onToggle}
-              className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pl-2 text-left"
-            >
-              {expanded ? (
-                <ChevronDown
-                  size={14}
-                  className="shrink-0 text-muted-foreground"
-                />
-              ) : (
-                <ChevronRight
-                  size={14}
-                  className="shrink-0 text-muted-foreground"
-                />
-              )}
-              <FolderOpen
-                size={14}
-                className="shrink-0 text-muted-foreground"
-              />
-              <span className="min-w-0 flex-1 truncate font-medium">
-                {ws.name}
-              </span>
-            </button>
-            <span
-              className={`flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs ${
-                isLocal
-                  ? "bg-primary/10 text-primary"
-                  : "bg-muted text-muted-foreground"
-              }`}
-            >
-              {isLocal ? <HardDrive size={12} /> : <Cloud size={12} />}
-              {isLocal ? "本地" : "云端"}
-            </span>
-          </div>
-        </ContextMenuTrigger>
+        <ContextMenuTrigger asChild>{header}</ContextMenuTrigger>
         <ContextMenuContent className="min-w-44">
           {!localUnavailable && source && (
             <>
-              <ContextMenuItem onSelect={() => requestCreate("file")}>
+              <ContextMenuItem
+                onSelect={() => treeRef.current?.startCreate("file")}
+              >
                 <FilePlus size={14} className="shrink-0" />
                 <span className="flex-1 truncate">新建文件</span>
               </ContextMenuItem>
-              <ContextMenuItem onSelect={() => requestCreate("dir")}>
+              <ContextMenuItem
+                onSelect={() => treeRef.current?.startCreate("dir")}
+              >
                 <FolderPlus size={14} className="shrink-0" />
                 <span className="flex-1 truncate">新建文件夹</span>
               </ContextMenuItem>
               {source.caps.transfer && (
                 <ContextMenuItem
-                  onSelect={() => {
-                    if (!expanded) onToggle();
-                    treeRef.current?.triggerUpload();
-                  }}
+                  onSelect={() => treeRef.current?.triggerUpload()}
                 >
                   <Upload size={14} className="shrink-0" />
                   <span className="flex-1 truncate">上传到此项目</span>
@@ -606,9 +613,9 @@ function WorkspaceRoot({
             <span className="flex-1 truncate">重命名</span>
           </ContextMenuItem>
           {folderId && (
-            <ContextMenuItem onSelect={() => onOpen(folderId)}>
-              <ArrowUpRight size={14} className="shrink-0" />
-              <span className="flex-1 truncate">打开工作区</span>
+            <ContextMenuItem onSelect={() => onViewConversations(folderId)}>
+              <MessageSquare size={14} className="shrink-0" />
+              <span className="flex-1 truncate">查看对话</span>
             </ContextMenuItem>
           )}
           <ContextMenuSeparator />
@@ -618,26 +625,7 @@ function WorkspaceRoot({
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
-
-      {expanded &&
-        (localUnavailable ? (
-          <div className="py-1 pl-7 text-xs text-muted-foreground/70">
-            本地项目的文件在你电脑上，请在桌面端查看。
-          </div>
-        ) : source ? (
-          <FileTree
-            ref={treeRef}
-            source={source}
-            chrome={false}
-            indent={14}
-            activePath={activePath}
-            onOpenFile={onOpenFile}
-          />
-        ) : (
-          <div className="py-1 pl-7 text-xs text-muted-foreground/70">
-            无法打开此项目，文件源暂不可用。
-          </div>
-        ))}
+      {tree}
     </div>
   );
 }

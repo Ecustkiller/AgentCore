@@ -7,13 +7,20 @@ the CEO is **opening** a producible-but-underspecified request (做网站 / 文�
 hitting a **mid-execution** high-cost fork (A vs B / an irreversible step), it asks the
 SAME way and through the SAME mechanism.
 
-ONE mechanism — always suspend + resume. The card surfaces, the turn suspends on the
-interaction registry's Future, and the user's answer flows back into the CEO's ReAct
-loop as this tool's result. There is no separate「开场即结束回合」path: 挂起+恢复 is the
-general case (it preserves any in-flight context — delegate results, read files), and it
-subsumes the opening case (where there is simply little context to preserve) at a
-negligible cost, so the runtime — not the model — owns「该结束还是该挂起」. The model
-only decides WHETHER to ask (restraint), never WHICH kind of asking.
+Two modes, one primitive — the model picks via ``blocking``. DEFAULT (``blocking`` true):
+suspend + resume — the card surfaces, the turn suspends on the interaction registry's
+Future, and the user's answer flows back into the CEO's ReAct loop as this tool's result.
+挂起+恢复 is the general case (it preserves any in-flight context — delegate results, read
+files) and subsumes the opening 引导 at negligible cost, so the runtime — not the model —
+owns「该结束还是该挂起」. NON-BLOCKING (``blocking`` false, Cursor 式): for a low-stakes
+fork the CEO already has a sensible default for, it surfaces the question, returns a
+``CONTINUE`` immediately (no suspend, no durable frame, no extra round) and keeps working
+on its stated default; the user's answer, if any, rides an ordinary next-turn message.
+Requires a stated fallback (an ``assumptions`` entry or a question ``default``) — without
+one「非阻塞」would silently guess, so it degrades to an error steering the CEO to block.
+The model decides WHETHER to ask (restraint) and, when it does, whether the fork is worth
+freezing the turn (block) or can ride a default (non-block). 对比与决策见
+docs/03-AI核心/Agent协作模式.md（向用户发问 / 阻塞与非阻塞）.
 
 The card's content is one adaptive shape (rich when opening, compact mid-task):
 ``message`` (the framing / opening line — always shown), optional ``context``
@@ -52,6 +59,7 @@ from agentcore.runtime.events import (
     checkpoint_required,
     checkpoint_resolved,
     content_delta,
+    question_posted,
 )
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
@@ -102,10 +110,11 @@ class AskUserTool:
         return ToolSchema(
             name="ask_user",
             description=(
-                "向用户发问并【暂停回合】，等 ta 回应后回到你的循环继续；用户选「停止」则结束"
-                "本回合。这是你唯一的「问用户」原语，开场引导与执行途中拍板共用。克制使用，别为"
-                "能自行决定的小事打断用户；何时该问、开工提案卡怎么分档、途中拍板怎么给选项，"
-                "见 consult_skill(asking_the_user)。"
+                "向用户发问。默认【暂停回合】等 ta 回应后回到你的循环继续（用户选「停止」则结束"
+                "本回合）；也可设 blocking=false 做【非阻塞发问】——抛出问题但你按既定默认继续、"
+                "不等待，用户答复会作为新消息在后续轮次并入。这是你唯一的「问用户」原语，开场引导"
+                "与执行途中拍板共用。克制使用，别为能自行决定的小事打断用户；何时该问 / 该不该阻塞、"
+                "开工提案卡怎么分档、途中拍板怎么给选项，见 consult_skill(asking_the_user)。"
             ),
             parameters={
                 "type": "object",
@@ -207,6 +216,16 @@ class AskUserTool:
                             "required": ["label"],
                         },
                     },
+                    "blocking": {
+                        "type": "boolean",
+                        "description": (
+                            "可选，默认 true。true=【暂停回合】等用户答复再继续——高风险 / 不可逆"
+                            "的岔路、或你没有合理默认时用。false=【非阻塞】——你已有合理默认、"
+                            "只是想给用户一个纠偏机会时用：抛出问题后你【立刻按默认继续、不等待】，"
+                            "用户回复会在后续轮次并入。设 false 时必须在 assumptions 或某个 "
+                            "question 的 default 里写明你将先采用的默认，否则该调用会被拒。"
+                        ),
+                    },
                 },
                 "required": ["message"],
             },
@@ -229,6 +248,15 @@ class AskUserTool:
         assumptions = _normalize_assumptions(arguments.get("assumptions"))
         questions = _normalize_questions(arguments.get("questions"))
         style_options = _normalize_style_options(arguments.get("style_options"))
+
+        # 非阻塞发问 (Cursor 式): surface + proceed, never freeze the turn. Branch BEFORE
+        # any suspend / durable-frame machinery — it shares none of it.
+        blocking_arg = arguments.get("blocking")
+        blocking = True if blocking_arg is None else bool(blocking_arg)
+        if not blocking:
+            return self._post_nonblocking(
+                message, ctx_text, assumptions, questions, style_options
+            )
 
         checkpoint_id = new_id()
         required = checkpoint_required(
@@ -290,6 +318,65 @@ class AskUserTool:
             self.sink.emit(content_delta(result.final_text))
         return result
 
+    def _post_nonblocking(
+        self,
+        message: str,
+        ctx_text: str,
+        assumptions: list[dict[str, Any]],
+        questions: list[dict[str, Any]],
+        style_options: list[dict[str, Any]],
+    ) -> ToolResult:
+        """非阻塞发问 (Cursor 式)：抛出确认但不挂起——CEO 按既定默认续跑，答复后续并入。
+
+        The counterpart to suspend+resume: rather than freezing the turn on the user's
+        answer, surface the question as a non-gating ``question_posted`` card (the client
+        renders chips that 回填 the composer; the answer rides an ordinary next-turn
+        message) and feed the CEO a ``CONTINUE`` that orders it to keep working on its
+        stated default. Guarded: a non-blocking ask MUST carry a fallback (an assumption,
+        or a question ``default``) or the user can't trust the CEO to proceed — without
+        one it returns an error steering the model to ``blocking=true`` instead. No
+        suspend / frame / extra round, so it costs nothing the worker-side ``escalate``
+        doesn't.
+        """
+        has_fallback = bool(assumptions) or any(q.get("default") for q in questions)
+        if not has_fallback:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=(
+                    "非阻塞发问（blocking=false）必须写明你将先采用的默认：在 assumptions "
+                    "列出你的暂定决策，或给某个 question 填 default。否则用户无从判断能否放心"
+                    "不管。若你确实要等用户拍板再动，请改用 blocking=true。"
+                ),
+            )
+        self.sink.emit(
+            question_posted(
+                ask_id=new_id(),
+                conversation_id=self.conversation_id,
+                question=message,
+                context=ctx_text,
+                assumptions=assumptions,
+                questions=questions,
+                style_options=style_options,
+            )
+        )
+        logger.info(
+            "ask_user.nonblocking",
+            conversation_id=self.conversation_id,
+            questions=len(questions),
+            assumptions=len(assumptions),
+        )
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=(
+                "已（非阻塞）把这个确认抛给用户，并按你写明的默认继续。【不要等待、不要停】："
+                "立刻继续推进手头工作、把本回合做完；用户若回复会作为新消息在后续轮次到达，"
+                "届时再据此调整。"
+            ),
+        )
+
     def _can_persist_suspension(self) -> bool:
         """Whether this ask_user pause should be durably persisted (结构化挂起 2b).
 
@@ -325,12 +412,15 @@ class AskUserTool:
             AskUserSuspension,
             captain_transcript,
             find_tool_call_id,
+            turn_history,
         )
 
         transcript = captain_transcript.get()
         if not transcript:
             logger.info("suspension.no_transcript", checkpoint_id=checkpoint_id)
             return
+        from agentcore.runtime.facts import snapshot_fact_log
+
         journal = list(self.sink.execution_journal() or [])
         journal.append(
             {
@@ -338,6 +428,18 @@ class AskUserTool:
                 "payload": required_event.payload,
                 "timestamp": required_event.timestamp,
             }
+        )
+        # The §18.3 fact-log stream at this same instant — the persist source (the
+        # display ``journal`` above is the degraded fallback). The suspending card is
+        # emitted only AFTER this save, so fold it in so the persisted stream carries it.
+        journal_entries = snapshot_fact_log(
+            trailing=[
+                {
+                    "kind": required_event.type.value,
+                    "payload": required_event.payload,
+                    "ts": required_event.timestamp,
+                }
+            ]
         )
         frame = AskUserSuspension(
             message_id=self.message_id or "",
@@ -349,12 +451,14 @@ class AskUserTool:
             base_system_prompt=self.base_system_prompt,
             user_message=self.user_message,
             transcript=list(transcript),
+            history=list(turn_history.get() or []),
             question=message,
             context=ctx_text,
             assumptions=assumptions,
             questions=questions,
             style_options=style_options,
             journal=journal,
+            journal_entries=journal_entries,
             trace_id=get_log_value("trace_id"),
         )
         await self.suspension_saver(frame)  # type: ignore[misc]

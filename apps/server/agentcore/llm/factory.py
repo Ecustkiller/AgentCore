@@ -26,6 +26,7 @@ def build_provider(credentials: LLMCredentials | None = None) -> DeepSeekProvide
         return DeepSeekProvider(
             api_key=credentials.api_key,
             base_url=credentials.base_url,
+            extra_headers=credentials.extra_headers,
         )
     return DeepSeekProvider(
         api_key=settings.deepseek_api_key,

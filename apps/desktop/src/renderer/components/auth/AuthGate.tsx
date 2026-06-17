@@ -5,6 +5,7 @@ import {
   setUnauthorizedHandler,
 } from "@/services/api";
 import { bootstrapAuth, diagnoseOutage } from "@/services/auth";
+import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import { useAuthStore } from "@/stores/auth";
 import { type ReactNode, useCallback, useEffect } from "react";
 
@@ -56,6 +57,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setServiceUnavailableHandler(null);
     };
   }, [runBootstrap]);
+
+  // 认证成功后预热桌面默认本地容器根（决策 #11 / 工作区对称化 D1a），使首个裸聊首发即可
+  // 携带容器根、由服务端懒建本地文件夹——此刻只授权 `~/Documents/AgentCore`、不建 Folder。
+  // 非桌面 / 失败时 no-op，不阻断渲染。
+  useEffect(() => {
+    if (status === "authenticated") void ensureDefaultContainerRoot();
+  }, [status]);
 
   if (status === "loading") {
     return (

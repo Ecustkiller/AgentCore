@@ -13,12 +13,14 @@ import {
 } from "@/lib/fileIndex";
 import type { FileSource } from "@/lib/fileSource";
 import { api } from "@/services/api";
+import { markCloudEscapeConversation } from "@/services/defaultWorkspace";
 import { loadLatestWindow } from "@/services/messages";
 import { createLocalRootSource } from "@/services/sources/localRootSource";
 import { createCloudWorkspaceSource } from "@/services/sources/workspaceSource";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import { getWorkspaceBinding } from "@/services/workspaceBinding";
+import { useComposerDraftStore } from "@/stores/composer";
 import {
   getActiveRuntime,
   useActiveGenerating,
@@ -189,6 +191,19 @@ export function MessageInput() {
   useEffect(() => {
     adjustHeight();
   }, [value, adjustHeight]);
+
+  // 回填 from a non-blocking ask card (its option chips drop the user's pick into the
+  // draft). Keyed on the store's monotonic token so an identical text still applies;
+  // append stacks answers to multiple questions, replace overwrites. Focus so the user
+  // can edit / send (a disabled textarea while generating keeps the value, ready to go).
+  const draftToken = useComposerDraftStore((s) => s.token);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draftToken is the intentional re-run key — apply the latest fill exactly once per bump.
+  useEffect(() => {
+    if (draftToken === 0) return;
+    const { text, mode } = useComposerDraftStore.getState();
+    setValue((v) => (mode === "append" && v.trim() ? `${v}\n${text}` : text));
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [draftToken]);
 
   const ensureIndex = useCallback(async () => {
     if (indexLoadedRef.current) return;
@@ -466,13 +481,22 @@ export function MessageInput() {
       // Filing at creation — rather than a follow-up move — avoids racing the
       // workspace-lock guard, which rejects a move once a chat has any messages
       // (双模式工作区 §九 ⑩).
-      const targetFolderId = useFoldersStore.getState().pendingNewChatFolderId;
+      // 桌面 local-first（决策 #11 / 工作区对称化 D1a）：未显式归档时，这是一条**裸聊**——
+      // 不预塞文件夹（folder_id=null），首次产文件时由服务端在默认本地容器下懒建 per 对话
+      // 文件夹（信号由 sendTurn 经 `pendingLocalContainerRoot` 携带）。「云端临时对话」逃生口
+      // 同为裸聊，但标记后其懒建落云端（不携带容器根）。
+      const foldersStore = useFoldersStore.getState();
+      const targetFolderId = foldersStore.pendingNewChatFolderId;
+      const cloudEscape = foldersStore.pendingNewChatCloud;
       try {
         const conv = await api.post<{ id: string }>("/v1/conversations", {
           title: null,
           folder_id: targetFolderId,
         });
         conversationId = conv.id;
+        // 记下逃生口意图，使后续回合的 `pendingLocalContainerRoot` 不为这条裸聊携带容器根
+        // （懒建落云端）。仅本进程内有效——逃生口是一次性的随手云问答。
+        if (cloudEscape) markCloudEscapeConversation(conv.id);
         upsertConversationFront({
           id: conv.id,
           title: "新对话",
@@ -483,9 +507,9 @@ export function MessageInput() {
         });
         useConversationStore.getState().setCurrentConversation(conv.id);
         createdNew = true;
-        if (targetFolderId) {
-          useFoldersStore.getState().setPendingNewChatFolder(null);
-        }
+        // 消费后复位（folder=null + cloud=false ⇒ 下次草稿仍是桌面默认本地裸聊）。
+        useFoldersStore.getState().setPendingNewChatFolder(null);
+        useFoldersStore.getState().setPendingNewChatCloud(false);
       } catch {
         return;
       }

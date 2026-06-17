@@ -3,7 +3,7 @@
 把黄金任务集喂给真实运行路径（``react_loop`` / ``run_chat_pipeline``），用确定性
 断言 + LLM 裁判双信号判定，产出可与 baseline 对比、可挂 CI 的回归报告。
 
-落地蓝图见 ``docs/07-规划/评估体系后端落地设计.md``；本包不被服务代码引用，纯离线工具。
+现状见 ``docs/02-架构/后端架构.md`` §五、未落地 P1+ 见 ``docs/07-规划/远期规划.md`` §2.4；本包不被服务代码引用，纯离线工具。
 
 P0（本阶段）：types + harness + 确定性 Check + seed_lint + runner + report + CLI。
 P1+（待落）：LLMJudge（语义打分）、baseline 回归门禁、CI 接入。

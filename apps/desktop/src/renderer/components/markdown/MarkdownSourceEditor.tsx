@@ -27,17 +27,16 @@ import {
   keymap,
 } from "@codemirror/view";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { type SelectionContext, sliceSelectionContext } from "./aiRewrite";
+import {
+  type RewriteTarget,
+  type SelectionContext,
+  isRewriteTargetIntact,
+  sliceSelectionContext,
+} from "./aiRewrite";
 import { markdownEditorTheme } from "./cmTheme";
 import { livePreview } from "./livePreview";
 
-/** {@link MarkdownSourceEditorHandle.startRewriteReview} 的目标选区（含原文校验）。 */
-export interface RewriteTarget {
-  from: number;
-  to: number;
-  /** 触发改写时选区的原文：应用前校验选区未被改动，避免改到错误位置。 */
-  selection: string;
-}
+export type { RewriteTarget } from "./aiRewrite";
 
 export interface MarkdownSourceEditorHandle {
   /** 当前编辑器正文。 */
@@ -102,8 +101,8 @@ export const MarkdownSourceEditor = forwardRef<
         const view = viewRef.current;
         if (!view) return false;
         // 选区在调用期间可能被并行编辑改动：越界或原文不匹配则拒绝，绝不改错位置。
-        if (from < 0 || to > view.state.doc.length || from > to) return false;
-        if (view.state.doc.sliceString(from, to) !== selection) return false;
+        if (!isRewriteTargetIntact(view.state, { from, to, selection }))
+          return false;
         const original = view.state.doc.toString();
         reviewOriginalRef.current = original;
         // 一次事务内：开启 merge（original=改写前整篇）+ 关实时预览 + 替换选区为改写文本

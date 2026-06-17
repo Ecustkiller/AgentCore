@@ -63,6 +63,7 @@ class WorkspaceOp(StrEnum):
     READ_BYTES = "read_bytes"
     WRITE_BYTES = "write_bytes"
     LIST = "list"
+    INDEX_FILES = "index_files"
     MKDIR = "mkdir"
     DELETE = "delete"
     MOVE = "move"

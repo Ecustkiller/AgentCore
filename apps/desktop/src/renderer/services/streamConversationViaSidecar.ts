@@ -1,5 +1,7 @@
 import { patchConversationCache } from "@/hooks/useConversations";
 import { StreamError } from "@/lib/errors";
+import { notifySuccess, notifyWarning } from "@/lib/toast";
+import { resolveSidecarInference } from "@/services/inferenceToken";
 import { recordLocalTurn } from "@/services/localTurns";
 import {
   clearActiveSidecarTurn,
@@ -42,6 +44,9 @@ export interface StreamViaSidecarOptions {
   conversationId: string;
   /** 绑定的本地授权根 id（主进程据此解析绝对路径并复用 / 拉起该根的 sidecar）。 */
   rootId: string;
+  /** 工作区子路径（工作区对称化 D1a）：非空时主进程把 sidecar 绑定到 `容器根/子路径`，
+   *  使懒建的 per 对话本地工作区各跑在自己目录里。空 = 该根自身（现行为）。 */
+  subpath?: string;
   content: string;
   /** 先前对话历史（sidecar 无库，需由调用方从本地会话切片喂入）。 */
   history?: SidecarHistoryEntry[];
@@ -51,13 +56,31 @@ export interface StreamViaSidecarOptions {
   signal?: AbortSignal;
 }
 
+export interface ResumeViaSidecarOptions {
+  conversationId: string;
+  rootId: string;
+  /** 工作区子路径（同 {@link StreamViaSidecarOptions.subpath}）：寻址按 root+subpath 起的
+   *  sidecar 进程，使子路径工作区的续跑也落在自己目录里。空 = 该根自身。 */
+  subpath?: string;
+  /** 挂起回合的 assistant message_id（续跑键；也是事件路由 / cancel 的寻址键）。 */
+  messageId: string;
+  decision: "continue" | "adjust" | "stop";
+  note: string;
+  selected?: string[];
+  /** 挂起回合的原始用户消息（来自帧）——续跑完成后随回写落库。 */
+  userMessage: string;
+  /** 注入的用户气泡 id（续跑前补回，见 `turns.runResume`）——回写据此对账。 */
+  userMessageId: string;
+  signal?: AbortSignal;
+}
+
 /** 一个轻量 turnId（cancel 的寻址键）。crypto.randomUUID 在 Electron renderer 可用。 */
 function newTurnId(): string {
   return `t_${crypto.randomUUID()}`;
 }
 
 /**
- * 从一次失败的 `startTurn` 拒绝里提取本地引擎真因（onStatus 没记到时的兜底）。
+ * 从一次失败的回合 RPC（`startTurn` / `resume`）拒绝里提取本地引擎真因（onStatus 没记到时的兜底）。
  *
  * 回合中途引擎报错时进程仍健康（无 `error`/`exited` 推送），真因落在 RPC 错误的 message 里；
  * 而 Electron 会把主进程 handler 抛出的错误包成
@@ -83,19 +106,122 @@ function describeSidecarTurnError(err: unknown): string | null {
 export async function streamConversationViaSidecar({
   conversationId,
   rootId,
+  subpath,
   content,
   history,
   optimisticUserId,
   signal,
 }: StreamViaSidecarOptions): Promise<SidecarTurnResult> {
-  // 新回合从干净的审批门开始（与云链路一致）。
+  const turnId = newTurnId();
+  // 云推理凭据（平台 key 不下放本机，走云端代理鉴权——Slice 4a）。取不到则带 undefined：
+  // dev 下 sidecar 回退其自身配置，生产则以可重试的引擎错误失败（胜过静默跑成无计费回合）。
+  const inference = (await resolveSidecarInference()) ?? undefined;
+  return runSidecarTurn({
+    conversationId,
+    rootId,
+    subpath,
+    turnId,
+    signal,
+    failMessage: "本地引擎未能完成回合，请重试",
+    invoke: () =>
+      window.sidecarApi.startTurn({
+        conversationId,
+        rootId,
+        subpath,
+        turnId,
+        userMessage: content,
+        history,
+        inference,
+      }),
+    writeBack: (result) =>
+      persistAndReconcile(conversationId, content, optimisticUserId, result),
+  });
+}
+
+/**
+ * 续跑一个持久挂起的本地回合（结构化挂起 2b resume）—— `streamConversationViaSidecar` 的对偶。
+ *
+ * sidecar 回合暂停后应用关闭、帧落本机文件；重开会话经 `listPaused` 重现续跑卡，用户的决定经
+ * 此函数下发到 sidecar 的 `resume`（claim 帧并跑 `resume_chat_pipeline`），过程事件与最终结果
+ * 形态与一次普通本地回合完全一致，故复用同一套事件分发与回写。事件路由 / cancel 键用
+ * message_id（一回合至多一个持久挂起）。
+ */
+export async function resumeConversationViaSidecar({
+  conversationId,
+  rootId,
+  subpath,
+  messageId,
+  decision,
+  note,
+  selected,
+  userMessage,
+  userMessageId,
+  signal,
+}: ResumeViaSidecarOptions): Promise<SidecarTurnResult> {
+  // 续跑同样要跑 LLM（重启后会新拉起引擎），故随带当前云推理凭据（同 startTurn）。
+  const inference = (await resolveSidecarInference()) ?? undefined;
+  return runSidecarTurn({
+    conversationId,
+    rootId,
+    subpath,
+    turnId: messageId,
+    signal,
+    failMessage: "本地引擎未能完成续跑，请重试",
+    invoke: () =>
+      window.sidecarApi.resume({
+        rootId,
+        subpath,
+        conversationId,
+        messageId,
+        decision,
+        note,
+        selected,
+        inference,
+      }),
+    writeBack: (result) =>
+      persistAndReconcile(conversationId, userMessage, userMessageId, result),
+  });
+}
+
+interface RunSidecarTurnOptions {
+  conversationId: string;
+  rootId: string;
+  /** 工作区子路径（D1a）：cancel / respond 据 root+subpath 寻址到正确的 sidecar 进程。 */
+  subpath?: string;
+  /** 事件路由 + cancel 的寻址键：新回合用 turnId，续跑用 message_id。 */
+  turnId: string;
+  signal?: AbortSignal;
+  /** 兜底错误文案（onStatus / RPC 真因都取不到时）。 */
+  failMessage: string;
+  /** 实际的 RPC 调用（startTurn / resume），Promise 在回合结束时携最终结果 resolve。 */
+  invoke: () => Promise<SidecarTurnResult>;
+  /** 回合结束后回写云端（落库 + 计费 + 对账），best-effort。 */
+  writeBack: (result: SidecarTurnResult) => Promise<void>;
+}
+
+/**
+ * 在 renderer 这端把一次 sidecar RPC（startTurn / resume）「伪装成」普通流式回合：订阅事件流
+ * 并原样喂 `dispatchSSEEvent`、桥接停止按钮到 `cancel`、收尾后回写云端、把本地引擎失败统一
+ * 包成带诊断的 `StreamError("sidecar")`。新回合与续跑共用这套脚手架，仅 `invoke` / `writeBack`
+ * 不同（避免两条链路各写一份事件/中止/错误处理）。
+ */
+async function runSidecarTurn({
+  conversationId,
+  rootId,
+  subpath,
+  turnId,
+  signal,
+  failMessage,
+  invoke,
+  writeBack,
+}: RunSidecarTurnOptions): Promise<SidecarTurnResult> {
+  // 回合从干净的审批门开始（与云链路一致）。
   useApprovalStore.getState().clear(conversationId);
 
-  // 登记「本会话此刻是 sidecar 回合」，使本回合内挂起的审批 / 交互结算（统一入口
-  // `resolveInteraction`）改走 `window.sidecarApi.respond` 回这条 stdio 链路，而非云端 HTTP。
-  setActiveSidecarTurn(conversationId, rootId);
-
-  const turnId = newTurnId();
+  // 登记「本会话此刻是 sidecar 回合」（连同 root+subpath），使本回合内挂起的审批 / 交互结算
+  // （统一入口 `resolveInteraction`）改走 `window.sidecarApi.respond` 回这条 stdio 链路（寻址到
+  // 按 root+subpath 起的同一进程），而非云端 HTTP。
+  setActiveSidecarTurn(conversationId, rootId, subpath);
 
   // 只消费本会话的事件；主进程已按 turnId 路由到本窗口，这里再按 conversationId 过滤，
   // 防一个 sidecar 服务多个会话时串台。
@@ -105,7 +231,7 @@ export async function streamConversationViaSidecar({
   });
 
   const onAbort = (): void => {
-    void window.sidecarApi.cancel({ rootId, turnId });
+    void window.sidecarApi.cancel({ rootId, subpath, turnId });
   };
   if (signal) {
     if (signal.aborted) onAbort();
@@ -113,20 +239,9 @@ export async function streamConversationViaSidecar({
   }
 
   try {
-    const result = await window.sidecarApi.startTurn({
-      conversationId,
-      rootId,
-      turnId,
-      userMessage: content,
-      history,
-    });
-    // 回合已在本机跑完——回写云端落库 + 计费，再对账乐观气泡（best-effort，见上）。
-    await persistAndReconcile(
-      conversationId,
-      content,
-      optimisticUserId,
-      result,
-    );
+    const result = await invoke();
+    // 回合已在本机跑完——回写云端落库 + 计费，再对账乐观气泡（best-effort）。
+    await writeBack(result);
     return result;
   } catch (err) {
     // 用户停止：与云链路一致地抛 AbortError（调用方据此不出错误横幅）。
@@ -139,7 +254,7 @@ export async function streamConversationViaSidecar({
     const detail =
       takeRecentSidecarFailure(rootId) ??
       describeSidecarTurnError(err) ??
-      "本地引擎未能完成回合，请重试";
+      failMessage;
     throw new StreamError("sidecar", undefined, { serverMessage: detail });
   } finally {
     // Abort / engine failure skips message_end (and thus its flush); drain any
@@ -154,9 +269,10 @@ export async function streamConversationViaSidecar({
 /**
  * 回写云端落库 + 计费，并对账乐观气泡（双模式工作区 §一.1）。
  *
- * best-effort：回合已在本机跑完并展示，落库/计费是旁路——失败只记录、绝不抛错（否则会
- * 把一个成功的回合误报为出错并触发重试横幅）。代价是失败时本会话历史「未同步」，下次重开
- * 会话从云端拉取时该回合不在；这条通路 dev 开关下使用，可接受。
+ * 回合已在本机跑完并展示，落库/计费是旁路；`recordLocalTurn` 自带有限退避重试（幂等安全，
+ * 服务端按 `user_message_id` / `run_id` 去重）。全部重试仍失败则**可见降级**：弹非阻断 toast
+ * 提示本回合未同步 + 提供手动「重试同步」，而非静默丢历史、也不复用会话错误横幅（那语义是
+ * 回合失败→重跑整轮，但回合其实成功了）。
  */
 async function persistAndReconcile(
   conversationId: string,
@@ -165,21 +281,85 @@ async function persistAndReconcile(
   result: SidecarTurnResult,
 ): Promise<void> {
   try {
-    const saved = await recordLocalTurn(conversationId, userMessage, result);
-    // 仅当末条 user 消息仍是本轮乐观气泡时才换 id（等价云链路 turn_saved）——防用户在回写
-    // 返回前又发了一条而改错对象。换 id 后失败重试走 regenerate 而非重发（不重复 user 轮）。
-    const messages = getRuntime(conversationId).messages;
-    const lastUser = [...messages].reverse().find((m) => m.role === "user");
-    if (lastUser?.id === optimisticUserId) {
-      useConversationStore
-        .getState()
-        .reconcileLastTurn(saved.user_message_id, conversationId);
-    }
-    // 本会话首次产出标题：更新侧栏缓存（等价云链路 title_generated）。
-    if (saved.title) {
-      patchConversationCache(conversationId, { title: saved.title });
-    }
+    const saved = await recordLocalTurn(
+      conversationId,
+      userMessage,
+      optimisticUserId,
+      result,
+    );
+    applyReconcile(conversationId, optimisticUserId, saved);
   } catch (err) {
     console.error("[sidecar] 本地回合回写云端失败（历史未同步）", err);
+    warnWriteBackFailed(conversationId, userMessage, optimisticUserId, result);
+  }
+}
+
+/**
+ * 对账乐观气泡（等价云链路 turn_saved + title_generated）。user id 现已是客户端权威，故换 id
+ * 通常是 X→X 无害交换；仍按「末条 user 仍是本轮乐观气泡」守卫——防用户在回写返回前又发了
+ * 一条而改错对象。本会话首次产出的标题刷进侧栏缓存。
+ */
+function applyReconcile(
+  conversationId: string,
+  optimisticUserId: string,
+  saved: Awaited<ReturnType<typeof recordLocalTurn>>,
+): void {
+  const messages = getRuntime(conversationId).messages;
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  if (lastUser?.id === optimisticUserId) {
+    useConversationStore
+      .getState()
+      .reconcileLastTurn(saved.user_message_id, conversationId);
+  }
+  if (saved.title) {
+    patchConversationCache(conversationId, { title: saved.title });
+  }
+}
+
+/**
+ * 回写彻底失败的可见降级：非阻断 toast + 手动「重试同步」。手动重试再 POST（幂等安全）：成功
+ * 则对账 + 成功提示，再失败则重新挂回提示（由用户决定何时再试，不无限自动循环）。
+ */
+function warnWriteBackFailed(
+  conversationId: string,
+  userMessage: string,
+  optimisticUserId: string,
+  result: SidecarTurnResult,
+): void {
+  notifyWarning("本回合未同步到云端", {
+    description: "重开会话可能看不到这条回复。",
+    action: {
+      label: "重试同步",
+      onClick: () => {
+        void retryWriteBack(
+          conversationId,
+          userMessage,
+          optimisticUserId,
+          result,
+        );
+      },
+    },
+  });
+}
+
+/** 手动重试一次回写（toast 按钮触发）；成功对账并提示，失败重新挂回降级提示。 */
+async function retryWriteBack(
+  conversationId: string,
+  userMessage: string,
+  optimisticUserId: string,
+  result: SidecarTurnResult,
+): Promise<void> {
+  try {
+    const saved = await recordLocalTurn(
+      conversationId,
+      userMessage,
+      optimisticUserId,
+      result,
+    );
+    applyReconcile(conversationId, optimisticUserId, saved);
+    notifySuccess("已同步到云端");
+  } catch (err) {
+    console.error("[sidecar] 本地回合回写重试失败（历史仍未同步）", err);
+    warnWriteBackFailed(conversationId, userMessage, optimisticUserId, result);
   }
 }

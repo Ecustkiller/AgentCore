@@ -61,3 +61,8 @@ class ToolRegistry:
     @property
     def count(self) -> int:
         return len(self._tools)
+
+    @property
+    def names(self) -> list[str]:
+        """Registered tool names (registration order)."""
+        return list(self._tools.keys())

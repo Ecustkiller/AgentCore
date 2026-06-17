@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
 
+    # Sidecar 云推理代理令牌 TTL（双模式工作区 §一.1 / Slice 4a）。桌面以 cookie 换一个
+    # 短期「推理令牌」交给本机 sidecar；sidecar 的 LLM 调用以它作 Bearer 命中 /v1/inference
+    # 代理（平台 key 永不下放本机，且平台计量在代理侧权威落账）。比 access JWT 长——一个本地
+    # 引擎会话内多回合复用、避免频繁重铸；但仍有限，过期后桌面在 sidecar 重连时重新换取。
+    inference_token_expire_minutes: int = 720  # 12h
+
     # Auth cookies. `secure` requires HTTPS (keep False for local http dev).
     # `samesite` "lax" suits same-site dev (renderer + API both on localhost). The
     # packaged desktop renderer (app://agentcore) is cross-site to the cloud API,
@@ -73,7 +79,9 @@ class Settings(BaseSettings):
     # in the env var; read as a list via the `cors_origins` property. The packaged
     # desktop renderer is served from app://agentcore (前端技术与架构.md §7.2), so
     # that fixed origin ships in the default alongside the dev Vite/preview ports.
-    cors_allow_origins: str = "http://localhost:5173,http://localhost:3000,app://agentcore"
+    cors_allow_origins: str = (
+        "http://localhost:5173,http://localhost:5174,http://localhost:3000,app://agentcore"
+    )
 
     # Auth-endpoint rate limiting (per client IP, fixed window). Blunts
     # credential-stuffing / registration spam on top of per-account lockout.
@@ -111,6 +119,49 @@ class Settings(BaseSettings):
     # response" so it wraps up rather than hanging.
     checkpoint_gate_enabled: bool = True
     checkpoint_timeout_seconds: float = 600.0
+
+    # Engine-level tool execution backstop (B1 工具超时兜底). A uniform ceiling the
+    # ReAct loop wraps around each tool call so a wedged tool (a hung network read, a
+    # runaway subprocess) can't stall a whole turn; on expiry the call returns a
+    # ``[超时]`` tool result the model adapts to (and that feeds LoopController's
+    # repeated-failure detection). Layered ABOVE each tool's own finer timeout — e.g.
+    # ``code_execute`` caps its sandbox at ≤60s, so the EXECUTION ceiling sits higher
+    # (90s) and only fires if the sandbox itself wedges. ORCHESTRATION (delegate /
+    # revise) and INTERACTION (ask_user) tools are EXEMPT: they legitimately wait
+    # minutes on sub-runs / the user and are bounded by their own lifecycle, not this.
+    tool_default_timeout_seconds: float = 60.0
+    tool_execution_timeout_seconds: float = 90.0
+
+    # Engine degraded handling + fallback (B2). An "empty response" round (the model
+    # returns no content AND no tool call) is a degradation, not a normal end: the
+    # ReAct loop (via LoopController) first retries ONCE on the profile's
+    # ``fallback_model`` (Flash → Pro escalation — the economy model choked, try the
+    # stronger one), and if a 2nd consecutive empty round follows, ends the turn with
+    # ``FinishReason.DEGRADED`` instead of a blank reply. The fallback fires only on
+    # this (rare) empty-round path, so the extra Pro call is bounded; disable it to
+    # go straight to degraded. ``empty_response_threshold`` is the consecutive-empty
+    # count that trips the degraded finish (the fallback retry sits inside it).
+    engine_fallback_enabled: bool = True
+    engine_empty_response_threshold: int = 2
+
+    # Convergence governance — tool failure circuit breaker + no-output early stop
+    # (B2, via LoopController). The circuit breaker counts a tool's *cumulative*
+    # failures across the run (args-agnostic, unlike fingerprint-keyed repeated-
+    # failure detection): at ``tool_failure_warn`` failures the model is told to stop
+    # retrying that tool; at ``tool_failure_disable`` the tool is removed from the
+    # toolset for the rest of the run. ``unproductive_threshold`` is the number of
+    # consecutive rounds where every tool call failed AND no content was produced
+    # that trips an early stop (forced tool-free answer, FinishReason.UNPRODUCTIVE)
+    # instead of spinning to the round cap.
+    engine_tool_failure_warn: int = 2
+    engine_tool_failure_disable: int = 3
+    engine_unproductive_threshold: int = 3
+    # Periodic progress-review reflection (B2 反思注入): inject a "step back and re-plan"
+    # steer starting at this round (0-indexed; 3 = the 4th round) and every
+    # ``reflection_interval`` rounds after — proactive cadence for long runs, separate
+    # from the event-driven NUDGE.
+    engine_reflection_start_round: int = 3
+    engine_reflection_interval: int = 3
 
     # Durable structured suspension (结构化挂起 2b: turn 级落盘 + POST .../resume). When
     # enabled, a turn that pauses at a top-level plan_review checkpoint is persisted to
@@ -171,6 +222,35 @@ class Settings(BaseSettings):
     memory_consolidation_sweep_batch_limit: int = 100
     # Max bullets kept per memory section (合并/去重: bounds growth, forces merge).
     memory_section_bullet_cap: int = 20
+
+    # --- Long-conversation compaction (执行引擎架构设计 §十三 长对话压缩) ---
+    # A rolling summary folds turns OLDER than the recency window into 已确立事实 /
+    # 决策 / 未决问题 / 文件路径, so a long chat feeds [summary] + recent turns rather
+    # than the whole transcript. The win is context-rot + cache-lapse cost resilience,
+    # NOT window overflow (DeepSeek's 1M does not overflow). Off-turn, token-triggered,
+    # watermark-gated; state is on the conversation row (compute once, reuse — never
+    # per-turn, so the exact-prefix cache holds). All best-effort, off the user path.
+    compaction_enabled: bool = True
+    # Trigger: when a finished turn's input tokens (DeepSeek-reported prompt size)
+    # exceed this, a background pass folds the older turns. Aligned with llm.mdc's 64K
+    # cost-control guidance; well under the 1M ceiling on purpose. The turn total is an
+    # upper bound on the captain prompt, so the trigger is conservative (folds early);
+    # the runner no-ops when there is nothing old enough to fold.
+    compaction_trigger_input_tokens: int = 64_000
+    # Recent messages kept VERBATIM after the watermark (older ones fold into the
+    # summary). Messages, not turns — a turn is ~2 messages.
+    compaction_recency_messages: int = 20
+    # Don't fire the LLM for a trivial fold: need at least this many messages BEYOND
+    # the recency window to be worth a summary pass.
+    compaction_min_fold_messages: int = 4
+    # Hard cap on messages folded in one pass (bounds the compaction call's own input);
+    # a longer backlog folds incrementally across triggers, oldest-first.
+    compaction_max_fold_messages: int = 200
+    # Safety cap on the un-folded tail the loader replays above the summary; only hit
+    # if compaction stalls (then recent-biased — see MessageRepository.list_recent_after).
+    compaction_context_max_messages: int = 300
+    # Char budget for the rolling summary (head+tail safety-net truncation).
+    compaction_summary_char_budget: int = 4_000
 
     # Cost display + free-tier quotas (成本与用量可观测 §六). Money flows and is
     # stored as integer nano-USD; `cny_per_usd` converts to CNY at the display

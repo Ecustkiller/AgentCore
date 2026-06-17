@@ -47,15 +47,22 @@ class DeepSeekProvider:
         self,
         api_key: str,
         base_url: str = "https://api.deepseek.com",
+        extra_headers: dict[str, str] | None = None,
     ):
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        # Per-turn extras (e.g. the sidecar's X-AgentCore-Conversation for the cloud
+        # inference proxy, Slice 4a). Merged last but can't clobber auth — the keys
+        # are namespaced and set by us, never user input.
+        if extra_headers:
+            headers.update(extra_headers)
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=10.0),
         )
 

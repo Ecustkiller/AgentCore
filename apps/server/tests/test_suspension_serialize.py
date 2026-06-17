@@ -5,7 +5,10 @@ RunState seed, a RunPlan (with its already-minted run_ids), the scheduler
 completed-map, and each TurnSuspension subclass frame must round-trip losslessly
 through ``paused_turns.frame`` — dispatched back to the right kind by
 ``suspension_from_json`` — so ``POST .../resume`` rebuilds the EXACT graph + CEO
-context it paused on.
+context it paused on. The frame holds resume CONTROL metadata only: the window-rebuild
+inputs (``transcript`` / ``history`` / ``journal`` / ``journal_entries``) are NOT
+serialized (执行级事件溯源 Phase 2 ⑤) — the CEO window is a projection of ``turn_journal``
+(+ reloaded history), rebuilt on claim, so these tests assert they DON'T survive to_json.
 """
 
 from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
@@ -129,13 +132,18 @@ def test_turn_suspension_full_frame_round_trips():
     assert restored.base_system_prompt == "base sys"
     assert restored.user_message == "原始请求"
     assert restored.trace_id == "trace123"
-    # transcript: the trailing assistant delegate tool-call is preserved intact.
-    assert restored.transcript[-1].tool_calls[0].id == "call_del_1"
-    assert restored.transcript[-1].reasoning_content == "先派活"
-    # plan with minted ids + the seed map line up (the WaveScheduler resume contract).
+    # transcript / history are NOT serialized into the frame (Phase 2 ⑤) — the CEO window
+    # is rebuilt from turn_journal on claim; resume echoes the call via the serialized
+    # tool_call_id (asserted above), not a stored transcript blob.
+    assert "transcript" not in frame.to_json()
+    assert "history" not in frame.to_json()
+    assert restored.transcript == []
+    # plan with minted ids survives (the WaveScheduler resume contract); the finished-worker
+    # ``completed`` seed is NOT serialized (Phase 2 ⑥) — resume re-projects it from the
+    # journal's run-final facts, so a claimed frame carries none.
     assert [n.run_id for n in restored.plan.nodes] == ["del_abc_1", "del_abc_2"]
-    assert set(restored.completed) == {"del_abc_1"}
-    assert restored.completed["del_abc_1"].content == "worker 产出"
+    assert "completed" not in frame.to_json()
+    assert restored.completed == {}
     # steps / pending carried for card re-render; the journal is NOT serialized into
     # the frame — it lives in turn_journal (§18.3), hydrated separately on claim.
     assert "journal" not in frame.to_json()
@@ -204,8 +212,11 @@ def test_ask_user_suspension_round_trips():
     assert restored.questions[0]["options"] == ["A", "B"]
     assert restored.questions[0]["multiple"] is True
     assert restored.style_options == [{"id": "s0", "label": "深色科技"}]
-    # the suspended ask_user call is preserved so resume echoes its id.
-    assert restored.transcript[-1].tool_calls[0].id == "call_ask_1"
+    # transcript / history are NOT serialized (Phase 2 ⑤): resume echoes the call via the
+    # serialized tool_call_id (asserted above) and rebuilds the window from turn_journal.
+    assert "transcript" not in frame.to_json()
+    assert "history" not in frame.to_json()
+    assert restored.transcript == []
     # the journal is not in the frame — turn_journal owns it (§18.3).
     assert "journal" not in frame.to_json()
     assert restored.journal == []

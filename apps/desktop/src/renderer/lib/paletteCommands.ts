@@ -4,6 +4,8 @@ import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import {
   BarChart3,
+  BookOpen,
+  Cloud,
   Compass,
   Cpu,
   Files,
@@ -83,6 +85,15 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: () => startNewConversation(navigate),
     },
     {
+      // 「云端临时对话」逃生口（决策 #11）：桌面默认本地后，纯云随手问答的显式入口。
+      id: "new-cloud-conversation",
+      title: "云端临时对话",
+      category: "操作",
+      icon: Cloud,
+      keywords: ["cloud", "temp", "yunduan", "linshi", "new", "chat"],
+      run: () => startNewConversation(navigate, null, { cloud: true }),
+    },
+    {
       id: "toggle-sidebar",
       title: sidebarCollapsed ? "展开侧栏" : "收起侧栏",
       category: "操作",
@@ -143,12 +154,20 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: go("/toolbox/ai-tools"),
     },
     {
+      id: "nav-manual",
+      title: "产品手册",
+      category: "前往",
+      icon: BookOpen,
+      keywords: ["manual", "guide", "docs", "help", "shouce", "chanpin"],
+      run: go("/toolbox/manual"),
+    },
+    {
       id: "nav-mechanism",
       title: "团队运行机制",
       category: "前往",
       icon: Workflow,
       keywords: ["team", "mechanism", "graph", "tuandui"],
-      run: go("/toolbox/mechanism"),
+      run: go("/toolbox/manual?s=panorama"),
     },
     {
       id: "nav-explore",

@@ -6,6 +6,7 @@ RunState, injects an upstream product into a downstream node's prompt, and emits
 the ``run_*`` graph events.
 """
 
+import tempfile
 from pathlib import Path
 
 from agentcore.core.types import ToolApproval, ToolCategory
@@ -17,12 +18,16 @@ from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.constants import DEP_CONTEXT_BUDGET
 from agentcore.runtime.runs.executor import (
     _allocate,
+    _build_messages,
+    _dep_context_blocks,
     _is_hard_failure,
+    _safe_index_files,
     _truncate_head_tail,
+    _workspace_manifest,
     build_agent_executor,
 )
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import RunContract, RunPhase
+from agentcore.runtime.runs.types import RunContract, RunPhase, RunSpec, RunState
 from agentcore.runtime.runs.wave import WaveScheduler
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -57,14 +62,21 @@ class _ContentProvider:
         yield LLMChunk(delta_content=text)
 
 
+# An isolated, EMPTY workspace root for the fake-provider runs: their tool stubs
+# never actually write to disk, so index_files() over this root is a clean [] —
+# keeping the worker workspace manifest deterministic (and off the polluted /
+# huge cwd tree that Path(".") would walk every run).
+_WS_ROOT = Path(tempfile.mkdtemp(prefix="exec-ws-"))
+
+
 def _ctx() -> ToolContext:
-    # These fake-provider runs never invoke a tool, so the backend is inert — it
-    # only has to satisfy the ToolContext contract (workspace_dir → backend).
+    # These fake-provider runs never invoke a real tool, so the backend is inert — it
+    # only has to satisfy the ToolContext contract and answer index_files() (empty).
     return ToolContext(
         execution_id="e",
         run_id="s",
         agent_id="a",
-        backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
+        backend=ServerWorkspace(root=_WS_ROOT, sandbox=SubprocessSandbox()),
         user_id="u",
     )
 
@@ -386,6 +398,23 @@ async def test_contract_requirements_stated_in_first_prompt():
     assert "结论" in provider.user_messages[0]
 
 
+async def test_worker_system_prompt_grants_structure_ownership():
+    # 认知分工的接收端（L3，worker 侧所有权）: the CEO brake (test_prompt.py) tells the
+    # CEO not to design the deliverable's structure; this is the counterpart that
+    # reaches the WORKER — its system prompt must empower it to OWN the professional
+    # structure and treat any skeleton leaked into the task as a starting suggestion
+    # (checked against the 原始用户请求, also in its prompt) rather than a fill-in
+    # template. Pins the fix so a refactor of the shared deliverable policy can't
+    # silently revert the worker to a「填字员」. Verified end-to-end (assembled system
+    # message), not just the constant, so the block must actually land in the prompt.
+    plan, _ = build_run_plan([{"role": "写作者", "task": "写一篇文章"}], id_prefix="t")
+    provider = _ContentProvider(["正文"])
+    await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
+    sys = provider.system_messages[0]
+    assert "专业结构" in sys
+    assert "填字" in sys
+
+
 async def test_contract_strict_hard_fails_after_retries():
     plan, _ = build_run_plan(
         [{"role": "A", "task": "做A", "contract": {"min_length": 50, "strict": True}}],
@@ -431,13 +460,19 @@ async def test_no_contract_passes_first_try_without_extra_call():
 
 class _ScriptedRounds:
     """Fake LLM yielding a pre-scripted chunk list per call (one call = one ReAct
-    round), so a test can script a multi-round attempt that calls file_write."""
+    round), so a test can script a multi-round attempt that calls file_write.
+
+    Records each call's first user message so a DAG test can assert what context
+    (e.g. a 递指针 pointer block) reached a downstream worker's prompt."""
 
     def __init__(self, rounds: list[list[LLMChunk]]) -> None:
         self._rounds = rounds
         self.calls = 0
+        self.user_messages: list[str] = []
 
     async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        user = next((m.content for m in request.messages if m.role == "user"), "")
+        self.user_messages.append(user or "")
         chunks = self._rounds[self.calls] if self.calls < len(self._rounds) else [
             LLMChunk(delta_content="done")
         ]
@@ -1064,7 +1099,355 @@ async def test_wide_fanin_shares_budget_bounded_total():
     provider = _ContentProvider([big, big, big, "FINAL"])
     await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
     writer_user = provider.user_messages[3]
-    # The three "前置结果" blocks together stay within the shared budget (+ markers /
-    # labels slack), nowhere near 3 × 40_000.
-    assert writer_user.count("前置结果") == 3
+    # The three "## 前置结果" blocks together stay within the shared budget (+ markers /
+    # labels slack), nowhere near 3 × 40_000. Count the block HEADER ("## 前置结果"), not
+    # the bare phrase — the team-position block (D) also names 「前置结果」 when telling a
+    # terminal node where its upstream products are.
+    assert writer_user.count("## 前置结果") == 3
     assert len(writer_user) < DEP_CONTEXT_BUDGET + 2_000
+
+
+# --- 递指针不递全文: a file-producing dep is injected as a POINTER, not full text --
+#
+# When an upstream WROTE its product to the shared workspace (files_touched), the
+# downstream gets a tight digest + the artifact paths to file_read — the artifact is
+# on disk, so re-shipping it whole through the prompt wastes tokens / risks tail
+# trimming. Pure-prose deps (no file to point at) keep the full-text budgeted path.
+
+
+def _state(content: str = "", *, files: list[str] | None = None) -> RunState:
+    return RunState(
+        phase=RunPhase.COMPLETED, content=content, files_touched=list(files or [])
+    )
+
+
+def _plan(*specs: RunSpec) -> RunPlan:
+    plan = RunPlan()
+    for spec in specs:
+        plan.add(spec)
+    return plan
+
+
+def test_dep_block_file_writer_becomes_pointer():
+    plan = _plan(RunSpec(run_id="u", agent_id="u", role="构建器", task="生成数据"))
+    completed = {
+        "u": _state("已生成数据集，详见文件。", files=["data/out.csv", "data/schema.json"])
+    }
+    blocks = _dep_context_blocks(plan, ["u"], completed)
+    assert len(blocks) == 1
+    label, body = blocks[0]
+    assert label == "构建器"
+    assert "已生成数据集" in body  # the worker's prose handoff digest is kept
+    assert "data/out.csv" in body and "data/schema.json" in body  # the pointer
+    assert "file_read" in body  # told how to pull the full content
+
+
+def test_dep_pointer_digests_prose_instead_of_shipping_whole():
+    # A file-writer with a huge prose body is DIGESTED (not budget-passed whole):
+    # the artifact is on disk, the prompt only needs orientation + the path.
+    plan = _plan(RunSpec(run_id="u", agent_id="u", role="写手", task="写报告"))
+    huge = "开头摘要" + ("文" * 5_000)
+    blocks = _dep_context_blocks(plan, ["u"], {"u": _state(huge, files=["report.md"])})
+    _, body = blocks[0]
+    assert "开头摘要" in body  # head digest present
+    assert huge not in body  # but NOT the full 5000-char product
+    assert "report.md" in body
+
+
+def test_dep_pointer_caps_file_list_with_elision():
+    plan = _plan(RunSpec(run_id="u", agent_id="u", role="生成器", task="批量生成"))
+    files = [f"f{i}.txt" for i in range(30)]
+    _, body = _dep_context_blocks(plan, ["u"], {"u": _state("done", files=files)})[0]
+    assert "f0.txt" in body  # the first ones are listed
+    assert "f25.txt" not in body  # beyond DEP_POINTER_MAX_FILES (20) is elided
+    assert "共 30 个文件" in body  # and the full count is disclosed
+
+
+def test_dep_block_prose_dep_unchanged_full_text():
+    # No files → the existing full-text path: a short prose dep is passed through whole.
+    plan = _plan(RunSpec(run_id="u", agent_id="u", role="研究员", task="调研"))
+    _, body = _dep_context_blocks(plan, ["u"], {"u": _state("纯文字结论无文件")})[0]
+    assert body == "纯文字结论无文件"
+
+
+async def test_dag_file_writing_upstream_passes_pointer_downstream():
+    # End-to-end: the upstream WRITES a file; the downstream's opening prompt carries
+    # a pointer (path + file_read hint), proving files_touched flows RunState→prompt.
+    tasks = [
+        {"id": "s1", "role": "构建器", "task": "生成数据文件"},
+        {"id": "s2", "role": "分析师", "task": "分析数据", "depends_on": ["s1"]},
+    ]
+    plan, _ = build_run_plan(tasks, id_prefix="t")
+    reg = ToolRegistry()
+    reg.register(_FileWriteTool())
+    rounds = [
+        # s1 round 1: write the file; round 2: a short prose handoff
+        [
+            LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(
+                        index=0,
+                        id="c1",
+                        function_name="file_write",
+                        arguments_delta='{"path": "data/out.csv", "content": "a,b\\n1,2"}',
+                    )
+                ]
+            )
+        ],
+        [LLMChunk(delta_content="已生成 data/out.csv")],
+        # s2: final answer (single round)
+        [LLMChunk(delta_content="分析完成")],
+    ]
+    provider = _ScriptedRounds(rounds)
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    res = await WaveScheduler().run(plan, executor)
+    assert res["t_s1"].files_touched == ["data/out.csv"]
+    assert res["t_s2"].phase is RunPhase.COMPLETED
+    downstream_user = provider.user_messages[-1]  # the analyst's opening prompt
+    assert "data/out.csv" in downstream_user  # got the pointer
+    assert "file_read" in downstream_user
+
+
+# --- 工作区产物清单: peer products (attributed) + pre-existing files -------------
+
+
+def test_workspace_manifest_lists_nondep_teammate_files():
+    plan = _plan(
+        RunSpec(run_id="a", agent_id="a", role="队友A", task="x"),
+        RunSpec(run_id="b", agent_id="b", role="队友B", task="y"),
+    )
+    completed = {"a": _state(files=["a.py"]), "b": _state(files=["b.py"])}
+    # The worker depends on "a" (excluded — it gets the richer pointer block); the
+    # non-dep peer "b" is surfaced so its product is discoverable.
+    manifest = _workspace_manifest(plan, completed, [], exclude_runs={"a"})
+    assert "b.py" in manifest and "队友B" in manifest
+    assert "a.py" not in manifest  # the dep is not duplicated here
+
+
+def test_workspace_manifest_lists_preexisting_files():
+    plan = _plan(RunSpec(run_id="a", agent_id="a", role="队友A", task="x"))
+    # No peer products; the ambient index (uploads / prior turns) is surfaced.
+    manifest = _workspace_manifest(plan, {}, ["上传/data.csv", "spec.md"], exclude_runs=set())
+    assert "上传/data.csv" in manifest and "spec.md" in manifest
+    assert "工作区已有" in manifest
+
+
+def test_workspace_manifest_dedupes_dep_and_peer_files_from_index():
+    plan = _plan(
+        RunSpec(run_id="dep", agent_id="dep", role="前置", task="x"),
+        RunSpec(run_id="peer", agent_id="peer", role="队友", task="y"),
+    )
+    completed = {"dep": _state(files=["dep.py"]), "peer": _state(files=["peer.py"])}
+    # The index also lists dep.py + peer.py (they're on disk) plus an ambient file.
+    manifest = _workspace_manifest(
+        plan, completed, ["dep.py", "peer.py", "ambient.txt"], exclude_runs={"dep"}
+    )
+    # dep file stays out entirely (it has the pointer block); peer file is attributed,
+    # not re-listed as「工作区已有」; the genuinely ambient file is labeled as such.
+    assert "dep.py" not in manifest
+    assert manifest.count("peer.py") == 1 and "队友" in manifest
+    assert "ambient.txt（工作区已有）" in manifest
+
+
+def test_workspace_manifest_empty_when_nothing_to_surface():
+    plan = _plan(RunSpec(run_id="a", agent_id="a", role="队友A", task="x"))
+    # Only files belong to a dep (excluded) and nothing in the index → empty.
+    assert _workspace_manifest(plan, {"a": _state(files=["a.py"])}, [], exclude_runs={"a"}) == ""
+    # A teammate that wrote nothing + no index contributes nothing.
+    assert _workspace_manifest(plan, {"a": _state("仅文字")}, [], exclude_runs=set()) == ""
+
+
+def test_workspace_manifest_caps_total_files():
+    specs = [RunSpec(run_id=f"r{i}", agent_id=f"r{i}", role=f"R{i}", task="t") for i in range(60)]
+    plan = _plan(*specs)
+    completed = {f"r{i}": _state(files=[f"r{i}.txt"]) for i in range(60)}
+    # 60 peer files + 60 ambient files: the count cap binds (short paths stay well under
+    # the char budget) → exactly WORKSPACE_MANIFEST_MAX_FILES entries + one elision line.
+    index = [f"amb{i}.txt" for i in range(60)]
+    manifest = _workspace_manifest(plan, completed, index, exclude_runs=set())
+    entries = [ln for ln in manifest.splitlines() if ln.startswith("- ")]
+    assert len(entries) == 40  # WORKSPACE_MANIFEST_MAX_FILES
+    assert manifest.splitlines()[-1].startswith("……")  # more-remain elision marker
+
+
+def test_workspace_manifest_char_budget_binds_before_count():
+    # A few very long paths blow the char budget before the 40-file count cap — the
+    # budget must bind first so long paths can't bloat the prompt.
+    plan = _plan(RunSpec(run_id="a", agent_id="a", role="A", task="t"))
+    long_paths = [f"deeply/nested/dir/segment/{i}/" + ("x" * 200) + ".txt" for i in range(40)]
+    manifest = _workspace_manifest(plan, {}, long_paths, exclude_runs=set())
+    entries = [ln for ln in manifest.splitlines() if ln.startswith("- ")]
+    assert 0 < len(entries) < 40  # stopped by the char budget, not the count cap
+    assert len(manifest) <= 2200  # ~CHAR_BUDGET + the elision line, not 40×200
+    assert manifest.splitlines()[-1].startswith("……")
+
+
+def test_build_messages_injects_workspace_manifest():
+    plan = _plan(
+        RunSpec(run_id="me", agent_id="me", role="我", task="干活", depends_on=["dep"]),
+        RunSpec(run_id="dep", agent_id="dep", role="前置", task="前置"),
+        RunSpec(run_id="peer", agent_id="peer", role="并行队友", task="别的"),
+    )
+    completed = {
+        "dep": _state("前置产物"),
+        "peer": _state(files=["peer/out.json"]),
+    }
+    msgs = _build_messages(
+        plan, plan.by_id("me"), completed, "SYS", "原始请求", index_paths=["上传/raw.txt"]
+    )
+    user = msgs[1].content or ""
+    assert "工作区现有文件" in user
+    assert "peer/out.json" in user and "并行队友" in user  # peer product, attributed
+    assert "上传/raw.txt" in user  # pre-existing file from the index
+
+
+def test_build_messages_no_manifest_block_when_nothing_ambient():
+    plan = _plan(RunSpec(run_id="me", agent_id="me", role="我", task="干活"))
+    msgs = _build_messages(plan, plan.by_id("me"), {}, "SYS", "原始请求")
+    assert "工作区现有文件" not in (msgs[1].content or "")
+
+
+async def test_safe_index_files_swallows_backend_failure():
+    class _Boom:
+        async def index_files(self, **_kw):
+            raise RuntimeError("desktop dropped")
+
+    class _Ok:
+        def __init__(self) -> None:
+            self.order: str | None = None
+
+        async def index_files(self, *, order: str = "path"):
+            self.order = order
+            return (["a.txt", "b.txt"], True)
+
+    assert await _safe_index_files(_Boom()) == []  # failure → empty, never raises
+    assert await _safe_index_files(object()) == []  # backend without indexing → empty
+    ok = _Ok()
+    assert await _safe_index_files(ok) == ["a.txt", "b.txt"]  # paths, flag dropped
+    assert ok.order == "recent"  # manifest asks for newest-first relevance ordering
+
+
+class _CountingIndexBackend:
+    """Wraps a real backend but counts ``index_files`` calls (delegates everything
+    else), to prove the pre-existing-files walk is snapshotted once per batch."""
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+        self.index_calls = 0
+
+    async def index_files(self, cap: int | None = None, *, order: str = "path"):
+        self.index_calls += 1
+        return await self._inner.index_files(cap, order=order)
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
+
+
+async def test_preexisting_index_snapshotted_once_per_turn():
+    # Three workers in one batch share a SINGLE workspace index walk (the per-turn
+    # snapshot cache), not one walk per worker — so the mtime stat cost doesn't multiply.
+    backend = _CountingIndexBackend(
+        ServerWorkspace(root=_WS_ROOT, sandbox=SubprocessSandbox())
+    )
+    ctx = ToolContext(
+        execution_id="e", run_id="s", agent_id="a", backend=backend, user_id="u"
+    )
+    plan, _ = build_run_plan(
+        [
+            {"role": "A", "task": "a"},
+            {"role": "B", "task": "b"},
+            {"role": "C", "task": "c"},
+        ],
+        id_prefix="t",
+    )
+    provider = _ContentProvider(["A", "B", "C"])
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=ToolRegistry(),
+        sink=EventSink(),
+        base_tool_context=ctx,
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    await WaveScheduler().run(plan, executor)
+    assert backend.index_calls == 1  # one walk for the whole batch, not three
+
+
+# --- 并行写软约束: the sibling block warns peers off colliding file paths --------
+
+
+def test_sibling_block_warns_about_file_path_collisions():
+    spec = RunSpec(run_id="x", agent_id="x", role="A", task="t", sibling_summary="- B：做B")
+    msgs = _build_messages(_plan(spec), spec, {}, "SYS", "原始请求")
+    user = msgs[1].content or ""
+    assert "避免互相覆盖" in user  # the soft path-ownership nudge
+    assert "做B" in user  # still carries the sibling intent summary
+
+
+def test_team_position_block_four_dag_shapes():
+    # D（统一团队位置块）: a worker's user prompt now carries its DAG TOPOLOGY — who runs
+    # beside it (siblings) and, crucially, where its output GOES — symmetric to the
+    # upstream PRODUCT injection (_dep_context_blocks). Four shapes → four framings; this
+    # pins each so the「上游越权写最终交付物」fix (an upstream link learns it hands off,
+    # not authors the final artifact) and the terminal-ownership boost (a writer learns
+    # it IS the final author) can't silently regress. Also pins A1 (递指针 affordance):
+    # the upstream branch — and ONLY it — grants a permission-style, role-suffixed
+    # filename for persisting large intermediates, replacing the residual empty-path
+    # file_write; the terminal author names the final file itself, so it must NOT appear
+    # there or on a pure parallel/solo node.
+    plan, errs = build_run_plan(
+        [
+            {"id": "r1", "role": "调研员A", "task": "查A"},
+            {"id": "r2", "role": "调研员B", "task": "查B"},
+            {"id": "w", "role": "写手", "task": "写报告", "depends_on": ["r1", "r2"]},
+        ],
+        id_prefix="t",
+    )
+    assert errs == []
+    r1, w = plan.by_id("t_r1"), plan.by_id("t_w")
+
+    # (1) UPSTREAM link (has dependents): told it feeds the downstream 写手 and must NOT
+    #     produce the final artifact itself — the over-reach fix.
+    up = _build_messages(plan, r1, {}, "SYS", "原始请求")[1].content or ""
+    assert "你在团队中的位置" in up
+    assert "上游一环" in up and "写手" in up
+    assert "不要自己产出整个最终交付物" in up
+    assert "调研员B" in up  # parallel-peer awareness still present
+    assert "不一定全是你的活" in up  # request reframed as a team goal, not a mandate
+    # A1: an upstream link that wants to persist a large intermediate is told to give it a
+    # role-suffixed filename (no empty-path file_write) — only on this branch.
+    assert "findings-" in up and "切勿用空路径" in up
+
+    # (2) TERMINAL synthesizer (has upstream, no dependents): told it IS the final author
+    #     — reinforces structure ownership (the worker-side L3 lever).
+    term = _build_messages(plan, w, {}, "SYS", "原始请求")[1].content or ""
+    assert "终端环" in term and "最终交付物" in term
+    assert "不要自己产出整个最终交付物" not in term  # not an upstream link
+    assert "findings-" not in term  # A1 is upstream-only; the terminal author names the final file
+    assert w.sibling_summary == ""  # lone fan-in → no parallel-peer line
+
+    # (3) PARALLEL batch (siblings only, no up/down): peer coordination, no flow framing.
+    par_plan, _ = build_run_plan(
+        [{"role": "A", "task": "做A"}, {"role": "B", "task": "做B"}], id_prefix="p"
+    )
+    par = _build_messages(par_plan, par_plan.by_id("p_1"), {}, "SYS", "原始请求")[1].content or ""
+    assert "并行队友" in par
+    assert "上游一环" not in par and "终端环" not in par
+    assert "findings-" not in par  # no hand-off → no A1 intermediate-persist hint
+
+    # (4) SOLO single worker (no team): no position block, plain request header.
+    solo_plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="s")
+    solo = _build_messages(solo_plan, solo_plan.by_id("s_1"), {}, "SYS", "原始请求")[1].content or ""
+    assert "你在团队中的位置" not in solo
+    assert "不一定全是你的活" not in solo  # a solo worker IS the whole job

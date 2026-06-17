@@ -26,20 +26,43 @@ snapshot backs up the right directory (决策⑥).
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
+from agentcore.runtime.events import EventSink
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
-from agentcore.workspace.locate import build_server_workspace
+from agentcore.workspace.locate import (
+    LocalBinding,
+    build_local_workspace,
+    build_server_workspace,
+)
 from agentcore.workspace.protocol import (
     DirEntry,
     GrepQuery,
     GrepResult,
     PathNotFound,
     ReplaceOutcome,
+    WorkspaceBackend,
 )
-from agentcore.workspace.server import ServerWorkspace
 
-# Returns the id of the folder the conversation was promoted into.
-PromoteFn = Callable[[], Awaitable[str]]
+
+@dataclass(frozen=True)
+class PromotionResult:
+    """The outcome of promoting a 裸聊 into a real folder on its first file write.
+
+    ``folder_id`` is the minted folder (so the rest of the turn + the end-of-run
+    snapshot target it). ``local_binding`` is set when the chat was promoted into a
+    **local** workspace (工作区对称化 D1a): a desktop sub-directory under a shared
+    container root, so the inner backend must be a ``LocalWorkspace`` reached over
+    the turn's channel rather than a server-hosted ``ServerWorkspace``. ``None``
+    keeps the cloud path (the original behavior).
+    """
+
+    folder_id: str
+    local_binding: LocalBinding | None = None
+
+
+# Promotes the conversation and returns where it landed (folder + cloud/local).
+PromoteFn = Callable[[], Awaitable[PromotionResult]]
 
 
 class DeferredWorkspace:
@@ -50,20 +73,37 @@ class DeferredWorkspace:
     once, on the first creating op.
     """
 
-    location = "server"
-
     def __init__(
         self,
         *,
         user_id: str,
         promote: PromoteFn,
+        sink: EventSink | None = None,
+        conversation_id: str = "",
         root_label: str = "workspace",
     ) -> None:
         self._user_id = user_id
         self._promote = promote
+        # Needed only to build a LocalWorkspace inner on a *local* promotion (工作区
+        # 对称化 D1a): the channel rides this turn's ``sink``. Unused for cloud.
+        self._sink = sink
+        self._conversation_id = conversation_id
         self._root_label = root_label
-        self._inner: ServerWorkspace | None = None
+        self._inner: WorkspaceBackend | None = None
         self._folder_id: str | None = None
+
+    @property
+    def location(self) -> str:
+        """The materialized backend's location, defaulting to cloud pre-promotion.
+
+        Dynamic (not a fixed attribute) because a 裸聊 may be promoted into either a
+        cloud (``ServerWorkspace``) or a local (``LocalWorkspace``) folder (工作区
+        对称化 D1a). The end-of-turn snapshot guard keys on this, so a locally-
+        promoted chat must report ``"local"`` — otherwise the turn would try to
+        snapshot an empty server-side directory whose files actually live on the
+        user's machine.
+        """
+        return self._inner.location if self._inner is not None else "server"
 
     @property
     def root_label(self) -> str:
@@ -82,15 +122,33 @@ class DeferredWorkspace:
         """
         return self._folder_id
 
-    async def _materialize(self) -> ServerWorkspace:
-        """Promote on first use, then return the real backend (idempotent)."""
+    async def _materialize(self) -> WorkspaceBackend:
+        """Promote on first use, then return the real backend (idempotent).
+
+        The promotion decides cloud vs local: a ``local_binding`` builds a
+        ``LocalWorkspace`` over this turn's channel (files land on the user's
+        machine under the container root's subpath, 工作区对称化 D1a); otherwise a
+        server-hosted ``ServerWorkspace`` (the original cloud path).
+        """
         if self._inner is None:
-            self._folder_id = await self._promote()
-            self._inner = build_server_workspace(
-                user_id=self._user_id,
-                folder_id=self._folder_id,
-                conversation_id="",
-            )
+            result = await self._promote()
+            self._folder_id = result.folder_id
+            if result.local_binding is not None:
+                if self._sink is None:
+                    raise RuntimeError(
+                        "local promotion requires the turn's sink for its channel"
+                    )
+                self._inner = build_local_workspace(
+                    binding=result.local_binding,
+                    sink=self._sink,
+                    conversation_id=self._conversation_id,
+                )
+            else:
+                self._inner = build_server_workspace(
+                    user_id=self._user_id,
+                    folder_id=result.folder_id,
+                    conversation_id="",
+                )
         return self._inner
 
     # --- creating ops: promote, then forward ------------------------------------
@@ -145,9 +203,9 @@ class DeferredWorkspace:
             return GrepResult()
         return await self._inner.grep(query)
 
-    async def index_files(self, cap: int | None = None) -> tuple[list[str], bool]:
+    async def index_files(
+        self, cap: int | None = None, *, order: str = "path"
+    ) -> tuple[list[str], bool]:
         if self._inner is None:
             return ([], False)
-        if cap is None:
-            return await self._inner.index_files()
-        return await self._inner.index_files(cap)
+        return await self._inner.index_files(cap, order=order)

@@ -5,12 +5,16 @@ type Schemas = components["schemas"];
 
 /** Sidebar folder metadata (§七). `localDir` is an optional bound directory;
  * `localRootId` is the desktop FS root the folder is bound to (local mode marker
- * — present ⇒ this project runs on the user's machine). */
+ * — present ⇒ this project runs on the user's machine); `localSubpath` is the
+ * sub-directory within that root this folder's workspace lives in (工作区对称化
+ * D1a — "" for an explicitly-added root project, a segment for a lazily-promoted
+ * per-conversation workspace; routes the sidecar engine to the right subtree). */
 export interface FolderMeta {
   id: string;
   name: string;
   localDir: string | null;
   localRootId: string | null;
+  localSubpath: string;
 }
 
 /** Server folder payload (`/folders`), generated from OpenAPI. */
@@ -22,6 +26,7 @@ export function toFolder(f: BackendFolder): FolderMeta {
     name: f.name,
     localDir: f.local_dir,
     localRootId: f.local_root_id ?? null,
+    localSubpath: f.local_subpath ?? "",
   };
 }
 

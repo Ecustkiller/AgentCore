@@ -256,17 +256,24 @@ class ServerWorkspace:
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
 
-    async def index_files(self, cap: int = _MAX_INDEX_FILES) -> tuple[list[str], bool]:
-        """Flat list of file paths for @ mentions (文件中枢统一 F4).
+    async def index_files(
+        self, cap: int | None = None, *, order: str = "path"
+    ) -> tuple[list[str], bool]:
+        """Flat list of file paths for @ mentions (文件中枢统一 F4) + worker manifest.
 
         Files only, ``IGNORED_DIRS`` pruned, capped at ``cap`` (``truncated`` when
-        hit) — the cloud counterpart to the desktop ``fsApi.listFiles`` that indexes
-        local roots, so @ behaves the same whether a workspace is cloud or local.
+        hit; ``cap=None`` uses the default ``_MAX_INDEX_FILES``) — the cloud
+        counterpart to the desktop ``fsApi.listFiles`` that indexes local roots, so @
+        and the worker manifest behave the same whether a workspace is cloud or local.
+        ``order="path"`` (default) = alphabetical (the @ view); ``order="recent"`` =
+        newest-first by mtime (one extra stat/file) for the manifest's relevance budget.
         Binary/oversized files are *not* filtered here (mirroring local): the read
         step applies that when a file is actually attached.
         """
+        cap = cap or _MAX_INDEX_FILES
+        recent = order == "recent"
         root = self._root.resolve()
-        paths: list[str] = []
+        collected: list[tuple[str, float]] = []  # (posix_path, mtime); mtime 0 unless recent
         truncated = False
         for dirpath, dirnames, filenames in os.walk(root):
             # Prune noise dirs in place so os.walk never descends into them.
@@ -275,14 +282,18 @@ class ServerWorkspace:
                 full = Path(dirpath) / fname
                 if full.is_symlink() or not full.is_file():
                     continue
-                paths.append(_posix(os.path.relpath(full, root)))
-                if len(paths) >= cap:
+                mtime = full.stat().st_mtime if recent else 0.0
+                collected.append((_posix(os.path.relpath(full, root)), mtime))
+                if len(collected) >= cap:
                     truncated = True
                     break
             if truncated:
                 break
-        paths.sort()
-        return paths, truncated
+        if recent:
+            collected.sort(key=lambda pm: pm[1], reverse=True)  # newest first
+        else:
+            collected.sort(key=lambda pm: pm[0])  # alphabetical
+        return [p for p, _ in collected], truncated
 
     async def mkdir(self, path: str) -> None:
         target = self._safe(path)

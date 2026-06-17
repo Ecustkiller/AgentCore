@@ -26,6 +26,10 @@ export interface SidecarStartTurnRequest {
   conversationId: string;
   /** 绑定的本地授权根 id（主进程据此解析绝对路径并复用 / 拉起该根的 sidecar）。 */
   rootId: string;
+  /** 工作区子路径（工作区对称化 D1a）：非空时主进程把 sidecar 的 `workspaceRoot` 设为
+   *  `容器根 absPath + subpath`，故懒建的 per 对话本地工作区各跑在自己目录里。缺省 / 空 =
+   *  该根自身（显式添加的本地项目，现行为）。sidecar 按 `rootId + subpath` 分别起进程。 */
+  subpath?: string;
   /** 本回合 id（cancel 的寻址键；renderer 自行铸造，需在该 sidecar 内唯一）。 */
   turnId: string;
   /** 用户本轮消息正文。 */
@@ -62,26 +66,6 @@ export interface SidecarRunsPayload {
   process?: Record<string, unknown>[] | null;
 }
 
-/**
- * 一行已定价的 per-run 成本账（与服务端 `CostRunPayload` / `asdict(RunCost)` 同形）。
- *
- * 刻意用 snake_case 对齐服务端 schema——renderer 把它**原样**转发给 `POST .../local-turns`
- * 落入 `cost_events`，全程不解读字段。计费信任边界见 `streamConversationViaSidecar`。
- */
-export interface SidecarCostRun {
-  run_id: string;
-  parent_run_id: string | null;
-  agent_id: string | null;
-  role: string;
-  model: string;
-  tokens: Record<string, number>;
-  cost: Record<string, number>;
-  cost_total_nano: number;
-  currency: string;
-  rounds: number;
-  duration_ms: number;
-}
-
 /** 一次回合的最终结果（startTurn 的延迟响应——流式细节已由 `turn/event` 给过）。 */
 export interface SidecarTurnResult {
   turnId: string;
@@ -99,9 +83,56 @@ export interface SidecarTurnResult {
   citations: SidecarCitation[];
   /** 回放载荷（团队图 / 思考·工具时间线）；纯聊天回合为 null。 */
   runs: SidecarRunsPayload | null;
-  /** 已定价的 per-run 成本账（落 `cost_events`，按 run_id 幂等）。 */
-  costRuns: SidecarCostRun[];
   error: string | null;
+}
+
+/**
+ * 一个等待续跑的「持久挂起回合」摘要（结构化挂起 2b / 双模式工作区 §一.1 durable）。
+ *
+ * 字段**严格**对齐服务端 `PausedTurnSummary`（snake_case）——renderer 把它**原样**喂给
+ * 同一个 `usePausedTurnStore.setForConversation`（云 / 本地共用一套挂起卡渲染，零重映射，
+ * 同 `SidecarRunsPayload` 对齐云 schema 的姿态）。sidecar 回合暂停于 plan_review / ask_user 检查点
+ * 且应用关闭后，帧落本机文件；重开会话时由主进程直接读盘列出（不拉起 Python）。
+ */
+export interface SidecarPausedTurn {
+  message_id: string;
+  /** 暂停点类型——决定续跑卡片形态。 */
+  kind: "plan_review" | "ask_user";
+  checkpoint_id: string;
+  user_message: string;
+  /** plan_review：被复核的检查点步 / 被门控的下游步（ask_user 帧为空）。 */
+  steps: Record<string, unknown>[];
+  pending: Record<string, unknown>[];
+  /** ask_user：统一卡片载荷（plan_review 帧为空）。 */
+  question: string;
+  context: string;
+  assumptions: Record<string, unknown>[];
+  questions: Record<string, unknown>[];
+  style_options: Record<string, unknown>[];
+}
+
+/** 续跑一个持久挂起的本地回合（结构化挂起 2b resume，经 sidecar 的 `resume` 方法）。 */
+export interface SidecarResumeRequest {
+  rootId: string;
+  /** 工作区子路径（同 `SidecarStartTurnRequest.subpath`）：寻址按 root+subpath 起的进程。 */
+  subpath?: string;
+  conversationId: string;
+  /** 挂起回合的 assistant message_id（续跑键；续跑后的回复复用它）。 */
+  messageId: string;
+  /** continue（按 CEO 方向跑门控下游）/ adjust（注入 note 转向后续跑）/ stop（就此结束）。 */
+  decision: "continue" | "adjust" | "stop";
+  /** adjust 的转向说明 / stop 的收尾语；continue 忽略。 */
+  note: string;
+  /** ask_user 的选项选择；plan_review 忽略。 */
+  selected?: string[];
+  /** 云代理凭据（同 `startTurn`）——续跑要跑 LLM；重启后续跑会新拉起引擎，故须随带。 */
+  inference?: SidecarInference;
+}
+
+/** 列出某会话在本机待续跑的持久挂起帧（重开会话时调，主进程直接读盘）。 */
+export interface SidecarListPausedRequest {
+  rootId: string;
+  conversationId: string;
 }
 
 /**
@@ -132,6 +163,8 @@ export interface SidecarStatusPush {
 /** 结算一个被挂起的交互（审批 / ask_user / 本地工具）——经 sidecar 的 `respond` 方法。 */
 export interface SidecarRespondRequest {
   rootId: string;
+  /** 工作区子路径（同 `SidecarStartTurnRequest.subpath`）：寻址按 root+subpath 起的进程。 */
+  subpath?: string;
   /** 被挂起交互的 id（即引擎 `ClientRequestBridge` 发出的 requestId）。 */
   requestId: string;
   conversationId: string;
@@ -142,6 +175,8 @@ export interface SidecarRespondRequest {
 /** 取消一个在跑的回合。 */
 export interface SidecarCancelRequest {
   rootId: string;
+  /** 工作区子路径（同 `SidecarStartTurnRequest.subpath`）：寻址按 root+subpath 起的进程。 */
+  subpath?: string;
   turnId: string;
 }
 
@@ -150,6 +185,8 @@ export const SIDECAR_CHANNELS = {
   startTurn: "sidecar:startTurn",
   cancel: "sidecar:cancel",
   respond: "sidecar:respond",
+  resume: "sidecar:resume",
+  listPaused: "sidecar:listPaused",
   event: "sidecar:event",
   status: "sidecar:status",
 } as const;
@@ -165,6 +202,11 @@ export interface SidecarApi {
   startTurn(req: SidecarStartTurnRequest): Promise<SidecarTurnResult>;
   cancel(req: SidecarCancelRequest): Promise<void>;
   respond(req: SidecarRespondRequest): Promise<void>;
+  /** 续跑一个持久挂起的本地回合；Promise 在续跑结束时 resolve（同 `startTurn` 携最终结果，
+   * 过程事件经 `onEvent` 推来）。 */
+  resume(req: SidecarResumeRequest): Promise<SidecarTurnResult>;
+  /** 列出某会话在本机待续跑的持久挂起帧（重开会话时拉取，渲染续跑卡）。 */
+  listPaused(req: SidecarListPausedRequest): Promise<SidecarPausedTurn[]>;
   /** 订阅本回合事件流；返回取消订阅函数。 */
   onEvent(cb: (e: SidecarEventPush) => void): () => void;
   /** 订阅 sidecar 生命周期/诊断事件；返回取消订阅函数。 */

@@ -6,6 +6,7 @@ that indexes local roots (文件中枢统一 F4), so it must behave the same: a 
 files-only, POSIX path list with noise dirs pruned and a hard cap.
 """
 
+import os
 from pathlib import Path
 
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -59,3 +60,17 @@ async def test_index_empty_workspace(tmp_path: Path):
     paths, truncated = await _ws(tmp_path).index_files()
     assert paths == []
     assert truncated is False
+
+
+async def test_index_recent_order_is_newest_first(tmp_path: Path):
+    # order="recent" returns newest-first by mtime (the worker manifest's relevance
+    # budget), independent of alphabetical order; default order stays the @ view.
+    for n in ["a_old.txt", "b_new.txt", "c_mid.txt"]:
+        (tmp_path / n).write_text("x", encoding="utf-8")
+    os.utime(tmp_path / "a_old.txt", (100, 100))  # oldest
+    os.utime(tmp_path / "c_mid.txt", (200, 200))  # middle
+    os.utime(tmp_path / "b_new.txt", (300, 300))  # newest
+    recent, _ = await _ws(tmp_path).index_files(order="recent")
+    assert recent == ["b_new.txt", "c_mid.txt", "a_old.txt"]
+    alpha, _ = await _ws(tmp_path).index_files()  # default = alphabetical, unaffected
+    assert alpha == ["a_old.txt", "b_new.txt", "c_mid.txt"]

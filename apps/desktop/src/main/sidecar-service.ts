@@ -17,12 +17,16 @@
  */
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   SIDECAR_CHANNELS,
   type SidecarCancelRequest,
   type SidecarInference,
+  type SidecarListPausedRequest,
+  type SidecarPausedTurn,
   type SidecarRespondRequest,
+  type SidecarResumeRequest,
   type SidecarStartTurnRequest,
   type SidecarStatusPush,
   type SidecarTurnResult,
@@ -35,6 +39,56 @@ import { getStoredRoot } from "./fs-service";
 // 审批请求随回合事件流回 renderer，用户的决定经 `window.sidecarApi.respond` 结算回这条 stdio
 // 链路（renderer 把统一结算入口 `resolveInteraction` 在本地回合改走 sidecar）。
 const SIDECAR_APPROVALS_ENABLED = true;
+
+// sidecar 的本机数据目录（app 私有）：持久挂起帧落 `<dataDir>/paused/<message_id>.json`。
+// 主进程在 initialize 时下发给 Python（见 `paused_store.LocalPausedTurnStore`），并在
+// 重开会话时**直接读盘**列出待续跑帧（不拉起 Python——只读列表无需引擎）。
+function sidecarDataDir(): string {
+  return join(app.getPath("userData"), "sidecar");
+}
+
+/**
+ * 直接读本机帧文件，列出某会话待续跑的持久挂起帧（不拉起 sidecar 进程）。
+ *
+ * 续跑帧由 Python `LocalPausedTurnStore` 落在 `<dataDir>/paused/*.json`，每条记录含顶层
+ * `conversation_id` / `created_at` 与已投影好的 `summary`（= 服务端 `PausedTurnSummary` 形状）。
+ * 这里只读这几个顶层字段、按会话过滤、按时间排序，返回 `summary` 原样——与 Python 的
+ * `listPaused` RPC 同源（summary 在落盘时算好存入），但读列表这一步无需引擎在跑。
+ * 尽力而为：任何读/解析失败都降级为「无待续跑」，绝不阻塞重开会话。
+ */
+async function readLocalPausedSummaries(
+  conversationId: string,
+): Promise<SidecarPausedTurn[]> {
+  const dir = join(sidecarDataDir(), "paused");
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return []; // 目录还不存在（从未挂起过）——无待续跑
+  }
+  const records: { createdAt: number; summary: SidecarPausedTurn }[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const raw = await readFile(join(dir, name), "utf-8");
+      const record = JSON.parse(raw) as {
+        conversation_id?: string;
+        created_at?: number;
+        summary?: SidecarPausedTurn;
+      };
+      if (record.conversation_id !== conversationId || !record.summary)
+        continue;
+      records.push({
+        createdAt: record.created_at ?? 0,
+        summary: record.summary,
+      });
+    } catch {
+      // 撕裂 / 非法帧——跳过这一条，不让它拖垮整次列举
+    }
+  }
+  records.sort((a, b) => a.createdAt - b.createdAt); // oldest-first，与云端一致
+  return records.map((r) => r.summary);
+}
 
 // --- 传输层（与 child_process 解耦，便于单测）---
 
@@ -303,6 +357,35 @@ interface ActiveTurn {
 }
 
 /**
+ * sidecar 进程的缓存键：`容器根 id + 工作区子路径`（工作区对称化 D1a）。
+ *
+ * 同一容器根下的多个子路径工作区**各起一个** sidecar（各自 `workspaceRoot = 容器根/子路径`），
+ * 故不能只按 rootId 复用——否则会撞进同一进程、跑在错误目录。空 subpath（显式添加的本地项目）
+ * 退化为 `${rootId}::`，与历史只按 rootId 起的行为等价（仅多个固定后缀）。
+ */
+function entryKey(rootId: string, subpath = ""): string {
+  return `${rootId}::${subpath}`;
+}
+
+/**
+ * 把容器根绝对路径与工作区子路径（工作区对称化 D1a）拼成 sidecar 的 `workspaceRoot`。
+ *
+ * 子路径非空时返回 `容器根/子路径` 并**确保该目录存在**（懒建工作区首次产文件通常已建出，但
+ * 防御性 mkdir 兜底极端早到的 sidecar 回合，避免引擎绑定到不存在的目录）。空子路径 = 容器根
+ * 自身（恒存在），不触盘，与历史行为逐字节一致。
+ */
+async function resolveWorkspaceRoot(
+  absPath: string,
+  subpath?: string,
+): Promise<string> {
+  const sub = (subpath ?? "").replace(/^\/+|\/+$/g, "");
+  if (!sub) return absPath;
+  const workspaceRoot = join(absPath, sub);
+  await mkdir(workspaceRoot, { recursive: true });
+  return workspaceRoot;
+}
+
+/**
  * 管理每个授权根的 sidecar：懒拉起 + 初始化、回合事件路由、cancel/respond、退出清理。
  *
  * `spawnFn` 可注入（默认真实 `spawnTransport`），便于单测用假传输驱动整条链路。
@@ -317,13 +400,21 @@ export class SidecarManager {
     ) => Transport = spawnTransport,
   ) {}
 
-  /** 拉起（或复用）某根的 sidecar，并完成一次性 initialize。 */
+  /**
+   * 拉起（或复用）某 `root + subpath` 的 sidecar，并完成一次性 initialize。
+   *
+   * `workspaceRoot` 已是绑定根目录（容器根 absPath 拼上子路径，由 IPC handler 算好），即引擎本
+   * 回合的工作区；缓存键含 subpath，故同容器根下的不同子路径工作区互不串台。状态推送仍按容器
+   * `rootId`（与 renderer 的 sidecarStatus / `takeRecentSidecarFailure(rootId)` 对齐——诊断按根聚合）。
+   */
   private ensure(
     rootId: string,
-    absPath: string,
+    subpath: string,
+    workspaceRoot: string,
     inference: SidecarInference | undefined,
   ): SidecarEntry {
-    const existing = this.entries.get(rootId);
+    const key = entryKey(rootId, subpath);
+    const existing = this.entries.get(key);
     if (existing) return existing;
 
     const transport = this.spawnFn(resolveSpawnConfig());
@@ -332,15 +423,18 @@ export class SidecarManager {
       this.onNotification(method, params),
     );
     client.onClosed((err) => {
-      this.entries.delete(rootId);
+      this.entries.delete(key);
       this.pushStatus({ rootId, phase: "exited", detail: err.message });
     });
 
     const ready = client
       .request("initialize", {
         userId: "local",
-        workspaceRoot: absPath,
+        workspaceRoot,
         approvalsEnabled: SIDECAR_APPROVALS_ENABLED,
+        // The app-private data dir for durable pause frames (双模式工作区 §一.1):
+        // its presence flips the engine's local paused-turn store on.
+        dataDir: sidecarDataDir(),
         ...(inference ? { inference } : {}),
       })
       .then(() => {
@@ -348,7 +442,7 @@ export class SidecarManager {
       })
       .catch((err: unknown) => {
         // 初始化失败（uv/venv 找不到、引擎导入失败等）——逐出，下次重拉；上抛给 startTurn。
-        this.entries.delete(rootId);
+        this.entries.delete(key);
         const detail = err instanceof Error ? err.message : String(err);
         this.pushStatus({ rootId, phase: "error", detail });
         client.dispose();
@@ -356,7 +450,7 @@ export class SidecarManager {
       });
 
     const entry: SidecarEntry = { client, ready };
-    this.entries.set(rootId, entry);
+    this.entries.set(key, entry);
     return entry;
   }
 
@@ -367,9 +461,14 @@ export class SidecarManager {
   async startTurn(
     wc: WebContents,
     req: SidecarStartTurnRequest,
-    absPath: string,
+    workspaceRoot: string,
   ): Promise<SidecarTurnResult> {
-    const entry = this.ensure(req.rootId, absPath, req.inference);
+    const entry = this.ensure(
+      req.rootId,
+      req.subpath ?? "",
+      workspaceRoot,
+      req.inference,
+    );
     await entry.ready; // 初始化失败则在此抛出 → renderer 据此降级
 
     this.turns.set(req.turnId, { wc, conversationId: req.conversationId });
@@ -379,6 +478,10 @@ export class SidecarManager {
         conversationId: req.conversationId,
         userMessage: req.userMessage,
         history: req.history ?? [],
+        // Re-send the current cloud-proxy token every turn: the sidecar is long-lived
+        // but the token rotates (12h TTL), so the engine adopts the fresh one per turn
+        // (initialize-time creds would otherwise 401 after expiry).
+        ...(req.inference ? { inference: req.inference } : {}),
       });
       return result as SidecarTurnResult;
     } finally {
@@ -386,9 +489,60 @@ export class SidecarManager {
     }
   }
 
+  /**
+   * 续跑一个持久挂起的本地回合（结构化挂起 2b）。
+   *
+   * 与 `startTurn` 同构：拉起 / 复用该根 sidecar，claim 本机帧并跑 `resume_chat_pipeline`，
+   * Promise 在续跑结束时携最终结果 resolve（供 renderer 回写云端），过程事件经 `sidecar:event`
+   * 推回。事件路由键用 message_id（一回合至多一个持久挂起）。
+   */
+  async resume(
+    wc: WebContents,
+    req: SidecarResumeRequest,
+    workspaceRoot: string,
+    inference: SidecarInference | undefined,
+  ): Promise<SidecarTurnResult> {
+    const entry = this.ensure(
+      req.rootId,
+      req.subpath ?? "",
+      workspaceRoot,
+      inference,
+    );
+    await entry.ready;
+
+    this.turns.set(req.messageId, { wc, conversationId: req.conversationId });
+    try {
+      const result = await entry.client.request("resume", {
+        messageId: req.messageId,
+        conversationId: req.conversationId,
+        decision: req.decision,
+        note: req.note,
+        selected: req.selected ?? [],
+        // Re-send the current cloud-proxy token (see startTurn): a day-old paused turn
+        // resumes with a fresh token rather than the stale initialize-time one.
+        ...(inference ? { inference } : {}),
+      });
+      return result as SidecarTurnResult;
+    } finally {
+      this.turns.delete(req.messageId);
+    }
+  }
+
+  /**
+   * 列出某会话在本机待续跑的持久挂起帧（重开会话时调）。
+   *
+   * **不拉起 Python**：只读帧文件（`readLocalPausedSummaries`）——只读列表无需引擎，避免每次
+   * 重开都付出冷启动 / 误触发拉起失败横幅。真正续跑（`resume`）才拉起引擎。
+   */
+  async listPaused(
+    req: SidecarListPausedRequest,
+  ): Promise<SidecarPausedTurn[]> {
+    return readLocalPausedSummaries(req.conversationId);
+  }
+
   /** 取消一个在跑的回合（尽力而为；无对应 sidecar 则静默）。 */
   async cancel(req: SidecarCancelRequest): Promise<void> {
-    const entry = this.entries.get(req.rootId);
+    const entry = this.entries.get(entryKey(req.rootId, req.subpath));
     if (!entry) return;
     try {
       await entry.client.request("cancel", { turnId: req.turnId });
@@ -399,7 +553,7 @@ export class SidecarManager {
 
   /** 结算一个被挂起的交互（审批 / ask_user / 本地工具）。 */
   async respond(req: SidecarRespondRequest): Promise<void> {
-    const entry = this.entries.get(req.rootId);
+    const entry = this.entries.get(entryKey(req.rootId, req.subpath));
     if (!entry) return;
     await entry.client.request("respond", {
       requestId: req.requestId,
@@ -451,7 +605,11 @@ export function registerSidecarIpc(): void {
     async (e, req: SidecarStartTurnRequest): Promise<SidecarTurnResult> => {
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");
-      return manager.startTurn(e.sender, req, root.absPath);
+      const workspaceRoot = await resolveWorkspaceRoot(
+        root.absPath,
+        req.subpath,
+      );
+      return manager.startTurn(e.sender, req, workspaceRoot);
     },
   );
 
@@ -461,6 +619,25 @@ export function registerSidecarIpc(): void {
 
   ipcMain.handle(SIDECAR_CHANNELS.respond, (_e, req: SidecarRespondRequest) =>
     manager.respond(req),
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.resume,
+    async (e, req: SidecarResumeRequest): Promise<SidecarTurnResult> => {
+      const root = await getStoredRoot(req.rootId);
+      if (!root) throw new Error("本地目录未授权或已移除");
+      const workspaceRoot = await resolveWorkspaceRoot(
+        root.absPath,
+        req.subpath,
+      );
+      return manager.resume(e.sender, req, workspaceRoot, req.inference);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.listPaused,
+    (_e, req: SidecarListPausedRequest): Promise<SidecarPausedTurn[]> =>
+      manager.listPaused(req),
   );
 
   app.on("before-quit", () => manager.disposeAll());

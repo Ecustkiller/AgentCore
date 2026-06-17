@@ -7,6 +7,7 @@ import { toast } from "sonner";
 // app signals state with icons elsewhere (color-tokens).
 const errorIcon = <AlertTriangle size={16} className="text-destructive" />;
 const successIcon = <CheckCircle2 size={16} className="text-success" />;
+const warningIcon = <AlertTriangle size={16} className="text-warning" />;
 
 /**
  * Surface any caught error as a toast, phrased by the shared error map
@@ -48,4 +49,26 @@ export function notifyError(err: unknown, context?: string): void {
 /** A success toast for a completed user action (e.g. a snapshot was created). */
 export function notifySuccess(message: string): void {
   toast.success(message, { icon: successIcon });
+}
+
+/**
+ * A non-blocking warning toast with an optional one-click action.
+ *
+ * Distinct from {@link notifyError}: the user's primary action SUCCEEDED, this just
+ * flags a degraded side-effect they can act on (e.g. a best-effort write-back that
+ * failed and can be retried). Amber icon on the neutral surface (color-tokens), so it
+ * reads as "heads up", not "failed". The action is caller-supplied (not the error map).
+ */
+export function notifyWarning(
+  message: string,
+  opts?: {
+    description?: string;
+    action?: { label: string; onClick: () => void };
+  },
+): void {
+  toast.warning(message, {
+    description: opts?.description,
+    icon: warningIcon,
+    action: opts?.action,
+  });
 }

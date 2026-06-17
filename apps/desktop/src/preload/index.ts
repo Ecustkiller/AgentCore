@@ -14,6 +14,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 const fsApi: FsApi = {
   addRoot: () => ipcRenderer.invoke(FS_CHANNELS.addRoot),
+  ensureDefaultRoot: () => ipcRenderer.invoke(FS_CHANNELS.ensureDefaultRoot),
   listRoots: () => ipcRenderer.invoke(FS_CHANNELS.listRoots),
   removeRoot: (rootId) =>
     ipcRenderer.invoke(FS_CHANNELS.removeRoot, { rootId }),
@@ -51,6 +52,8 @@ const sidecarApi: SidecarApi = {
   startTurn: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.startTurn, req),
   cancel: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.cancel, req),
   respond: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.respond, req),
+  resume: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.resume, req),
+  listPaused: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.listPaused, req),
   onEvent: (cb) => {
     const listener = (_e: unknown, payload: SidecarEventPush) => cb(payload);
     ipcRenderer.on(SIDECAR_CHANNELS.event, listener);

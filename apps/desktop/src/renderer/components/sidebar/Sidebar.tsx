@@ -28,9 +28,13 @@ export function Sidebar() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
+  // 「对话」(route "/") 既是「新建对话」动作、又兼作对话区的区段指示：仅在「没有具体会话被
+  // 选中」的状态下高亮——空白草稿 `/` 与「全部对话」页 `/conversations`；一旦进入具体会话
+  // `/conversations/:id`，高亮就让位给下方最近列表里的那条会话行（避免导航与会话行双重高亮）。
+  // 其余导航是普通区段 tab，落在该区段（含子路由）即整段高亮。
   const isNavActive = (route: string) =>
     route === "/"
-      ? pathname === "/" || pathname.startsWith("/conversations")
+      ? pathname === "/" || pathname === "/conversations"
       : pathname === route || pathname.startsWith(`${route}/`);
 
   // 「对话」入口默认就是新建一个空白对话（与「+」一致）；回到旧对话走下方「最近对话 /

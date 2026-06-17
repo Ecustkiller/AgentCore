@@ -32,7 +32,7 @@ from agentcore.llm.pricing import NANO_PER_USD, calculate_cost
 from agentcore.llm.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.costing import aggregate_cost
 from agentcore.runtime.engine import react_loop
-from agentcore.runtime.events import EventSink, EventType, SSEEvent
+from agentcore.runtime.events import EventSink, EventType, FinishReason, SSEEvent
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.tools.builtin import build_builtin_registry, build_ceo_tool_registry
 from agentcore.tools.protocol import ToolContext
@@ -129,14 +129,21 @@ def single_outcome(
     sink: RecordingSink,
     citations: list[dict],
     latency_ms: int,
+    finish_override: FinishReason | None = None,
 ) -> TurnOutcome:
     """把 ``react_loop`` 的返回值 + sink 截获的事实归一化成 :class:`TurnOutcome`.
 
-    ``react_loop`` 不回 finish_reason：镜像 pipeline 的口径按轮数推导（rounds 达上限即
-    ``max_rounds``，否则 ``end_turn``；degraded 当前不 emit）。成本用 ``runtime/costing``
-    的定价按 usage+model 现算（``react_loop`` 不回 cost）。纯函数，便于单测。
+    ``react_loop`` 的四元组不带 finish_reason，但 B2 收敛治理会把非默认终态经
+    ``finish_override_sink`` 抬出来：``DEGRADED``（空响应即便 fallback 后仍空）/
+    ``UNPRODUCTIVE``（连续全失败无正文早停）。有 ``finish_override`` 就用它（评估据此能
+    断言降级 / 早停、与 team 路径口径一致），否则镜像 pipeline 按轮数推导（rounds 达上限即
+    ``max_rounds``，否则 ``end_turn``）。成本用 ``runtime/costing`` 的定价按 usage+model
+    现算（``react_loop`` 不回 cost）。纯函数，便于单测。
     """
-    finish = "end_turn" if rounds < profile.max_rounds else "max_rounds"
+    if finish_override is not None:
+        finish = finish_override.value
+    else:
+        finish = "end_turn" if rounds < profile.max_rounds else "max_rounds"
     cost_nano = calculate_cost(profile.model, usage).total
     return TurnOutcome(
         content=content or "",
@@ -234,6 +241,10 @@ class EvalHarness:
             *_history_messages(case.history),
             LLMMessage(role="user", content=case.user_message),
         ]
+        # B2: collect the engine's non-default terminal reason (degraded / unproductive)
+        # the same way the run executor does, so the eval outcome surfaces it instead of
+        # masking it as a rounds-derived end_turn.
+        finish_override: list[FinishReason] = []
         content, _reasoning, usage, rounds = await react_loop(
             messages=messages,
             llm=provider,
@@ -242,6 +253,7 @@ class EvalHarness:
             tool_context=ctx,
             profile=profile,
             citation_sink=citations,
+            finish_override_sink=finish_override,
         )
         return single_outcome(
             content,
@@ -251,6 +263,7 @@ class EvalHarness:
             sink=sink,
             citations=citations,
             latency_ms=_ms(t0),
+            finish_override=finish_override[0] if finish_override else None,
         )
 
     async def _run_team(self, case, backend, profiles, sink, t0) -> TurnOutcome:

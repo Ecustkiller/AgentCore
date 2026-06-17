@@ -192,10 +192,17 @@ class LocalBinding:
     human-readable name, used for relative-path rendering so absolute local paths
     never leak into prompts. The *presence* of a binding is exactly what flips a
     conversation to local mode (§七); its absence means cloud.
+
+    ``subpath`` (工作区对称化 D1a) is the workspace's sub-directory *within* the
+    root. Empty = the folder is the root itself (an explicitly-added project). A
+    non-empty single segment scopes a per-conversation workspace under a shared
+    container root; ``LocalWorkspace`` prefixes it onto every op path so the engine
+    and the user only ever see workspace-relative paths.
     """
 
     root_id: str
     root_label: str = "workspace"
+    subpath: str = ""
 
 
 def build_local_workspace(
@@ -229,6 +236,7 @@ def build_local_workspace(
         channel,
         root_label=binding.root_label,
         execute_timeout_slack=settings.workspace_execute_timeout_slack_seconds,
+        base_subpath=binding.subpath,
     )
 
 
@@ -236,6 +244,7 @@ def resolve_local_binding(
     *,
     folder_id: str | None,
     folder_local_root_id: str | None,
+    folder_local_subpath: str | None = None,
     label: str | None = None,
 ) -> LocalBinding | None:
     """Resolve a conversation's local-mode binding from its folder's root id.
@@ -245,21 +254,35 @@ def resolve_local_binding(
     bound; a **folderless (裸聊)** conversation has no workspace yet, so it is always
     cloud. The governing scope being unbound (``None``) means cloud. Pure (takes the
     already-fetched ids) so it stays DB-free and unit-testable; callers fetch the
-    folder row and pass its ``local_root_id``.
+    folder row and pass its ``local_root_id`` (+ ``local_subpath`` for a workspace
+    that lives in a sub-directory of a shared container root, 工作区对称化 D1a).
     """
     root_id = folder_local_root_id if folder_id is not None else None
     if not root_id:
         return None
-    return LocalBinding(root_id=root_id, root_label=label or "workspace")
+    return LocalBinding(
+        root_id=root_id,
+        root_label=label or "workspace",
+        subpath=folder_local_subpath or "",
+    )
 
 
-def default_workspace_name(title: str | None) -> str:
+def default_workspace_name(
+    title: str | None, *, fallback_text: str | None = None
+) -> str:
     """Name for an auto-created workspace when a 裸聊 first produces files (B 懒建).
 
-    Uses the conversation's title so the new folder reads as "this chat's project";
-    falls back when the title has not been generated yet (it is async, post-turn).
+    Uses the conversation's title so the new folder reads as "this chat's project".
+    The title is generated async (post-turn), so at promote time (mid-turn, on the
+    first file write) it is usually still ``None`` — hence ``fallback_text`` (the
+    first user message), which makes a freshly-promoted workspace read meaningfully
+    instead of "未命名工作区". For a **local** workspace this name also seeds the
+    on-disk directory (工作区对称化 D1a), so a good name here matters more than for
+    cloud. Final fallback when nothing is available.
     """
     name = " ".join((title or "").split())
+    if not name:
+        name = " ".join((fallback_text or "").split())
     return name[:200] if name else "未命名工作区"
 
 

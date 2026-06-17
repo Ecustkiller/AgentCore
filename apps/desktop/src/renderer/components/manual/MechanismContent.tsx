@@ -10,7 +10,6 @@ import {
 } from "@/lib/elk-layout";
 import { MODEL_TIER_META, type RunStatus } from "@/stores/execution";
 import type { GraphEdge, GraphLayout } from "@/stores/graph";
-import { useUIStore } from "@/stores/ui";
 import {
   Background,
   type Edge,
@@ -20,22 +19,16 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import {
-  ArrowLeft,
-  BookOpen,
   Bot,
   CheckCircle2,
   ChevronRight,
   CornerDownRight,
   History,
-  LayoutGrid,
   Loader2,
-  Minus,
-  Network,
+  Package,
   Sparkles,
-  Square,
   UserRound,
   Workflow,
-  X,
   XCircle,
 } from "lucide-react";
 import {
@@ -47,21 +40,22 @@ import {
   useRef,
   useState,
 } from "react";
-import { useNavigate } from "react-router-dom";
 
 /**
- * 团队运行机制页（`/toolbox/mechanism`，工具箱「了解平台」组）。
+ * 运行机制内容块（产品手册「运行机制」组的 4 个内容件）。
  *
- * 真·全屏页（`fixed inset-0` 覆盖整窗含应用 TitleBar，顶栏自带窗口拖拽区 + 自绘最小化 /
- * 最大化 / 关闭控件，返回 / Esc 退出），面向用户的协作**透明页**（截图口碑传播点）：
- * ① 运行时全景 ② 协作回合主线 ③ 图例 ④ 机制场景——后者是 **真实**
- * `AgentNode`/`EndpointNode`/`StepEdge` + **真实** ELK 布局 + 内嵌 fit-to-width，所见即聊天
- * 内嵌协作图。
+ * 由 `pages/toolbox/ProductManual.tsx` 组合渲染——本模块只提供内容件，全屏壳 / 顶栏 /
+ * 左侧目录 / Esc 退出都归手册页。原「团队运行机制」独立页（`/toolbox/mechanism`）已并入
+ * 产品手册（IA 见 `docs/04-前端/前端UX设计.md §十二`）。
  *
- * 开发 / AI 价值靠源码自身：各数据块（PHASES / TURN_FLOW / SCENARIOS）旁以注释保留实现入口，
- * SCENARIOS 用真实节点 / 边 / 布局编码机制结构。SSE 事件族见
- * `docs/03-AI核心/执行引擎架构设计.md §十二` + `runtime/events.py`·`types/events.ts`；前端执行
- * 态见 `docs/04-前端 §9.x`。
+ * 四件：① `RuntimePanorama` 运行时全景 ② `CollaborationTurnFlow` 协作回合主线
+ * ③ `GraphLegend` 图例 ④ `MechanismScenarios` 机制场景——后者是 **真实**
+ * `AgentNode`/`EndpointNode`/`StepEdge` + **真实** ELK 布局 + 内嵌 fit-to-width（所见即聊天
+ * 内嵌协作图），单列呈现并按需懒挂载（`LazyMount`）避免一次性挂 8 个 ReactFlow。
+ *
+ * 开发 / AI 价值靠源码自身：各数据块（PHASES / TURN_FLOW / SCENARIOS）旁以注释保留实现入口。
+ * SSE 事件族见 `docs/03-AI核心/执行引擎架构设计.md §十二` + `runtime/events.py`·
+ * `types/events.ts`；前端执行态见 `docs/04-前端 §9.x`。
  */
 
 // `userInput`（非 `input`）：避开 ReactFlow 保留 type 名，否则默认样式表会给节点画
@@ -74,78 +68,57 @@ const nodeTypes = {
 const edgeTypes = { step: StepEdge };
 
 // ────────────────────────────────────────────────────────────────────────────
-// 通用呈现件
-// ────────────────────────────────────────────────────────────────────────────
-
-function Section({
-  icon,
-  title,
-  desc,
-  children,
-}: {
-  icon: ReactNode;
-  title: string;
-  desc?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="mb-12">
-      <h2 className="flex items-center gap-2 text-base font-medium text-foreground">
-        <span className="text-muted-foreground">{icon}</span>
-        {title}
-      </h2>
-      {desc ? (
-        <p className="mb-4 mt-1 text-sm leading-relaxed text-muted-foreground">
-          {desc}
-        </p>
-      ) : (
-        <div className="h-4" />
-      )}
-      {children}
-    </section>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────────
 // ① 运行时全景（请求管线）
 // ────────────────────────────────────────────────────────────────────────────
 
 // 实现入口（喂 AI，不渲染）：Prepare=runtime/pipeline.py · Execute=runtime/engine.py·runs/ ·
 // Finalize=conversation/service.py
-const PHASES: { title: string; desc: string }[] = [
+const PHASES: { title: string; icon: typeof Package; desc: string }[] = [
   {
     title: "Prepare",
+    icon: Package,
     desc: "装配 CEO 工具集（只读/检索 + delegate）、注入会话历史；历史只回放文本，工具 I/O 不进 LLM 上下文。",
   },
   {
     title: "Execute（ReAct 循环）",
+    icon: Workflow,
     desc: "CEO 思考 →（按需）delegate 组团 → WaveScheduler 跑 DAG → worker 执行 → CEO 收尾；收敛治理防机械循环。",
   },
   {
     title: "Finalize",
+    icon: CheckCircle2,
     desc: "消息落库、用量计费、标题生成；断连也「能存多少存多少」，不全有或全无。",
   },
 ];
 
-function PhaseStrip() {
+/** ① 运行时全景：Prepare → Execute → Finalize 三阶段。 */
+export function RuntimePanorama() {
   return (
     <div className="flex flex-col gap-2 lg:flex-row lg:items-stretch">
-      {PHASES.map((p, i) => (
-        <Fragment key={p.title}>
-          <div className="flex-1 rounded-xl border border-border bg-card p-3">
-            <p className="text-sm font-medium text-foreground">{p.title}</p>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {p.desc}
-            </p>
-          </div>
-          {i < PHASES.length - 1 && (
-            <ChevronRight
-              size={16}
-              className="hidden shrink-0 self-center text-muted-foreground lg:block"
-            />
-          )}
-        </Fragment>
-      ))}
+      {PHASES.map((p, i) => {
+        const Icon = p.icon;
+        return (
+          <Fragment key={p.title}>
+            <div className="flex-1 rounded-xl border border-border bg-card p-4">
+              <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Icon size={16} />
+              </div>
+              <p className="mt-3 text-sm font-medium text-foreground">
+                {p.title}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                {p.desc}
+              </p>
+            </div>
+            {i < PHASES.length - 1 && (
+              <ChevronRight
+                size={16}
+                className="hidden shrink-0 self-center text-muted-foreground lg:block"
+              />
+            )}
+          </Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -201,7 +174,8 @@ const TURN_FLOW: {
   },
 ];
 
-function TurnFlow() {
+/** ② 协作回合主线：从你的提问到答案落进气泡的完整生命周期。 */
+export function CollaborationTurnFlow() {
   return (
     <ol className="space-y-0">
       {TURN_FLOW.map((s, i) => (
@@ -332,7 +306,8 @@ const tierBadge = (tier: "strong" | "fast") => (
   </span>
 );
 
-function Legend() {
+/** ③ 图例：节点 / 状态 / 连线 / 徽章的含义，样式与聊天内嵌图一字不差。 */
+export function GraphLegend() {
   return (
     <div className="grid gap-3 lg:grid-cols-2">
       <LegendGroup title="节点">
@@ -959,7 +934,7 @@ function ScenarioGraph({ scenario }: { scenario: Scenario }) {
   }, [scenario]);
 
   return (
-    <section className="mb-8">
+    <div>
       <h3 className="text-sm font-medium text-foreground">{scenario.title}</h3>
       <p className="mb-2 mt-0.5 text-xs leading-relaxed text-muted-foreground">
         {scenario.desc}
@@ -996,120 +971,55 @@ function ScenarioGraph({ scenario }: { scenario: Scenario }) {
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card to-transparent" />
         )}
       </div>
-    </section>
+    </div>
   );
 }
 
-export function TeamMechanism() {
-  const navigate = useNavigate();
-  const exit = useCallback(() => navigate("/toolbox"), [navigate]);
-
-  // Esc 退出沉浸式页面回工具箱；命令面板（Ctrl/Cmd+K）开着时让它先吃 Esc。
+/**
+ * 视口懒挂载：滚动进入（提前 200px）才挂子树，避免一次性挂 8 个 ReactFlow。
+ * 占位用 minHeight 防跳动。
+ */
+function LazyMount({
+  minHeight,
+  children,
+}: {
+  minHeight: number;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [show, setShow] = useState(false);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || useUIStore.getState().searchOpen) return;
-      exit();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [exit]);
-
+    if (show) return;
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setShow(true);
+          obs.disconnect();
+        }
+      },
+      { rootMargin: "200px 0px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [show]);
   return (
-    // 真·全屏：fixed inset-0 覆盖整窗（含应用 TitleBar）。因此本页顶栏自带窗口拖拽区
-    // （[-webkit-app-region:drag]）+ 自绘最小化/最大化/关闭控件，否则无边框窗口将无法
-    // 移动 / 关闭。返回 / Esc 退出回工具箱。
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
-      <header className="flex h-12 shrink-0 items-center border-b border-border [-webkit-app-region:drag]">
-        <button
-          type="button"
-          onClick={exit}
-          className="ml-2 flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground [-webkit-app-region:no-drag]"
-        >
-          <ArrowLeft size={16} />
-          返回
-        </button>
-        <span className="ml-1 text-sm font-medium text-foreground">
-          团队运行机制
-        </span>
-        <div className="flex-1" />
-        {/* 自绘窗口控件：本页盖住了原生 TitleBar，故在此重建（与 TitleBar 同一 windowApi）。 */}
-        <div className="flex items-center [-webkit-app-region:no-drag]">
-          <button
-            type="button"
-            onClick={() => window.windowApi.minimize()}
-            aria-label="最小化"
-            className="flex h-12 w-12 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <Minus size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={() => window.windowApi.maximize()}
-            aria-label="最大化"
-            className="flex h-12 w-12 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <Square size={12} />
-          </button>
-          <button
-            type="button"
-            onClick={() => window.windowApi.close()}
-            aria-label="关闭"
-            className="flex h-12 w-12 items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      </header>
+    <div ref={ref} style={show ? undefined : { minHeight }}>
+      {show ? children : null}
+    </div>
+  );
+}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[1400px] px-8 py-8">
-          <h1 className="text-xl font-medium text-foreground">团队运行机制</h1>
-          <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-            看懂你的 AI 团队怎么协作：一个任务进来后，CEO 主 Agent
-            如何判断要不要组团、团队怎么分工与并行、每个队员在干什么、最后如何把结果汇总成答案。下方所有图都是
-            <span className="font-medium text-foreground">真实</span>
-            的协作图组件与布局——和你在对话里看到的一模一样。
-          </p>
-
-          <div className="mt-8">
-            <Section
-              icon={<Network size={16} />}
-              title="运行时全景（请求 → 回合 → 输出）"
-              desc="入口即 CEO 主 Agent：简单对话直接流式作答、零编排开销；需要产出或组队时，CEO 才调 delegate 进入多 Agent 编排。一次请求经准备 → 执行 → 收尾三阶段。"
-            >
-              <PhaseStrip />
-            </Section>
-
-            <Section
-              icon={<Workflow size={16} />}
-              title="协作回合主线（图怎么活起来）"
-              desc="一次多 Agent 回合从你的提问到答案落进气泡的完整生命周期：CEO 何时组团、波次如何解锁、worker 如何流式产出、最后如何收尾汇报。"
-            >
-              <TurnFlow />
-            </Section>
-
-            <Section
-              icon={<BookOpen size={16} />}
-              title="图例（看懂每个符号）"
-              desc="图上每个节点 / 状态 / 连线 / 徽章对应的含义，样式与聊天内嵌图一字不差。"
-            >
-              <Legend />
-            </Section>
-
-            <Section
-              icon={<LayoutGrid size={16} />}
-              title="机制场景（真实节点 + 真实 ELK 布局）"
-              desc="覆盖并行 / 串行 / 流式 / 辩论 / 嵌套 / 多层 / 热修 / 超大团队各形态——既是机制示例，也是节点组件与布局的渲染自查。"
-            >
-              <div className="grid gap-x-8 xl:grid-cols-2">
-                {SCENARIOS.map((s) => (
-                  <ScenarioGraph key={s.title} scenario={s} />
-                ))}
-              </div>
-            </Section>
-          </div>
-        </div>
-      </div>
+/** ④ 机制场景：8 个真实协作图，单列呈现、按需懒挂载。 */
+export function MechanismScenarios() {
+  return (
+    <div className="space-y-8">
+      {SCENARIOS.map((s) => (
+        <LazyMount key={s.title} minHeight={EMBED_MIN_HEIGHT + 56}>
+          <ScenarioGraph scenario={s} />
+        </LazyMount>
+      ))}
     </div>
   );
 }

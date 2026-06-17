@@ -90,6 +90,18 @@ export interface FileTreeHandle {
   refresh: () => void;
   /** 打开 OS 文件选择器，上传到源根（仅可传输的源）。 */
   triggerUpload: () => void;
+  /** 收起全部展开目录（外置工具栏的「全部折叠」用）。 */
+  collapseAll: () => void;
+}
+
+/** 树内部「工具栏相关」的活动状态，供外置工具栏（如侧栏面板头）响应式渲染。 */
+export interface FileTreeChromeState {
+  /** 正在上传（上传按钮转圈/禁用）。 */
+  uploading: boolean;
+  /** 有已展开目录（决定是否显示「全部折叠」）。 */
+  hasExpanded: boolean;
+  /** 根正在加载（刷新按钮转圈）。 */
+  loading: boolean;
 }
 
 interface FileTreeProps {
@@ -99,8 +111,20 @@ interface FileTreeProps {
   headerExtra?: React.ReactNode;
   /** 隐藏自带工具栏 + 自身高度/滚动（嵌入式多根堆叠用，由外层统一滚动）。 */
   chrome?: boolean;
+  /**
+   * 仅隐藏自带工具栏、但保留自身高度/滚动（chrome 模式下由外层接管工具栏、
+   * 把文件操作经 {@link FileTreeHandle} ref 驱动；侧栏单行面板头用）。
+   */
+  hideToolbar?: boolean;
+  /**
+   * 工具栏相关状态变更回调（外置工具栏据此响应式渲染上传/折叠/刷新态）。
+   * 调用方应传**稳定引用**（如 useState 的 setter），否则会按渲染抖动。
+   */
+  onChromeState?: (state: FileTreeChromeState) => void;
   /** 每行额外左内边距，用于把整棵树嵌套在某个标题（工作区根）之下。 */
   indent?: number;
+  /** 嵌入模式（chrome=false）下根为空时的提示文案（默认「空文件夹」）。 */
+  emptyText?: string;
 }
 
 export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
@@ -111,7 +135,10 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       activePath = null,
       headerExtra,
       chrome = true,
+      hideToolbar = false,
+      onChromeState,
       indent = 0,
+      emptyText = "空文件夹",
     },
     ref,
   ) {
@@ -290,9 +317,21 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         startCreate: (kind) => openCreate("", kind),
         refresh,
         triggerUpload: () => uploadRef.current?.click(),
+        collapseAll,
       }),
-      [openCreate, refresh],
+      [openCreate, refresh, collapseAll],
     );
+
+    // Mirror toolbar-relevant state up so an external toolbar (e.g. the side
+    // panel's single header row) can render upload/collapse/refresh reactively
+    // while still driving the actions through the ref.
+    useEffect(() => {
+      onChromeState?.({
+        uploading,
+        hasExpanded: expanded.size > 0,
+        loading: rootStatus === "loading",
+      });
+    }, [onChromeState, uploading, expanded, rootStatus]);
 
     const onDragOverRoot = (e: React.DragEvent) => {
       if (e.dataTransfer.types.includes(DRAG_MIME)) setDropTarget(null);
@@ -380,7 +419,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         className="py-1 text-xs text-muted-foreground/60"
         style={{ paddingLeft: indent + 8 }}
       >
-        空文件夹
+        {emptyText}
       </div>
     );
 
@@ -454,43 +493,45 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         onDrop={onDropRoot}
       >
         {uploadInput}
-        <div className="flex shrink-0 items-center gap-1 px-3 py-2">
-          {source.caps.transfer && (
-            <button
-              type="button"
-              onClick={() => uploadRef.current?.click()}
-              disabled={uploading}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-            >
-              {uploading ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )}
-              上传
-            </button>
-          )}
-          <IconButton title="新建文件" onClick={() => openCreate("", "file")}>
-            <FilePlus size={14} />
-          </IconButton>
-          <IconButton title="新建文件夹" onClick={() => openCreate("", "dir")}>
-            <FolderPlus size={14} />
-          </IconButton>
-          <div className="flex-1" />
-          {expanded.size > 0 && (
-            <IconButton title="全部折叠" onClick={collapseAll}>
-              <ChevronsDownUp size={14} />
+        {!hideToolbar && (
+          <div className="flex shrink-0 items-center gap-1 px-3 py-2">
+            {source.caps.transfer && (
+              <button
+                type="button"
+                onClick={() => uploadRef.current?.click()}
+                disabled={uploading}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+              >
+                {uploading ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Upload size={13} />
+                )}
+                上传
+              </button>
+            )}
+            <IconButton title="新建文件" onClick={() => openCreate("", "file")}>
+              <FilePlus size={14} />
             </IconButton>
-          )}
-          <IconButton
-            title="刷新"
-            onClick={refresh}
-            spinning={rootStatus === "loading"}
-          >
-            <RefreshCw size={14} />
-          </IconButton>
-          {headerExtra}
-        </div>
+            <IconButton title="新建文件夹" onClick={() => openCreate("", "dir")}>
+              <FolderPlus size={14} />
+            </IconButton>
+            <div className="flex-1" />
+            {expanded.size > 0 && (
+              <IconButton title="全部折叠" onClick={collapseAll}>
+                <ChevronsDownUp size={14} />
+              </IconButton>
+            )}
+            <IconButton
+              title="刷新"
+              onClick={refresh}
+              spinning={rootStatus === "loading"}
+            >
+              <RefreshCw size={14} />
+            </IconButton>
+            {headerExtra}
+          </div>
+        )}
 
         {dragOver && source.caps.transfer && (
           <div className="mx-3 mb-2 shrink-0 rounded-lg border border-dashed border-primary bg-primary/5 px-3 py-4 text-center text-xs text-primary">

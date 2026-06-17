@@ -7,27 +7,37 @@ import {
 import { useWorkspaces } from "@/hooks/useWorkspaces";
 import { useFoldersStore } from "@/stores/folders";
 import { useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 /**
  * The 文件 hub (跨工作区文件总览) — one place to browse files across *all* the
  * user's workspaces (= folders, cloud + local) without first opening a
- * conversation. Layout is VSCode 式左树右详情: the left rail is *one* multi-root
- * tree ({@link FileWorkbench}) where each workspace is a collapsible root over its
- * own {@link FileSource} (cloud → REST, local → desktop IPC); the right pane shows
- * the selected file's preview / editor, with the tree always visible.
+ * conversation. Layout is VSCode 式左树右详情: the left rail ({@link FileWorkbench})
+ * stacks every workspace as a flat, non-collapsible section over its own
+ * {@link FileSource} (cloud → REST, local → desktop IPC), all 平铺、无分区, told apart
+ * only by a cloud/local badge — every workspace is equal (工作区对称化 D1a 起无置顶的
+ * 默认壳；裸聊产文件时由服务端懒建一个 per 对话本地工作区，自然出现在这里)。The right
+ * pane shows the selected file's preview / editor, with the tree always visible.
  *
  * This page is the cross-project *lens* and also **hosts folder lifecycle** (rename
  * / delete / new folder / add local) — it owns the data (`GET /v1/workspaces`) and
- * the folder mutations, handing the workbench plain callbacks. `/folders/:id` stays
- * the single-project *home*; both read the same workspace enumeration and share the
- * file tree, so "which projects exist" has one source of truth (双模式工作区 决策
- * #9). 裸聊 has no workspace and never appears here.
+ * the folder mutations, handing the workbench plain callbacks. It is the **file**
+ * lens; chats live on `/conversations`. The two cross-link (双模式工作区 决策 #9,
+ * 端态 I): a project's「查看对话」jumps to `/conversations` filtered to that folder,
+ * and `/conversations`「浏览文件」jumps back here with `focusWsId` (read off the
+ * navigation state) so the target root expands + highlights. 一条裸聊在懒建出工作区
+ * 之前不在这里出现（无工作区）。
  */
 export function FilesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const query = useWorkspaces();
   const workspaces = useMemo(() => query.data ?? [], [query.data]);
+
+  // 从 /conversations「浏览文件」跳来时携带的目标工作区（`folder:<id>`）。location.key 每次
+  // 导航唯一，传给 workbench 作为「本次聚焦」的触发键（同一项目可重复聚焦）。
+  const focusWsId =
+    (location.state as { focusWsId?: string } | null)?.focusWsId ?? null;
 
   const fsApi = typeof window !== "undefined" ? window.fsApi : undefined;
 
@@ -77,7 +87,11 @@ export function FilesPage() {
         updateFolderMutation.mutate({ id: folderId, patch: { name } })
       }
       onDelete={(folderId) => deleteFolderMutation.mutate(folderId)}
-      onOpen={(folderId) => navigate(`/folders/${folderId}`)}
+      onViewConversations={(folderId) =>
+        navigate("/conversations", { state: { focusFolderId: folderId } })
+      }
+      focusWsId={focusWsId}
+      focusKey={location.key}
     />
   );
 }

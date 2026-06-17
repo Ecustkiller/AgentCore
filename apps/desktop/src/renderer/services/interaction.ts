@@ -1,5 +1,5 @@
 import { api } from "@/services/api";
-import { getActiveSidecarRoot } from "@/services/sidecarRouting";
+import { getActiveSidecarTarget } from "@/services/sidecarRouting";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];
@@ -37,10 +37,11 @@ export async function resolveInteraction(
   interactionId: string,
   body: ResolveInteractionBody,
 ): Promise<void> {
-  const sidecarRoot = getActiveSidecarRoot(conversationId);
-  if (sidecarRoot) {
+  const sidecarTarget = getActiveSidecarTarget(conversationId);
+  if (sidecarTarget) {
     await window.sidecarApi.respond({
-      rootId: sidecarRoot,
+      rootId: sidecarTarget.rootId,
+      subpath: sidecarTarget.subpath,
       requestId: interactionId,
       conversationId,
       result: body,

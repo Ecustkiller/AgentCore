@@ -74,6 +74,32 @@ DEP_CONTEXT_BUDGET = 16000
 # smaller than) the pass_through budget above.
 DEP_SUMMARY_CHARS = 600
 
+# 递指针不递全文 (Agent协作模式.md 远期 → 现状): when an upstream dependency already
+# WROTE its product to the shared workspace (its ``files_touched`` is non-empty), a
+# downstream worker gets a POINTER — a tight prose digest + the artifact paths to
+# ``file_read`` — instead of the whole product re-shipped through the prompt. The
+# artifact is on disk and reachable; re-injecting it whole wastes tokens and risks
+# tail-trimming (the budgeted full-text path). These bound the pointer: how far the
+# prose digest is cut, and how many paths to list before eliding. A pointer dep does
+# NOT draw on DEP_CONTEXT_BUDGET (only PROSE pass_through deps, which have no file to
+# point at, still share it).
+DEP_POINTER_SUMMARY_CHARS = 600
+DEP_POINTER_MAX_FILES = 20
+
+# 工作区产物清单: every worker opens with a compact manifest of files in the shared
+# workspace it can ``file_read`` — its ALREADY-FINISHED teammates' products this turn
+# (from their ``files_touched``, role-attributed) PLUS the pre-existing files on disk
+# (uploads / prior turns, via ``backend.index_files``), minus its own direct deps
+# (those get the richer pointer block). So the workspace is a discoverable common
+# context, not a passive store a worker must ``file_list`` to find — and it won't
+# re-create an artifact a peer (or a past turn) already landed. Capped so a big team /
+# large workspace can't bloat the prompt: a FILE-COUNT cap plus a CHAR budget (long
+# paths can't blow up the prompt even under the count cap, whichever binds first), and
+# the pre-existing files are fed newest-first (``index_files(order="recent")``) so the
+# budget spends on what's most likely relevant, not whatever sorts alphabetically first.
+WORKSPACE_MANIFEST_MAX_FILES = 40
+WORKSPACE_MANIFEST_CHAR_BUDGET = 1800
+
 # Canonical name of the worker-only「向上升级」tool (worker → CEO clarification
 # channel). One source of truth shared by three sites that must agree without coupling
 # ``runs`` to the ``tools`` package: the EscalateTool's schema name, the executor's

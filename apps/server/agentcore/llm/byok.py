@@ -27,6 +27,12 @@ from agentcore.security import KeyEncryptor
 
 logger = get_logger(__name__)
 
+# HTTP header a sidecar stamps on its cloud-proxy LLM calls so the /v1/inference
+# proxy can attribute spend to the conversation (双模式工作区 §一.1 / Slice 4a).
+# Shared so the stamper (sidecar/server.py) and the reader (api/routes/inference.py)
+# can never drift on the spelling.
+INFERENCE_CONVERSATION_HEADER = "X-AgentCore-Conversation"
+
 
 @dataclass(frozen=True)
 class LLMCredentials:
@@ -34,6 +40,10 @@ class LLMCredentials:
 
     api_key: str
     base_url: str
+    # Optional per-turn HTTP headers the provider sends upstream. The sidecar uses
+    # this to stamp the conversation id on its cloud-proxy LLM calls (Slice 4a) so
+    # the proxy can attribute spend; ordinary cloud turns leave it ``None``.
+    extra_headers: dict[str, str] | None = None
 
 
 def _encryptor() -> KeyEncryptor | None:

@@ -70,8 +70,19 @@ async def _save_pause_journal(suspension: TurnSuspension, trace_id: str | None) 
     it back (:func:`claim_paused_turn`) and the completed turn re-records it wholesale
     (``record`` replaces). Re-pausing (resume → pause again) replaces the cumulative
     stream. A failure logs and degrades — never breaks the pause.
+
+    Persists the §18.3 fact-log stream (:attr:`TurnSuspension.journal_entries` — the
+    suspending face's ``current_fact_log`` snapshot: execution facts interleaved with
+    forwarded display facts) so the paused journal is ``window_from_journal``-rebuildable
+    for the Phase 2 resume cutover. Falls back to flattening the display-only ``journal``
+    when no fact log was captured (a degraded / un-wired pause), preserving the old
+    behaviour for that path.
     """
-    entries = entries_from_runs({"events": suspension.journal})
+    entries = (
+        list(suspension.journal_entries)
+        if suspension.journal_entries
+        else entries_from_runs({"events": suspension.journal})
+    )
     if not entries:
         return
     try:
@@ -118,9 +129,15 @@ async def claim_paused_turn(
 
     The journal-so-far is re-hydrated from ``turn_journal`` (唯一事实源, it is not in
     the frame) onto :attr:`TurnSuspension.journal`, so the resume seeds + replays the
-    whole pre-pause graph exactly as before. The stored rows are left in place: the
-    resumed turn re-records them wholesale on completion (or the TTL sweep clears them
-    if the turn is abandoned).
+    whole pre-pause graph. The raw loaded stream is ALSO carried onto
+    :attr:`TurnSuspension.journal_entries` (the §18.3 fact-log stream, incl. the execution
+    facts the display projection drops): the resume folds it via ``window_from_journal`` to
+    rebuild the captain window (执行级事件溯源 Phase 2 ④/⑤ — the window is a projection of the
+    journal, no longer read from a frame ``transcript`` blob, which is no longer serialized).
+    The window's prior-turn history is reloaded separately from the message DB by the
+    caller (``service.resume_chat``) and threaded in. The stored rows are left in place: the
+    resumed turn re-records them wholesale on completion (or the TTL sweep clears them if the
+    turn is abandoned).
     """
     try:
         async with async_session_factory() as db:
@@ -134,6 +151,9 @@ async def claim_paused_turn(
     except Exception as e:  # noqa: BLE001 — a claim failure reads as "not resumable"
         logger.warning("suspension.claim_failed", message_id=message_id, error=str(e))
         return None
+    # Raw stream (execution facts + display) for the Phase 2 window rebuild; the display
+    # seed (events only) for the unchanged resume read path.
+    suspension.journal_entries = list(entries or [])
     runs = runs_from_entries(entries)
     suspension.journal = list((runs or {}).get("events") or [])
     return suspension

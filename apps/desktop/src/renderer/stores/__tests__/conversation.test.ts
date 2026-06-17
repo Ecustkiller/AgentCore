@@ -1,6 +1,7 @@
 import type {
   CheckpointRequiredPayload,
   PlanReviewRequiredPayload,
+  QuestionPostedPayload,
   SSEEvent,
 } from "@/types/events";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +10,7 @@ import {
   checkpointsFromEvents,
   getActiveRuntime,
   getRuntime,
+  nonBlockingAsksFromEvents,
   planReviewsFromEvents,
   useConversationStore,
 } from "../conversation";
@@ -217,6 +219,32 @@ describe("conversation store", () => {
     it("does nothing when no messages", () => {
       store().appendToLastMessage("chunk");
       expect(rt().messages).toEqual([]);
+    });
+  });
+
+  // The inline「思考·正文·工具」timeline (前端UX设计.md §一B): content folds into the
+  // process step list (interleaved with reasoning/tools), in addition to keeping the
+  // canonical message.content for copy / citations.
+  describe("process timeline (inline 思考·正文·工具)", () => {
+    it("folds content into a trailing content step after reasoning", () => {
+      store().createAssistantMessage();
+      store().appendReasoningToLastMessage("think");
+      store().appendToLastMessage("answer");
+      const msg = rt().messages[0];
+      expect(msg.content).toBe("answer");
+      expect(msg.process).toEqual([
+        { kind: "reasoning", text: "think" },
+        { kind: "content", text: "answer" },
+      ]);
+    });
+
+    it("coalesces consecutive content deltas into one content step", () => {
+      store().createAssistantMessage();
+      store().appendToLastMessage("答");
+      store().appendToLastMessage("案");
+      const msg = rt().messages[0];
+      expect(msg.content).toBe("答案");
+      expect(msg.process).toEqual([{ kind: "content", text: "答案" }]);
     });
   });
 
@@ -629,6 +657,89 @@ describe("ask_user cards (统一开场引导 + 途中拍板)", () => {
         decision: "continue",
         note: "就按这个开做",
       });
+    });
+  });
+});
+
+// 非阻塞发问 (ask_user blocking=false, Cursor 式): a non-gating card lives on the
+// assistant message that posted it — set live (addNonBlockingAsk) and rebuilt from the
+// journal on reload (nonBlockingAsksFromEvents). Unlike a checkpoint it has no
+// status/decision (never pending) and no settle — the user's answer rides a next-turn
+// message; the card's chips just 回填 the composer.
+describe("non-blocking ask cards (ask_user blocking=false)", () => {
+  const postedPayload = (id: string): QuestionPostedPayload => ({
+    ask_id: id,
+    conversation_id: "a",
+    question: "我先按响应式单页做，可以吗？",
+    context: "",
+    assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
+    questions: [
+      {
+        id: "q0",
+        prompt: "要不要双语？",
+        kind: "choice",
+        options: ["要", "不要"],
+        multiple: false,
+        default: "不要",
+      },
+    ],
+    style_options: [],
+  });
+  const postedEvent = (id: string): SSEEvent => ({
+    type: "question_posted",
+    timestamp: "",
+    payload: postedPayload(id),
+  });
+
+  describe("nonBlockingAsksFromEvents (history replay)", () => {
+    it("folds a question_posted event into one card (rich fields)", () => {
+      const cards = nonBlockingAsksFromEvents([postedEvent("n1")]);
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toMatchObject({
+        id: "n1",
+        question: "我先按响应式单页做，可以吗？",
+        assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
+      });
+      expect(cards[0].questions[0].default).toBe("不要");
+    });
+
+    it("dedupes a re-delivered event and preserves post order", () => {
+      const cards = nonBlockingAsksFromEvents([
+        postedEvent("n1"),
+        postedEvent("n2"),
+        postedEvent("n1"),
+      ]);
+      expect(cards.map((c) => c.id)).toEqual(["n1", "n2"]);
+    });
+
+    it("is empty when the journal has no non-blocking ask", () => {
+      expect(nonBlockingAsksFromEvents([])).toEqual([]);
+    });
+  });
+
+  describe("addNonBlockingAsk (live)", () => {
+    it("attaches a card to the live assistant message", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().addNonBlockingAsk(postedPayload("n1"), "a");
+      expect(rt().messages[0].nonBlockingAsks?.[0]).toMatchObject({
+        id: "n1",
+        assumptions: [{ id: "a0", label: "部署", value: "纯静态" }],
+      });
+    });
+
+    it("dedupes a re-delivered event", () => {
+      store().switchConversation("a");
+      store().createAssistantMessage();
+      store().addNonBlockingAsk(postedPayload("n1"), "a");
+      store().addNonBlockingAsk(postedPayload("n1"), "a");
+      expect(rt().messages[0].nonBlockingAsks).toHaveLength(1);
+    });
+
+    it("is a no-op when there is no assistant message yet", () => {
+      store().switchConversation("a");
+      store().addNonBlockingAsk(postedPayload("n1"), "a");
+      expect(rt().messages).toHaveLength(0);
     });
   });
 });

@@ -116,6 +116,29 @@ async def test_list_parses_dir_entries():
     ]
 
 
+async def test_index_files_parses_paths_and_truncation():
+    local, registry, sink = _make()
+    response = {"ok": True, "value": {"paths": ["a.txt", "sub/b.md"], "truncated": True}}
+    (paths, truncated), event = await _round_trip(
+        local.index_files(order="recent"), sink, registry, response
+    )
+    assert event.payload["op"] == WorkspaceOp.INDEX_FILES
+    assert event.payload["args"]["order"] == "recent"  # sort preference reaches desktop
+    assert paths == ["a.txt", "sub/b.md"]
+    assert truncated is True
+    # Indexing is read-only — it must not schedule an end-of-turn snapshot.
+    assert local.dirty is False
+
+
+async def test_index_files_tolerates_empty_envelope():
+    local, registry, sink = _make()
+    # A not-yet-promoted / empty workspace answers with a bare ok — degrade to ([], False).
+    (paths, truncated), _ = await _round_trip(
+        local.index_files(), sink, registry, {"ok": True}
+    )
+    assert paths == [] and truncated is False
+
+
 async def test_grep_parses_result():
     local, registry, sink = _make()
     response = {

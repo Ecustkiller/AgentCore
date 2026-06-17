@@ -11,10 +11,11 @@ import { EmptyHint, IconButton } from "@/components/files/parts";
 /**
  * Workspace mode of the conversation side panel — the file-in/out + persistence
  * surface for a conversation's project space (双模式工作区). Files are the panel's
- * always-on body; the two low-frequency surfaces are demoted to on-demand entries
- * off a single header row: 快照 opens a slide-over (backup / kept versions /
- * restore), 交接 opens a wide modal (PR three-way review needs more width than the
- * ≤560px panel). The shell (SidePanel) owns the frame / resize / close.
+ * always-on body; this view only injects three workspace-level affordances into the
+ * files toolbar's single header row (FileBrowser owns that row): 云端/本地选择器
+ * (leading), plus two on-demand entries (trailing) — 快照 opens a slide-over (backup
+ * / kept versions / restore), 交接 opens a wide modal (PR three-way review needs more
+ * width than the ≤560px panel). The shell (SidePanel) owns the frame / resize / close.
  *
  * A draft conversation (no id yet) has no server workspace, so it shows an empty
  * hint until the first turn persists it.
@@ -37,19 +38,23 @@ export function WorkspaceMode() {
 
   return (
     <div className="relative flex h-full flex-col">
-      <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5">
-        <WorkspaceModeBar conversationId={conversationId} />
-        <div className="min-w-0 flex-1" />
-        <IconButton title="快照" onClick={() => setSnapshotsOpen(true)}>
-          <History size={14} />
-        </IconButton>
-        <IconButton title="交接" onClick={() => setHandoffOpen(true)}>
-          <GitPullRequest size={14} />
-        </IconButton>
-      </div>
-
+      {/* 单行面板头：云端选择器（leading）+ 文件操作 + 快照/交接（trailing）合到 FilesSection
+          的工具栏一行（文件操作经其内部 FileTree 的 ref 驱动），不再单独占一行。 */}
       <div className="min-h-0 flex-1">
-        <FilesSection conversationId={conversationId} />
+        <FilesSection
+          conversationId={conversationId}
+          leading={<WorkspaceModeBar conversationId={conversationId} />}
+          trailing={
+            <>
+              <IconButton title="快照" onClick={() => setSnapshotsOpen(true)}>
+                <History size={14} />
+              </IconButton>
+              <IconButton title="交接" onClick={() => setHandoffOpen(true)}>
+                <GitPullRequest size={14} />
+              </IconButton>
+            </>
+          }
+        />
       </div>
 
       {/* 快照：从常驻 tab 降级为按需 slide-over（低频 / 恢复型操作）。 */}

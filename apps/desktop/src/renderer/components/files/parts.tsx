@@ -11,11 +11,13 @@ export function IconButton({
   title,
   onClick,
   spinning,
+  disabled,
   children,
 }: {
   title: string;
   onClick: () => void;
   spinning?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -23,7 +25,7 @@ export function IconButton({
       <button
         type="button"
         onClick={onClick}
-        disabled={spinning}
+        disabled={spinning || disabled}
         className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
       >
         {spinning ? <Loader2 size={14} className="animate-spin" /> : children}
