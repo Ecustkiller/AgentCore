@@ -1,7 +1,8 @@
 """Built-in tool implementations."""
 
-from agentcore.core.types import ToolApproval
+from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.builtin.code_execute import CodeExecuteTool
+from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.file_ops import (
     FileDeleteTool,
     FileListTool,
@@ -38,6 +39,23 @@ def build_builtin_registry() -> ToolRegistry:
     return registry
 
 
+def build_worker_registry() -> ToolRegistry:
+    """The delegated worker's toolset: the platform built-ins PLUS the worker-only
+    ``escalate`` upward channel.
+
+    Kept separate from ``build_builtin_registry`` so ``escalate`` reaches workers
+    WITHOUT leaking into the CEO's own toolset (``build_ceo_tool_registry`` derives the
+    CEO subset from the builtins) or the read-only ``GET /tools`` capability catalog —
+    mirroring how ``delegate`` / ``ask_user`` are wired in only where they belong. A
+    worker that re-delegates passes this registry on, so its sub-workers inherit
+    ``escalate`` too (a sub-worker escalates to its captain worker, which can re-escalate
+    to the CEO).
+    """
+    registry = build_builtin_registry()
+    registry.register(EscalateTool())
+    return registry
+
+
 def build_ceo_tool_registry() -> ToolRegistry:
     """The CEO chat agent's DIRECT toolset: read / retrieval only (协调者 CEO).
 
@@ -62,3 +80,22 @@ def build_ceo_tool_registry() -> ToolRegistry:
         if schema.approval is ToolApproval.NEVER:
             registry.register(full.get(schema.name))
     return registry
+
+
+def file_mutation_tool_names() -> frozenset[str]:
+    """The GRANTABLE file-mutation tools as one class (file_write / str_replace /
+    file_delete / file_move) — what a「本轮内允许所有文件改动」grant covers.
+
+    Derived from the single builtin registry as ``GRANTABLE ∩ FILESYSTEM`` so a new
+    file-edit tool joins the class automatically, while ``code_execute`` (EXECUTION,
+    a higher-risk side effect) stays out and keeps its own per-tool gate — the
+    same single-source posture as ``build_ceo_tool_registry`` (安全权限与治理 §三
+    边界2: 信任「这类操作」而非「随便干」).
+    """
+    full = build_builtin_registry()
+    return frozenset(
+        schema.name
+        for schema in full.list_all()
+        if schema.approval is ToolApproval.GRANTABLE
+        and schema.category is ToolCategory.FILESYSTEM
+    )

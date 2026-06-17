@@ -14,7 +14,7 @@ from sqlalchemy import update
 
 from agentcore.config import settings
 from agentcore.db.models import PausedTurnRow
-from agentcore.db.repositories import PausedTurnRepository
+from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepository
 from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime import suspension_persistence as persist_mod
 from agentcore.runtime import suspension_retention as retention_mod
@@ -156,12 +156,20 @@ async def test_save_claim_bridge_round_trips(session_factory, monkeypatch):
     pending = await persist_mod.list_paused_turns(cid)
     assert [f.message_id for f in pending] == [mid]
 
+    # The frame carries no journal — it was mirrored into turn_journal at save.
+    async with session_factory() as s:
+        entries = await TurnJournalRepository(s).load(mid)
+    assert [e["kind"] for e in entries] == ["run_plan"]
+
     claimed = await persist_mod.claim_paused_turn(mid, conversation_id=cid)
     assert claimed is not None
     assert claimed.message_id == mid
     assert claimed.user_message == "原始请求"
     assert claimed.transcript[-1].tool_calls[0].id == "call_del"
     assert claimed.completed["del_a_1"].content == "S1OUT"
+    # The journal-so-far is re-hydrated from turn_journal (唯一事实源, not the frame),
+    # so the resume seeds + replays the whole pre-pause graph.
+    assert claimed.journal == [{"type": "run_plan", "payload": {}, "timestamp": "t"}]
 
     # Claimed → no longer pending, and a re-claim misses (atomic once).
     assert await persist_mod.list_paused_turns(cid) == []
@@ -215,3 +223,35 @@ async def test_retention_sweep_noop_when_disabled(session_factory, monkeypatch):
     monkeypatch.setattr(retention_mod, "async_session_factory", session_factory)
     monkeypatch.setattr(settings, "structured_suspension_persist_enabled", False)
     assert await retention_mod.run_paused_turn_retention_sweep() == 0
+
+
+async def test_retention_sweep_clears_orphan_turn_journal(session_factory, monkeypatch):
+    # An abandoned pause's journal-so-far lives in turn_journal (唯一事实源) but never
+    # produced a message to project onto; the sweep that prunes the frame must clear
+    # the otherwise-orphan journal rows too.
+    monkeypatch.setattr(persist_mod, "async_session_factory", session_factory)
+    monkeypatch.setattr(retention_mod, "async_session_factory", session_factory)
+    monkeypatch.setattr(settings, "structured_suspension_persist_enabled", True)
+    monkeypatch.setattr(settings, "paused_turn_retention_days", 7)
+    mid, cid, uid = str(uuid4()), str(uuid4()), str(uuid4())
+
+    await persist_mod.save_paused_turn(_frame(mid, cid, uid))
+    async with session_factory() as s:
+        assert await TurnJournalRepository(s).load(mid)  # journal landed at pause
+
+    # Age the frame past the window, then sweep.
+    aged = datetime.now(UTC) - timedelta(days=10)
+    async with session_factory() as s:
+        await s.execute(
+            update(PausedTurnRow)
+            .where(PausedTurnRow.message_id == mid)
+            .values(updated_at=aged)
+        )
+        await s.commit()
+    deleted = await retention_mod.run_paused_turn_retention_sweep()
+
+    assert deleted == 1
+    # Both the frame AND its orphan journal are gone.
+    async with session_factory() as s:
+        assert await PausedTurnRepository(s).list_pending(cid) == []
+        assert await TurnJournalRepository(s).load(mid) == []

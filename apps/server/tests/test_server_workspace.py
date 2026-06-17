@@ -6,6 +6,7 @@ contract are exercised without touching the real repo. The ``execute`` test also
 pins the cwd fix: code runs in the workspace root and can read workspace files.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -372,3 +373,113 @@ async def test_mkdir_escape_raises_outside_workspace(tmp_path: Path):
     with pytest.raises(OutsideWorkspace):
         await _ws(ws_root).mkdir("../escape")
     assert not (tmp_path / "escape").exists()
+
+
+# --- read_for_edit (full text + mtime baseline + eol) ---
+
+
+async def test_read_for_edit_returns_text_mtime_and_eol(tmp_path: Path):
+    # write_bytes (not write_text): on Windows write_text would translate \n→\r\n and
+    # flip the detected eol; we want a genuine LF fixture here.
+    (tmp_path / "a.md").write_bytes("# 标题\n正文".encode("utf-8"))
+    text, mtime_ms, eol = await _ws(tmp_path).read_for_edit("a.md")
+    assert text == "# 标题\n正文"
+    assert eol == "lf"
+    assert mtime_ms > 0
+
+
+async def test_read_for_edit_normalizes_crlf_and_reports_eol(tmp_path: Path):
+    # CRLF is normalized to \n for the editor; eol="crlf" so write restores it.
+    (tmp_path / "win.md").write_bytes(b"a\r\nb\r\n")
+    text, _mtime, eol = await _ws(tmp_path).read_for_edit("win.md")
+    assert text == "a\nb\n"
+    assert eol == "crlf"
+
+
+async def test_read_for_edit_binary_raises_not_utf8(tmp_path: Path):
+    (tmp_path / "bin").write_bytes(b"\xff\xfe\x00\x01")
+    with pytest.raises(NotUTF8):
+        await _ws(tmp_path).read_for_edit("bin")
+
+
+async def test_read_for_edit_missing_raises_path_not_found(tmp_path: Path):
+    with pytest.raises(PathNotFound):
+        await _ws(tmp_path).read_for_edit("nope.md")
+
+
+# --- write_text_cas (mtime conditional write) ---
+
+
+async def test_write_text_cas_new_file_succeeds(tmp_path: Path):
+    ok, mtime_ms = await _ws(tmp_path).write_text_cas(
+        "new.md", "hello", baseline_mtime_ms=0, eol="lf"
+    )
+    assert ok is True
+    assert mtime_ms > 0
+    assert (tmp_path / "new.md").read_text(encoding="utf-8") == "hello"
+
+
+async def test_write_text_cas_new_file_conflict_when_exists(tmp_path: Path):
+    (tmp_path / "x.md").write_text("old", encoding="utf-8")
+    ok, disk_ms = await _ws(tmp_path).write_text_cas(
+        "x.md", "new", baseline_mtime_ms=0, eol="lf"
+    )
+    assert ok is False  # baseline 0 = "new file", but it already exists
+    assert disk_ms > 0
+    assert (tmp_path / "x.md").read_text(encoding="utf-8") == "old"  # not clobbered
+
+
+async def test_write_text_cas_matching_baseline_overwrites(tmp_path: Path):
+    ws = _ws(tmp_path)
+    _text, baseline, _eol = await (
+        _seed_and_read(ws, tmp_path, "doc.md", "v1")
+    )
+    ok, new_ms = await ws.write_text_cas(
+        "doc.md", "v2", baseline_mtime_ms=baseline, eol="lf"
+    )
+    assert ok is True
+    assert new_ms >= baseline
+    assert (tmp_path / "doc.md").read_text(encoding="utf-8") == "v2"
+
+
+async def test_write_text_cas_stale_baseline_conflicts(tmp_path: Path):
+    # Disk changed since the editor read it → conflict carrying the current mtime,
+    # and the file is left untouched (never blind-clobbered).
+    ok, disk_ms = await _ws(tmp_path).write_text_cas(
+        "doc.md", "mine", baseline_mtime_ms=123, eol="lf"
+    )
+    # baseline 123 but file doesn't exist → conflict (deleted/never-there under us)
+    assert ok is False
+    assert disk_ms == 0
+
+
+async def test_write_text_cas_detects_external_change(tmp_path: Path):
+    ws = _ws(tmp_path)
+    _t, baseline, _e = await _seed_and_read(ws, tmp_path, "doc.md", "v1")
+    # Simulate an Agent writing the file after the editor's baseline read: bump the
+    # mtime forward so the CAS sees a changed disk and refuses to clobber.
+    later = (baseline + 5000) / 1000
+    (tmp_path / "doc.md").write_text("agent-edit", encoding="utf-8")
+    os.utime(tmp_path / "doc.md", (later, later))
+    ok, disk_ms = await ws.write_text_cas(
+        "doc.md", "user-edit", baseline_mtime_ms=baseline, eol="lf"
+    )
+    assert ok is False
+    assert disk_ms != baseline
+    assert (tmp_path / "doc.md").read_text(encoding="utf-8") == "agent-edit"
+
+
+async def test_write_text_cas_restores_crlf(tmp_path: Path):
+    ok, _ms = await _ws(tmp_path).write_text_cas(
+        "win.md", "a\nb", baseline_mtime_ms=0, eol="crlf"
+    )
+    assert ok is True
+    assert (tmp_path / "win.md").read_bytes() == b"a\r\nb"
+
+
+async def _seed_and_read(
+    ws: ServerWorkspace, root: Path, name: str, content: str
+) -> tuple[str, int, str]:
+    """Write a file directly then read its edit baseline (text, mtime_ms, eol)."""
+    (root / name).write_text(content, encoding="utf-8")
+    return await ws.read_for_edit(name)

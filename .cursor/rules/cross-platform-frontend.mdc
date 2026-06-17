@@ -1,0 +1,47 @@
+---
+description: 前端跨端架构规范——做桌面/手机前端、抽 client-core、或决定组件复用/新建时参考：core/壳边界、能力端口、组件四类处置、为 AI 开发的防漂移规则
+globs:
+  - "apps/desktop/src/renderer/**"
+  - "apps/mobile/**"
+  - "packages/client-core/**"
+alwaysApply: false
+---
+
+# 前端跨端架构（core/壳 + 能力端口）
+
+桌面 + 手机是**同一产品**：手机端 = 桌面端 − 手机物理做不到的能力层。实现 = **共享逻辑核 + 各端平台壳**。设计蓝图与理由见 [`手机端落地设计`](/docs/07-规划/手机端落地设计.md)。
+
+> **过渡期**：`packages/client-core` / `apps/mobile` ⏳ 未落地。落地前，写**新前端逻辑**时按本规则组织（不与 Electron/IPC 硬耦合、不在组件里散平台分支），**为抽取留缝**。
+
+## 目标结构
+
+```
+packages/client-core/   逻辑核：stores / services / lib / types / data(FileSource+REST)
+                        ports/ 能力端口(抽象)  hooks/ headless 行为 hook
+apps/desktop/           Electron 壳：注入 IPC 端口 + 侧栏/SidePanel + 桌面 chrome
+apps/mobile/            Capacitor 壳：注入降级/空端口 + 底栏/栈式导航 + 触控 chrome
+```
+
+## 四条硬规则（防 AI 并行开发的失败模式）
+
+1. **零逻辑重复**——同一行为只在 core 一处实现（headless hook / store / service）。**绝不**把逻辑复制进壳。多 Agent 并行 + 有界上下文下，复制 = 漂移 = 静默 bug。
+2. **行为往可测核推**——能写单测的逻辑进 core；壳只留难验的 chrome。最大化测试覆盖的「可测核」，最小化「难验 chrome」。
+3. **能力差异靠端口注入，不靠分支**——禁止在共享代码里散 `if(platform)` / `if(window.fsApi)`；让壳显式 `inject(LocalFsPort)`，手机不注入即没有该能力。文件内**零平台分支**。
+4. **可预测放置 + 命名对齐**——core `useXxx` ⇄ 各壳 `Xxx`（同词根，grep 一次命中）；desktop/mobile 壳是 disjoint 文件树，唯一共享面是 `client-core`。
+
+## 组件四类处置
+
+| 类型 | 处置 |
+|---|---|
+| 纯逻辑/数据/状态 | **进 core**（headless hook / store / service） |
+| 尺寸/输入无关的叶子展示件（Markdown/Diagram/徽章/`ui/` 原语） | **复用**（传 size/density props） |
+| 布局·导航·交互容器（AppShell/Sidebar/SidePanel/PageContainer） | **各端新建** |
+| 中间态（协作图/ConversationItem/MessageInput/审批卡） | **headless 拆分**：共享 hook + 各端 chrome |
+
+## 决策启发式（拿不准复用/拆分/新建时）
+
+> **选「不复制逻辑」且「让尽量多行为落进可测核」的那个选项，哪怕多写一遍 chrome。**
+
+## 别过度拆（硬约束）
+
+headless 拆分是 indirection = AI 多跳追踪。**只有「行为重 + 两端都要 + chrome 真不同」三条全中才 headless 拆**；差一条就整件进 core、或整件各写。

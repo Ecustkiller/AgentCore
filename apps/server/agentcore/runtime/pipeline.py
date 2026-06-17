@@ -20,8 +20,9 @@ from agentcore.llm.protocol import LLMMessage, TokenUsage
 from agentcore.memory import default_memory_store
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
-from agentcore.runtime.citations import merge_citations
+from agentcore.runtime.citations import merge_citations, out_of_range_markers
 from agentcore.runtime.costing import aggregate_cost, captain_run_cost_from_state
+from agentcore.runtime.engine import join_segments
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
@@ -35,11 +36,8 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.prompt import (
-    CHAT_CHECKPOINT_AFTER_HINT,
-    CHAT_CHECKPOINT_HINT,
+    _CEO_CORE_HINT,
     CHAT_CITATION_HINT,
-    CHAT_REVISE_HINT,
-    CHAT_TEAM_CAPABILITY_HINT,
     assemble_system_prompt,
 )
 from agentcore.runtime.runs import (
@@ -54,6 +52,11 @@ from agentcore.runtime.sessions import (
     SessionSaver,
     default_session_registry,
 )
+from agentcore.runtime.skills import (
+    SkillRegistry,
+    build_system_skill_registry,
+    render_skill_directory,
+)
 from agentcore.runtime.suspension import (
     AskUserSuspension,
     PlanReviewSuspension,
@@ -62,8 +65,13 @@ from agentcore.runtime.suspension import (
     TurnSuspension,
     captain_transcript,
 )
-from agentcore.tools.builtin import build_builtin_registry, build_ceo_tool_registry
+from agentcore.tools.builtin import (
+    build_ceo_tool_registry,
+    build_worker_registry,
+    file_mutation_tool_names,
+)
 from agentcore.tools.builtin.ask_user import AskUserTool, ask_user_tool_result
+from agentcore.tools.builtin.consult_skill import ConsultSkillTool
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.revise import ReviseTool
 from agentcore.tools.protocol import ToolContext
@@ -94,14 +102,17 @@ def _assemble_ceo_toolset(
     suspension_saver: SuspensionSaver | None,
     suspension_deleter: SuspensionDeleter | None,
     backend_location: str,
+    skill_registry: SkillRegistry,
 ) -> tuple[DelegateTool, ReviseTool, ToolRegistry]:
-    """Wire the CEO coordinator's toolset (delegate + revise + read/retrieval + an
-    optional ask_user), shared by a fresh turn and a 2b resume.
+    """Wire the CEO coordinator's toolset (delegate + revise + read/retrieval +
+    consult_skill + an optional ask_user), shared by a fresh turn and a 2b resume.
 
     The CEO is a COORDINATOR: it holds only the read/retrieval built-ins plus the
     orchestration primitives, never the mutation tools (those live with workers via
     ``delegate``). ``base_system_prompt`` is the CLEAN prompt handed to delegate /
-    revise (reused verbatim by workers — no CEO-chat hints). ``message_id`` + the
+    revise (reused verbatim by workers — no CEO-chat hints). ``skill_registry`` backs
+    the CEO-only ``consult_skill`` tool (提示词瘦身 P2): the advanced-mechanism guidance
+    is pulled on demand instead of riding the prompt every turn. ``message_id`` + the
     suspension closures arm durable plan_review pauses (结构化挂起 2b) on the
     top-level delegate. Returns ``(delegate_tool, revise_tool, chat_tools)`` — the
     tools whose accumulated usage/ledger/citations the caller folds into the turn
@@ -144,6 +155,10 @@ def _assemble_ceo_toolset(
         session_loader=session_loader,
     )
     chat_tools.register(revise_tool)
+    # consult_skill (提示词瘦身 P2): always wired (not live-user gated) so the CEO can
+    # pull any advanced-mechanism guidance on demand; the always-on 能力目录 in the
+    # prompt lists the skills whose required tools are actually wired this turn.
+    chat_tools.register(ConsultSkillTool(registry=skill_registry))
     if checkpoint_enabled:
         # 结构化挂起 2b: arm the ask_user pause with the SAME durable closures as the
         # delegate plan_review — message_id keys the frame, the turn-level constants
@@ -300,11 +315,27 @@ async def run_chat_pipeline(
     try:
         # --- Phase 1: Prepare ---
         memory_markdown = await default_memory_store().load(user_id)
-        system_prompt = assemble_system_prompt(
-            memory_markdown=memory_markdown,
-            extra_context=_build_attachment_context(attachments),
+        # Clean, stable base (base + date + memory): NO attachments, NO CEO hints.
+        # This is the cacheable prefix shared by the CEO and reused verbatim by
+        # workers. The (per-turn, variable) attachment block is appended LAST below —
+        # after the stable CEO hint stack — so a turn carrying attached files does not
+        # bust DeepSeek's prefix cache for the hints (缓存友好: 易变内容置于稳定前缀之后).
+        system_prompt = assemble_system_prompt(memory_markdown=memory_markdown)
+        attachment_context = _build_attachment_context(attachments)
+        # Workers hold no CEO hints, so their base is the clean base + the same
+        # attachment block appended at the end — byte-identical to the old single-call
+        # assembly (assemble joins with "\n"), so the delegated team still sees the
+        # user's files while the worker's own stable prefix (base) stays cacheable.
+        worker_base_prompt = (
+            f"{system_prompt}\n{attachment_context}"
+            if attachment_context
+            else system_prompt
         )
-        worker_tools = build_builtin_registry()
+        worker_tools = build_worker_registry()
+        # System skills (提示词瘦身 P2): the advanced-mechanism guidance the CEO pulls
+        # on demand via consult_skill. Built once per turn; backs the tool AND the
+        # always-on 能力目录 rendered into the CEO prompt below.
+        skill_registry = build_system_skill_registry()
         llm = build_provider(llm_credentials)
 
         # The workspace backend is resolved per conversation by the caller
@@ -316,6 +347,7 @@ async def run_chat_pipeline(
             agent_id="default",
             backend=backend,
             user_id=user_id,
+            conversation_id=conversation_id,
         )
 
         # --- Phase 2: Assemble the CEO chat agent's toolset (coordinator) ---
@@ -347,6 +379,7 @@ async def run_chat_pipeline(
                 conversation_id=conversation_id,
                 registry=default_interaction_registry(),
                 timeout_seconds=settings.approval_timeout_seconds,
+                file_op_tools=file_mutation_tool_names(),
             )
             if (settings.approval_gate_enabled and approvals_enabled)
             else None
@@ -364,14 +397,15 @@ async def run_chat_pipeline(
         # before the delegate tool — because delegate consumes it too (it suspends
         # the WaveScheduler at a wave boundary when a step is marked checkpoint_after).
         checkpoint_enabled = settings.checkpoint_gate_enabled and approvals_enabled
-        # The delegate tool gets the CLEAN base prompt — it is reused verbatim by
-        # the workers (runs/executor.py), which must not be told about a delegate
-        # tool they do not hold. message_id + the suspension closures arm durable
-        # plan_review pauses (结构化挂起 2b) on the top-level delegate.
+        # The delegate tool gets the worker base prompt — the CLEAN base (no CEO chat
+        # hints, reused verbatim by workers in runs/executor.py — they must not be told
+        # about a delegate tool they do not hold) plus this turn's attachment block.
+        # message_id + the suspension closures arm durable plan_review pauses (结构化
+        # 挂起 2b) on the top-level delegate.
         delegate_tool, revise_tool, chat_tools = _assemble_ceo_toolset(
             llm=llm,
             sink=sink,
-            base_system_prompt=system_prompt,
+            base_system_prompt=worker_base_prompt,
             user_message=user_message,
             history=history,
             worker_tools=worker_tools,
@@ -388,21 +422,27 @@ async def run_chat_pipeline(
             suspension_saver=suspension_saver,
             suspension_deleter=suspension_deleter,
             backend_location=backend.location,
+            skill_registry=skill_registry,
         )
 
-        # The entry chat agent additionally learns it may escalate to a team and
-        # how to cite web sources inline (single-agent path only — see prompt.py).
-        # The checkpoint hint is appended only when ask_user is actually wired, so
-        # the prompt never advertises a tool the CEO does not hold.
-        chat_system_prompt = (
-            f"{system_prompt}\n{CHAT_TEAM_CAPABILITY_HINT}\n{CHAT_REVISE_HINT}"
-            f"\n{CHAT_CITATION_HINT}"
-        )
-        if checkpoint_enabled:
-            chat_system_prompt = (
-                f"{chat_system_prompt}\n{CHAT_CHECKPOINT_HINT}"
-                f"\n{CHAT_CHECKPOINT_AFTER_HINT}"
-            )
+        # The entry chat agent gets the SLIM CEO core + the always-on 能力目录 (提示词
+        # 瘦身 P2) + inline citation guidance. The directory lists only the skills whose
+        # required tools are actually wired this turn (derived from the assembled CEO
+        # toolset), so it never advertises a capability the CEO does not hold (e.g.
+        # asking_the_user appears only on the live-user path, when ask_user is wired)
+        # — the same invariant the old per-hint gating enforced. The advanced「怎么做」
+        # detail no longer rides every turn; the CEO pulls it via consult_skill.
+        ceo_tool_names = {schema.name for schema in chat_tools.list_all()}
+        skill_directory = render_skill_directory(skill_registry, ceo_tool_names)
+        chat_system_prompt = f"{system_prompt}\n{_CEO_CORE_HINT}"
+        if skill_directory:
+            chat_system_prompt = f"{chat_system_prompt}\n{skill_directory}"
+        chat_system_prompt = f"{chat_system_prompt}\n{CHAT_CITATION_HINT}"
+        # Attachments LAST — after the whole stable hint stack — so the CEO prefix
+        # (base + hints) stays byte-identical across turns and rides the prefix cache
+        # even on a turn that carries (variable) attached files.
+        if attachment_context:
+            chat_system_prompt = f"{chat_system_prompt}\n{attachment_context}"
 
         # --- Phase 3: Execute ---
         sink.emit(message_start(message_id, conversation_id=conversation_id))
@@ -447,11 +487,22 @@ async def run_chat_pipeline(
             err = captain_state.error or "captain run failed"
             sink.emit(error_event("PIPELINE_ERROR", err))
             sink.emit(message_end(FinishReason.ERROR))
+            # A captain that died mid-loop still burned tokens (B-deep 失败计费): the
+            # executor priced them onto captain_state, so carry the captain ledger row
+            # back even on error — _persist_turn_result writes cost_runs independently
+            # of whether any assistant text landed. Skip when nothing metered (no
+            # usage → no row), so a pre-LLM crash stays free.
+            cost_runs = (
+                [asdict(captain_run_cost_from_state(captain_run_id, captain_state))]
+                if captain_state.usage
+                else []
+            )
             return {
                 "message_id": message_id,
                 "content": "",
                 "error": err,
                 "finish_reason": FinishReason.ERROR,
+                "cost_runs": cost_runs,
             }
 
         final_content = captain_state.content
@@ -500,6 +551,18 @@ async def run_chat_pipeline(
         # usage/cost are folded back off the delegate tool instance above.
         merge_citations(citations, delegate_tool.citations)
         merge_citations(citations, revise_tool.citations)
+
+        # 引用越界观测：模型偶尔写出指向「不存在来源卡」的 [n]（数错或想指上一轮的号）。
+        # 客户端会把这类越界角标降级成纯文本，所以正文不动——只记一条 warning，让这种
+        # 误引率可被度量（logs/dev.jsonl，conversation_id 由 contextvars 自动带上）。
+        stray_markers = out_of_range_markers(final_content, len(citations))
+        if stray_markers:
+            logger.warning(
+                "citations.out_of_range",
+                message_id=message_id,
+                markers=stray_markers,
+                citation_count=len(citations),
+            )
 
         # Emit before message_end so the client attaches source cards to the
         # assistant message while it is still the live streaming bubble.
@@ -627,8 +690,10 @@ async def _settle_resumed_suspension(
     """
     if isinstance(suspension, AskUserSuspension):
         response = CheckpointResponse(decision=decision, note=note, selected=list(selected))
-        # Drop any pick that was not on the offered menu (same guard as the live tool).
-        response.selected = [s for s in response.selected if s in suspension.options]
+        # Drop any pick that was not on some question's menu (same guard as the live
+        # tool; the desktop composes its answer into ``note`` and sends no picks).
+        allowed = {o for q in suspension.questions for o in q.get("options", [])}
+        response.selected = [s for s in response.selected if s in allowed]
         sink.emit(
             checkpoint_resolved(
                 checkpoint_id=suspension.checkpoint_id,
@@ -696,13 +761,18 @@ async def resume_chat_pipeline(
     captain_run_id = suspension.captain_run_id or new_id()
     llm = build_provider(llm_credentials)
     try:
-        worker_tools = build_builtin_registry()
+        worker_tools = build_worker_registry()
+        # Same system-skill registry as a fresh turn so the resumed CEO loop can
+        # still consult_skill (提示词瘦身 P2). The CEO prompt itself is replayed from
+        # the stored transcript (already slim + 能力目录), so no directory re-render.
+        skill_registry = build_system_skill_registry()
         base_tool_context = ToolContext(
             execution_id=new_id(),
             run_id=new_id(),
             agent_id="default",
             backend=backend,
             user_id=suspension.user_id,
+            conversation_id=conversation_id,
         )
         approval_gate = (
             ApprovalGate(
@@ -710,6 +780,7 @@ async def resume_chat_pipeline(
                 conversation_id=conversation_id,
                 registry=default_interaction_registry(),
                 timeout_seconds=settings.approval_timeout_seconds,
+                file_op_tools=file_mutation_tool_names(),
             )
             if settings.approval_gate_enabled
             else None
@@ -736,11 +807,13 @@ async def resume_chat_pipeline(
             suspension_saver=suspension_saver,
             suspension_deleter=suspension_deleter,
             backend_location=backend.location,
+            skill_registry=skill_registry,
         )
 
         sink.emit(message_start(message_id, conversation_id=conversation_id))
-        # Continue the pre-pause exchange: seed the journal so the persisted
-        # messages.runs replays the whole graph + checkpoint, then settle the pause.
+        # Continue the pre-pause exchange: seed the journal so the persisted turn
+        # journal (projected as the message's runs) replays the whole graph +
+        # checkpoint, then settle the pause.
         sink.seed_journal(suspension.journal)
 
         # Publish the pre-pause CEO transcript so a re-pause DURING the settle (a
@@ -763,6 +836,10 @@ async def resume_chat_pipeline(
         # Rebuild the CEO transcript: the stored messages (ending at the assistant
         # suspended call) + that call's settled tool result.
         messages = list(suspension.transcript)
+        # Carry the CEO's pre-pause reply forward: the resumed loop below starts from a
+        # blank content, so without this the persisted content (and the next turn's LLM
+        # history) would lose everything written before the pause — parity with live.
+        pre_pause_content = _pre_pause_content(suspension.transcript)
         _append_resumed_tool_results(messages, suspension.tool_call_id, settled.output)
 
         # ask_user stop: the closing note IS the reply (terminal effect) — finish
@@ -771,7 +848,10 @@ async def resume_chat_pipeline(
             if settled.terminal_text:
                 sink.emit(content_delta(settled.terminal_text))
             return _finish_terminal_resume(
-                message_id=message_id, closing=settled.terminal_text, sink=sink
+                message_id=message_id,
+                pre_pause_content=pre_pause_content,
+                closing=settled.terminal_text,
+                sink=sink,
             )
 
         # Otherwise run the CEO loop to its reply (it may delegate / ask again).
@@ -802,17 +882,27 @@ async def resume_chat_pipeline(
             err = captain_state.error or "captain resume failed"
             sink.emit(error_event("PIPELINE_ERROR", err))
             sink.emit(message_end(FinishReason.ERROR))
+            # Bill the resumed captain's partial spend on a hard failure (B-deep 失败
+            # 计费), same as the fresh-turn path: priced onto captain_state, persisted
+            # by _persist_turn_result even without an assistant reply. No usage → no row.
+            cost_runs = (
+                [asdict(captain_run_cost_from_state(captain_run_id, captain_state))]
+                if captain_state.usage
+                else []
+            )
             return {
                 "message_id": message_id,
                 "content": "",
                 "error": err,
                 "finish_reason": FinishReason.ERROR,
+                "cost_runs": cost_runs,
             }
 
         return _finish_resume_turn(
             message_id=message_id,
             captain_run_id=captain_run_id,
             captain_state=captain_state,
+            pre_pause_content=pre_pause_content,
             delegate_tool=delegate_tool,
             revise_tool=revise_tool,
             profile=profile,
@@ -836,11 +926,36 @@ async def resume_chat_pipeline(
             await llm.close()
 
 
+def _pre_pause_content(transcript: list[LLMMessage]) -> str:
+    """The CEO's pre-pause reply text for a resumed turn (结构化挂起 2b parity).
+
+    The durable frame's ``transcript`` ends with THIS turn's assistant rounds (the last
+    carries the suspended tool_call). A fresh-process resume re-runs the CEO loop from a
+    blank ``final_content``, so without this the persisted ``content`` would keep ONLY
+    the post-resume text — losing whatever the CEO wrote before it paused (e.g. a
+    mid-task overview) and silently shrinking the next turn's LLM history. Rebuild it the
+    way the live loop would: join this turn's assistant contents (everything after the
+    last user message) as paragraphs. Prior turns (history before that user message) are
+    their own messages and are excluded.
+    """
+    start = 0
+    for i in range(len(transcript) - 1, -1, -1):
+        if transcript[i].role == "user":
+            start = i + 1
+            break
+    acc = ""
+    for msg in transcript[start:]:
+        if msg.role == "assistant" and msg.content:
+            acc = join_segments(acc, msg.content)
+    return acc
+
+
 def _finish_resume_turn(
     *,
     message_id: str,
     captain_run_id: str,
     captain_state,
+    pre_pause_content: str,
     delegate_tool: DelegateTool,
     revise_tool: ReviseTool,
     profile,
@@ -854,7 +969,7 @@ def _finish_resume_turn(
     :func:`run_chat_pipeline`'s tail (usage roll-up, per-run ledger, citations,
     message_end), returning the same result shape for the service to persist.
     """
-    final_content = captain_state.content
+    final_content = join_segments(pre_pause_content, captain_state.content)
     final_reasoning = captain_state.reasoning
     rounds = captain_state.rounds
     turn_usage = (
@@ -874,6 +989,14 @@ def _finish_resume_turn(
     turn_cost = aggregate_cost(cost_runs)
     merge_citations(citations, delegate_tool.citations)
     merge_citations(citations, revise_tool.citations)
+    stray_markers = out_of_range_markers(final_content, len(citations))
+    if stray_markers:
+        logger.warning(
+            "citations.out_of_range",
+            message_id=message_id,
+            markers=stray_markers,
+            citation_count=len(citations),
+        )
     if citations:
         sink.emit(citations_event(citations))
     sink.emit(
@@ -904,7 +1027,9 @@ def _finish_resume_turn(
     }
 
 
-def _finish_terminal_resume(*, message_id: str, closing: str, sink: EventSink) -> dict:
+def _finish_terminal_resume(
+    *, message_id: str, pre_pause_content: str, closing: str, sink: EventSink
+) -> dict:
     """Close a resumed ask_user turn that the user STOPPED (结构化挂起 2b terminal).
 
     No CEO round ran — the closing note is the whole reply (the engine's
@@ -919,7 +1044,7 @@ def _finish_terminal_resume(*, message_id: str, closing: str, sink: EventSink) -
     runs = _build_runs_payload(sink, finish)
     return {
         "message_id": message_id,
-        "content": closing,
+        "content": join_segments(pre_pause_content, closing),
         "reasoning_content": None,
         "input_tokens": 0,
         "output_tokens": 0,

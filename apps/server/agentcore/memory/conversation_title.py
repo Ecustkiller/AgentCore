@@ -24,6 +24,7 @@ from typing import Protocol, TypedDict
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.config import build_request, get_profile
+from agentcore.llm.protocol import TokenUsage
 
 logger = get_logger(__name__)
 
@@ -130,6 +131,11 @@ class LLMTitleGenerator:
     def __init__(self, provider: LLMProvider, *, role: str = "title") -> None:
         self._provider = provider
         self._profile = get_profile(role)
+        # The most recent call's spend, surfaced for the cost ledger (Gap C). Stays
+        # zero until a call actually completes (empty-messages short-circuit /
+        # timeout / error never bill), so the caller bills iff total_tokens > 0.
+        self.last_usage: TokenUsage = TokenUsage()
+        self.last_model: str = ""
 
     async def generate(self, data: TitleInput) -> str:
         if not data.messages:
@@ -149,4 +155,6 @@ class LLMTitleGenerator:
         except TimeoutError:
             logger.warning("title.timeout", conversation_id=data.conversation_id)
             return ""
+        self.last_usage = response.usage
+        self.last_model = response.model or self._profile.model
         return _sanitize_title(response.content)

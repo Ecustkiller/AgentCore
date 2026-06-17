@@ -31,7 +31,14 @@ import {
   Upload,
 } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { Centered, EmptyHint, IconButton, InlineError } from "./parts";
 import { useFileTreeData } from "./useFileTreeData";
 
@@ -76,216 +83,379 @@ function saveExpanded(id: string, set: Set<string>): void {
  * context menu + drag-to-move (within the source), with per-source persisted
  * fold state. The container owns where a clicked file opens (via `onOpenFile`).
  */
-export function FileTree({
-  source,
-  onOpenFile,
-  activePath = null,
-  headerExtra,
-}: {
+export interface FileTreeHandle {
+  /** 由外层（如多根工作区的根节点右键菜单）触发的「在源根处内联新建」。 */
+  startCreate: (kind: "file" | "dir") => void;
+  /** 刷新根 + 所有已展开目录。 */
+  refresh: () => void;
+  /** 打开 OS 文件选择器，上传到源根（仅可传输的源）。 */
+  triggerUpload: () => void;
+}
+
+interface FileTreeProps {
   source: FileSource;
   onOpenFile: (path: string, name: string) => void;
   activePath?: string | null;
   headerExtra?: React.ReactNode;
-}) {
-  const data = useFileTreeData(source);
-  const [expanded, setExpanded] = useState<Set<string>>(() =>
-    loadExpanded(source.id),
-  );
-  const [creating, setCreating] = useState<{
-    dir: string;
-    kind: "file" | "dir";
-  } | null>(null);
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const uploadRef = useRef<HTMLInputElement>(null);
+  /** 隐藏自带工具栏 + 自身高度/滚动（嵌入式多根堆叠用，由外层统一滚动）。 */
+  chrome?: boolean;
+  /** 每行额外左内边距，用于把整棵树嵌套在某个标题（工作区根）之下。 */
+  indent?: number;
+}
 
-  useEffect(() => {
-    setExpanded(loadExpanded(source.id));
-  }, [source.id]);
-
-  // Live updates: watch the root + every expanded dir (local FS only).
-  useEffect(() => {
-    const watch = source.watch;
-    if (!watch || !source.caps.watch) return;
-    const offs = ["", ...expanded].map((dir) =>
-      watch(dir, () => data.reload(dir)),
-    );
-    return () => {
-      for (const off of offs) off();
-    };
-  }, [source, expanded, data]);
-
-  const toggle = useCallback(
-    (dir: string) => {
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        if (next.has(dir)) next.delete(dir);
-        else {
-          next.add(dir);
-          data.ensureDir(dir);
-        }
-        saveExpanded(source.id, next);
-        return next;
-      });
+export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
+  function FileTree(
+    {
+      source,
+      onOpenFile,
+      activePath = null,
+      headerExtra,
+      chrome = true,
+      indent = 0,
     },
-    [data, source.id],
-  );
+    ref,
+  ) {
+    const data = useFileTreeData(source);
+    const [expanded, setExpanded] = useState<Set<string>>(() =>
+      loadExpanded(source.id),
+    );
+    const [creating, setCreating] = useState<{
+      dir: string;
+      kind: "file" | "dir";
+    } | null>(null);
+    const [renaming, setRenaming] = useState<string | null>(null);
+    const [dropTarget, setDropTarget] = useState<string | null>(null);
+    const [uploading, setUploading] = useState(false);
+    const [dragOver, setDragOver] = useState(false);
+    const uploadRef = useRef<HTMLInputElement>(null);
 
-  const collapseAll = useCallback(() => {
-    saveExpanded(source.id, new Set());
-    setExpanded(new Set());
-  }, [source.id]);
+    useEffect(() => {
+      setExpanded(loadExpanded(source.id));
+    }, [source.id]);
 
-  const refresh = useCallback(() => {
-    data.reload("");
-    for (const dir of expanded) data.reload(dir);
-  }, [data, expanded]);
+    // Live updates: watch the root + every expanded dir (local FS only).
+    useEffect(() => {
+      const watch = source.watch;
+      if (!watch || !source.caps.watch) return;
+      const offs = ["", ...expanded].map((dir) =>
+        watch(dir, () => data.reload(dir)),
+      );
+      return () => {
+        for (const off of offs) off();
+      };
+    }, [source, expanded, data]);
 
-  const openCreate = useCallback(
-    (dir: string, kind: "file" | "dir") => {
-      if (dir !== "") {
+    const toggle = useCallback(
+      (dir: string) => {
         setExpanded((prev) => {
-          if (prev.has(dir)) return prev;
-          const next = new Set(prev).add(dir);
-          data.ensureDir(dir);
+          const next = new Set(prev);
+          if (next.has(dir)) next.delete(dir);
+          else {
+            next.add(dir);
+            data.ensureDir(dir);
+          }
           saveExpanded(source.id, next);
           return next;
         });
-      }
-      setCreating({ dir, kind });
-    },
-    [data, source.id],
-  );
+      },
+      [data, source.id],
+    );
 
-  const submitCreate = useCallback(
-    async (rawName: string) => {
-      const target = creating;
-      setCreating(null);
-      if (!target) return;
-      const name = rawName.trim().replace(/^\/+|\/+$/g, "");
-      if (!name || name.includes("/")) return;
-      const path = joinPath(target.dir, name);
-      try {
-        if (target.kind === "dir") await source.mkdir(path);
-        else await source.createFile(path);
-        data.reload(target.dir);
-        if (target.kind === "file") onOpenFile(path, name);
-      } catch {
-        notifyError("已存在同名文件或文件夹，或创建失败");
-      }
-    },
-    [creating, source, data, onOpenFile],
-  );
+    const collapseAll = useCallback(() => {
+      saveExpanded(source.id, new Set());
+      setExpanded(new Set());
+    }, [source.id]);
 
-  const submitRename = useCallback(
-    async (path: string, rawName: string) => {
-      setRenaming(null);
-      const name = rawName.trim();
-      if (!name || name === baseName(path)) return;
-      if (name.includes("/")) {
-        notifyError("名称不能包含「/」");
-        return;
-      }
-      const dst = joinPath(parentDir(path), name);
-      try {
-        await source.move(path, dst);
-        data.reload(parentDir(path));
-      } catch {
-        notifyError("已存在同名文件，或重命名失败");
-      }
-    },
-    [source, data],
-  );
+    const refresh = useCallback(() => {
+      data.reload("");
+      for (const dir of expanded) data.reload(dir);
+    }, [data, expanded]);
 
-  const remove = useCallback(
-    async (node: FileNode) => {
-      const what = node.isDir ? "文件夹及其全部内容" : "文件";
-      if (
-        !window.confirm(`确定删除${what}「${node.name}」？此操作不可撤销。`)
-      ) {
-        return;
-      }
-      try {
-        await source.delete(node.path);
-        data.reload(parentDir(node.path));
-      } catch {
-        notifyError("删除失败");
-      }
-    },
-    [source, data],
-  );
-
-  // Move `src` into `destDir` (""=root), keeping its name. Guards against a no-op
-  // and against dropping a folder into its own subtree.
-  const moveInto = useCallback(
-    async (src: string, destDir: string) => {
-      const dst = joinPath(destDir, baseName(src));
-      if (dst === src) return;
-      if (destDir === src || destDir.startsWith(`${src}/`)) return;
-      try {
-        await source.move(src, dst);
-        data.reload(parentDir(src));
-        data.reload(destDir);
-      } catch {
-        notifyError("目标位置已存在同名文件，或移动失败");
-      }
-    },
-    [source, data],
-  );
-
-  const upload = useCallback(
-    async (files: FileList | null, destDir = "") => {
-      if (!files || files.length === 0 || !source.writeBytes) return;
-      setUploading(true);
-      try {
-        for (const file of Array.from(files)) {
-          await source.writeBytes(joinPath(destDir, file.name), file);
+    const openCreate = useCallback(
+      (dir: string, kind: "file" | "dir") => {
+        if (dir !== "") {
+          setExpanded((prev) => {
+            if (prev.has(dir)) return prev;
+            const next = new Set(prev).add(dir);
+            data.ensureDir(dir);
+            saveExpanded(source.id, next);
+            return next;
+          });
         }
-        data.reload(destDir);
-      } catch {
-        notifyError("上传失败");
-      } finally {
-        setUploading(false);
-      }
-    },
-    [source, data],
-  );
+        setCreating({ dir, kind });
+      },
+      [data, source.id],
+    );
 
-  const rootStatus = data.statusOf("");
-  const rootChildren = data.childrenOf("");
-
-  return (
-    <div
-      className="flex h-full flex-col"
-      onDragOver={(e) => {
-        if (e.dataTransfer.types.includes(DRAG_MIME)) setDropTarget(null);
-        else if (source.caps.transfer) {
-          e.preventDefault();
-          setDragOver(true);
+    const submitCreate = useCallback(
+      async (rawName: string) => {
+        const target = creating;
+        setCreating(null);
+        if (!target) return;
+        const name = rawName.trim().replace(/^\/+|\/+$/g, "");
+        if (!name || name.includes("/")) return;
+        const path = joinPath(target.dir, name);
+        try {
+          if (target.kind === "dir") await source.mkdir(path);
+          else await source.createFile(path);
+          data.reload(target.dir);
+          if (target.kind === "file") onOpenFile(path, name);
+        } catch {
+          notifyError("已存在同名文件或文件夹，或创建失败");
         }
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(e) => {
-        setDragOver(false);
-        setDropTarget(null);
-        const raw = e.dataTransfer.getData(DRAG_MIME);
-        if (raw) {
-          e.preventDefault();
-          const p = parsePayload(raw);
-          if (p && p.sourceId === source.id) void moveInto(p.path, "");
+      },
+      [creating, source, data, onOpenFile],
+    );
+
+    const submitRename = useCallback(
+      async (path: string, rawName: string) => {
+        setRenaming(null);
+        const name = rawName.trim();
+        if (!name || name === baseName(path)) return;
+        if (name.includes("/")) {
+          notifyError("名称不能包含「/」");
           return;
         }
-        if (source.caps.transfer && e.dataTransfer.files.length > 0) {
-          e.preventDefault();
-          void upload(e.dataTransfer.files, "");
+        const dst = joinPath(parentDir(path), name);
+        try {
+          await source.move(path, dst);
+          data.reload(parentDir(path));
+        } catch {
+          notifyError("已存在同名文件，或重命名失败");
         }
-      }}
-    >
-      <div className="flex shrink-0 items-center gap-1 px-3 py-2">
-        {source.caps.transfer && (
-          <>
+      },
+      [source, data],
+    );
+
+    const remove = useCallback(
+      async (node: FileNode) => {
+        const what = node.isDir ? "文件夹及其全部内容" : "文件";
+        if (
+          !window.confirm(`确定删除${what}「${node.name}」？此操作不可撤销。`)
+        ) {
+          return;
+        }
+        try {
+          await source.delete(node.path);
+          data.reload(parentDir(node.path));
+        } catch {
+          notifyError("删除失败");
+        }
+      },
+      [source, data],
+    );
+
+    // Move `src` into `destDir` (""=root), keeping its name. Guards against a no-op
+    // and against dropping a folder into its own subtree.
+    const moveInto = useCallback(
+      async (src: string, destDir: string) => {
+        const dst = joinPath(destDir, baseName(src));
+        if (dst === src) return;
+        if (destDir === src || destDir.startsWith(`${src}/`)) return;
+        try {
+          await source.move(src, dst);
+          data.reload(parentDir(src));
+          data.reload(destDir);
+        } catch {
+          notifyError("目标位置已存在同名文件，或移动失败");
+        }
+      },
+      [source, data],
+    );
+
+    const upload = useCallback(
+      async (files: FileList | null, destDir = "") => {
+        if (!files || files.length === 0 || !source.writeBytes) return;
+        setUploading(true);
+        try {
+          for (const file of Array.from(files)) {
+            await source.writeBytes(joinPath(destDir, file.name), file);
+          }
+          data.reload(destDir);
+        } catch {
+          notifyError("上传失败");
+        } finally {
+          setUploading(false);
+        }
+      },
+      [source, data],
+    );
+
+    const rootStatus = data.statusOf("");
+    const rootChildren = data.childrenOf("");
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        startCreate: (kind) => openCreate("", kind),
+        refresh,
+        triggerUpload: () => uploadRef.current?.click(),
+      }),
+      [openCreate, refresh],
+    );
+
+    const onDragOverRoot = (e: React.DragEvent) => {
+      if (e.dataTransfer.types.includes(DRAG_MIME)) setDropTarget(null);
+      else if (source.caps.transfer) {
+        e.preventDefault();
+        setDragOver(true);
+      }
+    };
+    const onDropRoot = (e: React.DragEvent) => {
+      setDragOver(false);
+      setDropTarget(null);
+      const raw = e.dataTransfer.getData(DRAG_MIME);
+      if (raw) {
+        e.preventDefault();
+        const p = parsePayload(raw);
+        if (p && p.sourceId === source.id) void moveInto(p.path, "");
+        return;
+      }
+      if (source.caps.transfer && e.dataTransfer.files.length > 0) {
+        e.preventDefault();
+        void upload(e.dataTransfer.files, "");
+      }
+    };
+
+    // 隐藏的上传 input 始终渲染（即使无工具栏的嵌入模式也要能经 triggerUpload 触发）。
+    const uploadInput = source.caps.transfer ? (
+      <input
+        ref={uploadRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          void upload(e.target.files, "");
+          e.target.value = "";
+        }}
+      />
+    ) : null;
+
+    // 加载 / 错误 / 空：有 chrome（独占面板）时居中铺满；嵌入堆叠时收成左对齐小行。
+    const loadingEl = chrome ? (
+      <Centered>
+        <Loader2 size={18} className="animate-spin text-muted-foreground/50" />
+      </Centered>
+    ) : (
+      <div
+        className="flex items-center gap-1.5 py-2 text-xs text-muted-foreground"
+        style={{ paddingLeft: indent + 8 }}
+      >
+        <Loader2 size={12} className="animate-spin" />
+        加载中…
+      </div>
+    );
+
+    const errorEl = chrome ? (
+      <InlineError onRetry={() => data.reload("")} />
+    ) : (
+      <div
+        className="flex items-center gap-2 py-2 text-xs text-destructive/80"
+        style={{ paddingLeft: indent + 8 }}
+      >
+        加载失败
+        <button
+          type="button"
+          onClick={() => data.reload("")}
+          className="underline-offset-2 hover:underline"
+        >
+          重试
+        </button>
+      </div>
+    );
+
+    const emptyEl = chrome ? (
+      <EmptyHint
+        inline
+        icon={<FileText size={22} className="text-muted-foreground/40" />}
+        title="暂无文件"
+        hint={
+          source.caps.transfer
+            ? "拖拽文件到此处，或点「上传」「新建」开始。"
+            : "点「新建」开始，或在此文件夹放入文件。"
+        }
+      />
+    ) : (
+      <div
+        className="py-1 text-xs text-muted-foreground/60"
+        style={{ paddingLeft: indent + 8 }}
+      >
+        空文件夹
+      </div>
+    );
+
+    const body =
+      rootStatus === "error" ? (
+        errorEl
+      ) : rootChildren === undefined ? (
+        loadingEl
+      ) : rootChildren.length === 0 && !creating ? (
+        emptyEl
+      ) : (
+        <ul>
+          {creating?.dir === "" && (
+            <InlineCreateRow
+              kind={creating.kind}
+              depth={0}
+              indentBase={indent}
+              onSubmit={submitCreate}
+              onCancel={() => setCreating(null)}
+            />
+          )}
+          {(rootChildren ?? []).map((node) => (
+            <Row
+              key={node.path}
+              node={node}
+              depth={0}
+              indentBase={indent}
+              source={source}
+              data={data}
+              expanded={expanded}
+              activePath={activePath}
+              creating={creating}
+              renaming={renaming}
+              dropTarget={dropTarget}
+              onToggle={toggle}
+              onOpenFile={onOpenFile}
+              onContextCreate={openCreate}
+              onStartRename={setRenaming}
+              onSubmitRename={submitRename}
+              onCancelRename={() => setRenaming(null)}
+              onSubmitCreate={submitCreate}
+              onCancelCreate={() => setCreating(null)}
+              onDelete={remove}
+              onMoveInto={moveInto}
+              onUpload={upload}
+              onDropTarget={setDropTarget}
+            />
+          ))}
+        </ul>
+      );
+
+  // 嵌入模式：无工具栏、无自身高度/滚动，撑内容高度；横向内边距由外层左栏统一给。
+  if (!chrome) {
+    return (
+      <div
+        onDragOver={onDragOverRoot}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDropRoot}
+      >
+        {uploadInput}
+        {body}
+      </div>
+    );
+  }
+
+    return (
+      <div
+        className="flex h-full flex-col"
+        onDragOver={onDragOverRoot}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDropRoot}
+      >
+        {uploadInput}
+        <div className="flex shrink-0 items-center gap-1 px-3 py-2">
+          {source.caps.transfer && (
             <button
               type="button"
               onClick={() => uploadRef.current?.click()}
@@ -299,109 +469,40 @@ export function FileTree({
               )}
               上传
             </button>
-            <input
-              ref={uploadRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={(e) => {
-                void upload(e.target.files, "");
-                e.target.value = "";
-              }}
-            />
-          </>
-        )}
-        <IconButton title="新建文件" onClick={() => openCreate("", "file")}>
-          <FilePlus size={14} />
-        </IconButton>
-        <IconButton title="新建文件夹" onClick={() => openCreate("", "dir")}>
-          <FolderPlus size={14} />
-        </IconButton>
-        <div className="flex-1" />
-        {expanded.size > 0 && (
-          <IconButton title="全部折叠" onClick={collapseAll}>
-            <ChevronsDownUp size={14} />
+          )}
+          <IconButton title="新建文件" onClick={() => openCreate("", "file")}>
+            <FilePlus size={14} />
           </IconButton>
-        )}
-        <IconButton
-          title="刷新"
-          onClick={refresh}
-          spinning={rootStatus === "loading"}
-        >
-          <RefreshCw size={14} />
-        </IconButton>
-        {headerExtra}
-      </div>
-
-      {dragOver && source.caps.transfer && (
-        <div className="mx-3 mb-2 shrink-0 rounded-lg border border-dashed border-primary bg-primary/5 px-3 py-4 text-center text-xs text-primary">
-          松开以上传到此处
+          <IconButton title="新建文件夹" onClick={() => openCreate("", "dir")}>
+            <FolderPlus size={14} />
+          </IconButton>
+          <div className="flex-1" />
+          {expanded.size > 0 && (
+            <IconButton title="全部折叠" onClick={collapseAll}>
+              <ChevronsDownUp size={14} />
+            </IconButton>
+          )}
+          <IconButton
+            title="刷新"
+            onClick={refresh}
+            spinning={rootStatus === "loading"}
+          >
+            <RefreshCw size={14} />
+          </IconButton>
+          {headerExtra}
         </div>
-      )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {rootStatus === "error" ? (
-          <InlineError onRetry={() => data.reload("")} />
-        ) : rootChildren === undefined ? (
-          <Centered>
-            <Loader2
-              size={18}
-              className="animate-spin text-muted-foreground/50"
-            />
-          </Centered>
-        ) : rootChildren.length === 0 && !creating ? (
-          <EmptyHint
-            inline
-            icon={<FileText size={22} className="text-muted-foreground/40" />}
-            title="暂无文件"
-            hint={
-              source.caps.transfer
-                ? "拖拽文件到此处，或点「上传」「新建」开始。"
-                : "点「新建」开始，或在此文件夹放入文件。"
-            }
-          />
-        ) : (
-          <ul>
-            {creating?.dir === "" && (
-              <InlineCreateRow
-                kind={creating.kind}
-                depth={0}
-                onSubmit={submitCreate}
-                onCancel={() => setCreating(null)}
-              />
-            )}
-            {(rootChildren ?? []).map((node) => (
-              <Row
-                key={node.path}
-                node={node}
-                depth={0}
-                source={source}
-                data={data}
-                expanded={expanded}
-                activePath={activePath}
-                creating={creating}
-                renaming={renaming}
-                dropTarget={dropTarget}
-                onToggle={toggle}
-                onOpenFile={onOpenFile}
-                onContextCreate={openCreate}
-                onStartRename={setRenaming}
-                onSubmitRename={submitRename}
-                onCancelRename={() => setRenaming(null)}
-                onSubmitCreate={submitCreate}
-                onCancelCreate={() => setCreating(null)}
-                onDelete={remove}
-                onMoveInto={moveInto}
-                onUpload={upload}
-                onDropTarget={setDropTarget}
-              />
-            ))}
-          </ul>
+        {dragOver && source.caps.transfer && (
+          <div className="mx-3 mb-2 shrink-0 rounded-lg border border-dashed border-primary bg-primary/5 px-3 py-4 text-center text-xs text-primary">
+            松开以上传到此处
+          </div>
         )}
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">{body}</div>
       </div>
-    </div>
-  );
-}
+    );
+  },
+);
 
 function parsePayload(raw: string): DragPayload | null {
   try {
@@ -423,6 +524,8 @@ function parsePayload(raw: string): DragPayload | null {
 interface RowProps {
   node: FileNode;
   depth: number;
+  /** 整棵树的统一额外左内边距（嵌套在工作区根之下时 > 0）。 */
+  indentBase: number;
   source: FileSource;
   data: ReturnType<typeof useFileTreeData>;
   expanded: Set<string>;
@@ -445,8 +548,8 @@ interface RowProps {
 }
 
 function Row(props: RowProps) {
-  const { node, depth, source, data, expanded, dropTarget } = props;
-  const indent = depth * 14 + 8;
+  const { node, depth, source, data, expanded, dropTarget, indentBase } = props;
+  const indent = depth * 14 + 8 + indentBase;
 
   const startDrag = (e: React.DragEvent) => {
     const payload: DragPayload = { sourceId: source.id, path: node.path };
@@ -595,6 +698,7 @@ function Row(props: RowProps) {
             <InlineCreateRow
               kind={props.creating.kind}
               depth={depth + 1}
+              indentBase={indentBase}
               onSubmit={props.onSubmitCreate}
               onCancel={props.onCancelCreate}
             />
@@ -602,7 +706,7 @@ function Row(props: RowProps) {
           {status === "loading" && children === undefined && (
             <li
               className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground"
-              style={{ paddingLeft: (depth + 1) * 14 + 8 + 18 }}
+              style={{ paddingLeft: (depth + 1) * 14 + 8 + 18 + indentBase }}
             >
               <Loader2 size={12} className="animate-spin" />
               加载中…
@@ -611,7 +715,7 @@ function Row(props: RowProps) {
           {status === "error" && (
             <li
               className="py-1 text-xs text-destructive/80"
-              style={{ paddingLeft: (depth + 1) * 14 + 8 + 18 }}
+              style={{ paddingLeft: (depth + 1) * 14 + 8 + 18 + indentBase }}
             >
               加载失败
             </li>
@@ -619,7 +723,7 @@ function Row(props: RowProps) {
           {children?.length === 0 && !props.creating && (
             <li
               className="py-1 text-xs text-muted-foreground/60"
-              style={{ paddingLeft: (depth + 1) * 14 + 8 + 18 }}
+              style={{ paddingLeft: (depth + 1) * 14 + 8 + 18 + indentBase }}
             >
               空文件夹
             </li>
@@ -710,18 +814,20 @@ function InlineRow({
 function InlineCreateRow({
   kind,
   depth,
+  indentBase = 0,
   onSubmit,
   onCancel,
 }: {
   kind: "file" | "dir";
   depth: number;
+  indentBase?: number;
   onSubmit: (name: string) => void;
   onCancel: () => void;
 }) {
   return (
     <li>
       <InlineRow
-        indent={depth * 14 + 8}
+        indent={depth * 14 + 8 + indentBase}
         icon={kind === "dir" ? <Folder size={13} /> : <FileText size={13} />}
       >
         <InlineInput initial="" onSubmit={onSubmit} onCancel={onCancel} />

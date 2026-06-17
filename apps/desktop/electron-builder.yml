@@ -20,6 +20,15 @@ files:
   - out/**
   - package.json
 
+# 内置 Python 运行时（远期规划 §一.1「内置 Python 打包」方案 B）：由 scripts/bundle-sidecar.mjs
+# 预构建到 resources/sidecar/（独立 CPython + --target site-packages），随包拷入应用
+# resources/sidecar/。主进程 resolveSpawnConfig 在 app.isPackaged 时据此拉起 sidecar，
+# 用户机器无需任何系统 Python / venv / uv。须在 electron-builder 前跑 `pnpm bundle:sidecar`
+# （package.json 的 build:* 已前置）；原生 wheel/解释器不可交叉编译，故每平台各自 CI 构建。
+extraResources:
+  - from: resources/sidecar
+    to: sidecar
+
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
 win:

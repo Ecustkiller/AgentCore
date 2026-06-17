@@ -125,3 +125,27 @@ def test_describe_contract_renders_rules():
 
 def test_describe_contract_none_is_empty():
     assert describe_contract(None) == ""
+
+
+# --- requires_files: the deliverable-landed gate over files_written -------------
+
+
+def test_requires_files_fails_when_none_written():
+    v = check_contract("我把整份代码贴在这里", RunContract(requires_files=True), files_written=0)
+    assert not v.ok
+    assert any("工作区" in f for f in v.failures)
+
+
+def test_requires_files_passes_when_a_file_was_written():
+    assert check_contract("已写入 index.html", RunContract(requires_files=True), files_written=1).ok
+
+
+def test_requires_files_off_by_default_ignores_file_count():
+    # A prose contract (requires_files unset) never fails for lack of a file write.
+    assert check_contract("纯文字分析", RunContract(min_length=2), files_written=0).ok
+
+
+def test_describe_contract_renders_requires_files():
+    desc = describe_contract(RunContract(requires_files=True))
+    assert "file_write" in desc
+    assert "工作区" in desc

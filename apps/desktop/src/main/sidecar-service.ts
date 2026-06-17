@@ -1,0 +1,467 @@
+/**
+ * Sidecar 服务（主进程）—— 拉起并驱动本机 Python 引擎进程。
+ *
+ * 双模式工作区 / 远期规划 §一.1：sidecar 是跑在用户机器上的 `python -m agentcore.sidecar`，
+ * **托管同一个运行时引擎**。本模块是它在 Electron 主进程这一侧的对接层：
+ *
+ * - `SidecarClient` —— 在一条「传输」之上实现 stdio JSON-RPC（行分帧、id 配对、通知派发、
+ *   断开清理）。它**不直接依赖 child_process**（构造时注入 `Transport`），故可脱离 Electron
+ *   单测（呼应 fs-service 把 `executeWorkspaceOp` 与 electron 解耦）。
+ * - `SidecarManager` —— 每个授权根懒拉起一个 sidecar（`Map<rootId, …>`），把回合事件路由回
+ *   发起的 renderer，并管理 cancel / respond / 退出清理。
+ * - `registerSidecarIpc` —— 注册 `sidecar:*` IPC handler，桥接 renderer ↔ 管理器。
+ *
+ * 事件回流：sidecar 的 `turn/event` 通知里的 `event` 与服务端 SSE 同形状，故主进程**原样**
+ * 经 `sidecar:event` 推给 renderer，renderer 再喂给同一个 `dispatchSSEEvent`——云 / 本地
+ * 两条链路共用一套事件处理。
+ */
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import {
+  SIDECAR_CHANNELS,
+  type SidecarCancelRequest,
+  type SidecarInference,
+  type SidecarRespondRequest,
+  type SidecarStartTurnRequest,
+  type SidecarStatusPush,
+  type SidecarTurnResult,
+} from "@shared/sidecar-contract";
+import { BrowserWindow, type WebContents, app, ipcMain } from "electron";
+import { getStoredRoot } from "./fs-service";
+
+// 本地回合的审批门（双模式工作区 / 远期规划 §一）。开启后，sidecar 引擎对 worker 的「碰真实
+// 机器」工具（file_write / code_execute 等 GRANTABLE）挂起审批，与云端 local 模式同语义——
+// 审批请求随回合事件流回 renderer，用户的决定经 `window.sidecarApi.respond` 结算回这条 stdio
+// 链路（renderer 把统一结算入口 `resolveInteraction` 在本地回合改走 sidecar）。
+const SIDECAR_APPROVALS_ENABLED = true;
+
+// --- 传输层（与 child_process 解耦，便于单测）---
+
+/** sidecar 进程的双向行管道：发一行、收一行、感知断开、关闭。 */
+export interface Transport {
+  /** 写一行（已含结尾 `\n`）到子进程 stdin。 */
+  send(line: string): void;
+  /** 注册「收到一整行 stdout」回调（行内不含结尾 `\n`）。 */
+  onLine(cb: (line: string) => void): void;
+  /** 注册「进程退出 / 出错」回调（err 为退出原因，正常退出可为 undefined）。 */
+  onClose(cb: (err?: Error) => void): void;
+  /** 终止进程。 */
+  close(): void;
+}
+
+interface SpawnConfig {
+  cmd: string;
+  args: string[];
+  cwd: string;
+  /** 额外环境变量，合并覆盖继承的环境（如内置运行时旁路 site-packages 的 `PYTHONPATH`）。 */
+  env?: Record<string, string>;
+}
+
+/**
+ * 解析拉起 sidecar 的命令。
+ *
+ * **打包态**（`app.isPackaged`）走**内置 Python 运行时**（远期规划 §一.1「内置 Python 打包」
+ * 方案 B）：随包带一份独立 CPython 发行版 + `--target` 装好的 site-packages（构建见
+ * `scripts/bundle-sidecar.mjs`），由 electron-builder `extraResources` 拷到
+ * `process.resourcesPath/sidecar`。用户机器**无需任何系统 Python / venv / uv**；引擎包不在
+ * 解释器自带 site-packages、而在旁路目录，故经 `PYTHONPATH` 注入（免 venv 重定位之痛）。
+ *
+ * **dev 态**（未打包）保持原行为：服务端 venv 的 python > `uv run python`。`AGENTCORE_SIDECAR_CMD`
+ * 覆写**始终最高优先**（即便已打包），便于对一个打包后的应用临时指向自定义解释器联调。
+ * 服务端目录默认取 `AGENTCORE_SERVER_DIR`，否则按 app 路径推 `../server`（dev 下 appPath =
+ * apps/desktop）。
+ */
+function resolveSpawnConfig(): SpawnConfig {
+  const serverDir =
+    process.env.AGENTCORE_SERVER_DIR ?? join(app.getAppPath(), "..", "server");
+
+  const cmdOverride = process.env.AGENTCORE_SIDECAR_CMD;
+  if (cmdOverride) {
+    const args = (process.env.AGENTCORE_SIDECAR_ARGS ?? "-m agentcore.sidecar")
+      .split(" ")
+      .filter(Boolean);
+    return { cmd: cmdOverride, args, cwd: serverDir };
+  }
+
+  // 打包态：内置 Python 运行时（方案 B）。
+  if (app.isPackaged) {
+    const base = join(process.resourcesPath, "sidecar");
+    const python =
+      process.platform === "win32"
+        ? join(base, "python", "python.exe")
+        : join(base, "python", "bin", "python3");
+    return {
+      cmd: python,
+      args: ["-m", "agentcore.sidecar"],
+      cwd: base,
+      env: { PYTHONPATH: join(base, "site-packages") },
+    };
+  }
+
+  // dev：服务端 venv 的 python（最稳，免 uv 的 PATH 问题）。
+  const venvPython =
+    process.platform === "win32"
+      ? join(serverDir, ".venv", "Scripts", "python.exe")
+      : join(serverDir, ".venv", "bin", "python");
+  if (existsSync(venvPython)) {
+    return {
+      cmd: venvPython,
+      args: ["-m", "agentcore.sidecar"],
+      cwd: serverDir,
+    };
+  }
+  // 回退：让 uv 解析环境（需 uv 在 PATH）。
+  return {
+    cmd: "uv",
+    args: ["run", "python", "-m", "agentcore.sidecar"],
+    cwd: serverDir,
+  };
+}
+
+/** 真实传输：spawn 子进程，把 stdout 按行切分，stderr 透传到主进程控制台（dev 可见）。 */
+function spawnTransport(config: SpawnConfig): Transport {
+  const child = spawn(config.cmd, config.args, {
+    cwd: config.cwd,
+    env: {
+      ...process.env,
+      PYTHONUTF8: "1",
+      PYTHONIOENCODING: "utf-8",
+      ...config.env,
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  child.stdin.setDefaultEncoding("utf-8");
+  child.stdout.setEncoding("utf-8");
+  child.stderr.setEncoding("utf-8");
+
+  let lineCb: ((line: string) => void) | null = null;
+  let closeCb: ((err?: Error) => void) | null = null;
+  let buffer = "";
+
+  child.stdout.on("data", (chunk: string) => {
+    buffer += chunk;
+    let idx = buffer.indexOf("\n");
+    while (idx >= 0) {
+      const line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      if (line.trim()) lineCb?.(line);
+      idx = buffer.indexOf("\n");
+    }
+  });
+  // sidecar 的日志（structlog）走 stderr——透传到主进程控制台，便于 dev 排查。
+  child.stderr.on("data", (chunk: string) => {
+    for (const l of chunk.split("\n")) {
+      if (l.trim()) console.error(`[sidecar] ${l}`);
+    }
+  });
+  child.on("error", (err) => closeCb?.(err));
+  child.on("close", (code) =>
+    closeCb?.(code ? new Error(`sidecar 进程退出（code ${code}）`) : undefined),
+  );
+
+  return {
+    send: (line) => {
+      child.stdin.write(line);
+    },
+    onLine: (cb) => {
+      lineCb = cb;
+    },
+    onClose: (cb) => {
+      closeCb = cb;
+    },
+    close: () => {
+      child.kill();
+    },
+  };
+}
+
+// --- JSON-RPC 客户端 ---
+
+/** 一个 JSON-RPC 错误响应（携带服务端的 code/message）。 */
+export class SidecarRpcError extends Error {
+  constructor(
+    readonly code: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SidecarRpcError";
+  }
+}
+
+interface Pending {
+  resolve: (value: unknown) => void;
+  reject: (err: Error) => void;
+}
+
+/**
+ * stdio JSON-RPC 客户端（行分帧）。与 Python 端 `agentcore/sidecar/protocol.py` 对齐：
+ * 一行一个 JSON，紧凑序列化 + `\n` 结尾。请求按 id 配对；服务端只回响应与通知
+ * （无服务端→客户端请求），故通知统一交给 `onNotification`。
+ */
+export class SidecarClient {
+  private nextId = 1;
+  private readonly pending = new Map<number, Pending>();
+  private notify: (method: string, params: Record<string, unknown>) => void =
+    () => {};
+  private closed = false;
+  private closeErr: Error | null = null;
+  private onClosedCb: ((err: Error) => void) | null = null;
+
+  constructor(private readonly transport: Transport) {
+    transport.onLine((line) => this.onLine(line));
+    transport.onClose((err) => this.onClose(err));
+  }
+
+  /** 注册通知处理器（如 `turn/event`）。 */
+  onNotification(
+    cb: (method: string, params: Record<string, unknown>) => void,
+  ): void {
+    this.notify = cb;
+  }
+
+  /** 注册「连接关闭」回调（进程退出 / 出错）；用于上层逐出缓存并提示。 */
+  onClosed(cb: (err: Error) => void): void {
+    this.onClosedCb = cb;
+  }
+
+  /** 发一个请求，Promise 在收到对应响应时 settle（错误响应 → reject `SidecarRpcError`）。 */
+  request(method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (this.closed) {
+      return Promise.reject(this.closeErr ?? new Error("sidecar 已关闭"));
+    }
+    const id = this.nextId++;
+    const line = `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`;
+    return new Promise<unknown>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      try {
+        this.transport.send(line);
+      } catch (e) {
+        this.pending.delete(id);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      }
+    });
+  }
+
+  dispose(): void {
+    this.transport.close();
+  }
+
+  private onLine(line: string): void {
+    let msg: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(line);
+      if (typeof parsed !== "object" || parsed === null) return;
+      msg = parsed as Record<string, unknown>;
+    } catch {
+      return; // 非法行——丢弃（日志走 stderr，不会混进这条通道）
+    }
+
+    const id = msg.id;
+    if (typeof id === "number" && ("result" in msg || "error" in msg)) {
+      const p = this.pending.get(id);
+      if (!p) return;
+      this.pending.delete(id);
+      if ("error" in msg) {
+        const err = msg.error as
+          | { code?: number; message?: string }
+          | undefined;
+        p.reject(
+          new SidecarRpcError(err?.code ?? -1, err?.message ?? "sidecar 错误"),
+        );
+      } else {
+        p.resolve(msg.result);
+      }
+      return;
+    }
+
+    if (typeof msg.method === "string") {
+      this.notify(msg.method, (msg.params as Record<string, unknown>) ?? {});
+    }
+  }
+
+  private onClose(err?: Error): void {
+    this.closed = true;
+    this.closeErr = err ?? new Error("sidecar 进程已退出");
+    for (const [, p] of this.pending) p.reject(this.closeErr);
+    this.pending.clear();
+    this.onClosedCb?.(this.closeErr);
+  }
+}
+
+// --- 管理器 ---
+
+interface SidecarEntry {
+  client: SidecarClient;
+  /** initialize 的就绪 Promise（失败则该 entry 已被逐出，需重拉）。 */
+  ready: Promise<void>;
+}
+
+interface ActiveTurn {
+  wc: WebContents;
+  conversationId: string;
+}
+
+/**
+ * 管理每个授权根的 sidecar：懒拉起 + 初始化、回合事件路由、cancel/respond、退出清理。
+ *
+ * `spawnFn` 可注入（默认真实 `spawnTransport`），便于单测用假传输驱动整条链路。
+ */
+export class SidecarManager {
+  private readonly entries = new Map<string, SidecarEntry>();
+  private readonly turns = new Map<string, ActiveTurn>();
+
+  constructor(
+    private readonly spawnFn: (
+      config: SpawnConfig,
+    ) => Transport = spawnTransport,
+  ) {}
+
+  /** 拉起（或复用）某根的 sidecar，并完成一次性 initialize。 */
+  private ensure(
+    rootId: string,
+    absPath: string,
+    inference: SidecarInference | undefined,
+  ): SidecarEntry {
+    const existing = this.entries.get(rootId);
+    if (existing) return existing;
+
+    const transport = this.spawnFn(resolveSpawnConfig());
+    const client = new SidecarClient(transport);
+    client.onNotification((method, params) =>
+      this.onNotification(method, params),
+    );
+    client.onClosed((err) => {
+      this.entries.delete(rootId);
+      this.pushStatus({ rootId, phase: "exited", detail: err.message });
+    });
+
+    const ready = client
+      .request("initialize", {
+        userId: "local",
+        workspaceRoot: absPath,
+        approvalsEnabled: SIDECAR_APPROVALS_ENABLED,
+        ...(inference ? { inference } : {}),
+      })
+      .then(() => {
+        this.pushStatus({ rootId, phase: "spawned" });
+      })
+      .catch((err: unknown) => {
+        // 初始化失败（uv/venv 找不到、引擎导入失败等）——逐出，下次重拉；上抛给 startTurn。
+        this.entries.delete(rootId);
+        const detail = err instanceof Error ? err.message : String(err);
+        this.pushStatus({ rootId, phase: "error", detail });
+        client.dispose();
+        throw err instanceof Error ? err : new Error(detail);
+      });
+
+    const entry: SidecarEntry = { client, ready };
+    this.entries.set(rootId, entry);
+    return entry;
+  }
+
+  /**
+   * 在某根的 sidecar 上跑一个回合；Promise 在回合结束时 resolve（携带最终结果），
+   * 过程事件经 `sidecar:event` 推给 `wc`。
+   */
+  async startTurn(
+    wc: WebContents,
+    req: SidecarStartTurnRequest,
+    absPath: string,
+  ): Promise<SidecarTurnResult> {
+    const entry = this.ensure(req.rootId, absPath, req.inference);
+    await entry.ready; // 初始化失败则在此抛出 → renderer 据此降级
+
+    this.turns.set(req.turnId, { wc, conversationId: req.conversationId });
+    try {
+      const result = await entry.client.request("startTurn", {
+        turnId: req.turnId,
+        conversationId: req.conversationId,
+        userMessage: req.userMessage,
+        history: req.history ?? [],
+      });
+      return result as SidecarTurnResult;
+    } finally {
+      this.turns.delete(req.turnId);
+    }
+  }
+
+  /** 取消一个在跑的回合（尽力而为；无对应 sidecar 则静默）。 */
+  async cancel(req: SidecarCancelRequest): Promise<void> {
+    const entry = this.entries.get(req.rootId);
+    if (!entry) return;
+    try {
+      await entry.client.request("cancel", { turnId: req.turnId });
+    } catch {
+      // 进程已退出 / 回合已结束——取消本就无意义，吞掉。
+    }
+  }
+
+  /** 结算一个被挂起的交互（审批 / ask_user / 本地工具）。 */
+  async respond(req: SidecarRespondRequest): Promise<void> {
+    const entry = this.entries.get(req.rootId);
+    if (!entry) return;
+    await entry.client.request("respond", {
+      requestId: req.requestId,
+      conversationId: req.conversationId,
+      result: req.result,
+    });
+  }
+
+  /** 退出时清理所有 sidecar（尽力发 shutdown 再终止进程）。 */
+  disposeAll(): void {
+    for (const [, entry] of this.entries) {
+      void entry.client.request("shutdown", {}).catch(() => {});
+      entry.client.dispose();
+    }
+    this.entries.clear();
+    this.turns.clear();
+  }
+
+  private onNotification(
+    method: string,
+    params: Record<string, unknown>,
+  ): void {
+    if (method !== "turn/event") return;
+    const turnId = String(params.turnId ?? "");
+    const turn = this.turns.get(turnId);
+    if (!turn || turn.wc.isDestroyed()) return;
+    turn.wc.send(SIDECAR_CHANNELS.event, {
+      conversationId: turn.conversationId,
+      turnId,
+      event: params.event,
+    });
+  }
+
+  private pushStatus(push: SidecarStatusPush): void {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.webContents.isDestroyed()) {
+        win.webContents.send(SIDECAR_CHANNELS.status, push);
+      }
+    }
+  }
+}
+
+/** 注册全部 sidecar IPC handler。须在 app ready 后调用。 */
+export function registerSidecarIpc(): void {
+  const manager = new SidecarManager();
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.startTurn,
+    async (e, req: SidecarStartTurnRequest): Promise<SidecarTurnResult> => {
+      const root = await getStoredRoot(req.rootId);
+      if (!root) throw new Error("本地目录未授权或已移除");
+      return manager.startTurn(e.sender, req, root.absPath);
+    },
+  );
+
+  ipcMain.handle(SIDECAR_CHANNELS.cancel, (_e, req: SidecarCancelRequest) =>
+    manager.cancel(req),
+  );
+
+  ipcMain.handle(SIDECAR_CHANNELS.respond, (_e, req: SidecarRespondRequest) =>
+    manager.respond(req),
+  );
+
+  app.on("before-quit", () => manager.disposeAll());
+}

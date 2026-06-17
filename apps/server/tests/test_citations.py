@@ -1,0 +1,57 @@
+"""Unit tests for citation-marker bounds validation (out_of_range_markers).
+
+Mirrors the desktop renderer's marker semantics (remarkCitations.ts): only
+``1..count`` are real chips; anything else is a marker pointing at a source card
+that does not exist, which the server logs for observability.
+"""
+
+from agentcore.runtime.citations import out_of_range_markers
+
+
+def test_in_range_markers_are_clean():
+    assert out_of_range_markers("See [1] and [2].", 2) == []
+
+
+def test_marker_past_count_is_flagged():
+    assert out_of_range_markers("See [1] and [3].", 2) == [3]
+
+
+def test_zero_marker_is_flagged():
+    assert out_of_range_markers("Bad [0] ref with [1].", 3) == [0]
+
+
+def test_no_citations_flags_any_marker():
+    assert out_of_range_markers("Unsupported claim [1].", 0) == [1]
+
+
+def test_results_are_deduped_and_sorted():
+    assert out_of_range_markers("[5] a [3] b [5] c [3]", 2) == [3, 5]
+
+
+def test_fenced_code_block_is_ignored():
+    content = "Real [1].\n```python\nfoo = arr[9]\nbar[7]\n```\n"
+    assert out_of_range_markers(content, 1) == []
+
+
+def test_inline_code_is_ignored():
+    assert out_of_range_markers("Use `arr[9]` then cite [1].", 1) == []
+
+
+def test_markdown_link_label_is_ignored():
+    assert out_of_range_markers("See [9](http://example.com) and [1].", 1) == []
+
+
+def test_prose_index_shares_client_semantics():
+    # A bare "[5]" in prose is indistinguishable from a citation, both here and in
+    # the renderer — so it is (correctly) counted as out-of-range.
+    assert out_of_range_markers("item [5] only, with [1].", 1) == [5]
+
+
+def test_negative_like_bracket_is_not_a_marker():
+    # "[-1]" is not a \\d+ marker; only real numeric markers count.
+    assert out_of_range_markers("range [-1] but cite [2]", 1) == [2]
+
+
+def test_empty_or_markerless_content():
+    assert out_of_range_markers("", 5) == []
+    assert out_of_range_markers("No markers at all.", 0) == []

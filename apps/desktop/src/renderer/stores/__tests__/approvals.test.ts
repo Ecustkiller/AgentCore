@@ -84,9 +84,11 @@ describe("autoApproveSiblings (本轮内都允许 batch放行)", () => {
       card({ approvalId: "a2", toolName: "file_write" }),
       card({ approvalId: "a3", toolName: "file_write" }),
     ];
-    expect(autoApproveSiblings(pending, self).map((p) => p.approvalId)).toEqual(
-      ["a2", "a3"],
-    );
+    expect(
+      autoApproveSiblings(pending, self, "approve_always").map(
+        (p) => p.approvalId,
+      ),
+    ).toEqual(["a2", "a3"]);
   });
 
   it("excludes itself, other tools, and cards already in flight", () => {
@@ -97,9 +99,11 @@ describe("autoApproveSiblings (本轮内都允许 batch放行)", () => {
       card({ approvalId: "a3", toolName: "file_write", resolving: true }),
       card({ approvalId: "a4", toolName: "file_write" }),
     ];
-    expect(autoApproveSiblings(pending, self).map((p) => p.approvalId)).toEqual(
-      ["a4"],
-    );
+    expect(
+      autoApproveSiblings(pending, self, "approve_always").map(
+        (p) => p.approvalId,
+      ),
+    ).toEqual(["a4"]);
   });
 
   it("excludes a same-tool card from another conversation", () => {
@@ -111,8 +115,64 @@ describe("autoApproveSiblings (本轮内都允许 batch放行)", () => {
       card({ approvalId: "a2", conversationId: "conv-1" }),
       card({ approvalId: "a3", conversationId: "conv-2" }),
     ];
-    expect(autoApproveSiblings(pending, self).map((p) => p.approvalId)).toEqual(
-      ["a2"],
-    );
+    expect(
+      autoApproveSiblings(pending, self, "approve_always").map(
+        (p) => p.approvalId,
+      ),
+    ).toEqual(["a2"]);
+  });
+
+  it("one-shot approve / deny sweep nothing", () => {
+    const self = card({ approvalId: "a1", toolName: "file_write" });
+    const pending = [self, card({ approvalId: "a2", toolName: "file_write" })];
+    expect(autoApproveSiblings(pending, self, "approve")).toEqual([]);
+    expect(autoApproveSiblings(pending, self, "deny")).toEqual([]);
+  });
+});
+
+describe("autoApproveSiblings (本轮内允许所有文件改动 class放行)", () => {
+  it("sweeps the whole file-mutation class, not just the same tool", () => {
+    // Clicking the class grant on a file_write card also clears str_replace /
+    // file_delete / file_move siblings — the one click a mixed-op task needs.
+    const self = card({ approvalId: "a1", toolName: "file_write" });
+    const pending = [
+      self,
+      card({ approvalId: "a2", toolName: "str_replace" }),
+      card({ approvalId: "a3", toolName: "file_delete" }),
+      card({ approvalId: "a4", toolName: "file_move" }),
+    ];
+    expect(
+      autoApproveSiblings(pending, self, "approve_always_files").map(
+        (p) => p.approvalId,
+      ),
+    ).toEqual(["a2", "a3", "a4"]);
+  });
+
+  it("leaves code_execute (outside the class) gated", () => {
+    const self = card({ approvalId: "a1", toolName: "file_write" });
+    const pending = [
+      self,
+      card({ approvalId: "a2", toolName: "str_replace" }),
+      card({ approvalId: "a3", toolName: "code_execute" }),
+    ];
+    expect(
+      autoApproveSiblings(pending, self, "approve_always_files").map(
+        (p) => p.approvalId,
+      ),
+    ).toEqual(["a2"]);
+  });
+
+  it("stays scoped to the card's conversation", () => {
+    const self = card({ approvalId: "a1", conversationId: "conv-1" });
+    const pending = [
+      self,
+      card({ approvalId: "a2", toolName: "str_replace", conversationId: "conv-1" }),
+      card({ approvalId: "a3", toolName: "str_replace", conversationId: "conv-2" }),
+    ];
+    expect(
+      autoApproveSiblings(pending, self, "approve_always_files").map(
+        (p) => p.approvalId,
+      ),
+    ).toEqual(["a2"]);
   });
 });

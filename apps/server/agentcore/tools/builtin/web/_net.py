@@ -26,7 +26,12 @@ from urllib.parse import urlparse
 
 import httpx
 
-SEARCH_TIMEOUT = 10.0
+# Overall search read budget. Kept ≥ SearXNG's own max_request_timeout (15s, see
+# deploy/searxng/settings.yml): a search fans out to several China engines and can
+# legitimately take >10s under load, so a tighter client deadline would abandon
+# results SearXNG would still return. Connect still uses the short
+# WEB_CONNECT_TIMEOUT, so a genuinely down host fast-fails into the breaker.
+SEARCH_TIMEOUT = 16.0
 WEB_CONNECT_TIMEOUT = 5.0  # connect deadline: blocked hosts fail fast
 WEB_READ_TIMEOUT = 15.0  # read window for slow-but-reachable sites
 WEB_HOST_FAIL_THRESHOLD = 3  # consecutive transport failures before tripping

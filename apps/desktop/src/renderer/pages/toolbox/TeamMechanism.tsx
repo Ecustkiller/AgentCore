@@ -397,7 +397,7 @@ function Legend() {
         <LegendRow
           sample={<EdgeSample variant="delegate" />}
           name="委派（虚线）"
-          desc="can_delegate：队长 worker → 子 worker（一层）。"
+          desc="can_delegate：captain worker → 子 worker（一层）。"
         />
         <LegendRow
           sample={<EdgeSample variant="revision" />}
@@ -716,7 +716,7 @@ const SCENARIOS: Scenario[] = [
         modelPreference: "strong",
       }),
       agent("lead", "前端组长", "completed", {
-        task: "细分前端工作并分派给组员",
+        task: "细分前端工作并分派给队员",
         durationMs: 6500,
         toolCount: 2,
         modelPreference: "strong",
@@ -1066,7 +1066,7 @@ export function TeamMechanism() {
           <h1 className="text-xl font-medium text-foreground">团队运行机制</h1>
           <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
             看懂你的 AI 团队怎么协作：一个任务进来后，CEO 主 Agent
-            如何判断要不要组团、团队怎么分工与并行、每个成员在干什么、最后如何把结果汇总成答案。下方所有图都是
+            如何判断要不要组团、团队怎么分工与并行、每个队员在干什么、最后如何把结果汇总成答案。下方所有图都是
             <span className="font-medium text-foreground">真实</span>
             的协作图组件与布局——和你在对话里看到的一模一样。
           </p>

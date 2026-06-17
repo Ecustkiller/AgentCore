@@ -7,9 +7,11 @@ blocking, and directory settings. Mirrors test_auth_service.py's fake-repo style
 """
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
+from agentcore.config import settings
 from agentcore.core.errors import (
     AuthorizationError,
     NotFoundError,
@@ -48,11 +50,7 @@ class FakeUsers:
         q = query.strip().lower()
         if not q:
             return []
-        hits = [
-            u
-            for u in self._by_id.values()
-            if u.username.lower() == q and u.status == "active"
-        ]
+        hits = [u for u in self._by_id.values() if u.username.lower() == q and u.status == "active"]
         return hits[:limit]
 
 
@@ -134,9 +132,7 @@ class FakeChats:
     async def list_auto_join_chats(self):
         return [c for c in self._chats.values() if getattr(c, "auto_join", False)]
 
-    async def add_member(
-        self, chat_id, user_id, *, role="member", state="accepted", pinned=False
-    ):
+    async def add_member(self, chat_id, user_id, *, role="member", state="accepted", pinned=False):
         from types import SimpleNamespace
 
         if await self.get_member(chat_id, user_id) is not None:
@@ -161,11 +157,7 @@ class FakeChats:
 
     async def get_member(self, chat_id, user_id):
         return next(
-            (
-                m
-                for m in self._members
-                if m.chat_id == chat_id and m.user_id == user_id
-            ),
+            (m for m in self._members if m.chat_id == chat_id and m.user_id == user_id),
             None,
         )
 
@@ -174,9 +166,7 @@ class FakeChats:
 
     async def remove_member(self, chat_id, user_id):
         self._members = [
-            m
-            for m in self._members
-            if not (m.chat_id == chat_id and m.user_id == user_id)
+            m for m in self._members if not (m.chat_id == chat_id and m.user_id == user_id)
         ]
 
     async def set_membership_flags(self, chat_id, user_id, *, muted=None, pinned=None):
@@ -194,11 +184,7 @@ class FakeChats:
             member.muted_by_admin = muted_by_admin
 
     async def list_memberships(self, user_id):
-        rows = [
-            (self._chats[m.chat_id], m)
-            for m in self._members
-            if m.user_id == user_id
-        ]
+        rows = [(self._chats[m.chat_id], m) for m in self._members if m.user_id == user_id]
         rows.sort(key=lambda cm: cm[0].last_message_at or _EPOCH, reverse=True)
         return rows
 
@@ -263,9 +249,7 @@ class FakeChats:
         )
         return rows[offset : offset + limit], len(rows)
 
-    async def mark_read(
-        self, chat_id, user_id, *, last_read_message_id, last_read_at=None
-    ):
+    async def mark_read(self, chat_id, user_id, *, last_read_message_id, last_read_at=None):
         member = await self.get_member(chat_id, user_id)
         member.last_read_message_id = last_read_message_id
         member.last_read_at = last_read_at or self._now()
@@ -315,9 +299,7 @@ class FakeDirectory:
 
         settings = self._by_user.get(user_id)
         if settings is None:
-            settings = SimpleNamespace(
-                user_id=user_id, discoverable=True, who_can_dm="anyone"
-            )
+            settings = SimpleNamespace(user_id=user_id, discoverable=True, who_can_dm="anyone")
             self._by_user[user_id] = settings
         if discoverable is not None:
             settings.discoverable = discoverable
@@ -479,9 +461,7 @@ async def test_send_message_non_member_404():
     stranger = users.add("stranger")
     chat = (await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)).chat
     with pytest.raises(NotFoundError):
-        await svc.send_message(
-            chat_id=chat.id, sender_id=stranger.user_id, content="hi"
-        )
+        await svc.send_message(chat_id=chat.id, sender_id=stranger.user_id, content="hi")
 
 
 async def test_send_message_persists_and_fans_out():
@@ -489,9 +469,7 @@ async def test_send_message_persists_and_fans_out():
     alice = users.add("alice")
     bob = users.add("bob")
     chat = (await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)).chat
-    msg = await svc.send_message(
-        chat_id=chat.id, sender_id=alice.user_id, content="hello bob"
-    )
+    msg = await svc.send_message(chat_id=chat.id, sender_id=alice.user_id, content="hello bob")
     assert msg.content == "hello bob"
     assert len(events.published) == 1
     recipients, event = events.published[0]
@@ -555,9 +533,7 @@ async def test_list_chats_resolves_peer_and_unread():
     assert views[0].peer.user_id == bob.user_id
     assert views[0].unread == 2
 
-    await svc.mark_read(
-        chat_id=chat.id, user_id=alice.user_id, last_read_message_id=last.id
-    )
+    await svc.mark_read(chat_id=chat.id, user_id=alice.user_id, last_read_message_id=last.id)
     views = await svc.list_chats(user_id=alice.user_id)
     assert views[0].unread == 0
 
@@ -567,12 +543,8 @@ async def test_list_chats_orders_recent_first():
     alice = users.add("alice")
     bob = users.add("bob")
     carol = users.add("carol")
-    chat_b = (
-        await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)
-    ).chat
-    chat_c = (
-        await svc.start_dm(requester_id=alice.user_id, peer_id=carol.user_id)
-    ).chat
+    chat_b = (await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)).chat
+    chat_c = (await svc.start_dm(requester_id=alice.user_id, peer_id=carol.user_id)).chat
     await svc.send_message(chat_id=chat_b.id, sender_id=alice.user_id, content="b")
     await svc.send_message(chat_id=chat_c.id, sender_id=alice.user_id, content="c")
     # chat_c has the most recent message -> it sorts first
@@ -589,17 +561,11 @@ async def test_list_messages_paginates():
     bob = users.add("bob")
     chat = (await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)).chat
     for i in range(5):
-        await svc.send_message(
-            chat_id=chat.id, sender_id=alice.user_id, content=f"m{i}"
-        )
-    page = await svc.list_messages(
-        chat_id=chat.id, user_id=alice.user_id, page=1, page_size=2
-    )
+        await svc.send_message(chat_id=chat.id, sender_id=alice.user_id, content=f"m{i}")
+    page = await svc.list_messages(chat_id=chat.id, user_id=alice.user_id, page=1, page_size=2)
     assert page.total == 5
     assert [m.content for m in page.messages] == ["m0", "m1"]
-    page2 = await svc.list_messages(
-        chat_id=chat.id, user_id=alice.user_id, page=2, page_size=2
-    )
+    page2 = await svc.list_messages(chat_id=chat.id, user_id=alice.user_id, page=2, page_size=2)
     assert [m.content for m in page2.messages] == ["m2", "m3"]
 
 
@@ -620,9 +586,7 @@ async def test_mark_read_non_member_404():
     stranger = users.add("stranger")
     chat = (await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)).chat
     with pytest.raises(NotFoundError):
-        await svc.mark_read(
-            chat_id=chat.id, user_id=stranger.user_id, last_read_message_id="x"
-        )
+        await svc.mark_read(chat_id=chat.id, user_id=stranger.user_id, last_read_message_id="x")
 
 
 # --- blocking ---
@@ -668,9 +632,7 @@ async def test_update_directory_partial_preserves_other_field():
     svc, users, *_ = _make()
     alice = users.add("alice")
     await svc.update_directory_settings(user_id=alice.user_id, discoverable=False)
-    view = await svc.update_directory_settings(
-        user_id=alice.user_id, who_can_dm="contacts"
-    )
+    view = await svc.update_directory_settings(user_id=alice.user_id, who_can_dm="contacts")
     assert view.discoverable is False  # untouched by the second patch
     assert view.who_can_dm == "contacts"
 
@@ -714,9 +676,7 @@ async def test_list_members_returns_participants():
     svc, users, chats, *_ = _make()
     alice = users.add("alice")
     bob = users.add("bob")
-    group = await chats.create_group(
-        auto_join=True, member_ids=[alice.user_id, bob.user_id]
-    )
+    group = await chats.create_group(auto_join=True, member_ids=[alice.user_id, bob.user_id])
     members = await svc.list_members(chat_id=group.id, user_id=alice.user_id)
     assert {m.user.user_id for m in members} == {alice.user_id, bob.user_id}
 
@@ -737,9 +697,7 @@ async def test_leave_chat_removes_member():
     svc, users, chats, *_ = _make()
     alice = users.add("alice")
     bob = users.add("bob")
-    group = await chats.create_group(
-        auto_join=True, member_ids=[alice.user_id, bob.user_id]
-    )
+    group = await chats.create_group(auto_join=True, member_ids=[alice.user_id, bob.user_id])
     await svc.leave_chat(chat_id=group.id, user_id=alice.user_id)
     assert await chats.get_member(group.id, alice.user_id) is None
     # bob is untouched; the group lives on.
@@ -785,9 +743,7 @@ async def test_set_chat_flags_partial_preserves_other():
     alice = users.add("alice")
     group = await chats.create_group(auto_join=True, member_ids=[alice.user_id])
     await svc.set_chat_flags(chat_id=group.id, user_id=alice.user_id, pinned=True)
-    view = await svc.set_chat_flags(
-        chat_id=group.id, user_id=alice.user_id, muted=True
-    )
+    view = await svc.set_chat_flags(chat_id=group.id, user_id=alice.user_id, muted=True)
     assert view.member.pinned is True  # untouched by the second patch
     assert view.member.muted is True
 
@@ -798,9 +754,7 @@ async def test_set_chat_flags_non_member_404():
     stranger = users.add("stranger")
     group = await chats.create_group(auto_join=True, member_ids=[alice.user_id])
     with pytest.raises(NotFoundError):
-        await svc.set_chat_flags(
-            chat_id=group.id, user_id=stranger.user_id, muted=True
-        )
+        await svc.set_chat_flags(chat_id=group.id, user_id=stranger.user_id, muted=True)
 
 
 # --- moderation: kick / mute / announce (Stage 3 审核治理) ---
@@ -811,9 +765,7 @@ async def test_kick_member_removes_and_posts_system_card():
     admin = users.add("admin", role="admin")
     alice = users.add("alice")
     group = await chats.create_group(member_ids=[admin.user_id, alice.user_id])
-    await svc.kick_member(
-        chat_id=group.id, actor_id=admin.user_id, target_id=alice.user_id
-    )
+    await svc.kick_member(chat_id=group.id, actor_id=admin.user_id, target_id=alice.user_id)
     assert await chats.get_member(group.id, alice.user_id) is None
     # the admin remains; the group lives on
     assert await chats.get_member(group.id, admin.user_id) is not None
@@ -829,9 +781,7 @@ async def test_kick_admin_target_forbidden():
     svc, users, chats, *_ = _make()
     admin = users.add("admin", role="admin")
     other_admin = users.add("root", role="admin")
-    group = await chats.create_group(
-        member_ids=[admin.user_id, other_admin.user_id]
-    )
+    group = await chats.create_group(member_ids=[admin.user_id, other_admin.user_id])
     with pytest.raises(AuthorizationError):
         await svc.kick_member(
             chat_id=group.id, actor_id=admin.user_id, target_id=other_admin.user_id
@@ -846,9 +796,7 @@ async def test_kick_non_member_404():
     stranger = users.add("stranger")
     group = await chats.create_group(member_ids=[admin.user_id])
     with pytest.raises(NotFoundError):
-        await svc.kick_member(
-            chat_id=group.id, actor_id=admin.user_id, target_id=stranger.user_id
-        )
+        await svc.kick_member(chat_id=group.id, actor_id=admin.user_id, target_id=stranger.user_id)
 
 
 async def test_kick_dm_rejected():
@@ -857,9 +805,7 @@ async def test_kick_dm_rejected():
     bob = users.add("bob")
     chat = (await svc.start_dm(requester_id=admin.user_id, peer_id=bob.user_id)).chat
     with pytest.raises(ValidationError):
-        await svc.kick_member(
-            chat_id=chat.id, actor_id=admin.user_id, target_id=bob.user_id
-        )
+        await svc.kick_member(chat_id=chat.id, actor_id=admin.user_id, target_id=bob.user_id)
 
 
 async def test_admin_mute_blocks_send_then_unmute_restores():
@@ -871,16 +817,12 @@ async def test_admin_mute_blocks_send_then_unmute_restores():
         chat_id=group.id, actor_id=admin.user_id, target_id=alice.user_id, muted=True
     )
     with pytest.raises(AuthorizationError):
-        await svc.send_message(
-            chat_id=group.id, sender_id=alice.user_id, content="hi"
-        )
+        await svc.send_message(chat_id=group.id, sender_id=alice.user_id, content="hi")
     # unmuting restores the ability to send
     await svc.set_admin_mute(
         chat_id=group.id, actor_id=admin.user_id, target_id=alice.user_id, muted=False
     )
-    msg = await svc.send_message(
-        chat_id=group.id, sender_id=alice.user_id, content="hi again"
-    )
+    msg = await svc.send_message(chat_id=group.id, sender_id=alice.user_id, content="hi again")
     assert msg.content == "hi again"
 
 
@@ -905,9 +847,7 @@ async def test_announce_posts_system_card_to_all_members():
     admin = users.add("admin", role="admin")
     alice = users.add("alice")
     group = await chats.create_group(member_ids=[admin.user_id, alice.user_id])
-    msg = await svc.post_announcement(
-        chat_id=group.id, actor_id=admin.user_id, content="维护通知"
-    )
+    msg = await svc.post_announcement(chat_id=group.id, actor_id=admin.user_id, content="维护通知")
     assert msg.content_type == "system_card"
     assert msg.sender_user_id is None
     recipients, event = events.published[-1]
@@ -921,6 +861,157 @@ async def test_announce_dm_rejected():
     bob = users.add("bob")
     chat = (await svc.start_dm(requester_id=admin.user_id, peer_id=bob.user_id)).chat
     with pytest.raises(ValidationError):
-        await svc.post_announcement(
-            chat_id=chat.id, actor_id=admin.user_id, content="hi"
+        await svc.post_announcement(chat_id=chat.id, actor_id=admin.user_id, content="hi")
+
+
+# --- attachments: upload / download (Stage 4 富消息) ---
+# These touch the real filesystem (build_chat_workspace), so data_dir is redirected
+# to tmp_path; the repos stay in-memory fakes for the membership gate.
+
+
+def _png_bytes(width: int, height: int) -> bytes:
+    """A real PNG of the given size, for the thumbnail/upload tests."""
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), (120, 30, 200)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+async def test_upload_attachment_roundtrips(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    group = await chats.create_group(member_ids=[alice.user_id])
+    result = await svc.upload_attachment(
+        chat_id=group.id,
+        user_id=alice.user_id,
+        path="attachments/x/pic.png",
+        data=b"\x89PNG\r\n",
+    )
+    assert result.size_bytes == 6
+    # non-image bytes → no thumbnail (the original is served inline)
+    assert result.thumb_path is None
+    # the bytes land under the chat's own im/<chat_id> space
+    stored = tmp_path / "workspaces" / "im" / group.id / "attachments" / "x" / "pic.png"
+    assert stored.read_bytes() == b"\x89PNG\r\n"
+    # and a member can read them back byte-for-byte
+    got = await svc.download_attachment(
+        chat_id=group.id, user_id=alice.user_id, path="attachments/x/pic.png"
+    )
+    assert got == b"\x89PNG\r\n"
+
+
+async def test_upload_image_generates_bounded_webp_thumbnail(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    group = await chats.create_group(member_ids=[alice.user_id])
+    data = _png_bytes(1000, 800)
+    result = await svc.upload_attachment(
+        chat_id=group.id, user_id=alice.user_id, path="attachments/x/photo.png", data=data
+    )
+    # a sibling thumbnail path is returned and a member can fetch it
+    assert result.thumb_path == "attachments/x/photo.png.thumb.webp"
+    thumb = await svc.download_attachment(
+        chat_id=group.id, user_id=alice.user_id, path=result.thumb_path
+    )
+    import io
+
+    from PIL import Image
+
+    with Image.open(io.BytesIO(thumb)) as img:
+        assert img.format == "WEBP"
+        assert max(img.size) <= 512  # bounded to the longest-edge cap
+
+
+async def test_upload_small_image_skips_thumbnail(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    group = await chats.create_group(member_ids=[alice.user_id])
+    result = await svc.upload_attachment(
+        chat_id=group.id,
+        user_id=alice.user_id,
+        path="attachments/y/small.png",
+        data=_png_bytes(100, 80),
+    )
+    # already within the cap → no thumbnail (it would save nothing)
+    assert result.thumb_path is None
+
+
+async def test_upload_attachment_non_member_404(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    stranger = users.add("stranger")
+    group = await chats.create_group(member_ids=[alice.user_id])
+    with pytest.raises(NotFoundError):
+        await svc.upload_attachment(
+            chat_id=group.id, user_id=stranger.user_id, path="attachments/a", data=b"x"
         )
+
+
+async def test_download_attachment_non_member_404(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    stranger = users.add("stranger")
+    group = await chats.create_group(member_ids=[alice.user_id])
+    await svc.upload_attachment(
+        chat_id=group.id, user_id=alice.user_id, path="attachments/a", data=b"x"
+    )
+    with pytest.raises(NotFoundError):
+        await svc.download_attachment(
+            chat_id=group.id, user_id=stranger.user_id, path="attachments/a"
+        )
+
+
+async def test_download_attachment_missing_404(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    group = await chats.create_group(member_ids=[alice.user_id])
+    with pytest.raises(NotFoundError):
+        await svc.download_attachment(
+            chat_id=group.id, user_id=alice.user_id, path="attachments/missing.png"
+        )
+
+
+async def test_upload_attachment_traversal_rejected(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    svc, users, chats, *_ = _make()
+    alice = users.add("alice")
+    group = await chats.create_group(member_ids=[alice.user_id])
+    with pytest.raises(ValidationError):
+        await svc.upload_attachment(
+            chat_id=group.id,
+            user_id=alice.user_id,
+            path="../../escape.txt",
+            data=b"x",
+        )
+
+
+async def test_send_message_attachments_only_no_content(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    svc, users, _chats, _blocks, _directory, events = _make()
+    alice = users.add("alice")
+    bob = users.add("bob")
+    chat = (await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)).chat
+    att = [{"name": "pic.png", "path": "pic.png", "workspace_path": "attachments/x/pic.png"}]
+    msg = await svc.send_message(
+        chat_id=chat.id,
+        sender_id=alice.user_id,
+        content=None,
+        content_type="image",
+        attachments=att,
+    )
+    assert msg.content is None
+    assert msg.content_type == "image"
+    assert msg.attachments == att
+    # the realtime fan-out carries the attachments + content_type
+    _recipients, event = events.published[-1]
+    assert event["message"]["content_type"] == "image"
+    assert event["message"]["attachments"] == att

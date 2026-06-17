@@ -1,6 +1,6 @@
 # 消息 IM（找人）
 
-> **状态**：**P0（人 ↔ 人单聊）✅ + 内测全员群 MVP & 自助管理（退群/静音/置顶/成员面板）✅ 已落地**；⏳ 官方号推送、P1（已读 UI / 在线态 / 联系人 / 隐私设置面）、P2 余项（富消息 / 人+AI 混合群 / 通用建群 + 群审核）、多 worker 实时。
+> **状态**：**P0（人 ↔ 人单聊）✅ + 内测全员群 MVP & 自助管理（退群/静音/置顶/成员面板）& 审核治理 & 富消息（图/文件）✅ 已落地**；⏳ 官方号推送、P1（已读 UI / 在线态 / 联系人 / 隐私设置面）、P2 余项（通用建群 + 群审核；人+AI 混合群见远期规划）、多 worker 实时。
 >
 > **定位**：**对话页 = 找 AI，消息页 = 找人**——复用前端聊天内核 + 实时通道，IM 另开后端表。
 
@@ -12,7 +12,7 @@
 
 | 决策 | 内容 |
 |---|---|
-| 双入口分工 | 对话页找 AI（保留），消息页找人（IM 收件箱）。纯 AI 团队群聊归对话页；消息页承载「人 ↔ 人」「官方号」「人 + AI 混合群（后置）」 |
+| 双入口分工 | 对话页找 AI（保留），消息页找人（IM 收件箱）。纯 AI 团队群聊归对话页；消息页承载「人 ↔ 人」「官方号」「人 + AI 混合群（远期，见 [`../07-规划/远期规划.md` §4.1](/docs/07-规划/远期规划.md)）」 |
 | 复用边界 | 复用的是**前端组件 + 实时通道**，不是同一张表 |
 | 关系模型 | **任意搜人**：按用户名 / ID 精确搜到即可发起，非好友前置；配套隐私 / 反滥用护栏（§五） |
 | 实时通道 | **每用户一条 SSE firehose + POST 发送**（§四） |
@@ -25,8 +25,8 @@
 
 | 表 | 关键字段 | 说明 |
 |---|---|---|
-| `chats` | `type`(dm·group·official) / `title?` / `avatar_url?` / `created_by` / `last_message_at` / `last_message_preview` | IM 会话；`last_*` 供列表排序与预览 |
-| `chat_members` | (`chat_id`+`user_id`) / `role`(owner·admin·member) / `state`(accepted·pending) / `last_read_message_id` / `muted` / `pinned` | 参与者 + 每人会话态；`state=pending` 即陌生人「消息请求」门；`last_read_*` 推未读数 |
+| `chats` | `type`(dm·group·official) / `title?` / `avatar_url?` / `created_by` / `auto_join` / `last_message_at` / `last_message_preview` | IM 会话；`last_*` 供列表排序与预览；`auto_join=true` 标记「新用户默认入群」（内测全员群，见 §七） |
+| `chat_members` | (`chat_id`+`user_id`) / `role`(owner·admin·member) / `state`(accepted·pending) / `last_read_message_id` / `muted` / `muted_by_admin` / `pinned` | 参与者 + 每人会话态；`state=pending` 即陌生人「消息请求」门；`muted`=用户自静音、`muted_by_admin`=管理员禁言（可读不可发），二者区分；`last_read_*` 推未读数 |
 | `chat_messages` | `chat_id` / `sender_user_id?`(null=系统) / `sender_type`(user·official·agent) / `content?` / `content_type`(text·image·file·system_card) / `attachments` / `payload?` / `reply_to_message_id?` / `client_msg_id`(幂等去重) | 人向消息；`client_msg_id` 解断网重发去重；`system_card`+`payload` 承载官方号 deep-link |
 | `user_blocks` | (`user_id`+`blocked_user_id`) | 对称拉黑：断 DM + 双向搜索互隐 |
 | `user_directory_settings` | `discoverable`(默认 true) / `who_can_dm`(默认 anyone) | 隐私自决；缺行 = 可被搜到（开放为默认） |
@@ -66,11 +66,11 @@
 | 维度 | 现状 / 决策 |
 |---|---|
 | 布局 | 左 `ChatList`（会话列表 + 本地搜索 + `NewChatDialog` 搜人发起）+ 右 `ChatThread`（线程 + `ChatComposer`）；`/messages/:chatId` 深链，URL = 活动会话单一真相 |
-| 数据层 | `services/messaging.ts`（REST 客户端 + 错误中文映射）+ `stores/messaging.ts`（Zustand）；类型手写镜像后端 schema（项目当前未跑 OpenAPI codegen） |
+| 数据层 | `services/messaging.ts`（REST 客户端 + 错误中文映射）+ `stores/messaging.ts`（Zustand）；REST 类型由后端 OpenAPI 生成（`pnpm gen:api` → `types/api.generated.ts`），service 取别名引用（单一真相源 = `schemas.py`） |
 | 实时 | `services/realtime.ts` 消费 firehose，挂在 `AppShell`（**应用级、非页面级**）——故在对话页也能实时更新未读；事件喂 `applyIncoming`；每次（重）连触发离线补偿（重拉列表 + 重载当前线程，对齐 §四） |
-| 发送 | 乐观上屏 + `client_msg_id`，服务端回执去重（对齐 §三幂等） |
+| 发送 | 乐观上屏 + `client_msg_id`，服务端回执去重（对齐 §三幂等）；图/文件附件先 PUT 上传到 chat 空间得 `workspace_path`，再随消息引用（`content` 可与附件二选一） |
 | 未读角标 | 侧栏「消息」入口显总未读（`useUnreadTotal`，静音会话不计数）+ 列表行内每会话未读 |
-| 气泡 | P0 纯文本（**非 Markdown**，区别于 AI 对话气泡）；`system_card` 居中胶囊占位 |
+| 气泡 | 文字纯文本（**非 Markdown**，区别于 AI 对话气泡）；图片内联缩略图（走 blob 鉴权拉取）、其它文件下载卡片（富消息 ✅）；`system_card` 居中胶囊 |
 | 滚动 | 复用 `lib/useStickToBottom`（与对话页 `ChatView` 共享） |
 
 ## 七、未落地（⏳ 已确认设计）
@@ -79,7 +79,16 @@
 |---|---|
 | 官方号(C) 推送 | 表 / schema 已留 `type=official`·`sender_type=official`·`system_card`+`payload`；**推送路径（任务完成 / 审批 → 写官方号会话 → deep-link 跳回对话页）业务逻辑未接** |
 | P1 | 已读回执 UI、在线态 / 正在输入（走实时通道 + Redis TTL，不入库）、联系人收藏、隐私设置面板 |
-| P2 | **人群聊：内测全员群 MVP + 自助管理 + 审核治理 ✅ 已落地**（`type=group` + `auto_join` 默认进群 + 群线程/发送者名/群标识 + 退群/静音/置顶/成员面板 + 平台 admin 踢人/禁言/公告 + system_card 系统提示，见下方设计指针）；通用建群、富消息（图 / 文件复用工作区上传）、**人 + AI 混合群**（`@` 唤起 agent → 接 CEO 编排，消息页独有差异化形态）仍 ⏳ |
+| P2 | **人群聊：内测全员群 MVP + 自助管理 + 审核治理 + 富消息（图/文件）✅ 已落地**（`type=group` + `auto_join` 默认进群 + 群线程/发送者名/群标识 + 退群/静音/置顶/成员面板 + 平台 admin 踢人/禁言/公告 + system_card 系统提示 + 图/文件附件复用工作区存储，关键决策见下方）；通用建群 + 群审核仍 ⏳；**人 + AI 混合群**（`@` 唤起 agent → 接 CEO 编排，消息页独有差异化形态）已迁远期规划 → [`../07-规划/远期规划.md` §4.1](/docs/07-规划/远期规划.md) |
 | 多 worker 实时 | firehose / pub-sub 上 Redis / NATS（见 §四） |
 
-> 🗂️ 「人群聊」首个落地形态（内测全员反馈群，含默认进群机制）落地设计 → 见 [`../07-规划/全员反馈群落地设计.md`](/docs/07-规划/全员反馈群落地设计.md)
+> **内测全员群关键决策**（首个「人群聊」落地形态；原 `07-规划/全员反馈群落地设计.md` 落地后退役，「代码看不出来」的理由迁入）：
+>
+> | 决策 | 结论与理由 |
+> |---|---|
+> | 默认进群机制 | `chats.auto_join=true` 标记「新用户默认入群」（迁移建群 + 回填活跃用户、`pinned=true`）；自动入群**只在注册时触发**、登录不重灌——否则退群永远失效（「可退群」语义前提）。被否：单建 `beta_group` 表 / 存 `beta_group_id` 配置（一行配置不值得建表；`auto_join` 列自描述、可扩展、查询直接） |
+> | 治理权来源 | 平台 admin（`users.role='admin'`，即创始团队），非群级 `chat_members.role`——内测群无群主、零迁移、前端 `user.role==='admin'` 免扩 schema 门控；群级 `role` 列保留给后续用户自建群。被否：内测群指定群主/群管（多一次成员迁移 + 前端需新增 role 字段） |
+> | 禁言存储 | 新列 `chat_members.muted_by_admin`（不复用 `state`，避免污染 accepted/pending 消息请求门）；禁言=可读不可发（send 403），管理员豁免。被否：`state='muted'`（语义混淆） |
+> | 系统提示范围 | 只发**公告 + 踢人**（`system_card`，NULL sender=official 居中胶囊）；入群/退群/禁言**不发**全群提示（全员群每次注册自动入群会刷屏；禁言改发言时 403 toast）。原 `POST .../ban` 改名 `POST .../mute` 做 toggle |
+> | 群内隐私 | roster 暴露成员显示名（内测社区可接受）；`discoverable=false` 隐身**不掩盖**已在群内身份；群内被拉黑者消息 MVP 仍可见（客户端过滤为后续可选项） |
+> | 内测后归宿 | 转放量时该群保留 / 拆主题多群 / 关停 → 见 [`../07-规划/远期规划.md` §三](/docs/07-规划/远期规划.md) |

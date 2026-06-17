@@ -86,3 +86,44 @@ def test_events_after_close_are_not_journalled():
     journal = sink.execution_journal()
     assert journal is not None
     assert [e["type"] for e in journal] == [EventType.RUN_PLAN.value]
+
+
+def test_tool_use_end_carries_capped_display():
+    # 工具结果富渲染: a tool's structured display rides the event when present and is
+    # size-capped (it is journaled / persisted); an absent display omits the key.
+    plain = tool_use_end("t1", "file_read", success=True, output="ok")
+    assert "display" not in plain.payload
+
+    ev = tool_use_end(
+        "t2",
+        "code_execute",
+        success=True,
+        output="ok",
+        display={"stdout": "x" * 9000, "results": list(range(80)), "exit_code": 0},
+    )
+    d = ev.payload["display"]
+    assert d["stdout"].endswith("…")
+    assert len(d["stdout"]) == 6001  # _DISPLAY_STR_CAP (6000) + ellipsis
+    assert len(d["results"]) == 50  # _DISPLAY_LIST_CAP
+    assert d["exit_code"] == 0
+
+
+def test_process_timeline_resolves_tool_display():
+    # The single-agent process timeline folds the tool's display onto its step so a
+    # reloaded turn renders the same rich result.
+    sink = EventSink()
+    sink.emit(tool_use_start("t1", "web_search", {"query": "x"}))
+    sink.emit(
+        tool_use_end(
+            "t1",
+            "web_search",
+            success=True,
+            output="ok",
+            display={"query": "x", "results": [{"title": "A"}]},
+        )
+    )
+    timeline = sink.process_timeline()
+    assert timeline is not None
+    tool_step = next(s for s in timeline if s.get("kind") == "tool")
+    assert tool_step["status"] == "success"
+    assert tool_step["display"] == {"query": "x", "results": [{"title": "A"}]}

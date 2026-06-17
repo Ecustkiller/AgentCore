@@ -20,16 +20,19 @@ import {
   relative,
   resolve,
 } from "node:path";
-import ignore, { type Ignore } from "ignore";
-import JSZip from "jszip";
 import {
   FS_CHANNELS,
   type FilePreview,
   type FsCreateKind,
+  type FsEncoding,
   type FsEntry,
+  type FsEol,
   type FsFileRef,
   type FsResult,
   type FsRoot,
+  type FsTextFile,
+  type FsWriteInput,
+  type FsWriteResult,
   type WorkspaceOpName,
   type WorkspaceOpResult,
 } from "@shared/ipc-contract";
@@ -40,6 +43,8 @@ import {
   dialog,
   ipcMain,
 } from "electron";
+import ignore, { type Ignore } from "ignore";
+import JSZip from "jszip";
 
 export interface StoredRoot {
   id: string;
@@ -49,6 +54,7 @@ export interface StoredRoot {
 
 const TEXT_PREVIEW_CAP = 256 * 1024; // 文本预览最多读取/展示 256KB
 const IMAGE_PREVIEW_CAP = 10 * 1024 * 1024; // 图片超过 10MB 退化为元信息
+const EDIT_READ_MAX = 5 * 1024 * 1024; // 「读以编辑」整文入内存上限 5 MiB（超出不在面板内编辑）
 
 const LIST_FILES_CAP = 5000; // @ 提及检索：单根最多返回文件数
 const LIST_FILES_MAX_DEPTH = 12; // 递归最大深度，防极深目录
@@ -143,6 +149,19 @@ async function saveRoots(): Promise<void> {
 
 async function ensureReady(): Promise<void> {
   if (rootsReady) await rootsReady;
+}
+
+/**
+ * 按 id 取一个已授权根（含绝对路径），供 sidecar 模式把 `rootId` 解析成 `workspaceRoot`。
+ *
+ * 与 renderer 的 `{rootId, relPath}` 寻址同源（绝对路径只存在于主进程）；本地引擎
+ * （sidecar）跑在用户机器上，需要这个绝对路径作为绑定根。未授权 / 已移除返回 null。
+ */
+export async function getStoredRoot(
+  rootId: string,
+): Promise<StoredRoot | null> {
+  await ensureReady();
+  return roots.get(rootId) ?? null;
 }
 
 /** 把异常映射为对用户友好的中文原因。 */
@@ -309,6 +328,150 @@ async function readFile(
     }
   } catch (e) {
     return { ok: false, reason: toReason(e) };
+  }
+}
+
+// --- 文档编辑（CodeMirror 源码编辑器）读写：完整正文 + 写前 CAS ---
+//
+// 与预览路径分工：预览 readFile 截断 256KB 且判别图片/二进制；编辑必须拿到完整正文，
+// 截断后保存会丢尾，故走独立通道。编解码镜像参考实现：BOM/UTF-8/GBK 回退嗅探编码、
+// 按 NUL 字节判二进制、回写按原文 eol 还原换行。GBK 仅可读（回写需 iconv，暂不引依赖）。
+
+/** 前 8000 字节含 NUL 即判二进制（与服务端 / 参考实现一致）。 */
+function sniffBinary(buf: Buffer): boolean {
+  const n = Math.min(buf.length, 8000);
+  for (let i = 0; i < n; i++) {
+    if (buf[i] === 0) return true;
+  }
+  return false;
+}
+
+/** 解码：BOM → utf-8-bom；合法 UTF-8 → utf-8；否则按中文场景回退 GBK（仅可读）。 */
+function decodeText(buf: Buffer): { encoding: FsEncoding; text: string } {
+  if (
+    buf.length >= 3 &&
+    buf[0] === 0xef &&
+    buf[1] === 0xbb &&
+    buf[2] === 0xbf
+  ) {
+    return {
+      encoding: "utf-8-bom",
+      text: new TextDecoder("utf-8").decode(buf.subarray(3)),
+    };
+  }
+  try {
+    return {
+      encoding: "utf-8",
+      text: new TextDecoder("utf-8", { fatal: true }).decode(buf),
+    };
+  } catch {
+    return { encoding: "gbk", text: new TextDecoder("gbk").decode(buf) };
+  }
+}
+
+/** 编码：先规一化为 `\n`，再按 eol 还原；utf-8-bom 补 BOM。GBK 不在此处（已被拒写）。 */
+function encodeText(content: string, encoding: FsEncoding, eol: FsEol): Buffer {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const withEol =
+    eol === "crlf" ? normalized.replace(/\n/g, "\r\n") : normalized;
+  if (encoding === "utf-8-bom") {
+    return Buffer.concat([
+      Buffer.from([0xef, 0xbb, 0xbf]),
+      Buffer.from(withEol, "utf-8"),
+    ]);
+  }
+  return Buffer.from(withEol, "utf-8");
+}
+
+async function readTextFile(
+  rootId: string,
+  relPath: string,
+): Promise<FsResult<FsTextFile>> {
+  await ensureReady();
+  const loc = locate(rootId, relPath);
+  if ("error" in loc) return loc.error;
+  const real = await realInside(loc.root, loc.abs);
+  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
+  try {
+    const st = await fs.stat(real);
+    if (!st.isFile()) return { ok: false, reason: "不是文件" };
+    if (st.size > EDIT_READ_MAX) {
+      return { ok: false, reason: "文件过大，暂不支持在面板内编辑" };
+    }
+    const buf = await fs.readFile(real);
+    if (sniffBinary(buf)) return { ok: false, reason: "二进制文件，无法编辑" };
+    const { encoding, text } = decodeText(buf);
+    const eol: FsEol = text.includes("\r\n") ? "crlf" : "lf";
+    return {
+      ok: true,
+      data: {
+        content: text.replace(/\r\n/g, "\n"),
+        mtimeMs: st.mtimeMs,
+        encoding,
+        eol,
+      },
+    };
+  } catch (e) {
+    return { ok: false, reason: toReason(e) };
+  }
+}
+
+async function writeTextFile(
+  rootId: string,
+  relPath: string,
+  input: FsWriteInput,
+): Promise<FsWriteResult> {
+  await ensureReady();
+  // GBK 回写需 iconv 编码器（暂不引依赖）：拒写，避免把文件静默改成 UTF-8。
+  if (input.encoding === "gbk") {
+    return {
+      ok: false,
+      reason: "unsupported",
+      message: "GBK 文件回写暂未启用",
+    };
+  }
+  const root = roots.get(rootId);
+  if (!root)
+    return { ok: false, reason: "denied", message: "目录未授权或已移除" };
+  const target = await resolveWritable(root, relPath);
+  if (!target)
+    return { ok: false, reason: "denied", message: "路径越界，已拒绝" };
+  if (target === root.absPath) {
+    return { ok: false, reason: "error", message: "目标是目录" };
+  }
+
+  // 写前 CAS：现存文件比对 mtime（四舍五入避毫秒抖动）；不存在则按基线区分
+  // 「新建」（baseline 0）与「读过的文件已被删/移」（baseline>0 → 冲突，迫使重读）。
+  let cur: import("node:fs").Stats | null = null;
+  try {
+    cur = await fs.stat(target);
+  } catch {
+    cur = null;
+  }
+  if (cur) {
+    if (Math.round(cur.mtimeMs) !== Math.round(input.baselineMtimeMs)) {
+      return { ok: false, reason: "conflict", diskMtimeMs: cur.mtimeMs };
+    }
+  } else if (input.baselineMtimeMs !== 0) {
+    return { ok: false, reason: "conflict", diskMtimeMs: 0 };
+  }
+
+  const buf = encodeText(input.content, input.encoding, input.eol);
+  try {
+    await fs.mkdir(dirname(target), { recursive: true });
+    await atomicWrite(target, buf);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "EBUSY" || code === "EPERM" || code === "EACCES") {
+      return { ok: false, reason: "locked", message: toReason(e) };
+    }
+    return { ok: false, reason: "error", message: toReason(e) };
+  }
+  try {
+    const st = await fs.stat(target);
+    return { ok: true, mtimeMs: st.mtimeMs };
+  } catch (e) {
+    return { ok: false, reason: "error", message: toReason(e) };
   }
 }
 
@@ -672,9 +835,12 @@ async function opGrep(
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
   const baseReal = await realInside(root, baseAbs);
   if (!baseReal) return opErr("PathNotFound", directory);
+  let baseIsFile = false;
   try {
-    if (!(await fs.stat(baseReal)).isDirectory()) {
-      return opErr("NotADirectory", directory);
+    const st = await fs.stat(baseReal);
+    baseIsFile = st.isFile();
+    if (!st.isDirectory() && !st.isFile()) {
+      return opErr("PathNotFound", directory);
     }
   } catch {
     return opErr("PathNotFound", directory);
@@ -695,6 +861,51 @@ async function opGrep(
   let filesScanned = 0;
   let stop = false;
 
+  // Scan one file's lines into the accumulators; return true if a result cap is
+  // hit. Shared by the single-file fast path and the directory walk so both
+  // render identical hits / counts / truncation (mirrors ServerWorkspace).
+  const scanFile = async (absFile: string): Promise<boolean> => {
+    const text = await readTextSafe(absFile);
+    if (text === null) return false; // binary / too large / unreadable — skip
+    const rel = toPosix(relative(root.absPath, absFile));
+    let fileCount = 0;
+    let stopLocal = false;
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (!re.test(lines[i])) continue;
+      fileCount++;
+      totalMatches++;
+      if (!filesOnly) {
+        hits.push({ path: rel, line_no: i + 1, text: trimLine(lines[i]) });
+        if (hits.length >= maxResults) {
+          truncated = true;
+          stopLocal = true;
+          break;
+        }
+      }
+    }
+    if (fileCount > 0) {
+      fileCounts.push([rel, fileCount]);
+      if (filesOnly && fileCounts.length >= maxResults) {
+        truncated = true;
+        stopLocal = true;
+      }
+    }
+    return stopLocal;
+  };
+
+  // `directory` may name a single file (rg PATTERN FILE): scan just it, no walk.
+  // `glob` is moot — the file is already pinpointed.
+  if (baseIsFile) {
+    await scanFile(baseReal);
+    return opOk({
+      hits,
+      file_counts: fileCounts,
+      total_matches: totalMatches,
+      truncated,
+    });
+  }
+
   const walk = async (absDir: string): Promise<void> => {
     if (stop) return;
     let dirents: import("node:fs").Dirent[];
@@ -714,32 +925,7 @@ async function opGrep(
         stop = true;
         break;
       }
-      const absFile = join(absDir, d.name);
-      const text = await readTextSafe(absFile);
-      if (text === null) continue;
-      const rel = toPosix(relative(root.absPath, absFile));
-      let fileCount = 0;
-      const lines = text.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        if (!re.test(lines[i])) continue;
-        fileCount++;
-        totalMatches++;
-        if (!filesOnly) {
-          hits.push({ path: rel, line_no: i + 1, text: trimLine(lines[i]) });
-          if (hits.length >= maxResults) {
-            truncated = true;
-            stop = true;
-            break;
-          }
-        }
-      }
-      if (fileCount > 0) {
-        fileCounts.push([rel, fileCount]);
-        if (filesOnly && fileCounts.length >= maxResults) {
-          truncated = true;
-          stop = true;
-        }
-      }
+      stop = await scanFile(join(absDir, d.name));
       if (stop) break;
     }
     if (stop) return;
@@ -1449,6 +1635,18 @@ export function registerFsIpc(): void {
     FS_CHANNELS.readFile,
     (_e, p: { rootId: string; relPath: string }) =>
       readFile(p.rootId, p.relPath),
+  );
+
+  ipcMain.handle(
+    FS_CHANNELS.readTextFile,
+    (_e, p: { rootId: string; relPath: string }) =>
+      readTextFile(p.rootId, p.relPath),
+  );
+
+  ipcMain.handle(
+    FS_CHANNELS.writeFile,
+    (_e, p: { rootId: string; relPath: string; input: FsWriteInput }) =>
+      writeTextFile(p.rootId, p.relPath, p.input),
   );
 
   ipcMain.handle(

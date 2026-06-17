@@ -10,6 +10,7 @@ worker 执行器（runs.executor）、委派工具（tools.delegate）与回合�
 开关），因为 worker 的本地编号会在汇入回合卡时被重排，标注反而会误导。
 """
 
+import re
 from typing import Any
 
 # 每回合「来源」卡的上限——足够支撑任何答案，又不至于把卡片条堆成一堵墙。
@@ -80,3 +81,39 @@ def annotate_tool_citations(
     if not entries:
         return content
     return f"{content}{_CITATION_NUMBER_HINT}{' '.join(entries)}"
+
+
+# 客户端把正文里的 [n] 渲染成可点的来源角标，但只解析 1..来源数；越界的 [n]（模型
+# 引用了一个没有对应卡片的编号——多半是数错或想指上一轮的号）会被原样留成纯文本。
+# 服务端在 message_end 前用下面这支度量这种「引用了不存在来源」的发生率，正文不改。
+_MARKER_RE = re.compile(r"\[(\d+)\]")
+# 扫描前先抠掉代码块 / 行内代码 / Markdown 链接：里头的 [5]、[label](url) 是数组
+# 下标、代码样例或链接锚，不是引用角标（客户端渲染也跳过它们），抠掉以免误报越界。
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+_MD_LINK_RE = re.compile(r"\[[^\]]*\]\([^)]*\)")
+
+
+def out_of_range_markers(content: str, citation_count: int) -> list[int]:
+    """返回 ``content`` 正文里指向「不存在来源卡」的引用角标编号（升序去重）。
+
+    合法编号是 ``1..citation_count``（= 来源卡数）。返回 ``n < 1`` 或 ``n > 上限``
+    的那些——客户端只把 ``1..上限`` 渲染成可点角标、越界的留成纯文本，即模型引用了
+    一个没有卡片的编号。仅用于可观测度量，不改写正文（裸 ``[n]`` 未必是引用，且客户端
+    已优雅降级）。
+
+    扫描前抠掉代码块 / 行内代码 / Markdown 链接，镜像客户端 remark 插件的跳过规则，
+    避免把 ``arr[5]`` 这类下标误判成越界引用。裸正文里的 ``[5]`` 与客户端同样无法
+    区分是否引用，按客户端语义一并计入。
+    """
+    if not content:
+        return []
+    scannable = _FENCED_CODE_RE.sub(" ", content)
+    scannable = _INLINE_CODE_RE.sub(" ", scannable)
+    scannable = _MD_LINK_RE.sub(" ", scannable)
+    bad = {
+        n
+        for n in (int(x) for x in _MARKER_RE.findall(scannable))
+        if n < 1 or n > citation_count
+    }
+    return sorted(bad)

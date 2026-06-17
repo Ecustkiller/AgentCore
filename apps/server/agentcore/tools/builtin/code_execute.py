@@ -24,7 +24,11 @@ class CodeExecuteTool:
                 "在工作区目录中执行代码（支持 Python、JavaScript、Bash），可访问"
                 "工作区内的文件。视工作区模式而定，它可能【直接运行在用户自己的"
                 "机器上】（本地模式），而非服务器沙箱；因此除非确有必要，避免执行"
-                "破坏性或不可逆的命令。"
+                "破坏性或不可逆的命令。\n"
+                "用法要点：① 优先用 language=python 或 javascript 直接运行内联代码，"
+                "少用 bash 外壳——bash 在部分主机（如 Windows）可能不可用。② 代码的"
+                "工作目录就是工作区根目录，访问工作区文件请用相对路径（如 fib.py），"
+                "不要假设 /workspace 之类的绝对路径。"
             ),
             parameters={
                 "type": "object",
@@ -87,10 +91,21 @@ class CodeExecuteTool:
         if result.exit_code != 0:
             output += f"\n\n退出码：{result.exit_code}"
 
+        # Render-oriented twin of ``output`` (工具结果富渲染): the client shows a
+        # terminal-style view (stdout, stderr in red, exit-code badge) instead of
+        # the flattened "stdout:\n…\nstderr:\n…" text. Kept structured so failures
+        # (non-zero exit) surface stderr distinctly.
+        display = {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exit_code": result.exit_code,
+            "language": language,
+        }
         return ToolResult(
             tool_call_id="",
             success=result.success,
             output=output,
             error=None if result.success else f"退出码 {result.exit_code}",
             duration_ms=duration_ms,
+            display=display,
         )

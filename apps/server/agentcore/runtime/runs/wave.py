@@ -29,8 +29,9 @@ from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
 # The most nodes one wave dispatches at once. Ready nodes beyond this stay
-# pending and ride the next wave.
-DEFAULT_MAX_PARALLEL = 6
+# pending and ride the next wave. Kept in step with MAX_PARALLEL_DELEGATIONS (the
+# tree-wide budget) so neither alone re-bottlenecks a wide fan-out.
+DEFAULT_MAX_PARALLEL = 8
 
 
 class WaveScheduler:

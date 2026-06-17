@@ -14,7 +14,7 @@ import {
   useRenameConversation,
   useTogglePin,
 } from "@/hooks/useConversations";
-import { useCreateFolder, useFolders } from "@/hooks/useFolders";
+import { useFolders } from "@/hooks/useFolders";
 import { notifyError } from "@/lib/toast";
 import { useApprovalStore } from "@/stores/approvals";
 import {
@@ -23,12 +23,10 @@ import {
   useConversationGenerating,
   useConversationStore,
 } from "@/stores/conversation";
-import { useFoldersStore } from "@/stores/folders";
 import {
   Archive,
   Check,
   Folder,
-  FolderPlus,
   Inbox,
   Lock,
   Pencil,
@@ -61,7 +59,6 @@ export function ConversationItem({ conversation }: Props) {
   const deleteMutation = useDeleteConversation();
   const pinMutation = useTogglePin();
   const archiveMutation = useArchiveConversation();
-  const createFolderMutation = useCreateFolder();
   const folders = useFolders();
   const isGenerating = useConversationGenerating(conversation.id);
   // A conversation's workspace is fixed once it starts (双模式工作区 §九 ⑩): its
@@ -156,19 +153,6 @@ export function ConversationItem({ conversation }: Props) {
   const moveTo = (folderId: string | null) => {
     if (folderId === currentFolderId) return;
     moveMutation.mutate({ id: conversation.id, folderId });
-  };
-
-  const moveToNewFolder = async () => {
-    try {
-      const folder = await createFolderMutation.mutateAsync({
-        name: "新建文件夹",
-      });
-      // Open the new folder's header in rename mode so the user can name it.
-      useFoldersStore.getState().setPendingRename(folder.id);
-      moveMutation.mutate({ id: conversation.id, folderId: folder.id });
-    } catch {
-      /* leave the conversation where it was; the folder create failed */
-    }
   };
 
   if (editing) {
@@ -361,16 +345,22 @@ export function ConversationItem({ conversation }: Props) {
             {conversation.pinned ? "取消置顶" : "置顶"}
           </span>
         </ContextMenuItem>
-        <ContextMenuSeparator />
         {workspaceLocked ? (
           // Started chat: its workspace is pinned to its current folder, so the
           // move actions are replaced by an explanatory locked hint (§九 ⑩).
-          <ContextMenuItem disabled>
-            <Lock size={14} className="shrink-0" />
-            <span className="flex-1 truncate">开始后不可更换工作区</span>
-          </ContextMenuItem>
-        ) : (
           <>
+            <ContextMenuSeparator />
+            <ContextMenuItem disabled>
+              <Lock size={14} className="shrink-0" />
+              <span className="flex-1 truncate">开始后不可更换工作区</span>
+            </ContextMenuItem>
+          </>
+        ) : folders.length > 0 || currentFolderId ? (
+          // Filing into an *existing* folder only — folder creation lives on the
+          // 文件 hub now (文件夹即工作区), so there's no "新建文件夹" entry here. With
+          // no folders yet, the whole "移到" section is hidden (nothing to file into).
+          <>
+            <ContextMenuSeparator />
             <ContextMenuLabel>移到</ContextMenuLabel>
             <div className="max-h-52 overflow-y-auto">
               {folders.map((f) => (
@@ -389,12 +379,8 @@ export function ConversationItem({ conversation }: Props) {
                 <span className="flex-1 truncate">移出文件夹</span>
               </ContextMenuItem>
             )}
-            <ContextMenuItem onSelect={() => void moveToNewFolder()}>
-              <FolderPlus size={14} className="shrink-0" />
-              <span className="flex-1 truncate">新建文件夹…</span>
-            </ContextMenuItem>
           </>
-        )}
+        ) : null}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => void handleArchive()}>
           <Archive size={14} className="shrink-0" />

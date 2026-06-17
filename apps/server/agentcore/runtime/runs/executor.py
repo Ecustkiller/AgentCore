@@ -37,9 +37,14 @@ from agentcore.runtime.events import (
     run_output_delta,
     run_reasoning_delta,
     run_started,
+    run_tool_progress,
+    tool_progress,
 )
 from agentcore.runtime.runs.constants import (
     DEFAULT_CONTRACT_RETRIES,
+    DEP_CONTEXT_BUDGET,
+    DEP_SUMMARY_CHARS,
+    ESCALATE_TOOL_NAME,
     MAX_CONTRACT_RETRIES,
     MAX_DELEGATION_DEPTH,
 )
@@ -51,6 +56,10 @@ from agentcore.runtime.runs.contract import (
 )
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
+from agentcore.runtime.runs.serialize import (
+    escalations_from_transcript,
+    files_touched_from_transcript,
+)
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import RunContract, RunPhase, RunSpec, RunState
 from agentcore.runtime.suspension import captain_transcript
@@ -66,40 +75,58 @@ DelegateFactory = Callable[[str, int], Tool]
 
 logger = get_logger(__name__)
 
-# Hard cap on a pass_through upstream product injected into a downstream prompt,
-# so a long upstream answer can't blow the dependent's context window. A node
-# whose policy declares ``result_handling="summarize"`` gets a tight summary
-# instead.
-_DEP_PASS_THROUGH_CAP = 4000
+# The deliverable-form policy shared by every delegated worker (leaf + captain).
+# It is the hinge that decides whether a product is PROSE (written as the text
+# answer) or a FILE ARTIFACT (persisted to the workspace via file_write). The
+# earlier identity only said "your text output is shown to the user", which steered
+# workers to PASTE file deliverables — runnable code, whole HTML apps, docs — inline
+# as one giant chat message and call no tools, so a "build a runnable HTML file"
+# task produced a 46k-char reply and ZERO files on disk (nothing for the user to
+# open / run, and nothing the workspace snapshot / FileBrowser could surface). The
+# split is stated explicitly so a file deliverable actually lands in the workspace.
+_WORKER_DELIVERABLE_POLICY = """\
+分清你的交付【形态】，用对的方式交付：
+- 交付物是【可独立阅读的文字】（分析、审查意见、设计 / 调研说明、解释、问答）时，直接\
+作为你的文字产出写出来，自包含、完整准确。
+- 交付物是【文件 / 产物】（可运行代码 / 网页 / 应用、脚本、配置、数据文件、多文件工程，\
+或任何用户要打开 / 运行 / 编辑 / 保存的东西，或任务要求「产出文件」）时，你【必须】调用 \
+file_write 把它真正写进工作区，而不是把整份内容粘在回复正文里；此时正文只简短交代：改了\
+哪些文件（给路径）、怎么运行、关键取舍，不要再整份粘贴文件内容。只贴在聊天里的代码不算交付。
+
+直接以产出本身开头，别写「我来为你生成…」「我是一个 agent」之类开场白或元叙述。你的文字\
+产出会直接展示给用户、也回流给主 Agent 整合，故要完整、准确、可独立阅读；任务附带产出\
+要求就逐条满足。"""
 
 # Prepended to every delegated worker's system prompt (right after the shared
-# base). A worker runs in an isolated context with one scoped task, no chance to
-# ask follow-ups, and no `delegate` tool — stated explicitly so it makes a
+# base). A leaf worker runs in an isolated context with one scoped task, no chance
+# to ask follow-ups, and no `delegate` tool — stated explicitly so it makes a
 # reasonable assumption and delivers, instead of punting with a clarifying
-# question it can never get answered. It is also told its product is shown to the
-# user directly (drillable in the UI) and flows back to the CEO, to motivate
-# self-contained, user-ready quality rather than writing only for the CEO.
-_WORKER_IDENTITY = """\
+# question it can never get answered. The shared deliverable policy then pins
+# prose-vs-file so a file deliverable lands in the workspace, not in the chat.
+_WORKER_IDENTITY = f"""\
 你是团队中的一名专家 worker。你只负责一个划定好的任务，外加完成它所需的上下文；\
-你不会有机会追问澄清，也不能再向下委派。如果某处信息不足，就做出最合理的假设、\
-简短说明，然后照常交付你的最佳结果。直接以任务要求的产出开头，保持自包含，不要写\
-“我是一个 agent”之类的元叙述。你的完整产出会在界面上直接展示给用户、也会回流给\
-主 Agent 整合，因此要完整、准确、可独立阅读；若任务附带了产出要求，逐条满足。"""
+你不能再向下委派。信息不足时，默认做出最合理的假设、简短说明，然后照常交付最佳结果——\
+不要为小事停下。只有遇到【必须由上级拍板的关键岔路】或【缺了就会让整件事走偏的信息】时，\
+才调用 escalate 把这个待决问题上报给主管（你够不到用户，这是你唯一的向上通道）；escalate \
+不会打断你、也不是停工——上报后仍按你当下最合理的假设把任务做完，主管会在你的产物之上纠偏。
+
+{_WORKER_DELIVERABLE_POLICY}"""
 
 # Variant identity for a worker that opted into one nested delegation level
 # (``can_delegate`` and still above the depth cap). Unlike the leaf worker it MAY
 # call ``delegate`` once to split its task across a small sub-team it commands —
 # but only when the work genuinely needs it, and its own sub-workers cannot
-# delegate further (the executor withholds the tool from them).
-_WORKER_CAPTAIN_IDENTITY = """\
+# delegate further (the executor withholds the tool from them). Same deliverable
+# policy: whatever it ultimately produces follows the prose-vs-file split.
+_WORKER_CAPTAIN_IDENTITY = f"""\
 你是团队中的一名专家 worker，并且被额外授权可以再向下委派一层子团队。你负责一个划定\
-好的任务，外加完成它所需的上下文；你不会有机会追问澄清。如果这个任务复杂到需要进一步\
+好的任务，外加完成它所需的上下文；你够不到用户、不会有人实时答疑。如果这个任务复杂到需要进一步\
 拆分，你可以调用 delegate 把它拆给一支由你指挥的子团队（只能再嵌套这一层，你的子成员\
 不能再向下委派），看到他们的产出后由你整合；若任务并不需要拆分，就自己直接完成，不要\
-为委派而委派。信息不足时做出最合理的假设、简短说明，然后照常交付。直接以任务要求的产\
-出开头，保持自包含，不要写“我是一个 agent”之类的元叙述。你的完整产出会在界面上直接\
-展示给用户、也会回流给主 Agent 整合，因此要完整、准确、可独立阅读；若任务附带了产出\
-要求，逐条满足。"""
+为委派而委派。信息不足时做出最合理的假设、简短说明，然后照常交付；只有遇到必须由上级\
+拍板的关键岔路，才用 escalate 上报给主管（你够不到用户），上报后仍按假设照常把活做完。
+
+{_WORKER_DELIVERABLE_POLICY}"""
 
 
 def build_agent_executor(
@@ -158,12 +185,23 @@ def build_agent_executor(
         )
         start = time.monotonic()
         contract = spec.policy.contract
+        # Hoisted out of the try so a hard exception can still bill what this run
+        # already spent (B-deep 失败计费): ``run_usage``/``run_rounds`` accumulate the
+        # completed contract-retry attempts, ``inflight`` mirrors the in-flight pass's
+        # spend (filled by react_loop, read only if that pass raises), and
+        # ``priced_model`` is the tier to price against once the profile resolves
+        # (None before that → an early setup failure carries no usage to price).
+        run_usage = TokenUsage()
+        run_rounds = 0
+        inflight: list[TokenUsage] = []
+        priced_model: str | None = None
         try:
             profile = apply_overrides(
                 profiles.agent(spec.model_preference),
                 thinking=spec.thinking,
                 reasoning_effort=spec.reasoning_effort,
             )
+            priced_model = profile.model
             tool_ctx = replace(
                 base_tool_context,
                 run_id=spec.run_id,
@@ -175,6 +213,8 @@ def build_agent_executor(
             # (one extra level) and is told so via the captain identity. Otherwise
             # it is a leaf worker on the shared registry with no delegate.
             worker_tools = tools
+            # spec.tools is None for an unrestricted worker → react_loop offers all
+            # team tools (the fail-safe default); a non-empty list restricts to those.
             allowed_tools = spec.tools
             identity = _WORKER_IDENTITY
             if (
@@ -184,14 +224,25 @@ def build_agent_executor(
             ):
                 child_delegate = delegate_factory(spec.run_id, spec.depth)
                 worker_tools = _registry_with(tools, child_delegate)
-                allowed_tools = [*spec.tools, child_delegate.schema.name]
+                # Unrestricted (None) stays None — the delegate now lives in
+                # worker_tools, so "offer all" already includes it. A restricted list
+                # must explicitly gain the delegate name to keep it callable.
+                allowed_tools = (
+                    None
+                    if spec.tools is None
+                    else [*spec.tools, child_delegate.schema.name]
+                )
                 identity = _WORKER_CAPTAIN_IDENTITY
+            # escalate is a worker's always-available upward channel — a safety primitive,
+            # not a capability the CEO restricts away. An unrestricted worker (None) is
+            # already offered it; a least-privilege worker (non-empty allow-list) must
+            # keep it explicitly, so it can still flag a blocker instead of guessing.
+            if allowed_tools is not None and ESCALATE_TOOL_NAME not in allowed_tools:
+                allowed_tools = [*allowed_tools, ESCALATE_TOOL_NAME]
             # Produce → check contract → re-prompt with the specific shortfalls.
             # This content-quality retry is intentionally separate from the
             # scheduler's infra-failure retry (RunPolicy.on_failure): they answer
             # different questions and must not be conflated.
-            run_usage = TokenUsage()
-            run_rounds = 0
             content = ""
             verdict = ContractVerdict(ok=True)
             # Web sources this worker consults, de-duped across contract retries.
@@ -222,10 +273,21 @@ def build_agent_executor(
                     agent_id=agent_id,
                     citation_sink=worker_citations,
                     approval_gate=approval_gate,
+                    usage_sink=inflight,
                 )
                 run_usage = run_usage + round_usage
                 run_rounds += round_rounds
-                verdict = check_contract(content, contract)
+                # This pass's usage is now folded into run_usage via its return value;
+                # drop the mirror so a later non-react raise can't double-count it.
+                inflight.clear()
+                # files_written backs the contract's requires_files gate: derived
+                # from this transcript's file-tool calls so a file deliverable that
+                # was only pasted into the reply (never written) fails and reworks.
+                verdict = check_contract(
+                    content,
+                    contract,
+                    files_written=len(files_touched_from_transcript(messages)),
+                )
                 if verdict.ok or attempt == attempts - 1:
                     break
                 messages.append(_retry_message(format_feedback(verdict)))
@@ -243,6 +305,11 @@ def build_agent_executor(
             # run still shows what it已花费.
             usage = run_usage.as_dict()
             cost = asdict(calculate_cost(profile.model, run_usage))
+            # Upward escalations this worker raised (escalate tool calls), harvested
+            # once from the transcript and carried on BOTH terminal states — a worker
+            # that flags a blocker then fails its contract should still surface that
+            # blocker to the CEO.
+            escalations = escalations_from_transcript(messages)
             if not verdict.ok and _is_hard_failure(content, contract):
                 reason = "；".join(verdict.failures)
                 logger.info("contract.failed", run_id=spec.run_id, failures=verdict.failures)
@@ -251,6 +318,7 @@ def build_agent_executor(
                     phase=RunPhase.FAILED,
                     content=content,
                     error=reason,
+                    escalations=escalations,
                     citations=worker_citations,
                     model=profile.model,
                     duration_ms=duration_ms,
@@ -277,19 +345,32 @@ def build_agent_executor(
                 phase=RunPhase.COMPLETED,
                 content=content,
                 warnings=[] if verdict.ok else list(verdict.failures),
+                escalations=escalations,
                 citations=worker_citations,
                 model=profile.model,
                 duration_ms=duration_ms,
                 rounds=run_rounds,
+                files_touched=files_touched_from_transcript(messages),
                 usage=usage,
                 cost=cost,
                 transcript=messages,
             )
         except Exception as e:  # noqa: BLE001 — surface any run failure to UI/state
             duration_ms = int((time.monotonic() - start) * 1000)
+            # Bill the rounds that completed before the failure: finished attempts are
+            # already in run_usage; an in-flight pass that raised left its spend in
+            # ``inflight`` (B-deep 失败计费).
+            if inflight:
+                run_usage = run_usage + inflight[0]
             logger.error("run.failed", run_id=spec.run_id, error=str(e), exc_info=True)
             sink.emit(run_failed(spec.run_id, agent_id, str(e)))
-            return RunState(phase=RunPhase.FAILED, error=str(e), duration_ms=duration_ms)
+            return _priced_failure(
+                str(e),
+                model=priced_model,
+                usage=run_usage,
+                rounds=run_rounds,
+                duration_ms=duration_ms,
+            )
 
     async def execute(spec: RunSpec, completed: Mapping[str, RunState]) -> RunState:
         # Bind this worker's identity so EVERY log emitted under it (tool.execute_end,
@@ -427,6 +508,11 @@ async def _drive_captain_loop(
     sink.emit(run_started(spec.run_id, agent_id, parent_run_id=None, kind=spec.kind))
     start = time.monotonic()
     token = captain_transcript.set(messages)
+    # Mirrors the loop's cumulative spend so a hard captain failure still bills the
+    # rounds that completed (B-deep 失败计费). NB: the captain runs raise_on_error=False,
+    # so an LLM error RETURNS partial usage (priced on the COMPLETED path below); this
+    # except only catches non-LLM crashes, where the mirror is the only record left.
+    inflight: list[TokenUsage] = []
     try:
         content, reasoning, usage, rounds = await react_loop(
             messages=messages,
@@ -435,9 +521,14 @@ async def _drive_captain_loop(
             sink=sink,
             tool_context=tool_ctx,
             profile=profile,
+            # The captain's content/reasoning stream to the bubble (engine defaults);
+            # its tool-call ARGUMENT assembly (the big delegate 任务书, composed before
+            # run_plan exists) rides a bubble-scoped tool_progress so it isn't invisible.
+            on_tool_progress=lambda tool, chars: sink.emit(tool_progress(tool, chars)),
             citation_sink=citation_sink,
             annotate_citations=True,
             approval_gate=approval_gate,
+            usage_sink=inflight,
         )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage_dict = usage.as_dict()
@@ -466,9 +557,16 @@ async def _drive_captain_loop(
         )
     except Exception as e:  # noqa: BLE001 — surface any captain failure to UI/state
         duration_ms = int((time.monotonic() - start) * 1000)
+        partial = inflight[0] if inflight else TokenUsage()
         logger.error("run.captain_failed", run_id=spec.run_id, error=str(e), exc_info=True)
         sink.emit(run_failed(spec.run_id, agent_id, str(e)))
-        return RunState(phase=RunPhase.FAILED, error=str(e), duration_ms=duration_ms)
+        return _priced_failure(
+            str(e),
+            model=profile.model,
+            usage=partial,
+            rounds=0,
+            duration_ms=duration_ms,
+        )
     finally:
         captain_transcript.reset(token)
 
@@ -482,6 +580,37 @@ def _registry_with(base: ToolRegistry, extra: Tool) -> ToolRegistry:
         registry.register(base.get(schema.name))
     registry.register(extra)
     return registry
+
+
+def _priced_failure(
+    error: str,
+    *,
+    model: str | None,
+    usage: TokenUsage,
+    rounds: int,
+    duration_ms: int,
+) -> RunState:
+    """A FAILED RunState that still carries the tokens the run spent before it died.
+
+    B-deep 失败计费: a hard exception used to drop a run's already-consumed usage —
+    it lived only inside the ``try`` — so a worker that failed on round 4 under-billed
+    rounds 1–3 (real spend on DeepSeek's side, invisible in the ledger). The
+    accumulated ``usage`` is priced here exactly once (via ``calculate_cost``) so a
+    failed-but-metered run produces a ledger row like any other run. ``usage``/``cost``
+    are left empty when nothing was spent (run failed before any LLM call, or before
+    the model tier resolved), so the per-run accumulator's ``if state.usage`` guard
+    still skips a never-metered failure — no spurious zero rows.
+    """
+    has_usage = bool(usage.input_tokens or usage.output_tokens)
+    return RunState(
+        phase=RunPhase.FAILED,
+        error=error,
+        model=model or "",
+        duration_ms=duration_ms,
+        rounds=rounds,
+        usage=usage.as_dict() if has_usage else {},
+        cost=asdict(calculate_cost(model, usage)) if (model and has_usage) else {},
+    )
 
 
 def _is_hard_failure(content: str, contract: RunContract | None) -> bool:
@@ -522,14 +651,13 @@ def _build_messages(
 
     user_parts: list[str] = [f"## 原始用户请求\n{user_message}"]
     if spec.sibling_summary:
-        user_parts.append(f"## 同时进行的其他任务\n{spec.sibling_summary}")
-    for dep_id in spec.depends_on:
-        dep_state = completed.get(dep_id)
-        if not dep_state or not dep_state.content:
-            continue
-        dep_spec = plan.by_id(dep_id)
-        label = dep_spec.role if dep_spec and dep_spec.role else dep_id
-        user_parts.append(f"## 前置结果（来自 {label}）\n{_dep_body(dep_spec, dep_state.content)}")
+        user_parts.append(
+            "## 同时进行的其他任务（队员正并行处理，你拿不到他们的产物；"
+            "据此划清职责边界，别与他们重复劳动，也别留下衔接空缺）\n"
+            + spec.sibling_summary
+        )
+    for label, body in _dep_context_blocks(plan, spec.depends_on, completed):
+        user_parts.append(f"## 前置结果（来自 {label}）\n{body}")
     user_parts.append(f"## 你的任务\n{spec.task}")
     if spec.expected_output:
         user_parts.append(f"## 预期产出\n{spec.expected_output}")
@@ -550,14 +678,85 @@ def _build_messages(
     ]
 
 
-def _dep_body(dep_spec: RunSpec | None, content: str) -> str:
-    """Size an upstream product for injection: a tight summary when the dep
-    declared ``result_handling="summarize"``, else pass_through with a hard cap."""
-    if dep_spec and dep_spec.policy.result_handling == "summarize":
-        return summarize(content, limit=600)
-    if len(content) > _DEP_PASS_THROUGH_CAP:
-        return content[:_DEP_PASS_THROUGH_CAP].rstrip() + "…"
-    return content
+def _dep_context_blocks(
+    plan: RunPlan, depends_on: list[str], completed: Mapping[str, RunState]
+) -> list[tuple[str, str]]:
+    """Render each upstream dependency's product into a ``(label, body)`` block.
+
+    Two fidelity policies, by the dep's ``result_handling``:
+
+    - ``summarize`` deps get a tight head digest (``DEP_SUMMARY_CHARS``), the
+      large-fan-in token-saving case; they don't draw on the pass_through budget.
+    - ``pass_through`` deps (the default, for 分析/检索→写作 链路 where 金额 / 法条编号
+      must survive) SHARE one per-worker total budget (``DEP_CONTEXT_BUDGET``),
+      water-filled across them (:func:`_allocate`) so a single rich upstream passes
+      through whole while a wide fan-in stays bounded instead of multiplying. A dep
+      that still overflows its share is HEAD+TAIL trimmed (:func:`_truncate_head_tail`)
+      so its tail isn't silently dropped.
+
+    Order follows ``depends_on``; deps with no terminal content are skipped."""
+    deps: list[tuple[str, str, bool]] = []  # (label, content, summarize_it)
+    for dep_id in depends_on:
+        state = completed.get(dep_id)
+        if not state or not state.content:
+            continue
+        dep_spec = plan.by_id(dep_id)
+        label = dep_spec.role if dep_spec and dep_spec.role else dep_id
+        summarize_it = bool(dep_spec and dep_spec.policy.result_handling == "summarize")
+        deps.append((label, state.content, summarize_it))
+
+    allowances = iter(
+        _allocate([len(c) for (_, c, s) in deps if not s], DEP_CONTEXT_BUDGET)
+    )
+    blocks: list[tuple[str, str]] = []
+    for label, content, summarize_it in deps:
+        body = (
+            summarize(content, limit=DEP_SUMMARY_CHARS)
+            if summarize_it
+            else _truncate_head_tail(content, next(allowances))
+        )
+        blocks.append((label, body))
+    return blocks
+
+
+def _allocate(sizes: list[int], budget: int) -> list[int]:
+    """Fair-share ``budget`` across items of the given ``sizes`` (water-filling).
+
+    Processing smallest-first, each item gets ``min(its size, an equal split of the
+    budget still left)``: a small dep claims only what it needs and frees the rest,
+    which redistributes to the larger deps — so the budget is used fully and a lone
+    pass_through dep gets the whole of it. Returns a per-item char allowance in the
+    INPUT order. ``[]`` for no items."""
+    n = len(sizes)
+    if n == 0:
+        return []
+    allowances = [0] * n
+    remaining = budget
+    # Smallest-first so a dep that needs less than its equal share frees the
+    # remainder for the larger ones (classic water-filling).
+    for rank, i in enumerate(sorted(range(n), key=lambda i: sizes[i])):
+        share = remaining // (n - rank)
+        allowances[i] = min(sizes[i], share)
+        remaining -= allowances[i]
+    return allowances
+
+
+def _truncate_head_tail(content: str, limit: int) -> str:
+    """Trim ``content`` to ``limit`` chars keeping BOTH ends with an elision marker
+    between, so trailing details (金额 / 法条编号) survive — a head-only cut would
+    silently drop them. Returns ``content`` unchanged when it already fits, ""
+    when ``limit <= 0``."""
+    if limit <= 0:
+        return ""
+    if len(content) <= limit:
+        return content
+    marker = "\n\n……（中间省略，已保留首尾）……\n\n"
+    keep = limit - len(marker)
+    if keep <= 0:
+        return content[:limit].rstrip() + "…"
+    head = keep * 3 // 5  # bias to the head (framing) while still keeping a real tail
+    tail = keep - head
+    return content[:head].rstrip() + marker + content[len(content) - tail :].lstrip()
 
 
 async def _react_and_capture(
@@ -568,11 +767,12 @@ async def _react_and_capture(
     sink: EventSink,
     tool_ctx: ToolContext,
     profile: ModelProfile,
-    allowed_tools: list[str],
+    allowed_tools: list[str] | None,
     run_id: str,
     agent_id: str,
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None,
+    usage_sink: list[TokenUsage] | None = None,
 ) -> tuple[str, TokenUsage, int]:
     """Run one ReAct pass over ``messages`` (mutated in place — the loop appends
     each assistant tool-call turn + tool results), then append the final assistant
@@ -581,7 +781,11 @@ async def _react_and_capture(
     This is the shared core of both the initial worker run and a 续写 (auto-rework /
     revise): ``react_loop`` returns the final no-tool answer WITHOUT appending it
     (engine returns before the append), so we add it here — making ``messages`` a
-    complete, replayable transcript for capture and continuation."""
+    complete, replayable transcript for capture and continuation.
+
+    ``usage_sink`` is forwarded to the loop so that when this pass raises (workers
+    run with ``raise_on_error=True``), the caller can still read the tokens spent on
+    the rounds that completed before the failure (B-deep 失败计费)."""
     content, _reasoning, usage, rounds = await react_loop(
         messages=messages,
         llm=llm,
@@ -592,10 +796,14 @@ async def _react_and_capture(
         allowed_tool_names=allowed_tools,
         on_content=lambda d: sink.emit(run_output_delta(run_id, agent_id, d)),
         on_reasoning=lambda d: sink.emit(run_reasoning_delta(run_id, agent_id, d)),
+        on_tool_progress=lambda tool, chars: sink.emit(
+            run_tool_progress(run_id, agent_id, tool, chars)
+        ),
         raise_on_error=True,
         citation_sink=citation_sink,
         annotate_citations=False,
         approval_gate=approval_gate,
+        usage_sink=usage_sink,
     )
     messages.append(LLMMessage(role="assistant", content=content))
     return content, usage, rounds
@@ -697,12 +905,18 @@ async def _continue_run_scoped(
         )
     )
     start = time.monotonic()
+    # Mirror the continuation's spend so a hard failure still bills it (B-deep 失败
+    # 计费); priced_model stays None until the profile resolves (an early setup failure
+    # carries no usage to price).
+    inflight: list[TokenUsage] = []
+    priced_model: str | None = None
     try:
         profile = apply_overrides(
             profiles.agent(spec.model_preference),
             thinking=spec.thinking,
             reasoning_effort=spec.reasoning_effort,
         )
+        priced_model = profile.model
         tool_ctx = replace(
             base_tool_context,
             run_id=revision_run_id,
@@ -726,11 +940,19 @@ async def _continue_run_scoped(
             agent_id=agent_id,
             citation_sink=citations,
             approval_gate=approval_gate,
+            usage_sink=inflight,
         )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage = round_usage.as_dict()
         cost = asdict(calculate_cost(profile.model, round_usage))
-        verdict = check_contract(content, spec.policy.contract)
+        # files_written counts the whole continued transcript (original draft + this
+        # revision), so a requires_files contract isn't spuriously flagged when the
+        # recall edits prose around files the first pass already wrote.
+        verdict = check_contract(
+            content,
+            spec.policy.contract,
+            files_written=len(files_touched_from_transcript(messages)),
+        )
         sink.emit(
             run_completed(
                 revision_run_id,
@@ -751,12 +973,20 @@ async def _continue_run_scoped(
             model=profile.model,
             duration_ms=duration_ms,
             rounds=round_rounds,
+            files_touched=files_touched_from_transcript(messages),
             usage=usage,
             cost=cost,
             transcript=messages,
         )
     except Exception as e:  # noqa: BLE001 — surface any revision failure to UI/state
         duration_ms = int((time.monotonic() - start) * 1000)
+        partial = inflight[0] if inflight else TokenUsage()
         logger.error("run.revise_failed", run_id=revision_run_id, error=str(e), exc_info=True)
         sink.emit(run_failed(revision_run_id, agent_id, str(e)))
-        return RunState(phase=RunPhase.FAILED, error=str(e), duration_ms=duration_ms)
+        return _priced_failure(
+            str(e),
+            model=priced_model,
+            usage=partial,
+            rounds=0,
+            duration_ms=duration_ms,
+        )

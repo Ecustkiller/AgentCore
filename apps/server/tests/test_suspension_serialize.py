@@ -136,8 +136,10 @@ def test_turn_suspension_full_frame_round_trips():
     assert [n.run_id for n in restored.plan.nodes] == ["del_abc_1", "del_abc_2"]
     assert set(restored.completed) == {"del_abc_1"}
     assert restored.completed["del_abc_1"].content == "worker 产出"
-    # journal / steps / pending carried for graph replay + card re-render.
-    assert restored.journal[0]["type"] == "run_plan"
+    # steps / pending carried for card re-render; the journal is NOT serialized into
+    # the frame — it lives in turn_journal (§18.3), hydrated separately on claim.
+    assert "journal" not in frame.to_json()
+    assert restored.journal == []
     assert restored.steps[0]["run_id"] == "del_abc_1"
     assert restored.pending[0]["run_id"] == "del_abc_2"
     # the reviewed checkpoint roots an adjust steer scopes to.
@@ -171,10 +173,20 @@ def test_ask_user_suspension_round_trips():
         base_system_prompt="base sys",
         user_message="帮我选",
         transcript=transcript,
-        question="A 还是 B?",
-        options=["A", "B"],
+        question="按这个计划开做？",
         context="两者代价不同",
-        multiple=True,
+        assumptions=[{"id": "a0", "label": "部署", "value": "纯静态"}],
+        questions=[
+            {
+                "id": "q0",
+                "prompt": "A 还是 B?",
+                "kind": "choice",
+                "options": ["A", "B"],
+                "multiple": True,
+                "default": "",
+            }
+        ],
+        style_options=[{"id": "s0", "label": "深色科技"}],
         journal=[{"type": "checkpoint_required", "payload": {}, "timestamp": "t"}],
         trace_id="trace456",
     )
@@ -185,13 +197,18 @@ def test_ask_user_suspension_round_trips():
     assert restored.kind is SuspensionKind.ASK_USER
     assert restored.message_id == "m2"
     assert restored.tool_call_id == "call_ask_1"
-    assert restored.question == "A 还是 B?"
-    assert restored.options == ["A", "B"]
+    assert restored.question == "按这个计划开做？"
     assert restored.context == "两者代价不同"
-    assert restored.multiple is True
+    assert restored.assumptions == [{"id": "a0", "label": "部署", "value": "纯静态"}]
+    assert restored.questions[0]["prompt"] == "A 还是 B?"
+    assert restored.questions[0]["options"] == ["A", "B"]
+    assert restored.questions[0]["multiple"] is True
+    assert restored.style_options == [{"id": "s0", "label": "深色科技"}]
     # the suspended ask_user call is preserved so resume echoes its id.
     assert restored.transcript[-1].tool_calls[0].id == "call_ask_1"
-    assert restored.journal[0]["type"] == "checkpoint_required"
+    # the journal is not in the frame — turn_journal owns it (§18.3).
+    assert "journal" not in frame.to_json()
+    assert restored.journal == []
 
 
 def test_suspension_from_json_tolerates_missing_keys():

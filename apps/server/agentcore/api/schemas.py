@@ -3,11 +3,11 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.approvals import ApprovalDecision
-from agentcore.runtime.checkpoints import CheckpointDecision
+from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.suspension import SuspensionKind
 
 # --- Auth ---
@@ -88,7 +88,7 @@ class ConversationSummary(BaseModel):
     # single-conversation responses where the count isn't needed.
     message_count: int = 0
     # Folder membership; None = 裸聊 (ungrouped, no workspace yet). A conversation's
-    # workspace/mode is derived from its folder (文件夹即工作区); see 会话列表设计.
+    # workspace/mode is derived from its folder (文件夹即工作区); see 对话列表设计.
     folder_id: str | None = None
     # Selected 质量档 (llm/modes.py); None = inherit user default → operator default.
     model_mode: str | None = None
@@ -340,6 +340,13 @@ class StoredAttachment(BaseModel):
     truncated: bool = False
     kind: Literal["file", "dir"] = "file"
     workspace_path: str | None = None
+    # Byte size of the stored file, surfaced for IM file chips (Stage 4 富消息).
+    # None for directory listings and legacy rows created before sizing.
+    size_bytes: int | None = None
+    # Workspace-relative path to a generated WebP thumbnail for an image
+    # attachment (Stage 4 富消息); the bubble inlines this instead of the full
+    # original. None for non-images / small images / files / legacy rows.
+    thumb_path: str | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -450,6 +457,42 @@ ResolveInteractionRequest = (
 )
 
 
+def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
+    """Project a resolve-interaction body into the engine-side result its awaiter expects.
+
+    The unified bridge (``runtime/interaction.py``) settles each suspend kind with a
+    different typed result, so the wire body is coerced per kind BEFORE it reaches
+    ``InteractionRegistry.resolve``:
+
+    - ``approval`` → the bare :class:`~agentcore.runtime.approvals.ApprovalDecision`
+      (the gate compares it by identity, so it MUST be the enum member, never a plain
+      string — a bare ``"approve_always"`` would silently fail the grant/sweep checks);
+    - ``ask_user`` / ``plan_review`` → a
+      :class:`~agentcore.runtime.checkpoints.CheckpointResponse` (decision + note, plus
+      the user's option picks for ask_user);
+    - ``client_tool`` → the desktop op's result envelope dict.
+
+    Shared by the cloud resolve route (``routes/conversations.py``) and the sidecar's
+    ``respond`` (``sidecar/server.py``) so both transports settle an interaction
+    identically — one construction point, no drift between cloud and local.
+    """
+    if isinstance(body, ResolveApprovalInteraction):
+        return body.decision
+    if isinstance(body, ResolveCheckpointInteraction):
+        return CheckpointResponse(
+            decision=body.decision, note=body.note, selected=body.selected
+        )
+    if isinstance(body, ResolvePlanReviewInteraction):
+        return CheckpointResponse(decision=body.decision, note=body.note)
+    if isinstance(body, ResolveClientToolInteraction):
+        return {
+            "ok": body.ok,
+            "value": body.value,
+            "error": body.error.model_dump() if body.error else None,
+        }
+    raise ValueError(f"unknown interaction kind: {getattr(body, 'kind', None)!r}")
+
+
 class ResumeTurnRequest(BaseModel):
     """Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).
 
@@ -478,9 +521,10 @@ class PausedTurnSummary(BaseModel):
     reuse, so an optimistic bubble reconciles cleanly.
 
     plan_review carries ``steps`` (the reviewed checkpoint nodes) + ``pending`` (the
-    gated downstream); ask_user carries ``question`` / ``options`` / ``context`` /
-    ``multiple`` (the CEO's decision prompt). The unused set is empty for the other
-    kind.
+    gated downstream); ask_user carries the unified card payload ``question`` (the
+    framing / opening line) + ``context`` + the optional opening content
+    ``assumptions`` / ``questions`` / ``style_options`` (empty for a compact mid-task
+    fork). The unused set is empty for the other kind.
     """
 
     message_id: str
@@ -492,9 +536,10 @@ class PausedTurnSummary(BaseModel):
     pending: list[dict[str, Any]] = Field(default_factory=list)
     # ask_user
     question: str = ""
-    options: list[str] = Field(default_factory=list)
     context: str = ""
-    multiple: bool = False
+    assumptions: list[dict[str, Any]] = Field(default_factory=list)
+    questions: list[dict[str, Any]] = Field(default_factory=list)
+    style_options: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PausedTurnListResponse(BaseModel):
@@ -557,6 +602,74 @@ class MessageListResponse(BaseModel):
     total: int
     has_more_before: bool = False
     has_more_after: bool = False
+
+
+# --- Local turn recording (双模式工作区 §一.1: sidecar 本地引擎回合回传落库) ---
+# A turn run by the local sidecar engine produced its reply on the user's machine —
+# no server pipeline ran — so the desktop reports the finished turn here to land it
+# in durable history (入库 / 跨设备) AND in the cost ledger (计费回写). Workspace
+# snapshots stay out of scope (local files live on the user's disk; the local→云
+# handoff is the separate explicit bridge).
+
+
+class CostRunPayload(BaseModel):
+    """One per-run cost ledger row the local pipeline priced (``asdict(RunCost)``).
+
+    The sidecar runs the SAME engine and prices each run once via the SAME
+    ``calculate_cost``, so its ledger has the identical shape the cloud turn builds
+    (captain root + one row per delegated member). The desktop relays it verbatim;
+    the server records it through the shared ``CostEventRepository.record_runs``,
+    which is idempotent by ``run_id`` (a retried write-back never double-bills).
+
+    Trust boundary (计费): these counts are reported by the user's machine, so they
+    are authoritative only for BYOK display (the user pays DeepSeek directly).
+    Platform-mode authoritative metering belongs at the cloud inference proxy
+    (远期规划 §一 终态), not here — see ``record_local_turn``.
+    """
+
+    run_id: str = Field(..., max_length=64)
+    parent_run_id: str | None = Field(None, max_length=64)
+    agent_id: str | None = Field(None, max_length=64)
+    role: str = Field("member", max_length=32)
+    model: str = Field("", max_length=128)
+    tokens: dict[str, int] = Field(default_factory=dict)
+    cost: dict[str, int] = Field(default_factory=dict)
+    cost_total_nano: int = Field(0, ge=0)
+    currency: str = Field("USD", max_length=8)
+    rounds: int = Field(0, ge=0)
+    duration_ms: int = Field(0, ge=0)
+
+
+class RecordTurnRequest(BaseModel):
+    """A finished local (sidecar) turn to persist: the user message + assistant reply.
+
+    Carries the assistant outcome the local pipeline returned (content / reasoning /
+    citations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored
+    ids agree) plus its priced ``cost_runs`` ledger. The display token totals ride
+    on ``Message.usage``; the ``cost_runs`` ledger is the spend truth source written
+    to ``cost_events`` — see :class:`CostRunPayload` for the BYOK trust boundary.
+    """
+
+    user_message: str = Field(..., min_length=1, max_length=32000)
+    content: str = Field("", max_length=500_000)
+    reasoning_content: str | None = Field(None, max_length=500_000)
+    citations: list[Citation] = Field(default_factory=list, max_length=50)
+    runs: RunsPayload | None = None
+    cost_runs: list[CostRunPayload] = Field(default_factory=list, max_length=200)
+    message_id: str | None = Field(None, max_length=64)
+    input_tokens: int = Field(0, ge=0)
+    output_tokens: int = Field(0, ge=0)
+    rounds: int = Field(0, ge=0)
+
+
+class RecordTurnResponse(BaseModel):
+    """The persisted ids for a recorded local turn (the desktop reconciles its
+    optimistic user/assistant bubbles against these; ``title`` is set only when this
+    turn minted the conversation's first title)."""
+
+    user_message_id: str
+    assistant_message_id: str | None = None
+    title: str | None = None
 
 
 # --- Global search (全局搜索 Tier 1: 跨对话/消息/文件夹关键词检索) ---
@@ -764,6 +877,47 @@ class UploadFileResponse(BaseModel):
 
     path: str
     size_bytes: int
+
+
+class WorkspaceEditDoc(BaseModel):
+    """Full text of a cloud workspace file for in-panel editing, plus CAS baseline.
+
+    Unlike the preview download (truncated at the transfer cap), this returns the
+    **whole** file so a save never drops the tail. ``mtime_ms`` is the write-time CAS
+    baseline (compared on write); ``eol`` lets the editor restore the original line
+    ending. Cloud files are server-stored UTF-8, so there is no encoding field.
+    """
+
+    text: str
+    mtime_ms: int
+    eol: Literal["lf", "crlf"]
+
+
+class WorkspaceWriteRequest(BaseModel):
+    """Conditional write of editor text to a cloud workspace file (mtime CAS).
+
+    ``baseline_mtime_ms`` is the version the edit started from (``0`` = new file); a
+    mismatch with the current disk mtime returns a conflict instead of clobbering an
+    Agent's concurrent write. ``content`` uses ``\\n`` newlines; the server restores
+    ``eol`` on write. Byte size is bounded in the route (same cap as upload).
+    """
+
+    content: str
+    eol: Literal["lf", "crlf"] = "lf"
+    baseline_mtime_ms: int = Field(0, ge=0)
+
+
+class WorkspaceWriteResult(BaseModel):
+    """Outcome of a conditional write.
+
+    ``ok`` → ``mtime_ms`` is the new version (next baseline). On ``conflict`` →
+    ``ok`` is False and ``mtime_ms`` is the **current disk** version, so the client
+    can offer "overwrite anyway" by re-writing with it as the baseline.
+    """
+
+    ok: bool
+    mtime_ms: int
+    conflict: bool = False
 
 
 class MoveFileRequest(BaseModel):
@@ -1058,10 +1212,41 @@ class ChatMessageListResponse(BaseModel):
 
 
 class SendChatMessageRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=32000)
+    """Send a message into a chat: plain text, or a 富消息 carrying attachments.
+
+    ``content`` is optional when ``attachments`` is non-empty (an image/file-only
+    message has no caption); otherwise it is required. ``content_type`` tells the
+    client how to render it — ``image`` for an inline gallery, ``file`` for
+    download chips — and is derived by the sender from what it uploaded.
+    """
+
+    content: str | None = Field(None, max_length=32000)
+    content_type: Literal["text", "image", "file"] = "text"
+    # Pre-uploaded via PUT /messages/chats/{id}/files/{path}; referenced here by
+    # their returned workspace paths. Capped low (a single message, not a folder).
+    attachments: list[StoredAttachment] = Field(default_factory=list, max_length=9)
     # Client-minted id for retry-safe idempotent send (dedup at the unique index).
     client_msg_id: str | None = Field(None, max_length=100)
     reply_to_message_id: str | None = Field(None, max_length=64)
+
+    @model_validator(mode="after")
+    def _require_content_or_attachments(self) -> "SendChatMessageRequest":
+        if not (self.content and self.content.strip()) and not self.attachments:
+            raise ValueError("消息内容与附件不能同时为空")
+        return self
+
+
+class ChatFileUploadResponse(BaseModel):
+    """Result of a chat attachment upload (Stage 4 富消息).
+
+    Mirrors ``UploadFileResponse`` but adds ``thumb_path``: a generated WebP
+    thumbnail's workspace path for images (None otherwise), which the sender
+    copies onto the message's ``StoredAttachment`` for cheap inline previews.
+    """
+
+    path: str
+    size_bytes: int
+    thumb_path: str | None = None
 
 
 class MarkReadRequest(BaseModel):
@@ -1099,6 +1284,26 @@ class BlockedUser(BaseModel):
 class BlockListResponse(BaseModel):
     data: list[BlockedUser]
     total: int
+
+
+# --- File assist (AI 改写) ---
+
+
+class RewriteRequest(BaseModel):
+    """选区改写入参（无状态、无路径）：把选中文本按指令改写，前后文仅作语境只读。"""
+
+    # 选中文本：必填。上限约束 LLM 成本，单段散文/小节足够；超大选区由前端切分或拒绝。
+    selection: str = Field(..., min_length=1, max_length=20000)
+    instruction: str = Field(..., min_length=1, max_length=2000)
+    # 选区前/后的上下文，给模型衔接语气/术语用——只读，绝不参与改写输出。
+    context_before: str = Field("", max_length=4000)
+    context_after: str = Field("", max_length=4000)
+
+
+class RewriteResponse(BaseModel):
+    """改写结果：替换选区的文本，由前端套 merge view 逐块评审（人决定接受/拒绝）。"""
+
+    rewritten: str
 
 
 # --- Generic ---

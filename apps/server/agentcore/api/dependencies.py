@@ -21,6 +21,7 @@ from agentcore.db.repositories import (
     MessageRepository,
     ModelModeRepository,
     RefreshTokenRepository,
+    TurnJournalRepository,
     UserBlockRepository,
     UserDirectoryRepository,
     UserRepository,
@@ -61,6 +62,12 @@ def get_message_repo(session: AsyncSession = Depends(get_db)) -> MessageReposito
 
 def get_cost_event_repo(session: AsyncSession = Depends(get_db)) -> CostEventRepository:
     return CostEventRepository(session)
+
+
+def get_turn_journal_repo(
+    session: AsyncSession = Depends(get_db),
+) -> TurnJournalRepository:
+    return TurnJournalRepository(session)
 
 
 def get_handoff_job_repo(session: AsyncSession = Depends(get_db)) -> HandoffJobRepository:

@@ -1,4 +1,4 @@
-"""对比评估骨架自测（多Agent对比评估设计 P0 / per-PR 零 LLM 硬门禁）.
+"""对比评估骨架自测（评估体系后端落地设计 第二部分 P0 / per-PR 零 LLM 硬门禁）.
 
 用**假 provider / 假 harness / 假裁判**零成本验证对比系统本身不坏，真模型留给 nightly。覆盖：
 - 配对 runner：各臂采样、layer1 不裁判、pass^k 计算、subject_arms；

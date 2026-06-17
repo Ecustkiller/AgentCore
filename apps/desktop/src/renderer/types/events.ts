@@ -2,6 +2,7 @@ export type SSEEventType =
   | "message_start"
   | "content_delta"
   | "reasoning_delta"
+  | "tool_progress"
   | "tool_use_start"
   | "tool_use_end"
   | "approval_required"
@@ -14,6 +15,7 @@ export type SSEEventType =
   | "run_started"
   | "run_output_delta"
   | "run_reasoning_delta"
+  | "run_tool_progress"
   | "run_completed"
   | "run_failed"
   | "run_progress"
@@ -46,17 +48,63 @@ export interface ReasoningDeltaPayload {
   delta: string;
 }
 
+/** The CEO captain is composing a tool call's ARGUMENTS (bubble-scoped twin of
+ * `RunToolProgressPayload`). `chars` is the cumulative length of the streamed
+ * argument string so far — for the prime case (`delegate`) the task book growing.
+ * The captain's voice is the chat bubble and its big delegate call assembles before
+ * `run_plan` fires (no graph yet), so this drives a live「正在生成 {tool}…」line on
+ * the assistant bubble. Transport-only: never journaled. */
+export interface ToolProgressPayload {
+  tool_name: string;
+  chars: number;
+}
+
 export interface ToolUseStartPayload {
   tool_call_id: string;
   tool_name: string;
   arguments: Record<string, unknown>;
 }
 
+/** One web hit in a `web_search` tool's structured display (工具结果富渲染): a
+ * result card's data (favicon via `site` · `title` · `snippet`). */
+export interface WebSearchHit {
+  title: string;
+  url: string;
+  snippet: string;
+  /** Display host (sans www.), parsed server-side so the card needs no URL work. */
+  site?: string;
+}
+
+/** `web_search` rich result: the query + its hits, shown as source-style cards. */
+export interface WebSearchDisplay {
+  query: string;
+  results: WebSearchHit[];
+}
+
+/** `code_execute` rich result: a terminal-style stdout/stderr view + exit code. */
+export interface CodeExecDisplay {
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+  language: string;
+}
+
+/** A tool's OPTIONAL render-oriented payload (工具结果富渲染), distinct from the
+ * model-facing `result` text. The desktop keys the renderer off the tool name and
+ * narrows this to the matching shape ({@link WebSearchDisplay} / {@link
+ * CodeExecDisplay} / …); an unknown or absent display falls back to the `result`
+ * text. Opaque on the wire (snake_case, exempt from the generated-types rule like
+ * the rest of the runs payload). */
+export type ToolDisplay = Record<string, unknown>;
+
 export interface ToolUseEndPayload {
   tool_call_id: string;
   tool_name: string;
   result: string;
   status: "success" | "error";
+  /** Rich rendering data for tools that have one (工具结果富渲染); absent for the
+   * many tools whose text `result` is enough. */
+  display?: ToolDisplay | null;
 }
 
 /** One step in a single-agent turn's 思考+工具 process timeline (前端UX设计.md §一).
@@ -75,12 +123,22 @@ export type ProcessStep =
       arguments: Record<string, unknown>;
       result: string | null;
       status: "running" | "success" | "error";
+      /** Rich rendering data resolved on `tool_use_end` (工具结果富渲染); absent
+       * for tools whose text `result` is enough. Persisted on the step so a
+       * reloaded turn renders the same card. */
+      display?: ToolDisplay | null;
     };
 
 /** The user's settlement of a paused GRANTABLE tool call; mirrors the backend
  * `ApprovalDecision`. `approve` allows this one call, `approve_always` allows the
- * tool for the rest of the turn, `deny` refuses it. */
-export type ApprovalDecision = "approve" | "approve_always" | "deny";
+ * tool for the rest of the turn, `approve_always_files` allows the whole
+ * file-mutation class (file_write / str_replace / file_delete / file_move) for the
+ * turn — code_execute stays separately gated — and `deny` refuses it. */
+export type ApprovalDecision =
+  | "approve"
+  | "approve_always"
+  | "approve_always_files"
+  | "deny";
 
 /** A GRANTABLE tool call (CEO chat path) is paused awaiting the user's
  * authorization. `approval_id` is echoed back to the resolve endpoint (it equals
@@ -108,18 +166,50 @@ export interface ApprovalResolvedPayload {
  * is engine-set only (a no-answer deadline) and never sent by the client. */
 export type CheckpointDecision = "continue" | "adjust" | "stop" | "timeout";
 
-/** The CEO paused the turn to ask the user a decision (ask_user checkpoint).
- * `checkpoint_id` is echoed back to the resolve endpoint; `options` are optional
- * concrete choices; `context` is optional supporting background; `multiple` flags
- * the options as multi-select (checkboxes) rather than single-select (radios).
- * Journaled (unlike approvals), so it replays inline on reload. */
+/** One 起步计划 chip on an ask_user card (开场引导): a low-impact, reversible
+ * decision the CEO made for the user, shown read-only as 「label + value」. */
+export interface AskAssumption {
+  id: string;
+  label: string;
+  value: string;
+}
+
+/** One askable item on an ask_user card: the focal fork mid-task (usually one, no
+ * `default`), or a high-leverage opening decision pre-filled with the CEO's
+ * `default` so a 想省事 user can one-click accept it all. `kind` "choice" picks
+ * from `options` (single- or `multiple`-select); "text" is a free-form fill (its
+ * `options`/`multiple` cleared server-side). */
+export interface AskQuestion {
+  id: string;
+  prompt: string;
+  kind: "choice" | "text";
+  options: string[];
+  multiple: boolean;
+  default: string;
+}
+
+/** One 风格预设 on an ask_user card — offered only for visual products (网站 / 海报
+ * / 幻灯…); non-visual asks omit them. */
+export interface AskStyleOption {
+  id: string;
+  label: string;
+}
+
+/** The CEO paused the turn to ask the user (ask_user — the one asking surface,
+ * covering both an opening 引导 and a mid-task fork). `checkpoint_id` is echoed back
+ * to the resolve endpoint; `question` is the framing / opening line (always shown);
+ * `context` is optional background. The rich opening content is optional (empty for
+ * a compact mid-task fork): `assumptions` (起步计划 chips), `questions` (the askable
+ * items), `style_options` (风格预设). Journaled (unlike approvals), so it replays
+ * inline on reload. */
 export interface CheckpointRequiredPayload {
   checkpoint_id: string;
   conversation_id: string;
   question: string;
-  options: string[];
   context: string;
-  multiple?: boolean;
+  assumptions: AskAssumption[];
+  questions: AskQuestion[];
+  style_options: AskStyleOption[];
 }
 
 /** A pending checkpoint was settled (continue / adjust / stop / timeout). `note`
@@ -252,6 +342,20 @@ export interface RunReasoningDeltaPayload {
   run_id: string;
   agent_id: string;
   delta: string;
+}
+
+/** A worker is actively composing a tool call's ARGUMENTS (run-scoped liveliness).
+ * `chars` is the cumulative length of the streamed argument string so far (the file
+ * body for file_write, the query for a search…), so the team UI can show
+ * 「正在生成 {tool} · N 字」on the node/detail while a long tool-call assembles —
+ * which otherwise surfaces nowhere (it is neither content nor reasoning, and
+ * `tool_use_start` fires only once the args finish). Transport-only: never
+ * journaled, so a reloaded run replays the finished call instead. */
+export interface RunToolProgressPayload {
+  run_id: string;
+  agent_id: string;
+  tool_name: string;
+  chars: number;
 }
 
 /** Token counts in the ledger short-key form ({input, output, reasoning,
@@ -410,6 +514,7 @@ export type SSEPayloadMap = {
   message_start: MessageStartPayload;
   content_delta: ContentDeltaPayload;
   reasoning_delta: ReasoningDeltaPayload;
+  tool_progress: ToolProgressPayload;
   tool_use_start: ToolUseStartPayload;
   tool_use_end: ToolUseEndPayload;
   approval_required: ApprovalRequiredPayload;
@@ -422,6 +527,7 @@ export type SSEPayloadMap = {
   run_started: RunStartedPayload;
   run_output_delta: RunOutputDeltaPayload;
   run_reasoning_delta: RunReasoningDeltaPayload;
+  run_tool_progress: RunToolProgressPayload;
   run_completed: RunCompletedPayload;
   run_failed: RunFailedPayload;
   run_progress: RunProgressPayload;

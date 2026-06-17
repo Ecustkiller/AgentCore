@@ -2,17 +2,21 @@ import {
   type ChatMessageDetail,
   type ChatParticipant,
   type ChatSummary,
+  type SendContentType,
+  type StoredAttachment,
   announce as apiAnnounce,
   kickMember as apiKickMember,
   leaveChat as apiLeaveChat,
   muteMember as apiMuteMember,
   sendMessage as apiSendMessage,
+  isImageAttachment,
   listChats,
   listMembers,
   listMessages,
   markRead,
   messagingErrorMessage,
   updateMembership,
+  uploadChatFile,
 } from "@/services/messaging";
 import { useAuthStore } from "@/stores/auth";
 import { create } from "zustand";
@@ -90,7 +94,13 @@ interface MessagingState {
   loadMessages: (chatId: string) => Promise<void>;
   /** Load (or refresh) a chat's member roster — used by group threads. */
   loadMembers: (chatId: string) => Promise<void>;
-  sendMessage: (chatId: string, content: string) => Promise<void>;
+  /** Send a text and/or attachment message. Files are uploaded to the chat's
+   * space first, then referenced; optimistic with rollback on failure. */
+  sendMessage: (
+    chatId: string,
+    content: string,
+    files?: File[],
+  ) => Promise<void>;
   markChatRead: (chatId: string) => Promise<void>;
   /** Toggle this user's per-chat flags (mute / pin); optimistic with rollback. */
   setMembershipFlags: (
@@ -175,20 +185,57 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
     }
   },
 
-  sendMessage: async (chatId, content) => {
+  sendMessage: async (chatId, content, files) => {
     const text = content.trim();
-    if (!text) return;
+    const pending = files ?? [];
+    if (!text && pending.length === 0) return;
 
     const clientMsgId = crypto.randomUUID();
+
+    // Upload attachments first, so the message references durable paths. A failed
+    // upload aborts the send (nothing optimistic was added yet) and surfaces a zh
+    // error — the composer keeps the draft + files so the user can retry.
+    let attachments: StoredAttachment[] = [];
+    if (pending.length > 0) {
+      set({ sendError: null });
+      try {
+        attachments = await Promise.all(
+          pending.map(async (file) => {
+            const path = `attachments/${crypto.randomUUID()}/${file.name}`;
+            const res = await uploadChatFile(chatId, path, file);
+            return {
+              name: file.name,
+              path: file.name,
+              kind: "file",
+              truncated: false,
+              workspace_path: res.path,
+              size_bytes: res.size_bytes,
+              thumb_path: res.thumb_path,
+            } satisfies StoredAttachment;
+          }),
+        );
+      } catch (err) {
+        set({ sendError: messagingErrorMessage(err, "附件上传失败，请重试") });
+        return;
+      }
+    }
+
+    const contentType: SendContentType =
+      attachments.length === 0
+        ? "text"
+        : attachments.every((a) => isImageAttachment(a.name))
+          ? "image"
+          : "file";
+
     const me = useAuthStore.getState().user;
     const optimistic: ChatMessageDetail = {
       id: `local:${clientMsgId}`,
       chat_id: chatId,
       sender_user_id: me?.id ?? null,
       sender_type: "user",
-      content: text,
-      content_type: "text",
-      attachments: [],
+      content: text || null,
+      content_type: contentType,
+      attachments,
       payload: null,
       reply_to_message_id: null,
       created_at: new Date().toISOString(),
@@ -211,7 +258,9 @@ export const useMessagingStore = create<MessagingState>((set, get) => ({
 
     try {
       const saved = await apiSendMessage(chatId, {
-        content: text,
+        content: text || undefined,
+        contentType,
+        attachments,
         clientMsgId,
       });
       // Swap the optimistic twin for the stored message. The firehose also

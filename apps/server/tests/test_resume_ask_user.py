@@ -14,14 +14,20 @@ plan_review machinery:
 """
 
 from agentcore.core.types import ToolEffect
+from agentcore.llm.protocol import LLMMessage
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType
-from agentcore.runtime.pipeline import _settle_resumed_suspension
+from agentcore.runtime.pipeline import (
+    _finish_terminal_resume,
+    _pre_pause_content,
+    _settle_resumed_suspension,
+)
 from agentcore.runtime.suspension import AskUserSuspension
 from agentcore.tools.builtin.ask_user import ask_user_tool_result
 
 
 def _ask_frame(*, options: list[str] | None = None) -> AskUserSuspension:
+    opts = options if options is not None else ["A", "B"]
     return AskUserSuspension(
         message_id="m1",
         conversation_id="c1",
@@ -33,9 +39,17 @@ def _ask_frame(*, options: list[str] | None = None) -> AskUserSuspension:
         user_message="A 还是 B?",
         transcript=[],
         question="A 还是 B?",
-        options=options if options is not None else ["A", "B"],
         context="",
-        multiple=False,
+        questions=[
+            {
+                "id": "q0",
+                "prompt": "A 还是 B?",
+                "kind": "choice",
+                "options": opts,
+                "multiple": False,
+                "default": "",
+            }
+        ],
     )
 
 
@@ -146,3 +160,60 @@ async def test_settle_ask_user_drops_off_menu_picks():
         if e["type"] == EventType.CHECKPOINT_RESOLVED.value
     ]
     assert resolved and resolved[0]["payload"]["selected"] == ["A"]
+
+
+# --- pre-pause carry-forward: a 2b resume keeps the CEO's pre-pause reply -----------
+
+
+def test_pre_pause_content_joins_this_turn_assistant_rounds():
+    # The frame transcript ends with this turn's assistant rounds; their joined content
+    # (paragraph-separated) is the pre-pause reply — what the live loop already accrued.
+    transcript = [
+        LLMMessage(role="system", content="sys"),
+        LLMMessage(role="user", content="新任务"),
+        LLMMessage(role="assistant", content="先看一下需求"),
+        LLMMessage(role="assistant", content="我来发问"),
+    ]
+    assert _pre_pause_content(transcript) == "先看一下需求\n\n我来发问"
+
+
+def test_pre_pause_content_excludes_prior_turns():
+    # Only THIS turn counts: assistant text before the last user message belongs to an
+    # earlier message and must not leak into the resumed reply.
+    transcript = [
+        LLMMessage(role="user", content="上一轮"),
+        LLMMessage(role="assistant", content="上一轮的回答"),
+        LLMMessage(role="user", content="这一轮"),
+        LLMMessage(role="assistant", content="这一轮开场"),
+    ]
+    assert _pre_pause_content(transcript) == "这一轮开场"
+
+
+def test_pre_pause_content_empty_when_no_preamble():
+    # The ideal ask_user shape (after the prompt fix): the CEO calls ask_user with an
+    # empty body, so there is nothing to carry forward.
+    transcript = [
+        LLMMessage(role="user", content="问"),
+        LLMMessage(role="assistant", content=""),
+    ]
+    assert _pre_pause_content(transcript) == ""
+
+
+def test_finish_terminal_resume_prepends_pre_pause_to_closing():
+    # ask_user STOP after the CEO already wrote an overview: the persisted reply is the
+    # overview + closing note as separate paragraphs (parity with live), not the closing
+    # note alone — the pre-pause text must not be dropped on a fresh-process resume.
+    result = _finish_terminal_resume(
+        message_id="m1",
+        pre_pause_content="阶段成果如上。",
+        closing="先到这。",
+        sink=EventSink(),
+    )
+    assert result["content"] == "阶段成果如上。\n\n先到这。"
+
+
+def test_finish_terminal_resume_keeps_closing_only_without_pre_pause():
+    result = _finish_terminal_resume(
+        message_id="m1", pre_pause_content="", closing="先到这。", sink=EventSink()
+    )
+    assert result["content"] == "先到这。"

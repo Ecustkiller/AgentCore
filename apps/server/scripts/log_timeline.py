@@ -63,29 +63,42 @@ async def fetch_messages(conn: Any, conv_id: str) -> list[dict]:
     rows = (
         await conn.execute(
             text(
-                "SELECT id, role, content, reasoning_content, tool_calls, runs, "
+                "SELECT id, role, content, reasoning_content, tool_calls, "
                 "usage, finish_reason, created_at FROM messages "
                 "WHERE conversation_id = :cid ORDER BY created_at"
             ),
             {"cid": conv_id},
         )
     ).all()
+    # The turn's replay payload moved out of messages.runs into the turn_journal
+    # table (§18.3 唯一事实源); count its facts per turn (== assistant message id).
+    journal_counts: dict[str, int] = {}
+    for jr in (
+        await conn.execute(
+            text(
+                "SELECT turn_id, count(*) FROM turn_journal "
+                "WHERE conversation_id = :cid GROUP BY turn_id"
+            ),
+            {"cid": conv_id},
+        )
+    ).all():
+        journal_counts[jr[0]] = jr[1]
     messages = []
     for r in rows:
         msg: dict[str, Any] = {
             "type": "message",
-            "timestamp": str(r[8]),
+            "timestamp": str(r[7]),
             "id": r[0],
             "role": r[1],
             "content_preview": (r[2] or "")[:200],
             "content_len": len(r[2] or ""),
             "has_reasoning": bool(r[3]),
             "tool_calls_count": len(r[4]) if r[4] else 0,
-            "runs_count": len((r[5] or {}).get("events", [])) if r[5] else 0,
-            "finish_reason": r[7],
+            "runs_count": journal_counts.get(r[0], 0),
+            "finish_reason": r[6],
         }
-        if r[6]:
-            msg["usage"] = r[6]
+        if r[5]:
+            msg["usage"] = r[5]
         messages.append(msg)
     return messages
 

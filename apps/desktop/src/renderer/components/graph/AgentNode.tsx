@@ -8,6 +8,7 @@ import {
   type RunStatus,
   STANCE_META,
   type Stance,
+  toolLabel,
 } from "@/stores/execution";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import {
@@ -36,6 +37,17 @@ interface AgentNodeData {
    * shown whenever it is not actively streaming its own output. */
   task: string;
   outputPreview: string;
+  /** Tail of the worker's streamed reasoning (run_reasoning_delta). Shown as the
+   * live "思考中" preview while the run is thinking — DeepSeek streams the whole
+   * reasoning before any content, so without this fallback a running node sits
+   * blank (no output yet) for the entire, often long, thinking phase. */
+  reasoningPreview?: string;
+  /** The tool call this worker is currently composing (run_tool_progress): name +
+   * chars of arguments streamed so far. Non-null only during active assembly. It
+   * ranks ABOVE the output preview while running, because a file-writing worker's
+   * deliverable streams as tool ARGUMENTS (not content) — without this the node is
+   * frozen for the whole, often minute-long, write. */
+  toolProgress?: { toolName: string; chars: number } | null;
   tokenCount: number;
   toolCount: number;
   focused: boolean;
@@ -114,12 +126,26 @@ const STATUS_STYLES: Record<
   },
 };
 
-export function AgentNode({ data, selected }: NodeProps) {
+export function AgentNode({ data }: NodeProps) {
   const d = data as AgentNodeData;
   const style = STATUS_STYLES[d.status] ?? STATUS_STYLES.pending;
   const isRunning = d.status === "running";
+  // 运行中中行优先级（修「看不到 worker 流式输出」的主因）：
+  //  ① 正在生成的工具调用 —— 其参数（如 file_write 的文件正文）既不是 content 也不是
+  //     reasoning，且 tool_use_start 要等参数拼完才触发，否则整段写入期（常达分钟级）
+  //     节点完全空白；故运行中只要在拼工具调用就优先显示它。
+  //  ② 自己的流式输出（带光标）。
+  //  ③ 输出未到时回退思考末尾预览（斜体，读作「内心独白」），思考期不空白。
+  //  ④ 都没到则落回任务一句话。
+  const liveTool = isRunning ? (d.toolProgress ?? null) : null;
+  const livePreview = isRunning && !liveTool ? d.outputPreview : "";
+  const liveThinking =
+    isRunning && !liveTool && !livePreview ? (d.reasoningPreview ?? "") : "";
   const horizontal = d.handleDirection === "horizontal";
-  const highlighted = d.focused || selected;
+  // Single highlight source: the side panel's active run tab for this turn
+  // (projected into `d.focused`). React Flow's built-in selection is off
+  // (GraphView elementsSelectable={false}), so there is no competing `selected`.
+  const highlighted = d.focused;
   const flashing = useTerminalFlash(d.status);
   const flashColor =
     d.status === "failed" ? "var(--destructive)" : "var(--success)";
@@ -174,7 +200,7 @@ export function AgentNode({ data, selected }: NodeProps) {
             }
           }}
           style={{ "--graph-flash-color": flashColor } as React.CSSProperties}
-          className={`relative w-[210px] cursor-default rounded-xl border px-3 py-2.5 text-left shadow-sm outline-none ring-2 ${style.bg} ${style.ring} ${isRunning ? "animate-pulse" : ""} ${flashing ? "animate-graph-node-flash" : ""} ${
+          className={`relative w-[210px] cursor-pointer rounded-xl border px-3 py-2.5 text-left shadow-sm outline-none ring-2 ${style.bg} ${style.ring} ${isRunning ? "animate-pulse" : ""} ${flashing ? "animate-graph-node-flash" : ""} ${
             highlighted
               ? "outline outline-2 outline-offset-2 outline-primary"
               : "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
@@ -244,23 +270,43 @@ export function AgentNode({ data, selected }: NodeProps) {
             )}
           </div>
 
-          {/* 中行 = 这个节点「在干什么」：运行中显自己的流式输出（带光标），其余
-              状态显被分配的任务一句话（run.task），取代过去取输出末尾 80 字、对文件/
-              代码而言纯属乱码的 tailText 预览。 */}
-          {isRunning
-            ? d.outputPreview && (
-                <p className="mt-2 line-clamp-2 text-xs leading-snug text-muted-foreground/80">
-                  {d.outputPreview}
-                  <span className="ml-0.5 inline-block animate-pulse text-primary">
-                    ▋
-                  </span>
-                </p>
-              )
-            : d.task && (
-                <p className="mt-2 line-clamp-2 text-xs leading-snug text-muted-foreground/70">
-                  {d.task}
-                </p>
+          {/* 中行 = 这个节点「在干什么」：运行中优先显「正在生成工具调用」（写文件等，
+              否则整段写入期空白），再到流式输出（带光标），输出未到回退思考末尾（斜体 +
+              「思考中」光标），都没到落回任务一句话；非运行态显被分配的任务（run.task）。 */}
+          {liveTool ? (
+            <p className="mt-2 line-clamp-2 text-xs leading-snug text-primary/90">
+              正在生成 {toolLabel(liveTool.toolName)}
+              {liveTool.chars > 0 && (
+                <span className="text-muted-foreground/70">
+                  {" · "}
+                  {formatCompact(liveTool.chars)} 字
+                </span>
               )}
+              <span className="ml-0.5 inline-block animate-pulse text-primary">
+                ▋
+              </span>
+            </p>
+          ) : livePreview ? (
+            <p className="mt-2 line-clamp-2 text-xs leading-snug text-muted-foreground/80">
+              {livePreview}
+              <span className="ml-0.5 inline-block animate-pulse text-primary">
+                ▋
+              </span>
+            </p>
+          ) : liveThinking ? (
+            <p className="mt-2 line-clamp-2 text-xs italic leading-snug text-muted-foreground/60">
+              {liveThinking}
+              <span className="ml-0.5 inline-block animate-pulse text-primary">
+                ▋
+              </span>
+            </p>
+          ) : (
+            d.task && (
+              <p className="mt-2 line-clamp-2 text-xs leading-snug text-muted-foreground/70">
+                {d.task}
+              </p>
+            )
+          )}
 
           {/* 脚注只留「用时 · 工具数」两个轻信号；¥ / token 已移交 run 详情面板。 */}
           {(durationText || d.toolCount > 0) && (

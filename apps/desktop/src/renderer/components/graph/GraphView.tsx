@@ -532,13 +532,11 @@ export function GraphView({
     ],
   );
 
+  // A node click always drills (no modifier multi-select branch): React Flow's
+  // built-in element selection is disabled below, so the graph has no selection
+  // gesture to defer to — every click is a single-node drill-in.
   const onNodeClick = useCallback(
-    (event: React.MouseEvent, node: Node) => {
-      // Modifier-click is React Flow's multi-select gesture; let it just toggle
-      // selection without also hijacking the single-node focus/detail flow.
-      if (event.shiftKey || event.metaKey || event.ctrlKey) return;
-      activateNode(node.id);
-    },
+    (_event: React.MouseEvent, node: Node) => activateNode(node.id),
     [activateNode],
   );
 
@@ -622,6 +620,10 @@ export function GraphView({
     const nodes: Node[] = workerRuns.map((run, i) => {
       const agent = execution.agents.find((a) => a.id === run.agentId);
       const output = agent ? agent.outputChunks.join("") : "";
+      // Reasoning streams run-scoped too (run_reasoning_delta); DeepSeek emits the
+      // whole reasoning before any content, so the node falls back to this tail
+      // while a running worker is still thinking (output empty) — see AgentNode.
+      const reasoning = agent ? agent.reasoningChunks.join("") : "";
       const focused = highlightRunId === run.id;
       // 乙 热修 P4: a「修订 vN」续写 node is badged as a version (not a teammate); it
       // has a worker parent too, so it must be excluded from the 子任务 check below.
@@ -647,6 +649,10 @@ export function GraphView({
           isAnimating: run.status === "running",
           task: run.task,
           outputPreview: tailText(output),
+          reasoningPreview: tailText(reasoning),
+          // Live tool-call assembly (run_tool_progress): the only signal while a
+          // worker streams a long file body as args — neither content nor reasoning.
+          toolProgress: agent?.toolProgress ?? null,
           tokenCount: estimateTokens(output),
           toolCount: agent?.toolCalls.length ?? 0,
           focused,
@@ -809,6 +815,12 @@ export function GraphView({
                 nodesDraggable={false}
                 nodesConnectable={false}
                 nodesFocusable={false}
+                // Node highlight has ONE source: the side panel's active run tab
+                // (projected into each node's `focused`). React Flow's built-in
+                // click-selection would paint a second, competing outline (two lit
+                // nodes, or a stray outline on the endpoints that only jump), so
+                // it is off — clicks still drill via onNodeClick.
+                elementsSelectable={false}
                 proOptions={{ hideAttribution: true }}
                 {...interactionProps}
               >

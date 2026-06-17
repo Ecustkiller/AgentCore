@@ -2,7 +2,6 @@ import { PageContainer } from "@/components/layout/PageContainer";
 import {
   AppWindow,
   ChevronRight,
-  Eye,
   FileText,
   FormInput,
   GitBranch,
@@ -125,13 +124,6 @@ const GROUPS: ToolboxGroup[] = [
         description: "看懂 AI 团队如何分工、协作、跑完一个任务",
         icon: Waypoints,
         to: "/toolbox/mechanism",
-      },
-      {
-        id: "tool-activity-preview",
-        title: "工具活动展示方案（预览）",
-        description: "单 Agent 工具活动前端展示的候选方案对比，选型用",
-        icon: Eye,
-        to: "/toolbox/tool-activity-preview",
       },
     ],
   },

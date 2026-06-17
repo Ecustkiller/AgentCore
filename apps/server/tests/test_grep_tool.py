@@ -63,11 +63,12 @@ async def test_grep_rejects_path_outside_workspace(tmp_path: Path):
     assert "超出了工作区范围" in result.error
 
 
-async def test_grep_rejects_non_directory(tmp_path: Path):
-    (tmp_path / "f.txt").write_text("hi", encoding="utf-8")
-    result = await GrepTool().execute({"pattern": "x", "path": "f.txt"}, _ctx(tmp_path))
+async def test_grep_rejects_missing_path(tmp_path: Path):
+    result = await GrepTool().execute(
+        {"pattern": "x", "path": "nope.txt"}, _ctx(tmp_path)
+    )
     assert result.success is False
-    assert "不是目录" in result.error
+    assert "不存在" in result.error
 
 
 # --- core search behavior ---
@@ -125,6 +126,29 @@ async def test_grep_scopes_to_subdirectory(tmp_path: Path):
     )
     assert "src/main.ts" in result.output
     assert "app.py" not in result.output
+
+
+async def test_grep_path_can_be_single_file(tmp_path: Path):
+    """``path`` may name a single file (rg PATTERN FILE) — scan just that file."""
+    _seed(tmp_path)
+    result = await GrepTool().execute(
+        {"pattern": "TODO", "path": "app.py"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert "app.py:2: return a + b  # TODO: validate" in result.output
+    # scoped to the one file — sibling matches must not leak in
+    assert "src/main.ts" not in result.output
+    assert "notes.md" not in result.output
+
+
+async def test_grep_single_file_path_ignores_glob(tmp_path: Path):
+    """When ``path`` is a file, ``glob`` is moot — the file is already pinpointed."""
+    _seed(tmp_path)
+    result = await GrepTool().execute(
+        {"pattern": "TODO", "path": "app.py", "glob": "*.ts"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert "app.py:2" in result.output
 
 
 async def test_grep_files_only_lists_files_with_counts(tmp_path: Path):

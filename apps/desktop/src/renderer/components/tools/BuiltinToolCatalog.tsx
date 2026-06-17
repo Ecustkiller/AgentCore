@@ -5,6 +5,7 @@ import {
   listTools,
 } from "@/services/tools";
 import {
+  BookOpen,
   FolderOpen,
   Globe,
   Loader2,
@@ -25,6 +26,7 @@ const CATEGORY_META: Record<ToolCategory, { label: string; icon: LucideIcon }> =
     execution: { label: "执行", icon: Terminal },
     orchestration: { label: "编排", icon: Network },
     interaction: { label: "交互", icon: MessageCircleQuestion },
+    skill: { label: "技能", icon: BookOpen },
   };
 
 // Render order; categories with no tools are skipped.
@@ -35,6 +37,7 @@ const CATEGORY_ORDER: ToolCategory[] = [
   "execution",
   "orchestration",
   "interaction",
+  "skill",
 ];
 
 const APPROVAL_LABEL: Record<ToolApproval, string> = {

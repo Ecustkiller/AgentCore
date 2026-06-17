@@ -208,8 +208,10 @@ class WorkspaceBackend(Protocol):
     async def grep(self, query: GrepQuery) -> GrepResult:
         """Regex-search file contents under ``query.directory`` (bounded).
 
-        Raises ``OutsideWorkspace`` / ``PathNotFound`` / ``NotADirectory``.
-        The regex is assumed already validated by the caller.
+        ``query.directory`` may be a directory (recursed, ``glob``-filtered) or a
+        single file (scanned alone, ``glob`` ignored — rg PATTERN FILE). Raises
+        ``OutsideWorkspace`` / ``PathNotFound``. The regex is assumed already
+        validated by the caller.
         """
         ...
 

@@ -24,7 +24,7 @@
 点图节点 → 右侧 SidePanel 新开该 run 的详情 tab（被动下钻）；面板是一条扁平 tab 栏——固定首位「工作区」tab（文件/快照/交接）+ 按需的 run 详情 tab。右上「侧面板」开关 / Ctrl+I → 显隐（冷启动落「工作区」tab），Ctrl+J → 直达「工作区」tab
 ```
 
-**侧栏对话区（IA）**：侧栏只列**最近若干对话**（扁平、按时间，当前对话恒置顶可见）+ 底部「查看全部对话」入口；完整列表、文件夹分组、文件夹增删改与「按文件夹筛选 / 页内搜索」统一收敛到独立的**对话管理页** `/conversations`（canvas 档：左侧文件夹筛选 + 右侧对话列表，点对话进 `/conversations/:id`）。**决策**：侧栏保持轻量、只承载高频的「最近 + 新建对话」，低频的归档/整理移交专门页面，避免侧栏被长列表与文件夹树占满；新建文件夹入口随之从侧栏移到管理页。**「对话」导航即「新建对话」**：点顶部「对话」入口默认开一个空白草稿对话（与「+」/`Ctrl/Cmd+N` 一致），回到旧会话走「最近对话 / 全部对话」（对齐 ChatGPT/Claude：主入口=新建，列表=返回）；路由 `/`（无 `:id`）是「新草稿」的唯一真相——`ConversationPage` 在无 `:id` 时丢弃上次会话，故刷新/直达 `/` 也是新对话，「新建对话」意图统一收敛到 `startNewConversation`。→ 见代码 `lib/newConversation.ts`、`pages/ConversationPage.tsx`、`components/sidebar/RecentConversations.tsx`、`pages/ConversationsPage.tsx`。
+**侧栏对话区（IA）**：侧栏只列**最近若干对话**（扁平、按时间，当前对话恒置顶可见）+ 底部「查看全部对话」入口；完整列表、文件夹分组与「按文件夹筛选 / 页内搜索」统一收敛到独立的**对话管理页** `/conversations`（canvas 档：左侧文件夹筛选 + 右侧对话列表，点对话进 `/conversations/:id`）；**文件夹的生命周期（新建 / 重命名 / 删除 / 添加本地文件夹）则归「文件」中枢 `/files` 管**——文件夹即工作区，项目事务单一入口，`/conversations` 只做按文件夹筛选（左下「管理文件夹」跳 `/files`）。**决策**：侧栏保持轻量、只承载高频的「最近 + 新建对话」，低频的归档/整理移交专门页面，避免侧栏被长列表与文件夹树占满。**「对话」导航即「新建对话」**：点顶部「对话」入口默认开一个空白草稿对话（与「+」/`Ctrl/Cmd+N` 一致），回到旧对话走「最近对话 / 全部对话」（对齐 ChatGPT/Claude：主入口=新建，列表=返回）；路由 `/`（无 `:id`）是「新草稿」的唯一真相——`ConversationPage` 在无 `:id` 时丢弃上次对话，故刷新/直达 `/` 也是新对话，「新建对话」意图统一收敛到 `startNewConversation`。→ 见代码 `lib/newConversation.ts`、`pages/ConversationPage.tsx`、`components/sidebar/RecentConversations.tsx`、`pages/ConversationsPage.tsx`。
 
 **团队展示统一到「内嵌协作图」**：多 Agent 回合的助手消息上方内嵌一张协作图（`InlineTeamGraph`），它是该回合的**主团队界面**——图顶状态条折进了原任务卡片的职责（状态 · N agents · M/M · 用时 · ¥合计 + 救火行），节点 face 只显角色 + 任务/输出 + 用时/工具（¥ / token 归 run 详情，§7.3B），点节点把详情下钻到右侧被动面板，右上「最大化」临时进全屏看大图/回放。单 Agent 回合不出图（无团队，无需协作图）；改由气泡顶部一条**可折叠的「思考+工具」过程时间线**（`ProcessTimeline`，§一B）承载该回合的思考与工具活动——默认折叠＝零噪音，展开＝完整透明度。原「对话内卡片 + 右侧常驻面板 + 全屏 overlay」三个抢戏的面已收成一面，决策与迁移源见 [`前端技术与架构.md` §9.2–9.6](/docs/04-前端/前端技术与架构.md)。
 
@@ -33,8 +33,9 @@
 单 Agent 回合 CEO 直接调工具（联网搜索 / 读网页 / 检索代码 / 执行）时，气泡顶部内嵌一条**可折叠过程时间线**：把 CEO 的**思考**与**工具调用**按真实发生顺序交织在一条时间线上（思考段 + 工具行：图标 · 中文名 · 参数 · 状态，点工具行展开完整结果），**最终答案始终独立在时间线下方**、不被打碎。流式时自动展开（看着它边想边查）、完成自动收起为一行「思考并使用了 N 个工具」（手动开合优先），与多 Agent run 详情「思考过程」区段同款交互（§十 run-detail）。**它并入并取代了原单 Agent 的独立「思考过程」面板** `ThinkingPanel`——单 Agent 过程从此只有一处、更连贯（`ThinkingPanel` 仅多 Agent CEO 思考仍用）。
 
 - **决策与理由**：原「单 Agent 纯气泡、气泡内工具卡已否决」造成**透明度缺口**——后端对每次工具都发了 `tool_use_start/end`，但前端把事件路由进团队图谱、因「无 plan」全部丢弃，用户对「AI 联网搜了什么、读了哪篇」零可见，落后于 Cursor/ChatGPT。取舍后**推翻该旧决策**：用「折叠兜噪音 + 过程/答案分离」消解「零噪音 vs 透明度」的张力（被否决的是**常驻、打碎正文的**穿插工具卡，不是工具可见性本身）。
-- **保序持久化**：过程时间线随回合持久化在 `messages.runs.process`（有序的思考段/工具步），刷新可回放（与多 Agent 团队图谱 journal 同一字段、同一加载路径，互斥：一回合二选一）；纯思考无工具的回合不落 `process`，回放时由 `reasoning_content` 合成单条思考段。
-- → 见代码 `components/chat/MessageBubble.tsx`（`ProcessTimeline`）、`stores/conversation.ts`（`Message.process` + 累积）、`services/streamConversation.ts`（工具事件双写图谱 + 过程线）、`runtime/events.py`（`EventSink.process_timeline`）、`runtime/pipeline.py`（`_build_runs_payload`）。
+- **保序持久化**：过程时间线随回合持久化（后端落 `turn_journal` 唯一事实源，读取投影为 `runs.process` 载荷；有序的思考段/工具步），刷新可回放（与多 Agent 团队图谱 journal 同一载荷、同一加载路径，互斥：一回合二选一）；纯思考无工具的回合不落 `process`，回放时由 `reasoning_content` 合成单条思考段。
+- **「正在生成 {工具}…」实时行 `ComposingToolLine`**：CEO captain 拼装一个**大工具调用的参数**时（主战场是 `delegate` 任务书，也含单 Agent 写大文件），气泡底部一行实时显示「正在生成 {工具} · N 字 ▋」——补 `tool_use_start` 之前的空白期（`delegate` 任务书往往在 `run_plan`、即团队图出现**之前**就拼几千字，否则气泡只剩光标、读着像卡死）。由气泡级 `tool_progress` 事件驱动（run 级 `run_tool_progress` 的孪生，§执行引擎 SSE 表），优先级高于「正在思考…」/光标；正文一开始流、或调用落为工具步（执行/团队图接管）即消失。**纯传输、不持久化**（重载由成稿的过程线/团队图替代）。
+- → 见代码 `components/chat/MessageBubble.tsx`（`ProcessTimeline` / `ComposingToolLine`）、`stores/conversation.ts`（`Message.process` + `composingTool` + 累积）、`services/streamConversation.ts`（工具事件双写图谱 + 过程线 + `tool_progress`→`setComposingTool`）、`runtime/events.py`（`EventSink.process_timeline` / `tool_progress`）、`runtime/pipeline.py`（`_build_runs_payload`）。
 
 | 形态 | 何时 | 职责 |
 |------|------|------|
@@ -78,7 +79,7 @@
 - **已停止**（`status=cancelled`）：同战绩形态，「已停止」标题，在跑节点冻结为 cancelled（不再转圈），救火行显示「已花 ¥」。
 - **失败**（整轮崩溃，`FailureStrip`）：高亮失败 Agent / run + `run_failed` 错误原因 + 救火行。
 
-救火行（`RecoveryActions`）由失败条、部分失败的已完成条、已停止条共用——重试（从最后一条用户消息整轮重跑）/ 调整指令（内联编辑后重发）/ 放弃（清空该回合执行槽）。状态条尾部为一级图标按钮：执行中给「停止」、已完成/已停止给「回放」（进全屏自动播放时间轴），外加常驻的折叠 / 全屏；不设 `[···]` 菜单——整轮重跑统一交给消息级「重新生成」与救火行「重试」（原菜单的「重新规划」是同一动作的重复入口、运行态还失效，与裸复制「任务 ID」一并移除）。内嵌图块在 `run_plan` 首次挂载时播放一次入场动画（`animate-task-card-enter`，遵循 `prefers-reduced-motion`，见 `styles/globals.css`）。
+救火行（`RecoveryActions`）由失败条、部分失败的已完成条、已停止条共用——重试（从最后一条用户消息整轮重新执行）/ 调整指令（内联编辑后重发）/ 放弃（清空该回合执行槽）。状态条尾部为一级图标按钮：执行中给「停止」、已完成/已停止给「回放」（进全屏自动播放时间轴），外加常驻的折叠 / 全屏；不设 `[···]` 菜单——整轮重新执行统一交给消息级「重新生成」与救火行「重试」（原菜单的「重新规划」是同一动作的重复入口、运行态还失效，与裸复制「任务 ID」一并移除）。内嵌图块在 `run_plan` 首次挂载时播放一次入场动画（`animate-task-card-enter`，遵循 `prefers-reduced-motion`，见 `styles/globals.css`）。
 
 **出现时机规则**（核心决策）：
 
@@ -92,13 +93,13 @@
 
 **为何无「规划中」态**（决策）：CEO + `delegate` 架构下 `run_plan` 同步到达，无独立规划空窗；「系统在思考」由 CEO reasoning 气泡覆盖；`tool_use_start(delegate)` 前无法预知是否组团，故状态条不设「规划中」态。→ 见代码 `delegate.py`、`engine.py`。
 
-**检查点卡片（已落地）**：CEO 执行中途遇到「自己无法独自定夺、且选错代价高」的关键岔路时，调内置工具 `ask_user` 暂停本回合并请用户拍板——区别于状态条里的团队进度，它是**会话流内、挂在该助手消息下**的独立卡片（琥珀 `warning` 令牌），刷新后随消息回放。卡片给「**提交 / 停止**」两动作（CEO 可附 `options` 具体选项 + 自由文本补充）：**提交**＝采纳或修正 CEO 方向，携带勾选项（`selected`）与可选补充续跑；**停止**＝优雅结束本回合（CEO 收尾语随之流式落库）。`options` 在 `multiple=true` 时渲染为多选 checkbox（可多选）、否则单选 radio；勾选不即时定案，须点「提交」。用户答复经 `POST …/interactions/{id}`（kind=ask_user，§18.2 统一挂起原语）回流进 CEO 的 ReAct 循环；超时由引擎落 `timeout`、交回 CEO 自行稳妥收尾。卡片仅在「该消息仍在流式（即本回合挂起中）」时可操作，历史/已结束回合渲染为只读记录。→ 见代码 `components/chat/CheckpointCard.tsx`、`services/checkpoint.ts`、`stores/conversation.ts`（`checkpointsFromEvents` / `addCheckpoint` / `settleCheckpoint`）、后端 `tools/builtin/ask_user.py`。SSE 契约（`checkpoint_required` / `checkpoint_resolved`）见 [执行引擎架构设计.md §SSE 事件](/docs/03-AI核心/执行引擎架构设计.md)。
+**检查点卡片 / 开工提案卡（已落地）**：CEO 调内置工具 `ask_user` 暂停回合、请用户拍板——这是**唯一的发问卡片**，开场引导与执行途中的高代价岔路共用同一张自适应卡片 `AskUserCard`（吸收了原 `KickoffCard`，不再有独立的开场卡）。它是**会话流内、挂在该助手消息下**的独立卡片，刷新后随消息回放。**语气按内容自适应**：开场味（有起步计划 `assumptions` / 风格 `style_options`，或每题都预填 `default`）= 蓝 `primary`／「就这样开做」；途中味（裸问题、无默认）= 琥珀 `warning`／「提交」。卡片可含 `message` 框架 + `context` 背景 + `assumptions` 起步计划（只读折叠块）+ `questions`（≤5，`choice` 单/多选或 `text` 填空，开场预填 `default`）+ `style_options` 风格预设 + 自由补充框。两动作：**提交**＝采纳或微调 CEO 方向续跑；**停止**＝优雅结束本回合（CEO 收尾语随之流式落库）。提交时前端把各题选择 + 风格 + 补充**拼成一段可读 `note`**（答复模型 α——唯一读者 CEO 只读散文，无需结构化线缆），`selected` 留空。用户答复经 `POST …/interactions/{id}`（kind=ask_user，§18.2 统一挂起原语）回流进 CEO 的 ReAct 循环；超时由引擎落 `timeout`、交回 CEO 自行稳妥收尾。卡片仅在「该消息仍在流式（即本回合挂起中）」时可操作，历史/已结束回合渲染为只读记录。→ 见代码 `components/chat/CheckpointCard.tsx`（`AskUserCard` 共享给断连续跑卡）、`services/checkpoint.ts`、`stores/conversation.ts`（`checkpointsFromEvents` / `addCheckpoint` / `settleCheckpoint`）、后端 `tools/builtin/ask_user.py`。SSE 契约（`checkpoint_required` / `checkpoint_resolved`）见 [执行引擎架构设计.md §SSE 事件](/docs/03-AI核心/执行引擎架构设计.md)。
 
 > **为何两态而非三态**（决策理由）：原「继续/调整」效果同一（都续跑），区别已隐含在内容（勾没勾选项、填没填补充），合并为「提交」并消除多选时「该点哪个」的犹豫；保留「停止」安全阀而非表单式「跳过」，因检查点是高代价岔路而非信息收集。线路 `CheckpointDecision` 留 `adjust` 仅供老对话回放。详见 [`编排器与CEO主Agent.md` §四](/docs/03-AI核心/编排器与CEO主Agent.md)。
 
-**结构化挂起卡片 `PlanReviewCard`（✅ 已落地，Phase 2a）**：DAG step 带 `checkpoint_after` 时，`WaveScheduler` 在**波间**暂停并请用户审视——区别于 CEO 主动 `ask_user`，这是**调度器按 plan 预声明的挂起点**（`kind=plan_review`）。机制镜像 `ask_user` 全链但走**独立平行路径**（payload 为 `steps`/`pending` 而非 `question`/`options`）：卡片挂在触发它的助手消息下，展示刚完成检查点步骤（role + 产出摘要）+ 待运行下游预览；**继续 / 调整 / 停止** 三按钮——区别于 `ask_user`，plan_review 的 `adjust` 是实生效独立决策（备注作为 steer 注入未跑下游），故「调整」单列、且仅备注非空时可点。三态同 `CheckpointCard`：**pending**（live 可点）/ **dormant**（reload 后非 live 的未决）/ **resolved**（已继续 / 已调整·指示已注入 / 已停止 / 超时已放行）。用户答复经 `POST …/interactions/{id}`（kind=plan_review）resolve；live 与 reload 共用 `planReviewsFromEvents` 折叠。→ 见代码 `components/chat/PlanReviewCard.tsx`、`services/planReview.ts`、`stores/conversation.ts`（`PlanReviewDisplay` / `addPlanReview` / `settlePlanReview`）、`services/streamConversation.ts`、`components/chat/MessageBubble.tsx`；后端见 `tools/builtin/delegate.py`、`runs/wave.py`、`runtime/events.py`。
+**结构化挂起卡片 `PlanReviewCard`（✅ 已落地，Phase 2a）**：DAG step 带 `checkpoint_after` 时，`WaveScheduler` 在**波间**暂停并请用户审视——区别于 CEO 主动 `ask_user`，这是**调度器按 plan 预声明的挂起点**（`kind=plan_review`）。机制镜像 `ask_user` 全链但走**独立平行路径**（payload 为 `steps`/`pending` 而非 `question`/`questions`）：卡片挂在触发它的助手消息下，展示刚完成检查点步骤（role + 产出摘要）+ 待运行下游预览；**继续 / 调整 / 停止** 三按钮——区别于 `ask_user`，plan_review 的 `adjust` 是实生效独立决策（备注作为 steer 注入未跑下游），故「调整」单列、且仅备注非空时可点。三态同 `CheckpointCard`：**pending**（live 可点）/ **dormant**（reload 后非 live 的未决）/ **resolved**（已继续 / 已调整·指示已注入 / 已停止 / 超时已放行）。用户答复经 `POST …/interactions/{id}`（kind=plan_review）resolve；live 与 reload 共用 `planReviewsFromEvents` 折叠。→ 见代码 `components/chat/PlanReviewCard.tsx`、`services/planReview.ts`、`stores/conversation.ts`（`PlanReviewDisplay` / `addPlanReview` / `settlePlanReview`）、`services/streamConversation.ts`、`components/chat/MessageBubble.tsx`；后端见 `tools/builtin/delegate.py`、`runs/wave.py`、`runtime/events.py`。
 
-**断连续跑卡片 `ResumePrompt`（✅ 已落地，Phase 2b）**：plan_review 暂停的回合若**断连/重启**丢了 live SSE（实时 `PlanReviewCard` 随之消失），后端已把整帧落库（结构化挂起 2b 回合级落盘，见 [`../03-AI核心/执行引擎架构设计.md` §暂停与恢复](/docs/03-AI核心/执行引擎架构设计.md)）。重开会话时拉 `GET …/paused` 列出待恢复回合，渲染在**输入框上方**（同 `ApprovalPrompt` 区，而非消息内——此刻尚无助手气泡可挂）的「待恢复」卡片：内容同 `PlanReviewCard`（已完成步骤 + 待运行下游 + 可选备注），**继续 / 调整 / 停止** 三按钮 → `POST …/messages/{mid}/resume`（携 `decision`/`note`）走 SSE 续跑，开一个新助手气泡承接后续（原子 claim：第二次/陈旧点击落 404，卡片乐观移除）。→ 见代码 `components/chat/ResumePrompt.tsx`、`services/resume.ts`、`stores/pausedTurns.ts`、`services/turns.ts`（`runResume`）、`services/streamConversation.ts`（`resumeConversation`）、`pages/ConversationPage.tsx`（重开拉取）。
+**断连续跑卡片 `ResumePrompt`（✅ 已落地，Phase 2b）**：plan_review 暂停的回合若**断连/重启**丢了 live SSE（实时 `PlanReviewCard` 随之消失），后端已把整帧落库（结构化挂起 2b 回合级落盘，见 [`../03-AI核心/执行引擎架构设计.md` §暂停与恢复](/docs/03-AI核心/执行引擎架构设计.md)）。重开会话时拉 `GET …/paused` 列出待恢复回合，渲染在**输入框上方**（同 `ApprovalPrompt` 区，而非消息内——此刻尚无助手气泡可挂）的「待恢复」卡片：内容同 `PlanReviewCard`（已完成步骤 + 待运行下游 + 可选备注），**继续 / 调整 / 停止** 三按钮 → `POST …/messages/{mid}/resume`（携 `decision`/`note`）走 SSE 续跑，开一个新助手气泡承接后续（原子 claim：第二次/陈旧点击落 404，卡片乐观移除）。**若暂停在 `ask_user`**（而非 plan_review），同一「待恢复」位渲染**统一的 `AskUserCard`**（与 live 卡同款，仅顶部说明「连接已断开·CEO 在等你拍板」），提交/停止 → 同一 resume 端点（答复同样拼成 `note`、答复模型 α）。→ 见代码 `components/chat/ResumePrompt.tsx`、`services/resume.ts`、`stores/pausedTurns.ts`、`services/turns.ts`（`runResume`）、`services/streamConversation.ts`（`resumeConversation`）、`pages/ConversationPage.tsx`（重开拉取）。
 
 > **勿与两个近邻混淆**：① **工具审批**（`approval_required`，GRANTABLE 工具授权）是另一套、渲染在输入框上方而非消息内；② **CEO 主动 `ask_user`** 与 **DAG `checkpoint_after` 结构化挂起**是不同机制（前者 CEO 运行时自决，后者调度器波间闸门）——二者 UI 形态相似但数据通路与 resolve kind 分离。`TeamPreviewCard` 团队预审 gate（执行前预览团队）仍 ⏳ Phase 2 preflight，见 [`编排器与CEO主Agent.md` §四](/docs/03-AI核心/编排器与CEO主Agent.md)。
 
@@ -117,7 +118,7 @@
 | 图分列对置 | 正/反节点按 `stance` 排序 + ELK `considerModelOrder`，分两带对置、汇聚到 CEO 收尾节点——`GraphView` / `lib/elk-layout.ts` |
 | 左右并排对比 | 图卡下方一张「辩论对比」卡片：按 `group` 分组，每组 `正方 \| 反方` 两栏并排（896px 阅读列）渲染 worker 产出，点角色行下钻右侧详情看全文；**多轮辩论按 `round` 逐轮渲染**（每轮一行「第 N 轮」正/反，第 k 轮反驳对方第 k-1 轮）——`DebateCompare`（`RoundRow`） |
 
-**辩论收尾复用现有检查点**：CEO 跑完对立 run 后调 `ask_user(options=["采纳正方","采纳反方","都要","补充论证"])`，复用 §三 `ask_user` 检查点卡片（CEO prompt 教「对立任务打标」与「`ask_user` 收尾」，见 `runtime/prompt.py`），无新检查点类型。
+**辩论收尾复用现有检查点**：CEO 跑完对立 run 后调 `ask_user`（一个 `questions` 项列出「采纳正方 / 采纳反方 / 都要 / 补充论证」），复用 §三 `ask_user` 检查点卡片（CEO prompt 教「对立任务打标」与「`ask_user` 收尾」，见 `runtime/prompt.py`），无新检查点类型。
 
 **多轮辩论（Arena）= DAG 模式，已落地**：真·多轮来回交锋靠 CEO 在 `delegate` 用**跨轮 `depends_on`**（第 k 轮依赖对方第 k-1 轮）+ `round` 标记表达，执行器注入上游产物供反驳，前端逐轮渲染（上「左右并排对比」行）。**已否决独立 Arena 子系统**（独立 SSE / 状态机 / `arena` 节点）——决策与唯一残留的「运行期决定轮数」边际项见 [`Agent协作模式.md` §7.4](/docs/03-AI核心/Agent协作模式.md)。
 
@@ -125,7 +126,7 @@
 
 ## 五、图视图（现状）
 
-内嵌于多 Agent 回合的助手消息（`InlineTeamGraph` 里 `GraphView` 的 `embedded` 形态，为**静态预览**：禁滚轮/捏合/双击/拖拽缩放且 `preventScrolling=false`，鼠标滑过时滚动的是对话而非缩放画布，缩放/平移探索全交给全屏），点状态条右上「最大化」进临时全屏（`TeamGraphFullscreen`）。**内嵌画布按 fit-to-width 定高**：宽度撑满消息列、缩放只缩不放（`zoom = min(1, 列宽/图宽)`，列宽以 `ResizeObserver` 实测）使节点尺寸跨消息一致，盒高跟 ELK 包围盒在该缩放下的真实投影走并 clamp（180–520px），故串行链矮、并行扇高——取代早期「按 run 数估算」会过早顶满、且无视拓扑、还因 `fitView` 两轴缩放致节点忽大忽小的旧策略；超高时顶对齐 + 底部渐隐示意「还有更多」，看全图进全屏。为此 `computeLayout` 随位置一并返回包围盒。`GraphView` 将 run 映射为 `agent` 节点 + 两端的端点节点（用户输入 / synthesis 收尾，`EndpointNode`），ELK 布局两种（默认左右流 / 树形——默认取左右流契合横屏、内嵌↔全屏方向一致，`lib/elk-layout.ts`；布局算法偏好持久化于 `stores/graph.ts`，位置/边为每图本地态，一页多张内嵌图互不覆盖）；节点 face 收敛为「角色 → 在干什么 → 用时/工具」三层：6 态色环 + 图标承载状态（**不再用文字重复**，普通队员只剩单行角色名）、模型档 / 深度思考徽章、中行（**运行中** = 流式输出预览带光标 / **其余态** = 任务一句话 `run.task`，取代旧的「取输出末尾 80 字、对代码/文件纯属乱码」的 tailText 预览）、脚注用时 + 工具数；**¥ / token 不上节点 face、归右侧 run 详情面板**（§7.3B）；`StepEdge` 运行中边以 SVG 粒子流（`animateMotion`）动画；节点状态过渡为纯 CSS：按 plan 顺序错峰入场（`graph-node-enter`）、run 进入终态时一次性完成/失败闪烁（`graph-node-flash` + `useTerminalFlash`）、切换布局时位移 morph（`.react-flow__node` transform 过渡），均遵循 `prefers-reduced-motion`。**run 详情单一出口**：内嵌与全屏点节点都下钻到右侧 `SidePanel` 新开的 run 详情 tab（全屏点完即退出，露出身后对话）；临时全屏额外提供画布右上布局切换工具栏（左右流 / 树形 + 「适应画布」按钮；**已移除 React Flow 自带 +/− 缩放控制条**，与工具栏 fit / `F` / 右键菜单「适应画布」三重重复）+ 帧流时间轴回放（`Timeline`：播放 / 拖动 / 回到实时，亦可从完成 / 已停止态状态条「回放」直接进全屏自动播放）+ 节点/画布右键菜单（查看详情 / 居中此节点 / 适应画布，复用 `sidebar/ContextMenu`）+ `F` 适应画布 + Esc 退出（→ 见代码 `components/graph/`）。
+内嵌于多 Agent 回合的助手消息（`InlineTeamGraph` 里 `GraphView` 的 `embedded` 形态，为**静态预览**：禁滚轮/捏合/双击/拖拽缩放且 `preventScrolling=false`，鼠标滑过时滚动的是对话而非缩放画布，缩放/平移探索全交给全屏），点状态条右上「最大化」进临时全屏（`TeamGraphFullscreen`）。**内嵌画布按 fit-to-width 定高**：宽度撑满消息列、缩放只缩不放（`zoom = min(1, 列宽/图宽)`，列宽以 `ResizeObserver` 实测）使节点尺寸跨消息一致，盒高跟 ELK 包围盒在该缩放下的真实投影走并 clamp（180–520px），故串行链矮、并行扇高——取代早期「按 run 数估算」会过早顶满、且无视拓扑、还因 `fitView` 两轴缩放致节点忽大忽小的旧策略；超高时顶对齐 + 底部渐隐示意「还有更多」，看全图进全屏。为此 `computeLayout` 随位置一并返回包围盒。`GraphView` 将 run 映射为 `agent` 节点 + 两端的端点节点（用户输入 / synthesis 收尾，`EndpointNode`），ELK 布局两种（默认左右流 / 树形——默认取左右流契合横屏、内嵌↔全屏方向一致，`lib/elk-layout.ts`；布局算法偏好持久化于 `stores/graph.ts`，位置/边为每图本地态，一页多张内嵌图互不覆盖）；节点 face 收敛为「角色 → 在干什么 → 用时/工具」三层：6 态色环 + 图标承载状态（**不再用文字重复**，普通队员只剩单行角色名）、模型档 / 深度思考徽章、中行（**运行中**四级优先，使节点在往往很长的「思考/写文件」期**永不空白**——修「看不到 worker 流式输出」的主因：① 正在生成的工具调用「正在生成 {工具} · N 字」（`run_tool_progress`）——写文件等场景里 worker 的产出是作为工具调用**参数**流出的，既非 content 也非 reasoning，且 `tool_use_start` 要等参数拼完才触发，否则整段写入期空白；② 自己的流式输出预览带光标；③ 输出未到时——DeepSeek 先把思考整段流完才吐正文——回退「思考末尾预览」（斜体 +「思考中」光标）；④ 都没到落回任务一句话 / **其余态** = 任务一句话 `run.task`，取代旧的「取输出末尾 80 字、对代码/文件纯属乱码」的 tailText 预览）、脚注用时 + 工具数；**¥ / token 不上节点 face、归右侧 run 详情面板**（§7.3B）；`StepEdge` 运行中边以 SVG 粒子流（`animateMotion`）动画；节点状态过渡为纯 CSS：按 plan 顺序错峰入场（`graph-node-enter`）、run 进入终态时一次性完成/失败闪烁（`graph-node-flash` + `useTerminalFlash`）、切换布局时位移 morph（`.react-flow__node` transform 过渡），均遵循 `prefers-reduced-motion`。**run 详情单一出口**：内嵌与全屏点节点都下钻到右侧 `SidePanel` 新开的 run 详情 tab（全屏点完即退出，露出身后对话）；临时全屏额外提供画布右上布局切换工具栏（左右流 / 树形 + 「适应画布」按钮；**已移除 React Flow 自带 +/− 缩放控制条**，与工具栏 fit / `F` / 右键菜单「适应画布」三重重复）+ 帧流时间轴回放（`Timeline`：播放 / 拖动 / 回到实时，亦可从完成 / 已停止态状态条「回放」直接进全屏自动播放）+ 节点/画布右键菜单（查看详情 / 居中此节点 / 适应画布，复用 `sidebar/ContextMenu`）+ `F` 适应画布 + Esc 退出（→ 见代码 `components/graph/`）。
 
 **嵌套子团队父子分组**（阶段2 嵌套委派）：某 worker 经 `can_delegate` 再向下带一层小队时，其子 worker **不接入**「用户输入 / synthesis」端点 bookend（只有顶层 worker 参与端点接线），而由 captain worker 画一条**虚线委派边**指向每个子 worker（`StepEdge` 按 `kind:"delegate"` 渲染虚线，区别于实线 DAG 依赖与运行中粒子流），子 worker 节点带「子任务」徽章（`AgentNode`）。分组键取 `run_plan` 预声明的 `parent_run_id`，故布局在 `run_started` 之前即成组、分层布局把子 worker 紧贴其 captain 聚拢。**端点钉层**：CEO 汇聚点端点钉在 ELK 末层、用户输入端点钉首层（`layerConstraint` LAST_SEPARATE / FIRST_SEPARATE）——否则叶子子 worker 与汇聚点同跳数（都距父 worker 一跳、下游皆空），会被 ELK 拉到**同一列**，汇聚点本应排在子团队之后；钉层后恒为「用户输入 → 团队波次 → 子团队 → CEO 汇聚点」，对扁平/辩论/多波 DAG 是 no-op（汇聚点本就在末层）。**子团队下沉**：钉层后父 worker 那条**实线**「父→汇聚点」边仍会横穿夹在中间层的子 worker（与父同跳被 ELK 摆到同一行、读成假主干链，且边优先级无法消除），故再加一道**跨轴后处理**把整条子团队带下沉到该主干线**之下**——子团队遂以虚线支线清楚挂在父 worker 下、主干线不被遮挡（仅动交叉轴、不改层与列；包围盒随之在交叉轴增高）。**多父整块堆叠**：同一波次多个父各自带子队时，逐父独立下沉会令两支子队（乃至上方父的子队与下方父本身）落到同一交叉带相互压盖；故下沉按交叉轴阅读序把每个「父 + 其子树」当一个**整块依次堆叠**、维护 floor——必要时把靠下的父连同整块再下推让开上一块，端点随后按父的**最终**跨度重新居中（故下沉须在端点居中**之前**跑；单父退化为原行为、零回归）。**否决容器嵌套盒**：父子关系用「委派边 + 徽章 + 下沉支线」表达而非 ELK compound 容器——下沉后处理已用单测覆盖「2 级嵌套 / 同层双父」且证明开销低，compound 的重构布局风险与其收益不成正比。→ 见代码 `GraphView.tsx`、`lib/elk-layout.ts`（`LayoutBookends` / `dropSubTeamsBelowParent`）、单测 `lib/__tests__/elk-layout.test.ts`。
 
@@ -182,7 +183,7 @@
 
 ## 九、文件交互设计 ✅ 已确定
 
-> 已落地——**文件夹即工作区**：**取消全局文件页**，文件只在「工作区（=文件夹）」上下文里浏览——① 对话内的工作区面板；② **文件夹总览页** `/folders/:id`（点文件夹「打开工作区」→ 看文件树 + 其下对话 + 云/本地徽标 + 新建对话；作用域单个文件夹、非全局）。裸聊无工作区，产文件时懒建文件夹。「添加文件夹 = 建本地绑定项目」一步到位（`POST /v1/folders` 带 `local_root_id`，游离根概念已移除），树/预览/增删改下沉共用 `FileTree`/`FilePreview`（→ 见代码 `components/files/`、`components/workspace/`、`main/fs-service.ts`）。`FileSource` 抽象 / @ 提及多源索引见 [`前端技术与架构.md` §8.7](/docs/04-前端/前端技术与架构.md)；后端工作区一等资源契约见 [`双模式工作区.md` §九](/docs/02-架构/双模式工作区.md)。本节为 UX 层面决策。
+> 已落地——**文件夹即工作区**：文件在「工作区（=文件夹）」上下文里浏览，三个入口——① 对话内的工作区面板；② **文件夹总览页** `/folders/:id`（点文件夹「打开工作区」→ 看文件树 + 其下对话 + 云/本地徽标 + 新建对话；作用域单个文件夹）；③ **文件中枢** `/files`（顶部导航「文件」→ **VSCode 式左树右详情**：左栏一棵**多根树**（每个工作区=文件夹为可折叠根节点，展开即内联看其文件），右栏展示选中文件的预览/编辑、**树常驻不被顶掉**；作用域**跨项目全局**，并**承载文件夹的生命周期**：工作区根节点**右键菜单**管理（重命名/删除/新建文件·文件夹/上传/打开工作区），顶栏「新建文件夹」与「添加本地文件夹」）。③ 是「跨工作区文件总览」，建在工作区一等概念上（rail 与 `/conversations` 同一枚举源，故不双份记账），**区别于早期被否的「旧式全局文件页（拍平对话文件）+ 游离根」**。裸聊无工作区，产文件时懒建文件夹。「添加文件夹 = 建本地绑定项目」一步到位（入口在 ③ 文件中枢顶栏：选 OS 目录 → `POST /v1/folders` 带 `local_root_id` 单条建项目，游离根概念已移除）；**`/conversations` 仅保留按文件夹筛选与「打开工作区」，文件夹的增删改不再在对话页**（管理入口跳 `/files`）。树/预览/增删改下沉共用 `FileTree`（窄侧栏 swap 式 `FileBrowser` ↔ 文件中枢 split 式 `FileWorkbench` 两种装配，文件详情渲染共用 `FileDetail`）（→ 见代码 `components/files/`、`components/workspace/`、`pages/FilesPage.tsx`、`main/fs-service.ts`）。`FileSource` 抽象 / @ 提及多源索引见 [`前端技术与架构.md` §8.7](/docs/04-前端/前端技术与架构.md)；后端工作区一等资源契约见 [`双模式工作区.md` §九](/docs/02-架构/双模式工作区.md)。本节为 UX 层面决策。
 
 **设计原则**：一棵以本地授权目录为根的树。**被否决**：「云端/本地两平级源」上下分段——心智割裂 + 主次写死。
 
@@ -192,13 +193,15 @@
 | 展开目录 | 懒读子项 + 启动 watch；折叠即停止 watch |
 | 内联改名 | 就地 input，回车/blur 提交，Esc 取消 |
 | 拖拽移动 | 落点校验（非原父/非自身子树） |
-| 右键菜单 | 普通节点：新建/下载/打开/重命名/删除（共用 `FileTree`）；根级「设为项目」已隐含（加文件夹即建项目），「连接/断开」本地目录 ⏳（待文件夹级绑定端点） |
+| 右键菜单 | 普通节点：新建/下载/打开/重命名/删除（共用 `FileTree`）；**工作区根节点**（文件中枢 `FileWorkbench`）：重命名/删除/新建文件·文件夹/上传/打开工作区；根级「设为项目」已隐含（加文件夹即建项目），「连接/断开」本地目录 ⏳（待文件夹级绑定端点） |
 
-**审批 UX（写操作）**：只读时尝试写引导开启；可写时写前弹审批（可「本轮内都允许」批量放行，依赖 §三工具审批三态 `grantable` 级别，避免 N 次写 = N 次弹窗）。
+**审批 UX（写操作）**：只读时尝试写引导开启；可写时写前弹审批（可「本轮内都允许」按同名工具、或「本轮内允许所有文件改动」按整类一次放行，依赖 §三工具审批三态 `grantable` 级别，避免 N 次写/改/删 = N 次弹窗）。
 
 **对话落点表达**：已选文件夹→输入框「文件夹」pill 显示项目名；未选但 Agent 自动落点→pill 标「自动」并提供「固定为文件夹」一键升级；无桌面→不挂写工具，需显式出口。
 
 **隐私承诺**：默认不留存（未备份内容不进云）；在途可用（读文件时正文临时发给模型）；备份/分享 = 显式上传（不自动同步，操作前明示）。
+
+**AI 产物可编辑**（文档编辑器，P1–P2 已落地）：工作区面板里 `.md/.markdown` 从只读预览升级为**可编辑**——CodeMirror 源码编辑器 + **编辑/预览**视图切换。编辑态内联实时预览（公式 / mermaid / markmap / 表格 / frontmatter 就地渲染，**光标进块自动还原源码**，既有所见即所得手感又字节忠实不脏 diff）+ 文本变换工具栏（标题/加粗/列表/表格/链接…）。保存：**防抖自动保存 + `Ctrl/Cmd+S` 即存**；写前 CAS——磁盘被外部编辑器 / Agent 改即提示**冲突**、交用户裁决，**绝不盲覆盖**。**非 UTF-8 编码**（GBK 等）以**只读模式**打开（改了存不下，不如不给改的假象）。选区 **AI 改写**评审（接受/拒绝逐块）属 P3 ⏳·并行落地中。技术架构见 [`前端技术与架构.md` §8.8 / §9.10](/docs/04-前端/前端技术与架构.md)，落地蓝图见 [`07-规划/文档编辑器落地设计`](/docs/07-规划/文档编辑器落地设计.md)。
 
 ---
 
@@ -221,7 +224,7 @@
 | 打开方式 | 点内嵌图节点下钻该 run（无自动进度 tab） | 按需、零噪音 |
 | 节点高亮 | 内嵌图高亮**派生自**面板当前激活 run tab（切/关 tab、切到「工作区」tab、关面板自动跟随）；全屏图用自身选中 | 一面一个高亮源，**否决**反向 `selectRun` 跨 store 对账 |
 
-**run-detail 区段构成**：头部（角色 / 状态 / 用时）、任务、错误（失败强制展开）、**思考过程**（worker 思考全文，`run_reasoning_delta` 流式；流式时自动展开、完成自动收起）、输出、工具调用、**协作关系**（`dependsOn` 依赖 + 后续）、**委派关系**（上级 + 子任务树，详见下段）、**资源消耗**（power 粒度全量 token + ¥ 明细；默认折叠，开「用量明细」时展开，¥ 总额不受该开关影响）。**独立 `reasoning` Tab 已否决**——思考全文本质 per-run，归 run-detail「思考过程」区段而非全局 Tab。→ 见代码 `RunDetailBody.tsx`。
+**run-detail 区段构成**：头部（角色 / 状态 / 用时）、任务、错误（失败强制展开）、**思考过程**（worker 思考全文，`run_reasoning_delta` 流式；流式时自动展开、完成自动收起）、**正在生成**（worker 拼装工具调用参数时的实时行「{工具} · N 字」，`run_tool_progress`；仅运行中且参数流式中出现，参数拼完即让位给下方工具调用行）、输出、工具调用、**协作关系**（`dependsOn` 依赖 + 后续）、**委派关系**（上级 + 子任务树，详见下段）、**资源消耗**（power 粒度全量 token + ¥ 明细；默认折叠，开「用量明细」时展开，¥ 总额不受该开关影响）。**独立 `reasoning` Tab 已否决**——思考全文本质 per-run，归 run-detail「思考过程」区段而非全局 Tab。→ 见代码 `RunDetailBody.tsx`。
 
 **委派展示统一**：单一可视化（`GraphView` 一张图同表委派树与 `depends_on` 依赖）+ 单一数据模型（`AgentRun`：编排步骤与委派子 Agent 共用同一节点类型）+ `run_*` 事件族（前端不拼接两路流）。**被否决**：前端按 N 隐藏其一（状态仍分叉）；保留双协议只在前端合并（双写漂移）。
 
@@ -235,7 +238,7 @@
 
 可发现性是 Agent 的固有属性，单独成轴，不从「被哪个团队引用」反推。三态：`public`（上架，进发现/搜索，并入 CEO **智能路由**的可用人才池）、`unlisted`（后台构件，不进发现面但按 id 可直达）、`private`（仅创作者可见）。**可发现 ≠ 用户手选**：可发现只是把 agent 喂进 CEO 的人才池由智能路由自动组团，**不给用户开「选择器」菜单**（手选 = 替代 CEO 调度、制造双决策逻辑，已否决）。
 
-**设计原则**：单一谓词（一处过滤 `visibility=public` 覆盖全部发现入口）；`is_featured` 解耦（回归「编辑精选」本职，与可见性正交）；缺省 public（避免误隐藏）；组件型默认 unlisted（团队成员/队长/竞技场角色）。
+**设计原则**：单一谓词（一处过滤 `visibility=public` 覆盖全部发现入口）；`is_featured` 解耦（回归「编辑精选」本职，与可见性正交）；缺省 public（避免误隐藏）；组件型默认 unlisted（团队成员/captain/竞技场角色）。
 
 **被否决**：把辩论/对抗角色拆成独立实体——违背 Multi-Agent First；多轮辩论是普通 DAG 的内联角色 + `stance`/`round` 标记（§四），无独立 Arena 实体或槽位。
 
@@ -255,27 +258,15 @@
 
 ---
 
-## 十三、质量档设置页（现状）
+## 十三、质量档设置页（内测已退役）
 
-> **已落地**：`/more/model-modes`（MorePage「质量档」）。用户以**团队语言**为 Agent 团队选模型——内部 profile 名（`chat` / `agent.strong` / `agent.fast`）永不外露。前后端共享一套词表（`lib/modelModes.ts`）与缓存（`stores/modelModes.ts`，对话输入框 `ModeSelector` 同源，故设置页 CRUD 后选择器即时刷新）。本节为关键决策；档位解析 / 运营 ceiling 等后端语义见 [`../03-AI核心/编排器与CEO主Agent.md` §2.1](/docs/03-AI核心/编排器与CEO主Agent.md) 与代码 `llm/modes.py`、`api/routes/model_modes.py`。
+> **内测（方案 A-中+）下线**：Pro 撤出用户 ceiling → 用户侧坍缩成单 Flash 档。质量档设置页（`/more/model-modes`）、对话输入框 `ModeSelector`、前端词表/缓存（`lib`·`stores`·`services` 的 `modelModes`）整片删除，导航与命令面板入口移除。后端选择层（预设 / ceiling / `resolve_profile_set` / DB 表）原地休眠，ceiling 加回 Pro 即零迁移恢复。后端语义见 [`../03-AI核心/编排器与CEO主Agent.md` §2.1](/docs/03-AI核心/编排器与CEO主Agent.md) 与代码 `llm/modes.py`。
 
-**模型**：一个「质量档」= 团队角色 → 模型的映射。角色三类（CEO 本体 / 主力 worker / 经济 worker），仅前两者可配；**经济 worker 锁定 Flash**（决策：经济档「按定义就便宜」，升 Pro 自相矛盾，仅只读展示）。系统预设两枚只读（`经济档` = 全程 Flash = 系统默认 / `高质量档` = CEO 本体 + 主力 worker 升 Pro），用户可在运营 ceiling 内新建自定义档。解析优先级：对话 → 用户默认 → 运营默认 → 系统默认（经济）；未知 / 已删档回落经济，绝不让模型配置问题打断回合。
+恢复时复用的退役前 UX 决策（仅保留要点）：
 
-**一个统一列表**（核心决策，反「选默认」与「浏览档位」割裂）：页面收敛为单列表——顶部「跟随系统默认」行 + 系统预设 + 我的质量档，每行左侧 radio，**点选即设为账号默认**（乐观更新 + 持久化），选中行打「默认」徽章。**否决**原「顶部 `<select>` 选默认 + 下方重复列预设 / 自定义」的双表达（选完看不出哪个是默认、信息重复）。
-
-| 行内元素 | 说明 |
-|---|---|
-| radio（设默认） | 点选即账号默认；「跟随系统默认」行解析为运营默认并显示当前落点；每对话仍可在输入框单独切换 |
-| 角色→模型摘要 | 预设与自定义**同一种**「CEO 本体 → Pro」展示（反原预设用文案、自定义用映射的不一致） |
-| 成本徽章 | 由 assignments 推导 `基准 / 中等 / 较高` 三档（`muted` / `info` / `warning`）；**定性而非假的 ×**——真实花费取决于各角色 token 占比，只给档不给伪精度 |
-| 展开团队 | 点行展开，列三个角色（含锁定的经济 worker）的最终模型 + 成本注 |
-| 编辑 / 删除 | 仅自定义档；删除为**行内确认**（不弹原生 `window.confirm`，与设计系统一致） |
-
-**健壮性决策**：catalog（可配角色 + ceiling 模型）加载失败 → 错误条 + 重试并禁用「新建」（不静默消失）；删除「当前默认档」先回退到跟随系统默认，**避免悬空默认 id**（后端 soft-delete 不清 `default_model_mode`）；首屏骨架占位。
-
-> 此处「成本徽章」是**档位相对成本定性**（选档时的决策辅助），与 [`前端成本呈现.md`](/docs/04-前端/前端成本呈现.md) §七的**实际 ¥ 记账呈现**是两套东西，勿混。
-
-→ 见代码：`pages/more/ModelModeSettings.tsx`、`lib/modelModes.ts`（词表 + `modeCostTier` / `effectiveRoleModel`）、`stores/modelModes.ts`、`components/chat/ModeSelector.tsx`；后端 `llm/modes.py`、`api/routes/model_modes.py`。
+- **团队语言**：用户以「CEO 本体 / 主力 worker / 经济 worker」选模型，内部 profile 名（`chat`/`agent.strong`/`agent.fast`）永不外露；经济 worker 锁定 Flash（只读展示）。
+- **一个统一列表**（反「选默认 / 浏览档位」割裂）：单列表（跟随默认 + 系统预设 + 我的质量档），radio 点选即账号默认、选中打「默认」徽章；**否决**「顶部 `<select>` + 下方重复列」的双表达。
+- **成本徽章**：由 assignments 推导 `基准 / 中等 / 较高`（`muted`/`info`/`warning`），**定性而非假的 ×**；与 [`前端成本呈现.md`](/docs/04-前端/前端成本呈现.md) §七的实际 ¥ 记账是两套东西，勿混。
 
 ---
 

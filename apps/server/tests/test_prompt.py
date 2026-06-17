@@ -1,17 +1,24 @@
-"""Tests for system-prompt assembly (`assemble_system_prompt`).
+"""Tests for system-prompt assembly (`assemble_system_prompt`) and the slim CEO core.
 
-Pins the shared <output_style> contract that keeps the whole team's voice
-professional and anti-"AI slop": emoji are off by default with a soft carve-out,
-formatting stays proportional to the content, and structure is expressed via the
-Markdown the UI renders. Because the block lives in the shared base, it must reach
-both the CEO chat agent and every delegated worker — and survive the optional
-memory / attachment-context sections being layered on top.
+Pins two things:
+
+1. The shared <output_style> / <tool_safety> contract that keeps the whole team's
+   voice professional and anti-"AI slop" — it lives in the base prompt, so it must
+   reach both the CEO chat agent and every delegated worker, and survive the
+   optional memory / attachment-context sections layered on top.
+2. The SLIM CEO core (提示词瘦身 P2): ``_CEO_CORE_HINT`` keeps only the always-on
+   routing spine (tool boundary / split criterion / hidden-context rule / same-layer
+   pipeline / synthesize-don't-restate) + a pointer to ``consult_skill`` and the
+   能力目录. The rarely-used「怎么做」detail (multi-round debate / nested delegation /
+   asking the user / revise) is moved into system Skills
+   (runtime/skills.py, see test_skills.py) — so it must NOT ride the core every turn.
 """
 
+import re
+
 from agentcore.runtime.prompt import (
-    CHAT_CHECKPOINT_HINT,
+    _CEO_CORE_HINT,
     CHAT_CITATION_HINT,
-    CHAT_TEAM_CAPABILITY_HINT,
     assemble_system_prompt,
 )
 
@@ -55,6 +62,34 @@ def test_tool_safety_block_present_in_base():
     assert "本地模式" in out
 
 
+def test_tool_use_block_teaches_parallel_calls():
+    # The executor already runs a round's tool_calls concurrently (engine
+    # _execute_tools: asyncio.gather + semaphore). The only missing lever was telling
+    # the model to BATCH independent calls into one round so that concurrency is
+    # actually used (otherwise the ReAct loop emits one call per round = serial). This
+    # guidance lives in the shared base prompt so both the CEO and every worker batch
+    # independent retrievals. Pin it so a refactor can't silently re-idle the
+    # concurrent executor.
+    out = assemble_system_prompt()
+    assert "<tool_use>" in out
+    assert "互相独立" in out
+    assert "并发" in out
+    assert "一次性" in out
+
+
+def test_runtime_context_uses_date_granularity_for_cache_stability():
+    # The runtime-context line sits in the system-prompt prefix BEFORE the large
+    # stable hint stack, so it must NOT carry second-precision time: a value that
+    # changed every turn broke DeepSeek's exact-prefix cache for everything after it
+    # (the whole CEO hint stack got re-billed each turn). Pin date granularity + the
+    # call-to-call stability that makes the stable core cacheable within a day, so a
+    # refactor can't silently reintroduce the cache-buster.
+    out = assemble_system_prompt()
+    assert re.search(r"当前日期：\d{4}-\d{2}-\d{2}", out)
+    assert not re.search(r"\d{2}:\d{2}:\d{2}", out)  # no HH:MM:SS timestamp
+    assert assemble_system_prompt() == out  # byte-identical across calls (same day)
+
+
 def test_output_style_survives_memory_and_context_layers():
     out = assemble_system_prompt(
         memory_markdown="- 用户偏好简洁回复",
@@ -66,117 +101,89 @@ def test_output_style_survives_memory_and_context_layers():
     assert "<attached_files>" in out
 
 
-def test_style_precedes_ceo_only_team_hint_when_composed():
-    # The CEO prompt is base + team hint (see pipeline.run_chat_pipeline). The
-    # shared style must come from the base, independent of the CEO-only hint.
+def test_style_precedes_ceo_only_core_when_composed():
+    # The CEO prompt is base + core hint (see pipeline.run_chat_pipeline). The
+    # shared style must come from the base, independent of the CEO-only core.
     base = assemble_system_prompt()
     assert "<output_style>" in base
-    assert "<output_style>" not in CHAT_TEAM_CAPABILITY_HINT
+    assert "<output_style>" not in _CEO_CORE_HINT
 
 
-def test_team_hint_teaches_delegate_knobs():
-    # The CEO is taught the delegate knobs that are otherwise "dark features":
-    # the cost tier (fast/strong), the quality contract, and output shaping.
-    hint = CHAT_TEAM_CAPABILITY_HINT
-    assert "fast" in hint
-    assert "strong" in hint
-    assert "contract" in hint
-    assert "expected_output" in hint
-
-
-def test_team_hint_states_coordinator_tool_boundary():
+def test_core_states_coordinator_tool_boundary():
     # 协调者 CEO: the CEO holds only read/retrieval tools and must delegate any work
     # that produces or changes an artifact (even a single file). Pin that the
     # boundary is taught, so the prompt can't silently regress to a do-it-all CEO
     # whose instructions no longer match its (read-only) toolset.
-    hint = CHAT_TEAM_CAPABILITY_HINT
+    hint = _CEO_CORE_HINT
     assert "只读" in hint
     assert "delegate" in hint
     # The hint must steer production/mutation to a worker, not the CEO's own hands.
     assert "交给 worker" in hint
 
 
-def test_team_hint_teaches_finalize_for_single_delivery():
-    # 提案2a: the CEO learns it can finalize a single self-contained delivery, so a
-    # one-worker job is surfaced directly without a redundant synthesis round.
-    assert "finalize" in CHAT_TEAM_CAPABILITY_HINT
+def test_core_teaches_split_criterion_over_count():
+    # 拆分判据 = 活儿的自然结构（子任务是否真正独立可并行 / 需不同专长），NOT 任务数量.
+    # The criterion is BIDIRECTIONAL: both over-splitting and collapsing a naturally
+    # multi-part deliverable into one worker are deviations. The core must warn against
+    # under-teaming (the「组队太保守」regression), not only against over-splitting —
+    # so a refactor can't quietly revert to a single-direction「别拆碎」brake.
+    hint = _CEO_CORE_HINT
+    assert "独立" in hint and "并行" in hint and "专长" in hint
+    assert "不是数量本身" in hint
+    assert "塌缩" in hint  # the reverse signal: don't collapse multi-part work into one
 
 
-def test_team_hint_teaches_debate_stance_tagging():
-    # 辩论/审查 (前端UX设计.md §四③): the CEO tags opposing tasks with stance so the
-    # frontend can tell a debate from普通并行 — the only signal, since执行 is identical
-    # (守住「形状是数据不是模式」). Pin it so the always-on hint keeps teaching it.
-    hint = CHAT_TEAM_CAPABILITY_HINT
-    assert "stance" in hint
-    assert "pro" in hint and "con" in hint
-    assert "辩论" in hint
+def test_core_teaches_same_layer_pipeline():
+    # A multi-stage pipeline is a DAG within ONE delegate call (depends_on, same
+    # layer) — the high-frequency case stays in the core. The nesting axis
+    # (can_delegate) is advanced and moved to the team_orchestration_advanced skill.
+    hint = _CEO_CORE_HINT
+    assert "depends_on" in hint
+    assert "同一层" in hint
 
 
-def test_team_hint_teaches_multi_round_debate():
-    # 真·多轮辩论 (Agent协作模式 §7.4): a real back-and-forth debate is just a DAG —
-    # the CEO tags each task's `round` and wires 跨轮 depends_on (round-k 依赖对方
-    # round-(k-1)) so每轮 rebuts the last. The mechanism + 前端逐轮渲染 are already
-    # landed, so the always-on hint must keep teaching the CEO to USE them, else
-    # multi-round silently never happens. Pin round + 跨轮 so a refactor can't drop it.
-    # 同时 pin 克制约束: docs 把 multi-round 定为边际/niche, 故 hint 须先导向单轮、仅确需
-    # 层层反驳才多轮且克制轮数, 防 CEO 滥用昂贵的多轮.
-    hint = CHAT_TEAM_CAPABILITY_HINT
-    assert "多轮辩论" in hint
-    assert "round" in hint
-    assert "跨轮" in hint
-    assert "克制" in hint
+def test_core_teaches_delegating_parallel_research():
+    # C: deliverable-scale research that spans independent angles is TEAM work — the
+    # CEO must fan it out to parallel research workers (which hold retrieval tools too),
+    # not run all retrieval serially itself and delegate only the writing (the
+    # 「调研收归 CEO 串行」 regression seen in the law conversation). Its own retrieval
+    # stays for direct answers / light orientation (探路), not the deliverable's legwork.
+    hint = _CEO_CORE_HINT
+    assert "调研" in hint
+    assert "探路" in hint
 
 
-def test_checkpoint_hint_teaches_debate_closing_with_options():
-    # ⑤: a debate closes by handing the采纳 A/B choice to the user via ask_user
-    # options — no new checkpoint type (复用现有机制). It must live in the checkpoint
-    # hint (shown only when ask_user is actually wired), not the always-on team hint.
-    assert "采纳正方" in CHAT_CHECKPOINT_HINT
-    assert "options" in CHAT_CHECKPOINT_HINT
-    assert "采纳正方" not in CHAT_TEAM_CAPABILITY_HINT
+def test_core_reminds_pass_hidden_context_to_worker():
+    # A worker never sees the conversation history, so the CEO must write the
+    # decision's key assumptions / constraints into the task itself.
+    hint = _CEO_CORE_HINT
+    assert "看不到" in hint
+    assert "对话历史" in hint
+
+
+def test_core_points_to_consult_skill_and_directory():
+    # 提示词瘦身 P2: the slim core must point the CEO at consult_skill + the 能力目录
+    # so it knows the advanced「怎么做」guidance is pull-on-demand, not missing.
+    hint = _CEO_CORE_HINT
+    assert "consult_skill" in hint
+    assert "能力目录" in hint
+
+
+def test_core_drops_advanced_mechanism_detail():
+    # Regression guard for P2: the rarely-used machinery now lives in system Skills,
+    # so its DETAIL must not creep back into the always-on core (that would re-inflate
+    # the per-turn prompt). These tokens are unique to the moved-out skill bodies.
+    hint = _CEO_CORE_HINT
+    for token in ("多轮辩论", "跨轮", "stance", "采纳正方", "checkpoint_after", "target_run_id"):
+        assert token not in hint, f"advanced detail '{token}' leaked back into the core"
 
 
 def test_citation_hint_teaches_multi_source_anchoring():
     # When several sources back one claim, the CEO anchors all of them ([1][2]), not
     # only the source tied to the final conclusion — every contributing source must
     # stay traceable from the prose (UI 引用卡 already lists them; this adds the
-    # inline anchor).
+    # inline anchor). citation stays inline (not a skill — short + only relevant when
+    # web results were used).
     hint = CHAT_CITATION_HINT
     assert "一并标注" in hint
     assert "[1][2]" in hint
-
-
-def test_team_hint_teaches_split_criterion_over_count():
-    # 拆分判据 = 子任务是否真正独立可并行 / 需不同专长, NOT 任务数量 — replaces the
-    # vague「少数几个」the CEO itself flagged as un-actionable.
-    hint = CHAT_TEAM_CAPABILITY_HINT
-    assert "独立" in hint and "并行" in hint and "专长" in hint
-    assert "不看数量" in hint
-
-
-def test_team_hint_distinguishes_dag_depth_from_nesting():
-    # A multi-stage pipeline is a DAG within ONE delegate call (depends_on, same
-    # layer, depth 1) — NOT nesting. can_delegate is the other axis, only for a
-    # single task that needs its own sub-team. Pin the distinction so the CEO stops
-    # conflating pipeline length with delegation depth.
-    hint = CHAT_TEAM_CAPABILITY_HINT
-    assert "depends_on" in hint
-    assert "can_delegate" in hint
-    assert "同一层" in hint
-
-
-def test_team_hint_reminds_pass_hidden_context_to_worker():
-    # A worker never sees the conversation history, so the CEO must write the
-    # decision's key assumptions / constraints into the task itself.
-    hint = CHAT_TEAM_CAPABILITY_HINT
-    assert "看不到" in hint
-    assert "对话历史" in hint
-
-
-def test_checkpoint_hint_teaches_proceed_and_annotate_assumption():
-    # The non-interrupt branch: when proceeding on a non-trivial default, the CEO
-    # flags the assumption inline so the user can cheaply correct it — the adopted
-    # half of the「置信度」idea, without a (miscalibrated) numeric threshold.
-    hint = CHAT_CHECKPOINT_HINT
-    assert "假设" in hint
-    assert "若不符请指正" in hint

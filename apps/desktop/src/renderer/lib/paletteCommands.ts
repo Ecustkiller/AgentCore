@@ -6,6 +6,7 @@ import {
   BarChart3,
   Compass,
   Cpu,
+  Files,
   Gauge,
   Info,
   Keyboard,
@@ -18,7 +19,6 @@ import {
   PanelLeft,
   Plus,
   Settings,
-  SlidersHorizontal,
   Sparkles,
   Sun,
   Users,
@@ -111,6 +111,14 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: go("/conversations"),
     },
     {
+      id: "nav-files",
+      title: "文件",
+      category: "前往",
+      icon: Files,
+      keywords: ["files", "workspace", "wenjian", "gongzuoqu"],
+      run: go("/files"),
+    },
+    {
       id: "nav-messages",
       title: "消息",
       category: "前往",
@@ -152,10 +160,10 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
     },
     {
       id: "nav-settings",
-      title: "设置 · 通用",
+      title: "设置",
       category: "前往",
       icon: Settings,
-      keywords: ["settings", "general", "shezhi", "more"],
+      keywords: ["settings", "shezhi", "more"],
       run: go("/more"),
     },
     {
@@ -165,14 +173,6 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       icon: Cpu,
       keywords: ["settings", "model", "moxing"],
       run: go("/more/model"),
-    },
-    {
-      id: "nav-settings-model-modes",
-      title: "设置 · 模型模式",
-      category: "前往",
-      icon: SlidersHorizontal,
-      keywords: ["settings", "model modes", "quality", "moshi"],
-      run: go("/more/model-modes"),
     },
     {
       id: "nav-settings-usage",

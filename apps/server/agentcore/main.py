@@ -13,10 +13,10 @@ from agentcore.api.routes import (
     auth,
     conversations,
     favicon,
+    files,
     folders,
     llm_key,
     messages,
-    model_modes,
     realtime,
     search,
     system,
@@ -33,7 +33,10 @@ from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
 from agentcore.runtime.session_retention import session_retention_loop
 from agentcore.runtime.suspension_retention import paused_turn_retention_loop
 from agentcore.security import KeyEncryptor
-from agentcore.tools.builtin.web.search_backend import aclose_search_backend
+from agentcore.tools.builtin.web.search_backend import (
+    aclose_search_backend,
+    probe_search_backend,
+)
 from agentcore.workspace.retention import retention_loop
 
 logger = logging.getLogger(__name__)
@@ -113,6 +116,12 @@ async def lifespan(app: FastAPI):
     if settings.memory_consolidation_enabled:
         consolidation_task = asyncio.create_task(consolidation_loop())
 
+    # Dev-experience: log SearXNG ✓/✗ at boot so a not-started search dependency is
+    # visible immediately instead of only surfacing mid-run as a breaker message.
+    # Fire-and-forget — bounded by the probe's own short timeout and never blocks or
+    # fails startup (web_search just degrades while SearXNG is down).
+    searxng_probe_task = asyncio.create_task(probe_search_backend())
+
     # Recoverable-worker roster TTL sweep (留人 跨进程落盘 P3): prune run_sessions
     # rows idle past the 7-day window so the durable roster stays bounded.
     session_retention_task: asyncio.Task | None = None
@@ -129,6 +138,10 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # Stop the boot probe if shutdown races its short window (no-op once done).
+        searxng_probe_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await searxng_probe_task
         if retention_task is not None:
             retention_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -192,10 +205,10 @@ app.include_router(system.router)
 app.include_router(auth.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
 app.include_router(favicon.router, prefix="/v1")
+app.include_router(files.router, prefix="/v1")
 app.include_router(folders.router, prefix="/v1")
 app.include_router(llm_key.router, prefix="/v1")
 app.include_router(messages.router, prefix="/v1")
-app.include_router(model_modes.router, prefix="/v1")
 app.include_router(realtime.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 app.include_router(tools.router, prefix="/v1")

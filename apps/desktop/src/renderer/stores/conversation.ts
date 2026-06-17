@@ -6,6 +6,9 @@ import {
   useExecutionStore,
 } from "@/stores/execution";
 import type {
+  AskAssumption,
+  AskQuestion,
+  AskStyleOption,
   CheckpointDecision,
   CheckpointRequiredPayload,
   CheckpointResolvedPayload,
@@ -23,25 +26,29 @@ import type {
 import { create } from "zustand";
 
 /**
- * A checkpoint the CEO raised mid-turn (ask_user) projected for display. Lives on
- * the assistant message it belongs to (not a separate store like approvals) so it
- * replays inline from the journal — the question + answer are part of the
- * conversation, not transient gating. `status` flips `pending → resolved` on the
- * `checkpoint_resolved` event (live) or on the journal's resolved frame (replay).
+ * An ask_user prompt the CEO raised (the one asking surface — an opening 引导 or a
+ * mid-task fork) projected for display. Lives on the assistant message it belongs
+ * to (not a separate store like approvals) so it replays inline from the journal —
+ * the question + answer are part of the conversation, not transient gating.
+ * `status` flips `pending → resolved` on the `checkpoint_resolved` event (live) or
+ * on the journal's resolved frame (replay). The rich opening content
+ * (`assumptions` / `questions` / `styleOptions`) is empty for a compact mid-task
+ * fork; `question` (the framing / opening line) is always present.
  */
 export interface CheckpointDisplay {
   id: string;
   question: string;
-  options: string[];
   context: string;
-  /** Whether `options` are multi-select (checkboxes) vs single-select (radios). */
-  multiple: boolean;
+  assumptions: AskAssumption[];
+  questions: AskQuestion[];
+  styleOptions: AskStyleOption[];
   status: "pending" | "resolved";
   /** The settled decision; null while pending. */
   decision: CheckpointDecision | null;
-  /** The user's steer (adjust) or closing remark (stop); empty otherwise. */
+  /** The user's composed answer / steer (continue) or closing remark (stop). */
   note: string;
-  /** The option(s) the user picked; empty while pending or if none chosen. */
+  /** The option(s) the user picked (legacy/non-desktop clients); the desktop folds
+   * its picks into `note`, so this is usually empty. */
   selected: string[];
 }
 
@@ -61,9 +68,10 @@ export function checkpointsFromEvents(events: SSEEvent[]): CheckpointDisplay[] {
       byId.set(p.checkpoint_id, {
         id: p.checkpoint_id,
         question: p.question,
-        options: p.options ?? [],
         context: p.context ?? "",
-        multiple: p.multiple ?? false,
+        assumptions: p.assumptions ?? [],
+        questions: p.questions ?? [],
+        styleOptions: p.style_options ?? [],
         status: "pending",
         decision: null,
         note: "",
@@ -185,7 +193,12 @@ function resolveToolStep(
   const steps = process.map((s) => {
     if (!changed && s.kind === "tool" && s.id === payload.tool_call_id) {
       changed = true;
-      return { ...s, result: payload.result, status: payload.status };
+      return {
+        ...s,
+        result: payload.result,
+        status: payload.status,
+        display: payload.display ?? null,
+      };
     }
     return s;
   });
@@ -231,7 +244,7 @@ export interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
-  /** 模型思考过程（思考档位下的 reasoning_content）；流式与历史回放共用。 */
+  /** 模型思考过程（思考强度档下的 reasoning_content）；流式与历史回放共用。 */
   reasoning?: string;
   /** 单 Agent 回合的「思考+工具」过程时间线（前端UX设计.md §一）：CEO 自身的思考与
    * 其工具调用按发生顺序交织，折叠进气泡顶部的过程面板。流式时由 SSE 增量构建
@@ -242,6 +255,12 @@ export interface Message {
   createdAt: string;
   executionId: string | null;
   isStreaming: boolean;
+  /** The tool call the CEO captain is *currently composing* (tool_progress): name +
+   * chars of arguments streamed so far. Live-only (never persisted): set while the
+   * captain assembles a big call (e.g. the delegate 任务书) before any content/graph,
+   * cleared once content streams, the tool executes, or the turn ends. Drives the
+   * bubble's「正在生成 {tool}…」line so the pre-delegate gap isn't blank. */
+  composingTool?: { toolName: string; chars: number } | null;
   attachments?: MessageAttachmentMeta[];
   /** Web sources backing an assistant reply; rendered as source cards. */
   citations?: Citation[];
@@ -421,6 +440,14 @@ interface ConversationState {
   appendToLastMessage: (chunk: string, conversationId?: string | null) => void;
   appendReasoningToLastMessage: (
     chunk: string,
+    conversationId?: string | null,
+  ) => void;
+  /** Set (or clear) the CEO captain's currently-composing tool call on the live
+   * assistant message (tool_progress) — drives the bubble's「正在生成 {tool}…」line
+   * during the pre-graph delegate-assembly gap. Cleared automatically when content
+   * streams / the tool executes / the turn ends. */
+  setComposingTool: (
+    tool: { toolName: string; chars: number } | null,
     conversationId?: string | null,
   ) => void;
   /** Append a started tool call as a `running` step on the live assistant
@@ -631,6 +658,8 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         messages[messages.length - 1] = {
           ...last,
           content: last.content + chunk,
+          // The captain is writing its answer now → any「正在生成工具」line is done.
+          composingTool: null,
         };
         return { messages };
       }),
@@ -651,6 +680,15 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
+    setComposingTool: (tool, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") return null;
+        messages[messages.length - 1] = { ...last, composingTool: tool };
+        return { messages };
+      }),
+
     addProcessTool: (payload, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
@@ -659,6 +697,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         messages[messages.length - 1] = {
           ...last,
           process: appendToolStep(last.process, payload),
+          // The composed call is now executing → its real process step replaces the
+          // transient「正在生成」line.
+          composingTool: null,
         };
         return { messages };
       }),
@@ -727,9 +768,10 @@ export const useConversationStore = create<ConversationState>((set, get) => {
             {
               id: payload.checkpoint_id,
               question: payload.question,
-              options: payload.options ?? [],
               context: payload.context ?? "",
-              multiple: payload.multiple ?? false,
+              assumptions: payload.assumptions ?? [],
+              questions: payload.questions ?? [],
+              styleOptions: payload.style_options ?? [],
               status: "pending",
               decision: null,
               note: "",
@@ -844,7 +886,11 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (last) {
-          messages[messages.length - 1] = { ...last, isStreaming: false };
+          messages[messages.length - 1] = {
+            ...last,
+            isStreaming: false,
+            composingTool: null,
+          };
         }
         return { messages, isGenerating: false };
       }),

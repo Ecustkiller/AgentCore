@@ -42,6 +42,7 @@ from agentcore.db.models import (
     PausedTurnRow,
     RefreshToken,
     RunSessionRow,
+    TurnJournalRow,
     User,
     UserBlock,
     UserDirectorySettings,
@@ -380,17 +381,25 @@ class ConversationRepository:
         return result.scalars().all()
 
     async def hard_delete(self, conversation_id: str) -> None:
-        """Physically remove a conversation and all its rows (messages + cost ledger).
+        """Physically remove a conversation and all its rows (messages + cost ledger
+        + turn journal).
 
         App-level cascade (no DB FK, per repo convention). Used only by retention
         after the grace period — distinct from ``soft_delete`` (the user-facing
-        recoverable delete).
+        recoverable delete). The ``turn_journal`` replay stream (唯一事实源, §18.3)
+        is dropped here too — it would otherwise orphan (it has no own TTL sweep,
+        unlike paused_turns / run_sessions).
         """
         await self._session.execute(
             delete(Message).where(Message.conversation_id == conversation_id)
         )
         await self._session.execute(
             delete(CostEvent).where(CostEvent.conversation_id == conversation_id)
+        )
+        await self._session.execute(
+            delete(TurnJournalRow).where(
+                TurnJournalRow.conversation_id == conversation_id
+            )
         )
         await self._session.execute(
             delete(Conversation).where(Conversation.id == conversation_id)
@@ -716,7 +725,6 @@ class MessageRepository:
         metadata: dict | None = None,
         attachments: list | None = None,
         citations: list | None = None,
-        runs: dict | None = None,
         message_id: str | None = None,
         trace_id: str | None = None,
     ) -> Message:
@@ -738,8 +746,6 @@ class MessageRepository:
             msg.attachments = attachments
         if citations is not None:
             msg.citations = citations
-        if runs is not None:
-            msg.runs = runs
         self._session.add(msg)
         await self._session.commit()
         await self._session.refresh(msg)
@@ -960,8 +966,20 @@ class MessageRepository:
         Used by regenerate / edit-and-resend to drop the superseded assistant
         reply (and any later turns) before re-running. Messages have no
         soft-delete column — replacing a turn means the old branch is gone
-        (conversation branching is a separate, later feature).
+        (conversation branching is a separate, later feature). Each dropped
+        message's ``turn_journal`` replay stream goes with it (§18.3 唯一事实源 — it
+        could never project without its message).
         """
+        await self._session.execute(
+            delete(TurnJournalRow).where(
+                TurnJournalRow.turn_id.in_(
+                    select(Message.id).where(
+                        Message.conversation_id == conversation_id,
+                        Message.created_at > after_created_at,
+                    )
+                )
+            )
+        )
         result = await self._session.execute(
             delete(Message).where(
                 Message.conversation_id == conversation_id,
@@ -978,10 +996,18 @@ class MessageRepository:
 
         Scoped to ``conversation_id`` so a guessed id from another conversation
         won't match (the route has already proven ownership of this conversation —
-        IDOR-safe). Messages have no soft-delete column, so this is a physical
-        delete; the append-only ``cost_events`` ledger is intentionally left intact
-        (real spend is never rewritten — 不变量 #1). No-op (False) if absent.
+        IDOR-safe; the turn_journal delete is scoped the same way, so a cross-tenant
+        id touches neither row). Messages have no soft-delete column, so this is a
+        physical delete; its ``turn_journal`` replay stream is dropped with it (§18.3
+        唯一事实源), but the append-only ``cost_events`` ledger is intentionally left
+        intact (real spend is never rewritten — 不变量 #1). No-op (False) if absent.
         """
+        await self._session.execute(
+            delete(TurnJournalRow).where(
+                TurnJournalRow.turn_id == message_id,
+                TurnJournalRow.conversation_id == conversation_id,
+            )
+        )
         result = await self._session.execute(
             delete(Message).where(
                 Message.id == message_id,
@@ -1024,7 +1050,7 @@ class CostEventRepository:
         *,
         user_id: str,
         conversation_id: str,
-        message_id: str,
+        message_id: str | None,
         runs: Sequence[dict],
         trace_id: str | None = None,
     ) -> int:
@@ -1038,6 +1064,11 @@ class CostEventRepository:
         because a Core bulk insert does not fire the ORM-level default. ``trace_id``
         (the turn's log correlation key) stamps every row so the spend joins to its
         log trace.
+
+        ``message_id`` is ``None`` for off-turn background LLM calls (标题生成 /
+        记忆整合, Gap C) — those belong to no assistant turn, so the NULL keeps them
+        out of any single turn's per-message 工资单 and out of the「请求数」count,
+        while still summing into the account/conversation cost totals.
         """
         if not runs:
             return 0
@@ -2029,15 +2060,114 @@ class PausedTurnRepository:
         """Delete up to ``limit`` paused turns idle since before ``before`` (TTL sweep).
 
         ``updated_at`` advances on re-pause (resume → pause again), so an actively
-        re-paused turn stays alive while one abandoned past the window is pruned.
-        Batched so a sweep never holds one huge transaction; returns rows removed."""
-        stale = (
-            select(PausedTurnRow.message_id)
-            .where(PausedTurnRow.updated_at < before)
-            .limit(limit)
+        re-paused turn stays alive while one abandoned past the window is pruned. Also
+        clears each pruned turn's ``turn_journal`` rows — the journal-so-far is stored
+        there (唯一事实源, §18.3) and would otherwise orphan, since an abandoned pause
+        never produces a message to project onto. Batched (one transaction) so a sweep
+        never holds one huge lock; returns the number of paused turns removed.
+        """
+        stale_ids = (
+            (
+                await self._session.execute(
+                    select(PausedTurnRow.message_id)
+                    .where(PausedTurnRow.updated_at < before)
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not stale_ids:
+            return 0
+        await self._session.execute(
+            delete(TurnJournalRow).where(TurnJournalRow.turn_id.in_(stale_ids))
         )
         result = await self._session.execute(
-            delete(PausedTurnRow).where(PausedTurnRow.message_id.in_(stale))
+            delete(PausedTurnRow).where(PausedTurnRow.message_id.in_(stale_ids))
         )
         await self._session.commit()
         return result.rowcount or 0
+
+
+class TurnJournalRepository:
+    """The §18.6 ``Journal`` port's Postgres impl — the唯一事实源 store (§18.3).
+
+    A turn's execution facts are stored append-only, ordered by ``seq`` within a
+    ``turn_id`` (== the assistant ``message_id``). :meth:`record` replaces the turn's
+    rows wholesale (idempotent for a resume that reuses the id); :meth:`load_map`
+    batch-loads several turns for the read-time projection (no N+1 when a history
+    page renders). Entries are plain ``{kind, payload, ts}`` dicts — the
+    ``runs``↔entries transform lives in ``runtime/journal.py`` (the engine domain),
+    keeping this layer pure storage.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def record(
+        self,
+        *,
+        turn_id: str,
+        conversation_id: str,
+        trace_id: str | None,
+        entries: Sequence[dict],
+    ) -> None:
+        """Replace a turn's journal with ``entries`` (delete-then-insert, one commit).
+
+        Replace (not append) so a resume reusing the same ``turn_id`` re-persists the
+        full, current fact stream without duplicating the pre-pause prefix. A no-op
+        for empty ``entries`` after clearing any stale rows.
+        """
+        await self._session.execute(
+            delete(TurnJournalRow).where(TurnJournalRow.turn_id == turn_id)
+        )
+        if entries:
+            self._session.add_all(
+                [
+                    TurnJournalRow(
+                        turn_id=turn_id,
+                        seq=seq,
+                        kind=str(entry.get("kind") or ""),
+                        payload=entry.get("payload") or {},
+                        ts=entry.get("ts"),
+                        conversation_id=conversation_id,
+                        trace_id=trace_id,
+                    )
+                    for seq, entry in enumerate(entries)
+                ]
+            )
+        await self._session.commit()
+
+    async def load(self, turn_id: str) -> list[dict]:
+        """One turn's facts as ordered ``{kind, payload, ts}`` entries (``[]`` if none)."""
+        result = await self._session.execute(
+            select(TurnJournalRow)
+            .where(TurnJournalRow.turn_id == turn_id)
+            .order_by(TurnJournalRow.seq.asc())
+        )
+        return [
+            {"kind": r.kind, "payload": r.payload, "ts": r.ts}
+            for r in result.scalars().all()
+        ]
+
+    async def load_map(self, turn_ids: Sequence[str]) -> dict[str, list[dict]]:
+        """Several turns' facts keyed by ``turn_id`` (ordered entries), batched.
+
+        One query over all ids (ordered by turn_id, seq) grouped in Python, so a
+        history page projects every assistant message's replay payload without an
+        N+1. Turns with no facts are simply absent from the map.
+        """
+        ids = list(dict.fromkeys(turn_ids))
+        if not ids:
+            return {}
+        result = await self._session.execute(
+            select(TurnJournalRow)
+            .where(TurnJournalRow.turn_id.in_(ids))
+            .order_by(TurnJournalRow.turn_id.asc(), TurnJournalRow.seq.asc())
+        )
+        grouped: dict[str, list[dict]] = {}
+        for r in result.scalars().all():
+            grouped.setdefault(r.turn_id, []).append(
+                {"kind": r.kind, "payload": r.payload, "ts": r.ts}
+            )
+        return grouped

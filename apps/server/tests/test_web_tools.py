@@ -5,6 +5,8 @@ calling ``read_url`` against private/blocked hosts (classification short-circuit
 before any request), and search parsing is tested via the pure ``_parse_results``.
 """
 
+import asyncio
+import time
 from pathlib import Path
 
 import httpx
@@ -38,18 +40,24 @@ from agentcore.tools.builtin.web.search_backend import (
     SearXNGBackend,
     _parse_results,
 )
+from agentcore.tools.builtin.web.url_cache import (
+    ConversationUrlCache,
+    UrlCacheEntry,
+    UrlCacheRegistry,
+)
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 
-def _ctx() -> ToolContext:
+def _ctx(conversation_id: str = "") -> ToolContext:
     return ToolContext(
         execution_id="e",
         run_id="s",
         agent_id="a",
         backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
+        conversation_id=conversation_id,
     )
 
 
@@ -327,6 +335,187 @@ async def test_searxng_backend_trips_circuit_after_transport_failures(monkeypatc
         await backend.search("q")
 
 
+async def test_searxng_breaker_message_is_honest():
+    # An open breaker must NOT claim "未就绪/出网受限" (it opens on repeated request
+    # failures, usually overload under a parallel burst — SearXNG is typically up).
+    host = "localhost"
+    _net._states.pop(host, None)
+    for _ in range(_net.WEB_HOST_FAIL_THRESHOLD):
+        note_failure(host)
+
+    backend = SearXNGBackend("http://localhost:18888")
+    with pytest.raises(EgressError) as ei:
+        await backend.search("q")
+    msg = str(ei.value)
+    assert "熔断" in msg
+    assert host in msg
+    assert "未就绪" not in msg and "出网受限" not in msg
+    _net._states.pop(host, None)
+
+
+async def test_searxng_backend_caps_concurrent_requests(monkeypatch):
+    # A parallel team can fire dozens of searches at once; the backend semaphore must
+    # cap simultaneous hits on the single SearXNG instance so the burst queues into
+    # waves instead of saturating it (which is what trips the breaker for everyone).
+    host = "localhost"
+    _net._states.pop(host, None)
+    req = httpx.Request("GET", "http://localhost:18888/search")
+    payload = {"results": [{"url": "https://e.com/a", "title": "A", "content": "x"}]}
+
+    state = {"inflight": 0, "peak": 0}
+    gate = asyncio.Event()
+
+    class _GatedClient:
+        async def get(self, *args, **kwargs):
+            state["inflight"] += 1
+            state["peak"] = max(state["peak"], state["inflight"])
+            try:
+                await gate.wait()  # hold the slot open until released
+            finally:
+                state["inflight"] -= 1
+            return httpx.Response(200, json=payload, request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _GatedClient())
+
+    backend = SearXNGBackend("http://localhost:18888")
+    cap = search_backend_mod._SEARCH_CONCURRENCY
+    tasks = [asyncio.create_task(backend.search("q")) for _ in range(cap + 4)]
+    for _ in range(100):  # pump the loop until the gate fills to the ceiling
+        await asyncio.sleep(0)
+        if state["inflight"] >= cap:
+            break
+    assert state["inflight"] == cap  # extra tasks are parked on the semaphore, not in flight
+
+    gate.set()  # release; the parked tasks drain in a second wave
+    results = await asyncio.gather(*tasks)
+    assert state["peak"] == cap  # never exceeded the cap
+    assert all(len(r) == 1 for r in results)
+    _net._states.pop(host, None)
+
+
+async def test_searxng_backend_retries_transient_5xx_then_succeeds(monkeypatch):
+    host = "localhost"
+    _net._states.pop(host, None)
+    monkeypatch.setattr(search_backend_mod, "_SEARCH_RETRY_BASE_S", 0.0)
+    monkeypatch.setattr(search_backend_mod, "_SEARCH_RETRY_JITTER_S", 0.0)
+
+    req = httpx.Request("GET", "http://localhost:18888/search")
+    payload = {"results": [{"url": "https://e.com/a", "title": "A", "content": "x"}]}
+
+    class _FlakyClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def get(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls < 2:  # first attempt 502, retry succeeds
+                return httpx.Response(502, request=req)
+            return httpx.Response(200, json=payload, request=req)
+
+    client = _FlakyClient()
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client)
+
+    backend = SearXNGBackend("http://localhost:18888")
+    results = await backend.search("q")
+
+    assert client.calls == 2  # retried once past the 502
+    assert [r.url for r in results] == ["https://e.com/a"]
+    # success on the retry clears the breaker — no failure recorded
+    assert host not in _net._states
+
+
+async def test_searxng_backend_gives_up_after_persistent_5xx(monkeypatch):
+    host = "localhost"
+    _net._states.pop(host, None)
+    monkeypatch.setattr(search_backend_mod, "_SEARCH_RETRY_BASE_S", 0.0)
+    monkeypatch.setattr(search_backend_mod, "_SEARCH_RETRY_JITTER_S", 0.0)
+
+    req = httpx.Request("GET", "http://localhost:18888/search")
+
+    class _AllFailClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def get(self, *args, **kwargs):
+            self.calls += 1
+            return httpx.Response(502, request=req)
+
+    client = _AllFailClient()
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client)
+
+    backend = SearXNGBackend("http://localhost:18888")
+    with pytest.raises(httpx.HTTPStatusError):
+        await backend.search("q")
+
+    assert client.calls == search_backend_mod._SEARCH_ATTEMPTS  # exhausted the retries
+    # one breaker failure per CALL (not one per internal attempt)
+    assert _net._states[host].fails == 1
+
+
+async def test_searxng_backend_does_not_retry_4xx(monkeypatch):
+    host = "localhost"
+    _net._states.pop(host, None)
+    req = httpx.Request("GET", "http://localhost:18888/search")
+
+    class _ClientErrClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def get(self, *args, **kwargs):
+            self.calls += 1
+            return httpx.Response(400, request=req)
+
+    client = _ClientErrClient()
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: client)
+
+    backend = SearXNGBackend("http://localhost:18888")
+    with pytest.raises(httpx.HTTPStatusError):
+        await backend.search("q")
+
+    assert client.calls == 1  # client errors are not retried
+    assert host not in _net._states  # nor counted against the breaker
+
+
+async def test_probe_search_backend_reports_reachable(monkeypatch):
+    monkeypatch.setattr(search_backend_mod, "_backend", None)
+    req = httpx.Request("GET", "http://localhost:18888/healthz")
+
+    class _OkClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, *args, **kwargs):
+            return httpx.Response(200, text="OK", request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _OkClient())
+    assert await search_backend_mod.probe_search_backend() == (True, "http://localhost:18888")
+
+
+async def test_probe_search_backend_reports_unreachable(monkeypatch):
+    # A down dependency must be reported, never raised — startup can't be broken by it.
+    monkeypatch.setattr(search_backend_mod, "_backend", None)
+
+    class _DownClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, *args, **kwargs):
+            raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _DownClient())
+    result = await search_backend_mod.probe_search_backend()
+    assert result is not None
+    ok, detail = result
+    assert ok is False
+    assert "ConnectError" in detail
+
+
 async def test_web_search_fast_fails_when_circuit_open(monkeypatch):
     host = "localhost"
     _net._states.pop(host, None)
@@ -410,6 +599,34 @@ async def test_web_search_emits_structured_citations(monkeypatch):
     ]
 
 
+async def test_web_search_emits_structured_display(monkeypatch):
+    # 工具结果富渲染: the client renders the hits as cards from ``display`` (not the
+    # JSON output), so it carries each hit's title/url/snippet + parsed site.
+    class _FakeBackend:
+        async def search(self, query, max_results=5):
+            return [
+                SearchResult("标题一", "https://www.example.com/a", "摘要一"),
+                SearchResult("标题二", "https://b.cn/p", "摘要二"),
+            ]
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _FakeBackend())
+    result = await WebSearchTool().execute({"query": "深圳天气"}, _ctx())
+
+    assert result.success is True
+    assert result.display == {
+        "query": "深圳天气",
+        "results": [
+            {
+                "title": "标题一",
+                "url": "https://www.example.com/a",
+                "snippet": "摘要一",
+                "site": "example.com",
+            },
+            {"title": "标题二", "url": "https://b.cn/p", "snippet": "摘要二", "site": "b.cn"},
+        ],
+    }
+
+
 def test_merge_citations_dedups_across_rounds_by_normalized_url():
     sink: list[dict] = []
     first = merge_citations(
@@ -473,3 +690,183 @@ def test_annotate_tool_citations_omits_capped_and_dedups_by_number():
 
 def test_annotate_tool_citations_no_numbers_leaves_content_unchanged():
     assert annotate_tool_citations("R", [{"url": "https://a.com"}], {}) == "R"
+
+
+# --- read_url conversation-scoped fetch cache (P2) ---
+
+
+async def test_read_url_caches_within_conversation(monkeypatch):
+    html = (
+        "<html><head><title>缓存页</title>"
+        '<meta name="description" content="摘要">'
+        "</head><body><p>正文内容</p></body></html>"
+    )
+    calls = {"n": 0}
+
+    async def _allow(_url: str):
+        return None
+
+    async def _fake_request(_client, _method, url, **_kwargs):
+        calls["n"] += 1
+        return httpx.Response(200, html=html, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _fake_request)
+
+    ctx = _ctx(conversation_id="conv-cache-hit")
+    tool = ReadUrlTool()
+    r1 = await tool.execute({"url": "https://x.example.com/p"}, ctx)
+    r2 = await tool.execute({"url": "https://x.example.com/p"}, ctx)
+
+    assert r1.success and r2.success
+    assert calls["n"] == 1  # second read served from cache, no re-fetch
+    assert r1.metadata.get("cached") is not True
+    assert r2.metadata.get("cached") is True
+    # the cached hit preserves content + citation metadata
+    assert "正文内容" in r2.output
+    assert r2.citations[0]["title"] == "缓存页"
+    assert r2.citations[0]["snippet"] == "摘要"
+    assert r2.citations[0]["site"] == "x.example.com"
+    # same page via trailing slash + fragment normalises to the same cache key
+    r3 = await tool.execute({"url": "https://x.example.com/p/#sec"}, ctx)
+    assert calls["n"] == 1
+    assert r3.metadata.get("cached") is True
+
+
+async def test_read_url_skips_cache_without_conversation(monkeypatch):
+    html = "<html><head><title>T</title></head><body><p>x</p></body></html>"
+    calls = {"n": 0}
+
+    async def _allow(_url: str):
+        return None
+
+    async def _fake_request(_client, _method, url, **_kwargs):
+        calls["n"] += 1
+        return httpx.Response(200, html=html, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _fake_request)
+
+    tool = ReadUrlTool()
+    await tool.execute({"url": "https://nocache.example.com/a"}, _ctx())
+    await tool.execute({"url": "https://nocache.example.com/a"}, _ctx())
+    assert calls["n"] == 2  # unscoped (conversation_id == "") → no caching, fetched twice
+
+
+async def test_read_url_cache_refetches_when_more_chars_needed(monkeypatch):
+    body = "<html><body><p>" + ("z" * 500) + "</p></body></html>"
+    calls = {"n": 0}
+
+    async def _allow(_url: str):
+        return None
+
+    async def _fake_request(_client, _method, url, **_kwargs):
+        calls["n"] += 1
+        return httpx.Response(200, html=body, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _fake_request)
+
+    ctx = _ctx(conversation_id="conv-cache-chars")
+    tool = ReadUrlTool()
+    # first read captures only 100 chars (truncated); a later read needing 400 must
+    # re-fetch with the bigger budget rather than serve the short cached copy.
+    await tool.execute({"url": "https://big.example.com/p", "max_chars": 100}, ctx)
+    assert calls["n"] == 1
+    r2 = await tool.execute({"url": "https://big.example.com/p", "max_chars": 400}, ctx)
+    assert calls["n"] == 2
+    assert r2.metadata.get("cached") is not True
+    # now 400 chars are cached → a <=400 request hits without re-fetching
+    r3 = await tool.execute({"url": "https://big.example.com/p", "max_chars": 300}, ctx)
+    assert calls["n"] == 2
+    assert r3.metadata.get("cached") is True
+
+
+def _entry(
+    url: str, content: str = "body", *, max_chars: int = 8000, truncated: bool = False
+) -> UrlCacheEntry:
+    return UrlCacheEntry(
+        url=url,
+        title="T",
+        content=content,
+        snippet="s",
+        site=site_of(url),
+        max_chars=max_chars,
+        truncated=truncated,
+        stored_at=time.time(),
+    )
+
+
+def test_url_cache_get_put_and_key_normalization():
+    cache = ConversationUrlCache()
+    cache.put(_entry("https://a.com/p"))
+    # trailing slash + fragment normalise to the same key as the stored URL
+    assert cache.get("https://a.com/p/#frag", min_chars=8000) is not None
+    assert "https://a.com/p" in cache
+    assert cache.get("https://other.com", min_chars=1) is None
+
+
+def test_url_cache_truncated_entry_needs_refetch_for_more_chars():
+    cache = ConversationUrlCache()
+    cache.put(_entry("https://a.com", content="x" * 100, max_chars=100, truncated=True))
+    assert cache.get("https://a.com", min_chars=100) is not None  # enough captured
+    assert cache.get("https://a.com", min_chars=200) is None  # wants more than captured
+
+
+def test_url_cache_full_entry_serves_any_char_request():
+    cache = ConversationUrlCache()
+    cache.put(_entry("https://a.com", content="short", truncated=False))
+    # a non-truncated entry holds the whole page → even a larger ask is a hit
+    assert cache.get("https://a.com", min_chars=99999) is not None
+
+
+def test_url_cache_expires_after_ttl():
+    cache = ConversationUrlCache(ttl_seconds=10.0)
+    stale = _entry("https://a.com")
+    stale.stored_at = time.time() - 100  # older than the TTL window
+    cache.put(stale)
+    assert cache.get("https://a.com", min_chars=1) is None
+
+
+def test_url_cache_lru_evicts_over_count():
+    cache = ConversationUrlCache(max_entries=2)
+    for i in range(3):
+        cache.put(_entry(f"https://s{i}.com", content="x"))
+    assert len(cache) == 2
+    assert "https://s0.com" not in cache  # oldest evicted
+    assert "https://s2.com" in cache
+
+
+def test_url_cache_lru_evicts_over_bytes():
+    cache = ConversationUrlCache(max_bytes=10)
+    cache.put(_entry("https://a.com", content="x" * 8))
+    cache.put(_entry("https://b.com", content="y" * 8))  # total 16 > 10
+    assert "https://a.com" not in cache  # oldest evicted to fit the byte budget
+    assert "https://b.com" in cache
+
+
+def test_url_cache_registry_scopes_per_conversation():
+    reg = UrlCacheRegistry()
+    c1 = reg.get_or_create("conv1")
+    c2 = reg.get_or_create("conv2")
+    assert c1 is not c2
+    assert reg.get_or_create("conv1") is c1  # stable per conversation
+
+
+def test_url_cache_registry_caps_conversation_count_lru():
+    reg = UrlCacheRegistry(max_conversations=2)
+    reg.get_or_create("a")
+    reg.get_or_create("b")
+    reg.get_or_create("c")
+    assert len(reg) == 2
+    assert "a" not in reg  # LRU-evicted
+    assert "c" in reg
+
+
+def test_url_cache_registry_reaps_idle_conversation():
+    reg = UrlCacheRegistry(conversation_ttl_seconds=10.0)
+    idle = reg.get_or_create("idle")
+    idle.last_access = time.time() - 100  # force past the idle window
+    reg.get_or_create("fresh")  # creation triggers idle reaping
+    assert "idle" not in reg
+    assert "fresh" in reg

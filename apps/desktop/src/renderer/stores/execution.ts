@@ -11,8 +11,10 @@ import type {
   RunProgressPayload,
   RunReasoningDeltaPayload,
   RunStartedPayload,
+  RunToolProgressPayload,
   SSEEvent,
   Stance,
+  ToolDisplay,
   ToolUseEndPayload,
   ToolUseStartPayload,
   UsageBreakdown,
@@ -73,6 +75,30 @@ export const STANCE_META: Record<Stance, { label: string; short: string }> = {
   con: { label: "反方", short: "反" },
 };
 
+/** Tool name → 中文 label, shared by the team graph's live「正在生成」progress line
+ * (AgentNode) and the run-detail tool rows. A label-only twin of MessageBubble's
+ * TOOL_META (which also couples a lucide icon, so it can't live in the store); keep
+ * the two in sync. An unknown tool falls back to its raw name. */
+export const TOOL_LABELS: Record<string, string> = {
+  web_search: "搜索网页",
+  read_url: "读取网页",
+  grep: "检索代码",
+  code_execute: "执行代码",
+  file_read: "读取文件",
+  file_write: "写入文件",
+  file_list: "列出目录",
+  str_replace: "编辑文件",
+  file_delete: "删除文件",
+  file_move: "移动文件",
+  // CEO captain tools (surfaced by the bubble's tool_progress / process timeline).
+  delegate: "委派任务",
+  ask_user: "向你确认",
+};
+
+export function toolLabel(name: string): string {
+  return TOOL_LABELS[name] ?? name;
+}
+
 /**
  * Effective reasoning effort (提案 B). `null` = non-thinking; no worker tier is
  * non-thinking anymore (dev-stage: both tiers think at `high`), so this only
@@ -111,6 +137,9 @@ export interface ToolCallState {
   toolName: string;
   arguments: Record<string, unknown>;
   result: string | null;
+  /** Rich rendering data resolved on `tool_use_end` (工具结果富渲染); absent for
+   * tools whose text `result` is enough. */
+  display?: ToolDisplay | null;
   status: "running" | "success" | "error";
 }
 
@@ -128,6 +157,12 @@ export interface AgentState {
    * for non-thinking workers or older journals that never carried reasoning. */
   reasoningChunks: string[];
   toolCalls: ToolCallState[];
+  /** The tool call this worker is *currently composing* (run_tool_progress): its
+   * name + the chars of arguments streamed so far. Non-null only during active
+   * argument assembly — set on each progress tick, cleared once the call starts
+   * executing (tool_use_start) or the run ends. Drives the node/detail's live
+   *「正在生成 {tool} · N 字」line so a long file write never looks frozen. */
+  toolProgress: { toolName: string; chars: number } | null;
 }
 
 /** A structured DAG checkpoint (plan_review, 结构化挂起 2a) that paused the scheduler
@@ -263,6 +298,13 @@ export type RunFrame =
   | { t: number; kind: "run_reasoning_delta"; agentId: string; delta: string }
   | {
       t: number;
+      kind: "run_tool_progress";
+      agentId: string;
+      toolName: string;
+      chars: number;
+    }
+  | {
+      t: number;
       kind: "run_completed";
       runId: string;
       agentId: string;
@@ -296,6 +338,7 @@ export type RunFrame =
       kind: "tool_use_end";
       toolCallId: string;
       result: string;
+      display?: ToolDisplay | null;
       status: "success" | "error";
     }
   | {
@@ -334,6 +377,7 @@ export function projectExecution(
     outputChunks: [],
     reasoningChunks: [],
     toolCalls: [],
+    toolProgress: null,
   }));
   const runs: RunNode[] = plan.runs.map((s) => ({
     id: s.id,
@@ -399,6 +443,7 @@ export function projectExecution(
               outputChunks: [],
               reasoningChunks: [],
               toolCalls: [],
+              toolProgress: null,
             });
             run = {
               id: f.runId,
@@ -436,6 +481,7 @@ export function projectExecution(
         if (agent) {
           agent.status = "working";
           agent.currentRunId = f.runId;
+          agent.toolProgress = null;
         }
         break;
       }
@@ -447,6 +493,15 @@ export function projectExecution(
       case "run_reasoning_delta": {
         const agent = agentById(f.agentId);
         if (agent) agent.reasoningChunks.push(f.delta);
+        break;
+      }
+      case "run_tool_progress": {
+        // The worker is composing a tool call's arguments (the file body for
+        // file_write, …): light up the live「正在生成」line. Cleared when the call
+        // starts executing (tool_use_start) or the run ends.
+        const agent = agentById(f.agentId);
+        if (agent)
+          agent.toolProgress = { toolName: f.toolName, chars: f.chars };
         break;
       }
       case "run_completed": {
@@ -465,6 +520,7 @@ export function projectExecution(
         if (agent) {
           agent.status = "completed";
           agent.currentRunId = null;
+          agent.toolProgress = null;
         }
         break;
       }
@@ -494,7 +550,10 @@ export function projectExecution(
           run.error = f.error;
         }
         const agent = agentById(f.agentId);
-        if (agent) agent.status = "error";
+        if (agent) {
+          agent.status = "error";
+          agent.toolProgress = null;
+        }
         break;
       }
       case "run_progress": {
@@ -516,6 +575,9 @@ export function projectExecution(
             result: null,
             status: "running",
           });
+          // The call's arguments finished assembling and it is now executing, so
+          // the「正在生成」progress line gives way to this real tool-call row.
+          agent.toolProgress = null;
         }
         break;
       }
@@ -524,6 +586,7 @@ export function projectExecution(
           const tc = agent.toolCalls.find((t) => t.id === f.toolCallId);
           if (tc) {
             tc.result = f.result;
+            tc.display = f.display ?? null;
             tc.status = f.status;
             break;
           }
@@ -571,6 +634,8 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       return `${role(frame.agentId)} 输出中…`;
     case "run_reasoning_delta":
       return `${role(frame.agentId)} 思考中…`;
+    case "run_tool_progress":
+      return `${role(frame.agentId)} 生成 ${toolLabel(frame.toolName)}…`;
     case "run_completed":
       return `${role(frame.agentId)} 完成`;
     case "run_failed":
@@ -817,6 +882,16 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         delta: p.delta,
       };
     }
+    case "run_tool_progress": {
+      const p = event.payload as RunToolProgressPayload;
+      return {
+        t,
+        kind: "run_tool_progress",
+        agentId: p.agent_id,
+        toolName: p.tool_name,
+        chars: p.chars,
+      };
+    }
     case "run_completed": {
       const p = event.payload as RunCompletedPayload;
       return {
@@ -868,6 +943,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         kind: "tool_use_end",
         toolCallId: p.tool_call_id,
         result: p.result,
+        display: p.display ?? null,
         status: p.status,
       };
     }

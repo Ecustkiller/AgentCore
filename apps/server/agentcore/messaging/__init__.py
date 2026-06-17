@@ -12,6 +12,7 @@ from agentcore.messaging.hub import (
     default_chat_hub,
 )
 from agentcore.messaging.service import (
+    AttachmentUpload,
     ChatView,
     DirectoryView,
     MessagePage,
@@ -19,6 +20,7 @@ from agentcore.messaging.service import (
 )
 
 __all__ = [
+    "AttachmentUpload",
     "ChatEventPublisher",
     "ChatHub",
     "ChatView",

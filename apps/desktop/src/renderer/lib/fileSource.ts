@@ -30,6 +30,30 @@ export type FilePreviewResult =
 /** 目录变更回调（仅当 `caps.watch` 为真时有意义）。 */
 export type FileChangeHandler = (dir: string) => void;
 
+/** 文件版本（写前 CAS 基线）：本地用 mtime，云端用 etag/updatedAt（P4）。 */
+export type FileVersion = { mtimeMs?: number; etag?: string };
+/** 编辑用编码；`gbk` 仅可读不可回写。 */
+export type EditEncoding = "utf-8" | "utf-8-bom" | "gbk";
+export type EditEol = "lf" | "crlf";
+
+/** 「读以编辑」结果（源无关）：完整正文（`\n` 换行）+ 版本基线 + 原文编码/换行。 */
+export interface FileEditDoc {
+  text: string;
+  version: FileVersion;
+  encoding: EditEncoding;
+  eol: EditEol;
+}
+
+/** 写文本结果（源无关）。`conflict` 携磁盘/远端当前版本，供「仍然覆盖」用其做基线再写。 */
+export type WriteTextResult =
+  | { ok: true; version: FileVersion }
+  | { ok: false; reason: "conflict"; version: FileVersion }
+  | {
+      ok: false;
+      reason: "denied" | "locked" | "unsupported" | "error";
+      message?: string;
+    };
+
 /**
  * 核心之外的可选能力。共用 UI 读这些决定挂哪些操作面（组件内不按源分支）。
  */
@@ -80,6 +104,26 @@ export interface FileSource {
   move(src: string, dst: string): Promise<void>;
   /** 删除文件或目录（目录递归）。 */
   delete(path: string): Promise<void>;
+
+  /**
+   * 读一个文本文件用于**编辑**（完整正文 + 版本基线 + 编码/换行）。仅当 `caps.edit`
+   * 且源支持源码编辑（本地 IPC；云端 P4）。与 `read`（预览，可能截断）分工——宿主
+   * 编辑器只认这层接口，不分支本地/云端。
+   */
+  readForEdit?(path: string): Promise<FileEditDoc>;
+  /**
+   * 把编辑器正文写回 `path`，带写前 CAS（`baseline` 版本，`null` 视为新建）。仅当
+   * `caps.edit`。失败以判别式 `reason` 返回（`conflict` 携当前版本），不抛异常。
+   */
+  writeText?(
+    path: string,
+    input: {
+      content: string;
+      encoding: EditEncoding;
+      eol: EditEol;
+      baseline: FileVersion | null;
+    },
+  ): Promise<WriteTextResult>;
 
   /** 写原始字节到 `path`（建/覆盖）。仅当 `caps.edit || caps.transfer`。 */
   writeBytes?(path: string, body: Blob): Promise<void>;

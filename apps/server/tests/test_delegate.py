@@ -17,7 +17,8 @@ from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
-from agentcore.runtime.runs.types import RunPhase, RunState
+from agentcore.runtime.runs.plan import RunPlan
+from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -918,7 +919,8 @@ async def test_durable_pause_persists_frame_then_drops_on_live_resolve():
     assert frame.completed  # s1 finished before the pause
     assert any(s["role"] == "研究员" for s in frame.steps)
     assert any(p["role"] == "写手" for p in frame.pending)
-    # the pause's plan_review_required rides the frame journal so a resume replays it
+    # the pause's plan_review_required is captured on the suspension's journal — it is
+    # saved to turn_journal (§18.3, not the frame JSON) for the resume to replay.
     assert any(e["type"] == "plan_review_required" for e in frame.journal)
     # live resolve dropped the now-stale backstop
     assert dropped == ["m1"]
@@ -1023,3 +1025,93 @@ async def test_resume_plan_adjust_steers_the_tail():
         if m.role == "user" and "撰写" in (m.content or "")
     )
     assert "把重点放在风险上" in s2_user
+
+
+def test_format_for_ceo_surfaces_file_manifest_and_skip_filelist_hint():
+    # A worker that wrote files exposes them as a 文件产出 manifest in the CEO-facing
+    # aggregate, and the footer tells the CEO not to re-list the workspace to verify —
+    # 收敛阶段省掉冗余 file_list 轮 (改法A).
+    tool = _tool(_Provider([]))
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="建仪表盘", role="前端工程师")])
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="已完成仪表盘",
+            files_touched=["dashboard.html", "assets/styles.css"],
+        )
+    }
+    out = tool._format_for_ceo(plan, results)
+    assert "文件产出（已写入工作区）" in out
+    assert "`dashboard.html`" in out
+    assert "`assets/styles.css`" in out
+    assert "无需再用 file_list" in out
+
+
+def test_format_for_ceo_omits_manifest_when_worker_touched_no_files():
+    tool = _tool(_Provider([]))
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="查资料", role="研究员")])
+    results = {"w1": RunState(phase=RunPhase.COMPLETED, content="一段研究综述")}
+    out = tool._format_for_ceo(plan, results)
+    # 改法A 的「无噪音」契约：纯文本 worker 不渲染逐项文件清单（避免噪音）。守卫只在
+    # footer 规则里，不给每个无文件的 worker 盲标，免得误伤合法的调研/分析/辩论 worker。
+    # （footer 规则文本里会提到「文件产出」一词，故只断言逐项清单行 `> 文件产出` 不出现。）
+    assert "> 文件产出" not in out
+
+
+def test_format_for_ceo_footer_guards_against_claiming_unwritten_files():
+    # 防幻觉守卫: even when NO worker wrote files, the footer must instruct the CEO
+    # that「文件产出」is the sole ground truth — a worker that CLAIMS files but has
+    # no manifest line did NOT actually write them, so the CEO must judge that file
+    # delivery 未达成 and never report it as done. Text-only workers stay exempt.
+    tool = _tool(_Provider([]))
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="建文件", role="工程师")])
+    results = {"w1": RunState(phase=RunPhase.COMPLETED, content="我已创建 app.py 并写入代码")}
+    out = tool._format_for_ceo(plan, results)
+    assert "防幻觉" in out
+    assert "未真正写入" in out
+    assert "未达成" in out
+    assert "属正常" in out  # text-only workers are explicitly exempted
+
+
+def test_format_for_ceo_surfaces_escalations_blockers_first():
+    # Worker escalations are surfaced PROMINENTLY (a top section) with the question +
+    # its暂用假设, blockers marked and sorted first, plus the resolve guidance
+    # (ask_user / revise). Each escalating worker's own block also carries a marker.
+    tool = _tool(_Provider([]))
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="w1", task="查行情", role="调研"),
+            RunSpec(run_id="w2", task="建后端", role="后端"),
+        ]
+    )
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="软的备注",
+            escalations=[{"question": "目标受众是谁?", "assumption": "暂按大众", "blocking": False}],
+        ),
+        "w2": RunState(
+            phase=RunPhase.COMPLETED,
+            content="后端骨架",
+            escalations=[{"question": "用 Postgres 还是 MySQL?", "assumption": "暂用 PG", "blocking": True}],
+        ),
+    }
+    out = tool._format_for_ceo(plan, results)
+    assert "队员升级了待决问题" in out
+    assert "用 Postgres 还是 MySQL?" in out and "目标受众是谁?" in out
+    assert "其暂用假设：暂用 PG" in out
+    # The blocking item is marked and ordered before the non-blocking one.
+    assert "【关键阻塞】" in out
+    assert out.index("Postgres") < out.index("目标受众")
+    # The CEO is told HOW to resolve, via its own levers.
+    assert "ask_user" in out and "revise" in out
+    # Each escalating worker's own block flags it too.
+    assert "已升级 1 项待决问题" in out
+
+
+def test_format_for_ceo_no_escalation_section_when_none():
+    tool = _tool(_Provider([]))
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="查资料", role="研究员")])
+    results = {"w1": RunState(phase=RunPhase.COMPLETED, content="一段综述")}
+    out = tool._format_for_ceo(plan, results)
+    assert "队员升级了待决问题" not in out

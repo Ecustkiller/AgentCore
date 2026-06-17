@@ -6,17 +6,12 @@ import {
   useDeleteConversation,
   useUnarchiveConversation,
 } from "@/hooks/useConversations";
-import {
-  useCreateFolder,
-  useDeleteFolder,
-  useFolders,
-  useUpdateFolder,
-} from "@/hooks/useFolders";
+import { useFolders } from "@/hooks/useFolders";
 import { startNewConversation } from "@/lib/newConversation";
 import { notifyError } from "@/lib/toast";
 import type { FolderMeta } from "@/services/folders";
 import { type Conversation, useConversationStore } from "@/stores/conversation";
-import { UNGROUPED_KEY, useFoldersStore } from "@/stores/folders";
+import { UNGROUPED_KEY } from "@/stores/folders";
 import {
   Archive,
   ArchiveRestore,
@@ -24,17 +19,15 @@ import {
   Check,
   Folder as FolderIcon,
   FolderOpen,
-  FolderPlus,
   HardDrive,
   Inbox,
   MessageSquare,
-  Pencil,
   Plus,
   Search,
   Trash2,
   X,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 /** Synthetic left-pane filter key for「全部对话」(not a real folder). */
@@ -61,8 +54,6 @@ function byPinnedThenRecency(a: Conversation, b: Conversation): number {
 export function ConversationsPage() {
   const conversations = useConversations();
   const folders = useFolders();
-  const createFolderMutation = useCreateFolder();
-  const setPendingRename = useFoldersStore((s) => s.setPendingRename);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -155,18 +146,6 @@ export function ConversationsPage() {
     startNewConversation(navigate, folderTarget);
   };
 
-  const handleNewFolder = async () => {
-    try {
-      const folder = await createFolderMutation.mutateAsync({
-        name: "新建文件夹",
-      });
-      setSelected(folder.id);
-      setPendingRename(folder.id); // its row opens straight into rename mode
-    } catch {
-      /* create failed (offline / 401); leave the page as-is */
-    }
-  };
-
   return (
     <div className="h-full w-full overflow-hidden">
       <div className="mx-auto flex h-full max-w-[1200px] flex-col px-6 py-8">
@@ -215,19 +194,18 @@ export function ConversationsPage() {
                   selected={selected === f.id}
                   flashing={flashId === f.id}
                   onSelect={() => setSelected(f.id)}
-                  onDeleted={() => {
-                    if (selected === f.id) setSelected(ALL_KEY);
-                  }}
                 />
               ))}
             </div>
+            {/* 文件夹的新建 / 重命名 / 删除 / 添加本地文件夹已统一到「文件」页（文件夹即工
+                作区）；这里只做按文件夹筛选，管理入口跳到文件中枢。 */}
             <button
               type="button"
-              onClick={() => void handleNewFolder()}
+              onClick={() => navigate("/files")}
               className="mt-2 flex h-9 shrink-0 items-center gap-2 rounded-lg border border-dashed border-border px-3 text-sm text-muted-foreground hover:border-foreground/30 hover:text-foreground"
             >
-              <FolderPlus size={16} className="shrink-0" />
-              新建文件夹
+              <FolderOpen size={16} className="shrink-0" />
+              管理文件夹
             </button>
           </aside>
 
@@ -349,110 +327,29 @@ function FilterRow({
   );
 }
 
-/** A real-folder filter row: select to filter, hover for rename/delete. Deleting
- * a folder unbinds its conversations (they drop into 未分组). */
+/** A real-folder filter row: select to filter the conversation list; hover to jump
+ * to its workspace overview. Folder lifecycle (新建 / 重命名 / 删除 / 添加本地文件夹)
+ * lives on the 文件 hub now (文件夹即工作区), so this row is filter-only. */
 function FolderFilterRow({
   folder,
   count,
   selected,
   flashing,
   onSelect,
-  onDeleted,
 }: {
   folder: FolderMeta;
   count: number;
   selected: boolean;
   flashing: boolean;
   onSelect: () => void;
-  onDeleted: () => void;
 }) {
-  const updateFolderMutation = useUpdateFolder();
-  const deleteFolderMutation = useDeleteFolder();
-  const pendingRenameId = useFoldersStore((s) => s.pendingRenameId);
-  const setPendingRename = useFoldersStore((s) => s.setPendingRename);
   const navigate = useNavigate();
-
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(folder.name);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [hovered, setHovered] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const skipBlurRef = useRef(false);
-
-  // A folder just created via "新建文件夹" opens straight into rename mode.
-  useEffect(() => {
-    if (pendingRenameId === folder.id) {
-      setDraft(folder.name);
-      setEditing(true);
-      setPendingRename(null);
-    }
-  }, [pendingRenameId, folder.id, folder.name, setPendingRename]);
-
-  useEffect(() => {
-    if (editing) {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }
-  }, [editing]);
-
-  const commitRename = () => {
-    setEditing(false);
-    const name = draft.trim();
-    if (!name || name === folder.name) return;
-    // Optimistic rename + silent rollback both live in the mutation.
-    updateFolderMutation.mutate({ id: folder.id, patch: { name } });
-  };
-
-  const handleDelete = async () => {
-    setConfirmingDelete(false);
-    // The mutation deletes server-side, then unbinds this folder's conversations
-    // into 未分组 and drops the folder from the cache.
-    try {
-      await deleteFolderMutation.mutateAsync(folder.id);
-    } catch {
-      return;
-    }
-    onDeleted();
-  };
-
-  if (editing) {
-    return (
-      <div className="flex h-9 items-center rounded-lg bg-accent px-2">
-        <FolderIcon size={16} className="mr-2 shrink-0 text-muted-foreground" />
-        <input
-          ref={inputRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              inputRef.current?.blur();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              skipBlurRef.current = true;
-              setEditing(false);
-            }
-          }}
-          onBlur={() => {
-            if (skipBlurRef.current) {
-              skipBlurRef.current = false;
-              return;
-            }
-            commitRename();
-          }}
-          className="h-7 min-w-0 flex-1 bg-transparent text-sm text-accent-foreground focus:outline-none"
-        />
-      </div>
-    );
-  }
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => {
-        setHovered(false);
-        setConfirmingDelete(false);
-      }}
+      onMouseLeave={() => setHovered(false)}
       className={`group flex h-9 items-center gap-1 rounded-lg px-2 transition-shadow ${
         selected
           ? "bg-accent text-accent-foreground"
@@ -474,65 +371,17 @@ function FolderFilterRow({
           />
         )}
       </button>
-      {confirmingDelete ? (
-        <span className="flex shrink-0 items-center gap-0.5">
-          <SimpleTooltip label="确认删除（对话保留）">
-            <button
-              type="button"
-              aria-label="确认删除文件夹"
-              onClick={() => void handleDelete()}
-              className="flex size-6 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10"
-            >
-              <Check size={13} />
-            </button>
-          </SimpleTooltip>
-          <SimpleTooltip label="取消">
-            <button
-              type="button"
-              aria-label="取消删除"
-              onClick={() => setConfirmingDelete(false)}
-              className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
-            >
-              <X size={13} />
-            </button>
-          </SimpleTooltip>
-        </span>
-      ) : hovered ? (
-        <span className="flex shrink-0 items-center gap-0.5">
-          <SimpleTooltip label="打开工作区">
-            <button
-              type="button"
-              aria-label="打开文件夹工作区"
-              onClick={() => navigate(`/folders/${folder.id}`)}
-              className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
-            >
-              <FolderOpen size={13} />
-            </button>
-          </SimpleTooltip>
-          <SimpleTooltip label="重命名">
-            <button
-              type="button"
-              aria-label="重命名文件夹"
-              onClick={() => {
-                setDraft(folder.name);
-                setEditing(true);
-              }}
-              className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
-            >
-              <Pencil size={13} />
-            </button>
-          </SimpleTooltip>
-          <SimpleTooltip label="删除（对话保留）">
-            <button
-              type="button"
-              aria-label="删除文件夹"
-              onClick={() => setConfirmingDelete(true)}
-              className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:text-destructive"
-            >
-              <Trash2 size={13} />
-            </button>
-          </SimpleTooltip>
-        </span>
+      {hovered ? (
+        <SimpleTooltip label="打开工作区">
+          <button
+            type="button"
+            aria-label="打开文件夹工作区"
+            onClick={() => navigate(`/folders/${folder.id}`)}
+            className="flex size-6 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
+          >
+            <FolderOpen size={13} />
+          </button>
+        </SimpleTooltip>
       ) : (
         <span className="shrink-0 text-xs text-muted-foreground/60">
           {count}

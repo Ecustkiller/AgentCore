@@ -7,9 +7,9 @@ GRANTABLE tool approval carries a one-shot *decision*; a checkpoint carries the
 user's answer to a question the CEO raised mid-turn (continue / adjust / stop).
 
 Unlike approvals and ops (pure transport), a checkpoint's question + answer are
-journaled onto the assistant message (``messages.runs``; see
-``events._JOURNAL_EVENT_TYPES``) so a reload replays the exchange inline — it is
-part of the conversation, not just gating.
+journaled to the turn_journal table (see ``events._JOURNAL_EVENT_TYPES``) and
+projected into the assistant message's runs payload, so a reload replays the
+exchange inline — it is part of the conversation, not just gating.
 
 State is in-process (single-worker posture, same as the approval gate); front
 with Redis to scale to multiple workers (see ``config.py``).

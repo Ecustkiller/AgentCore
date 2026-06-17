@@ -8,6 +8,11 @@ so a turn is never resumed twice) + :func:`list_paused_turns` (a conversation's 
 frames on reopen). Uses ``async_session_factory`` directly (not an injected request
 session), matching the cost-ledger / session-roster persistence posture.
 
+The paused turn's journal-so-far rides the ``turn_journal`` table (唯一事实源, §18.3),
+NOT the frame: :func:`save_paused_turn` mirrors it there and :func:`claim_paused_turn`
+re-hydrates it, so the replay stream has a single home whether the turn is paused or
+completed.
+
 Saves are best-effort: a persistence failure logs and degrades to 2a in-memory
 behaviour (the live resolve still works; only the durable backstop is lost) rather
 than breaking the user's turn. The save MUST happen before the suspend ``await`` so a
@@ -19,7 +24,8 @@ from __future__ import annotations
 from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
-from agentcore.db.repositories import PausedTurnRepository
+from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepository
+from agentcore.runtime.journal import entries_from_runs, runs_from_entries
 from agentcore.runtime.suspension import TurnSuspension, suspension_from_json
 
 logger = get_logger(__name__)
@@ -31,7 +37,10 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
     Stamps the ambient turn ``trace_id`` (this runs inside the pipeline's trace
     scope) so the persisted pause links back to its originating turn's logs.
     Upsert: re-pausing the same turn (resume → pause again) overwrites in place.
+    The journal-so-far is NOT in the frame — it is mirrored into ``turn_journal``
+    (唯一事实源, §18.3) by :func:`_save_pause_journal`.
     """
+    trace_id = suspension.trace_id or get_log_value("trace_id") or None
     try:
         async with async_session_factory() as db:
             await PausedTurnRepository(db).upsert(
@@ -39,11 +48,43 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
                 conversation_id=suspension.conversation_id,
                 user_id=suspension.user_id,
                 frame=suspension.to_json(),
-                trace_id=suspension.trace_id or get_log_value("trace_id") or None,
+                trace_id=trace_id,
             )
     except Exception as e:  # noqa: BLE001 — persistence must never break the turn
         logger.warning(
             "suspension.persist_failed",
+            message_id=suspension.message_id,
+            error=str(e),
+        )
+        return
+    # The frame is committed and alone makes the turn resumable; now mirror the
+    # journal-so-far as a SEPARATE best-effort write so its failure can never roll
+    # back the frame. A lost journal only costs the graph replay on reload.
+    await _save_pause_journal(suspension, trace_id)
+
+
+async def _save_pause_journal(suspension: TurnSuspension, trace_id: str | None) -> None:
+    """Record a paused turn's journal-so-far to ``turn_journal`` (唯一事实源, best-effort).
+
+    Keyed by the same ``message_id`` the resumed turn reuses, so the resume hydrates
+    it back (:func:`claim_paused_turn`) and the completed turn re-records it wholesale
+    (``record`` replaces). Re-pausing (resume → pause again) replaces the cumulative
+    stream. A failure logs and degrades — never breaks the pause.
+    """
+    entries = entries_from_runs({"events": suspension.journal})
+    if not entries:
+        return
+    try:
+        async with async_session_factory() as db:
+            await TurnJournalRepository(db).record(
+                turn_id=suspension.message_id,
+                conversation_id=suspension.conversation_id,
+                trace_id=trace_id,
+                entries=entries,
+            )
+    except Exception as e:  # noqa: BLE001 — journal persistence must never break the turn
+        logger.warning(
+            "suspension.journal_persist_failed",
             message_id=suspension.message_id,
             error=str(e),
         )
@@ -74,16 +115,28 @@ async def claim_paused_turn(
     ``conversation_id`` (the one the route verified the caller owns) so a frame is only
     claimed within that conversation (IDOR-safe). A load error degrades to ``None``
     (the route reports「已处理或不存在」) rather than raising.
+
+    The journal-so-far is re-hydrated from ``turn_journal`` (唯一事实源, it is not in
+    the frame) onto :attr:`TurnSuspension.journal`, so the resume seeds + replays the
+    whole pre-pause graph exactly as before. The stored rows are left in place: the
+    resumed turn re-records them wholesale on completion (or the TTL sweep clears them
+    if the turn is abandoned).
     """
     try:
         async with async_session_factory() as db:
             row = await PausedTurnRepository(db).claim(
                 message_id, conversation_id=conversation_id
             )
+            if row is None:
+                return None
+            suspension = suspension_from_json(row.frame)
+            entries = await TurnJournalRepository(db).load(message_id)
     except Exception as e:  # noqa: BLE001 — a claim failure reads as "not resumable"
         logger.warning("suspension.claim_failed", message_id=message_id, error=str(e))
         return None
-    return suspension_from_json(row.frame) if row is not None else None
+    runs = runs_from_entries(entries)
+    suspension.journal = list((runs or {}).get("events") or [])
+    return suspension
 
 
 async def list_paused_turns(conversation_id: str) -> list[TurnSuspension]:

@@ -1,80 +1,110 @@
-import { PageContainer } from "@/components/layout/PageContainer";
 import { useAuthStore } from "@/stores/auth";
 import {
-  ArrowLeft,
   Gauge,
   Info,
   KeyRound,
   Keyboard,
+  type LucideIcon,
   Palette,
-  Settings,
-  SlidersHorizontal,
   Users,
 } from "lucide-react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 
-const BASE_SECTIONS = [
-  { icon: Settings, label: "通用", path: "/more" },
-  { icon: KeyRound, label: "模型配置", path: "/more/model" },
-  { icon: SlidersHorizontal, label: "质量档", path: "/more/model-modes" },
-  { icon: Gauge, label: "用量", path: "/more/usage" },
-  { icon: Palette, label: "外观", path: "/more/appearance" },
-  { icon: Keyboard, label: "快捷键", path: "/more/shortcuts" },
+interface NavItem {
+  icon: LucideIcon;
+  label: string;
+  path: string;
+  /** Hidden unless the signed-in user is an admin (the page also guards). */
+  adminOnly?: boolean;
+}
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+// Settings are grouped by intent rather than a flat list: 模型 (the BYOK key +
+// which models the team uses, kept adjacent), 账户 (spend, members), 偏好 (UI),
+// 关于. Opening 设置 (/more) redirects to the first page (模型配置).
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: "模型",
+    items: [{ icon: KeyRound, label: "模型配置", path: "/more/model" }],
+  },
+  {
+    label: "账户",
+    items: [
+      { icon: Gauge, label: "用量", path: "/more/usage" },
+      { icon: Users, label: "成员", path: "/more/members", adminOnly: true },
+    ],
+  },
+  {
+    label: "偏好",
+    items: [
+      { icon: Palette, label: "外观", path: "/more/appearance" },
+      { icon: Keyboard, label: "快捷键", path: "/more/shortcuts" },
+    ],
+  },
+  {
+    label: "关于",
+    items: [{ icon: Info, label: "关于", path: "/more/about" }],
+  },
 ];
 
-const ABOUT_SECTION = { icon: Info, label: "关于", path: "/more/about" };
-
 export function MorePage() {
-  const navigate = useNavigate();
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
-
-  // Invite management is admin-only; hide the entry otherwise (the page also guards).
-  const sections = [
-    ...BASE_SECTIONS,
-    ...(isAdmin ? [{ icon: Users, label: "成员", path: "/more/members" }] : []),
-    ABOUT_SECTION,
-  ];
 
   return (
     <div className="flex h-full w-full">
       {/* Secondary navigation */}
-      <nav className="flex w-[200px] shrink-0 flex-col border-r border-border bg-muted/30">
-        <div className="flex h-12 items-center gap-2 px-4">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
-            <ArrowLeft size={14} />
-          </button>
-          <span className="text-sm font-medium">更多</span>
-        </div>
-
-        <div className="space-y-0.5 px-2">
-          {sections.map((section) => (
-            <NavLink
-              key={section.path}
-              to={section.path}
-              end={section.path === "/more"}
-              className={({ isActive }) =>
-                `flex h-9 w-full items-center gap-3 rounded-lg px-3 text-sm ${
-                  isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                }`
-              }
-            >
-              <section.icon size={14} className="shrink-0" />
-              <span>{section.label}</span>
-            </NavLink>
-          ))}
+      <nav className="flex w-[220px] shrink-0 flex-col overflow-y-auto border-r border-border bg-muted/30 py-4">
+        <div className="space-y-4 px-2">
+          {NAV_GROUPS.map((group) => {
+            const items = group.items.filter((i) => !i.adminOnly || isAdmin);
+            if (items.length === 0) return null;
+            return (
+              <div key={group.label}>
+                <p className="px-3 pb-1 text-xs font-medium text-muted-foreground">
+                  {group.label}
+                </p>
+                <div className="space-y-0.5">
+                  {items.map((item) => (
+                    <NavRow key={item.path} item={item} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </nav>
 
-      {/* Content area */}
-      <PageContainer width="content" className="flex-1">
-        <Outlet />
-      </PageContainer>
+      {/* Content area — a left-anchored reading column (split layout, so it sets
+          its own width rather than the centered content gradient). */}
+      <div className="h-full w-full overflow-y-auto">
+        <div className="w-full max-w-3xl px-6 py-8">
+          <Outlet />
+        </div>
+      </div>
     </div>
+  );
+}
+
+/** One grouped nav row. */
+function NavRow({ item }: { item: NavItem }) {
+  const Icon = item.icon;
+  return (
+    <NavLink
+      to={item.path}
+      className={({ isActive }) =>
+        `flex h-9 w-full items-center gap-3 rounded-lg px-3 text-sm ${
+          isActive
+            ? "bg-accent text-accent-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+        }`
+      }
+    >
+      <Icon size={16} className="shrink-0" />
+      <span>{item.label}</span>
+    </NavLink>
   );
 }

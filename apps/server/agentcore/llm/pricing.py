@@ -16,8 +16,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
+from agentcore.core.logging import get_logger
 from agentcore.llm.config import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
 from agentcore.llm.protocol import TokenUsage
+
+logger = get_logger(__name__)
 
 # 1 USD expressed in nano-USD. The ledger and API speak integer nano-USD.
 NANO_PER_USD = 1_000_000_000
@@ -81,10 +84,34 @@ def calculate_cost(model: str, usage: TokenUsage) -> Cost:
 
     Input is split by cache hit/miss (DeepSeek pre-splits the counts); output is
     priced whole (reasoning already included). Returns integer nano-USD.
+
+    Two guards keep the bill honest when upstream usage is imperfect:
+
+    - **Cache-split reconciliation**: pricing the input by hit/miss alone silently
+      bills it as 0 whenever the cache split is absent but the prompt isn't — e.g.
+      a BYOK ``base_url`` pointing at a proxy/gateway that returns standard
+      OpenAI usage without DeepSeek's ``prompt_cache_{hit,miss}_tokens``, a model
+      swap, or a dropped field. So the uncached count is reconciled to
+      ``max(input_tokens − cache_hit, cache_miss)``: on the native DeepSeek path
+      (``hit + miss == prompt``) this is a no-op, and when the split is missing
+      the whole prompt is priced as a cache miss instead of vanishing.
+    - **Fallback visibility**: an unknown/unset ``model`` degrades to the Flash
+      tier (a missing price must never crash a turn), but that can undercount a
+      Pro run ~3×, so the degrade is logged (``cost.pricing_fallback``) instead of
+      happening silently.
     """
     p = pricing_for(model)
+    if model not in _PRICING and (usage.input_tokens or usage.output_tokens):
+        logger.warning(
+            "cost.pricing_fallback",
+            model=model or "(unset)",
+            fallback=_DEFAULT_MODEL,
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+        )
+    cache_miss_tokens = max(usage.input_tokens - usage.cache_hit_tokens, usage.cache_miss_tokens)
     cached = _nano(usage.cache_hit_tokens, p["cache_hit"])
-    uncached = _nano(usage.cache_miss_tokens, p["cache_miss"])
+    uncached = _nano(cache_miss_tokens, p["cache_miss"])
     output = _nano(usage.output_tokens, p["output"])
     input_total = cached + uncached
     return Cost(

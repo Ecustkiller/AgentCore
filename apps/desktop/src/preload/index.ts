@@ -4,6 +4,12 @@ import {
   type FsApi,
   type FsChangedEvent,
 } from "@shared/ipc-contract";
+import {
+  SIDECAR_CHANNELS,
+  type SidecarApi,
+  type SidecarEventPush,
+  type SidecarStatusPush,
+} from "@shared/sidecar-contract";
 import { contextBridge, ipcRenderer } from "electron";
 
 const fsApi: FsApi = {
@@ -16,6 +22,10 @@ const fsApi: FsApi = {
   listFiles: (rootId) => ipcRenderer.invoke(FS_CHANNELS.listFiles, { rootId }),
   readFile: (rootId, relPath) =>
     ipcRenderer.invoke(FS_CHANNELS.readFile, { rootId, relPath }),
+  readTextFile: (rootId, relPath) =>
+    ipcRenderer.invoke(FS_CHANNELS.readTextFile, { rootId, relPath }),
+  writeFile: (rootId, relPath, input) =>
+    ipcRenderer.invoke(FS_CHANNELS.writeFile, { rootId, relPath, input }),
   rename: (rootId, relPath, newName) =>
     ipcRenderer.invoke(FS_CHANNELS.rename, { rootId, relPath, newName }),
   move: (rootId, srcRelPath, destRelPath) =>
@@ -37,6 +47,22 @@ const fsApi: FsApi = {
     ipcRenderer.invoke(FS_CHANNELS.workspaceOp, { rootId, op, args }),
 };
 
+const sidecarApi: SidecarApi = {
+  startTurn: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.startTurn, req),
+  cancel: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.cancel, req),
+  respond: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.respond, req),
+  onEvent: (cb) => {
+    const listener = (_e: unknown, payload: SidecarEventPush) => cb(payload);
+    ipcRenderer.on(SIDECAR_CHANNELS.event, listener);
+    return () => ipcRenderer.removeListener(SIDECAR_CHANNELS.event, listener);
+  },
+  onStatus: (cb) => {
+    const listener = (_e: unknown, payload: SidecarStatusPush) => cb(payload);
+    ipcRenderer.on(SIDECAR_CHANNELS.status, listener);
+    return () => ipcRenderer.removeListener(SIDECAR_CHANNELS.status, listener);
+  },
+};
+
 const windowApi = {
   minimize: () => ipcRenderer.send("window:minimize"),
   maximize: () => ipcRenderer.send("window:maximize"),
@@ -47,6 +73,7 @@ if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld("electron", electronAPI);
     contextBridge.exposeInMainWorld("fsApi", fsApi);
+    contextBridge.exposeInMainWorld("sidecarApi", sidecarApi);
     contextBridge.exposeInMainWorld("windowApi", windowApi);
   } catch (error) {
     console.error(error);
@@ -56,6 +83,8 @@ if (process.contextIsolated) {
   window.electron = electronAPI;
   // @ts-ignore - 非隔离环境下直接挂载
   window.fsApi = fsApi;
+  // @ts-ignore - 非隔离环境下直接挂载
+  window.sidecarApi = sidecarApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.windowApi = windowApi;
 }

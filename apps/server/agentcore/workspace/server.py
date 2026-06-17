@@ -18,6 +18,7 @@ import shutil
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 
 from agentcore.tools.sandbox.protocol import (
     ExecutionRequest,
@@ -81,9 +82,17 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
 
 
 class ServerWorkspace:
-    """``WorkspaceBackend`` backed by a server-side directory + sandbox."""
+    """``WorkspaceBackend`` backed by a directory + sandbox on the host machine.
 
-    location = "server"
+    ``location`` defaults to ``"server"`` (an isolated cloud sandbox — workers run
+    un-gated). The sidecar reuses this exact backend but passes ``location="local"``:
+    there the engine runs ON the user's machine and ``root`` IS their real disk, so a
+    delegated worker's ``file_write`` / ``code_execute`` needs the same consent the
+    cloud's local mode demands — the gate keys off ``backend.location == "local"``
+    (see ``delegate.py`` worker_gate, ``pipeline.py`` revise_gate). The op surface is
+    identical either way (direct ``Path`` access; never a ``WorkspaceChannel``
+    round-trip — that is ``LocalWorkspace``'s job).
+    """
 
     def __init__(
         self,
@@ -91,10 +100,12 @@ class ServerWorkspace:
         sandbox: SandboxProvider,
         *,
         root_label: str = "workspace",
+        location: Literal["server", "local"] = "server",
     ) -> None:
         self._root = root
         self._sandbox = sandbox
         self.root_label = root_label
+        self.location: Literal["server", "local"] = location
         # Flips True on the first mutating op so the service snapshots only
         # workspaces a turn actually changed (see WorkspaceBackend.dirty).
         self._dirty = False
@@ -155,6 +166,79 @@ class ServerWorkspace:
             raise WorkspaceIOError(str(e)) from e
         self._dirty = True
         return len(data)
+
+    async def read_for_edit(
+        self, path: str
+    ) -> tuple[str, int, Literal["lf", "crlf"]]:
+        """Read a text file for in-panel editing: ``(text, mtime_ms, eol)``.
+
+        Unlike the preview download (truncated), this returns the **whole** file so
+        a later save never drops the tail. Content is newline-normalized to ``\\n``;
+        the original EOL is reported so the editor can restore it on write.
+        ``mtime_ms`` is the write-time CAS baseline (see :meth:`write_text_cas`).
+        Raises ``OutsideWorkspace`` / ``PathNotFound`` / ``NotAFile`` / ``NotUTF8`` /
+        ``WorkspaceIOError``.
+        """
+        target = self._safe(path)
+        if not target.exists():
+            raise PathNotFound(path)
+        if not target.is_file():
+            raise NotAFile(path)
+        try:
+            raw = target.read_bytes()
+            mtime_ms = target.stat().st_mtime_ns // 1_000_000
+        except OSError as e:
+            raise WorkspaceIOError(str(e)) from e
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise NotUTF8(path) from e
+        eol: Literal["lf", "crlf"] = "crlf" if "\r\n" in text else "lf"
+        return text.replace("\r\n", "\n"), mtime_ms, eol
+
+    async def write_text_cas(
+        self,
+        path: str,
+        content: str,
+        *,
+        baseline_mtime_ms: int,
+        eol: Literal["lf", "crlf"],
+    ) -> tuple[bool, int]:
+        """Conditionally write ``content`` with a write-time CAS on mtime.
+
+        Returns ``(ok, mtime_ms)``: on success ``mtime_ms`` is the new mtime; on a
+        **conflict** (``ok`` is False) it is the current disk mtime, so the caller can
+        offer "overwrite anyway" using it as the next baseline — we never blind-clobber
+        a file changed under us (e.g. by an Agent turn). ``baseline_mtime_ms == 0``
+        means "new file": a conflict if something already exists at ``path``. ``\\n``
+        is restored to ``eol`` before an atomic (temp + rename) write. Raises
+        ``OutsideWorkspace`` / ``NotAFile`` / ``WorkspaceIOError``.
+
+        Best-effort against external writers; callers serialize against same-workspace
+        turns via ``workspace_lock`` so an Agent write can't interleave mid-CAS.
+        """
+        target = self._safe(path)
+        exists = target.exists()
+        if exists and not target.is_file():
+            raise NotAFile(path)
+        try:
+            if baseline_mtime_ms == 0:
+                if exists:
+                    return False, target.stat().st_mtime_ns // 1_000_000
+            elif not exists:
+                return False, 0  # the baseline file was deleted under us
+            else:
+                disk_ms = target.stat().st_mtime_ns // 1_000_000
+                if disk_ms != baseline_mtime_ms:
+                    return False, disk_ms
+            body = content.replace("\n", "\r\n") if eol == "crlf" else content
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write_bytes(target, body.encode("utf-8"))
+            new_ms = target.stat().st_mtime_ns // 1_000_000
+        except OSError as e:
+            raise WorkspaceIOError(str(e)) from e
+        self._dirty = True
+        return True, new_ms
 
     async def list(self, directory: str, pattern: str) -> list[DirEntry]:
         base = self._safe(directory)
@@ -287,18 +371,23 @@ class ServerWorkspace:
         base = self._safe(query.directory)
         if not base.exists():
             raise PathNotFound(query.directory)
-        if not base.is_dir():
-            raise NotADirectory(query.directory)
 
         flags = re.IGNORECASE if query.case_insensitive else 0
         regex = re.compile(query.pattern, flags)
-        name_filter = normalize_glob(query.glob or "")
         max_results = max(1, min(query.max_results, _MAX_RESULTS_CAP))
-
         result = GrepResult()
+
+        # ``directory`` may name a single file (rg PATTERN FILE muscle memory):
+        # scan just that file, no walk. ``glob`` is moot — the file is pinpointed.
+        if base.is_file():
+            self._grep_one_file(
+                base, regex, result, files_only=query.files_only, max_results=max_results
+            )
+            return result
+
+        name_filter = normalize_glob(query.glob or "")
         files_scanned = 0
         stop = False
-
         for dirpath, dirnames, filenames in os.walk(base):
             # Prune noise dirs in place so os.walk never descends into them.
             dirnames[:] = sorted(d for d in dirnames if d not in IGNORED_DIRS)
@@ -312,35 +401,59 @@ class ServerWorkspace:
                     stop = True
                     break
 
-                text = read_text_file(Path(dirpath) / fname)
-                if text is None:
-                    continue
-
-                rel = _posix(os.path.relpath(Path(dirpath) / fname, self._root))
-                file_count = 0
-                for lineno, line in enumerate(text.splitlines(), start=1):
-                    if not regex.search(line):
-                        continue
-                    file_count += 1
-                    result.total_matches += 1
-                    if not query.files_only:
-                        result.hits.append(GrepHit(rel, lineno, _trim(line)))
-                        if len(result.hits) >= max_results:
-                            result.truncated = True
-                            stop = True
-                            break
-
-                if file_count:
-                    result.file_counts.append((rel, file_count))
-                    if query.files_only and len(result.file_counts) >= max_results:
-                        result.truncated = True
-                        stop = True
-                if stop:
+                if self._grep_one_file(
+                    Path(dirpath) / fname,
+                    regex,
+                    result,
+                    files_only=query.files_only,
+                    max_results=max_results,
+                ):
+                    stop = True
                     break
             if stop:
                 break
 
         return result
+
+    def _grep_one_file(
+        self,
+        abs_path: Path,
+        regex: re.Pattern[str],
+        result: GrepResult,
+        *,
+        files_only: bool,
+        max_results: int,
+    ) -> bool:
+        """Scan one file's lines into ``result``; return True if a result cap hit.
+
+        Shared by the single-file fast path and the directory walk so both render
+        identical ``rel:line: text`` hits, per-file counts, and truncation flags.
+        """
+        text = read_text_file(abs_path)
+        if text is None:  # binary / too large / unreadable — skip
+            return False
+
+        rel = _posix(os.path.relpath(abs_path, self._root))
+        file_count = 0
+        stop = False
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if not regex.search(line):
+                continue
+            file_count += 1
+            result.total_matches += 1
+            if not files_only:
+                result.hits.append(GrepHit(rel, lineno, _trim(line)))
+                if len(result.hits) >= max_results:
+                    result.truncated = True
+                    stop = True
+                    break
+
+        if file_count:
+            result.file_counts.append((rel, file_count))
+            if files_only and len(result.file_counts) >= max_results:
+                result.truncated = True
+                stop = True
+        return stop
 
     async def execute(self, req: ExecutionRequest) -> ExecutionResult:
         # Run code in the workspace root so relative file paths resolve against

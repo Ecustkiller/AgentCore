@@ -94,9 +94,7 @@ def parse_workspace_id(ws_id: str) -> WorkspaceId:
     return WorkspaceId(kind=kind, ident=ident)  # type: ignore[arg-type]
 
 
-def workspace_has_entries(
-    *, user_id: str, folder_id: str | None, conversation_id: str
-) -> bool:
+def workspace_has_entries(*, user_id: str, folder_id: str | None, conversation_id: str) -> bool:
     """Whether the workspace dir exists and is non-empty — *without* creating it.
 
     Backs the hub enumeration's F1 filter (未分组空间只在真有文件时才列出, 文件中枢
@@ -109,9 +107,7 @@ def workspace_has_entries(
     return root.is_dir() and any(root.iterdir())
 
 
-def workspace_root_path(
-    *, user_id: str, folder_id: str | None, conversation_id: str
-) -> Path:
+def workspace_root_path(*, user_id: str, folder_id: str | None, conversation_id: str) -> Path:
     """The workspace directory path for a conversation — without creating it.
 
     The pure path helper behind :func:`resolve_workspace_root`; retention cleanup
@@ -124,9 +120,7 @@ def workspace_root_path(
     return _workspaces_base() / relpath
 
 
-def resolve_workspace_root(
-    *, user_id: str, folder_id: str | None, conversation_id: str
-) -> Path:
+def resolve_workspace_root(*, user_id: str, folder_id: str | None, conversation_id: str) -> Path:
     """Return (creating if needed) the workspace directory for a conversation."""
     root = workspace_root_path(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
@@ -135,9 +129,7 @@ def resolve_workspace_root(
     return root
 
 
-def workspace_storage_key(
-    *, user_id: str, folder_id: str | None, conversation_id: str
-) -> str:
+def workspace_storage_key(*, user_id: str, folder_id: str | None, conversation_id: str) -> str:
     """The snapshot storage key for a conversation's workspace.
 
     Mirrors the on-disk layout under ``data_dir`` (``workspaces/<user>/<folder>``
@@ -162,6 +154,32 @@ def build_server_workspace(
     root = resolve_workspace_root(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
+    return ServerWorkspace(root=root, sandbox=sandbox or SubprocessSandbox())
+
+
+# IM chat attachments live in their own top-level space, separate from the
+# per-user conversation workspaces above: a chat is shared by many users, so it
+# is keyed by ``chat_id`` (a server-minted UUID, safe as a single path segment)
+# rather than nested under any one member's ``user_id``. Reusing ``ServerWorkspace``
+# gives the same traversal guard and atomic writes for free (Stage 4 富消息).
+_IM_SEGMENT = "im"
+
+
+def chat_workspace_root_path(chat_id: str) -> Path:
+    """The on-disk root for a chat's attachments — without creating it."""
+    return _workspaces_base() / _IM_SEGMENT / chat_id
+
+
+def build_chat_workspace(
+    chat_id: str, *, sandbox: SandboxProvider | None = None
+) -> ServerWorkspace:
+    """Construct the ``ServerWorkspace`` rooted at a chat's attachment space.
+
+    Callers must authorize membership *before* building this (the directory is
+    created on resolve), so a non-member never materializes a chat's space.
+    """
+    root = chat_workspace_root_path(chat_id)
+    root.mkdir(parents=True, exist_ok=True)
     return ServerWorkspace(root=root, sandbox=sandbox or SubprocessSandbox())
 
 
@@ -203,9 +221,7 @@ def build_local_workspace(
         conversation_id=conversation_id,
         registry=registry or default_interaction_registry(),
         timeout_seconds=(
-            settings.workspace_op_timeout_seconds
-            if timeout_seconds is None
-            else timeout_seconds
+            settings.workspace_op_timeout_seconds if timeout_seconds is None else timeout_seconds
         ),
         root_id=binding.root_id,
     )

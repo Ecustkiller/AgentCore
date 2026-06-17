@@ -13,9 +13,11 @@ model cites by a number that always lines up with the card).
 
 from pathlib import Path
 
+import pytest
+
 from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.config import ModelProfile
-from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
+from agentcore.llm.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -66,10 +68,14 @@ class _StubTool:
         citations: list[dict] | None = None,
         citation_script: list[list[dict]] | None = None,
         terminal: bool = False,
+        fail_output: str = "",
     ) -> None:
         self._name = name
         self._success = success
         self._citations = citations
+        # Diagnostic detail a failing tool puts in ``output`` (mirrors code_execute,
+        # whose stdout/stderr ride output while ``error`` is just the exit code).
+        self._fail_output = fail_output
         # Per-call citation lists (i-th call returns the i-th list); lets a test
         # drive multi-round dedup/numbering. Overrides ``citations`` when set.
         self._citation_script = citation_script
@@ -89,7 +95,9 @@ class _StubTool:
         call_index = self.calls
         self.calls += 1
         if not self._success:
-            return ToolResult(tool_call_id="", success=False, output="", error="boom")
+            return ToolResult(
+                tool_call_id="", success=False, output=self._fail_output, error="boom"
+            )
         if self._citation_script is not None:
             citations = (
                 self._citation_script[call_index]
@@ -181,6 +189,21 @@ async def test_repeated_failure_nudge_is_failure_flavored():
     assert content == "gave up, here is what I know"
     nudges = [m for m in messages if m.role == "user" and m.content and "失败" in m.content]
     assert len(nudges) == 1
+
+
+async def test_failed_tool_surfaces_diagnostic_output_not_just_error():
+    # 失败的工具结果必须把 output（如 code_execute 的 stdout/stderr）连同 error 一起回给
+    # model——否则模型只看到「boom」这种干巴巴的 error、对真实报错盲调（曾导致 worker 反复
+    # 乱试 bash 才发现 bash 在本机不可用）。这里模拟 code_execute 失败：error 简短、真正的
+    # 诊断在 output 里。
+    call = _tool_chunk("search", "{}")
+    provider = _ScriptedProvider([[call], [_content_chunk("ok")]])
+    tool = _StubTool(success=False, fail_output="stderr:\nexecvpe(/bin/bash) failed")
+    _result, messages = await _run(provider, tool, max_rounds=20)
+
+    tool_msg = next(m for m in messages if m.role == "tool")
+    assert "boom" in (tool_msg.content or "")  # error 摘要保留
+    assert "execvpe(/bin/bash) failed" in (tool_msg.content or "")  # 诊断细节被回显
 
 
 async def test_max_rounds_exhaustion_forces_nonempty_answer():
@@ -348,3 +371,71 @@ async def test_worker_path_collects_citations_without_annotating():
     tool_msg = next(m for m in messages if m.role == "tool")
     assert tool_msg.content == "result"
     assert "[来源编号]" not in (tool_msg.content or "")
+
+
+# --- usage_sink: partial usage survives a mid-loop raise (B-deep 失败计费) ----
+
+
+class _MeterThenBoom:
+    """Round 0 meters usage (a tool call so the loop continues + a usage chunk);
+    round 1 raises. With raise_on_error=True the loop re-raises — but the round
+    that completed must still be readable via usage_sink so the caller can bill it."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        c = self.calls
+        self.calls += 1
+        if c == 0:
+            yield _tool_chunk("search", "{}")
+            yield LLMChunk(
+                usage=TokenUsage(input_tokens=1000, cache_miss_tokens=1000, output_tokens=400)
+            )
+            return
+        raise RuntimeError("provider down")
+        yield  # pragma: no cover - makes this an async generator
+
+
+async def test_usage_sink_holds_completed_round_usage_on_raise():
+    sink_usage: list[TokenUsage] = []
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    with pytest.raises(RuntimeError, match="provider down"):
+        await react_loop(
+            messages=[LLMMessage(role="user", content="go")],
+            llm=_MeterThenBoom(),
+            tools=_registry(_StubTool()),
+            sink=EventSink(),
+            tool_context=_context(),
+            profile=profile,
+            raise_on_error=True,
+            usage_sink=sink_usage,
+        )
+    # The round that completed before the crash is mirrored for the caller to bill.
+    assert len(sink_usage) == 1
+    assert sink_usage[0].cache_miss_tokens == 1000
+    assert sink_usage[0].output_tokens == 400
+
+
+async def test_usage_sink_empty_when_first_round_raises():
+    # Nothing metered before the crash → the mirror stays empty, so the caller bills
+    # nothing (no spurious zero-usage ledger row).
+    class _BoomFirst:
+        async def stream(self, request):  # noqa: ANN001
+            raise RuntimeError("down")
+            yield  # pragma: no cover
+
+    sink_usage: list[TokenUsage] = []
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    with pytest.raises(RuntimeError, match="down"):
+        await react_loop(
+            messages=[LLMMessage(role="user", content="go")],
+            llm=_BoomFirst(),
+            tools=_registry(_StubTool()),
+            sink=EventSink(),
+            tool_context=_context(),
+            profile=profile,
+            raise_on_error=True,
+            usage_sink=sink_usage,
+        )
+    assert sink_usage == []

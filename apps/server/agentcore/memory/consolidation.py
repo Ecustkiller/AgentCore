@@ -35,6 +35,7 @@ from agentcore.config import settings
 from agentcore.conversation.history import load_recent_history
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
+from agentcore.db.errors import is_schema_error
 from agentcore.db.repositories import ConversationRepository, MessageRepository
 from agentcore.llm.byok import resolve_user_llm_credentials
 from agentcore.llm.factory import build_provider
@@ -283,4 +284,8 @@ async def consolidation_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning("memory.consolidation_sweep_failed", error=str(e))
+            # Schema fault (missing table/column = pending migration) is persistent,
+            # not transient — escalate to error so a watchdog catches the whole sweep
+            # silently failing every interval; ordinary transients stay at warning.
+            log = logger.error if is_schema_error(e) else logger.warning
+            log("memory.consolidation_sweep_failed", error=str(e))

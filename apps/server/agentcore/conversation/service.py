@@ -49,6 +49,7 @@ from agentcore.runtime.events import (
     title_generated,
     turn_saved,
 )
+from agentcore.runtime.journal import persist_turn_journal
 from agentcore.runtime.pipeline import resume_chat_pipeline, run_chat_pipeline
 from agentcore.runtime.session_persistence import load_run_session, save_run_session
 from agentcore.runtime.suspension import TurnSuspension
@@ -409,16 +410,14 @@ async def _persist_turn_result(
         conv_repo = ConversationRepository(session)
 
         if assistant_reply:
+            # The pipeline's message id pins the row so the streamed/persisted
+            # assistant ids agree on reload.
             await msg_repo.create(
                 conversation_id=conversation_id,
                 role="assistant",
                 content=assistant_reply,
                 reasoning_content=assistant_reasoning,
                 citations=assistant_citations,
-                # The team graph (when the CEO delegated) and the pipeline's
-                # message id, so a past multi-agent turn replays on reload and
-                # the streamed/persisted assistant ids agree.
-                runs=assistant_runs,
                 message_id=result.get("message_id"),
                 trace_id=trace_id,
                 metadata={
@@ -426,6 +425,17 @@ async def _persist_turn_result(
                     "output_tokens": result.get("output_tokens", 0),
                     "rounds": result.get("rounds", 0),
                 },
+            )
+            # 唯一事实源: record the turn's execution fact stream to the journal,
+            # keyed by the assistant message id (§18.3). The replay payload
+            # (MessageDetail.runs) is projected back from it on read — no longer
+            # stored on the message. Best-effort (never breaks the committed reply).
+            await persist_turn_journal(
+                session,
+                message_id=result.get("message_id"),
+                conversation_id=conversation_id,
+                trace_id=trace_id,
+                runs=assistant_runs,
             )
 
         # 落账: persist the per-run cost ledger for this turn (captain root + one
@@ -574,25 +584,34 @@ async def _persist_incomplete_turn(
     is warning-only and never escapes this detached task (文档铁律).
     """
     note = (
-        "（连接中断，本回合未完成。下面是已完成成员的产出，已为你保留；"
+        "（连接中断，本回合未完成。下面是已完成队员的产出，已为你保留；"
         "如需继续，可重新发送消息。）"
     )
     try:
         async with async_session_factory() as session:
-            await MessageRepository(session).create(
+            msg = await MessageRepository(session).create(
                 conversation_id=conversation_id,
                 role="assistant",
                 content=note,
-                runs={
-                    "events": journal,
-                    "finish_reason": FinishReason.CANCELLED.value,
-                },
                 metadata={
                     "incomplete": True,
                     "finish_reason": FinishReason.CANCELLED.value,
                 },
                 message_id=message_id,
                 trace_id=trace_id,
+            )
+            # 唯一事实源: keep the already-finished team work as the turn's journal
+            # (§18.3) so the salvaged bubble replays its graph; finish_reason rides
+            # the turn_end fact (the client reads it to badge「已中断」).
+            await persist_turn_journal(
+                session,
+                message_id=msg.id,
+                conversation_id=conversation_id,
+                trace_id=trace_id,
+                runs={
+                    "events": journal,
+                    "finish_reason": FinishReason.CANCELLED.value,
+                },
             )
         logger.info(
             "chat.incomplete_persisted",
@@ -751,6 +770,144 @@ async def stream_chat(
     finally:
         if not sink._closed:
             sink.close()
+
+
+async def record_local_turn(
+    *,
+    conversation_id: str,
+    user_id: str,
+    user_message: str,
+    assistant_content: str,
+    assistant_reasoning: str | None = None,
+    citations: list[dict] | None = None,
+    runs: dict | None = None,
+    cost_runs: list[dict] | None = None,
+    message_id: str | None = None,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    rounds: int = 0,
+    llm_credentials: LLMCredentials | None = None,
+) -> dict:
+    """Persist a turn that ran on the user's machine via the sidecar (双模式工作区 §一.1).
+
+    The local engine produced the reply on the user's box — no server pipeline ran —
+    so the desktop reports the finished turn here to land it in durable history (入库
+    / 跨设备) AND in the cost ledger (计费回写). Mirrors ``stream_chat``'s persistence
+    tail (user row + assistant row + per-run 落账 + idempotent title) but WITHOUT a
+    live ``sink`` (a plain REST call, not an SSE turn) and WITHOUT a workspace
+    snapshot (local files live on the user's disk; the local→云 handoff is the
+    separate explicit bridge). Returns the persisted ids (+ any newly minted title)
+    so the desktop reconciles its optimistic bubbles.
+
+    计费信任边界: ``cost_runs`` is the local pipeline's own priced ledger (same engine,
+    same ``calculate_cost``), recorded through the SAME ``record_runs`` as the cloud
+    turn — idempotent by ``run_id``, so a retried write-back never double-bills. The
+    counts are reported by the user's machine, so they are authoritative only for
+    BYOK display billing (the user pays DeepSeek directly); platform-mode
+    authoritative metering belongs at the cloud inference proxy (远期规划 §一 终态),
+    not in this client-reported path.
+    """
+    trace_id = new_trace_id()
+    with log_context(trace_id=trace_id, conversation_id=conversation_id, user_id=user_id):
+        async with async_session_factory() as session:
+            user_msg = await MessageRepository(session).create(
+                conversation_id=conversation_id,
+                role="user",
+                content=user_message,
+            )
+
+        # An empty reply (a tool-only / errored local turn) still persists the user
+        # row above; only skip the assistant row when there is nothing to show.
+        assistant_message_id: str | None = None
+        if assistant_content:
+            async with async_session_factory() as session:
+                assistant_msg = await MessageRepository(session).create(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=assistant_content,
+                    reasoning_content=assistant_reasoning,
+                    citations=citations,
+                    message_id=message_id,
+                    trace_id=trace_id,
+                    metadata={
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "rounds": rounds,
+                    },
+                )
+                assistant_message_id = assistant_msg.id
+                # 唯一事实源: the local engine relays the same replay payload; record
+                # it to the journal keyed by the assistant id (§18.3), same as cloud.
+                await persist_turn_journal(
+                    session,
+                    message_id=assistant_msg.id,
+                    conversation_id=conversation_id,
+                    trace_id=trace_id,
+                    runs=runs,
+                )
+
+        # 落账: persist the local turn's per-run cost ledger (captain root + one row
+        # per delegated member), shared with the cloud path via ``record_runs`` —
+        # idempotent by run_id so a retried write-back never double-bills. A ledger
+        # failure must NEVER break the turn (文档铁律): roll back the aborted
+        # statement and move on; the messages above are already committed.
+        if cost_runs:
+            async with async_session_factory() as session:
+                try:
+                    await CostEventRepository(session).record_runs(
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                        runs=cost_runs,
+                        trace_id=trace_id,
+                    )
+                    _log_cost_recorded(conversation_id, message_id, cost_runs)
+                except Exception as e:
+                    await session.rollback()
+                    logger.warning(
+                        "cost.ledger_write_failed",
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                        error=str(e),
+                    )
+
+        async with async_session_factory() as session:
+            conv = await ConversationRepository(session).get_by_id(conversation_id)
+            needs_title = bool(conv and not conv.title)
+
+        title: str | None = None
+        if needs_title:
+            provider = build_provider(llm_credentials)
+            try:
+                title = await _generate_title(
+                    provider=provider,
+                    conversation_id=conversation_id,
+                    user_message=user_message,
+                    assistant_reply=assistant_content,
+                )
+            finally:
+                await provider.close()
+            if title:
+                async with async_session_factory() as session:
+                    await ConversationRepository(session).update_title(
+                        conversation_id, title
+                    )
+
+        # Refresh long-term memory off the turn (same idle debounce as stream_chat).
+        schedule_consolidation(conversation_id)
+
+        logger.info(
+            "chat.local_turn_recorded",
+            conversation_id=conversation_id,
+            message_id=message_id,
+            chars=len(assistant_content or ""),
+            rounds=rounds,
+        )
+        return {
+            "user_message_id": user_msg.id,
+            "assistant_message_id": assistant_message_id,
+            "title": title,
+        }
 
 
 async def regenerate_chat(
@@ -1020,13 +1177,21 @@ async def _persist_job_turn(
                 content=assistant_reply,
                 reasoning_content=result.get("reasoning_content") or None,
                 citations=result.get("citations") or None,
-                runs=result.get("runs") or None,
                 message_id=result.get("message_id"),
                 metadata={
                     "input_tokens": result.get("input_tokens", 0),
                     "output_tokens": result.get("output_tokens", 0),
                     "rounds": result.get("rounds", 0),
                 },
+            )
+            # 唯一事实源: the job conversation replays the team graph from the journal
+            # like any turn (§18.3). Untraced (handoff jobs carry no log trace).
+            await persist_turn_journal(
+                session,
+                message_id=result.get("message_id"),
+                conversation_id=conversation_id,
+                trace_id=None,
+                runs=result.get("runs") or None,
             )
         if cost_runs:
             try:

@@ -35,6 +35,12 @@ class ToolContext:
     agent_id: str
     backend: WorkspaceBackend
     user_id: str
+    # The owning conversation, used by conversation-scoped tool state (e.g. the
+    # read_url fetch cache, web/url_cache.py). Set once on the pipeline's base
+    # context and inherited by every worker via ``dataclasses.replace``. Defaults
+    # to "" for unscoped call sites (tests / evals) — a tool simply skips its
+    # conversation-scoped optimisation when this is empty.
+    conversation_id: str = ""
 
 
 @dataclass
@@ -67,6 +73,18 @@ class ToolResult:
     assigns each source a canonical number (its card index) and folds *that
     number* back into the tool's model-facing output, so the model can cite by a
     card-aligned number (see ``engine._annotate_tool_citations``).
+
+    ``display`` is an OPTIONAL render-oriented payload, distinct from the
+    model-facing ``output`` string: a tool that has a richer client rendering than
+    plain text (``web_search`` → result cards, ``code_execute`` → a terminal
+    stdout/stderr view) populates it, and the desktop renders per tool — falling
+    back to the ``output`` text when absent (工具结果富渲染). It rides the
+    ``tool_use_end`` event → the process timeline / journal → the client (size-
+    capped on the way, ``events._cap_display``), so a live turn and its reloaded
+    twin render the same card. 形状是数据不是模式: the frontend keys the renderer off
+    the tool name, so ``display`` is just the data that name's view needs (most
+    tools leave it ``None``; edits like ``str_replace`` need nothing here — the
+    client derives their diff from the call ``arguments`` it already has).
     """
 
     tool_call_id: str
@@ -79,6 +97,7 @@ class ToolResult:
     final_text: str | None = None
     output_limit: int | None = None
     citations: list[dict[str, Any]] | None = None
+    display: dict[str, Any] | None = None
 
     _MAX_OUTPUT_LEN = 4000
 

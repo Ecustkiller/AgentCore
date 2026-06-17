@@ -1,9 +1,4 @@
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import {
-  useConversations,
-  useRenameConversation,
-} from "@/hooks/useConversations";
-import { notifyError } from "@/lib/toast";
 import { useChatScroll } from "@/lib/useChatScroll";
 import {
   loadLatestWindow,
@@ -26,11 +21,10 @@ import {
   ArrowDown,
   KeyRound,
   Loader2,
-  Pencil,
   RotateCw,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { MessageInput } from "./MessageInput";
@@ -90,107 +84,6 @@ function RetryBanner() {
   );
 }
 
-/**
- * Slim header above the conversation showing its title, with inline rename
- * (单会话页重命名). The chat view is otherwise headerless, so this is the in-place
- * rename entry (the sidebar list is the other one). Renders nothing for a brand-new
- * draft (no id) or a conversation not in the cache, so the empty
- * "今天想解决什么问题？" state stays clean. The title is read from — and the rename
- * written back to — the shared grouped cache, so an auto-generated title
- * (title_generated) and a sidebar rename both reflect here live. Double-click the
- * bar or click the pencil to edit; Enter commits, Esc cancels.
- */
-function ConversationHeader() {
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  const conversations = useConversations();
-  const renameMutation = useRenameConversation();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const skipBlurRef = useRef(false);
-
-  const conv = conversationId
-    ? conversations.find((c) => c.id === conversationId)
-    : undefined;
-
-  useEffect(() => {
-    if (editing) {
-      inputRef.current?.focus();
-      inputRef.current?.select();
-    }
-  }, [editing]);
-
-  if (!conversationId || !conv) return null;
-
-  const startEdit = () => {
-    setDraft(conv.title);
-    setEditing(true);
-  };
-
-  const commit = () => {
-    setEditing(false);
-    const title = draft.trim();
-    // No-op on an empty or unchanged title; optimistic rename + rollback live in
-    // the mutation, so a failed write reverts and we only add a toast here.
-    if (!title || title === conv.title) return;
-    renameMutation.mutate(
-      { id: conv.id, title },
-      { onError: (err) => notifyError(err, "重命名失败") },
-    );
-  };
-
-  if (editing) {
-    return (
-      <div className="flex h-11 shrink-0 items-center border-b border-border px-6 pr-14">
-        <input
-          ref={inputRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              inputRef.current?.blur();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              skipBlurRef.current = true;
-              setEditing(false);
-            }
-          }}
-          onBlur={() => {
-            if (skipBlurRef.current) {
-              skipBlurRef.current = false;
-              return;
-            }
-            commit();
-          }}
-          className="h-7 min-w-0 flex-1 rounded-md bg-accent px-2 text-sm font-medium text-foreground focus:outline-none"
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div
-      onDoubleClick={startEdit}
-      className="group/title flex h-11 shrink-0 items-center gap-1 border-b border-border px-6 pr-14"
-    >
-      <span className="truncate text-sm font-medium text-foreground">
-        {conv.title}
-      </span>
-      <SimpleTooltip label="重命名对话">
-        <button
-          type="button"
-          onClick={startEdit}
-          aria-label="重命名对话"
-          className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/title:opacity-100"
-        >
-          <Pencil size={13} />
-        </button>
-      </SimpleTooltip>
-    </div>
-  );
-}
-
 export function ChatView() {
   const messages = useActiveMessages();
   const conversationId = useConversationStore((s) => s.currentConversationId);
@@ -231,14 +124,16 @@ export function ChatView() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <ConversationHeader />
       {/* Scrollable message area (scrollbar at container edge, content centered).
           The relative wrapper anchors the floating 回到底部 button to the viewport
           so it stays put instead of scrolling away with the messages. */}
       <div className="relative min-h-0 flex-1">
         <div ref={scrollRef} className="h-full overflow-y-auto">
           {hasMessages ? (
-            <div className="mx-auto w-full max-w-3xl space-y-4 px-6 py-4">
+            <div className="mx-auto w-full max-w-3xl space-y-4 px-6 pb-4 pt-10">
+              {/* Headerless chat view: the top padding keeps the first message
+                  clear of the floating side-panel toggle (top-right of the pane,
+                  set in ConversationPage). */}
               {/* Top sentinel: spins while the previous page loads (scroll-up
                   infinite scroll); the window anchors so the view stays put. */}
               {(loadingOlder || hasMoreBefore) && (

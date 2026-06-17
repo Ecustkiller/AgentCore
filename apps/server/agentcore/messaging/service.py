@@ -16,6 +16,7 @@ and an optional realtime publisher (a seam — see ``events.py``) it calls to fa
 new message out to every member's live connections.
 """
 
+import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -34,6 +35,15 @@ from agentcore.db.repositories import (
     UserRepository,
 )
 from agentcore.messaging.events import ChatEventPublisher, NullChatEventPublisher
+from agentcore.messaging.thumbnails import make_image_thumbnail
+from agentcore.workspace.locate import build_chat_workspace
+from agentcore.workspace.protocol import (
+    NotAFile,
+    OutsideWorkspace,
+    PathNotFound,
+    WorkspaceError,
+    WorkspaceIOError,
+)
 
 logger = get_logger(__name__)
 
@@ -72,6 +82,19 @@ class MessagePage:
 
 
 @dataclass(frozen=True)
+class AttachmentUpload:
+    """The result of storing an attachment: bytes written + the optional thumbnail.
+
+    ``thumb_path`` is a workspace-relative path to a generated WebP preview for
+    images (None for non-images / small images / a failed thumbnail), referenced
+    by the message's ``StoredAttachment`` so the bubble can inline it cheaply.
+    """
+
+    size_bytes: int
+    thumb_path: str | None
+
+
+@dataclass(frozen=True)
 class MemberView:
     """A group member for the roster: their user plus moderation-relevant flags.
 
@@ -103,9 +126,7 @@ class MessagingService:
 
     # --- People search (任意搜人 + 护栏) ---
 
-    async def search_users(
-        self, *, requester_id: str, query: str, limit: int = 20
-    ) -> list[User]:
+    async def search_users(self, *, requester_id: str, query: str, limit: int = 20) -> list[User]:
         """Exact-match people-search, filtered by visibility rules.
 
         Drops the requester themselves, any user in a block relationship with
@@ -170,9 +191,7 @@ class MessagingService:
         for chat in chats:
             await self._chats.add_member(chat.id, user_id, pinned=True)
         if chats:
-            logger.info(
-                "chat.auto_join", user=user_id, chats=[c.id for c in chats]
-            )
+            logger.info("chat.auto_join", user=user_id, chats=[c.id for c in chats])
 
     async def list_members(self, *, chat_id: str, user_id: str) -> list[MemberView]:
         """The members of a chat (for the group roster + member panel).
@@ -183,9 +202,7 @@ class MessagingService:
         """
         if await self._chats.get_member(chat_id, user_id) is None:
             raise NotFoundError("会话不存在")
-        members = sorted(
-            await self._chats.list_members(chat_id), key=lambda m: m.joined_at
-        )
+        members = sorted(await self._chats.list_members(chat_id), key=lambda m: m.joined_at)
         users = await self._users.get_by_ids([m.user_id for m in members])
         views: list[MemberView] = []
         for m in members:
@@ -228,9 +245,7 @@ class MessagingService:
         """Update this user's per-chat flags (mute / pin) and return the row."""
         if await self._chats.get_member(chat_id, user_id) is None:
             raise NotFoundError("会话不存在")
-        await self._chats.set_membership_flags(
-            chat_id, user_id, muted=muted, pinned=pinned
-        )
+        await self._chats.set_membership_flags(chat_id, user_id, muted=muted, pinned=pinned)
         return await self.chat_view(chat_id=chat_id, user_id=user_id)
 
     # --- Moderation (Stage 3 审核治理: 平台 admin kick / mute / announce) ---
@@ -238,9 +253,7 @@ class MessagingService:
     # own the resource invariants (chat is a moderated group, target is a member,
     # admins can't be moderated) and the system-card side effects.
 
-    async def kick_member(
-        self, *, chat_id: str, actor_id: str, target_id: str
-    ) -> None:
+    async def kick_member(self, *, chat_id: str, actor_id: str, target_id: str) -> None:
         """Remove a member from a group (admin 踢人) and post a system notice.
 
         404 unknown chat / target-not-a-member; 422 for a dm (a pair, not a room);
@@ -281,9 +294,7 @@ class MessagingService:
             muted=muted,
         )
 
-    async def post_announcement(
-        self, *, chat_id: str, actor_id: str, content: str
-    ) -> ChatMessage:
+    async def post_announcement(self, *, chat_id: str, actor_id: str, content: str) -> ChatMessage:
         """Post an admin announcement (官方公告) as a centered ``system_card``.
 
         Sent as the official/system account (NULL sender) so it renders as a
@@ -335,9 +346,7 @@ class MessagingService:
             payload=payload,
         )
         members = await self._chats.list_members(chat_id)
-        await self._events.publish(
-            [m.user_id for m in members], self._message_event(message)
-        )
+        await self._events.publish([m.user_id for m in members], self._message_event(message))
         return message
 
     async def chat_view(self, *, chat_id: str, user_id: str) -> ChatView:
@@ -352,9 +361,7 @@ class MessagingService:
             raise NotFoundError("会话不存在")
         peer: User | None = None
         if chat.type == "dm":
-            peer_ids = await self._chats.peer_ids_for(
-                [chat_id], exclude_user_id=user_id
-            )
+            peer_ids = await self._chats.peer_ids_for([chat_id], exclude_user_id=user_id)
             peer_id = peer_ids.get(chat_id)
             if peer_id:
                 peer = (await self._users.get_by_ids([peer_id])).get(peer_id)
@@ -395,7 +402,7 @@ class MessagingService:
         *,
         chat_id: str,
         sender_id: str,
-        content: str,
+        content: str | None,
         content_type: str = "text",
         attachments: list | None = None,
         reply_to_message_id: str | None = None,
@@ -407,6 +414,7 @@ class MessagingService:
         either direction refuses the send. A reply by the party who was holding a
         pending message-request accepts it. The stored message is fanned out to
         every member's live connections (sender included, for multi-device).
+        ``content`` may be empty for a 富消息 carrying only ``attachments``.
         """
         member = await self._chats.get_member(chat_id, sender_id)
         if member is None:
@@ -418,9 +426,7 @@ class MessagingService:
             raise AuthorizationError("你已被管理员禁言，暂时无法发言")
 
         if chat.type == "dm":
-            peer_ids = await self._chats.peer_ids_for(
-                [chat_id], exclude_user_id=sender_id
-            )
+            peer_ids = await self._chats.peer_ids_for([chat_id], exclude_user_id=sender_id)
             peer_id = peer_ids.get(chat_id)
             if peer_id and await self._blocks.is_blocked_between(sender_id, peer_id):
                 raise AuthorizationError("无法向该用户发送消息")
@@ -439,10 +445,69 @@ class MessagingService:
             await self._chats.accept_request(chat_id, sender_id)
 
         members = await self._chats.list_members(chat_id)
-        await self._events.publish(
-            [m.user_id for m in members], self._message_event(message)
-        )
+        await self._events.publish([m.user_id for m in members], self._message_event(message))
         return message
+
+    # --- Attachments (富消息: 图/文件，复用工作区存储) ---
+    # A chat owns a shared ``ServerWorkspace`` (build_chat_workspace) under
+    # ``workspaces/im/<chat_id>/``. Upload then send is two steps: PUT the bytes
+    # here, then reference the returned path in a send_message attachment. Both
+    # gate membership first (non-member 404), and the chat-scoped backend means a
+    # member can only reach this chat's files — never another chat's (no IDOR).
+
+    async def upload_attachment(
+        self, *, chat_id: str, user_id: str, path: str, data: bytes
+    ) -> AttachmentUpload:
+        """Store an attachment's bytes in the chat's workspace; return its metadata.
+
+        Members only (404 otherwise). ``path`` is workspace-relative; one escaping
+        the chat space is refused (422). Size limits are enforced at the route
+        before the body is read.
+
+        For an image, a bounded WebP thumbnail is generated and stored alongside
+        (``<path>.thumb.webp``) so the thread can show cheap inline previews; its
+        path rides back in ``thumb_path``. Thumbnailing is best-effort and off the
+        event loop (CPU-bound) — a failure leaves ``thumb_path`` None and the
+        original is served inline.
+        """
+        if await self._chats.get_member(chat_id, user_id) is None:
+            raise NotFoundError("会话不存在")
+        backend = build_chat_workspace(chat_id)
+        try:
+            size_bytes = await backend.write_bytes(path, data)
+        except OutsideWorkspace as e:
+            raise ValidationError("路径非法：超出会话附件范围") from e
+        except WorkspaceIOError as e:
+            raise ValidationError(f"附件写入失败：{e}") from e
+
+        thumb_path: str | None = None
+        thumbnail = await asyncio.to_thread(make_image_thumbnail, data)
+        if thumbnail is not None:
+            candidate = f"{path}.thumb.webp"
+            try:
+                await backend.write_bytes(candidate, thumbnail)
+                thumb_path = candidate
+            except WorkspaceError as e:
+                # The original is already stored and serviceable; a missing
+                # thumbnail just means the client inlines the full image.
+                logger.warning("chat.thumbnail_store_failed", chat=chat_id, error=str(e))
+        return AttachmentUpload(size_bytes=size_bytes, thumb_path=thumb_path)
+
+    async def download_attachment(self, *, chat_id: str, user_id: str, path: str) -> bytes:
+        """Return an attachment's raw bytes (members only; 404 otherwise).
+
+        Scoped to this chat's workspace, so a member can fetch only files that
+        belong to this chat. 404 for a missing path; 422 for an illegal path.
+        """
+        if await self._chats.get_member(chat_id, user_id) is None:
+            raise NotFoundError("会话不存在")
+        backend = build_chat_workspace(chat_id)
+        try:
+            return await backend.read_bytes(path)
+        except OutsideWorkspace as e:
+            raise ValidationError("路径非法：超出会话附件范围") from e
+        except (PathNotFound, NotAFile) as e:
+            raise NotFoundError("附件不存在") from e
 
     async def list_messages(
         self,
@@ -458,22 +523,14 @@ class MessagingService:
         page = max(1, page)
         page_size = max(1, min(page_size, _MAX_PAGE_SIZE))
         offset = (page - 1) * page_size
-        messages, total = await self._chats.list_messages(
-            chat_id, limit=page_size, offset=offset
-        )
-        return MessagePage(
-            messages=messages, total=total, page=page, page_size=page_size
-        )
+        messages, total = await self._chats.list_messages(chat_id, limit=page_size, offset=offset)
+        return MessagePage(messages=messages, total=total, page=page, page_size=page_size)
 
-    async def mark_read(
-        self, *, chat_id: str, user_id: str, last_read_message_id: str
-    ) -> None:
+    async def mark_read(self, *, chat_id: str, user_id: str, last_read_message_id: str) -> None:
         """Advance the user's read cursor (drives unread counts). Non-members 404."""
         if await self._chats.get_member(chat_id, user_id) is None:
             raise NotFoundError("会话不存在")
-        await self._chats.mark_read(
-            chat_id, user_id, last_read_message_id=last_read_message_id
-        )
+        await self._chats.mark_read(chat_id, user_id, last_read_message_id=last_read_message_id)
 
     # --- Blocking (任意搜人 护栏) ---
 
@@ -500,9 +557,7 @@ class MessagingService:
         settings = await self._directory.get(user_id)
         if settings is None:
             return DirectoryView(discoverable=True, who_can_dm="anyone")
-        return DirectoryView(
-            discoverable=settings.discoverable, who_can_dm=settings.who_can_dm
-        )
+        return DirectoryView(discoverable=settings.discoverable, who_can_dm=settings.who_can_dm)
 
     async def update_directory_settings(
         self,
@@ -518,9 +573,7 @@ class MessagingService:
         if who_can_dm is not None:
             changes["who_can_dm"] = who_can_dm
         settings = await self._directory.upsert(user_id, **changes)
-        return DirectoryView(
-            discoverable=settings.discoverable, who_can_dm=settings.who_can_dm
-        )
+        return DirectoryView(discoverable=settings.discoverable, who_can_dm=settings.who_can_dm)
 
     # --- Realtime event payloads ---
 
@@ -540,8 +593,6 @@ class MessagingService:
                 "attachments": message.attachments or [],
                 "payload": message.payload,
                 "reply_to_message_id": message.reply_to_message_id,
-                "created_at": (
-                    message.created_at.isoformat() if message.created_at else None
-                ),
+                "created_at": (message.created_at.isoformat() if message.created_at else None),
             },
         }

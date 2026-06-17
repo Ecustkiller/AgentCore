@@ -18,7 +18,7 @@ export function ConversationPage() {
     const store = useConversationStore.getState();
     // 索引路由 `/` = 新草稿：丢弃上一条已打开的会话，渲染空白对话。这样无论从哪个
     // 入口落到 `/`（导航「对话」、Ctrl/Cmd+N、刷新直达），看到的都是新对话，而不是
-    // store 里残留的上次会话。pendingNewChatFolder 不在这里碰——那是「新建对话」入口
+    // store 里残留的上次对话。pendingNewChatFolder 不在这里碰——那是「新建对话」入口
     // 设置的落库目标（见 startNewConversation），清掉会破坏「全部对话」按文件夹新建。
     if (!id) {
       if (store.currentConversationId !== null) store.switchConversation(null);

@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
+from agentcore.db.errors import is_schema_error
 from agentcore.db.repositories import PausedTurnRepository
 
 logger = get_logger(__name__)
@@ -56,8 +57,10 @@ async def paused_turn_retention_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 — a failed sweep must not kill the loop
-            # Best-effort backstop: a sweep failure (DB blip, missing table mid-deploy)
-            # is operational, not a code bug — log the cause on ONE line, no traceback,
-            # so a recurring transient can't flood the AI logs (it retries next interval).
-            logger.warning("suspension.retention_failed", error=str(e))
+            # Best-effort backstop, logged on ONE line (no traceback) so a recurring
+            # transient can't flood the AI logs. A schema fault (e.g. paused_turns
+            # missing = pending migration) is persistent, not transient — escalate it
+            # to error so a watchdog catches the whole sweep silently failing forever.
+            log = logger.error if is_schema_error(e) else logger.warning
+            log("suspension.retention_failed", error=str(e))
         await asyncio.sleep(interval)

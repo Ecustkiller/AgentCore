@@ -42,6 +42,142 @@ def test_counter_start_offsets_ids():
     assert plan.nodes[0].run_id == "t_6"
 
 
+def test_dag_fanout_siblings_get_sibling_summary():
+    # The fix: parallel researchers that fan out from the same point (here both have
+    # no deps → same dep set) now see each other — they used to get nothing and ran
+    # blind/overlapping. The downstream writer fans in alone (its own dep set), so it
+    # gets NO sibling (it receives r1/r2 via depends_on instead).
+    tasks = [
+        {"id": "r1", "role": "调研员A", "task": "查行业数据"},
+        {"id": "r2", "role": "调研员B", "task": "查竞品案例"},
+        {"id": "w", "role": "写手", "task": "汇总成稿", "depends_on": ["r1", "r2"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs == []
+    r1, r2, w = plan.by_id("t_r1"), plan.by_id("t_r2"), plan.by_id("t_w")
+    assert "调研员B" in r1.sibling_summary and "查竞品案例" in r1.sibling_summary
+    assert "调研员A" in r2.sibling_summary and "查行业数据" in r2.sibling_summary
+    # A node never lists itself, and the lone writer has no fan-out peer.
+    assert "调研员A" not in r1.sibling_summary
+    assert w.sibling_summary == ""
+
+
+def test_dag_shared_upstream_fanout_are_siblings():
+    # Siblings = same dep set, not just「no deps」: two nodes that both depend on the
+    # SAME upstream fan out together and must see each other.
+    tasks = [
+        {"id": "u", "role": "设计", "task": "出规格"},
+        {"id": "a", "role": "前端", "task": "实现页面", "depends_on": ["u"]},
+        {"id": "b", "role": "后端", "task": "实现接口", "depends_on": ["u"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs == []
+    a, b = plan.by_id("t_a"), plan.by_id("t_b")
+    assert "后端" in a.sibling_summary and "前端" in b.sibling_summary
+
+
+def test_dag_independent_chains_in_same_wave_are_not_siblings():
+    # Narrower than「same wave」on purpose: s2 (deps [s1]) and u2 (deps [u1]) land in
+    # the same topological wave but belong to independent chains → NOT siblings, so a
+    # worker isn't told about unrelated concurrent work and branch independence holds.
+    tasks = [
+        {"id": "s1", "role": "研究员", "task": "调研"},
+        {"id": "s2", "role": "写手", "task": "撰写", "depends_on": ["s1"]},
+        {"id": "u1", "role": "采购", "task": "比价"},
+        {"id": "u2", "role": "出纳", "task": "付款", "depends_on": ["u1"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs == []
+    assert plan.by_id("t_s2").sibling_summary == ""
+    assert plan.by_id("t_u2").sibling_summary == ""
+    # The two roots DO share the empty dep set (a root-level flat fan-out), so they
+    # are siblings — consistent with a flat batch.
+    assert "采购" in plan.by_id("t_s1").sibling_summary
+    assert "研究员" in plan.by_id("t_u1").sibling_summary
+
+
+def test_dag_linear_chain_has_no_siblings():
+    # A pure A→B→C pipeline gives every node a unique dep set, so none has a peer.
+    tasks = [
+        {"id": "a", "role": "A", "task": "a"},
+        {"id": "b", "role": "B", "task": "b", "depends_on": ["a"]},
+        {"id": "c", "role": "C", "task": "c", "depends_on": ["b"]},
+    ]
+    plan, errs = build_run_plan(tasks, id_prefix="t")
+    assert errs == []
+    assert all(n.sibling_summary == "" for n in plan.nodes)
+
+
+def test_sibling_summary_task_excerpt_capped():
+    # A long sibling task is truncated to the per-sibling cap with an ellipsis, so a
+    # wide fan-out's awareness block can't blow up a worker's context.
+    long_task = "x" * 500
+    plan, errs = build_run_plan(
+        [{"role": "A", "task": long_task}, {"role": "B", "task": "短"}], id_prefix="t"
+    )
+    assert errs == []
+    b = plan.nodes[1]
+    assert "x" * 150 in b.sibling_summary
+    assert "x" * 200 not in b.sibling_summary
+    assert b.sibling_summary.endswith("…")
+
+
+def test_sibling_summary_carries_objective_and_expected_output():
+    # Boundary-drawing enrichment: a peer's bullet shows its 责任(objective, preferred
+    # over the raw task) AND its 预期产出(expected_output), so parallel workers can see
+    # who owns what and what each hands back — and not overlap / leave a seam.
+    plan, errs = build_run_plan(
+        [
+            {
+                "role": "后端",
+                "task": "实现下单接口的全部细节……",
+                "objective": "负责服务端 API",
+                "expected_output": "OpenAPI 契约 + 实现",
+            },
+            {
+                "role": "前端",
+                "task": "做下单页",
+                "objective": "负责下单页面",
+                "expected_output": "可交互页面",
+            },
+        ],
+        id_prefix="t",
+    )
+    assert errs == []
+    backend, frontend = plan.nodes
+    # frontend sees backend's objective (not the raw task) + its expected output.
+    assert "负责服务端 API" in frontend.sibling_summary
+    assert "实现下单接口的全部细节" not in frontend.sibling_summary  # objective wins over task
+    assert "预期产出：OpenAPI 契约 + 实现" in frontend.sibling_summary
+    assert "负责下单页面" in backend.sibling_summary
+
+
+def test_sibling_summary_falls_back_to_task_without_objective():
+    # No objective declared → the task instruction is the scope so a peer is never
+    # blank; no expected_output → no 产出 note appended.
+    plan, errs = build_run_plan(
+        [{"role": "A", "task": "做A"}, {"role": "B", "task": "做B"}], id_prefix="t"
+    )
+    assert errs == []
+    a = plan.nodes[0]
+    assert a.sibling_summary == "- B：做B"  # task as scope, no（预期产出：…）tail
+
+
+def test_sibling_summary_expected_output_excerpt_capped():
+    # The 预期产出 note has its own shorter cap, independent of the scope cap.
+    plan, errs = build_run_plan(
+        [
+            {"role": "A", "task": "a", "expected_output": "y" * 300},
+            {"role": "B", "task": "b"},
+        ],
+        id_prefix="t",
+    )
+    assert errs == []
+    b = plan.nodes[1]
+    assert "y" * 80 in b.sibling_summary
+    assert "y" * 120 not in b.sibling_summary
+
+
 def test_dag_namespaces_ids_and_rewrites_edges():
     tasks = [
         {"id": "s1", "role": "A", "task": "a"},
@@ -93,6 +229,37 @@ def test_tools_filtered_by_allowlist():
         valid_tools={"web_search"},
     )
     assert plan.nodes[0].tools == ["web_search"]
+
+
+def test_omitted_tools_means_no_restriction():
+    # Fail-safe default: omitting ``tools`` must leave the worker UNrestricted
+    # (None → react_loop offers all team tools), NOT stranded tool-less ([]). This is
+    # the root fix for the "worker dumps file content as text, workspace stays empty,
+    # CEO hallucinates success" bug.
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "a"}], id_prefix="t", valid_tools={"web_search"}
+    )
+    assert plan.nodes[0].tools is None
+
+
+def test_all_invalid_tools_falls_back_to_no_restriction():
+    # A task naming only unknown tools (typo / hallucinated name) filters to empty —
+    # which must fall back to None (all tools), never [] (no tools).
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "a", "tools": ["ghost", "phantom"]}],
+        id_prefix="t",
+        valid_tools={"web_search"},
+    )
+    assert plan.nodes[0].tools is None
+
+
+def test_explicit_empty_tools_is_no_restriction():
+    # An explicit empty list is meaningless for a worker (a tool-less worker can do
+    # nothing), so it too means "no restriction", not "no tools".
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "a", "tools": []}], id_prefix="t"
+    )
+    assert plan.nodes[0].tools is None
 
 
 def test_invalid_model_preference_falls_back_to_strong():
@@ -274,6 +441,24 @@ def test_contract_block_with_no_rule_is_none():
     # strict alone declares no enforceable rule → None (baseline still applies).
     plan, _ = build_run_plan(
         [{"role": "A", "task": "a", "contract": {"strict": True}}], id_prefix="t"
+    )
+    assert plan.nodes[0].policy.contract is None
+
+
+def test_requires_files_parsed_onto_contract():
+    # requires_files alone IS an enforceable rule (unlike strict alone), so a contract
+    # is built and the deliverable-landed gate actually fires.
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "a", "contract": {"requires_files": True}}], id_prefix="t"
+    )
+    c = plan.nodes[0].policy.contract
+    assert c is not None
+    assert c.requires_files is True
+
+
+def test_requires_files_false_alone_is_no_rule():
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "a", "contract": {"requires_files": False}}], id_prefix="t"
     )
     assert plan.nodes[0].policy.contract is None
 

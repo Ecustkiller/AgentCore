@@ -2,7 +2,7 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { referencedCitationNumbers } from "@/lib/citations";
 import { copyText } from "@/lib/clipboard";
 import { errorActionForCode } from "@/lib/errors";
-import { formatCost, formatMessageTime } from "@/lib/format";
+import { formatCompact, formatCost, formatMessageTime } from "@/lib/format";
 import { notifyError } from "@/lib/toast";
 import { deleteMessage } from "@/services/messages";
 import { runRegenerate } from "@/services/turns";
@@ -16,9 +16,9 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useUsageStore } from "@/stores/usage";
+import type { ProcessStep } from "@/types/events";
 import {
   AlertTriangle,
-  Brain,
   Check,
   ChevronDown,
   ChevronRight,
@@ -29,6 +29,7 @@ import {
   FileText,
   Folder,
   Globe,
+  HelpCircle,
   KeyRound,
   type LucideIcon,
   Paperclip,
@@ -37,10 +38,10 @@ import {
   Search,
   Terminal,
   Trash2,
+  Users,
   Wrench,
   X,
 } from "lucide-react";
-import type { ProcessStep } from "@/types/events";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CheckpointCard } from "./CheckpointCard";
@@ -48,6 +49,12 @@ import { InlineTeamGraph } from "./InlineTeamGraph";
 import { Markdown } from "./Markdown";
 import { PlanReviewCard } from "./PlanReviewCard";
 import { type CitationFlash, SourceCards } from "./SourceCards";
+import {
+  type ToolResultData,
+  ToolResultView,
+  hasToolResultBody,
+  toolResultPeek,
+} from "./toolResult/ToolResultView";
 
 interface Props {
   message: Message;
@@ -153,12 +160,79 @@ function useCopyAction(getText: () => string) {
   return { copied, onCopy };
 }
 
+/** Three pulsing dots — the shared「正在思考」liveliness cue (图2 的 ● ● ●). */
+function ThinkingDots() {
+  return (
+    <span className="inline-flex gap-1" aria-hidden>
+      <span
+        className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
+        style={{ animationDelay: "0ms" }}
+      />
+      <span
+        className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
+        style={{ animationDelay: "150ms" }}
+      />
+      <span
+        className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
+        style={{ animationDelay: "300ms" }}
+      />
+    </span>
+  );
+}
+
+/**
+ * Borderless disclosure header shared by {@link ThinkingPanel} and
+ * {@link ProcessTimeline} (对齐 Cursor 的轻量内联思考样式).
+ *
+ * While streaming it shows the 图2 dots + a live label and no chevron — the dots
+ * are the "live" cue and the panel auto-expands; a finished turn shows a chevron
+ * + static label. The whole row is the toggle in both states.
+ */
+function ThinkingHeader({
+  isStreaming,
+  expanded,
+  streamingLabel,
+  doneLabel,
+  onToggle,
+}: {
+  isStreaming: boolean;
+  expanded: boolean;
+  streamingLabel: string;
+  doneLabel: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex w-full items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {isStreaming ? (
+        <>
+          <ThinkingDots />
+          <span>{streamingLabel}</span>
+        </>
+      ) : (
+        <>
+          {expanded ? (
+            <ChevronDown size={14} className="shrink-0" />
+          ) : (
+            <ChevronRight size={14} className="shrink-0" />
+          )}
+          <span>{doneLabel}</span>
+        </>
+      )}
+    </button>
+  );
+}
+
 /**
  * Collapsible panel showing the model's thinking (reasoning_content).
  *
- * Default-expands while the reasoning is still streaming so the user sees the
- * model think live, then auto-collapses once the turn finishes. Manual toggles
- * are always respected.
+ * Borderless & inline (Cursor 风格): default-expands while streaming so the user
+ * watches it think live, then auto-collapses once the turn finishes. Manual
+ * toggles always win. Used by multi-agent turns — the single-agent turn uses the
+ * richer {@link ProcessTimeline} instead.
  */
 function ThinkingPanel({
   reasoning,
@@ -176,23 +250,17 @@ function ThinkingPanel({
   }, [isStreaming]);
 
   return (
-    <div className="mb-2 rounded-lg border border-border bg-muted/40">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
-      >
-        <Brain size={14} className="shrink-0" />
-        <span>{isStreaming ? "正在思考…" : "思考过程"}</span>
-        {expanded ? (
-          <ChevronDown size={14} className="ml-auto shrink-0" />
-        ) : (
-          <ChevronRight size={14} className="ml-auto shrink-0" />
-        )}
-      </button>
+    <div className="mb-2">
+      <ThinkingHeader
+        isStreaming={isStreaming}
+        expanded={expanded}
+        streamingLabel="正在思考…"
+        doneLabel="思考过程"
+        onToggle={() => setExpanded((v) => !v)}
+      />
       {expanded && (
-        <div className="whitespace-pre-wrap border-t border-border px-3 py-2 text-sm text-muted-foreground">
-          {reasoning}
+        <div className="mt-1.5 pl-3">
+          <Markdown content={reasoning} isStreaming={isStreaming} muted />
         </div>
       )}
     </div>
@@ -212,10 +280,44 @@ const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   str_replace: { Icon: Pencil, label: "编辑文件" },
   file_delete: { Icon: Trash2, label: "删除文件" },
   file_move: { Icon: FileText, label: "移动文件" },
+  // CEO captain tools — the delegate 任务书 is the prime large call surfaced by
+  // ComposingToolLine; both also label the captain's process timeline steps.
+  delegate: { Icon: Users, label: "委派任务" },
+  ask_user: { Icon: HelpCircle, label: "向你确认" },
 };
 
 const toolMeta = (name: string): { Icon: LucideIcon; label: string } =>
   TOOL_META[name] ?? { Icon: Wrench, label: name };
+
+/**
+ * Live「正在生成 {工具}…」line for the CEO captain composing a tool call's
+ * arguments (tool_progress) — the bubble-scoped twin of the worker node's liveTool.
+ * Surfaces the otherwise-blank gap while the captain assembles a big call (the
+ * delegate 任务书) before any content streams or the team graph appears, so a long
+ * assembly reads as live progress, not a frozen bubble.
+ */
+function ComposingToolLine({
+  tool,
+}: {
+  tool: { toolName: string; chars: number };
+}) {
+  const { Icon, label } = toolMeta(tool.toolName);
+  return (
+    <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+      <Icon size={14} className="shrink-0 text-primary" />
+      <span>
+        正在生成 {label}
+        {tool.chars > 0 && (
+          <span className="text-muted-foreground/70">
+            {" · "}
+            {formatCompact(tool.chars)} 字
+          </span>
+        )}
+      </span>
+      <span className="inline-block animate-pulse text-primary">▋</span>
+    </span>
+  );
+}
 
 /** The most descriptive argument to show beside a tool's label (its query / url /
  * path / …); empty when the call carries no representative string arg. */
@@ -238,12 +340,6 @@ function toolDetail(args: Record<string, unknown>): string {
     if (typeof v === "string" && v.trim()) return v.trim();
   }
   return "";
-}
-
-/** First non-empty line of a tool result, clamped — the collapsed one-line peek. */
-function resultPeek(result: string): string {
-  const line = result.split("\n").find((l) => l.trim()) ?? "";
-  return line.length > 140 ? `${line.slice(0, 140)}…` : line;
 }
 
 /** A tool step's status dot in the process timeline (running / ok / error). */
@@ -272,14 +368,21 @@ function ProcessToolRow({
   const [open, setOpen] = useState(false);
   const { Icon, label } = toolMeta(step.tool_name);
   const detail = toolDetail(step.arguments);
-  const hasResult = step.status !== "running" && !!step.result;
+  const data: ToolResultData = {
+    toolName: step.tool_name,
+    args: step.arguments,
+    result: step.result,
+    display: step.display,
+    status: step.status,
+  };
+  const hasBody = hasToolResultBody(data);
   return (
     <div className="min-w-0">
       <button
         type="button"
-        onClick={() => hasResult && setOpen((v) => !v)}
+        onClick={() => hasBody && setOpen((v) => !v)}
         className={`flex w-full items-start gap-2 text-left ${
-          hasResult ? "cursor-pointer" : "cursor-default"
+          hasBody ? "cursor-pointer" : "cursor-default"
         }`}
       >
         <Icon size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
@@ -292,7 +395,7 @@ function ProcessToolRow({
               </span>
             )}
           </span>
-          {hasResult && !open && (
+          {hasBody && !open && (
             <span
               className={`block truncate text-xs ${
                 step.status === "error"
@@ -300,62 +403,43 @@ function ProcessToolRow({
                   : "text-muted-foreground/70"
               }`}
             >
-              {resultPeek(step.result ?? "")}
+              {toolResultPeek(data)}
             </span>
           )}
         </span>
         <ProcessStatusIcon status={step.status} />
       </button>
-      {open && hasResult && (
-        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
-          {step.result}
-        </pre>
-      )}
+      {open && hasBody && <ToolResultView data={data} />}
     </div>
   );
 }
 
-/** One row of the process timeline (a reasoning segment or a tool call), with the
- * connector dot + line shared by both kinds. */
-function ProcessRow({ step, last }: { step: ProcessStep; last: boolean }) {
-  const dotClass =
-    step.kind === "reasoning"
-      ? "bg-muted-foreground/40"
-      : step.status === "error"
-        ? "bg-destructive"
-        : step.status === "running"
-          ? "animate-pulse bg-primary"
-          : "bg-success";
-  return (
-    <div className="flex gap-3">
-      <div className="flex flex-col items-center">
-        <span className={`mt-1 size-2 shrink-0 rounded-full ${dotClass}`} />
-        {!last && <span className="w-px flex-1 bg-border" />}
-      </div>
-      <div className={`min-w-0 flex-1 ${last ? "" : "pb-3"}`}>
-        {step.kind === "reasoning" ? (
-          <div className="flex items-start gap-1.5">
-            <Brain size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
-            <p className="whitespace-pre-wrap text-sm italic text-muted-foreground">
-              {step.text}
-            </p>
-          </div>
-        ) : (
-          <ProcessToolRow step={step} />
-        )}
-      </div>
-    </div>
-  );
+/** One row in the lightweight process list (a+): a reasoning segment renders as
+ * quiet gray Markdown (lists / headings / emphasis preserved), a tool call as its
+ * icon · label · result row. The old connector-dot + vertical-line timeline
+ * decoration is gone (轻量灰色列表). `streaming` is true only for the trailing
+ * step, so a finished reasoning segment still highlights any code it carries. */
+function ProcessRow({
+  step,
+  streaming,
+}: {
+  step: ProcessStep;
+  streaming: boolean;
+}) {
+  if (step.kind === "reasoning") {
+    return <Markdown content={step.text} isStreaming={streaming} muted />;
+  }
+  return <ProcessToolRow step={step} />;
 }
 
 /**
- * Collapsible「思考+工具」过程时间线 for a single-agent turn (前端UX设计.md §一).
+ * Collapsible「思考+工具」过程 for a single-agent turn (前端UX设计.md §一).
  *
- * The merged successor to {@link ThinkingPanel}: the CEO's reasoning interleaved
- * with its tool calls in turn order, on one timeline. Like ThinkingPanel it
- * default-expands while streaming (watch it think + act live) and auto-collapses
- * when the turn finishes (零噪音); manual toggles win. The final answer stays
- * separate below it — the process never breaks up the reply.
+ * Borderless & inline (Cursor 风格, a+): folds the CEO's reasoning + its tool
+ * calls into one quiet gray list under a 图2-style dots header. Default-expands
+ * while streaming (watch it think + act live) and auto-collapses when the turn
+ * finishes (零噪音); manual toggles win. The final answer stays separate below
+ * it — the process never breaks up the reply.
  */
 function ProcessTimeline({
   process,
@@ -376,38 +460,26 @@ function ProcessTimeline({
     (n, s) => (s.kind === "tool" ? n + 1 : n),
     0,
   );
-  const header = isStreaming
-    ? toolCount > 0
-      ? "正在思考并使用工具…"
-      : "正在思考…"
-    : toolCount > 0
-      ? `思考并使用了 ${toolCount} 个工具`
-      : "思考过程";
 
   return (
-    <div className="mb-2 rounded-lg border border-border bg-muted/40">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
-      >
-        <Brain size={14} className="shrink-0" />
-        <span>{header}</span>
-        {expanded ? (
-          <ChevronDown size={14} className="ml-auto shrink-0" />
-        ) : (
-          <ChevronRight size={14} className="ml-auto shrink-0" />
-        )}
-      </button>
+    <div className="mb-2">
+      <ThinkingHeader
+        isStreaming={isStreaming}
+        expanded={expanded}
+        streamingLabel={toolCount > 0 ? "正在思考并使用工具…" : "正在思考…"}
+        doneLabel={
+          toolCount > 0 ? `思考并使用了 ${toolCount} 个工具` : "思考过程"
+        }
+        onToggle={() => setExpanded((v) => !v)}
+      />
       {expanded && (
-        <div className="border-t border-border px-3 py-2.5">
+        <div className="mt-1.5 space-y-2 pl-3">
           {process.map((step, i) => (
             <ProcessRow
-              // Append-only timeline: a step's index is stable for its lifetime
-              // (only the trailing step mutates), so the index is a safe key.
+              // biome-ignore lint/suspicious/noArrayIndexKey: append-only list — a step's index is stable for its lifetime (only the trailing step mutates, reasoning steps have no id), so the index is a safe key.
               key={i}
               step={step}
-              last={i === process.length - 1}
+              streaming={isStreaming && i === process.length - 1}
             />
           ))}
         </div>
@@ -741,24 +813,17 @@ function AssistantMessage({ message }: Props) {
         isStreaming={message.isStreaming}
       />
       {message.isStreaming &&
-        (message.content.length === 0 && !hasReasoning && !hasProcess ? (
+        (message.composingTool && message.executionId === null ? (
+          // Captain is assembling a big tool call (the delegate 任务书) — show its
+          // live char count instead of a bare cursor. Pre-graph only: once delegate
+          // executes, run_plan sets executionId and the team graph takes over.
+          <ComposingToolLine tool={message.composingTool} />
+        ) : message.content.length === 0 && !hasReasoning && !hasProcess ? (
           // Nothing streamed yet (the gap between send and the first token):
           // show an explicit "正在思考…" so the turn never looks like it stalled.
+          // Same 图2 dots as the thinking header → a seamless 等待→思考 transition.
           <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="inline-flex gap-1" aria-hidden>
-              <span
-                className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
-                style={{ animationDelay: "0ms" }}
-              />
-              <span
-                className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
-                style={{ animationDelay: "150ms" }}
-              />
-              <span
-                className="size-1.5 animate-pulse rounded-full bg-muted-foreground/70"
-                style={{ animationDelay: "300ms" }}
-              />
-            </span>
+            <ThinkingDots />
             正在思考…
           </span>
         ) : (
@@ -800,8 +865,9 @@ function AssistantMessage({ message }: Props) {
           referenced={referenced}
         />
       )}
-      {/* Checkpoints the CEO raised this turn (ask_user) — interactive only while
-          this bubble is the live, suspended turn; otherwise a replayed record. */}
+      {/* ask_user cards the CEO raised this turn (统一开场引导 + 途中拍板) —
+          interactive only while this bubble is the live, suspended turn; otherwise
+          a replayed record. */}
       {checkpoints.map((cp) => (
         <CheckpointCard
           key={cp.id}

@@ -8,14 +8,94 @@ so a session loaded from the DB replays the exact context for ``continue_run``.
 from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.runs import RunSession, RunSpec
 from agentcore.runtime.runs.serialize import (
+    escalations_from_transcript,
+    files_touched_from_transcript,
     session_from_row,
     session_to_row,
     spec_from_json,
     spec_to_json,
+    state_from_json,
+    state_to_json,
     transcript_from_json,
     transcript_to_json,
 )
-from agentcore.runtime.runs.types import RunContract, RunKind, RunPolicy
+from agentcore.runtime.runs.types import RunContract, RunKind, RunPhase, RunPolicy, RunState
+
+
+def _assistant_call(call_id: str, name: str, arguments: str) -> LLMMessage:
+    return LLMMessage(
+        role="assistant",
+        content=None,
+        tool_calls=[ToolCall(id=call_id, function=ToolCallFunction(name=name, arguments=arguments))],
+    )
+
+
+def test_files_touched_from_transcript_collects_produced_paths_in_order():
+    transcript = [
+        LLMMessage(role="user", content="建站"),
+        _assistant_call("c1", "file_write", '{"path": "index.html", "content": "<html>"}'),
+        LLMMessage(role="tool", content="已写入", tool_call_id="c1"),
+        _assistant_call("c2", "web_search", '{"query": "x"}'),  # non-mutating → ignored
+        _assistant_call("c3", "str_replace", '{"path": "index.html", "old_string": "a", "new_string": "b"}'),
+        _assistant_call("c4", "file_move", '{"source": "a.txt", "destination": "docs/b.txt"}'),
+        LLMMessage(role="assistant", content="完成"),
+    ]
+    # index.html deduped (write + edit), file_move records its destination, web_search dropped.
+    assert files_touched_from_transcript(transcript) == ["index.html", "docs/b.txt"]
+
+
+def test_files_touched_from_transcript_skips_malformed_and_pathless():
+    transcript = [
+        _assistant_call("c1", "file_write", "not valid json"),
+        _assistant_call("c2", "file_read", '{"path": "x"}'),  # read is not a product
+        _assistant_call("c3", "file_write", '{"content": "no path here"}'),
+    ]
+    assert files_touched_from_transcript(transcript) == []
+
+
+def test_state_json_round_trips_files_touched():
+    state = RunState(phase=RunPhase.COMPLETED, content="x", files_touched=["a.html", "b.css"])
+    restored = state_from_json(state_to_json(state))
+    assert restored.files_touched == ["a.html", "b.css"]
+
+
+def test_escalations_from_transcript_collects_in_call_order():
+    transcript = [
+        LLMMessage(role="user", content="做事"),
+        _assistant_call(
+            "c1",
+            "escalate",
+            '{"question": "Postgres 还是 MySQL?", "assumption": "暂用 PG", "blocking": true}',
+        ),
+        LLMMessage(role="tool", content="已记录", tool_call_id="c1"),
+        _assistant_call("c2", "web_search", '{"query": "x"}'),  # not an escalation
+        _assistant_call("c3", "escalate", '{"question": "目标受众是谁?"}'),
+        LLMMessage(role="assistant", content="完成"),
+    ]
+    out = escalations_from_transcript(transcript)
+    assert out == [
+        {"question": "Postgres 还是 MySQL?", "assumption": "暂用 PG", "blocking": True},
+        {"question": "目标受众是谁?", "assumption": "", "blocking": False},
+    ]
+
+
+def test_escalations_from_transcript_skips_malformed_and_empty_question():
+    transcript = [
+        _assistant_call("c1", "escalate", "not valid json"),
+        _assistant_call("c2", "escalate", '{"question": "   "}'),  # empty after strip
+        _assistant_call("c3", "escalate", '{"assumption": "no question key"}'),
+    ]
+    assert escalations_from_transcript(transcript) == []
+
+
+def test_state_json_round_trips_escalations():
+    state = RunState(
+        phase=RunPhase.COMPLETED,
+        content="x",
+        escalations=[{"question": "q1", "assumption": "a1", "blocking": True}],
+    )
+    restored = state_from_json(state_to_json(state))
+    assert restored.escalations == [{"question": "q1", "assumption": "a1", "blocking": True}]
 
 
 def test_transcript_round_trips_with_tool_calls_and_tool_results():

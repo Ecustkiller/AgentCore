@@ -6,6 +6,8 @@ Flash tier instead of crashing. Prices are asserted against the authoritative
 table in docs/06-参考/DeepSeek-V4-API参考.md §三.
 """
 
+from structlog.testing import capture_logs
+
 from agentcore.llm.config import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
 from agentcore.llm.pricing import (
     NANO_PER_USD,
@@ -72,6 +74,75 @@ def test_unknown_model_falls_back_to_flash():
     assert calculate_cost("totally-unknown", usage) == calculate_cost(
         DEEPSEEK_V4_FLASH, usage
     )
+
+
+# --- cache-split reconciliation: the input bill always matches the prompt ---
+
+
+def test_cache_split_missing_bills_whole_prompt_as_miss():
+    # A proxy/gateway returns standard OpenAI usage: prompt_tokens but NO
+    # DeepSeek cache_hit/cache_miss split. The old code priced only hit+miss (both
+    # 0) → input billed as 0; reconciliation prices the whole prompt as a miss.
+    usage = _usage(input_tokens=1_000_000, cache_hit_tokens=0, cache_miss_tokens=0)
+    cost = calculate_cost(DEEPSEEK_V4_FLASH, usage)
+    assert cost.cached == 0
+    assert cost.input == 140_000_000  # 1M @ $0.14 miss, not 0
+    assert cost.total == 140_000_000
+
+
+def test_cache_split_partial_reconciles_remainder_as_miss():
+    # Only hits reported (miss field dropped): the uncached remainder
+    # (input − hit) is still billed as miss, never lost.
+    usage = _usage(input_tokens=1_000_000, cache_hit_tokens=300_000, cache_miss_tokens=0)
+    cost = calculate_cost(DEEPSEEK_V4_FLASH, usage)
+    cached = calculate_cost(DEEPSEEK_V4_FLASH, _usage(cache_hit_tokens=300_000)).cached
+    miss = calculate_cost(DEEPSEEK_V4_FLASH, _usage(cache_miss_tokens=700_000)).input
+    assert cost.cached == cached
+    assert cost.input == cached + miss
+
+
+def test_native_cache_split_is_a_noop():
+    # Native DeepSeek path (hit + miss == prompt): reconciliation must not change
+    # the bill — pricing with vs. without input_tokens set is identical.
+    with_input = calculate_cost(
+        DEEPSEEK_V4_FLASH,
+        _usage(input_tokens=2_000_000, cache_hit_tokens=1_000_000, cache_miss_tokens=1_000_000),
+    )
+    split_only = calculate_cost(
+        DEEPSEEK_V4_FLASH,
+        _usage(cache_hit_tokens=1_000_000, cache_miss_tokens=1_000_000),
+    )
+    assert with_input == split_only
+
+
+# --- pricing fallback is observable, not silent (gap D) ---
+
+
+def _fallback_logs(logs: list[dict]) -> list[dict]:
+    return [e for e in logs if e["event"] == "cost.pricing_fallback"]
+
+
+def test_unknown_model_logs_pricing_fallback():
+    with capture_logs() as logs:
+        calculate_cost("totally-unknown", _usage(input_tokens=100, output_tokens=50))
+    events = _fallback_logs(logs)
+    assert len(events) == 1
+    assert events[0]["model"] == "totally-unknown"
+    assert events[0]["fallback"] == DEEPSEEK_V4_FLASH
+    assert events[0]["log_level"] == "warning"
+
+
+def test_known_model_does_not_log_fallback():
+    with capture_logs() as logs:
+        calculate_cost(DEEPSEEK_V4_PRO, _usage(input_tokens=100, output_tokens=50))
+    assert _fallback_logs(logs) == []
+
+
+def test_unknown_model_zero_usage_is_silent():
+    # A run that never hit the LLM (no tokens) must not spam a fallback warning.
+    with capture_logs() as logs:
+        calculate_cost("totally-unknown", _usage())
+    assert _fallback_logs(logs) == []
 
 
 def test_zero_usage_is_zero_cost():

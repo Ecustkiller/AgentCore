@@ -25,6 +25,10 @@ from agentcore.tools.builtin.web._net import (
     site_of,
     web_timeout,
 )
+from agentcore.tools.builtin.web.url_cache import (
+    UrlCacheEntry,
+    default_url_cache_registry,
+)
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
 logger = get_logger(__name__)
@@ -301,6 +305,46 @@ class ReadUrlTool:
         except (TypeError, ValueError):
             max_chars = _DEFAULT_MAX_CHARS
 
+        # Conversation-scoped fetch cache: a repeat read of the same page within the
+        # conversation is served from memory (within a freshness TTL) instead of
+        # re-fetching. Only successful fetches are cached, so a hit's URL already
+        # passed the SSRF gate above; unscoped call sites (conversation_id == "")
+        # skip the cache entirely.
+        cache = (
+            default_url_cache_registry().get_or_create(context.conversation_id)
+            if context.conversation_id
+            else None
+        )
+        if cache is not None:
+            cached = cache.get(url, min_chars=max_chars)
+            if cached is not None:
+                text = cached.content[:max_chars]
+                output = json.dumps(
+                    {"url": url, "title": cached.title, "content": text},
+                    ensure_ascii=False,
+                )
+                logger.info("tool.read_url_cache_hit", url=url, content_chars=len(text))
+                return ToolResult(
+                    tool_call_id="",
+                    success=True,
+                    output=output,
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                    output_limit=max_chars + 1024,
+                    metadata={
+                        "title": cached.title,
+                        "content_chars": len(text),
+                        "cached": True,
+                    },
+                    citations=[
+                        {
+                            "url": url,
+                            "title": cached.title,
+                            "snippet": cached.snippet,
+                            "site": cached.site,
+                        }
+                    ],
+                )
+
         headers = {
             "User-Agent": "Mozilla/5.0 (compatible; AgentCore/1.0; +https://agentcore.dev)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -323,6 +367,20 @@ class ReadUrlTool:
 
         title, text, description = _extract_page(html, max_chars)
         snippet = _make_snippet(description, text)
+        site = site_of(url)
+        if cache is not None:
+            cache.put(
+                UrlCacheEntry(
+                    url=url,
+                    title=title,
+                    content=text,
+                    snippet=snippet,
+                    site=site,
+                    max_chars=max_chars,
+                    truncated=len(text) >= max_chars,
+                    stored_at=time.time(),
+                )
+            )
         output = json.dumps({"url": url, "title": title, "content": text}, ensure_ascii=False)
         return ToolResult(
             tool_call_id="",
@@ -332,6 +390,6 @@ class ReadUrlTool:
             output_limit=max_chars + 1024,
             metadata={"title": title, "content_chars": len(text)},
             citations=[
-                {"url": url, "title": title, "snippet": snippet, "site": site_of(url)}
+                {"url": url, "title": title, "snippet": snippet, "site": site}
             ],
         )

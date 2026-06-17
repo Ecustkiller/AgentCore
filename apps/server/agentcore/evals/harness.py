@@ -27,7 +27,7 @@ from agentcore.evals.types import EvalCase, EvalConfigError, TurnOutcome
 from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.config import ModelProfile
 from agentcore.llm.factory import build_provider
-from agentcore.llm.modes import resolve_profile_set
+from agentcore.llm.modes import KNOWN_MODELS, resolve_profile_set
 from agentcore.llm.pricing import NANO_PER_USD, calculate_cost
 from agentcore.llm.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.costing import aggregate_cost
@@ -40,6 +40,13 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 logger = get_logger(__name__)
+
+# Eval exercises the FULL model catalog (incl. Pro), decoupled from the *user*
+# ceiling (settings.selectable_models). 内测 (方案 A-中+) pulls Pro from users, but
+# eval must still resolve ``quality`` → Pro to compare Flash-vs-Pro CEO and run the
+# Pro judge — so the harness/judge clamp against this catalog ceiling, not the user
+# one. (Mirrors tests/test_modes.py ``_FULL_CEILING``.)
+_EVAL_CEILING = frozenset(KNOWN_MODELS)
 
 # eval 运行的固定隔离身份：独立 user_id（避免读到真实用户的记忆/配额），workspace 由
 # fixture 或临时目录提供。
@@ -193,7 +200,7 @@ class EvalHarness:
         sink = RecordingSink()
         backend = ServerWorkspace(root=self._fixture_root(case), sandbox=SubprocessSandbox())
         profiles = resolve_profile_set(
-            case.mode, custom_modes={}, ceiling=settings.selectable_models
+            case.mode, custom_modes={}, ceiling=_EVAL_CEILING
         )
         t0 = time.monotonic()
         try:
