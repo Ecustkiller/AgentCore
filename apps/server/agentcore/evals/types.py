@@ -48,9 +48,10 @@ class EvalCase:
 class TurnOutcome:
     """harness 把一次真实运行归一化成可断言的事实。
 
-    单 Agent 路径的 ``finish_reason`` 由轮数推导（``react_loop`` 不返回它）；``roster``
-    取自 ``run_plan.agents[*].role``（team 路径）；``cost_usd`` 单 Agent 现算、team 读
-    ``cost_runs``。
+    单 Agent 路径的 ``finish_reason`` 优先取引擎经 ``finish_override_sink`` 抬出的非默认
+    终态（``degraded`` / ``unproductive``），无则按轮数推导（``end_turn`` / ``max_rounds``）；
+    ``roster`` 取自 ``run_plan.agents[*].role``（team 路径）；``cost_usd`` 单 Agent 现算、
+    team 读 ``cost_runs``。
     """
 
     content: str
@@ -146,7 +147,7 @@ class Harness(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# 对比评估（团队 vs 单体）—— 见 docs/07-规划/评估体系后端落地设计.md 第二部分
+# 对比评估（团队 vs 单体）—— 现状见 docs/02-架构/后端架构.md §五（未落地 P1+ 见 远期规划.md §2.4）
 #
 # 与上面的「功能评估」正交：那套判单条回合对不对（绝对正确性 + 绝对分裁判）；
 # 这套判同一任务下「多 Agent 是否真比单 Agent 好」（多臂对照 + 成对偏好裁判）。

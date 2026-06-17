@@ -38,6 +38,9 @@ function folderToWorkspace(f: FolderMeta): WorkspaceInfo {
     name: f.name,
     location: isLocal ? "local" : "cloud",
     rootId: f.localRootId,
+    // 工作区对称化 D1a：透传文件夹的子路径。UI 新建 / 添加本地文件夹恒为根级（""）；懒建的
+    // per 对话工作区由服务端建、经 listWorkspaces 刷新带回真实子路径——此乐观投影一般只碰前者。
+    subpath: f.localSubpath,
     hasFiles: isLocal,
   };
 }

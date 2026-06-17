@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from agentcore.runtime.facts import Fact, record_turn_fact
+
 
 class EventType(StrEnum):
     MESSAGE_START = "message_start"
@@ -41,6 +43,13 @@ class EventType(StrEnum):
     # the exchange is conversation, not just gating.
     CHECKPOINT_REQUIRED = "checkpoint_required"
     CHECKPOINT_RESOLVED = "checkpoint_resolved"
+    # Non-blocking ask (ask_user blocking=false, Cursor 式): the CEO surfaced a
+    # question it already has a default for and KEPT WORKING — no suspend, no resolve.
+    # Carries the same rich shape as a checkpoint, but it never gates the turn: the
+    # client renders a non-gating card whose chips 回填 the composer (the user's answer
+    # rides an ordinary next-turn message). Journaled so it replays inline on reload;
+    # there is no paired「resolved」(it was never pending). 见 tools/builtin/ask_user.py.
+    QUESTION_POSTED = "question_posted"
     # Structured DAG checkpoint (结构化挂起 2a): a delegate step marked
     # ``checkpoint_after`` completed and the WaveScheduler paused at the wave
     # boundary before its dependents, awaiting the user's plan_review (continue /
@@ -87,7 +96,12 @@ class EventType(StrEnum):
 class FinishReason(StrEnum):
     END_TURN = "end_turn"
     MAX_ROUNDS = "max_rounds"
+    # The model kept returning empty responses (no content, no tool call) even after
+    # the fallback retry — ended degraded rather than blank (B2).
     DEGRADED = "degraded"
+    # Early-stopped a run of consecutive rounds where every tool call failed and no
+    # content was produced — salvaged a forced tool-free answer (B2 无产出早停).
+    UNPRODUCTIVE = "unproductive"
     ERROR = "error"
     CANCELLED = "cancelled"
 
@@ -276,6 +290,40 @@ def checkpoint_required(
         type=EventType.CHECKPOINT_REQUIRED,
         payload={
             "checkpoint_id": checkpoint_id,
+            "conversation_id": conversation_id,
+            "question": question,
+            "context": context,
+            "assumptions": assumptions or [],
+            "questions": questions or [],
+            "style_options": style_options or [],
+        },
+    )
+
+
+def question_posted(
+    *,
+    ask_id: str,
+    conversation_id: str,
+    question: str,
+    context: str = "",
+    assumptions: list[dict[str, Any]] | None = None,
+    questions: list[dict[str, Any]] | None = None,
+    style_options: list[dict[str, Any]] | None = None,
+) -> SSEEvent:
+    """Non-blocking ask (ask_user blocking=false): surface a question, never suspend.
+
+    Same rich shape as :func:`checkpoint_required` (so the client reuses the card body)
+    but it is NOT a checkpoint: the turn does not pause and there is no resolve — the
+    CEO has already proceeded on its stated default (``assumptions`` / a question
+    ``default``). The client renders a non-gating card whose option chips 回填 the
+    composer; the user's answer, if any, rides an ordinary next-turn message. ``ask_id``
+    keys the card (dedupe a re-delivered event). Journaled (see ``_JOURNAL_EVENT_TYPES``)
+    so a reload replays it inline.
+    """
+    return SSEEvent(
+        type=EventType.QUESTION_POSTED,
+        payload={
+            "ask_id": ask_id,
             "conversation_id": conversation_id,
             "question": question,
             "context": context,
@@ -696,6 +744,9 @@ _JOURNAL_EVENT_TYPES = frozenset(
         # approval / workspace-op events.
         EventType.CHECKPOINT_REQUIRED,
         EventType.CHECKPOINT_RESOLVED,
+        # Non-blocking ask (ask_user blocking=false): journaled so the card replays
+        # inline on reload — it has no resolved twin (it never gated the turn).
+        EventType.QUESTION_POSTED,
         # Structured DAG checkpoints (checkpoint_after): journaled so the pause +
         # its resolution replay inline on reload, same as ask_user checkpoints.
         EventType.PLAN_REVIEW_REQUIRED,
@@ -712,6 +763,9 @@ _JOURNAL_SURFACE_TYPES = frozenset(
     {
         EventType.RUN_PLAN.value,
         EventType.CHECKPOINT_REQUIRED.value,
+        # A turn that only posted a non-blocking ask (no delegate, no checkpoint) still
+        # has a journal worth replaying — its card.
+        EventType.QUESTION_POSTED.value,
         EventType.PLAN_REVIEW_REQUIRED.value,
     }
 )
@@ -737,13 +791,15 @@ class EventSink:
         # journal), accumulated as they are emitted so the team graph can be
         # persisted and replayed. Empty for a pure single-agent turn.
         self._journal: list[dict[str, Any]] = []
-        # Single-agent process timeline: the CEO's own thinking interleaved with
-        # its tool calls, in emission order, folded into compact segments (one
-        # reasoning step coalesces consecutive deltas; one step per tool call).
-        # This is what the inline「思考过程」面板 replays for a single-agent turn —
-        # the team-graph journal above stays None there. ``_has_run_plan`` marks
-        # the turn as multi-agent (graph instead), ``_has_tool`` gates persistence
-        # (a tool-less turn replays from reasoning_content, no process payload).
+        # Single-agent process timeline (前端UX设计.md §一B): the CEO's own thinking,
+        # reply text, and tool calls interleaved in emission order, folded into
+        # compact segments (consecutive reasoning deltas coalesce into one reasoning
+        # step, consecutive content deltas into one content step, one step per tool
+        # call). This is the Cursor 式全内联时间线 the client replays for a single-agent
+        # turn — the team-graph journal above stays None there. ``_has_run_plan`` marks
+        # the turn as multi-agent (graph instead), ``_has_tool`` gates persistence (a
+        # tool-less turn replays from reasoning_content + message content, no process
+        # payload — there is no interleaving to preserve without tools).
         self._process: list[dict[str, Any]] = []
         self._has_run_plan = False
         self._has_tool = False
@@ -758,6 +814,18 @@ class EventSink:
                         "timestamp": event.timestamp,
                     }
                 )
+                # 执行级事件溯源: forward this display fact into the turn's single
+                # ordered fact log (§18.3), interleaved with the engine's execution
+                # facts (llm_call / round_boundary / …). The log is the durable
+                # journal's source; this keeps the display lane (above) and the
+                # execution lane in ONE order. No-op outside a turn (no log bound).
+                record_turn_fact(
+                    Fact(
+                        kind=event.type.value,
+                        payload=event.payload,
+                        ts=event.timestamp,
+                    )
+                )
             self._accumulate_process(event)
             self._queue.put_nowait(event)
 
@@ -765,9 +833,12 @@ class EventSink:
         """Fold one event into the single-agent process timeline.
 
         Mirrors the client-side build (streamConversation) so a live turn and its
-        reloaded twin produce the same panel: reasoning deltas coalesce into the
-        trailing reasoning step; each tool call appends a step that its matching
-        ``tool_use_end`` later resolves (result + status).
+        reloaded twin produce the same inline timeline (前端UX设计.md §一B): reasoning
+        deltas coalesce into the trailing reasoning step, content deltas into the
+        trailing content step (the CEO's reply text, interleaved in true emission
+        order — the trailing content step is the final answer), and each tool call
+        appends a step that its matching ``tool_use_end`` later resolves (result +
+        status). Events arrive here in emission order, so the steps are ordered.
         """
         t = event.type
         if t == EventType.RUN_PLAN:
@@ -780,6 +851,14 @@ class EventSink:
                 self._process[-1]["text"] += delta
             else:
                 self._process.append({"kind": "reasoning", "text": delta})
+        elif t == EventType.CONTENT_DELTA:
+            delta = event.payload.get("delta") or ""
+            if not delta:
+                return
+            if self._process and self._process[-1].get("kind") == "content":
+                self._process[-1]["text"] += delta
+            else:
+                self._process.append({"kind": "content", "text": delta})
         elif t == EventType.TOOL_USE_START:
             self._has_tool = True
             payload = event.payload
@@ -840,14 +919,16 @@ class EventSink:
         return self._journal if has_surface else None
 
     def process_timeline(self) -> list[dict[str, Any]] | None:
-        """This single-agent turn's「思考+工具」timeline, or None.
+        """This single-agent turn's「思考·正文·工具」inline timeline, or None.
 
         None for a multi-agent turn (``run_plan`` → the team graph carries the
-        activity instead) or a turn that used no tool (a thinking-only turn
-        replays from ``reasoning_content`` as one segment — no process payload
-        needed). Otherwise the ordered reasoning/tool steps the client folds into
-        the inline process panel, persisted via the journal (projected as the
-        message's ``runs.process``).
+        activity instead) or a turn that used no tool: a tool-less turn has no
+        interleaving to preserve (reasoning always precedes the reply), so it
+        replays from ``reasoning_content`` (one thinking segment) + the message
+        content (the answer) — no process payload needed. Otherwise the ordered
+        reasoning/content/tool steps the client folds into the inline timeline,
+        persisted via the journal (projected as the message's ``runs.process``);
+        the trailing content step is the final answer.
         """
         if self._has_run_plan or not self._has_tool:
             return None

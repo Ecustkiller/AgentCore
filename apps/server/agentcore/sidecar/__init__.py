@@ -16,11 +16,12 @@ only the §18.6 host ports are swapped for local implementations:
   key is never placed on the user's machine), wired via the per-turn
   ``LLMCredentials`` the engine already injects into ``build_provider``.
 
-Persistence + billing land via **cloud write-back**, not a local DB: the sidecar
-process holds no store (its in-process ``ConversationStore`` / ``BillingSink``
-ports stay no-op), so the desktop relays each finished turn — messages + priced
-``cost_runs`` — to ``POST .../local-turns``, which lands it in durable history and
-the cost ledger (idempotent by ``run_id``). Packaging is handled too: a packaged
+Persistence lands via **cloud write-back**, not a local DB: the sidecar process
+holds no store (its in-process ``ConversationStore`` port stays no-op), so the
+desktop relays each finished turn — messages + citations + replay ``runs`` — to
+``POST .../local-turns``, which lands it in durable history. Spend is metered
+authoritatively at the cloud inference proxy (Slice 4a), not relayed from the
+client. Packaging is handled too: a packaged
 desktop ships a standalone CPython + ``--target`` site-packages and spawns it when
 ``app.isPackaged`` (no system Python/venv/uv needed — see
 ``apps/desktop/scripts/bundle-sidecar.mjs``). Still deferred: the Journal and

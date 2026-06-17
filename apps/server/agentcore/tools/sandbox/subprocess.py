@@ -93,12 +93,19 @@ class SubprocessSandbox:
                         timeout=request.timeout_seconds,
                     )
                 except TimeoutError:
-                    process.kill()
-                    await process.wait()
                     duration_ms = int((time.monotonic() - start) * 1000)
                     raise SandboxTimeoutError(
                         f"Execution exceeded {request.timeout_seconds}s timeout"
                     ) from None
+                finally:
+                    # Kill the child on ANY non-normal exit — its own timeout OR an
+                    # external cancel (the engine's tool-timeout backstop or a user
+                    # stop propagating CancelledError into this await) — so a runaway
+                    # process never outlives the call as an orphan (B1 取消安全). A
+                    # clean completion has already set returncode, so this is a no-op.
+                    if process.returncode is None:
+                        process.kill()
+                        await process.wait()
 
                 duration_ms = int((time.monotonic() - start) * 1000)
 

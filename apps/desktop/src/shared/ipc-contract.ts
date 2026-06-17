@@ -104,6 +104,7 @@ export type WorkspaceOpName =
   | "read_bytes"
   | "write_bytes"
   | "list"
+  | "index_files"
   | "mkdir"
   | "delete"
   | "move"
@@ -130,6 +131,7 @@ export interface FsChangedEvent {
 /** IPC 通道名 —— 主进程与 preload 共用，避免硬编码漂移。 */
 export const FS_CHANNELS = {
   addRoot: "fs:addRoot",
+  ensureDefaultRoot: "fs:ensureDefaultRoot",
   listRoots: "fs:listRoots",
   removeRoot: "fs:removeRoot",
   listDir: "fs:listDir",
@@ -154,6 +156,13 @@ export const FS_CHANNELS = {
  */
 export interface FsApi {
   addRoot(): Promise<FsRoot | null>;
+  /**
+   * 取得（必要时自动创建 + 授权）默认本地工作区根（`~/Documents/AgentCore`）。
+   *
+   * 桌面 local-first（双模式工作区 决策 #11）的地基：让新对话/新项目无需用户走目录
+   * 选择器就有一个开箱即用的本地落地处。幂等——已存在同路径的授权根则原样复用。
+   */
+  ensureDefaultRoot(): Promise<FsRoot>;
   listRoots(): Promise<FsRoot[]>;
   removeRoot(rootId: string): Promise<void>;
   listDir(rootId: string, relPath: string): Promise<FsResult<FsEntry[]>>;

@@ -2,6 +2,7 @@ import { api } from "@/services/api";
 import {
   type Message,
   checkpointsFromEvents,
+  nonBlockingAsksFromEvents,
   planReviewsFromEvents,
   useConversationStore,
 } from "@/stores/conversation";
@@ -41,7 +42,7 @@ export interface BackendMessage {
   /** Persisted turn replay payload. `events` is a multi-agent turn's ordered
    * run/tool SSE events (replayed through the same fold as the live stream to
    * rebuild the team graph on reload, §9.3); `process` is a single-agent turn's
-   * 思考+工具 timeline (前端UX设计.md §一). null for user / plain turns. (Opaque JSON
+   * 思考·正文·工具 inline timeline (前端UX设计.md §一B). null for user / plain turns. (Opaque JSON
    * in the OpenAPI — SSE/event payloads are exempt from the generated-types rule.) */
   runs?: {
     events: SSEEvent[];
@@ -79,14 +80,17 @@ export function toMessage(m: BackendMessage): Message {
   // them independently of `executionId` — a turn can have a checkpoint without a
   // team graph.
   const checkpoints = checkpointsFromEvents(events);
+  // Non-blocking asks (ask_user blocking=false) are journaled too, so a reloaded turn
+  // replays its non-gating cards inline.
+  const nonBlockingAsks = nonBlockingAsksFromEvents(events);
   // plan_review events are journaled like ask_user checkpoints, so a reloaded turn
   // replays its structured DAG pauses inline too (结构化挂起 2a).
   const planReviews = planReviewsFromEvents(events);
-  // Single-agent 思考+工具 process timeline (前端UX设计.md §一): prefer the persisted
-  // ordered steps (a tool-using turn), else synthesize one reasoning step from
-  // reasoning_content (a thinking-only turn, or a pre-feature row), so the inline
-  // process panel replays the shape the live turn built. Multi-agent turns omit it
-  // — the team graph carries their activity instead.
+  // Single-agent 思考·正文·工具 inline timeline (前端UX设计.md §一B): prefer the persisted
+  // ordered steps (a tool-using turn — now incl. content steps), else synthesize one
+  // reasoning step from reasoning_content (a thinking-only turn, or a pre-feature row),
+  // so the inline timeline replays the shape the live turn built. Multi-agent turns omit
+  // it — the team graph carries their activity instead.
   const process: ProcessStep[] | undefined = executionId
     ? undefined
     : (m.runs?.process ??
@@ -107,6 +111,7 @@ export function toMessage(m: BackendMessage): Message {
       ? { events, finishReason: m.runs?.finish_reason ?? "stop" }
       : undefined,
     checkpoints: checkpoints.length ? checkpoints : undefined,
+    nonBlockingAsks: nonBlockingAsks.length ? nonBlockingAsks : undefined,
     planReviews: planReviews.length ? planReviews : undefined,
     isStreaming: false,
     attachments: m.attachments?.length

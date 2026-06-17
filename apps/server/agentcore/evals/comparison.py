@@ -1,4 +1,4 @@
-"""对比评估 runner（团队 vs 单体）—— 见 docs/07-规划/评估体系后端落地设计.md 第二部分.
+"""对比评估 runner（团队 vs 单体）—— 现状见 docs/02-架构/后端架构.md §五.
 
 零侵入复用「功能评估」地基：为每个臂合成一个 :class:`EvalCase` 喂现有 :class:`EvalHarness`
 （两条运行路径都已存在），再用 :class:`~agentcore.evals.types.PairwiseJudge` 成对裁判主臂

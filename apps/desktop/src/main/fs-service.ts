@@ -475,49 +475,85 @@ async function writeTextFile(
   }
 }
 
+/**
+ * 工作区扁平文件索引（共享走法）：广度优先逐层展开 `real` 根，受深度（`LIST_FILES_MAX_DEPTH`）
+ * 与总数（`LIST_FILES_CAP`）双重限制；跳过依赖/构建/VCS 目录，不跟随符号链接（避免环路与越界）。
+ * `truncated` 表示命中 cap 截断。@ 提及检索（`listFiles`）与 worker 工作区清单（`opIndexFiles`）
+ * 共用同一套走法，使本地根与云端 `ServerWorkspace.index_files` 呈现一致的扁平视图。
+ *
+ * `order`：`"path"`（默认）= 字母序、**不 stat**（@ 提及/选择器走法，延迟敏感）；`"recent"` =
+ * 按 mtime 倒序（每文件多一次 `stat`），供 worker 清单在大树里把预算花在最可能相关的新文件上。
+ */
+async function collectWorkspaceFiles(
+  real: string,
+  order: "path" | "recent" = "path",
+): Promise<{ files: FsFileRef[]; truncated: boolean }> {
+  const recent = order === "recent";
+  const collected: Array<{ ref: FsFileRef; mtimeMs: number }> = [];
+  let truncated = false;
+  const stack: Array<{ abs: string; rel: string; depth: number }> = [
+    { abs: real, rel: "", depth: 0 },
+  ];
+  while (stack.length > 0) {
+    if (collected.length >= LIST_FILES_CAP) {
+      truncated = true;
+      break;
+    }
+    const cur = stack.pop();
+    if (!cur) break;
+    let dirents: import("node:fs").Dirent[];
+    try {
+      dirents = await fs.readdir(cur.abs, { withFileTypes: true });
+    } catch {
+      continue; // 单个子目录不可读不影响整体
+    }
+    for (const d of dirents) {
+      if (d.isSymbolicLink()) continue;
+      const childRel = cur.rel ? `${cur.rel}/${d.name}` : d.name;
+      if (d.isDirectory()) {
+        if (LIST_FILES_SKIP_DIRS.has(d.name) || d.name.startsWith(".git")) {
+          continue;
+        }
+        if (cur.depth + 1 <= LIST_FILES_MAX_DEPTH) {
+          stack.push({
+            abs: join(cur.abs, d.name),
+            rel: childRel,
+            depth: cur.depth + 1,
+          });
+        }
+      } else if (d.isFile()) {
+        let mtimeMs = 0;
+        if (recent) {
+          try {
+            mtimeMs = (await fs.stat(join(cur.abs, d.name))).mtimeMs;
+          } catch {
+            mtimeMs = 0; // unreadable stat → sinks to the bottom of the recent sort
+          }
+        }
+        collected.push({ ref: { relPath: childRel, name: d.name }, mtimeMs });
+        if (collected.length >= LIST_FILES_CAP) {
+          truncated = true;
+          break;
+        }
+      }
+    }
+  }
+  if (recent) {
+    collected.sort((a, b) => b.mtimeMs - a.mtimeMs); // newest first
+  } else {
+    collected.sort((a, b) => a.ref.relPath.localeCompare(b.ref.relPath, "zh"));
+  }
+  return { files: collected.map((c) => c.ref), truncated };
+}
+
 async function listFiles(rootId: string): Promise<FsResult<FsFileRef[]>> {
   await ensureReady();
   const loc = locate(rootId, "");
   if ("error" in loc) return loc.error;
   const real = await realInside(loc.root, loc.abs);
   if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
-
-  const files: FsFileRef[] = [];
-  // 广度优先逐层展开，受深度与总数双重限制；不跟随符号链接目录，避免环路。
-  const stack: Array<{ abs: string; rel: string; depth: number }> = [
-    { abs: real, rel: "", depth: 0 },
-  ];
   try {
-    while (stack.length > 0 && files.length < LIST_FILES_CAP) {
-      const cur = stack.pop();
-      if (!cur) break;
-      let dirents: import("node:fs").Dirent[];
-      try {
-        dirents = await fs.readdir(cur.abs, { withFileTypes: true });
-      } catch {
-        continue; // 单个子目录不可读不影响整体
-      }
-      for (const d of dirents) {
-        if (d.isSymbolicLink()) continue;
-        const childRel = cur.rel ? `${cur.rel}/${d.name}` : d.name;
-        if (d.isDirectory()) {
-          if (LIST_FILES_SKIP_DIRS.has(d.name) || d.name.startsWith(".git")) {
-            continue;
-          }
-          if (cur.depth + 1 <= LIST_FILES_MAX_DEPTH) {
-            stack.push({
-              abs: join(cur.abs, d.name),
-              rel: childRel,
-              depth: cur.depth + 1,
-            });
-          }
-        } else if (d.isFile()) {
-          files.push({ relPath: childRel, name: d.name });
-          if (files.length >= LIST_FILES_CAP) break;
-        }
-      }
-    }
-    files.sort((a, b) => a.relPath.localeCompare(b.relPath, "zh"));
+    const { files } = await collectWorkspaceFiles(real);
     return { ok: true, data: files };
   } catch (e) {
     return { ok: false, reason: toReason(e) };
@@ -815,6 +851,30 @@ async function opList(
   await walk(baseReal, "", 0);
   results.sort((a, b) => a.path.localeCompare(b.path));
   return opOk(results.slice(0, WORKSPACE_LIST_MAX));
+}
+
+// index_files：把绑定根（或其 `base` 子树）扁平索引成相对文件路径列表（忽略目录剪枝 + cap），
+// 返回 {paths, truncated}。服务端 LocalWorkspace.index_files 经此打通，使 @ 提及与 worker
+// 工作区清单在本地根上与云端 ServerWorkspace.index_files 行为一致。`order` 选排序
+// （"recent" 按 mtime 倒序供清单预算，否则字母序）。
+//
+// `base` = 工作区子路径（工作区对称化 D1a）：把索引限定到该子树，并把子路径前缀**拼回**各结果
+// （故返回的是 root-相对路径），服务端 `LocalWorkspace._out` 再剥成工作区相对——与 list/grep
+// 回填 root-相对、服务端统一剥前缀的约定一致。`""` / `"."` = 整根（现行为，无前缀）。子树尚不
+// 存在（裸聊懒建后尚未产文件）→ 空列表。
+async function opIndexFiles(
+  root: StoredRoot,
+  order: "path" | "recent",
+  base = "",
+): Promise<WorkspaceOpResult> {
+  const sub = base === "." ? "" : base.replace(/^\/+|\/+$/g, "");
+  const baseAbs = resolveLexical(root, sub || ".");
+  if (!baseAbs) return opErr("OutsideWorkspace", base);
+  const baseReal = await realInside(root, baseAbs);
+  if (!baseReal) return opOk({ paths: [], truncated: false });
+  const { files, truncated } = await collectWorkspaceFiles(baseReal, order);
+  const prefix = sub ? `${sub}/` : "";
+  return opOk({ paths: files.map((f) => prefix + f.relPath), truncated });
 }
 
 async function opGrep(
@@ -1331,6 +1391,18 @@ async function opExecute(
     Math.min(Number(args.timeout_seconds ?? 30), EXEC_TIMEOUT_CAP_S),
   );
 
+  // cwd = 工作区子路径（工作区对称化 D1a）：把进程工作目录定到该子树，使本地执行与文件工具
+  // 同目录（呼应服务端 cwd=workspace）。`""` / `"."` = 绑定根自身（现行为）。子树尚不存在
+  // （裸聊懒建后还没产文件就先执行）→ 回退根，避免用不存在的 cwd 拉起进程而失败。
+  const cwdRel = String(args.cwd ?? "");
+  const sub = cwdRel === "." ? "" : cwdRel.replace(/^\/+|\/+$/g, "");
+  let cwdAbs = root.absPath;
+  if (sub) {
+    const resolved = resolveLexical(root, sub);
+    const real = resolved ? await realInside(root, resolved) : null;
+    if (real) cwdAbs = real;
+  }
+
   // 脚本写入临时目录（与服务端一致：代码文件在临时区，进程 cwd 才是工作区）。
   let tmpDir: string;
   try {
@@ -1344,7 +1416,7 @@ async function opExecute(
     return await runSubprocess(
       lang.cmd,
       scriptFile,
-      root.absPath,
+      cwdAbs,
       stdin,
       timeoutSeconds,
       startedMs,
@@ -1492,6 +1564,12 @@ export async function executeWorkspaceOp(
           String(args.directory ?? "."),
           String(args.pattern ?? "*"),
         );
+      case "index_files":
+        return await opIndexFiles(
+          root,
+          args.order === "recent" ? "recent" : "path",
+          String(args.base ?? ""),
+        );
       case "mkdir":
         return await opMkdir(root, String(args.path ?? ""));
       case "delete":
@@ -1596,6 +1674,29 @@ export function registerFsIpc(): void {
       absPath = result.filePaths[0];
     }
 
+    const existing = [...roots.values()].find((r) => r.absPath === absPath);
+    if (existing) return { id: existing.id, name: existing.name };
+
+    const id = randomUUID();
+    const name = basename(absPath) || absPath;
+    roots.set(id, { id, name, absPath });
+    await saveRoots();
+    return { id, name };
+  });
+
+  // 桌面 local-first 地基（双模式工作区 决策 #11）：取得默认本地工作区根，必要时自动
+  // 创建 ~/Documents/AgentCore 并登记为授权根——无需用户走目录选择器，给新对话一个
+  // 开箱即用的本地落地处。幂等：已存在同路径的根则复用（不重复登记）。
+  ipcMain.handle(FS_CHANNELS.ensureDefaultRoot, async (): Promise<FsRoot> => {
+    await ensureReady();
+    const base = join(app.getPath("documents"), "AgentCore");
+    await fs.mkdir(base, { recursive: true });
+    let absPath: string;
+    try {
+      absPath = await fs.realpath(base);
+    } catch {
+      absPath = base;
+    }
     const existing = [...roots.values()].find((r) => r.absPath === absPath);
     if (existing) return { id: existing.id, name: existing.name };
 

@@ -177,6 +177,7 @@ async def list_workspaces(
                 name=f.name,
                 location="local" if local else "cloud",
                 root_id=f.local_root_id,
+                subpath=f.local_subpath,
                 has_files=True
                 if local
                 else workspace_has_entries(

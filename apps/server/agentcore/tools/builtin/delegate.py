@@ -187,20 +187,29 @@ _DELEGATE_PARAMETERS = {
                     "contract": {
                         "type": "object",
                         "description": (
-                            "可选：对该 worker 产出的质量要求（机械校验）。不达标会带着"
-                            "具体差距自动返工一次；返工后仍不达标时，默认仅附质检提醒"
-                            "（软），strict=true 则判该 worker 失败（硬退）。"
+                            "可选：对该 worker 产出的【验收底线】（事后机械校验，非事前结构蓝图）——"
+                            "声明产出必须满足的硬性兜底（必含要点 / 篇幅 / 格式 / 落盘），确保不漏关键"
+                            "项，不是用来替专家规定交付物的完整结构。不达标会带着具体差距自动返工一次；"
+                            "返工后仍不达标时，默认仅附质检提醒（软），strict=true 则判该 worker 失败"
+                            "（硬退）。"
                         ),
                         "properties": {
                             "required_sections": {
                                 "type": "array",
                                 "items": {"type": "string"},
-                                "description": "产出必须包含的小标题，如『结论』『风险』。",
+                                "description": (
+                                    "验收底线：产出必须覆盖的少数关键部分（按小标题校验是否在场），"
+                                    "如『结论』『风险』。用于兜底「别漏掉关键内容」，不是用来替专家"
+                                    "规定完整章节骨架——交付物的结构由 worker 设计。"
+                                ),
                             },
                             "must_contain": {
                                 "type": "array",
                                 "items": {"type": "string"},
-                                "description": "产出必须出现的关键词/内容。",
+                                "description": (
+                                    "验收底线：产出必须出现的关键词 / 内容（字面校验）；只兜关键点，"
+                                    "不是用来规定结构。"
+                                ),
                             },
                             "min_length": {
                                 "type": "integer",
@@ -761,12 +770,15 @@ class DelegateTool:
             PlanReviewSuspension,
             captain_transcript,
             find_tool_call_id,
+            turn_history,
         )
 
         transcript = captain_transcript.get()
         if not transcript:
             logger.info("suspension.no_transcript", checkpoint_id=checkpoint_id)
             return
+        from agentcore.runtime.facts import snapshot_fact_log
+
         journal = list(self._sink.execution_journal() or [])
         journal.append(
             {
@@ -774,6 +786,18 @@ class DelegateTool:
                 "payload": required_event.payload,
                 "timestamp": required_event.timestamp,
             }
+        )
+        # The §18.3 fact-log stream at this same instant — the persist source (the
+        # display ``journal`` above is the degraded fallback). The plan_review card is
+        # emitted only AFTER this save, so fold it in so the persisted stream carries it.
+        journal_entries = snapshot_fact_log(
+            trailing=[
+                {
+                    "kind": required_event.type.value,
+                    "payload": required_event.payload,
+                    "ts": required_event.timestamp,
+                }
+            ]
         )
         frame = PlanReviewSuspension(
             message_id=self._message_id or "",
@@ -785,9 +809,11 @@ class DelegateTool:
             base_system_prompt=self._system_prompt,
             user_message=self._user_message,
             transcript=list(transcript),
+            history=list(turn_history.get() or []),
             plan=plan,
             completed=dict(completed),
             journal=journal,
+            journal_entries=journal_entries,
             steps=steps,
             pending=pending,
             trace_id=get_log_value("trace_id"),

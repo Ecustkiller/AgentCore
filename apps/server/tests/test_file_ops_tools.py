@@ -1,4 +1,4 @@
-"""Tests for the file_delete and file_move tools (mutating workspace file ops).
+"""Tests for the file_write, file_delete and file_move tools (mutating file ops).
 
 Hermetic: every test runs against a throwaway ``ServerWorkspace`` rooted at
 ``tmp_path`` and inspects the real on-disk result, mirroring the str_replace tool
@@ -8,7 +8,7 @@ typed-failure → user-message mapping (the heavy I/O lives in the backend).
 
 from pathlib import Path
 
-from agentcore.tools.builtin.file_ops import FileDeleteTool, FileMoveTool
+from agentcore.tools.builtin.file_ops import FileDeleteTool, FileMoveTool, FileWriteTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -22,6 +22,48 @@ def _ctx(workspace: Path) -> ToolContext:
         backend=ServerWorkspace(root=workspace, sandbox=SubprocessSandbox()),
         user_id="u",
     )
+
+
+# --- file_write ---
+
+
+async def test_write_creates_file(tmp_path: Path):
+    result = await FileWriteTool().execute(
+        {"path": "notes/report.md", "content": "# Hi"}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert (tmp_path / "notes" / "report.md").read_text(encoding="utf-8") == "# Hi"
+
+
+async def test_write_rejects_empty_path(tmp_path: Path):
+    # A worker that omits/empties ``path`` must get a crisp required-arg error — NOT
+    # a backend write onto the workspace root dir (the real-world file_write failure:
+    # path=None → root → "[Errno 13] Permission denied: <abs server path>").
+    (tmp_path / "keep.txt").write_text("keep", encoding="utf-8")
+    result = await FileWriteTool().execute(
+        {"path": "", "content": "x" * 5000}, _ctx(tmp_path)
+    )
+    assert result.success is False
+    assert "path 不能为空" in result.error
+    # the root must be untouched (no clobber, no stray file)
+    assert (tmp_path / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+
+async def test_write_rejects_missing_path(tmp_path: Path):
+    result = await FileWriteTool().execute({"content": "body"}, _ctx(tmp_path))
+    assert result.success is False
+    assert "path 不能为空" in result.error
+
+
+async def test_write_rejects_path_outside_workspace(tmp_path: Path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    result = await FileWriteTool().execute(
+        {"path": "../escaped.md", "content": "leak"}, _ctx(ws)
+    )
+    assert result.success is False
+    assert "超出了工作区范围" in result.error
+    assert not (tmp_path / "escaped.md").exists()
 
 
 # --- file_delete ---

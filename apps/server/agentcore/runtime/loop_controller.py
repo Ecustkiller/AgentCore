@@ -28,6 +28,44 @@ from enum import StrEnum
 
 DEFAULT_WINDOW = 8
 DEFAULT_THRESHOLD = 3
+# Consecutive empty-response rounds that trip a degraded finish (B2). The fallback
+# retry sits inside this streak, so the default 2 = one empty → fallback retry → if
+# still empty, degraded.
+DEFAULT_EMPTY_THRESHOLD = 2
+# Tool failure circuit breaker (B2): cumulative (run-scoped, args-agnostic) failure
+# counts per tool. At the warn threshold the model is told to stop retrying that
+# tool; at the disable threshold the tool is removed from the toolset for the rest
+# of the run. Unlike REPEATED_FAILURE detection (which keys on the exact call
+# fingerprint within the sliding window), this counts a tool failing *any* way and
+# never resets — it catches "this tool just isn't working out, no matter the args".
+DEFAULT_TOOL_FAILURE_WARN = 2
+DEFAULT_TOOL_FAILURE_DISABLE = 3
+# Consecutive *unproductive* rounds that trip an early stop (B2 无产出早停). An
+# unproductive round = the model called ≥1 tool, every call FAILED, and it produced
+# no content — it is "working" but getting nowhere. Distinct from an empty round
+# (no tool call at all → degraded ladder).
+DEFAULT_UNPRODUCTIVE_THRESHOLD = 3
+# Periodic progress-review reflection (B2 反思注入): on a long multi-round run, inject
+# a "step back and re-plan" prompt starting at the 4th round (0-indexed 3) and every
+# 3 rounds after (rounds 4 / 7 / 10 …). Cadence-driven and proactive — unlike the
+# event-driven NUDGE, which only fires once a mechanical loop is detected.
+DEFAULT_REFLECTION_START_ROUND = 3
+DEFAULT_REFLECTION_INTERVAL = 3
+
+
+def progress_review_prompt(round_number: int) -> str:
+    """The periodic progress-review steer (B2 反思注入), anchored to the round count.
+
+    A structured "step back" prompt — not open-ended self-doubt — that asks the model
+    to consolidate facts, name the gap to the goal, and pick the next concrete action
+    (and to just answer if it already has enough), keeping a long run from drifting.
+    """
+    return (
+        f"[系统提示] 进度复盘（已进行 {round_number} 轮）：请先停下来梳理——"
+        "(1) 目前已确认了哪些关键事实？(2) 距离用户的目标还差什么？"
+        "(3) 下一步最有效的具体动作是什么？避免重复已经做过的尝试；"
+        "若现有信息已足够，请直接给出最终答案。"
+    )
 
 
 class StuckReason(StrEnum):
@@ -44,6 +82,9 @@ class Intervention(StrEnum):
     CONTINUE = "continue"
     NUDGE = "nudge"
     FINALIZE = "finalize"
+    # B2 degraded handling: the model returned an empty response — retry the round
+    # once on the profile's fallback model before treating it as terminal.
+    FALLBACK = "fallback"
 
 
 @dataclass(frozen=True)
@@ -88,6 +129,46 @@ class StuckSignal:
         )
 
 
+@dataclass(frozen=True)
+class CircuitBreak:
+    """Tools that crossed a cumulative-failure threshold this round (B2 熔断).
+
+    ``warned`` hit the warn threshold (tell the model to stop retrying them);
+    ``disabled`` hit the disable threshold (the engine removes them from the
+    toolset for the rest of the run). Each is a tuple of tool names; both empty
+    means nothing tripped this round.
+    """
+
+    warned: tuple[str, ...] = ()
+    disabled: tuple[str, ...] = ()
+
+    def __bool__(self) -> bool:
+        return bool(self.warned or self.disabled)
+
+    def message(self) -> str | None:
+        """The single ``[系统提示]`` to inject this round, or ``None``.
+
+        Anchored to the concrete fact (which tool, what now happens) like the
+        nudge messages — disable first (the stronger action), then warn.
+        """
+        parts: list[str] = []
+        if self.disabled:
+            names = "、".join(f"`{n}`" for n in self.disabled)
+            parts.append(
+                f"工具 {names} 已多次失败，本回合起停用，无法再调用——"
+                "请改用其他工具或基于已有信息推进。"
+            )
+        if self.warned:
+            names = "、".join(f"`{n}`" for n in self.warned)
+            parts.append(
+                f"工具 {names} 已多次失败，请不要再以相同方式调用它："
+                "换不同的输入、换一个工具，或基于已有信息直接推进。"
+            )
+        if not parts:
+            return None
+        return "[系统提示] " + " ".join(parts)
+
+
 def fingerprint_tool_call(name: str, arguments: str) -> str:
     """Stable hash of ``(tool_name, normalized args)``.
 
@@ -113,17 +194,132 @@ class LoopController:
     """
 
     def __init__(
-        self, *, window: int = DEFAULT_WINDOW, threshold: int = DEFAULT_THRESHOLD
+        self,
+        *,
+        window: int = DEFAULT_WINDOW,
+        threshold: int = DEFAULT_THRESHOLD,
+        empty_threshold: int = DEFAULT_EMPTY_THRESHOLD,
+        tool_failure_warn: int = DEFAULT_TOOL_FAILURE_WARN,
+        tool_failure_disable: int = DEFAULT_TOOL_FAILURE_DISABLE,
+        unproductive_threshold: int = DEFAULT_UNPRODUCTIVE_THRESHOLD,
+        reflection_start_round: int = DEFAULT_REFLECTION_START_ROUND,
+        reflection_interval: int = DEFAULT_REFLECTION_INTERVAL,
     ) -> None:
         self._window = window
         self._threshold = threshold
+        self._empty_threshold = max(1, empty_threshold)
+        self._tool_failure_warn = max(1, tool_failure_warn)
+        self._tool_failure_disable = max(self._tool_failure_warn, tool_failure_disable)
+        self._unproductive_threshold = max(1, unproductive_threshold)
+        self._reflection_start_round = max(0, reflection_start_round)
+        self._reflection_interval = max(1, reflection_interval)
         self._recent: deque[ToolAttempt] = deque(maxlen=window)
         self._nudged = False
+        # B2 empty-response sub-policy: a separate consecutive-empty-round counter
+        # (NOT the tool-attempt window) and a one-shot "已用过 fallback" latch.
+        self._consecutive_empty = 0
+        self._fell_back = False
+        # B2 tool circuit breaker: cumulative per-tool failure counts (run-scoped,
+        # never cleared by the nudge window reset) + one-shot latches so each tool
+        # fires its warn / disable transition at most once.
+        self._tool_failures: Counter[str] = Counter()
+        self._tool_warned: set[str] = set()
+        self._tool_disabled: set[str] = set()
+        # B2 no-output early stop: consecutive unproductive rounds (all tools failed,
+        # no content). Reset by any productive round (content OR a tool success).
+        self._consecutive_unproductive = 0
 
     def record(self, attempts: list[ToolAttempt]) -> None:
-        """Append one round's tool attempts (in call order) to the window."""
+        """Append one round's tool attempts (in call order) to the window.
+
+        Also bumps the run-scoped per-tool cumulative failure tally that drives the
+        circuit breaker — independent of the sliding window (which the nudge reset
+        clears), since "this tool keeps failing" is a whole-run signal.
+        """
         for attempt in attempts:
             self._recent.append(attempt)
+            if not attempt.success:
+                self._tool_failures[attempt.tool_name] += 1
+
+    def note_empty_round(self, is_empty: bool) -> None:
+        """Track consecutive empty-response rounds (B2).
+
+        An empty round = the model produced no content and called no tool. A
+        non-empty round (real answer OR a tool call) resets the streak — so only
+        *consecutive* empties escalate toward a degraded finish.
+        """
+        self._consecutive_empty = self._consecutive_empty + 1 if is_empty else 0
+
+    def empty_response_action(self, *, fallback_available: bool) -> Intervention:
+        """Decide what to do after an empty round (B2 degraded ladder).
+
+        ``FINALIZE`` once the consecutive-empty streak hits the threshold (the turn
+        ends as degraded rather than blank); else ``FALLBACK`` for the first empty
+        when a fallback model is available and unused (retry the round on it); else
+        ``CONTINUE`` (retry the round as-is). The fallback latch ensures we escalate
+        the model at most once per run.
+        """
+        if self._consecutive_empty >= self._empty_threshold:
+            return Intervention.FINALIZE
+        if fallback_available and not self._fell_back:
+            self._fell_back = True
+            return Intervention.FALLBACK
+        return Intervention.CONTINUE
+
+    def tool_circuit_breaker(self) -> CircuitBreak:
+        """Tools whose cumulative failures crossed a threshold (call after ``record``).
+
+        Returns the tools that *newly* hit the warn / disable threshold this round
+        (each transition fires once per tool per run). The engine injects the
+        :meth:`CircuitBreak.message` and removes any ``disabled`` tools from the
+        toolset for the remaining rounds. A tool that leaps straight to the disable
+        count is only disabled (no redundant warn).
+        """
+        newly_warned: list[str] = []
+        newly_disabled: list[str] = []
+        for name, count in self._tool_failures.items():
+            if name in self._tool_disabled:
+                continue
+            if count >= self._tool_failure_disable:
+                self._tool_disabled.add(name)
+                self._tool_warned.discard(name)
+                newly_disabled.append(name)
+            elif count >= self._tool_failure_warn and name not in self._tool_warned:
+                self._tool_warned.add(name)
+                newly_warned.append(name)
+        return CircuitBreak(warned=tuple(newly_warned), disabled=tuple(newly_disabled))
+
+    def note_round_productivity(
+        self, *, had_tool_calls: bool, all_failed: bool, had_content: bool
+    ) -> None:
+        """Track consecutive *unproductive* rounds (B2 无产出早停).
+
+        An unproductive round = the model called ≥1 tool, every call failed, and it
+        produced no content. Any productive round — content this round, a tool
+        success, or a no-tool round (handled by the empty/degraded path) — resets
+        the streak, so only a sustained all-failing-no-output run escalates.
+        """
+        unproductive = had_tool_calls and all_failed and not had_content
+        self._consecutive_unproductive = (
+            self._consecutive_unproductive + 1 if unproductive else 0
+        )
+
+    def unproductive_early_stop(self) -> bool:
+        """True once the consecutive-unproductive streak hits the threshold."""
+        return self._consecutive_unproductive >= self._unproductive_threshold
+
+    def reflection_due(self, round_idx: int) -> bool:
+        """Whether to inject a periodic progress-review reflection (B2 反思注入).
+
+        Fires on a fixed cadence — at ``reflection_start_round`` (0-indexed) and every
+        ``reflection_interval`` rounds after (default: round_idx 3 / 6 / 9 …, i.e. the
+        4th / 7th / 10th round). The prompt the next round sees comes from
+        :func:`progress_review_prompt`. Independent of the stuck detector: this is a
+        proactive "re-plan" beat for long runs, not a reaction to a detected loop.
+        """
+        if round_idx < self._reflection_start_round:
+            return False
+        return (round_idx - self._reflection_start_round) % self._reflection_interval == 0
 
     def detect(self) -> StuckSignal | None:
         """Return the strongest stuck signal in the window, or ``None``.

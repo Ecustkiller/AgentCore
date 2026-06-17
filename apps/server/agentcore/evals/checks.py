@@ -17,7 +17,7 @@ from agentcore.evals.types import CheckOutcome, EvalCase, TurnOutcome
 
 @dataclass
 class FinishReasonCheck:
-    """回合正常收口（默认 ``end_turn``，即非 error / max_rounds / degraded）。"""
+    """回合正常收口（默认 ``end_turn``，即非 error / max_rounds / degraded / unproductive）。"""
 
     expected: str = "end_turn"
     name: str = "FinishReason"

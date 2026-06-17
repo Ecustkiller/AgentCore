@@ -77,3 +77,9 @@ ignore = ["B008", "A002", "E402"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Pin tmp dirs to a fixed, project-local basetemp (gitignored via .pytest_*/). The
+# default auto-numbered base (<tmp>/pytest-of-<user>/) keeps a `pytest-current`
+# symlink whose session-finish cleanup throws PermissionError [WinError 5] on Windows
+# (symlink stat denied), making the run exit non-zero even when every test passed. A
+# fixed --basetemp skips that numbered-dir + symlink machinery entirely.
+addopts = "--basetemp=.pytest_tmp"

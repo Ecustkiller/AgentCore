@@ -1,6 +1,7 @@
 import { PageContainer } from "@/components/layout/PageContainer";
 import {
   AppWindow,
+  BookOpen,
   ChevronRight,
   FileText,
   FormInput,
@@ -11,7 +12,6 @@ import {
   Plug,
   Presentation,
   Table2,
-  Waypoints,
   Workflow,
   Wrench,
 } from "lucide-react";
@@ -119,11 +119,11 @@ const GROUPS: ToolboxGroup[] = [
     label: "了解平台",
     entries: [
       {
-        id: "mechanism",
-        title: "团队运行机制",
-        description: "看懂 AI 团队如何分工、协作、跑完一个任务",
-        icon: Waypoints,
-        to: "/toolbox/mechanism",
+        id: "manual",
+        title: "产品手册",
+        description: "从上手到玩转，到看懂团队怎么运转",
+        icon: BookOpen,
+        to: "/toolbox/manual",
       },
     ],
   },

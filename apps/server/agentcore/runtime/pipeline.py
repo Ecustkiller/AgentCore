@@ -34,6 +34,17 @@ from agentcore.runtime.events import (
     message_start,
     plan_review_resolved,
 )
+from agentcore.runtime.facts import (
+    TurnFactLog,
+    TurnStartedFact,
+    current_fact_log,
+    record_turn_fact,
+)
+from agentcore.runtime.journal import (
+    completed_from_journal,
+    entries_from_runs,
+    window_from_journal,
+)
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.prompt import (
     _CEO_CORE_HINT,
@@ -64,6 +75,7 @@ from agentcore.runtime.suspension import (
     SuspensionSaver,
     TurnSuspension,
     captain_transcript,
+    turn_history,
 )
 from agentcore.tools.builtin import (
     build_ceo_tool_registry,
@@ -265,6 +277,31 @@ def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict | None:
     return payload
 
 
+def _durable_journal_entries(
+    fact_log: TurnFactLog, runs: dict[str, Any] | None
+) -> list[dict[str, Any]] | None:
+    """The §18.3 fact log composed into the turn's durable journal entries (or None).
+
+    The fact log is the single ordered stream (execution facts interleaved with the
+    forwarded display facts); the durable journal adds the display-only tail the log
+    does not carry — the single-agent ``process`` timeline (a post-hoc display
+    aggregate) + the closing ``turn_end`` — both read off the already-built ``runs``
+    so the two stay consistent. ``runs.events`` is NOT re-appended: those display
+    events already ride the fact log (ungated), and the read-side projection
+    (:func:`~agentcore.runtime.journal.runs_from_entries`) re-gates them.
+
+    Gated to ``runs`` non-None — the SAME turns that persisted a journal before — so a
+    plain chat turn still writes nothing (storage + None-gate parity); resume / salvage
+    / local-relay paths carry no fact log and fall back to the legacy ``runs`` flatten.
+    """
+    if runs is None:
+        return None
+    tail = entries_from_runs(
+        {"process": runs.get("process"), "finish_reason": runs.get("finish_reason")}
+    )
+    return fact_log.entries() + tail
+
+
 async def run_chat_pipeline(
     *,
     conversation_id: str,
@@ -311,6 +348,18 @@ async def run_chat_pipeline(
     # the CEO delegates, this id is declared as the graph's CAPTAIN 汇聚点 the
     # workers hang under (see DelegateTool._plan_event).
     captain_run_id = new_id()
+
+    # 执行级事件溯源 (§18.3): the turn's single ordered fact log. Bound to the ambient
+    # contextvar BEFORE any sink.emit / captain run so the engine's execution facts
+    # (round_boundary / llm_call / note / message_final) AND the sink's display facts
+    # (run_*/tool_use_*/interaction) accumulate here in ONE order — copied into each
+    # delegated worker's task, so the whole team writes to this log. Reset in finally.
+    fact_log = TurnFactLog()
+    fact_log_token = current_fact_log.set(fact_log)
+    # 执行级事件溯源 Phase 2 ⑤: publish this turn's history so a suspending face captures it
+    # into the durable frame — the resume window splices it ahead of the journal-folded
+    # rounds (the journal stores only history's LENGTH). Reset in finally.
+    history_token = turn_history.set(history)
 
     try:
         # --- Phase 1: Prepare ---
@@ -448,6 +497,21 @@ async def run_chat_pipeline(
         sink.emit(message_start(message_id, conversation_id=conversation_id))
 
         profile = profiles.get("chat")
+
+        # 执行级事件溯源 (§18.3): the turn's HEAD fact — the verbatim CEO system prompt
+        # (dynamic: date / skills / attachments, so captured not re-rendered), the user
+        # message, the model profile, and how many prior messages were folded in. This
+        # is the window fold's anchor; recorded before the captain runs so it is the
+        # log's first fact (message_start is display-only, not journaled).
+        record_turn_fact(
+            TurnStartedFact(
+                system_prompt=chat_system_prompt,
+                user_message=user_message,
+                model_profile=profile.model,
+                history_len=len(history),
+            ).to_fact()
+        )
+
         # Web sources the chat agent consults this turn (web_search / read_url),
         # aggregated + de-duped by the loop for source cards + persistence.
         citations: list[dict] = []
@@ -520,7 +584,7 @@ async def run_chat_pipeline(
             + TokenUsage.from_usage_dict(delegate_tool.usage)
             + TokenUsage.from_usage_dict(revise_tool.usage)
         )
-        finish = (
+        finish = captain_state.finish_override or (
             FinishReason.END_TURN
             if rounds < profile.max_rounds
             else FinishReason.MAX_ROUNDS
@@ -599,6 +663,14 @@ async def run_chat_pipeline(
             "citations": citations,
             "runs": runs,
             "cost_runs": cost_runs,
+            # 执行级事件溯源 (§18.3): the durable journal source — the turn's single
+            # ordered fact log (engine execution facts interleaved with the forwarded
+            # display facts) + the process / turn_end tail. The persistence tail stores
+            # this verbatim and projects it back (gated) for display. Gated to the SAME
+            # turns that persisted before (``runs`` non-None): a plain chat turn keeps
+            # writing no journal (storage + None-gate parity); when it surfaced a graph
+            # or a single-agent process, the journal is now lossless.
+            "journal_entries": _durable_journal_entries(fact_log, runs),
         }
 
     except Exception as e:
@@ -612,6 +684,8 @@ async def run_chat_pipeline(
             "finish_reason": FinishReason.ERROR,
         }
     finally:
+        current_fact_log.reset(fact_log_token)
+        turn_history.reset(history_token)
         sink.close()
         with contextlib.suppress(Exception):
             await llm.close()
@@ -714,9 +788,18 @@ async def _settle_resumed_suspension(
                 note=note,
             )
         )
+        # Re-seed finished workers from the §18.3 journal run-final facts (执行级事件溯源
+        # Phase 2 ⑥ — `completed_from_journal` == the dropped `frame.completed`, gated by
+        # the conformance golden), so the resumed plan bills the whole graph once without
+        # the旁路 blob. Falls back to the in-memory `completed` for a same-process resume
+        # (tests) whose journal was not hydrated; a claimed frame always carries the facts
+        # (else `_resumed_captain_window` already raised on the empty journal upstream).
+        seed_completed = (
+            completed_from_journal(suspension.journal_entries) or suspension.completed
+        )
         delegate_result = await delegate_tool.resume_plan(
             suspension.plan,
-            suspension.completed,
+            seed_completed,
             decision=decision,
             note=note,
             checkpoint_run_ids=suspension.checkpoint_run_ids,
@@ -727,6 +810,50 @@ async def _settle_resumed_suspension(
     raise ValueError(f"unknown suspension kind: {suspension.kind!r}")
 
 
+def _resumed_captain_window(
+    suspension: TurnSuspension, history: list[dict] | None
+) -> list[LLMMessage]:
+    """Rebuild the resumed CEO window from the §18.3 turn journal (Phase 2 ④/⑤).
+
+    The captain transcript at pause is a PROJECTION of the journal, not a stored blob:
+    fold ``suspension.journal_entries`` (the fact stream re-hydrated by ``claim_paused_turn``
+    from ``turn_journal``, or carried in the Sidecar's local frame) back into the LLM
+    window via :func:`window_from_journal`, splicing the reloaded conversation ``history``
+    between the captured system prompt and the user message (the journal stores only its
+    length — history is itself a projection of earlier turns, supplied by the caller exactly
+    as a fresh send builds it: the cloud reloads it from the message DB, the Sidecar from
+    its local frame record). The captain run is inferred from the journal's first
+    ``role="captain"`` round_boundary, so it does not depend on the frame's ``captain_run_id``.
+
+    ``suspension.transcript`` is NO LONGER serialized (Phase 2 ⑤) — it survives only as an
+    in-memory carrier on a same-process resume (tests), so a non-empty one is used (with a
+    warning) but a claimed frame's is empty. When BOTH the journal and the in-memory
+    transcript are empty the pause is unrecoverable (its best-effort ``turn_journal`` write
+    was lost): fail LOUD rather than resume on a silently empty window.
+    """
+    history_msgs = (
+        [LLMMessage(role=h["role"], content=h["content"]) for h in history]
+        if history
+        else None
+    )
+    window = window_from_journal(suspension.journal_entries, history=history_msgs)
+    if window:
+        return window
+    if suspension.transcript:
+        logger.warning(
+            "resume.window_from_frame_fallback",
+            message_id=suspension.message_id,
+            reason="journal_unavailable_inmemory_transcript",
+            frame_transcript_len=len(suspension.transcript),
+        )
+        return list(suspension.transcript)
+    raise RuntimeError(
+        "resume: cannot rebuild the CEO window — no journal_entries to fold and no "
+        "in-memory transcript (the pause's turn_journal write was lost); "
+        f"message_id={suspension.message_id}"
+    )
+
+
 async def resume_chat_pipeline(
     *,
     suspension: TurnSuspension,
@@ -735,6 +862,7 @@ async def resume_chat_pipeline(
     selected: list[str] | None = None,
     sink: EventSink,
     backend: WorkspaceBackend,
+    history: list[dict] | None = None,
     llm_credentials: LLMCredentials | None = None,
     profile_set: ProfileSet | None = None,
     session_saver: SessionSaver | None = None,
@@ -744,22 +872,30 @@ async def resume_chat_pipeline(
 ) -> dict:
     """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
 
-    Rebuilds the turn from the durable :class:`TurnSuspension` frame and finishes it:
-    re-wire the CEO toolset, seed the journal with the pre-pause graph, apply the
-    user's decision to the paused frame by kind (:func:`_settle_resumed_suspension`),
-    feed the settled result back as the suspended tool result, and — unless the
-    answer ended the turn in-band (ask_user ``stop``) — run the CEO loop on the
-    rebuilt transcript to its reply. The whole turn is billed ONCE here, under the
-    ORIGINAL ``message_id`` so the assistant row + ledger reuse it. A downstream
-    checkpoint can pause again — the same hooks re-persist a fresh frame, so resume
-    is fully re-entrant. ``selected`` carries the user's option picks (ask_user only).
-    Returns the same result shape as :func:`run_chat_pipeline` for the service.
+    Rebuilds the turn from the §18.3 turn journal and finishes it: re-wire the CEO
+    toolset, seed the display journal with the pre-pause graph, **rebuild the CEO window
+    by folding the journal facts** (:func:`_resumed_captain_window` — the captain
+    transcript is a projection of the journal, no longer read from ``frame.transcript``,
+    执行级事件溯源 Phase 2 ④), apply the user's decision to the paused frame by kind
+    (:func:`_settle_resumed_suspension`), feed the settled result back as the suspended
+    tool result, and — unless the answer ended the turn in-band (ask_user ``stop``) — run
+    the CEO loop on the rebuilt window to its reply. ``history`` is the reloaded prior
+    context (the caller passes ``load_chat_context(...)[:-1]`` exactly as a fresh send),
+    spliced into the window head since the journal stores only its length. The whole turn
+    is billed ONCE here, under the ORIGINAL ``message_id`` so the assistant row + ledger
+    reuse it. A downstream checkpoint can pause again — the same hooks re-persist a fresh
+    frame, so resume is fully re-entrant. ``selected`` carries the user's option picks
+    (ask_user only). Returns the same result shape as :func:`run_chat_pipeline`.
     """
     profiles = profile_set or default_profile_set()
     message_id = suspension.message_id
     conversation_id = suspension.conversation_id
     captain_run_id = suspension.captain_run_id or new_id()
     llm = build_provider(llm_credentials)
+    # Republish history so a re-pause DURING the settle (a downstream checkpoint while
+    # resume_plan runs) captures it into the fresh frame — symmetric with the live turn
+    # (Phase 2 ⑤). Reset in finally.
+    history_token = turn_history.set(history or [])
     try:
         worker_tools = build_worker_registry()
         # Same system-skill registry as a fresh turn so the resumed CEO loop can
@@ -816,10 +952,16 @@ async def resume_chat_pipeline(
         # checkpoint, then settle the pause.
         sink.seed_journal(suspension.journal)
 
+        # Rebuild the CEO window by FOLDING the turn journal (Phase 2 ④): the captain
+        # transcript at pause is a projection of the §18.3 facts, not a stored blob —
+        # window_from_journal(journal_entries) + the reloaded history reconstructs the
+        # exact messages the CEO suspended on (the conformance golden gates this ==).
+        transcript = _resumed_captain_window(suspension, history)
+
         # Publish the pre-pause CEO transcript so a re-pause DURING the settle (a
         # second downstream checkpoint while resume_plan runs) captures the same
         # transcript the CEO is still suspended on — symmetric with the original pause.
-        token = captain_transcript.set(suspension.transcript)
+        token = captain_transcript.set(transcript)
         try:
             settled = await _settle_resumed_suspension(
                 suspension,
@@ -833,13 +975,13 @@ async def resume_chat_pipeline(
         finally:
             captain_transcript.reset(token)
 
-        # Rebuild the CEO transcript: the stored messages (ending at the assistant
+        # Rebuild the CEO transcript: the folded window (ending at the assistant
         # suspended call) + that call's settled tool result.
-        messages = list(suspension.transcript)
+        messages = list(transcript)
         # Carry the CEO's pre-pause reply forward: the resumed loop below starts from a
         # blank content, so without this the persisted content (and the next turn's LLM
         # history) would lose everything written before the pause — parity with live.
-        pre_pause_content = _pre_pause_content(suspension.transcript)
+        pre_pause_content = _pre_pause_content(transcript)
         _append_resumed_tool_results(messages, suspension.tool_call_id, settled.output)
 
         # ask_user stop: the closing note IS the reply (terminal effect) — finish
@@ -921,6 +1063,7 @@ async def resume_chat_pipeline(
             "finish_reason": FinishReason.ERROR,
         }
     finally:
+        turn_history.reset(history_token)
         sink.close()
         with contextlib.suppress(Exception):
             await llm.close()
@@ -977,8 +1120,10 @@ def _finish_resume_turn(
         + TokenUsage.from_usage_dict(delegate_tool.usage)
         + TokenUsage.from_usage_dict(revise_tool.usage)
     )
-    finish = (
-        FinishReason.END_TURN if rounds < profile.max_rounds else FinishReason.MAX_ROUNDS
+    finish = captain_state.finish_override or (
+        FinishReason.END_TURN
+        if rounds < profile.max_rounds
+        else FinishReason.MAX_ROUNDS
     )
     captain_cost = captain_run_cost_from_state(captain_run_id, captain_state)
     cost_runs = [

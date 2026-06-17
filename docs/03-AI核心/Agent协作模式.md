@@ -86,7 +86,8 @@ CEO 是唯一裁决者，用户裁决仅在置信度低时触发。
 | 意见冲突 | CEO 读取各 worker 产物后裁决（收尾时综合） |
 | 资源冲突 | DAG 依赖关系避免并发写入 |
 | 优先级冲突 | CEO 负责任务排序（`delegate` 的 `depends_on`） |
-| 置信度低 | CEO 调内置 `ask_user` 升级给用户拍板（提交/停止；选项可单/多选），暂停回合待答复后回流 ReAct 循环 ✅ |
+| 置信度低（阻塞） | CEO 调内置 `ask_user` 升级给用户拍板（提交/停止；选项可单/多选），**暂停回合**待答复后回流 ReAct 循环——高风险 / 不可逆岔路、或 CEO 没有合理默认时用 ✅ |
+| 置信度低（非阻塞）✅ | CEO 已有合理默认、只想给用户一个纠偏机会时，调 `ask_user(blocking=false)`：抛出问题 + 写明默认（`assumptions` 或某 `question` 的 `default`），**不挂起、立刻按默认续跑**把本回合做完；问题以非 gating 的 `content_delta` 提示给用户，答复作为新消息在后续轮次并入。无合理默认则拒绝并引导改用 `blocking=true`（防"非阻塞=偷偷瞎猜"）。这是 worker `escalate` 在 CEO↔用户层的对偶：同样「问而不停」 → 见代码：`tools/builtin/ask_user.py` `_post_nonblocking` |
 
 ---
 
@@ -171,8 +172,7 @@ CEO 是唯一裁决者，用户裁决仅在置信度低时触发。
 |------|------|------|
 | 协作边界 | **对话是产物的天然归属**（而非可选文件夹） | 一次对话的产物天然属于这次协作 |
 | 产物空间 | 对话级工作区，所有参与 Agent 共享可见 | 消除"无 folder 时产物不可见"的断链 |
-| DAG 注入方式 | **现状**：下游按 `depends_on` 取上游 `RunState.content`，由 `result_handling`（`pass_through` / `summarize`）控保真度 | 调度器内传递，非 file_id 指针 |
-| ⏳ 远期 | **递指针不递全文**：注入 file_id + 摘要，需全文则自行读取 | 见 [`编排器与CEO主Agent.md` §2.3](/docs/03-AI核心/编排器与CEO主Agent.md) |
+| DAG 注入方式 | 下游按 `depends_on` 取上游 `RunState.content`，`result_handling`（`pass_through`/`summarize`）控保真度；**已落盘的产物改递指针**（摘要 + 路径 + `file_read`，不占全文预算），worker 开局另注入「工作区产物清单」（队友产物 + 既有文件，经 backend 一等能力 `index_files` 云/本地一致） | 文字走 prompt、文件递指针、工作区可发现；详见 [`编排器与CEO主Agent.md` §2.3](/docs/03-AI核心/编排器与CEO主Agent.md) |
 | 安全网 | Agent 未主动落库时，系统自动保存产物到工作区 | 宁污勿漏——误兜底可清理，下游断料才是致命的 |
 | 安全网策略 | **只追加，从不覆盖** | 覆盖即静默丢数据，一个会弄丢东西的安全网就不是安全网 |
 

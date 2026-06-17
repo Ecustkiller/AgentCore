@@ -234,16 +234,20 @@ export function ConversationsPage() {
               </button>
             </div>
 
-            {/* 文件夹即工作区: a selected folder is a project, so offer to open its
-                workspace overview (files + chats) — the "browse a project's files
-                without entering a chat" entry. */}
+            {/* 文件夹即工作区: a selected folder is a project. Files live on the 文件
+                hub (`/files`); this cross-links there with the project's root pre-
+                focused (端态 I — no `/folders/:id` overview page). */}
             {selected !== ALL_KEY &&
               selected !== UNGROUPED_KEY &&
               selected !== ARCHIVED_KEY &&
               folderIds.has(selected) && (
                 <button
                   type="button"
-                  onClick={() => navigate(`/folders/${selected}`)}
+                  onClick={() =>
+                    navigate("/files", {
+                      state: { focusWsId: `folder:${selected}` },
+                    })
+                  }
                   className="mt-3 flex w-full shrink-0 items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-left text-sm text-foreground hover:border-foreground/30 hover:bg-accent/60"
                 >
                   <FolderOpen
@@ -251,7 +255,7 @@ export function ConversationsPage() {
                     className="shrink-0 text-muted-foreground"
                   />
                   <span className="min-w-0 flex-1 truncate">
-                    打开「{activeName}」工作区 · 浏览文件
+                    浏览「{activeName}」的文件
                   </span>
                   <ArrowRight
                     size={15}
@@ -327,9 +331,10 @@ function FilterRow({
   );
 }
 
-/** A real-folder filter row: select to filter the conversation list; hover to jump
- * to its workspace overview. Folder lifecycle (新建 / 重命名 / 删除 / 添加本地文件夹)
- * lives on the 文件 hub now (文件夹即工作区), so this row is filter-only. */
+/** A real-folder filter row: select to filter the conversation list; hover to browse
+ * its files on the 文件 hub (`/files`, with the root pre-focused). Folder lifecycle
+ * (新建 / 重命名 / 删除 / 添加本地文件夹) lives on that hub too (文件夹即工作区), so
+ * this row is filter-only. */
 function FolderFilterRow({
   folder,
   count,
@@ -372,11 +377,15 @@ function FolderFilterRow({
         )}
       </button>
       {hovered ? (
-        <SimpleTooltip label="打开工作区">
+        <SimpleTooltip label="浏览文件">
           <button
             type="button"
-            aria-label="打开文件夹工作区"
-            onClick={() => navigate(`/folders/${folder.id}`)}
+            aria-label="浏览此文件夹的文件"
+            onClick={() =>
+              navigate("/files", {
+                state: { focusWsId: `folder:${folder.id}` },
+              })
+            }
             className="flex size-6 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"
           >
             <FolderOpen size={13} />

@@ -11,15 +11,17 @@ numbering (engine-assigned card numbers folded back into the tool output so the
 model cites by a number that always lines up with the card).
 """
 
+import asyncio
 from pathlib import Path
 
 import pytest
 
+from agentcore.config import settings
 from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.config import ModelProfile
 from agentcore.llm.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
-from agentcore.runtime.engine import react_loop
-from agentcore.runtime.events import EventSink
+from agentcore.runtime.engine import react_loop, resolve_tool_timeout
+from agentcore.runtime.events import EventSink, FinishReason
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -179,7 +181,9 @@ async def test_repeated_call_nudges_then_finalizes():
 
 async def test_repeated_failure_nudge_is_failure_flavored():
     same = _tool_chunk("search", '{"q": "x"}')
-    # 3 identical failures → NUDGE; round 3 the model gives a plain answer.
+    # 3 identical failures → repeated-failure NUDGE; round 3 the model gives a plain
+    # answer. (The cumulative circuit breaker also fires its own steers here — they're
+    # a separate mechanism; this test pins the fingerprint-flavored nudge specifically.)
     provider = _ScriptedProvider(
         [[same], [same], [same], [_content_chunk("gave up, here is what I know")]]
     )
@@ -187,7 +191,13 @@ async def test_repeated_failure_nudge_is_failure_flavored():
     (content, *_), messages = await _run(provider, tool, max_rounds=20)
 
     assert content == "gave up, here is what I know"
-    nudges = [m for m in messages if m.role == "user" and m.content and "失败" in m.content]
+    # the distinctive repeated-failure nudge (anchored to the exact-repeat count) is
+    # injected exactly once
+    nudges = [
+        m
+        for m in messages
+        if m.role == "user" and m.content and "已用相同方式失败" in m.content
+    ]
     assert len(nudges) == 1
 
 
@@ -439,3 +449,311 @@ async def test_usage_sink_empty_when_first_round_raises():
             usage_sink=sink_usage,
         )
     assert sink_usage == []
+
+
+# --- B1: engine-level tool timeout backstop ----------------------------------
+
+
+def _schema(category: ToolCategory, timeout: float | None = None) -> ToolSchema:
+    return ToolSchema(
+        name="t",
+        description="d",
+        parameters={"type": "object", "properties": {}},
+        category=category,
+        timeout_seconds=timeout,
+    )
+
+
+def test_resolve_tool_timeout_by_category():
+    # The exemption policy is the part most likely to silently regress and break a
+    # legitimate long wait (delegate's sub-DAG / ask_user's user round-trip), so pin it.
+    assert resolve_tool_timeout(_schema(ToolCategory.ORCHESTRATION)) is None
+    assert resolve_tool_timeout(_schema(ToolCategory.INTERACTION)) is None
+    # execution runs code → higher ceiling; everything else → the flat default
+    assert (
+        resolve_tool_timeout(_schema(ToolCategory.EXECUTION))
+        == settings.tool_execution_timeout_seconds
+    )
+    assert (
+        resolve_tool_timeout(_schema(ToolCategory.SEARCH))
+        == settings.tool_default_timeout_seconds
+    )
+    assert (
+        resolve_tool_timeout(_schema(ToolCategory.FILESYSTEM))
+        == settings.tool_default_timeout_seconds
+    )
+    # an explicit per-tool override wins over the category rule — even the exemption
+    assert resolve_tool_timeout(_schema(ToolCategory.ORCHESTRATION, 12.5)) == 12.5
+    assert resolve_tool_timeout(_schema(ToolCategory.EXECUTION, 5.0)) == 5.0
+
+
+class _SlowTool:
+    """A tool that sleeps well past its declared ceiling, to trip the engine timeout."""
+
+    def __init__(self, *, delay: float, timeout_seconds: float | None) -> None:
+        self._delay = delay
+        self._timeout_seconds = timeout_seconds
+        self.completed = False
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="slow",
+            description="stub",
+            parameters={"type": "object", "properties": {}},
+            category=ToolCategory.SEARCH,
+            timeout_seconds=self._timeout_seconds,
+        )
+
+    async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
+        await asyncio.sleep(self._delay)
+        self.completed = True  # only reached if the timeout did NOT fire
+        return ToolResult(tool_call_id="", success=True, output="late result")
+
+
+async def test_tool_timeout_aborts_and_loop_recovers():
+    # A tool that blows its (tiny) ceiling is aborted by the engine: the model gets a
+    # timeout tool result it can adapt to, and the turn reaches an answer instead of
+    # hanging on the wedged call. The tool's own body is cancelled (never completes).
+    provider = _ScriptedProvider(
+        [[_tool_chunk("slow", "{}")], [_content_chunk("recovered")]]
+    )
+    tool = _SlowTool(delay=5.0, timeout_seconds=0.05)
+    messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    content, _r, _u, _rounds = await react_loop(
+        messages=messages,
+        llm=provider,
+        tools=_registry(tool),
+        sink=EventSink(),
+        tool_context=_context(),
+        profile=profile,
+    )
+
+    assert content == "recovered"
+    assert tool.completed is False  # the sleep was cancelled, not awaited to the end
+    tool_msg = next(m for m in messages if m.role == "tool")
+    assert "中止" in (tool_msg.content or "")  # the model saw an honest timeout error
+
+
+# --- B2: empty-response degraded + fallback model -----------------------------
+
+
+class _ModelRecordingProvider:
+    """Scripted provider that also records each request's model (to assert fallback)."""
+
+    def __init__(self, rounds: list[list[LLMChunk]]) -> None:
+        self._rounds = rounds
+        self.calls = 0
+        self.models: list[str] = []
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        self.models.append(request.model)
+        chunks = self._rounds[self.calls] if self.calls < len(self._rounds) else []
+        self.calls += 1
+        for chunk in chunks:
+            yield chunk
+
+
+async def _run_loop(provider, profile, *, finish_override_sink=None, tool=None):  # noqa: ANN001
+    messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
+    return await react_loop(
+        messages=messages,
+        llm=provider,
+        tools=_registry(tool or _StubTool()),
+        sink=EventSink(),
+        tool_context=_context(),
+        profile=profile,
+        finish_override_sink=finish_override_sink,
+    )
+
+
+async def test_empty_response_falls_back_to_stronger_model_and_recovers():
+    # Round 0 is empty (no content, no tool) → the engine retries round 1 on the
+    # profile's fallback model, which answers. The turn finishes clean (not degraded).
+    provider = _ModelRecordingProvider([[], [_content_chunk("recovered")]])
+    profile = ModelProfile(
+        model="primary",
+        fallback_model="fallback-pro",
+        thinking=False,
+        reasoning_effort=None,
+        max_rounds=20,
+    )
+    finish_override: list[FinishReason] = []
+    content, _r, _u, _rounds = await _run_loop(
+        provider, profile, finish_override_sink=finish_override
+    )
+
+    assert content == "recovered"
+    assert provider.models == ["primary", "fallback-pro"]  # escalated on the empty
+    assert finish_override == []  # recovered → not degraded
+
+
+async def test_consecutive_empty_after_fallback_finishes_degraded():
+    # Round 0 empty → fallback; round 1 (on fallback) ALSO empty → the streak hits the
+    # threshold → degraded finish (no blank-but-clean end_turn).
+    provider = _ModelRecordingProvider([[], []])
+    profile = ModelProfile(
+        model="primary",
+        fallback_model="fallback-pro",
+        thinking=False,
+        reasoning_effort=None,
+        max_rounds=20,
+    )
+    finish_override: list[FinishReason] = []
+    content, _r, _u, _rounds = await _run_loop(
+        provider, profile, finish_override_sink=finish_override
+    )
+
+    assert content == ""
+    assert provider.models == ["primary", "fallback-pro"]
+    # surfaced as FinishReason.DEGRADED by the caller
+    assert finish_override == [FinishReason.DEGRADED]
+
+
+async def test_empty_response_degrades_without_fallback_model():
+    # No fallback model configured: two consecutive empties go straight to degraded,
+    # and the model is never switched.
+    provider = _ModelRecordingProvider([[], []])
+    profile = ModelProfile(
+        model="primary",
+        fallback_model=None,
+        thinking=False,
+        reasoning_effort=None,
+        max_rounds=20,
+    )
+    finish_override: list[FinishReason] = []
+    await _run_loop(provider, profile, finish_override_sink=finish_override)
+
+    assert provider.models == ["primary", "primary"]  # no escalation
+    assert finish_override == [FinishReason.DEGRADED]
+
+
+# --- B2: tool failure circuit breaker + no-output early stop --------------------
+
+
+class _ToolsRecordingProvider:
+    """Scripted provider that records the tool names offered to it each round.
+
+    Lets a test assert the circuit breaker actually removed a disabled tool from the
+    toolset (request.tools) on the round after it tripped, not just that a steer was
+    injected.
+    """
+
+    def __init__(self, rounds: list[list[LLMChunk]]) -> None:
+        self._rounds = rounds
+        self.calls = 0
+        self.offered: list[list[str]] = []
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        self.offered.append([t["function"]["name"] for t in (request.tools or [])])
+        chunks = self._rounds[self.calls] if self.calls < len(self._rounds) else []
+        self.calls += 1
+        for chunk in chunks:
+            yield chunk
+
+
+async def test_circuit_breaker_warns_then_disables_failing_tool():
+    # `flaky` fails with DIFFERENT args every round (so fingerprint-keyed
+    # REPEATED_FAILURE never trips) and the model writes content each round (so the
+    # unproductive early-stop never trips) — isolating the cumulative circuit breaker:
+    # warn at the 2nd failure, disable (remove from the toolset) at the 3rd.
+    reg = ToolRegistry()
+    reg.register(_StubTool(success=False, name="flaky"))
+    reg.register(_StubTool(success=True, name="other"))
+    provider = _ToolsRecordingProvider(
+        [
+            [_content_chunk("t0"), _tool_chunk("flaky", '{"q": "a"}')],
+            [_content_chunk("t1"), _tool_chunk("flaky", '{"q": "b"}')],
+            [_content_chunk("t2"), _tool_chunk("flaky", '{"q": "c"}')],
+            [_content_chunk("done")],
+        ]
+    )
+    messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    await react_loop(
+        messages=messages,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        tool_context=_context(),
+        profile=profile,
+    )
+
+    steers = [m.content or "" for m in messages if m.role == "user"]
+    assert any("请不要再以相同方式调用" in s for s in steers)  # warn at 2 failures
+    assert any("停用" in s for s in steers)  # disable at 3 failures
+    # the disabled tool is gone from the toolset offered on the round AFTER disable
+    assert provider.offered[0] == ["flaky", "other"]
+    assert provider.offered[-1] == ["other"]
+
+
+async def test_unproductive_rounds_early_stop_and_salvage_answer():
+    # Every round: one tool call that FAILS (varied args → not a repeated pattern) and
+    # no content. After the unproductive threshold (3) consecutive such rounds the loop
+    # early-stops via a forced tool-free answer and surfaces FinishReason.UNPRODUCTIVE.
+    flaky = _StubTool(success=False, name="flaky")
+    provider = _ScriptedProvider(
+        [
+            [_tool_chunk("flaky", '{"q": "a"}')],
+            [_tool_chunk("flaky", '{"q": "b"}')],
+            [_tool_chunk("flaky", '{"q": "c"}')],
+            [_content_chunk("salvaged answer")],  # the forced finalize round
+        ]
+    )
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    finish_override: list[FinishReason] = []
+    content, _r, _u, rounds = await _run_loop(
+        provider, profile, finish_override_sink=finish_override, tool=flaky
+    )
+
+    assert content == "salvaged answer"
+    assert rounds == 3  # stopped at the 3rd unproductive round, before the cap
+    assert provider.calls == 4  # 3 loop rounds + 1 forced finalize
+    assert finish_override == [FinishReason.UNPRODUCTIVE]
+
+
+async def test_reflection_injected_on_long_run_cadence():
+    # Distinct SUCCESSFUL tool calls each round (no repeat / failure / unproductive /
+    # circuit-breaker interference) over a long run → only the periodic reflection
+    # fires, on the round_idx 3 / 6 cadence (the 4th / 7th round), anchored to the
+    # round number.
+    rounds: list[list[LLMChunk]] = [
+        [_tool_chunk("search", '{"q": "%d"}' % i)] for i in range(8)
+    ]
+    rounds.append([_content_chunk("final")])
+    provider = _ScriptedProvider(rounds)
+    (content, *_), messages = await _run(provider, _StubTool(), max_rounds=20)
+
+    assert content == "final"
+    reviews = [
+        m
+        for m in messages
+        if m.role == "user" and m.content and "进度复盘" in m.content
+    ]
+    assert len(reviews) == 2  # injected after round_idx 3 and 6
+    assert any("已进行 4 轮" in (m.content or "") for m in reviews)
+    assert any("已进行 7 轮" in (m.content or "") for m in reviews)
+
+
+async def test_productive_round_resets_unproductive_streak():
+    # A round that produces content (even alongside a failing tool) breaks the streak,
+    # so an intermittent failure run is NOT early-stopped as unproductive.
+    flaky = _StubTool(success=False, name="flaky")
+    provider = _ScriptedProvider(
+        [
+            [_tool_chunk("flaky", '{"q": "a"}')],  # unproductive (fail, no content)
+            [_content_chunk("progress"), _tool_chunk("flaky", '{"q": "b"}')],  # resets
+            [_tool_chunk("flaky", '{"q": "c"}')],  # streak restarts at 1
+            [_content_chunk("final")],
+        ]
+    )
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    finish_override: list[FinishReason] = []
+    content, _r, _u, _rounds = await _run_loop(
+        provider, profile, finish_override_sink=finish_override, tool=flaky
+    )
+
+    # reached the model's own answer — never early-stopped
+    assert "final" in content
+    assert finish_override == []

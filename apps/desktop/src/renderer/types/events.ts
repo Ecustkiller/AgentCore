@@ -9,6 +9,7 @@ export type SSEEventType =
   | "approval_resolved"
   | "checkpoint_required"
   | "checkpoint_resolved"
+  | "question_posted"
   | "plan_review_required"
   | "plan_review_resolved"
   | "run_plan"
@@ -107,15 +108,19 @@ export interface ToolUseEndPayload {
   display?: ToolDisplay | null;
 }
 
-/** One step in a single-agent turn's 思考+工具 process timeline (前端UX设计.md §一).
- * The CEO's own reasoning interleaved with its tool calls, in turn order: a
- * `reasoning` step coalesces consecutive thinking deltas; a `tool` step records one
- * call, resolved (result + status) by its matching `tool_use_end`. Built live from
- * the SSE stream (streamConversation) and persisted on `messages.runs.process`
- * (snake_case wire shape — exempt from the generated-types rule like the rest of
- * the runs payload) so a reloaded turn replays the same inline panel. */
+/** One step in a single-agent turn's 思考·正文·工具 process timeline (前端UX设计.md
+ * §一B — Cursor 式全内联时间线). The CEO's own reasoning, reply text, and tool calls
+ * interleaved in true emission order: a `reasoning` step coalesces consecutive
+ * thinking deltas, a `content` step coalesces consecutive reply-text deltas, and a
+ * `tool` step records one call resolved (result + status) by its matching
+ * `tool_use_end`. The TRAILING `content` step is the final answer — there is no
+ * separate answer block; the timeline IS the reply. Built live from the SSE stream
+ * (streamConversation) and persisted on `messages.runs.process` (snake_case wire
+ * shape — exempt from the generated-types rule like the rest of the runs payload)
+ * so a reloaded turn replays the same inline timeline. */
 export type ProcessStep =
   | { kind: "reasoning"; text: string }
+  | { kind: "content"; text: string }
   | {
       kind: "tool";
       id: string;
@@ -221,6 +226,23 @@ export interface CheckpointResolvedPayload {
   decision: CheckpointDecision;
   note: string;
   selected?: string[];
+}
+
+/** A non-blocking ask the CEO posted (ask_user blocking=false, Cursor 式): it
+ * surfaced a question it already has a default for and KEPT WORKING — no suspend, no
+ * resolve. Same rich shape as {@link CheckpointRequiredPayload} so the card body is
+ * reused, but it never gates the turn: the client renders a non-gating card whose
+ * option chips 回填 the composer (the user's answer rides an ordinary next-turn
+ * message). `ask_id` keys the card (dedupe a re-delivered event). Journaled, so it
+ * replays inline on reload; there is no paired `*_resolved` (it was never pending). */
+export interface QuestionPostedPayload {
+  ask_id: string;
+  conversation_id: string;
+  question: string;
+  context: string;
+  assumptions: AskAssumption[];
+  questions: AskQuestion[];
+  style_options: AskStyleOption[];
 }
 
 /** One just-completed checkpoint step under review (plan_review, 结构化挂起 2a):
@@ -406,7 +428,13 @@ export interface RunProgressPayload {
 }
 
 export interface MessageEndPayload {
-  finish_reason: "end_turn" | "max_rounds" | "degraded" | "error" | "cancelled";
+  finish_reason:
+    | "end_turn"
+    | "max_rounds"
+    | "degraded"
+    | "unproductive"
+    | "error"
+    | "cancelled";
   usage?: {
     input_tokens: number;
     output_tokens: number;
@@ -521,6 +549,7 @@ export type SSEPayloadMap = {
   approval_resolved: ApprovalResolvedPayload;
   checkpoint_required: CheckpointRequiredPayload;
   checkpoint_resolved: CheckpointResolvedPayload;
+  question_posted: QuestionPostedPayload;
   plan_review_required: PlanReviewRequiredPayload;
   plan_review_resolved: PlanReviewResolvedPayload;
   run_plan: RunPlanPayload;

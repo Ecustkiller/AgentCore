@@ -62,6 +62,62 @@ class InviteListResponse(BaseModel):
     total: int
 
 
+# --- Admin (用户管理: 平台管理员后台, admin-only) ---
+
+
+class AdminUserResponse(BaseModel):
+    """A platform account as seen by the admin console (full record + quota state).
+
+    Richer than ``UserResponse`` (the self-view): adds ``status`` and the per-user
+    quota overrides so the operator can manage accounts. Each quota override is
+    nullable — NULL = inherit the global config threshold for that dimension
+    (成本配额与计费.md §一, 决策④); a value (incl. 0 = unlimited) overrides it.
+    """
+
+    id: str
+    username: str
+    display_name: str
+    email: str | None
+    role: Literal["user", "admin"]
+    status: Literal["active", "disabled"]
+    is_unlimited: bool
+    quota_daily_tokens: int | None
+    quota_monthly_cost_usd: float | None
+    quota_daily_requests: int | None
+    default_model_mode: str | None
+    created_at: datetime
+
+
+class AdminUserListResponse(BaseModel):
+    data: list[AdminUserResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminUpdateUserRequest(BaseModel):
+    """Partial update of a user's role / status / quota (admin console).
+
+    Tri-state semantics key off which fields are *present* in the request body
+    (Pydantic ``model_fields_set``), not their value:
+    - field absent        → leave unchanged
+    - quota field = null  → clear the override (inherit the global config)
+    - quota field = value → set the override (0 = unlimited for that dimension)
+
+    ``is_unlimited`` short-circuits all three quota dimensions for trusted
+    accounts. Sending ``role``/``status`` that targets the caller's own account in
+    a way that would revoke their own admin access is refused at the service layer
+    (no self-lockout — the platform always keeps ≥1 active admin).
+    """
+
+    role: Literal["user", "admin"] | None = None
+    status: Literal["active", "disabled"] | None = None
+    is_unlimited: bool | None = None
+    quota_daily_tokens: int | None = Field(None, ge=0)
+    quota_monthly_cost_usd: float | None = Field(None, ge=0)
+    quota_daily_requests: int | None = Field(None, ge=0)
+
+
 # --- Conversations ---
 
 
@@ -236,6 +292,12 @@ class FolderSummary(BaseModel):
     # Local-mode binding (desktop FS root id); None = cloud. Drives the mode badge
     # for the folder and all its conversations (§七).
     local_root_id: str | None = None
+    # Sub-path within the bound local root (工作区对称化 D1a); None/"" = the root
+    # itself (an explicitly-added local project). A non-empty segment marks a
+    # per-conversation workspace lazily promoted under a shared container root —
+    # the desktop binds its sidecar engine to ``local_root_id`` + this subpath so a
+    # promoted bare chat's local engine runs in its own directory (§四).
+    local_subpath: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -296,6 +358,12 @@ class WorkspaceSummary(BaseModel):
     location: Literal["cloud", "local"]
     # The bound desktop root id when local; None when cloud.
     root_id: str | None = None
+    # Sub-path within ``root_id`` this workspace lives at (工作区对称化 D1a). Set for a
+    # per-conversation local workspace lazily promoted under a shared container root;
+    # None for cloud and for explicitly-added local projects bound at their root. The
+    # desktop browses ``root_id`` + ``subpath`` so each sub-workspace shows only its
+    # own files.
+    subpath: str | None = None
     # Whether the space holds files. Folders always list (a project is a project);
     # ungrouped spaces list only when non-empty (F1) — so this is the filter that
     # let them in. Always True for local (the server can't see local files).
@@ -352,6 +420,13 @@ class StoredAttachment(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=32000)
     attachments: list[MessageAttachment] = Field(default_factory=list, max_length=20)
+    # Desktop default local container root (工作区对称化 D1a). When a 裸聊's first
+    # file lands, it is lazily promoted into a *local* workspace under this root (a
+    # per-conversation subpath) instead of a cloud folder — keeping desktop and
+    # cloud symmetric. None = web / mobile / explicit "云端临时对话" → cloud promote.
+    # Opaque desktop FS-root handle (same trust model as ``local_root_id``); ignored
+    # once the conversation already has a folder.
+    local_container_root_id: str | None = Field(None, max_length=200)
 
 
 class RegenerateMessageRequest(BaseModel):
@@ -612,42 +687,14 @@ class MessageListResponse(BaseModel):
 # handoff is the separate explicit bridge).
 
 
-class CostRunPayload(BaseModel):
-    """One per-run cost ledger row the local pipeline priced (``asdict(RunCost)``).
-
-    The sidecar runs the SAME engine and prices each run once via the SAME
-    ``calculate_cost``, so its ledger has the identical shape the cloud turn builds
-    (captain root + one row per delegated member). The desktop relays it verbatim;
-    the server records it through the shared ``CostEventRepository.record_runs``,
-    which is idempotent by ``run_id`` (a retried write-back never double-bills).
-
-    Trust boundary (计费): these counts are reported by the user's machine, so they
-    are authoritative only for BYOK display (the user pays DeepSeek directly).
-    Platform-mode authoritative metering belongs at the cloud inference proxy
-    (远期规划 §一 终态), not here — see ``record_local_turn``.
-    """
-
-    run_id: str = Field(..., max_length=64)
-    parent_run_id: str | None = Field(None, max_length=64)
-    agent_id: str | None = Field(None, max_length=64)
-    role: str = Field("member", max_length=32)
-    model: str = Field("", max_length=128)
-    tokens: dict[str, int] = Field(default_factory=dict)
-    cost: dict[str, int] = Field(default_factory=dict)
-    cost_total_nano: int = Field(0, ge=0)
-    currency: str = Field("USD", max_length=8)
-    rounds: int = Field(0, ge=0)
-    duration_ms: int = Field(0, ge=0)
-
-
 class RecordTurnRequest(BaseModel):
     """A finished local (sidecar) turn to persist: the user message + assistant reply.
 
     Carries the assistant outcome the local pipeline returned (content / reasoning /
     citations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored
-    ids agree) plus its priced ``cost_runs`` ledger. The display token totals ride
-    on ``Message.usage``; the ``cost_runs`` ledger is the spend truth source written
-    to ``cost_events`` — see :class:`CostRunPayload` for the BYOK trust boundary.
+    ids agree). The display token totals ride on ``Message.usage``. Spend is NOT sent:
+    a sidecar turn's LLM calls are metered authoritatively at the cloud inference proxy
+    (``/v1/inference``, Slice 4a), so this write-back persists content only.
     """
 
     user_message: str = Field(..., min_length=1, max_length=32000)
@@ -655,7 +702,12 @@ class RecordTurnRequest(BaseModel):
     reasoning_content: str | None = Field(None, max_length=500_000)
     citations: list[Citation] = Field(default_factory=list, max_length=50)
     runs: RunsPayload | None = None
-    cost_runs: list[CostRunPayload] = Field(default_factory=list, max_length=200)
+    # The client-minted id of the user bubble (a clean UUID). Pinning the persisted
+    # user row to it makes the whole write-back idempotent: the desktop retries this
+    # POST on a flaky response, and a retry after a write we DID commit must not
+    # duplicate the user/assistant rows (双模式工作区 §一.1 回写可靠性). Optional for
+    # back-compat; the desktop always sends it.
+    user_message_id: str | None = Field(None, max_length=64)
     message_id: str | None = Field(None, max_length=64)
     input_tokens: int = Field(0, ge=0)
     output_tokens: int = Field(0, ge=0)

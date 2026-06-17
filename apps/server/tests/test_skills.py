@@ -173,6 +173,20 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     assert "can_delegate" in body
 
 
+def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_step():
+    # 认知分工 + 结构跟着证据走（L3/L4，法律论文案例的根因修复）: the skill teaches that
+    # a deliverable's professional STRUCTURE belongs to the expert worker (not the
+    # CEO's task), that contract.required_sections is an acceptance floor (not a
+    # structure blueprint), and that研究级大型交付 should make「定结构」an evidence-driven,
+    # user-gated outline step (调研 → 提纲 + checkpoint_after → 全文) rather than the
+    # CEO fixing the skeleton up front. Pins the范式 so it can't silently drop out.
+    body = _body("team_orchestration_advanced")
+    assert "方案" in body  # 约束 vs 方案
+    assert "required_sections" in body  # 验收底线、非结构蓝图
+    assert "提纲" in body
+    assert "checkpoint_after" in body
+
+
 def test_debate_skill_teaches_stance_and_multi_round():
     body = _body("debate_and_review")
     assert "stance" in body

@@ -63,7 +63,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 ## 二、记忆注入流程 ✅ 已确定
 
-工作记忆（当前对话历史）经 `load_history` 进窗口，CEO 与各 worker 都读得到；**用户长期记忆**随文件注入管线合成进共享 `<rules>` 基座（CEO 与 worker 共用同一基座，见 §1.4）。会话摘要注入路径已移除（见 §1.3）。
+工作记忆（当前对话历史）经 `load_recent_history`（取最近 N 条、按时序）进窗口，CEO 与各 worker 都读得到；**用户长期记忆**随文件注入管线合成进共享 `<rules>` 基座（CEO 与 worker 共用同一基座，见 §1.4）。会话摘要注入路径已移除（见 §1.3）。
 
 **关键决策：用户偏好折叠进共享 `<rules>` 基座（CEO 与 worker 共用），不另建独立 `user_preferences` 上下文通道。** 偏好随 `assemble_system_prompt(memory_markdown=...)` 进基座，CEO 与 worker 都吃得到，无需为「编排/分工」单开一条注入路径。
 

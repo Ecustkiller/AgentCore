@@ -117,6 +117,15 @@ class FileWriteTool:
         rel_path = arguments.get("path", "")
         content = arguments.get("content", "")
 
+        # A missing/empty path resolves to the workspace root (a directory); writing
+        # onto it raises a cryptic OS error (Permission denied / IsADirectory) that
+        # leaks the absolute server path and gives the model nothing to act on. Fail
+        # fast with the required-arg message instead (parity with str_replace/move).
+        if not rel_path:
+            return _error(
+                "path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start
+            )
+
         try:
             written = await context.backend.write(rel_path, content)
         except OutsideWorkspace:

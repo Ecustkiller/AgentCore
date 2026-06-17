@@ -267,6 +267,28 @@ def state_map_from_json(data: dict[str, Any] | None) -> dict[str, RunState]:
     return {run_id: state_from_json(raw) for run_id, raw in (data or {}).items()}
 
 
+def run_final_fact(run_id: str, state: RunState) -> Any:
+    """A worker run's terminal RunState as a ``message_final`` journal fact.
+
+    执行级事件溯源 Phase 2 ⑥ (``frame.completed`` 的事实来源): the payload **is**
+    :func:`state_to_json` (the exact seed shape the frame stored) keyed by ``run_id`` and
+    tagged by its ``phase``, so :func:`agentcore.runtime.journal.completed_from_journal`
+    rebuilds the scheduler seed map with the SAME deserializer (:func:`state_from_json`) —
+    zero drift between the (being-removed) ``paused_turns.frame`` blob and its journal
+    projection. Recorded for EVERY terminal worker (COMPLETED / FAILED) at the executor's
+    single run choke point, so a resume re-seeds finished nodes from facts, never the旁路
+    frame. ``message_final`` (vs a new kind) keeps the §18.3 execution-kind set stable; the
+    captain's own ``message_final`` (content/reasoning, no ``phase``) is NOT a seed and is
+    skipped by the projection.
+    """
+    from agentcore.runtime.facts import Fact, FactKind
+
+    return Fact(
+        kind=FactKind.MESSAGE_FINAL.value,
+        payload={"run_id": run_id, **state_to_json(state)},
+    )
+
+
 def session_to_row(session: RunSession) -> dict[str, Any]:
     """The persisted columns for a RunSession (``conversation_id`` is attached by the
     repository from the turn envelope, not stored on the in-memory session)."""

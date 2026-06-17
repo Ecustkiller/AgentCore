@@ -4,9 +4,19 @@
 journal's ordered facts; ``runs_from_entries`` projects them back. The two must be
 exact inverses so a turn round-trips through ``turn_journal`` unchanged — that is
 what lets the message's ``runs`` be a pure projection rather than a stored blob.
+
+``window_from_journal`` is the EXECUTION-side projection (the other half of「一切皆
+投影」): it folds the same facts back into the ``list[LLMMessage]`` the engine fed the
+model, so resume reads it instead of the旁路 frame and the conformance golden can
+assert it ``==`` the live transcript.
 """
 
-from agentcore.runtime.journal import entries_from_runs, runs_from_entries
+from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.runtime.journal import (
+    entries_from_runs,
+    runs_from_entries,
+    window_from_journal,
+)
 
 
 def test_multi_agent_events_round_trip():
@@ -86,3 +96,339 @@ def test_process_absent_key_not_emitted_on_projection():
     projected = runs_from_entries(entries_from_runs(runs))
     assert "process" not in projected
     assert projected == runs
+
+
+# --- Execution-sourced journals (§18.3 fact log) re-gate on projection ---------
+#
+# A fact-log journal stores the FULL UNGATED stream (the captain's own run/tool events
+# ride it, plus the execution facts). runs_from_entries must re-apply the display gate
+# for these — discriminated by the presence of execution facts — so the bubble matches
+# what the old gated ``_build_runs_payload`` produced, while legacy journals (above)
+# stay pure inverses.
+
+
+def test_execution_sourced_plain_chat_turn_projects_to_none():
+    # A plain chat turn's fact log: the captain ran (run_started/completed) but never
+    # surfaced a graph and used no tools. Execution facts persist (for window rebuild),
+    # but the DISPLAY is a plain bubble → runs projects to None (None-gate).
+    entries = [
+        {"kind": "turn_started", "payload": {"user_message": "hi"}, "ts": None},
+        {"kind": "run_started", "payload": {"run_id": "cap"}, "ts": "t0"},
+        {"kind": "round_boundary",
+         "payload": {"round_idx": 0, "run_id": "cap", "role": "captain"}, "ts": None},
+        {"kind": "llm_call", "payload": {"content": "hello", "round_idx": 0}, "ts": None},
+        {"kind": "run_completed", "payload": {"run_id": "cap"}, "ts": "t1"},
+        {"kind": "message_final", "payload": {"run_id": "cap", "content": "hello"}, "ts": None},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    assert runs_from_entries(entries) is None
+
+
+def test_execution_sourced_surfaced_turn_keeps_graph_drops_exec_facts():
+    # A delegated turn (run_plan surfaces): the team graph projects to events; the
+    # interleaved execution facts are skipped (they are not client-foldable).
+    entries = [
+        {"kind": "turn_started", "payload": {"user_message": "go"}, "ts": None},
+        {"kind": "round_boundary",
+         "payload": {"round_idx": 0, "run_id": "cap", "role": "captain"}, "ts": None},
+        {"kind": "llm_call", "payload": {"tool_calls": [{"id": "d"}]}, "ts": None},
+        {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t0"},
+        {"kind": "run_started", "payload": {"run_id": "w1"}, "ts": "t1"},
+        {"kind": "run_completed", "payload": {"run_id": "w1"}, "ts": "t2"},
+        {"kind": "message_final", "payload": {"run_id": "cap", "content": "done"}, "ts": None},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    assert runs_from_entries(entries) == {
+        "events": [
+            {"type": "run_plan", "payload": {"execution_id": "e1"}, "timestamp": "t0"},
+            {"type": "run_started", "payload": {"run_id": "w1"}, "timestamp": "t1"},
+            {"type": "run_completed", "payload": {"run_id": "w1"}, "timestamp": "t2"},
+        ],
+        "finish_reason": "end_turn",
+    }
+
+
+def test_execution_sourced_single_agent_tool_turn_drops_captain_events_keeps_process():
+    # A single-agent tool turn (captain used a tool, never delegated/checkpointed):
+    # no surface type → its captain run/tool events drop from ``events`` (parity with
+    # the old execution_journal() gate), but the process timeline replays.
+    entries = [
+        {"kind": "turn_started", "payload": {"user_message": "find x"}, "ts": None},
+        {"kind": "run_started", "payload": {"run_id": "cap"}, "ts": "t0"},
+        {"kind": "round_boundary",
+         "payload": {"round_idx": 0, "run_id": "cap", "role": "captain"}, "ts": None},
+        {"kind": "llm_call", "payload": {"tool_calls": [{"id": "c1"}]}, "ts": None},
+        {"kind": "tool_use_start", "payload": {"tool_call_id": "c1"}, "ts": "t1"},
+        {"kind": "tool_use_end", "payload": {"tool_call_id": "c1"}, "ts": "t2"},
+        {"kind": "run_completed", "payload": {"run_id": "cap"}, "ts": "t3"},
+        {"kind": "process_tool",
+         "payload": {"kind": "tool", "id": "c1", "tool_name": "web_search",
+                     "result": "r", "status": "success"}, "ts": None},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    assert runs_from_entries(entries) == {
+        "events": [],
+        "finish_reason": "end_turn",
+        "process": [{"kind": "tool", "id": "c1", "tool_name": "web_search",
+                     "result": "r", "status": "success"}],
+    }
+
+
+# --- window_from_journal: execution projection (§三, the LLM-window fold) ----------
+#
+# These build journals by hand to pin the fold rules; test_engine_facts.py drives the
+# REAL react_loop and asserts the projection reconstructs the live transcript verbatim
+# (the unit-level conformance check the Phase 2 golden generalizes to paused turns).
+
+
+def _fact(kind: str, payload: dict, ts=None) -> dict:
+    return {"kind": kind, "payload": payload, "ts": ts}
+
+
+def _started(system_prompt="S", user_message="go", history_len=0) -> dict:
+    return _fact("turn_started", {
+        "system_prompt": system_prompt, "user_message": user_message,
+        "model_profile": "m", "history_len": history_len})
+
+
+def _boundary(run_id="cap", round_idx=0, role="captain") -> dict:
+    return _fact("round_boundary", {"round_idx": round_idx, "run_id": run_id, "role": role})
+
+
+def _llm(run_id="cap", round_idx=0, *, content="", reasoning="", tool_calls=None) -> dict:
+    return _fact("llm_call", {
+        "run_id": run_id, "round_idx": round_idx, "content": content,
+        "reasoning_content": reasoning, "tool_calls": tool_calls or [],
+        "usage": {}, "finish_reason": "tool_calls" if tool_calls else "stop"})
+
+
+def _tc(call_id: str, name: str, arguments: str) -> dict:
+    return {"id": call_id, "type": "function",
+            "function": {"name": name, "arguments": arguments}}
+
+
+def _tool_call(call_id: str, result: str, run_id="cap", name="t") -> dict:
+    # The execution tool_call fact the window fold reads its tool result from (the FULL
+    # post-annotation text); the display tool_use_start/end pair rides separately.
+    return _fact("tool_call",
+                 {"run_id": run_id, "tool_call_id": call_id, "name": name,
+                  "arguments": "{}", "result": result, "success": True})
+
+
+def test_window_folds_head_assistant_tool_drops_final_answer():
+    # A single-agent tool turn: round 0 calls a tool, round 1 answers with text. The
+    # window is system + user + assistant(tool_call) + tool(result) — the round-1 final
+    # answer is the loop's RETURN, never appended to the window the model saw.
+    entries = [
+        _started(system_prompt="SYS", user_message="find x"),
+        _boundary(round_idx=0),
+        _llm(round_idx=0, reasoning="thinking", tool_calls=[_tc("c1", "search", '{"q":"x"}')]),
+        _tool_call("c1", "the result"),
+        _boundary(round_idx=1),
+        _llm(round_idx=1, content="the answer"),
+        _fact("message_final", {"run_id": "cap", "content": "the answer"}),
+        _fact("turn_end", {"finish_reason": "end_turn"}),
+    ]
+    assert window_from_journal(entries) == [
+        LLMMessage(role="system", content="SYS"),
+        LLMMessage(role="user", content="find x"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[ToolCall(id="c1", type="function",
+                                 function=ToolCallFunction(name="search", arguments='{"q":"x"}'))],
+            reasoning_content="thinking",
+        ),
+        LLMMessage(role="tool", content="the result", tool_call_id="c1"),
+    ]
+
+
+def test_window_none_without_turn_started():
+    # A legacy / display-only journal (no execution facts) has no head anchor → the
+    # captain window is not reconstructable (Phase 1), so the projection returns None.
+    entries = [
+        _fact("run_plan", {"execution_id": "e1"}, ts="t0"),
+        _fact("tool_use_end", {"tool_call_id": "c1", "result": "r"}, ts="t1"),
+        _fact("turn_end", {"finish_reason": "end_turn"}),
+    ]
+    assert window_from_journal(entries) is None
+    assert window_from_journal(None) is None
+    assert window_from_journal([]) is None
+
+
+def test_window_splices_caller_history_between_system_and_user():
+    # The facts carry only history_len; the caller supplies the prior-turn messages,
+    # spliced between system and user exactly as the executor builds the transcript.
+    history = [
+        LLMMessage(role="user", content="earlier"),
+        LLMMessage(role="assistant", content="earlier reply"),
+    ]
+    entries = [_started(system_prompt="SYS", user_message="now"), _boundary(round_idx=0),
+               _llm(round_idx=0, content="done")]
+    assert window_from_journal(entries, history=history) == [
+        LLMMessage(role="system", content="SYS"),
+        LLMMessage(role="user", content="earlier"),
+        LLMMessage(role="assistant", content="earlier reply"),
+        LLMMessage(role="user", content="now"),
+    ]
+
+
+def test_window_folds_note_as_user_message_in_order():
+    # An engine-injected note (a convergence NUDGE) is part of the real window: it folds
+    # to a user message after the round's assistant+tool, before the next round.
+    entries = [
+        _started(),
+        _boundary(round_idx=0),
+        _llm(round_idx=0, tool_calls=[_tc("c1", "search", "{}")]),
+        _tool_call("c1", "r"),
+        _fact("note", {"role": "user", "content": "重复了，换个思路", "reason": "nudge"}),
+        _boundary(round_idx=1),
+        _llm(round_idx=1, content="ok"),
+    ]
+    window = window_from_journal(entries)
+    # ...system, user, assistant(tool), tool, note(user)
+    assert window[-1] == LLMMessage(role="user", content="重复了，换个思路")
+    assert window[-2] == LLMMessage(role="tool", content="r", tool_call_id="c1")
+    assert window[2].role == "assistant"
+
+
+def test_window_scopes_to_captain_ignoring_worker_facts():
+    # A delegated turn: worker facts interleave during the captain's delegate call. The
+    # captain window must contain ONLY the captain's assistant(delegate) + the delegate
+    # result — the worker's own assistant (different run_id) and its file_write tool
+    # (different tool_call_id) are excluded, proving run-scope + tool_call_id pairing.
+    entries = [
+        _started(system_prompt="SYS", user_message="build it"),
+        _boundary(run_id="cap", round_idx=0, role="captain"),
+        _llm(run_id="cap", round_idx=0, tool_calls=[_tc("d1", "delegate", "{}")]),
+        _fact("tool_use_start", {"tool_call_id": "d1", "tool_name": "delegate"}),
+        # --- worker runs inside the delegate call ---
+        _boundary(run_id="w1", round_idx=0, role="worker"),
+        _llm(run_id="w1", round_idx=0, tool_calls=[_tc("fw", "file_write", "{}")]),
+        _tool_call("fw", "written", run_id="w1"),
+        _boundary(run_id="w1", round_idx=1, role="worker"),
+        _llm(run_id="w1", round_idx=1, content="worker done"),
+        _fact("message_final", {"run_id": "w1", "content": "worker done"}),
+        # --- captain's delegate result returns ---
+        _tool_call("d1", "team product"),
+        _boundary(run_id="cap", round_idx=1, role="captain"),
+        _llm(run_id="cap", round_idx=1, content="final reply"),
+        _fact("message_final", {"run_id": "cap", "content": "final reply"}),
+        _fact("turn_end", {"finish_reason": "end_turn"}),
+    ]
+    assert window_from_journal(entries) == [
+        LLMMessage(role="system", content="SYS"),
+        LLMMessage(role="user", content="build it"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[ToolCall(id="d1", type="function",
+                                 function=ToolCallFunction(name="delegate", arguments="{}"))],
+            reasoning_content=None,
+        ),
+        LLMMessage(role="tool", content="team product", tool_call_id="d1"),
+    ]
+    # And scoping to the worker run folds ITS rounds (head still turn_started — a
+    # worker's own task-prompt head is Phase 2; here we only assert run isolation).
+    worker_window = window_from_journal(entries, run_id="w1")
+    assert worker_window[2] == LLMMessage(
+        role="assistant", content=None,
+        tool_calls=[ToolCall(id="fw", type="function",
+                             function=ToolCallFunction(name="file_write", arguments="{}"))],
+        reasoning_content=None)
+    assert worker_window[3] == LLMMessage(role="tool", content="written", tool_call_id="fw")
+
+
+def test_window_captain_note_mid_delegate_attributed_by_run_id():
+    # 边界② cleared: a captain note (a force-finalize) is recorded AFTER the delegate
+    # returns but BEFORE any new captain round_boundary, so the most-recent boundary is
+    # the worker's (active run = w1). It still folds into the CAPTAIN window because the
+    # note carries run_id="cap" — the old active-run fallback would have dropped it.
+    entries = [
+        _started(system_prompt="SYS", user_message="build it"),
+        _boundary(run_id="cap", round_idx=0, role="captain"),
+        _llm(run_id="cap", round_idx=0, tool_calls=[_tc("d1", "delegate", "{}")]),
+        _fact("tool_use_start", {"tool_call_id": "d1", "tool_name": "delegate"}),
+        # worker runs inside the delegate call → active run becomes w1.
+        _boundary(run_id="w1", round_idx=0, role="worker"),
+        _llm(run_id="w1", round_idx=0, content="worker done"),
+        _fact("message_final", {"run_id": "w1", "content": "worker done"}),
+        _tool_call("d1", "team product"),  # delegate returns to the captain
+        # captain force-finalize note, injected while the active run is STILL w1.
+        _fact("note", {"role": "user", "content": "请基于已有信息给出最终答复。",
+                       "reason": "finalize", "run_id": "cap"}),
+    ]
+    assert window_from_journal(entries) == [
+        LLMMessage(role="system", content="SYS"),
+        LLMMessage(role="user", content="build it"),
+        LLMMessage(role="assistant", content=None,
+                   tool_calls=[ToolCall(id="d1", type="function",
+                                        function=ToolCallFunction(name="delegate", arguments="{}"))],
+                   reasoning_content=None),
+        LLMMessage(role="tool", content="team product", tool_call_id="d1"),
+        LLMMessage(role="user", content="请基于已有信息给出最终答复。"),
+    ]
+    # Contrast: the SAME note WITHOUT a run_id falls back to the active run (w1), so it is
+    # NOT attributed to the captain window — the exact pre-fix 边界② bug, now gated.
+    legacy = entries[:-1] + [
+        _fact("note", {"role": "user", "content": "X", "reason": "finalize"})
+    ]
+    assert window_from_journal(legacy)[-1] == LLMMessage(
+        role="tool", content="team product", tool_call_id="d1"
+    )
+
+
+def test_window_paused_turn_ends_at_suspended_call_no_phantom_tool():
+    # The resume-shape conformance check: at a pause the turn suspends INSIDE the tool
+    # (ask_user / delegate) — its ``tool_use_start`` is journaled but NO ``tool_call`` fact
+    # is recorded (the result is still pending). The window must end at the assistant that
+    # issued the suspended call, with NO tool message — exactly what frame.transcript
+    # holds — so resume can append the settled result itself (执行级事件溯源落地设计 §五).
+    entries = [
+        _started(system_prompt="SYS", user_message="A 还是 B?"),
+        _boundary(round_idx=0),
+        _llm(round_idx=0, tool_calls=[_tc("call_ask", "ask_user", '{"q":"A/B"}')]),
+        _fact("tool_use_start", {"tool_call_id": "call_ask", "tool_name": "ask_user"}),
+        # paused here: no tool_use_end for call_ask, no further rounds.
+    ]
+    assert window_from_journal(entries) == [
+        LLMMessage(role="system", content="SYS"),
+        LLMMessage(role="user", content="A 还是 B?"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[ToolCall(id="call_ask", type="function",
+                                 function=ToolCallFunction(name="ask_user", arguments='{"q":"A/B"}'))],
+            reasoning_content=None,
+        ),
+    ]
+
+
+def test_window_prior_completed_tool_kept_but_suspended_one_dropped():
+    # A pause AFTER a completed tool round: round 0's search completed (has a tool_call
+    # fact) → its tool message stays; round 1's delegate is suspended (no tool_call fact)
+    # → its tool message is omitted. Proves the presence-keyed rule is per-call.
+    entries = [
+        _started(system_prompt="SYS", user_message="build"),
+        _boundary(round_idx=0),
+        _llm(round_idx=0, tool_calls=[_tc("c1", "search", "{}")]),
+        _tool_call("c1", "found it"),
+        _boundary(round_idx=1),
+        _llm(round_idx=1, tool_calls=[_tc("d1", "delegate", "{}")]),
+        _fact("tool_use_start", {"tool_call_id": "d1", "tool_name": "delegate"}),
+        # paused inside delegate.
+    ]
+    window = window_from_journal(entries)
+    assert window == [
+        LLMMessage(role="system", content="SYS"),
+        LLMMessage(role="user", content="build"),
+        LLMMessage(role="assistant", content=None,
+                   tool_calls=[ToolCall(id="c1", type="function",
+                                        function=ToolCallFunction(name="search", arguments="{}"))],
+                   reasoning_content=None),
+        LLMMessage(role="tool", content="found it", tool_call_id="c1"),
+        LLMMessage(role="assistant", content=None,
+                   tool_calls=[ToolCall(id="d1", type="function",
+                                        function=ToolCallFunction(name="delegate", arguments="{}"))],
+                   reasoning_content=None),
+    ]

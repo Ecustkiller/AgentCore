@@ -74,7 +74,7 @@ def lint_suite(cases: list[dict[str, Any]]) -> list[str]:
     return errors
 
 
-# --- 对比评估用例校验（团队 vs 单体）—— 见 docs/07-规划/评估体系后端落地设计.md 第二部分 ---
+# --- 对比评估用例校验（团队 vs 单体）—— 现状见 docs/02-架构/后端架构.md §五 ---
 
 _ARCHETYPES = {"parallel_research", "debate", "cross_domain", "simple"}
 _ARMS = {"single", "team", "matched_single"}

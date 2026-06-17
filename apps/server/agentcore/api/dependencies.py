@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import Cookie, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentcore.admin import AdminService
 from agentcore.auth import AuthService
 from agentcore.core.errors import AuthenticationError, AuthorizationError
 from agentcore.db.base import get_session
@@ -42,6 +43,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 def get_user_repo(session: AsyncSession = Depends(get_db)) -> UserRepository:
     return UserRepository(session)
+
+
+def get_admin_service(session: AsyncSession = Depends(get_db)) -> AdminService:
+    """Build the admin account-management service (用户管理) on the request session."""
+    return AdminService(users=UserRepository(session))
 
 
 def get_conversation_repo(session: AsyncSession = Depends(get_db)) -> ConversationRepository:

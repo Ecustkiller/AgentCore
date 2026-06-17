@@ -40,6 +40,9 @@ INTERNAL_ERROR = -32603
 # Server-defined codes (the -32000..-32099 implementation-defined band).
 TURN_CANCELLED = -32001
 NOT_INITIALIZED = -32002
+# A ``resume`` whose durable frame is gone (already resumed, or never persisted) —
+# the desktop drops the stale resume card, mirroring the cloud route's 404.
+PAUSED_TURN_NOT_FOUND = -32003
 
 
 class ProtocolError(ValueError):

@@ -7,7 +7,6 @@ import { FilesPage } from "@/pages/FilesPage";
 import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { ToolboxPage } from "@/pages/ToolboxPage";
-import { WorkspacePage } from "@/pages/WorkspacePage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AppearanceSettings } from "@/pages/more/AppearanceSettings";
 import { MembersSettings } from "@/pages/more/MembersSettings";
@@ -15,7 +14,7 @@ import { ModelSettings } from "@/pages/more/ModelSettings";
 import { ShortcutsSettings } from "@/pages/more/ShortcutsSettings";
 import { UsageSettings } from "@/pages/more/UsageSettings";
 import { AiToolsPage } from "@/pages/toolbox/AiToolsPage";
-import { TeamMechanism } from "@/pages/toolbox/TeamMechanism";
+import { ProductManual } from "@/pages/toolbox/ProductManual";
 import { Navigate, createHashRouter } from "react-router-dom";
 
 export const router = createHashRouter([
@@ -31,12 +30,11 @@ export const router = createHashRouter([
       { path: "conversations", element: <ConversationsPage /> },
       { path: "conversations/:id", element: <ConversationPage /> },
       { path: "files", element: <FilesPage /> },
-      { path: "folders/:folderId", element: <WorkspacePage /> },
       { path: "messages", element: <MessagesPage /> },
       { path: "messages/:chatId", element: <MessagesPage /> },
       { path: "toolbox", element: <ToolboxPage /> },
       { path: "toolbox/ai-tools", element: <AiToolsPage /> },
-      { path: "toolbox/mechanism", element: <TeamMechanism /> },
+      { path: "toolbox/manual", element: <ProductManual /> },
       { path: "explore", element: <ExplorePage /> },
       {
         path: "more",

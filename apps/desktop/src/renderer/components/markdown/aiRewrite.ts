@@ -20,6 +20,17 @@ export interface SelectionContext {
   contextAfter: string;
 }
 
+/**
+ * AI 改写落地的目标选区：起止偏移 + 触发改写时该区间的原文。落地前据此校验选区未被
+ * 并行编辑改动（见 {@link isRewriteTargetIntact}），避免改到错误位置。
+ */
+export interface RewriteTarget {
+  from: number;
+  to: number;
+  /** 触发改写时选区的原文（应用前比对，原文不匹配即拒绝）。 */
+  selection: string;
+}
+
 /** 前后文各取多少字符喂给模型：够衔接语气/术语，又不让 prompt 失控膨胀。 */
 const DEFAULT_CONTEXT_CHARS = 1500;
 
@@ -43,4 +54,19 @@ export function sliceSelectionContext(
     contextBefore: doc.sliceString(Math.max(0, from - ctxChars), from),
     contextAfter: doc.sliceString(to, Math.min(doc.length, to + ctxChars)),
   };
+}
+
+/**
+ * 校验改写目标选区在「取选区 → 调后端 → 落地」窗口期未被并行编辑改动：偏移须落在当前
+ * 文档界内（`0 ≤ from ≤ to ≤ length`），且该区间现有原文仍等于触发时的选区文本。
+ *
+ * 返回 `false` 即拒绝应用改写（绝不改到错误位置）——这是 AI 改写落地的安全闸，与
+ * {@link MarkdownSourceEditorHandle.startRewriteReview} 共用同一判定。
+ */
+export function isRewriteTargetIntact(
+  state: EditorState,
+  { from, to, selection }: RewriteTarget,
+): boolean {
+  if (from < 0 || to > state.doc.length || from > to) return false;
+  return state.doc.sliceString(from, to) === selection;
 }

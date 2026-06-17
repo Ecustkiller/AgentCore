@@ -16,7 +16,7 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useUsageStore } from "@/stores/usage";
-import type { ProcessStep } from "@/types/events";
+import type { Citation, ProcessStep } from "@/types/events";
 import {
   AlertTriangle,
   Check,
@@ -47,6 +47,7 @@ import { useNavigate } from "react-router-dom";
 import { CheckpointCard } from "./CheckpointCard";
 import { InlineTeamGraph } from "./InlineTeamGraph";
 import { Markdown } from "./Markdown";
+import { NonBlockingAskCard } from "./NonBlockingAskCard";
 import { PlanReviewCard } from "./PlanReviewCard";
 import { type CitationFlash, SourceCards } from "./SourceCards";
 import {
@@ -414,75 +415,150 @@ function ProcessToolRow({
   );
 }
 
-/** One row in the lightweight process list (a+): a reasoning segment renders as
- * quiet gray Markdown (lists / headings / emphasis preserved), a tool call as its
- * icon · label · result row. The old connector-dot + vertical-line timeline
- * decoration is gone (轻量灰色列表). `streaming` is true only for the trailing
- * step, so a finished reasoning segment still highlights any code it carries. */
+/**
+ * One reasoning segment in the inline process timeline (前端UX设计.md §一B): a
+ * borderless, muted, collapsible「思考过程」block (Cursor 式轻量内联). Auto-expands
+ * while it is the live trailing segment (watch it think), auto-collapses once the
+ * next step begins or the turn ends; manual toggles win. A turn can hold several
+ * (思考→正文→工具→思考…), each its own collapsible — so the answer never gets buried
+ * under one giant thinking dump.
+ */
+function InlineReasoning({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming: boolean;
+}) {
+  const [expanded, setExpanded] = useState(streaming);
+  const prevStreaming = useRef(streaming);
+
+  useEffect(() => {
+    if (prevStreaming.current && !streaming) setExpanded(false);
+    prevStreaming.current = streaming;
+  }, [streaming]);
+
+  return (
+    <div>
+      <ThinkingHeader
+        isStreaming={streaming}
+        expanded={expanded}
+        streamingLabel="正在思考…"
+        doneLabel="思考过程"
+        onToggle={() => setExpanded((v) => !v)}
+      />
+      {expanded && (
+        <div className="mt-1.5 pl-3">
+          <Markdown content={text} isStreaming={streaming} muted />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One row in the inline process timeline (前端UX设计.md §一B): a reasoning segment
+ * renders as a muted collapsible block, a content segment as normal rich text (the
+ * reply, with inline citations), a tool call as its icon · label · result row.
+ * `streaming` is true only for the trailing step, so the live cursor / dots ride the
+ * last segment and finished segments still highlight any code they carry. */
 function ProcessRow({
   step,
   streaming,
+  citations,
+  onCitationClick,
 }: {
   step: ProcessStep;
   streaming: boolean;
+  citations: Citation[];
+  onCitationClick: (n: number) => void;
 }) {
   if (step.kind === "reasoning") {
-    return <Markdown content={step.text} isStreaming={streaming} muted />;
+    return <InlineReasoning text={step.text} streaming={streaming} />;
+  }
+  if (step.kind === "content") {
+    return (
+      <Markdown
+        content={step.text}
+        citations={citations}
+        onCitationClick={onCitationClick}
+        isStreaming={streaming}
+      />
+    );
   }
   return <ProcessToolRow step={step} />;
 }
 
 /**
- * Collapsible「思考+工具」过程 for a single-agent turn (前端UX设计.md §一).
+ * The single-agent turn's「思考·正文·工具」inline timeline (前端UX设计.md §一B —
+ * Cursor 式全内联).
  *
- * Borderless & inline (Cursor 风格, a+): folds the CEO's reasoning + its tool
- * calls into one quiet gray list under a 图2-style dots header. Default-expands
- * while streaming (watch it think + act live) and auto-collapses when the turn
- * finishes (零噪音); manual toggles win. The final answer stays separate below
- * it — the process never breaks up the reply.
+ * Renders the CEO's reasoning, reply text, and tool calls in their TRUE
+ * chronological order as one stream: reasoning segments are muted collapsible
+ * blocks (零噪音), reply text is normal rich text (with inline citations), tool
+ * calls are their icon · label · result rows. The TRAILING content step IS the
+ * final answer — there is no separate answer block below; the timeline is the
+ * reply. A reloaded tool-less turn carries no persisted content steps (only tools
+ * journal interleaving), so it falls back to rendering `fallbackContent`
+ * (message.content) as the trailing answer — the reply never disappears.
  */
 function ProcessTimeline({
   process,
   isStreaming,
+  citations,
+  onCitationClick,
+  composingTool,
+  fallbackContent,
 }: {
   process: ProcessStep[];
   isStreaming: boolean;
+  citations: Citation[];
+  onCitationClick: (n: number) => void;
+  composingTool: { toolName: string; chars: number } | null;
+  fallbackContent: string;
 }) {
-  const [expanded, setExpanded] = useState(isStreaming);
-  const prevStreaming = useRef(isStreaming);
-
-  useEffect(() => {
-    if (prevStreaming.current && !isStreaming) setExpanded(false);
-    prevStreaming.current = isStreaming;
-  }, [isStreaming]);
-
-  const toolCount = process.reduce(
-    (n, s) => (s.kind === "tool" ? n + 1 : n),
-    0,
-  );
+  const last = process[process.length - 1];
+  // The timeline carries the reply when it has a content step; otherwise (a
+  // reloaded tool-less turn whose reply wasn't journaled as steps) render
+  // message.content as the trailing answer so the reply is never lost.
+  const hasContentStep = process.some((s) => s.kind === "content");
+  // Between rounds (the last step is a resolved tool, the next round's thinking not
+  // yet streamed) show a live「正在思考…」cue so the bubble doesn't read as frozen; a
+  // streaming reasoning / content / still-running-tool step carries its own
+  // liveliness, and an arg-assembly (composingTool) takes precedence.
+  const showThinkingTail =
+    isStreaming &&
+    !composingTool &&
+    last?.kind === "tool" &&
+    last.status !== "running";
 
   return (
-    <div className="mb-2">
-      <ThinkingHeader
-        isStreaming={isStreaming}
-        expanded={expanded}
-        streamingLabel={toolCount > 0 ? "正在思考并使用工具…" : "正在思考…"}
-        doneLabel={
-          toolCount > 0 ? `思考并使用了 ${toolCount} 个工具` : "思考过程"
-        }
-        onToggle={() => setExpanded((v) => !v)}
-      />
-      {expanded && (
-        <div className="mt-1.5 space-y-2 pl-3">
-          {process.map((step, i) => (
-            <ProcessRow
-              // biome-ignore lint/suspicious/noArrayIndexKey: append-only list — a step's index is stable for its lifetime (only the trailing step mutates, reasoning steps have no id), so the index is a safe key.
-              key={i}
-              step={step}
-              streaming={isStreaming && i === process.length - 1}
-            />
-          ))}
-        </div>
+    <div className="space-y-2">
+      {process.map((step, i) => (
+        <ProcessRow
+          // biome-ignore lint/suspicious/noArrayIndexKey: append-only list — a step's index is stable for its lifetime (only the trailing step mutates), so the index is a safe key.
+          key={i}
+          step={step}
+          streaming={isStreaming && i === process.length - 1}
+          citations={citations}
+          onCitationClick={onCitationClick}
+        />
+      ))}
+      {!hasContentStep && fallbackContent && (
+        <Markdown
+          content={fallbackContent}
+          citations={citations}
+          onCitationClick={onCitationClick}
+          isStreaming={isStreaming}
+        />
+      )}
+      {isStreaming && composingTool && (
+        <ComposingToolLine tool={composingTool} />
+      )}
+      {showThinkingTail && (
+        <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+          <ThinkingDots />
+          正在思考…
+        </span>
       )}
     </div>
   );
@@ -733,6 +809,7 @@ function AssistantMessage({ message }: Props) {
     [message.content, citations.length],
   );
   const checkpoints = message.checkpoints ?? [];
+  const nonBlockingAsks = message.nonBlockingAsks ?? [];
   const planReviews = message.planReviews ?? [];
   // A turn salvaged after a disconnect / stop (断线别白干): the backend persisted the
   // finished team work as an incomplete message, flagged via runs.finish_reason. A
@@ -781,57 +858,73 @@ function AssistantMessage({ message }: Props) {
   return (
     <div className="group min-w-0" onMouseEnter={onPeekCost}>
       {hasProcess ? (
+        // Single-agent turn: the inline「思考·正文·工具」timeline IS the reply — it
+        // renders the reasoning, reply text, and tool calls in true order, with the
+        // trailing content step as the final answer (前端UX设计.md §一B). No separate
+        // bottom answer block / cursor here — the timeline owns them.
         <ProcessTimeline
           process={message.process ?? []}
           isStreaming={message.isStreaming}
+          citations={citations}
+          onCitationClick={onCitationClick}
+          composingTool={
+            message.executionId === null
+              ? (message.composingTool ?? null)
+              : null
+          }
+          fallbackContent={message.content}
         />
       ) : (
-        hasReasoning && (
-          <ThinkingPanel
-            reasoning={message.reasoning ?? ""}
+        // Multi-agent turn (team graph carries the activity) or a plain/no-process
+        // turn: keep the standalone thinking panel + the answer rendered below.
+        <>
+          {hasReasoning && (
+            <ThinkingPanel
+              reasoning={message.reasoning ?? ""}
+              isStreaming={message.isStreaming}
+            />
+          )}
+          {message.executionId && (
+            <InlineTeamGraph
+              messageId={message.id}
+              executionId={message.executionId}
+              journal={message.runs}
+            />
+          )}
+          {isIncomplete && (
+            <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+              <CircleSlash size={14} />
+              已中断 · 已保存完成的部分
+            </div>
+          )}
+          <Markdown
+            content={message.content}
+            citations={citations}
+            onCitationClick={onCitationClick}
             isStreaming={message.isStreaming}
           />
-        )
+          {message.isStreaming &&
+            (message.composingTool && message.executionId === null ? (
+              // Captain is assembling a big tool call (the delegate 任务书) — show its
+              // live char count instead of a bare cursor. Pre-graph only: once
+              // delegate executes, run_plan sets executionId and the graph takes over.
+              <ComposingToolLine tool={message.composingTool} />
+            ) : message.content.length === 0 && !hasReasoning ? (
+              // Nothing streamed yet (the gap between send and the first token):
+              // show an explicit "正在思考…" so the turn never looks like it stalled.
+              // Same 图2 dots as the thinking header → a seamless 等待→思考 transition.
+              <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                <ThinkingDots />
+                正在思考…
+              </span>
+            ) : (
+              <span
+                className="mt-1 inline-block h-4 w-1.5 rounded-full bg-foreground/60"
+                style={{ animation: "blink-cursor 0.8s step-end infinite" }}
+              />
+            ))}
+        </>
       )}
-      {message.executionId && (
-        <InlineTeamGraph
-          messageId={message.id}
-          executionId={message.executionId}
-          journal={message.runs}
-        />
-      )}
-      {isIncomplete && (
-        <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-          <CircleSlash size={14} />
-          已中断 · 已保存完成的部分
-        </div>
-      )}
-      <Markdown
-        content={message.content}
-        citations={citations}
-        onCitationClick={onCitationClick}
-        isStreaming={message.isStreaming}
-      />
-      {message.isStreaming &&
-        (message.composingTool && message.executionId === null ? (
-          // Captain is assembling a big tool call (the delegate 任务书) — show its
-          // live char count instead of a bare cursor. Pre-graph only: once delegate
-          // executes, run_plan sets executionId and the team graph takes over.
-          <ComposingToolLine tool={message.composingTool} />
-        ) : message.content.length === 0 && !hasReasoning && !hasProcess ? (
-          // Nothing streamed yet (the gap between send and the first token):
-          // show an explicit "正在思考…" so the turn never looks like it stalled.
-          // Same 图2 dots as the thinking header → a seamless 等待→思考 transition.
-          <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-            <ThinkingDots />
-            正在思考…
-          </span>
-        ) : (
-          <span
-            className="mt-1 inline-block h-4 w-1.5 rounded-full bg-foreground/60"
-            style={{ animation: "blink-cursor 0.8s step-end infinite" }}
-          />
-        ))}
       {message.error && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
@@ -875,6 +968,12 @@ function AssistantMessage({ message }: Props) {
           conversationId={conversationId}
           interactive={message.isStreaming}
         />
+      ))}
+      {/* Non-blocking asks (ask_user blocking=false) — non-gating cards whose option
+          chips 回填 the composer; live + replayed alike (no interactive/resolved split,
+          they were never pending). */}
+      {nonBlockingAsks.map((ask) => (
+        <NonBlockingAskCard key={ask.id} ask={ask} />
       ))}
       {/* Structured DAG checkpoints the WaveScheduler paused on this turn
           (plan_review, 结构化挂起 2a) — same live/replay rule as ask_user above. */}

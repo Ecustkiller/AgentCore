@@ -30,13 +30,37 @@ function adaptPreview(p: LocalPreview): FilePreviewResult {
  * directory", so the unified full-destination `move` is translated back to
  * whichever the IPC expresses; a simultaneous move+rename isn't expressible in
  * one call today and is rejected (the tree never issues that pair).
+ *
+ * `subpath` (工作区对称化 D1a): when this source is a per-conversation workspace
+ * lazily promoted under a shared container root, every workspace-relative path is
+ * prefixed with the subpath on the way to the IPC and stripped on the way back —
+ * so the tree, editor, and watcher only ever see paths relative to *this*
+ * workspace, never the container root. `""` = the root itself (an explicitly-added
+ * local project), a pure pass-through.
  */
 export function createLocalRootSource(
   rootId: string,
   label: string,
+  subpath = "",
 ): FileSource {
+  const base = subpath.replace(/^\/+|\/+$/g, "");
+  // Workspace-relative → container-relative (prefix). "" / root → the base itself.
+  const inPath = (p: string): string => {
+    if (!base) return p;
+    const rel = p.replace(/^\/+/, "");
+    return rel ? `${base}/${rel}` : base;
+  };
+  // Container-relative → workspace-relative (strip). Inverse of inPath.
+  const outPath = (p: string): string => {
+    if (!base) return p;
+    if (p === base) return "";
+    const prefix = `${base}/`;
+    return p.startsWith(prefix) ? p.slice(prefix.length) : p;
+  };
   return {
-    id: `local:${rootId}`,
+    // Distinct id per subpath workspace so the hub treats two workspaces under the
+    // same container root as separate sources (caching / active selection by id).
+    id: base ? `local:${rootId}:${base}` : `local:${rootId}`,
     label,
     caps: {
       watch: true,
@@ -46,11 +70,11 @@ export function createLocalRootSource(
       handoff: false,
     },
     async listDir(dir) {
-      const res = await window.fsApi.listDir(rootId, dir);
+      const res = await window.fsApi.listDir(rootId, inPath(dir));
       if (!res.ok) throw new Error(res.reason);
       return res.data.map(
         (e): FileNode => ({
-          path: e.relPath,
+          path: outPath(e.relPath),
           name: e.name,
           isDir: e.kind === "dir",
         }),
@@ -59,17 +83,25 @@ export function createLocalRootSource(
     async listFileIndex() {
       // Flat file list for the @ index (文件中枢统一 F4); the IPC already prunes
       // node_modules/.git… and caps the count, matching the cloud /file-index.
+      // A subpath workspace indexes the whole container root then filters to its
+      // subtree — wasteful but self-contained (no IPC surface), and rarely hit:
+      // the /files rail browses via listDir, and @ mention sources are built at
+      // root level. Best-effort like the rest of the @ index.
       const res = await window.fsApi.listFiles(rootId);
       if (!res.ok) throw new Error(res.reason);
-      return res.data.map((f) => f.relPath);
+      if (!base) return res.data.map((f) => f.relPath);
+      const prefix = `${base}/`;
+      return res.data
+        .filter((f) => f.relPath.startsWith(prefix))
+        .map((f) => f.relPath.slice(prefix.length));
     },
     async read(path): Promise<FilePreviewResult> {
-      const res = await window.fsApi.readFile(rootId, path);
+      const res = await window.fsApi.readFile(rootId, inPath(path));
       if (!res.ok) throw new Error(res.reason);
       return adaptPreview(res.data);
     },
     async readForEdit(path): Promise<FileEditDoc> {
-      const res = await window.fsApi.readTextFile(rootId, path);
+      const res = await window.fsApi.readTextFile(rootId, inPath(path));
       if (!res.ok) throw new Error(res.reason);
       const { content, mtimeMs, encoding, eol } = res.data;
       return { text: content, version: { mtimeMs }, encoding, eol };
@@ -83,7 +115,7 @@ export function createLocalRootSource(
           message: "GBK 文件回写暂未启用",
         };
       }
-      const res = await window.fsApi.writeFile(rootId, path, {
+      const res = await window.fsApi.writeFile(rootId, inPath(path), {
         content: input.content,
         encoding: input.encoding,
         eol: input.eol,
@@ -100,40 +132,52 @@ export function createLocalRootSource(
       return { ok: false, reason: res.reason, message: res.message };
     },
     async createFile(path) {
-      const res = await window.fsApi.create(rootId, path, "file");
+      const res = await window.fsApi.create(rootId, inPath(path), "file");
       if (!res.ok) throw new Error(res.reason);
     },
     async mkdir(path) {
-      const res = await window.fsApi.create(rootId, path, "dir");
+      const res = await window.fsApi.create(rootId, inPath(path), "dir");
       if (!res.ok) throw new Error(res.reason);
     },
     async move(src, dst) {
+      // sameParent/sameName are computed on the workspace-relative paths (a prefix
+      // shared by both sides cancels out), then translated to whichever IPC the
+      // local source expresses, with the subpath prefixed onto the actual targets.
       const sameParent = parentDir(src) === parentDir(dst);
       const sameName = baseName(src) === baseName(dst);
       if (sameParent && sameName) return;
       if (sameParent) {
-        const res = await window.fsApi.rename(rootId, src, baseName(dst));
+        const res = await window.fsApi.rename(
+          rootId,
+          inPath(src),
+          baseName(dst),
+        );
         if (!res.ok) throw new Error(res.reason);
         return;
       }
       if (sameName) {
-        const res = await window.fsApi.move(rootId, src, parentDir(dst));
+        const res = await window.fsApi.move(
+          rootId,
+          inPath(src),
+          inPath(parentDir(dst)),
+        );
         if (!res.ok) throw new Error(res.reason);
         return;
       }
       throw new Error("暂不支持同时移动并改名");
     },
     async delete(path) {
-      const res = await window.fsApi.delete(rootId, path);
+      const res = await window.fsApi.delete(rootId, inPath(path));
       if (!res.ok) throw new Error(res.reason);
     },
     watch(dir, onChange) {
-      void window.fsApi.watch(rootId, dir);
+      const watched = inPath(dir);
+      void window.fsApi.watch(rootId, watched);
       const off = window.fsApi.onChanged((e) => {
-        if (e.rootId === rootId && e.relPath === dir) onChange(dir);
+        if (e.rootId === rootId && e.relPath === watched) onChange(dir);
       });
       return () => {
-        void window.fsApi.unwatch(rootId, dir);
+        void window.fsApi.unwatch(rootId, watched);
         off();
       };
     },

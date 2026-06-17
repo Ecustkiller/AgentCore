@@ -1,4 +1,5 @@
 import { ApiError, BASE_URL, NetworkError, api } from "@/services/api";
+import { clearSidecarInference } from "@/services/inferenceToken";
 import type { AuthUser } from "@/stores/auth";
 import type { components } from "@/types/api.generated";
 
@@ -25,9 +26,13 @@ export async function login(
   username: string,
   password: string,
 ): Promise<AuthUser> {
-  return toUser(
+  const user = toUser(
     await api.post<BackendUser>("/v1/auth/login", { username, password }),
   );
+  // Fresh session → drop any inference token cached for a previous user, so the
+  // sidecar never mints under one user then bills another (token is user-scoped).
+  clearSidecarInference();
+  return user;
 }
 
 export interface RegisterInput {
@@ -38,7 +43,7 @@ export interface RegisterInput {
 }
 
 export async function register(input: RegisterInput): Promise<AuthUser> {
-  return toUser(
+  const user = toUser(
     await api.post<BackendUser>("/v1/auth/register", {
       username: input.username,
       password: input.password,
@@ -46,10 +51,13 @@ export async function register(input: RegisterInput): Promise<AuthUser> {
       display_name: input.displayName || undefined,
     }),
   );
+  clearSidecarInference(); // fresh session → drop any prior-user token (see login)
+  return user;
 }
 
 export async function logout(): Promise<void> {
   await api.post("/v1/auth/logout");
+  clearSidecarInference(); // session ended → next login re-mints
 }
 
 /**

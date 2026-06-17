@@ -78,7 +78,9 @@ async def test_upsert_then_claim_round_trips(session_factory):
     assert isinstance(restored, PlanReviewSuspension)
     assert restored.tool_call_id == "call_del"
     assert [n.run_id for n in restored.plan.nodes] == ["del_a_1", "del_a_2"]
-    assert set(restored.completed) == {"del_a_1"}
+    # ``completed`` is NOT serialized into the frame (Phase 2 ⑥) — re-seeded from the
+    # journal's run-final facts on resume, so a claimed frame carries none.
+    assert restored.completed == {}
 
     # Claimed once → gone (a second claim sees nothing).
     async with session_factory() as s:
@@ -165,11 +167,18 @@ async def test_save_claim_bridge_round_trips(session_factory, monkeypatch):
     assert claimed is not None
     assert claimed.message_id == mid
     assert claimed.user_message == "原始请求"
-    assert claimed.transcript[-1].tool_calls[0].id == "call_del"
-    assert claimed.completed["del_a_1"].content == "S1OUT"
-    # The journal-so-far is re-hydrated from turn_journal (唯一事实源, not the frame),
-    # so the resume seeds + replays the whole pre-pause graph.
+    # transcript / completed are NOT serialized into the frame (Phase 2 ⑤/⑥) — resume
+    # rebuilds the CEO window + re-seeds finished workers from turn_journal; the suspended
+    # call id survives via the tool_call_id field, the plan via its own serialization.
+    assert claimed.transcript == []
+    assert claimed.completed == {}
+    assert claimed.tool_call_id == "call_del"
+    assert [n.run_id for n in claimed.plan.nodes] == ["del_a_1", "del_a_2"]
+    # The journal-so-far is re-hydrated from turn_journal (唯一事实源, not the frame): the
+    # display ``journal`` (resume seed) AND the raw ``journal_entries`` (the window source
+    # _resumed_captain_window folds) both come back, so resume replays the pre-pause graph.
     assert claimed.journal == [{"type": "run_plan", "payload": {}, "timestamp": "t"}]
+    assert [e["kind"] for e in claimed.journal_entries] == ["run_plan"]
 
     # Claimed → no longer pending, and a re-claim misses (atomic once).
     assert await persist_mod.list_paused_turns(cid) == []

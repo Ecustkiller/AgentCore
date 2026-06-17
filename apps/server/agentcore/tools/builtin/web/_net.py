@@ -20,6 +20,7 @@ This module is the shared remedy, wired in at the common choke point
 
 from __future__ import annotations
 
+import ssl
 import time
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -64,6 +65,25 @@ def site_of(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+def _is_ssl_error(e: BaseException) -> bool:
+    """True when an exception (or its cause chain) is a TLS/cert-verification failure.
+
+    httpx wraps the handshake's ``ssl.SSLError`` in an ``httpx.ConnectError`` whose own
+    ``str()`` is often empty, so the generic「无法建立连接」branch would mislabel a broken
+    cert chain as「出网受限」— a real, high-frequency case for China gov/court sites (see
+    实测案例复盘.md 案例 1). Walk the ``__cause__``/``__context__`` chain for an
+    ``ssl.SSLError`` (with a string fallback for the verify-failed marker).
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = e
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, ssl.SSLError):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return "CERTIFICATE_VERIFY_FAILED" in str(e)
+
+
 def describe_net_error(e: BaseException) -> str:
     """Readable reason for a failed outbound request.
 
@@ -73,6 +93,11 @@ def describe_net_error(e: BaseException) -> str:
     """
     if isinstance(e, EgressError):
         return str(e)
+    if _is_ssl_error(e):
+        return (
+            "SSL 证书校验失败（站点证书链不被信任，常见于国内部分政务/法院站点）；"
+            "改用 web_search 摘要或换其它来源，勿对同一站点反复重试"
+        )
     if isinstance(e, httpx.ConnectTimeout):
         return "连接超时（无法连上该站点，可能出网受限或站点不可达）"
     if isinstance(e, httpx.ReadTimeout):

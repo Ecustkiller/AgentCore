@@ -15,9 +15,10 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from agentcore.config import settings
 from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolApproval
+from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.llm.config import ModelProfile, build_request, get_profile
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.observability import log_llm_call
@@ -32,19 +33,28 @@ from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
 from agentcore.runtime.citations import annotate_tool_citations, merge_citations
 from agentcore.runtime.events import (
     EventSink,
+    FinishReason,
     content_delta,
     error_event,
     reasoning_delta,
     tool_use_end,
     tool_use_start,
 )
+from agentcore.runtime.facts import (
+    LlmCallFact,
+    NoteFact,
+    RoundBoundaryFact,
+    ToolCallFact,
+    record_turn_fact,
+)
 from agentcore.runtime.loop_controller import (
     Intervention,
     LoopController,
     ToolAttempt,
     fingerprint_tool_call,
+    progress_review_prompt,
 )
-from agentcore.tools.protocol import ToolContext, ToolResult
+from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
@@ -78,6 +88,34 @@ _FINALIZE_INSTRUCTION = (
 )
 
 
+# Tool categories whose calls are NOT bounded by the engine timeout backstop (B1):
+# they legitimately block for minutes on a sub-run or the user, and are bounded by
+# their own lifecycle instead — delegate/revise drive sub-DAGs (each constituent
+# tool call is itself bounded), ask_user waits on the user behind its own checkpoint
+# timeout. A flat ceiling here would wrongly kill a legitimate long wait.
+_TIMEOUT_EXEMPT_CATEGORIES = frozenset(
+    {ToolCategory.ORCHESTRATION, ToolCategory.INTERACTION}
+)
+
+
+def resolve_tool_timeout(schema: ToolSchema) -> float | None:
+    """The engine-level wall-clock ceiling (seconds) for one call of this tool.
+
+    ``None`` ⇒ no engine backstop (the tool manages its own lifecycle). Precedence:
+    an explicit ``schema.timeout_seconds`` wins; else the tool's category decides —
+    ORCHESTRATION / INTERACTION are exempt (``None``), EXECUTION gets the higher
+    execution ceiling (it runs code), everything else the default. This is a coarse
+    safety net layered above each tool's own finer timeout, never a replacement (B1).
+    """
+    if schema.timeout_seconds is not None:
+        return schema.timeout_seconds
+    if schema.category in _TIMEOUT_EXEMPT_CATEGORIES:
+        return None
+    if schema.category is ToolCategory.EXECUTION:
+        return settings.tool_execution_timeout_seconds
+    return settings.tool_default_timeout_seconds
+
+
 async def react_loop(
     *,
     messages: list[LLMMessage],
@@ -95,6 +133,9 @@ async def react_loop(
     annotate_citations: bool = True,
     approval_gate: ApprovalGate | None = None,
     usage_sink: list[TokenUsage] | None = None,
+    finish_override_sink: list[FinishReason] | None = None,
+    run_id: str = "",
+    role: str = "",
 ) -> tuple[str, str, TokenUsage, int]:
     """Run the ReAct loop.
 
@@ -133,19 +174,46 @@ async def react_loop(
     raises. It is cleared on entry and only ever holds the latest cumulative total
     (a single-element list); on a normal return the caller uses the returned usage
     instead.
+    ``finish_override_sink`` (when provided, CEO captain path) is an out-param
+    mirroring the ``usage_sink`` idiom: it carries a single :class:`FinishReason`
+    the caller should stamp on the turn instead of the rounds-derived default
+    (``end_turn`` / ``max_rounds``). The loop sets it to ``DEGRADED`` when the model
+    keeps returning empty responses even after the fallback retry, or ``UNPRODUCTIVE``
+    when it early-stops a run of all-tools-failed-no-content rounds (B2). Cleared on
+    entry; left empty on a normal finish (one channel, since a run takes at most one
+    such terminal path).
+
+    ``run_id`` / ``role`` scope the execution-level facts (§18.3) this loop records
+    into the turn's ambient :data:`~agentcore.runtime.facts.current_fact_log`
+    (round_boundary / llm_call / note) — captain vs worker, so a multi-agent turn's
+    facts split per run. They default to empty (a standalone loop / test records
+    facts with no scope, or none at all when no log is bound).
     """
     profile = profile or get_profile("chat")
     # Reset any caller-provided usage mirror so it reflects only this loop's spend
     # (callers reuse one list across contract-retry attempts).
     if usage_sink is not None:
         usage_sink.clear()
+    if finish_override_sink is not None:
+        finish_override_sink.clear()
 
-    if allowed_tool_names is None:
-        tool_defs = tools.get_openai_definitions() if tools.count > 0 else None
-    elif allowed_tool_names:
-        tool_defs = tools.get_openai_definitions(allowed_tool_names) or None
-    else:
-        tool_defs = None
+    # Tools the circuit breaker (B2) has retired for the rest of this run. Recomputing
+    # the openai defs from the current allow-list minus this set lets a wedged tool be
+    # removed mid-run without rebuilding the whole loop (empty result → tool_choice
+    # falls back to "none", forcing a text answer).
+    disabled_tools: set[str] = set()
+
+    def _resolve_tool_defs() -> list[dict[str, Any]] | None:
+        if allowed_tool_names is None:
+            candidates = tools.names if tools.count > 0 else []
+        else:
+            candidates = list(allowed_tool_names)
+        candidates = [name for name in candidates if name not in disabled_tools]
+        if not candidates:
+            return None
+        return tools.get_openai_definitions(candidates) or None
+
+    tool_defs = _resolve_tool_defs()
 
     emit_content = on_content or (lambda delta: sink.emit(content_delta(delta)))
     emit_reasoning = on_reasoning or (lambda delta: sink.emit(reasoning_delta(delta)))
@@ -155,15 +223,32 @@ async def react_loop(
     final_reasoning = ""
 
     # Per-run convergence governance: detects mechanical loops outside the model.
-    controller = LoopController()
+    controller = LoopController(
+        empty_threshold=settings.engine_empty_response_threshold,
+        tool_failure_warn=settings.engine_tool_failure_warn,
+        tool_failure_disable=settings.engine_tool_failure_disable,
+        unproductive_threshold=settings.engine_unproductive_threshold,
+        reflection_start_round=settings.engine_reflection_start_round,
+        reflection_interval=settings.engine_reflection_interval,
+    )
+    # B2 degraded fallback: the model the next round runs on. None = the profile's
+    # own model; set to profile.fallback_model after an empty round to retry once on
+    # the stronger model. Sticky for the rest of the run once escalated.
+    active_model: str | None = None
 
     for round_idx in range(profile.max_rounds):
         logger.debug("react.round_start", round=round_idx, messages=len(messages))
+        # 执行级事件溯源 (§18.3): mark this ReAct round edge — the seam `round_boundary.
+        # fold` later cuts the LLM window / pause snapshot on. No-op outside a turn.
+        record_turn_fact(
+            RoundBoundaryFact(round_idx=round_idx, run_id=run_id, role=role).to_fact()
+        )
         request = build_request(
             profile,
             messages,
             tools=tool_defs,
             tool_choice="auto" if tool_defs else "none",
+            model=active_model,
         )
 
         try:
@@ -199,6 +284,24 @@ async def react_loop(
         if round_reasoning:
             final_reasoning += round_reasoning
 
+        # 执行级事件溯源 (§18.3): record THIS round's LLM output as a fact — content +
+        # reasoning_content + tool_calls + usage. Only the output is stored; the input
+        # window is the fold of all prior facts (correct-by-construction, no quadratic
+        # window duplication). reasoning_content is kept verbatim because DeepSeek
+        # thinking mode requires it echoed back on a tool-call round (llm.mdc / §4.3),
+        # so a window rebuilt from facts must reproduce it. No-op outside a turn.
+        record_turn_fact(
+            LlmCallFact(
+                run_id=run_id,
+                round_idx=round_idx,
+                content=round_content,
+                reasoning_content=round_reasoning,
+                tool_calls=_tool_calls_to_dicts(round_tool_calls),
+                usage=usage.as_dict() if usage else {},
+                finish_reason="tool_calls" if round_tool_calls else "stop",
+            ).to_fact()
+        )
+
         # Per-round trace: tools requested this round + the round's own token split
         # (reasoning_tokens is the key "how hard did it think" signal). `done=True`
         # marks the no-tool round that ends the loop. Inherits the worker's
@@ -213,8 +316,39 @@ async def react_loop(
             done=not round_tool_calls,
         )
 
+        # Track empty-response rounds for the degraded ladder (B2): a round that
+        # produced no content AND no tool call is a degradation, not a finish.
+        round_empty = not round_content and not round_tool_calls
+        controller.note_empty_round(round_empty)
+
         if not round_tool_calls:
-            return final_content, final_reasoning, total_usage, round_idx + 1
+            if round_content:
+                # A real textual answer with no further tool calls → normal finish.
+                return final_content, final_reasoning, total_usage, round_idx + 1
+            # Empty response: retry once on the fallback model, else end the turn
+            # degraded rather than returning a blank reply.
+            fallback_model = profile.fallback_model
+            fallback_available = (
+                settings.engine_fallback_enabled
+                and fallback_model is not None
+                and fallback_model != (active_model or profile.model)
+            )
+            action = controller.empty_response_action(
+                fallback_available=fallback_available
+            )
+            if action is Intervention.FALLBACK:
+                active_model = fallback_model
+                logger.warning(
+                    "engine.fallback_model", round=round_idx, fallback_model=fallback_model
+                )
+                continue
+            if action is Intervention.FINALIZE:
+                logger.warning("engine.degraded", round=round_idx)
+                if finish_override_sink is not None:
+                    finish_override_sink.append(FinishReason.DEGRADED)
+                return final_content, final_reasoning, total_usage, round_idx + 1
+            # CONTINUE (no fallback available): retry the round as-is.
+            continue
 
         # DeepSeek thinking mode requires reasoning_content to be echoed back on
         # any assistant turn that carried tool_calls, or the next request 400s
@@ -235,6 +369,7 @@ async def react_loop(
             approval_gate=approval_gate,
             citation_sink=citation_sink,
             annotate_citations=annotate_citations,
+            run_id=run_id,
         )
         messages.extend(tool_results)
 
@@ -255,10 +390,49 @@ async def react_loop(
             combined = join_segments(final_content, handoff_content)
             return combined, final_reasoning, total_usage, round_idx + 1
 
+        controller.record(attempts)
+
+        # B2 no-output early stop: track whether this round was *unproductive* —
+        # every tool call failed AND the model wrote nothing. A sustained streak of
+        # these (caught by the backstop below the pattern ladder) means the run is
+        # going nowhere even though no single mechanical pattern tripped.
+        round_all_failed = bool(attempts) and all(not a.success for a in attempts)
+        controller.note_round_productivity(
+            had_tool_calls=bool(round_tool_calls),
+            all_failed=round_all_failed,
+            had_content=bool(round_content),
+        )
+
+        # B2 tool failure circuit breaker: a tool that keeps failing (cumulative,
+        # args-agnostic — what fingerprint-keyed REPEATED_FAILURE misses) gets the
+        # model told to stop retrying it, then is removed from the toolset for the
+        # rest of the run. Runs before the pattern ladder so a wedged tool is retired
+        # up front; the injected steer is part of the real window, so it's journaled.
+        breaker = controller.tool_circuit_breaker()
+        if breaker.disabled:
+            disabled_tools.update(breaker.disabled)
+            tool_defs = _resolve_tool_defs()
+        breaker_message = breaker.message()
+        if breaker_message is not None:
+            logger.info(
+                "engine.tool_circuit_breaker",
+                warned=list(breaker.warned),
+                disabled=list(breaker.disabled),
+                round=round_idx,
+            )
+            messages.append(LLMMessage(role="user", content=breaker_message))
+            record_turn_fact(
+                NoteFact(
+                    role="user",
+                    content=breaker_message,
+                    reason="circuit_breaker",
+                    run_id=run_id,
+                ).to_fact()
+            )
+
         # Convergence governance: detect mechanical loops and intervene. NUDGE
         # injects a fact-anchored reflection and lets the model recover; a second
         # trip FINALIZEs (force a tool-free answer) so we never spin to the cap.
-        controller.record(attempts)
         signal = controller.detect()
         action = controller.decide(signal)
         if signal is not None and action is Intervention.NUDGE:
@@ -269,7 +443,15 @@ async def react_loop(
                 count=signal.count,
                 round=round_idx,
             )
-            messages.append(LLMMessage(role="user", content=signal.reflection_message()))
+            reflection = signal.reflection_message()
+            messages.append(LLMMessage(role="user", content=reflection))
+            # 执行级事件溯源 (§18.3): the injected NUDGE is part of the real LLM window
+            # (the next round sees it), so the window fold needs it as a fact.
+            record_turn_fact(
+                NoteFact(
+                    role="user", content=reflection, reason="nudge", run_id=run_id
+                ).to_fact()
+            )
             continue
         if signal is not None and action is Intervention.FINALIZE:
             logger.warning(
@@ -290,6 +472,45 @@ async def react_loop(
                 total_usage=total_usage,
                 rounds=round_idx + 1,
                 reason=signal.reason.value,
+                run_id=run_id,
+            )
+
+        # B2 no-output early stop (backstop): no mechanical pattern tripped, but the
+        # model has spent the unproductive threshold of consecutive rounds with every
+        # tool failing and nothing written — bail to a forced tool-free answer rather
+        # than burning the rest of the budget, and surface the turn as UNPRODUCTIVE.
+        if controller.unproductive_early_stop():
+            logger.warning(
+                "engine.unproductive_stop", round=round_idx, attempts=len(attempts)
+            )
+            if finish_override_sink is not None:
+                finish_override_sink.append(FinishReason.UNPRODUCTIVE)
+            return await _force_finalize(
+                messages=messages,
+                llm=llm,
+                profile=profile,
+                emit_content=emit_content,
+                emit_reasoning=emit_reasoning,
+                final_content=final_content,
+                final_reasoning=final_reasoning,
+                total_usage=total_usage,
+                rounds=round_idx + 1,
+                reason="unproductive",
+                run_id=run_id,
+            )
+
+        # B2 reflection injection: on a long run, inject a periodic progress-review
+        # steer (proactive re-plan beat, not loop-triggered). Skip when a circuit-
+        # breaker steer already landed this round so we don't stack two system prompts.
+        if breaker_message is None and controller.reflection_due(round_idx):
+            review = progress_review_prompt(round_idx + 1)
+            logger.info("engine.reflection_inject", round=round_idx)
+            messages.append(LLMMessage(role="user", content=review))
+            # 执行级事件溯源 (§18.3): injected into the real window → journaled as a fact.
+            record_turn_fact(
+                NoteFact(
+                    role="user", content=review, reason="reflection", run_id=run_id
+                ).to_fact()
             )
 
     # Round budget exhausted while still tool-calling: force a tool-free answer
@@ -307,7 +528,31 @@ async def react_loop(
         total_usage=total_usage,
         rounds=profile.max_rounds,
         reason="max_rounds",
+        run_id=run_id,
     )
+
+
+def _tool_calls_to_dicts(tool_calls: list[ToolCall] | None) -> list[dict[str, Any]]:
+    """Serialize a round's tool calls for the ``llm_call`` fact (§18.3).
+
+    The window fold rebuilds the assistant message from this, so it mirrors the
+    OpenAI/transcript shape (``runs.serialize._tool_call_to_dict``) exactly — id +
+    type + function(name, arguments) — keeping the facts module free of an
+    ``llm.protocol`` import on the read side.
+    """
+    if not tool_calls:
+        return []
+    return [
+        {
+            "id": tc.id,
+            "type": tc.type,
+            "function": {
+                "name": tc.function.name,
+                "arguments": tc.function.arguments,
+            },
+        }
+        for tc in tool_calls
+    ]
 
 
 def join_segments(acc: str, new: str) -> str:
@@ -342,6 +587,7 @@ async def _force_finalize(
     total_usage: TokenUsage,
     rounds: int,
     reason: str,
+    run_id: str = "",
 ) -> tuple[str, str, TokenUsage, int]:
     """Force one tool-free LLM round to guarantee a real textual answer.
 
@@ -351,6 +597,17 @@ async def _force_finalize(
     content was already accumulated rather than raising.
     """
     messages.append(LLMMessage(role="user", content=_FINALIZE_INSTRUCTION))
+    # 执行级事件溯源 (§18.3): the forced-finalize instruction is injected into the real
+    # LLM window, so the window fold needs it as a fact (no-op outside a turn). Scoped to
+    # the calling run so the captain window picks it up even mid-delegate (边界②).
+    record_turn_fact(
+        NoteFact(
+            role="user",
+            content=_FINALIZE_INSTRUCTION,
+            reason="finalize",
+            run_id=run_id,
+        ).to_fact()
+    )
     request = build_request(profile, messages, tools=None, tool_choice="none")
     try:
         content, reasoning, _tool_calls, usage = await _stream_llm_round(
@@ -478,6 +735,7 @@ async def _execute_tools(
     approval_gate: ApprovalGate | None = None,
     citation_sink: list[dict[str, Any]] | None = None,
     annotate_citations: bool = True,
+    run_id: str = "",
 ) -> tuple[list[LLMMessage], ToolResult | None, list[ToolAttempt]]:
     """Execute tool calls (parallel, capped).
 
@@ -544,7 +802,33 @@ async def _execute_tools(
                 )
 
         started = time.monotonic()
-        result = await tool.execute(args, context)
+        timeout = resolve_tool_timeout(tool.schema)
+        try:
+            if timeout is None:
+                result = await tool.execute(args, context)
+            else:
+                result = await asyncio.wait_for(tool.execute(args, context), timeout)
+        except TimeoutError:
+            # B1 backstop: the call blew its ceiling. wait_for has already cancelled
+            # the tool coroutine (a cancel-safe tool releases its side effects in
+            # turn — e.g. the sandbox kills its subprocess); surface a model-facing
+            # error so the loop adapts instead of hanging, and count it as a failed
+            # attempt so a tool that keeps timing out trips convergence governance.
+            duration_ms = int((time.monotonic() - started) * 1000)
+            timeout_msg = (
+                f"工具 '{name}' 执行超过 {timeout:.0f}s 仍未完成，已中止。"
+                "请改用更快的方式、缩小处理范围，或换一种方案，不要原样重试。"
+            )
+            sink.emit(tool_use_end(tc.id, name, success=False, output=timeout_msg))
+            logger.warning(
+                "tool.execute_end", tool=name, status="timeout", duration_ms=duration_ms
+            )
+            return (
+                LLMMessage(role="tool", content=timeout_msg, tool_call_id=tc.id),
+                None,
+                ToolAttempt(fingerprint, name, success=False),
+                [],
+            )
         result.tool_call_id = tc.id
 
         if result.success:
@@ -614,5 +898,25 @@ async def _execute_tools(
                 message.content = annotate_tool_citations(
                     message.content or "", message_citations, numbers
                 )
+
+    # 执行级事件溯源 (§18.3 / Phase 2 边界①): record each completed call's FINAL
+    # model-facing result as a tool_call fact — captured HERE, after the citation
+    # annotation above, so it is byte-for-byte what the next round's window carried (the
+    # forwarded tool_use_end fires inside _run_one with the pre-annotation text). The
+    # window fold reads tool results from these facts. ``tool_calls`` is positionally
+    # aligned with ``quads`` (asyncio.gather preserves order), so zip pairs each result
+    # to its issuing call. A suspended call never reaches here (it blocks in execute), so
+    # no fact is recorded for it — the fold reads that absence as "result still pending".
+    for tc, (message, _terminal, attempt, _citations) in zip(tool_calls, quads):
+        record_turn_fact(
+            ToolCallFact(
+                run_id=run_id,
+                tool_call_id=message.tool_call_id or tc.id,
+                name=tc.function.name,
+                arguments=tc.function.arguments or "",
+                result=message.content or "",
+                success=attempt.success,
+            ).to_fact()
+        )
 
     return messages, terminal, attempts

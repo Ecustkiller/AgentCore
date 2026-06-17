@@ -19,6 +19,7 @@ import type {
   PlanReviewResolvedPayload,
   PlanReviewStep,
   ProcessStep,
+  QuestionPostedPayload,
   SSEEvent,
   ToolUseEndPayload,
   ToolUseStartPayload,
@@ -92,6 +93,50 @@ export function checkpointsFromEvents(events: SSEEvent[]): CheckpointDisplay[] {
 }
 
 /**
+ * A non-blocking ask the CEO posted (ask_user blocking=false, Cursor 式) projected
+ * for display. Like {@link CheckpointDisplay} it lives on the assistant message it
+ * belongs to (so it replays from the journal), but it is NOT a gating checkpoint:
+ * there is no `status` / `decision` — it was never pending. The card renders the
+ * question + read-only 起步计划 + option chips that 回填 the composer; the user's
+ * answer rides an ordinary next-turn message.
+ */
+export interface NonBlockingAskDisplay {
+  id: string;
+  question: string;
+  context: string;
+  assumptions: AskAssumption[];
+  questions: AskQuestion[];
+  styleOptions: AskStyleOption[];
+}
+
+/**
+ * Fold a persisted turn journal's `question_posted` events into display items, in the
+ * order they were posted. Mirrors {@link checkpointsFromEvents} for the non-gating
+ * ask, so a reloaded turn replays the same cards the live turn showed.
+ */
+export function nonBlockingAsksFromEvents(
+  events: SSEEvent[],
+): NonBlockingAskDisplay[] {
+  const byId = new Map<string, NonBlockingAskDisplay>();
+  const order: string[] = [];
+  for (const e of events) {
+    if (e.type !== "question_posted") continue;
+    const p = e.payload as QuestionPostedPayload;
+    if (byId.has(p.ask_id)) continue;
+    order.push(p.ask_id);
+    byId.set(p.ask_id, {
+      id: p.ask_id,
+      question: p.question,
+      context: p.context ?? "",
+      assumptions: p.assumptions ?? [],
+      questions: p.questions ?? [],
+      styleOptions: p.style_options ?? [],
+    });
+  }
+  return order.map((id) => byId.get(id) as NonBlockingAskDisplay);
+}
+
+/**
  * A structured DAG checkpoint the WaveScheduler paused on (plan_review, 结构化挂起
  * 2a) projected for display. Like {@link CheckpointDisplay} it lives on the
  * assistant message it belongs to (not a separate store) so it replays inline from
@@ -161,6 +206,29 @@ function appendReasoningStep(
     steps[steps.length - 1] = { ...last, text: last.text + delta };
   } else {
     steps.push({ kind: "reasoning", text: delta });
+  }
+  return steps;
+}
+
+/**
+ * Fold one content delta into the single-agent process timeline: extend the
+ * trailing content step when the last step is reply text, else open a new one.
+ * Mirrors {@link appendReasoningStep} (and the backend sink's `_accumulate_process`)
+ * so the CEO's reply text interleaves with its thinking + tool steps in true order —
+ * the trailing content step is the final answer (前端UX设计.md §一B). Content also
+ * keeps accumulating on `message.content` (copy / citations / the canonical text);
+ * this only adds the ordered render lane.
+ */
+function appendContentStep(
+  process: ProcessStep[] | undefined,
+  delta: string,
+): ProcessStep[] {
+  const steps = process ? [...process] : [];
+  const last = steps[steps.length - 1];
+  if (last && last.kind === "content") {
+    steps[steps.length - 1] = { ...last, text: last.text + delta };
+  } else {
+    steps.push({ kind: "content", text: delta });
   }
   return steps;
 }
@@ -246,11 +314,13 @@ export interface Message {
   content: string;
   /** 模型思考过程（思考强度档下的 reasoning_content）；流式与历史回放共用。 */
   reasoning?: string;
-  /** 单 Agent 回合的「思考+工具」过程时间线（前端UX设计.md §一）：CEO 自身的思考与
-   * 其工具调用按发生顺序交织，折叠进气泡顶部的过程面板。流式时由 SSE 增量构建
-   * （reasoning_delta 续写尾部思考段、tool_use_* 落工具步），历史回放时由
-   * `runs.process` 还原（toMessage）。仅单 Agent 用到工具的回合存在；多 Agent 回合
-   * 改由团队图呈现（不读此字段），纯对话回合无此字段。 */
+  /** 单 Agent 回合的「思考·正文·工具」内联过程时间线（前端UX设计.md §一B）：CEO 自身
+   * 的思考、回复正文与工具调用按真实发生顺序交织成一条流——气泡不再把正文单独抽到
+   * 底部，末尾的 content 步即最终答案。流式时由 SSE 增量构建（reasoning_delta 续写尾部
+   * 思考段、content_delta 续写尾部正文段、tool_use_* 落工具步），历史回放时由
+   * `runs.process` 还原（toMessage）。多 Agent 回合改由团队图呈现（不读此字段）；后端
+   * `_has_tool` 门控持久化——用过工具的回合落完整 content 步，纯对话/纯思考回合不落
+   * process，回放时由 reasoning_content 合成单条思考段、正文回落 message.content。 */
   process?: ProcessStep[];
   createdAt: string;
   executionId: string | null;
@@ -280,6 +350,11 @@ export interface Message {
    * under this assistant bubble (会话流内，不并入状态条). Absent for turns with no
    * checkpoint. */
   checkpoints?: CheckpointDisplay[];
+  /** Non-blocking asks the CEO posted this turn (ask_user blocking=false). Set live
+   * as the `question_posted` events arrive and rebuilt from the journal on reload, so
+   * the non-gating cards render inline under this assistant bubble. Absent for turns
+   * with no non-blocking ask. */
+  nonBlockingAsks?: NonBlockingAskDisplay[];
   /** Structured DAG checkpoints the WaveScheduler paused on this turn (plan_review,
    * 结构化挂起 2a). Set live as the SSE events arrive and rebuilt from the journal on
    * reload, so the cards render inline under this assistant bubble alongside any
@@ -499,6 +574,13 @@ interface ConversationState {
     selected: string[],
     conversationId?: string | null,
   ) => void;
+  /** Append a non-blocking ask the CEO just posted (`question_posted`) to the live
+   * assistant message, as a non-gating card. Deduped by id; no-op if there is no
+   * assistant message yet. There is no settle — it was never pending. */
+  addNonBlockingAsk: (
+    payload: QuestionPostedPayload,
+    conversationId?: string | null,
+  ) => void;
   /** Append a structured DAG checkpoint the WaveScheduler just paused on
    * (`plan_review_required`) to the live assistant message, as a pending card.
    * Deduped by id; no-op if there is no assistant message yet. */
@@ -658,6 +740,11 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         messages[messages.length - 1] = {
           ...last,
           content: last.content + chunk,
+          // Fold the reply text into the single-agent process timeline (in arrival
+          // order, after any preceding 思考/工具 step) so it renders inline at its
+          // true chronological position (前端UX设计.md §一B); `content` above stays
+          // the canonical full text for copy / citations.
+          process: appendContentStep(last.process, chunk),
           // The captain is writing its answer now → any「正在生成工具」line is done.
           composingTool: null,
         };
@@ -776,6 +863,38 @@ export const useConversationStore = create<ConversationState>((set, get) => {
               decision: null,
               note: "",
               selected: [],
+            },
+          ],
+        };
+        return { messages };
+      }),
+
+    addNonBlockingAsk: (payload, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        let idx = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "assistant") {
+            idx = i;
+            break;
+          }
+        }
+        if (idx === -1) return null;
+        const msg = messages[idx];
+        const existing = msg.nonBlockingAsks ?? [];
+        // A re-delivered event must not stack a second card for one ask.
+        if (existing.some((a) => a.id === payload.ask_id)) return null;
+        messages[idx] = {
+          ...msg,
+          nonBlockingAsks: [
+            ...existing,
+            {
+              id: payload.ask_id,
+              question: payload.question,
+              context: payload.context ?? "",
+              assumptions: payload.assumptions ?? [],
+              questions: payload.questions ?? [],
+              styleOptions: payload.style_options ?? [],
             },
           ],
         };

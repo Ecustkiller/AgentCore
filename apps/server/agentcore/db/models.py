@@ -215,6 +215,23 @@ class Conversation(Base):
     memory_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Long-conversation compaction (执行引擎架构设计 §十三 长对话压缩 / conversation/
+    # compaction.py). A rolling summary folds turns OLDER than the recency window into
+    # 已确立事实 / 决策 / 未决问题 / 文件路径, so a long chat feeds [summary] + recent
+    # turns instead of the whole transcript — fighting context rot + cache-lapse cost,
+    # not window overflow (DeepSeek's 1M does not overflow). Three columns, all NULL =
+    # never compacted (the loader falls back to the plain recent window):
+    #   compaction_summary       — the current rolling summary text
+    #   compacted_through        — watermark: created_at of the last message folded in
+    #   compaction_input_tokens  — the turn input tokens measured at the last (re)compaction
+    # Computed OFF the turn by the token-triggered background pass, then REUSED across
+    # turns (compute once, never per-turn) so the DeepSeek exact-prefix cache holds —
+    # recomputing the prefix every turn would bust it (see runtime/prompt.py).
+    compaction_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compacted_through: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    compaction_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -280,6 +297,14 @@ class Folder(Base):
     # against this root. Opaque desktop handle minted by the desktop (fs-service
     # `randomUUID`), so a plain string, not PG_UUID (not a server-owned id).
     local_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Sub-path *within* ``local_root_id`` this workspace lives at (工作区对称化 D1a).
+    # NULL/"" = the folder is the root itself (an explicitly-added local project).
+    # A non-empty segment marks a per-conversation workspace lazily promoted under a
+    # shared container root (~/Documents/AgentCore/<title>/): same container root,
+    # distinct subpath, so each file-producing desktop chat reads as its own card —
+    # symmetric with cloud bare-chat promotion. Server-generated (not user input),
+    # a single FS-safe path segment; the desktop joins ``root + subpath``.
+    local_subpath: Mapped[str | None] = mapped_column(String(400), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

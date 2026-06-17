@@ -80,6 +80,59 @@ def decode_access_token(token: str) -> str:
     return sub
 
 
+# --- Inference tokens (scoped JWT for the sidecar's cloud-proxy LLM calls) ---
+
+
+def create_inference_token(
+    user_id: str, *, expires_delta: timedelta | None = None
+) -> str:
+    """Mint a scoped token authorizing a local sidecar's LLM calls through the cloud
+    inference proxy (双模式工作区 §一.1 / Slice 4a).
+
+    The desktop authenticates via httpOnly cookies, so the renderer can never hand
+    the sidecar a usable bearer; instead it exchanges its cookie for THIS token and
+    passes it to the on-machine engine, which sends it as ``Authorization: Bearer``
+    to ``/v1/inference``. A distinct ``type`` ("inference", not "access") means it
+    can ONLY authorize the inference proxy — :func:`decode_inference_token` refuses
+    an access token and ``decode_access_token`` refuses this one, so the two kinds
+    can never be confused (a leaked inference token can't drive the cookie-auth API).
+    """
+    now = datetime.now(UTC)
+    expire = now + (
+        expires_delta
+        or timedelta(minutes=settings.inference_token_expire_minutes)
+    )
+    claims = {
+        "sub": user_id,
+        "type": "inference",
+        "iat": int(now.timestamp()),
+        "exp": int(expire.timestamp()),
+    }
+    return jwt.encode(claims, settings.jwt_secret_key, algorithm=_JWT_ALGORITHM)
+
+
+def decode_inference_token(token: str) -> str:
+    """Return the subject (user_id) of a valid inference token (Slice 4a).
+
+    Raises ``AuthenticationError`` for any invalid, tampered, expired, or
+    wrong-type token (including a regular ``access`` token), so the proxy
+    translates it to a 401 uniformly.
+    """
+    try:
+        claims = jwt.decode(
+            token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM]
+        )
+    except JWTError as exc:
+        raise AuthenticationError("Invalid or expired inference token") from exc
+
+    if claims.get("type") != "inference":
+        raise AuthenticationError("Wrong token type")
+    sub = claims.get("sub")
+    if not sub:
+        raise AuthenticationError("Token missing subject")
+    return sub
+
+
 # --- Refresh tokens (opaque, high-entropy) ---
 
 

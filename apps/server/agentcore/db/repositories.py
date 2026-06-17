@@ -111,6 +111,34 @@ class UserRepository:
         )
         return result.scalars().all()
 
+    async def list_all(
+        self, *, limit: int = 50, offset: int = 0, query: str | None = None
+    ) -> tuple[list[User], int]:
+        """All accounts for the admin console (用户管理), newest-first, paginated.
+
+        Unlike ``search`` (exact-match, anti-enumeration for the 找人 directory),
+        this is the operator's full roster: an optional ``query`` does a substring
+        ILIKE over username/display_name, and disabled accounts are included.
+        Returns ``(rows, total)`` so the caller can render page controls.
+        """
+        conditions: list[ColumnElement[bool]] = []
+        q = (query or "").strip()
+        if q:
+            pattern = _ilike_pattern(q)
+            conditions.append(
+                or_(User.username.ilike(pattern), User.display_name.ilike(pattern))
+            )
+        count_stmt = select(func.count()).select_from(User)
+        list_stmt = select(User)
+        if conditions:
+            count_stmt = count_stmt.where(*conditions)
+            list_stmt = list_stmt.where(*conditions)
+        total = await self._session.scalar(count_stmt)
+        result = await self._session.execute(
+            list_stmt.order_by(User.created_at.desc()).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all()), int(total or 0)
+
     async def create(
         self,
         *,
@@ -136,6 +164,15 @@ class UserRepository:
     async def set_role(self, user_id: str, role: str) -> None:
         await self._session.execute(
             update(User).where(User.user_id == user_id).values(role=role)
+        )
+        await self._session.commit()
+
+    async def set_status(self, user_id: str, status: str) -> None:
+        """Enable/disable an account (admin 用户管理). A disabled user is refused at
+        ``get_current_user`` on the next request, so no token revocation is needed.
+        """
+        await self._session.execute(
+            update(User).where(User.user_id == user_id).values(status=status)
         )
         await self._session.commit()
 
@@ -422,6 +459,34 @@ class ConversationRepository:
         )
         await self._session.commit()
 
+    async def set_compaction(
+        self,
+        conversation_id: str,
+        *,
+        summary: str,
+        compacted_through: datetime,
+        input_tokens: int | None,
+    ) -> None:
+        """Persist the rolling compaction summary + its watermark (执行引擎 §十三 长对话压缩).
+
+        ``summary`` is the merged rolling digest, ``compacted_through`` the created_at
+        of the last message folded into it (the loader replays only messages strictly
+        newer than this), and ``input_tokens`` the turn-input size that triggered this
+        (re)compaction — observability for tuning the threshold. Written once per fold
+        by the off-turn background pass (conversation/compaction.py); reused verbatim
+        across turns so the DeepSeek exact-prefix cache holds.
+        """
+        await self._session.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(
+                compaction_summary=summary,
+                compacted_through=compacted_through,
+                compaction_input_tokens=input_tokens,
+            )
+        )
+        await self._session.commit()
+
     async def list_pending_memory_consolidation(
         self, *, idle_before: datetime, limit: int
     ) -> Sequence[str]:
@@ -505,16 +570,20 @@ class FolderRepository:
         name: str,
         local_dir: str | None = None,
         local_root_id: str | None = None,
+        local_subpath: str | None = None,
     ) -> Folder:
         # ``local_root_id`` binds the folder to a desktop FS root at creation (文件
         # 中枢统一 F2): the hub's "添加文件夹 = 建本地绑定项目" is one insert, not a
-        # create-then-bind round trip.
+        # create-then-bind round trip. ``local_subpath`` (工作区对称化 D1a) marks a
+        # per-conversation workspace lazily promoted under a shared container root;
+        # NULL for an explicitly-added project bound at its root.
         folder = Folder(
             id=new_id(),
             user_id=user_id,
             name=name,
             local_dir=local_dir,
             local_root_id=local_root_id,
+            local_subpath=local_subpath,
         )
         self._session.add(folder)
         await self._session.commit()
@@ -836,6 +905,29 @@ class MessageRepository:
         result = await self._session.execute(
             select(Message)
             .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.desc())
+            .limit(limit)
+        )
+        return list(reversed(result.scalars().all()))
+
+    async def list_recent_after(
+        self, conversation_id: str, *, after: datetime, limit: int
+    ) -> Sequence[Message]:
+        """The most recent ``limit`` messages STRICTLY NEWER than ``after``, chronological.
+
+        The compaction loader's window above the watermark (执行引擎 §十三 长对话压缩):
+        replays the un-folded tail (everything after ``compacted_through``) prefixed by
+        the rolling summary. Recent-biased like ``list_recent`` — under a stalled
+        compaction the tail can outgrow ``limit``, and dropping the OLDEST of it (which
+        are at least near the summary boundary) is safer than dropping the newest, which
+        would re-introduce the very recency loss compaction exists to avoid.
+        """
+        result = await self._session.execute(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.created_at > after,
+            )
             .order_by(Message.created_at.desc())
             .limit(limit)
         )

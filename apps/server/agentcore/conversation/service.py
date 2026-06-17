@@ -9,10 +9,12 @@ import time
 from collections.abc import Coroutine
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.config import settings
-from agentcore.conversation.history import load_history
+from agentcore.conversation.compaction import schedule_compaction
+from agentcore.conversation.history import load_chat_context
 from agentcore.core.errors import AgentCoreError
 from agentcore.core.log_context import log_context, new_trace_id
 from agentcore.core.logging import get_logger
@@ -58,7 +60,7 @@ from agentcore.runtime.suspension_persistence import (
     save_paused_turn,
 )
 from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
-from agentcore.workspace.deferred import DeferredWorkspace
+from agentcore.workspace.deferred import DeferredWorkspace, PromotionResult
 from agentcore.workspace.handoff import snapshot_local
 from agentcore.workspace.locate import (
     LocalBinding,
@@ -128,36 +130,117 @@ async def _resolve_local_binding(
     return resolve_local_binding(
         folder_id=conv.folder_id,
         folder_local_root_id=folder.local_root_id if folder else None,
+        folder_local_subpath=folder.local_subpath if folder else None,
         label=folder.name if folder else None,
     )
 
 
+# Characters illegal in a single FS path segment (Windows is the strictest, so we
+# honor its set everywhere for portability): the reserved set plus control chars.
+_SUBPATH_FORBIDDEN = set('<>:"/\\|?*') | {chr(c) for c in range(32)}
+_SUBPATH_MAX = 80  # keep on-disk directory names readable, not full 200-char names
+
+
+def _sanitize_subpath_segment(name: str) -> str:
+    """Turn a workspace name into one FS-safe directory segment (工作区对称化 D1a).
+
+    Drops reserved/control characters, collapses whitespace, trims trailing dots /
+    spaces (illegal on Windows), and caps length so the on-disk folder under the
+    container reads cleanly. Falls back to ``"workspace"`` if nothing survives.
+    """
+    cleaned = "".join(c for c in name if c not in _SUBPATH_FORBIDDEN)
+    cleaned = " ".join(cleaned.split()).rstrip(". ")
+    return cleaned[:_SUBPATH_MAX].rstrip(". ") or "workspace"
+
+
+async def _unique_local_subpath(
+    repo: FolderRepository, *, user_id: str, container_root_id: str, name: str
+) -> str:
+    """A subpath segment for ``name`` not already used by a folder in the container.
+
+    Two bare chats promoted before their titles exist would both want
+    "未命名工作区"; sharing one on-disk directory would merge their files. So dedupe
+    against the user's existing folders bound to the same container root, suffixing
+    ``-2``, ``-3``… on collision. Server-generated (never user input), so it is a
+    safe single path segment.
+    """
+    base = _sanitize_subpath_segment(name)
+    folders = await repo.list_by_user(user_id)
+    taken = {
+        f.local_subpath
+        for f in folders
+        if f.local_root_id == container_root_id and f.local_subpath
+    }
+    if base not in taken:
+        return base
+    i = 2
+    while f"{base}-{i}" in taken:
+        i += 1
+    return f"{base}-{i}"
+
+
 def _bare_chat_promote(
-    *, user_id: str, conversation_id: str, title: str | None
+    *,
+    user_id: str,
+    conversation_id: str,
+    title: str | None,
+    user_message: str,
+    local_container_root_id: str | None,
 ):
     """Build the lazy-promotion callback for a 裸聊 turn (文件夹即工作区 §懒建).
 
     ``DeferredWorkspace`` invokes this the first time the team (or a residency write)
     creates a file: mint a folder named after the chat, file the conversation into
-    it, and return the folder id so the rest of the turn — and the end-of-turn
+    it, and return where it landed so the rest of the turn — and the end-of-turn
     snapshot — target it. Runs in its own session because it fires mid-run, after the
     turn's setup session has already closed.
+
+    When ``local_container_root_id`` is set (a desktop bare chat, 工作区对称化 D1a),
+    the new folder is bound **local** at a unique subpath under that container root,
+    so each file-producing desktop chat becomes its own local workspace card —
+    symmetric with cloud. Otherwise it is a cloud folder (the original behavior). The
+    name comes from the title when available, else the first user message (the title
+    is async, usually still absent at this mid-turn moment) — and for local it also
+    seeds the on-disk directory, so a meaningful name matters.
     """
 
-    async def _promote() -> str:
+    async def _promote() -> PromotionResult:
+        name = default_workspace_name(title, fallback_text=user_message)
+        local_subpath: str | None = None
         async with async_session_factory() as session:
-            folder = await FolderRepository(session).create(
-                user_id=user_id, name=default_workspace_name(title)
+            repo = FolderRepository(session)
+            if local_container_root_id:
+                local_subpath = await _unique_local_subpath(
+                    repo,
+                    user_id=user_id,
+                    container_root_id=local_container_root_id,
+                    name=name,
+                )
+            folder = await repo.create(
+                user_id=user_id,
+                name=name,
+                local_root_id=local_container_root_id,
+                local_subpath=local_subpath,
             )
             await ConversationRepository(session).set_folder(
                 conversation_id, folder.id, user_id=user_id
             )
+        binding = (
+            LocalBinding(
+                root_id=local_container_root_id,
+                root_label=name,
+                subpath=local_subpath or "",
+            )
+            if local_container_root_id
+            else None
+        )
         logger.info(
             "workspace.bare_chat_promoted",
             conversation_id=conversation_id,
             folder_id=folder.id,
+            location="local" if binding else "server",
         )
-        return folder.id
+        return PromotionResult(folder_id=folder.id, local_binding=binding)
 
     return _promote
 
@@ -170,21 +253,31 @@ def _build_turn_backend(
     title: str | None,
     sink: EventSink,
     local_binding: LocalBinding | None,
+    user_message: str = "",
+    local_container_root_id: str | None = None,
 ) -> WorkspaceBackend:
     """Pick a turn's workspace backend, deferring creation for a 裸聊 (§懒建).
 
-    A folderless cloud conversation has no workspace yet, so it gets a
+    A folderless conversation has no workspace yet, so it gets a
     ``DeferredWorkspace`` that materializes a real folder only on the first file
-    creation (keeping casual chats zero-cost). A filed — or locally-bound —
-    conversation resolves its backend eagerly via ``build_workspace`` (cloud/local
-    fork unchanged).
+    creation (keeping casual chats zero-cost). ``local_container_root_id`` (a desktop
+    bare chat, 工作区对称化 D1a) makes that lazy folder a **local** workspace under
+    the container root; without it the chat promotes to cloud. A filed — or
+    locally-bound — conversation resolves its backend eagerly via ``build_workspace``
+    (cloud/local fork unchanged).
     """
     if folder_id is None and local_binding is None:
         return DeferredWorkspace(
             user_id=user_id,
             promote=_bare_chat_promote(
-                user_id=user_id, conversation_id=conversation_id, title=title
+                user_id=user_id,
+                conversation_id=conversation_id,
+                title=title,
+                user_message=user_message,
+                local_container_root_id=local_container_root_id,
             ),
+            sink=sink,
+            conversation_id=conversation_id,
         )
     return build_workspace(
         user_id=user_id,
@@ -403,6 +496,10 @@ async def _persist_turn_result(
     assistant_reasoning = result.get("reasoning_content") or None
     assistant_citations = result.get("citations") or None
     assistant_runs = result.get("runs") or None
+    # 执行级事件溯源 (§18.3): the pre-composed fact-log journal (single source). Present
+    # on a fresh send / regenerate (run_chat_pipeline); absent on a resume / salvage,
+    # which fall back to flattening ``runs`` in persist_turn_journal.
+    journal_entries = result.get("journal_entries")
     cost_runs = result.get("cost_runs") or []
 
     async with async_session_factory() as session:
@@ -436,6 +533,7 @@ async def _persist_turn_result(
                 conversation_id=conversation_id,
                 trace_id=trace_id,
                 runs=assistant_runs,
+                entries=journal_entries,
             )
 
         # 落账: persist the per-run cost ledger for this turn (captain root + one
@@ -495,6 +593,14 @@ async def _persist_turn_result(
     # memory — when the user pauses (水位线+锁 / 防抖+sweeper). Non-blocking; a
     # missed debounce (restart / closed client) is caught by the periodic sweeper.
     schedule_consolidation(conversation_id)
+
+    # 长对话压缩 (执行引擎架构设计 §十三 长对话压缩): when this turn's prompt crossed the
+    # token threshold, fold the older turns into the conversation's rolling summary OFF
+    # the turn (token-triggered, watermark-gated, computed once & reused so the prefix
+    # cache holds). ``input_tokens`` is the turn total (an upper bound on the captain
+    # prompt) — a conservative trigger; the pass no-ops if there is nothing old to fold.
+    # Non-blocking; a missed fire self-heals on the next over-threshold turn.
+    schedule_compaction(conversation_id, result.get("input_tokens", 0))
 
     # Best-effort workspace backup (决策⑥): if this turn changed files, snapshot
     # the workspace to object storage. It runs after message_end (and the title
@@ -671,6 +777,7 @@ async def stream_chat(
     sink: EventSink,
     attachments: list[dict] | None = None,
     llm_credentials: LLMCredentials | None = None,
+    local_container_root_id: str | None = None,
 ) -> None:
     """Main entry: persist user message, run pipeline, persist assistant reply.
 
@@ -682,6 +789,13 @@ async def stream_chat(
     persist as durable, team-readable, downloadable project files; the stored
     message keeps only display metadata + each file's ``workspace_path`` (never the
     raw text), and attachments are still kept out of title/memory generation.
+
+    `local_container_root_id` (工作区对称化 D1a) is the desktop's default local
+    container root: when a **裸聊** turn first produces a file, it is lazily promoted
+    into a *local* workspace under this root (a per-conversation subpath) instead of
+    a cloud folder — so desktop and cloud are symmetric (each file-producing chat is
+    its own card). ``None`` (web / mobile / explicit "云端临时对话") keeps the cloud
+    lazy-promote. Ignored once the conversation already has a folder.
     """
     try:
         async with async_session_factory() as session:
@@ -709,6 +823,8 @@ async def stream_chat(
             title=title,
             sink=sink,
             local_binding=local_binding,
+            user_message=user_message,
+            local_container_root_id=local_container_root_id,
         )
 
         # Folder-level lock (决策④): serialize tasks that share this workspace so
@@ -733,7 +849,9 @@ async def stream_chat(
                     content=user_message,
                     attachments=to_stored_metadata(resident_attachments),
                 )
-                history = await load_history(session, conversation_id, max_messages=40)
+                history = await load_chat_context(
+                    session, conversation_id, max_messages=40
+                )
 
             # Reconcile the optimistic user bubble to its real row id, so a retry
             # after a mid-stream failure regenerates from the saved turn rather
@@ -772,6 +890,32 @@ async def stream_chat(
             sink.close()
 
 
+async def _recorded_turn_response(
+    *, conversation_id: str, user_message_id: str, message_id: str | None
+) -> dict:
+    """Build ``record_local_turn``'s response from already-persisted rows (a retry hit).
+
+    The turn was recorded by an earlier call whose response the desktop never saw;
+    return the same ids it would have, so the optimistic bubbles reconcile against the
+    real rows instead of spawning a duplicate turn. The current title rides along (the
+    desktop syncs its sidebar cache) — we cannot tell whether this very turn minted it,
+    and syncing to the authoritative title is always safe.
+    """
+    async with async_session_factory() as session:
+        assistant_id: str | None = None
+        if message_id:
+            assistant = await MessageRepository(session).get_by_id(
+                message_id, conversation_id=conversation_id
+            )
+            assistant_id = assistant.id if assistant else None
+        conv = await ConversationRepository(session).get_by_id(conversation_id)
+    return {
+        "user_message_id": user_message_id,
+        "assistant_message_id": assistant_id,
+        "title": conv.title if conv else None,
+    }
+
+
 async def record_local_turn(
     *,
     conversation_id: str,
@@ -781,7 +925,7 @@ async def record_local_turn(
     assistant_reasoning: str | None = None,
     citations: list[dict] | None = None,
     runs: dict | None = None,
-    cost_runs: list[dict] | None = None,
+    user_message_id: str | None = None,
     message_id: str | None = None,
     input_tokens: int = 0,
     output_tokens: int = 0,
@@ -792,28 +936,65 @@ async def record_local_turn(
 
     The local engine produced the reply on the user's box — no server pipeline ran —
     so the desktop reports the finished turn here to land it in durable history (入库
-    / 跨设备) AND in the cost ledger (计费回写). Mirrors ``stream_chat``'s persistence
-    tail (user row + assistant row + per-run 落账 + idempotent title) but WITHOUT a
-    live ``sink`` (a plain REST call, not an SSE turn) and WITHOUT a workspace
-    snapshot (local files live on the user's disk; the local→云 handoff is the
-    separate explicit bridge). Returns the persisted ids (+ any newly minted title)
-    so the desktop reconciles its optimistic bubbles.
+    / 跨设备). Mirrors ``stream_chat``'s persistence tail (user row + assistant row +
+    journal + idempotent title) but WITHOUT a live ``sink`` (a plain REST call, not an
+    SSE turn) and WITHOUT a workspace snapshot (local files live on the user's disk;
+    the local→云 handoff is the separate explicit bridge). Returns the persisted ids
+    (+ any newly minted title) so the desktop reconciles its optimistic bubbles.
 
-    计费信任边界: ``cost_runs`` is the local pipeline's own priced ledger (same engine,
-    same ``calculate_cost``), recorded through the SAME ``record_runs`` as the cloud
-    turn — idempotent by ``run_id``, so a retried write-back never double-bills. The
-    counts are reported by the user's machine, so they are authoritative only for
-    BYOK display billing (the user pays DeepSeek directly); platform-mode
-    authoritative metering belongs at the cloud inference proxy (远期规划 §一 终态),
-    not in this client-reported path.
+    计费: NOT recorded here — a sidecar turn's LLM calls are metered authoritatively at
+    the cloud inference proxy (``/v1/inference``, Slice 4a) as they happen, so this
+    write-back persists content only (no client-reported ledger to double-bill).
+
+    回写可靠性 (双模式工作区 §一.1): the desktop wraps this POST in a bounded retry, so a
+    retry after a response we DID commit must NOT duplicate the turn. ``user_message_id``
+    (the client-minted user-bubble id) makes the whole write-back idempotent: it is
+    pinned as the persisted user row's id, and if a row with it already exists the turn
+    was recorded — we return the persisted ids (+ current title) without re-creating.
     """
     trace_id = new_trace_id()
     with log_context(trace_id=trace_id, conversation_id=conversation_id, user_id=user_id):
-        async with async_session_factory() as session:
-            user_msg = await MessageRepository(session).create(
+        # Idempotency fast path: a retried write-back whose user row already landed is a
+        # no-op — return the persisted ids so the desktop reconciles against the same
+        # rows the first (lost-response) call created, never a duplicate turn.
+        if user_message_id:
+            async with async_session_factory() as session:
+                already = await MessageRepository(session).get_by_id(
+                    user_message_id, conversation_id=conversation_id
+                )
+            if already is not None:
+                logger.info(
+                    "chat.local_turn_idempotent_hit",
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                )
+                return await _recorded_turn_response(
+                    conversation_id=conversation_id,
+                    user_message_id=user_message_id,
+                    message_id=message_id,
+                )
+
+        # Pin the user row to the client id so the idempotency check above sees it on a
+        # retry. A concurrent retry that beat us here trips the unique id → IntegrityError;
+        # treat that race as the same idempotent hit.
+        try:
+            async with async_session_factory() as session:
+                user_msg = await MessageRepository(session).create(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=user_message,
+                    message_id=user_message_id,
+                )
+        except IntegrityError:
+            logger.info(
+                "chat.local_turn_idempotent_race",
                 conversation_id=conversation_id,
-                role="user",
-                content=user_message,
+                message_id=message_id,
+            )
+            return await _recorded_turn_response(
+                conversation_id=conversation_id,
+                user_message_id=user_message_id,
+                message_id=message_id,
             )
 
         # An empty reply (a tool-only / errored local turn) still persists the user
@@ -846,31 +1027,8 @@ async def record_local_turn(
                     runs=runs,
                 )
 
-        # 落账: persist the local turn's per-run cost ledger (captain root + one row
-        # per delegated member), shared with the cloud path via ``record_runs`` —
-        # idempotent by run_id so a retried write-back never double-bills. A ledger
-        # failure must NEVER break the turn (文档铁律): roll back the aborted
-        # statement and move on; the messages above are already committed.
-        if cost_runs:
-            async with async_session_factory() as session:
-                try:
-                    await CostEventRepository(session).record_runs(
-                        user_id=user_id,
-                        conversation_id=conversation_id,
-                        message_id=message_id,
-                        runs=cost_runs,
-                        trace_id=trace_id,
-                    )
-                    _log_cost_recorded(conversation_id, message_id, cost_runs)
-                except Exception as e:
-                    await session.rollback()
-                    logger.warning(
-                        "cost.ledger_write_failed",
-                        conversation_id=conversation_id,
-                        message_id=message_id,
-                        error=str(e),
-                    )
-
+        # Spend is metered at the cloud inference proxy (Slice 4a), so a sidecar turn
+        # carries no client-reported ledger to record here — persistence is content-only.
         async with async_session_factory() as session:
             conv = await ConversationRepository(session).get_by_id(conversation_id)
             needs_title = bool(conv and not conv.title)
@@ -951,7 +1109,7 @@ async def regenerate_chat(
             await msg_repo.delete_after(conversation_id, after_created_at=target.created_at)
 
             user_message = edited_content if edited_content is not None else (target.content or "")
-            history = await load_history(session, conversation_id, max_messages=40)
+            history = await load_chat_context(session, conversation_id, max_messages=40)
             local_binding = await _resolve_local_binding(session, conv)
             profile_set = await _resolve_profile_set(session, conv, user_id)
 
@@ -1033,6 +1191,14 @@ async def resume_chat(
             title = conv.title
             local_binding = await _resolve_local_binding(session, conv)
             profile_set = await _resolve_profile_set(session, conv, user_id)
+            # Reload the prior context exactly as a fresh send does (load_chat_context
+            # then drop the trailing current-user turn): the §18.3 journal stores only
+            # history's LENGTH, so resume re-supplies the messages to splice into the
+            # rebuilt CEO window (window_from_journal, Phase 2 ④). No new turn landed
+            # while the turn was paused, so this tails the same window the original saw.
+            history = await load_chat_context(
+                session, conversation_id, max_messages=40
+            )
 
         backend = _build_turn_backend(
             user_id=user_id,
@@ -1080,6 +1246,7 @@ async def resume_chat(
                         selected=response.selected,
                         sink=sink,
                         backend=backend,
+                        history=history[:-1],
                         llm_credentials=llm_credentials,
                         profile_set=profile_set,
                         session_saver=session_saver,
@@ -1185,13 +1352,16 @@ async def _persist_job_turn(
                 },
             )
             # 唯一事实源: the job conversation replays the team graph from the journal
-            # like any turn (§18.3). Untraced (handoff jobs carry no log trace).
+            # like any turn (§18.3). The handoff job runs the full pipeline, so it
+            # carries the fact-log journal (single source); fall back to ``runs`` if
+            # absent. Untraced (handoff jobs carry no log trace).
             await persist_turn_journal(
                 session,
                 message_id=result.get("message_id"),
                 conversation_id=conversation_id,
                 trace_id=None,
                 runs=result.get("runs") or None,
+                entries=result.get("journal_entries"),
             )
         if cost_runs:
             try:

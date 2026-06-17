@@ -13,6 +13,7 @@ const mk = (id: string, name = id): FolderMeta => ({
   name,
   localDir: null,
   localRootId: null,
+  localSubpath: "",
 });
 
 function readFolders(): FolderMeta[] {

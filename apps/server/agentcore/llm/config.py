@@ -53,6 +53,14 @@ class ModelProfile:
     temperature: float = 0.7
     max_tokens: int | None = None
     max_rounds: int = 16
+    # Engine-level degraded fallback (B2): the model to retry ONE round with when the
+    # primary model returns an empty response (no content, no tool call). ``None`` ⇒
+    # no fallback (the loop goes straight to a degraded finish). Set on the
+    # interactive profiles to the flagship (Flash → Pro escalation): the economy model
+    # choked, so try the stronger one once before giving up. Skipped when the resolved
+    # model already equals it (高质量档 already on Pro). Gated by
+    # ``settings.engine_fallback_enabled``. Background one-shot profiles leave it None.
+    fallback_model: str | None = None
     # Scenario tag, stamped from the PROFILES key by get_profile (the dict entries
     # leave it ""). Flows onto LLMRequest.scenario for per-scenario observability.
     name: str = ""
@@ -79,6 +87,7 @@ PROFILES: dict[str, ModelProfile] = {
         reasoning_effort="high",
         temperature=0.7,
         max_rounds=16,
+        fallback_model=DEEPSEEK_V4_PRO,
     ),
     # Light tier: simpler, well-scoped sub-tasks (fetch / format / single lookup /
     # light rewrite). Thinks at "high" like strong, but with a small round budget
@@ -92,6 +101,7 @@ PROFILES: dict[str, ModelProfile] = {
         reasoning_effort="high",
         temperature=0.7,
         max_rounds=4,
+        fallback_model=DEEPSEEK_V4_PRO,
     ),
     # Strong tier: sub-tasks needing reasoning / quality. Its BASE model is Flash
     # (the economy default); the ``quality`` mode preset (llm/modes.py) lifts it to
@@ -103,8 +113,21 @@ PROFILES: dict[str, ModelProfile] = {
         reasoning_effort="high",
         temperature=0.7,
         max_rounds=28,
+        fallback_model=DEEPSEEK_V4_PRO,
     ),
     "memory": ModelProfile(
+        model=DEEPSEEK_V4_FLASH,
+        thinking=False,
+        reasoning_effort=None,
+        temperature=0.3,
+        max_rounds=1,
+    ),
+    # Long-conversation compaction (执行引擎架构设计 §十三 长对话压缩): fold older turns
+    # into a rolling structured summary. Fast + non-thinking (World B narrow task, like
+    # memory/title); low temperature for faithful, drift-free summarization; one-shot
+    # (never ReAct). max_tokens left open — the summary is bounded by its prompt budget
+    # plus a head/tail char-truncation safety net in conversation/compaction.py.
+    "compaction": ModelProfile(
         model=DEEPSEEK_V4_FLASH,
         thinking=False,
         reasoning_effort=None,
@@ -211,17 +234,20 @@ def build_request(
     tools: list[dict] | None = None,
     tool_choice: Literal["auto", "none", "required"] = "auto",
     stream: bool = True,
+    model: str | None = None,
 ) -> LLMRequest:
     """Spread a ModelProfile into an LLMRequest.
 
     The single place that knows how a profile maps onto request fields, so call
     sites never hand-copy model/temperature/thinking/reasoning_effort/max_tokens.
     ``max_rounds`` is a ReAct-loop budget, not an API field, so it is
-    intentionally not part of the request.
+    intentionally not part of the request. ``model`` overrides ``profile.model``
+    for one request (B2 degraded fallback: the engine retries a round on the
+    profile's ``fallback_model`` while keeping every other param identical).
     """
     return LLMRequest(
         messages=messages,
-        model=profile.model,
+        model=model or profile.model,
         temperature=profile.temperature,
         max_tokens=profile.max_tokens,
         thinking=profile.thinking,

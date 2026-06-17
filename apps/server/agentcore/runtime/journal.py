@@ -23,9 +23,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
+from agentcore.runtime.events import _JOURNAL_SURFACE_TYPES
+from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from agentcore.llm.protocol import LLMMessage
+    from agentcore.runtime.runs.types import RunState
 
 logger = get_logger(__name__)
 
@@ -74,34 +79,266 @@ def entries_from_runs(runs: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 
 def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    """Project ordered journal entries back into a ``runs`` replay payload.
+    """Project ordered journal entries back into a ``runs`` replay payload (DISPLAY).
 
-    Exact inverse of :func:`entries_from_runs`: team-graph events rebuild the
-    ``{type, payload, timestamp}`` shape the client folds, process steps restore
-    verbatim from their payload, and the ``turn_end`` fact supplies ``finish_reason``.
-    Returns ``None`` when there is nothing replayable (no entries), matching the
+    Inverse of :func:`entries_from_runs` for the team-graph ``events`` / single-agent
+    ``process`` / ``turn_end`` lanes: events rebuild the ``{type, payload, timestamp}``
+    shape the client folds, process steps restore verbatim, ``turn_end`` supplies
+    ``finish_reason``. Returns ``None`` when nothing is replayable, matching the
     old「``messages.runs`` is NULL」contract so the client renders a plain bubble.
+
+    Two journal lineages flow through here and must project IDENTICALLY (so a turn's
+    bubble is the same whoever wrote its journal):
+
+    - **Legacy / seeded / resume-frame journals** (no §18.3 execution facts): the
+      events were ALREADY display-gated at write (``_build_runs_payload`` stored the
+      team graph only when surfaced, ``[]`` otherwise; a salvaged turn stored
+      ``{events:[], finish}`` on purpose). So these project as a PURE inverse —
+      untouched — preserving the round-trip contract + the cancelled-salvage bubble +
+      ``suspension_persistence`` resume hydration.
+    - **Execution-sourced journals** (carry execution facts — the fact log is the
+      single source, 执行级事件溯源落地设计.md): these stored the FULL UNGATED stream
+      (the captain's own ``run_*`` / ``tool_use_*`` ride it too). Re-apply the display
+      gate so a non-surfaced turn does not suddenly render the captain's run events as
+      a team graph: drop ``events`` unless a surface type is present (parity with
+      ``EventSink.execution_journal``), and project to ``None`` when nothing is left to
+      show (a plain chat turn — its facts persist for window rebuild but display as a
+      plain bubble). The discriminator is the presence of execution facts, NOT the
+      content, so the two clauses never fire on a legacy/salvage journal.
     """
     if not entries:
         return None
     events: list[dict[str, Any]] = []
     process: list[dict[str, Any]] = []
     finish_reason: str | None = None
+    has_exec_facts = False
     for entry in entries:
         kind = entry.get("kind") or ""
         payload = entry.get("payload") or {}
         if kind == KIND_TURN_END:
             finish_reason = payload.get("finish_reason")
+        elif kind in EXECUTION_ONLY_KINDS:
+            # Execution-level facts (§18.3: turn_started / round_boundary / llm_call /
+            # note / message_final) carry engine-rebuild state, not client-foldable
+            # display events — skip them so they never leak into runs.events (the
+            # client fold would choke on an unknown event type). Their presence marks
+            # this as an execution-sourced journal → re-gate the display below.
+            has_exec_facts = True
+            continue
         elif kind.startswith(_PROCESS_PREFIX):
             process.append(payload)
         else:
             events.append(
                 {"type": kind, "payload": payload, "timestamp": entry.get("ts")}
             )
+    if has_exec_facts:
+        # Surface gate (parity with EventSink.execution_journal): the captain's own
+        # run events are execution detail, not a replayable team graph — show events
+        # only when the turn surfaced (delegated / checkpointed).
+        if not any(e["type"] in _JOURNAL_SURFACE_TYPES for e in events):
+            events = []
+        # None-gate: an execution-sourced turn with no graph + no process is a plain
+        # chat turn → render a plain bubble (the facts still persist for rebuild).
+        if not events and not process:
+            return None
     runs: dict[str, Any] = {"events": events, "finish_reason": finish_reason}
     if process:
         runs["process"] = process
     return runs
+
+
+def window_from_journal(
+    entries: list[dict[str, Any]] | None,
+    *,
+    run_id: str | None = None,
+    history: list[LLMMessage] | None = None,
+) -> list[LLMMessage] | None:
+    """Project a turn's journal facts into ONE run's LLM window (EXECUTION).
+
+    The execution-side counterpart of :func:`runs_from_entries`: where that rebuilds
+    the *display* runs payload, this folds the §18.3 execution facts back into the
+    ``list[LLMMessage]`` the engine actually fed the model — the same shape the live
+    captain transcript / a worker's ``messages`` take, so resume can feed it straight
+    back and the conformance golden can assert it ``==`` the transcript at a pause
+    (执行级事件溯源落地设计.md §三, the ``window_from_journal`` projection).
+
+    Correct-by-construction — only outputs are journaled, so the window is the fold of
+    all prior facts (no quadratic input duplication):
+
+    - ``turn_started`` → the head: a ``system`` message (the verbatim captured prompt)
+      + the ``user`` message, with ``history`` (prior turns — supplied by the caller,
+      since the facts carry only its length: history is itself a projection of earlier
+      turns) spliced between them exactly as the executor builds it.
+    - each ``llm_call`` of the target run that carried ``tool_calls`` → the ``assistant``
+      message (``content`` / ``reasoning_content`` echoed verbatim — DeepSeek thinking
+      mode 400s without the reasoning on a tool-call turn, llm.mdc §4.3 — plus the
+      ``tool_calls``), followed by one ``tool`` message per **completed** call (result
+      matched by ``tool_call_id`` from the execution ``tool_call`` fact — the FULL
+      post-annotation text the round carried, 边界① cleared). A call with no ``tool_call``
+      fact is the SUSPENDED one (the pause happens inside ``ask_user`` / ``delegate``,
+      which blocks before the fact is recorded): no tool message, so the window ends at
+      the assistant exactly as the paused transcript does. A no-tool ``llm_call`` is the
+      turn's final answer — the loop *returns* it, never appends it.
+    - each engine-injected ``note`` (NUDGE / FINALIZE / circuit-breaker / reflection)
+      belonging to the target run (by the note's own ``run_id``, 边界② cleared) → a
+      ``user`` message, exactly as the loop injects it — so a captain note injected
+      mid-delegate still folds into the captain window.
+
+    ``run_id`` scopes a multi-agent turn to one run; ``None`` infers the captain (the
+    run of the first ``role="captain"`` round_boundary — the resume target, whose head
+    is ``turn_started``). Returns ``None`` when there is no ``turn_started`` to anchor
+    the head (a legacy / display-only journal): only the captain window is reconstructed,
+    whose head is a fact; a worker's task-prompt head is not yet journaled.
+    """
+    if not entries:
+        return None
+    from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+
+    # Head anchor + (when unscoped) the captain run to fold: one pass for both.
+    started: dict[str, Any] | None = None
+    target = run_id
+    for entry in entries:
+        kind = entry.get("kind") or ""
+        payload = entry.get("payload") or {}
+        if kind == FactKind.TURN_STARTED.value and started is None:
+            started = payload
+        elif (
+            kind == FactKind.ROUND_BOUNDARY.value
+            and target is None
+            and payload.get("role") == "captain"
+        ):
+            target = payload.get("run_id") or ""
+    if started is None:
+        return None
+    if target is None:
+        # No captain round_boundary (degenerate / single-run) → fold the first run.
+        for entry in entries:
+            if (entry.get("kind") or "") == FactKind.ROUND_BOUNDARY.value:
+                target = (entry.get("payload") or {}).get("run_id") or ""
+                break
+
+    # Index each tool result by tool_call_id from the execution ``tool_call`` fact (the
+    # FULL post-annotation result the round actually carried — NOT the forwarded display
+    # ``tool_use_end``, whose text predates the CEO citation fold, 边界① cleared). The
+    # assistant→tool pairing matches on tool_call_id (globally unique), so a worker's
+    # tools never bleed into the captain window.
+    tool_results: dict[str, str] = {}
+    for entry in entries:
+        if (entry.get("kind") or "") == FactKind.TOOL_CALL.value:
+            payload = entry.get("payload") or {}
+            tcid = payload.get("tool_call_id")
+            if tcid:
+                tool_results[tcid] = payload.get("result") or ""
+
+    # Head: system + history (caller-supplied prior turns) + user — the executor's
+    # exact build (runs/executor.build_captain_executor).
+    window: list[LLMMessage] = [
+        LLMMessage(role="system", content=started.get("system_prompt") or "")
+    ]
+    if history:
+        window.extend(history)
+    window.append(LLMMessage(role="user", content=started.get("user_message") or ""))
+
+    # Fold the target run's rounds in stream order: assistant (+ its tool results),
+    # then any active-run note, mirroring how react_loop mutates ``messages``.
+    active_run: str | None = None
+    for entry in entries:
+        kind = entry.get("kind") or ""
+        payload = entry.get("payload") or {}
+        if kind == FactKind.ROUND_BOUNDARY.value:
+            active_run = payload.get("run_id") or ""
+        elif kind == FactKind.LLM_CALL.value:
+            if payload.get("run_id") != target:
+                continue
+            tool_calls = payload.get("tool_calls") or []
+            if not tool_calls:
+                # A no-tool round is the turn's final answer (the loop returns it),
+                # not part of the window the next round would have seen.
+                continue
+            window.append(
+                LLMMessage(
+                    role="assistant",
+                    content=payload.get("content") or None,
+                    tool_calls=[
+                        ToolCall(
+                            id=tc.get("id") or "",
+                            type=tc.get("type") or "function",
+                            function=ToolCallFunction(
+                                name=(tc.get("function") or {}).get("name") or "",
+                                arguments=(tc.get("function") or {}).get("arguments")
+                                or "",
+                            ),
+                        )
+                        for tc in tool_calls
+                    ],
+                    reasoning_content=payload.get("reasoning_content") or None,
+                )
+            )
+            for tc in tool_calls:
+                tcid = tc.get("id") or ""
+                # Append a tool message ONLY when the call actually completed (a
+                # ``tool_use_end`` fact exists). The pause itself happens INSIDE the
+                # suspended call (``ask_user`` / ``delegate``): it emitted ``tool_use_
+                # start`` but no ``tool_use_end``, and the live transcript ends at the
+                # assistant message with the result still pending (resume appends it).
+                # So a missing result means "suspended / in-flight", NOT "empty result"
+                # — keying on presence keeps the window == the paused transcript.
+                if tcid in tool_results:
+                    window.append(
+                        LLMMessage(
+                            role="tool",
+                            content=tool_results[tcid],
+                            tool_call_id=tcid,
+                        )
+                    )
+        elif kind == FactKind.NOTE.value:
+            # Attribute by the note's OWN run_id (边界② cleared), so a captain note
+            # injected while a delegated worker is the active run still folds into the
+            # captain window. Fall back to the active run for a note that carries no
+            # run_id (a degenerate / pre-Phase-2 stream).
+            note_run = payload.get("run_id") or active_run
+            if note_run == target:
+                window.append(
+                    LLMMessage(
+                        role=payload.get("role") or "user",
+                        content=payload.get("content") or "",
+                    )
+                )
+    return window
+
+
+def completed_from_journal(
+    entries: list[dict[str, Any]] | None,
+) -> dict[str, RunState]:
+    """Project the journal's worker run-final facts into the scheduler seed map (resume).
+
+    The execution counterpart of ``frame.completed`` (执行级事件溯源 Phase 2 ⑥): every
+    terminal worker recorded a ``message_final`` fact whose payload IS its seed
+    :class:`RunState` (``serialize.run_final_fact`` → ``state_to_json``, tagged by the
+    ``phase`` key). Fold them back keyed by ``run_id`` — with the SAME deserializer
+    (``state_from_json``), so the projection is byte-for-byte the blob the frame stored
+    (the conformance golden gates this ``==``) — so a resume re-seeds finished nodes from
+    facts and bills the whole plan once, no旁路 frame.
+
+    Last write per ``run_id`` wins (a retried / revised run supersedes). The captain's own
+    ``message_final`` (content/reasoning, no ``phase``) is NOT a seed and is skipped, as is
+    a legacy / display journal with no run-final facts (→ ``{}``).
+    """
+    if not entries:
+        return {}
+    from agentcore.runtime.runs.serialize import state_from_json
+
+    completed: dict[str, RunState] = {}
+    for entry in entries:
+        if (entry.get("kind") or "") != FactKind.MESSAGE_FINAL.value:
+            continue
+        payload = entry.get("payload") or {}
+        run_id = payload.get("run_id")
+        # ``phase`` presence is the RunState-head discriminator: a worker run-final carries
+        # the full seed shape, the captain's plain message_final does not.
+        if run_id and "phase" in payload:
+            completed[run_id] = state_from_json(payload)
+    return completed
 
 
 async def persist_turn_journal(
@@ -111,17 +348,25 @@ async def persist_turn_journal(
     conversation_id: str,
     trace_id: str | None,
     runs: dict[str, Any] | None,
+    entries: list[dict[str, Any]] | None = None,
 ) -> None:
     """Record a turn's replay payload to the journal (唯一事实源), best-effort.
 
     Called from the message-persistence tail right after the assistant row is
-    written, on the SAME session, keyed by the assistant ``message_id``. Flattens
-    ``runs`` to entries and replaces the turn's rows wholesale (so a resume reusing
-    the id re-persists cleanly). A failure must NEVER break the turn (文档铁律, same
-    posture as the cost ledger): it rolls back only this write and logs — the reply
-    is already committed and the worst case is a turn that won't replay its graph.
+    written, on the SAME session, keyed by the assistant ``message_id``. Replaces
+    the turn's rows wholesale (so a resume reusing the id re-persists cleanly). A
+    failure must NEVER break the turn (文档铁律, same posture as the cost ledger): it
+    rolls back only this write and logs — the reply is already committed and the
+    worst case is a turn that won't replay its graph.
+
+    ``entries`` is the pre-composed §18.3 fact-log stream (the single ordered log:
+    the engine's execution facts interleaved with the forwarded display facts, plus
+    the process timeline + ``turn_end`` tail). When given it is stored verbatim — the
+    fact log is now the source. ``runs`` is the legacy display payload, flattened via
+    :func:`entries_from_runs` when no fact log is supplied (the manual salvage / local
+    relay / resume call sites that do not run the fact-recording pipeline).
     """
-    entries = entries_from_runs(runs)
+    entries = entries if entries is not None else entries_from_runs(runs)
     if not message_id or not entries:
         return
     from agentcore.db.repositories import TurnJournalRepository

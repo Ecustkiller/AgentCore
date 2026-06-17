@@ -26,6 +26,7 @@ import type {
   MessageEndPayload,
   PlanReviewRequiredPayload,
   PlanReviewResolvedPayload,
+  QuestionPostedPayload,
   ReasoningDeltaPayload,
   RunPlanPayload,
   SSEEvent,
@@ -163,6 +164,11 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
     }
     case "reasoning_delta": {
       ensureStreamingAssistant(ctx.conversationId);
+      // Drain rAF-buffered content first so the process timeline folds steps in
+      // true emission order: content is rAF-batched but reasoning is applied now,
+      // so a queued「正文」must land before this「思考」step or the inline timeline
+      // would mis-order them (前端UX设计.md §一B). No-op when nothing is buffered.
+      flushPendingContent(ctx.conversationId);
       useConversationStore
         .getState()
         .appendReasoningToLastMessage(
@@ -274,6 +280,18 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
           p.decision,
           p.note ?? "",
           p.selected ?? [],
+          ctx.conversationId,
+        );
+      break;
+    }
+    case "question_posted": {
+      // Non-blocking ask (ask_user blocking=false): like a checkpoint it lives on its
+      // assistant message so it replays inline, but it never gates — attach a
+      // non-gating card to the live bubble (no resolve; chips 回填 the composer).
+      useConversationStore
+        .getState()
+        .addNonBlockingAsk(
+          event.payload as QuestionPostedPayload,
           ctx.conversationId,
         );
       break;
@@ -398,6 +416,9 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       const mid = execMessageId();
       const frame = frameFromEvent(event);
       if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+      // Drain rAF-buffered content first so a preceding「正文」step lands before this
+      // tool step in the inline process timeline (ordering, see reasoning_delta).
+      flushPendingContent(ctx.conversationId);
       useConversationStore
         .getState()
         .addProcessTool(
@@ -410,6 +431,9 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       const mid = execMessageId();
       const frame = frameFromEvent(event);
       if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+      // Keep the timeline ordered: flush any buffered content before resolving the
+      // tool step (a content delta can arrive between start and end).
+      flushPendingContent(ctx.conversationId);
       useConversationStore
         .getState()
         .endProcessTool(event.payload as ToolUseEndPayload, ctx.conversationId);
@@ -558,6 +582,9 @@ export interface StreamConversationOptions {
   conversationId: string;
   content: string;
   attachments?: OutgoingAttachment[];
+  /** 「待定本地容器根」id（工作区对称化 D2）：桌面裸聊首发携带，让服务端首次产文件时把这条
+   *  裸聊懒建为该容器下的 per 对话本地文件夹（D1a）。已归档 / 云端逃生口 / 非桌面 → 省略。 */
+  localContainerRootId?: string | null;
   signal?: AbortSignal;
 }
 
@@ -570,16 +597,17 @@ export async function streamConversation({
   conversationId,
   content,
   attachments,
+  localContainerRootId,
   signal,
 }: StreamConversationOptions): Promise<void> {
-  const body = JSON.stringify(
-    attachments && attachments.length > 0
-      ? { content, attachments }
-      : { content },
-  );
+  const payload: Record<string, unknown> = { content };
+  if (attachments && attachments.length > 0) payload.attachments = attachments;
+  // 仅在有信号时携带——服务端 SendMessageRequest.local_container_root_id 缺省即走云端懒建。
+  if (localContainerRootId)
+    payload.local_container_root_id = localContainerRootId;
   await runMessageStream(
     `/v1/conversations/${conversationId}/messages`,
-    body,
+    JSON.stringify(payload),
     conversationId,
     signal,
   );

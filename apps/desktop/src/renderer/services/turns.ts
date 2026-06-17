@@ -8,6 +8,7 @@ import {
   isRetriableStreamError,
   streamErrorAction,
 } from "@/lib/errors";
+import { pendingLocalContainerRoot } from "@/services/defaultWorkspace";
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import {
   buildSidecarHistory,
@@ -19,7 +20,10 @@ import {
   resumeConversation,
   streamConversation,
 } from "@/services/streamConversation";
-import { streamConversationViaSidecar } from "@/services/streamConversationViaSidecar";
+import {
+  resumeConversationViaSidecar,
+  streamConversationViaSidecar,
+} from "@/services/streamConversationViaSidecar";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   type Message,
@@ -129,20 +133,65 @@ export async function runResume(
 
   store.clearError(conversationId);
   bumpConversationCache(conversationId);
+
+  // Route durable resume the same way as a send: a conversation bound to a present
+  // local root resumes on the sidecar engine (双模式工作区 §一.1); else the cloud.
+  // Capture the pending frame BEFORE removing it — the sidecar path needs its
+  // original user message (never cloud-persisted for a paused sidecar turn).
+  const sidecarTarget = await resolveSidecarRoot(conversationId);
+  const pending = usePausedTurnStore
+    .getState()
+    .pending.find((p) => p.messageId === messageId);
   usePausedTurnStore.getState().remove(messageId);
+
+  // A paused sidecar turn's user message was never written to the cloud (it paused
+  // before write-back), so it is absent from the reopened transcript. Inject it back
+  // (with a fresh id the completion write-back will pin) so the continuation reads
+  // naturally and reconciles cleanly. Cloud resume already has its user row loaded.
+  const sidecarResume = sidecarTarget !== null && pending !== undefined;
+  const userMessageId = sidecarResume ? crypto.randomUUID() : "";
+  if (sidecarResume && pending) {
+    store.addMessage(
+      {
+        id: userMessageId,
+        role: "user",
+        content: pending.userMessage,
+        createdAt: new Date().toISOString(),
+        executionId: null,
+        isStreaming: false,
+      },
+      conversationId,
+    );
+  }
+
   store.createAssistantMessage(conversationId);
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
   try {
-    await resumeConversation({
-      conversationId,
-      messageId,
-      decision,
-      note,
-      selected,
-      signal: ac.signal,
-    });
+    if (sidecarResume && pending && sidecarTarget) {
+      await resumeConversationViaSidecar({
+        conversationId,
+        rootId: sidecarTarget.rootId,
+        subpath: sidecarTarget.subpath,
+        messageId,
+        decision,
+        note,
+        selected,
+        userMessage: pending.userMessage,
+        userMessageId,
+        signal: ac.signal,
+      });
+    } else {
+      await resumeConversation({
+        conversationId,
+        messageId,
+        decision,
+        note,
+        selected,
+        signal: ac.signal,
+      });
+    }
   } catch (err) {
     if (isAbort(err)) return;
     const s = useConversationStore.getState();
@@ -230,24 +279,31 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     // 路由（双模式工作区 §一.1）：dev 开关开 + 会话绑定本机本地根 + 无附件 → 走本地
     // sidecar 引擎；否则维持现状云链路（含所有 local 会话的服务端持久化/计费）。附件需
     // 服务端上传处理，Slice 1 sidecar 不接，故有附件时退回云端不丢附件。
-    const sidecarRoot =
+    const sidecarTarget =
       attachments.length === 0
         ? await resolveSidecarRoot(conversationId)
         : null;
-    if (sidecarRoot) {
+    if (sidecarTarget) {
       await streamConversationViaSidecar({
         conversationId,
-        rootId: sidecarRoot,
+        rootId: sidecarTarget.rootId,
+        subpath: sidecarTarget.subpath,
         content,
         history: buildSidecarHistory(conversationId, optimisticUserId),
         optimisticUserId,
         signal: ac.signal,
       });
     } else {
+      // 云链路（默认）：桌面裸聊首发携带「待定本地容器根」（工作区对称化 D2），让服务端
+      // 首次产文件时把这条裸聊懒建为该容器下的 per 对话本地文件夹（D1a）。已归档 / 云端
+      // 逃生口 / 非桌面 → null（裸聊懒建走云端，现行为不变）。
+      const localContainerRootId =
+        await pendingLocalContainerRoot(conversationId);
       await streamConversation({
         conversationId,
         content,
         attachments,
+        localContainerRootId,
         signal: ac.signal,
       });
     }

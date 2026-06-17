@@ -161,6 +161,17 @@ def test_core_reminds_pass_hidden_context_to_worker():
     assert "对话历史" in hint
 
 
+def test_core_teaches_constraint_vs_solution_boundary():
+    # 认知分工边界（约束 vs 方案）: the CEO writes requirements/constraints into the
+    # task, but leaves the deliverable's professional STRUCTURE (a paper's chapters /
+    # argument, a codebase's architecture) to the expert worker — unless the user
+    # fixed it. Pins the fix for the「CEO 替专家把方案定死、worker 沦为填字员」regression
+    # (法律论文案例) so a refactor can't revert to a single-direction「写清约束」brake.
+    hint = _CEO_CORE_HINT
+    assert "专业方案" in hint
+    assert "填字员" in hint
+
+
 def test_core_points_to_consult_skill_and_directory():
     # 提示词瘦身 P2: the slim core must point the CEO at consult_skill + the 能力目录
     # so it knows the advanced「怎么做」guidance is pull-on-demand, not missing.

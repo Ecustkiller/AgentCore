@@ -29,6 +29,11 @@ export interface WorkspaceInfo {
   location: "cloud" | "local";
   /** The bound desktop root id when local; null when cloud. */
   rootId: string | null;
+  /** Sub-path within the bound local root (工作区对称化 D1a); "" = the root itself
+   * (an explicitly-added local project) or cloud. A non-empty segment marks a
+   * per-conversation workspace lazily promoted under a shared container root —
+   * the hub scopes its browse ops to this subtree. */
+  subpath: string;
   hasFiles: boolean;
 }
 
@@ -40,6 +45,7 @@ export async function listWorkspaces(): Promise<WorkspaceInfo[]> {
     name: w.name,
     location: w.location,
     rootId: w.root_id ?? null,
+    subpath: w.subpath ?? "",
     hasFiles: w.has_files,
   }));
 }

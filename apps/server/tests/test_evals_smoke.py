@@ -21,7 +21,12 @@ from agentcore.evals.runner import apply_checks, run_suite
 from agentcore.evals.types import EvalCase, TurnOutcome
 from agentcore.llm.config import ModelProfile
 from agentcore.llm.protocol import LLMChunk, TokenUsage
-from agentcore.runtime.events import run_completed, run_plan, tool_use_start
+from agentcore.runtime.events import (
+    FinishReason,
+    run_completed,
+    run_plan,
+    tool_use_start,
+)
 
 
 class _ScriptedProvider:
@@ -66,6 +71,28 @@ def test_harness_single_path_content_only():
 
     checks = apply_checks(case, outcome)
     assert all(c.passed for c in checks)
+
+
+def test_harness_single_path_surfaces_degraded():
+    # B2: the engine empties out (no content, no tool) twice → degraded. The eval
+    # outcome must surface "degraded" (via finish_override_sink) instead of masking it
+    # as a rounds-derived end_turn, so a regression in convergence is assertable.
+    provider = _ScriptedProvider([[], []])
+    harness = EvalHarness(provider=provider)
+    case = EvalCase(
+        id="t_degraded",
+        category="qa",
+        user_message="…",
+        path="single",
+        checks=[{"name": "FinishReason", "args": {"expected": "degraded"}}],
+    )
+    outcome = asyncio.run(harness.run_case(case))
+
+    assert outcome.error is None
+    assert outcome.content == ""
+    assert outcome.finish_reason == "degraded"
+    # and the FinishReason check can now assert that terminal reason directly
+    assert all(c.passed for c in apply_checks(case, outcome))
 
 
 # --- RecordingSink：事件 → 过程事实 -------------------------------------------
@@ -158,6 +185,26 @@ def test_single_outcome_derives_finish_and_cost():
 
     capped = single_outcome("hi", usage, 10, profile=profile, sink=sink, citations=[], latency_ms=1)
     assert capped.finish_reason == "max_rounds"  # rounds 达上限
+
+
+def test_single_outcome_finish_override_wins_over_rounds():
+    # When the engine hands back a non-default terminal reason, it must win over the
+    # rounds-derivation (here rounds 3 < max 10 would otherwise read "end_turn").
+    profile = ModelProfile(
+        model="deepseek-v4-flash", thinking=False, reasoning_effort=None, max_rounds=10
+    )
+    sink = RecordingSink()
+    usage = TokenUsage()
+    degraded = single_outcome(
+        "", usage, 3, profile=profile, sink=sink, citations=[], latency_ms=1,
+        finish_override=FinishReason.DEGRADED,
+    )
+    assert degraded.finish_reason == "degraded"
+    unproductive = single_outcome(
+        "salvaged", usage, 3, profile=profile, sink=sink, citations=[], latency_ms=1,
+        finish_override=FinishReason.UNPRODUCTIVE,
+    )
+    assert unproductive.finish_reason == "unproductive"
 
 
 # --- runner + report 端到端（假 harness） -------------------------------------
