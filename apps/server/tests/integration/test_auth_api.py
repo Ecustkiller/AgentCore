@@ -6,6 +6,8 @@ owner-scoped conversation CRUD, IDOR protection, refresh rotation + reuse
 detection, login lockout, and logout.
 """
 
+from uuid import uuid4
+
 import httpx
 
 _PW = "password123"
@@ -21,6 +23,15 @@ async def _register_and_login(
     assert r.status_code == 201, r.text
     r = await client.post(
         "/v1/auth/login", json={"username": username, "password": _PW}
+    )
+    assert r.status_code == 200, r.text
+
+
+async def _login_admin(
+    client: httpx.AsyncClient, username: str, password: str
+) -> None:
+    r = await client.post(
+        "/v1/auth/login", json={"username": username, "password": password}
     )
     assert r.status_code == 200, r.text
 
@@ -175,6 +186,101 @@ async def test_logout_clears_cookies(client, make_invite):
     assert (await client.get("/v1/auth/me")).status_code == 401
 
 
+# --- bearer-token flow (mobile web / Capacitor shell, M2) ---
+
+
+async def test_token_login_returns_tokens_and_authorizes_via_bearer(client, make_invite):
+    code = await make_invite("INV-TOK-1")
+    r = await client.post(
+        "/v1/auth/register",
+        json={"username": "mobile1", "password": _PW, "invite_code": code},
+    )
+    assert r.status_code == 201, r.text
+
+    r = await client.post(
+        "/v1/auth/token", json={"username": "mobile1", "password": _PW}
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["access_token"] and body["refresh_token"]
+    assert body["token_type"] == "bearer" and body["expires_in"] > 0
+    assert body["user"]["username"] == "mobile1"
+    # The bearer flow sets NO cookies (it's for capacitor:// / new-origin clients).
+    assert "access_token" not in client.cookies
+
+    # The access token alone (no cookie) authorizes a protected route.
+    me = await client.get(
+        "/v1/auth/me",
+        headers={"Authorization": f"Bearer {body['access_token']}"},
+    )
+    assert me.status_code == 200 and me.json()["username"] == "mobile1"
+
+
+async def test_bearer_invalid_token_rejected(client):
+    r = await client.get(
+        "/v1/auth/me", headers={"Authorization": "Bearer not-a-real-token"}
+    )
+    assert r.status_code == 401
+
+
+async def test_token_refresh_rotates_via_body_and_detects_reuse(client, make_invite):
+    code = await make_invite("INV-TOK-2")
+    await client.post(
+        "/v1/auth/register",
+        json={"username": "mobile2", "password": _PW, "invite_code": code},
+    )
+    tok = (
+        await client.post(
+            "/v1/auth/token", json={"username": "mobile2", "password": _PW}
+        )
+    ).json()
+
+    r = await client.post(
+        "/v1/auth/token/refresh", json={"refresh_token": tok["refresh_token"]}
+    )
+    assert r.status_code == 200, r.text
+    rotated = r.json()
+    assert rotated["refresh_token"] != tok["refresh_token"]
+    # the rotated access token authorizes
+    me = await client.get(
+        "/v1/auth/me",
+        headers={"Authorization": f"Bearer {rotated['access_token']}"},
+    )
+    assert me.status_code == 200
+
+    # replaying the old (already-rotated) refresh token is reuse -> 401
+    assert (
+        await client.post(
+            "/v1/auth/token/refresh", json={"refresh_token": tok["refresh_token"]}
+        )
+    ).status_code == 401
+
+
+async def test_token_revoke_kills_refresh(client, make_invite):
+    code = await make_invite("INV-TOK-3")
+    await client.post(
+        "/v1/auth/register",
+        json={"username": "mobile3", "password": _PW, "invite_code": code},
+    )
+    tok = (
+        await client.post(
+            "/v1/auth/token", json={"username": "mobile3", "password": _PW}
+        )
+    ).json()
+
+    assert (
+        await client.post(
+            "/v1/auth/token/revoke", json={"refresh_token": tok["refresh_token"]}
+        )
+    ).status_code == 200
+    # a revoked refresh token can no longer rotate
+    assert (
+        await client.post(
+            "/v1/auth/token/refresh", json={"refresh_token": tok["refresh_token"]}
+        )
+    ).status_code == 401
+
+
 # --- invite issuance (admin) ---
 
 
@@ -212,3 +318,72 @@ async def test_non_admin_cannot_access_invites(client, make_invite):
     await _register_and_login(client, code, "regular")
     assert (await client.post("/v1/auth/invites", json={})).status_code == 403
     assert (await client.get("/v1/auth/invites")).status_code == 403
+
+
+# --- invite revocation (邀请码撤销) ---
+
+
+async def test_admin_revokes_invite_blocks_registration(client, make_admin):
+    username, password = await make_admin()
+    await _login_admin(client, username, password)
+
+    body = (await client.post("/v1/auth/invites", json={})).json()
+    invite_id, code = body["id"], body["code"]
+
+    r = await client.post(f"/v1/auth/invites/{invite_id}/revoke")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "revoked"
+
+    # the list reflects the new terminal status
+    listed = (await client.get("/v1/auth/invites")).json()["data"]
+    assert listed[0]["status"] == "revoked"
+
+    # a revoked code can no longer register an account
+    r = await client.post(
+        "/v1/auth/register",
+        json={"username": "toolate", "password": _PW, "invite_code": code},
+    )
+    assert r.status_code == 422
+
+
+async def test_revoke_used_invite_rejected(client, new_client, make_admin):
+    username, password = await make_admin()
+    await _login_admin(client, username, password)
+    body = (await client.post("/v1/auth/invites", json={})).json()
+    invite_id, code = body["id"], body["code"]
+
+    async with new_client() as newcomer:
+        await _register_and_login(newcomer, code, "consumer")
+
+    # the code is consumed → revoke is refused (422)
+    assert (
+        await client.post(f"/v1/auth/invites/{invite_id}/revoke")
+    ).status_code == 422
+
+
+async def test_revoke_invite_twice_rejected(client, make_admin):
+    username, password = await make_admin()
+    await _login_admin(client, username, password)
+    invite_id = (await client.post("/v1/auth/invites", json={})).json()["id"]
+    assert (
+        await client.post(f"/v1/auth/invites/{invite_id}/revoke")
+    ).status_code == 200
+    assert (
+        await client.post(f"/v1/auth/invites/{invite_id}/revoke")
+    ).status_code == 422
+
+
+async def test_revoke_unknown_invite_404(client, make_admin):
+    username, password = await make_admin()
+    await _login_admin(client, username, password)
+    assert (
+        await client.post(f"/v1/auth/invites/{uuid4()}/revoke")
+    ).status_code == 404
+
+
+async def test_non_admin_cannot_revoke_invite(client, make_invite):
+    code = await make_invite("INV-REVOKE-USER")
+    await _register_and_login(client, code, "regular2")
+    assert (
+        await client.post(f"/v1/auth/invites/{uuid4()}/revoke")
+    ).status_code == 403

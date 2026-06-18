@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     BigInteger,
     and_,
+    case,
     cast,
     delete,
     distinct,
@@ -43,6 +44,7 @@ from agentcore.db.models import (
     RefreshToken,
     RunSessionRow,
     TurnJournalRow,
+    TurnMetricsRow,
     User,
     UserBlock,
     UserDirectorySettings,
@@ -138,6 +140,25 @@ class UserRepository:
             list_stmt.order_by(User.created_at.desc()).limit(limit).offset(offset)
         )
         return list(result.scalars().all()), int(total or 0)
+
+    async def count_overview(self) -> dict[str, int]:
+        """Account tallies for the admin system panel (管理员后台 P2 系统状态).
+
+        One round-trip via conditional aggregation: ``total`` counts every account
+        (disabled included), ``active`` = ``status == "active"``, ``admins`` =
+        ``role == "admin"``. Read-only — a deployment-health glance, not management.
+        """
+        stmt = select(
+            func.count().label("total"),
+            func.count().filter(User.status == "active").label("active"),
+            func.count().filter(User.role == "admin").label("admins"),
+        ).select_from(User)
+        row = (await self._session.execute(stmt)).one()
+        return {
+            "total": int(row.total),
+            "active": int(row.active),
+            "admins": int(row.admins),
+        }
 
     async def create(
         self,
@@ -1259,16 +1280,16 @@ class CostEventRepository:
         )
 
     async def aggregate_for_window(
-        self, *, user_id: str, since: datetime
+        self, *, user_id: str | None = None, since: datetime
     ) -> dict:
-        """A user's spend since a cutoff (account dashboard today / month window).
-
-        Hits ``ix_cost_events_user_created``.
+        """Spend since a cutoff. ``user_id`` scopes to one account (account dashboard
+        today / month window, hits ``ix_cost_events_user_created``); ``None``
+        aggregates platform-wide (admin 全站用量看板 — every account).
         """
-        return await self._aggregate(
-            CostEvent.user_id == user_id,
-            CostEvent.created_at >= since,
-        )
+        conditions: list[ColumnElement] = [CostEvent.created_at >= since]
+        if user_id is not None:
+            conditions.append(CostEvent.user_id == user_id)
+        return await self._aggregate(*conditions)
 
     async def aggregate_by_role_for_window(
         self, *, user_id: str, since: datetime
@@ -1301,7 +1322,7 @@ class CostEventRepository:
         ]
 
     async def aggregate_daily_for_window(
-        self, *, user_id: str, since: datetime
+        self, *, user_id: str | None = None, since: datetime
     ) -> dict[str, int]:
         """Daily spend (UTC days) since a cutoff — the dashboard 7-day trend sparkline.
 
@@ -1309,19 +1330,89 @@ class CostEventRepository:
         day, returning an ``{iso_date: nano_total}`` map (only days that had rows).
         The caller zero-fills the absent days so the series is a fixed length. The
         day key is computed in UTC (``created_at AT TIME ZONE 'UTC'``) to match the
-        account window boundaries. Filters on ``ix_cost_events_user_created``.
+        account window boundaries. ``user_id`` scopes to one account (hits
+        ``ix_cost_events_user_created``); ``None`` is platform-wide (admin 看板).
         """
         day = func.date_trunc("day", func.timezone("UTC", CostEvent.created_at))
+        conditions: list[ColumnElement] = [CostEvent.created_at >= since]
+        if user_id is not None:
+            conditions.append(CostEvent.user_id == user_id)
         stmt = (
             select(
                 day.label("day"),
                 _sum_int(CostEvent.cost_total_nano).label("c_total"),
             )
-            .where(CostEvent.user_id == user_id, CostEvent.created_at >= since)
+            .where(*conditions)
             .group_by(day)
         )
         rows = (await self._session.execute(stmt)).all()
         return {row.day.date().isoformat(): int(row.c_total) for row in rows}
+
+    async def aggregate_by_user_for_window(
+        self, *, since: datetime, limit: int = 20
+    ) -> list[dict]:
+        """Per-user spend since a cutoff — the platform 工资单 by user (admin 全站看板).
+
+        The cross-user counterpart of ``aggregate_by_role_for_window``: groups the
+        (platform-wide) window by ``user_id`` and SUMs the scalar ``cost_total_nano``
+        plus a distinct-turn count, joining ``users`` for the display identity. Only
+        accounts that actually spent (>0) are returned, ordered by spend desc and
+        capped at ``limit`` (Top spenders) — no user filter, this is the whole
+        platform. Money is integer nano-USD; the caller formats ¥ from the single
+        ``cny_per_usd`` rate.
+        """
+        total = _sum_int(CostEvent.cost_total_nano)
+        stmt = (
+            select(
+                CostEvent.user_id.label("user_id"),
+                User.username.label("username"),
+                User.display_name.label("display_name"),
+                total.label("c_total"),
+                func.count(distinct(CostEvent.message_id)).label("turns"),
+            )
+            .join(User, User.user_id == CostEvent.user_id)
+            .where(CostEvent.created_at >= since)
+            .group_by(CostEvent.user_id, User.username, User.display_name)
+            .having(total > 0)
+            .order_by(total.desc())
+            .limit(limit)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            {
+                "user_id": row.user_id,
+                "username": row.username,
+                "display_name": row.display_name,
+                "cost_total": int(row.c_total),
+                "turns": int(row.turns),
+            }
+            for row in rows
+        ]
+
+    async def aggregate_cost_by_message_for_conversation(
+        self, conversation_id: str
+    ) -> dict[str, int]:
+        """Per-turn spend for one conversation, keyed by ``message_id`` (会话复盘).
+
+        Groups the conversation's ledger rows by the assistant turn they belong to
+        (``message_id``) and SUMs the scalar ``cost_total_nano``. Off-turn rows
+        (标题/记忆, ``message_id`` NULL) are excluded — they belong to no turn. The
+        admin 复盘 view attaches each turn's ¥ from this map (no re-pricing; the
+        caller folds the single ``cny_per_usd`` rate).
+        """
+        stmt = (
+            select(
+                CostEvent.message_id.label("message_id"),
+                _sum_int(CostEvent.cost_total_nano).label("c_total"),
+            )
+            .where(
+                CostEvent.conversation_id == conversation_id,
+                CostEvent.message_id.is_not(None),
+            )
+            .group_by(CostEvent.message_id)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {row.message_id: int(row.c_total) for row in rows}
 
 
 class HandoffJobRepository:
@@ -1442,6 +1533,19 @@ class CredentialsRepository:
             update(Credentials)
             .where(Credentials.user_id == user_id)
             .values(failed_attempts=0, locked_until=None)
+        )
+        await self._session.commit()
+
+    async def set_password(self, user_id: str, password_hash: str) -> None:
+        """Replace the stored hash and clear any lockout. An admin reset both rotates
+        the secret and unlocks the account (a forgotten password may have tripped the
+        brute-force lock)."""
+        await self._session.execute(
+            update(Credentials)
+            .where(Credentials.user_id == user_id)
+            .values(
+                password_hash=password_hash, failed_attempts=0, locked_until=None
+            )
         )
         await self._session.commit()
 
@@ -1580,6 +1684,12 @@ class InviteRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id(self, invite_id: str) -> Invite | None:
+        result = await self._session.execute(
+            select(Invite).where(Invite.id == invite_id)
+        )
+        return result.scalar_one_or_none()
+
     async def list_recent(self, *, limit: int = 100) -> Sequence[Invite]:
         result = await self._session.execute(
             select(Invite).order_by(Invite.created_at.desc()).limit(limit)
@@ -1593,6 +1703,17 @@ class InviteRepository:
             .values(used_by=used_by, used_at=datetime.now(UTC))
         )
         await self._session.commit()
+
+    async def revoke(self, invite_id: str, *, revoked_at: datetime) -> Invite | None:
+        """Stamp ``revoked_at`` and return the fresh row (ORM mutate + refresh so the
+        returned object is fully populated under async expire-on-commit)."""
+        invite = await self.get_by_id(invite_id)
+        if invite is None:
+            return None
+        invite.revoked_at = revoked_at
+        await self._session.commit()
+        await self._session.refresh(invite)
+        return invite
 
 
 class ChatRepository:
@@ -2263,3 +2384,194 @@ class TurnJournalRepository:
                 {"kind": r.kind, "payload": r.payload, "ts": r.ts}
             )
         return grouped
+
+
+class TurnMetricsRepository:
+    """Per-turn 运营观测 telemetry store — the admin 观测看板 data source.
+
+    Writes one compact row per completed assistant turn (:meth:`record`, called
+    best-effort at the turn's persistence tail) and serves the dashboard's
+    platform-wide rollups: a window's health (:meth:`aggregate_health_for_window`
+    — error rate / latency p95 / 委派率), the daily trend
+    (:meth:`aggregate_daily_for_window`), and the recent-error feed
+    (:meth:`list_recent_errors`). Aggregates are unscoped (every account) — admin
+    is a cross-user surface; per-conversation drill-down (会话复盘, P2) joins these
+    rows with messages + cost_events by trace_id.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def record(
+        self,
+        *,
+        turn_id: str,
+        conversation_id: str,
+        user_id: str,
+        trace_id: str | None,
+        agent_id: str | None,
+        kind: str,
+        status: str,
+        finish_reason: str | None,
+        error: str | None,
+        rounds: int,
+        duration_ms: int,
+        delegated: bool,
+        workers: int,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        """Append one telemetry row for a completed turn (one commit).
+
+        The caller (conversation service) supplies the already-computed turn
+        outcome — this layer stays pure storage. A row id is minted here (Core
+        bulk paths skip the ORM default, but this is a single ORM ``add``).
+        """
+        self._session.add(
+            TurnMetricsRow(
+                id=new_id(),
+                turn_id=turn_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                agent_id=agent_id,
+                kind=kind,
+                status=status,
+                finish_reason=finish_reason,
+                error=error,
+                rounds=rounds,
+                duration_ms=duration_ms,
+                delegated=delegated,
+                workers=workers,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+        )
+        await self._session.commit()
+
+    async def aggregate_health_for_window(self, *, since: datetime) -> dict:
+        """Platform-wide turn health since a cutoff (admin 观测看板 全站健康).
+
+        One round-trip returns the rollup the dashboard needs: turn count, error
+        count (status='error'), delegated count, average + p95 latency, average
+        rounds, and token totals. The caller derives the rates (errors/turns,
+        delegated/turns) so this layer returns only raw aggregates. p95 uses
+        Postgres ``percentile_cont`` (NULL → 0 on an empty window). Filters on
+        ``ix_turn_metrics_created``.
+        """
+        err = case((TurnMetricsRow.status == "error", 1), else_=0)
+        dele = case((TurnMetricsRow.delegated.is_(True), 1), else_=0)
+        stmt = select(
+            func.count().label("turns"),
+            func.coalesce(func.sum(err), 0).label("errors"),
+            func.coalesce(func.sum(dele), 0).label("delegated"),
+            func.coalesce(func.avg(TurnMetricsRow.duration_ms), 0).label("avg_duration"),
+            func.percentile_cont(0.95)
+            .within_group(TurnMetricsRow.duration_ms.asc())
+            .label("p95_duration"),
+            func.coalesce(func.avg(TurnMetricsRow.rounds), 0).label("avg_rounds"),
+            func.coalesce(func.sum(TurnMetricsRow.input_tokens), 0).label("input_tokens"),
+            func.coalesce(func.sum(TurnMetricsRow.output_tokens), 0).label(
+                "output_tokens"
+            ),
+        ).where(TurnMetricsRow.created_at >= since)
+        row = (await self._session.execute(stmt)).one()
+        return {
+            "turns": int(row.turns or 0),
+            "errors": int(row.errors or 0),
+            "delegated": int(row.delegated or 0),
+            "avg_duration_ms": int(row.avg_duration or 0),
+            "p95_duration_ms": int(row.p95_duration or 0),
+            "avg_rounds": float(row.avg_rounds or 0.0),
+            "input_tokens": int(row.input_tokens or 0),
+            "output_tokens": int(row.output_tokens or 0),
+        }
+
+    async def aggregate_daily_for_window(self, *, since: datetime) -> dict[str, dict]:
+        """Daily turn/error counts (UTC days) since a cutoff — the dashboard trend.
+
+        Groups the window into UTC calendar days (matching the cost trend's day
+        boundaries) and returns an ``{iso_date: {turns, errors}}`` map (only days
+        with rows); the caller zero-fills absent days for a fixed-length series.
+        """
+        day = func.date_trunc("day", func.timezone("UTC", TurnMetricsRow.created_at))
+        err = case((TurnMetricsRow.status == "error", 1), else_=0)
+        stmt = (
+            select(
+                day.label("day"),
+                func.count().label("turns"),
+                func.coalesce(func.sum(err), 0).label("errors"),
+            )
+            .where(TurnMetricsRow.created_at >= since)
+            .group_by(day)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {
+            row.day.date().isoformat(): {
+                "turns": int(row.turns or 0),
+                "errors": int(row.errors or 0),
+            }
+            for row in rows
+        }
+
+    async def list_recent_errors(self, *, limit: int = 20) -> Sequence[TurnMetricsRow]:
+        """The most recent errored turns (status='error'), newest-first.
+
+        The dashboard's「近期错误」feed and the entry point for 会话复盘 — each row
+        carries the trace_id/conversation_id to drill from a failure into its full
+        turn. Capped at ``limit`` (the long tail isn't actionable on a dashboard).
+        """
+        result = await self._session.execute(
+            select(TurnMetricsRow)
+            .where(TurnMetricsRow.status == "error")
+            .order_by(TurnMetricsRow.created_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def list_for_conversation(
+        self, conversation_id: str
+    ) -> Sequence[TurnMetricsRow]:
+        """Every turn's telemetry for one conversation, oldest-first (会话复盘).
+
+        The 复盘 timeline joins these to the conversation's messages by ``trace_id``;
+        oldest-first matches the message thread's chronological order. Hits
+        ``ix_turn_metrics_conversation_created``.
+        """
+        result = await self._session.execute(
+            select(TurnMetricsRow)
+            .where(TurnMetricsRow.conversation_id == conversation_id)
+            .order_by(TurnMetricsRow.created_at.asc())
+        )
+        return result.scalars().all()
+
+    async def list_recent_for_user(
+        self, user_id: str, *, limit: int = 20
+    ) -> Sequence[TurnMetricsRow]:
+        """The most recent turns for one account (用户详情下钻 最近活动), newest-first.
+
+        The per-user counterpart of :meth:`list_recent_errors` — every turn (ok +
+        error), capped at ``limit``, so the operator sees an account's latest
+        activity and can drill any row into 会话复盘. Filters on ``user_id``; the
+        ``ix_turn_metrics_created`` index serves the newest-first ordering (a
+        bounded recent-N read, so a dedicated user index isn't warranted yet).
+        """
+        result = await self._session.execute(
+            select(TurnMetricsRow)
+            .where(TurnMetricsRow.user_id == user_id)
+            .order_by(TurnMetricsRow.created_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def count_distinct_users_for_window(self, *, since: datetime) -> int:
+        """Distinct accounts that completed ≥1 turn since a cutoff (活跃用户).
+
+        The 概览 dashboard's「今日活跃」metric — ``COUNT(DISTINCT user_id)`` over
+        ``turn_metrics`` in the window (a user who took a turn is "active"). Filters
+        on ``ix_turn_metrics_created``.
+        """
+        stmt = select(func.count(distinct(TurnMetricsRow.user_id))).where(
+            TurnMetricsRow.created_at >= since
+        )
+        return int((await self._session.execute(stmt)).scalar_one() or 0)

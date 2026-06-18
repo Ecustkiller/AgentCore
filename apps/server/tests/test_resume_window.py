@@ -1,7 +1,7 @@
 """Resume cutover: the CEO window is rebuilt from the journal, NOT the frame transcript.
 
 Guards :func:`agentcore.runtime.pipeline._resumed_captain_window` — the consumer side of
-the conformance golden (执行级事件溯源落地设计.md §五 Phase 2 ④). The golden proves the
+the conformance golden (执行级事件溯源 §18.3 Phase 2 ④). The golden proves the
 projection ``window_from_journal(journal-at-pause) == frame.transcript``; this proves
 resume actually READS the projection: it folds ``suspension.journal_entries`` (+ reloaded
 history) into the window and ignores ``frame.transcript`` whenever the journal is present.

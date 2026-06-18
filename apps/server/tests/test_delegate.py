@@ -946,6 +946,98 @@ async def test_durable_capture_skipped_without_transcript():
     assert saved == []  # nothing captured without a transcript
 
 
+async def test_durable_resume_drives_tail_from_journal_not_frame():
+    # 执行级事件溯源 Phase 2 e2e (frame.plan/.completed 退场): the FULL pause → durable-resume
+    # chain proves the resumed turn rebuilds BOTH the DAG and the finished-worker seed from
+    # the TURN JOURNAL — never the frame, which no longer serializes them. Drive a real
+    # captain delegate to a checkpoint pause under a bound fact log (so the snapshot carries
+    # the plan_snapshot + s1 run-final facts), round-trip the frame through to_json (dropping
+    # plan/completed/transcript), re-attach the journaled entries as ``claim_paused_turn``
+    # would, then settle a CONTINUE — s2 must run, seeded by s1, off the journal projection.
+    from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+    from agentcore.runtime.journal import completed_from_journal, plan_from_journal
+    from agentcore.runtime.pipeline import _settle_resumed_suspension
+    from agentcore.runtime.suspension import (
+        PlanReviewSuspension,
+        captain_transcript,
+        suspension_from_json,
+    )
+
+    registry = InteractionRegistry()
+    saved: list = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(mid):
+        pass
+
+    # --- Phase A: drive a REAL captain delegate to its checkpoint pause -----------------
+    pause_tool = _tool_durable(
+        _Provider(["S1OUT", "S2OUT"]), EventSink(), registry, _save, _drop
+    )
+    transcript = [
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_del",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    log = TurnFactLog()
+    log_token = current_fact_log.set(log)
+    ct_token = captain_transcript.set(transcript)
+    try:
+        exec_task = asyncio.create_task(pause_tool.execute({"tasks": _CKPT_DAG}, _ctx()))
+        await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
+        await exec_task
+    finally:
+        captain_transcript.reset(ct_token)
+        current_fact_log.reset(log_token)
+
+    assert saved, "the durable checkpoint must have captured a frame"
+    captured = saved[0]
+
+    # --- Phase B: simulate claim_paused_turn — the frame round-trips through to_json -----
+    # (plan / completed / transcript DROPPED), and turn_journal re-hydrates journal_entries.
+    restored = suspension_from_json(captured.to_json())
+    assert isinstance(restored, PlanReviewSuspension)
+    assert restored.plan.nodes == []  # the DAG is NOT in the frame anymore
+    assert restored.completed == {}  # nor the finished-worker seed
+    restored.journal_entries = list(captured.journal_entries)
+
+    # The journal ALONE rebuilds the 2-node DAG (with minted ids) + the s1 seed.
+    projected_plan = plan_from_journal(restored.journal_entries)
+    assert projected_plan is not None and len(projected_plan.nodes) == 2
+    assert len(completed_from_journal(restored.journal_entries)) == 1
+
+    # --- Phase C: durably resume — settle a CONTINUE with a FRESH delegate --------------
+    resume_sink = EventSink()
+    resume_sink.seed_journal(
+        [{"type": EventType.PLAN_REVIEW_REQUIRED.value, "payload": {}, "timestamp": "t"}]
+    )
+    resume_provider = _Provider(["S2OUT"])
+    resume_tool = _tool(resume_provider, resume_sink)
+    settled = await _settle_resumed_suspension(
+        restored,
+        decision=CheckpointDecision.CONTINUE,
+        note="",
+        selected=[],
+        sink=resume_sink,
+        delegate_tool=resume_tool,
+        execution_id="e_resume",
+    )
+    assert "S1OUT" in settled.output  # the seeded product (from the journal) is shown
+    assert "S2OUT" in settled.output  # the tail ran on resume
+    assert resume_provider.calls == 1  # ONLY s2 ran — s1 was re-seeded from facts, not re-run
+
+
 def _resume_plan(prefix: str = "del_resume"):
     """Build a 2-step checkpoint DAG plan the way ``execute`` does, for resume tests."""
     from agentcore.runtime.runs import build_run_plan

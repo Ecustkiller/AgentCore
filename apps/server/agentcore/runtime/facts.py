@@ -16,9 +16,9 @@ frame): the captain transcript never enters the stream, ``run_completed`` carrie
 only a summary, and the system prompt / injected nudges are not facts. Resume bridges
 the gap with the旁路 ``paused_turns.frame``.
 
-This module owns the **six execution-level facts** that close that gap (the new
+This module owns the **seven execution-level facts** that close that gap (the new
 kinds), making the journal lossless so the window / frame become projections of it
-(执行级事件溯源落地设计.md):
+(执行级事件溯源；as-built 见执行引擎 §18.3):
 
 - :class:`TurnStartedFact` — the turn's head: the *verbatim* system prompt, the user
   message, the model profile. Anchors the window fold (the system prompt is dynamic —
@@ -42,6 +42,14 @@ kinds), making the journal lossless so the window / frame become projections of 
 - :class:`MessageFinalFact` — a run's / the turn's **full** output text (vs the
   ``run_completed`` summary), so resume feeds a worker's product back from facts
   rather than from the frame.
+- ``plan_snapshot`` — a delegate's full DAG (``plan_to_json``: every :class:`RunSpec`
+  with its minted run_id + accumulated ``steer`` + policy/contract), recorded at plan
+  build and after each ``adjust`` steer. Resume folds the LAST one (``plan_from_journal``)
+  to re-drive the unfinished tail, so ``paused_turns.frame`` need not carry the plan
+  (执行级事件溯源 Phase 2, the ``frame.plan`` exit). Built by the
+  ``runs.serialize.plan_snapshot_fact`` helper (which owns ``plan_to_json``) rather than a
+  dataclass here — like ``run_final_fact`` for the worker ``message_final`` — so this
+  module stays free of the runs-package import.
 
 The remaining three kinds are sourced elsewhere: ``run_event`` / ``interaction`` keep
 riding their SSE event-type entries (from the sink — incl. the display ``tool_use_start``
@@ -65,7 +73,7 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 
 
 class FactKind(StrEnum):
-    """The six execution-level fact kinds this module produces (§18.3).
+    """The seven execution-level fact kinds this module produces (§18.3).
 
     These are NEW kinds (no rename of the existing display entries, which keep their
     SSE event-type kind — zero migration). The umbrella ``run_event`` / ``interaction``
@@ -73,6 +81,9 @@ class FactKind(StrEnum):
     sink / ``journal.KIND_TURN_END``). ``TOOL_CALL`` IS listed (the execution fact
     carrying the full result the window folds); the display tool card still rides the
     sink's ``tool_use_start`` / ``tool_use_end`` pair, which keep their SSE kind.
+    ``PLAN_SNAPSHOT`` (the delegate's full DAG, the resume seed for ``frame.plan``) uses
+    a value DISTINCT from the display ``run_plan`` event so the display projection's
+    surface gate is unaffected.
     """
 
     TURN_STARTED = "turn_started"
@@ -81,6 +92,7 @@ class FactKind(StrEnum):
     TOOL_CALL = "tool_call"
     NOTE = "note"
     MESSAGE_FINAL = "message_final"
+    PLAN_SNAPSHOT = "plan_snapshot"
 
 
 # The execution-only kinds the DISPLAY projection (runs_from_entries) must skip: they
@@ -205,7 +217,7 @@ class ToolCallFact:
     """One completed tool call's FULL model-facing result — the window's tool message.
 
     The window fold reads tool results from this fact, NOT the forwarded display
-    ``tool_use_end`` (执行级事件溯源落地设计 §三 边界①): on the CEO chat path the engine
+    ``tool_use_end`` (执行级事件溯源 §18.3 投影边界①): on the CEO chat path the engine
     folds citation numbers into the tool message AFTER emitting ``tool_use_end``, so the
     event's ``result`` is the pre-annotation text while the model actually saw the
     annotated one. Recorded after that annotation, so ``result`` is byte-for-byte what
@@ -247,7 +259,7 @@ class NoteFact:
     instruction into the loop's ``messages``; these are not model output nor a tool
     result, so without a fact the window fold would miss them. ``reason`` tags the
     source (``nudge`` / ``finalize`` / …) for time-travel readability. ``run_id`` scopes
-    the note to its run (执行级事件溯源落地设计 §三 边界②): a captain note injected while a
+    the note to its run (执行级事件溯源 §18.3 投影边界②): a captain note injected while a
     delegated worker is the active run must still fold into the CAPTAIN window, so the
     fold attributes by this id rather than by "the most-recent round_boundary".
     """

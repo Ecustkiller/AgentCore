@@ -235,9 +235,11 @@ class RunState:
     attempt: int = 0
     wave: int = 0
     content: str = ""
-    # The run's thinking text (concatenated across rounds). Carried so the CAPTAIN
-    # root run can hand its reasoning back to the pipeline for persistence; worker
-    # reasoning streams run-scoped (run_reasoning_delta) and is left empty here.
+    # The run's thinking text (the last attempt's, parallel to ``content``). Carried
+    # so the CAPTAIN root run hands its reasoning to the pipeline for persistence AND
+    # so a delegated worker's 思考全文 lands in its ``message_final`` fact — the reload
+    # rebuilds the run node's thinking from this fact, not from the (transport-only,
+    # no longer journaled) ``run_reasoning_delta`` stream (执行级事件溯源: deltas 退场).
     reasoning: str = ""
     error: str = ""
     # Soft contract shortfalls on a COMPLETED run: the output was accepted (a

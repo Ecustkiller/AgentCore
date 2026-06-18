@@ -43,6 +43,7 @@ from agentcore.runtime.facts import (
 from agentcore.runtime.journal import (
     completed_from_journal,
     entries_from_runs,
+    plan_from_journal,
     window_from_journal,
 )
 from agentcore.runtime.interaction import default_interaction_registry
@@ -797,8 +798,14 @@ async def _settle_resumed_suspension(
         seed_completed = (
             completed_from_journal(suspension.journal_entries) or suspension.completed
         )
+        # Rebuild the DAG from the journal's plan_snapshot fact (执行级事件溯源 Phase 2 —
+        # `plan_from_journal` == the dropped `frame.plan`, gated by the conformance golden),
+        # so the resumed drive re-mints nothing and its run_ids match `seed_completed`. Same
+        # fallback posture as the seed: the in-memory `plan` carrier covers a same-process
+        # resume (tests) whose journal was not bound; a claimed frame always carries the fact.
+        plan = plan_from_journal(suspension.journal_entries) or suspension.plan
         delegate_result = await delegate_tool.resume_plan(
-            suspension.plan,
+            plan,
             seed_completed,
             decision=decision,
             note=note,

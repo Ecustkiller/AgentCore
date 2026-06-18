@@ -1,6 +1,90 @@
 {
   "components": {
     "schemas": {
+      "AdminConversationLine": {
+        "description": "One of a user's conversations in the 用户详情 roster (compact row).\n\nid/title/timestamps + message count, newest-activity first. Links to the\nexisting 会话复盘 (``GET /v1/admin/observability/conversations/{id}``) for the\nfull merged timeline. ``title`` is NULL for an untitled conversation.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "messages": {
+            "title": "Messages",
+            "type": "integer"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "created_at",
+          "updated_at",
+          "messages"
+        ],
+        "title": "AdminConversationLine",
+        "type": "object"
+      },
+      "AdminConversationReplay": {
+        "description": "One conversation's 复盘 timeline (``GET /v1/admin/observability/conversations/{id}``).\n\nMerges the three turn sources by trace_id / message_id: the message thread\n(bodies, from ``messages``), per-turn outcome/quality (``turn_metrics``), and\nper-turn spend (``cost_events``). Admin-only, cross-user — the drill-down target\nof the 观测看板's 近期错误 feed (opens a failed turn in full context).",
+        "properties": {
+          "cny_per_usd": {
+            "title": "Cny Per Usd",
+            "type": "number"
+          },
+          "conversation": {
+            "$ref": "#/components/schemas/ReplayConversation"
+          },
+          "cost_total": {
+            "title": "Cost Total",
+            "type": "integer"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ReplayMessage"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "turns": {
+            "title": "Turns",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "conversation",
+          "messages",
+          "turns",
+          "errors",
+          "cost_total",
+          "cny_per_usd"
+        ],
+        "title": "AdminConversationReplay",
+        "type": "object"
+      },
       "AdminMuteRequest": {
         "description": "Admin 禁言 toggle for a group member (muted = can read, can't send).",
         "properties": {
@@ -13,6 +97,187 @@
           "muted"
         ],
         "title": "AdminMuteRequest",
+        "type": "object"
+      },
+      "AdminObservabilitySummary": {
+        "description": "Platform-wide 运营观测看板 (``GET /v1/admin/observability/summary``, admin-only).\n\nThe operator's health view, sourced from ``turn_metrics`` (not the dev log\nfile): today's and the trailing 7-day window health, the 7-day daily trend, and\nthe most recent errored turns. Aggregated over *every* account (admin is a\ncross-user surface). Per-turn money/text are NOT here — drill into a turn by\n``trace_id`` (会话复盘, P2) to join cost_events + messages.",
+        "properties": {
+          "recent_daily": {
+            "items": {
+              "$ref": "#/components/schemas/DailyTurns"
+            },
+            "title": "Recent Daily",
+            "type": "array"
+          },
+          "recent_errors": {
+            "items": {
+              "$ref": "#/components/schemas/TurnMetricLine"
+            },
+            "title": "Recent Errors",
+            "type": "array"
+          },
+          "today": {
+            "$ref": "#/components/schemas/TurnHealthWindow"
+          },
+          "week": {
+            "$ref": "#/components/schemas/TurnHealthWindow"
+          }
+        },
+        "required": [
+          "today",
+          "week",
+          "recent_daily",
+          "recent_errors"
+        ],
+        "title": "AdminObservabilitySummary",
+        "type": "object"
+      },
+      "AdminOverview": {
+        "description": "Landing dashboard (``GET /v1/admin/overview``, admin-only) — platform pulse.\n\nToday's vitals (active users / turn health / cost), account tallies, the 7-day\ncost + turn trends, deployment health, and the most recent errors (drillable\ninto 会话复盘). Money is integer nano-USD; the client folds ``cny_per_usd`` for ¥.",
+        "properties": {
+          "active_users_today": {
+            "title": "Active Users Today",
+            "type": "integer"
+          },
+          "admins": {
+            "title": "Admins",
+            "type": "integer"
+          },
+          "billing_mode": {
+            "title": "Billing Mode",
+            "type": "string"
+          },
+          "cny_per_usd": {
+            "title": "Cny Per Usd",
+            "type": "number"
+          },
+          "cost_today": {
+            "$ref": "#/components/schemas/CostBreakdown"
+          },
+          "database_ok": {
+            "title": "Database Ok",
+            "type": "boolean"
+          },
+          "recent_daily_cost": {
+            "items": {
+              "$ref": "#/components/schemas/DailyCost"
+            },
+            "title": "Recent Daily Cost",
+            "type": "array"
+          },
+          "recent_daily_turns": {
+            "items": {
+              "$ref": "#/components/schemas/DailyTurns"
+            },
+            "title": "Recent Daily Turns",
+            "type": "array"
+          },
+          "recent_errors": {
+            "items": {
+              "$ref": "#/components/schemas/TurnMetricLine"
+            },
+            "title": "Recent Errors",
+            "type": "array"
+          },
+          "today": {
+            "$ref": "#/components/schemas/TurnHealthWindow"
+          },
+          "users_active": {
+            "title": "Users Active",
+            "type": "integer"
+          },
+          "users_total": {
+            "title": "Users Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active_users_today",
+          "today",
+          "cost_today",
+          "users_total",
+          "users_active",
+          "admins",
+          "recent_daily_cost",
+          "recent_daily_turns",
+          "database_ok",
+          "recent_errors",
+          "cny_per_usd",
+          "billing_mode"
+        ],
+        "title": "AdminOverview",
+        "type": "object"
+      },
+      "AdminResetPasswordResponse": {
+        "description": "The one-off password minted by an admin reset (重置密码), returned exactly once.\n\nPlaintext is never persisted — only its hash. The admin hands this to the user,\nwhose existing sessions are already revoked, so they must log in with it next.",
+        "properties": {
+          "temporary_password": {
+            "title": "Temporary Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "temporary_password"
+        ],
+        "title": "AdminResetPasswordResponse",
+        "type": "object"
+      },
+      "AdminSystemStatus": {
+        "description": "Read-only platform status for the admin console (``GET /v1/admin/system``).\n\nA deployment sanity-check at a glance (管理员后台 P2): the billing mode + global\nquota defaults + FX rate (all deploy-time ``config``, not editable here),\ndatabase reachability, build provenance, and account tallies. Everything is\nread-only — config changes go through env + redeploy, not the console.",
+        "properties": {
+          "admins": {
+            "title": "Admins",
+            "type": "integer"
+          },
+          "billing_mode": {
+            "title": "Billing Mode",
+            "type": "string"
+          },
+          "built_at": {
+            "title": "Built At",
+            "type": "string"
+          },
+          "cny_per_usd": {
+            "title": "Cny Per Usd",
+            "type": "number"
+          },
+          "database_ok": {
+            "title": "Database Ok",
+            "type": "boolean"
+          },
+          "git_sha": {
+            "title": "Git Sha",
+            "type": "string"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/QuotaStatus"
+          },
+          "users_active": {
+            "title": "Users Active",
+            "type": "integer"
+          },
+          "users_total": {
+            "title": "Users Total",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "billing_mode",
+          "cny_per_usd",
+          "quota",
+          "database_ok",
+          "version",
+          "git_sha",
+          "built_at",
+          "users_total",
+          "users_active",
+          "admins"
+        ],
+        "title": "AdminSystemStatus",
         "type": "object"
       },
       "AdminUpdateUserRequest": {
@@ -97,6 +362,146 @@
           }
         },
         "title": "AdminUpdateUserRequest",
+        "type": "object"
+      },
+      "AdminUsageSummary": {
+        "description": "Platform-wide usage dashboard (``GET /v1/admin/usage/summary``, admin-only).\n\nThe cross-user counterpart of ``UsageSummary``: today's / this month's totals\naggregated over *every* account, the Top spenders by user (工资单 by user), and\nthe 7-day platform trend. ``billing_mode`` is surfaced so the client frames cost\nhonestly — in \"byok\" these totals are the sum of each user's spend on their\n*own* DeepSeek key (not platform-paid).",
+        "properties": {
+          "billing_mode": {
+            "title": "Billing Mode",
+            "type": "string"
+          },
+          "cny_per_usd": {
+            "title": "Cny Per Usd",
+            "type": "number"
+          },
+          "month": {
+            "$ref": "#/components/schemas/UsageWindow"
+          },
+          "month_by_user": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserCostLine"
+            },
+            "title": "Month By User",
+            "type": "array"
+          },
+          "recent_daily_cost": {
+            "items": {
+              "$ref": "#/components/schemas/DailyCost"
+            },
+            "title": "Recent Daily Cost",
+            "type": "array"
+          },
+          "today": {
+            "$ref": "#/components/schemas/UsageWindow"
+          }
+        },
+        "required": [
+          "today",
+          "month",
+          "month_by_user",
+          "recent_daily_cost",
+          "cny_per_usd",
+          "billing_mode"
+        ],
+        "title": "AdminUsageSummary",
+        "type": "object"
+      },
+      "AdminUserCostLine": {
+        "description": "One account's spend over a window — the platform 工资单 by user (全站看板).\n\nThe cross-user counterpart of ``RoleCostLine``. Money is integer nano-USD; the\nclient formats ¥ from the summary's single ``cny_per_usd`` (no re-pricing).",
+        "properties": {
+          "cost_total": {
+            "title": "Cost Total",
+            "type": "integer"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "turns": {
+            "title": "Turns",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "display_name",
+          "cost_total",
+          "turns"
+        ],
+        "title": "AdminUserCostLine",
+        "type": "object"
+      },
+      "AdminUserDetail": {
+        "description": "One account's drill-down (``GET /v1/admin/users/{id}/detail``, admin-only).\n\nStitches the per-user views an operator needs to understand an account: the\nfull record (``user``), this account's usage (today/month/trend/by-role — the\nper-user counterpart of ``AdminUsageSummary``, scoped via ``cost_events.user_id``),\nits recent conversations, and its recent turn activity (``turn_metrics``, each\ndrillable into 会话复盘). Money is integer nano-USD; the client folds the single\n``cny_per_usd`` for ¥. ``billing_mode`` frames cost honestly (byok = own-key spend).",
+        "properties": {
+          "billing_mode": {
+            "title": "Billing Mode",
+            "type": "string"
+          },
+          "cny_per_usd": {
+            "title": "Cny Per Usd",
+            "type": "number"
+          },
+          "conversations": {
+            "items": {
+              "$ref": "#/components/schemas/AdminConversationLine"
+            },
+            "title": "Conversations",
+            "type": "array"
+          },
+          "month": {
+            "$ref": "#/components/schemas/UsageWindow"
+          },
+          "month_by_role": {
+            "items": {
+              "$ref": "#/components/schemas/RoleCostLine"
+            },
+            "title": "Month By Role",
+            "type": "array"
+          },
+          "recent_daily_cost": {
+            "items": {
+              "$ref": "#/components/schemas/DailyCost"
+            },
+            "title": "Recent Daily Cost",
+            "type": "array"
+          },
+          "recent_turns": {
+            "items": {
+              "$ref": "#/components/schemas/TurnMetricLine"
+            },
+            "title": "Recent Turns",
+            "type": "array"
+          },
+          "today": {
+            "$ref": "#/components/schemas/UsageWindow"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AdminUserResponse"
+          }
+        },
+        "required": [
+          "user",
+          "today",
+          "month",
+          "month_by_role",
+          "recent_daily_cost",
+          "conversations",
+          "recent_turns",
+          "cny_per_usd",
+          "billing_mode"
+        ],
+        "title": "AdminUserDetail",
         "type": "object"
       },
       "AdminUserListResponse": {
@@ -1151,6 +1556,30 @@
         "title": "DailyCost",
         "type": "object"
       },
+      "DailyTurns": {
+        "description": "One UTC day's turn + error counts — a point in the 观测 trend.",
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "turns": {
+            "title": "Turns",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "turns",
+          "errors"
+        ],
+        "title": "DailyTurns",
+        "type": "object"
+      },
       "DirectorySettings": {
         "description": "A user's discoverability + who-can-DM privacy (任意搜人 护栏).",
         "properties": {
@@ -1681,11 +2110,24 @@
             "title": "Id",
             "type": "string"
           },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
           "status": {
             "enum": [
               "active",
               "used",
-              "expired"
+              "expired",
+              "revoked"
             ],
             "title": "Status",
             "type": "string"
@@ -2320,6 +2762,252 @@
         "title": "RegisterRequest",
         "type": "object"
       },
+      "ReplayConversation": {
+        "description": "The conversation header for a 复盘 (owner identity + title).",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "user_id",
+          "username",
+          "display_name",
+          "created_at"
+        ],
+        "title": "ReplayConversation",
+        "type": "object"
+      },
+      "ReplayMessage": {
+        "description": "One message in a 会话复盘 timeline (the thread + per-turn overlays).\n\nAn assistant message carries its turn's telemetry (``metrics``, joined by\ntrace_id), spend (``cost_total``, summed from cost_events by message_id), and the\nturn's execution spans (``spans``, projected from turn_journal); user messages\nhave none. ``content`` is the raw message text (the prompt / reply) — the\nsubstance of the post-mortem.",
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "cost_total": {
+            "default": 0,
+            "title": "Cost Total",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnMetricLine"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "spans": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ReplaySpan"
+            },
+            "title": "Spans",
+            "type": "array"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "content",
+          "created_at",
+          "trace_id"
+        ],
+        "title": "ReplayMessage",
+        "type": "object"
+      },
+      "ReplaySpan": {
+        "description": "One execution span inside a turn — a tool call or an LLM call — projected\ncompactly from ``turn_journal`` for the 复盘 drill-down.\n\nDeliberately summary-only: NOT the heavy/sensitive replay payload (system\nprompts, full tool results), just what triages a turn — what ran, in which\nround/run, ok?, finish_reason, tokens, and a short preview. Per-span latency is\nomitted: the execution facts don't reliably carry a per-span timestamp yet.",
+        "properties": {
+          "args_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Args Preview"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finish Reason"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens"
+          },
+          "result_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Preview"
+          },
+          "round_idx": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Round Idx"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "success": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Success"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "ReplaySpan",
+        "type": "object"
+      },
       "ResolveApprovalInteraction": {
         "description": "Settle a paused GRANTABLE tool call (``approval`` interaction).\n\n``decision`` is one of ``approve`` (allow this one call), ``approve_always``\n(allow this tool for the rest of the turn), or ``deny`` (refuse).",
         "properties": {
@@ -2914,6 +3602,20 @@
         "title": "StatusResponse",
         "type": "object"
       },
+      "StopTurnResponse": {
+        "description": "Outcome of an explicit 停止 (执行与请求解耦 C1 · slice 1a).\n\n``stopped`` is True when a live detached run was found for the conversation and\nsignalled to cancel; False when nothing was running (already finished / never\nstarted), so the call is idempotent and the client can settle the bubble either\nway.",
+        "properties": {
+          "stopped": {
+            "title": "Stopped",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "stopped"
+        ],
+        "title": "StopTurnResponse",
+        "type": "object"
+      },
       "StoredAttachment": {
         "description": "Persisted attachment display metadata (no extracted text).\n\n``workspace_path`` is set when the attachment was written into the durable\nproject space (附件驻留): a workspace-relative path under ``attachments/`` that\nthe file-download API can serve. ``None`` for directory listings (nothing is\nwritten to disk) and for legacy rows created before residency.",
         "properties": {
@@ -2988,6 +3690,78 @@
         ],
         "title": "SuspensionKind",
         "type": "string"
+      },
+      "TokenRefreshRequest": {
+        "description": "Rotate a bearer client's token pair (refresh token in the body, not a cookie).",
+        "properties": {
+          "refresh_token": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Refresh Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_token"
+        ],
+        "title": "TokenRefreshRequest",
+        "type": "object"
+      },
+      "TokenResponse": {
+        "description": "Bearer-token bundle for non-cookie clients (mobile web / Capacitor shell, M2).\n\nThe cookie login (``/v1/auth/login``) keeps tokens in httpOnly cookies; this is\nits body-returning twin for clients whose origin (``capacitor://`` / a new web\norigin) can't rely on SameSite cookies (认证与会话.md §十). ``expires_in`` is the\naccess token's lifetime in seconds so the client refreshes before it lapses;\n``user`` rides the login response (identity in one round trip) and is omitted on\nrefresh.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "token_type": {
+            "const": "bearer",
+            "default": "bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "access_token",
+          "refresh_token",
+          "expires_in"
+        ],
+        "title": "TokenResponse",
+        "type": "object"
+      },
+      "TokenRevokeRequest": {
+        "description": "Bearer-client logout: revoke the presented refresh token's whole family.",
+        "properties": {
+          "refresh_token": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Refresh Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh_token"
+        ],
+        "title": "TokenRevokeRequest",
+        "type": "object"
       },
       "ToolApproval": {
         "description": "Tool approval requirement levels.",
@@ -3099,6 +3873,173 @@
           "agents"
         ],
         "title": "TurnCost",
+        "type": "object"
+      },
+      "TurnHealthWindow": {
+        "description": "Turn health aggregated over a time window (today / 近 7 日) — 全站健康.\n\nRates are derived server-side from the raw counts (the client renders them as\npercentages); ``p95_duration_ms`` surfaces the latency tail the average hides.",
+        "properties": {
+          "avg_duration_ms": {
+            "title": "Avg Duration Ms",
+            "type": "integer"
+          },
+          "avg_rounds": {
+            "title": "Avg Rounds",
+            "type": "number"
+          },
+          "delegated_rate": {
+            "title": "Delegated Rate",
+            "type": "number"
+          },
+          "delegated_turns": {
+            "title": "Delegated Turns",
+            "type": "integer"
+          },
+          "error_rate": {
+            "title": "Error Rate",
+            "type": "number"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "p95_duration_ms": {
+            "title": "P95 Duration Ms",
+            "type": "integer"
+          },
+          "turns": {
+            "title": "Turns",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turns",
+          "errors",
+          "error_rate",
+          "avg_duration_ms",
+          "p95_duration_ms",
+          "avg_rounds",
+          "delegated_turns",
+          "delegated_rate",
+          "input_tokens",
+          "output_tokens"
+        ],
+        "title": "TurnHealthWindow",
+        "type": "object"
+      },
+      "TurnMetricLine": {
+        "description": "One turn's telemetry row — the 近期错误 feed + 会话复盘 entry point.\n\nCarries the join keys (``trace_id`` / ``conversation_id``) to drill from a\nfailure into the full turn (logs + messages + spend). ``error`` is the\ntruncated soft-error text (NULL on success). Built straight from the ORM row.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delegated": {
+            "title": "Delegated",
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finish Reason"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "turn_id": {
+            "title": "Turn Id",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "workers": {
+            "title": "Workers",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "turn_id",
+          "conversation_id",
+          "user_id",
+          "agent_id",
+          "trace_id",
+          "kind",
+          "status",
+          "finish_reason",
+          "error",
+          "rounds",
+          "duration_ms",
+          "delegated",
+          "workers",
+          "created_at"
+        ],
+        "title": "TurnMetricLine",
         "type": "object"
       },
       "UpdateConversationRequest": {
@@ -3857,6 +4798,345 @@
         ]
       }
     },
+    "/v1/admin/observability/conversations/{conversation_id}": {
+      "get": {
+        "description": "会话复盘 (观测 P2): one conversation's merged timeline — the message thread\n(bodies) overlaid with each turn's outcome/quality (turn_metrics), spend\n(cost_events), and execution spans (turn_journal), joined by trace_id /\nmessage_id.\n\nAdmin-only and cross-user (any account's conversation), unlike the owner-scoped\n``/v1/conversations/*``. The drill-down target of the 近期错误 feed: open a\nfailed turn in full context (prompt + reply/error + rounds/latency + ¥ + the\nturn's tool/LLM spans).",
+        "operationId": "observability_conversation_v1_admin_observability_conversations__conversation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminConversationReplay"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Observability Conversation",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/observability/summary": {
+      "get": {
+        "description": "运营观测看板 (观测, P1): platform-wide turn health (today + trailing 7 days),\nthe 7-day daily trend, and the most recent errored turns.\n\nSourced from ``turn_metrics`` (the per-turn telemetry sink), NOT the dev log\nfile — so it works under prod's stdout-only logging posture and aggregates with\nindexed SQL instead of scanning a multi-MB JSONL. Aggregated over *every*\naccount (admin is a cross-user surface). Each error row carries its ``trace_id``\n/ ``conversation_id`` to drill from a failure into the full turn (会话复盘, P2).",
+        "operationId": "observability_summary_v1_admin_observability_summary_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminObservabilitySummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Observability Summary",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/overview": {
+      "get": {
+        "description": "控制台概览 (landing dashboard): today's platform pulse (active users + turn\nhealth + cost), account tallies, the 7-day cost / turn trends, deployment\nhealth, and a short recent-errors feed.\n\nA curated one-call home view that *reuses the same aggregates* as the 用量 /\n观测 / 系统 surfaces (so the headline numbers never drift from the drill-down\npages) plus one extra metric — distinct active users today. Each error row\ncarries its ``conversation_id`` to drill into 会话复盘.",
+        "operationId": "overview_v1_admin_overview_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOverview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Overview",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/system": {
+      "get": {
+        "description": "系统状态 (read-only): billing mode + global quota defaults + FX rate (config),\ndatabase reachability, build provenance, and account tallies.\n\nA deployment sanity-check — nothing here is editable from the console (config is\nenv + redeploy). Reuses the same DB probe as ``/readyz`` and the same version as\n``/version`` so the panel never drifts from the real signals.",
+        "operationId": "system_status_v1_admin_system_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSystemStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "System Status",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/usage/summary": {
+      "get": {
+        "description": "全站用量看板: platform-wide today / month totals, the Top spenders by user\n(工资单 by user), and the 7-day platform trend.\n\nThe cross-user counterpart of ``GET /v1/usage/summary`` — same windows (bounded\nat the current UTC day / month start, MVP), but aggregated over *every* account\ninstead of scoped to the caller. ``billing_mode`` lets the client frame cost\nhonestly: in \"byok\" these totals are the sum of each user's spend on their own\nDeepSeek key (not platform-paid).",
+        "operationId": "usage_summary_v1_admin_usage_summary_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUsageSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Usage Summary",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/admin/users": {
       "get": {
         "description": "The full account roster (newest-first), paginated. ``q`` substring-filters\nusername/display_name. Admin-only directory — enumeration is intended here.",
@@ -3900,6 +5180,22 @@
                 }
               ],
               "title": "Q"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -3962,6 +5258,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -4016,10 +5328,176 @@
         ]
       }
     },
+    "/v1/admin/users/{user_id}/detail": {
+      "get": {
+        "description": "用户详情下钻 (用户管理 P0): one account's record + its own usage (today / month\n/ 7-day trend / by-role) + recent conversations + recent turn activity.\n\nThe per-user counterpart of the platform 用量看板 — same windows / 口径 but scoped\nto one account (``cost_events.user_id``) — composed with the account's recent\nconversation roster (message counts batched, no N+1) and its recent turns (each\ncarries ``conversation_id`` to drill into 会话复盘). Admin cross-user; 404 for an\nunknown id. Reuses the per-user cost aggregates already serving ``/v1/usage/summary``.",
+        "operationId": "user_detail_v1_admin_users__user_id__detail_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "User Detail",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/users/{user_id}/reset-password": {
+      "post": {
+        "description": "Reset an account's password to a fresh one-off (重置密码), returned once for the\nadmin to hand over. Revokes the user's sessions (forces re-login on every device)\nand clears any lockout. 404 for an unknown account. The credential mechanics live\nin ``AuthService`` (password/session domain); this route is the admin-gated entry.",
+        "operationId": "reset_user_password_v1_admin_users__user_id__reset_password_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminResetPasswordResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset User Password",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/v1/auth/invites": {
       "get": {
         "operationId": "list_invites_v1_auth_invites_get",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -4067,6 +5545,22 @@
       "post": {
         "operationId": "create_invite_v1_auth_invites_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -4124,6 +5618,81 @@
           }
         },
         "summary": "Create Invite",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/invites/{invite_id}/revoke": {
+      "post": {
+        "description": "Retire an unused invite (邀请码撤销). 404 unknown id; 422 if already used/revoked.\nReturns the now-revoked invite so the client can update the row in place.",
+        "operationId": "revoke_invite_v1_auth_invites__invite_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invite_id",
+            "required": true,
+            "schema": {
+              "title": "Invite Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Invite",
         "tags": [
           "auth"
         ]
@@ -4223,6 +5792,22 @@
       "get": {
         "operationId": "me_v1_auth_me_get",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -4358,6 +5943,132 @@
         ]
       }
     },
+    "/v1/auth/token": {
+      "post": {
+        "description": "Bearer-token login: same credential check as cookie ``/login`` but returns the\naccess + refresh tokens in the JSON body (plus the user — identity in one call).",
+        "operationId": "token_login_v1_auth_token_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Token Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/token/refresh": {
+      "post": {
+        "description": "Rotate a bearer client's token pair (refresh token carried in the body). Reuse /\nexpiry detection is the same family-revoking logic as cookie refresh.",
+        "operationId": "token_refresh_v1_auth_token_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Token Refresh",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/token/revoke": {
+      "post": {
+        "description": "Bearer-client logout: revoke the refresh token's whole family. Idempotent — an\nunknown / already-revoked token still returns ok (never reveals token validity).",
+        "operationId": "token_revoke_v1_auth_token_revoke_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Token Revoke",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/conversations": {
       "get": {
         "operationId": "list_conversations_v1_conversations_get",
@@ -4395,6 +6106,22 @@
               "description": "True 返回已归档对话（「已归档」视图）；默认仅返回未归档",
               "title": "Archived",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -4444,6 +6171,22 @@
       "post": {
         "operationId": "create_conversation_v1_conversations_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -4505,6 +6248,22 @@
         "operationId": "list_conversations_grouped_v1_conversations_grouped_get",
         "parameters": [
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -4560,6 +6319,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -4619,6 +6394,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -4672,6 +6463,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -4744,6 +6551,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -4800,6 +6623,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -4872,6 +6711,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -4940,6 +6795,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -5005,6 +6876,22 @@
             "schema": {
               "title": "Job Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -5084,6 +6971,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -5149,6 +7052,22 @@
             "schema": {
               "title": "Interaction Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -5241,6 +7160,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -5375,6 +7310,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -5419,7 +7370,7 @@
         ]
       },
       "post": {
-        "description": "Send a user message and get a streaming AI response via SSE.\n\nThe pipeline runs as a detached task feeding ``sink``; its handle is passed\nto ``sse_response`` so a client disconnect (e.g. the user hits stop) cancels\nit server-side rather than letting it run to completion unobserved.\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.",
+        "description": "Send a user message and get a streaming AI response via SSE.\n\n执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in\nthe ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches\nto it (``detach_on_disconnect=True``). A client disconnect therefore no longer\nkills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the\nbackground; an explicit 停止 routes through ``POST .../stop`` instead.\n\nGated before the stream starts (成本配额与计费.md §一) so a refused turn gets a\nclean error instead of a half-opened SSE: per-user rate limit first (sheds a\nflooding account before any resource DB work), then ownership, then the\nBYOK/quota billing gate (BYOK mode requires the user's own key; platform mode\nenforces quota). The resolved BYOK credentials thread through the whole turn.",
         "operationId": "send_message_v1_conversations__conversation_id__messages_post",
         "parameters": [
           {
@@ -5429,6 +7380,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -5508,6 +7475,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -5554,7 +7537,7 @@
     },
     "/v1/conversations/{conversation_id}/messages/{message_id}/regenerate": {
       "post": {
-        "description": "Re-run a turn from an existing user message via SSE.\n\nServes both \"regenerate\" (no body content — reuse the stored user text) and\n\"edit & resend\" (``content`` set — edit the user message first). The target\n``message_id`` must be a user message; the superseded assistant reply and any\nlater turns are dropped before re-running. Like ``send_message``, the pipeline\nruns as a detached task so a client disconnect cancels it server-side. A\nre-run is a fresh turn, so it passes the same gates (rate limit → ownership →\nBYOK/quota billing gate) as ``send_message``.",
+        "description": "Re-run a turn from an existing user message via SSE.\n\nServes both \"regenerate\" (no body content — reuse the stored user text) and\n\"edit & resend\" (``content`` set — edit the user message first). The target\n``message_id`` must be a user message; the superseded assistant reply and any\nlater turns are dropped before re-running. Like ``send_message``, the pipeline\nruns as a detached task tracked in the ``TurnRunRegistry`` and the SSE only\nattaches (执行与请求解耦 C1 · slice 1a): a disconnect lets it finish + persist,\nan explicit 停止 goes through ``POST .../stop``. A re-run is a fresh turn, so it\npasses the same gates (rate limit → ownership → BYOK/quota billing gate) as\n``send_message``.",
         "operationId": "regenerate_message_v1_conversations__conversation_id__messages__message_id__regenerate_post",
         "parameters": [
           {
@@ -5573,6 +7556,22 @@
             "schema": {
               "title": "Message Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -5652,6 +7651,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -5719,6 +7734,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -5778,6 +7809,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -5832,6 +7879,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -5913,6 +7976,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -5979,6 +8058,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -6023,6 +8118,154 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/stop": {
+      "post": {
+        "description": "Explicitly stop the conversation's in-flight turn (执行与请求解耦 C1 · slice 1a).\n\nNow that a client disconnect no longer cancels a turn (it runs to completion +\npersists in the background), the user's 「停止」 routes here instead. Cancels the\ndetached run task tracked in the ``TurnRunRegistry``, which unwinds through the\nturn's ``CancelledError`` salvage — finished team work is kept as an incomplete\nmessage (断线别白干). Idempotent: ``stopped=false`` when nothing is running\n(already finished / never started), so a late click settles cleanly. Owner-gated.",
+        "operationId": "stop_message_v1_conversations__conversation_id__stop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopTurnResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stop Message",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/stream": {
+      "get": {
+        "description": "Re-attach to the conversation's in-flight turn and 续看 it live (C1 · slice 1b).\n\nSince a disconnect no longer cancels a turn (slice 1a — it runs detached + persists\nin the background), a client that dropped (network blip) or reopened the app can\nrejoin the live run here: the SSE replays the transcript so far (coalesced — one\ncontent / reasoning block, the team graph, finished tool calls) then tails new\nevents, all in the SAME event shape as the original stream, so the client folds it\nthrough one dispatch path.\n\nReturns ``204 No Content`` when no run is live for the conversation (already\nfinished / never started / suspended at a checkpoint) — the client then falls back\nto the persisted transcript (reload) / durable resume. A pure observer: dropping\nthis stream detaches again (never cancels); an explicit 停止 still goes through\n``POST .../stop``. Owner-gated.",
+        "operationId": "attach_stream_v1_conversations__conversation_id__stream_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Attach Stream",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/workspace/binding": {
       "delete": {
         "description": "Unbind the conversation's workspace (fall back to cloud).\n\nClears the binding on the folder (= 工作区), returning every conversation in it\nto cloud — which the ``folder`` scope in the response signals. A 裸聊 has no\nworkspace to unbind, so it is already cloud (a no-op).",
@@ -6035,6 +8278,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -6095,6 +8354,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -6149,6 +8424,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -6221,6 +8512,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -6287,6 +8594,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -6368,6 +8691,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -6431,6 +8770,22 @@
             "schema": {
               "title": "Path",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -6513,6 +8868,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -6578,6 +8949,22 @@
             "schema": {
               "title": "Path",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -6647,6 +9034,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -6711,6 +9114,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -6770,6 +9189,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -6824,6 +9259,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -6891,6 +9342,22 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -6997,6 +9464,22 @@
         "operationId": "rewrite_file_selection_v1_files_assist_rewrite_post",
         "parameters": [
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -7056,6 +9539,22 @@
         "operationId": "list_folders_v1_folders_get",
         "parameters": [
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -7106,6 +9605,22 @@
       "post": {
         "operationId": "create_folder_v1_folders_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -7175,6 +9690,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -7228,6 +9759,22 @@
             "schema": {
               "title": "Folder Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -7290,6 +9837,22 @@
         "description": "Exchange the caller's cookie session for a scoped inference token (Slice 4a).\n\nCookie-authenticated like the rest of the API; returns a token the desktop\npasses to its local sidecar so the engine's LLM calls reach ``/v1/inference``\nas this user (the platform key stays server-side).",
         "operationId": "mint_inference_token_v1_inference_token_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -7389,6 +9952,22 @@
         "operationId": "list_blocks_v1_messages_blocks_get",
         "parameters": [
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -7436,6 +10015,22 @@
         "description": "Block a user (symmetric: severs DMs and hides each from the other's search).\n\n422 self-block; 404 unknown target.",
         "operationId": "block_user_v1_messages_blocks_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -7506,6 +10101,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -7556,6 +10167,22 @@
         "operationId": "list_chats_v1_messages_chats_get",
         "parameters": [
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -7605,6 +10232,22 @@
         "description": "Open (or reuse) a 1:1 chat with another user (by their user id).\n\n422 self-dm; 404 unknown/disabled peer; 403 when blocked or the peer only\naccepts contacts. The peer joins as a pending message request until they reply.",
         "operationId": "start_dm_v1_messages_chats_dm_post",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -7672,6 +10315,22 @@
             "schema": {
               "title": "Chat Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -7753,6 +10412,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -7817,6 +10492,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -7876,6 +10567,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -7932,6 +10639,22 @@
             "schema": {
               "title": "Chat Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -8003,6 +10726,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -8068,6 +10807,22 @@
             "schema": {
               "title": "Target Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -8137,6 +10892,22 @@
             "schema": {
               "title": "Chat Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -8232,6 +11003,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -8286,6 +11073,22 @@
             "schema": {
               "title": "Chat Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -8358,6 +11161,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -8418,6 +11237,22 @@
         "operationId": "get_directory_settings_v1_messages_directory_get",
         "parameters": [
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -8465,6 +11300,22 @@
         "description": "Patch privacy settings; an omitted/null field is left unchanged.",
         "operationId": "update_directory_settings_v1_messages_directory_patch",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -8549,6 +11400,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -8608,6 +11475,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -8657,6 +11540,22 @@
         "description": "Open this user's realtime firehose (server→client SSE).\n\nSubscribes the connection to the in-process hub; a new message in any chat the\nuser belongs to arrives as a ``chat_message`` event. Heartbeat comments keep\nthe stream warm, and the subscription is released when the client disconnects.",
         "operationId": "realtime_firehose_v1_realtime_get",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -8745,6 +11644,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -8794,6 +11709,22 @@
         "description": "List the platform's built-in tools (name, description, category, approval).\n\nSerializes the same registry the chat pipeline equips workers with, minus the\nCEO-only ``delegate`` primitive. The catalog is static platform metadata (not\nuser-scoped); auth is required only to match the app's authenticated posture.",
         "operationId": "list_tools_v1_tools_get",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -8845,6 +11776,22 @@
         "operationId": "get_usage_summary_v1_usage_summary_get",
         "parameters": [
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -8895,6 +11842,22 @@
         "operationId": "delete_llm_key_v1_users_me_llm_key_delete",
         "parameters": [
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -8943,6 +11906,22 @@
         "operationId": "get_llm_key_v1_users_me_llm_key_get",
         "parameters": [
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -8990,6 +11969,22 @@
         "description": "Store or replace the user's DeepSeek key (encrypted at rest; status reset).",
         "operationId": "set_llm_key_v1_users_me_llm_key_put",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -9051,6 +12046,22 @@
         "operationId": "test_llm_key_v1_users_me_llm_key_test_post",
         "parameters": [
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -9100,6 +12111,22 @@
         "description": "Enumerate the user's workspaces (文件夹即工作区: a workspace **is** a folder).\n\nEvery folder is a project, always listed — local ones unconditionally (the\nserver can't see their files, and a binding is explicit intent, not noise),\ncloud ones carrying a ``has_files`` flag. Conversations are not workspaces: a\n裸聊 has no space until it is promoted into a folder, after which it appears here\nas that folder.",
         "operationId": "list_workspaces_v1_workspaces_get",
         "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
           {
             "in": "cookie",
             "name": "access_token",
@@ -9157,6 +12184,22 @@
             "schema": {
               "title": "Ws Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -9226,6 +12269,22 @@
             "schema": {
               "title": "Ws Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -9307,6 +12366,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -9370,6 +12445,22 @@
             "schema": {
               "title": "Path",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -9442,6 +12533,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -9508,6 +12615,22 @@
               "default": false,
               "title": "Recursive",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -9579,6 +12702,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -9642,6 +12781,22 @@
             "schema": {
               "title": "Path",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -9709,6 +12864,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -9765,6 +12936,22 @@
             "schema": {
               "title": "Ws Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -9837,6 +13024,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -9891,6 +13094,22 @@
             "schema": {
               "title": "Ws Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {
@@ -9972,6 +13191,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
             "in": "cookie",
             "name": "access_token",
             "required": false,
@@ -10035,6 +13270,22 @@
             "schema": {
               "title": "Snapshot Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           },
           {

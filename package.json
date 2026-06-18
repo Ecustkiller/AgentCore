@@ -1,0 +1,17 @@
+{
+  "name": "agentcore",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.28.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "conformance": "pnpm -r run conformance && pnpm -C apps/desktop run conformance"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

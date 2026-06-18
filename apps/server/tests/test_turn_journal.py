@@ -174,6 +174,112 @@ def test_execution_sourced_single_agent_tool_turn_drops_captain_events_keeps_pro
     }
 
 
+# --- deltas 退场: worker output/thinking synthesized from message_final ------------
+#
+# A worker run no longer journals per-token run_output_delta / run_reasoning_delta.
+# runs_from_entries reconstructs ONE equivalent delta block each from the worker's
+# message_final fact, spliced just before its terminal event — so the client fold
+# rebuilds 输出/思考 unchanged. The CAPTAIN's own message_final (its reply is the chat
+# bubble) is never synthesized onto a run node.
+
+
+def test_worker_output_and_reasoning_synthesized_before_run_completed():
+    entries = [
+        {"kind": "turn_started", "payload": {"user_message": "go"}, "ts": None},
+        {"kind": "run_started",
+         "payload": {"run_id": "cap", "agent_id": "cap", "kind": "captain"}, "ts": "t0"},
+        {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t1"},
+        {"kind": "run_started",
+         "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"}, "ts": "t2"},
+        {"kind": "run_completed", "payload": {"run_id": "w1", "agent_id": "w1"}, "ts": "t3"},
+        {"kind": "message_final",
+         "payload": {"run_id": "w1", "phase": "completed",
+                     "content": "worker输出", "reasoning": "worker思考"}, "ts": None},
+        {"kind": "run_completed", "payload": {"run_id": "cap", "agent_id": "cap"}, "ts": "t4"},
+        {"kind": "message_final",
+         "payload": {"run_id": "cap", "content": "汇总回复", "reasoning": "captain思考"}, "ts": None},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    # Reasoning precedes content (live order), both inherit the run_completed timestamp,
+    # and they land immediately before the worker's run_completed.
+    assert runs_from_entries(entries)["events"] == [
+        {"type": "run_started",
+         "payload": {"run_id": "cap", "agent_id": "cap", "kind": "captain"}, "timestamp": "t0"},
+        {"type": "run_plan", "payload": {"execution_id": "e1"}, "timestamp": "t1"},
+        {"type": "run_started",
+         "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"}, "timestamp": "t2"},
+        {"type": "run_reasoning_delta",
+         "payload": {"run_id": "w1", "agent_id": "w1", "delta": "worker思考"}, "timestamp": "t3"},
+        {"type": "run_output_delta",
+         "payload": {"run_id": "w1", "agent_id": "w1", "delta": "worker输出"}, "timestamp": "t3"},
+        {"type": "run_completed", "payload": {"run_id": "w1", "agent_id": "w1"}, "timestamp": "t3"},
+        {"type": "run_completed", "payload": {"run_id": "cap", "agent_id": "cap"}, "timestamp": "t4"},
+    ]
+
+
+def test_captain_message_final_is_not_synthesized_onto_a_run_node():
+    # The captain's reply is the bubble (turn-level content_delta), so its message_final
+    # must never become a run_output_delta — even though the captain has a run node.
+    entries = [
+        {"kind": "run_started",
+         "payload": {"run_id": "cap", "agent_id": "cap", "kind": "captain"}, "ts": "t0"},
+        {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t1"},
+        {"kind": "run_completed", "payload": {"run_id": "cap", "agent_id": "cap"}, "ts": "t2"},
+        {"kind": "message_final",
+         "payload": {"run_id": "cap", "content": "回复", "reasoning": "想"}, "ts": None},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    events = runs_from_entries(entries)["events"]
+    assert not any(
+        e["type"] in ("run_output_delta", "run_reasoning_delta") for e in events
+    )
+
+
+def test_failed_worker_partial_output_synthesized_before_run_failed():
+    # A FAILED worker can still have produced partial output/thinking: its message_final
+    # (phase=failed) carries them, synthesized before run_failed (parity with the old
+    # delta replay, which showed a failed run's partial output too).
+    entries = [
+        {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t0"},
+        {"kind": "run_started",
+         "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"}, "ts": "t1"},
+        {"kind": "run_failed",
+         "payload": {"run_id": "w1", "agent_id": "w1", "error": "boom"}, "ts": "t2"},
+        {"kind": "message_final",
+         "payload": {"run_id": "w1", "phase": "failed", "content": "半成品",
+                     "reasoning": "中途思考", "error": "boom"}, "ts": None},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    assert runs_from_entries(entries)["events"] == [
+        {"type": "run_plan", "payload": {"execution_id": "e1"}, "timestamp": "t0"},
+        {"type": "run_started",
+         "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"}, "timestamp": "t1"},
+        {"type": "run_reasoning_delta",
+         "payload": {"run_id": "w1", "agent_id": "w1", "delta": "中途思考"}, "timestamp": "t2"},
+        {"type": "run_output_delta",
+         "payload": {"run_id": "w1", "agent_id": "w1", "delta": "半成品"}, "timestamp": "t2"},
+        {"type": "run_failed",
+         "payload": {"run_id": "w1", "agent_id": "w1", "error": "boom"}, "timestamp": "t2"},
+    ]
+
+
+def test_synthesis_skips_empty_content_or_reasoning():
+    # A non-thinking worker produced no reasoning → only an output delta is synthesized
+    # (no empty run_reasoning_delta is injected).
+    entries = [
+        {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t0"},
+        {"kind": "run_started",
+         "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"}, "ts": "t1"},
+        {"kind": "run_completed", "payload": {"run_id": "w1", "agent_id": "w1"}, "ts": "t2"},
+        {"kind": "message_final",
+         "payload": {"run_id": "w1", "phase": "completed", "content": "只有输出",
+                     "reasoning": ""}, "ts": None},
+        {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
+    ]
+    types = [e["type"] for e in runs_from_entries(entries)["events"]]
+    assert types == ["run_plan", "run_started", "run_output_delta", "run_completed"]
+
+
 # --- window_from_journal: execution projection (§三, the LLM-window fold) ----------
 #
 # These build journals by hand to pin the fold rules; test_engine_facts.py drives the
@@ -383,7 +489,7 @@ def test_window_paused_turn_ends_at_suspended_call_no_phantom_tool():
     # (ask_user / delegate) — its ``tool_use_start`` is journaled but NO ``tool_call`` fact
     # is recorded (the result is still pending). The window must end at the assistant that
     # issued the suspended call, with NO tool message — exactly what frame.transcript
-    # holds — so resume can append the settled result itself (执行级事件溯源落地设计 §五).
+    # holds — so resume can append the settled result itself (执行级事件溯源 §18.3).
     entries = [
         _started(system_prompt="SYS", user_message="A 还是 B?"),
         _boundary(round_idx=0),

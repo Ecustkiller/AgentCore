@@ -1,7 +1,7 @@
 """Conformance golden: a paused turn's PERSISTED journal projects back to its transcript.
 
-This is the machine judge gating the Phase 2 resume cutover (执行级事件溯源落地设计.md
-§五「闸：golden」). It drives the REAL :class:`AskUserTool` to its suspend point and
+This is the machine judge gating the Phase 2 resume cutover (执行级事件溯源 §18.3，
+conformance golden 闸). It drives the REAL :class:`AskUserTool` to its suspend point and
 asserts that ``window_from_journal`` folded over the exact stream the face persists
 (``frame.journal_entries`` — the ``current_fact_log`` snapshot ``_save_pause_journal``
 writes to ``turn_journal``) reproduces, byte for byte, the ``captain_transcript`` the
@@ -36,10 +36,11 @@ from agentcore.runtime.facts import TurnFactLog, TurnStartedFact, current_fact_l
 from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
 from agentcore.runtime.journal import (
     completed_from_journal,
+    plan_from_journal,
     runs_from_entries,
     window_from_journal,
 )
-from agentcore.runtime.runs.serialize import state_map_to_json
+from agentcore.runtime.runs.serialize import plan_to_json, state_map_to_json
 from agentcore.runtime.suspension import captain_transcript
 from agentcore.core.types import ToolCategory  # noqa: F401 — parity with engine-facts harness
 from agentcore.tools.builtin.ask_user import AskUserTool
@@ -91,7 +92,7 @@ class _StubTool:
 
     No citations on purpose: the CEO path annotates citation numbers into the tool
     message AFTER emitting ``tool_use_end``, a known Phase-1 divergence the journal does
-    not yet capture (执行级事件溯源落地设计 §三 边界①). Keeping this tool citation-free
+    not yet capture (执行级事件溯源 §18.3 投影边界①). Keeping this tool citation-free
     means the completed tool round it produces folds back faithfully, so this gate pins
     the multi-round pause shape WITHOUT tripping that separate, documented gap.
     """
@@ -371,6 +372,10 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript():
         # frame.completed = the scheduler's finished-worker seed at the checkpoint (s1) —
         # the blob Phase 2 ⑥ replaces with a journal projection.
         captured["completed"] = dict(frame.completed)
+        # frame.plan (frozen as JSON at the pause instant) = the DAG blob Phase 2 replaces
+        # with the ``plan_snapshot`` journal projection. Frozen now since the live object
+        # could be steered later.
+        captured["plan_json"] = plan_to_json(frame.plan)
 
     async def deleter(_message_id: str) -> None:
         captured["deleted"] = True
@@ -495,3 +500,16 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript():
     (s1_run_id,) = projected
     assert s1_run_id.endswith("_s1")
     assert projected[s1_run_id].content == "S1OUT"
+
+    # THE PLAN GOLDEN (执行级事件溯源 Phase 2, frame.plan 退场): the ``plan_snapshot`` fact folds
+    # back to the EXACT DAG the frame snapshotted — so a resume rebuilds the plan (its minted
+    # run_ids matching the seed map above) from the journal, gating the drop of frame.plan.
+    # Compared through the shared serializer (plan_to_json) → byte-for-byte equal.
+    projected_plan = plan_from_journal(persisted)
+    assert projected_plan is not None
+    assert plan_to_json(projected_plan) == captured["plan_json"]
+    # Both nodes (s1 ran, s2 pending) survive with their minted ids + dependency edge.
+    assert [n.run_id for n in projected_plan.nodes] == [
+        n["run_id"] for n in captured["plan_json"]["nodes"]  # type: ignore[index]
+    ]
+    assert projected_plan.nodes[1].depends_on == [projected_plan.nodes[0].run_id]

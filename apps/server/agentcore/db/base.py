@@ -1,11 +1,20 @@
 """SQLAlchemy base configuration and session management."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from agentcore.config import settings
+from agentcore.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+# A readiness probe must fail fast: a refused connection errors instantly, but a
+# dropped / firewalled host would otherwise hang until the driver timeout.
+_DB_PROBE_TIMEOUT_S = 3.0
 
 
 class Base(DeclarativeBase):
@@ -34,3 +43,21 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Dependency that yields an async DB session."""
     async with async_session_factory() as session:
         yield session
+
+
+async def database_ready(timeout_s: float = _DB_PROBE_TIMEOUT_S) -> bool:
+    """True iff a trivial query round-trips within ``timeout_s``.
+
+    The single source for「is PostgreSQL reachable right now?」— used by the
+    Kubernetes readiness probe (``/readyz``) and the admin system panel
+    (管理员后台 P2 系统状态). A pure probe on a fresh session: it swallows every
+    error (returning False, logged once) so each caller decides how to react
+    (a ``503`` vs. a read-only status flag).
+    """
+    try:
+        async with async_session_factory() as session:
+            await asyncio.wait_for(session.execute(text("SELECT 1")), timeout_s)
+        return True
+    except Exception:  # noqa: BLE001 - any failure means "not ready"; reason logged
+        logger.warning("db.ping_failed", exc_info=True)
+        return False

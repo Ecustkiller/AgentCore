@@ -1,13 +1,17 @@
-import { AdminShell } from "@/components/AdminShell";
+import { AdminShell, type AdminTab } from "@/components/AdminShell";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { AnalyticsPage, type AnalyticsSegment } from "@/pages/AnalyticsPage";
+import { InvitesPage } from "@/pages/InvitesPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { OverviewPage } from "@/pages/OverviewPage";
+import { SystemPage } from "@/pages/SystemPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { NetworkError, setUnauthorizedHandler } from "@/services/api";
 import { fetchMe, logout } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
 import { ShieldAlert } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 async function bootstrap(): Promise<void> {
   const {
@@ -31,6 +35,15 @@ async function bootstrap(): Promise<void> {
 
 export function App() {
   const status = useAuthStore((s) => s.status);
+  const [tab, setTab] = useState<AdminTab>("overview");
+  // 分析's lens persists across tab switches so 概览 KPIs can deep-link to a lens.
+  const [analyticsSegment, setAnalyticsSegment] =
+    useState<AnalyticsSegment>("cost");
+
+  const navigate = (next: AdminTab, segment?: AnalyticsSegment) => {
+    if (segment) setAnalyticsSegment(segment);
+    setTab(next);
+  };
 
   useEffect(() => {
     // A request that stays 401 after a refresh drops the whole app to login.
@@ -84,8 +97,17 @@ export function App() {
   }
 
   return (
-    <AdminShell>
-      <UsersPage />
+    <AdminShell active={tab} onNavigate={setTab}>
+      {tab === "overview" && <OverviewPage onNavigate={navigate} />}
+      {tab === "users" && <UsersPage />}
+      {tab === "invites" && <InvitesPage />}
+      {tab === "analytics" && (
+        <AnalyticsPage
+          segment={analyticsSegment}
+          onSegmentChange={setAnalyticsSegment}
+        />
+      )}
+      {tab === "system" && <SystemPage />}
     </AdminShell>
   );
 }

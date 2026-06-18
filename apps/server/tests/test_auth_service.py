@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from agentcore.auth import AuthService
-from agentcore.core.errors import AuthenticationError, ValidationError
+from agentcore.core.errors import (
+    AuthenticationError,
+    NotFoundError,
+    ValidationError,
+)
 from agentcore.core.types import new_id
 from agentcore.security import decode_access_token, hash_refresh_token
 
@@ -65,6 +69,12 @@ class FakeCredentials:
         cred.failed_attempts = 0
         cred.locked_until = None
 
+    async def set_password(self, user_id, password_hash):
+        cred = self._by_user[user_id]
+        cred.password_hash = password_hash
+        cred.failed_attempts = 0
+        cred.locked_until = None
+
 
 class FakeRefreshTokens:
     def __init__(self) -> None:
@@ -114,6 +124,7 @@ class FakeInvites:
             used_by=None,
             expires_at=expires_at,
             used_at=None,
+            revoked_at=None,
         )
         self.records[inv.id] = inv
         return inv
@@ -121,12 +132,22 @@ class FakeInvites:
     async def get_by_code(self, code):
         return next((i for i in self.records.values() if i.code == code), None)
 
+    async def get_by_id(self, invite_id):
+        return self.records.get(invite_id)
+
     async def list_recent(self, *, limit=100):
         return list(self.records.values())[:limit]
 
     async def mark_used(self, invite_id, *, used_by):
         self.records[invite_id].used_by = used_by
         self.records[invite_id].used_at = datetime.now(UTC)
+
+    async def revoke(self, invite_id, *, revoked_at):
+        inv = self.records.get(invite_id)
+        if inv is None:
+            return None
+        inv.revoked_at = revoked_at
+        return inv
 
 
 def _make():
@@ -319,3 +340,83 @@ async def test_list_invites_returns_all_minted():
     await svc.create_invite(created_by="admin-1")
     await svc.create_invite(created_by="admin-1")
     assert len(await svc.list_invites()) == 2
+
+
+# --- invite revocation (邀请码撤销) ---
+
+
+async def test_revoke_invite_stamps_revoked_and_blocks_registration():
+    svc, _u, _c, _t, invites = _make()
+    invite = await svc.create_invite(created_by="admin-1")
+    revoked = await svc.revoke_invite(invite_id=invite.id)
+    assert revoked.revoked_at is not None
+    # a revoked code can no longer register an account
+    with pytest.raises(ValidationError):
+        await svc.register(username="late", password=_PW, invite_code=invite.code)
+
+
+async def test_revoke_invite_unknown_id_raises_not_found():
+    svc, *_ = _make()
+    with pytest.raises(NotFoundError):
+        await svc.revoke_invite(invite_id="does-not-exist")
+
+
+async def test_revoke_invite_used_code_rejected():
+    svc, _u, _c, _t, invites = _make()
+    invite = await svc.create_invite(created_by="admin-1")
+    await svc.register(username="early", password=_PW, invite_code=invite.code)
+    with pytest.raises(ValidationError):
+        await svc.revoke_invite(invite_id=invite.id)
+
+
+async def test_revoke_invite_twice_rejected():
+    svc, *_ = _make()
+    invite = await svc.create_invite(created_by="admin-1")
+    await svc.revoke_invite(invite_id=invite.id)
+    with pytest.raises(ValidationError):
+        await svc.revoke_invite(invite_id=invite.id)
+
+
+# --- admin password reset (重置密码) ---
+
+
+async def test_admin_reset_password_rotates_secret_and_revokes_sessions():
+    svc, _u, _c, tokens, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="nora", password=_PW, invite_code="C1")
+    _, pair = await svc.login(username="nora", password=_PW)
+
+    temp = await svc.admin_reset_password(user_id=user.user_id)
+    assert len(temp) >= 8 and temp != _PW
+
+    # old password no longer works; the freshly minted one does
+    with pytest.raises(AuthenticationError):
+        await svc.login(username="nora", password=_PW)
+    relogged, _ = await svc.login(username="nora", password=temp)
+    assert relogged.user_id == user.user_id
+
+    # every pre-reset session is revoked (the old refresh token is dead)
+    with pytest.raises(AuthenticationError):
+        await svc.refresh(refresh_token=pair.refresh_token)
+
+
+async def test_admin_reset_password_clears_lockout():
+    svc, _u, creds, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="omar", password=_PW, invite_code="C1")
+    for _ in range(5):
+        with pytest.raises(AuthenticationError):
+            await svc.login(username="omar", password="wrong-pw")
+    assert (await creds.get_by_user_id(user.user_id)).locked_until is not None
+
+    temp = await svc.admin_reset_password(user_id=user.user_id)
+    cred = await creds.get_by_user_id(user.user_id)
+    assert cred.locked_until is None and cred.failed_attempts == 0
+    relogged, _ = await svc.login(username="omar", password=temp)
+    assert relogged.user_id == user.user_id
+
+
+async def test_admin_reset_password_unknown_user_raises_not_found():
+    svc, *_ = _make()
+    with pytest.raises(NotFoundError):
+        await svc.admin_reset_password(user_id="ghost")

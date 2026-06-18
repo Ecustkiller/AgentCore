@@ -28,6 +28,7 @@ from agentcore.db.repositories import (
     HandoffJobRepository,
     MessageRepository,
     ModelModeRepository,
+    TurnMetricsRepository,
     UserRepository,
 )
 from agentcore.llm.byok import LLMCredentials, resolve_user_llm_credentials
@@ -440,6 +441,7 @@ async def _run_and_persist(
             raise
         finish = result.get("finish_reason")
         cost_runs = result.get("cost_runs") or []
+        duration_ms = int((time.monotonic() - started) * 1000)
         logger.info(
             "chat.turn_complete",
             finish_reason=getattr(finish, "value", finish),
@@ -452,7 +454,7 @@ async def _run_and_persist(
             # cost_runs = captain root + one row per delegated member, so members
             # = len - 1 (0 when the CEO answered solo).
             workers=max(len(cost_runs) - 1, 0),
-            duration_ms=int((time.monotonic() - started) * 1000),
+            duration_ms=duration_ms,
             error=result.get("error"),
         )
 
@@ -467,6 +469,9 @@ async def _run_and_persist(
         generate_title=generate_title,
         llm_credentials=llm_credentials,
         trace_id=trace_id,
+        turn_id=turn_id,
+        duration_ms=duration_ms,
+        kind="turn",
     )
 
 
@@ -482,15 +487,20 @@ async def _persist_turn_result(
     generate_title: bool,
     llm_credentials: LLMCredentials | None,
     trace_id: str,
+    turn_id: str,
+    duration_ms: int,
+    kind: str = "turn",
 ) -> None:
-    """Persist a completed turn's reply + ledger, then title / memory / snapshot.
+    """Persist a completed turn's reply + ledger + telemetry, then title / memory / snapshot.
 
     Shared end-of-turn tail of a fresh send, a regenerate, AND a 结构化挂起 resume —
     each computes its own pipeline ``result`` then hands it here. A resume reuses the
     ORIGINAL ``message_id`` / ``trace_id`` (carried on the frame), so the assistant
     row + ledger it writes for the first time on completion join back to the turn
     that paused. ``generate_title`` is idempotent-guarded (only fires when the
-    conversation still lacks a title).
+    conversation still lacks a title). ``turn_id`` / ``duration_ms`` / ``kind`` feed
+    the 运营观测 telemetry row (admin 观测看板); ``kind`` is "turn" for a fresh send /
+    regenerate, "resume" for a 结构化挂起 continuation.
     """
     assistant_reply = result.get("content") or ""
     assistant_reasoning = result.get("reasoning_content") or None
@@ -563,6 +573,48 @@ async def _persist_turn_result(
                     message_id=result.get("message_id"),
                     error=str(e),
                 )
+
+        # 运营观测: persist this turn's compact telemetry row (admin 观测看板 数据源).
+        # Mirrors what was just logged at chat.turn_complete / chat.resume_complete,
+        # but in Postgres so the dashboard aggregates with indexed SQL — the JSONL
+        # log file may not exist in prod's stdout-only posture (settings.log_file
+        # default ""). Written for EVERY completed turn (ok or soft-error), even
+        # one that produced no assistant text. Best-effort: a telemetry write must
+        # NEVER break the committed turn (同 cost ledger 铁律) — roll back the aborted
+        # statement and move on.
+        finish = result.get("finish_reason")
+        finish_value = getattr(finish, "value", finish)
+        turn_error = result.get("error")
+        try:
+            await TurnMetricsRepository(session).record(
+                turn_id=turn_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                trace_id=trace_id,
+                agent_id="CEO",
+                kind=kind,
+                status=(
+                    "error"
+                    if turn_error or finish_value == FinishReason.ERROR.value
+                    else "ok"
+                ),
+                finish_reason=finish_value,
+                error=str(turn_error)[:1000] if turn_error else None,
+                rounds=int(result.get("rounds", 0) or 0),
+                duration_ms=duration_ms,
+                delegated=bool(assistant_runs),
+                workers=max(len(cost_runs) - 1, 0),
+                input_tokens=int(result.get("input_tokens", 0) or 0),
+                output_tokens=int(result.get("output_tokens", 0) or 0),
+            )
+        except Exception as e:
+            await session.rollback()
+            logger.warning(
+                "observability.turn_metrics_write_failed",
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                error=str(e),
+            )
 
         conv = await conv_repo.get_by_id(conversation_id)
         needs_title = bool(generate_title and conv and not conv.title)
@@ -1222,12 +1274,13 @@ async def resume_chat(
             # Reuse the originating turn's trace_id so the resumed continuation is
             # greppable as ONE turn end-to-end (falls back to a fresh id if untraced).
             trace_id = suspension.trace_id or new_trace_id()
+            turn_id = new_id()
             started = time.monotonic()
             with log_context(
                 trace_id=trace_id,
                 conversation_id=conversation_id,
                 user_id=user_id,
-                turn_id=new_id(),
+                turn_id=turn_id,
                 agent_id="CEO",
             ):
                 logger.info(
@@ -1268,6 +1321,7 @@ async def resume_chat(
                     raise
                 finish = result.get("finish_reason")
                 cost_runs = result.get("cost_runs") or []
+                duration_ms = int((time.monotonic() - started) * 1000)
                 logger.info(
                     "chat.resume_complete",
                     finish_reason=getattr(finish, "value", finish),
@@ -1275,7 +1329,7 @@ async def resume_chat(
                     reply_chars=len(result.get("content") or ""),
                     delegated=bool(result.get("runs")),
                     workers=max(len(cost_runs) - 1, 0),
-                    duration_ms=int((time.monotonic() - started) * 1000),
+                    duration_ms=duration_ms,
                     error=result.get("error"),
                 )
 
@@ -1290,6 +1344,9 @@ async def resume_chat(
                 generate_title=True,
                 llm_credentials=llm_credentials,
                 trace_id=trace_id,
+                turn_id=turn_id,
+                duration_ms=duration_ms,
+                kind="resume",
             )
 
     except Exception as e:

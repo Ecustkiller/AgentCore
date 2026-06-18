@@ -1,0 +1,380 @@
+"""The ProjectedTurn oracle: fold an SSE event vector → the normalized judge state.
+
+This is the backend-authoritative twin of the frontend folds (mobile
+``src/protocol/fold.ts``; desktop ``stores/execution.ts`` + ``streamConversation``).
+Its output IS the golden every端 must match (手机端落地设计 §六 支柱1).
+
+Semantics are deliberately a port of the two PROVEN frontend/runtime projections, so
+the oracle never invents behavior the product doesn't already have:
+
+- the multi-agent team graph (agents / runs / progress) mirrors desktop
+  ``projectExecution`` (run_plan skeleton → run_* frames fold in; progress derived
+  from run states; revisions synthesized from their run_started frame);
+- the single-agent 思考·正文·工具 ``process`` timeline mirrors
+  ``EventSink._accumulate_process`` (reasoning/content deltas coalesce; one step per
+  tool call resolved by its tool_use_end), surfaced only for a single-agent turn
+  (no run_plan), parity with ``process_timeline()`` going None once a graph exists;
+- ``content`` / ``reasoning`` accumulate the captain bubble's deltas (present even in
+  a multi-agent turn — the CEO speaks above the graph);
+- ``status`` / ``pendingInteraction`` fold the gate state machine (a *_required pauses,
+  its *_resolved resumes; a paused turn's stream simply ends at the *_required);
+- ``cost`` / ``finishReason`` come from message_end (回合总账).
+
+Output keys are the camelCase ProjectedTurn shape (see
+``packages/protocol-conformance/src/projectedTurn.ts``); wire-shaped leaves
+(usage / cost / tool arguments / process step) are carried verbatim (snake_case kept).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+# message_end.finish_reason → terminal TurnStatus (parity with desktop statusFromFinish,
+# extended with the non-error completed reasons the chat turn can carry).
+_FINISH_TO_STATUS: dict[str, str] = {
+    "end_turn": "completed",
+    "max_rounds": "completed",
+    "degraded": "completed",
+    "unproductive": "completed",
+    "error": "failed",
+    "cancelled": "cancelled",
+}
+
+
+def _agent_from_plan(a: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": a.get("id", ""),
+        "role": a.get("role", ""),
+        "modelPreference": a.get("model_preference", "strong"),
+        "thinking": bool(a.get("thinking", True)),
+        "reasoningEffort": a.get("reasoning_effort", "high"),
+        "status": "idle",
+        "currentRunId": None,
+        "output": "",
+        "reasoning": "",
+        "toolProgress": None,
+    }
+
+
+def _run_from_plan(s: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": s.get("id", ""),
+        "agentId": s.get("agent_id", ""),
+        "task": s.get("task", ""),
+        "status": "pending",
+        "dependsOn": list(s.get("depends_on") or []),
+        "outputSummary": None,
+        "durationMs": None,
+        "error": None,
+        "parentRunId": s.get("parent_run_id"),
+        "kind": s.get("kind") or "agent",
+        "role": None,
+        "model": None,
+        "usage": None,
+        "cost": None,
+        "stance": s.get("stance"),
+        "group": s.get("group"),
+        "round": s.get("round") or 0,
+        "revisionOf": None,
+        "revision": 0,
+        "checkpoint": None,
+    }
+
+
+def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fold an ordered SSE event vector into the normalized ProjectedTurn dict."""
+    content = ""
+    reasoning = ""
+    process: list[dict[str, Any]] = []
+    citations: list[dict[str, Any]] = []
+    agents: list[dict[str, Any]] = []
+    runs: list[dict[str, Any]] = []
+    has_run_plan = False
+    plan_id: str | None = None
+    status = "running"
+    finish_reason: str | None = None
+    cost: dict[str, Any] | None = None
+    pending: dict[str, Any] | None = None
+    # plan_review_resolved carries only the checkpoint id → remember the gated run ids.
+    checkpoint_steps: dict[str, list[str]] = {}
+
+    def agent_by_id(aid: str) -> dict[str, Any] | None:
+        return next((a for a in agents if a["id"] == aid), None)
+
+    def run_by_id(rid: str) -> dict[str, Any] | None:
+        return next((r for r in runs if r["id"] == rid), None)
+
+    for ev in events:
+        etype = ev.get("type") or ""
+        p = ev.get("payload") or {}
+
+        if etype == "content_delta":
+            delta = p.get("delta") or ""
+            content += delta
+            if delta:
+                if process and process[-1].get("kind") == "content":
+                    process[-1]["text"] += delta
+                else:
+                    process.append({"kind": "content", "text": delta})
+
+        elif etype == "reasoning_delta":
+            delta = p.get("delta") or ""
+            reasoning += delta
+            if delta:
+                if process and process[-1].get("kind") == "reasoning":
+                    process[-1]["text"] += delta
+                else:
+                    process.append({"kind": "reasoning", "text": delta})
+
+        elif etype == "tool_use_start":
+            step: dict[str, Any] = {
+                "kind": "tool",
+                "id": p.get("tool_call_id", ""),
+                "tool_name": p.get("tool_name", ""),
+                "arguments": p.get("arguments") or {},
+                "result": None,
+                "status": "running",
+            }
+            process.append(step)
+            # Multi-agent: attach the executing call to the running run's agent too
+            # (desktop attaches tool calls to whichever run is running). Captured on the
+            # agent's currentRunId; worker tool fidelity beyond status is a later ratchet.
+            running = next((r for r in runs if r["status"] == "running"), None)
+            if running:
+                ag = agent_by_id(running["agentId"])
+                if ag:
+                    ag["toolProgress"] = None
+
+        elif etype == "tool_use_end":
+            call_id = p.get("tool_call_id", "")
+            result = p.get("result")
+            display = p.get("display")
+            for step in reversed(process):
+                if step.get("kind") == "tool" and step.get("id") == call_id:
+                    step["result"] = result
+                    step["status"] = p.get("status", "success")
+                    if display is not None:
+                        step["display"] = display
+                    break
+
+        elif etype == "citations":
+            citations = list(p.get("citations") or [])
+
+        elif etype == "run_plan":
+            has_run_plan = True
+            ip = p.get("execution_id")
+            if plan_id is None or plan_id == ip:
+                plan_id = ip
+                for a in p.get("agents") or []:
+                    if not agent_by_id(a.get("id", "")):
+                        agents.append(_agent_from_plan(a))
+                for s in p.get("runs") or []:
+                    if not run_by_id(s.get("id", "")):
+                        runs.append(_run_from_plan(s))
+            else:
+                # A different execution id is a fresh plan (desktop resets the slot).
+                plan_id = ip
+                agents = [_agent_from_plan(a) for a in (p.get("agents") or [])]
+                runs = [_run_from_plan(s) for s in (p.get("runs") or [])]
+
+        elif etype == "run_started":
+            rid = p.get("run_id", "")
+            agid = p.get("agent_id", "")
+            revision = p.get("revision") or 0
+            parent = p.get("parent_run_id")
+            kind = p.get("kind") or "agent"
+            run = run_by_id(rid)
+            # 定向唤回 续写 (乙 热修 P4): a revision (>=2) is not in the plan — synthesize
+            # it off the original, mirroring projectExecution.
+            if run is None and revision and parent:
+                original = run_by_id(parent)
+                if original is not None:
+                    origin_agent = agent_by_id(original["agentId"])
+                    agents.append(
+                        {
+                            "id": agid,
+                            "role": origin_agent["role"] if origin_agent else original["agentId"],
+                            "modelPreference": origin_agent["modelPreference"]
+                            if origin_agent
+                            else "strong",
+                            "thinking": origin_agent["thinking"] if origin_agent else True,
+                            "reasoningEffort": origin_agent["reasoningEffort"]
+                            if origin_agent
+                            else "high",
+                            "status": "idle",
+                            "currentRunId": None,
+                            "output": "",
+                            "reasoning": "",
+                            "toolProgress": None,
+                        }
+                    )
+                    run = {
+                        **_run_from_plan({"id": rid, "agent_id": agid, "task": original["task"]}),
+                        "parentRunId": parent,
+                        "kind": kind,
+                        "revisionOf": parent,
+                        "revision": revision,
+                    }
+                    runs.append(run)
+            if run is not None:
+                run["status"] = "running"
+                run["parentRunId"] = parent
+                run["kind"] = kind
+            ag = agent_by_id(agid)
+            if ag:
+                ag["status"] = "working"
+                ag["currentRunId"] = rid
+                ag["toolProgress"] = None
+
+        elif etype == "run_output_delta":
+            ag = agent_by_id(p.get("agent_id", ""))
+            if ag:
+                ag["output"] += p.get("delta") or ""
+
+        elif etype == "run_reasoning_delta":
+            ag = agent_by_id(p.get("agent_id", ""))
+            if ag:
+                ag["reasoning"] += p.get("delta") or ""
+
+        elif etype == "run_tool_progress":
+            ag = agent_by_id(p.get("agent_id", ""))
+            if ag:
+                ag["toolProgress"] = {
+                    "toolName": p.get("tool_name", ""),
+                    "chars": p.get("chars", 0),
+                }
+
+        elif etype == "run_completed":
+            run = run_by_id(p.get("run_id", ""))
+            if run is not None:
+                run["status"] = "completed"
+                run["outputSummary"] = p.get("output_summary")
+                run["durationMs"] = p.get("duration_ms")
+                run["role"] = p.get("role")
+                run["model"] = p.get("model")
+                run["usage"] = p.get("usage")
+                run["cost"] = p.get("cost")
+            ag = agent_by_id(p.get("agent_id", ""))
+            if ag:
+                ag["status"] = "completed"
+                ag["currentRunId"] = None
+                ag["toolProgress"] = None
+
+        elif etype == "run_failed":
+            run = run_by_id(p.get("run_id", ""))
+            if run is not None:
+                run["status"] = "failed"
+                run["error"] = p.get("error")
+            ag = agent_by_id(p.get("agent_id", ""))
+            if ag:
+                ag["status"] = "error"
+                ag["toolProgress"] = None
+
+        elif etype == "run_progress":
+            # Progress is derived from run states below (cumulative, multi-batch safe);
+            # the wire counter is a timeline marker only.
+            pass
+
+        elif etype == "approval_required":
+            pending = {
+                "kind": "approval",
+                "approvalId": p.get("approval_id", ""),
+                "toolCallId": p.get("tool_call_id", ""),
+                "toolName": p.get("tool_name", ""),
+                "arguments": p.get("arguments") or {},
+            }
+            status = "paused"
+
+        elif etype == "approval_resolved":
+            if (
+                pending
+                and pending.get("kind") == "approval"
+                and pending.get("approvalId") == p.get("approval_id")
+            ):
+                pending = None
+                status = "running"
+
+        elif etype == "checkpoint_required":
+            pending = {
+                "kind": "checkpoint",
+                "checkpointId": p.get("checkpoint_id", ""),
+                "question": p.get("question", ""),
+                "context": p.get("context", ""),
+            }
+            status = "paused"
+
+        elif etype == "checkpoint_resolved":
+            if (
+                pending
+                and pending.get("kind") == "checkpoint"
+                and pending.get("checkpointId") == p.get("checkpoint_id")
+            ):
+                pending = None
+                status = "running"
+
+        elif etype == "plan_review_required":
+            cid = p.get("checkpoint_id", "")
+            run_ids = [s.get("run_id", "") for s in (p.get("steps") or [])]
+            checkpoint_steps[cid] = run_ids
+            for rid in run_ids:
+                run = run_by_id(rid)
+                if run is not None:
+                    run["checkpoint"] = {"status": "pending", "decision": None}
+            pending = {"kind": "plan_review", "checkpointId": cid, "runIds": run_ids}
+            status = "paused"
+
+        elif etype == "plan_review_resolved":
+            cid = p.get("checkpoint_id", "")
+            for rid in checkpoint_steps.get(cid, []):
+                run = run_by_id(rid)
+                if run is not None:
+                    run["checkpoint"] = {
+                        "status": "resolved",
+                        "decision": p.get("decision"),
+                    }
+            if pending and pending.get("kind") == "plan_review" and pending.get("checkpointId") == cid:
+                pending = None
+                status = "running"
+
+        elif etype == "error":
+            status = "failed"
+
+        elif etype == "message_end":
+            finish_reason = p.get("finish_reason")
+            cost = p.get("cost")
+            status = _FINISH_TO_STATUS.get(finish_reason or "", "completed")
+
+        else:
+            # message_start / turn_saved / title_generated / tool_progress /
+            # question_posted (non-gating) / workspace_op_required / handoff_* —
+            # not part of the normalized turn judge state (no-op). Mirrored by the
+            # frontend folds' assertNever switch so the set stays in lockstep.
+            pass
+
+    # A cancelled turn never received terminal frames for in-flight nodes; freeze them
+    # (parity with projectExecution's cancelled pass).
+    if status == "cancelled":
+        for r in runs:
+            if r["status"] == "running":
+                r["status"] = "cancelled"
+        for a in agents:
+            if a["status"] == "working":
+                a["status"] = "cancelled"
+
+    return {
+        "status": status,
+        "finishReason": finish_reason,
+        "content": content,
+        "reasoning": reasoning,
+        # Single-agent inline timeline only; the team graph carries multi-agent activity.
+        "process": [] if has_run_plan else process,
+        "citations": citations,
+        "agents": agents,
+        "runs": runs,
+        "progress": {
+            "completed": sum(1 for r in runs if r["status"] == "completed"),
+            "total": len(runs),
+        },
+        "pendingInteraction": pending,
+        "cost": cost,
+    }

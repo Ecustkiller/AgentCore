@@ -20,7 +20,7 @@ async def test_livez_is_always_alive_and_skips_dependencies(monkeypatch):
     async def _must_not_run() -> bool:
         raise AssertionError("liveness must not probe the database")
 
-    monkeypatch.setattr(system, "_database_ready", _must_not_run)
+    monkeypatch.setattr(system, "database_ready", _must_not_run)
     async with _client() as c:
         r = await c.get("/livez")
 
@@ -32,7 +32,7 @@ async def test_readyz_returns_200_when_database_reachable(monkeypatch):
     async def _ready() -> bool:
         return True
 
-    monkeypatch.setattr(system, "_database_ready", _ready)
+    monkeypatch.setattr(system, "database_ready", _ready)
     async with _client() as c:
         r = await c.get("/readyz")
 
@@ -44,7 +44,7 @@ async def test_readyz_returns_503_when_database_down(monkeypatch):
     async def _down() -> bool:
         return False
 
-    monkeypatch.setattr(system, "_database_ready", _down)
+    monkeypatch.setattr(system, "database_ready", _down)
     async with _client() as c:
         r = await c.get("/readyz")
 

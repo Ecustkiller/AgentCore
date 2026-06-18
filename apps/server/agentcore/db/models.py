@@ -165,6 +165,12 @@ class Invite(Base):
     used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Admin revocation (邀请码撤销): set when an admin kills an unused code so it can
+    # no longer register an account. Distinct from expiry (time-based) and use
+    # (consumed) — a revoked code was deliberately retired before either happened.
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -848,6 +854,86 @@ class TurnJournalRow(Base):
     # Originating turn's log trace_id (DB↔logs join), stamped on every fact. See
     # core/log_context.py. NULL when untraced.
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+# --- Turn metrics (运营观测: per-turn telemetry for the admin 观测看板) ---
+# One row per COMPLETED assistant turn — the operator-facing counterpart of the
+# dev firehose (logs/dev.jsonl). It persists the same outcome/quality fields the
+# turn already logs at chat.turn_complete / chat.resume_complete (status /
+# finish_reason / rounds / duration / delegated / workers / tokens), so the admin
+# 观测 dashboard aggregates them with indexed SQL instead of scanning the JSONL
+# file — which prod's stdout-only logging posture (settings.log_file default "")
+# may never even write. Written best-effort at the turn's persistence tail: a
+# telemetry write must NEVER break the user's turn (同 cost ledger / 工作区快照 铁律).
+#
+# Deliberately compact + non-duplicative: money lives in cost_events and the
+# message body in messages — both join here by trace_id (the one-per-interaction
+# key), so a 会话复盘 stitches the three by trace_id/conversation_id without this
+# row copying spend or text. Distinct from turn_journal (the replay event stream,
+# keyed by message_id): that is for client replay, this is the aggregatable
+# outcome row for ops. Tool/LLM span-level detail is intentionally NOT here (it
+# stays a dev concern in the log file); add a span_metrics table only if ops需要.
+
+
+class TurnMetricsRow(Base):
+    """Per-turn 运营观测 telemetry (one row per completed assistant turn).
+
+    Powers the admin 观测看板 (全站健康: error rate / latency / rounds / 委派率 +
+    7-day trend) and, with messages + cost_events joined by trace_id, the 会话复盘
+    timeline. See the module note above for why it is a purpose-built DB sink
+    rather than the log file.
+    """
+
+    __tablename__ = "turn_metrics"
+    __table_args__ = (
+        CheckConstraint("status in ('ok', 'error')", name="ck_turn_metrics_status"),
+        CheckConstraint("kind in ('turn', 'resume')", name="ck_turn_metrics_kind"),
+        # 全站健康看板: window aggregates + the daily trend filter/group on created_at.
+        Index("ix_turn_metrics_created", "created_at"),
+        # 会话复盘 (P2): every turn of one conversation, newest-first.
+        Index("ix_turn_metrics_conversation_created", "conversation_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
+    )
+    # The turn id minted at chat.turn_start (core.types.new_id == str(uuid4())); the
+    # log correlation handle, not the assistant message id (that is the journal's key).
+    turn_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    # The turn's top agent (the CEO/captain); delegated members are counted in `workers`.
+    agent_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Join key to the runtime logs + cost_events + messages (one per interaction).
+    trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    # turn = fresh send / regenerate; resume = 结构化挂起 continuation.
+    kind: Mapped[str] = mapped_column(
+        String(16), default="turn", server_default=text("'turn'")
+    )
+    status: Mapped[str] = mapped_column(
+        String(8), default="ok", server_default=text("'ok'")
+    )
+    # The turn's terminal finish_reason (FinishReason value), e.g. stop / length / error.
+    finish_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # A soft error surfaced in the turn result (truncated); NULL on success.
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rounds: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    duration_ms: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0")
+    )
+    delegated: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
+    workers: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    input_tokens: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0")
+    )
+    output_tokens: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

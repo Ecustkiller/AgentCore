@@ -3,7 +3,7 @@
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
-from fastapi import Cookie, Depends
+from fastapi import Cookie, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.admin import AdminService
@@ -23,6 +23,7 @@ from agentcore.db.repositories import (
     ModelModeRepository,
     RefreshTokenRepository,
     TurnJournalRepository,
+    TurnMetricsRepository,
     UserBlockRepository,
     UserDirectoryRepository,
     UserRepository,
@@ -33,6 +34,23 @@ from agentcore.security import decode_access_token
 
 # Cookie name carrying the access JWT (set by the auth routes).
 ACCESS_TOKEN_COOKIE = "access_token"
+
+
+def _bearer_token(authorization: str | None) -> str | None:
+    """Extract the JWT from an ``Authorization: Bearer <token>`` header.
+
+    The bearer path serves non-cookie clients (mobile web / Capacitor shell, M2):
+    their origin can't rely on SameSite cookies, so they send the access token as a
+    Bearer header instead. Returns None when the header is absent or not the Bearer
+    scheme, so the caller falls back to the cookie (desktop) or to a 401.
+    """
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    token = token.strip()
+    return token or None
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -68,6 +86,12 @@ def get_message_repo(session: AsyncSession = Depends(get_db)) -> MessageReposito
 
 def get_cost_event_repo(session: AsyncSession = Depends(get_db)) -> CostEventRepository:
     return CostEventRepository(session)
+
+
+def get_turn_metrics_repo(
+    session: AsyncSession = Depends(get_db),
+) -> TurnMetricsRepository:
+    return TurnMetricsRepository(session)
 
 
 def get_turn_journal_repo(
@@ -111,12 +135,15 @@ def get_auth_service(session: AsyncSession = Depends(get_db)) -> AuthService:
 
 async def get_current_user(
     access_token: Annotated[str | None, Cookie(alias=ACCESS_TOKEN_COOKIE)] = None,
+    authorization: Annotated[str | None, Header()] = None,
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> User:
-    """Resolve the authenticated user from the access-token cookie (401 if absent/invalid)."""
-    if not access_token:
+    """Resolve the authenticated user from the access-token cookie (desktop) or an
+    ``Authorization: Bearer`` header (mobile/web bearer clients); 401 if absent/invalid."""
+    token = access_token or _bearer_token(authorization)
+    if not token:
         raise AuthenticationError("Not authenticated")
-    user_id = decode_access_token(access_token)
+    user_id = decode_access_token(token)
     user = await user_repo.get_by_id(user_id)
     if user is None or user.status != "active":
         raise AuthenticationError("User not found or inactive")
@@ -125,13 +152,15 @@ async def get_current_user(
 
 async def get_optional_user(
     access_token: Annotated[str | None, Cookie(alias=ACCESS_TOKEN_COOKIE)] = None,
+    authorization: Annotated[str | None, Header()] = None,
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> User | None:
     """Like get_current_user but returns None instead of raising when unauthenticated."""
-    if not access_token:
+    token = access_token or _bearer_token(authorization)
+    if not token:
         return None
     try:
-        user_id = decode_access_token(access_token)
+        user_id = decode_access_token(token)
     except AuthenticationError:
         return None
     user = await user_repo.get_by_id(user_id)

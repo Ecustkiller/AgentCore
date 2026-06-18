@@ -1,0 +1,303 @@
+{
+  "name": "multi_agent_debate",
+  "description": "多 Agent：辩论 stance/group/round 显示标记",
+  "events": [
+    {
+      "type": "message_start",
+      "payload": {
+        "message_id": "m1",
+        "conversation_id": "conv_demo"
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "发起辩论。"
+      },
+      "timestamp": "2026-01-01T00:00:00.001Z"
+    },
+    {
+      "type": "run_plan",
+      "payload": {
+        "execution_id": "exec1",
+        "plan_type": "multi_agent",
+        "task_summary": "是否采用方案 A",
+        "agents": [
+          {
+            "id": "w1",
+            "role": "正方",
+            "model_preference": "strong",
+            "thinking": true,
+            "reasoning_effort": "high"
+          },
+          {
+            "id": "w2",
+            "role": "反方",
+            "model_preference": "strong",
+            "thinking": true,
+            "reasoning_effort": "high"
+          }
+        ],
+        "runs": [
+          {
+            "id": "r1",
+            "agent_id": "w1",
+            "task": "论证支持",
+            "depends_on": [],
+            "stance": "pro",
+            "group": "g1",
+            "round": 1
+          },
+          {
+            "id": "r2",
+            "agent_id": "w2",
+            "task": "论证反对",
+            "depends_on": [],
+            "stance": "con",
+            "group": "g1",
+            "round": 1
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "r1",
+        "agent_id": "w1",
+        "parent_run_id": null,
+        "kind": "agent",
+        "revision": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "r1",
+        "agent_id": "w1",
+        "delta": "支持理由"
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "r1",
+        "agent_id": "w1",
+        "output_summary": "正方完成",
+        "duration_ms": 800,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.005Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "r2",
+        "agent_id": "w2",
+        "parent_run_id": null,
+        "kind": "agent",
+        "revision": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.006Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "r2",
+        "agent_id": "w2",
+        "delta": "反对理由"
+      },
+      "timestamp": "2026-01-01T00:00:00.007Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "r2",
+        "agent_id": "w2",
+        "output_summary": "反方完成",
+        "duration_ms": 850,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.008Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": " 双方已陈述。"
+      },
+      "timestamp": "2026-01-01T00:00:00.009Z"
+    },
+    {
+      "type": "message_end",
+      "payload": {
+        "finish_reason": "end_turn",
+        "usage": {
+          "input_tokens": 3000,
+          "output_tokens": 500,
+          "reasoning_tokens": 0,
+          "cache_hit_tokens": 0,
+          "cache_miss_tokens": 0
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "rounds": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.010Z"
+    }
+  ],
+  "projected": {
+    "status": "completed",
+    "finishReason": "end_turn",
+    "content": "发起辩论。 双方已陈述。",
+    "reasoning": "",
+    "process": [],
+    "citations": [],
+    "agents": [
+      {
+        "id": "w1",
+        "role": "正方",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "支持理由",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "w2",
+        "role": "反方",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "反对理由",
+        "reasoning": "",
+        "toolProgress": null
+      }
+    ],
+    "runs": [
+      {
+        "id": "r1",
+        "agentId": "w1",
+        "task": "论证支持",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "正方完成",
+        "durationMs": 800,
+        "error": null,
+        "parentRunId": null,
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": "pro",
+        "group": "g1",
+        "round": 1,
+        "revisionOf": null,
+        "revision": 0,
+        "checkpoint": null
+      },
+      {
+        "id": "r2",
+        "agentId": "w2",
+        "task": "论证反对",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "反方完成",
+        "durationMs": 850,
+        "error": null,
+        "parentRunId": null,
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": "con",
+        "group": "g1",
+        "round": 1,
+        "revisionOf": null,
+        "revision": 0,
+        "checkpoint": null
+      }
+    ],
+    "progress": {
+      "completed": 2,
+      "total": 2
+    },
+    "pendingInteraction": null,
+    "cost": {
+      "input": 240000,
+      "cached": 64000,
+      "output": 120000,
+      "total": 360000,
+      "currency": "USD"
+    }
+  }
+}

@@ -628,6 +628,16 @@ def run_started(
 
 
 def run_output_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
+    """A delegated worker's output increment — run-scoped, so the team UI streams a
+    worker's text into its node/detail live.
+
+    Transport-only liveliness (执行级事件溯源: deltas 退场): NOT in
+    ``_JOURNAL_EVENT_TYPES``, so it never enters the journal / fact log. The worker's
+    authoritative full output is its ``message_final`` fact (``RunState.content``); a
+    reload synthesizes an equivalent delta block from that fact in
+    ``journal.runs_from_entries``, so the client fold replays the same output without
+    persisting per-token deltas (peer of ``run_tool_progress``).
+    """
     return SSEEvent(
         type=EventType.RUN_OUTPUT_DELTA,
         payload={"run_id": run_id, "agent_id": agent_id, "delta": delta},
@@ -636,9 +646,14 @@ def run_output_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
 
 def run_reasoning_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
     """A delegated worker's thinking increment — the reasoning twin of
-    ``run_output_delta`` (run-scoped, so the team UI can stream a worker's
-    思考全文 into its run-detail live instead of discarding it). Journaled, so a
-    reload replays the same thinking through the client-side fold.
+    ``run_output_delta`` (run-scoped, so the team UI streams a worker's 思考全文 into
+    its run-detail live).
+
+    Transport-only liveliness (执行级事件溯源: deltas 退场): NOT journaled. The worker's
+    authoritative full thinking is its ``message_final`` fact (``RunState.reasoning``,
+    captured by the executor); a reload synthesizes an equivalent reasoning delta block
+    from that fact in ``journal.runs_from_entries``, so the thinking still replays
+    through the client fold without persisting per-token deltas.
     """
     return SSEEvent(
         type=EventType.RUN_REASONING_DELTA,
@@ -732,8 +747,12 @@ _JOURNAL_EVENT_TYPES = frozenset(
     {
         EventType.RUN_PLAN,
         EventType.RUN_STARTED,
-        EventType.RUN_OUTPUT_DELTA,
-        EventType.RUN_REASONING_DELTA,
+        # NOTE: run_output_delta / run_reasoning_delta are deliberately NOT here
+        # (执行级事件溯源: deltas 退场). They are transport-only liveliness now (peers of
+        # run_tool_progress): the worker's authoritative full output + thinking are the
+        # ``message_final`` fact, and a reload synthesizes equivalent delta blocks from
+        # it via ``journal.runs_from_entries`` — so the client fold is unchanged while
+        # the journal stops carrying per-token deltas.
         EventType.RUN_COMPLETED,
         EventType.RUN_FAILED,
         EventType.RUN_PROGRESS,
@@ -776,6 +795,45 @@ _JOURNAL_SURFACE_TYPES = frozenset(
 # without bloating the message row. The live SSE still carries the full result.
 _PROCESS_RESULT_CAP = 8000
 
+# Reconnect replay log (执行与请求解耦 C1 · slice 1b 实时重连续看). A detached run keeps
+# emitting; ``_history`` retains a compact, REPLAYABLE transcript of the turn so a
+# client that drops (network blip) or reopens (cold) can re-attach, replay what it
+# missed, then tail live (see ``EventSink.take_over``). Bounded by VISIBLE content,
+# not token count: per-token deltas coalesce (below) and tool results are capped, so
+# a long turn's history tracks its rendered size, not its event count.
+#
+# Skipped — never replayed:
+# - Pure liveliness (tool_progress / run_tool_progress): a「正在生成…」counter is
+#   moot by reconnect; the finished call replays via tool_use_start/end.
+# - Terminal (message_end / error): the live tail delivers the REAL terminal event;
+#   a still-running turn (the only kind we attach to) has not emitted one yet.
+# - Local/handoff transport (workspace_op_required / handoff_*): replaying an op
+#   request would re-run a side-effecting op; these ride their own short SSEs, not
+#   the chat-turn attach path.
+_HISTORY_SKIP_TYPES = frozenset(
+    {
+        EventType.TOOL_PROGRESS,
+        EventType.RUN_TOOL_PROGRESS,
+        EventType.MESSAGE_END,
+        EventType.ERROR,
+        EventType.WORKSPACE_OP_REQUIRED,
+        EventType.HANDOFF_SNAPSHOT_DONE,
+        EventType.HANDOFF_JOB_STARTED,
+        EventType.HANDOFF_APPLY_DONE,
+    }
+)
+# Turn-scoped deltas coalesce into the trailing same-type history entry (the CEO
+# bubble's reply text / thinking), so reconnect replays one content + one reasoning
+# block instead of thousands of token events.
+_HISTORY_COALESCE_TURN = frozenset(
+    {EventType.CONTENT_DELTA, EventType.REASONING_DELTA}
+)
+# Run-scoped deltas coalesce too, but only into a trailing entry of the SAME run
+# (a worker's output / thinking) — interleaved workers keep separate blocks.
+_HISTORY_COALESCE_RUN = frozenset(
+    {EventType.RUN_OUTPUT_DELTA, EventType.RUN_REASONING_DELTA}
+)
+
 
 class EventSink:
     """Async queue bridging execution (producer) and SSE (consumer).
@@ -787,6 +845,19 @@ class EventSink:
     def __init__(self) -> None:
         self._queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue()
         self._closed = False
+        # 执行与请求解耦 (C1 · slice 1a): once the SSE consumer goes away (client
+        # disconnect) the run keeps going detached, but with no one draining the
+        # queue it would grow for the rest of a long turn. ``detach`` flips this so
+        # ``emit`` stops queueing transport events while still recording the durable
+        # journal / process timeline / fact log (persistence + replay never depended
+        # on the consumer). Never un-set — a new turn uses a fresh sink.
+        self._detached = False
+        # Reconnect replay log (执行与请求解耦 C1 · slice 1b): a compact, coalesced
+        # transcript of this turn's REPLAYABLE events, accumulated regardless of
+        # detach so a re-attaching client can replay what it missed then tail live
+        # (see ``take_over``). Bounded by visible content (deltas coalesced, results
+        # capped), independent of the SSE ``_queue`` (which detach stops feeding).
+        self._history: list[SSEEvent] = []
         # Ordered run/tool events of this turn (the multi-agent execution
         # journal), accumulated as they are emitted so the team graph can be
         # persisted and replayed. Empty for a pure single-agent turn.
@@ -827,7 +898,113 @@ class EventSink:
                     )
                 )
             self._accumulate_process(event)
-            self._queue.put_nowait(event)
+            # Reconnect transcript (slice 1b): accumulated even while detached so a
+            # later attach can replay it — independent of the SSE queue below.
+            self._record_history(event)
+            # After ``detach`` (consumer gone, run continues) skip the SSE queue so
+            # it cannot grow unbounded — the journal/process/fact accumulation above
+            # already ran, so the turn still persists + replays in full.
+            if not self._detached:
+                self._queue.put_nowait(event)
+
+    def _record_history(self, event: SSEEvent) -> None:
+        """Fold one event into the bounded reconnect replay log (slice 1b).
+
+        Mirrors what the live SSE consumer would have applied, minus the noise:
+        liveliness / terminal / local-op events are skipped (see
+        ``_HISTORY_SKIP_TYPES``), per-token deltas coalesce into the trailing
+        same-stream block, and a tool result is capped. The result is a compact
+        transcript that, replayed through the SAME client dispatch, reconstructs the
+        turn's on-screen state up to now — then the live tail continues it.
+        """
+        t = event.type
+        if t in _HISTORY_SKIP_TYPES:
+            return
+        if t in _HISTORY_COALESCE_TURN:
+            delta = event.payload.get("delta") or ""
+            if not delta:
+                return
+            last = self._history[-1] if self._history else None
+            if last is not None and last.type == t:
+                last.payload["delta"] = (last.payload.get("delta") or "") + delta
+            else:
+                self._history.append(
+                    SSEEvent(type=t, payload={"delta": delta}, timestamp=event.timestamp)
+                )
+            return
+        if t in _HISTORY_COALESCE_RUN:
+            delta = event.payload.get("delta") or ""
+            if not delta:
+                return
+            run_id = event.payload.get("run_id")
+            last = self._history[-1] if self._history else None
+            if (
+                last is not None
+                and last.type == t
+                and last.payload.get("run_id") == run_id
+            ):
+                last.payload["delta"] = (last.payload.get("delta") or "") + delta
+            else:
+                self._history.append(
+                    SSEEvent(type=t, payload=dict(event.payload), timestamp=event.timestamp)
+                )
+            return
+        if t == EventType.TOOL_USE_END:
+            payload = dict(event.payload)
+            result = payload.get("result")
+            if isinstance(result, str) and len(result) > _PROCESS_RESULT_CAP:
+                payload["result"] = result[:_PROCESS_RESULT_CAP] + "…"
+            self._history.append(
+                SSEEvent(type=t, payload=payload, timestamp=event.timestamp)
+            )
+            return
+        self._history.append(
+            SSEEvent(type=t, payload=event.payload, timestamp=event.timestamp)
+        )
+
+    def detach(self) -> None:
+        """Stop queueing transport events after the SSE consumer disconnects (断连续跑).
+
+        Called by the SSE layer when the client drops mid-turn under
+        ``detach_on_disconnect`` (执行与请求解耦 C1 · slice 1a): the detached run
+        keeps executing and persisting, but nothing is draining ``_queue`` anymore,
+        so further ``emit`` calls would pile up for the rest of the turn. After this,
+        ``emit`` still records the journal, single-agent process timeline, and fact
+        log (those are independent of delivery), it just no longer enqueues for SSE.
+        Idempotent; never reversed by the disconnect path (a fresh turn gets a fresh
+        sink) — only a deliberate re-attach (``take_over``) re-enables the queue.
+        """
+        self._detached = True
+
+    def take_over(self) -> list[SSEEvent]:
+        """Hand a re-attaching consumer the replay transcript and resume live tailing.
+
+        实时重连续看 (执行与请求解耦 C1 · slice 1b). A client that dropped (or a fresh
+        one reopening the conversation) attaches to the still-running detached run via
+        this. Runs synchronously (no ``await``) so it is atomic against ``emit``:
+
+        1. Drain + discard the unread SSE backlog — every one of those events is
+           already represented in ``_history`` (emit records history BEFORE the
+           queue), so keeping them would double them against the replay.
+        2. Snapshot ``_history`` — the events to replay (everything up to now).
+        3. Re-enable the queue (un-detach) IF the run is still live, so post-snapshot
+           ``emit`` calls tail to this new consumer. If the run already finished
+           (raced us between registry lookup and here), re-arm the close sentinel
+           instead so the consumer replays then ends cleanly.
+
+        The caller yields the returned snapshot, then drains ``get()`` for the tail.
+        """
+        while True:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        snapshot = list(self._history)
+        if self._closed:
+            self._queue.put_nowait(None)
+        else:
+            self._detached = False
+        return snapshot
 
     def _accumulate_process(self, event: SSEEvent) -> None:
         """Fold one event into the single-agent process timeline.

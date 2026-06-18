@@ -12,9 +12,7 @@
 
 CEO 是**协调者**：它只直接持有「只读 / 检索」工具（联网搜索、读网页、读文件、列目录、grep），用来理解意图与直接作答；一切会**产出或改动产物**的工作（写 / 改 / 删 / 移文件、运行代码）它都不持有相应工具，必须经 `delegate` 交给 worker——即便只派一个。worker 持有全套工具去动手。
 
-> 这是「聊天优先 + 按需编排」的统一收敛：把原先的「聊天 Agent + 隐形编排器 + 合成器」三套人格合并为**一个 CEO**，消除职责重叠与人格切换，并让编排获得「先澄清再下达」的能力。
->
-> **底线**：合并的是「对用户的身份/声音」，不是「每轮都跑重规划」。CEO 默认走快的会话档，只读/检索类对话直接作答（零编排开销）；「组团/下计划/动手产出」是按需触发的能力。
+> **底线**：对用户呈现**一个 CEO 声音**；CEO 默认走快的会话档，只读/检索类对话直接作答（零编排开销）；「组团/下计划/动手产出」按需触发。
 
 ### 职责边界（CEO）
 
@@ -38,7 +36,7 @@ CEO 的工具面**只保留只读 / 检索**（`web_search`、`read_url`、`file
 | CEO 直接做 | 【对话式回答】：纯问答 / 闲聊 / 解释、只靠检索就能答的请求、分析推理类的**简短回应**——零团队开销，首字即时 |
 | 一律委派 | 【交付物】：用户要打开 / 运行 / 编辑 / 保存 / 复用的实质产物（代码 / 应用 / 网页、脚本、配置，以及**成篇**报告 / 分析稿 / 方案 / 文档），哪怕只写一个文件、改一行也派一个 worker，并在 task 里点明「产出物是文件、写进工作区」（成篇文字交付也写成 `.md`） |
 
-> **委派判据：交付物 vs 对话，而非「有没有工具」✅ 已落地**：委派的触发线**不是**「这个我有没有对应工具」——文字产出不需要任何工具，照此画线时凡能用文字表达的活（含本该落盘的代码 / 文档 / 报告）CEO 都会走阻力最小路径自己写完，团队形同虚设（这正是「CEO 大部分内容还自己干」的根因）。正确的线是「产出是**对话式回答**还是**交付物**」：对话式（问答 / 解释 / 检索直答 / 简短分析推理）CEO 直答，保首字即时；交付物（用户要打开 / 运行 / 编辑 / 保存 / 复用的实质产物，**含成篇报告 / 分析稿 / 方案 / 文档**）一律 `delegate` 并在 task 里点明落盘成工作区文件（成篇文字写成 `.md`）。配套**防泄漏铁律**：CEO 绝不为省一次委派把整份代码 / 文件 / 成篇交付贴进正文充数（与 worker 侧 footer 守卫对称）。worker 侧无需改默认形态策略——其「任务明确要求产出文件」分支已能让分析稿按 task 指示落盘，而**中间产物**（注入下游、非最终交付）仍留作文字不落盘。→ 见代码：`runtime/prompt.py` `_CEO_CORE_HINT`、`runtime/skills.py` `team_orchestration_advanced`。
+> **委派判据：交付物 vs 对话，而非「有没有工具」✅ 已落地**：对话式（问答/解释/检索直答/简短分析）CEO 直答；交付物（用户要打开/运行/编辑/保存/复用的实质产物，含成篇报告/文档）一律 `delegate` 并在 task 里点明落盘。配套防泄漏铁律：CEO 绝不为省委派把整份代码/文件贴进正文。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`。
 
 **为什么是档2（被否决：档1「全能 CEO」、档3「纯编排 CEO」）：**
 
@@ -46,21 +44,21 @@ CEO 的工具面**只保留只读 / 检索**（`web_search`、`read_url`、`file
 - **档3（CEO 只剩 `delegate`，连检索都过 worker）**——已评估否决：把高频检索也压上 worker 往返，延迟与成本显著上升，且「检索大输出不进 CEO 上下文」已被历史重建原则（工具 I/O 不跨轮回放）基本覆盖。
 - **档2 取中**：拿走瘦身最大的两份收益（团队心智 + CEO 上下文洁净），又把「委派税」约束在「只有真正产出 / 变更时才付」，不碰高频只读路径。
 
-> **团队形态判据：双向、调研归团队 ✅ 已落地**：上面的委派判据定「要不要委派」；这条定「委派后团队多大、调研谁来跑」。**① 判据双向**：拆几个看【活的自然结构】而非数量——过度拆碎（连贯串行活拆成互传文件的碎片）与**塌缩成一个**（把天然多文件 / 多角色 / 多视角的交付物压进单 worker 串着做）都是偏差。早期措辞只单向防「过拆」（「别拆碎」「只有…才派多个」），又叠加能力目录里「单 worker delegate 无需 consult」的盖章，把模型系统性推向「单 worker 直出」：实测复杂交付（多文件官网、成篇学术稿）也退化成 `delegate nodes=1`，与「真正的 Agent 团队协作」定位相悖。故补足反向信号 + 落单 worker 前自检 + 拿不准先 `consult_skill(team_orchestration_advanced)`，并清掉散落三处（能力目录 / 常驻核心结尾 / `consult_skill` 工具描述）的「单 worker 无需 consult」措辞。**② 交付级调研归团队**：交付物若需大量调研、且天然分多个独立角度（不同来源 / 子领域、检索 vs 案例 vs 趋势），把各角度作为**并行调研 worker** 一次 `delegate`、用 `depends_on` 汇入下游写手，而非 CEO 自己串行跑完检索、只派一个写手。**这不重开已否决的档3**：CEO 的高频检索（对话式直答 + 开工前轻量探路）仍归 CEO，只有「交付级 + 多角度」的调研腿脚活才扇出——边界仍是档2。→ 见代码：`runtime/prompt.py` `_CEO_CORE_HINT`、`runtime/skills.py` `render_skill_directory`、`tools/builtin/consult_skill.py`。
+> **团队形态判据：双向、调研归团队 ✅ 已落地**：上面的委派判据定「要不要委派」；这条定「委派后团队多大、调研谁来跑」。**① 判据双向**：拆几个看【活的自然结构】——过度拆碎与塌缩成一个都是偏差；落单 worker 前自检，拿不准先 `consult_skill(team_orchestration_advanced)`。**② 交付级调研归团队**：交付物若需大量调研、且天然分多个独立角度，把各角度作为**并行调研 worker** 一次 `delegate`、用 `depends_on` 汇入下游写手——CEO 的高频检索（对话式直答 + 开工前轻量探路）仍归 CEO，只有「交付级 + 多角度」的调研腿脚活才扇出。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`。
 
-> **认知分工判据：约束归 CEO、专业方案归专家 ✅ 已落地**：前两条定「要不要委派」「团队多大」；这条定**委派时 task 里该写什么、不该写什么**。实测根因（法律论文案例，见 [`实测案例复盘.md`](/docs/07-规划/实测案例复盘.md)）：CEO 委派写作 worker 时把整篇论文骨架（各章标题分节、字数、参考文献数）在 task 里定死，worker 退化成填字员——这撞「真正的 Agent 团队协作，而非单 Agent + 子任务派发」的定位（团队沦为「一个聪明大脑 + 一群打字员」）。**与「委派判据」治的不是同一病**：那条治「CEO 干脆不委派、自己写完」；这条是深一层的新接缝——CEO 委派了，却替专家把方案想完了。根因系统性：「定结构」入口散落 `task` 自由文本 + `expected_output` + `contract.required_sections` 三处，系统从 schema 到 prompt 都在邀请 CEO 行使「方案权」却没界定边界。**正确边界**：task 交【需求与约束】（目标、硬指标、关键前提、验收底线），交付物的【专业方案】（章节结构与论证脉络、代码模块划分与架构、设计布局）默认归专家 worker，除非用户已明确指定结构。**为何不靠收窄 contract 字段解决**：`contract`（`required_sections` 等）本质是**验收契约**（确定性后置校验 + 自动返工，与下 §落盘契约门同族），合法用途是「必须覆盖的验收底线」；砍它会赔掉可机械校验的验收，加 `maxItems` 之类机械阈值会误伤合理多要点、且触补丁绊线；而越位的**主入口是 `task` 自由文本**——自然语言无代码门、无法 schema 化，只能靠原则收口。故落地三处：① CEO 核心补「约束 vs 方案」自检（收口 task 主入口）；② `contract` 字段描述**语义正名**为「验收底线、非结构蓝图」（字段名 `required_sections` 与其「校验必备小标题」实现相符，**不改名**以免名实不符）；③ 调研驱动的大型交付把「定结构」做成可把关的显式步骤（见下条）。→ 见代码：`runtime/prompt.py` `_CEO_CORE_HINT`、`runtime/skills.py` `team_orchestration_advanced`、`tools/builtin/delegate.py`（contract schema 描述）。
+> **认知分工判据：约束归 CEO、专业方案归专家 ✅ 已落地**：前两条定「要不要委派」「团队多大」；这条定**委派时 task 里该写什么、不该写什么**。**正确边界**：task 交【需求与约束】（目标、硬指标、关键前提、验收底线），交付物的【专业方案】（章节结构、模块划分、设计布局）默认归专家 worker，除非用户已明确指定结构。`contract`（`required_sections` 等）是**验收契约**而非结构蓝图。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`、`tools/builtin/delegate.py`。
 
-> **结构跟着证据走：提纲作为可把关的流水线步骤 ✅ 已落地（复用既有机制）**：上一条的配套时序。对需大量调研的成篇交付，别在调研返回前把结构定死（避免「结构先于证据」）。用既有机制把「定结构」摆到正确的位置与时间——并行调研 worker →（写作 worker 先据调研产出**提纲**，该提纲步骤设 `checkpoint_after=true` 让用户改 / 批）→ 同一 worker 据定稿提纲写全文，`depends_on` 串依赖。**提纲由专家据证据产出、用户拍板**，而非 CEO 在 task 里凭空先写好。**不新增 schema**：`depends_on` + `checkpoint_after` 已足以表达（再加 `outline_first` 这类离散开关反而违背「形状是数据不是模式」）；只在 `team_orchestration_advanced` skill 里把范式教给 CEO，限「研究级大活」、简单交付不套。→ 见代码：`runtime/skills.py` `team_orchestration_advanced`、`tools/builtin/delegate.py`（`checkpoint_after` / `depends_on`）。
+> **worker 侧认知分工**：结构所有权、团队拓扑位置、上游落盘许可——→ 见 [`Agent协作模式.md` §二](/docs/03-AI核心/Agent协作模式.md)。
 
-> **轻量直出（finalize）✅ 已落地**：单 worker 仍跑完整 worker 循环，但当 CEO 判断"本次只派一个 worker、且这次委派即整件事的最终交付"（建个文件 / 改一行）时，可在 `delegate` 设 `finalize=true`——该 worker 成功后其产出**直接作为回合答复**（`ToolEffect.HANDOFF` 终态），省掉 CEO 再写一段概览的合成轮；多 worker 或 worker 失败时自动回落到 CEO 收尾（安全兜底）。worker 用量仍记在工具实例上由 pipeline 折算，终态返回不带 token 以免双计。
->
-> **仍待评估**：是否再给 CEO 一条"快速编辑"后门（本地模式对标 Cursor 即时小改），需与"协调者只读边界"权衡——这是另一回事（给 CEO 自己装写工具，已否决的档1方向），留待后续单独决策。
+> **结构跟着证据走：提纲作为可把关的流水线步骤 ✅ 已落地**：对需大量调研的成篇交付，用 `depends_on` + `checkpoint_after` 把「定结构」摆到调研之后——并行调研 worker → 写作 worker 先产出提纲（`checkpoint_after` 让用户改批）→ 据定稿提纲写全文。不新增 schema。→ 见代码：`runtime/skills.py`、`tools/builtin/delegate.py`。
 
-> **产出形态：文件落盘 vs 文字直出 ✅ 已落地**：worker 持全套工具，但「该写文件还是写正文」由其身份提示词按交付【形态】判定——分析 / 审查 / 说明等**可独立阅读的文字**默认直接作为文字产出；可运行代码 / 网页 / 脚本 / 多文件工程等**文件类产物必须 `file_write` 落进工作区**（正文只留摘要 + 路径）。否则 worker 会把整份产物当聊天正文吐出、`file_write` 一次不调，工作区里没有任何文件——用户无法打开 / 运行，工作区快照与文件浏览器（`/files` 文件中枢 / 对话面板 `FileBrowser`）也无从展示。**新判据下的覆盖**：当成篇报告 / 分析稿作为**最终交付物**时，CEO 会在 task 里点明落盘，命中 worker 形态策略的「任务明确要求产出文件」分支、写成 `.md`（见上 §委派判据）；只有**中间产物**（注入下游、非最终交付）才保持文字默认、不落盘。CEO 侧做**双保险**：委派文件类 / 成篇文字交付任务时在 task 里点明「产出物是文件、请写进工作区」（必要时配 `expected_output`），`ask_user` 开工提案卡开场也说明最终交付是工作区里的实文件。→ 见代码：`runtime/runs/executor.py` `_WORKER_DELIVERABLE_POLICY`（worker 侧）、`runtime/prompt.py` `_CEO_CORE_HINT`、`runtime/skills.py` `asking_the_user`（CEO 侧）。
+> **轻量直出（finalize）✅ 已落地**：单 worker 且 `finalize=true` 时，worker 产出直接作为回合答复（`ToolEffect.HANDOFF`），省掉 CEO 合成轮；多 worker 或失败时回落 CEO 收尾。→ 见代码：`tools/builtin/delegate.py`。
 
-> **落盘契约门 `requires_files`（软规则 → 可验证代码门）✅ 已落地**：上面的「文件类产物必须落盘」此前**纯靠提示词**，曾失守过（一个「建可运行 HTML」任务产出 46k 字回复、磁盘零文件）。现把它升级为契约门：CEO 在 `delegate` 任务的 `contract.requires_files=true` 声明该交付为文件（**语义判断归模型**——只有它知道这份活该不该产出文件），执行器用**确定性信号** `files_touched`（从 transcript 解析的真实 `file_write`/`str_replace`/`file_move` 调用记录）判定；零落盘即未达标，**复用既有契约门自动返工一次**（反馈「请用 file_write 落盘」），默认非 strict（软提醒不硬退）、`strict=true` 则判该 worker 失败。未声明时行为与之前完全一致（纯文字交付不受影响）。**与 §footer 守卫否决的机械方案区分**：那条否决的是「逐个 worker 扫正文判是否声称写了文件」——对每个 worker 的脆弱内容启发式，触发补丁绊线；本门是**opt-in + 确定性后置条件**，仅在 CEO 显式声明文件交付的 task 上启用，判据是工具调用计数而非语义猜测，故不犯同一忌。这是防御纵深第三层（worker 形态提示词 + footer 守卫 + 本契约门），把「能不能落盘」从「押 worker 听不听话」收成代码可验证、可自修正的硬门。→ 见代码：`runtime/runs/types.py` `RunContract.requires_files`、`runtime/runs/contract.py` `check_contract`、`runtime/runs/executor.py`（`files_touched` → 返工）、`tools/builtin/delegate.py` schema、`runtime/runs/builder.py` `_parse_contract`。
+> **产出形态：文件落盘 vs 文字直出 ✅ 已落地**：worker 按交付【形态】判定写文件还是写正文；CEO 在 task 里点明落盘要求，`ask_user` 开工卡也说明最终交付是工作区实文件。→ 见代码：`runtime/runs/executor.py`、`runtime/prompt.py`、`runtime/skills.py`。
 
-> **CEO 提示词形态：精简核心 + 能力目录 + 按需 consult ✅ 已落地**（提示词瘦身）：CEO 常驻系统提示词只保留「决定干什么」的路由脊柱（身份 + 协调者工具边界 + 单/多 worker 判据 +「worker 看不到对话历史」+「别复述、写综述」+ 进阶档位一行指针），外加一张「能力目录」；「怎么干」的进阶机制——团队编排进阶 / 辩论与交叉审查 / 定向唤回 / 向用户发问（开场引导 + 途中拍板）——做成**系统 Skill**，模型决定要用时才 `consult_skill(name)` 把正文拉回循环。能力目录按「所需工具是否装配」动态显隐（`ask_user` 仅活跃用户路径才列），永不广告 CEO 没有的能力。净效：每轮常驻量从约 6.8k 字降到约 3.1k 字，4 段罕用机制（合计约 4.3k 字）移出热路径、仅在 consult 时进上下文。**分层不变量（防回灌）**：同一条知识只在唯一所有者出现——「何时委派 / 怎么扇出」归 CEO 核心，进阶档位的「怎么用」归对应 Skill，「有哪些能力可拉取」归能力目录；**常驻的工具描述（`delegate` / `consult_skill` / `revise` / `ask_user`）只留机械契约 + 一行指针**，不重教 WHEN/HOW（否则每轮重复计费、且改一处漏一处）；共享基座的 `output_style` 图表段、worker 形态策略同理——只留必要语义，机械细节下沉到对应工具描述 / 代码门（如落盘 `requires_files`）。系统 Skill 的「两类来源、单一机制」与 Prompt 自适应见 [`工具与能力系统.md §二`](/docs/03-AI核心/工具与能力系统.md)。→ 见代码：`runtime/prompt.py`（`_CEO_CORE_HINT` / `CHAT_CITATION_HINT` / `_DEFAULT_SYSTEM_PROMPT`）、`runtime/skills.py`、`tools/builtin/{delegate,consult_skill,revise,ask_user}.py`、`runtime/runs/executor.py` `_WORKER_DELIVERABLE_POLICY`、`runtime/pipeline.py`。
+> **落盘契约门 `requires_files` ✅ 已落地**：CEO 设 `contract.requires_files=true` 声明文件交付；执行器用 `files_touched` 确定性判定，未达标自动返工一次。→ 见代码：`runtime/runs/contract.py`、`tools/builtin/delegate.py`。
+
+> **CEO 提示词形态：精简核心 + 能力目录 + 按需 consult ✅ 已落地**：常驻只保留路由脊柱 + 能力目录；进阶机制做成系统 Skill，用时 `consult_skill`。**分层不变量**：同一条知识只在唯一所有者出现。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`、`tools/builtin/`。
 
 ### 实现方案：自研编排，不依赖第三方框架 ✅ 已确定
 
@@ -109,13 +107,13 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 >
 > **被否决：SYNTHESIS 合稿节点**（在 plan 末尾挂一个独立合稿 Agent）。合稿仍是「循环外一趟」，正是 CEO 模型想溶解的形态；`react_loop` 现成支持「工具返回后继续循环」，无需独立节点。
 
-> **文件产出清单（收敛免回工作区核对）✅**：`delegate` 折叠回 CEO 的汇总里，每个动过工作区的 worker 附一行「文件产出」——执行器从其 transcript 提取落盘路径（`file_write`/`str_replace`/`file_move` → `RunState.files_touched`，随回合落盘续跑持久化）。这就是本次产物清单，CEO 据此直接收尾、**不必再 `file_list`/`file_read` 回工作区核对**（除非清单为空或明显不全），省掉收敛阶段的冗余目录轮。最佳努力：经 `code_execute` 间接写出的文件不计入，只捕获直接文件工具调用。→ 见代码：`runtime/runs/{executor,serialize}.py`、`tools/builtin/delegate.py` `_format_for_ceo`。
+> **文件产出清单（收敛免回工作区核对）✅**：`delegate` 汇总附各 worker「文件产出」行，CEO 据此收尾、不必再 `file_list` 回工作区核对。→ 见代码：`runtime/runs/executor.py`、`tools/builtin/delegate.py`。
 >
-> **同一清单兼作防幻觉凭据（footer 守卫）✅**：「文件产出」清单也是 worker 是否真落盘的**唯一地面真相**。`_format_for_ceo` 的 footer 据此立铁律——worker 正文若声称/暗示写了文件却没有该行（清单为空），即判这些文件**未真正写入**：CEO 不得报「已创建/已完成」，应判该文件交付未达成并 `revise` 唤回原作者真正调 `file_write`（或重派）。这是 §2.5「缺省=全量工具」修掉根因后的**防御纵深第二层**，专防个别 Flash worker 仍把 `file_write` 当文本吐出。**刻意做成指令级（交 CEO 判断），不逐个 worker 机械标「未落盘」**：纯文本 worker（调研/分析/辩论）本就无文件产出属正常，机械盲标会误伤、且扫正文判「是否声称写文件」属对账补丁（触发补丁绊线）——清单为空是否危险取决于 worker 有无「声称」，只有 LLM 能判。→ 见代码：`tools/builtin/delegate.py` `_format_for_ceo`。
+> **同一清单兼作防幻觉凭据（footer 守卫）✅**：清单为空时 CEO 不得报「已创建/已完成」，应 `revise` 唤回或重派。→ 见代码：`tools/builtin/delegate.py`。
 
 ### execute 流程（概念）
 
-`delegate(tasks)` → `build_run_plan` → `run_plan` SSE 预声明 → `WaveScheduler.run` → worker 产出折叠回 CEO（非终态）或 `finalize` 直出。机制详述见 [`执行引擎架构设计.md`](/docs/03-AI核心/执行引擎架构设计.md) §一、§十四。
+→ 见 [`执行引擎架构设计.md` §十三](/docs/03-AI核心/执行引擎架构设计.md)（`delegate` → `build_run_plan` → `WaveScheduler`）。
 
 ---
 
@@ -132,17 +130,16 @@ CEO 不指定具体模型，只表达能力需求，由运行时映射（fast/st
 | `fast` | 速度/成本优先，简单机械子任务 | DeepSeek V4 Flash（思考 high，小轮数预算） |
 | `strong` | 质量优先，复杂子任务 | Flash（**内测锁 Flash**：质量档机制可提至 Pro，但内测 Pro 已撤出用户 ceiling，见下） |
 
-> 现状：两 worker 档基座均为 Flash（思考 high，靠轮数预算区分，开发期降本）。把 `strong` 提到 Pro 的机制是**质量档**（下文），已取代原 `_STRONG_MODEL` 全局单点翻转（路线图 P1-7）——但**内测（方案 A-中+）已把 Pro 撤出用户 ceiling，用户侧坍缩成单 Flash 档**，整套机制现休眠待恢复。运行参数单一真相源 `llm/config.py`（`PROFILES`、`agent_profile`、`apply_overrides`）。
+> **现状**：两 worker 档基座均为 Flash；**内测 Pro 已撤出用户 ceiling**，质量档机制休眠待恢复。运行参数 → 见 `.cursor/rules/llm.mdc` / `llm/config.py`。
 
 设计理由：① 解耦委派与具体模型，模型更新不改委派逻辑；② 用户可覆盖映射（即下文质量档）；③ 未来可做智能路由。
 
-**质量档（用户可选模型层，决策② 的落地）** — ⏳ **内测休眠**：机制已完整实现，但内测（方案 A-中+）把 Pro 撤出用户 ceiling、用户侧坍缩成单 Flash 档——质量档/自定义档前端 UI 与 `/v1/model-modes` 路由已下线，预设 / ceiling / `resolve_profile_set` / DB 表整套原地保留（ceiling 加回 Pro 即零迁移恢复）。**Pro 不删**：常量/定价/裁判路径保留，eval 用自有全量 ceiling（解耦于用户 ceiling，见 `evals/harness.py` `_EVAL_CEILING`）仍跑 Flash-vs-Pro 与 Pro 裁判。下文为这套（休眠）机制本身——在 `delegate` 的 fast/strong 抽象之上，用户以**团队语言**为团队选模型，一个「质量档」= 团队角色 → 模型映射，叠加在 `PROFILES` 基座上，**只换 model、不动思考 / 温度 / 轮数**（调参是工程关注点，非用户旋钮）。
+**质量档（用户可选模型层）** — ⏳ **内测休眠**：机制已实现，但 Pro 撤出用户 ceiling、用户侧坍缩单 Flash 档——预设/ceiling/`resolve_profile_set`/DB 表保留，ceiling 加回 Pro 即零迁移恢复。
 
-- **角色**：CEO 本体（`chat`）/ 主力 worker（`agent.strong`）可配；**经济 worker（`agent.fast`）锁定 Flash**（决策：经济档「按定义就便宜」，升 Pro 自相矛盾）。
-- **预设（只读）**：`经济档` = 全程 Flash = 系统默认；`高质量档` = CEO 本体 + 主力 worker 升 Pro（**内测：Pro 不在用户 ceiling，`高质量档`/自定义档对用户不可达、解析时钳到 Flash；`高质量档` 仅 eval 经全量 ceiling 可达**）。用户可在运营 ceiling 内建自定义档。
-- **两层合成**：运营 `selectable_models` 设可选模型上限（写入校验 + 解析时 `_clamp_to_ceiling` **双重**钳制，旧档在 ceiling 收紧后仍安全——内测撤 Pro 正是用这把钳子让残留档安全坍缩到 Flash）；用户档在其内取值。
-- **解析优先级**：对话 → 用户默认 → 运营默认 → 系统默认（经济）；未知 / 已删档回落经济——模型配置问题**绝不打断回合**（同 `pricing_for` / `get_profile` 的 fail-safe）。
-- **纯函数 + 注入**：`resolve_profile_set` 每回合解析出 `ProfileSet` 显式注入流水线（无模块级可变全局），并发回合互不串档。前端设置页 UX（**内测已退役**）见 [`../04-前端/前端UX设计.md` §十三](/docs/04-前端/前端UX设计.md)。
+- **角色**：CEO 本体（`chat`）/ 主力 worker（`agent.strong`）可配；**经济 worker（`agent.fast`）锁定 Flash**。
+- **预设**：`经济档` = 全程 Flash；`高质量档` = CEO + 主力 worker 升 Pro（内测对用户不可达）。
+- **解析优先级**：对话 → 用户默认 → 运营默认 → 系统默认；未知档回落经济，**绝不打断回合**。
+- **运行参数**（`PROFILES`、ceiling、钳制逻辑）→ 见 `.cursor/rules/llm.mdc` / `llm/config.py`；前端 UX 见 [`../04-前端/前端UX设计.md` §十三](/docs/04-前端/前端UX设计.md)。
 
 ### 2.2 `depends_on` — 依赖关系（并行/串行的唯一开关）
 
@@ -165,11 +162,11 @@ CEO 不指定具体模型，只表达能力需求，由运行时映射（fast/st
 
 > **默认偏全文**：「一律摘要」会丢失关键信息。执行形状由 `depends_on` 自然落定，无需离散计划类型。
 
-> **保真度预算：每 worker 共享 + 水填充 + 首尾保留 ✅ 已落地**：`pass_through` 上游注入下游时的「硬上限」不是「每依赖一刀切」，而是**每个下游 worker 一份总预算**（`DEP_CONTEXT_BUDGET`，与 CEO 读批次产出的 `_DELEGATE_OUTPUT_LIMIT` 对齐——写手综合上游调研，理应与 CEO 综合批次同等的上下文额度），在该 worker 的多个 pass_through 依赖间**水填充公平分配**（小依赖只取所需、余额让给大依赖；单一依赖独享全额）。这修掉两处旧隐患：① 旧的「每依赖 4000 字」对单条长调研过紧、且 N 个依赖会乘成 N×4000 无界膨胀；② 旧的截断是**只砍头部**，把长产物的**尾部**（金额 / 法条编号常在结尾）静默丢弃。现超预算时改**首尾保留 + 中间省略**（`_truncate_head_tail`），与 `pass_through` 的「保真」初衷一致。`summarize` 依赖另走紧凑摘要（`DEP_SUMMARY_CHARS`），不占该预算。→ 见代码：`runtime/runs/constants.py`（`DEP_CONTEXT_BUDGET` / `DEP_SUMMARY_CHARS`）、`runtime/runs/executor.py`（`_dep_context_blocks` / `_allocate` / `_truncate_head_tail`）。
+> **保真度预算：每 worker 共享 + 水填充 + 首尾保留 ✅ 已落地**：`pass_through` 上游注入时，**每个下游 worker 一份总预算**，在多个 pass_through 依赖间水填充公平分配；超预算时**首尾保留 + 中间省略**（避免尾部关键细节被静默丢弃）。`summarize` 另走紧凑摘要，不占该预算。→ 见代码：`runtime/runs/executor.py`、`runtime/runs/constants.py`。
 
-> **递指针不递全文（文件产物）✅ 已落地**：上面的全文/摘要两档**只适用于纯文字产物**。当上游把产物 `file_write` 落了盘（`RunState.files_touched` 非空），下游不再把内容塞进 prompt，而是注入**指针**——上游交接话术的紧凑摘要（`DEP_POINTER_SUMMARY_CHARS`）+ 文件路径清单（封顶 `DEP_POINTER_MAX_FILES`）+「需全文请 `file_read` 读取」。产物已在共享工作区且可达，再塞全文是白费 token、还会被预算首尾截断丢细节；指针依赖**不占** `DEP_CONTEXT_BUDGET`（只有「无文件可指」的纯文字 `pass_through` 依赖才分享预算）。这是早先记为远期的「递指针不递全文」落地——但**仅对真落盘的产物**生效；纯文字中间产物（未落盘、按交付策略也不该落盘）仍走全文注入，**不为递指针而强行落盘**。→ 见代码：`runtime/runs/executor.py`（`_dep_context_blocks` / `_pointer_body`）、`constants.py`（`DEP_POINTER_*`）。
+> **递指针不递全文（文件产物）✅ 已落地**：上游已 `file_write` 落盘时，下游注入紧凑摘要 + 文件路径清单 +「需全文请 `file_read`」，不占 `pass_through` 预算。纯文字中间产物仍走全文注入。→ 见代码：`runtime/runs/executor.py`。
 
-> **工作区产物清单：worker 开局即可发现共享工作区全貌 ✅ 已落地**：每个 worker 开局除了自己依赖的产物块，还注入一份「工作区现有文件」清单，两类来源**去重合并**：① **队友产物**——本回合所有已完成、且非本节点直接依赖的队友的 `files_touched`（按角色标注「来自 X」）；② **既有文件**——工作区里上轮遗留 / 用户上传 / 间接写入等**非本回合队友产**的文件（标「工作区已有」）。让共享工作区从「被动文件库」变成开局即**可发现的共同上下文**：worker 不必先花一轮 `file_list` 摸索，就知道盘上有什么、可直接 `file_read` 取用，也不会重造一份队友（或上一轮）已产出的东西。直接依赖被排除（它们已有更丰富的指针 / 产物块）；全表受**文件数 + 字符预算双重封顶**（`WORKSPACE_MANIFEST_MAX_FILES` / `WORKSPACE_MANIFEST_CHAR_BUDGET`，孰先触发为准，超出留一行「…可 file_list 查看」省略提示——这样长路径也撑不爆 prompt）。队友产物**纯从调度器已传入的 `completed` map 推导**（确定性、零额外 I/O）；既有文件来自 **`index_files`——已升为 `WorkspaceBackend` 一等能力**：云端 `ServerWorkspace` 直接遍历，本地 `LocalWorkspace` 经 workspace channel（`WorkspaceOp.INDEX_FILES`）让桌面端遍历绑定根（与 @ 提及检索共用同一套忽略剪枝 + cap 走法），故 worker 与 @ 索引在云 / 本地看到**一致的扁平视图**。既有文件按 **mtime 倒序**喂入（`index_files(order="recent")`）：大树里预算优先花在最新（上传 / 最近产出）文件上，而非字母序碰巧靠前的无关老文件；**@ 提及仍走 `order="path"` 字母序、免 stat**（选择器延迟敏感，排序参数让它不为清单的 mtime 排序买单）。既有文件是**回合级快照**：「团队开工前盘上有什么」一回合内不变，故**整批只遍历一次**（`build_agent_executor` 闭包里惰性 + 锁，并发首波只触发一次 walk），所有 worker 复用，避免 mtime 的 per-file stat 在每个 worker 上重复乘开销；队友产物则**逐 worker 现取**（`completed`），故后波仍能经队友 `files_touched` 看到前波落盘。**权衡**：队友*间接*写入的文件（`code_execute` 副作用、不进 `files_touched`）不会出现在后波快照里——可接受，主流场景（上传 / 上轮 / `file_write` 产物）全覆盖。**best-effort**：列举失败（桌面掉线 / I/O 抖动）只让清单退化为「仅队友产物」，绝不让 worker run 失败——工作区感知是增强、非硬依赖。并发同波兄弟此刻尚未完成、故互不可见（与「兄弟拿不到彼此产物」的隔离一致）。→ 见代码：`runtime/runs/executor.py`（`_workspace_manifest` / `_safe_index_files` / `_preexisting_files` 回合级快照）、`runtime/runs/constants.py`（`WORKSPACE_MANIFEST_*`）、`workspace/protocol.py`（`WorkspaceBackend.index_files`，`order` 参数）、`workspace/{server,local,deferred}.py`、`workspace/channel.py`（`INDEX_FILES`）、`apps/desktop/src/main/fs-service.ts`（`opIndexFiles` 复用 `collectWorkspaceFiles`）。
+> **工作区产物清单 ✅ 已落地**：每个 worker 开局注入「队友产物 + 既有文件」去重清单（经 `index_files` 云/本地一致视图），让共享工作区开局可发现；全表受文件数/字符预算封顶；列举失败退化为仅队友产物。→ 见代码：`runtime/runs/executor.py`、`workspace/protocol.py`。
 
 > **并行写软约束 ✅ 已落地**：同扇出并行兄弟共享同一工作区 backend、且**不**受跨会话文件夹锁约束（任务内并行小队不锁），而 `file_write` 是覆盖语义——两个兄弟写同名路径会互相覆盖。当前先用**软约束**：兄弟感知块追加一句「若都要写文件，各自用不同文件 / 子目录，避免互相覆盖」。若实测仍有 race 再上路径命名空间 / 工作区内细粒度写锁（暂不引入，避免过早复杂化）。→ 见代码：`runtime/runs/executor.py` `_build_messages`（兄弟块）。
 
@@ -208,9 +205,7 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 
 ## 四、开场引导：`ask_user` 开工提案卡 ✅ 已落地
 
-> **状态**：前后端已落地。开场引导是 `ask_user`（CEO 唯一的「向用户发问」原语）的一种**内容形态**，不是独立工具——`runtime.pipeline` 在 CEO 工具面装配 `ask_user`（与 `delegate` 并列），**不**进 `build_builtin_registry`，被委派的 worker 永不向用户开提案卡。**历史**：曾实现成独立的 `kickoff` 工具（开场即终回合、不挂起），开发期已重构并入 `ask_user`（理由见下「被否决」②）。
->
-> → 见代码：`apps/server/agentcore/tools/builtin/ask_user.py`、前端 `apps/desktop/src/renderer/components/chat/CheckpointCard.tsx`（统一卡片 `AskUserCard`）
+> 开场引导是 `ask_user`（CEO 唯一的「向用户发问」原语）的一种**内容形态**，不是独立工具。→ 见代码：`tools/builtin/ask_user.py`、前端 `CheckpointCard.tsx`。
 
 对「**能做、但用户没说全**」的产出类请求（做网站 / 应用 / 海报 / 文档…，且用合理默认就能开工），CEO 不甩一堵澄清问题墙、也不闷头开干，而是调 `ask_user` 开一张**开工提案卡**开场：用自己的口吻复述目标（`message`）、摊开起步计划与少数高杠杆决策，让想省事的人一键开做、想管的人就地调整。
 
@@ -241,11 +236,11 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 
 **阻塞与否（`blocking`）则归模型——与上面不矛盾**：开场/途中是伪选择（同一机制的内容差异），而「这个岔路值不值得冻住用户」是**真·语义判断**，只有模型知道自己手上的默认有多稳、岔路猜错代价多大，运行时无从代判。故新增一个正交维度交给模型：默认 `blocking=true`（挂起等答复，用于高风险 / 不可逆 / 无合理默认）；`blocking=false` 时**抛出问题但不挂起**——模型必须在 `assumptions` 或某 `question.default` 写明将先采用的默认（否则该调用被拒，防"非阻塞=偷偷瞎猜"），随即按默认续跑把回合做完，用户回复作为新消息在后续轮次并入。这是 worker `escalate`「问而不停」在 CEO↔用户层的对偶。
 
-提交答复（阻塞）是 `ToolEffect.CONTINUE`（CEO 带用户的选择续跑）；停止是 `ToolEffect.INTERACT`——在带内优雅终结本回合的终态效应（收尾语随 `final_text` 落库 + 流式）。问答经 `InteractionRegistry` 挂起、`POST …/interactions/{id}` 回值；卡片骑在 journaled 的 `checkpoint_required` / `checkpoint_resolved` 事件对上，故重载会内联重放完整问答。桌面端把各题选择 + 风格 + 自由补充拼成一段可读 `note`（答复模型 α，唯一读者是 CEO，无需结构化线缆），`selected` 留空。**非阻塞路径**截然不同：不挂起、不落持久帧、不额外烧轮，问题以非 gating 的 `content_delta` 提示直接呈现，工具立即回 `CONTINUE` 命令 CEO 别等、继续干（→ 见代码：`tools/builtin/ask_user.py` `_post_nonblocking`）。INTERACT 效应与挂起家族的边界见 [`执行引擎架构设计.md` §检查点决策语义](/docs/03-AI核心/执行引擎架构设计.md)；前端卡片渲染见 [`../04-前端/前端UX设计.md`](/docs/04-前端/前端UX设计.md)。
+提交答复（阻塞）是 `ToolEffect.CONTINUE`；停止是 `ToolEffect.INTERACT`。经 `InteractionRegistry` 挂起、`POST …/interactions/{id}` 回值；挂起/续跑契约见 [`执行引擎架构设计.md` §检查点决策语义 / §暂停与恢复](/docs/03-AI核心/执行引擎架构设计.md)。前端卡片见 [`../04-前端/前端UX设计.md`](/docs/04-前端/前端UX设计.md)。
 
 **何时不用 `ask_user`**：简单问答 / 闲聊 / 检索直答——直接答；需求已说全、无值得确认的决策——直接 `delegate` 开干；连意图都不可解（目标都复述不出）——先用一句普通文字问清意图，而不是出卡。
 
-> **被否决**：① **开场即甩问题墙**——高摩擦、劝退想省事的用户，正是开工提案卡要消除的反模式（故每个重点问题强制预填默认，把「问题墙」降维成「一键通过 + 可选微调」）。② **开场与途中实现成两个工具（`kickoff` + `ask_user`）**——逼模型每次先做「该用哪个发问工具」的路由判断，本质是把运行时该管的「结束还是挂起」推给模型、在错误的接缝上让模型选错；开发期已重构为**单工具**、内容自适应（默认挂起；阻塞与否由模型按岔路代价定，是真·语义判断而非伪路由，见上）。
+> **被否决**：① **开场即甩问题墙**（故每个重点问题强制预填默认）。② **开场与途中做成两个工具（`kickoff` + `ask_user`）**——统一为单工具 `ask_user`，阻塞与否由 `blocking` 正交维度表达。
 
 ---
 

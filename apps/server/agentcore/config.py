@@ -79,8 +79,14 @@ class Settings(BaseSettings):
     # in the env var; read as a list via the `cors_origins` property. The packaged
     # desktop renderer is served from app://agentcore (前端技术与架构.md §7.2), so
     # that fixed origin ships in the default alongside the dev Vite/preview ports.
+    # The mobile client (手机端落地设计 P0) adds its own origins: the mobile-web dev
+    # server (5175) and the Capacitor shells whose webview origin is non-standard —
+    # capacitor://localhost (iOS) + http(s)://localhost (Android). They authenticate by
+    # bearer token (not cookies), but the browser still requires a CORS allow-listing.
     cors_allow_origins: str = (
-        "http://localhost:5173,http://localhost:5174,http://localhost:3000,app://agentcore"
+        "http://localhost:5173,http://localhost:5174,http://localhost:3000,"
+        "http://localhost:5175,app://agentcore,"
+        "capacitor://localhost,http://localhost,https://localhost"
     )
 
     # Auth-endpoint rate limiting (per client IP, fixed window). Blunts
@@ -162,6 +168,16 @@ class Settings(BaseSettings):
     # from the event-driven NUDGE.
     engine_reflection_start_round: int = 3
     engine_reflection_interval: int = 3
+
+    # Observability — execution span tree (D2 可观测性; 契约见 管理员后台.md). Off the user path,
+    # best-effort: at turn end the durable Turn Journal is projected into an
+    # OTel-GenAI-semconv-aligned span tree (one span per run node + nested tool spans,
+    # see runtime/spans.py) and handed to the SpanExporter port. The default
+    # LogSpanExporter emits it as a structured ``obs.turn_spans`` log line (greppable by
+    # trace_id) — a multi-agent run's execution trace without a heavyweight OTel SDK; a
+    # future OTLP exporter (跨进程 trace) is a drop-in via the same port. Disable to skip
+    # the projection entirely.
+    observability_span_export_enabled: bool = True
 
     # Durable structured suspension (结构化挂起 2b: turn 级落盘 + POST .../resume). When
     # enabled, a turn that pauses at a top-level plan_review checkpoint is persisted to

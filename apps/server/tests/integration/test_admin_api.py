@@ -1,16 +1,64 @@
 """Integration tests for the admin console API (``/v1/admin/*``, real PG).
 
-Covers the 用户管理 P0 surface end-to-end over the full HTTP chain (cookies, DI,
-error mapping): the ``AdminUser`` gate (401/403), the account roster (pagination
-+ substring filter), role/status/quota patches with tri-state quota semantics,
-the disable→access-revoked chain, and the no-self-lockout guard.
+Covers 用户管理 P0 (the ``AdminUser`` gate, the account roster, role/status/quota
+patches with tri-state quota semantics, the disable→access-revoked chain, and the
+no-self-lockout guard), plus 全站用量看板 P1 (``/usage/summary`` cross-user
+aggregation) and 系统状态 P2 (``/system`` read-only snapshot) — all end-to-end over
+the full HTTP chain (cookies, DI, error mapping).
 """
+
+from uuid import uuid4
 
 import httpx
 
-from agentcore.db.repositories import UserRepository
+from agentcore.config import settings
+from agentcore.core.types import new_id
+from agentcore.db.repositories import (
+    ConversationRepository,
+    CostEventRepository,
+    MessageRepository,
+    TurnJournalRepository,
+    TurnMetricsRepository,
+    UserRepository,
+)
+from agentcore.llm.pricing import NANO_PER_USD
 
 _PW = "password123"
+
+
+async def _seed_spend(
+    session_factory, *, user_id: str, total: int, role: str = "captain"
+) -> None:
+    """Seed one priced turn (one distinct message_id) for ``user_id`` into the
+    ledger, landing in today's + this month's windows (created_at server-defaults
+    to now). The write path itself is covered by test_cost_ledger.py."""
+    async with session_factory() as session:
+        await CostEventRepository(session).record_runs(
+            user_id=user_id,
+            conversation_id=new_id(),
+            message_id=new_id(),
+            runs=[
+                {
+                    "run_id": new_id(),
+                    "parent_run_id": None,
+                    "agent_id": new_id(),
+                    "role": role,
+                    "model": "deepseek-v4-pro",
+                    "tokens": {
+                        "input": 100,
+                        "output": 50,
+                        "reasoning": 0,
+                        "cache_hit": 60,
+                        "cache_miss": 40,
+                    },
+                    "cost": {"input": 800, "cached": 100, "output": 200, "total": total},
+                    "cost_total_nano": total,
+                    "currency": "USD",
+                    "rounds": 1,
+                    "duration_ms": 500,
+                }
+            ],
+        )
 
 
 async def _login(client: httpx.AsyncClient, username: str, password: str) -> None:
@@ -134,6 +182,59 @@ async def test_admin_disable_revokes_target_access(
         assert (await target.get("/v1/auth/me")).status_code == 401
 
 
+# --- password reset (重置密码) ---
+
+
+async def test_admin_resets_user_password(client, new_client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    code = (await client.post("/v1/auth/invites", json={})).json()["code"]
+
+    async with new_client() as target:
+        await _register_and_login(target, code, "forgetful")
+        uid = (await target.get("/v1/auth/me")).json()["id"]
+
+        r = await client.post(f"/v1/admin/users/{uid}/reset-password")
+        assert r.status_code == 200, r.text
+        temp = r.json()["temporary_password"]
+        assert len(temp) >= 8
+
+        # every pre-reset session is revoked — the old refresh token is dead
+        assert (await target.post("/v1/auth/refresh")).status_code == 401
+
+    # the old password no longer logs in; the one-off temp password does
+    async with new_client() as fresh:
+        assert (
+            await fresh.post(
+                "/v1/auth/login", json={"username": "forgetful", "password": _PW}
+            )
+        ).status_code == 401
+        assert (
+            await fresh.post(
+                "/v1/auth/login",
+                json={"username": "forgetful", "password": temp},
+            )
+        ).status_code == 200
+
+
+async def test_reset_password_unknown_user_404(client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    assert (
+        await client.post(f"/v1/admin/users/{uuid4()}/reset-password")
+    ).status_code == 404
+
+
+async def test_reset_password_requires_admin(client, make_invite):
+    code = await make_invite("INV-RP")
+    await _register_and_login(client, code, "plainuser")
+    me = (await client.get("/v1/auth/me")).json()["id"]
+    # even targeting self, the role gate refuses a non-admin before the service runs
+    assert (
+        await client.post(f"/v1/admin/users/{me}/reset-password")
+    ).status_code == 403
+
+
 async def test_admin_sets_then_clears_quota(client, make_admin, session_factory):
     username, password = await make_admin()
     await _login(client, username, password)
@@ -202,3 +303,629 @@ async def test_admin_rejects_invalid_values(client, make_admin, session_factory)
     assert (
         await client.patch(f"/v1/admin/users/{uid}", json={"quota_daily_tokens": -5})
     ).status_code == 422
+
+
+# --- 全站用量看板 (P1) + 系统状态 (P2) gate ---
+
+
+async def test_admin_usage_and_system_require_auth(client):
+    assert (await client.get("/v1/admin/usage/summary")).status_code == 401
+    assert (await client.get("/v1/admin/system")).status_code == 401
+
+
+async def test_non_admin_cannot_access_usage_or_system(client, make_invite):
+    code = await make_invite("INV-NA2")
+    await _register_and_login(client, code, "regular2")
+    assert (await client.get("/v1/admin/usage/summary")).status_code == 403
+    assert (await client.get("/v1/admin/system")).status_code == 403
+
+
+# --- 全站用量看板: cross-user aggregation ---
+
+
+async def test_admin_usage_summary_aggregates_across_users(
+    client, make_admin, session_factory
+):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    bob = await _seed_user(session_factory, "bob")
+
+    # alice outspends bob over two turns; bob has one. The admin itself never spent,
+    # so it must be absent from the by-user payroll (>0 only).
+    await _seed_spend(session_factory, user_id=alice, total=5000)
+    await _seed_spend(session_factory, user_id=alice, total=3000)
+    await _seed_spend(session_factory, user_id=bob, total=1000)
+
+    r = await client.get("/v1/admin/usage/summary")
+    assert r.status_code == 200, r.text
+    b = r.json()
+
+    # Platform totals span *every* account; all spend is "now" → today == month.
+    assert b["today"]["cost"]["total"] == 9000
+    assert b["month"]["cost"]["total"] == 9000
+    assert b["today"]["requests"] == 3  # three distinct message_ids
+
+    # Top spenders by user, spend-desc: alice (8000, 2 turns) before bob (1000, 1).
+    by_user = b["month_by_user"]
+    assert [u["user_id"] for u in by_user] == [alice, bob]
+    assert by_user[0]["username"] == "alice"
+    assert by_user[0]["cost_total"] == 8000
+    assert by_user[0]["turns"] == 2
+    assert by_user[1]["cost_total"] == 1000
+
+    # The 7-day trend is a fixed-length series; today carries the whole spend.
+    trend = b["recent_daily_cost"]
+    assert len(trend) == 7
+    assert trend[-1]["cost_total"] == 9000
+    assert sum(p["cost_total"] for p in trend) == 9000
+    assert b["billing_mode"] == settings.billing_mode
+
+
+async def test_admin_usage_summary_empty_is_zero(client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+
+    r = await client.get("/v1/admin/usage/summary")
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["today"]["cost"]["total"] == 0
+    assert b["month_by_user"] == []
+    assert [p["cost_total"] for p in b["recent_daily_cost"]] == [0] * 7
+
+
+# --- 系统状态: read-only deployment snapshot ---
+
+
+async def test_admin_system_status_reports_config_health_and_counts(
+    client, make_admin, session_factory
+):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    await _seed_user(session_factory, "alice")
+    await _seed_user(session_factory, "carol", role="admin")
+    await _seed_user(session_factory, "dave", status="disabled")
+
+    r = await client.get("/v1/admin/system")
+    assert r.status_code == 200, r.text
+    b = r.json()
+
+    # Config snapshot (deploy-time settings, surfaced read-only).
+    assert b["billing_mode"] == settings.billing_mode
+    assert b["cny_per_usd"] == settings.cny_per_usd
+    assert b["quota"]["daily_tokens"] == settings.quota_daily_tokens
+    assert b["quota"]["daily_requests"] == settings.quota_daily_requests
+    assert b["quota"]["monthly_cost_nano"] == int(
+        settings.quota_monthly_cost_usd * NANO_PER_USD
+    )
+    # Health + provenance: the request itself proves the DB is reachable.
+    assert b["database_ok"] is True
+    assert isinstance(b["version"], str) and b["version"]
+    # Account tallies: admin + alice + carol(admin) + dave(disabled) = 4 total;
+    # active = admin + alice + carol = 3; admins = admin + carol = 2.
+    assert b["users_total"] == 4
+    assert b["users_active"] == 3
+    assert b["admins"] == 2
+
+
+# --- 运营观测看板 (观测, P1) ---
+
+
+async def _seed_turn(
+    session_factory,
+    *,
+    user_id: str,
+    status: str = "ok",
+    finish_reason: str = "stop",
+    error: str | None = None,
+    rounds: int = 1,
+    duration_ms: int = 500,
+    delegated: bool = False,
+    workers: int = 0,
+    input_tokens: int = 100,
+    output_tokens: int = 50,
+) -> None:
+    """Seed one turn_metrics row for ``user_id`` landing in today's window
+    (created_at server-defaults to now). The write path is exercised end-to-end by
+    the conversation service; here it seeds the dashboard's read side directly."""
+    async with session_factory() as session:
+        await TurnMetricsRepository(session).record(
+            turn_id=new_id(),
+            conversation_id=new_id(),
+            user_id=user_id,
+            trace_id=uuid4().hex,
+            agent_id="CEO",
+            kind="turn",
+            status=status,
+            finish_reason=finish_reason,
+            error=error,
+            rounds=rounds,
+            duration_ms=duration_ms,
+            delegated=delegated,
+            workers=workers,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+
+async def test_admin_observability_requires_auth(client):
+    assert (await client.get("/v1/admin/observability/summary")).status_code == 401
+    assert (
+        await client.get(f"/v1/admin/observability/conversations/{new_id()}")
+    ).status_code == 401
+
+
+async def test_non_admin_cannot_access_observability(client, make_invite):
+    code = await make_invite("INV-OBS")
+    await _register_and_login(client, code, "regular_obs")
+    assert (await client.get("/v1/admin/observability/summary")).status_code == 403
+    assert (
+        await client.get(f"/v1/admin/observability/conversations/{new_id()}")
+    ).status_code == 403
+
+
+async def test_admin_observability_summary_aggregates(
+    client, make_admin, session_factory
+):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    bob = await _seed_user(session_factory, "bob")
+
+    # 4 turns total across two users: 3 ok + 1 error; one ok turn delegated.
+    await _seed_turn(session_factory, user_id=alice, delegated=True, workers=2)
+    await _seed_turn(session_factory, user_id=alice)
+    await _seed_turn(
+        session_factory,
+        user_id=alice,
+        status="error",
+        finish_reason="error",
+        error="boom",
+        rounds=3,
+        duration_ms=800,
+        output_tokens=0,
+    )
+    await _seed_turn(session_factory, user_id=bob)
+
+    r = await client.get("/v1/admin/observability/summary")
+    assert r.status_code == 200, r.text
+    b = r.json()
+
+    # today health spans every account; all turns are "now" → today == week.
+    today = b["today"]
+    assert today["turns"] == 4
+    assert today["errors"] == 1
+    assert today["error_rate"] == 0.25
+    assert today["delegated_turns"] == 1
+    assert today["delegated_rate"] == 0.25
+    # rounds: (1 + 1 + 3 + 1) / 4 = 1.5; tokens SUM across all 4 turns.
+    assert today["avg_rounds"] == 1.5
+    assert today["input_tokens"] == 400
+    assert today["output_tokens"] == 150
+    assert today["p95_duration_ms"] > 0
+    assert b["week"]["turns"] == 4
+
+    # 近期错误 feed: the one errored turn, with its drill-down join keys.
+    errs = b["recent_errors"]
+    assert len(errs) == 1
+    assert errs[0]["status"] == "error"
+    assert errs[0]["finish_reason"] == "error"
+    assert errs[0]["error"] == "boom"
+    assert errs[0]["trace_id"] and len(errs[0]["trace_id"]) == 32
+
+    # 7-day trend is a fixed-length series; today carries all 4 turns / 1 error.
+    trend = b["recent_daily"]
+    assert len(trend) == 7
+    assert trend[-1]["turns"] == 4
+    assert trend[-1]["errors"] == 1
+    assert sum(p["turns"] for p in trend) == 4
+
+
+async def test_admin_observability_summary_empty_is_zero(client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+
+    r = await client.get("/v1/admin/observability/summary")
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["today"]["turns"] == 0
+    assert b["today"]["errors"] == 0
+    assert b["today"]["error_rate"] == 0.0
+    assert b["today"]["p95_duration_ms"] == 0
+    assert b["recent_errors"] == []
+    assert [p["turns"] for p in b["recent_daily"]] == [0] * 7
+
+
+# --- 会话复盘 (观测 P2): timeline merge by trace_id / message_id ---
+
+
+async def _seed_conversation_with_turn(
+    session_factory,
+    *,
+    user_id: str,
+    status: str = "ok",
+    error: str | None = None,
+    cost_nano: int = 4200,
+) -> tuple[str, str]:
+    """Seed one conversation as the three turn sources the 复盘 merges: a user
+    prompt + an assistant reply sharing a ``trace_id``, a ``turn_metrics`` row on
+    that trace, and a ``cost_events`` row on the reply's ``message_id``. Returns
+    ``(conversation_id, assistant_message_id)`` for the assertions."""
+    trace_id = uuid4().hex
+    async with session_factory() as session:
+        conv = await ConversationRepository(session).create(
+            user_id=user_id, title="复盘会话"
+        )
+        # Production stamps trace_id only on the assistant reply; the user prompt's
+        # is NULL — so a trace overlays exactly one message in the replay.
+        await MessageRepository(session).create(
+            conversation_id=conv.id,
+            role="user",
+            content="帮我做个东西",
+        )
+        assistant = await MessageRepository(session).create(
+            conversation_id=conv.id,
+            role="assistant",
+            content="好的，已完成" if status == "ok" else "出错了",
+            trace_id=trace_id,
+        )
+        await TurnMetricsRepository(session).record(
+            turn_id=assistant.id,
+            conversation_id=conv.id,
+            user_id=user_id,
+            trace_id=trace_id,
+            agent_id="CEO",
+            kind="turn",
+            status=status,
+            finish_reason="error" if status == "error" else "stop",
+            error=error,
+            rounds=2,
+            duration_ms=700,
+            delegated=True,
+            workers=1,
+            input_tokens=120,
+            output_tokens=60,
+        )
+        await CostEventRepository(session).record_runs(
+            user_id=user_id,
+            conversation_id=conv.id,
+            message_id=assistant.id,
+            runs=[
+                {
+                    "run_id": new_id(),
+                    "parent_run_id": None,
+                    "agent_id": new_id(),
+                    "role": "captain",
+                    "model": "deepseek-v4-pro",
+                    "tokens": {
+                        "input": 120,
+                        "output": 60,
+                        "reasoning": 0,
+                        "cache_hit": 0,
+                        "cache_miss": 120,
+                    },
+                    "cost": {
+                        "input": 0,
+                        "cached": 0,
+                        "output": 0,
+                        "total": cost_nano,
+                    },
+                    "cost_total_nano": cost_nano,
+                    "currency": "USD",
+                    "rounds": 2,
+                    "duration_ms": 700,
+                }
+            ],
+        )
+        # The turn's execution journal (keyed by the assistant message id) — the
+        # source the 复盘 projects tool/LLM spans from.
+        await TurnJournalRepository(session).record(
+            turn_id=assistant.id,
+            conversation_id=conv.id,
+            trace_id=trace_id,
+            entries=[
+                {
+                    "kind": "llm_call",
+                    "payload": {
+                        "run_id": "r1",
+                        "round_idx": 0,
+                        "finish_reason": "tool_calls",
+                        "usage": {"input": 120, "output": 60},
+                    },
+                    "ts": None,
+                },
+                {
+                    "kind": "tool_call",
+                    "payload": {
+                        "run_id": "r1",
+                        "tool_call_id": "tc1",
+                        "name": "read_file",
+                        "arguments": '{"path": "a.py"}',
+                        "result": "file body",
+                        "success": True,
+                    },
+                    "ts": None,
+                },
+            ],
+        )
+    return conv.id, assistant.id
+
+
+async def test_admin_conversation_replay_merges_timeline(
+    client, make_admin, session_factory
+):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    conv_id, assistant_id = await _seed_conversation_with_turn(
+        session_factory, user_id=alice, status="error", error="boom", cost_nano=4200
+    )
+
+    r = await client.get(f"/v1/admin/observability/conversations/{conv_id}")
+    assert r.status_code == 200, r.text
+    b = r.json()
+
+    # Conversation header carries the (cross-user) owner identity + title.
+    assert b["conversation"]["id"] == conv_id
+    assert b["conversation"]["title"] == "复盘会话"
+    assert b["conversation"]["user_id"] == alice
+    assert b["conversation"]["username"] == "alice"
+
+    # Rollup over the conversation's traced turns + the FX rate for ¥ display.
+    assert b["turns"] == 1
+    assert b["errors"] == 1
+    assert b["cost_total"] == 4200
+    assert b["cny_per_usd"] == settings.cny_per_usd
+
+    # Timeline is oldest-first: the user prompt, then the assistant reply.
+    msgs = b["messages"]
+    assert [m["role"] for m in msgs] == ["user", "assistant"]
+    user_msg, assistant_msg = msgs
+
+    # The user message has no turn overlay (no metrics, no spend, no spans).
+    assert user_msg["metrics"] is None
+    assert user_msg["cost_total"] == 0
+    assert user_msg["spans"] == []
+
+    # The assistant message merges its turn telemetry (by trace_id) + spend
+    # (by message_id) onto the thread row.
+    assert assistant_msg["id"] == assistant_id
+    assert assistant_msg["cost_total"] == 4200
+    m = assistant_msg["metrics"]
+    assert m is not None
+    assert m["status"] == "error"
+    assert m["finish_reason"] == "error"
+    assert m["error"] == "boom"
+    assert m["rounds"] == 2
+    assert m["delegated"] is True and m["workers"] == 1
+    assert m["trace_id"] == assistant_msg["trace_id"]
+
+    # Execution spans projected from turn_journal (llm_call + tool_call), in order.
+    spans = assistant_msg["spans"]
+    assert [s["kind"] for s in spans] == ["llm", "tool"]
+    assert spans[0]["round_idx"] == 0
+    assert spans[0]["finish_reason"] == "tool_calls"
+    assert spans[0]["output_tokens"] == 60
+    assert spans[1]["name"] == "read_file"
+    assert spans[1]["success"] is True
+    assert "a.py" in spans[1]["args_preview"]
+    assert spans[1]["result_preview"] == "file body"
+
+
+async def test_admin_conversation_replay_surfaces_textless_error_turn(
+    client, make_admin, session_factory
+):
+    """A turn that errored before persisting any assistant reply has a turn_metrics
+    row but no message to ride. The replay must still surface it (as a bare turn
+    marker) so a 复盘 never hides the failure."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    trace_id = uuid4().hex
+    async with session_factory() as session:
+        conv = await ConversationRepository(session).create(
+            user_id=alice, title="空回合"
+        )
+        conv_id = conv.id
+        # Only the user prompt is persisted (no assistant reply for this failed turn).
+        await MessageRepository(session).create(
+            conversation_id=conv_id, role="user", content="炸一下"
+        )
+        await TurnMetricsRepository(session).record(
+            turn_id=new_id(),
+            conversation_id=conv_id,
+            user_id=alice,
+            trace_id=trace_id,
+            agent_id="CEO",
+            kind="turn",
+            status="error",
+            finish_reason="error",
+            error="early boom",
+            rounds=0,
+            duration_ms=120,
+            delegated=False,
+            workers=0,
+            input_tokens=10,
+            output_tokens=0,
+        )
+
+    r = await client.get(f"/v1/admin/observability/conversations/{conv_id}")
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["turns"] == 1 and b["errors"] == 1
+
+    # Timeline: the user prompt, then a synthetic turn marker (no body, carries the
+    # failed turn's metrics) — newest after, since metrics is recorded post-prompt.
+    msgs = b["messages"]
+    assert [m["role"] for m in msgs] == ["user", "assistant"]
+    marker = msgs[1]
+    assert marker["content"] is None
+    assert marker["metrics"]["status"] == "error"
+    assert marker["metrics"]["error"] == "early boom"
+    assert marker["trace_id"] == trace_id
+
+
+async def test_admin_conversation_replay_unknown_404(client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    r = await client.get(f"/v1/admin/observability/conversations/{new_id()}")
+    assert r.status_code == 404
+
+
+# --- 用户详情下钻 (用户管理 P0 drill-down) ---
+
+
+async def test_admin_user_detail_requires_auth(client):
+    assert (await client.get(f"/v1/admin/users/{new_id()}/detail")).status_code == 401
+
+
+async def test_non_admin_cannot_access_user_detail(client, make_invite):
+    code = await make_invite("INV-DETAIL")
+    await _register_and_login(client, code, "regular_detail")
+    me = (await client.get("/v1/auth/me")).json()["id"]
+    assert (await client.get(f"/v1/admin/users/{me}/detail")).status_code == 403
+
+
+async def test_admin_user_detail_unknown_404(client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    r = await client.get(
+        "/v1/admin/users/00000000-0000-0000-0000-000000000000/detail"
+    )
+    assert r.status_code == 404
+
+
+async def test_admin_user_detail_composes_account_view(
+    client, make_admin, session_factory
+):
+    """The drill-down stitches one account's record + its own usage (today/month/
+    trend/by-role) + recent conversations (with message counts) + recent turns —
+    all scoped to that account (another user's spend/turns never leak in)."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    bob = await _seed_user(session_factory, "bob")
+
+    # alice: one priced captain turn + a full conversation (user+assistant msgs, a
+    # turn_metrics row, spend, journal). bob gets his own spend + conversation to
+    # prove the detail is user-scoped (bob's numbers must not bleed into alice's).
+    await _seed_spend(session_factory, user_id=alice, total=7000, role="captain")
+    conv_id, _ = await _seed_conversation_with_turn(
+        session_factory, user_id=alice, status="ok", cost_nano=4200
+    )
+    await _seed_spend(session_factory, user_id=bob, total=99999)
+    await _seed_conversation_with_turn(session_factory, user_id=bob)
+
+    r = await client.get(f"/v1/admin/users/{alice}/detail")
+    assert r.status_code == 200, r.text
+    b = r.json()
+
+    # Profile: the admin-rich account record.
+    assert b["user"]["id"] == alice
+    assert b["user"]["username"] == "alice"
+
+    # Usage scoped to alice: two priced turns (7000 + 4200 = 11200); all "now" so
+    # today == month, two distinct message_ids → requests == 2. bob's 99999 absent.
+    assert b["today"]["cost"]["total"] == 11200
+    assert b["month"]["cost"]["total"] == 11200
+    assert b["today"]["requests"] == 2
+
+    # by-role payroll (spend-desc, >0 only): both alice turns are captain → merged.
+    roles = {row["role"]: row for row in b["month_by_role"]}
+    assert roles["captain"]["cost_total"] == 11200
+    assert roles["captain"]["turns"] == 2
+
+    # 7-day trend: fixed length, today carries all of alice's spend.
+    assert len(b["recent_daily_cost"]) == 7
+    assert b["recent_daily_cost"][-1]["cost_total"] == 11200
+
+    # Recent conversations: only alice's, with batched message count (user+asst = 2).
+    convs = b["conversations"]
+    assert [c["id"] for c in convs] == [conv_id]
+    assert convs[0]["title"] == "复盘会话"
+    assert convs[0]["messages"] == 2
+
+    # Recent activity: only alice's traced turn (bob's excluded), drillable by conv id.
+    turns = b["recent_turns"]
+    assert len(turns) == 1
+    assert turns[0]["conversation_id"] == conv_id
+    assert turns[0]["status"] == "ok"
+
+    assert b["cny_per_usd"] == settings.cny_per_usd
+    assert b["billing_mode"] == settings.billing_mode
+
+
+# --- 控制台概览 (landing dashboard) ---
+
+
+async def test_admin_overview_requires_auth(client):
+    assert (await client.get("/v1/admin/overview")).status_code == 401
+
+
+async def test_non_admin_cannot_access_overview(client, make_invite):
+    code = await make_invite("INV-OV")
+    await _register_and_login(client, code, "regular_ov")
+    assert (await client.get("/v1/admin/overview")).status_code == 403
+
+
+async def test_admin_overview_aggregates_today(client, make_admin, session_factory):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    bob = await _seed_user(session_factory, "bob")
+
+    # Turns across two users: alice 2 (1 error) + bob 1 → 3 turns, 1 error, 2 active
+    # users (the admin took no turn, so it's not "active"). Spend lands today.
+    await _seed_turn(session_factory, user_id=alice)
+    await _seed_turn(
+        session_factory,
+        user_id=alice,
+        status="error",
+        finish_reason="error",
+        error="boom",
+    )
+    await _seed_turn(session_factory, user_id=bob)
+    await _seed_spend(session_factory, user_id=alice, total=5000)
+    await _seed_spend(session_factory, user_id=bob, total=1000)
+
+    r = await client.get("/v1/admin/overview")
+    assert r.status_code == 200, r.text
+    b = r.json()
+
+    # 今日 pulse: distinct active users + turn health + cost.
+    assert b["active_users_today"] == 2
+    assert b["today"]["turns"] == 3
+    assert b["today"]["errors"] == 1
+    assert abs(b["today"]["error_rate"] - 1 / 3) < 0.001
+    assert b["cost_today"]["total"] == 6000
+
+    # Account tallies: admin + alice + bob = 3 total, all active, 1 admin.
+    assert b["users_total"] == 3
+    assert b["users_active"] == 3
+    assert b["admins"] == 1
+
+    # 7-day trends: fixed length, today carries it all.
+    assert len(b["recent_daily_cost"]) == 7
+    assert b["recent_daily_cost"][-1]["cost_total"] == 6000
+    assert len(b["recent_daily_turns"]) == 7
+    assert b["recent_daily_turns"][-1]["turns"] == 3
+    assert b["recent_daily_turns"][-1]["errors"] == 1
+
+    # Deployment health + the short recent-errors feed.
+    assert b["database_ok"] is True
+    assert len(b["recent_errors"]) == 1
+    assert b["recent_errors"][0]["error"] == "boom"
+    assert b["billing_mode"] == settings.billing_mode
+
+
+async def test_admin_overview_empty_is_zero(client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    r = await client.get("/v1/admin/overview")
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["active_users_today"] == 0
+    assert b["today"]["turns"] == 0
+    assert b["cost_today"]["total"] == 0
+    assert b["recent_errors"] == []
+    assert [p["turns"] for p in b["recent_daily_turns"]] == [0] * 7
