@@ -133,6 +133,9 @@ def test_execution_only_kinds_match_enum():
         "tool_call",
         "note",
         "message_final",
+        # 执行级事件溯源 Phase 2 (frame.plan 退场): the delegate's DAG snapshot — a value
+        # distinct from the display ``run_plan`` event so the display gate is untouched.
+        "plan_snapshot",
     }
     assert EXECUTION_ONLY_KINDS == frozenset(k.value for k in FactKind)
 

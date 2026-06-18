@@ -218,6 +218,48 @@ async def test_worker_reasoning_streamed_as_run_reasoning_delta():
     assert [e.payload["delta"] for e in output] == ["结论"]
 
 
+async def test_completed_worker_run_final_fact_carries_full_output_and_reasoning():
+    # 执行级事件溯源 (deltas 退场): a worker's FULL output + thinking are captured onto its
+    # terminal RunState → its run_final_fact (``message_final``), so the reload rebuilds
+    # the node's 输出/思考 from the fact (synthesizing the delta block) instead of the
+    # no-longer-journaled per-token deltas. Drives the REAL executor under a bound fact
+    # log and asserts the recorded fact carries both, full-text — closing the gap where
+    # the worker's reasoning was previously discarded (only streamed, never a fact).
+    from agentcore.runtime.facts import FactKind, TurnFactLog, current_fact_log
+
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+
+    class _ReasoningProvider:
+        async def stream(self, request):
+            yield LLMChunk(delta_reasoning="先拆解")
+            yield LLMChunk(delta_reasoning="再对比")
+            yield LLMChunk(delta_content="结论")
+
+    log = TurnFactLog()
+    token = current_fact_log.set(log)
+    try:
+        res = await WaveScheduler().run(
+            plan, _executor(plan, _ReasoningProvider(), EventSink())
+        )
+    finally:
+        current_fact_log.reset(token)
+
+    # The terminal RunState now carries the worker's thinking (previously left empty).
+    assert res["t_1"].phase is RunPhase.COMPLETED
+    assert res["t_1"].content == "结论"
+    assert res["t_1"].reasoning == "先拆解再对比"
+
+    finals = [
+        e
+        for e in log.entries()
+        if e["kind"] == FactKind.MESSAGE_FINAL.value
+        and e["payload"].get("run_id") == "t_1"
+    ]
+    assert len(finals) == 1
+    assert finals[0]["payload"]["content"] == "结论"
+    assert finals[0]["payload"]["reasoning"] == "先拆解再对比"
+
+
 async def test_run_started_carries_parent_and_kind_slots():
     """run_started pre-wires parent_run_id / kind (阶段2 声明位): a 阶段1 flat
     worker is a top-level ``agent`` — parent_run_id is None, kind == 'agent' —
@@ -308,6 +350,44 @@ async def test_worker_hard_failure_bills_completed_rounds():
     assert state.usage["cache_miss"] == 1000
     assert state.usage["output"] == 400
     assert state.cost["total"] > 0
+
+
+async def test_failed_worker_run_final_fact_reseeds_from_journal():
+    # 执行级事件溯源 Phase 2 ⑥ golden (FAILED arm): a FAILED worker journals its terminal
+    # RunState at the SAME `execute` choke point as a COMPLETED one (run_final_fact covers
+    # every phase), so `completed_from_journal` re-seeds it on resume — phase + error +
+    # the billed pre-crash usage — not only COMPLETED nodes. Drives the REAL executor under
+    # a bound fact log so the recording site + the projector are exercised together.
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+    from agentcore.runtime.journal import completed_from_journal
+
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    reg = ToolRegistry()
+    reg.register(_GrantableTool("noop"))  # un-gated → the metered round runs before the boom
+    executor = build_agent_executor(
+        plan=plan,
+        llm=_MeteredRoundThenBoom(),
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    log = TurnFactLog()
+    token = current_fact_log.set(log)
+    try:
+        res = await WaveScheduler().run(plan, executor)
+    finally:
+        current_fact_log.reset(token)
+    assert res["t_1"].phase is RunPhase.FAILED
+
+    seed = completed_from_journal(log.entries())
+    assert set(seed) == {"t_1"}
+    assert seed["t_1"].phase is RunPhase.FAILED
+    assert "provider down" in seed["t_1"].error
+    # The billed pre-crash round survives the journal round-trip (a resume bills it once).
+    assert seed["t_1"].usage["cache_miss"] == 1000
 
 
 async def test_worker_failure_before_any_usage_has_no_ledger_row():

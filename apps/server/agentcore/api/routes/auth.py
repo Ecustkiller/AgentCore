@@ -1,8 +1,11 @@
-"""Authentication routes: register, login, refresh, logout, me.
+"""Authentication routes: register, login, refresh, logout, me (+ bearer-token twins).
 
-Tokens are delivered as httpOnly cookies so the browser/Electron client never
-handles them in JS (XSS-resistant). The refresh cookie is path-scoped to the
-auth endpoints; the access cookie is sent on every API call.
+The cookie flow delivers tokens as httpOnly cookies so the browser/Electron client
+never handles them in JS (XSS-resistant); the refresh cookie is path-scoped to the
+auth endpoints and the access cookie rides every API call. The ``/token*`` endpoints
+are the body-returning twins for non-cookie clients (mobile web / Capacitor shell,
+M2) whose origin can't rely on SameSite cookies — they send ``Authorization: Bearer``
+instead (认证与会话.md §十; resolution in api/dependencies.py).
 """
 
 from datetime import UTC, datetime
@@ -24,6 +27,9 @@ from agentcore.api.schemas import (
     LoginRequest,
     RegisterRequest,
     StatusResponse,
+    TokenRefreshRequest,
+    TokenResponse,
+    TokenRevokeRequest,
     UserResponse,
 )
 from agentcore.auth import AuthService, TokenPair
@@ -57,8 +63,11 @@ def _user_response(user: User) -> UserResponse:
 
 
 def _invite_status(invite: Invite, now: datetime) -> str:
+    # Terminal first: a consumed code stays "used" even if later revoked/expired.
     if invite.used_at is not None:
         return "used"
+    if invite.revoked_at is not None:
+        return "revoked"
     if invite.expires_at is not None and invite.expires_at <= now:
         return "expired"
     return "active"
@@ -74,6 +83,7 @@ def _invite_response(invite: Invite, now: datetime) -> InviteResponse:
         created_at=invite.created_at,
         expires_at=invite.expires_at,
         used_at=invite.used_at,
+        revoked_at=invite.revoked_at,
     )
 
 
@@ -167,6 +177,55 @@ async def logout(
     return StatusResponse()
 
 
+# --- Bearer-token flow (mobile web / Capacitor shell, M2) ---
+# Body-returning twins of the cookie login/refresh/logout above, for clients whose
+# origin (capacitor:// / a new web origin) can't rely on SameSite cookies (认证与会话.md
+# §十). Same AuthService + token machinery; the client stores the returned tokens and
+# sends `Authorization: Bearer <access>` on every call (resolved in api/dependencies.py).
+
+
+def _token_response(tokens: TokenPair, *, user: User | None = None) -> TokenResponse:
+    return TokenResponse(
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        expires_in=settings.jwt_access_token_expire_minutes * 60,
+        user=_user_response(user) if user is not None else None,
+    )
+
+
+@router.post("/token", response_model=TokenResponse)
+async def token_login(
+    body: LoginRequest,
+    service: AuthService = Depends(get_auth_service),
+):
+    """Bearer-token login: same credential check as cookie ``/login`` but returns the
+    access + refresh tokens in the JSON body (plus the user — identity in one call)."""
+    user, tokens = await service.login(username=body.username, password=body.password)
+    return _token_response(tokens, user=user)
+
+
+@router.post("/token/refresh", response_model=TokenResponse)
+async def token_refresh(
+    body: TokenRefreshRequest,
+    service: AuthService = Depends(get_auth_service),
+):
+    """Rotate a bearer client's token pair (refresh token carried in the body). Reuse /
+    expiry detection is the same family-revoking logic as cookie refresh."""
+    tokens = await service.refresh(refresh_token=body.refresh_token)
+    return _token_response(tokens)
+
+
+@router.post("/token/revoke", response_model=StatusResponse)
+async def token_revoke(
+    body: TokenRevokeRequest,
+    service: AuthService = Depends(get_auth_service),
+):
+    """Bearer-client logout: revoke the refresh token's whole family. Idempotent — an
+    unknown / already-revoked token still returns ok (never reveals token validity)."""
+    await service.logout(refresh_token=body.refresh_token)
+    return StatusResponse()
+
+
 @router.get("/me", response_model=UserResponse)
 async def me(user: AuthUser):
     return _user_response(user)
@@ -196,3 +255,15 @@ async def list_invites(
         data=[_invite_response(i, now) for i in invites],
         total=len(invites),
     )
+
+
+@router.post("/invites/{invite_id}/revoke", response_model=InviteResponse)
+async def revoke_invite(
+    invite_id: str,
+    admin: AdminUser,
+    service: AuthService = Depends(get_auth_service),
+):
+    """Retire an unused invite (邀请码撤销). 404 unknown id; 422 if already used/revoked.
+    Returns the now-revoked invite so the client can update the row in place."""
+    invite = await service.revoke_invite(invite_id=invite_id)
+    return _invite_response(invite, datetime.now(UTC))

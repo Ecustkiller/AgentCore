@@ -281,6 +281,12 @@ def build_agent_executor(
             # scheduler's infra-failure retry (RunPolicy.on_failure): they answer
             # different questions and must not be conflated.
             content = ""
+            # The worker's full thinking from the LAST attempt (parallel to
+            # ``content``, which each attempt overwrites): carried onto the terminal
+            # RunState → its ``message_final`` fact so resume / reload rebuild the
+            # worker's 思考全文 from the journal, not from the (being-retired)
+            # ``run_reasoning_delta`` stream (执行级事件溯源: deltas 退场).
+            reasoning = ""
             verdict = ContractVerdict(ok=True)
             # Web sources this worker consults, de-duped across contract retries.
             # Collect-only (annotate_citations=False): the worker text stays
@@ -310,7 +316,7 @@ def build_agent_executor(
             )
             attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
             for attempt in range(attempts):
-                content, round_usage, round_rounds = await _react_and_capture(
+                content, reasoning, round_usage, round_rounds = await _react_and_capture(
                     messages,
                     llm=llm,
                     tools=worker_tools,
@@ -366,6 +372,7 @@ def build_agent_executor(
                 return RunState(
                     phase=RunPhase.FAILED,
                     content=content,
+                    reasoning=reasoning,
                     error=reason,
                     escalations=escalations,
                     citations=worker_citations,
@@ -396,6 +403,7 @@ def build_agent_executor(
             return RunState(
                 phase=RunPhase.COMPLETED,
                 content=content,
+                reasoning=reasoning,
                 warnings=[] if verdict.ok else list(verdict.failures),
                 escalations=escalations,
                 citations=worker_citations,
@@ -1058,7 +1066,7 @@ async def _react_and_capture(
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None,
     usage_sink: list[TokenUsage] | None = None,
-) -> tuple[str, TokenUsage, int]:
+) -> tuple[str, str, TokenUsage, int]:
     """Run one ReAct pass over ``messages`` (mutated in place — the loop appends
     each assistant tool-call turn + tool results), then append the final assistant
     answer so the transcript ends with the worker's product.
@@ -1068,10 +1076,16 @@ async def _react_and_capture(
     (engine returns before the append), so we add it here — making ``messages`` a
     complete, replayable transcript for capture and continuation.
 
+    Returns the loop's full ``reasoning`` alongside ``content`` so the caller can
+    carry it onto the worker's terminal :class:`RunState` → its ``message_final``
+    fact (执行级事件溯源: deltas 退场). The worker's thinking is the run's authoritative
+    fact there; ``run_reasoning_delta`` stays as a transport-only live signal (no
+    longer journaled), exactly like ``run_output_delta`` / ``run_tool_progress``.
+
     ``usage_sink`` is forwarded to the loop so that when this pass raises (workers
     run with ``raise_on_error=True``), the caller can still read the tokens spent on
     the rounds that completed before the failure (B-deep 失败计费)."""
-    content, _reasoning, usage, rounds = await react_loop(
+    content, reasoning, usage, rounds = await react_loop(
         messages=messages,
         llm=llm,
         tools=tools,
@@ -1093,7 +1107,7 @@ async def _react_and_capture(
         role="worker",
     )
     messages.append(LLMMessage(role="assistant", content=content))
-    return content, usage, rounds
+    return content, reasoning, usage, rounds
 
 
 def _retry_message(feedback: str) -> LLMMessage:
@@ -1215,7 +1229,7 @@ async def _continue_run_scoped(
         messages = list(session.transcript)
         messages.append(_revision_message(feedback))
         citations: list[dict] = []
-        content, round_usage, round_rounds = await _react_and_capture(
+        content, reasoning, round_usage, round_rounds = await _react_and_capture(
             messages,
             llm=llm,
             tools=tools,
@@ -1240,10 +1254,15 @@ async def _continue_run_scoped(
             spec.policy.contract,
             files_written=len(files_touched_from_transcript(messages)),
         )
-        # 执行级事件溯源 (§18.3): the revised FULL product under the revision run id,
-        # so the version chain's latest output is reconstructable from the journal.
+        # 执行级事件溯源 (§18.3): the revised FULL product (content + 思考) under the
+        # revision run id, so the version chain's latest output AND thinking are
+        # reconstructable from the journal — the reload synthesizes this run node's
+        # run_output_delta / run_reasoning_delta from here once the live deltas stop
+        # being journaled (deltas 退场).
         record_turn_fact(
-            MessageFinalFact(run_id=revision_run_id, content=content).to_fact()
+            MessageFinalFact(
+                run_id=revision_run_id, content=content, reasoning=reasoning
+            ).to_fact()
         )
         sink.emit(
             run_completed(
@@ -1260,6 +1279,7 @@ async def _continue_run_scoped(
         return RunState(
             phase=RunPhase.COMPLETED,
             content=content,
+            reasoning=reasoning,
             warnings=[] if verdict.ok else list(verdict.failures),
             citations=citations,
             model=profile.model,

@@ -57,6 +57,7 @@ from agentcore.api.schemas import (
     SnapshotListResponse,
     SnapshotSummary,
     StatusResponse,
+    StopTurnResponse,
     UpdateConversationRequest,
     UploadFileResponse,
     WorkspaceBindingResponse,
@@ -67,7 +68,7 @@ from agentcore.api.schemas import (
     WorkspaceWriteResult,
     interaction_result_from_body,
 )
-from agentcore.api.sse import sse_response
+from agentcore.api.sse import sse_attach_response, sse_response
 from agentcore.config import settings
 from agentcore.conversation.quota import QuotaLimits, enforce_quota
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
@@ -109,6 +110,7 @@ from agentcore.runtime.suspension_persistence import (
     claim_paused_turn,
     list_paused_turns,
 )
+from agentcore.runtime.turn_runs import turn_runs
 from agentcore.storage import SnapshotNotFound
 from agentcore.workspace.files import (
     create_dir,
@@ -528,9 +530,11 @@ async def send_message(
 ):
     """Send a user message and get a streaming AI response via SSE.
 
-    The pipeline runs as a detached task feeding ``sink``; its handle is passed
-    to ``sse_response`` so a client disconnect (e.g. the user hits stop) cancels
-    it server-side rather than letting it run to completion unobserved.
+    执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in
+    the ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches
+    to it (``detach_on_disconnect=True``). A client disconnect therefore no longer
+    kills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the
+    background; an explicit 停止 routes through ``POST .../stop`` instead.
 
     Gated before the stream starts (成本配额与计费.md §一) so a refused turn gets a
     clean error instead of a half-opened SSE: per-user rate limit first (sheds a
@@ -557,8 +561,57 @@ async def send_message(
             local_container_root_id=body.local_container_root_id,
         )
     )
+    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
 
-    return sse_response(sink, producer=task)
+    return sse_response(sink, detach_on_disconnect=True)
+
+
+@router.post("/{conversation_id}/stop", response_model=StopTurnResponse)
+async def stop_message(
+    conversation_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Explicitly stop the conversation's in-flight turn (执行与请求解耦 C1 · slice 1a).
+
+    Now that a client disconnect no longer cancels a turn (it runs to completion +
+    persists in the background), the user's 「停止」 routes here instead. Cancels the
+    detached run task tracked in the ``TurnRunRegistry``, which unwinds through the
+    turn's ``CancelledError`` salvage — finished team work is kept as an incomplete
+    message (断线别白干). Idempotent: ``stopped=false`` when nothing is running
+    (already finished / never started), so a late click settles cleanly. Owner-gated.
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    stopped = turn_runs.stop(conversation_id)
+    return StopTurnResponse(stopped=stopped)
+
+
+@router.get("/{conversation_id}/stream")
+async def attach_stream(
+    conversation_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Re-attach to the conversation's in-flight turn and 续看 it live (C1 · slice 1b).
+
+    Since a disconnect no longer cancels a turn (slice 1a — it runs detached + persists
+    in the background), a client that dropped (network blip) or reopened the app can
+    rejoin the live run here: the SSE replays the transcript so far (coalesced — one
+    content / reasoning block, the team graph, finished tool calls) then tails new
+    events, all in the SAME event shape as the original stream, so the client folds it
+    through one dispatch path.
+
+    Returns ``204 No Content`` when no run is live for the conversation (already
+    finished / never started / suspended at a checkpoint) — the client then falls back
+    to the persisted transcript (reload) / durable resume. A pure observer: dropping
+    this stream detaches again (never cancels); an explicit 停止 still goes through
+    ``POST .../stop``. Owner-gated.
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    run = turn_runs.get(conversation_id)
+    if run is None or run.task.done():
+        return Response(status_code=204)
+    return sse_attach_response(run.sink)
 
 
 @router.post("/{conversation_id}/local-turns", response_model=RecordTurnResponse)
@@ -1114,9 +1167,11 @@ async def regenerate_message(
     "edit & resend" (``content`` set — edit the user message first). The target
     ``message_id`` must be a user message; the superseded assistant reply and any
     later turns are dropped before re-running. Like ``send_message``, the pipeline
-    runs as a detached task so a client disconnect cancels it server-side. A
-    re-run is a fresh turn, so it passes the same gates (rate limit → ownership →
-    BYOK/quota billing gate) as ``send_message``.
+    runs as a detached task tracked in the ``TurnRunRegistry`` and the SSE only
+    attaches (执行与请求解耦 C1 · slice 1a): a disconnect lets it finish + persist,
+    an explicit 停止 goes through ``POST .../stop``. A re-run is a fresh turn, so it
+    passes the same gates (rate limit → ownership → BYOK/quota billing gate) as
+    ``send_message``.
     """
     await enforce_user_message_rate_limit(user.user_id)
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
@@ -1136,8 +1191,9 @@ async def regenerate_message(
             llm_credentials=credentials,
         )
     )
+    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
 
-    return sse_response(sink, producer=task)
+    return sse_response(sink, detach_on_disconnect=True)
 
 
 @router.get("/{conversation_id}/paused", response_model=PausedTurnListResponse)
@@ -1219,7 +1275,10 @@ async def resume_message(
             llm_credentials=credentials,
         )
     )
-    return sse_response(sink, producer=task)
+    # 执行与请求解耦 (C1 · slice 1a): track the resumed run so a disconnect lets it
+    # finish + persist and 停止 routes through POST .../stop, same as a fresh send.
+    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
+    return sse_response(sink, detach_on_disconnect=True)
 
 
 # --- Workspace snapshots (axis-3 persistence: backup / kept versions / download) ---

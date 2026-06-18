@@ -16,7 +16,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from agentcore.config import settings
-from agentcore.core.errors import AuthenticationError, ValidationError
+from agentcore.core.errors import (
+    AuthenticationError,
+    NotFoundError,
+    ValidationError,
+)
 from agentcore.core.types import new_id
 from agentcore.db.models import Invite, User
 from agentcore.db.repositories import (
@@ -29,6 +33,7 @@ from agentcore.security import (
     create_access_token,
     generate_invite_code,
     generate_refresh_token,
+    generate_temp_password,
     hash_password,
     hash_refresh_token,
     verify_password,
@@ -48,7 +53,7 @@ class TokenPair:
 
 
 def _invite_is_valid(invite: Invite | None, now: datetime) -> bool:
-    if invite is None or invite.used_at is not None:
+    if invite is None or invite.used_at is not None or invite.revoked_at is not None:
         return False
     return not (invite.expires_at is not None and invite.expires_at <= now)
 
@@ -172,6 +177,47 @@ class AuthService:
 
     async def list_invites(self, *, limit: int = 100) -> Sequence[Invite]:
         return await self._invites.list_recent(limit=limit)
+
+    async def revoke_invite(self, *, invite_id: str) -> Invite:
+        """Retire an unused invite so it can no longer register an account (邀请码撤销).
+
+        Only a still-active code can be revoked: a used one is already consumed and an
+        already-revoked one is a no-op — both raise rather than silently succeed, so the
+        admin gets clear feedback. (Expired-unused codes are still revocable: it makes
+        their retirement explicit instead of relying on the time check.)
+        """
+        invite = await self._invites.get_by_id(invite_id)
+        if invite is None:
+            raise NotFoundError("邀请码不存在")
+        if invite.used_at is not None:
+            raise ValidationError("该邀请码已被使用，无法撤销")
+        if invite.revoked_at is not None:
+            raise ValidationError("该邀请码已撤销")
+        revoked = await self._invites.revoke(invite_id, revoked_at=datetime.now(UTC))
+        if revoked is None:  # pragma: no cover - existence just validated above
+            raise NotFoundError("邀请码不存在")
+        return revoked
+
+    # --- admin account ops ---
+
+    async def admin_reset_password(self, *, user_id: str) -> str:
+        """Reset an account's password to a fresh one-off, returned once for the admin
+        to hand over (重置密码). Revokes the user's refresh tokens (forces re-login on
+        every device) and clears any brute-force lockout. The plaintext is never stored
+        — only its hash. Raises ``NotFoundError`` for an unknown account.
+        """
+        user = await self._users.get_by_id(user_id)
+        if user is None:
+            raise NotFoundError("用户不存在")
+        creds = await self._credentials.get_by_user_id(user_id)
+        if creds is None:  # pragma: no cover - an account always has credentials
+            raise NotFoundError("用户凭据不存在")
+
+        temp_password = generate_temp_password()
+        await self._credentials.set_password(user_id, hash_password(temp_password))
+        # Force re-login everywhere: the old sessions must not outlive the reset.
+        await self._refresh_tokens.revoke_all_for_user(user_id)
+        return temp_password
 
     # --- internals ---
 

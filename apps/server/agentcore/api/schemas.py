@@ -41,6 +41,36 @@ class UserResponse(BaseModel):
     default_model_mode: str | None = None
 
 
+class TokenResponse(BaseModel):
+    """Bearer-token bundle for non-cookie clients (mobile web / Capacitor shell, M2).
+
+    The cookie login (``/v1/auth/login``) keeps tokens in httpOnly cookies; this is
+    its body-returning twin for clients whose origin (``capacitor://`` / a new web
+    origin) can't rely on SameSite cookies (认证与会话.md §十). ``expires_in`` is the
+    access token's lifetime in seconds so the client refreshes before it lapses;
+    ``user`` rides the login response (identity in one round trip) and is omitted on
+    refresh.
+    """
+
+    access_token: str
+    refresh_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+    user: UserResponse | None = None
+
+
+class TokenRefreshRequest(BaseModel):
+    """Rotate a bearer client's token pair (refresh token in the body, not a cookie)."""
+
+    refresh_token: str = Field(..., min_length=1, max_length=512)
+
+
+class TokenRevokeRequest(BaseModel):
+    """Bearer-client logout: revoke the presented refresh token's whole family."""
+
+    refresh_token: str = Field(..., min_length=1, max_length=512)
+
+
 class CreateInviteRequest(BaseModel):
     # None = never expires; otherwise the code is valid for this many days.
     expires_in_days: int | None = Field(None, ge=1, le=365)
@@ -49,12 +79,15 @@ class CreateInviteRequest(BaseModel):
 class InviteResponse(BaseModel):
     id: str
     code: str
-    status: Literal["active", "used", "expired"]
+    # active = issuable; used = consumed (terminal); expired = lapsed unused;
+    # revoked = retired by an admin before use (邀请码撤销).
+    status: Literal["active", "used", "expired", "revoked"]
     created_by: str | None
     used_by: str | None
     created_at: datetime
     expires_at: datetime | None
     used_at: datetime | None
+    revoked_at: datetime | None = None
 
 
 class InviteListResponse(BaseModel):
@@ -116,6 +149,16 @@ class AdminUpdateUserRequest(BaseModel):
     quota_daily_tokens: int | None = Field(None, ge=0)
     quota_monthly_cost_usd: float | None = Field(None, ge=0)
     quota_daily_requests: int | None = Field(None, ge=0)
+
+
+class AdminResetPasswordResponse(BaseModel):
+    """The one-off password minted by an admin reset (重置密码), returned exactly once.
+
+    Plaintext is never persisted — only its hash. The admin hands this to the user,
+    whose existing sessions are already revoked, so they must log in with it next.
+    """
+
+    temporary_password: str
 
 
 # --- Conversations ---
@@ -724,6 +767,17 @@ class RecordTurnResponse(BaseModel):
     title: str | None = None
 
 
+class StopTurnResponse(BaseModel):
+    """Outcome of an explicit 停止 (执行与请求解耦 C1 · slice 1a).
+
+    ``stopped`` is True when a live detached run was found for the conversation and
+    signalled to cancel; False when nothing was running (already finished / never
+    started), so the call is idempotent and the client can settle the bubble either
+    way."""
+
+    stopped: bool
+
+
 # --- Global search (全局搜索 Tier 1: 跨对话/消息/文件夹关键词检索) ---
 # One keyword query fans out over the user's own conversations (title), messages
 # (content) and folders (name) — see 前端技术与架构.md §9.8. Backed by ILIKE
@@ -1147,6 +1201,309 @@ class UsageSummary(BaseModel):
     # (the turn runs on the user's own key), so the client reframes the quota meters
     # as「自带 Key 不限额」and presents cost as the user's own DeepSeek spend.
     billing_mode: str
+
+
+# --- Admin: 全站用量看板 (P1) + 系统状态 (P2) ---
+# The cross-user counterparts of the per-user usage schemas above, plus a
+# read-only deployment-status snapshot. Both endpoints are admin-gated
+# (管理员后台.md); they reuse UsageWindow / DailyCost / QuotaStatus defined above.
+
+
+class AdminUserCostLine(BaseModel):
+    """One account's spend over a window — the platform 工资单 by user (全站看板).
+
+    The cross-user counterpart of ``RoleCostLine``. Money is integer nano-USD; the
+    client formats ¥ from the summary's single ``cny_per_usd`` (no re-pricing).
+    """
+
+    user_id: str
+    username: str
+    display_name: str
+    cost_total: int
+    # Distinct assistant turns this account ran over the window.
+    turns: int
+
+
+class AdminUsageSummary(BaseModel):
+    """Platform-wide usage dashboard (``GET /v1/admin/usage/summary``, admin-only).
+
+    The cross-user counterpart of ``UsageSummary``: today's / this month's totals
+    aggregated over *every* account, the Top spenders by user (工资单 by user), and
+    the 7-day platform trend. ``billing_mode`` is surfaced so the client frames cost
+    honestly — in "byok" these totals are the sum of each user's spend on their
+    *own* DeepSeek key (not platform-paid).
+    """
+
+    today: UsageWindow
+    month: UsageWindow
+    # This month's spend split by user (工资单 by user), spend-desc, >0 only, capped.
+    month_by_user: list[AdminUserCostLine]
+    # Last 7 UTC days incl today, oldest-first, zero-filled — the platform trend.
+    recent_daily_cost: list[DailyCost]
+    cny_per_usd: float
+    billing_mode: str
+
+
+class AdminSystemStatus(BaseModel):
+    """Read-only platform status for the admin console (``GET /v1/admin/system``).
+
+    A deployment sanity-check at a glance (管理员后台 P2): the billing mode + global
+    quota defaults + FX rate (all deploy-time ``config``, not editable here),
+    database reachability, build provenance, and account tallies. Everything is
+    read-only — config changes go through env + redeploy, not the console.
+    """
+
+    billing_mode: str
+    cny_per_usd: float
+    # Global quota defaults (config); per-user overrides live on the user record.
+    quota: QuotaStatus
+    # A live ``SELECT 1`` round-trip succeeded within the probe timeout.
+    database_ok: bool
+    version: str
+    git_sha: str
+    built_at: str
+    users_total: int
+    users_active: int
+    admins: int
+
+
+# --- Admin: 运营观测看板 (观测, P1) ---
+# The operator-facing health view, sourced from turn_metrics (the per-turn
+# telemetry DB sink) rather than the dev log firehose (logs/dev.jsonl). Admin-gated
+# (管理员后台.md). Per-turn money/text are NOT duplicated here — a 会话复盘 (P2)
+# joins cost_events + messages by trace_id.
+
+
+class TurnHealthWindow(BaseModel):
+    """Turn health aggregated over a time window (today / 近 7 日) — 全站健康.
+
+    Rates are derived server-side from the raw counts (the client renders them as
+    percentages); ``p95_duration_ms`` surfaces the latency tail the average hides.
+    """
+
+    turns: int
+    errors: int
+    # errors / turns in 0..1 (0 when the window has no turns).
+    error_rate: float
+    avg_duration_ms: int
+    p95_duration_ms: int
+    avg_rounds: float
+    # Turns that delegated to ≥1 member (multi-agent), and its share of turns.
+    delegated_turns: int
+    delegated_rate: float
+    input_tokens: int
+    output_tokens: int
+
+
+class DailyTurns(BaseModel):
+    """One UTC day's turn + error counts — a point in the 观测 trend."""
+
+    # ISO date (YYYY-MM-DD) of the UTC calendar day.
+    date: str
+    turns: int
+    errors: int
+
+
+class TurnMetricLine(BaseModel):
+    """One turn's telemetry row — the 近期错误 feed + 会话复盘 entry point.
+
+    Carries the join keys (``trace_id`` / ``conversation_id``) to drill from a
+    failure into the full turn (logs + messages + spend). ``error`` is the
+    truncated soft-error text (NULL on success). Built straight from the ORM row.
+    """
+
+    turn_id: str
+    conversation_id: str
+    user_id: str
+    agent_id: str | None
+    trace_id: str | None
+    kind: str
+    status: str
+    finish_reason: str | None
+    error: str | None
+    rounds: int
+    duration_ms: int
+    delegated: bool
+    workers: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AdminObservabilitySummary(BaseModel):
+    """Platform-wide 运营观测看板 (``GET /v1/admin/observability/summary``, admin-only).
+
+    The operator's health view, sourced from ``turn_metrics`` (not the dev log
+    file): today's and the trailing 7-day window health, the 7-day daily trend, and
+    the most recent errored turns. Aggregated over *every* account (admin is a
+    cross-user surface). Per-turn money/text are NOT here — drill into a turn by
+    ``trace_id`` (会话复盘, P2) to join cost_events + messages.
+    """
+
+    today: TurnHealthWindow
+    week: TurnHealthWindow
+    # Last 7 UTC days incl today, oldest-first, zero-filled — the trend bars.
+    recent_daily: list[DailyTurns]
+    # Most recent errored turns (newest-first, capped) — the 近期错误 feed.
+    recent_errors: list[TurnMetricLine]
+
+
+# --- Admin: 控制台概览 (landing dashboard) ---
+# A curated one-call snapshot for the console home, stitched from the same
+# aggregates as 用量 / 观测 / 系统 (one extra: distinct active users) so the
+# headline numbers never drift from those drill-down pages.
+
+
+class AdminOverview(BaseModel):
+    """Landing dashboard (``GET /v1/admin/overview``, admin-only) — platform pulse.
+
+    Today's vitals (active users / turn health / cost), account tallies, the 7-day
+    cost + turn trends, deployment health, and the most recent errors (drillable
+    into 会话复盘). Money is integer nano-USD; the client folds ``cny_per_usd`` for ¥.
+    """
+
+    # 今日 pulse: distinct users that took a turn, the turn-health rollup (turns /
+    # errors / error_rate / p95 / 委派率 / tokens), and total spend today.
+    active_users_today: int
+    today: TurnHealthWindow
+    cost_today: CostBreakdown
+    # Account tallies (status-based, same source as 系统状态).
+    users_total: int
+    users_active: int
+    admins: int
+    # 7-day trends (oldest-first, zero-filled) — cost bars + turn/error bars.
+    recent_daily_cost: list[DailyCost]
+    recent_daily_turns: list[DailyTurns]
+    # Deployment health + a short recent-errors feed (drill into 会话复盘 by id).
+    database_ok: bool
+    recent_errors: list[TurnMetricLine]
+    cny_per_usd: float
+    billing_mode: str
+
+
+# --- Admin: 用户详情下钻 (用户管理 P0 drill-down) ---
+# One account's at-a-glance profile: the full record + its *own* usage (the
+# per-user counterpart of the platform 用量看板) + its recent conversations and
+# turn activity (each drillable into 会话复盘). Admin cross-user, read-only.
+
+
+class AdminConversationLine(BaseModel):
+    """One of a user's conversations in the 用户详情 roster (compact row).
+
+    id/title/timestamps + message count, newest-activity first. Links to the
+    existing 会话复盘 (``GET /v1/admin/observability/conversations/{id}``) for the
+    full merged timeline. ``title`` is NULL for an untitled conversation.
+    """
+
+    id: str
+    title: str | None
+    created_at: datetime
+    updated_at: datetime
+    # Total messages in the conversation (user + assistant).
+    messages: int
+
+
+class AdminUserDetail(BaseModel):
+    """One account's drill-down (``GET /v1/admin/users/{id}/detail``, admin-only).
+
+    Stitches the per-user views an operator needs to understand an account: the
+    full record (``user``), this account's usage (today/month/trend/by-role — the
+    per-user counterpart of ``AdminUsageSummary``, scoped via ``cost_events.user_id``),
+    its recent conversations, and its recent turn activity (``turn_metrics``, each
+    drillable into 会话复盘). Money is integer nano-USD; the client folds the single
+    ``cny_per_usd`` for ¥. ``billing_mode`` frames cost honestly (byok = own-key spend).
+    """
+
+    user: AdminUserResponse
+    today: UsageWindow
+    month: UsageWindow
+    # This month's spend split by role (团队工资单 by role), spend-desc, >0 only.
+    month_by_role: list[RoleCostLine]
+    # Last 7 UTC days incl today, oldest-first, zero-filled — the trend sparkline.
+    recent_daily_cost: list[DailyCost]
+    # Recent conversations (newest-activity first, capped).
+    conversations: list[AdminConversationLine]
+    # Recent turns (newest-first, capped) — each drillable into 会话复盘.
+    recent_turns: list[TurnMetricLine]
+    cny_per_usd: float
+    billing_mode: str
+
+
+class ReplaySpan(BaseModel):
+    """One execution span inside a turn — a tool call or an LLM call — projected
+    compactly from ``turn_journal`` for the 复盘 drill-down.
+
+    Deliberately summary-only: NOT the heavy/sensitive replay payload (system
+    prompts, full tool results), just what triages a turn — what ran, in which
+    round/run, ok?, finish_reason, tokens, and a short preview. Per-span latency is
+    omitted: the execution facts don't reliably carry a per-span timestamp yet.
+    """
+
+    kind: str  # "tool" | "llm"
+    run_id: str | None = None
+    round_idx: int | None = None
+    # Tool spans:
+    name: str | None = None
+    success: bool | None = None
+    args_preview: str | None = None
+    result_preview: str | None = None
+    # LLM spans:
+    finish_reason: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+
+
+class ReplayMessage(BaseModel):
+    """One message in a 会话复盘 timeline (the thread + per-turn overlays).
+
+    An assistant message carries its turn's telemetry (``metrics``, joined by
+    trace_id), spend (``cost_total``, summed from cost_events by message_id), and the
+    turn's execution spans (``spans``, projected from turn_journal); user messages
+    have none. ``content`` is the raw message text (the prompt / reply) — the
+    substance of the post-mortem.
+    """
+
+    id: str
+    role: str
+    content: str | None
+    created_at: datetime
+    trace_id: str | None
+    metrics: TurnMetricLine | None = None
+    # Per-turn spend (integer nano-USD); the client folds ``cny_per_usd`` for ¥.
+    cost_total: int = 0
+    # The turn's tool/LLM spans (turn_journal projection); empty for user prompts and
+    # for turns that journaled nothing (a plain single-agent chat with no tools).
+    spans: list[ReplaySpan] = []
+
+
+class ReplayConversation(BaseModel):
+    """The conversation header for a 复盘 (owner identity + title)."""
+
+    id: str
+    title: str | None
+    user_id: str
+    username: str | None
+    display_name: str | None
+    created_at: datetime
+
+
+class AdminConversationReplay(BaseModel):
+    """One conversation's 复盘 timeline (``GET /v1/admin/observability/conversations/{id}``).
+
+    Merges the three turn sources by trace_id / message_id: the message thread
+    (bodies, from ``messages``), per-turn outcome/quality (``turn_metrics``), and
+    per-turn spend (``cost_events``). Admin-only, cross-user — the drill-down target
+    of the 观测看板's 近期错误 feed (opens a failed turn in full context).
+    """
+
+    conversation: ReplayConversation
+    messages: list[ReplayMessage]
+    # Conversation rollup over its traced turns.
+    turns: int
+    errors: int
+    # Total turn spend (integer nano-USD) + the single FX rate for ¥ display.
+    cost_total: int
+    cny_per_usd: float
 
 
 # --- Messaging (消息页 = 找人 IM; 消息IM.md) ---

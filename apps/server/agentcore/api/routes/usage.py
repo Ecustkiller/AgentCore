@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends
 
+from agentcore.api.cost_view import cost_breakdown, usage_breakdown
 from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
@@ -22,12 +23,10 @@ from agentcore.api.dependencies import (
 from agentcore.api.schemas import (
     AgentCostLine,
     ConversationCost,
-    CostBreakdown,
     DailyCost,
     QuotaStatus,
     RoleCostLine,
     TurnCost,
-    UsageBreakdown,
     UsageSummary,
     UsageWindow,
 )
@@ -35,36 +34,13 @@ from agentcore.config import settings
 from agentcore.core.errors import NotFoundError
 from agentcore.db.models import CostEvent
 from agentcore.db.repositories import ConversationRepository, CostEventRepository
-from agentcore.llm.pricing import NANO_PER_USD, nano_usd_to_cny
+from agentcore.llm.pricing import NANO_PER_USD
 
 router = APIRouter(tags=["usage"])
 
 # Account dashboard trend window: the last N UTC days (incl today) shown as a
 # spend sparkline (§7.3D). Fixed length so the series is zero-filled and stable.
 _TREND_DAYS = 7
-
-
-def _cost_breakdown(cost: dict) -> CostBreakdown:
-    """Map a ledger cost dict to the API schema, attaching the display CNY value."""
-    total = int(cost.get("total", 0))
-    return CostBreakdown(
-        input=int(cost.get("input", 0)),
-        cached=int(cost.get("cached", 0)),
-        output=int(cost.get("output", 0)),
-        total=total,
-        currency=str(cost.get("currency", "USD")),
-        cny_total=nano_usd_to_cny(total, settings.cny_per_usd),
-    )
-
-
-def _usage_breakdown(tokens: dict) -> UsageBreakdown:
-    return UsageBreakdown(
-        input=int(tokens.get("input", 0)),
-        output=int(tokens.get("output", 0)),
-        reasoning=int(tokens.get("reasoning", 0)),
-        cache_hit=int(tokens.get("cache_hit", 0)),
-        cache_miss=int(tokens.get("cache_miss", 0)),
-    )
 
 
 def _sum_rows(rows: list[CostEvent]) -> tuple[dict, dict, int]:
@@ -107,8 +83,8 @@ async def get_message_cost(
             agent_id=row.agent_id,
             role=row.role,
             model=row.model,
-            usage=_usage_breakdown(row.tokens or {}),
-            cost=_cost_breakdown(row.cost or {}),
+            usage=usage_breakdown(row.tokens or {}),
+            cost=cost_breakdown(row.cost or {}),
             duration_ms=int(row.duration_ms or 0),
         )
         for row in rows
@@ -116,8 +92,8 @@ async def get_message_cost(
     usage, cost, rounds = _sum_rows(rows)
     return TurnCost(
         message_id=message_id,
-        usage=_usage_breakdown(usage),
-        cost=_cost_breakdown(cost),
+        usage=usage_breakdown(usage),
+        cost=cost_breakdown(cost),
         rounds=rounds,
         agents=agents,
     )
@@ -140,8 +116,8 @@ async def get_conversation_cost(
     agg = await repo.aggregate_for_conversation(conversation_id, user_id=user.user_id)
     return ConversationCost(
         conversation_id=conversation_id,
-        usage=_usage_breakdown(agg["usage"]),
-        cost=_cost_breakdown(agg["cost"]),
+        usage=usage_breakdown(agg["usage"]),
+        cost=cost_breakdown(agg["cost"]),
         turns=agg["turns"],
     )
 
@@ -184,13 +160,13 @@ async def get_usage_summary(
 
     return UsageSummary(
         today=UsageWindow(
-            usage=_usage_breakdown(today["usage"]),
-            cost=_cost_breakdown(today["cost"]),
+            usage=usage_breakdown(today["usage"]),
+            cost=cost_breakdown(today["cost"]),
             requests=today["turns"],
         ),
         month=UsageWindow(
-            usage=_usage_breakdown(month["usage"]),
-            cost=_cost_breakdown(month["cost"]),
+            usage=usage_breakdown(month["usage"]),
+            cost=cost_breakdown(month["cost"]),
             requests=month["turns"],
         ),
         month_by_role=[

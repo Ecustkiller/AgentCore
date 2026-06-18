@@ -1,0 +1,30 @@
+{
+  "name": "agentcore-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AgentCore Mobile - 手机端 web 客户端 (桌面端减能力层; 手机端落地设计 P1)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "conformance": "tsx src/protocol/conformance.run.ts"
+  },
+  "dependencies": {
+    "@agentcore/contract-types": "workspace:*",
+    "@agentcore/protocol-conformance": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

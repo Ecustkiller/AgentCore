@@ -22,14 +22,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from agentcore.config import settings
 from agentcore.core.logging import get_logger
-from agentcore.runtime.events import _JOURNAL_SURFACE_TYPES
+from agentcore.runtime.events import _JOURNAL_SURFACE_TYPES, EventType
 from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind
+from agentcore.runtime.runs.types import RunKind
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from agentcore.llm.protocol import LLMMessage
+    from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunState
 
 logger = get_logger(__name__)
@@ -78,6 +81,71 @@ def entries_from_runs(runs: dict[str, Any] | None) -> list[dict[str, Any]]:
     return entries
 
 
+# A run node's terminal display event: the deltas-退场 synthesis splices the run's full
+# output/thinking right before it. Both COMPLETED and FAILED qualify — a failed worker
+# can still have produced (partial) output worth showing on reload.
+_RUN_TERMINAL_TYPES = frozenset(
+    {EventType.RUN_COMPLETED.value, EventType.RUN_FAILED.value}
+)
+
+
+def _splice_synthetic_deltas(
+    events: list[dict[str, Any]],
+    final_outputs: dict[str, dict[str, str]],
+    agent_run_ids: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Reconstruct each agent run's run_output_delta / run_reasoning_delta from its
+    ``message_final`` fact (执行级事件溯源: deltas 退场).
+
+    The per-token worker deltas are no longer journaled; instead a single equivalent
+    delta block is spliced in just before the run's terminal event (run_completed /
+    run_failed), so the unchanged client fold rebuilds the node's 输出 / 思考全文 on
+    reload (it sees the same event types, merely coalesced into one delta each).
+
+    Scoped to agent runs (``agent_run_ids``, from the kind=agent run_started): the
+    CAPTAIN's own ``message_final`` is the chat bubble's text (streamed as the
+    turn-level ``content_delta``, not run-scoped), so it must NOT light up the captain
+    run node — and its run_id is absent from ``agent_run_ids``, so it is skipped here.
+    Reasoning precedes content, mirroring the live order (DeepSeek streams the whole
+    reasoning_content before any content); both inherit the terminal event's timestamp
+    so the replay timeline orders them immediately before completion.
+    """
+    out: list[dict[str, Any]] = []
+    for ev in events:
+        if ev.get("type") in _RUN_TERMINAL_TYPES:
+            run_id = (ev.get("payload") or {}).get("run_id")
+            agent_id = agent_run_ids.get(run_id) if run_id else None
+            final = final_outputs.get(run_id) if run_id else None
+            if final is not None and agent_id is not None:
+                ts = ev.get("timestamp")
+                if final["reasoning"]:
+                    out.append(
+                        {
+                            "type": EventType.RUN_REASONING_DELTA.value,
+                            "payload": {
+                                "run_id": run_id,
+                                "agent_id": agent_id,
+                                "delta": final["reasoning"],
+                            },
+                            "timestamp": ts,
+                        }
+                    )
+                if final["content"]:
+                    out.append(
+                        {
+                            "type": EventType.RUN_OUTPUT_DELTA.value,
+                            "payload": {
+                                "run_id": run_id,
+                                "agent_id": agent_id,
+                                "delta": final["content"],
+                            },
+                            "timestamp": ts,
+                        }
+                    )
+        out.append(ev)
+    return out
+
+
 def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """Project ordered journal entries back into a ``runs`` replay payload (DISPLAY).
 
@@ -97,7 +165,7 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
       untouched — preserving the round-trip contract + the cancelled-salvage bubble +
       ``suspension_persistence`` resume hydration.
     - **Execution-sourced journals** (carry execution facts — the fact log is the
-      single source, 执行级事件溯源落地设计.md): these stored the FULL UNGATED stream
+      single source, 执行级事件溯源 §18.3): these stored the FULL UNGATED stream
       (the captain's own ``run_*`` / ``tool_use_*`` ride it too). Re-apply the display
       gate so a non-surfaced turn does not suddenly render the captain's run events as
       a team graph: drop ``events`` unless a surface type is present (parity with
@@ -105,6 +173,15 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
       show (a plain chat turn — its facts persist for window rebuild but display as a
       plain bubble). The discriminator is the presence of execution facts, NOT the
       content, so the two clauses never fire on a legacy/salvage journal.
+
+    deltas 退场: an execution-sourced journal no longer carries per-token
+    ``run_output_delta`` / ``run_reasoning_delta`` (they are transport-only liveliness
+    now). Each agent run's full output + thinking is its ``message_final`` fact, from
+    which :func:`_splice_synthetic_deltas` reconstructs ONE equivalent delta block per
+    run, spliced just before the run's terminal event — so the client fold replays the
+    same 输出 / 思考 with zero change. (A legacy journal that still carries real deltas
+    has no ``message_final`` facts, so the synthesis is a no-op and it round-trips
+    untouched.)
     """
     if not entries:
         return None
@@ -112,25 +189,57 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
     process: list[dict[str, Any]] = []
     finish_reason: str | None = None
     has_exec_facts = False
+    # deltas 退场: a worker/revision run's full output + thinking now lives only in its
+    # ``message_final`` fact (the per-token run_output_delta / run_reasoning_delta are no
+    # longer journaled). Collect those finals (run_id → {content, reasoning}) and the
+    # agent-kind run ids (run_id → agent_id, from run_started) so the display projection
+    # can synthesize equivalent delta blocks below — keeping the client fold unchanged.
+    final_outputs: dict[str, dict[str, str]] = {}
+    agent_run_ids: dict[str, str] = {}
     for entry in entries:
         kind = entry.get("kind") or ""
         payload = entry.get("payload") or {}
         if kind == KIND_TURN_END:
             finish_reason = payload.get("finish_reason")
+        elif kind == FactKind.MESSAGE_FINAL.value:
+            # An execution fact (skipped from events like its peers), BUT its full
+            # text is replayed as a synthetic delta block (spliced below). Collect
+            # it keyed by run_id; the captain's own message_final is collected too but
+            # is never synthesized (its run_id is not an agent run — see the splice).
+            has_exec_facts = True
+            run_id = payload.get("run_id")
+            if run_id:
+                final_outputs[run_id] = {
+                    "content": payload.get("content") or "",
+                    "reasoning": payload.get("reasoning") or "",
+                }
+            continue
         elif kind in EXECUTION_ONLY_KINDS:
             # Execution-level facts (§18.3: turn_started / round_boundary / llm_call /
-            # note / message_final) carry engine-rebuild state, not client-foldable
-            # display events — skip them so they never leak into runs.events (the
-            # client fold would choke on an unknown event type). Their presence marks
-            # this as an execution-sourced journal → re-gate the display below.
+            # note / tool_call / plan_snapshot) carry engine-rebuild state, not client-
+            # foldable display events — skip them so they never leak into runs.events
+            # (the client fold would choke on an unknown event type). Their presence
+            # marks this as an execution-sourced journal → re-gate the display below.
             has_exec_facts = True
             continue
         elif kind.startswith(_PROCESS_PREFIX):
             process.append(payload)
         else:
+            # Remember each agent (worker / revision) run's agent_id so the synthetic
+            # delta block can be attributed (the captain run_started is kind=captain →
+            # excluded, so its message_final never becomes a run-node delta).
+            if (
+                kind == EventType.RUN_STARTED.value
+                and payload.get("kind") == RunKind.AGENT.value
+            ):
+                run_id = payload.get("run_id")
+                if run_id:
+                    agent_run_ids[run_id] = payload.get("agent_id") or ""
             events.append(
                 {"type": kind, "payload": payload, "timestamp": entry.get("ts")}
             )
+    if final_outputs:
+        events = _splice_synthetic_deltas(events, final_outputs, agent_run_ids)
     if has_exec_facts:
         # Surface gate (parity with EventSink.execution_journal): the captain's own
         # run events are execution detail, not a replayable team graph — show events
@@ -160,7 +269,7 @@ def window_from_journal(
     ``list[LLMMessage]`` the engine actually fed the model — the same shape the live
     captain transcript / a worker's ``messages`` take, so resume can feed it straight
     back and the conformance golden can assert it ``==`` the transcript at a pause
-    (执行级事件溯源落地设计.md §三, the ``window_from_journal`` projection).
+    (执行级事件溯源 §18.3, the ``window_from_journal`` projection).
 
     Correct-by-construction — only outputs are journaled, so the window is the fold of
     all prior facts (no quadratic input duplication):
@@ -341,6 +450,32 @@ def completed_from_journal(
     return completed
 
 
+def plan_from_journal(entries: list[dict[str, Any]] | None) -> RunPlan | None:
+    """Project the journal's ``plan_snapshot`` facts into the delegate's DAG (resume).
+
+    The execution counterpart of ``frame.plan`` (执行级事件溯源 Phase 2, its exit): the
+    delegate recorded a ``plan_snapshot`` fact (``serialize.plan_snapshot_fact`` →
+    ``plan_to_json``) at plan build and after each ``adjust`` steer. Fold back the LAST one
+    — last-write-wins, so the accumulated steer + any post-build mutation is reflected —
+    with the SAME deserializer (``plan_from_json``), so the projection is byte-for-byte the
+    graph the frame stored (the conformance golden gates this ``==``). A resume thus rebuilds
+    the EXACT plan (its already-minted run_ids matching the ``completed_from_journal`` seed)
+    and re-drives the unfinished tail, no旁路 frame.
+
+    Returns ``None`` when no ``plan_snapshot`` fact is present (a legacy / display journal,
+    or a non-delegate turn) — the caller falls back to the in-memory carrier.
+    """
+    if not entries:
+        return None
+    from agentcore.runtime.runs.serialize import plan_from_json
+
+    latest: dict[str, Any] | None = None
+    for entry in entries:
+        if (entry.get("kind") or "") == FactKind.PLAN_SNAPSHOT.value:
+            latest = entry.get("payload") or {}
+    return plan_from_json(latest) if latest is not None else None
+
+
 async def persist_turn_journal(
     session: AsyncSession,
     *,
@@ -384,4 +519,17 @@ async def persist_turn_journal(
             "journal.persist_failed",
             message_id=message_id,
             error=str(e),
+        )
+
+    # D2 观测：把同一份耐久 entries 投影成执行 span 树并导出（off the user path、
+    # best-effort）。这里是所有回合路径（首轮 / 重答 / handoff / resume / salvage）写
+    # 耐久 journal 的唯一汇点，故 span 树天然覆盖全路径。导出自身吞异常、绝不影响回合。
+    if settings.observability_span_export_enabled:
+        from agentcore.runtime.spans import export_turn_spans
+
+        export_turn_spans(
+            entries,
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            turn_id=message_id,
         )

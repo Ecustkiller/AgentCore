@@ -6,7 +6,7 @@ import {
   streamErrorAction,
 } from "@/lib/errors";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { streamConversation } from "../streamConversation";
+import { attachConversation, streamConversation } from "../streamConversation";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -154,5 +154,43 @@ describe("streamConversation (refused turn)", () => {
     expect(streamErr.code).toBe("RATE_LIMITED");
     expect(streamErr.serverMessage).toBe("操作过于频繁，请约 42 秒后再发送。");
     expect(streamErr.retryAfter).toBe(42);
+  });
+});
+
+describe("attachConversation (实时重连续看 1b)", () => {
+  it("returns 'none' on a 204 so the caller falls back to the persisted transcript", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(null, { status: 204 }))),
+    );
+    await expect(attachConversation("c1")).resolves.toBe("none");
+  });
+
+  it("targets the conversation's stream endpoint with a GET", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(new Response(null, { status: 204 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await attachConversation("conv-42");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/v1/conversations/conv-42/stream");
+    expect(init.method).toBe("GET");
+  });
+
+  it("raises a StreamError when the attach is refused (e.g. not owned → 404)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: { code: "NOT_FOUND" } }), {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      ),
+    );
+    const err = await attachConversation("c1").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StreamError);
+    expect((err as StreamError).status).toBe(404);
   });
 });

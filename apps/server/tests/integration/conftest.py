@@ -1,9 +1,11 @@
 """Integration-test fixtures backed by a real PostgreSQL instance.
 
-Each test runs against a throwaway ``agentcore_it`` schema that is created and
-dropped per test, so integration tests never touch dev data and stay isolated
-from one another. Using a dedicated *schema* (not a separate database) means no
-CREATEDB privilege is required — the app role already owns its database.
+Each test runs against a throwaway, per-process ``agentcore_it_<pid>`` schema that
+is created and dropped per test, so integration tests never touch dev data, stay
+isolated from one another, and — crucially — don't collide when several pytest
+processes (parallel agents / pytest-xdist workers) hit the same server at once.
+Using a dedicated *schema* (not a separate database) means no CREATEDB privilege
+is required — the app role already owns its database.
 
 Tests auto-skip when no PostgreSQL is reachable, keeping unit-only runs green.
 The target server comes from ``TEST_DATABASE_URL`` (falls back to the app's
@@ -27,6 +29,7 @@ import agentcore.db.models  # noqa: F401  (register models on Base.metadata)
 from agentcore.api.dependencies import get_db
 from agentcore.config import settings
 from agentcore.db.base import Base
+from agentcore.db.base import engine as app_engine
 from agentcore.db.repositories import (
     CredentialsRepository,
     InviteRepository,
@@ -35,7 +38,13 @@ from agentcore.db.repositories import (
 from agentcore.main import app
 from agentcore.security import hash_password
 
-_TEST_SCHEMA = "agentcore_it"
+# Per-process schema so concurrent test runs never DROP/CREATE the *same* schema
+# out from under each other. A shared name lets a second pytest process (parallel
+# agent / pytest-xdist worker) wipe the first run's rows mid-test ("用户名或密码错误")
+# or race its CREATE ("schema already exists"). PID is unique per live process and
+# distinguishes xdist workers (each a separate process); the per-test
+# DROP-before-CREATE below still self-heals a same-PID orphan from a crashed run.
+_TEST_SCHEMA = f"agentcore_it_{os.getpid()}"
 
 
 def _test_db_url() -> str:
@@ -94,6 +103,20 @@ def new_client(session_factory) -> Callable:
             yield c
 
     return _make
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _dispose_app_engine_pool() -> AsyncIterator[None]:
+    """Drain the process-global engine's pool after each test.
+
+    ``database_ready()`` (readiness probe + admin 系统/概览 panels) pings the global
+    ``engine`` directly, *not* the per-test ``get_db`` override. With function-scoped
+    event loops a pooled connection binds to the first test's loop, so the next test
+    that probes hits a connection on a closed loop ("Event loop is closed"). Disposing
+    here — inside each test's own loop — guarantees the next probe opens fresh.
+    """
+    yield
+    await app_engine.dispose()
 
 
 @pytest.fixture(autouse=True)

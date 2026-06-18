@@ -289,6 +289,25 @@ def run_final_fact(run_id: str, state: RunState) -> Any:
     )
 
 
+def plan_snapshot_fact(plan: RunPlan) -> Any:
+    """A delegate's full DAG as a ``plan_snapshot`` journal fact (执行级事件溯源 Phase 2).
+
+    The execution source for ``frame.plan`` (its exit): the payload **is**
+    :func:`plan_to_json` (the exact graph the frame stored — every :class:`RunSpec` with
+    its minted run_id, accumulated ``steer`` and policy/contract), so
+    :func:`agentcore.runtime.journal.plan_from_journal` rebuilds it with the SAME
+    deserializer (:func:`plan_from_json`) — zero drift between the (being-removed) blob and
+    its journal projection (the conformance golden gates this ``==``). Recorded at plan
+    build AND after each ``adjust`` steer, so the LAST snapshot reflects the cumulative
+    plan (steer accumulates across checkpoints); the projector takes the last one,
+    last-write-wins. A distinct kind from the display ``run_plan`` event keeps the display
+    projection's surface gate untouched.
+    """
+    from agentcore.runtime.facts import Fact, FactKind
+
+    return Fact(kind=FactKind.PLAN_SNAPSHOT.value, payload=plan_to_json(plan))
+
+
 def session_to_row(session: RunSession) -> dict[str, Any]:
     """The persisted columns for a RunSession (``conversation_id`` is attached by the
     repository from the turn envelope, not stored on the in-memory session)."""

@@ -3,6 +3,7 @@ import { SidePanel } from "@/components/layout/SidePanel";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { fetchMessageWindow, jumpToMessage } from "@/services/messages";
 import { loadPausedTurns } from "@/services/resume";
+import { attachOnOpen } from "@/services/turns";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
 import { PanelRight } from "lucide-react";
@@ -53,6 +54,13 @@ export function ConversationPage() {
               },
               id,
             );
+            // 实时重连续看 (C1 · slice 1b): a transcript that ends on a user message
+            // has no persisted reply yet — since 断连不再取消 (slice 1a) a turn may
+            // still be running detached. Rejoin it so its progress streams in live;
+            // a 204 (nothing running) is a clean no-op.
+            if (win.messages.at(-1)?.role === "user") {
+              void attachOnOpen(id);
+            }
           }
         }
       } catch {

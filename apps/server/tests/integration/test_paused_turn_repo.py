@@ -77,9 +77,10 @@ async def test_upsert_then_claim_round_trips(session_factory):
     restored = suspension_from_json(row.frame)
     assert isinstance(restored, PlanReviewSuspension)
     assert restored.tool_call_id == "call_del"
-    assert [n.run_id for n in restored.plan.nodes] == ["del_a_1", "del_a_2"]
-    # ``completed`` is NOT serialized into the frame (Phase 2 ⑥) — re-seeded from the
-    # journal's run-final facts on resume, so a claimed frame carries none.
+    # NEITHER ``plan`` NOR ``completed`` is serialized into the frame (执行级事件溯源 Phase 2) —
+    # both are re-projected from the journal's plan_snapshot / run-final facts on resume, so a
+    # claimed frame carries an empty plan placeholder + no completed.
+    assert restored.plan.nodes == []
     assert restored.completed == {}
 
     # Claimed once → gone (a second claim sees nothing).
@@ -167,13 +168,13 @@ async def test_save_claim_bridge_round_trips(session_factory, monkeypatch):
     assert claimed is not None
     assert claimed.message_id == mid
     assert claimed.user_message == "原始请求"
-    # transcript / completed are NOT serialized into the frame (Phase 2 ⑤/⑥) — resume
-    # rebuilds the CEO window + re-seeds finished workers from turn_journal; the suspended
-    # call id survives via the tool_call_id field, the plan via its own serialization.
+    # transcript / completed / plan are NOT serialized into the frame (执行级事件溯源 Phase 2
+    # ⑤/⑥ + plan 退场) — resume rebuilds the CEO window, re-seeds finished workers, AND
+    # rebuilds the DAG from turn_journal; only the suspended call id survives (tool_call_id).
     assert claimed.transcript == []
     assert claimed.completed == {}
+    assert claimed.plan.nodes == []
     assert claimed.tool_call_id == "call_del"
-    assert [n.run_id for n in claimed.plan.nodes] == ["del_a_1", "del_a_2"]
     # The journal-so-far is re-hydrated from turn_journal (唯一事实源, not the frame): the
     # display ``journal`` (resume seed) AND the raw ``journal_entries`` (the window source
     # _resumed_captain_window folds) both come back, so resume replays the pre-pause graph.

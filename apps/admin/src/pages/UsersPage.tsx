@@ -1,4 +1,5 @@
 import { QuotaDialog } from "@/components/QuotaDialog";
+import { UserDetail } from "@/components/UserDetail";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -41,6 +42,8 @@ export function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<AdminUser | null>(null);
+  // Drill-in: a user id opens the 用户详情 view (replacing the roster).
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   // Debounce the search box; a new query always restarts at page 1.
   useEffect(() => {
@@ -94,6 +97,10 @@ export function UsersPage() {
   );
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  if (detailId) {
+    return <UserDetail userId={detailId} onBack={() => setDetailId(null)} />;
+  }
 
   return (
     <div className="mx-auto max-w-[1200px] px-6 py-8">
@@ -152,18 +159,25 @@ export function UsersPage() {
                   className="border-border border-b last:border-0 hover:bg-accent/40"
                 >
                   <td className="px-4 py-3">
-                    <div className="font-medium text-foreground">
-                      {u.display_name || u.username}
-                      {isSelf && (
-                        <span className="ml-2 text-muted-foreground text-xs">
-                          (我)
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-muted-foreground text-xs">
-                      @{u.username}
-                      {u.email ? ` · ${u.email}` : ""}
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDetailId(u.id)}
+                      title="查看用户详情"
+                      className="rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <div className="font-medium text-foreground hover:underline">
+                        {u.display_name || u.username}
+                        {isSelf && (
+                          <span className="ml-2 text-muted-foreground text-xs">
+                            (我)
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-muted-foreground text-xs">
+                        @{u.username}
+                        {u.email ? ` · ${u.email}` : ""}
+                      </div>
+                    </button>
                   </td>
                   <td className="px-4 py-3">
                     <select

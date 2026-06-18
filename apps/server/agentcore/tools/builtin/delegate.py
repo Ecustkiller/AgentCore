@@ -427,6 +427,11 @@ class DelegateTool:
             logger.info("delegate.rejected", errors=errors)
             return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
 
+        # 执行级事件溯源 Phase 2 (frame.plan 退场): journal the full DAG (minted run_ids +
+        # policy/contract) so a resume rebuilds the plan from facts (plan_from_journal),
+        # not the旁路 frame. Recorded once at build; an ``adjust`` steer re-snapshots.
+        self._record_plan_snapshot(plan)
+
         execution_id = self._base_tool_context.execution_id or new_id()
         self._sink.emit(self._plan_event(execution_id, plan))
         logger.info("delegate.started", nodes=len(plan.nodes), call=self._calls)
@@ -826,6 +831,21 @@ class DelegateTool:
             await self._suspension_deleter(self._message_id or "")
 
     @staticmethod
+    def _record_plan_snapshot(plan: RunPlan) -> None:
+        """Journal the current plan as a ``plan_snapshot`` fact (执行级事件溯源 Phase 2).
+
+        The execution source for ``frame.plan`` (its exit): recorded at build and after each
+        ``adjust`` steer, so the LAST snapshot is the cumulative DAG and ``plan_from_journal``
+        rebuilds it on resume. A no-op outside a fact-log-bound turn (``record_turn_fact``
+        drops it) — e.g. a same-process resume (no log) or a standalone run — so the
+        in-memory carrier stays the fallback there, exactly like the run-final facts.
+        """
+        from agentcore.runtime.facts import record_turn_fact
+        from agentcore.runtime.runs.serialize import plan_snapshot_fact
+
+        record_turn_fact(plan_snapshot_fact(plan))
+
+    @staticmethod
     def _apply_steer(
         plan: RunPlan, completed: dict, checkpoint_ids: set[str], note: str
     ) -> None:
@@ -841,6 +861,9 @@ class DelegateTool:
         instruction block. Nodes already in ``completed`` are done and skipped.
         Accumulates (one bullet per adjust) so a node steered across multiple
         checkpoints keeps every note.
+
+        Re-snapshots the steered plan to the journal so a later durable pause's
+        ``plan_from_journal`` reflects the accumulated steer (frame.plan 退场).
         """
         targets = DelegateTool._downstream_of(plan, checkpoint_ids)
         block = f"- {note}"
@@ -848,6 +871,7 @@ class DelegateTool:
             if node.run_id in completed or node.run_id not in targets:
                 continue
             node.steer = f"{node.steer}\n{block}" if node.steer else block
+        DelegateTool._record_plan_snapshot(plan)
 
     @staticmethod
     def _downstream_of(plan: RunPlan, roots: set[str]) -> set[str]:

@@ -23,13 +23,13 @@
 
 遵循项目建模约定（UUID 主键、**无 ForeignKey**、`server_default`、按查询维度建索引；见 [`核心接口定义.md` §6.2](/docs/02-架构/核心接口定义.md)）。字段细节 → 见代码 `db/models.py`。
 
-| 表 | 关键字段 | 说明 |
-|---|---|---|
-| `chats` | `type`(dm·group·official) / `title?` / `avatar_url?` / `created_by` / `auto_join` / `last_message_at` / `last_message_preview` | IM 会话；`last_*` 供列表排序与预览；`auto_join=true` 标记「新用户默认入群」（内测全员群，见 §七） |
-| `chat_members` | (`chat_id`+`user_id`) / `role`(owner·admin·member) / `state`(accepted·pending) / `last_read_message_id` / `muted` / `muted_by_admin` / `pinned` | 参与者 + 每人会话态；`state=pending` 即陌生人「消息请求」门；`muted`=用户自静音、`muted_by_admin`=管理员禁言（可读不可发），二者区分；`last_read_*` 推未读数 |
-| `chat_messages` | `chat_id` / `sender_user_id?`(null=系统) / `sender_type`(user·official·agent) / `content?` / `content_type`(text·image·file·system_card) / `attachments` / `payload?` / `reply_to_message_id?` / `client_msg_id`(幂等去重) | 人向消息；`client_msg_id` 解断网重发去重；`system_card`+`payload` 承载官方号 deep-link |
-| `user_blocks` | (`user_id`+`blocked_user_id`) | 对称拉黑：断 DM + 双向搜索互隐 |
-| `user_directory_settings` | `discoverable`(默认 true) / `who_can_dm`(默认 anyone) | 隐私自决；缺行 = 可被搜到（开放为默认） |
+| 表 | 说明 |
+|---|---|
+| `chats` | IM 会话；`auto_join=true` 标记「新用户默认入群」（内测全员群，见 §七） |
+| `chat_members` | 参与者 + 每人会话态；`state=pending` 即陌生人「消息请求」门；`muted`=用户自静音、`muted_by_admin`=管理员禁言（可读不可发） |
+| `chat_messages` | 人向消息；`client_msg_id` 解断网重发去重；`system_card`+`payload` 承载官方号 deep-link |
+| `user_blocks` | 对称拉黑：断 DM + 双向搜索互隐 |
+| `user_directory_settings` | 隐私自决；缺行 = 可被搜到（开放为默认） |
 
 ## 三、后端 API（✅ `/v1/messages`）
 
@@ -61,19 +61,11 @@
 
 ## 六、前端 MessagesPage（✅ 已落地）
 
-桌面端「消息」两栏收件箱：复用对话页前端内核，但走**独立 store / service**，与 AI 对话状态解耦（对齐后端「另开 IM 表」边界）。
+桌面端「消息」两栏收件箱：复用对话页前端内核 + 实时通道，但走**独立 store / service**，与 AI 对话状态解耦。
 
-| 维度 | 现状 / 决策 |
-|---|---|
-| 布局 | 左 `ChatList`（会话列表 + 本地搜索 + `NewChatDialog` 搜人发起）+ 右 `ChatThread`（线程 + `ChatComposer`）；`/messages/:chatId` 深链，URL = 活动会话单一真相 |
-| 数据层 | `services/messaging.ts`（REST 客户端 + 错误中文映射）+ `stores/messaging.ts`（Zustand）；REST 类型由后端 OpenAPI 生成（`pnpm gen:api` → `types/api.generated.ts`），service 取别名引用（单一真相源 = `schemas.py`） |
-| 实时 | `services/realtime.ts` 消费 firehose，挂在 `AppShell`（**应用级、非页面级**）——故在对话页也能实时更新未读；事件喂 `applyIncoming`；每次（重）连触发离线补偿（重拉列表 + 重载当前线程，对齐 §四） |
-| 发送 | 乐观上屏 + `client_msg_id`，服务端回执去重（对齐 §三幂等）；图/文件附件先 PUT 上传到 chat 空间得 `workspace_path`，再随消息引用（`content` 可与附件二选一） |
-| 未读角标 | 侧栏「消息」入口显总未读（`useUnreadTotal`，静音会话不计数）+ 列表行内每会话未读 |
-| 气泡 | 文字纯文本（**非 Markdown**，区别于 AI 对话气泡）；图片内联缩略图（走 blob 鉴权拉取）、其它文件下载卡片（富消息 ✅）；`system_card` 居中胶囊 |
-| 滚动 | 复用 `lib/useStickToBottom`（与对话页 `ChatView` 共享） |
+→ 见代码 `apps/desktop/src/renderer/pages/MessagesPage.tsx`、`services/messaging.ts`、`stores/messaging.ts`
 
-## 七、未落地（⏳ 已确认设计）
+## 七、余项缺口（⏳）与内测全员群关键决策（✅）
 
 | 项 | 现状 / 缺口 |
 |---|---|
@@ -82,13 +74,13 @@
 | P2 | **人群聊：内测全员群 MVP + 自助管理 + 审核治理 + 富消息（图/文件）✅ 已落地**（`type=group` + `auto_join` 默认进群 + 群线程/发送者名/群标识 + 退群/静音/置顶/成员面板 + 平台 admin 踢人/禁言/公告 + system_card 系统提示 + 图/文件附件复用工作区存储，关键决策见下方）；通用建群 + 群审核仍 ⏳；**人 + AI 混合群**（`@` 唤起 agent → 接 CEO 编排，消息页独有差异化形态）已迁远期规划 → [`../07-规划/远期规划.md` §4.1](/docs/07-规划/远期规划.md) |
 | 多 worker 实时 | firehose / pub-sub 上 Redis / NATS（见 §四） |
 
-> **内测全员群关键决策**（首个「人群聊」落地形态；原 `07-规划/全员反馈群落地设计.md` 落地后退役，「代码看不出来」的理由迁入）：
+> **内测全员群关键决策**（首个「人群聊」落地形态）：
 >
 > | 决策 | 结论与理由 |
 > |---|---|
 > | 默认进群机制 | `chats.auto_join=true` 标记「新用户默认入群」（迁移建群 + 回填活跃用户、`pinned=true`）；自动入群**只在注册时触发**、登录不重灌——否则退群永远失效（「可退群」语义前提）。被否：单建 `beta_group` 表 / 存 `beta_group_id` 配置（一行配置不值得建表；`auto_join` 列自描述、可扩展、查询直接） |
 > | 治理权来源 | 平台 admin（`users.role='admin'`，即创始团队），非群级 `chat_members.role`——内测群无群主、零迁移、前端 `user.role==='admin'` 免扩 schema 门控；群级 `role` 列保留给后续用户自建群。被否：内测群指定群主/群管（多一次成员迁移 + 前端需新增 role 字段） |
 > | 禁言存储 | 新列 `chat_members.muted_by_admin`（不复用 `state`，避免污染 accepted/pending 消息请求门）；禁言=可读不可发（send 403），管理员豁免。被否：`state='muted'`（语义混淆） |
-> | 系统提示范围 | 只发**公告 + 踢人**（`system_card`，NULL sender=official 居中胶囊）；入群/退群/禁言**不发**全群提示（全员群每次注册自动入群会刷屏；禁言改发言时 403 toast）。原 `POST .../ban` 改名 `POST .../mute` 做 toggle |
+> | 系统提示范围 | 只发**公告 + 踢人**（`system_card`，NULL sender=official 居中胶囊）；入群/退群/禁言**不发**全群提示（全员群每次注册自动入群会刷屏；禁言改发言时 403 toast）。禁言端点 `POST .../mute`（toggle） |
 > | 群内隐私 | roster 暴露成员显示名（内测社区可接受）；`discoverable=false` 隐身**不掩盖**已在群内身份；群内被拉黑者消息 MVP 仍可见（客户端过滤为后续可选项） |
 > | 内测后归宿 | 转放量时该群保留 / 拆主题多群 / 关停 → 见 [`../07-规划/远期规划.md` §三](/docs/07-规划/远期规划.md) |

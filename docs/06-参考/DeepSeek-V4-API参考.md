@@ -20,18 +20,6 @@
 | 开源协议 | MIT | MIT |
 | 定位 | 高并发、路由、日常对话 | 复杂推理、Agent、专业编码 |
 
-### 在 AgentCore 中的角色分配
-
-| AgentCore 角色 | 模型 | 思考模式 |
-|---------------|------|---------|
-| CEO 主 Agent（对话 + 按需 delegate + 收尾，走 `chat` 档） | deepseek-v4-flash | 思考模式 (high)（`max` 按需 per-agent 解锁） |
-| `fast` 档 worker（较简单 / 范围明确） | deepseek-v4-flash | 思考模式 (high)、回合预算小 |
-| `strong` 档 worker、单聊、合成 | deepseek-v4-flash（基座；高质量档提升至 Pro） | 思考模式 (high) |
-| 极复杂任务（per-agent 按需解锁） | deepseek-v4-flash | 思考模式 (max) |
-| 标题 / 记忆维护（后台机械任务） | deepseek-v4-flash | 非思考（提速省钱） |
-
-> 开发期统一为「`high`/`max` 两档有效思考强度 + 后台机械任务非思考」，全部走 Flash。`fast` 与 `strong` 同为 `high`，靠回合预算（4 vs 28）与 per-agent `max` 解锁区分；不再保留非思考的 worker 档。
-
 ---
 
 ## 二、API 连接信息

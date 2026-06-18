@@ -1,4 +1,5 @@
 import type { ErrorAction } from "@/lib/errors";
+import { stopConversation } from "@/services/stopTurn";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   type ExecutionJournal,
@@ -1134,7 +1135,15 @@ export const useConversationStore = create<ConversationState>((set, get) => {
       patchConversation(conversationId, () => ({ abort: a })),
 
     stopGeneration: () => {
+      // Abort the local stream for instant UI feedback (frees the socket, stops
+      // reading). Since 执行与请求解耦 (C1 · slice 1a) a dropped connection no longer
+      // cancels the server run — it would keep going and billing — so also POST the
+      // explicit stop so the backend cancels the detached run. Best-effort + fire
+      // and forget (the bubble is settled below regardless); a no-op for a local /
+      // sidecar turn, which the abort already stops.
+      const conversationId = get().currentConversationId;
       activeRuntime(get()).abort?.abort();
+      if (conversationId) void stopConversation(conversationId);
       patchActive(() => ({ abort: null }));
       get().finalizeLastMessage();
       // Aborting cuts the stream before any `approval_resolved`, so a paused tool

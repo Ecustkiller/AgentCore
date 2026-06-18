@@ -457,6 +457,143 @@ export interface OutgoingAttachment {
 }
 
 /**
+ * Drain an SSE response body, routing every `data:` event through
+ * `dispatchSSEEvent`. Shared by the POST turn channel (send / regenerate /
+ * resume) and the GET re-attach channel (实时重连续看 C1 · slice 1b) — every SSE
+ * consumer folds events through the one dispatch, so a live stream, a reload, and
+ * a reconnect all rebuild identical state.
+ *
+ * Applies the idle stall watchdog: the backend heart-beats every ~15s while a
+ * turn thinks, so a live connection always delivers bytes; total silence for the
+ * timeout means the socket is dead (server / proxy dropped it), so we cancel and
+ * raise a retriable network error rather than hang. This is an *idle* timeout,
+ * never a total-duration cap — a long turn that keeps streaming (or just
+ * heart-beating) is never cut off.
+ */
+async function pumpSSE(
+  response: Response,
+  conversationId: string,
+): Promise<void> {
+  const reader = response.body?.getReader();
+  if (!reader) return;
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const IDLE_TIMEOUT_MS = 60_000;
+  const readChunk = (): ReturnType<typeof reader.read> =>
+    new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        // Free the dead socket so the backend sees the disconnect (and, for an
+        // attach, detaches again — the run keeps going regardless).
+        void reader.cancel().catch(() => {});
+        reject(new StreamError("network"));
+      }, IDLE_TIMEOUT_MS);
+      reader.read().then(
+        (r) => {
+          clearTimeout(timer);
+          resolve(r);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      );
+    });
+
+  while (true) {
+    const { done, value } = await readChunk();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const event = JSON.parse(line.slice(6)) as SSEEvent;
+        dispatchSSEEvent(event, { conversationId });
+      } catch {
+        /* malformed event — skip */
+      }
+    }
+  }
+}
+
+/** Outcome of a re-attach attempt (执行与请求解耦 C1 · slice 1b). */
+export type AttachOutcome =
+  /** A live run was found; its transcript replayed and the stream was followed
+   * (to `message_end`, or until the connection dropped — the caller distinguishes
+   * via the thrown error). */
+  | "attached"
+  /** No run is live for the conversation (204) — already finished / never started
+   * / suspended at a checkpoint. The caller falls back to the persisted transcript
+   * (reload) or durable resume. */
+  | "none";
+
+/**
+ * Re-attach to a conversation's in-flight turn and 续看 it live (C1 · slice 1b).
+ *
+ * Since a disconnect no longer cancels a turn (slice 1a — it runs detached +
+ * persists), a client that dropped (network blip) or reopened the app can rejoin
+ * the live run: the backend replays the transcript so far then tails new events,
+ * all in the SAME shape as the original stream, so they fold through the one
+ * `dispatchSSEEvent`. A pure observer — dropping it never cancels the run (an
+ * explicit 停止 still goes through the stop endpoint).
+ *
+ * Returns `"none"` on a 204 (nothing live to rejoin). Throws a {@link StreamError}
+ * on a transport drop while attached (retriable) or on auth — same contract as the
+ * POST channel, so callers reuse the existing retry classification.
+ */
+export async function attachConversation(
+  conversationId: string,
+  signal?: AbortSignal,
+): Promise<AttachOutcome> {
+  const doFetch = () =>
+    fetch(`${BASE_URL}/v1/conversations/${conversationId}/stream`, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "text/event-stream" },
+      signal,
+    });
+
+  try {
+    let response = await doFetch();
+    if (response.status === 401) {
+      if (await tryRefresh()) {
+        response = await doFetch();
+      }
+      if (response.status === 401) {
+        notifyUnauthorized();
+        throw new StreamError("auth");
+      }
+    }
+    // 204 = no live run to rejoin; let the caller reload the persisted transcript.
+    if (response.status === 204) return "none";
+    if (!response.ok) {
+      throw await streamErrorFromResponse(response);
+    }
+
+    await pumpSSE(response, conversationId);
+
+    // Stream ended without a terminal event while the turn still reads as
+    // generating: the run finished + closed between our attach and replay, or the
+    // connection dropped. Signal a retriable drop so the caller reloads / retries.
+    if (getRuntime(conversationId).isGenerating) {
+      throw new StreamError("network");
+    }
+    return "attached";
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    if (err instanceof StreamError) throw err;
+    throw new StreamError("network");
+  } finally {
+    flushPendingContent(conversationId);
+  }
+}
+
+/**
  * POST to an SSE endpoint and route every event through `dispatchSSEEvent`.
  *
  * Shared by send and regenerate: both are a POST returning `text/event-stream`.
@@ -504,56 +641,7 @@ async function runMessageStream(
       throw await streamErrorFromResponse(response);
     }
 
-    const reader = response.body?.getReader();
-    if (!reader) return;
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    // Stall watchdog. The backend sends a heartbeat comment every ~15s while a
-    // turn is thinking, so a live connection always keeps delivering bytes. If we
-    // receive nothing at all for this long the stream is dead (server/proxy
-    // dropped it) — abort and surface a retriable error instead of spinning
-    // forever. This is an *idle* timeout, never a total-duration cap: a long turn
-    // that keeps streaming (or just heart-beating) is never cut off.
-    const IDLE_TIMEOUT_MS = 60_000;
-    const readChunk = (): ReturnType<typeof reader.read> =>
-      new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          // Free the dead socket so the backend sees the disconnect and stops.
-          void reader.cancel().catch(() => {});
-          reject(new StreamError("network"));
-        }, IDLE_TIMEOUT_MS);
-        reader.read().then(
-          (r) => {
-            clearTimeout(timer);
-            resolve(r);
-          },
-          (e) => {
-            clearTimeout(timer);
-            reject(e);
-          },
-        );
-      });
-
-    while (true) {
-      const { done, value } = await readChunk();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const event = JSON.parse(line.slice(6)) as SSEEvent;
-          dispatchSSEEvent(event, { conversationId });
-        } catch {
-          /* malformed event — skip */
-        }
-      }
-    }
+    await pumpSSE(response, conversationId);
 
     // Stream closed without a terminal event (message_end / inline error) while
     // the turn still reads as generating: the backend never signalled completion,

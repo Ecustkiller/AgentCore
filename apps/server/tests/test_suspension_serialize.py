@@ -1,14 +1,14 @@
 """TurnSuspension JSON round-trip + capture helpers (结构化挂起 2b turn 级落盘).
 
-Pins the inert data layer that makes a plan_review / ask_user pause durable: a
-RunState seed, a RunPlan (with its already-minted run_ids), the scheduler
-completed-map, and each TurnSuspension subclass frame must round-trip losslessly
-through ``paused_turns.frame`` — dispatched back to the right kind by
-``suspension_from_json`` — so ``POST .../resume`` rebuilds the EXACT graph + CEO
-context it paused on. The frame holds resume CONTROL metadata only: the window-rebuild
-inputs (``transcript`` / ``history`` / ``journal`` / ``journal_entries``) are NOT
-serialized (执行级事件溯源 Phase 2 ⑤) — the CEO window is a projection of ``turn_journal``
-(+ reloaded history), rebuilt on claim, so these tests assert they DON'T survive to_json.
+Pins the inert data layer that makes a plan_review / ask_user pause durable: the
+serializers (RunState seed, RunPlan with minted run_ids, scheduler completed-map) still
+round-trip losslessly (they back the journal facts now), and each TurnSuspension subclass
+frame round-trips its CONTROL metadata — dispatched back to the right kind by
+``suspension_from_json``. The frame holds resume CONTROL metadata ONLY: the rebuild inputs
+(``transcript`` / ``history`` / ``journal`` / ``journal_entries`` — Phase 2 ⑤; ``plan`` /
+``completed`` — Phase 2) are NOT serialized — the CEO window, the DAG and the finished-worker
+seed are all projections of ``turn_journal`` (+ reloaded history), rebuilt on claim, so these
+tests assert they DON'T survive to_json.
 """
 
 from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
@@ -138,10 +138,12 @@ def test_turn_suspension_full_frame_round_trips():
     assert "transcript" not in frame.to_json()
     assert "history" not in frame.to_json()
     assert restored.transcript == []
-    # plan with minted ids survives (the WaveScheduler resume contract); the finished-worker
-    # ``completed`` seed is NOT serialized (Phase 2 ⑥) — resume re-projects it from the
-    # journal's run-final facts, so a claimed frame carries none.
-    assert [n.run_id for n in restored.plan.nodes] == ["del_abc_1", "del_abc_2"]
+    # NEITHER the ``plan`` (with minted ids) NOR the finished-worker ``completed`` seed is
+    # serialized (执行级事件溯源 Phase 2) — resume re-projects BOTH from the journal
+    # (``plan_from_journal`` / ``completed_from_journal``), so a claimed frame carries an
+    # empty plan placeholder + no completed.
+    assert "plan" not in frame.to_json()
+    assert restored.plan.nodes == []
     assert "completed" not in frame.to_json()
     assert restored.completed == {}
     # steps / pending carried for card re-render; the journal is NOT serialized into

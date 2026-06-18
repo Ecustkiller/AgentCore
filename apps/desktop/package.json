@@ -16,6 +16,7 @@
     "lint": "biome check src/",
     "lint:fix": "biome check --write src/",
     "test": "vitest",
+    "conformance": "vitest run src/renderer/protocol",
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript ../server/openapi.json -o src/renderer/types/api.generated.ts",
     "postinstall": "pnpm gen:api"

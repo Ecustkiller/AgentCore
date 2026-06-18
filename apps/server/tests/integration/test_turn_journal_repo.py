@@ -1,6 +1,6 @@
 """Turn Journal repository — the §18.3 fact stream survives a real Postgres round trip.
 
-The other half of the Phase 2 resume gate (执行级事件溯源落地设计.md §五「DB 往返」):
+The other half of the Phase 2 resume gate (执行级事件溯源 §18.3，DB 往返 golden):
 the conformance golden (``tests/test_pause_conformance.py``) proves the projection folds
 an in-memory journal back to the live transcript; this proves the journal itself survives
 ``TurnJournalRepository.record`` → ``load`` through PostgreSQL JSONB unchanged — so the

@@ -160,6 +160,23 @@ def generate_invite_code() -> str:
     return secrets.token_urlsafe(12)
 
 
+# A one-off password handed to a user after an admin reset. Readable (drops the
+# ambiguous 0/O/1/l/I) and long enough to clear the registration policy (≥8) with
+# margin, so it survives being copied out of the console and typed back in.
+_TEMP_PASSWORD_ALPHABET = (
+    "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+)
+_TEMP_PASSWORD_LENGTH = 14
+
+
+def generate_temp_password() -> str:
+    """Return a high-entropy, human-readable one-off password (admin reset)."""
+    return "".join(
+        secrets.choice(_TEMP_PASSWORD_ALPHABET)
+        for _ in range(_TEMP_PASSWORD_LENGTH)
+    )
+
+
 # --- Symmetric encryption (at-rest secrets: BYOK provider keys) ---
 # AES-256-GCM for encrypting user-supplied API keys before they touch the DB
 # (db/models.py UserLlmKey.api_key_enc). The plaintext key never lands on disk;

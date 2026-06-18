@@ -47,7 +47,12 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
 }
 
-const isAuthPath = (path: string): boolean => path.startsWith("/v1/auth/");
+// The credential/session endpoints whose 401 is *expected* (bad password, no
+// session yet) — they must NOT trigger the refresh-replay-then-logout flow.
+// `/v1/auth/invites` lives under the same prefix but is a protected admin
+// resource, so it gets the standard 401 handling like `/v1/admin/*`.
+const isAuthPath = (path: string): boolean =>
+  path.startsWith("/v1/auth/") && !path.startsWith("/v1/auth/invites");
 
 async function tryRefresh(): Promise<boolean> {
   try {

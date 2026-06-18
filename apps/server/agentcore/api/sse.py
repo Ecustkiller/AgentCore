@@ -28,7 +28,10 @@ def _format_sse(event: SSEEvent) -> str:
 
 
 async def _event_generator(
-    sink: EventSink, producer: asyncio.Task | None
+    sink: EventSink,
+    producer: asyncio.Task | None,
+    *,
+    detach_on_disconnect: bool = False,
 ) -> AsyncIterator[str]:
     try:
         while True:
@@ -45,27 +48,90 @@ async def _event_generator(
                 break
             yield _format_sse(event)
     except (asyncio.CancelledError, GeneratorExit):
-        # The client disconnected before the stream finished (e.g. the user hit
-        # "stop", which aborts the fetch). Cancel the detached producer so it
-        # stops burning tokens for a response nobody will read. Normal
-        # completion (sink closed by the pipeline) skips this branch, leaving
-        # any post-stream work — title/memory — to finish in the background.
-        if producer is not None and not producer.done():
+        # The client disconnected before the stream finished. Two policies:
+        #
+        # - detach_on_disconnect (chat turns, 执行与请求解耦 C1 · slice 1a): the run
+        #   is detached + tracked in the TurnRunRegistry, so a dropped connection
+        #   must NOT kill it (案例 1: 断连即丢交付). Detach the sink so the unread
+        #   queue stops growing; the run finishes + persists in the background, and
+        #   an explicit 停止 routes through POST .../stop instead.
+        # - else (handoff archive/dispatch/apply SSEs): cancel the producer so it
+        #   stops burning work for a response nobody will read.
+        #
+        # Normal completion (sink closed by the pipeline) skips this branch.
+        if detach_on_disconnect:
+            sink.detach()
+        elif producer is not None and not producer.done():
             producer.cancel()
         raise
 
 
 def sse_response(
-    sink: EventSink, *, producer: asyncio.Task | None = None
+    sink: EventSink,
+    *,
+    producer: asyncio.Task | None = None,
+    detach_on_disconnect: bool = False,
 ) -> StreamingResponse:
     """Create a StreamingResponse that consumes an EventSink.
 
-    ``producer`` is the background task feeding the sink. When provided, it is
-    cancelled if the client disconnects mid-stream, so server-side generation
-    stops together with the client instead of running on detached.
+    Two client-disconnect policies (mutually exclusive):
+
+    - ``producer`` (default): the background task feeding the sink is cancelled when
+      the client disconnects, so generation stops together with the client. Used by
+      the short handoff SSEs.
+    - ``detach_on_disconnect=True``: the run is decoupled from the request (执行与请求
+      解耦 C1 · slice 1a) — a disconnect only detaches the sink and the run keeps
+      going + persists in the background; cancellation is done explicitly via the
+      stop endpoint. Used by the chat-turn SSEs (send / regenerate / resume), which
+      register their task in the ``TurnRunRegistry`` instead of passing it here.
     """
     return StreamingResponse(
-        _event_generator(sink, producer),
+        _event_generator(sink, producer, detach_on_disconnect=detach_on_disconnect),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _attach_generator(sink: EventSink) -> AsyncIterator[str]:
+    """Replay a running turn's transcript, then tail it live (实时重连续看, C1 · 1b).
+
+    Used by the attach endpoint when a client re-connects to a still-running detached
+    run. ``take_over`` (synchronous) hands us the replay snapshot and re-arms the SSE
+    queue; we flush the snapshot, then drain new events exactly like the primary
+    generator (same heartbeat, same disconnect policy). Because the run is detached,
+    a disconnect here just detaches again — it never cancels the turn.
+    """
+    replay = sink.take_over()
+    try:
+        for event in replay:
+            yield _format_sse(event)
+        while True:
+            try:
+                event = await asyncio.wait_for(sink.get(), _HEARTBEAT_INTERVAL_S)
+            except TimeoutError:
+                yield ": ping\n\n"
+                continue
+            if event is None:
+                break
+            yield _format_sse(event)
+    except (asyncio.CancelledError, GeneratorExit):
+        sink.detach()
+        raise
+
+
+def sse_attach_response(sink: EventSink) -> StreamingResponse:
+    """Stream a re-attaching client the replay-then-tail of a live detached run (1b).
+
+    The run keeps executing independently (执行与请求解耦); this is a pure observer that
+    replays what the client missed and follows along, so dropping it again is harmless
+    (detach, never cancel — an explicit 停止 still goes through ``POST .../stop``).
+    """
+    return StreamingResponse(
+        _attach_generator(sink),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -590,6 +590,83 @@ describe("hydrateFromJournal (reload replay, §9.3)", () => {
     }
   });
 
+  it("reconstructs a worker's full output + thinking from synthesized deltas (deltas 退场)", () => {
+    // The backend no longer journals per-token run_output_delta / run_reasoning_delta.
+    // runs_from_entries synthesizes ONE of each per worker (from its message_final),
+    // reasoning before content, spliced just before run_completed — this is the exact
+    // event shape a reload now receives. The UNCHANGED fold must rebuild 思考全文 + 输出
+    // from it (the cross-layer 后端投影 ↔ 桌面 fold alignment that replaces the live
+    // delta stream on reload).
+    const synthesized: ExecutionJournal = {
+      finishReason: "stop",
+      events: [
+        {
+          type: "run_plan",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          payload: {
+            execution_id: "exec-1",
+            plan_type: "multi_agent",
+            task_summary: "T",
+            agents: [
+              { id: "agent-1", role: "研究员", model_preference: "strong" },
+            ],
+            runs: [
+              {
+                id: "run-1",
+                agent_id: "agent-1",
+                task: "研究",
+                depends_on: [],
+              },
+            ],
+          },
+        },
+        {
+          type: "run_started",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          payload: {
+            agent_id: "agent-1",
+            run_id: "run-1",
+            parent_run_id: null,
+            kind: "agent",
+          },
+        },
+        {
+          type: "run_reasoning_delta",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          payload: { run_id: "run-1", agent_id: "agent-1", delta: "完整思考" },
+        },
+        {
+          type: "run_output_delta",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          payload: { run_id: "run-1", agent_id: "agent-1", delta: "完整输出" },
+        },
+        {
+          type: "run_completed",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          payload: {
+            run_id: "run-1",
+            agent_id: "agent-1",
+            output_summary: "摘要",
+            duration_ms: 1000,
+          },
+        },
+      ],
+    };
+    store().hydrateFromJournal(MID, synthesized);
+    const r = rt();
+    const p = r.plan;
+    expect(p).toBeTruthy();
+    if (!p) return;
+    const exec = projectExecution(p, r.frames, r.status);
+    const agent = exec.agents.find((a) => a.id === "agent-1");
+    // Full output + thinking are reconstructed from the synthesized single-block deltas.
+    expect(agent?.outputChunks.join("")).toBe("完整输出");
+    expect(agent?.reasoningChunks.join("")).toBe("完整思考");
+    const run = exec.runs.find((s) => s.id === "run-1");
+    expect(run?.status).toBe("completed");
+    expect(run?.outputSummary).toBe("摘要");
+  });
+
   it("is idempotent — never clobbers an already-built (live) slot", () => {
     store().startExecution(plan, MID);
     store().recordFrame(started("agent-1", "run-1"), MID);

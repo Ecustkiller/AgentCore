@@ -13,9 +13,10 @@ union (base :class:`TurnSuspension` + :class:`PlanReviewSuspension` /
 - **plan_review** — the ``WaveScheduler`` paused at a wave boundary after a
   ``checkpoint_after`` step (inside ``delegate``). Resume re-drives the remaining
     plan tail, feeds the workers' product back as the suspended ``delegate`` tool
-  result, then continues the CEO loop. Carries the ``plan`` (with minted run_ids)
-  + the reviewed ``steps`` / gated ``pending`` (the finished-worker ``completed`` seed
-  is re-projected from the journal on resume, not serialized — Phase 2 ⑥).
+  result, then continues the CEO loop. Carries only the reviewed ``steps`` / gated
+  ``pending`` (display re-render): the ``plan`` (with minted run_ids) and the
+  finished-worker ``completed`` seed are BOTH re-projected from the journal on resume
+  (``plan_from_journal`` / ``completed_from_journal``), not serialized — 执行级事件溯源 Phase 2.
 - **ask_user** — the CEO paused mid-loop on its ``ask_user`` checkpoint (the one
   asking primitive — opening 引导 or mid-task fork). Resume maps the user's answer
   to the ``ask_user`` tool result and continues the CEO loop (no plan tail). Carries
@@ -209,14 +210,19 @@ class TurnSuspension:
 class PlanReviewSuspension(TurnSuspension):
     """A turn frozen at a ``plan_review`` checkpoint — the WaveScheduler resume substrate.
 
-    Adds the ``plan`` (with its already-minted run_ids); resume treats finished nodes as
-    done (re-seeded from the journal's run-final facts, ``completed_from_journal`` — NOT a
-    serialized blob, Phase 2 ⑥) and runs only the downstream tail; plus the reviewed
-    ``steps`` + gated ``pending`` so the card re-renders on reopen.
+    The ``plan`` (with its already-minted run_ids) and the finished-node ``completed`` seed
+    are BOTH rebuilt from the journal on resume (``plan_from_journal`` / ``completed_from_journal``
+    — NOT serialized blobs, 执行级事件溯源 Phase 2), so the resumed drive re-mints nothing and
+    runs only the downstream tail; only the reviewed ``steps`` + gated ``pending`` (the card's
+    display re-render on reopen) ride in the frame.
     """
 
     kind: ClassVar[SuspensionKind] = SuspensionKind.PLAN_REVIEW
 
+    # The delegate's DAG (with minted run_ids). An in-memory carrier ONLY (执行级事件溯源
+    # Phase 2, frame.plan 退场): NOT serialized — resume rebuilds it from the journal's
+    # ``plan_snapshot`` fact (``plan_from_journal``); the delegate captures it here live for
+    # the conformance golden. An empty RunPlan placeholder on a claimed frame.
     plan: RunPlan
     # run_id → finished RunState (the WaveScheduler ``seed_completed`` for resume). An
     # in-memory carrier ONLY (执行级事件溯源 Phase 2 ⑥): NOT serialized into the frame — resume
@@ -235,15 +241,14 @@ class PlanReviewSuspension(TurnSuspension):
         return {s["run_id"] for s in self.steps if "run_id" in s}
 
     def to_json(self) -> dict[str, Any]:
-        from agentcore.runtime.runs.serialize import plan_to_json
-
         data = self._base_json()
+        # NOTE: NEITHER ``plan`` NOR ``completed`` is serialized (执行级事件溯源 Phase 2): the
+        # delegate journals a ``plan_snapshot`` fact + a run-final fact per worker, so resume
+        # rebuilds both from the journal (``plan_from_journal`` / ``completed_from_journal``,
+        # gated by the conformance golden). Both stay in-memory carriers (the delegate captures
+        # them live for that golden) but off the frame — only the reviewed ``steps`` / gated
+        # ``pending`` (display re-render on reopen) ride along.
         data.update(
-            plan=plan_to_json(self.plan),
-            # NOTE: ``completed`` (the finished-worker seed map) is NOT serialized
-            # (执行级事件溯源 Phase 2 ⑥) — resume re-seeds it from the journal's run-final facts
-            # via ``completed_from_journal`` (gated by the conformance golden). Kept as an
-            # in-memory carrier (the delegate captures it for that golden) but off the frame.
             steps=list(self.steps),
             pending=list(self.pending),
         )
@@ -303,11 +308,13 @@ def suspension_from_json(data: dict[str, Any]) -> TurnSuspension:
             questions=list(data.get("questions") or []),
             style_options=list(data.get("style_options") or []),
         )
-    # NOTE: ``completed`` is NOT read from the frame (Phase 2 ⑥) — it defaults empty and is
-    # re-seeded from the journal's run-final facts (``completed_from_journal``) on resume.
+    # NOTE: NEITHER ``plan`` NOR ``completed`` is read from the frame (执行级事件溯源 Phase 2) —
+    # both default empty and are re-projected from the journal on resume (``plan_from_journal``
+    # / ``completed_from_journal``). ``plan_from_json({})`` yields an empty RunPlan placeholder
+    # (the field is required); the resume fold replaces it with the journaled DAG.
     return PlanReviewSuspension(
         **base,
-        plan=plan_from_json(data.get("plan") or {}),
+        plan=plan_from_json({}),
         steps=list(data.get("steps") or []),
         pending=list(data.get("pending") or []),
     )
