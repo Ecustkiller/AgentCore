@@ -6,6 +6,7 @@ import {
   Keyboard,
   type LucideIcon,
   Palette,
+  UserCog,
   Users,
 } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
@@ -34,6 +35,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "账户",
     items: [
+      { icon: UserCog, label: "账户设置", path: "/more/account" },
       { icon: Gauge, label: "用量", path: "/more/usage" },
       { icon: Users, label: "成员", path: "/more/members", adminOnly: true },
     ],

@@ -13,15 +13,22 @@ from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, Response
 
+from agentcore.api.account_cleanup import cleanup_account_resources
 from agentcore.api.dependencies import (
     ACCESS_TOKEN_COOKIE,
     AdminUser,
     AuthUser,
+    get_asset_storage,
     get_auth_service,
+    get_conversation_repo,
+    get_conversation_share_repo,
     get_messaging_service,
+    get_user_llm_key_repo,
 )
 from agentcore.api.schemas import (
+    ChangePasswordRequest,
     CreateInviteRequest,
+    DeleteAccountRequest,
     InviteListResponse,
     InviteResponse,
     LoginRequest,
@@ -30,6 +37,7 @@ from agentcore.api.schemas import (
     TokenRefreshRequest,
     TokenResponse,
     TokenRevokeRequest,
+    UpdateProfileRequest,
     UserResponse,
 )
 from agentcore.auth import AuthService, TokenPair
@@ -37,7 +45,13 @@ from agentcore.config import settings
 from agentcore.core.errors import AuthenticationError
 from agentcore.core.logging import get_logger
 from agentcore.db.models import Invite, User
+from agentcore.db.repositories import (
+    ConversationRepository,
+    ConversationShareRepository,
+    UserLlmKeyRepository,
+)
 from agentcore.messaging import MessagingService
+from agentcore.storage.assets import AssetStorage
 
 logger = get_logger(__name__)
 
@@ -51,15 +65,7 @@ RefreshCookie = Annotated[str | None, Cookie(alias=REFRESH_TOKEN_COOKIE)]
 
 
 def _user_response(user: User) -> UserResponse:
-    return UserResponse(
-        id=user.user_id,
-        username=user.username,
-        display_name=user.display_name,
-        email=user.email,
-        role=user.role,
-        created_at=user.created_at,
-        default_model_mode=user.default_model_mode,
-    )
+    return UserResponse.from_user(user)
 
 
 def _invite_status(invite: Invite, now: datetime) -> str:
@@ -229,6 +235,70 @@ async def token_revoke(
 @router.get("/me", response_model=UserResponse)
 async def me(user: AuthUser):
     return _user_response(user)
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    body: UpdateProfileRequest,
+    user: AuthUser,
+    service: AuthService = Depends(get_auth_service),
+):
+    """Edit the signed-in user's profile (个人资料编辑). PATCH semantics: only the fields
+    present in the body change — an explicit ``null`` email clears it, an omitted field
+    is left untouched (distinguished via ``model_fields_set``)."""
+    fields = body.model_dump(include=body.model_fields_set)
+    updated = await service.update_profile(user_id=user.user_id, **fields)
+    return _user_response(updated)
+
+
+@router.post("/change-password", response_model=StatusResponse)
+async def change_password(
+    body: ChangePasswordRequest,
+    user: AuthUser,
+    response: Response,
+    service: AuthService = Depends(get_auth_service),
+):
+    """Change the signed-in user's password (修改密码). All other devices are logged out
+    (their refresh families are revoked); this session is handed fresh cookies so the
+    active device stays signed in."""
+    tokens = await service.change_password(
+        user_id=user.user_id,
+        current_password=body.current_password,
+        new_password=body.new_password,
+    )
+    _set_auth_cookies(response, tokens)
+    return StatusResponse()
+
+
+@router.delete("/me", response_model=StatusResponse)
+async def delete_account(
+    body: DeleteAccountRequest,
+    user: AuthUser,
+    response: Response,
+    service: AuthService = Depends(get_auth_service),
+    conversations: ConversationRepository = Depends(get_conversation_repo),
+    shares: ConversationShareRepository = Depends(get_conversation_share_repo),
+    llm_keys: UserLlmKeyRepository = Depends(get_user_llm_key_repo),
+    assets: AssetStorage = Depends(get_asset_storage),
+):
+    """Self-service account deletion (注销账户). Verifies the password, then soft-deletes
+    + anonymizes the account and revokes all sessions. Cross-domain cleanup lives here
+    (outside the auth domain): soft-delete the user's conversations so the retention
+    sweeper reclaims their workspaces, revoke every public share link so no shared
+    snapshot outlives the account, drop the BYOK key so no ciphertext outlives the
+    account, and remove the avatar object. Finally clear this device's cookies."""
+    avatar_key = user.avatar_key  # captured before soft_delete nulls it
+    await service.delete_account(user_id=user.user_id, password=body.password)
+    await cleanup_account_resources(
+        user.user_id,
+        avatar_key=avatar_key,
+        conversations=conversations,
+        shares=shares,
+        llm_keys=llm_keys,
+        assets=assets,
+    )
+    _clear_auth_cookies(response)
+    return StatusResponse()
 
 
 @router.post("/invites", response_model=InviteResponse, status_code=201)

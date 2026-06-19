@@ -18,6 +18,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -55,6 +56,12 @@ class User(Base):
     )
     # Optional, reserved for future password recovery / OAuth.
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    # Object-storage key of the user's avatar (头像), e.g.
+    # ``avatars/<user_id>/<hash>.webp``; NULL = no avatar (UI shows the initial).
+    # Stores the storage key, not a URL — the served URL is derived at the API edge
+    # (UserResponse.avatar_url) so the backend stays agnostic of its public origin.
+    # The bytes live in object storage (storage/assets.py), never in the row.
+    avatar_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     role: Mapped[str] = mapped_column(
         String(20), default="user", server_default=text("'user'")
     )
@@ -82,6 +89,16 @@ class User(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    )
+    # Self-service account deletion (注销账户). NULL = live account; a timestamp marks
+    # a user-initiated deletion. On delete the row is soft-deleted + anonymized
+    # (username → "deleted_<id>", email → NULL) so the unique identifiers free up for
+    # re-registration, while the append-only cost ledger (不变量①) stays intact.
+    # Distinct from `status='disabled'` (admin-disabled, recoverable): a deleted
+    # account is terminal. `get_current_user` already refuses non-active users, so a
+    # deletion also sets status='disabled' to kill live tokens on the next request.
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 
@@ -359,6 +376,56 @@ class Message(Base):
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+# --- Conversation shares (公开只读分享链接: 对标 ChatGPT 分享) ---
+# A public, read-only link to a snapshot of a conversation. 分享 is an explicit,
+# opt-in action (隐私承诺: 分享 = 显式操作、操作前明示), so a row only exists once
+# the owner创建分享. The transcript is FROZEN into ``snapshot`` at share time
+# (所见即所享): the public page renders that copy, so later edits/deletes to the
+# live messages never leak into a shared link, and no future turns are exposed.
+# Content-only by design — the snapshot holds just role + content + timestamp, never
+# reasoning / cost / team graph / files (those are private). The row id doubles as
+# the unguessable URL token (uuid4 = 122 bits). Revoked (not hard-deleted) so a
+# killed link 404s immediately while the audit trail survives; cascade-revoked when
+# the conversation is deleted or the account is注销 (ownership lifecycle).
+
+
+class ConversationShare(Base):
+    __tablename__ = "conversation_shares"
+    __table_args__ = (
+        # The owner's "manage shares for this conversation" list.
+        Index("ix_conversation_shares_conversation", "conversation_id"),
+        # Account-注销 cascade revokes every share a user created.
+        Index("ix_conversation_shares_user", "user_id"),
+    )
+
+    # PK doubles as the public share token (uuid4, unguessable) — the public URL is
+    # ``/shared/<id>``. No separate token column needed (consistent with repo PKs).
+    id: Mapped[str] = mapped_column(
+        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
+    )
+    # The shared conversation + its owner (app-level FKs, per repo convention).
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
+    # Conversation title captured at share time (the public page heading), frozen
+    # alongside the transcript so a later rename doesn't change a live link.
+    title: Mapped[str] = mapped_column(String(500), server_default=text("''"))
+    # The frozen, content-only transcript: a list of {role, content, created_at(iso)}
+    # for the user/assistant turns at share time. Immutable — the public render reads
+    # this, never the live messages (所见即所享 + no future-turn leak).
+    snapshot: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    # Set when the owner revokes the link (or a cascade does); a revoked share 404s
+    # on the public page. Soft (not a row delete) so revocation is observable and the
+    # link can never silently reactivate.
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 
@@ -936,4 +1003,41 @@ class TurnMetricsRow(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
+    )
+
+
+class PushDeviceRow(Base):
+    """A mobile device's push token, per user (原生推送设备注册, 手机端落地设计 P2).
+
+    A Capacitor client registers its FCM token here so the backend can notify the user
+    when an agent needs them (a durable plan_review / ask_user pause) while the app is
+    backgrounded (SSE dropped). The ``token`` is globally unique — re-registering one
+    (token rotation, or the same device under a new login) MOVES it to the current user
+    (upsert on ``token``), so a token is never owned by two users. Unregistered on logout
+    and pruned automatically when FCM reports it stale (push.notify).
+    """
+
+    __tablename__ = "push_devices"
+    __table_args__ = (
+        CheckConstraint(
+            "platform in ('ios', 'android', 'web')", name="ck_push_devices_platform"
+        ),
+        # One row per device token (the upsert key); a token belongs to one user.
+        UniqueConstraint("token", name="uq_push_devices_token"),
+        # Fan-out lookup: a user's tokens when a push fires.
+        Index("ix_push_devices_user", "user_id"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
+    )
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
+    # The FCM registration token (long, opaque); Text since it has no fixed bound.
+    token: Mapped[str] = mapped_column(Text)
+    platform: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )

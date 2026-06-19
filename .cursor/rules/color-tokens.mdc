@@ -10,9 +10,9 @@ alwaysApply: false
 
 只用语义 token，颜色由主题统一定义。**禁止**硬编码任何具体颜色值。
 
-## 单一定义源
+## 单一定义源（桌面权威）
 
-所有 token 在 `apps/desktop/src/renderer/styles/globals.css` 的 `:root` / `.dark` 定义（**OKLCH**，hue 255 为品牌色），`@theme inline` 映射成 Tailwind 工具类。需要新颜色 → 先在这里加 token，不要就地造色。
+桌面所有 token 在 `apps/desktop/src/renderer/styles/globals.css` 的 `:root` / `.dark` 定义（**OKLCH**，hue 255 为品牌色），`@theme inline` 映射成 Tailwind 工具类。需要新颜色 → 先在这里加 token，不要就地造色。下方两张表（Tailwind 类名）均为桌面端；**手机端镜像见「跨端」一节**。
 
 ## 语义 token
 
@@ -37,6 +37,24 @@ alwaysApply: false
 | `completed` | `success`（绿） |
 | `failed` | `destructive`（红） |
 | 检查点 / 待裁决 | `warning`（琥珀） |
+
+## 跨端（桌面 + 手机）· 品牌不变量
+
+两端是同一产品。token 层唯一的**硬约束 = 跨端品牌不变量必须一致**：
+
+- **品牌色 hue 255**；状态色语义 hue 固定：成功 152 / 警告 65 / 错误 27 / 信息·品牌 255。精确 L/C 值以桌面 `globals.css` 为准（**不要在第三处再抄一份 OKLCH 数值**）：桌面有 `:root`（浅色）+ `.dark`（深色）两套；**手机端仅浅色**，只镜像 `:root` 那套值。
+- 改品牌 / 状态色 → **桌面 + 手机两处都改**（桌面 `globals.css`、手机 `apps/mobile/src/styles.css`）。
+- **手机端暂不做暗色模式**（明确决策，非待办）：手机端是桌面减能力层的瘦客户端，浅色已满足当前需求，暗色为纯增量样式、需要再单独决策。故手机 `styles.css` 只维护 `:root` 一套浅色值、**不引入 `.dark` / `prefers-color-scheme` 分支**；桌面 `.dark` 不要求手机镜像。
+
+实现方式两端不同（各自全新建，符合 `cross-platform-frontend`）：
+
+| 端 | 配色实现 |
+|---|---|
+| 桌面 | Tailwind v4 + `globals.css` 的 `:root`/`.dark` + `@theme inline`（上面两表的类名即桌面） |
+| 手机 | 无 Tailwind；自有 `styles.css` 的 `:root`，**用途名**（`--bg`/`--panel`/`--accent`…，按用途而非同名映射桌面语义）+ 裸 `var(--*)`；值**手工镜像桌面 `:root`（浅色）OKLCH**，**仅浅色**（见上：手机暂不做暗色） |
+
+- 手机 `:root` 那套 OKLCH 字面量是 `packages/design-tokens` 提取前的**接受态**，不算违反「禁硬编码」（是语义 OKLCH 值、非 `bg-blue-500` 式散色）。
+- **真正的共享单源 `packages/design-tokens` 提取推迟到 M1（桌面入 workspace）/ M6–M7（手机 palette 定稿）**；在此之前手机手工镜像、漂移靠肉眼兜（色彩漂移便宜、一眼可见，非静默 bug）。背景见 [`手机端落地设计 §四/§十`](/docs/07-规划/手机端落地设计.md)。
 
 ## 禁止
 

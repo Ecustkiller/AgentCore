@@ -14,12 +14,14 @@ import {
 import type { FileSource } from "@/lib/fileSource";
 import { api } from "@/services/api";
 import { markCloudEscapeConversation } from "@/services/defaultWorkspace";
+import { dispatchHandoffJob } from "@/services/handoff";
 import { loadLatestWindow } from "@/services/messages";
 import { createLocalRootSource } from "@/services/sources/localRootSource";
 import { createCloudWorkspaceSource } from "@/services/sources/workspaceSource";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import { getWorkspaceBinding } from "@/services/workspaceBinding";
+import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { useComposerDraftStore } from "@/stores/composer";
 import {
   getActiveRuntime,
@@ -27,7 +29,7 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
-import { Folder, Paperclip, Send, Square, X } from "lucide-react";
+import { Cloud, CloudUpload, Folder, Paperclip, Send, Square, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MentionMenu } from "./MentionMenu";
@@ -148,6 +150,10 @@ export function MessageInput() {
   const addMessage = useConversationStore((s) => s.addMessage);
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const navigate = useNavigate();
+  // 后台云端任务（交接「方案 B」）：本地模式对话才显示「后台」开关；开启后发送即把任务
+  // 交给云端团队后台跑（dispatchHandoffJob），而非普通发消息。
+  const [isLocal, setIsLocal] = useState(false);
+  const [backgroundMode, setBackgroundMode] = useState(false);
 
   // ---- @ 提及 / 文件浏览菜单 ----
   const [menuMode, setMenuMode] = useState<MenuMode>(null);
@@ -232,6 +238,31 @@ export function MessageInput() {
     setDirIndex([]);
     setSourceCount(0);
     sourcesRef.current = new Map();
+  }, [conversationId]);
+
+  // Resolve cloud/local for the 「后台云端」 entry (shared via the backgroundTasks
+  // store so the timeline feed reuses the same binding lookup). Cloud / drafts hide
+  // the entry; leaving local mode also disarms any armed background mode.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is the intentional re-run key — re-resolve the mode whenever the active conversation changes.
+  useEffect(() => {
+    if (!conversationId) {
+      setIsLocal(false);
+      setBackgroundMode(false);
+      return;
+    }
+    let cancelled = false;
+    void useBackgroundTasksStore
+      .getState()
+      .ensureMode(conversationId)
+      .then((mode) => {
+        if (cancelled) return;
+        const local = mode === "local";
+        setIsLocal(local);
+        if (!local) setBackgroundMode(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [conversationId]);
 
   const closeMenu = useCallback(() => {
@@ -465,9 +496,54 @@ export function MessageInput() {
     useConversationStore.getState().stopGeneration();
   }, []);
 
+  // 把一条任务派发为后台云端任务（交接「方案 B」/ P2e e2）：先乐观落一张「派发中」卡进
+  // 时间线，再经 dispatchHandoffJob 走 e1 打包 + 起云端作业；成功后拉权威列表换掉乐观项，
+  // 失败则把这张卡就地标红——全程不阻塞输入框（用户可继续聊）。
+  const dispatchBackgroundTask = useCallback((convId: string, task: string) => {
+    const store = useBackgroundTasksStore.getState();
+    const tempId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const base = {
+      id: tempId,
+      sourceConversationId: convId,
+      jobConversationId: "",
+      baseSnapshotId: "",
+      resultSnapshotId: null as string | null,
+      task,
+      createdAt: now,
+      finishedAt: null as string | null,
+    };
+    store.upsert(convId, {
+      ...base,
+      status: "pending",
+      error: null,
+      updatedAt: now,
+    });
+    void dispatchHandoffJob(convId, task)
+      .then(() => store.load(convId))
+      .catch((err) => {
+        store.upsert(convId, {
+          ...base,
+          status: "failed",
+          error: err instanceof Error ? err.message : "派发失败",
+          updatedAt: new Date().toISOString(),
+        });
+      });
+  }, []);
+
   const handleSend = useCallback(async () => {
     const trimmed = value.trim();
     if (!trimmed || isGenerating) return;
+
+    // 后台云端任务分支：本地模式 + 开关开启时，交给云端团队后台跑，不走普通发送。
+    // 开关只在已落库的本地对话出现，故此处必有 conversationId。
+    const activeConvId = useConversationStore.getState().currentConversationId;
+    if (backgroundMode && isLocal && activeConvId) {
+      dispatchBackgroundTask(activeConvId, trimmed);
+      setValue("");
+      closeMenu();
+      return;
+    }
 
     const pending = attachments;
     const store = useConversationStore.getState();
@@ -574,7 +650,17 @@ export function MessageInput() {
       attachments: outgoing,
       optimisticUserId: userMsgId,
     });
-  }, [value, attachments, isGenerating, addMessage, navigate, closeMenu]);
+  }, [
+    value,
+    attachments,
+    isGenerating,
+    addMessage,
+    navigate,
+    closeMenu,
+    backgroundMode,
+    isLocal,
+    dispatchBackgroundTask,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -727,7 +813,11 @@ export function MessageInput() {
               e.currentTarget.selectionStart ?? 0,
             )
           }
-          placeholder="输入消息，@ 引用文件…"
+          placeholder={
+            backgroundMode
+              ? "描述要交给云端团队后台完成的任务…"
+              : "输入消息，@ 引用文件…"
+          }
           disabled={isGenerating}
           className="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
           rows={1}
@@ -747,6 +837,30 @@ export function MessageInput() {
             >
               <Paperclip size={16} />
             </button>
+            {isLocal && (
+              <SimpleTooltip
+                label={
+                  backgroundMode
+                    ? "已切到「后台云端」：发送会把任务交给云端团队后台跑"
+                    : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => setBackgroundMode((v) => !v)}
+                  disabled={isGenerating}
+                  aria-label="切换后台云端任务"
+                  aria-pressed={backgroundMode}
+                  className={`flex size-8 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-40 ${
+                    backgroundMode
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  <Cloud size={16} />
+                </button>
+              </SimpleTooltip>
+            )}
           </div>
           <div className="flex items-center gap-3">
             {charCount > 0 && (
@@ -767,9 +881,14 @@ export function MessageInput() {
                 type="button"
                 onClick={handleSend}
                 disabled={!value.trim()}
+                aria-label={backgroundMode ? "派发到云端后台" : "发送"}
                 className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
               >
-                <Send size={14} />
+                {backgroundMode ? (
+                  <CloudUpload size={14} />
+                ) : (
+                  <Send size={14} />
+                )}
               </button>
             )}
           </div>

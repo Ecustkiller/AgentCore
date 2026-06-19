@@ -7,7 +7,11 @@ from typing import Any
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.builtin.web._net import describe_net_error, site_of
-from agentcore.tools.builtin.web.search_backend import get_search_backend
+from agentcore.tools.builtin.web.search_backend import SearchResult, get_search_backend
+from agentcore.tools.builtin.web.search_cache import (
+    SearchCacheEntry,
+    default_search_cache_registry,
+)
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
 logger = get_logger(__name__)
@@ -65,6 +69,24 @@ class WebSearchTool:
         except (TypeError, ValueError):
             max_results = _DEFAULT_MAX_RESULTS
 
+        # Conversation-scoped result cache (案例1 #5 检索去重 / 共享检索缓存): a repeat of
+        # the same query within the conversation — including across delegated workers,
+        # which share the conversation_id — is served from memory instead of re-hitting
+        # SearXNG/Tavily, cutting duplicate searches that pressure the shared instance.
+        # Unscoped call sites (conversation_id == "") skip the cache entirely.
+        cache = (
+            default_search_cache_registry().get_or_create(context.conversation_id)
+            if context.conversation_id
+            else None
+        )
+        if cache is not None:
+            hit = cache.get(query, min_results=max_results)
+            if hit is not None:
+                logger.info(
+                    "tool.web_search_cache_hit", query=query, result_count=len(hit.results)
+                )
+                return self._success_result(query, hit.results, start, cached=True)
+
         try:
             backend = get_search_backend()
             results = await backend.search(query, max_results=max_results)
@@ -81,6 +103,29 @@ class WebSearchTool:
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
+        # Cache only successful, non-empty result sets — an empty result is left to
+        # re-search (it may have been a transient miss), mirroring read_url's
+        # "only cache successful fetches" rule.
+        if cache is not None and results:
+            cache.put(
+                SearchCacheEntry(
+                    query=query,
+                    results=results,
+                    max_results=max_results,
+                    stored_at=time.time(),
+                )
+            )
+        return self._success_result(query, results, start, cached=False)
+
+    def _success_result(
+        self,
+        query: str,
+        results: list[SearchResult],
+        start: float,
+        *,
+        cached: bool,
+    ) -> ToolResult:
+        """Build the (identical-shape) success ToolResult for a live or cached hit."""
         items = [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
         output = json.dumps({"query": query, "results": items}, ensure_ascii=False)
         citations = [
@@ -98,13 +143,16 @@ class WebSearchTool:
                 for r in results
             ],
         }
+        metadata: dict[str, Any] = {"result_count": len(items)}
+        if cached:
+            metadata["cached"] = True
         return ToolResult(
             tool_call_id="",
             success=True,
             output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
             output_limit=_OUTPUT_LIMIT,
-            metadata={"result_count": len(items)},
+            metadata=metadata,
             citations=citations or None,
             display=display,
         )

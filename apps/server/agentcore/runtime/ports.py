@@ -2,8 +2,10 @@
 
 The engine runs the SAME code locally and in the cloud; everything host-specific is
 injected behind a port. This module is the in-code mirror of 执行引擎架构设计 §18.6 —
-a single catalog of the seams a future Sidecar (07-规划/远期规划 §一.1) would swap
-for local implementations (SQLite / in-memory / in-proc).
+a single catalog of the seams a fully-offline Sidecar (07-规划/远期规划 §一.1 完全离线)
+would swap for local implementations (SQLite / in-memory / in-proc). The Sidecar itself
+has landed (hybrid: local engine, cloud persistence/billing — see 双模式工作区 §十); these
+ports go local only when offline drives it.
 
 Landed as Protocols here:
 
@@ -19,8 +21,8 @@ Landed as Protocols here:
   ``db.repositories.TurnJournalRepository``; the ``runs``↔facts transform lives in
   ``runtime/journal.py``.
 
-The remaining §18.6 ports stay as their concrete implementations until the Sidecar
-work (07-规划/远期规划 §一.1) needs them swappable — Protocol-izing them now, with
+The remaining §18.6 ports stay as their concrete implementations until 完全离线
+(07-规划/远期规划 §一.1) needs them swappable — Protocol-izing them now, with
 no second implementation to satisfy, would be premature abstraction:
 
 - InferenceGateway → ``llm`` provider (``llm/factory.build_provider`` → DeepSeekProvider)

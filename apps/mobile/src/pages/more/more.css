@@ -1,0 +1,339 @@
+/* Settings (设置/更多) — feature-scoped styles, layered over the global tokens +
+   base classes in styles.css. Co-located so this batch never touches the shared
+   stylesheet (keeps cross-batch edits collision-free). Light theme only (手机端暂不做暗色). */
+
+/* Hub identity header — avatar/initial + name. */
+.more-ident {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.more-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.more-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.more-ident-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.more-name {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.more-sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Hub nav rows. */
+.more-group {
+  padding: 8px;
+}
+
+.more-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 12px 14px;
+  text-align: left;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 400;
+}
+
+.more-row:active {
+  background: var(--panel);
+}
+
+.more-row-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.more-row-chevron {
+  flex-shrink: 0;
+  font-size: 18px;
+  color: var(--muted);
+}
+
+.more-row-danger {
+  color: var(--error);
+}
+
+/* Sub-page scroll body. */
+.settings-body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px;
+}
+
+.settings-desc {
+  margin: 0 0 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* A titled block: heading + card surface. */
+.section {
+  margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.section-title.danger {
+  color: var(--error);
+}
+
+.section-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.section-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.section-card.danger {
+  border-color: var(--warning-border);
+}
+
+/* Labelled field. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.field input:disabled {
+  opacity: 0.6;
+}
+
+.field-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Secondary (outline) button used across settings. */
+.btn-outline {
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.btn-danger {
+  color: #fff;
+  background: var(--error);
+}
+
+.btn-danger-outline {
+  color: var(--error);
+  background: transparent;
+  border: 1px solid var(--warning-border);
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Reveal-key input pairing. */
+.key-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.key-input-wrap input {
+  width: 100%;
+  padding-right: 56px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+.key-reveal {
+  position: absolute;
+  right: 6px;
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+}
+
+.masked-key {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 15px;
+}
+
+/* Status pill for the key connectivity result. */
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.status-ok {
+  color: var(--success);
+}
+.status-err {
+  color: var(--error);
+}
+.status-idle {
+  color: var(--muted);
+}
+
+.ext-link {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* Usage dashboard. */
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.meter-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.meter-pct {
+  color: var(--muted);
+}
+
+.meter-pct.near {
+  color: var(--warning);
+}
+
+.meter-track {
+  height: 8px;
+  overflow: hidden;
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.meter-fill.near {
+  background: var(--warning);
+}
+
+.meter-cap {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.payroll {
+  margin-top: 8px;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.payroll-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  font-size: 14px;
+}
+
+.payroll-row + .payroll-row {
+  border-top: 1px solid var(--border);
+}
+
+.payroll-turns {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.payroll-cost {
+  font-variant-numeric: tabular-nums;
+}
+
+.about-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.about-label {
+  width: 72px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.about-value {
+  color: var(--fg);
+}
+
+.about-value.mono {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}

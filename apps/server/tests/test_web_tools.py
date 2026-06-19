@@ -35,10 +35,18 @@ from agentcore.tools.builtin.web.read_url import (
     _URLBlock,
 )
 from agentcore.tools.builtin.web.search import WebSearchTool
+from agentcore.tools.builtin.web import search_cache as search_cache_mod
 from agentcore.tools.builtin.web.search_backend import (
+    FallbackSearchBackend,
     SearchResult,
     SearXNGBackend,
+    TavilyBackend,
     _parse_results,
+)
+from agentcore.tools.builtin.web.search_cache import (
+    ConversationSearchCache,
+    SearchCacheEntry,
+    SearchCacheRegistry,
 )
 from agentcore.tools.builtin.web.url_cache import (
     ConversationUrlCache,
@@ -542,6 +550,343 @@ async def test_web_search_fast_fails_when_circuit_open(monkeypatch):
     assert result.success is False
     assert "熔断" in result.error
     assert result.duration_ms < 500
+
+
+# --- search_backend: Tavily fallback leg ---
+
+
+async def test_tavily_backend_parses_results_and_sends_bearer(monkeypatch):
+    # Tavily's result objects share SearXNG's title/url/content shape, so the same
+    # _parse_results handles both. Verify the request carries the Bearer key + query.
+    captured: dict = {}
+    req = httpx.Request("POST", "https://api.tavily.com/search")
+    payload = {
+        "results": [
+            {"title": "T1", "url": "https://a.com", "content": "snip a", "score": 0.9},
+            {"title": "T2", "url": "https://b.com", "content": "snip b", "score": 0.8},
+        ]
+    }
+
+    class _Client:
+        async def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return httpx.Response(200, json=payload, request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
+
+    backend = TavilyBackend(api_key="tvly-test", base_url="https://api.tavily.com")
+    results = await backend.search("深圳天气", max_results=2)
+
+    assert [(r.title, r.url, r.snippet) for r in results] == [
+        ("T1", "https://a.com", "snip a"),
+        ("T2", "https://b.com", "snip b"),
+    ]
+    assert captured["url"] == "https://api.tavily.com/search"
+    assert captured["headers"]["Authorization"] == "Bearer tvly-test"
+    assert captured["json"]["query"] == "深圳天气"
+    assert captured["json"]["max_results"] == 2
+
+
+async def test_tavily_backend_requires_api_key():
+    # Defensive: an unconfigured Tavily leg fails honestly rather than calling the API.
+    backend = TavilyBackend(api_key="", base_url="https://api.tavily.com")
+    with pytest.raises(EgressError, match="API key"):
+        await backend.search("q")
+
+
+async def test_tavily_backend_raises_on_http_error(monkeypatch):
+    req = httpx.Request("POST", "https://api.tavily.com/search")
+
+    class _Client:
+        async def post(self, *args, **kwargs):
+            return httpx.Response(401, request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
+    backend = TavilyBackend(api_key="tvly-bad", base_url="https://api.tavily.com")
+    with pytest.raises(httpx.HTTPStatusError):
+        await backend.search("q")
+
+
+class _StubBackend:
+    """Minimal SearchBackend: returns canned results or raises a canned error."""
+
+    def __init__(self, results=None, exc=None):
+        self._results = results or []
+        self._exc = exc
+        self.calls = 0
+
+    async def search(self, query, max_results=5):
+        self.calls += 1
+        if self._exc is not None:
+            raise self._exc
+        return self._results
+
+
+async def test_fallback_uses_primary_on_success():
+    # A successful primary never touches the fallback (no per-query Tavily cost).
+    primary = _StubBackend(results=[SearchResult("P", "https://p.com", "ps")])
+    fallback = _StubBackend(results=[SearchResult("F", "https://f.com", "fs")])
+    results = await FallbackSearchBackend(primary, fallback).search("q")
+
+    assert [r.url for r in results] == ["https://p.com"]
+    assert primary.calls == 1
+    assert fallback.calls == 0
+
+
+async def test_fallback_switches_on_primary_failure():
+    # The 案例1 mode: SearXNG breaker open → retry once via Tavily.
+    primary = _StubBackend(exc=EgressError("熔断"))
+    fallback = _StubBackend(results=[SearchResult("F", "https://f.com", "fs")])
+    results = await FallbackSearchBackend(primary, fallback).search("q")
+
+    assert [r.url for r in results] == ["https://f.com"]
+    assert primary.calls == 1 and fallback.calls == 1
+
+
+async def test_fallback_surfaces_primary_error_when_both_fail():
+    # Both down → the PRIMARY's (already-tuned, honest) reason is what the model sees.
+    primary = _StubBackend(exc=EgressError("主熔断信息"))
+    fallback = _StubBackend(exc=httpx.ConnectError("tavily down"))
+
+    with pytest.raises(EgressError, match="主熔断信息"):
+        await FallbackSearchBackend(primary, fallback).search("q")
+
+
+async def test_fallback_aclose_closes_both_legs():
+    closed: list[str] = []
+
+    class _Closeable(_StubBackend):
+        def __init__(self, name):
+            super().__init__()
+            self._name = name
+
+        async def aclose(self):
+            closed.append(self._name)
+
+    await FallbackSearchBackend(_Closeable("p"), _Closeable("f")).aclose()
+    assert sorted(closed) == ["f", "p"]
+
+
+def test_get_search_backend_is_bare_searxng_without_tavily(monkeypatch):
+    monkeypatch.setattr(search_backend_mod, "_backend", None)
+    monkeypatch.setattr(search_backend_mod.settings, "tavily_api_key", "")
+    assert isinstance(search_backend_mod.get_search_backend(), SearXNGBackend)
+
+
+def test_get_search_backend_wraps_fallback_when_tavily_configured(monkeypatch):
+    monkeypatch.setattr(search_backend_mod, "_backend", None)
+    monkeypatch.setattr(search_backend_mod.settings, "tavily_api_key", "tvly-x")
+    backend = search_backend_mod.get_search_backend()
+    assert isinstance(backend, FallbackSearchBackend)
+    assert isinstance(backend.primary, SearXNGBackend)
+    assert isinstance(backend.fallback, TavilyBackend)
+
+
+async def test_probe_unwraps_fallback_to_probe_searxng_primary(monkeypatch):
+    # With Tavily configured the active backend is the wrapper; probe must still
+    # reach the SearXNG primary behind it (Tavily has nothing SearXNG-specific).
+    monkeypatch.setattr(search_backend_mod, "_backend", None)
+    monkeypatch.setattr(search_backend_mod.settings, "tavily_api_key", "tvly-x")
+    req = httpx.Request("GET", "http://localhost:18888/healthz")
+
+    class _OkClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, *args, **kwargs):
+            return httpx.Response(200, text="OK", request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _OkClient())
+    assert await search_backend_mod.probe_search_backend() == (True, "http://localhost:18888")
+
+
+async def test_aclose_search_backend_closes_and_resets(monkeypatch):
+    closed = {"n": 0}
+
+    class _Closeable:
+        async def search(self, *a, **k):
+            return []
+
+        async def aclose(self):
+            closed["n"] += 1
+
+    monkeypatch.setattr(search_backend_mod, "_backend", _Closeable())
+    await search_backend_mod.aclose_search_backend()
+    assert closed["n"] == 1
+    assert search_backend_mod._backend is None
+
+
+# --- search_cache: web_search conversation result cache (案例1 #5 检索去重) ---
+
+
+def _sresult(url: str, title: str = "T", snippet: str = "s") -> SearchResult:
+    return SearchResult(title=title, url=url, snippet=snippet)
+
+
+def _sentry(query: str, results, *, max_results: int = 8, stored_at=None) -> SearchCacheEntry:
+    return SearchCacheEntry(
+        query=query,
+        results=results,
+        max_results=max_results,
+        stored_at=time.time() if stored_at is None else stored_at,
+    )
+
+
+def test_search_cache_get_put_and_key_normalization():
+    cache = ConversationSearchCache()
+    cache.put(_sentry("Hello World", [_sresult("https://a.com")]))
+    # trimmed + lowercased + whitespace-collapsed normalises to the same key
+    assert cache.get("  hello   world ", min_results=1) is not None
+    assert "HELLO world" in cache
+    assert cache.get("other", min_results=1) is None
+
+
+def test_search_cache_capped_entry_needs_refetch_for_more():
+    cache = ConversationSearchCache()
+    # returned exactly the cap (5) → more results may exist upstream
+    cache.put(_sentry("q", [_sresult(f"https://a/{i}") for i in range(5)], max_results=5))
+    assert cache.get("q", min_results=5) is not None  # enough captured
+    assert cache.get("q", min_results=8) is None  # wants more than the capped set
+
+
+def test_search_cache_under_cap_entry_serves_any_request():
+    cache = ConversationSearchCache()
+    # backend returned fewer (2) than the cap (8) → that's everything it had
+    cache.put(_sentry("q", [_sresult("https://a/1"), _sresult("https://a/2")], max_results=8))
+    assert cache.get("q", min_results=50) is not None
+
+
+def test_search_cache_expires_after_ttl():
+    cache = ConversationSearchCache(ttl_seconds=10.0)
+    cache.put(_sentry("q", [_sresult("https://a")], stored_at=time.time() - 100))
+    assert cache.get("q", min_results=1) is None
+
+
+def test_search_cache_lru_evicts_over_count():
+    cache = ConversationSearchCache(max_entries=2)
+    for i in range(3):
+        cache.put(_sentry(f"q{i}", [_sresult(f"https://s{i}.com")]))
+    assert len(cache) == 2
+    assert "q0" not in cache  # oldest evicted
+    assert "q2" in cache
+
+
+def test_search_cache_lru_evicts_over_bytes():
+    cache = ConversationSearchCache(max_bytes=60)
+    cache.put(_sentry("q0", [_sresult("https://a.com", snippet="x" * 30)]))
+    cache.put(_sentry("q1", [_sresult("https://b.com", snippet="y" * 30)]))  # total > 60
+    assert "q0" not in cache  # oldest evicted to fit the byte budget
+    assert "q1" in cache
+
+
+def test_search_cache_registry_scopes_per_conversation():
+    reg = SearchCacheRegistry()
+    c1 = reg.get_or_create("c1")
+    c2 = reg.get_or_create("c2")
+    assert c1 is not c2
+    assert reg.get_or_create("c1") is c1
+
+
+def test_search_cache_registry_caps_conversation_count_lru():
+    reg = SearchCacheRegistry(max_conversations=2)
+    reg.get_or_create("a")
+    reg.get_or_create("b")
+    reg.get_or_create("c")
+    assert len(reg) == 2
+    assert "a" not in reg  # LRU-evicted
+    assert "c" in reg
+
+
+def test_search_cache_registry_reaps_idle_conversation():
+    reg = SearchCacheRegistry(conversation_ttl_seconds=10.0)
+    idle = reg.get_or_create("idle")
+    idle.last_access = time.time() - 100  # force past the idle window
+    reg.get_or_create("fresh")  # creation triggers idle reaping
+    assert "idle" not in reg
+    assert "fresh" in reg
+
+
+async def test_web_search_caches_within_conversation(monkeypatch):
+    monkeypatch.setattr(search_cache_mod, "_registry", SearchCacheRegistry())
+    calls = {"n": 0}
+
+    class _Backend:
+        async def search(self, query, max_results=5):
+            calls["n"] += 1
+            return [SearchResult("标题", "https://a.com", "摘要")]
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    ctx = _ctx(conversation_id="conv-search-cache")
+    tool = WebSearchTool()
+    r1 = await tool.execute({"query": "深圳天气"}, ctx)
+    r2 = await tool.execute({"query": "  深圳天气 "}, ctx)  # normalises to the same key
+
+    assert r1.success and r2.success
+    assert calls["n"] == 1  # second served from cache, no re-search
+    assert r1.metadata.get("cached") is not True
+    assert r2.metadata.get("cached") is True
+    assert r2.output == r1.output  # cached hit has the identical result shape
+
+
+async def test_web_search_skips_cache_without_conversation(monkeypatch):
+    monkeypatch.setattr(search_cache_mod, "_registry", SearchCacheRegistry())
+    calls = {"n": 0}
+
+    class _Backend:
+        async def search(self, query, max_results=5):
+            calls["n"] += 1
+            return [SearchResult("t", "https://a.com", "s")]
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    tool = WebSearchTool()
+    await tool.execute({"query": "q"}, _ctx())  # conversation_id == "" → no caching
+    await tool.execute({"query": "q"}, _ctx())
+    assert calls["n"] == 2
+
+
+async def test_web_search_empty_results_not_cached(monkeypatch):
+    monkeypatch.setattr(search_cache_mod, "_registry", SearchCacheRegistry())
+    calls = {"n": 0}
+
+    class _Backend:
+        async def search(self, query, max_results=5):
+            calls["n"] += 1
+            return []  # empty → not cached, left to re-search
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    ctx = _ctx(conversation_id="conv-empty")
+    tool = WebSearchTool()
+    await tool.execute({"query": "q"}, ctx)
+    await tool.execute({"query": "q"}, ctx)
+    assert calls["n"] == 2
+
+
+async def test_web_search_cache_refetches_when_more_results_needed(monkeypatch):
+    monkeypatch.setattr(search_cache_mod, "_registry", SearchCacheRegistry())
+    calls = {"n": 0}
+
+    class _Backend:
+        async def search(self, query, max_results=5):
+            calls["n"] += 1
+            # always return exactly max_results (capped) → "more may exist"
+            return [SearchResult(f"t{i}", f"https://a.com/{i}", "s") for i in range(max_results)]
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    ctx = _ctx(conversation_id="conv-more")
+    tool = WebSearchTool()
+    await tool.execute({"query": "q", "max_results": 3}, ctx)
+    assert calls["n"] == 1
+    # wants MORE than the capped cached set → re-search with the bigger budget
+    await tool.execute({"query": "q", "max_results": 8}, ctx)
+    assert calls["n"] == 2
+    # now 8 are cached → a <=8 request hits without re-searching
+    await tool.execute({"query": "q", "max_results": 5}, ctx)
+    assert calls["n"] == 2
 
 
 # --- ToolResult.output_limit ---

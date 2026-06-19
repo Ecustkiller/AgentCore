@@ -9,6 +9,9 @@ export interface AuthUser {
   /** The user's account-default 质量档 (D2); null = inherit the operator default.
    * The settings page reads/writes this; the modes store carries the resolved one. */
   defaultModelMode: string | null;
+  /** Ready-to-render avatar URL (头像), already absolute (services/auth resolves the
+   * backend's relative path against the API base); null = no avatar, show the initial. */
+  avatarUrl: string | null;
 }
 
 /**

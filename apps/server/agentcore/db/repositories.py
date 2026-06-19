@@ -10,6 +10,7 @@ Each repository handles CRUD for a single model.
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from sqlalchemy import (
     BigInteger,
@@ -33,6 +34,7 @@ from agentcore.db.models import (
     ChatMember,
     ChatMessage,
     Conversation,
+    ConversationShare,
     CostEvent,
     Credentials,
     Folder,
@@ -41,6 +43,7 @@ from agentcore.db.models import (
     Message,
     ModelMode,
     PausedTurnRow,
+    PushDeviceRow,
     RefreshToken,
     RunSessionRow,
     TurnJournalRow,
@@ -84,6 +87,17 @@ class UserRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_email(self, email: str) -> User | None:
+        """Find an account by exact email (case-insensitive) — the uniqueness
+        pre-check for profile edits (个人资料编辑). ``email`` is a unique column, so a
+        non-None match identifies the sole holder; the service rejects a change that
+        would collide with another user.
+        """
+        result = await self._session.execute(
+            select(User).where(func.lower(User.email) == email.strip().lower())
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_ids(self, user_ids: Sequence[str]) -> dict[str, User]:
         """Fetch users by id, keyed by id — batch lookup for the chat list (avoids
         an N+1 when resolving dm peers / message senders).
@@ -114,44 +128,98 @@ class UserRepository:
         return result.scalars().all()
 
     async def list_all(
-        self, *, limit: int = 50, offset: int = 0, query: str | None = None
-    ) -> tuple[list[User], int]:
-        """All accounts for the admin console (用户管理), newest-first, paginated.
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        query: str | None = None,
+        role: str | None = None,
+        status: str | None = None,
+        sort: str = "created_at",
+        order: str = "desc",
+        include_deleted: bool = False,
+    ) -> tuple[list[tuple[User, int]], int]:
+        """All accounts for the admin console (用户管理), paginated, with each account's
+        all-time cumulative spend (for the 累计成本 column + cost sort).
 
-        Unlike ``search`` (exact-match, anti-enumeration for the 找人 directory),
-        this is the operator's full roster: an optional ``query`` does a substring
-        ILIKE over username/display_name, and disabled accounts are included.
-        Returns ``(rows, total)`` so the caller can render page controls.
+        Unlike ``search`` (exact-match, anti-enumeration for the 找人 directory), this
+        is the operator's full roster. Filters (AND-combined): ``query`` substring
+        ILIKEs username/display_name, ``role``/``status`` pin those dimensions. 注销
+        (soft-deleted, anonymized → ``deleted_<id>``) accounts are excluded unless
+        ``include_deleted`` — tombstones, noise for the live roster but kept for audit.
+        ``sort`` ∈ {``created_at``, ``cost``} with ``order`` ∈ {``asc``, ``desc``}
+        (cost ties break by newest-first for stable pagination). The total reflects the
+        same filters. Returns ``([(user, cost_total_nano)], total)``.
+
+        Cost is a LEFT JOIN onto a per-user SUM of ``cost_events.cost_total_nano`` (a
+        never-spent account reads 0). MVP aggregates the ledger per roster page — fine
+        at single-deploy scale (``cost_events`` is indexed on ``user_id``); a cached
+        rollup is the escape hatch if the ledger outgrows it.
         """
         conditions: list[ColumnElement[bool]] = []
+        if not include_deleted:
+            conditions.append(User.deleted_at.is_(None))
         q = (query or "").strip()
         if q:
             pattern = _ilike_pattern(q)
             conditions.append(
                 or_(User.username.ilike(pattern), User.display_name.ilike(pattern))
             )
+        if role is not None:
+            conditions.append(User.role == role)
+        if status is not None:
+            conditions.append(User.status == status)
+
         count_stmt = select(func.count()).select_from(User)
-        list_stmt = select(User)
         if conditions:
             count_stmt = count_stmt.where(*conditions)
-            list_stmt = list_stmt.where(*conditions)
         total = await self._session.scalar(count_stmt)
-        result = await self._session.execute(
-            list_stmt.order_by(User.created_at.desc()).limit(limit).offset(offset)
+
+        # Per-user lifetime spend; LEFT-joined so an account with no ledger row is 0.
+        cost_subq = (
+            select(
+                CostEvent.user_id.label("uid"),
+                _sum_int(CostEvent.cost_total_nano).label("cost_total"),
+            )
+            .group_by(CostEvent.user_id)
+            .subquery()
         )
-        return list(result.scalars().all()), int(total or 0)
+        cost_col = func.coalesce(cost_subq.c.cost_total, 0)
+
+        list_stmt = select(User, cost_col.label("cost_total")).outerjoin(
+            cost_subq, cost_subq.c.uid == User.user_id
+        )
+        if conditions:
+            list_stmt = list_stmt.where(*conditions)
+
+        if sort == "cost":
+            primary = cost_col.asc() if order == "asc" else cost_col.desc()
+            # Stable tiebreak: the many zero-spend accounts fall back to newest-first.
+            list_stmt = list_stmt.order_by(primary, User.created_at.desc())
+        else:
+            list_stmt = list_stmt.order_by(
+                User.created_at.asc() if order == "asc" else User.created_at.desc()
+            )
+
+        rows = (
+            await self._session.execute(list_stmt.limit(limit).offset(offset))
+        ).all()
+        return [(row[0], int(row[1])) for row in rows], int(total or 0)
 
     async def count_overview(self) -> dict[str, int]:
         """Account tallies for the admin system panel (管理员后台 P2 系统状态).
 
-        One round-trip via conditional aggregation: ``total`` counts every account
-        (disabled included), ``active`` = ``status == "active"``, ``admins`` =
-        ``role == "admin"``. Read-only — a deployment-health glance, not management.
+        One round-trip via conditional aggregation over the *live* population only —
+        注销 (soft-deleted) accounts are anonymized tombstones, not part of the
+        roster, so every tally excludes them: ``total`` counts live accounts
+        (disabled included), ``active`` = live ``status == "active"``, ``admins`` =
+        live ``role == "admin"``. Read-only — a deployment-health glance.
         """
+        live = User.deleted_at.is_(None)
         stmt = select(
-            func.count().label("total"),
-            func.count().filter(User.status == "active").label("active"),
-            func.count().filter(User.role == "admin").label("admins"),
+            func.count().filter(live).label("total"),
+            func.count().filter(live, User.status == "active").label("active"),
+            func.count().filter(live, User.role == "admin").label("admins"),
         ).select_from(User)
         row = (await self._session.execute(stmt)).one()
         return {
@@ -243,6 +311,67 @@ class UserRepository:
             update(User).where(User.user_id == user_id).values(**values)
         )
         await self._session.commit()
+
+    async def update(
+        self,
+        user_id: str,
+        *,
+        display_name: str | object = _UNSET,
+        email: str | None | object = _UNSET,
+    ) -> User | None:
+        """Patch a user's profile fields (个人资料编辑), returning the updated row.
+
+        Only the fields actually passed are written (``_UNSET`` = leave unchanged), so
+        the caller can change display name without touching email. An explicit ``None``
+        email clears it. Uniqueness (email) is validated one layer up in the service.
+        Returns ``None`` for an unknown id.
+        """
+        values: dict[str, object | None] = {}
+        if display_name is not _UNSET:
+            values["display_name"] = display_name
+        if email is not _UNSET:
+            values["email"] = email
+        if values:
+            await self._session.execute(
+                update(User).where(User.user_id == user_id).values(**values)
+            )
+            await self._session.commit()
+        return await self.get_by_id(user_id)
+
+    async def set_avatar(self, user_id: str, avatar_key: str | None) -> User | None:
+        """Set or clear the user's avatar storage key (头像), returning the row.
+
+        ``None`` clears it (removed avatar / account anonymization). The object bytes
+        themselves are managed by the caller (asset storage lives outside this layer).
+        Returns ``None`` for an unknown id.
+        """
+        await self._session.execute(
+            update(User).where(User.user_id == user_id).values(avatar_key=avatar_key)
+        )
+        await self._session.commit()
+        return await self.get_by_id(user_id)
+
+    async def soft_delete(self, user_id: str) -> User | None:
+        """Soft-delete + anonymize an account (注销账户), returning the updated row.
+
+        Stamps ``deleted_at``, disables the account (so ``get_current_user`` refuses it
+        on the next request — live tokens die), and frees the unique identifiers for
+        re-registration by anonymizing ``username`` → ``deleted_<id>``, clearing
+        ``email`` and dropping the avatar key (the object is purged by the caller). The
+        append-only cost ledger (不变量①) is intentionally untouched. Returns ``None``
+        for an unknown id.
+        """
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return None
+        user.deleted_at = datetime.now(UTC)
+        user.status = "disabled"
+        user.username = f"deleted_{user_id}"
+        user.email = None
+        user.avatar_key = None
+        await self._session.commit()
+        await self._session.refresh(user)
+        return user
 
 
 class ConversationRepository:
@@ -419,6 +548,24 @@ class ConversationRepository:
             return True
         return False
 
+    async def soft_delete_all_for_user(self, user_id: str) -> int:
+        """Soft-delete every live conversation owned by a user (账户注销级联).
+
+        One bulk update so deleting an account doesn't N+1 over its history; already
+        soft-deleted rows are skipped. Returns the number newly soft-deleted. The
+        retention sweeper later reclaims their workspaces just like any soft delete.
+        """
+        result = await self._session.execute(
+            update(Conversation)
+            .where(
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+            )
+            .values(deleted_at=datetime.now())
+        )
+        await self._session.commit()
+        return int(result.rowcount or 0)
+
     async def list_purgeable(
         self, *, before: datetime, limit: int
     ) -> Sequence[Conversation]:
@@ -578,6 +725,115 @@ class ConversationRepository:
             await self._session.commit()
             await self._session.refresh(conv)
         return conv
+
+
+class ConversationShareRepository:
+    """Public read-only conversation shares (公开只读分享链接, 对标 ChatGPT 分享).
+
+    A share freezes a content-only transcript snapshot at create time; the public
+    page renders that copy. Revocation is soft (``revoked_at``) so a killed link
+    404s at once while the row survives, and is cascade-applied when the owning
+    conversation is deleted / the account is注销.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def create(
+        self,
+        *,
+        conversation_id: str,
+        user_id: str,
+        title: str,
+        snapshot: list[dict],
+    ) -> ConversationShare:
+        share = ConversationShare(
+            id=new_id(),
+            conversation_id=conversation_id,
+            user_id=user_id,
+            title=title,
+            snapshot=snapshot,
+        )
+        self._session.add(share)
+        await self._session.commit()
+        await self._session.refresh(share)
+        return share
+
+    async def get_active(self, token: str) -> ConversationShare | None:
+        """An un-revoked share by its public token (the row id), or None.
+
+        Backs the public ``/shared/<token>`` render: a revoked / unknown token
+        resolves to None so the page 404s without leaking whether the id ever
+        existed.
+        """
+        result = await self._session.execute(
+            select(ConversationShare).where(
+                ConversationShare.id == token,
+                ConversationShare.revoked_at.is_(None),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_active_for_conversation(
+        self, conversation_id: str, *, user_id: str
+    ) -> Sequence[ConversationShare]:
+        """A conversation's live shares (owner-scoped), newest first — the "manage
+        links" list. Owner scoping means a guessed conversation id can't enumerate
+        another user's shares."""
+        result = await self._session.execute(
+            select(ConversationShare)
+            .where(
+                ConversationShare.conversation_id == conversation_id,
+                ConversationShare.user_id == user_id,
+                ConversationShare.revoked_at.is_(None),
+            )
+            .order_by(ConversationShare.created_at.desc())
+        )
+        return result.scalars().all()
+
+    async def revoke(
+        self, share_id: str, *, conversation_id: str, user_id: str
+    ) -> bool:
+        """Revoke one share (owner + conversation scoped). Returns False when the id
+        is unknown / already revoked / not the user's, so a stale revoke 404s."""
+        result = await self._session.execute(
+            update(ConversationShare)
+            .where(
+                ConversationShare.id == share_id,
+                ConversationShare.conversation_id == conversation_id,
+                ConversationShare.user_id == user_id,
+                ConversationShare.revoked_at.is_(None),
+            )
+            .values(revoked_at=datetime.now(UTC))
+        )
+        await self._session.commit()
+        return bool(result.rowcount or 0)
+
+    async def revoke_all_for_conversation(self, conversation_id: str) -> int:
+        """Revoke every live share of a conversation (删除对话 cascade)."""
+        result = await self._session.execute(
+            update(ConversationShare)
+            .where(
+                ConversationShare.conversation_id == conversation_id,
+                ConversationShare.revoked_at.is_(None),
+            )
+            .values(revoked_at=datetime.now(UTC))
+        )
+        await self._session.commit()
+        return int(result.rowcount or 0)
+
+    async def revoke_all_for_user(self, user_id: str) -> int:
+        """Revoke every live share a user created (账户注销 cascade)."""
+        result = await self._session.execute(
+            update(ConversationShare)
+            .where(
+                ConversationShare.user_id == user_id,
+                ConversationShare.revoked_at.is_(None),
+            )
+            .values(revoked_at=datetime.now(UTC))
+        )
+        await self._session.commit()
+        return int(result.rowcount or 0)
 
 
 class FolderRepository:
@@ -913,6 +1169,23 @@ class MessageRepository:
             base_query.order_by(Message.created_at.asc()).limit(limit).offset(offset)
         )
         return result.scalars().all(), total
+
+    async def list_all_for_conversation(
+        self, conversation_id: str
+    ) -> Sequence[Message]:
+        """Every message of a conversation, oldest-first — the full transcript.
+
+        Backs export (导出对话) and the share snapshot (分享对话): both freeze/serialize
+        the WHOLE conversation, not a scroll window, so an unbounded ordered read is
+        the right shape (an explicit, infrequent operation, unlike the paginated chat
+        view). Returns rows in render order (created_at asc).
+        """
+        result = await self._session.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.asc())
+        )
+        return result.scalars().all()
 
     async def list_recent(
         self, conversation_id: str, *, limit: int
@@ -2363,6 +2636,27 @@ class TurnJournalRepository:
             for r in result.scalars().all()
         ]
 
+    async def load_owned(self, turn_id: str, conversation_id: str) -> list[dict]:
+        """One turn's facts, scoped to its conversation (IDOR-safe read).
+
+        Same projection as :meth:`load` but filtered by ``conversation_id`` too, so a
+        user who owns conversation A can't read conversation B's journal by passing a
+        foreign ``turn_id`` — mirroring the conversation-scoped message delete. A
+        cross-tenant pair simply matches no rows (``[]``).
+        """
+        result = await self._session.execute(
+            select(TurnJournalRow)
+            .where(
+                TurnJournalRow.turn_id == turn_id,
+                TurnJournalRow.conversation_id == conversation_id,
+            )
+            .order_by(TurnJournalRow.seq.asc())
+        )
+        return [
+            {"kind": r.kind, "payload": r.payload, "ts": r.ts}
+            for r in result.scalars().all()
+        ]
+
     async def load_map(self, turn_ids: Sequence[str]) -> dict[str, list[dict]]:
         """Several turns' facts keyed by ``turn_id`` (ordered entries), batched.
 
@@ -2575,3 +2869,74 @@ class TurnMetricsRepository:
             TurnMetricsRow.created_at >= since
         )
         return int((await self._session.execute(stmt)).scalar_one() or 0)
+
+
+class PushDeviceRepository:
+    """Push device tokens for native notifications (原生推送设备, 手机端落地设计 P2)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def upsert(self, *, user_id: str, token: str, platform: str) -> None:
+        """Register (or move) a device token to ``user_id``.
+
+        Upsert on ``token`` (its unique key): a token re-registered after rotation, or
+        the same physical device logging in as another account, is REASSIGNED to the
+        current user rather than duplicated — so a token is owned by exactly one user
+        and a stale owner can never receive the new user's pushes.
+        """
+        now = datetime.now(UTC)
+        stmt = (
+            pg_insert(PushDeviceRow)
+            .values(
+                id=str(uuid4()),
+                user_id=user_id,
+                token=token,
+                platform=platform,
+            )
+            .on_conflict_do_update(
+                index_elements=["token"],
+                set_={"user_id": user_id, "platform": platform, "updated_at": now},
+            )
+        )
+        await self._session.execute(stmt)
+        await self._session.commit()
+
+    async def list_by_user(self, user_id: str) -> Sequence[PushDeviceRow]:
+        """A user's registered devices, newest-first (设备管理 / 测试用)."""
+        result = await self._session.execute(
+            select(PushDeviceRow)
+            .where(PushDeviceRow.user_id == user_id)
+            .order_by(PushDeviceRow.created_at.desc())
+        )
+        return result.scalars().all()
+
+    async def tokens_for_user(self, user_id: str) -> list[str]:
+        """Just the token strings for a user — the push fan-out read path."""
+        result = await self._session.execute(
+            select(PushDeviceRow.token).where(PushDeviceRow.user_id == user_id)
+        )
+        return list(result.scalars().all())
+
+    async def delete(self, *, user_id: str, token: str) -> bool:
+        """Unregister one token, scoped to its owner (logout). True if a row was removed.
+
+        The ``user_id`` guard makes this idempotent and non-cross-tenant: a user can
+        only delete their own token, never evict another account's device.
+        """
+        result = await self._session.execute(
+            delete(PushDeviceRow).where(
+                PushDeviceRow.token == token, PushDeviceRow.user_id == user_id
+            )
+        )
+        await self._session.commit()
+        return (result.rowcount or 0) > 0
+
+    async def delete_tokens(self, tokens: Sequence[str]) -> None:
+        """Prune tokens FCM reported as stale/unregistered (push.notify hygiene)."""
+        if not tokens:
+            return
+        await self._session.execute(
+            delete(PushDeviceRow).where(PushDeviceRow.token.in_(list(tokens)))
+        )
+        await self._session.commit()

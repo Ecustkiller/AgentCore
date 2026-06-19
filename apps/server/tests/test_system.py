@@ -1,4 +1,4 @@
-"""Unit tests for the system probes: liveness, readiness, and version.
+"""Unit tests for the system probes: liveness, readiness, version, update policy.
 
 The database probe is monkeypatched so readiness covers both the ready (200) and
 not-ready (503) branches deterministically, without needing a live PostgreSQL.
@@ -63,3 +63,25 @@ async def test_version_exposes_build_provenance(monkeypatch):
     assert body["git_sha"] == "abc1234"
     assert body["built_at"] == "2026-06-15T00:00:00Z"
     assert isinstance(body["version"], str) and body["version"]
+
+
+async def test_updates_policy_enabled_by_default(monkeypatch):
+    # The desktop updater's remote circuit breaker is open (updates allowed) unless
+    # explicitly flipped —放量默认开, fail-open.
+    monkeypatch.setattr(system.settings, "desktop_updates_enabled", True)
+    async with _client() as c:
+        r = await c.get("/updates/policy")
+
+    assert r.status_code == 200
+    assert r.json() == {"enabled": True}
+
+
+async def test_updates_policy_reflects_kill_switch(monkeypatch):
+    # Flipping the flag false is the kill switch that pauses downloads for a bad
+    # release; the client honors it (fail-open only on transport/non-200, not this).
+    monkeypatch.setattr(system.settings, "desktop_updates_enabled", False)
+    async with _client() as c:
+        r = await c.get("/updates/policy")
+
+    assert r.status_code == 200
+    assert r.json() == {"enabled": False}

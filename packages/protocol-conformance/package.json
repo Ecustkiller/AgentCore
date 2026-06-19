@@ -5,7 +5,8 @@
   "type": "module",
   "description": "协议一致性巡检：后端权威向量 + golden + ProjectedTurn schema + 通用断言（规范，非实现）",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./projectedTurn": "./src/projectedTurn.ts"
   },
   "types": "./src/index.ts",
   "dependencies": {

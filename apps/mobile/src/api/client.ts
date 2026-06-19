@@ -5,8 +5,12 @@
 // holds the token pair and sends `Authorization: Bearer <access>` on every call
 // (backend resolution: api/dependencies.py get_current_user).
 //
-// SKELETON NOTE: tokens live in localStorage for now (XSS-exposed). M2/P2 swaps this
-// for Capacitor Secure Storage; the access TTL + refresh rotation already bound the blast.
+// STORAGE SEAM (P2 安全存储): the token pair's source of truth is an in-memory cache (so
+// authHeader() / route guards stay synchronous), write-through to a pluggable async
+// `TokenPersistence` backend. Default = web localStorage (XSS-exposed; the access TTL +
+// refresh rotation bound the blast). A NATIVE build injects a Capacitor Secure Storage
+// adapter via setTokenPersistence() at startup — so this file never imports Capacitor and
+// the swap to OS Keychain/Keystore is one adapter + one boot call, not a rewrite.
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -18,20 +22,81 @@ export interface Tokens {
   refresh_token: string;
 }
 
+/**
+ * Where the token pair survives across launches. All ops are async (the native
+ * Keychain/Keystore is async); the in-memory cache below serves the sync read path so
+ * swapping the backend never ripples async through every caller. Implementations MUST NOT
+ * throw — a failed persist degrades to "this launch only", never a crash.
+ */
+export interface TokenPersistence {
+  load(): Promise<Tokens | null>;
+  save(tokens: Tokens): Promise<void>;
+  clear(): Promise<void>;
+}
+
+// Default (web) backend: localStorage, wrapped to the async port so the native adapter is
+// a drop-in. Not secure (XSS-exposed); a native build replaces it via setTokenPersistence.
+const webTokenPersistence: TokenPersistence = {
+  async load() {
+    const access_token = localStorage.getItem(ACCESS_KEY);
+    const refresh_token = localStorage.getItem(REFRESH_KEY);
+    return access_token && refresh_token
+      ? { access_token, refresh_token }
+      : null;
+  },
+  async save(tokens) {
+    localStorage.setItem(ACCESS_KEY, tokens.access_token);
+    localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
+  },
+  async clear() {
+    localStorage.removeItem(ACCESS_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+  },
+};
+
+let backend: TokenPersistence = webTokenPersistence;
+// In-memory source of truth for the sync read path (authHeader / RequireAuth). Seeded once
+// by hydrateTokens() at startup, then kept in step with every save/clear.
+let cached: Tokens | null = null;
+
+/**
+ * Swap the persistence backend. A native build injects a Capacitor Secure Storage adapter
+ * here at startup (before hydrateTokens()); web keeps the localStorage default.
+ */
+export function setTokenPersistence(persistence: TokenPersistence): void {
+  backend = persistence;
+}
+
+/**
+ * Load the persisted pair into the in-memory cache. Call once at startup BEFORE the first
+ * sync getTokens() (bootstrapAuth does), so route guards see a restored session. A failed
+ * load is treated as "no session" (never throws).
+ */
+export async function hydrateTokens(): Promise<Tokens | null> {
+  try {
+    cached = await backend.load();
+  } catch {
+    cached = null;
+  }
+  return cached;
+}
+
+/** The current token pair from the in-memory cache (sync). Null when logged out or before
+ *  hydrateTokens() has run. */
 export function getTokens(): Tokens | null {
-  const access_token = localStorage.getItem(ACCESS_KEY);
-  const refresh_token = localStorage.getItem(REFRESH_KEY);
-  return access_token && refresh_token ? { access_token, refresh_token } : null;
+  return cached;
 }
 
 export function setTokens(tokens: Tokens): void {
-  localStorage.setItem(ACCESS_KEY, tokens.access_token);
-  localStorage.setItem(REFRESH_KEY, tokens.refresh_token);
+  cached = tokens;
+  // Write-through; persistence is async + best-effort (the session already works off the
+  // cache). A rejected save just means "not restored next launch", never a broken login.
+  void backend.save(tokens).catch(() => {});
 }
 
 export function clearTokens(): void {
-  localStorage.removeItem(ACCESS_KEY);
-  localStorage.removeItem(REFRESH_KEY);
+  cached = null;
+  void backend.clear().catch(() => {});
 }
 
 export function apiUrl(path: string): string {

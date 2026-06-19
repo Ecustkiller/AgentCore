@@ -27,6 +27,17 @@ class FakeUsers:
     async def get_by_username(self, username):
         return next((u for u in self._by_id.values() if u.username == username), None)
 
+    async def get_by_email(self, email):
+        target = email.strip().lower()
+        return next(
+            (
+                u
+                for u in self._by_id.values()
+                if u.email and u.email.lower() == target
+            ),
+            None,
+        )
+
     async def create(
         self, *, username, display_name=None, email=None, role="user", status="active"
     ):
@@ -37,8 +48,28 @@ class FakeUsers:
             email=email,
             role=role,
             status=status,
+            deleted_at=None,
         )
         self._by_id[user.user_id] = user
+        return user
+
+    async def update(self, user_id, **fields):
+        # Mirrors the real repo: the service only forwards the keys that changed.
+        user = self._by_id.get(user_id)
+        if user is None:
+            return None
+        for key, value in fields.items():
+            setattr(user, key, value)
+        return user
+
+    async def soft_delete(self, user_id):
+        user = self._by_id.get(user_id)
+        if user is None:
+            return None
+        user.deleted_at = datetime.now(UTC)
+        user.status = "disabled"
+        user.username = f"deleted_{user_id}"
+        user.email = None
         return user
 
 
@@ -420,3 +451,155 @@ async def test_admin_reset_password_unknown_user_raises_not_found():
     svc, *_ = _make()
     with pytest.raises(NotFoundError):
         await svc.admin_reset_password(user_id="ghost")
+
+
+# --- change password (self-service 修改密码) ---
+
+
+async def test_change_password_rotates_secret_and_keeps_current_session():
+    svc, _u, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="pia", password=_PW, invite_code="C1")
+    _, old_pair = await svc.login(username="pia", password=_PW)
+
+    new_pair = await svc.change_password(
+        user_id=user.user_id, current_password=_PW, new_password="brand-new-pw"
+    )
+
+    # old password dead, new one works
+    with pytest.raises(AuthenticationError):
+        await svc.login(username="pia", password=_PW)
+    relogged, _ = await svc.login(username="pia", password="brand-new-pw")
+    assert relogged.user_id == user.user_id
+
+    # the returned pair is a live session; the pre-change one was revoked
+    rotated = await svc.refresh(refresh_token=new_pair.refresh_token)
+    assert rotated.refresh_token
+    with pytest.raises(AuthenticationError):
+        await svc.refresh(refresh_token=old_pair.refresh_token)
+
+
+async def test_change_password_wrong_current_raises():
+    svc, _u, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="quinn", password=_PW, invite_code="C1")
+    with pytest.raises(AuthenticationError):
+        await svc.change_password(
+            user_id=user.user_id, current_password="nope", new_password="brand-new-pw"
+        )
+
+
+async def test_change_password_weak_new_raises():
+    svc, _u, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="rob", password=_PW, invite_code="C1")
+    with pytest.raises(ValidationError):
+        await svc.change_password(
+            user_id=user.user_id, current_password=_PW, new_password="short"
+        )
+
+
+async def test_change_password_same_as_current_raises():
+    svc, _u, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="sue", password=_PW, invite_code="C1")
+    with pytest.raises(ValidationError):
+        await svc.change_password(
+            user_id=user.user_id, current_password=_PW, new_password=_PW
+        )
+
+
+# --- update profile (个人资料编辑) ---
+
+
+async def test_update_profile_changes_display_name():
+    svc, _u, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="tom", password=_PW, invite_code="C1")
+    updated = await svc.update_profile(user_id=user.user_id, display_name="Tommy")
+    assert updated.display_name == "Tommy"
+
+
+async def test_update_profile_sets_and_clears_email():
+    svc, _u, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="ula", password=_PW, invite_code="C1")
+    updated = await svc.update_profile(user_id=user.user_id, email="ula@example.com")
+    assert updated.email == "ula@example.com"
+    cleared = await svc.update_profile(user_id=user.user_id, email=None)
+    assert cleared.email is None
+
+
+async def test_update_profile_rejects_duplicate_email():
+    svc, _u, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    await invites.create(code="C2")
+    first = await svc.register(username="vic", password=_PW, invite_code="C1")
+    second = await svc.register(username="wes", password=_PW, invite_code="C2")
+    await svc.update_profile(user_id=first.user_id, email="taken@example.com")
+    with pytest.raises(ValidationError):
+        await svc.update_profile(user_id=second.user_id, email="taken@example.com")
+
+
+async def test_update_profile_rejects_empty_display_name():
+    svc, _u, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="xena", password=_PW, invite_code="C1")
+    with pytest.raises(ValidationError):
+        await svc.update_profile(user_id=user.user_id, display_name="   ")
+
+
+async def test_update_profile_partial_leaves_other_fields():
+    svc, _u, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(
+        username="yan", password=_PW, invite_code="C1", email="yan@example.com"
+    )
+    updated = await svc.update_profile(user_id=user.user_id, display_name="Yan!")
+    assert updated.display_name == "Yan!" and updated.email == "yan@example.com"
+
+
+async def test_update_profile_unknown_user_raises_not_found():
+    svc, *_ = _make()
+    with pytest.raises(NotFoundError):
+        await svc.update_profile(user_id="ghost", display_name="Nobody")
+
+
+# --- delete account (注销账户: 软删 + 匿名化) ---
+
+
+async def test_delete_account_soft_deletes_anonymizes_and_revokes():
+    svc, users, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="zoe", password=_PW, invite_code="C1")
+    _, pair = await svc.login(username="zoe", password=_PW)
+
+    await svc.delete_account(user_id=user.user_id, password=_PW)
+
+    row = await users.get_by_id(user.user_id)
+    assert row.deleted_at is not None
+    assert row.status == "disabled"
+    assert row.username == f"deleted_{user.user_id}"
+    assert row.email is None
+
+    # the old username/session no longer authenticate
+    with pytest.raises(AuthenticationError):
+        await svc.login(username="zoe", password=_PW)
+    with pytest.raises(AuthenticationError):
+        await svc.refresh(refresh_token=pair.refresh_token)
+
+
+async def test_delete_account_wrong_password_raises_and_keeps_account():
+    svc, users, _c, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="abe", password=_PW, invite_code="C1")
+    with pytest.raises(AuthenticationError):
+        await svc.delete_account(user_id=user.user_id, password="wrong-pw")
+    row = await users.get_by_id(user.user_id)
+    assert row.deleted_at is None and row.status == "active"
+
+
+async def test_delete_account_unknown_user_raises_not_found():
+    svc, *_ = _make()
+    with pytest.raises(NotFoundError):
+        await svc.delete_account(user_id="ghost", password=_PW)

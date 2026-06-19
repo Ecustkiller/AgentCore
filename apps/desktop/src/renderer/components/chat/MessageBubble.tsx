@@ -1,10 +1,18 @@
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { referencedCitationNumbers } from "@/lib/citations";
 import { copyText } from "@/lib/clipboard";
 import { errorActionForCode } from "@/lib/errors";
 import { formatCompact, formatCost, formatMessageTime } from "@/lib/format";
+import { groupToolRuns } from "@/lib/processTimeline";
 import { notifyError } from "@/lib/toast";
-import { deleteMessage } from "@/services/messages";
+import { deleteMessage, getMessagePrompt } from "@/services/messages";
 import { runRegenerate } from "@/services/turns";
 import { downloadWorkspaceFile } from "@/services/workspace";
 import {
@@ -19,6 +27,8 @@ import { useUsageStore } from "@/stores/usage";
 import type { Citation, ProcessStep } from "@/types/events";
 import {
   AlertTriangle,
+  ArrowUp,
+  BookOpen,
   Check,
   ChevronDown,
   ChevronRight,
@@ -33,8 +43,10 @@ import {
   KeyRound,
   type LucideIcon,
   Paperclip,
+  PenLine,
   Pencil,
   RefreshCw,
+  ScrollText,
   Search,
   Terminal,
   Trash2,
@@ -134,6 +146,91 @@ function DeleteMessageAction({ messageId }: { messageId: string }) {
       label="删除"
       onClick={() => setConfirming(true)}
     />
+  );
+}
+
+type PromptState =
+  | { status: "loading" }
+  | { status: "ready"; text: string }
+  | { status: "empty" };
+
+/**
+ * Hover action that opens the turn's verbatim system prompt (查看本回合提示词, 提示词
+ * 透明 L3 · 对所有人开放). Lazily fetches on open from the turn journal's head fact —
+ * the exact prompt that steered THIS reply — and shows it verbatim with a copy button.
+ * A turn that journaled no prompt (legacy / salvaged) reads as a graceful empty state.
+ */
+function ViewPromptAction({
+  conversationId,
+  messageId,
+}: {
+  conversationId: string;
+  messageId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [state, setState] = useState<PromptState>({ status: "loading" });
+  const { copied, onCopy } = useCopyAction(() =>
+    state.status === "ready" ? state.text : "",
+  );
+
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next) {
+      setState({ status: "loading" });
+      getMessagePrompt(conversationId, messageId)
+        .then((text) => setState({ status: "ready", text }))
+        .catch(() => setState({ status: "empty" }));
+    }
+  };
+
+  return (
+    <>
+      <MessageAction
+        icon={<ScrollText size={13} />}
+        label="提示词"
+        onClick={() => onOpenChange(true)}
+      />
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col">
+          <DialogHeader>
+            <DialogTitle>本回合系统提示词</DialogTitle>
+            <DialogDescription>
+              AI
+              本回合实际遵循的逐字系统提示词（含当日日期、能力目录等动态内容）。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-hidden px-5 pb-5">
+            {state.status === "loading" && (
+              <p className="py-8 text-center text-muted-foreground text-sm">
+                加载中…
+              </p>
+            )}
+            {state.status === "empty" && (
+              <p className="py-8 text-center text-muted-foreground text-sm">
+                本回合没有可查看的提示词。
+              </p>
+            )}
+            {state.status === "ready" && (
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="mb-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={onCopy}
+                    className="inline-flex h-7 items-center gap-1 rounded-lg px-1.5 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    {copied ? <Check size={13} /> : <Copy size={13} />}
+                    {copied ? "已复制" : "复制"}
+                  </button>
+                </div>
+                <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-3 py-2 text-foreground/90 text-xs leading-relaxed">
+                  {state.text}
+                </pre>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -285,6 +382,10 @@ const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   // ComposingToolLine; both also label the captain's process timeline steps.
   delegate: { Icon: Users, label: "委派任务" },
   ask_user: { Icon: HelpCircle, label: "向你确认" },
+  consult_skill: { Icon: BookOpen, label: "查阅能力" },
+  revise: { Icon: PenLine, label: "修订产物" },
+  // Worker-only upward channel (build_worker_registry); surfaces in run detail.
+  escalate: { Icon: ArrowUp, label: "上报问题" },
 };
 
 const toolMeta = (name: string): { Icon: LucideIcon; label: string } =>
@@ -341,6 +442,40 @@ function toolDetail(args: Record<string, unknown>): string {
     if (typeof v === "string" && v.trim()) return v.trim();
   }
   return "";
+}
+
+/** Last path segment of a detail string (a file 名 from a path / url); the whole
+ * string when it carries no separator (a query / pattern). Keeps a group header's
+ * name list compact instead of echoing full paths. */
+function baseName(detail: string): string {
+  if (!detail) return "";
+  const segs = detail.split(/[/\\]/);
+  return segs[segs.length - 1] || detail;
+}
+
+/**
+ * Header summary for a folded tool group (前端UX设计.md §一B). A single-category run
+ * of ≤3 lists each call's 名/查询 (e.g.「读取文件 a.ts · b.ts」) since the names beat a
+ * bare count when there are only a few; otherwise per-category counts in first-seen
+ * order (e.g.「读取文件 6 · 编辑文件 2 · 列出目录 1」), reusing the TOOL_META 中文名.
+ */
+function toolGroupSummary(
+  tools: Extract<ProcessStep, { kind: "tool" }>[],
+): string {
+  const sameKind = tools.every((t) => t.tool_name === tools[0].tool_name);
+  if (sameKind && tools.length <= 3) {
+    const { label } = toolMeta(tools[0].tool_name);
+    const names = tools.map((t) => baseName(toolDetail(t.arguments)));
+    if (names.every(Boolean)) return `${label} ${names.join(" · ")}`;
+  }
+  const order: string[] = [];
+  const counts = new Map<string, number>();
+  for (const t of tools) {
+    const { label } = toolMeta(t.tool_name);
+    if (!counts.has(label)) order.push(label);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return order.map((l) => `${l} ${counts.get(l)}`).join(" · ");
 }
 
 /** A tool step's status dot in the process timeline (running / ok / error). */
@@ -411,6 +546,70 @@ function ProcessToolRow({
         <ProcessStatusIcon status={step.status} />
       </button>
       {open && hasBody && <ToolResultView data={data} />}
+    </div>
+  );
+}
+
+/**
+ * A folded run of ≥2 consecutive tool calls in the process timeline (前端UX设计.md
+ * §一B — 连续同类折叠). Mirrors {@link InlineReasoning}'s fold state machine: it
+ * auto-expands while it is the live trailing activity (watch it work), auto-collapses
+ * once the turn finishes; manual toggles always win. The header summarizes the run
+ * (per-category counts / file names), pulses the 图2 dots while a tool is still
+ * running, and surfaces a「N 个失败」badge on any error. Expanded, it renders the
+ * unchanged {@link ProcessToolRow} per tool — each row still opens its own result, so
+ * no detail is lost by grouping.
+ */
+function ProcessToolGroup({
+  tools,
+  isStreaming,
+}: {
+  tools: Extract<ProcessStep, { kind: "tool" }>[];
+  isStreaming: boolean;
+}) {
+  const [expanded, setExpanded] = useState(isStreaming);
+  const prevStreaming = useRef(isStreaming);
+
+  useEffect(() => {
+    if (prevStreaming.current && !isStreaming) setExpanded(false);
+    prevStreaming.current = isStreaming;
+  }, [isStreaming]);
+
+  const summary = toolGroupSummary(tools);
+  const errorCount = tools.reduce(
+    (n, t) => n + (t.status === "error" ? 1 : 0),
+    0,
+  );
+  const running = tools.some((t) => t.status === "running");
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      >
+        {running ? (
+          <ThinkingDots />
+        ) : expanded ? (
+          <ChevronDown size={14} className="shrink-0" />
+        ) : (
+          <ChevronRight size={14} className="shrink-0" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-left">{summary}</span>
+        {errorCount > 0 && (
+          <span className="shrink-0 text-destructive">
+            {errorCount} 个失败
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="mt-1.5 space-y-2 pl-3">
+          {tools.map((t) => (
+            <ProcessToolRow key={t.id} step={t} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -531,18 +730,39 @@ function ProcessTimeline({
     last?.kind === "tool" &&
     last.status !== "running";
 
+  // Coalesce consecutive tool steps into collapsible groups before rendering
+  // (前端UX设计.md §一B); reasoning/content stay 1:1 and break runs, so order is
+  // preserved. View-only — `process[]` is untouched, so journal/conformance are not.
+  const nodes = groupToolRuns(process);
+
   return (
     <div className="space-y-2">
-      {process.map((step, i) => (
-        <ProcessRow
-          // biome-ignore lint/suspicious/noArrayIndexKey: append-only list — a step's index is stable for its lifetime (only the trailing step mutates), so the index is a safe key.
-          key={i}
-          step={step}
-          streaming={isStreaming && i === process.length - 1}
-          citations={citations}
-          onCitationClick={onCitationClick}
-        />
-      ))}
+      {nodes.map((node, i) => {
+        // The trailing node carries the live cue (streaming cursor / dots / the
+        // expanded active tool group); finished nodes stay static & collapsed.
+        const live = isStreaming && i === nodes.length - 1;
+        if (node.kind === "tool-group") {
+          return (
+            <ProcessToolGroup
+              // biome-ignore lint/suspicious/noArrayIndexKey: append-only timeline — a node's index is stable for its lifetime (only the trailing node mutates), so the index is a safe key.
+              key={i}
+              tools={node.tools}
+              isStreaming={live}
+            />
+          );
+        }
+        const step: ProcessStep = node.kind === "tool" ? node.step : node;
+        return (
+          <ProcessRow
+            // biome-ignore lint/suspicious/noArrayIndexKey: append-only timeline — a node's index is stable for its lifetime (only the trailing node mutates), so the index is a safe key.
+            key={i}
+            step={step}
+            streaming={live}
+            citations={citations}
+            onCitationClick={onCitationClick}
+          />
+        );
+      })}
       {!hasContentStep && fallbackContent && (
         <Markdown
           content={fallbackContent}
@@ -998,6 +1218,12 @@ function AssistantMessage({ message }: Props) {
             onClick={handleRegenerate}
           />
           <DeleteMessageAction messageId={message.id} />
+          {conversationId && (
+            <ViewPromptAction
+              conversationId={conversationId}
+              messageId={message.id}
+            />
+          )}
           {costText && (
             <span className="ml-1 text-xs text-muted-foreground/70">
               {costText}

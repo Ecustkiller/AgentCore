@@ -90,17 +90,25 @@ PROFILES: dict[str, ModelProfile] = {
         fallback_model=DEEPSEEK_V4_PRO,
     ),
     # Light tier: simpler, well-scoped sub-tasks (fetch / format / single lookup /
-    # light rewrite). Thinks at "high" like strong, but with a small round budget
+    # light rewrite). Thinks at "high" like strong, but with a smaller round budget
     # and no per-agent max unlock — so it stays the cheaper/faster of the two
     # tiers without dropping to non-thinking. (Dev-stage decision 2026-06-14:
     # collapse worker tiers onto the two effective thinking levels high/max; no
     # non-thinking worker tier.)
+    #
+    # max_rounds is a CEILING, not a budget that is always spent: a 1-2 round
+    # fetch/format task exits early regardless, so raising the cap costs those
+    # nothing. The old cap of 4 was too tight — 实测案例复盘 案例1 showed 4/5 light-tier
+    # research workers starve at exactly round 4 (search→read→refine→synthesize
+    # can't fit), forcing an incomplete finish. 8 gives iterative light work room to
+    # converge while staying well below strong's 28 (the tiers remain distinct, and
+    # fast stays bounded for cost). Genuinely deep research is a strong-tier call.
     "agent.fast": ModelProfile(
         model=DEEPSEEK_V4_FLASH,
         thinking=True,
         reasoning_effort="high",
         temperature=0.7,
-        max_rounds=4,
+        max_rounds=8,
         fallback_model=DEEPSEEK_V4_PRO,
     ),
     # Strong tier: sub-tasks needing reasoning / quality. Its BASE model is Flash

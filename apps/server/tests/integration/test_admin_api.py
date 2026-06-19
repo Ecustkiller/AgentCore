@@ -89,6 +89,13 @@ async def _seed_user(
     return user.user_id
 
 
+async def _soft_delete_user(session_factory, user_id: str) -> None:
+    """注销 a seeded account (the self-service deletion path) so the admin-side
+    tombstone behavior can be asserted."""
+    async with session_factory() as session:
+        await UserRepository(session).soft_delete(user_id)
+
+
 # --- the AdminUser gate ---
 
 
@@ -147,6 +154,146 @@ async def test_admin_roster_filter_and_pagination(client, make_admin, session_fa
     r = await client.get("/v1/admin/users", params={"page_size": 2})
     body = r.json()
     assert body["page_size"] == 2 and len(body["data"]) == 2 and body["total"] == 4
+
+
+async def test_admin_roster_hides_deleted_by_default(
+    client, make_admin, session_factory
+):
+    """注销 (soft-deleted, anonymized) accounts are tombstones: excluded from the
+    roster (and its total) by default, surfaced only with ``include_deleted`` — and
+    when surfaced they carry the ``deleted_at`` flag + anonymized username."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    await _seed_user(session_factory, "alice")
+    gone = await _seed_user(session_factory, "zombie")
+    await _soft_delete_user(session_factory, gone)
+
+    # Default roster: live accounts only (admin + alice); the tombstone is hidden.
+    r = await client.get("/v1/admin/users")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 2
+    assert {u["username"] for u in body["data"]} == {username, "alice"}
+    assert all(u["deleted_at"] is None for u in body["data"])
+
+    # Audit view: the tombstone reappears — anonymized (deleted_<id>), flagged.
+    r = await client.get("/v1/admin/users", params={"include_deleted": "true"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 3
+    tomb = next(u for u in body["data"] if u["id"] == gone)
+    assert tomb["username"] == f"deleted_{gone}"
+    assert tomb["deleted_at"] is not None
+    assert tomb["status"] == "disabled"
+
+
+# --- roster: cumulative cost + sort + role/status filters ---
+
+
+async def test_admin_roster_carries_cost_and_sorts_by_spend(
+    client, make_admin, session_factory
+):
+    """Each roster row carries its all-time spend (``cost_total``), and ``sort=cost``
+    orders by it; the response ships the FX rate for ¥ display. A never-spent account
+    reads 0 (LEFT JOIN onto the ledger)."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    bob = await _seed_user(session_factory, "bob")
+    # alice outspends bob over two turns; the admin never spent (→ 0).
+    await _seed_spend(session_factory, user_id=alice, total=5000)
+    await _seed_spend(session_factory, user_id=alice, total=3000)
+    await _seed_spend(session_factory, user_id=bob, total=1000)
+
+    # Default sort still carries cost_total per row + the single FX rate.
+    body = (await client.get("/v1/admin/users")).json()
+    assert body["cny_per_usd"] == settings.cny_per_usd
+    costs = {u["id"]: u["cost_total"] for u in body["data"]}
+    assert costs[alice] == 8000
+    assert costs[bob] == 1000
+    admin_id = next(u["id"] for u in body["data"] if u["username"] == username)
+    assert costs[admin_id] == 0  # never spent
+
+    # sort=cost desc: biggest spender first; the zero-spend admin sinks to the end.
+    desc = (
+        await client.get("/v1/admin/users", params={"sort": "cost", "order": "desc"})
+    ).json()["data"]
+    assert [u["id"] for u in desc][:2] == [alice, bob]
+    assert desc[-1]["cost_total"] == 0
+
+    # sort=cost asc: mirror — biggest spender last.
+    asc = (
+        await client.get("/v1/admin/users", params={"sort": "cost", "order": "asc"})
+    ).json()["data"]
+    assert [u["id"] for u in asc][-2:] == [bob, alice]
+
+
+async def test_admin_roster_sorts_by_created_at_order(
+    client, make_admin, session_factory
+):
+    """``order`` flips the default ``created_at`` sort: desc is newest-first, asc is
+    oldest-first. The admin is seeded first, so it leads asc and trails desc."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    await _seed_user(session_factory, "alice")
+    await _seed_user(session_factory, "bob")
+
+    desc = (await client.get("/v1/admin/users")).json()["data"]
+    asc = (
+        await client.get("/v1/admin/users", params={"order": "asc"})
+    ).json()["data"]
+    assert desc[-1]["username"] == username  # oldest account trails newest-first
+    assert asc[0]["username"] == username  # …and leads oldest-first
+
+
+async def test_admin_roster_filters_by_role_and_status(
+    client, make_admin, session_factory
+):
+    """``role`` / ``status`` pin those dimensions, AND-combined with each other."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    await _seed_user(session_factory, "alice")  # user / active
+    await _seed_user(session_factory, "carol", role="admin")
+    await _seed_user(session_factory, "dave", status="disabled")  # user / disabled
+
+    # role=admin → the make_admin account + carol.
+    admins = (await client.get("/v1/admin/users", params={"role": "admin"})).json()
+    assert {u["username"] for u in admins["data"]} == {username, "carol"}
+    assert admins["total"] == 2
+
+    # role=user → alice + dave (the plain users, regardless of status).
+    plain = (await client.get("/v1/admin/users", params={"role": "user"})).json()
+    assert {u["username"] for u in plain["data"]} == {"alice", "dave"}
+
+    # status=disabled → only dave.
+    disabled = (
+        await client.get("/v1/admin/users", params={"status": "disabled"})
+    ).json()
+    assert {u["username"] for u in disabled["data"]} == {"dave"}
+    assert disabled["total"] == 1
+
+    # AND-combined: role=user & status=active → alice alone.
+    combo = (
+        await client.get(
+            "/v1/admin/users", params={"role": "user", "status": "active"}
+        )
+    ).json()
+    assert {u["username"] for u in combo["data"]} == {"alice"}
+
+
+async def test_admin_roster_rejects_invalid_filter_params(client, make_admin):
+    """The enum-shaped query params are validated at the edge (422), never silently
+    coerced to a wrong filter."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    for params in (
+        {"role": "superuser"},
+        {"status": "frozen"},
+        {"sort": "username"},
+        {"order": "sideways"},
+    ):
+        r = await client.get("/v1/admin/users", params=params)
+        assert r.status_code == 422, (params, r.text)
 
 
 # --- role / status / quota patches ---
@@ -233,6 +380,67 @@ async def test_reset_password_requires_admin(client, make_invite):
     assert (
         await client.post(f"/v1/admin/users/{me}/reset-password")
     ).status_code == 403
+
+
+# --- 注销账号 (admin-initiated deletion, 用户管理 强操作) ---
+
+
+async def test_admin_deletes_user_anonymizes_and_cascades(
+    client, make_admin, session_factory
+):
+    """DELETE 注销s an account: anonymizes + disables it (returns the tombstone with
+    ``deleted_at``), drops it from the default roster + the system tallies, and
+    cascades cross-domain cleanup (the user's conversations are soft-deleted)."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    uid = await _seed_user(session_factory, "alice")
+    async with session_factory() as session:
+        conv = await ConversationRepository(session).create(user_id=uid, title="留念")
+    conv_id = conv.id
+
+    r = await client.delete(f"/v1/admin/users/{uid}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["deleted_at"] is not None
+    assert body["username"] == f"deleted_{uid}"
+    assert body["status"] == "disabled"
+
+    # Default roster hides the tombstone; system total drops to the live count (admin).
+    roster = (await client.get("/v1/admin/users")).json()
+    assert uid not in {u["id"] for u in roster["data"]}
+    assert (await client.get("/v1/admin/system")).json()["users_total"] == 1
+
+    # Cross-domain cascade: the account's conversation was soft-deleted.
+    async with session_factory() as session:
+        assert await ConversationRepository(session).get_by_id(conv_id) is None
+
+
+async def test_admin_cannot_delete_self(client, make_admin):
+    """No self-lockout: an admin can't 注销 their own account (keeps ≥1 active admin)."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    me = (await client.get("/v1/auth/me")).json()["id"]
+
+    assert (await client.delete(f"/v1/admin/users/{me}")).status_code == 422
+    # untouched: still present in the roster
+    roster = (await client.get("/v1/admin/users")).json()
+    assert me in {u["id"] for u in roster["data"]}
+
+
+async def test_admin_delete_unknown_user_404(client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    assert (await client.delete(f"/v1/admin/users/{uuid4()}")).status_code == 404
+
+
+async def test_delete_user_requires_admin(client, make_invite):
+    # unauthenticated → 401 (the gate rejects before any lookup)
+    assert (await client.delete(f"/v1/admin/users/{uuid4()}")).status_code == 401
+    # a logged-in non-admin → 403, even targeting their own account
+    code = await make_invite("INV-DELU")
+    await _register_and_login(client, code, "regular_delu")
+    me = (await client.get("/v1/auth/me")).json()["id"]
+    assert (await client.delete(f"/v1/admin/users/{me}")).status_code == 403
 
 
 async def test_admin_sets_then_clears_quota(client, make_admin, session_factory):
@@ -406,6 +614,26 @@ async def test_admin_system_status_reports_config_health_and_counts(
     assert b["users_total"] == 4
     assert b["users_active"] == 3
     assert b["admins"] == 2
+
+
+async def test_admin_system_counts_exclude_deleted(
+    client, make_admin, session_factory
+):
+    """注销 accounts drop out of every system tally — they're anonymized tombstones,
+    not part of the live population (so ``total`` no longer over-counts them)."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    await _seed_user(session_factory, "alice")
+    gone = await _seed_user(session_factory, "zombie")
+    await _soft_delete_user(session_factory, gone)
+
+    r = await client.get("/v1/admin/system")
+    assert r.status_code == 200, r.text
+    b = r.json()
+    # Live = admin + alice (zombie soft-deleted → excluded from total *and* active).
+    assert b["users_total"] == 2
+    assert b["users_active"] == 2
+    assert b["admins"] == 1
 
 
 # --- 运营观测看板 (观测, P1) ---

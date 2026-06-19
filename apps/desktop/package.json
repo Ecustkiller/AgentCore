@@ -22,6 +22,8 @@
     "postinstall": "pnpm gen:api"
   },
   "dependencies": {
+    "@agentcore/contract-types": "workspace:*",
+    "@agentcore/protocol-conformance": "workspace:*",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language": "^6.12.3",
@@ -38,6 +40,7 @@
     "@xyflow/react": "^12.0.0",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "electron-updater": "^6.8.9",
     "elkjs": "^0.9.0",
     "ignore": "^7.0.5",
     "jszip": "^3.10.1",

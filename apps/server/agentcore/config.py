@@ -56,6 +56,17 @@ class Settings(BaseSettings):
     # 18888 avoids the Windows winnat reserved range 8866–8965.
     searxng_url: str = "http://localhost:18888"
 
+    # Tavily fallback search (案例1 检索韧性残留补齐). When tavily_api_key is set,
+    # get_search_backend() wraps the SearXNG primary in a FallbackSearchBackend: a
+    # query that FAILS on SearXNG (breaker-open / transport / persistent 5xx — the
+    # "whole team goes search-blind" mode from 实测案例复盘 案例1) retries ONCE via
+    # Tavily, a hosted search API reachable from outside mainland China. SearXNG stays
+    # the primary so normal queries pay no Tavily cost; Tavily fires only on a primary
+    # failure. Empty key ⇒ no fallback (pure SearXNG, behaviour unchanged). The
+    # protocol's intended second implementation — see search_backend.SearchBackend.
+    tavily_api_key: str = ""
+    tavily_base_url: str = "https://api.tavily.com"
+
     jwt_secret_key: str = "dev-secret-change-in-production"
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
@@ -168,6 +179,18 @@ class Settings(BaseSettings):
     # from the event-driven NUDGE.
     engine_reflection_start_round: int = 3
     engine_reflection_interval: int = 3
+
+    # Manager-CEO breadth nudge (档2.5 纯粹管理者 CEO): a delegation-capable run (the CEO
+    # captain / a can_delegate worker) that keeps doing read-only investigation ITSELF —
+    # cumulative info-gathering calls crossing ``threshold`` while it has not delegated —
+    # gets ONE steer to fan the breadth out to a parallel research team instead of reading
+    # everything solo (which serializes the work and bloats the CEO context within the
+    # turn). One-shot per run; gated on ``min_round`` so a legitimate pre-delegation scout
+    # batch in the opening round doesn't trip it. ``threshold = 0`` disables it; runs that
+    # cannot delegate (leaf workers) never fire it regardless. Tunable — calibrate from the
+    # delegation rate now made observable at chat.turn_complete (delegated = workers > 0).
+    engine_delegation_nudge_threshold: int = 4
+    engine_delegation_nudge_min_round: int = 1
 
     # Observability — execution span tree (D2 可观测性; 契约见 管理员后台.md). Off the user path,
     # best-effort: at turn end the durable Turn Journal is projected into an
@@ -325,6 +348,15 @@ class Settings(BaseSettings):
     git_sha: str = "unknown"
     built_at: str = "unknown"
 
+    # Desktop auto-update remote circuit breaker (前端技术与架构.md §7.6, 部署与运维.md
+    # §7.9). The desktop updater polls GET /updates/policy before each check and pauses
+    # downloads when this is false — a kill switch for a bad release. **fail-open**:
+    # the client treats any non-200/transport error as enabled, so an API outage never
+    # strands clients without updates (the opposite default of feature flags, which
+    # fail-safe). Full staged rollout (stagingPercentage) / channels ride on the
+    # feature-flag system (§7.9) and are not wired here yet.
+    desktop_updates_enabled: bool = True
+
     # Local data dir for server-side artifacts (e.g. the MVP long-term memory
     # files at <data_dir>/memory/<user_id>.md, and per-conversation/-folder
     # workspaces at <data_dir>/workspaces/...). See memory/store.py, workspace/.
@@ -370,6 +402,11 @@ class Settings(BaseSettings):
     # raw request body is read into memory, so this bounds per-request memory.
     workspace_upload_max_bytes: int = 25 * 1024 * 1024  # 25 MiB
 
+    # Max size (bytes) of a raw avatar upload (头像上传). Tighter than a workspace
+    # file: it's read into memory and re-encoded to a small WebP, so the original
+    # never needs to be large. Bounds per-request memory for the avatar endpoint.
+    avatar_upload_max_bytes: int = 5 * 1024 * 1024  # 5 MiB
+
     # Timeout (seconds) for a `git clone` into a workspace (文件进出·git clone).
     # The clone is shallow (--depth 1) so this bounds a slow/large public repo.
     workspace_clone_timeout_seconds: int = 120
@@ -399,6 +436,18 @@ class Settings(BaseSettings):
     # size; this only bounds how long the server waits before failing the handoff as
     # a transport error (a dropped desktop still fails cleanly, never hangs).
     workspace_handoff_timeout_seconds: float = 300.0
+
+    # --- 原生推送 (FCM, 手机端落地设计 P2) ---
+    # Default OFF: with this false, build_push_sender() returns NullPushSender and
+    # notify_user() short-circuits before any DB hit, so a turn carries zero push
+    # overhead until an operator wires Firebase. Enable + point at a Firebase
+    # service-account JSON (含 client_email / private_key / project_id) to deliver.
+    push_enabled: bool = False
+    # Optional override for the FCM project id; falls back to the JSON's project_id.
+    fcm_project_id: str = ""
+    # Filesystem path to the Firebase service-account JSON used to mint the OAuth2
+    # bearer (signed with python-jose, exchanged via httpx — no new dependency).
+    fcm_service_account_path: str = ""
 
     @property
     def cors_origins(self) -> list[str]:

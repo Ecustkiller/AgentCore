@@ -93,6 +93,10 @@ export const TOOL_LABELS: Record<string, string> = {
   // CEO captain tools (surfaced by the bubble's tool_progress / process timeline).
   delegate: "委派任务",
   ask_user: "向你确认",
+  consult_skill: "查阅能力",
+  revise: "修订产物",
+  // Worker-only upward channel (build_worker_registry); surfaces in run detail.
+  escalate: "上报问题",
 };
 
 export function toolLabel(name: string): string {

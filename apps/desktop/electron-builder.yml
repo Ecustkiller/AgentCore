@@ -10,6 +10,10 @@
 appId: xyz.fashitianxia.agentcore
 productName: AgentCore
 
+# 应用图标单源 = build/icon.png（1024×1024 方形品牌标记）。electron-builder 自动从
+# buildResources 的 icon.png 派生各平台图标（Windows .ico / macOS .icns / Linux png 集）。
+# 注意：仓库根 .gitignore 通用忽略 build/（Python 产物），已对 apps/desktop/build/icon.png
+# 加豁免使其入仓；运行时窗口图标另在 resources/icon.png（经 ?asset，见 main/index.ts）。
 directories:
   output: release/${version}
   buildResources: build

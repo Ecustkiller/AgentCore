@@ -14,6 +14,7 @@ from agentcore.db.models import User
 from agentcore.db.repositories import (
     ChatRepository,
     ConversationRepository,
+    ConversationShareRepository,
     CostEventRepository,
     CredentialsRepository,
     FolderRepository,
@@ -21,16 +22,19 @@ from agentcore.db.repositories import (
     InviteRepository,
     MessageRepository,
     ModelModeRepository,
+    PushDeviceRepository,
     RefreshTokenRepository,
     TurnJournalRepository,
     TurnMetricsRepository,
     UserBlockRepository,
     UserDirectoryRepository,
+    UserLlmKeyRepository,
     UserRepository,
 )
 from agentcore.messaging import MessagingService
 from agentcore.messaging.hub import HubChatEventPublisher, default_chat_hub
 from agentcore.security import decode_access_token
+from agentcore.storage.assets import AssetStorage, build_asset_storage
 
 # Cookie name carrying the access JWT (set by the auth routes).
 ACCESS_TOKEN_COOKIE = "access_token"
@@ -72,6 +76,23 @@ def get_conversation_repo(session: AsyncSession = Depends(get_db)) -> Conversati
     return ConversationRepository(session)
 
 
+def get_conversation_share_repo(
+    session: AsyncSession = Depends(get_db),
+) -> ConversationShareRepository:
+    return ConversationShareRepository(session)
+
+
+def get_user_llm_key_repo(
+    session: AsyncSession = Depends(get_db),
+) -> UserLlmKeyRepository:
+    return UserLlmKeyRepository(session)
+
+
+def get_asset_storage() -> AssetStorage:
+    """The process-wide asset store (头像等小对象); filesystem in dev, S3 in prod."""
+    return build_asset_storage()
+
+
 def get_folder_repo(session: AsyncSession = Depends(get_db)) -> FolderRepository:
     return FolderRepository(session)
 
@@ -102,6 +123,12 @@ def get_turn_journal_repo(
 
 def get_handoff_job_repo(session: AsyncSession = Depends(get_db)) -> HandoffJobRepository:
     return HandoffJobRepository(session)
+
+
+def get_push_device_repo(
+    session: AsyncSession = Depends(get_db),
+) -> PushDeviceRepository:
+    return PushDeviceRepository(session)
 
 
 def get_messaging_service(

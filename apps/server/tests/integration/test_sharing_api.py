@@ -1,0 +1,214 @@
+"""End-to-end API tests for conversation sharing (分享对话) against a real PG schema.
+
+Covers the owner loop (create → list → revoke), the public read-only page (renders
+the frozen snapshot; revoked / unknown / malformed tokens 404), snapshot freezing
+(a later message never leaks into an existing link), owner scoping, auth gating, the
+cascades (delete conversation / delete account revoke shares), and public XSS safety.
+"""
+
+from datetime import UTC, datetime, timedelta
+
+import httpx
+
+from agentcore.db.models import Message
+
+_PW = "password123"
+
+
+async def _register_and_login(
+    client: httpx.AsyncClient, invite_code: str, username: str
+) -> None:
+    r = await client.post(
+        "/v1/auth/register",
+        json={"username": username, "password": _PW, "invite_code": invite_code},
+    )
+    assert r.status_code == 201, r.text
+    r = await client.post(
+        "/v1/auth/login", json={"username": username, "password": _PW}
+    )
+    assert r.status_code == 200, r.text
+
+
+async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
+    r = await client.post("/v1/conversations", json={"title": title})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+async def _seed_messages(session_factory, conversation_id: str, turns) -> None:
+    base = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    async with session_factory() as session:
+        for i, (role, content) in enumerate(turns):
+            session.add(
+                Message(
+                    conversation_id=conversation_id,
+                    role=role,
+                    content=content,
+                    created_at=base + timedelta(minutes=i),
+                )
+            )
+        await session.commit()
+
+
+async def test_create_list_view_revoke(
+    client, new_client, make_invite, session_factory
+):
+    code = await make_invite("INV-SH-1")
+    await _register_and_login(client, code, "sh1")
+    conv_id = await _new_conversation(client, "分享测试")
+    await _seed_messages(
+        session_factory, conv_id, [("user", "问题甲"), ("assistant", "回答乙")]
+    )
+
+    # Create a share.
+    r = await client.post(f"/v1/conversations/{conv_id}/shares")
+    assert r.status_code == 201, r.text
+    share = r.json()
+    assert share["url"] == f"/shared/{share['id']}"
+    assert share["title"] == "分享测试"
+
+    # It appears in the owner's list.
+    r = await client.get(f"/v1/conversations/{conv_id}/shares")
+    assert r.status_code == 200
+    assert r.json()["total"] == 1
+
+    # The public page renders the snapshot — no cookies needed.
+    async with new_client() as anon:
+        page = await anon.get(share["url"])
+        assert page.status_code == 200
+        assert page.headers["content-type"].startswith("text/html")
+        assert "问题甲" in page.text
+        assert "回答乙" in page.text
+        assert "分享测试" in page.text
+
+    # Revoke → public page 404s, list empties.
+    r = await client.delete(f"/v1/conversations/{conv_id}/shares/{share['id']}")
+    assert r.status_code == 200
+    async with new_client() as anon:
+        assert (await anon.get(share["url"])).status_code == 404
+    assert (await client.get(f"/v1/conversations/{conv_id}/shares")).json()["total"] == 0
+
+
+async def test_revoke_is_not_repeatable(client, make_invite, session_factory):
+    code = await make_invite("INV-SH-2")
+    await _register_and_login(client, code, "sh2")
+    conv_id = await _new_conversation(client, "x")
+    await _seed_messages(session_factory, conv_id, [("user", "q")])
+    share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
+    assert (
+        await client.delete(f"/v1/conversations/{conv_id}/shares/{share['id']}")
+    ).status_code == 200
+    # A second revoke 404s (already revoked).
+    assert (
+        await client.delete(f"/v1/conversations/{conv_id}/shares/{share['id']}")
+    ).status_code == 404
+
+
+async def test_snapshot_is_frozen_against_later_messages(
+    client, new_client, make_invite, session_factory
+):
+    code = await make_invite("INV-SH-3")
+    await _register_and_login(client, code, "sh3")
+    conv_id = await _new_conversation(client, "冻结")
+    await _seed_messages(session_factory, conv_id, [("user", "最初的问题")])
+    share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
+
+    # A new turn lands AFTER the share was created.
+    await _seed_messages(
+        session_factory, conv_id, [("assistant", "稍后才有的新内容")]
+    )
+
+    async with new_client() as anon:
+        page = await anon.get(share["url"])
+        assert "最初的问题" in page.text
+        # The later message is NOT exposed by the existing link (所见即所享).
+        assert "稍后才有的新内容" not in page.text
+
+
+async def test_public_view_unknown_and_malformed_token_404(client, new_client, make_invite):
+    # Need an initialized schema (client fixture) but no auth for the public page.
+    code = await make_invite("INV-SH-4")
+    await _register_and_login(client, code, "sh4")
+    async with new_client() as anon:
+        # Well-formed but unknown uuid.
+        r = await anon.get("/shared/00000000-0000-0000-0000-000000000000")
+        assert r.status_code == 404
+        assert r.headers["content-type"].startswith("text/html")
+        # Malformed (not a uuid) — short-circuits to 404, never a 500.
+        assert (await anon.get("/shared/not-a-real-token")).status_code == 404
+
+
+async def test_share_requires_auth_and_owner(
+    client, new_client, make_invite, session_factory
+):
+    code = await make_invite("INV-SH-5")
+    await _register_and_login(client, code, "owner5")
+    conv_id = await _new_conversation(client, "private")
+    await _seed_messages(session_factory, conv_id, [("user", "secret")])
+
+    # Anonymous can't create.
+    async with new_client() as anon:
+        assert (
+            await anon.post(f"/v1/conversations/{conv_id}/shares")
+        ).status_code == 401
+
+    # A different user can't create / list (404, IDOR-safe).
+    code2 = await make_invite("INV-SH-5b")
+    async with new_client() as other:
+        await _register_and_login(other, code2, "intruder5")
+        assert (
+            await other.post(f"/v1/conversations/{conv_id}/shares")
+        ).status_code == 404
+        assert (
+            await other.get(f"/v1/conversations/{conv_id}/shares")
+        ).status_code == 404
+
+
+async def test_delete_conversation_revokes_shares(
+    client, new_client, make_invite, session_factory
+):
+    code = await make_invite("INV-SH-6")
+    await _register_and_login(client, code, "sh6")
+    conv_id = await _new_conversation(client, "to delete")
+    await _seed_messages(session_factory, conv_id, [("user", "q")])
+    share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
+
+    assert (await client.delete(f"/v1/conversations/{conv_id}")).status_code == 200
+    async with new_client() as anon:
+        assert (await anon.get(share["url"])).status_code == 404
+
+
+async def test_delete_account_revokes_shares(
+    client, new_client, make_invite, session_factory
+):
+    code = await make_invite("INV-SH-7")
+    await _register_and_login(client, code, "sh7")
+    conv_id = await _new_conversation(client, "acct")
+    await _seed_messages(session_factory, conv_id, [("user", "q")])
+    share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
+
+    r = await client.request(
+        "DELETE", "/v1/auth/me", json={"password": _PW}
+    )
+    assert r.status_code == 200, r.text
+    async with new_client() as anon:
+        assert (await anon.get(share["url"])).status_code == 404
+
+
+async def test_public_view_escapes_xss(
+    client, new_client, make_invite, session_factory
+):
+    code = await make_invite("INV-SH-8")
+    await _register_and_login(client, code, "sh8")
+    conv_id = await _new_conversation(client, "xss")
+    await _seed_messages(
+        session_factory,
+        conv_id,
+        [("assistant", "<script>alert('x')</script> hello")],
+    )
+    share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
+    async with new_client() as anon:
+        page = await anon.get(share["url"])
+        assert page.status_code == 200
+        assert "<script" not in page.text
+        assert "&lt;script&gt;" in page.text

@@ -1,10 +1,24 @@
-import { ApiError, BASE_URL, NetworkError, api } from "@/services/api";
+import {
+  ApiError,
+  BASE_URL,
+  NetworkError,
+  api,
+  tryRefresh,
+} from "@/services/api";
 import { clearSidecarInference } from "@/services/inferenceToken";
 import type { AuthUser } from "@/stores/auth";
 import type { components } from "@/types/api.generated";
 
 /** Server user payload (`/auth/me|login|register`), generated from OpenAPI. */
 type BackendUser = components["schemas"]["UserResponse"];
+
+/** Resolve the backend's relative avatar URL (`/v1/users/<id>/avatar?v=…`) against
+ *  the API base so consumers can drop it straight into an `<img src>`. Leaves
+ *  absolute URLs untouched; null stays null (UI falls back to the initial). */
+function avatarSrc(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.startsWith("/") ? `${BASE_URL}${url}` : url;
+}
 
 function toUser(u: BackendUser): AuthUser {
   return {
@@ -14,6 +28,7 @@ function toUser(u: BackendUser): AuthUser {
     email: u.email,
     role: u.role,
     defaultModelMode: u.default_model_mode ?? null,
+    avatarUrl: avatarSrc(u.avatar_url),
   };
 }
 
@@ -58,6 +73,81 @@ export async function register(input: RegisterInput): Promise<AuthUser> {
 export async function logout(): Promise<void> {
   await api.post("/v1/auth/logout");
   clearSidecarInference(); // session ended → next login re-mints
+}
+
+/**
+ * Change the signed-in user's password (修改密码). The backend revokes every other
+ * device's session and re-issues this one's cookies, so the caller stays logged in
+ * — no re-login needed here. Throws {@link ApiError} (401 wrong current password,
+ * 422 weak/unchanged new password) for the form to surface.
+ */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  await api.post("/v1/auth/change-password", {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+}
+
+/** Profile fields the user may edit. Omit a key to leave it unchanged; pass
+ *  `email: null` to clear it (PATCH semantics, mirrored on the backend). */
+export interface ProfileUpdate {
+  displayName?: string;
+  email?: string | null;
+}
+
+/** Update the signed-in user's profile (个人资料编辑); returns the refreshed user so
+ *  the caller can sync the auth store. 422 if the email is already taken. */
+export async function updateProfile(update: ProfileUpdate): Promise<AuthUser> {
+  const body: Record<string, unknown> = {};
+  if (update.displayName !== undefined) body.display_name = update.displayName;
+  if (update.email !== undefined) body.email = update.email;
+  return toUser(await api.patch<BackendUser>("/v1/auth/me", body));
+}
+
+/**
+ * Upload a new avatar (头像上传). The backend reads the **raw image bytes** (no
+ * multipart) and re-encodes them to a square WebP, so we POST the File directly —
+ * the shared `api` helper can't be used as it JSON-encodes the body. Returns the
+ * refreshed user (its `avatarUrl` carries a content-hash cache-buster, so the new
+ * picture shows immediately). Mirrors `api.ts`'s refresh-once-on-401 policy.
+ */
+export async function uploadAvatar(file: File): Promise<AuthUser> {
+  const send = (): Promise<Response> =>
+    fetch(`${BASE_URL}/v1/users/me/avatar`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+  let res: Response;
+  try {
+    res = await send();
+    if (res.status === 401 && (await tryRefresh())) res = await send();
+  } catch (cause) {
+    throw new NetworkError(cause);
+  }
+  if (!res.ok) throw new ApiError(res.status, await res.text(), res.headers);
+  return toUser((await res.json()) as BackendUser);
+}
+
+/** Remove the avatar and fall back to the initial (恢复默认头像). Idempotent on the
+ *  backend; returns the refreshed user with `avatarUrl: null`. */
+export async function deleteAvatar(): Promise<AuthUser> {
+  return toUser(await api.delete<BackendUser>("/v1/users/me/avatar"));
+}
+
+/**
+ * Self-service account deletion (注销账户). The password re-confirms intent; the
+ * backend soft-deletes + anonymizes the account and revokes all sessions. The
+ * caller must drop to the login screen afterwards. Throws {@link ApiError} (401
+ * wrong password) for the form to surface.
+ */
+export async function deleteAccount(password: string): Promise<void> {
+  await api.delete("/v1/auth/me", { password });
+  clearSidecarInference(); // account gone → drop any cached inference token
 }
 
 /**

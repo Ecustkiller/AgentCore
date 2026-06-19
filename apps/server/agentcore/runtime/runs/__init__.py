@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.concurrency import (
+    child_budget,
     current_budget,
-    gather_bounded,
     reset_budget,
     set_budget,
 )
@@ -59,7 +59,7 @@ __all__ = [
     "RunSpec",
     "RunState",
     "TERMINAL_PHASES",
-    "gather_bounded",
+    "child_budget",
     "current_budget",
     "set_budget",
     "reset_budget",

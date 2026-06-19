@@ -71,9 +71,11 @@ class _StubTool:
         citation_script: list[list[dict]] | None = None,
         terminal: bool = False,
         fail_output: str = "",
+        category: ToolCategory = ToolCategory.SEARCH,
     ) -> None:
         self._name = name
         self._success = success
+        self._category = category
         self._citations = citations
         # Diagnostic detail a failing tool puts in ``output`` (mirrors code_execute,
         # whose stdout/stderr ride output while ``error`` is just the exit code).
@@ -90,7 +92,7 @@ class _StubTool:
             name=self._name,
             description="stub",
             parameters={"type": "object", "properties": {}},
-            category=ToolCategory.SEARCH,
+            category=self._category,
         )
 
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
@@ -757,3 +759,85 @@ async def test_productive_round_resets_unproductive_streak():
     # reached the model's own answer — never early-stopped
     assert "final" in content
     assert finish_override == []
+
+
+# --- 档2.5: manager-CEO delegation breadth nudge (engine wiring) -----------------
+
+
+def _read_then_answer(reads: int) -> _ScriptedProvider:
+    # `reads` rounds of a read with DISTINCT args (so the repeated-call detector never
+    # trips — isolating the breadth nudge), then a tool-free answer.
+    rounds: list[list[LLMChunk]] = [
+        [_tool_chunk("file_read", '{"p": "%d"}' % i)] for i in range(reads)
+    ]
+    rounds.append([_content_chunk("done")])
+    return _ScriptedProvider(rounds)
+
+
+async def _run_with_registry(provider: _ScriptedProvider, reg: ToolRegistry):
+    messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
+    content, *_ = await react_loop(
+        messages=messages,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        tool_context=_context(),
+        profile=profile,
+    )
+    return content, messages
+
+
+async def test_delegation_breadth_nudge_fires_for_capable_run_investigating_solo():
+    # A delegation-capable run (holds an ORCHESTRATION tool) that keeps doing read-only
+    # investigation itself — read breadth crossing the default threshold (4) without a
+    # delegate — gets exactly ONE breadth nudge to fan it out to a research team.
+    reg = ToolRegistry()
+    reg.register(_StubTool(name="file_read"))  # investigation (SEARCH + NEVER approval)
+    reg.register(_StubTool(name="delegate", category=ToolCategory.ORCHESTRATION))
+    content, messages = await _run_with_registry(_read_then_answer(4), reg)
+
+    assert content == "done"
+    nudges = [
+        m for m in messages if m.role == "user" and m.content and "成规模的调查" in m.content
+    ]
+    assert len(nudges) == 1
+    assert "4 次" in nudges[0].content and "delegate" in nudges[0].content
+    # the periodic reflection (due at round_idx 3, the same round the nudge fires) is
+    # suppressed so two steers don't stack in one round.
+    assert not any(m.content and "进度复盘" in m.content for m in messages if m.content)
+
+
+async def test_no_breadth_nudge_for_a_run_that_cannot_delegate():
+    # A leaf worker (no ORCHESTRATION tool in its set) investigating broadly is doing
+    # its own job — it must never be told to delegate, no matter how much it reads.
+    reg = ToolRegistry()
+    reg.register(_StubTool(name="file_read"))
+    content, messages = await _run_with_registry(_read_then_answer(5), reg)
+
+    assert content == "done"
+    assert not any(m.content and "成规模的调查" in m.content for m in messages if m.content)
+
+
+async def test_no_breadth_nudge_once_the_run_delegates():
+    # A capable run that DOES delegate early is behaving as a manager: a couple of
+    # scout reads before the delegate, then more reads after the result comes back,
+    # must not trip the nudge (the delegate latches it off for the rest of the run).
+    reg = ToolRegistry()
+    reg.register(_StubTool(name="file_read"))
+    reg.register(_StubTool(name="delegate", category=ToolCategory.ORCHESTRATION))
+    provider = _ScriptedProvider(
+        [
+            [_tool_chunk("file_read", '{"p": "scout"}')],  # 1 scout read
+            [_tool_chunk("delegate", "{}")],  # delegates → behaving as a manager
+            [_tool_chunk("file_read", '{"p": "a"}')],  # post-result reads...
+            [_tool_chunk("file_read", '{"p": "b"}')],
+            [_tool_chunk("file_read", '{"p": "c"}')],
+            [_tool_chunk("file_read", '{"p": "d"}')],
+            [_content_chunk("done")],
+        ]
+    )
+    content, messages = await _run_with_registry(provider, reg)
+
+    assert content == "done"
+    assert not any(m.content and "成规模的调查" in m.content for m in messages if m.content)

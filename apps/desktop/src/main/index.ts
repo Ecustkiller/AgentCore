@@ -2,8 +2,14 @@ import { join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { is } from "@electron-toolkit/utils";
 import { net, BrowserWindow, app, ipcMain, protocol, shell } from "electron";
+// `?asset` 让 electron-vite 把图标拷入产物并解析为运行时绝对路径；用作窗口/任务栏图标
+// （dev 与 Linux 主要靠它；打包后 Windows exe / macOS 包图标另由 electron-builder 从
+// build/icon.png 派生）。
+import icon from "../../resources/icon.png?asset";
 import { registerFsIpc } from "./fs-service";
 import { registerSidecarIpc } from "./sidecar-service";
+import { initUpdater } from "./updater";
+import { loadWindowState, manageWindowState } from "./window-state";
 
 // Production renderer is served from a custom app:// scheme instead of file://,
 // so it gets a real, stable origin (app://agentcore). That origin is what makes
@@ -42,14 +48,19 @@ function registerAppProtocol(): void {
   });
 }
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
+  // 恢复上次的窗口尺寸/位置/最大化（x/y 缺省时由 OS 居中）。
+  const windowState = loadWindowState();
   const mainWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    width: windowState.width,
+    height: windowState.height,
+    x: windowState.x,
+    y: windowState.y,
     minWidth: 800,
     minHeight: 600,
     show: false,
     frame: false,
+    icon,
     ...(process.platform === "darwin" && {
       titleBarStyle: "hidden",
       trafficLightPosition: { x: 12, y: 12 },
@@ -60,6 +71,8 @@ function createWindow(): void {
       sandbox: false,
     },
   });
+  if (windowState.isMaximized) mainWindow.maximize();
+  manageWindowState(mainWindow);
 
   ipcMain.on("window:minimize", () => mainWindow.minimize());
   ipcMain.on("window:maximize", () => {
@@ -81,13 +94,18 @@ function createWindow(): void {
   } else {
     mainWindow.loadURL(`${APP_SCHEME}://${APP_ORIGIN_HOST}/index.html`);
   }
+
+  return mainWindow;
 }
 
 app.whenReady().then(() => {
   registerAppProtocol();
   registerFsIpc();
   registerSidecarIpc();
-  createWindow();
+  const mainWindow = createWindow();
+  // 自动更新随首个窗口创建后初始化一次（IPC 句柄全局唯一，不在 createWindow 内调用，
+  // 以免 macOS 上 activate 重建窗口时重复注册）。
+  initUpdater(mainWindow);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

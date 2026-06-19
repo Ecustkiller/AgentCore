@@ -6,8 +6,10 @@ receives 404 (never another user's data — IDOR-safe).
 """
 
 import asyncio
+import json
 import mimetypes
 from datetime import datetime
+from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
+    get_conversation_share_repo,
     get_cost_event_repo,
     get_db,
     get_folder_repo,
@@ -43,6 +46,7 @@ from agentcore.api.schemas import (
     HandoffJobSummary,
     MessageDetail,
     MessageListResponse,
+    MessagePromptResponse,
     MoveConversationRequest,
     MoveFileRequest,
     PausedTurnListResponse,
@@ -70,6 +74,10 @@ from agentcore.api.schemas import (
 )
 from agentcore.api.sse import sse_attach_response, sse_response
 from agentcore.config import settings
+from agentcore.conversation.export import (
+    conversation_to_json,
+    conversation_to_markdown,
+)
 from agentcore.conversation.quota import QuotaLimits, enforce_quota
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import (
@@ -89,6 +97,7 @@ from agentcore.core.logging import get_logger
 from agentcore.db.models import Conversation, User
 from agentcore.db.repositories import (
     ConversationRepository,
+    ConversationShareRepository,
     CostEventRepository,
     FolderRepository,
     HandoffJobRepository,
@@ -105,7 +114,7 @@ from agentcore.runtime.events import (
     handoff_snapshot_done,
 )
 from agentcore.runtime.interaction import default_interaction_registry
-from agentcore.runtime.journal import runs_from_entries
+from agentcore.runtime.journal import runs_from_entries, system_prompt_from_journal
 from agentcore.runtime.suspension_persistence import (
     claim_paused_turn,
     list_paused_turns,
@@ -390,11 +399,80 @@ async def delete_conversation(
     conversation_id: str,
     user: AuthUser,
     repo: ConversationRepository = Depends(get_conversation_repo),
+    share_repo: ConversationShareRepository = Depends(get_conversation_share_repo),
 ):
     deleted = await repo.soft_delete(conversation_id, user_id=user.user_id)
     if not deleted:
         raise NotFoundError("对话不存在")
+    # Cascade-revoke any public share links (分享对话): deleting a conversation must
+    # kill its read-only links so a stale snapshot can't outlive it. Owner already
+    # proven by the soft_delete above, so a blanket per-conversation revoke is safe.
+    await share_repo.revoke_all_for_conversation(conversation_id)
     return StatusResponse()
+
+
+def _download_headers(filename: str) -> dict[str, str]:
+    """Content-Disposition for a download, with an RFC 5987 UTF-8 ``filename*``.
+
+    A conversation title can be non-ASCII (Chinese), which a bare ``filename=`` can't
+    carry; ``filename*=UTF-8''<pct-encoded>`` does, with a sanitized ASCII
+    ``filename=`` fallback for older clients.
+    """
+    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii") or "conversation"
+    quoted = quote(filename, safe="")
+    return {
+        "Content-Disposition": (
+            f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{quoted}'
+        )
+    }
+
+
+def _safe_export_stem(title: str, conversation_id: str) -> str:
+    """A filesystem-safe base name for an export file, derived from the title.
+
+    Strips path separators / control chars and caps the length; falls back to the
+    conversation id when the title is empty or strips to nothing.
+    """
+    cleaned = "".join(
+        ch for ch in (title or "") if ch.isprintable() and ch not in '/\\:*?"<>|'
+    ).strip()
+    cleaned = cleaned[:80].strip()
+    return cleaned or f"conversation-{conversation_id[:8]}"
+
+
+@router.get("/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: str,
+    user: AuthUser,
+    format: str = Query("md", pattern="^(md|json)$"),
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    msg_repo: MessageRepository = Depends(get_message_repo),
+):
+    """Export a conversation's full transcript as a download (导出对话).
+
+    Reads the WHOLE transcript server-side (not a scroll window, so nothing is
+    missed) and renders it owner-scoped (404 for a non-owner). ``format=md`` is a
+    clean, content-only Markdown record (the default a user reads / pastes);
+    ``format=json`` is a full-fidelity dump for power users / re-import. Spend is
+    never exported — it lives in the cost ledger, not the message body.
+    """
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    messages = await msg_repo.list_all_for_conversation(conversation_id)
+    stem = _safe_export_stem(conv.title, conversation_id)
+    if format == "json":
+        payload = conversation_to_json(conv, messages)
+        content = json.dumps(payload, ensure_ascii=False, indent=2)
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers=_download_headers(f"{stem}.json"),
+        )
+    content = conversation_to_markdown(conv, messages)
+    return Response(
+        content=content,
+        media_type="text/markdown; charset=utf-8",
+        headers=_download_headers(f"{stem}.md"),
+    )
 
 
 @router.get("/{conversation_id}/messages", response_model=MessageListResponse)
@@ -489,6 +567,33 @@ async def delete_message(
     if not deleted:
         raise NotFoundError("消息不存在")
     return StatusResponse()
+
+
+@router.get(
+    "/{conversation_id}/messages/{message_id}/prompt",
+    response_model=MessagePromptResponse,
+)
+async def get_message_prompt(
+    conversation_id: str,
+    message_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    journal_repo: TurnJournalRepository = Depends(get_turn_journal_repo),
+):
+    """The verbatim system prompt the CEO ran for ONE assistant turn (查看本回合提示词).
+
+    提示词透明 L3 (对所有人开放): reads the ``turn_started`` head fact from the turn
+    journal (§18.3) — the exact prompt that turn was given, dynamic bits and all — so a
+    user can see precisely what steered the reply. Owner-scoped + conversation-scoped
+    (``load_owned``) so a foreign ``message_id`` can't leak another tenant's prompt. 404
+    for a user message or a legacy turn that journaled no head fact.
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    entries = await journal_repo.load_owned(message_id, conversation_id)
+    system_prompt = system_prompt_from_journal(entries)
+    if system_prompt is None:
+        raise NotFoundError("本回合没有可查看的提示词")
+    return MessagePromptResponse(system_prompt=system_prompt)
 
 
 async def _preflight_turn_llm(

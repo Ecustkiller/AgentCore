@@ -1,12 +1,25 @@
 // Auth flow for the mobile bearer client (M3). Mirrors the backend /v1/auth/token*
 // endpoints added in M2.
-import { apiFetch, apiUrl, clearTokens, getTokens, setTokens } from "@/api/client";
+import {
+  apiFetch,
+  apiUrl,
+  clearTokens,
+  getTokens,
+  hydrateTokens,
+  setTokens,
+} from "@/api/client";
+import { disablePush, enablePush } from "@/api/push";
 
 export interface User {
   id: string;
   username: string;
   display_name: string;
   role: string;
+  // Carried by /auth/me and the account mutations; optional so the lean login path
+  // (token response) doesn't have to populate them. `avatar_url` is a relative path
+  // (/v1/users/<id>/avatar?v=…) fetched as a blob for display (bearer can't ride an <img>).
+  email?: string | null;
+  avatar_url?: string | null;
 }
 
 interface TokenResponse {
@@ -28,6 +41,8 @@ export async function login(username: string, password: string): Promise<User> {
   }
   const data = (await res.json()) as TokenResponse;
   setTokens({ access_token: data.access_token, refresh_token: data.refresh_token });
+  // Authenticated → register this device for push (native-only, best-effort, non-blocking).
+  void enablePush();
   // The token login returns the user inline (identity in one round trip); fall back
   // to /me only if the server omitted it.
   return data.user ?? (await me());
@@ -42,6 +57,9 @@ export async function me(): Promise<User> {
 export async function logout(): Promise<void> {
   const tokens = getTokens();
   if (tokens) {
+    // Unregister this device first — the DELETE is bearer-authed, so it must run while the
+    // tokens are still present (before clearTokens). Native-only + best-effort.
+    await disablePush();
     // Best-effort: revoke the refresh family server-side, but always clear locally.
     await fetch(apiUrl("/v1/auth/token/revoke"), {
       method: "POST",
@@ -105,13 +123,19 @@ export function bootstrapAuth(force = false): Promise<BootstrapResult> {
 }
 
 async function runBootstrap(): Promise<BootstrapResult> {
+  // 0. Restore the persisted token pair into the sync cache before any getTokens() —
+  //    on native this reads Secure Storage (async), so it must complete before routing.
+  await hydrateTokens();
   // 1. Validate any stored session, telling a real logout (401) apart from a
   //    backend outage (5xx / fetch threw). On outage we keep the tokens and route
   //    to the retry screen — a transient outage must never sign a valid session out.
   if (getTokens()) {
     try {
       const res = await apiFetch("/v1/auth/me");
-      if (res.ok) return { kind: "authenticated" };
+      if (res.ok) {
+        void enablePush(); // restored session → (re)register for push (native-only)
+        return { kind: "authenticated" };
+      }
       if (res.status !== 401) {
         return { kind: "unavailable", reason: await outageReason() };
       }

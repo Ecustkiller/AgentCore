@@ -12,6 +12,10 @@ acts on the right signal:
   traffic is held back until recovery.
 - ``GET /version`` — build provenance (semantic version + git SHA + build time)
   for traceability and instant rollback.
+- ``GET /updates/policy`` — desktop auto-update remote circuit breaker. The
+  desktop updater polls it before each check; ``enabled: false`` is a kill switch
+  for a bad release. Unauthenticated and dependency-free like ``/version`` so the
+  updater can reach it pre-login; the client treats it as **fail-open**.
 
 The desktop client probes ``/readyz`` on startup to tell an infrastructure
 outage (e.g. the database is down) apart from a normal unauthenticated state, so
@@ -65,3 +69,19 @@ async def version() -> dict[str, str]:
         "git_sha": settings.git_sha,
         "built_at": settings.built_at,
     }
+
+
+@router.get("/updates/policy")
+async def updates_policy() -> dict[str, bool]:
+    """Desktop auto-update remote circuit breaker (前端技术与架构.md §7.6).
+
+    The desktop updater polls this before each check and pauses downloads when
+    ``enabled`` is false — a kill switch for a bad release. Unauthenticated and
+    dependency-free (like ``/version``) so the updater can reach it pre-login and
+    during a partial outage. The client is **fail-open**: it treats any error or
+    non-200 as enabled, so this endpoint going down never strands updates.
+
+    Staged rollout (stagingPercentage) and beta/stable channels ride on the
+    feature-flag system (部署与运维.md §7.9) and are not part of this payload yet.
+    """
+    return {"enabled": settings.desktop_updates_enabled}

@@ -2,8 +2,15 @@ import { api } from "@/services/api";
 import type { components } from "@/types/api.generated";
 
 export type AdminUser = components["schemas"]["AdminUserResponse"];
+/** A roster row: the account record + its all-time cumulative spend (`cost_total`). */
+export type AdminUserListItem = components["schemas"]["AdminUserListItem"];
 export type AdminUserListResponse =
   components["schemas"]["AdminUserListResponse"];
+
+export type UserRole = "user" | "admin";
+export type UserStatus = "active" | "disabled";
+export type UserSort = "created_at" | "cost";
+export type SortOrder = "asc" | "desc";
 export type AdminUpdateUserRequest =
   components["schemas"]["AdminUpdateUserRequest"];
 export type AdminUserDetail = components["schemas"]["AdminUserDetail"];
@@ -17,6 +24,14 @@ export interface ListUsersParams {
   page: number;
   pageSize: number;
   q?: string;
+  /** Pin the role / status dimension (omit = all). */
+  role?: UserRole;
+  status?: UserStatus;
+  /** Sort key + direction (default: newest registration first). */
+  sort?: UserSort;
+  order?: SortOrder;
+  /** Surface 注销 (soft-deleted, anonymized) accounts — hidden by default. */
+  includeDeleted?: boolean;
 }
 
 export async function listUsers(
@@ -25,9 +40,14 @@ export async function listUsers(
   const search = new URLSearchParams({
     page: String(params.page),
     page_size: String(params.pageSize),
+    sort: params.sort ?? "created_at",
+    order: params.order ?? "desc",
   });
   const q = params.q?.trim();
   if (q) search.set("q", q);
+  if (params.role) search.set("role", params.role);
+  if (params.status) search.set("status", params.status);
+  if (params.includeDeleted) search.set("include_deleted", "true");
   return api.get<AdminUserListResponse>(`/v1/admin/users?${search.toString()}`);
 }
 
@@ -65,4 +85,14 @@ export async function resetUserPassword(
   return api.post<AdminResetPasswordResponse>(
     `/v1/admin/users/${userId}/reset-password`,
   );
+}
+
+/**
+ * 注销 (soft-delete + anonymize) an account, admin-initiated. Anonymizes + disables
+ * the account, revokes its sessions, and cascades cross-domain cleanup (conversations
+ * / shares / BYOK / avatar). Returns the tombstone record (carries `deleted_at`).
+ * Irreversible — the caller must confirm with the operator first.
+ */
+export async function deleteUser(userId: string): Promise<AdminUser> {
+  return api.delete<AdminUser>(`/v1/admin/users/${userId}`);
 }

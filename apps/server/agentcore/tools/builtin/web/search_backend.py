@@ -1,10 +1,17 @@
 """Search backend — pluggable web search for built-in tools.
 
-Default implementation talks to a self-hosted SearXNG instance whose engine set
-is curated to mainland-China-reachable engines (baidu/360search/sogou/quark, see
-``deploy/searxng/settings.yml``) — the public engines (google/ddg/brave) time
-out from a China-hosted server. The ``SearchBackend`` protocol allows swapping in
-Tavily or another provider without touching the tool layer.
+The default primary talks to a self-hosted SearXNG instance whose engine set is
+curated to mainland-China-reachable engines (baidu/360search/sogou/quark, see
+``deploy/searxng/settings.yml``) — the public engines (google/ddg/brave) time out
+from a China-hosted server.
+
+The ``SearchBackend`` protocol's second implementation is :class:`TavilyBackend`
+(a hosted search API reachable from outside mainland China). When a Tavily key is
+configured, :func:`get_search_backend` wraps the SearXNG primary in a
+:class:`FallbackSearchBackend` so a query that *fails* on SearXNG (breaker-open /
+transport / persistent 5xx — the "whole team goes search-blind" mode from
+``实测案例复盘`` 案例1) retries once via Tavily. SearXNG stays the primary so normal
+queries pay no Tavily cost; Tavily fires only on a primary failure.
 """
 
 from __future__ import annotations
@@ -24,6 +31,7 @@ from agentcore.tools.builtin.web._net import (
     WEB_CONNECT_TIMEOUT,
     EgressError,
     circuit_remaining,
+    describe_net_error,
     note_failure,
     note_success,
 )
@@ -194,28 +202,170 @@ class SearXNGBackend:
         raise EgressError(f"搜索服务 {host} 连续返回服务端错误（5xx），已停止重试")
 
 
+# Tavily caps max_results at 20 (0-20); clamp defensively though the tool layer
+# already bounds the request to ≤12.
+_TAVILY_MAX_RESULTS_CAP = 20
+_TAVILY_SEARCH_PATH = "/search"
+
+
+class TavilyBackend:
+    """Search via the Tavily API — the reliable fallback when SearXNG is unusable.
+
+    Tavily is a hosted search API reachable from outside mainland China, so it
+    covers the exact gap that strands the self-hosted SearXNG primary (overload →
+    breaker open, or restricted egress). It is the second ``SearchBackend`` the
+    protocol was designed for, wired in ONLY as the fallback leg of
+    :class:`FallbackSearchBackend` (never the default) so steady-state queries keep
+    hitting the free self-hosted instance and incur no per-query Tavily cost.
+
+    Tavily's result objects expose ``title`` / ``url`` / ``content`` — the same
+    shape SearXNG returns — so :func:`_parse_results` parses both. Holds a
+    persistent ``httpx.AsyncClient`` (keep-alive to the fixed Tavily host), closed
+    on shutdown via the wrapping backend's ``aclose``.
+    """
+
+    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
+        self.api_key = api_key if api_key is not None else settings.tavily_api_key
+        self.base_url = (base_url or settings.tavily_base_url).rstrip("/")
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Lazily build the shared client, bound to the running event loop.
+
+        Lazy (not in ``__init__``) so the client attaches to the server's loop at
+        first use, mirroring :class:`SearXNGBackend`. Connect uses the short
+        ``WEB_CONNECT_TIMEOUT`` (a down host fast-fails) under the generous overall
+        ``SEARCH_TIMEOUT`` read budget.
+        """
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(SEARCH_TIMEOUT, connect=WEB_CONNECT_TIMEOUT)
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        """Close the persistent client and drop it (idempotent; re-lazies on next use)."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    async def search(
+        self, query: str, max_results: int = DEFAULT_MAX_RESULTS
+    ) -> list[SearchResult]:
+        # Guard: only reached if mis-wired without a key (get_search_backend builds
+        # this backend only when a key is set). Honest, model-facing reason.
+        if not self.api_key:
+            raise EgressError("Tavily 回退搜索未配置 API key（设置 TAVILY_API_KEY 启用）")
+
+        payload = {
+            "query": query,
+            "max_results": max(1, min(max_results, _TAVILY_MAX_RESULTS_CAP)),
+            "search_depth": "basic",
+        }
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        client = self._get_client()
+        # No retry / no breaker here: Tavily is the fallback leg, called per-query
+        # only after the primary already failed. One honest attempt — its errors
+        # propagate to FallbackSearchBackend, which logs and surfaces the primary's
+        # (already tuned) reason. Keeps this leg simple and side-effect free.
+        resp = await client.post(
+            f"{self.base_url}{_TAVILY_SEARCH_PATH}", json=payload, headers=headers
+        )
+        resp.raise_for_status()
+        return _parse_results(resp.json(), max_results)
+
+
+class FallbackSearchBackend:
+    """A primary backend with a fallback leg: try primary, on FAILURE try fallback.
+
+    The primary (self-hosted SearXNG) stays the default path so normal queries pay
+    no external-API cost; the fallback (Tavily) fires ONLY when the primary raises —
+    breaker-open / transport failure / persistent 5xx, i.e. the 案例1 "whole team
+    goes search-blind" mode. A successful (even empty-result) primary never calls
+    the fallback: this catches *failures*, not thin recall, to keep the change
+    bounded and the cost predictable.
+
+    If BOTH legs fail, the PRIMARY's exception is surfaced — it is the configured
+    default and its ``EgressError`` text is the already-tuned, honest reason the
+    model acts on; the fallback's failure is logged for diagnosis.
+    """
+
+    def __init__(self, primary: SearchBackend, fallback: SearchBackend) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    async def search(
+        self, query: str, max_results: int = DEFAULT_MAX_RESULTS
+    ) -> list[SearchResult]:
+        try:
+            return await self.primary.search(query, max_results=max_results)
+        except Exception as primary_exc:  # noqa: BLE001 - any primary failure → try fallback
+            logger.warning(
+                "search.primary_failed_try_fallback",
+                reason=describe_net_error(primary_exc),
+                error_repr=repr(primary_exc),
+            )
+            try:
+                results = await self.fallback.search(query, max_results=max_results)
+            except Exception as fb_exc:  # noqa: BLE001 - both down → surface primary's reason
+                logger.warning(
+                    "search.fallback_failed",
+                    reason=describe_net_error(fb_exc),
+                    error_repr=repr(fb_exc),
+                )
+                raise primary_exc
+            logger.info("search.fallback_succeeded", result_count=len(results))
+            return results
+
+    async def aclose(self) -> None:
+        """Close both legs' clients (best-effort; one failure can't block the other)."""
+        for backend in (self.primary, self.fallback):
+            closer = getattr(backend, "aclose", None)
+            if closer is None:
+                continue
+            try:
+                await closer()
+            except Exception:  # noqa: BLE001 - best-effort shutdown cleanup
+                logger.warning("search.backend_aclose_failed", backend=type(backend).__name__)
+
+
 _backend: SearchBackend | None = None
 
 
 def get_search_backend() -> SearchBackend:
+    """Build (once) the process-wide search backend.
+
+    SearXNG is always the primary. When a Tavily key is configured it is wrapped in
+    a :class:`FallbackSearchBackend` so a primary failure retries via Tavily;
+    otherwise the bare SearXNG backend is returned (behaviour unchanged).
+    """
     global _backend
     if _backend is None:
-        _backend = SearXNGBackend()
+        primary = SearXNGBackend()
+        if settings.tavily_api_key:
+            _backend = FallbackSearchBackend(primary, TavilyBackend())
+            logger.info("search.backend_ready", primary="searxng", fallback="tavily")
+        else:
+            _backend = primary
     return _backend
 
 
 async def aclose_search_backend() -> None:
-    """Close the process-wide search backend's HTTP client (app shutdown / tests).
+    """Close the process-wide search backend's HTTP client(s) (app shutdown / tests).
 
-    Wired into the app lifespan so the SearXNG keep-alive pool is released cleanly
-    (no "Unclosed client" warning, no leaked sockets). Also the reset hook tests use
-    to drop a backend built against a patched client. No-op if never built or if the
-    backend impl owns no client.
+    Wired into the app lifespan so the SearXNG (and, when configured, Tavily)
+    keep-alive pools are released cleanly (no "Unclosed client" warning, no leaked
+    sockets). Also the reset hook tests use to drop a backend built against a patched
+    client. Duck-typed: closes any backend exposing ``aclose`` (SearXNG / Tavily /
+    the fallback wrapper, which closes both legs). No-op if never built.
     """
     global _backend
-    if isinstance(_backend, SearXNGBackend):
-        await _backend.aclose()
+    backend = _backend
     _backend = None
+    if backend is not None:
+        closer = getattr(backend, "aclose", None)
+        if closer is not None:
+            await closer()
 
 
 async def probe_search_backend() -> tuple[bool, str] | None:
@@ -229,8 +379,10 @@ async def probe_search_backend() -> tuple[bool, str] | None:
     with the short connect deadline so the check itself can't hang startup.
     """
     backend = get_search_backend()
+    if isinstance(backend, FallbackSearchBackend):
+        backend = backend.primary  # probe the SearXNG primary behind the fallback
     if not isinstance(backend, SearXNGBackend):
-        return None  # custom backend (e.g. Tavily): nothing SearXNG-specific to probe
+        return None  # custom backend (e.g. pure Tavily): nothing SearXNG-specific to probe
     base = backend.base_url
     try:
         async with httpx.AsyncClient(

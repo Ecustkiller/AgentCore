@@ -10,6 +10,11 @@ import {
   type SidecarEventPush,
   type SidecarStatusPush,
 } from "@shared/sidecar-contract";
+import {
+  UPDATER_CHANNELS,
+  type UpdaterApi,
+  type UpdaterStatus,
+} from "@shared/updater-contract";
 import { contextBridge, ipcRenderer } from "electron";
 
 const fsApi: FsApi = {
@@ -66,6 +71,19 @@ const sidecarApi: SidecarApi = {
   },
 };
 
+const updaterApi: UpdaterApi = {
+  configure: (apiBaseUrl) =>
+    ipcRenderer.invoke(UPDATER_CHANNELS.configure, apiBaseUrl),
+  check: () => ipcRenderer.invoke(UPDATER_CHANNELS.check),
+  quitAndInstall: () => ipcRenderer.invoke(UPDATER_CHANNELS.quitAndInstall),
+  getStatus: () => ipcRenderer.invoke(UPDATER_CHANNELS.getStatus),
+  onStatus: (cb) => {
+    const listener = (_e: unknown, payload: UpdaterStatus) => cb(payload);
+    ipcRenderer.on(UPDATER_CHANNELS.status, listener);
+    return () => ipcRenderer.removeListener(UPDATER_CHANNELS.status, listener);
+  },
+};
+
 const windowApi = {
   minimize: () => ipcRenderer.send("window:minimize"),
   maximize: () => ipcRenderer.send("window:maximize"),
@@ -77,6 +95,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld("electron", electronAPI);
     contextBridge.exposeInMainWorld("fsApi", fsApi);
     contextBridge.exposeInMainWorld("sidecarApi", sidecarApi);
+    contextBridge.exposeInMainWorld("updaterApi", updaterApi);
     contextBridge.exposeInMainWorld("windowApi", windowApi);
   } catch (error) {
     console.error(error);
@@ -88,6 +107,8 @@ if (process.contextIsolated) {
   window.fsApi = fsApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.sidecarApi = sidecarApi;
+  // @ts-ignore - 非隔离环境下直接挂载
+  window.updaterApi = updaterApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.windowApi = windowApi;
 }

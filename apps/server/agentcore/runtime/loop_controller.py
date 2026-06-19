@@ -68,6 +68,23 @@ def progress_review_prompt(round_number: int) -> str:
     )
 
 
+def delegation_nudge_prompt(investigation_calls: int) -> str:
+    """The manager-CEO breadth steer (档2.5), anchored to the observed read count.
+
+    Fires once when a delegation-capable run keeps doing read-only investigation
+    itself. Like every other injected steer it is anchored to a concrete fact ("you
+    have run N read-only calls") rather than open-ended doubt, then points at the
+    concrete next action — fan the breadth out to a parallel research team.
+    """
+    return (
+        f"[系统提示] 你已亲自做了 {investigation_calls} 次只读检索来查这件事——这已是一项"
+        "「成规模的调查」，正是团队该干的活，而不该由你独自串行读完。与其自己把文件逐个读下去"
+        "（既慢，又把大量文件正文堆进你当前的上下文），不如把调查按几个独立角度拆开，用 "
+        "`delegate` 一次派出并行调研 worker（它们同样持检索工具），让各自的发现汇总回来由你"
+        "综述——哪怕最终答案只是一段话。若你其实已掌握足够信息，也可以现在就给出最终答案。"
+    )
+
+
 class StuckReason(StrEnum):
     """Which mechanical loop pattern was observed."""
 
@@ -204,6 +221,9 @@ class LoopController:
         unproductive_threshold: int = DEFAULT_UNPRODUCTIVE_THRESHOLD,
         reflection_start_round: int = DEFAULT_REFLECTION_START_ROUND,
         reflection_interval: int = DEFAULT_REFLECTION_INTERVAL,
+        delegation_nudge_threshold: int = 0,
+        investigation_tools: frozenset[str] = frozenset(),
+        delegation_tools: frozenset[str] = frozenset(),
     ) -> None:
         self._window = window
         self._threshold = threshold
@@ -215,6 +235,17 @@ class LoopController:
         self._reflection_interval = max(1, reflection_interval)
         self._recent: deque[ToolAttempt] = deque(maxlen=window)
         self._nudged = False
+        # Manager-CEO breadth nudge (档2.5): cumulative read-only investigation call
+        # count (run-scoped, never cleared by the nudge window reset — "how broad has
+        # this gone" is a whole-run signal) + a "已委派" latch + a one-shot fire latch.
+        # ``threshold <= 0`` (default) or an empty ``delegation_tools`` (a leaf worker
+        # that *cannot* delegate) keeps it dormant — only a delegation-capable run fires.
+        self._delegation_nudge_threshold = max(0, delegation_nudge_threshold)
+        self._investigation_tools = investigation_tools
+        self._delegation_tools = delegation_tools
+        self._investigation_calls = 0
+        self._delegated = False
+        self._delegation_nudged = False
         # B2 empty-response sub-policy: a separate consecutive-empty-round counter
         # (NOT the tool-attempt window) and a one-shot "已用过 fallback" latch.
         self._consecutive_empty = 0
@@ -240,6 +271,14 @@ class LoopController:
             self._recent.append(attempt)
             if not attempt.success:
                 self._tool_failures[attempt.tool_name] += 1
+            # Manager-CEO breadth nudge bookkeeping (档2.5): tally read-only
+            # investigation breadth and latch once the run has delegated (after which
+            # it is behaving as a manager and must not be nudged). Counts every call
+            # (incl. failures) — a wide scan is breadth regardless of per-call success.
+            if attempt.tool_name in self._investigation_tools:
+                self._investigation_calls += 1
+            if attempt.tool_name in self._delegation_tools:
+                self._delegated = True
 
     def note_empty_round(self, is_empty: bool) -> None:
         """Track consecutive empty-response rounds (B2).
@@ -320,6 +359,35 @@ class LoopController:
         if round_idx < self._reflection_start_round:
             return False
         return (round_idx - self._reflection_start_round) % self._reflection_interval == 0
+
+    @property
+    def investigation_calls(self) -> int:
+        """Cumulative read-only investigation calls this run (for the nudge message)."""
+        return self._investigation_calls
+
+    def delegation_nudge_due(self) -> bool:
+        """One-shot: a delegation-capable run keeps investigating solo (档2.5).
+
+        True the first time cumulative read-only investigation calls cross the
+        threshold while the run has NOT delegated — the manager-CEO steer to fan a
+        broad investigation out to a parallel research team instead of reading it all
+        itself. Latches so it fires at most once per run; returns False forever once
+        the run has delegated (it is now managing) or when disabled (threshold ≤ 0 /
+        a run that cannot delegate, both modelled as threshold 0 by the engine).
+        Caller still gates the *timing* (a min-round guard) so an opening scout batch
+        does not trip it — kept in the engine since rounds live there.
+        """
+        if self._delegation_nudge_threshold <= 0 or self._delegation_nudged:
+            return False
+        # A run that cannot delegate (no orchestration tool — a leaf worker) is never
+        # nudged to delegate: this is the authoritative guard, so the engine can pass
+        # the threshold unconditionally and rely on the empty set here.
+        if not self._delegation_tools:
+            return False
+        if self._delegated or self._investigation_calls < self._delegation_nudge_threshold:
+            return False
+        self._delegation_nudged = True
+        return True
 
     def detect(self) -> StuckSignal | None:
         """Return the strongest stuck signal in the window, or ``None``.

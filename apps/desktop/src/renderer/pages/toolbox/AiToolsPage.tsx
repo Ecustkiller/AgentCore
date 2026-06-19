@@ -1,9 +1,9 @@
 import { PageContainer } from "@/components/layout/PageContainer";
-import { BuiltinToolCatalog } from "@/components/tools/BuiltinToolCatalog";
+import { CapabilityCatalog } from "@/components/tools/CapabilityCatalog";
 import { ChevronLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-/** 工具箱「AI 工具」卡片的子页：内置动作工具只读目录（复用 BuiltinToolCatalog）。 */
+/** 工具箱「AI 能力」子页：完整的能力图鉴（工具 + 技能 + AI 工作准则，CapabilityCatalog）。 */
 export function AiToolsPage() {
   const navigate = useNavigate();
 
@@ -12,19 +12,19 @@ export function AiToolsPage() {
       <button
         type="button"
         onClick={() => navigate("/toolbox")}
-        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        className="mb-4 inline-flex items-center gap-1 text-muted-foreground text-sm hover:text-foreground"
       >
         <ChevronLeft size={16} />
         工具箱
       </button>
 
-      <h1 className="text-xl font-semibold text-foreground">AI 工具</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        平台内置工具，所有 Agent 默认可用
+      <h1 className="font-semibold text-foreground text-xl">AI 能力</h1>
+      <p className="mt-1 text-muted-foreground text-sm">
+        AI 团队能用的工具、能查阅的技能，以及它遵循的工作准则——全部公开可查
       </p>
 
       <div className="mt-6">
-        <BuiltinToolCatalog />
+        <CapabilityCatalog />
       </div>
     </PageContainer>
   );

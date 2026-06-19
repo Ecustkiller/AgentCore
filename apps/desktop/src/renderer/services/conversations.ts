@@ -1,5 +1,6 @@
-import { api } from "@/services/api";
+import { BASE_URL, api } from "@/services/api";
 import { type FolderMeta, toFolder } from "@/services/folders";
+import { authedFetch, saveBlob } from "@/services/workspace";
 import type { Conversation } from "@/stores/conversation";
 import type { components } from "@/types/api.generated";
 
@@ -95,6 +96,42 @@ export async function renameConversation(
   title: string,
 ): Promise<void> {
   await api.patch(`/v1/conversations/${id}`, { title });
+}
+
+/** Export formats offered by the backend (导出对话): a clean Markdown record or a
+ * full-fidelity JSON dump. */
+export type ExportFormat = "md" | "json";
+
+/** Pull the download filename from a Content-Disposition header, preferring the
+ * RFC 5987 `filename*=UTF-8''…` form (carries the non-ASCII title) over the ASCII
+ * `filename="…"` fallback; returns `fallback` when the header is absent/unreadable
+ * (the server must expose the header via CORS for this to be populated). */
+function filenameFromDisposition(res: Response, fallback: string): string {
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (utf8?.[1]) {
+    try {
+      return decodeURIComponent(utf8[1]);
+    } catch {
+      // Malformed percent-encoding — fall through to the ASCII form.
+    }
+  }
+  const ascii = /filename="?([^";]+)"?/i.exec(cd);
+  return ascii?.[1]?.trim() || fallback;
+}
+
+/** Download a conversation's full transcript as a file (导出对话). Streams the
+ * attachment via the cookie-authed raw-bytes path (bypassing the JSON `api`
+ * helper) and saves it with the server's sanitized filename. */
+export async function exportConversation(
+  id: string,
+  format: ExportFormat = "md",
+): Promise<void> {
+  const res = await authedFetch(
+    `${BASE_URL}/v1/conversations/${id}/export?format=${format}`,
+  );
+  const blob = await res.blob();
+  saveBlob(blob, filenameFromDisposition(res, `conversation.${format}`));
 }
 
 /** Pin / unpin a conversation (置顶对话). Returns the updated row. */

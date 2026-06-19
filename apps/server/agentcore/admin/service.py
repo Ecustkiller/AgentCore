@@ -22,12 +22,34 @@ class AdminService:
         self._users = users
 
     async def list_users(
-        self, *, page: int, page_size: int, query: str | None = None
-    ) -> tuple[list[User], int]:
-        """One page of the account roster (newest-first), with the total count."""
+        self,
+        *,
+        page: int,
+        page_size: int,
+        query: str | None = None,
+        role: str | None = None,
+        status: str | None = None,
+        sort: str = "created_at",
+        order: str = "desc",
+        include_deleted: bool = False,
+    ) -> tuple[list[tuple[User, int]], int]:
+        """One page of the account roster + each row's all-time spend, with the total.
+
+        ``query``/``role``/``status`` filter (AND); ``sort`` ∈ {created_at, cost} with
+        ``order`` ∈ {asc, desc}; ``include_deleted`` surfaces 注销 (soft-deleted,
+        anonymized) accounts (hidden by default — a tombstone roster is ops noise).
+        The route validates the enum-shaped params; this layer forwards them verbatim.
+        """
         offset = (page - 1) * page_size
         return await self._users.list_all(
-            limit=page_size, offset=offset, query=query
+            limit=page_size,
+            offset=offset,
+            query=query,
+            role=role,
+            status=status,
+            sort=sort,
+            order=order,
+            include_deleted=include_deleted,
         )
 
     async def update_user(

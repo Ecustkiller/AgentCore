@@ -62,7 +62,6 @@ const CAPS: FileSourceCaps = {
   transfer: false,
   edit: true,
   snapshots: false,
-  handoff: false,
 };
 
 function makeSource(over: Partial<FileSource> = {}): FileSource {

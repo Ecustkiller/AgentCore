@@ -1,4 +1,7 @@
 import { type VersionInfo, fetchVersion } from "@/services/system";
+import { useUpdatesStore } from "@/stores/updates";
+import type { UpdaterStatus } from "@shared/updater-contract";
+import { Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { SettingsHeader } from "./SettingsHeader";
 
@@ -18,6 +21,74 @@ function Row({
         {value}
       </span>
     </p>
+  );
+}
+
+/** Human-readable line for each updater phase (前端技术与架构.md §7.6). */
+function updateStatusText(status: UpdaterStatus): string {
+  switch (status.phase) {
+    case "idle":
+      return "点击下方按钮检查是否有新版本。";
+    case "unsupported":
+      return "开发模式下不检查更新；自动更新仅在安装版中生效。";
+    case "checking":
+      return "正在检查更新…";
+    case "not-available":
+      return "已是最新版本。";
+    case "available":
+      return `发现新版本 ${status.version}，正在后台下载…`;
+    case "downloading":
+      return `正在下载新版本 ${status.version}…（${status.percent}%）`;
+    case "downloaded":
+      return `新版本 ${status.version} 已下载，重启后生效。`;
+    case "error":
+      return `更新检查失败：${status.message}`;
+  }
+}
+
+/** 软件更新: mirror the main-process updater status + 检查 / 重启安装 actions. */
+function UpdateSection() {
+  const status = useUpdatesStore((s) => s.status);
+  const check = useUpdatesStore((s) => s.check);
+  const install = useUpdatesStore((s) => s.install);
+
+  const busy =
+    status.phase === "checking" ||
+    status.phase === "available" ||
+    status.phase === "downloading";
+
+  return (
+    <section className="mt-8 border-t border-border pt-6">
+      <h2 className="text-sm font-semibold text-foreground">软件更新</h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {updateStatusText(status)}
+      </p>
+      <div className="mt-3">
+        {status.phase === "downloaded" ? (
+          <button
+            type="button"
+            onClick={() => void install()}
+            className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm text-primary-foreground hover:opacity-90"
+          >
+            重启安装
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void check()}
+            disabled={busy || status.phase === "unsupported"}
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-40"
+          >
+            {busy ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <RefreshCw size={14} />
+            )}
+            检查更新
+          </button>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -45,7 +116,10 @@ export function AboutSettings() {
 
   return (
     <div>
-      <SettingsHeader title="关于 AgentCore" description="版本信息与构建溯源。" />
+      <SettingsHeader
+        title="关于 AgentCore"
+        description="版本信息与构建溯源。"
+      />
 
       <div className="mt-6 space-y-2 text-sm">
         {loading ? (
@@ -69,6 +143,8 @@ export function AboutSettings() {
           </>
         ) : null}
       </div>
+
+      <UpdateSection />
     </div>
   );
 }
