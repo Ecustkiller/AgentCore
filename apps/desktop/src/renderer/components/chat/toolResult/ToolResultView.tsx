@@ -1,10 +1,11 @@
 import { cleanSourceTitle } from "@/lib/citations";
 import type {
   CodeExecDisplay,
+  SkillConsultDisplay,
   ToolDisplay,
   WebSearchDisplay,
 } from "@/types/events";
-import { FileCode2, FileText, Terminal } from "lucide-react";
+import { BookOpen, FileCode2, FileText, Terminal } from "lucide-react";
 import { useMemo } from "react";
 import { Favicon } from "../Favicon";
 import { type DiffLine, lineDiff } from "./diff";
@@ -36,6 +37,10 @@ function isCodeExecDisplay(d: unknown): d is CodeExecDisplay {
     typeof x.stderr === "string" ||
     typeof x.exit_code === "number"
   );
+}
+
+function isSkillConsultDisplay(d: unknown): d is SkillConsultDisplay {
+  return !!d && typeof (d as { skill_name?: unknown }).skill_name === "string";
 }
 
 /** Whether a tool has anything to expand — a rich display, an editable diff, or a
@@ -78,6 +83,9 @@ export function toolResultPeek(d: ToolResultData): string {
     if (code !== 0) return `退出码 ${code}`;
     const firstOut = (d.display.stdout ?? "").split("\n").find((l) => l.trim());
     return clampLine(firstOut ?? "已执行");
+  }
+  if (isSkillConsultDisplay(d.display)) {
+    return clampLine(d.display.summary || "已查阅能力指引");
   }
   if (isFileEdit(d)) {
     const path = asString(d.args.path);
@@ -175,6 +183,39 @@ function CodeExecResult({ display }: { display: CodeExecDisplay }) {
           </pre>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Pulled system-skill card (渐进披露 可视化): the catalog name + one-line summary as
+ * a header, with the full guidance body the CEO consulted shown verbatim below — so
+ * the user sees exactly which capability the AI reached for and what it read. */
+function SkillConsultResult({
+  display,
+  result,
+}: {
+  display: SkillConsultDisplay;
+  result: string;
+}) {
+  return (
+    <div className="mt-1 overflow-hidden rounded-lg border border-border">
+      <div className="flex items-center gap-2 border-border/60 border-b bg-muted/40 px-2.5 py-1 text-xs">
+        <BookOpen size={12} className="shrink-0 text-muted-foreground" />
+        <span className="truncate font-mono text-foreground">
+          {display.skill_name}
+        </span>
+        <span className="ml-auto shrink-0 text-muted-foreground">能力指引</span>
+      </div>
+      {display.summary && (
+        <div className="border-border/60 border-b px-2.5 py-1.5 text-xs text-muted-foreground">
+          {display.summary}
+        </div>
+      )}
+      {result.trim() && (
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed text-foreground/90">
+          {result}
+        </pre>
+      )}
     </div>
   );
 }
@@ -323,6 +364,11 @@ export function ToolResultView({ data }: { data: ToolResultData }) {
   }
   if (isCodeExecDisplay(data.display)) {
     return <CodeExecResult display={data.display} />;
+  }
+  if (isSkillConsultDisplay(data.display)) {
+    return (
+      <SkillConsultResult display={data.display} result={data.result ?? ""} />
+    );
   }
   if (isFileEdit(data)) {
     return (

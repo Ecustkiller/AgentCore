@@ -25,7 +25,7 @@ function adaptPreview(p: LocalPreview): FilePreviewResult {
  * `window.fsApi`).
  *
  * Native lazy per-directory listing + live watch; no byte transfer (files are
- * already on disk) and no snapshots/handoff (those are workspace concerns). The
+ * already on disk) and no snapshots (a workspace concern). The
  * local IPC splits "rename in place" (a bare new name) from "move into a
  * directory", so the unified full-destination `move` is translated back to
  * whichever the IPC expresses; a simultaneous move+rename isn't expressible in
@@ -67,7 +67,6 @@ export function createLocalRootSource(
       transfer: false,
       edit: true,
       snapshots: false,
-      handoff: false,
     },
     async listDir(dir) {
       const res = await window.fsApi.listDir(rootId, inPath(dir));

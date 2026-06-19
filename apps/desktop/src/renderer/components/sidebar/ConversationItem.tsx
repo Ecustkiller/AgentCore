@@ -16,6 +16,10 @@ import {
 } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
 import { notifyError } from "@/lib/toast";
+import {
+  type ExportFormat,
+  exportConversation,
+} from "@/services/conversations";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   type Conversation,
@@ -23,15 +27,19 @@ import {
   useConversationGenerating,
   useConversationStore,
 } from "@/stores/conversation";
+import { useShareStore } from "@/stores/share";
 import {
   Archive,
   Check,
+  Download,
+  FileJson,
   Folder,
   Inbox,
   Lock,
   Pencil,
   Pin,
   PinOff,
+  Share2,
   Trash2,
   X,
 } from "lucide-react";
@@ -153,6 +161,16 @@ export function ConversationItem({ conversation }: Props) {
   const moveTo = (folderId: string | null) => {
     if (folderId === currentFolderId) return;
     moveMutation.mutate({ id: conversation.id, folderId });
+  };
+
+  // Export (导出对话): stream the transcript to a file via the service (it picks the
+  // server-sanitized filename); a failed download surfaces as a toast.
+  const handleExport = async (format: ExportFormat) => {
+    try {
+      await exportConversation(conversation.id, format);
+    } catch (err) {
+      notifyError(err, "导出失败");
+    }
   };
 
   if (editing) {
@@ -381,6 +399,21 @@ export function ConversationItem({ conversation }: Props) {
             )}
           </>
         ) : null}
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onSelect={() => useShareStore.getState().open(conversation.id)}
+        >
+          <Share2 size={14} className="shrink-0" />
+          <span className="flex-1 truncate">分享…</span>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void handleExport("md")}>
+          <Download size={14} className="shrink-0" />
+          <span className="flex-1 truncate">导出 Markdown</span>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void handleExport("json")}>
+          <FileJson size={14} className="shrink-0" />
+          <span className="flex-1 truncate">导出 JSON</span>
+        </ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => void handleArchive()}>
           <Archive size={14} className="shrink-0" />

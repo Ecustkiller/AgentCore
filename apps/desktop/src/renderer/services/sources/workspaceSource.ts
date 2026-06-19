@@ -44,7 +44,6 @@ const CLOUD_CAPS = {
   transfer: true,
   edit: true,
   snapshots: true,
-  handoff: true,
 } as const;
 
 /**

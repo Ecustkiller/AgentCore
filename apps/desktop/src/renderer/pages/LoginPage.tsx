@@ -145,6 +145,13 @@ export function LoginPage() {
           >
             {busy ? "请稍候…" : mode === "login" ? "登录" : "注册并登录"}
           </button>
+
+          {/* 自助找回密码依赖邮件，属后续阶段；内测期由管理员在「成员」里重置。 */}
+          {mode === "login" && (
+            <p className="pt-1 text-center text-xs text-muted-foreground">
+              忘记密码？请联系管理员重置。
+            </p>
+          )}
         </form>
       </div>
     </div>

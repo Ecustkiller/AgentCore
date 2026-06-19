@@ -1,5 +1,9 @@
 import { startNewConversation } from "@/lib/newConversation";
 import { chord } from "@/lib/shortcuts";
+import { notifyError } from "@/lib/toast";
+import { exportConversation } from "@/services/conversations";
+import { useConversationStore } from "@/stores/conversation";
+import { useShareStore } from "@/stores/share";
 import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import {
@@ -8,6 +12,7 @@ import {
   Cloud,
   Compass,
   Cpu,
+  Download,
   Files,
   Gauge,
   Info,
@@ -21,8 +26,10 @@ import {
   PanelLeft,
   Plus,
   Settings,
+  Share2,
   Sparkles,
   Sun,
+  UserCog,
   Users,
   Workflow,
 } from "lucide-react";
@@ -111,6 +118,38 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       hint: usageDetail ? "当前：开" : "当前：关",
       run: () => useUIStore.getState().toggleUsageDetail(),
     },
+    {
+      // Acts on the open conversation (导出对话). A draft has no server id yet, so
+      // guard with a hint rather than silently no-op'ing.
+      id: "export-conversation",
+      title: "导出当前对话（Markdown）",
+      category: "操作",
+      icon: Download,
+      keywords: ["export", "download", "daochu", "markdown", "md"],
+      run: () => {
+        const id = useConversationStore.getState().currentConversationId;
+        if (!id) {
+          notifyError("请先打开一个对话");
+          return;
+        }
+        void exportConversation(id).catch((e) => notifyError(e, "导出失败"));
+      },
+    },
+    {
+      id: "share-conversation",
+      title: "分享当前对话",
+      category: "操作",
+      icon: Share2,
+      keywords: ["share", "link", "public", "fenxiang", "lianjie"],
+      run: () => {
+        const id = useConversationStore.getState().currentConversationId;
+        if (!id) {
+          notifyError("请先打开一个对话");
+          return;
+        }
+        useShareStore.getState().open(id);
+      },
+    },
 
     // ---- 前往 (navigation) ----
     {
@@ -192,6 +231,22 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       icon: Cpu,
       keywords: ["settings", "model", "moxing"],
       run: go("/more/model"),
+    },
+    {
+      id: "nav-settings-account",
+      title: "设置 · 账户",
+      category: "前往",
+      icon: UserCog,
+      keywords: [
+        "settings",
+        "account",
+        "profile",
+        "password",
+        "zhanghu",
+        "mima",
+        "ziliao",
+      ],
+      run: go("/more/account"),
     },
     {
       id: "nav-settings-usage",

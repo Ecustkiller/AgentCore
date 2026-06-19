@@ -504,40 +504,13 @@
         "title": "AdminUserDetail",
         "type": "object"
       },
-      "AdminUserListResponse": {
+      "AdminUserListItem": {
+        "description": "A roster row: the account record + its all-time cumulative spend.\n\nExtends the account view with ``cost_total`` (all-time, integer nano-USD) so the\n用户管理 roster can both **sort by** and **display** per-user lifetime cost without a\nsecond round-trip. The client folds the response's ``cny_per_usd`` for ¥.",
         "properties": {
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/AdminUserResponse"
-            },
-            "title": "Data",
-            "type": "array"
-          },
-          "page": {
-            "title": "Page",
+          "cost_total": {
+            "title": "Cost Total",
             "type": "integer"
           },
-          "page_size": {
-            "title": "Page Size",
-            "type": "integer"
-          },
-          "total": {
-            "title": "Total",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "data",
-          "total",
-          "page",
-          "page_size"
-        ],
-        "title": "AdminUserListResponse",
-        "type": "object"
-      },
-      "AdminUserResponse": {
-        "description": "A platform account as seen by the admin console (full record + quota state).\n\nRicher than ``UserResponse`` (the self-view): adds ``status`` and the per-user\nquota overrides so the operator can manage accounts. Each quota override is\nnullable — NULL = inherit the global config threshold for that dimension\n(成本配额与计费.md §一, 决策④); a value (incl. 0 = unlimited) overrides it.",
-        "properties": {
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -553,6 +526,18 @@
               }
             ],
             "title": "Default Model Mode"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
           },
           "display_name": {
             "title": "Display Name",
@@ -643,7 +628,171 @@
           "quota_monthly_cost_usd",
           "quota_daily_requests",
           "default_model_mode",
-          "created_at"
+          "created_at",
+          "deleted_at",
+          "cost_total"
+        ],
+        "title": "AdminUserListItem",
+        "type": "object"
+      },
+      "AdminUserListResponse": {
+        "properties": {
+          "cny_per_usd": {
+            "title": "Cny Per Usd",
+            "type": "number"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AdminUserListItem"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "page_size",
+          "cny_per_usd"
+        ],
+        "title": "AdminUserListResponse",
+        "type": "object"
+      },
+      "AdminUserResponse": {
+        "description": "A platform account as seen by the admin console (full record + quota state).\n\nRicher than ``UserResponse`` (the self-view): adds ``status`` and the per-user\nquota overrides so the operator can manage accounts. Each quota override is\nnullable — NULL = inherit the global config threshold for that dimension\n(成本配额与计费.md §一, 决策④); a value (incl. 0 = unlimited) overrides it.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "default_model_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model Mode"
+          },
+          "deleted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deleted At"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "is_unlimited": {
+            "title": "Is Unlimited",
+            "type": "boolean"
+          },
+          "quota_daily_requests": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quota Daily Requests"
+          },
+          "quota_daily_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quota Daily Tokens"
+          },
+          "quota_monthly_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quota Monthly Cost Usd"
+          },
+          "role": {
+            "enum": [
+              "user",
+              "admin"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "disabled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "display_name",
+          "email",
+          "role",
+          "status",
+          "is_unlimited",
+          "quota_daily_tokens",
+          "quota_monthly_cost_usd",
+          "quota_daily_requests",
+          "default_model_mode",
+          "created_at",
+          "deleted_at"
         ],
         "title": "AdminUserResponse",
         "type": "object"
@@ -814,6 +963,142 @@
           "display_name"
         ],
         "title": "BlockedUser",
+        "type": "object"
+      },
+      "CapabilitiesResponse": {
+        "description": "The complete capability picture for the 能力图鉴 page (single fetch).",
+        "properties": {
+          "guidelines": {
+            "$ref": "#/components/schemas/CapabilityGuidelines"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilitySkill"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityTool"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tools",
+          "skills",
+          "guidelines"
+        ],
+        "title": "CapabilitiesResponse",
+        "type": "object"
+      },
+      "CapabilityGuidelines": {
+        "description": "The system-prompt TEMPLATE the agents follow (静态 蓝图; the per-turn verbatim\nprompt is served separately, see the message prompt endpoint).\n\n``shared_base`` is the base every agent (CEO + workers) shares (identity, output\nstyle, tool-use, safety); ``ceo`` is the CEO coordinator's full chat system-prompt\ntemplate (shared base + CEO routing core + 能力目录 + citation guidance), composed by\nthe SAME ``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.",
+        "properties": {
+          "ceo": {
+            "title": "Ceo",
+            "type": "string"
+          },
+          "shared_base": {
+            "title": "Shared Base",
+            "type": "string"
+          }
+        },
+        "required": [
+          "shared_base",
+          "ceo"
+        ],
+        "title": "CapabilityGuidelines",
+        "type": "object"
+      },
+      "CapabilitySkill": {
+        "description": "A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on\none-line trigger) plus the full ``body`` guidance the CEO pulls via consult_skill.",
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "summary",
+          "body"
+        ],
+        "title": "CapabilitySkill",
+        "type": "object"
+      },
+      "CapabilityTool": {
+        "description": "A tool in the capability catalog: its public schema + who may call it.\n\nUnlike ``ToolInfo`` (the legacy worker-built-ins-only ``GET /tools``), this is the\nCOMPLETE catalog — it also carries the CEO-only orchestration primitives\n(``delegate`` / ``revise`` / ``consult_skill`` / ``ask_user``) and the worker-only\n``escalate``. ``available_to`` is a subset of ``[\"ceo\", \"worker\"]`` so the UI can\nshow which side of the team holds each tool.",
+        "properties": {
+          "approval": {
+            "$ref": "#/components/schemas/ToolApproval"
+          },
+          "available_to": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available To",
+            "type": "array"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ToolCategory"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "title": "Parameters",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "category",
+          "approval",
+          "parameters",
+          "available_to"
+        ],
+        "title": "CapabilityTool",
+        "type": "object"
+      },
+      "ChangePasswordRequest": {
+        "description": "Self-service password change (修改密码): the current password proves intent,\nthe new one is validated server-side (same ≥8 policy as registration).",
+        "properties": {
+          "current_password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Current Password",
+            "type": "string"
+          },
+          "new_password": {
+            "maxLength": 256,
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "ChangePasswordRequest",
         "type": "object"
       },
       "ChatFileUploadResponse": {
@@ -1578,6 +1863,94 @@
           "errors"
         ],
         "title": "DailyTurns",
+        "type": "object"
+      },
+      "DeleteAccountRequest": {
+        "description": "Self-service account deletion (注销账户): the password re-confirms a\ndestructive, irreversible action before the account is soft-deleted + anonymized.",
+        "properties": {
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "DeleteAccountRequest",
+        "type": "object"
+      },
+      "DeviceListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "DeviceListResponse",
+        "type": "object"
+      },
+      "DeviceRegistration": {
+        "description": "A mobile client registering its push token (POST /v1/devices).\n\n``platform`` is a closed set so a bad client can't seed an unroutable row; the\nbackend currently delivers via FCM (Android + iOS-via-FCM), ``web`` is reserved.",
+        "properties": {
+          "platform": {
+            "enum": [
+              "ios",
+              "android",
+              "web"
+            ],
+            "title": "Platform",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "platform"
+        ],
+        "title": "DeviceRegistration",
+        "type": "object"
+      },
+      "DeviceSummary": {
+        "description": "One registered device (设备管理 / 测试用).\n\nDeliberately omits the raw ``token`` — it's a delivery secret, never echoed back.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "platform",
+          "created_at"
+        ],
+        "title": "DeviceSummary",
         "type": "object"
       },
       "DirectorySettings": {
@@ -2396,6 +2769,20 @@
           "total"
         ],
         "title": "MessageListResponse",
+        "type": "object"
+      },
+      "MessagePromptResponse": {
+        "description": "The verbatim system prompt ONE assistant turn ran with (本回合提示词, 提示词透明).\n\nSurfaces the ``turn_started`` head fact captured in the turn journal (§18.3) — the\nexact CEO system prompt for that turn, dynamic bits (date / 能力目录 / attachments)\nand all. Read-only, owner-scoped; absent for user messages or legacy turns (404).",
+        "properties": {
+          "system_prompt": {
+            "title": "System Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "system_prompt"
+        ],
+        "title": "MessagePromptResponse",
         "type": "object"
       },
       "MoveConversationRequest": {
@@ -3517,6 +3904,57 @@
         "title": "SetLlmKeyRequest",
         "type": "object"
       },
+      "ShareListResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ShareSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
+        ],
+        "title": "ShareListResponse",
+        "type": "object"
+      },
+      "ShareSummary": {
+        "description": "One public read-only conversation share (分享链接).\n\n``url`` is a RELATIVE path (``/shared/<id>``) — like ``UserResponse.avatar_url``,\nthe client prepends the API origin so the backend stays agnostic of its public\nhost. ``id`` is the management handle (used to revoke); it is also the URL token.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "title",
+          "created_at"
+        ],
+        "title": "ShareSummary",
+        "type": "object"
+      },
       "SnapshotListResponse": {
         "properties": {
           "data": {
@@ -4181,6 +4619,37 @@
         "title": "UpdateMembershipRequest",
         "type": "object"
       },
+      "UpdateProfileRequest": {
+        "description": "Patch the signed-in user's profile (个人资料编辑). Both fields optional — only\nthose present are changed; an explicit ``null`` email clears it. ``display_name``\nmust be non-empty when present (enforced in the service).",
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "title": "UpdateProfileRequest",
+        "type": "object"
+      },
       "UploadFileResponse": {
         "description": "Result of a workspace file upload.",
         "properties": {
@@ -4305,6 +4774,17 @@
       },
       "UserResponse": {
         "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -4798,6 +5278,75 @@
         ]
       }
     },
+    "/shared/{token}": {
+      "get": {
+        "description": "Public, read-only view of a shared conversation snapshot (no auth).\n\nRenders the frozen, content-only snapshot as a self-contained HTML page. A\nrevoked / unknown / malformed token returns a friendly 404 page (never an error\nor an existence leak). The token must be a uuid — anything else can't be a valid\nshare id, so short-circuit to 404 before touching the DB (a non-uuid would error\nthe uuid-typed lookup).",
+        "operationId": "view_shared_shared__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "View Shared",
+        "tags": [
+          "shared"
+        ]
+      }
+    },
+    "/updates/policy": {
+      "get": {
+        "description": "Desktop auto-update remote circuit breaker (前端技术与架构.md §7.6).\n\nThe desktop updater polls this before each check and pauses downloads when\n``enabled`` is false — a kill switch for a bad release. Unauthenticated and\ndependency-free (like ``/version``) so the updater can reach it pre-login and\nduring a partial outage. The client is **fail-open**: it treats any error or\nnon-200 as enabled, so this endpoint going down never strands updates.\n\nStaged rollout (stagingPercentage) and beta/stable channels ride on the\nfeature-flag system (部署与运维.md §7.9) and are not part of this payload yet.",
+        "operationId": "updates_policy_updates_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Updates Policy Updates Policy Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Updates Policy",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/v1/admin/observability/conversations/{conversation_id}": {
       "get": {
         "description": "会话复盘 (观测 P2): one conversation's merged timeline — the message thread\n(bodies) overlaid with each turn's outcome/quality (turn_metrics), spend\n(cost_events), and execution spans (turn_journal), joined by trace_id /\nmessage_id.\n\nAdmin-only and cross-user (any account's conversation), unlike the owner-scoped\n``/v1/conversations/*``. The drill-down target of the 近期错误 feed: open a\nfailed turn in full context (prompt + reply/error + rounds/latency + ¥ + the\nturn's tool/LLM spans).",
@@ -5139,7 +5688,7 @@
     },
     "/v1/admin/users": {
       "get": {
-        "description": "The full account roster (newest-first), paginated. ``q`` substring-filters\nusername/display_name. Admin-only directory — enumeration is intended here.",
+        "description": "The full account roster, paginated, each row carrying its all-time spend.\n\nFilters (AND): ``q`` substring-matches username/display_name, ``role``/``status``\npin those dimensions. ``sort`` ∈ {``created_at``, ``cost``} (累计成本) with ``order``\n∈ {``asc``, ``desc``}. ``include_deleted`` surfaces 注销 (soft-deleted, anonymized)\naccounts — hidden by default as tombstones, shown on demand for audit. Admin-only\ndirectory — enumeration is intended here. ``cny_per_usd`` folds each row's nano-USD\n``cost_total`` into ¥.",
         "operationId": "list_users_v1_admin_users_get",
         "parameters": [
           {
@@ -5180,6 +5729,84 @@
                 }
               ],
               "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "user",
+                    "admin"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Role"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "active",
+                    "disabled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created_at",
+              "enum": [
+                "created_at",
+                "cost"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Order",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_deleted",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Deleted",
+              "type": "boolean"
             }
           },
           {
@@ -5244,6 +5871,79 @@
       }
     },
     "/v1/admin/users/{user_id}": {
+      "delete": {
+        "description": "注销 (soft-delete + anonymize) an account, admin-initiated (用户管理 强操作).\n\nThe stronger sibling of 停用 (a reversible status flip): this anonymizes the\naccount (username → ``deleted_<id>``, email/avatar cleared), disables it (live\ntokens die on the next request), revokes its sessions, and cascades cross-domain\ncleanup (conversations soft-deleted for the retention sweeper, public shares\nrevoked, BYOK key dropped, avatar object removed) — the same destructive path as\nself-service 注销, minus the password. Refuses self-deletion (no self-lockout →\n≥1 active admin always remains); 404 for an unknown account. The append-only cost\nledger is intentionally retained. Returns the tombstone record (carries\n``deleted_at``) so the client can flag the row 「已注销」or drop it from the roster.",
+        "operationId": "delete_user_v1_admin_users__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete User",
+        "tags": [
+          "admin"
+        ]
+      },
       "patch": {
         "description": "Partially update an account's role / status / quota.\n\nOnly fields *present* in the body are applied (tri-state — see\n``AdminUpdateUserRequest``): a quota field sent as ``null`` clears the override,\na value sets it; absent fields are left untouched. Returns the fresh record.",
         "operationId": "update_user_v1_admin_users__user_id__patch",
@@ -5475,6 +6175,82 @@
         "summary": "Reset User Password",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/v1/auth/change-password": {
+      "post": {
+        "description": "Change the signed-in user's password (修改密码). All other devices are logged out\n(their refresh families are revoked); this session is handed fresh cookies so the\nactive device stays signed in.",
+        "operationId": "change_password_v1_auth_change_password_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Change Password",
+        "tags": [
+          "auth"
         ]
       }
     },
@@ -5789,6 +6565,80 @@
       }
     },
     "/v1/auth/me": {
+      "delete": {
+        "description": "Self-service account deletion (注销账户). Verifies the password, then soft-deletes\n+ anonymizes the account and revokes all sessions. Cross-domain cleanup lives here\n(outside the auth domain): soft-delete the user's conversations so the retention\nsweeper reclaims their workspaces, revoke every public share link so no shared\nsnapshot outlives the account, drop the BYOK key so no ciphertext outlives the\naccount, and remove the avatar object. Finally clear this device's cookies.",
+        "operationId": "delete_account_v1_auth_me_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Account",
+        "tags": [
+          "auth"
+        ]
+      },
       "get": {
         "operationId": "me_v1_auth_me_get",
         "parameters": [
@@ -5848,6 +6698,80 @@
           }
         },
         "summary": "Me",
+        "tags": [
+          "auth"
+        ]
+      },
+      "patch": {
+        "description": "Edit the signed-in user's profile (个人资料编辑). PATCH semantics: only the fields\npresent in the body change — an explicit ``null`` email clears it, an omitted field\nis left untouched (distinguished via ``model_fields_set``).",
+        "operationId": "update_me_v1_auth_me_patch",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Me",
         "tags": [
           "auth"
         ]
@@ -6066,6 +6990,72 @@
         "summary": "Token Revoke",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/v1/capabilities": {
+      "get": {
+        "description": "The complete capability picture: tools (with CEO/worker reach), system Skills,\nand the CEO system-prompt template — the data behind 工具箱 → 能力图鉴.",
+        "operationId": "get_capabilities_v1_capabilities_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Capabilities",
+        "tags": [
+          "capabilities"
         ]
       }
     },
@@ -6608,6 +7598,90 @@
         "summary": "Get Conversation Cost",
         "tags": [
           "usage"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/export": {
+      "get": {
+        "description": "Export a conversation's full transcript as a download (导出对话).\n\nReads the WHOLE transcript server-side (not a scroll window, so nothing is\nmissed) and renders it owner-scoped (404 for a non-owner). ``format=md`` is a\nclean, content-only Markdown record (the default a user reads / pastes);\n``format=json`` is a full-fidelity dump for power users / re-import. Spend is\nnever exported — it lives in the cost ledger, not the message body.",
+        "operationId": "export_conversation_v1_conversations__conversation_id__export_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "md",
+              "pattern": "^(md|json)$",
+              "title": "Format",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Conversation",
+        "tags": [
+          "conversations"
         ]
       }
     },
@@ -7535,6 +8609,90 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/messages/{message_id}/prompt": {
+      "get": {
+        "description": "The verbatim system prompt the CEO ran for ONE assistant turn (查看本回合提示词).\n\n提示词透明 L3 (对所有人开放): reads the ``turn_started`` head fact from the turn\njournal (§18.3) — the exact prompt that turn was given, dynamic bits and all — so a\nuser can see precisely what steered the reply. Owner-scoped + conversation-scoped\n(``load_owned``) so a foreign ``message_id`` can't leak another tenant's prompt. 404\nfor a user message or a legacy turn that journaled no head fact.",
+        "operationId": "get_message_prompt_v1_conversations__conversation_id__messages__message_id__prompt_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePromptResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Message Prompt",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/messages/{message_id}/regenerate": {
       "post": {
         "description": "Re-run a turn from an existing user message via SSE.\n\nServes both \"regenerate\" (no body content — reuse the stored user text) and\n\"edit & resend\" (``content`` set — edit the user message first). The target\n``message_id`` must be a user message; the superseded assistant reply and any\nlater turns are dropped before re-running. Like ``send_message``, the pipeline\nruns as a detached task tracked in the ``TurnRunRegistry`` and the SSE only\nattaches (执行与请求解耦 C1 · slice 1a): a disconnect lets it finish + persist,\nan explicit 停止 goes through ``POST .../stop``. A re-run is a fresh turn, so it\npasses the same gates (rate limit → ownership → BYOK/quota billing gate) as\n``send_message``.",
@@ -7791,6 +8949,238 @@
         "summary": "List Conversation Paused Turns",
         "tags": [
           "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/shares": {
+      "get": {
+        "description": "List a conversation's live share links (owner-scoped) — the manage view.",
+        "operationId": "list_shares_v1_conversations__conversation_id__shares_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Shares",
+        "tags": [
+          "sharing"
+        ]
+      },
+      "post": {
+        "description": "Create a public read-only link for a conversation (分享对话).\n\nOwner-scoped (404 otherwise). Freezes a content-only snapshot of the transcript\n*now* — the public page renders this copy, so a later edit / delete to the live\nmessages never changes a shared link, and no future turns are exposed. Each call\nmints a fresh snapshot + token; revoke (or delete the conversation) to kill a link.",
+        "operationId": "create_share_v1_conversations__conversation_id__shares_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Share",
+        "tags": [
+          "sharing"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/shares/{share_id}": {
+      "delete": {
+        "description": "Revoke a share link (撤销分享). The link 404s immediately after. 404 if the\nconversation isn't owned or the share is unknown / already revoked.",
+        "operationId": "revoke_share_v1_conversations__conversation_id__shares__share_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "share_id",
+            "required": true,
+            "schema": {
+              "title": "Share Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Share",
+        "tags": [
+          "sharing"
         ]
       }
     },
@@ -9412,6 +10802,219 @@
         "summary": "Move Workspace File",
         "tags": [
           "conversations"
+        ]
+      }
+    },
+    "/v1/devices": {
+      "delete": {
+        "description": "Unregister one of the current user's device tokens (logout).\n\n``token`` is a query parameter (an FCM token contains URL-reserved characters, so a\npath segment is unsafe). Owner-scoped + idempotent: deleting an unknown / already-gone\ntoken still returns ok (the client's goal — \"this device no longer receives\" — holds).",
+        "operationId": "unregister_device_v1_devices_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unregister Device",
+        "tags": [
+          "devices"
+        ]
+      },
+      "get": {
+        "description": "The current user's registered devices (newest-first), tokens withheld.",
+        "operationId": "list_devices_v1_devices_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Devices",
+        "tags": [
+          "devices"
+        ]
+      },
+      "post": {
+        "description": "Register (or refresh) this device's push token for the current user.\n\nIdempotent: upsert on the token, so re-registering after a token rotation or a new\nlogin simply moves the token to the current user instead of creating duplicates.",
+        "operationId": "register_device_v1_devices_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRegistration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Device",
+        "tags": [
+          "devices"
         ]
       }
     },
@@ -11836,6 +13439,136 @@
         ]
       }
     },
+    "/v1/users/me/avatar": {
+      "delete": {
+        "description": "Remove the signed-in user's avatar (恢复默认头像).\n\nIdempotent: with no avatar set it still returns 200 with the unchanged user.",
+        "operationId": "delete_my_avatar_v1_users_me_avatar_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete My Avatar",
+        "tags": [
+          "users"
+        ]
+      },
+      "post": {
+        "description": "Upload the signed-in user's avatar (头像上传).\n\nRaw image bytes in the body (no multipart) — the client sends the picture file\ndirectly. The bytes are re-encoded to a square WebP, stored under a content-\naddressed key, and the superseded object is removed. 422 if the body isn't a\ndecodable image or exceeds ``avatar_upload_max_bytes``.",
+        "operationId": "upload_my_avatar_v1_users_me_avatar_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload My Avatar",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/v1/users/me/llm-key": {
       "delete": {
         "description": "Remove the user's stored key (BYOK turns then refuse until one is set again).",
@@ -12103,6 +13836,47 @@
         "summary": "Test Llm Key",
         "tags": [
           "llm-key"
+        ]
+      }
+    },
+    "/v1/users/{user_id}/avatar": {
+      "get": {
+        "description": "Serve a user's avatar image (**public**, no auth).\n\nAvatars are non-secret and shown to teammates; a plain ``<img>`` can't carry the\nauth cookie cross-origin, so this stays open. 404 when the user has no avatar (or\nthe object is missing). Always WebP (the only format the upload stores).",
+        "operationId": "get_user_avatar_v1_users__user_id__avatar_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get User Avatar",
+        "tags": [
+          "users"
         ]
       }
     },

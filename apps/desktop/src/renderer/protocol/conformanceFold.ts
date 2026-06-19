@@ -6,17 +6,22 @@
 // AUTHENTICITY: the team-graph projection reuses desktop's REAL pure fold
 // (`projectExecution` + `planFromRunPlan` + `frameFromEvent` from stores/execution.ts)
 // — the complex, drift-prone surface is the actual production code, not a copy. The
-// single-agent scalar lane (content / reasoning / process timeline / citations /
-// pending gate / cost) is desktop's live path entangled in Zustand stores + rAF
-// (streamConversation.ts), which isn't purely callable here, so it is re-derived to
-// the same ProjectedTurn shape and pinned to the golden. Making that lane share one
-// pure fold with production is a later rung.
+// single-agent process timeline (思考·正文·工具) now ALSO reuses the same pure helpers
+// production renders through (`@/lib/processTimeline`, shared with stores/
+// conversation.ts), so that lane is production-sourced too — no second coalesce rule
+// to drift. Only the thin turn-level scalars (content / reasoning strings / citations /
+// pending gate / cost) are assembled here to build the ProjectedTurn the golden judges.
 //
-// The ProjectedTurn type is mirrored locally (not imported from
-// @agentcore/protocol-conformance) so desktop stays decoupled from the workspace
-// packages until it formally joins (M1); the committed golden JSON is the real
-// contract this is checked against.
+// ProjectedTurn (+ its sub-shapes) is imported from the shared
+// @agentcore/protocol-conformance package now that desktop has joined the workspace —
+// one judge type for both ends; the committed golden JSON is the real contract checked.
 
+import {
+  appendContentStep,
+  appendReasoningStep,
+  appendToolStep,
+  resolveToolStep,
+} from "@/lib/processTimeline";
 import {
   type ExecutionPlan,
   type ExecutionStatus,
@@ -38,91 +43,18 @@ import type {
   ToolUseEndPayload,
   ToolUseStartPayload,
 } from "@/types/events";
+import type {
+  CostBreakdown,
+  PendingInteraction,
+  ProcessStep,
+  ProjectedAgent,
+  ProjectedCitation,
+  ProjectedRun,
+  ProjectedTurn,
+  TurnStatus,
+} from "@agentcore/protocol-conformance/projectedTurn";
 
-// --- Local mirror of @agentcore/protocol-conformance ProjectedTurn (judged by the
-// committed golden JSON, not by this type) ---
-
-type TurnStatus = "running" | "paused" | "completed" | "failed" | "cancelled";
-
-interface ProcessStepReasoning {
-  kind: "reasoning";
-  text: string;
-}
-interface ProcessStepContent {
-  kind: "content";
-  text: string;
-}
-interface ProcessStepTool {
-  kind: "tool";
-  id: string;
-  tool_name: string;
-  arguments: Record<string, unknown>;
-  result: string | null;
-  status: "running" | "success" | "error";
-  display?: Record<string, unknown> | null;
-}
-type ProcessStep = ProcessStepReasoning | ProcessStepContent | ProcessStepTool;
-
-interface ProjectedAgent {
-  id: string;
-  role: string;
-  modelPreference: "fast" | "strong";
-  thinking: boolean;
-  reasoningEffort: "high" | "max" | null;
-  status: "idle" | "working" | "completed" | "error" | "cancelled";
-  currentRunId: string | null;
-  output: string;
-  reasoning: string;
-  toolProgress: { toolName: string; chars: number } | null;
-}
-
-interface ProjectedRun {
-  id: string;
-  agentId: string;
-  task: string;
-  status: "pending" | "ready" | "running" | "completed" | "failed" | "cancelled";
-  dependsOn: string[];
-  outputSummary: string | null;
-  durationMs: number | null;
-  error: string | null;
-  parentRunId: string | null;
-  kind: "agent" | "captain";
-  role: string | null;
-  model: string | null;
-  usage: Record<string, number> | null;
-  cost: Record<string, unknown> | null;
-  stance: "pro" | "con" | null;
-  group: string | null;
-  round: number;
-  revisionOf: string | null;
-  revision: number;
-  checkpoint: { status: "pending" | "resolved"; decision: string | null } | null;
-}
-
-type PendingInteraction =
-  | {
-      kind: "approval";
-      approvalId: string;
-      toolCallId: string;
-      toolName: string;
-      arguments: Record<string, unknown>;
-    }
-  | { kind: "checkpoint"; checkpointId: string; question: string; context: string }
-  | { kind: "plan_review"; checkpointId: string; runIds: string[] };
-
-export interface ProjectedTurn {
-  status: TurnStatus;
-  finishReason: string | null;
-  content: string;
-  reasoning: string;
-  process: ProcessStep[];
-  citations: CitationsPayload["citations"];
-  agents: ProjectedAgent[];
-  runs: ProjectedRun[];
-  progress: { completed: number; total: number };
-  pendingInteraction: PendingInteraction | null;
-  cost: Record<string, unknown> | null;
-}
+export type { ProjectedTurn };
 
 const FINISH_TO_STATUS: Record<string, TurnStatus> = {
   end_turn: "completed",
@@ -137,21 +69,27 @@ const FINISH_TO_STATUS: Record<string, TurnStatus> = {
  * non-exported `mergePlanInto` in stores/execution.ts). */
 function mergePlan(cur: ExecutionPlan, next: ExecutionPlan): ExecutionPlan {
   const agents = [...cur.agents];
-  for (const a of next.agents) if (!agents.some((x) => x.id === a.id)) agents.push(a);
+  for (const a of next.agents)
+    if (!agents.some((x) => x.id === a.id)) agents.push(a);
   const runs = [...cur.runs];
   for (const s of next.runs) if (!runs.some((x) => x.id === s.id)) runs.push(s);
-  return { ...cur, agents, runs, taskSummary: next.taskSummary || cur.taskSummary };
+  return {
+    ...cur,
+    agents,
+    runs,
+    taskSummary: next.taskSummary || cur.taskSummary,
+  };
 }
 
 /** Desktop's fold → ProjectedTurn (the conformance snapshot). */
 export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let content = "";
   let reasoning = "";
-  const process: ProcessStep[] = [];
-  let citations: CitationsPayload["citations"] = [];
+  let process: ProcessStep[] = [];
+  let citations: ProjectedCitation[] = [];
   let status: TurnStatus = "running";
   let finishReason: string | null = null;
-  let cost: Record<string, unknown> | null = null;
+  let cost: CostBreakdown | null = null;
   let pending: PendingInteraction | null = null;
 
   // Team graph via the REAL desktop fold: build the plan + frame stream the same way
@@ -164,48 +102,26 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "content_delta": {
         const d = (ev.payload as ContentDeltaPayload).delta || "";
         content += d;
-        if (d) {
-          const last = process[process.length - 1];
-          if (last && last.kind === "content") last.text += d;
-          else process.push({ kind: "content", text: d });
-        }
+        if (d) process = appendContentStep(process, d);
         break;
       }
       case "reasoning_delta": {
         const d = (ev.payload as ReasoningDeltaPayload).delta || "";
         reasoning += d;
-        if (d) {
-          const last = process[process.length - 1];
-          if (last && last.kind === "reasoning") last.text += d;
-          else process.push({ kind: "reasoning", text: d });
-        }
+        if (d) process = appendReasoningStep(process, d);
         break;
       }
       case "tool_use_start": {
         const p = ev.payload as ToolUseStartPayload;
-        process.push({
-          kind: "tool",
-          id: p.tool_call_id,
-          tool_name: p.tool_name,
-          arguments: p.arguments ?? {},
-          result: null,
-          status: "running",
-        });
+        process = appendToolStep(process, p);
         const frame = frameFromEvent(ev);
         if (frame) frames.push(frame);
         break;
       }
       case "tool_use_end": {
         const p = ev.payload as ToolUseEndPayload;
-        for (let i = process.length - 1; i >= 0; i--) {
-          const step = process[i];
-          if (step.kind === "tool" && step.id === p.tool_call_id) {
-            step.result = p.result;
-            step.status = p.status;
-            if (p.display != null) step.display = p.display;
-            break;
-          }
-        }
+        const resolved = resolveToolStep(process, p);
+        if (resolved) process = resolved;
         const frame = frameFromEvent(ev);
         if (frame) frames.push(frame);
         break;
@@ -300,7 +216,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "message_end": {
         const p = ev.payload as MessageEndPayload;
         finishReason = p.finish_reason;
-        cost = (p.cost ?? null) as Record<string, unknown> | null;
+        cost = p.cost ?? null;
         status = FINISH_TO_STATUS[p.finish_reason] ?? "completed";
         break;
       }
@@ -341,8 +257,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     kind: r.kind,
     role: r.role,
     model: r.model,
-    usage: r.usage as Record<string, number> | null,
-    cost: r.cost as Record<string, unknown> | null,
+    usage: r.usage,
+    cost: r.cost,
     stance: r.stance,
     group: r.group,
     round: r.round,
@@ -360,9 +276,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     citations,
     agents,
     runs,
-    progress: execution
-      ? execution.progress
-      : { completed: 0, total: 0 },
+    progress: execution ? execution.progress : { completed: 0, total: 0 },
     pendingInteraction: pending,
     cost,
   };

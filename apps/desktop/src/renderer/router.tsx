@@ -8,6 +8,7 @@ import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { ToolboxPage } from "@/pages/ToolboxPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
+import { AccountSettings } from "@/pages/more/AccountSettings";
 import { AppearanceSettings } from "@/pages/more/AppearanceSettings";
 import { MembersSettings } from "@/pages/more/MembersSettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
@@ -43,6 +44,7 @@ export const router = createHashRouter([
           // Opening 设置 lands on the first page (模型配置); there is no overview.
           { index: true, element: <Navigate to="/more/model" replace /> },
           { path: "model", element: <ModelSettings /> },
+          { path: "account", element: <AccountSettings /> },
           { path: "usage", element: <UsageSettings /> },
           { path: "appearance", element: <AppearanceSettings /> },
           { path: "shortcuts", element: <ShortcutsSettings /> },

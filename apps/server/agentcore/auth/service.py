@@ -14,6 +14,7 @@ with in-memory fakes (no DB).
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from agentcore.config import settings
 from agentcore.core.errors import (
@@ -42,6 +43,10 @@ from agentcore.security import (
 _MIN_PASSWORD_LENGTH = 8
 _MAX_FAILED_ATTEMPTS = 5
 _LOCKOUT_DURATION = timedelta(minutes=15)
+
+# Sentinel for "field not provided" in a partial profile update, distinct from an
+# explicit None (which clears the nullable email column).
+_UNSET: Any = object()
 
 
 @dataclass(frozen=True)
@@ -218,6 +223,120 @@ class AuthService:
         # Force re-login everywhere: the old sessions must not outlive the reset.
         await self._refresh_tokens.revoke_all_for_user(user_id)
         return temp_password
+
+    async def admin_delete_account(
+        self, *, actor_id: str, user_id: str
+    ) -> tuple[User, str | None]:
+        """Admin-initiated 注销 (account deletion): soft-delete + anonymize the target
+        and revoke its sessions — no password (the admin role gate + the client's
+        二次确认 prove intent, and the operator can't know the target's password).
+
+        Refuses self-deletion (``不能注销自己的账户``): the no-self-lockout guard that,
+        with accounts never hard-deleted, keeps the platform at ≥1 active admin (the
+        same invariant as ``AdminService.update_user``). Idempotent for an already-注销
+        account (returns it untouched, no re-revoke). Returns ``(tombstone_record,
+        pre-deletion avatar_key)`` so the route can GC the avatar object *after*
+        anonymization has nulled the key. Cross-domain cleanup (conversations / shares
+        / BYOK) is the route's, via the shared ``cleanup_account_resources``. Raises
+        ``NotFoundError`` for an unknown account.
+        """
+        if actor_id == user_id:
+            raise ValidationError("不能注销自己的账户")
+        user = await self._users.get_by_id(user_id)
+        if user is None:
+            raise NotFoundError("用户不存在")
+        if user.deleted_at is not None:
+            return user, None
+        avatar_key = user.avatar_key
+        updated = await self._users.soft_delete(user_id)
+        await self._refresh_tokens.revoke_all_for_user(user_id)
+        return (updated or user), avatar_key
+
+    # --- self-service account ops (账户设置: 改密码 / 改资料 / 注销) ---
+
+    async def change_password(
+        self, *, user_id: str, current_password: str, new_password: str
+    ) -> TokenPair:
+        """Change a logged-in user's password (修改密码), verifying the current one.
+
+        Confirms the current password before rotating to the new one, enforces the same
+        minimum length as registration, then revokes every refresh family (all other
+        devices must re-login) and mints a fresh pair for the current session so the
+        active device stays signed in. Raises ``AuthenticationError`` if the current
+        password is wrong, ``ValidationError`` if the new password is too weak/unchanged.
+        """
+        creds = await self._credentials.get_by_user_id(user_id)
+        if creds is None or not verify_password(
+            current_password, creds.password_hash
+        ):
+            raise AuthenticationError("当前密码不正确")
+        if len(new_password) < _MIN_PASSWORD_LENGTH:
+            raise ValidationError(f"密码至少需要 {_MIN_PASSWORD_LENGTH} 个字符")
+        if verify_password(new_password, creds.password_hash):
+            raise ValidationError("新密码不能与当前密码相同")
+        await self._credentials.set_password(user_id, hash_password(new_password))
+        await self._refresh_tokens.revoke_all_for_user(user_id)
+        return await self._issue_tokens(
+            user_id, family=new_id(), now=datetime.now(UTC)
+        )
+
+    async def update_profile(
+        self,
+        *,
+        user_id: str,
+        display_name: str | object = _UNSET,
+        email: str | None | object = _UNSET,
+    ) -> User:
+        """Update a user's profile (个人资料编辑: 显示名 / 邮箱), returning the new row.
+
+        Patch semantics — only the passed fields change. Display name must be
+        non-empty; email must be unique (a collision with another live account → 422),
+        and an explicit ``None``/blank clears it. Raises ``NotFoundError`` for an
+        unknown user, ``ValidationError`` on an empty display name or a taken email.
+        """
+        user = await self._users.get_by_id(user_id)
+        if user is None:
+            raise NotFoundError("用户不存在")
+
+        changed: dict[str, object | None] = {}
+        if display_name is not _UNSET:
+            name = display_name.strip() if isinstance(display_name, str) else ""
+            if not name:
+                raise ValidationError("显示名不能为空")
+            changed["display_name"] = name
+        if email is not _UNSET:
+            normalized = email.strip() if isinstance(email, str) else ""
+            if not normalized:
+                changed["email"] = None
+            else:
+                existing = await self._users.get_by_email(normalized)
+                if existing is not None and existing.user_id != user_id:
+                    raise ValidationError("该邮箱已被占用")
+                changed["email"] = normalized
+
+        if not changed:
+            return user
+        updated = await self._users.update(user_id, **changed)
+        return updated or user
+
+    async def delete_account(self, *, user_id: str, password: str) -> None:
+        """Self-service account deletion (注销账户): verify password, then soft-delete.
+
+        Confirms the password — a destructive, irreversible action must prove intent —
+        then soft-deletes + anonymizes the account (frees username/email, disables it)
+        and revokes all refresh families. Cross-domain cleanup (the user's conversations
+        + BYOK key) is the route's job, since those repos live outside the auth domain.
+        Raises ``NotFoundError`` for an unknown user, ``AuthenticationError`` if the
+        password is wrong.
+        """
+        user = await self._users.get_by_id(user_id)
+        if user is None:
+            raise NotFoundError("用户不存在")
+        creds = await self._credentials.get_by_user_id(user_id)
+        if creds is None or not verify_password(password, creds.password_hash):
+            raise AuthenticationError("密码不正确")
+        await self._users.soft_delete(user_id)
+        await self._refresh_tokens.revoke_all_for_user(user_id)
 
     # --- internals ---
 

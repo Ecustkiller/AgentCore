@@ -1,0 +1,114 @@
+/* Rich Markdown extras (手机端落地设计 P1 · 富渲染): syntax highlight + KaTeX + mermaid +
+   citation chips. Layered over the .md base in styles.css. Co-located so this batch
+   never touches the shared stylesheet. Light theme only (手机端暂不做暗色).
+
+   The highlight palette maps highlight.js token classes onto the existing SEMANTIC
+   tokens (no hardcoded hex — color-tokens.mdc): it won't match a stock editor theme but
+   stays on-brand and token-consistent. */
+
+.md .hljs-comment,
+.md .hljs-quote {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.md .hljs-keyword,
+.md .hljs-selector-tag,
+.md .hljs-section,
+.md .hljs-name,
+.md .hljs-tag {
+  color: var(--accent);
+}
+
+.md .hljs-string,
+.md .hljs-attr,
+.md .hljs-attribute,
+.md .hljs-addition,
+.md .hljs-meta-string {
+  color: var(--success);
+}
+
+.md .hljs-number,
+.md .hljs-literal,
+.md .hljs-built_in,
+.md .hljs-class .hljs-title,
+.md .hljs-symbol,
+.md .hljs-bullet {
+  color: var(--warning);
+}
+
+.md .hljs-title,
+.md .hljs-title.function_,
+.md .hljs-type,
+.md .hljs-variable,
+.md .hljs-template-variable {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.md .hljs-deletion {
+  color: var(--error);
+}
+
+.md .hljs-meta,
+.md .hljs-comment .hljs-doctag {
+  color: var(--muted);
+}
+
+.md .hljs-emphasis {
+  font-style: italic;
+}
+.md .hljs-strong {
+  font-weight: 700;
+}
+
+/* --- KaTeX: keep inline math at body size; let display math scroll on narrow screens. --- */
+.md .katex {
+  font-size: 1.02em;
+}
+
+.md .katex-display {
+  margin: 10px 0;
+  padding: 2px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* --- Mermaid: centered, responsive; strip the surrounding code <pre> box. --- */
+.md .mermaid-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0;
+  overflow-x: auto;
+}
+
+.md .mermaid-wrap svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* :has lets a mermaid block shed the default <pre> chrome on modern webviews; older
+   engines just keep the bordered box (graceful, still renders). */
+.md pre:has(.mermaid-wrap) {
+  padding: 0;
+  background: none;
+  border: none;
+}
+
+/* --- Inline citation chips ([n] → cite:n link from remarkCitations). --- */
+.cite-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  margin: 0 1px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--accent);
+  text-decoration: none;
+  vertical-align: super;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 4px;
+}

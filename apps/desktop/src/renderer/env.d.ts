@@ -2,6 +2,7 @@
 
 import type { FsApi } from "@shared/ipc-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
+import type { UpdaterApi } from "@shared/updater-contract";
 
 interface WindowApi {
   minimize: () => void;
@@ -20,6 +21,7 @@ declare global {
   interface Window {
     fsApi: FsApi;
     sidecarApi: SidecarApi;
+    updaterApi: UpdaterApi;
     windowApi: WindowApi;
   }
 }

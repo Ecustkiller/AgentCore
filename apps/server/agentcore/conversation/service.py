@@ -442,6 +442,11 @@ async def _run_and_persist(
         finish = result.get("finish_reason")
         cost_runs = result.get("cost_runs") or []
         duration_ms = int((time.monotonic() - started) * 1000)
+        # cost_runs = captain root + one row per delegated member, so members = len - 1
+        # (0 when the CEO answered solo). ``delegated`` means "real workers ran"
+        # (workers > 0), NOT "a captain run existed" — the latter is always true under
+        # the unified Run model and made the metric/委派率 meaningless (档2.5 观测修正).
+        workers = max(len(cost_runs) - 1, 0)
         logger.info(
             "chat.turn_complete",
             finish_reason=getattr(finish, "value", finish),
@@ -450,10 +455,8 @@ async def _run_and_persist(
             output_tokens=result.get("output_tokens", 0),
             reasoning_tokens=result.get("reasoning_tokens", 0),
             reply_chars=len(result.get("content") or ""),
-            delegated=bool(result.get("runs")),
-            # cost_runs = captain root + one row per delegated member, so members
-            # = len - 1 (0 when the CEO answered solo).
-            workers=max(len(cost_runs) - 1, 0),
+            delegated=workers > 0,
+            workers=workers,
             duration_ms=duration_ms,
             error=result.get("error"),
         )
@@ -585,6 +588,9 @@ async def _persist_turn_result(
         finish = result.get("finish_reason")
         finish_value = getattr(finish, "value", finish)
         turn_error = result.get("error")
+        # delegated = "real workers ran" (workers > 0), consistent with the
+        # chat.turn_complete log — see the 档2.5 观测修正 note there.
+        workers = max(len(cost_runs) - 1, 0)
         try:
             await TurnMetricsRepository(session).record(
                 turn_id=turn_id,
@@ -602,8 +608,8 @@ async def _persist_turn_result(
                 error=str(turn_error)[:1000] if turn_error else None,
                 rounds=int(result.get("rounds", 0) or 0),
                 duration_ms=duration_ms,
-                delegated=bool(assistant_runs),
-                workers=max(len(cost_runs) - 1, 0),
+                delegated=workers > 0,
+                workers=workers,
                 input_tokens=int(result.get("input_tokens", 0) or 0),
                 output_tokens=int(result.get("output_tokens", 0) or 0),
             )
@@ -1322,13 +1328,16 @@ async def resume_chat(
                 finish = result.get("finish_reason")
                 cost_runs = result.get("cost_runs") or []
                 duration_ms = int((time.monotonic() - started) * 1000)
+                # delegated = "real workers ran" (workers > 0) — see the 档2.5 观测修正
+                # note at chat.turn_complete.
+                workers = max(len(cost_runs) - 1, 0)
                 logger.info(
                     "chat.resume_complete",
                     finish_reason=getattr(finish, "value", finish),
                     rounds=result.get("rounds", 0),
                     reply_chars=len(result.get("content") or ""),
-                    delegated=bool(result.get("runs")),
-                    workers=max(len(cost_runs) - 1, 0),
+                    delegated=workers > 0,
+                    workers=workers,
                     duration_ms=duration_ms,
                     error=result.get("error"),
                 )

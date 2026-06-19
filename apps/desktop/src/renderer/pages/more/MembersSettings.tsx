@@ -9,12 +9,14 @@ const STATUS_LABEL: Record<Invite["status"], string> = {
   active: "可用",
   used: "已使用",
   expired: "已过期",
+  revoked: "已撤销",
 };
 
 const STATUS_CLASS: Record<Invite["status"], string> = {
   active: "bg-success/10 text-success",
   used: "bg-muted text-muted-foreground",
   expired: "bg-destructive/10 text-destructive",
+  revoked: "bg-muted text-muted-foreground",
 };
 
 export function MembersSettings() {

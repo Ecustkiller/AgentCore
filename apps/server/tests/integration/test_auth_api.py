@@ -186,6 +186,129 @@ async def test_logout_clears_cookies(client, make_invite):
     assert (await client.get("/v1/auth/me")).status_code == 401
 
 
+# --- self-service account ops (账户设置: 改密码 / 改资料 / 注销) ---
+
+
+async def test_change_password_keeps_session_and_rotates_secret(client, make_invite):
+    code = await make_invite("INV-CP-1")
+    await _register_and_login(client, code, "harry")
+
+    r = await client.post(
+        "/v1/auth/change-password",
+        json={"current_password": _PW, "new_password": "newpassword456"},
+    )
+    assert r.status_code == 200, r.text
+    # this session stays valid — the route re-issues fresh cookies
+    assert (await client.get("/v1/auth/me")).status_code == 200
+    # old password is dead; the new one logs in
+    assert (
+        await client.post(
+            "/v1/auth/login", json={"username": "harry", "password": _PW}
+        )
+    ).status_code == 401
+    assert (
+        await client.post(
+            "/v1/auth/login",
+            json={"username": "harry", "password": "newpassword456"},
+        )
+    ).status_code == 200
+
+
+async def test_change_password_wrong_current_rejected(client, make_invite):
+    code = await make_invite("INV-CP-2")
+    await _register_and_login(client, code, "iris")
+    r = await client.post(
+        "/v1/auth/change-password",
+        json={"current_password": "wrong-pw", "new_password": "newpassword456"},
+    )
+    assert r.status_code == 401
+
+
+async def test_change_password_requires_auth(client):
+    r = await client.post(
+        "/v1/auth/change-password",
+        json={"current_password": _PW, "new_password": "newpassword456"},
+    )
+    assert r.status_code == 401
+
+
+async def test_update_profile_changes_display_name_and_email(client, make_invite):
+    code = await make_invite("INV-UP-1")
+    await _register_and_login(client, code, "jack")
+
+    r = await client.patch(
+        "/v1/auth/me",
+        json={"display_name": "Jack Jones", "email": "jack@example.com"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["display_name"] == "Jack Jones"
+    assert body["email"] == "jack@example.com"
+    # persisted across a fresh read
+    me = (await client.get("/v1/auth/me")).json()
+    assert me["display_name"] == "Jack Jones" and me["email"] == "jack@example.com"
+
+
+async def test_update_profile_rejects_duplicate_email(client, new_client, make_invite):
+    code1 = await make_invite("INV-UP-2")
+    await _register_and_login(client, code1, "kate")
+    assert (
+        await client.patch("/v1/auth/me", json={"email": "shared@example.com"})
+    ).status_code == 200
+
+    code2 = await make_invite("INV-UP-3")
+    async with new_client() as other:
+        await _register_and_login(other, code2, "liam")
+        r = await other.patch("/v1/auth/me", json={"email": "shared@example.com"})
+        assert r.status_code == 422
+
+
+async def test_update_profile_requires_auth(client):
+    assert (
+        await client.patch("/v1/auth/me", json={"display_name": "x"})
+    ).status_code == 401
+
+
+async def test_delete_account_anonymizes_and_frees_username(client, make_invite):
+    code = await make_invite("INV-DEL-1")
+    await _register_and_login(client, code, "mona")
+    # give the account data so the route's conversation cascade actually runs
+    assert (
+        await client.post("/v1/conversations", json={"title": "to be gone"})
+    ).status_code == 201
+
+    r = await client.request("DELETE", "/v1/auth/me", json={"password": _PW})
+    assert r.status_code == 200, r.text
+    # cookies cleared → unauthenticated, and the old credentials are dead
+    assert (await client.get("/v1/auth/me")).status_code == 401
+    assert (
+        await client.post(
+            "/v1/auth/login", json={"username": "mona", "password": _PW}
+        )
+    ).status_code == 401
+    # the username was anonymized away → a brand-new account can reclaim it
+    code2 = await make_invite("INV-DEL-2")
+    r = await client.post(
+        "/v1/auth/register",
+        json={"username": "mona", "password": _PW, "invite_code": code2},
+    )
+    assert r.status_code == 201, r.text
+
+
+async def test_delete_account_wrong_password_rejected(client, make_invite):
+    code = await make_invite("INV-DEL-3")
+    await _register_and_login(client, code, "nate")
+    r = await client.request("DELETE", "/v1/auth/me", json={"password": "wrong-pw"})
+    assert r.status_code == 401
+    # the account is untouched and still usable
+    assert (await client.get("/v1/auth/me")).status_code == 200
+
+
+async def test_delete_account_requires_auth(client):
+    r = await client.request("DELETE", "/v1/auth/me", json={"password": _PW})
+    assert r.status_code == 401
+
+
 # --- bearer-token flow (mobile web / Capacitor shell, M2) ---
 
 

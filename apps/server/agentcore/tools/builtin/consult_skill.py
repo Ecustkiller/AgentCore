@@ -87,4 +87,10 @@ class ConsultSkillTool:
             success=True,
             output=skill.body,
             output_limit=_CONSULT_OUTPUT_LIMIT,
+            # Render-oriented twin of ``output`` (工具结果富渲染): the catalog name +
+            # one-line summary let the desktop label the step「查阅能力：{summary}」and
+            # frame the pulled guidance, instead of dumping the raw body as anonymous
+            # tool text. The full body still rides ``output`` (the verbatim guidance the
+            # user can expand). 形状是数据不是模式 — just what the consult_skill view needs.
+            display={"skill_name": skill.name, "summary": skill.summary},
         )

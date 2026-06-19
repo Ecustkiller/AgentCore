@@ -4,6 +4,6 @@
 // 提取）。两端 fold 都 import 这里的 SSEEventType 并 `switch` + assertNever 穷尽——
 // 后端加事件类型 → 这里加一支 → 两端编译失败直到处理（最便宜的漂移绊线）。
 //
-// ⏳ 桌面端仍用其本地副本 types/events.ts；其 import 迁移到本包是后续任务（需 desktop
-// 先并入 workspace）。在那之前两份须保持一致；本包是新代码（mobile / conformance）的源。
+// ✅ 桌面端已并入 workspace 并迁移：其 types/events.ts 改为 `export type *` 透传本包 +
+// 仅保留 4 个桌面独有的工具富渲染类型（手机精简端不需要）。本包是两端事件类型的单一源。
 export * from "./events";

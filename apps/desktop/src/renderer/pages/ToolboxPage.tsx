@@ -95,8 +95,8 @@ const GROUPS: ToolboxGroup[] = [
     entries: [
       {
         id: "ai-tools",
-        title: "AI 工具",
-        description: "平台内置能力，所有 Agent 默认可用",
+        title: "AI 能力",
+        description: "工具、技能与 AI 工作准则一览，全部公开可查",
         icon: Wrench,
         to: "/toolbox/ai-tools",
       },

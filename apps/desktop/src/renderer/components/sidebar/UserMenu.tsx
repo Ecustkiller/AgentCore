@@ -26,11 +26,12 @@ export function UserMenu() {
     useAuthStore.getState().setUnauthenticated();
   };
 
+  const avatarUrl = authUser?.avatarUrl ?? profile.avatarUrl;
   const avatar = (
     <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-sm font-medium text-sidebar-accent-foreground">
-      {profile.avatarUrl ? (
+      {avatarUrl ? (
         <img
-          src={profile.avatarUrl}
+          src={avatarUrl}
           alt={displayName}
           className="size-8 rounded-full object-cover"
         />

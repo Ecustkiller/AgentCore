@@ -4,7 +4,7 @@
  * 文件页（本地 OS 根，经 `window.fsApi`）与对话工作区面板（服务端 REST，经
  * `services/workspace`）本质都是「一棵带预览 + 增删改的文件树」。`FileSource`
  * 是让**同一套树/预览组件**渲染任意一种的接缝：源暴露 read/list/CRUD 核心 +
- * 能力位（watch / transfer / snapshots / handoff），UI 据能力位决定挂哪些可选
+ * 能力位（watch / transfer / edit / snapshots），UI 据能力位决定挂哪些可选
  * 面，而非在组件里按源分支。
  *
  * 寻址一律**源内相对**：每个 path 都是相对源根的 POSIX（"/" 分隔）路径，根本身
@@ -64,10 +64,11 @@ export interface FileSourceCaps {
   transfer: boolean;
   /** 面板内文本编辑经 `writeBytes` 回写。 */
   edit: boolean;
-  /** 轴3 快照（备份 / 版本 / 恢复）对该源可用。 */
+  /**
+   * 轴3 快照（备份 / 版本 / 恢复）对该源可用。**声明保留位**：当前 UI 未据此门控
+   * （工作区快照浮层无条件挂载），留待按源差异化挂叠加层时启用。
+   */
   snapshots: boolean;
-  /** 云端交接（PR 三方评审）对该源可用。 */
-  handoff: boolean;
 }
 
 export interface FileSource {

@@ -1,7 +1,8 @@
 """Pydantic request/response schemas for API layer."""
 
 from datetime import datetime
-from typing import Any, Literal
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -9,6 +10,22 @@ from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.approvals import ApprovalDecision
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.suspension import SuspensionKind
+
+if TYPE_CHECKING:
+    from agentcore.db.models import User
+
+
+def _avatar_url(user_id: str, avatar_key: str | None) -> str | None:
+    """Derive the served avatar URL from the stored object key (or None).
+
+    ``avatars/<id>/<hash>.webp`` → ``/v1/users/<id>/avatar?v=<hash>``: a relative
+    path (client prefixes its API base) with the content hash as a cache-buster, so
+    the served <img> changes exactly when the picture does. → api/routes/users.py.
+    """
+    if not avatar_key:
+        return None
+    version = PurePosixPath(avatar_key).stem
+    return f"/v1/users/{user_id}/avatar?v={version}"
 
 # --- Auth ---
 
@@ -28,6 +45,30 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=256)
 
 
+class ChangePasswordRequest(BaseModel):
+    """Self-service password change (修改密码): the current password proves intent,
+    the new one is validated server-side (same ≥8 policy as registration)."""
+
+    current_password: str = Field(..., min_length=1, max_length=256)
+    new_password: str = Field(..., min_length=8, max_length=256)
+
+
+class UpdateProfileRequest(BaseModel):
+    """Patch the signed-in user's profile (个人资料编辑). Both fields optional — only
+    those present are changed; an explicit ``null`` email clears it. ``display_name``
+    must be non-empty when present (enforced in the service)."""
+
+    display_name: str | None = Field(None, max_length=200)
+    email: str | None = Field(None, max_length=255)
+
+
+class DeleteAccountRequest(BaseModel):
+    """Self-service account deletion (注销账户): the password re-confirms a
+    destructive, irreversible action before the account is soft-deleted + anonymized."""
+
+    password: str = Field(..., min_length=1, max_length=256)
+
+
 class UserResponse(BaseModel):
     id: str
     username: str
@@ -39,6 +80,26 @@ class UserResponse(BaseModel):
     # None = inherit the operator default. Surfaced so the client knows the default
     # at login without a second call.
     default_model_mode: str | None = None
+    # Served avatar URL (头像) derived from the stored object key, e.g.
+    # ``/v1/users/<id>/avatar?v=<hash>``; None = no avatar. A relative path on
+    # purpose — the backend is agnostic of its public origin, so the client prefixes
+    # its API base. The ``?v=`` is a content hash, so the cached <img> refreshes on
+    # change. → see api/routes/users.py for the (public) serving endpoint.
+    avatar_url: str | None = None
+
+    @classmethod
+    def from_user(cls, user: "User") -> "UserResponse":
+        """Build the API view of a user row (the single source for this mapping)."""
+        return cls(
+            id=user.user_id,
+            username=user.username,
+            display_name=user.display_name,
+            email=user.email,
+            role=user.role,
+            created_at=user.created_at,
+            default_model_mode=user.default_model_mode,
+            avatar_url=_avatar_url(user.user_id, user.avatar_key),
+        )
 
 
 class TokenResponse(BaseModel):
@@ -119,13 +180,30 @@ class AdminUserResponse(BaseModel):
     quota_daily_requests: int | None
     default_model_mode: str | None
     created_at: datetime
+    # NULL for a live account; a timestamp marks a 注销 (self-service deleted +
+    # anonymized) account. The roster hides these by default and renders them as
+    # 「已注销」when surfaced — they're tombstones, not manageable accounts.
+    deleted_at: datetime | None
+
+
+class AdminUserListItem(AdminUserResponse):
+    """A roster row: the account record + its all-time cumulative spend.
+
+    Extends the account view with ``cost_total`` (all-time, integer nano-USD) so the
+    用户管理 roster can both **sort by** and **display** per-user lifetime cost without a
+    second round-trip. The client folds the response's ``cny_per_usd`` for ¥.
+    """
+
+    cost_total: int
 
 
 class AdminUserListResponse(BaseModel):
-    data: list[AdminUserResponse]
+    data: list[AdminUserListItem]
     total: int
     page: int
     page_size: int
+    # FX rate to fold each row's nano-USD ``cost_total`` into ¥ (single source: config).
+    cny_per_usd: float
 
 
 class AdminUpdateUserRequest(BaseModel):
@@ -704,6 +782,17 @@ class MessageDetail(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class MessagePromptResponse(BaseModel):
+    """The verbatim system prompt ONE assistant turn ran with (本回合提示词, 提示词透明).
+
+    Surfaces the ``turn_started`` head fact captured in the turn journal (§18.3) — the
+    exact CEO system prompt for that turn, dynamic bits (date / 能力目录 / attachments)
+    and all. Read-only, owner-scoped; absent for user messages or legacy turns (404).
+    """
+
+    system_prompt: str
+
+
 class MessageListResponse(BaseModel):
     """A window of a conversation's messages (chronological, oldest-first).
 
@@ -843,6 +932,58 @@ class SnapshotSummary(BaseModel):
 
 class SnapshotListResponse(BaseModel):
     data: list[SnapshotSummary]
+    total: int
+
+
+# --- Conversation shares (公开只读分享链接: 对标 ChatGPT 分享) ---
+
+
+class ShareSummary(BaseModel):
+    """One public read-only conversation share (分享链接).
+
+    ``url`` is a RELATIVE path (``/shared/<id>``) — like ``UserResponse.avatar_url``,
+    the client prepends the API origin so the backend stays agnostic of its public
+    host. ``id`` is the management handle (used to revoke); it is also the URL token.
+    """
+
+    id: str
+    url: str
+    title: str
+    created_at: datetime
+
+
+class ShareListResponse(BaseModel):
+    data: list[ShareSummary]
+    total: int
+
+
+# --- Push devices (原生推送设备注册: FCM token, 手机端落地设计 P2) ---
+
+
+class DeviceRegistration(BaseModel):
+    """A mobile client registering its push token (POST /v1/devices).
+
+    ``platform`` is a closed set so a bad client can't seed an unroutable row; the
+    backend currently delivers via FCM (Android + iOS-via-FCM), ``web`` is reserved.
+    """
+
+    token: str = Field(..., min_length=1, max_length=4096)
+    platform: Literal["ios", "android", "web"]
+
+
+class DeviceSummary(BaseModel):
+    """One registered device (设备管理 / 测试用).
+
+    Deliberately omits the raw ``token`` — it's a delivery secret, never echoed back.
+    """
+
+    id: str
+    platform: str
+    created_at: datetime
+
+
+class DeviceListResponse(BaseModel):
+    data: list[DeviceSummary]
     total: int
 
 
@@ -1073,6 +1214,58 @@ class ToolInfo(BaseModel):
 class ToolListResponse(BaseModel):
     data: list[ToolInfo]
     total: int
+
+
+# --- Capabilities (能力图鉴: the complete read-only picture of what agents can do) ---
+
+
+class CapabilityTool(BaseModel):
+    """A tool in the capability catalog: its public schema + who may call it.
+
+    Unlike ``ToolInfo`` (the legacy worker-built-ins-only ``GET /tools``), this is the
+    COMPLETE catalog — it also carries the CEO-only orchestration primitives
+    (``delegate`` / ``revise`` / ``consult_skill`` / ``ask_user``) and the worker-only
+    ``escalate``. ``available_to`` is a subset of ``["ceo", "worker"]`` so the UI can
+    show which side of the team holds each tool.
+    """
+
+    name: str
+    description: str
+    category: ToolCategory
+    approval: ToolApproval
+    parameters: dict[str, Any]
+    available_to: list[str]
+
+
+class CapabilitySkill(BaseModel):
+    """A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on
+    one-line trigger) plus the full ``body`` guidance the CEO pulls via consult_skill."""
+
+    name: str
+    summary: str
+    body: str
+
+
+class CapabilityGuidelines(BaseModel):
+    """The system-prompt TEMPLATE the agents follow (静态 蓝图; the per-turn verbatim
+    prompt is served separately, see the message prompt endpoint).
+
+    ``shared_base`` is the base every agent (CEO + workers) shares (identity, output
+    style, tool-use, safety); ``ceo`` is the CEO coordinator's full chat system-prompt
+    template (shared base + CEO routing core + 能力目录 + citation guidance), composed by
+    the SAME ``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.
+    """
+
+    shared_base: str
+    ceo: str
+
+
+class CapabilitiesResponse(BaseModel):
+    """The complete capability picture for the 能力图鉴 page (single fetch)."""
+
+    tools: list[CapabilityTool]
+    skills: list[CapabilitySkill]
+    guidelines: CapabilityGuidelines
 
 
 # --- Cost & usage (团队工资单 + 账户仪表盘) ---

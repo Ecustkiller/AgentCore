@@ -2,9 +2,11 @@ import { useGroupedConversations } from "@/hooks/useConversations";
 import { GLOBAL_SHORTCUTS } from "@/lib/shortcuts";
 import { useApplyTheme } from "@/lib/theme";
 import { startRealtime, stopRealtime } from "@/services/realtime";
+import { startUpdates } from "@/stores/updates";
 import { useUsageStore } from "@/stores/usage";
 import { useEffect, useRef } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
+import { ShareConversationDialog } from "../conversation/ShareConversationDialog";
 import { Sidebar } from "../sidebar/Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { TitleBar } from "./TitleBar";
@@ -36,6 +38,12 @@ export function AppShell() {
     startRealtime();
     return () => stopRealtime();
   }, []);
+
+  // Auto-update lives at the shell so a downloaded build surfaces its "重启安装"
+  // notice (and the 关于 page status stays live) regardless of the current route.
+  // The main process drives the silent download + check schedule; this only mirrors
+  // status and toasts when an update is ready (前端技术与架构.md §7.6).
+  useEffect(() => startUpdates(), []);
 
   // Global keyboard shortcuts (§二) — dispatched off the single-source table in
   // lib/shortcuts.ts (also rendered by the 快捷键 settings page, so behavior and
@@ -70,6 +78,7 @@ export function AppShell() {
       </div>
 
       <CommandPalette />
+      <ShareConversationDialog />
     </div>
   );
 }

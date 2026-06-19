@@ -48,9 +48,8 @@ from agentcore.runtime.journal import (
 )
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.prompt import (
-    _CEO_CORE_HINT,
-    CHAT_CITATION_HINT,
     assemble_system_prompt,
+    compose_ceo_chat_prompt,
 )
 from agentcore.runtime.runs import (
     RunKind,
@@ -67,7 +66,6 @@ from agentcore.runtime.sessions import (
 from agentcore.runtime.skills import (
     SkillRegistry,
     build_system_skill_registry,
-    render_skill_directory,
 )
 from agentcore.runtime.suspension import (
     AskUserSuspension,
@@ -483,11 +481,11 @@ async def run_chat_pipeline(
         # — the same invariant the old per-hint gating enforced. The advanced「怎么做」
         # detail no longer rides every turn; the CEO pulls it via consult_skill.
         ceo_tool_names = {schema.name for schema in chat_tools.list_all()}
-        skill_directory = render_skill_directory(skill_registry, ceo_tool_names)
-        chat_system_prompt = f"{system_prompt}\n{_CEO_CORE_HINT}"
-        if skill_directory:
-            chat_system_prompt = f"{chat_system_prompt}\n{skill_directory}"
-        chat_system_prompt = f"{chat_system_prompt}\n{CHAT_CITATION_HINT}"
+        chat_system_prompt = compose_ceo_chat_prompt(
+            system_prompt,
+            skill_registry=skill_registry,
+            ceo_tool_names=ceo_tool_names,
+        )
         # Attachments LAST — after the whole stable hint stack — so the CEO prefix
         # (base + hints) stays byte-identical across turns and rides the prefix cache
         # even on a turn that carries (variable) attached files.

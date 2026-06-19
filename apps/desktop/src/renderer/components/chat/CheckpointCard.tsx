@@ -151,6 +151,12 @@ export function AskUserCard({
       init[q.id] = q.default ? [q.default] : [];
     return init;
   });
+  // Per-question「其他」escape hatch (Cursor 式): when a choice question's options
+  // don't fit, the user reveals an inline custom field for THAT question instead of
+  // dumping into the single global note. `otherOn` is the revealed/selected flag,
+  // `otherText` the typed value — folded into that question's answer on submit.
+  const [otherOn, setOtherOn] = useState<Record<string, boolean>>({});
+  const [otherText, setOtherText] = useState<Record<string, string>>({});
   const [styleId, setStyleId] = useState<string | null>(
     content.styleOptions[0]?.id ?? null,
   );
@@ -174,11 +180,29 @@ export function AskUserCard({
       }
       return { ...cur, [q.id]: picked.includes(opt) ? [] : [opt] };
     });
+    // Single-select: picking a listed option deselects「其他」(mutually exclusive).
+    if (!q.multiple)
+      setOtherOn((cur) => (cur[q.id] ? { ...cur, [q.id]: false } : cur));
   };
 
   const setText = (q: AskQuestion, value: string) => {
     if (busy) return;
     setAnswers((cur) => ({ ...cur, [q.id]: value ? [value] : [] }));
+  };
+
+  // Toggle a choice question's「其他」field. Single-select: engaging it clears the
+  // listed picks (mutually exclusive); multi-select: it coexists with checked options.
+  const toggleOther = (q: AskQuestion) => {
+    if (busy) return;
+    const turningOn = !otherOn[q.id];
+    setOtherOn((cur) => ({ ...cur, [q.id]: turningOn }));
+    if (turningOn && !q.multiple)
+      setAnswers((cur) => ({ ...cur, [q.id]: [] }));
+  };
+
+  const setOtherValue = (q: AskQuestion, value: string) => {
+    if (busy) return;
+    setOtherText((cur) => ({ ...cur, [q.id]: value }));
   };
 
   const send = (decision: CheckpointUserDecision) => {
@@ -189,7 +213,15 @@ export function AskUserCard({
     const composed =
       decision === "stop"
         ? note.trim()
-        : composeAnswer(content, answers, styleId, note, opening);
+        : composeAnswer(
+            content,
+            answers,
+            otherOn,
+            otherText,
+            styleId,
+            note,
+            opening,
+          );
     // The caller resolves / resumes; on a hard failure (live decide) re-enable so
     // the user can retry (resume unmounts the card, so the reset is a harmless no-op).
     Promise.resolve(onSubmit(decision, composed)).catch(() =>
@@ -200,8 +232,11 @@ export function AskUserCard({
   // How many decisions already carry a value — surfaced on the opening CTA so a
   // 想省事 user sees the card is ready to ship as-is.
   const presetCount =
-    content.questions.filter((q) => (answers[q.id] ?? []).length > 0).length +
-    (styleId ? 1 : 0);
+    content.questions.filter(
+      (q) =>
+        (answers[q.id] ?? []).length > 0 ||
+        (otherOn[q.id] && (otherText[q.id] ?? "").trim().length > 0),
+    ).length + (styleId ? 1 : 0);
 
   return (
     <div
@@ -272,10 +307,14 @@ export function AskUserCard({
             numbered={content.questions.length > 1}
             question={q}
             answer={answers[q.id] ?? []}
+            otherOn={otherOn[q.id] ?? false}
+            otherText={otherText[q.id] ?? ""}
             disabled={busy}
             tone={tone}
             onToggleChoice={(opt) => toggleChoice(q, opt)}
             onSetText={(v) => setText(q, v)}
+            onToggleOther={() => toggleOther(q)}
+            onSetOther={(v) => setOtherValue(q, v)}
           />
         ))}
 
@@ -372,19 +411,27 @@ function QuestionField({
   numbered,
   question,
   answer,
+  otherOn,
+  otherText,
   disabled,
   tone,
   onToggleChoice,
   onSetText,
+  onToggleOther,
+  onSetOther,
 }: {
   index: number;
   numbered: boolean;
   question: AskQuestion;
   answer: string[];
+  otherOn: boolean;
+  otherText: string;
   disabled: boolean;
   tone: (typeof TONE)[keyof typeof TONE];
   onToggleChoice: (opt: string) => void;
   onSetText: (value: string) => void;
+  onToggleOther: () => void;
+  onSetOther: (value: string) => void;
 }) {
   return (
     <div className="min-w-0">
@@ -457,6 +504,40 @@ function QuestionField({
                 </button>
               );
             })}
+            {/* 「其他」逃生口：选项不合适时就地为这一题填自定义答案，而非塞进全局补充框。 */}
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={onToggleOther}
+              className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors disabled:opacity-40 ${
+                otherOn ? tone.optActive : tone.optIdle
+              }`}
+            >
+              <span
+                className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border-2 ${
+                  question.multiple ? "rounded-lg" : "rounded-full"
+                } ${otherOn ? tone.markActive : "border-border"}`}
+              >
+                {otherOn &&
+                  (question.multiple ? (
+                    <Check size={11} strokeWidth={3} />
+                  ) : (
+                    <span className={`size-2 rounded-full ${tone.dot}`} />
+                  ))}
+              </span>
+              <span className="min-w-0 flex-1 whitespace-pre-wrap">其他…</span>
+            </button>
+            {otherOn && (
+              <input
+                type="text"
+                value={otherText}
+                onChange={(e) => onSetOther(e.target.value)}
+                disabled={disabled}
+                autoFocus
+                placeholder="填写你的答案"
+                className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${tone.focus}`}
+              />
+            )}
           </div>
         )}
       </div>
@@ -615,6 +696,8 @@ function ResolvedCheckpoint({ checkpoint }: { checkpoint: CheckpointDisplay }) {
 function composeAnswer(
   content: AskUserContent,
   answers: Record<string, string[]>,
+  otherOn: Record<string, boolean>,
+  otherText: Record<string, string>,
   styleId: string | null,
   note: string,
   opening: boolean,
@@ -626,7 +709,10 @@ function composeAnswer(
   const lines: string[] = [];
   for (const q of content.questions) {
     const picked = (answers[q.id] ?? []).map((s) => s.trim()).filter(Boolean);
-    if (picked.length) lines.push(`· ${q.prompt}：${picked.join("、")}`);
+    // 「其他」自定义值并入这一题的答案（多选时与已勾选项并列，单选时即为答案）。
+    const custom = otherOn[q.id] ? (otherText[q.id] ?? "").trim() : "";
+    const values = custom ? [...picked, custom] : picked;
+    if (values.length) lines.push(`· ${q.prompt}：${values.join("、")}`);
     else if (q.default) lines.push(`· ${q.prompt}：（按你的默认）`);
   }
   const style = content.styleOptions.find((s) => s.id === styleId);

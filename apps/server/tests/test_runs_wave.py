@@ -1,11 +1,16 @@
 """Tests for WaveScheduler: ready-selection, dep-context handoff, the four
-on_failure strategies (degrade / skip / abort / retry), exception capture, and
-the pause/resume substrate (seed_completed / should_stop / on_progress).
+on_failure strategies (degrade / skip / abort / retry), exception capture, the
+pause/resume substrate (seed_completed / should_stop / on_progress), and the
+continuous-dispatch properties (downstream starts before a slow sibling; the
+tree-wide budget isn't multiplied by nesting).
 
 Uses a fake RunExecutor (a plain async callable) — no LLM, no engine — so the
 scheduler's control flow is exercised in isolation.
 """
 
+import asyncio
+
+from agentcore.runtime.runs.concurrency import reset_budget, set_budget
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunPolicy, RunSpec, RunState
 from agentcore.runtime.runs.wave import WaveScheduler
@@ -133,7 +138,10 @@ async def test_executor_exception_becomes_failed_state():
     assert "kaboom" in res["a"].error
 
 
-async def test_on_progress_fires_after_each_wave():
+async def test_on_progress_fires_after_each_node():
+    # Continuous dispatch fires on_progress once per completed node (smoother than
+    # the old per-wave cadence). A pipeline finishes a→b, so the snapshots grow by
+    # one each time.
     plan = RunPlan()
     plan.add(_spec("a"))
     plan.add(_spec("b", ("a",)))
@@ -166,20 +174,77 @@ async def test_should_stop_pauses_between_waves():
     assert res == {}
 
 
-async def test_max_parallel_caps_wave_width():
+async def test_max_parallel_caps_concurrency():
+    # 4 independent nodes, width 2 → never more than 2 run at once, but all finish.
     plan = RunPlan()
     for x in ("a", "b", "c", "d"):
         plan.add(_spec(x))
-    waves_seen: list[int] = []
+    state = {"active": 0, "peak": 0}
 
     async def ex(spec: RunSpec, _completed) -> RunState:
+        state["active"] += 1
+        state["peak"] = max(state["peak"], state["active"])
+        await asyncio.sleep(0.01)
+        state["active"] -= 1
         return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
 
-    await WaveScheduler(max_parallel=2).run(
-        plan, ex, on_progress=lambda c: waves_seen.append(len(c))
-    )
-    # 4 independent nodes, width 2 → two waves of 2 (cumulative 2 then 4).
-    assert waves_seen == [2, 4]
+    res = await WaveScheduler(max_parallel=2).run(plan, ex)
+    assert set(res) == {"a", "b", "c", "d"}
+    assert state["peak"] <= 2
+
+
+async def test_continuous_dispatch_starts_downstream_before_slow_sibling():
+    # a ∥ b independent; c depends only on a. b is slow. Continuous dispatch lets c
+    # run the moment a finishes, instead of waiting for the whole「wave」(slow b) —
+    # the latency win this scheduler exists for. (The old barrier scheduler would
+    # finish b before c could start.)
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b"))
+    plan.add(_spec("c", ("a",)))
+    order: list[str] = []
+
+    async def ex(spec: RunSpec, _completed) -> RunState:
+        await asyncio.sleep(0.05 if spec.run_id == "b" else 0.005)
+        order.append(spec.run_id)
+        return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+    res = await WaveScheduler().run(plan, ex)
+    assert all(s.phase is RunPhase.COMPLETED for s in res.values())
+    assert order.index("c") < order.index("b")
+
+
+async def test_nested_fanout_respects_tree_budget():
+    # An outer node whose executor itself runs a nested WaveScheduler must not let
+    # the tree's concurrent leaf count exceed the budget (分而不乘): with budget 4,
+    # the 4 outer nodes each get child budget 1, so each nested scheduler runs its
+    # leaves serially → at most 4 leaves run at once, not 4 × 4.
+    peak = {"active": 0, "max": 0}
+
+    async def leaf(spec: RunSpec, _completed) -> RunState:
+        peak["active"] += 1
+        peak["max"] = max(peak["max"], peak["active"])
+        await asyncio.sleep(0.01)
+        peak["active"] -= 1
+        return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+    async def outer(spec: RunSpec, _completed) -> RunState:
+        nested = RunPlan()
+        for i in range(4):
+            nested.add(_spec(f"{spec.run_id}{i}"))
+        await WaveScheduler().run(nested, leaf)
+        return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+    plan = RunPlan()
+    for x in ("p", "q", "r", "s"):
+        plan.add(_spec(x))
+    token = set_budget(4)
+    try:
+        res = await WaveScheduler().run(plan, outer)
+    finally:
+        reset_budget(token)
+    assert all(s.phase is RunPhase.COMPLETED for s in res.values())
+    assert peak["max"] <= 4
 
 
 # --- 结构化挂起 2a: on_checkpoint wave-boundary suspend hook ---------------------

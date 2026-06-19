@@ -12,7 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from agentcore.api.routes import (
     admin,
     auth,
+    capabilities,
     conversations,
+    devices,
     favicon,
     files,
     folders,
@@ -21,9 +23,11 @@ from agentcore.api.routes import (
     messages,
     realtime,
     search,
+    sharing,
     system,
     tools,
     usage,
+    users,
     workspaces,
 )
 from agentcore.config import settings
@@ -185,6 +189,10 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Downloads (导出对话 / workspace zips) carry the filename in Content-Disposition;
+    # browsers hide non-simple response headers cross-origin unless explicitly exposed,
+    # so the renderer can read the server's sanitized UTF-8 filename instead of guessing.
+    expose_headers=["Content-Disposition"],
 )
 
 
@@ -209,7 +217,9 @@ async def agentcore_error_handler(request, exc: AgentCoreError):
 app.include_router(system.router)
 app.include_router(admin.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
+app.include_router(capabilities.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
+app.include_router(devices.router, prefix="/v1")
 app.include_router(favicon.router, prefix="/v1")
 app.include_router(files.router, prefix="/v1")
 app.include_router(folders.router, prefix="/v1")
@@ -218,6 +228,11 @@ app.include_router(llm_key.router, prefix="/v1")
 app.include_router(messages.router, prefix="/v1")
 app.include_router(realtime.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
+# Conversation sharing (分享对话): owner-only manage under /v1, plus the public
+# read-only page at the root (/shared/{token}, no /v1, no auth).
+app.include_router(sharing.router, prefix="/v1")
+app.include_router(sharing.public_router)
 app.include_router(tools.router, prefix="/v1")
 app.include_router(usage.router, prefix="/v1")
+app.include_router(users.router, prefix="/v1")
 app.include_router(workspaces.router, prefix="/v1")

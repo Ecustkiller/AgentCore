@@ -25,8 +25,13 @@ from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepository
+from agentcore.push import PushNotification, notify_user
 from agentcore.runtime.journal import entries_from_runs, runs_from_entries
-from agentcore.runtime.suspension import TurnSuspension, suspension_from_json
+from agentcore.runtime.suspension import (
+    SuspensionKind,
+    TurnSuspension,
+    suspension_from_json,
+)
 
 logger = get_logger(__name__)
 
@@ -61,6 +66,39 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
     # journal-so-far as a SEPARATE best-effort write so its failure can never roll
     # back the frame. A lost journal only costs the graph replay on reload.
     await _save_pause_journal(suspension, trace_id)
+    # A durable pause is the canonical 需要你 (attention) event: the turn is now BLOCKED
+    # on the user and stays so until they act. Fan a native push out to their devices so
+    # they learn even with the app backgrounded (SSE gone). Best-effort + default-off
+    # (notify_user short-circuits when push is unconfigured) — never blocks the pause.
+    await _notify_pause(suspension)
+
+
+async def _notify_pause(suspension: TurnSuspension) -> None:
+    """Push a 需要你 notification for a durable pause (best-effort, default-off).
+
+    Copy is keyed by the suspend kind; the ``data`` carries the ids the mobile client
+    deep-links on tap (conversation + the paused turn). ``notify_user`` itself swallows
+    all errors, so this never affects the pause.
+    """
+    if suspension.kind == SuspensionKind.PLAN_REVIEW:
+        title = "AI 计划待确认"
+        body = "团队已产出阶段成果，待你确认是否继续。"
+    else:
+        title = "AI 需要你的回应"
+        question = (getattr(suspension, "question", "") or "").strip()
+        body = question[:120] if question else "AI 正在等待你的回应以继续任务。"
+    await notify_user(
+        suspension.user_id,
+        PushNotification(
+            title=title,
+            body=body,
+            data={
+                "conversation_id": suspension.conversation_id,
+                "message_id": suspension.message_id,
+                "kind": suspension.kind.value,
+            },
+        ),
+    )
 
 
 async def _save_pause_journal(suspension: TurnSuspension, trace_id: str | None) -> None:

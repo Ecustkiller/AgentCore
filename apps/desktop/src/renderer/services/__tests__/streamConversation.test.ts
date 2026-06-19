@@ -167,14 +167,14 @@ describe("attachConversation (实时重连续看 1b)", () => {
   });
 
   it("targets the conversation's stream endpoint with a GET", async () => {
-    const fetchMock = vi.fn(() =>
+    const fetchMock = vi.fn((_input: string, _init?: RequestInit) =>
       Promise.resolve(new Response(null, { status: 204 })),
     );
     vi.stubGlobal("fetch", fetchMock);
     await attachConversation("conv-42");
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain("/v1/conversations/conv-42/stream");
-    expect(init.method).toBe("GET");
+    expect(init?.method).toBe("GET");
   });
 
   it("raises a StreamError when the attach is refused (e.g. not owned → 404)", async () => {

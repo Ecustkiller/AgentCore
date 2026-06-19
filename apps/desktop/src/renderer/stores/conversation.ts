@@ -1,4 +1,10 @@
 import type { ErrorAction } from "@/lib/errors";
+import {
+  appendContentStep,
+  appendReasoningStep,
+  appendToolStep,
+  resolveToolStep,
+} from "@/lib/processTimeline";
 import { stopConversation } from "@/services/stopTurn";
 import { useApprovalStore } from "@/stores/approvals";
 import {
@@ -190,89 +196,8 @@ export function planReviewsFromEvents(events: SSEEvent[]): PlanReviewDisplay[] {
   return order.map((id) => byId.get(id) as PlanReviewDisplay);
 }
 
-/**
- * Fold one reasoning delta into a single-agent process timeline: extend the
- * trailing reasoning step when the last step is thinking, else open a new one.
- * Coalescing consecutive deltas keeps the timeline a few segments (one per
- * think→act boundary) rather than one node per token. Mirrors the backend sink's
- * `_accumulate_process`, so a live turn and its reloaded twin read the same shape.
- */
-function appendReasoningStep(
-  process: ProcessStep[] | undefined,
-  delta: string,
-): ProcessStep[] {
-  const steps = process ? [...process] : [];
-  const last = steps[steps.length - 1];
-  if (last && last.kind === "reasoning") {
-    steps[steps.length - 1] = { ...last, text: last.text + delta };
-  } else {
-    steps.push({ kind: "reasoning", text: delta });
-  }
-  return steps;
-}
-
-/**
- * Fold one content delta into the single-agent process timeline: extend the
- * trailing content step when the last step is reply text, else open a new one.
- * Mirrors {@link appendReasoningStep} (and the backend sink's `_accumulate_process`)
- * so the CEO's reply text interleaves with its thinking + tool steps in true order —
- * the trailing content step is the final answer (前端UX设计.md §一B). Content also
- * keeps accumulating on `message.content` (copy / citations / the canonical text);
- * this only adds the ordered render lane.
- */
-function appendContentStep(
-  process: ProcessStep[] | undefined,
-  delta: string,
-): ProcessStep[] {
-  const steps = process ? [...process] : [];
-  const last = steps[steps.length - 1];
-  if (last && last.kind === "content") {
-    steps[steps.length - 1] = { ...last, text: last.text + delta };
-  } else {
-    steps.push({ kind: "content", text: delta });
-  }
-  return steps;
-}
-
-/** Append a started tool call as a `running` step to the process timeline. */
-function appendToolStep(
-  process: ProcessStep[] | undefined,
-  payload: ToolUseStartPayload,
-): ProcessStep[] {
-  const steps = process ? [...process] : [];
-  steps.push({
-    kind: "tool",
-    id: payload.tool_call_id,
-    tool_name: payload.tool_name,
-    arguments: payload.arguments ?? {},
-    result: null,
-    status: "running",
-  });
-  return steps;
-}
-
-/** Resolve a tool step (result + status) on its matching `tool_use_end`; returns
- * the same array reference when no step matches (id absent), so callers can no-op. */
-function resolveToolStep(
-  process: ProcessStep[] | undefined,
-  payload: ToolUseEndPayload,
-): ProcessStep[] | undefined {
-  if (!process) return process;
-  let changed = false;
-  const steps = process.map((s) => {
-    if (!changed && s.kind === "tool" && s.id === payload.tool_call_id) {
-      changed = true;
-      return {
-        ...s,
-        result: payload.result,
-        status: payload.status,
-        display: payload.display ?? null,
-      };
-    }
-    return s;
-  });
-  return changed ? steps : process;
-}
+// 单聊 process timeline 的 coalesce helpers 已抽到 @/lib/processTimeline（生产/巡检
+// 同源：本 store 实时渲染与 protocol/conformanceFold 共用一份，杜绝两份规则漂移）。
 
 export interface Conversation {
   id: string;

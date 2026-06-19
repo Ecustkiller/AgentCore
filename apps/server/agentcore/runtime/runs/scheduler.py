@@ -1,10 +1,12 @@
 """RunScheduler — the one scheduler that drives a RunPlan to completion.
 
-A scheduler advances a plan wave by wave (deps → waves, :meth:`RunPlan.waves`),
-runs each wave's nodes concurrently through an injected :class:`RunExecutor`, and
-accepts nodes appended mid-run (阶段2 captain ``delegate``). Isolating the
-interface keeps ``runs`` free of any host import — the executor (*how* a node
-runs) is the host's concern, not the scheduler's (which only owns *when*).
+A scheduler advances a plan by dependency order — launching each node the moment
+its ``depends_on`` are terminal and a concurrency slot is free (continuous, not
+wave-synchronous) — runs nodes concurrently through an injected
+:class:`RunExecutor`, and accepts nodes appended mid-run (阶段2 captain
+``delegate``). Isolating the interface keeps ``runs`` free of any host import — the
+executor (*how* a node runs) is the host's concern, not the scheduler's (which only
+owns *when*).
 
 → 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
 """
@@ -36,8 +38,9 @@ class RunScheduler(Protocol):
         """Drive ``plan`` to completion; return each node's terminal
         :class:`RunState` keyed by ``run_id``.
 
-        Wave order honours ``depends_on``; per-node failure handling follows the
-        node's :class:`RunPolicy` (``on_failure``), so a failed dependency can
-        fail / skip / retry its dependents without the caller branching.
+        Dispatch order honours ``depends_on`` (a node runs only once its deps are
+        terminal); per-node failure handling follows the node's :class:`RunPolicy`
+        (``on_failure``), so a failed dependency can fail / skip / retry its
+        dependents without the caller branching.
         """
         ...

@@ -110,6 +110,7 @@ export const api = {
       method: "PATCH",
       body: body ? JSON.stringify(body) : undefined,
     }),
+  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
 };
 
 /** A user-facing zh message for any thrown api error (backend msg → status → net). */

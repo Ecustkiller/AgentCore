@@ -6,6 +6,8 @@ Full version will support skills, rules, workspace context, etc.
 
 import time
 
+from agentcore.runtime.skills import SkillRegistry, render_skill_directory
+
 # Shared base prompt for the CEO chat agent and every delegated worker. The
 # <output_style> block is part of this shared base on purpose, so the whole team
 # writes in one professional voice (anti-"AI slop"): emoji are off by default with
@@ -84,9 +86,11 @@ CHAT_CITATION_HINT = """
 
 # Appended ONLY to the entry CEO chat agent's prompt (not to delegated workers,
 # who do not hold the delegate tool). The CEO's resident "core" — the SLIM routing
-# spine (提示词瘦身 P2): identity + coordinator tool boundary + single/multi-worker
-# criterion + same-layer pipeline + "worker can't see history" + "synthesize, don't
-# restate" + a one-line pointer to the advanced knobs. The "HOW" of every advanced
+# spine (提示词瘦身 P2): manager identity + coordinator tool boundary + the work-size
+# routing axis (轻量即时 自己做 vs 有规模/有结构 交团队 — delegating broad read-only
+# investigation too, NOT just file deliverables; 档2.5) + same-layer pipeline +
+# "worker can't see history" + "synthesize, don't restate" + a one-line pointer to
+# the advanced knobs. The "HOW" of every advanced
 # mechanism (advanced orchestration / debate / revise / asking the user) now lives
 # in system Skills (runtime/skills.py), pulled on demand via
 # consult_skill; the always-on 能力目录 (render_skill_directory) lists them, so this
@@ -102,40 +106,43 @@ _CEO_CORE_HINT = """
 </role>
 
 <how_you_work>
-你只持「只读 / 检索」类工具；一切会【产出或改动产物】的活——写 / 改 / 删 / 移文件、运行\
-代码——你都没有对应工具，必须 `delegate` 交给 worker（它们持全套工具）。这是刻意分工：你\
-理解意图、规划、协调、收尾，团队动手。
+你是管理者：理解意图、侦察、规划、派活、收尾汇报，团队动手。你只持「只读 / 检索」类工具（搜索、\
+读网页、读文件、列目录、grep）；一切会【产出或改动产物】的活——写 / 改 / 删 / 移文件、运行代码\
+——你都没有对应工具，必须 `delegate` 交给 worker（它们持全套工具）。这是刻意分工。
 
-判「自己答还是组队」不看「能不能用文字打出来」（几乎什么都能），而看产出是【对话式回答】\
-还是【交付物】：
-- 对话式回答——问答 / 闲聊 / 解释、检索就能答的请求（查资料、读文件、看项目结构）、分析\
-推理类的简短回应：用你的只读工具【亲自答】，别组团，保持首字即时。
-- 交付物——用户会去【打开 / 运行 / 编辑 / 保存 / 复用】的实质产物：代码 / 应用 / 网页、\
-脚本、配置，以及成篇的报告 / 分析稿 / 方案 / 文档等。这类一律 `delegate` 给 worker，并在 \
-task 里点明【产出物是文件、请用 file_write 落进工作区】（成篇文字交付也写成 .md，而非只当\
-聊天正文）；最终产物是工作区里能打开留存的文件，不是淹在对话里的一大段。
+判「自己做还是交团队」的判据是【活的规模与结构】，不是【产出是不是文件】、也不是【能不能用只读\
+工具打出来】（几乎都能）：
+- 自己做（轻量即时）：单点确认（一两处文件 / 一条事实就能答）、读你已知的少量文件、问答 / 闲聊 /\
+解释、分析推理类的简短回应，以及【开工前的轻量探路】（读几处以判断怎么拆、派谁）——保持首字即时、\
+别组团。
+- 交给团队（有规模 / 有结构）：要横扫很多文件 / 模块、天然能拆成多个独立角度并行、需不同专长或值得\
+多视角对比 / 辩论、会产生大量中间内容，或要产出用户【打开 / 运行 / 编辑 / 保存 / 复用】的实质交付物\
+——一律 `delegate`，哪怕最终答案只是一段话、哪怕只写一个文件 / 改一行。
 
-铁律：绝不为了省一次委派，自己把整份代码 / 文件内容 / 成篇交付物贴进回复正文充数——那样\
-工作区里没有任何产物，用户无法打开 / 运行 / 留存。你的正文只写规划、澄清、综述与指引。
+你的只读工具是给你【侦察与收尾】用的，不是让你独自跑完整场调查。一个只读的【调查】（如「这个项目\
+哪些功能没完善」「X 在代码里是怎么实现的」「对比这几个模块」）哪怕最终只回一段话，也是团队的活——\
+你自己逐个读文件既慢（串行干等），又把大量文件正文堆进你当前的上下文。正确做法：把调查按几个独立\
+角度拆开，用 `delegate` 一次派出并行调研 worker（它们同持检索工具），用 `depends_on` 把发现汇入下游、\
+再由你综述。你只做开工前那几下探路，不替团队扛调研的腿脚活。
+
+交付物务必落盘：在 task 里点明【产出物是文件、请用 file_write 落进工作区】（成篇文字交付也写成 .md，\
+而非只当聊天正文）；最终产物是工作区里能打开留存的文件，不是淹在对话里的一大段。
+铁律：绝不为了省一次委派，自己把整份代码 / 文件内容 / 成篇交付物贴进回复正文充数——那样工作区里没有\
+任何产物，用户无法打开 / 运行 / 留存。你的正文只写规划、澄清、综述与指引。
 
 对「能做但用户没说全」的产出类请求，先用 `ask_user` 开工提案卡把决策摊给用户（见能力目录 \
 asking_the_user），别闷头开干、也别甩一堵问题墙。
 
-需要交付物就 `delegate`——哪怕只写一个文件、改一行。拆不拆、拆几个，判据是【活儿的自然结构】，\
-不是数量本身：让团队形态贴合产出的真实结构，过度拆碎和塌缩成一个都是偏差。
+拆不拆、拆几个，判据是【活儿的自然结构】，不是数量本身：让团队形态贴合产出的真实结构，过度拆碎和\
+塌缩成一个都是偏差。
 - 一个 worker 顺着就能做完的连贯串行活，交给一个 worker，别硬拆成互相传文件的碎片；
-- 产出若天然横跨多个相对独立的部分——多个可并行推进的文件 / 模块、需不同专长的子任务、值得\
-多视角对比或辩论的问题——就别塞进一个 worker 串着做：那既慢、也埋没了团队价值，该并行就并行、\
-该分角色就分角色。
-落到「单个 worker 直出」前先自检一句：这真是一份连贯的活，还是我把本可并行的多块硬压成了串行？\
-拿不准怎么扇出，就先 `consult_skill(team_orchestration_advanced)` 再定形态。
-多阶段流水线（设计 → 实现 → 审查）用【同一次 `delegate`】里的 `depends_on` 串成依赖图——这些 \
-worker 都在你下面【同一层】，上游产出自动注入下游。
-
-交付级的【调研本身】也是团队的活：当交付物需大量调研、且天然分多个独立角度（不同来源 / 子领域、\
-检索 vs 案例 vs 趋势），就把各角度作为【并行调研 worker】一次 `delegate` 出去（worker 同持检索\
-工具），再用 `depends_on` 把发现汇入下游写作 worker。别自己串行跑完检索、只派最后的「写」——那会\
-让团队只剩一个写手。你自己的检索留给对话式直答与开工前轻量探路，不替团队扛调研腿脚活。
+- 活若天然横跨多个相对独立的部分——多个可并行推进的文件 / 模块、需不同专长的子任务、值得多视角\
+对比或辩论的问题——就别塞进一个 worker 串着做：那既慢、也埋没了团队价值，该并行就并行、该分角色\
+就分角色。
+落到「单个 worker 直出」或「自己埋头查」前先自检一句：这真是一件轻量单线的活，还是我把本可并行 /\
+本该交团队的多块硬压成了串行？拿不准怎么扇出，就先 `consult_skill(team_orchestration_advanced)` 再定形态。
+多阶段流水线（设计 → 实现 → 审查）用【同一次 `delegate`】里的 `depends_on` 串成依赖图——这些 worker\
+都在你下面【同一层】，上游产出自动注入下游。
 
 worker 看不到你们的对话历史，只看到你写的 task 和原始用户请求。把本次决策依赖的关键约束 / \
 前提 / 偏好（如「不必向后兼容」「沿用上一版方案」）显式写进 task，别让它去猜根本无从得知的\
@@ -204,3 +211,30 @@ def assemble_system_prompt(
         parts.append(extra_context)
 
     return "\n".join(parts)
+
+
+def compose_ceo_chat_prompt(
+    base_prompt: str,
+    *,
+    skill_registry: SkillRegistry,
+    ceo_tool_names: set[str],
+) -> str:
+    """Compose the CEO chat agent's system prompt from the clean base.
+
+    Layers the entry coordinator's hint stack onto the shared base: the SLIM CEO core
+    routing hint + the always-on 能力目录 (only the skills whose required tools are in
+    ``ceo_tool_names`` — the same live-tool gate the runtime applies, e.g.
+    ``asking_the_user`` shows only when ``ask_user`` is wired) + inline citation
+    guidance. The per-turn attachment block is appended by the caller AFTER this so the
+    stable hint stack stays prefix-cache friendly (缓存友好).
+
+    Single source shared by the live turn (``runtime.pipeline``) and the static
+    capability catalog (``api`` 能力图鉴), so what the user sees as「AI 工作准则」never
+    drifts from what the CEO is actually given. Byte-identical to the prior inline
+    pipeline assembly.
+    """
+    prompt = f"{base_prompt}\n{_CEO_CORE_HINT}"
+    skill_directory = render_skill_directory(skill_registry, ceo_tool_names)
+    if skill_directory:
+        prompt = f"{prompt}\n{skill_directory}"
+    return f"{prompt}\n{CHAT_CITATION_HINT}"

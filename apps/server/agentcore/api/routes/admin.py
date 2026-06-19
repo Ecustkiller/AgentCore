@@ -12,20 +12,25 @@ snapshot). 邀请码 lives under ``/v1/auth/invites`` (already admin-gated).
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 
 from agentcore.admin import AdminService
+from agentcore.api.account_cleanup import cleanup_account_resources
 from agentcore.api.cost_view import cost_breakdown, usage_breakdown
 from agentcore.api.dependencies import (
     AdminUser,
     get_admin_service,
+    get_asset_storage,
     get_auth_service,
     get_conversation_repo,
+    get_conversation_share_repo,
     get_cost_event_repo,
     get_message_repo,
     get_turn_journal_repo,
     get_turn_metrics_repo,
+    get_user_llm_key_repo,
     get_user_repo,
 )
 from agentcore.api.routes.system import app_version
@@ -40,6 +45,7 @@ from agentcore.api.schemas import (
     AdminUsageSummary,
     AdminUserCostLine,
     AdminUserDetail,
+    AdminUserListItem,
     AdminUserListResponse,
     AdminUserResponse,
     DailyCost,
@@ -60,13 +66,16 @@ from agentcore.db.base import database_ready
 from agentcore.db.models import User
 from agentcore.db.repositories import (
     ConversationRepository,
+    ConversationShareRepository,
     CostEventRepository,
     MessageRepository,
     TurnJournalRepository,
     TurnMetricsRepository,
+    UserLlmKeyRepository,
     UserRepository,
 )
 from agentcore.llm.pricing import NANO_PER_USD
+from agentcore.storage.assets import AssetStorage
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -175,6 +184,14 @@ def _admin_user_response(user: User) -> AdminUserResponse:
         quota_daily_requests=user.quota_daily_requests,
         default_model_mode=user.default_model_mode,
         created_at=user.created_at,
+        deleted_at=user.deleted_at,
+    )
+
+
+def _admin_user_list_item(user: User, cost_total: int) -> AdminUserListItem:
+    """A roster row = the account record + its all-time cumulative spend (nano-USD)."""
+    return AdminUserListItem(
+        **_admin_user_response(user).model_dump(), cost_total=cost_total
     )
 
 
@@ -251,16 +268,38 @@ async def list_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     q: str | None = Query(None, max_length=100),
+    role: Literal["user", "admin"] | None = Query(None),
+    status: Literal["active", "disabled"] | None = Query(None),
+    sort: Literal["created_at", "cost"] = Query("created_at"),
+    order: Literal["asc", "desc"] = Query("desc"),
+    include_deleted: bool = Query(False),
     service: AdminService = Depends(get_admin_service),
 ) -> AdminUserListResponse:
-    """The full account roster (newest-first), paginated. ``q`` substring-filters
-    username/display_name. Admin-only directory — enumeration is intended here."""
-    users, total = await service.list_users(page=page, page_size=page_size, query=q)
+    """The full account roster, paginated, each row carrying its all-time spend.
+
+    Filters (AND): ``q`` substring-matches username/display_name, ``role``/``status``
+    pin those dimensions. ``sort`` ∈ {``created_at``, ``cost``} (累计成本) with ``order``
+    ∈ {``asc``, ``desc``}. ``include_deleted`` surfaces 注销 (soft-deleted, anonymized)
+    accounts — hidden by default as tombstones, shown on demand for audit. Admin-only
+    directory — enumeration is intended here. ``cny_per_usd`` folds each row's nano-USD
+    ``cost_total`` into ¥.
+    """
+    rows, total = await service.list_users(
+        page=page,
+        page_size=page_size,
+        query=q,
+        role=role,
+        status=status,
+        sort=sort,
+        order=order,
+        include_deleted=include_deleted,
+    )
     return AdminUserListResponse(
-        data=[_admin_user_response(u) for u in users],
+        data=[_admin_user_list_item(u, cost_total) for u, cost_total in rows],
         total=total,
         page=page,
         page_size=page_size,
+        cny_per_usd=settings.cny_per_usd,
     )
 
 
@@ -315,6 +354,42 @@ async def reset_user_password(
     """
     temp_password = await auth_service.admin_reset_password(user_id=user_id)
     return AdminResetPasswordResponse(temporary_password=temp_password)
+
+
+@router.delete("/users/{user_id}", response_model=AdminUserResponse)
+async def delete_user(
+    user_id: str,
+    admin: AdminUser,
+    auth_service: AuthService = Depends(get_auth_service),
+    conversations: ConversationRepository = Depends(get_conversation_repo),
+    shares: ConversationShareRepository = Depends(get_conversation_share_repo),
+    llm_keys: UserLlmKeyRepository = Depends(get_user_llm_key_repo),
+    assets: AssetStorage = Depends(get_asset_storage),
+) -> AdminUserResponse:
+    """注销 (soft-delete + anonymize) an account, admin-initiated (用户管理 强操作).
+
+    The stronger sibling of 停用 (a reversible status flip): this anonymizes the
+    account (username → ``deleted_<id>``, email/avatar cleared), disables it (live
+    tokens die on the next request), revokes its sessions, and cascades cross-domain
+    cleanup (conversations soft-deleted for the retention sweeper, public shares
+    revoked, BYOK key dropped, avatar object removed) — the same destructive path as
+    self-service 注销, minus the password. Refuses self-deletion (no self-lockout →
+    ≥1 active admin always remains); 404 for an unknown account. The append-only cost
+    ledger is intentionally retained. Returns the tombstone record (carries
+    ``deleted_at``) so the client can flag the row 「已注销」or drop it from the roster.
+    """
+    updated, avatar_key = await auth_service.admin_delete_account(
+        actor_id=admin.user_id, user_id=user_id
+    )
+    await cleanup_account_resources(
+        user_id,
+        avatar_key=avatar_key,
+        conversations=conversations,
+        shares=shares,
+        llm_keys=llm_keys,
+        assets=assets,
+    )
+    return _admin_user_response(updated)
 
 
 @router.get("/users/{user_id}/detail", response_model=AdminUserDetail)

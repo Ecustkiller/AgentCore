@@ -1,16 +1,87 @@
-import { useActiveMessages } from "@/stores/conversation";
+import type { HandoffJob } from "@/services/handoff";
+import {
+  useBackgroundTasks,
+  useBackgroundTasksSync,
+  useWorkspaceRootId,
+} from "@/stores/backgroundTasks";
+import {
+  type Message,
+  useActiveMessages,
+  useConversationStore,
+} from "@/stores/conversation";
+import { useMemo } from "react";
+import { BackgroundTaskCard } from "./BackgroundTaskCard";
 import { MessageBubble } from "./MessageBubble";
 
 // Auto-scroll lives in ChatView's useStickToBottom: it owns the scroll container
 // and only follows new content while the user is already at the bottom.
 export function MessageList() {
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   const messages = useActiveMessages();
+  // 后台云端任务（交接「方案 B」）：本地模式对话才同步，按时间戳并入时间线，故卡片
+  // 与消息一同**原位**渲染、随对话重开重放（数据源是后端持久化的 handoff jobs）。
+  useBackgroundTasksSync(conversationId);
+  const tasks = useBackgroundTasks(conversationId);
+  // 绑定的本地根，供成功任务的内联评审写回本地（同一对话所有卡共用，故在此读取一次下传）。
+  const rootId = useWorkspaceRootId(conversationId);
+
+  const items = useMemo(() => mergeTimeline(messages, tasks), [messages, tasks]);
 
   return (
     <div className="space-y-6">
-      {messages.map((msg) => (
-        <MessageBubble key={msg.id} message={msg} />
-      ))}
+      {items.map((it) =>
+        it.kind === "message" ? (
+          <MessageBubble key={it.key} message={it.msg} />
+        ) : (
+          <BackgroundTaskCard key={it.key} job={it.job} rootId={rootId} />
+        ),
+      )}
     </div>
   );
+}
+
+type TimelineItem =
+  | { kind: "message"; at: number; key: string; msg: Message }
+  | { kind: "task"; at: number; key: string; job: HandoffJob };
+
+/**
+ * 把消息与后台云端任务并成一条按时间排序的时间线。等时间戳时消息排在任务前（任务由
+ * 消息触发，自然落其后）。任务为空时退化为纯消息列表（最常见路径）。
+ */
+function mergeTimeline(
+  messages: Message[],
+  tasks: HandoffJob[],
+): TimelineItem[] {
+  if (tasks.length === 0) {
+    return messages.map((msg) => ({
+      kind: "message",
+      at: Date.parse(msg.createdAt) || 0,
+      key: `m:${msg.id}`,
+      msg,
+    }));
+  }
+  const merged: TimelineItem[] = [
+    ...messages.map(
+      (msg): TimelineItem => ({
+        kind: "message",
+        at: Date.parse(msg.createdAt) || 0,
+        key: `m:${msg.id}`,
+        msg,
+      }),
+    ),
+    ...tasks.map(
+      (job): TimelineItem => ({
+        kind: "task",
+        at: Date.parse(job.createdAt) || 0,
+        key: `t:${job.id}`,
+        job,
+      }),
+    ),
+  ];
+  merged.sort(
+    (a, b) =>
+      a.at - b.at ||
+      (a.kind === b.kind ? 0 : a.kind === "message" ? -1 : 1),
+  );
+  return merged;
 }
