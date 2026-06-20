@@ -8,6 +8,7 @@
 export type SSEEventType =
   | "message_start"
   | "content_delta"
+  | "content_reset"
   | "reasoning_delta"
   | "tool_progress"
   | "tool_use_start"
@@ -21,18 +22,23 @@ export type SSEEventType =
   | "plan_review_resolved"
   | "run_plan"
   | "run_started"
+  | "run_context"
   | "run_output_delta"
   | "run_reasoning_delta"
   | "run_tool_progress"
   | "run_completed"
   | "run_failed"
   | "run_progress"
+  | "debate_result"
+  | "debate_round_started"
+  | "debate_round"
   | "message_end"
   | "error"
   | "title_generated"
   | "turn_saved"
   | "citations"
   | "workspace_op_required"
+  | "workspace_promoted"
   | "handoff_snapshot_done"
   | "handoff_job_started"
   | "handoff_apply_done";
@@ -51,6 +57,12 @@ export interface MessageStartPayload {
 export interface ContentDeltaPayload {
   delta: string;
 }
+
+/** 交付前核验回炉（finish_guard）：CEO 自报 done 的正文未过轻层核验（如编造引用），引擎丢弃
+ * 这一版、回炉重写。Payload-less 信号——客户端清空当前流式气泡已累积的正文（含 process 尾部
+ * content 步），再接收重写版的 `content_delta`，使「违规版 → 修正版」是一次干净替换而非追加。
+ * Transport-only（不进 journal；历史回放靠最终 message content / 持久化的 process timeline）。 */
+export type ContentResetPayload = Record<string, never>;
 
 export interface ReasoningDeltaPayload {
   delta: string;
@@ -206,7 +218,11 @@ export interface PlanAgentPayload {
 
 export interface RunPlanPayload {
   execution_id: string;
-  plan_type: "single_agent" | "multi_agent";
+  /** `debate` is a 辩论编排 surface (debate 工具/主持人): the moderator + per-round
+   * debater nodes are declared as run_plan batches just like multi_agent, plus a
+   * terminal `debate_result` carrying the brief + narrative. The graph folds the
+   * nodes identically; the debate view keys off this plan_type. */
+  plan_type: "single_agent" | "multi_agent" | "debate";
   task_summary: string;
   agents: PlanAgentPayload[];
   runs: Array<{
@@ -235,6 +251,45 @@ export interface RunStartedPayload {
   parent_run_id: string | null;
   kind: RunKind;
   revision?: number;
+}
+
+/** One labeled segment of context a run received at assembly time (上下文传递可视化) —
+ * the wire twin of the backend `ContextBlock`, and the structured single source behind
+ * both the worker prompt and this event (用户看到的 == LLM 吃到的). `channel` buckets it
+ * for the UI: `request` (团队级原始请求) / `team_position` (DAG 拓扑) / `dependency` (上游
+ * 产物注入) / `workspace` (工作区文件清单) / `task` / `expected_output` / `requirements` /
+ * `steer`. A `dependency` block carries its provenance — the upstream `source_role` /
+ * `source_run_id`, the `fidelity` chosen (`pointer` 递指针 / `summarize` / `pass_through`),
+ * and the artifact `files` it points at. `chars` is the ORIGINAL injected size; `truncated`
+ * flags that `body` was capped (budget trim OR the event's display cap). */
+export interface ContextBlockWire {
+  channel:
+    | "request"
+    | "team_position"
+    | "dependency"
+    | "workspace"
+    | "task"
+    | "expected_output"
+    | "requirements"
+    | "steer";
+  heading: string;
+  body: string;
+  chars: number;
+  truncated: boolean;
+  source_role: string;
+  source_run_id: string;
+  fidelity: "" | "pointer" | "summarize" | "pass_through";
+  files: string[];
+}
+
+/** The structured context a worker run was fed (上下文传递可视化, 通道 worker 侧), emitted
+ * once per run right after `run_started`. `blocks` is the ordered list the opening user
+ * message was rendered from, so the run detail shows exactly what fed the LLM. Journaled,
+ * so a past turn replays its received context on reload through the same fold. */
+export interface RunContextPayload {
+  run_id: string;
+  agent_id: string;
+  blocks: ContextBlockWire[];
 }
 
 export interface RunOutputDeltaPayload {
@@ -298,6 +353,105 @@ export interface RunProgressPayload {
   total: number;
 }
 
+// ── 辩论编排产物（debate 工具/主持人收场，前端辩论视图渲染用）─────────────────
+// 一场辩论收场时 emit 的【完整结构化产物】，与 run_plan(plan_type="debate") 的图节点
+// 互补：图承载逐辩手执行（发言全文随辩手 run 走 run_output_delta），本事件承载主持人的
+// 交锋叙事线（逐轮焦点/裁判/小结）+ 决策简报。各方发言全文不在此（体量大），靠
+// `rounds[*].sides[*].run_id` 关联执行图的辩手节点取回。Snake_case 原样（wire-shaped
+// leaf，三端 verbatim 折入 ProjectedTurn.debate，不做有损转换）。
+
+/** 一方/一个视角的定义（决策简报与叙事线据此标注立场）。`stance` 是自由文本（debate
+ * 为 支持/反对，red_team 为 红队/被审方，roundtable 为各视角名），区别于图节点 badge
+ * 用的 `Stance`（仅 pro/con）。`is_subject` 标红队被审的方案方。 */
+export interface DebateSideInfo {
+  key: string;
+  name: string;
+  stance: string;
+  is_subject: boolean;
+}
+
+/** 叙事线某一轮里某一方的执行指针：`run_id` 关联执行图的辩手节点（取发言全文 L3）。 */
+export interface DebateRoundSide {
+  key: string;
+  name: string;
+  run_id: string;
+  ok: boolean;
+}
+
+/** 主持人对一轮交锋的裁判（收敛判定 L1）：是否真交锋/有新论据/已收敛 + 停轮理由。 */
+export interface DebateVerdict {
+  real_clash: boolean;
+  new_arguments: boolean;
+  converged: boolean;
+  stop_reason: string;
+  rationale: string;
+}
+
+/** 叙事线的一轮（L1 焦点 + 裁判 / L2 小结）：`sides` 是本轮各方→辩手 run 的映射。 */
+export interface DebateRoundInfo {
+  round_no: number;
+  focus: string;
+  summary: string;
+  verdict: DebateVerdict;
+  sides: DebateRoundSide[];
+}
+
+/** 进行中实时叠加的一轮叙事态（debate_round_started / debate_round 折叠累积，进 ProjectedTurn
+ * .debateRounds）：`debate_round_started` 先给 `focus`（`verdict=null` ⇒ 该轮只定了焦点、尚未
+ * 裁判，即进行中），`debate_round` 补 `summary`/`verdict`/`sides`。收场后由 `debate_result` 的
+ * 全量 `rounds`（{@link DebateRoundInfo}，`verdict` 必有）接管——本类型是「进行中」的孪生。 */
+export interface DebateNarrativeRound {
+  round_no: number;
+  focus: string;
+  summary: string;
+  verdict: DebateVerdict | null;
+  sides: DebateRoundSide[];
+}
+
+/** 决策简报（结论卡）：交锋焦点、各方最强论点、事实/价值分歧、倾向与置信、建议、待解问题。 */
+export interface DebateBriefInfo {
+  crux: string;
+  strongest_points: Record<string, string>;
+  factual_disputes: string[];
+  value_disputes: string[];
+  leaning: string;
+  confidence: string;
+  recommendation: string;
+  open_questions: string[];
+}
+
+export interface DebateResultPayload {
+  execution_id: string;
+  /** 主持人节点的 run_id（前端据此把本事件挂到对应辩论上）。 */
+  moderator_run_id: string;
+  form: "debate" | "red_team" | "roundtable";
+  motion: string;
+  /** 收场原因（converged / focus_clarified / red_team_exhausted / max_rounds / all_failed）。 */
+  stop_reason: string;
+  /** 呈现顺序提示：true=叙事线优先（如 roundtable 探讨），false=简报优先（如 debate 决策）。 */
+  narrative_first: boolean;
+  sides: DebateSideInfo[];
+  rounds: DebateRoundInfo[];
+  brief: DebateBriefInfo;
+}
+
+/** 一轮辩论开场（辩手发言【前】）：主持人定下本轮焦点 → 前端先亮焦点头、再流式各方发言。
+ * Transport-only（不进 journal）；收场全量叙事线由 {@link DebateResultPayload} 承载。 */
+export interface DebateRoundStartedPayload {
+  execution_id: string;
+  moderator_run_id: string;
+  round_no: number;
+  focus: string;
+}
+
+/** 一轮辩论收尾（裁判 + 小结【后】）：即 {@link DebateResultPayload.rounds} 的逐轮单元，加
+ * 上 `execution_id`/`moderator_run_id` 定位。前端进行中据此叠本轮焦点 / 小结 / 裁判到辩论视图。
+ * Transport-only（不进 journal，重载由 `debate_result` 重建）。 */
+export interface DebateRoundPayload extends DebateRoundInfo {
+  execution_id: string;
+  moderator_run_id: string;
+}
+
 export interface MessageEndPayload {
   finish_reason:
     | "end_turn"
@@ -350,6 +504,21 @@ export interface WorkspaceOpRequiredPayload {
   args: Record<string, unknown>;
 }
 
+/** A folderless 裸聊 was lazily promoted into a real folder on its first file write
+ * (文件夹即工作区 §懒建 / 工作区对称化 D1a). The chat now belongs to `folder_id`; the
+ * live client re-groups it under that folder and surfaces the new workspace in the 文件
+ * rail — without this the promotion is invisible until a manual refetch/reload. A local
+ * promotion carries `local_root_id` + `local_subpath` (the file landed on the user's
+ * machine); a cloud one leaves `local_root_id` null. One-shot signal — the folder is
+ * durable state read back on reload, so it is not journaled. */
+export interface WorkspacePromotedPayload {
+  conversation_id: string;
+  folder_id: string;
+  name: string;
+  local_root_id: string | null;
+  local_subpath: string;
+}
+
 export interface HandoffSnapshotDonePayload {
   snapshot_id: string;
   conversation_id: string;
@@ -382,6 +551,7 @@ export interface HandoffApplyDonePayload {
 export type SSEPayloadMap = {
   message_start: MessageStartPayload;
   content_delta: ContentDeltaPayload;
+  content_reset: ContentResetPayload;
   reasoning_delta: ReasoningDeltaPayload;
   tool_progress: ToolProgressPayload;
   tool_use_start: ToolUseStartPayload;
@@ -395,18 +565,23 @@ export type SSEPayloadMap = {
   plan_review_resolved: PlanReviewResolvedPayload;
   run_plan: RunPlanPayload;
   run_started: RunStartedPayload;
+  run_context: RunContextPayload;
   run_output_delta: RunOutputDeltaPayload;
   run_reasoning_delta: RunReasoningDeltaPayload;
   run_tool_progress: RunToolProgressPayload;
   run_completed: RunCompletedPayload;
   run_failed: RunFailedPayload;
   run_progress: RunProgressPayload;
+  debate_result: DebateResultPayload;
+  debate_round_started: DebateRoundStartedPayload;
+  debate_round: DebateRoundPayload;
   message_end: MessageEndPayload;
   error: ErrorPayload;
   title_generated: TitleGeneratedPayload;
   turn_saved: TurnSavedPayload;
   citations: CitationsPayload;
   workspace_op_required: WorkspaceOpRequiredPayload;
+  workspace_promoted: WorkspacePromotedPayload;
   handoff_snapshot_done: HandoffSnapshotDonePayload;
   handoff_job_started: HandoffJobStartedPayload;
   handoff_apply_done: HandoffApplyDonePayload;

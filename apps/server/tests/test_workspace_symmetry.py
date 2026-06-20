@@ -15,14 +15,16 @@ Three layers, all without a real desktop or DB:
 """
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
+from agentcore.conversation import service
 from agentcore.conversation.service import (
     _sanitize_subpath_segment,
     _unique_local_subpath,
 )
-from agentcore.runtime.events import EventSink, SSEEvent
+from agentcore.runtime.events import EventSink, EventType, SSEEvent
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.tools.sandbox.protocol import ExecutionRequest
 from agentcore.workspace.channel import WorkspaceChannel
@@ -67,6 +69,50 @@ async def _round_trip(coro, sink, registry, response: dict):
     event = await _await_request(sink)
     assert registry.resolve(event.payload["request_id"], response, conversation_id=CONV)
     return await task, event
+
+
+def _drain(sink: EventSink) -> list[SSEEvent]:
+    """All events queued on the sink so far (emit is synchronous)."""
+    out: list[SSEEvent] = []
+    while not sink._queue.empty():  # noqa: SLF001 - test-only inspection
+        out.append(sink._queue.get_nowait())
+    return out
+
+
+def _patch_promote_db(monkeypatch) -> None:
+    """Stub the DB so ``_bare_chat_promote`` runs without a session (no-DB ethos).
+
+    The minted folder echoes the requested binding so the test can assert the
+    promotion event mirrors what was filed; ``set_folder`` is a no-op.
+    """
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _FakeFolderRepo:
+        def __init__(self, _session):
+            pass
+
+        async def list_by_user(self, _user_id):
+            return []
+
+        async def create(self, *, user_id, name, local_root_id, local_subpath):
+            return SimpleNamespace(id="f-new")
+
+    class _FakeConvRepo:
+        def __init__(self, _session):
+            pass
+
+        async def set_folder(self, conversation_id, folder_id, *, user_id):
+            return None
+
+    monkeypatch.setattr(service, "async_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr(service, "FolderRepository", _FakeFolderRepo)
+    monkeypatch.setattr(service, "ConversationRepository", _FakeConvRepo)
 
 
 # --- LocalWorkspace subpath scoping -------------------------------------------
@@ -227,6 +273,57 @@ async def test_deferred_local_promotion_requires_sink():
     ws = DeferredWorkspace(user_id="u1", promote=promote)  # no sink
     with pytest.raises(RuntimeError, match="sink"):
         await ws._materialize()  # noqa: SLF001 - test-only trigger
+
+
+# --- bare-chat promotion emits the workspace_promoted signal -------------------
+# Regression guard for "AI 产出了文件但前端看不到 / 对话从未分组消失": the lazy
+# promotion is server-side + mid-turn, so without this event the live client never
+# learns the 裸聊 became a folder. _bare_chat_promote must emit it on the turn's sink.
+
+
+async def test_bare_chat_promote_emits_local_workspace_promoted(monkeypatch):
+    _patch_promote_db(monkeypatch)
+    sink = EventSink()
+    promote = service._bare_chat_promote(  # noqa: SLF001 - unit under test
+        user_id="u1",
+        conversation_id="c1",
+        title="My Title",
+        user_message="hello",
+        local_container_root_id="root-x",
+        sink=sink,
+    )
+    result = await promote()
+    assert result.local_binding is not None  # local promotion
+
+    promoted = [e for e in _drain(sink) if e.type == EventType.WORKSPACE_PROMOTED]
+    assert len(promoted) == 1
+    p = promoted[0].payload
+    assert p["conversation_id"] == "c1"
+    assert p["folder_id"] == "f-new"
+    assert p["name"] == "My Title"
+    assert p["local_root_id"] == "root-x"  # carries the container root for the client
+    assert p["local_subpath"] == "My Title"  # sanitized title → per-chat subpath
+
+
+async def test_bare_chat_promote_emits_cloud_workspace_promoted(monkeypatch):
+    _patch_promote_db(monkeypatch)
+    sink = EventSink()
+    promote = service._bare_chat_promote(  # noqa: SLF001 - unit under test
+        user_id="u1",
+        conversation_id="c2",
+        title=None,  # title still pending mid-turn → name falls back to the message
+        user_message="do a thing",
+        local_container_root_id=None,  # web/mobile/「云端临时对话」 → cloud promotion
+        sink=sink,
+    )
+    result = await promote()
+    assert result.local_binding is None  # cloud promotion
+
+    p = [e for e in _drain(sink) if e.type == EventType.WORKSPACE_PROMOTED][0].payload
+    assert p["folder_id"] == "f-new"
+    assert p["name"] == "do a thing"
+    assert p["local_root_id"] is None  # cloud → client treats it as a cloud folder
+    assert p["local_subpath"] == ""
 
 
 # --- naming / subpath helpers (pure) ------------------------------------------

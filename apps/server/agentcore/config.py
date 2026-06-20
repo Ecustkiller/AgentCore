@@ -192,6 +192,16 @@ class Settings(BaseSettings):
     engine_delegation_nudge_threshold: int = 4
     engine_delegation_nudge_min_round: int = 1
 
+    # 交付前核验·轻层回炉 (finish_guard): when the CEO declares done (a no-tool round with
+    # content), react_loop first runs a pure-code light check over the product's observable
+    # signals (first cut: fabricated citations — [n] markers pointing at a source card that
+    # does not exist). A hit discards that draft (a content_reset clears the streamed bubble),
+    # injects a fact-anchored steer, and reworks the round instead of delivering. ``max_reworks``
+    # caps how many times one run may be sent back this way (these rounds count toward
+    # max_rounds); once exhausted the product ships as-is and the residual is left for the
+    # pipeline out_of_range warning to record. 0 disables the guard.
+    engine_finish_guard_max_reworks: int = 2
+
     # Observability — execution span tree (D2 可观测性; 契约见 管理员后台.md). Off the user path,
     # best-effort: at turn end the durable Turn Journal is projected into an
     # OTel-GenAI-semconv-aligned span tree (one span per run node + nested tool spans,

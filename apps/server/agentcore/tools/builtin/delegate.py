@@ -462,6 +462,7 @@ class DelegateTool:
         from agentcore.runtime.costing import usage_metadata
         from agentcore.runtime.runs import (
             DEFAULT_MAX_PARALLEL,
+            BatchMetrics,
             RunPhase,
             WaveScheduler,
             build_agent_executor,
@@ -503,13 +504,34 @@ class DelegateTool:
         # are active this turn (gate on + bridge/conversation wired). Off ⇒ None, so
         # a ``checkpoint_after`` marker stays inert and the plan runs straight through.
         on_checkpoint = self._checkpoint_hook(plan) if self._checkpoint_active() else None
+        batch_metrics: list[BatchMetrics] = []
         results = await WaveScheduler(self._max_parallel or DEFAULT_MAX_PARALLEL).run(
             plan,
             executor,
             seed_completed=seed_completed,
             on_progress=_progress,
             on_checkpoint=on_checkpoint,
+            metrics_sink=batch_metrics,
         )
+        if batch_metrics:
+            # 调度埋点量化: one batch-health line per delegate run — did parallelism
+            # materialise (avg_parallelism = busy/wall) and was the width cap the
+            # bottleneck (slot_starved > 0). Symmetric with delegate.started.
+            m = batch_metrics[0]
+            logger.info(
+                "delegate.completed",
+                call=self._calls,
+                nodes=m.nodes,
+                width=m.width,
+                peak=m.peak_running,
+                wall_ms=m.wall_ms,
+                busy_ms=m.busy_ms,
+                avg_parallelism=round(m.busy_ms / m.wall_ms, 2) if m.wall_ms else 0.0,
+                slot_starved=m.slot_starved,
+                completed=m.completed,
+                failed=m.failed,
+                skipped=m.skipped,
+            )
 
         call_usage = self._accumulate_usage(results)
         self._collect_ledger(plan, results)

@@ -59,6 +59,7 @@ const sidecarApi: SidecarApi = {
   respond: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.respond, req),
   resume: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.resume, req),
   listPaused: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.listPaused, req),
+  probe: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.probe, req),
   onEvent: (cb) => {
     const listener = (_e: unknown, payload: SidecarEventPush) => cb(payload);
     ipcRenderer.on(SIDECAR_CHANNELS.event, listener);

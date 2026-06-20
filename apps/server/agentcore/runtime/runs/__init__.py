@@ -28,6 +28,7 @@ from agentcore.runtime.runs.scheduler import RunExecutor, RunScheduler
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import (
     TERMINAL_PHASES,
+    BatchMetrics,
     RunContract,
     RunKind,
     RunOrigin,
@@ -58,6 +59,7 @@ __all__ = [
     "RunContract",
     "RunSpec",
     "RunState",
+    "BatchMetrics",
     "TERMINAL_PHASES",
     "child_budget",
     "current_budget",

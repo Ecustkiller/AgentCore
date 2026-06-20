@@ -53,6 +53,26 @@ export function appendContentStep(
   return steps;
 }
 
+/**
+ * Drop the trailing content step(s) from the timeline (交付前核验回炉 content_reset):
+ * the model's done-round draft failed the light verification (e.g. fabricated
+ * citations), so its just-streamed reply text is discarded and rewritten. Mirrors the
+ * backend `EventSink._accumulate_process` reset branch — pop ONLY trailing `content`
+ * steps, keeping the preceding reasoning / tool steps (they really happened). Returns
+ * the same reference when there is nothing to drop so callers can no-op.
+ */
+export function dropTrailingContentSteps(
+  process: ProcessStep[] | undefined,
+): ProcessStep[] {
+  if (!process || process.length === 0) return process ?? [];
+  if (process[process.length - 1].kind !== "content") return process;
+  const steps = [...process];
+  while (steps.length > 0 && steps[steps.length - 1].kind === "content") {
+    steps.pop();
+  }
+  return steps;
+}
+
 /** Append a started tool call as a `running` step to the timeline. */
 export function appendToolStep(
   process: ProcessStep[] | undefined,

@@ -1,6 +1,9 @@
 import { patchConversationCache } from "@/hooks/useConversations";
+import { addFolderCache } from "@/hooks/useFolders";
+import { addWorkspaceFromFolder } from "@/hooks/useWorkspaces";
 import { StreamError } from "@/lib/errors";
 import { notifyUnauthorized, tryRefresh } from "@/services/api";
+import type { FolderMeta } from "@/services/folders";
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import { performWorkspaceOp } from "@/services/workspaceOps";
 import { useApprovalStore } from "@/stores/approvals";
@@ -22,6 +25,9 @@ import type {
   CheckpointResolvedPayload,
   CitationsPayload,
   ContentDeltaPayload,
+  DebateResultPayload,
+  DebateRoundPayload,
+  DebateRoundStartedPayload,
   ErrorPayload,
   MessageEndPayload,
   PlanReviewRequiredPayload,
@@ -36,6 +42,7 @@ import type {
   ToolUseStartPayload,
   TurnSavedPayload,
   WorkspaceOpRequiredPayload,
+  WorkspacePromotedPayload,
 } from "@/types/events";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
@@ -115,6 +122,17 @@ export function flushPendingContent(conversationId: string): void {
   useConversationStore.getState().appendToLastMessage(buffered, conversationId);
 }
 
+/** 丢弃某会话已缓冲但未写出的 content（取消挂起 frame，且不 append）。`content_reset` 用：
+ * 那批 delta 属于被交付前核验否决的违规正文，无需落到气泡。无缓冲时仅取消挂起 frame。 */
+export function discardPendingContent(conversationId: string): void {
+  const frame = pendingFrame.get(conversationId);
+  if (frame !== undefined) {
+    cancelAnimationFrame(frame);
+    pendingFrame.delete(conversationId);
+  }
+  pendingContent.delete(conversationId);
+}
+
 /** 把一段 content delta 入桶，并确保已排定一次 frame flush。 */
 function queueContentDelta(conversationId: string, delta: string): void {
   pendingContent.set(
@@ -160,6 +178,14 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
         ctx.conversationId,
         (event.payload as ContentDeltaPayload).delta,
       );
+      break;
+    }
+    case "content_reset": {
+      // 交付前核验回炉：done 轮草稿未过轻层核验（如编造引用），引擎丢弃并重写。先丢掉 rAF
+      // 缓冲里未写出的违规 delta，再清空气泡正文（含 process 尾部 content 步），使「违规版 →
+      // 修正版」是一次干净替换而非追加。镜像后端 `_accumulate_process` 的 reset 分支。
+      discardPendingContent(ctx.conversationId);
+      useConversationStore.getState().resetStreamingContent(ctx.conversationId);
       break;
     }
     case "reasoning_delta": {
@@ -365,6 +391,30 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       break;
     }
 
+    // ---- 裸聊懒升级（文件夹即工作区 §懒建 / 工作区对称化 D1a）----
+    // The server minted a real folder for this 裸聊 on its first file write and filed
+    // the conversation into it. Reflect that into the same caches a folder create
+    // would touch, so the promotion is visible NOW instead of after a refetch/reload:
+    // ① the grouped folder list (sidebar gains a folder filter row), ② the
+    // conversation's folderId (it re-groups under that folder, leaving 未分组), ③ the
+    // 文件 hub workspace rail (the new card — local promotions carry their subpath, so
+    // the file the team just wrote is reachable). addWorkspaceFromFolder is a no-op if
+    // the hub was never opened (it fetches fresh on first open).
+    case "workspace_promoted": {
+      const p = event.payload as WorkspacePromotedPayload;
+      const folder: FolderMeta = {
+        id: p.folder_id,
+        name: p.name,
+        localDir: null,
+        localRootId: p.local_root_id,
+        localSubpath: p.local_subpath,
+      };
+      addFolderCache(folder);
+      patchConversationCache(p.conversation_id, { folderId: p.folder_id });
+      addWorkspaceFromFolder(folder);
+      break;
+    }
+
     // ---- multi-agent execution stream ----
     // Each run/tool fact is appended to the journal; the graph is a projection
     // of that frame stream (see stores/execution.ts), so live + replay share
@@ -383,7 +433,12 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       // their bubble keeps `executionId === null` and shows its own ¥ caption.
       // The detail panel is no longer auto-opened — it is a passive drill-down
       // target, opened on demand by clicking a graph node.
-      if (payload.plan_type === "multi_agent") {
+      // multi_agent 与 debate 都让主气泡渲染 inline 团队图（辩论是 CEO→主持人→辩手的
+      // 树）并把成本行让位给图的状态条。single_agent 不发 run_plan，气泡保留自己的 ¥。
+      if (
+        payload.plan_type === "multi_agent" ||
+        payload.plan_type === "debate"
+      ) {
         useConversationStore
           .getState()
           .setLastAssistantExecutionId(
@@ -397,6 +452,7 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
     // to this turn's journal (a no-op slot has no plan, so stray single-agent
     // facts are ignored downstream). One path for every frame kind.
     case "run_started":
+    case "run_context":
     case "run_output_delta":
     case "run_reasoning_delta":
     case "run_tool_progress":
@@ -440,6 +496,48 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       break;
     }
 
+    // 辩论收场：把完整结构化产物（简报 + 叙事线）存入该回合 execution slot（直播与重连
+    // 回放同一路径），辩论视图据此渲染；无 plan 的 slot 忽略（杂散事件）。
+    case "debate_result": {
+      const mid = execMessageId();
+      if (mid)
+        useExecutionStore
+          .getState()
+          .recordDebateResult(event.payload as DebateResultPayload, mid);
+      break;
+    }
+
+    // 辩论逐轮增量（进行中实时叠加）：主持人每轮焦点（发言前）/ 小结 + 裁判（发言后）折入该
+    // 回合 slot 的 debateRounds，让辩论视图进行中就逐轮叠出，不必干等 debate_result 收场。
+    case "debate_round_started": {
+      const mid = execMessageId();
+      if (mid) {
+        const p = event.payload as DebateRoundStartedPayload;
+        useExecutionStore.getState().recordDebateRound(
+          { round_no: p.round_no, focus: p.focus, summary: "", verdict: null, sides: [] },
+          mid,
+        );
+      }
+      break;
+    }
+    case "debate_round": {
+      const mid = execMessageId();
+      if (mid) {
+        const p = event.payload as DebateRoundPayload;
+        useExecutionStore.getState().recordDebateRound(
+          {
+            round_no: p.round_no,
+            focus: p.focus,
+            summary: p.summary,
+            verdict: p.verdict,
+            sides: p.sides,
+          },
+          mid,
+        );
+      }
+      break;
+    }
+
     default:
       break;
   }
@@ -452,8 +550,10 @@ export interface OutgoingAttachment {
   /** 文件为正文；目录为「文件清单」文本。 */
   text: string;
   truncated: boolean;
-  /** file=单文件；dir=目录文件清单。 */
-  kind?: "file" | "dir";
+  /** file=单文件；dir=目录文件清单；conversation=引用对话（正文为其最近若干条消息）。 */
+  kind?: "file" | "dir" | "conversation";
+  /** 仅 kind=conversation：被引用对话的 id（供气泡 chip 标注 / 后续跳转）。 */
+  conversation_id?: string;
 }
 
 /**

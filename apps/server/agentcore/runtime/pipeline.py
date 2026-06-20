@@ -40,13 +40,13 @@ from agentcore.runtime.facts import (
     current_fact_log,
     record_turn_fact,
 )
+from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.journal import (
     completed_from_journal,
     entries_from_runs,
     plan_from_journal,
     window_from_journal,
 )
-from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
@@ -83,6 +83,7 @@ from agentcore.tools.builtin import (
 )
 from agentcore.tools.builtin.ask_user import AskUserTool, ask_user_tool_result
 from agentcore.tools.builtin.consult_skill import ConsultSkillTool
+from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.revise import ReviseTool
 from agentcore.tools.protocol import ToolContext
@@ -114,7 +115,7 @@ def _assemble_ceo_toolset(
     suspension_deleter: SuspensionDeleter | None,
     backend_location: str,
     skill_registry: SkillRegistry,
-) -> tuple[DelegateTool, ReviseTool, ToolRegistry]:
+) -> tuple[DelegateTool, ReviseTool, DebateTool, ToolRegistry]:
     """Wire the CEO coordinator's toolset (delegate + revise + read/retrieval +
     consult_skill + an optional ask_user), shared by a fresh turn and a 2b resume.
 
@@ -125,9 +126,9 @@ def _assemble_ceo_toolset(
     the CEO-only ``consult_skill`` tool (提示词瘦身 P2): the advanced-mechanism guidance
     is pulled on demand instead of riding the prompt every turn. ``message_id`` + the
     suspension closures arm durable plan_review pauses (结构化挂起 2b) on the
-    top-level delegate. Returns ``(delegate_tool, revise_tool, chat_tools)`` — the
-    tools whose accumulated usage/ledger/citations the caller folds into the turn
-    totals.
+    top-level delegate. Returns ``(delegate_tool, revise_tool, debate_tool,
+    chat_tools)`` — the tools whose accumulated usage/ledger/citations the caller
+    folds into the turn totals.
     """
     delegate_tool = DelegateTool(
         llm=llm,
@@ -166,6 +167,22 @@ def _assemble_ceo_toolset(
         session_loader=session_loader,
     )
     chat_tools.register(revise_tool)
+    # debate (辩论编排原语): the CEO's对抗性多视角思考 primitive, sibling to delegate. A
+    # Moderator hosts an adaptive多轮 debate内部 and returns双产物 (决策简报 + 交锋叙事线);
+    # like delegate它非终结且把辩手/主持人的 usage/ledger/citations累加在实例上，由本回合
+    # 折回总账。→ docs/03-AI核心/辩论编排设计.md
+    debate_tool = DebateTool(
+        llm=llm,
+        sink=sink,
+        system_prompt=base_system_prompt,
+        user_message=user_message,
+        tools=worker_tools,
+        base_tool_context=base_tool_context,
+        profile_set=profiles,
+        captain_run_id=captain_run_id,
+        approval_gate=approval_gate,
+    )
+    chat_tools.register(debate_tool)
     # consult_skill (提示词瘦身 P2): always wired (not live-user gated) so the CEO can
     # pull any advanced-mechanism guidance on demand; the always-on 能力目录 in the
     # prompt lists the skills whose required tools are actually wired this turn.
@@ -191,14 +208,15 @@ def _assemble_ceo_toolset(
                 suspension_deleter=suspension_deleter,
             )
         )
-    return delegate_tool, revise_tool, chat_tools
+    return delegate_tool, revise_tool, debate_tool, chat_tools
 
 
 def _build_attachment_context(attachments: list[dict] | None) -> str | None:
-    """Render user-referenced files/directories into a system-prompt block.
+    """Render user-referenced files / dirs / conversations into a prompt block.
 
     Files carry pre-extracted text; directories carry a recursive file listing
-    (paths only, no file bodies). Both are truncated client-side. A file with a
+    (paths only, no file bodies); conversations carry their recent messages
+    (materialized client-side). All are truncated client-side. A file with a
     ``workspace_path`` was persisted into the workspace (附件驻留), so the header
     points the agent at that durable path — it can re-read or edit the file with
     the file tools instead of relying only on the inlined (possibly truncated)
@@ -222,6 +240,12 @@ def _build_attachment_context(attachments: list[dict] | None) -> str | None:
                 f"--- Directory: {name} ({path}){note} ---\n"
                 f"File paths (contents not included):\n{text}"
             )
+        elif att.get("kind") == "conversation":
+            # A referenced past conversation: its recent messages, materialized
+            # client-side into `text`. Nothing is written to the workspace;
+            # truncated => only the most recent slice was carried.
+            note = " (recent messages only)" if att.get("truncated") else ""
+            blocks.append(f"--- Conversation: {name}{note} ---\n{text}")
         else:
             # Prefer the durable in-workspace path so the model can act on the
             # real file; fall back to the original (local) path when un-resident.
@@ -245,10 +269,12 @@ def _build_attachment_context(attachments: list[dict] | None) -> str | None:
     )
     return (
         "<attached_files>\n"
-        "The user attached the following files and directories as context for "
-        "this message. Treat them as reference material the user provided; cite "
-        "them by name when relevant. Directory entries list file paths only "
-        f"(file contents are not included).{resident_note}\n\n"
+        "The user attached the following files, directories and past "
+        "conversations as context for this message. Treat them as reference "
+        "material the user provided; cite them by name when relevant. Directory "
+        "entries list file paths only (file contents are not included); a "
+        "Conversation block holds that conversation's recent messages."
+        f"{resident_note}\n\n"
         f"{body}\n"
         "</attached_files>"
     )
@@ -450,7 +476,7 @@ async def run_chat_pipeline(
         # about a delegate tool they do not hold) plus this turn's attachment block.
         # message_id + the suspension closures arm durable plan_review pauses (结构化
         # 挂起 2b) on the top-level delegate.
-        delegate_tool, revise_tool, chat_tools = _assemble_ceo_toolset(
+        delegate_tool, revise_tool, debate_tool, chat_tools = _assemble_ceo_toolset(
             llm=llm,
             sink=sink,
             base_system_prompt=worker_base_prompt,
@@ -582,6 +608,7 @@ async def run_chat_pipeline(
             TokenUsage.from_usage_dict(captain_state.usage)
             + TokenUsage.from_usage_dict(delegate_tool.usage)
             + TokenUsage.from_usage_dict(revise_tool.usage)
+            + TokenUsage.from_usage_dict(debate_tool.usage)
         )
         finish = captain_state.finish_override or (
             FinishReason.END_TURN
@@ -603,6 +630,9 @@ async def run_chat_pipeline(
             # Each 定向唤回 (revise) continuation is its own member run row, parented
             # to the original worker so the version chain is reconstructable (决策②).
             *(asdict(r) for r in revise_tool.run_ledger),
+            # 辩论：主持人一行 + 每个辩手每轮一行（含 continue_run 续写），各自 parented
+            # 到上级（辩手→主持人、主持人→captain），与 delegate 同形折账。
+            *(asdict(r) for r in debate_tool.run_ledger),
         ]
         turn_cost = aggregate_cost(cost_runs)
 
@@ -614,6 +644,7 @@ async def run_chat_pipeline(
         # usage/cost are folded back off the delegate tool instance above.
         merge_citations(citations, delegate_tool.citations)
         merge_citations(citations, revise_tool.citations)
+        merge_citations(citations, debate_tool.citations)
 
         # 引用越界观测：模型偶尔写出指向「不存在来源卡」的 [n]（数错或想指上一轮的号）。
         # 客户端会把这类越界角标降级成纯文本，所以正文不动——只记一条 warning，让这种
@@ -928,7 +959,7 @@ async def resume_chat_pipeline(
         )
         session_store = default_session_registry().get_or_create(conversation_id)
         checkpoint_enabled = settings.checkpoint_gate_enabled
-        delegate_tool, revise_tool, chat_tools = _assemble_ceo_toolset(
+        delegate_tool, revise_tool, debate_tool, chat_tools = _assemble_ceo_toolset(
             llm=llm,
             sink=sink,
             base_system_prompt=suspension.base_system_prompt,
@@ -1052,6 +1083,7 @@ async def resume_chat_pipeline(
             pre_pause_content=pre_pause_content,
             delegate_tool=delegate_tool,
             revise_tool=revise_tool,
+            debate_tool=debate_tool,
             profile=profile,
             citations=citations,
             sink=sink,
@@ -1106,6 +1138,7 @@ def _finish_resume_turn(
     pre_pause_content: str,
     delegate_tool: DelegateTool,
     revise_tool: ReviseTool,
+    debate_tool: DebateTool,
     profile,
     citations: list[dict],
     sink: EventSink,
@@ -1124,6 +1157,7 @@ def _finish_resume_turn(
         TokenUsage.from_usage_dict(captain_state.usage)
         + TokenUsage.from_usage_dict(delegate_tool.usage)
         + TokenUsage.from_usage_dict(revise_tool.usage)
+        + TokenUsage.from_usage_dict(debate_tool.usage)
     )
     finish = captain_state.finish_override or (
         FinishReason.END_TURN
@@ -1135,10 +1169,12 @@ def _finish_resume_turn(
         asdict(captain_cost),
         *(asdict(r) for r in delegate_tool.run_ledger),
         *(asdict(r) for r in revise_tool.run_ledger),
+        *(asdict(r) for r in debate_tool.run_ledger),
     ]
     turn_cost = aggregate_cost(cost_runs)
     merge_citations(citations, delegate_tool.citations)
     merge_citations(citations, revise_tool.citations)
+    merge_citations(citations, debate_tool.citations)
     stray_markers = out_of_range_markers(final_content, len(citations))
     if stray_markers:
         logger.warning(

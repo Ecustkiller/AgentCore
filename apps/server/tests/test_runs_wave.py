@@ -12,7 +12,7 @@ import asyncio
 
 from agentcore.runtime.runs.concurrency import reset_budget, set_budget
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import RunPhase, RunPolicy, RunSpec, RunState
+from agentcore.runtime.runs.types import BatchMetrics, RunPhase, RunPolicy, RunSpec, RunState
 from agentcore.runtime.runs.wave import WaveScheduler
 
 
@@ -328,3 +328,71 @@ async def test_checkpoint_after_inert_without_hook():
     res = await WaveScheduler().run(plan, _ok)
     assert res["a"].phase is RunPhase.COMPLETED
     assert res["b"].phase is RunPhase.COMPLETED
+
+
+# --- 调度埋点量化 (BatchMetrics) ---
+
+
+async def _slow_ok(spec: RunSpec, _completed) -> RunState:
+    await asyncio.sleep(0.02)
+    return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+
+async def test_metrics_sink_reports_batch_health():
+    plan = RunPlan()
+    for x in ("a", "b", "c"):
+        plan.add(_spec(x))
+    sink: list[BatchMetrics] = []
+    await WaveScheduler().run(plan, _ok, metrics_sink=sink)
+    assert len(sink) == 1
+    m = sink[0]
+    assert m.nodes == 3
+    assert (m.completed, m.failed, m.skipped) == (3, 0, 0)
+    assert m.peak_running >= 1
+    assert m.slot_starved == 0  # default width (8) ≥ 3 → no starvation
+    assert m.wall_ms >= 0 and m.busy_ms >= 0
+
+
+async def test_metrics_not_appended_without_sink():
+    # No sink → no metrics work surfaced (the scheduler return shape is unchanged).
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    res = await WaveScheduler().run(plan, _ok)
+    assert res["a"].phase is RunPhase.COMPLETED
+
+
+async def test_metrics_peak_running_reflects_parallelism():
+    plan = RunPlan()
+    for x in ("a", "b", "c"):
+        plan.add(_spec(x))
+    sink: list[BatchMetrics] = []
+    await WaveScheduler(max_parallel=8).run(plan, _slow_ok, metrics_sink=sink)
+    m = sink[0]
+    assert m.peak_running == 3  # all three overlap under a wide cap
+    assert m.slot_starved == 0
+
+
+async def test_metrics_slot_starved_when_width_capped():
+    plan = RunPlan()
+    for x in ("a", "b", "c"):
+        plan.add(_spec(x))
+    sink: list[BatchMetrics] = []
+    # width 1 → siblings can't all start; ready nodes starve on the cap.
+    await WaveScheduler(max_parallel=1).run(plan, _slow_ok, metrics_sink=sink)
+    m = sink[0]
+    assert m.width == 1
+    assert m.peak_running == 1
+    assert m.slot_starved > 0
+    assert m.completed == 3
+
+
+async def test_metrics_excludes_seeded_nodes():
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+    seed = {"a": RunState(phase=RunPhase.COMPLETED, content="a")}
+    sink: list[BatchMetrics] = []
+    await WaveScheduler().run(plan, _ok, seed_completed=seed, metrics_sink=sink)
+    m = sink[0]
+    assert m.nodes == 1  # only b actually ran here
+    assert m.completed == 1

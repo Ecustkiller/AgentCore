@@ -57,6 +57,26 @@ async def test_persist_skips_empty_text(tmp_path: Path):
     assert ws.dirty is False
 
 
+async def test_persist_skips_conversation_reference(tmp_path: Path):
+    ws = _ws(tmp_path)
+    out = await persist_attachments(
+        ws,
+        [
+            {
+                "name": "讨论",
+                "path": "对话",
+                "text": "用户: hi\n\n助手: yo",
+                "kind": "conversation",
+                "conversation_id": "conv-1",
+            }
+        ],
+    )
+    # A conversation reference carries text but no file bytes — never resident.
+    assert "workspace_path" not in out[0]
+    assert not (tmp_path / ATTACHMENTS_DIR).exists()
+    assert ws.dirty is False
+
+
 async def test_persist_dedups_same_name(tmp_path: Path):
     ws = _ws(tmp_path)
     out = await persist_attachments(
@@ -125,6 +145,7 @@ def test_to_stored_metadata_drops_text_keeps_path():
             "truncated": True,
             "kind": "file",
             "workspace_path": "attachments/a.py",
+            "conversation_id": None,
         }
     ]
     assert "text" not in stored[0]
@@ -134,6 +155,26 @@ def test_to_stored_metadata_defaults_for_unpersisted():
     stored = to_stored_metadata([{"name": "d", "path": "/d", "kind": "dir"}])
     assert stored[0]["workspace_path"] is None
     assert stored[0]["truncated"] is False
+
+
+def test_to_stored_metadata_keeps_conversation_id():
+    stored = to_stored_metadata(
+        [
+            {
+                "name": "讨论",
+                "path": "对话",
+                "text": "用户: hi",
+                "kind": "conversation",
+                "conversation_id": "conv-1",
+            }
+        ]
+    )
+    assert stored[0]["kind"] == "conversation"
+    assert stored[0]["conversation_id"] == "conv-1"
+    # A conversation reference is never written to disk → no workspace_path.
+    assert stored[0]["workspace_path"] is None
+    # The one-shot text is still dropped from stored metadata.
+    assert "text" not in stored[0]
 
 
 def test_safe_attachment_name():

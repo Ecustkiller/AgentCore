@@ -20,10 +20,12 @@ import multiAgentDebate from "../../../../../../packages/protocol-conformance/fi
 import multiAgentDelegate from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_delegate.json";
 import multiAgentMultiBatch from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_multi_batch.json";
 import multiAgentRevision from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_revision.json";
+import multiAgentRoundtableRounds from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_roundtable_rounds.json";
 import multiAgentWorkerTool from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_worker_tool.json";
 import planReviewPaused from "../../../../../../packages/protocol-conformance/fixtures/plan_review_paused.json";
 import planReviewResolvedContinue from "../../../../../../packages/protocol-conformance/fixtures/plan_review_resolved_continue.json";
 import singleAgentCitations from "../../../../../../packages/protocol-conformance/fixtures/single_agent_citations.json";
+import singleAgentContentReset from "../../../../../../packages/protocol-conformance/fixtures/single_agent_content_reset.json";
 import singleAgentError from "../../../../../../packages/protocol-conformance/fixtures/single_agent_error.json";
 import singleAgentText from "../../../../../../packages/protocol-conformance/fixtures/single_agent_text.json";
 import singleAgentTool from "../../../../../../packages/protocol-conformance/fixtures/single_agent_tool.json";
@@ -40,9 +42,11 @@ const fixtures = [
   singleAgentTool,
   singleAgentError,
   singleAgentCitations,
+  singleAgentContentReset,
   multiAgentDelegate,
   multiAgentWorkerTool,
   multiAgentDebate,
+  multiAgentRoundtableRounds,
   multiAgentRevision,
   multiAgentMultiBatch,
   approvalPaused,

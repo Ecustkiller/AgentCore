@@ -51,6 +51,7 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.8",
     "httpx>=0.28",
+    "pytest-timeout>=2.4.0",
 ]
 
 [project.scripts]
@@ -84,3 +85,12 @@ testpaths = ["tests"]
 # (symlink stat denied), making the run exit non-zero even when every test passed. A
 # fixed --basetemp skips that numbered-dir + symlink machinery entirely.
 addopts = "--basetemp=.pytest_tmp"
+# Per-test wall-clock guard (pytest-timeout): a hung test — e.g. an asyncio await on
+# an event that never fires — would otherwise stall the whole suite for minutes (CI /
+# parallel agents just see a silent hang). This converts that into a fast, faulthandler-
+# dumped failure instead. ``thread`` method is mandatory on Windows (the default
+# ``signal``/SIGALRM is POSIX-only). 60s sits far above any real test's runtime yet
+# still trips a true (unbounded) hang quickly; individual slow tests can override with
+# ``@pytest.mark.timeout(N)``.
+timeout = 60
+timeout_method = "thread"

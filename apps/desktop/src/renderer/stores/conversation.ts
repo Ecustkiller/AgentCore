@@ -3,6 +3,7 @@ import {
   appendContentStep,
   appendReasoningStep,
   appendToolStep,
+  dropTrailingContentSteps,
   resolveToolStep,
 } from "@/lib/processTimeline";
 import { stopConversation } from "@/services/stopTurn";
@@ -227,11 +228,13 @@ export interface MessageAttachmentMeta {
   name: string;
   path: string;
   truncated: boolean;
-  /** file=单文件；dir=目录（附带文件清单）。缺省视为 file（兼容旧数据）。 */
-  kind?: "file" | "dir";
+  /** file=单文件；dir=目录（附带文件清单）；conversation=引用对话。缺省视为 file（兼容旧数据）。 */
+  kind?: "file" | "dir" | "conversation";
   /** 附件驻留后在工作区内的相对路径（如 `attachments/foo.py`）；可经文件下载 API
    * 取回。仅文件型且已驻留时存在；目录与旧数据为空。 */
   workspacePath?: string;
+  /** 仅 kind=conversation：被引用对话的 id（供 chip 标注 / 后续跳转）。 */
+  conversationId?: string;
 }
 
 export interface Message {
@@ -439,6 +442,11 @@ interface ConversationState {
   // user views another conversation; UI callers omit it to target the active one.
   addMessage: (message: Message, conversationId?: string | null) => void;
   appendToLastMessage: (chunk: string, conversationId?: string | null) => void;
+  /** 交付前核验回炉（content_reset）：清空当前流式 assistant 气泡已累积的正文——`content`
+   * 归零、process 弹掉尾部 content 步（保留思考/工具步）。镜像后端 `_accumulate_process` 的
+   * reset 分支，使 finish_guard 否决的违规草稿被「替换」而非与重写版追加拼接。No-op 当末条
+   * 不是 assistant。 */
+  resetStreamingContent: (conversationId?: string | null) => void;
   appendReasoningToLastMessage: (
     chunk: string,
     conversationId?: string | null,
@@ -673,6 +681,19 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           process: appendContentStep(last.process, chunk),
           // The captain is writing its answer now → any「正在生成工具」line is done.
           composingTool: null,
+        };
+        return { messages };
+      }),
+
+    resetStreamingContent: (conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") return null;
+        messages[messages.length - 1] = {
+          ...last,
+          content: "",
+          process: dropTrailingContentSteps(last.process),
         };
         return { messages };
       }),

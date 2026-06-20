@@ -16,14 +16,24 @@
 // the structural turn state around them is camelCase.
 
 import type {
+  ContextBlockWire,
   CostBreakdown,
+  DebateNarrativeRound,
+  DebateResultPayload,
   ProcessStep,
   RunKind,
   Stance,
   UsageBreakdown,
 } from "@agentcore/contract-types";
 
-export type { CostBreakdown, ProcessStep, UsageBreakdown };
+export type {
+  ContextBlockWire,
+  CostBreakdown,
+  DebateNarrativeRound,
+  DebateResultPayload,
+  ProcessStep,
+  UsageBreakdown,
+};
 
 /** Turn-level lifecycle, the single fold of desktop's ExecutionStatus + the chat
  * turn's own state. `running` until a gate (→ `paused`) or the terminal event:
@@ -98,6 +108,11 @@ export interface ProjectedRun {
   revisionOf: string | null;
   revision: number;
   checkpoint: ProjectedRunCheckpoint | null;
+  /** 收到的上下文 (上下文传递可视化): the structured context blocks this run was fed at
+   * assembly time (from its `run_context` event), carried VERBATIM (wire-shaped
+   * snake_case) — the SAME data the LLM saw. Empty until that event folds in (or for a
+   * run whose opening was not block-assembled). */
+  receivedContext: ContextBlockWire[];
 }
 
 /** A pending user gate — the one surface the turn is blocked on (`paused`). Only the
@@ -147,4 +162,13 @@ export interface ProjectedTurn {
   /** Turn total from message_end.cost (回合总账); null until the turn ends or when no
    * turn ran (error/not-found paths). */
   cost: CostBreakdown | null;
+  /** The structured product of a 辩论 that concluded this turn (the `debate_result`
+   * event), carried VERBATIM (snake_case kept) — the decision brief + clash
+   * narrative the debate view renders, keyed to the graph's debater runs by
+   * `run_id`. Null for a turn that ran no debate. */
+  debate: DebateResultPayload | null;
+  /** 辩论进行中的逐轮叙事（`debate_round_started` / `debate_round` 折叠累积）：让前端进行中
+   * 就叠出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。Transport-only 事件，
+   * 故重载（journal 无逐轮事件）恒为 `[]`——届时全量叙事线已在 {@link debate} 里。非辩论恒 `[]`。 */
+  debateRounds: DebateNarrativeRound[];
 }

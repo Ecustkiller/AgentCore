@@ -8,6 +8,7 @@ import {
   setLlmKey,
   testLlmKey,
 } from "@/services/llmKey";
+import { clearSidecarHealth } from "@/services/sidecarHealth";
 import { useUIStore } from "@/stores/ui";
 import {
   CheckCircle2,
@@ -97,25 +98,32 @@ export function ModelSettings() {
 /**
  * 本地引擎（sidecar）开关（双模式工作区 §一.1）。开启后，绑定了本机本地文件夹的对话在用户
  * 电脑上直接运行（直连本地磁盘、文件/代码不再每 op 往返云端，更快），而非云端遥控桌面；裸聊与
- * 云端项目、带附件的回合仍走云。默认关——sidecar 暂非真离线（推理仍经云端，断网不可用）、被
- * 委派 worker 强制走审批门，故先做成显式 opt-in 的实验能力（路由判定见 `services/sidecarRouting`）。
+ * 云端项目、带附件的回合仍走云。**默认开**、可关闭——启动失败会自动降级回云端（故默认开安全，
+ * 见 `turns.sendTurn`）；但 sidecar 暂非真离线（推理仍经云端，断网不可用）（路由判定见
+ * `services/sidecarRouting`）。
  */
 function LocalEngineToggle() {
   const enabled = useUIStore((s) => s.sidecarEnabled);
   const setEnabled = useUIStore((s) => s.setSidecarEnabled);
+  // 重新开启本地引擎时清掉本会话健康缓存：给上次因环境起不来被标坏、现已修好的根一次重新探活
+  // 的机会（见 sidecarHealth）。关闭时无需清（不会再走 sidecar）。
+  const onToggle = (v: boolean): void => {
+    setEnabled(v);
+    if (v) clearSidecarHealth();
+  };
   return (
     <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-4 py-3">
       <div className="min-w-0">
-        <p className="text-sm text-foreground">本地引擎（实验）</p>
+        <p className="text-sm text-foreground">本地引擎</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          开启后，绑定了本机本地文件夹的对话在你的电脑上运行（直连本地磁盘、更快），而非云端
-          遥控。裸聊与云端项目仍走云；推理仍经云端，断网不可用。
+          绑定本机本地文件夹的对话默认在你的电脑上运行（直连本地磁盘、更快），启动失败会自动切回
+          云端。裸聊与云端项目仍走云；AI 推理仍在云端，断网时不可用。关闭后全部走云端。
         </p>
       </div>
       <Switch
         checked={enabled}
-        onCheckedChange={setEnabled}
-        label="本地引擎（实验）"
+        onCheckedChange={onToggle}
+        label="本地引擎"
       />
     </div>
   );

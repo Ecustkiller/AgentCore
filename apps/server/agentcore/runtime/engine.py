@@ -35,6 +35,7 @@ from agentcore.runtime.events import (
     EventSink,
     FinishReason,
     content_delta,
+    content_reset,
     error_event,
     reasoning_delta,
     tool_use_end,
@@ -55,6 +56,7 @@ from agentcore.runtime.loop_controller import (
     fingerprint_tool_call,
     progress_review_prompt,
 )
+from agentcore.runtime.verify import finish_guard, format_guard_steer
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 
@@ -266,6 +268,11 @@ async def react_loop(
     # the stronger model. Sticky for the rest of the run once escalated.
     active_model: str | None = None
 
+    # 交付前核验回炉计数（finish_guard）：CEO 自报 done 时若轻层未过则回炉重写；此计数限制
+    # 同一 run 被这样退回的次数（计入 max_rounds 总预算），超上限即按现状放行、留待 pipeline
+    # 的 out_of_range warning 记录残留。
+    finish_guard_reworks = 0
+
     for round_idx in range(profile.max_rounds):
         logger.debug("react.round_start", round=round_idx, messages=len(messages))
         # 执行级事件溯源 (§18.3): mark this ReAct round edge — the seam `round_boundary.
@@ -273,6 +280,10 @@ async def react_loop(
         record_turn_fact(
             RoundBoundaryFact(round_idx=round_idx, run_id=run_id, role=role).to_fact()
         )
+        # 交付前核验回炉用（finish_guard）：记下本轮 LLM 输出累加前的正文；若本轮自报 done 但
+        # 轻层未过需回炉，把 final_content 退回这里（丢掉这一版待修正的正文），让模型下一轮重写
+        # 完整答案，而非续接在违规版后面。
+        content_before_round = final_content
         request = build_request(
             profile,
             messages,
@@ -353,6 +364,43 @@ async def react_loop(
 
         if not round_tool_calls:
             if round_content:
+                # 交付前核验·轻层守卫 (finish_guard): 自报 done（无工具调用 + 有正文）时不立刻
+                # 接受，先过纯代码轻层。命中且回炉额度未尽 → 丢弃这一版（content_reset 清空已
+                # 流式到气泡的正文）、把 final_content 退回本轮之前、注入锚定事实的修正提示、不
+                # 算 done、继续循环——ReAct「唯一终止信号 = done」的对称解，CEO 直答与 worker
+                # 收尾同处覆盖。仅 CEO 路径（annotate_citations）跑校验：worker 文本未编号、其
+                # 本地 [n] 汇入回合卡会重排，此校验语义不适用。
+                reworks = (
+                    finish_guard(final_content, citation_count=len(citation_sink or []))
+                    if annotate_citations
+                    else []
+                )
+                if (
+                    reworks
+                    and finish_guard_reworks < settings.engine_finish_guard_max_reworks
+                ):
+                    finish_guard_reworks += 1
+                    steer = format_guard_steer(reworks)
+                    logger.info(
+                        "engine.finish_guard_rework",
+                        round=round_idx,
+                        attempt=finish_guard_reworks,
+                        issues=len(reworks),
+                    )
+                    sink.emit(content_reset())
+                    final_content = content_before_round
+                    messages.append(LLMMessage(role="user", content=steer))
+                    # 注入的修正提示是真实 LLM 窗口的一部分（下一轮可见），故窗口 fold 需要它
+                    # 作为 fact（无 turn 时 no-op）。
+                    record_turn_fact(
+                        NoteFact(
+                            role="user",
+                            content=steer,
+                            reason="finish_guard",
+                            run_id=run_id,
+                        ).to_fact()
+                    )
+                    continue
                 # A real textual answer with no further tool calls → normal finish.
                 return final_content, final_reasoning, total_usage, round_idx + 1
             # Empty response: retry once on the fallback model, else end the turn

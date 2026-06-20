@@ -11,6 +11,10 @@
 import type {
   ContentDeltaPayload,
   CostBreakdown,
+  DebateNarrativeRound,
+  DebateResultPayload,
+  DebateRoundPayload,
+  DebateRoundStartedPayload,
   ApprovalRequiredPayload,
   ApprovalResolvedPayload,
   CheckpointRequiredPayload,
@@ -22,6 +26,7 @@ import type {
   PlanReviewResolvedPayload,
   ReasoningDeltaPayload,
   RunCompletedPayload,
+  RunContextPayload,
   RunFailedPayload,
   RunOutputDeltaPayload,
   RunPlanPayload,
@@ -53,6 +58,23 @@ const FINISH_TO_STATUS: Record<string, TurnStatus> = {
 
 function assertNever(x: never): never {
   throw new Error(`fold: unhandled SSE event type: ${JSON.stringify(x)}`);
+}
+
+/** Fold one 逐轮叙事 update (`debate_round_started` → focus only, verdict null;
+ * `debate_round` → full) into the accumulated list, keyed by `round_no` (a later
+ * `debate_round` overwrites the focus-only entry — it carries focus too), kept
+ * ascending. Mirrors desktop `upsertDebateRound` (conformance pins them equal). */
+function upsertNarrativeRound(
+  rounds: DebateNarrativeRound[],
+  round: DebateNarrativeRound,
+): DebateNarrativeRound[] {
+  const idx = rounds.findIndex((r) => r.round_no === round.round_no);
+  if (idx === -1) {
+    return [...rounds, round].sort((a, b) => a.round_no - b.round_no);
+  }
+  const next = [...rounds];
+  next[idx] = round;
+  return next;
 }
 
 function agentFromPlan(a: PlanAgentPayload): ProjectedAgent {
@@ -92,6 +114,8 @@ function runFromPlan(s: RunPlanPayload["runs"][number]): ProjectedRun {
     revisionOf: null,
     revision: 0,
     checkpoint: null,
+    // 收到的上下文 (上下文传递可视化): filled by the run_context event; empty until then.
+    receivedContext: [],
   };
 }
 
@@ -107,6 +131,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   let status: TurnStatus = "running";
   let finishReason: string | null = null;
   let cost: CostBreakdown | null = null;
+  let debate: DebateResultPayload | null = null;
+  let debateRounds: DebateNarrativeRound[] = [];
   let pending: PendingInteraction | null = null;
   const checkpointSteps = new Map<string, string[]>();
 
@@ -123,6 +149,20 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           const last = process[process.length - 1];
           if (last && last.kind === "content") last.text += d;
           else process.push({ kind: "content", text: d });
+        }
+        break;
+      }
+      // 交付前核验回炉（finish_guard）：done 轮草稿未过轻层核验，引擎丢弃这一版、发
+      // content_reset、回炉重写。该事件进 _history（重连回放会重发），故 fold 必须镜像后端
+      // _accumulate_process 与 desktop fold：清正文标量 + 弹掉 process 尾部连续 content 步
+      // （reasoning/tool 是真实过程，保留），让重写版从干净态重累积。
+      case "content_reset": {
+        content = "";
+        while (
+          process.length > 0 &&
+          process[process.length - 1].kind === "content"
+        ) {
+          process.pop();
         }
         break;
       }
@@ -234,6 +274,15 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
+      case "run_context": {
+        // 收到的上下文 (上下文传递可视化): record the structured context this run was fed
+        // onto its node, carried verbatim — the SAME data the LLM saw. Mirrors the
+        // desktop fold + backend oracle (conformance pins them equal).
+        const p = ev.payload as RunContextPayload;
+        const run = runById(p.run_id);
+        if (run) run.receivedContext = p.blocks;
+        break;
+      }
       case "run_output_delta": {
         const p = ev.payload as RunOutputDeltaPayload;
         const ag = agentById(p.agent_id);
@@ -290,6 +339,35 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         // Derived below from run states (cumulative, multi-batch safe); wire counter
         // is a timeline marker only.
         break;
+      // 辩论收场：整段结构化产物（简报 + 交锋叙事线）verbatim 折入 ProjectedTurn.debate，
+      // 与团队图互补（图承载辩手执行/发言全文，本字段承载主持人裁判 + 决策简报）。
+      case "debate_result":
+        debate = ev.payload as DebateResultPayload;
+        break;
+      // 辩论逐轮增量（进行中实时叠加，非 frame）：折叠累积成 debateRounds，与 oracle / 桌面
+      // fold 一致。round_started 先给焦点（verdict=null=进行中），round 补 summary/verdict/sides。
+      case "debate_round_started": {
+        const p = ev.payload as DebateRoundStartedPayload;
+        debateRounds = upsertNarrativeRound(debateRounds, {
+          round_no: p.round_no,
+          focus: p.focus,
+          summary: "",
+          verdict: null,
+          sides: [],
+        });
+        break;
+      }
+      case "debate_round": {
+        const p = ev.payload as DebateRoundPayload;
+        debateRounds = upsertNarrativeRound(debateRounds, {
+          round_no: p.round_no,
+          focus: p.focus,
+          summary: p.summary,
+          verdict: p.verdict,
+          sides: p.sides,
+        });
+        break;
+      }
       case "approval_required": {
         const p = ev.payload as ApprovalRequiredPayload;
         pending = {
@@ -371,6 +449,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "tool_progress":
       case "question_posted":
       case "workspace_op_required":
+      case "workspace_promoted":
       case "handoff_snapshot_done":
       case "handoff_job_started":
       case "handoff_apply_done":
@@ -400,5 +479,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
     },
     pendingInteraction: pending,
     cost,
+    debate,
+    debateRounds,
   };
 }

@@ -64,10 +64,11 @@ async def persist_attachments(
     """Write file attachments into the workspace; return them enriched in order.
 
     Each returned dict is the input dict plus a ``workspace_path`` key for every
-    file actually written (``attachments/<name>``). Directory attachments and
-    empty-text files are passed through untouched (no ``workspace_path``). A
-    per-file write failure is logged and skipped — a bad attachment must never
-    break the turn (文档铁律); the turn proceeds with that file un-resident.
+    file actually written (``attachments/<name>``). Only ``kind="file"`` is
+    persisted; directory listings, conversation references and empty-text files
+    are passed through untouched (no ``workspace_path``) — they carry no file
+    bytes of their own. A per-file write failure is logged and skipped — a bad
+    attachment must never break the turn (文档铁律); it proceeds un-resident.
     """
     if not attachments:
         return []
@@ -106,6 +107,7 @@ def to_stored_metadata(attachments: list[dict]) -> list[dict]:
             "truncated": bool(a.get("truncated")),
             "kind": a.get("kind") or "file",
             "workspace_path": a.get("workspace_path"),
+            "conversation_id": a.get("conversation_id"),
         }
         for a in attachments
     ]

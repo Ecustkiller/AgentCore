@@ -1,4 +1,8 @@
-import { type TimelineNode, groupToolRuns } from "@/lib/processTimeline";
+import {
+  type TimelineNode,
+  dropTrailingContentSteps,
+  groupToolRuns,
+} from "@/lib/processTimeline";
 import type { ProcessStep } from "@/types/events";
 import { describe, expect, it } from "vitest";
 
@@ -105,6 +109,43 @@ describe("groupToolRuns", () => {
     const process: ProcessStep[] = [tool("a"), tool("b")];
     const snapshot = [...process];
     groupToolRuns(process);
+    expect(process).toEqual(snapshot);
+  });
+});
+
+describe("dropTrailingContentSteps", () => {
+  it("returns [] for empty / undefined", () => {
+    expect(dropTrailingContentSteps([])).toEqual([]);
+    expect(dropTrailingContentSteps(undefined)).toEqual([]);
+  });
+
+  it("drops the trailing content step (回炉丢弃草稿正文)", () => {
+    expect(
+      dropTrailingContentSteps([reasoning("想一下"), content("草稿答案")]),
+    ).toEqual([reasoning("想一下")]);
+  });
+
+  it("keeps preceding reasoning / tool steps (它们真实发生过)", () => {
+    expect(
+      dropTrailingContentSteps([reasoning("想"), tool("a"), content("草稿")]),
+    ).toEqual([reasoning("想"), tool("a")]);
+  });
+
+  it("pops all consecutive trailing content steps", () => {
+    expect(
+      dropTrailingContentSteps([tool("a"), content("一"), content("二")]),
+    ).toEqual([tool("a")]);
+  });
+
+  it("no-ops (same reference) when the last step is not content", () => {
+    const process: ProcessStep[] = [content("正文"), tool("a")];
+    expect(dropTrailingContentSteps(process)).toBe(process);
+  });
+
+  it("does not mutate the input array", () => {
+    const process: ProcessStep[] = [reasoning("想"), content("草稿")];
+    const snapshot = [...process];
+    dropTrailingContentSteps(process);
     expect(process).toEqual(snapshot);
   });
 });

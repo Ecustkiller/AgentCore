@@ -54,3 +54,39 @@ def test_truncated_note_and_directory_listing():
     assert "--- File: big.txt (/big.txt) (truncated) ---" in out
     assert "--- Directory: src (/src) ---" in out
     assert "File paths (contents not included):" in out
+
+
+def test_conversation_reference_rendered():
+    out = _build_attachment_context(
+        [
+            {
+                "name": "讨论 X 方案",
+                "path": "对话",
+                "text": "用户: 你好\n\n助手: 在的",
+                "kind": "conversation",
+                "conversation_id": "conv-1",
+            }
+        ]
+    )
+    assert out is not None
+    # A conversation renders as its own block — no path, no residency hint.
+    assert "--- Conversation: 讨论 X 方案 ---" in out
+    assert "用户: 你好" in out
+    assert "助手: 在的" in out
+    # The guidance now mentions past conversations as a reference kind.
+    assert "past" in out
+    assert "saved into your workspace" not in out
+
+
+def test_conversation_reference_truncated_note():
+    out = _build_attachment_context(
+        [
+            {
+                "name": "长对话",
+                "text": "用户: 一些内容",
+                "kind": "conversation",
+                "truncated": True,
+            }
+        ]
+    )
+    assert "--- Conversation: 长对话 (recent messages only) ---" in out

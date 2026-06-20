@@ -16,6 +16,12 @@ from agentcore.runtime.facts import Fact, record_turn_fact
 class EventType(StrEnum):
     MESSAGE_START = "message_start"
     CONTENT_DELTA = "content_delta"
+    # 交付前核验回炉（finish_guard）：CEO 自报 done 的正文未过轻层核验（如编造引用），引擎
+    # 丢弃这一版、回炉重写，并发此事件让客户端清空当前流式气泡已累积的正文，再接收重写版的
+    # content_delta，使「违规版 → 修正版」呈现为一次干净替换而非追加。Transport-only（不在
+    # _JOURNAL_EVENT_TYPES）：纯对话回合的历史回放用最终 message content（已是修正版），有
+    # 工具回合靠 _accumulate_process 同步 pop 掉被丢弃的那版正文。
+    CONTENT_RESET = "content_reset"
     REASONING_DELTA = "reasoning_delta"
     # The CEO captain is composing a tool call's ARGUMENTS (e.g. the delegate 任务书).
     # Bubble-scoped twin of run_tool_progress (which is run-scoped, for workers): the
@@ -62,6 +68,14 @@ class EventType(StrEnum):
     # directory, then awaits the result posted back to the ops resolve endpoint.
     # Transport only — deliberately NOT journaled into the team graph.
     WORKSPACE_OP_REQUIRED = "workspace_op_required"
+    # 裸聊懒升级（文件夹即工作区 §懒建 / 工作区对称化 D1a）：a folderless 裸聊's first
+    # file write minted a real folder and filed the conversation into it. Without this
+    # signal the promotion is invisible to the live client — the chat stays in 未分组
+    # and the new workspace + its file only surface on a manual refetch / reload. Tells
+    # the client to re-group the chat under the new folder and surface it in the 文件
+    # rail. One-shot: the folder is durable state read back on reload, so this is NOT
+    # journaled (it only closes the mid-turn stale window).
+    WORKSPACE_PROMOTED = "workspace_promoted"
     # Local→云 handoff (双模式工作区 P2e / e1): a local workspace was archived over
     # the channel and snapshotted to object storage; carries the new snapshot id.
     # One-shot completion signal — not journaled into the team graph.
@@ -78,6 +92,12 @@ class EventType(StrEnum):
     # Multi-agent execution events (CEO delegate path)
     RUN_PLAN = "run_plan"
     RUN_STARTED = "run_started"
+    # 收到的上下文 (上下文传递可视化): the structured ContextBlock list a run's opening was
+    # assembled from — the same data the LLM was fed (单一源), emitted right after
+    # run_started so the frontend shows exactly what each worker received (原始请求 / 团队
+    # 位置 / 前置结果 / 工作区 / 任务…). Journaled (see _JOURNAL_EVENT_TYPES) so a past
+    # turn's received context replays on reload through the same fold as the live stream.
+    RUN_CONTEXT = "run_context"
     RUN_OUTPUT_DELTA = "run_output_delta"
     RUN_REASONING_DELTA = "run_reasoning_delta"
     RUN_COMPLETED = "run_completed"
@@ -91,6 +111,20 @@ class EventType(StrEnum):
     # growth and deliberately NOT journaled (a reloaded run shows the finished call
     # via the journaled tool_use_start/end — live progress is moot by then).
     RUN_TOOL_PROGRESS = "run_tool_progress"
+    # 辩论编排（debate 工具 / 主持人）：一场辩论收场时 emit 的【完整结构化产物】——逐轮
+    # 焦点 / 裁判 / 小结（交锋叙事线 L1/L2）+ 决策简报（结论卡）+ 各方→辩手 run_id 映射
+    # （前端据此从执行图的辩手节点取发言全文 L3，不把全文塞进本事件）。进 journal（与
+    # run_plan 同属 surface 的辩论回合，runs_from_entries 原样回放）；前端按 plan_type=
+    # "debate" 把主持人 / 辩手节点折叠成辩论专属视图，本事件供其渲染简报与三层叙事线。
+    DEBATE_RESULT = "debate_result"
+    # 辩论逐轮增量（主持人驱动）——让前端进行中就看到主持人的逐轮编排，而非干等收场。
+    # DEBATE_ROUND_STARTED 在本轮辩手发言【前】emit（携 round_no + 本轮焦点 focus）：焦点先于
+    # 发言亮出；DEBATE_ROUND 在本轮裁判 + 小结产出【后】emit（携完整一轮 focus/summary/verdict
+    # + 各方→辩手 run_id）。二者均 transport-only（不在 _JOURNAL_EVENT_TYPES）：重载由收场的
+    # debate_result 重建全量叙事线，逐轮事件只服务进行中的实时叠加（仍进 _history，断线重连可
+    # 重放）。前端 fold 累积成 ProjectedTurn.debateRounds，与 debate_result（debate）互补。
+    DEBATE_ROUND_STARTED = "debate_round_started"
+    DEBATE_ROUND = "debate_round"
 
 
 class FinishReason(StrEnum):
@@ -128,6 +162,16 @@ def message_start(message_id: str, *, conversation_id: str) -> SSEEvent:
 
 def content_delta(delta: str) -> SSEEvent:
     return SSEEvent(type=EventType.CONTENT_DELTA, payload={"delta": delta})
+
+
+def content_reset() -> SSEEvent:
+    """交付前核验回炉信号：丢弃当前流式气泡已累积的正文，准备接收重写版。
+
+    finish_guard 在 CEO 自报 done 时拦下未过核验的正文（如编造引用），引擎退回累积正文、
+    注入修正提示、回炉重写。客户端收到后清空当前 assistant 气泡的尾部正文（镜像后端
+    ``_accumulate_process`` 的 pop），使「违规版 → 修正版」呈现为一次干净替换而非追加。
+    """
+    return SSEEvent(type=EventType.CONTENT_RESET)
 
 
 def reasoning_delta(delta: str) -> SSEEvent:
@@ -434,6 +478,42 @@ def workspace_op_required(
     )
 
 
+def workspace_promoted(
+    *,
+    conversation_id: str,
+    folder_id: str,
+    name: str,
+    local_root_id: str | None,
+    local_subpath: str,
+) -> SSEEvent:
+    """A 裸聊 was lazily promoted into a real folder on its first file write.
+
+    A folderless conversation has no workspace until the team first creates a file
+    (文件夹即工作区 §懒建); at that moment ``_bare_chat_promote`` mints a folder and
+    files the conversation into it. The promotion is server-side and mid-turn, so the
+    live client would otherwise not learn of it until a manual refetch — leaving the
+    chat stranded in 未分组 and the freshly-written file invisible (no workspace card).
+    This event closes that window: the client re-groups the conversation under
+    ``folder_id`` and surfaces the new folder in the 文件 rail.
+
+    ``local_root_id`` (+ ``local_subpath``) is set for a **local** promotion (工作区
+    对称化 D1a — the file landed on the user's machine under a container root); it is
+    ``None`` for a cloud promotion. The client derives local-vs-cloud from its presence
+    (mirroring ``FolderMeta``). Emitted once, before the file op itself; not journaled
+    (the folder is durable state replayed from the DB on reload).
+    """
+    return SSEEvent(
+        type=EventType.WORKSPACE_PROMOTED,
+        payload={
+            "conversation_id": conversation_id,
+            "folder_id": folder_id,
+            "name": name,
+            "local_root_id": local_root_id,
+            "local_subpath": local_subpath,
+        },
+    )
+
+
 def handoff_snapshot_done(
     *, snapshot_id: str, conversation_id: str, size_bytes: int
 ) -> SSEEvent:
@@ -627,6 +707,24 @@ def run_started(
     )
 
 
+def run_context(run_id: str, agent_id: str, blocks: list[dict[str, Any]]) -> SSEEvent:
+    """The structured context a Run received at assembly time (上下文传递可视化).
+
+    ``blocks`` is the ordered, wire-shaped ContextBlock list the executor rendered this
+    run's opening user message FROM — the SAME data the LLM was fed (单一源：用户看到的 ==
+    LLM 吃到的), each ``{channel, heading, body, chars, truncated, source_role,
+    source_run_id, fidelity, files}``. Emitted once per run right after ``run_started`` so
+    the frontend's run detail shows exactly what fed it (5 通道之 worker 侧: 原始请求 / 团队
+    位置 / 前置结果 / 工作区 / 任务…). Journaled (``_JOURNAL_EVENT_TYPES``) so a past turn
+    replays its received context on reload; bodies are head+tail capped at the call site so
+    a huge pasted request can't bloat the journal (the cap is flagged via ``truncated``).
+    """
+    return SSEEvent(
+        type=EventType.RUN_CONTEXT,
+        payload={"run_id": run_id, "agent_id": agent_id, "blocks": blocks},
+    )
+
+
 def run_output_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
     """A delegated worker's output increment — run-scoped, so the team UI streams a
     worker's text into its node/detail live.
@@ -739,6 +837,75 @@ def run_progress(completed: int, total: int) -> SSEEvent:
     )
 
 
+def debate_result(
+    *,
+    execution_id: str,
+    moderator_run_id: str,
+    payload: dict[str, Any],
+) -> SSEEvent:
+    """一场辩论收场的完整结构化产物（见 :class:`EventType.DEBATE_RESULT`）。
+
+    ``payload`` 由 ``DebateResult.to_event_payload`` 产出（form / motion / stop_reason /
+    rounds / brief / sides），承载交锋叙事线 + 决策简报；各方的发言【全文】不在此（体量大），
+    靠 ``rounds[*].sides[*].run_id`` 关联执行图里的辩手节点。``moderator_run_id`` 让前端把
+    本事件挂到对应的辩论（主持人节点）上。
+    """
+    return SSEEvent(
+        type=EventType.DEBATE_RESULT,
+        payload={
+            "execution_id": execution_id,
+            "moderator_run_id": moderator_run_id,
+            **payload,
+        },
+    )
+
+
+def debate_round_started(
+    *,
+    execution_id: str,
+    moderator_run_id: str,
+    round_no: int,
+    focus: str,
+) -> SSEEvent:
+    """一轮辩论开场（见 :class:`EventType.DEBATE_ROUND_STARTED`）。
+
+    主持人定下本轮焦点后、辩手发言【前】emit，让前端在该轮发言开始流式前先亮出焦点（进行中
+    实时叠加）。Transport-only（不进 journal）：收场全量叙事线由 ``debate_result`` 承载。
+    """
+    return SSEEvent(
+        type=EventType.DEBATE_ROUND_STARTED,
+        payload={
+            "execution_id": execution_id,
+            "moderator_run_id": moderator_run_id,
+            "round_no": round_no,
+            "focus": focus,
+        },
+    )
+
+
+def debate_round(
+    *,
+    execution_id: str,
+    moderator_run_id: str,
+    payload: dict[str, Any],
+) -> SSEEvent:
+    """一轮辩论收尾（见 :class:`EventType.DEBATE_ROUND`）。
+
+    本轮裁判 + 小结产出【后】emit。``payload`` 由 ``RoundResult.to_event_payload`` 产出
+    （round_no / focus / summary / verdict / 各方→辩手 run_id），即 ``debate_result.rounds``
+    的逐轮单元——前端进行中据此把本轮焦点 / 小结 / 裁判实时叠到辩论视图。Transport-only
+    （不进 journal，重载由 ``debate_result`` 重建）。
+    """
+    return SSEEvent(
+        type=EventType.DEBATE_ROUND,
+        payload={
+            "execution_id": execution_id,
+            "moderator_run_id": moderator_run_id,
+            **payload,
+        },
+    )
+
+
 # Event types that make up the multi-agent execution journal: persisted to the
 # turn_journal table (唯一事实源, §18.3) and projected into the assistant message's
 # runs payload on read, so a past turn's team graph replays on reload through the
@@ -747,6 +914,10 @@ _JOURNAL_EVENT_TYPES = frozenset(
     {
         EventType.RUN_PLAN,
         EventType.RUN_STARTED,
+        # 收到的上下文 (上下文传递可视化, 决策①进 journal): a run's received ContextBlocks,
+        # so a past turn replays exactly what each worker was fed (bodies are capped at the
+        # emit site so the journal stays bounded).
+        EventType.RUN_CONTEXT,
         # NOTE: run_output_delta / run_reasoning_delta are deliberately NOT here
         # (执行级事件溯源: deltas 退场). They are transport-only liveliness now (peers of
         # run_tool_progress): the worker's authoritative full output + thinking are the
@@ -756,6 +927,9 @@ _JOURNAL_EVENT_TYPES = frozenset(
         EventType.RUN_COMPLETED,
         EventType.RUN_FAILED,
         EventType.RUN_PROGRESS,
+        # 辩论收场的结构化产物（简报 + 叙事线）：journaled 以便重载原样回放辩论视图——它随
+        # 辩论的 run_plan（surface 类型）一起被持久化，runs_from_entries 通用投影即可回放。
+        EventType.DEBATE_RESULT,
         EventType.TOOL_USE_START,
         EventType.TOOL_USE_END,
         # User checkpoints (ask_user — opening 引导 or mid-task fork): journaled so
@@ -1036,6 +1210,12 @@ class EventSink:
                 self._process[-1]["text"] += delta
             else:
                 self._process.append({"kind": "content", "text": delta})
+        elif t == EventType.CONTENT_RESET:
+            # 交付前核验回炉：丢弃刚累积的这一版正文（含违规引用），让重写版从干净状态重新
+            # 累积。只弹尾部连续的 content step——其前的 reasoning / tool step 是真实发生过
+            # 的过程，保留。镜像客户端对 content_reset 的处理，使实时与回放一致。
+            while self._process and self._process[-1].get("kind") == "content":
+                self._process.pop()
         elif t == EventType.TOOL_USE_START:
             self._has_tool = True
             payload = event.payload

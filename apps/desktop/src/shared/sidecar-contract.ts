@@ -135,6 +135,16 @@ export interface SidecarListPausedRequest {
   conversationId: string;
 }
 
+/** 探活一个 `root + subpath` 的 sidecar：拉起进程并完成 initialize 握手即返回（不跑回合），
+ *  用于在首次真正走 sidecar 前提前验证本机环境（Python / venv / 引擎导入 / 工作区绑定）能起
+ *  得来（见 renderer `sidecarHealth`）。 */
+export interface SidecarProbeRequest {
+  rootId: string;
+  /** 工作区子路径（同 `SidecarStartTurnRequest.subpath`）：按 root+subpath 寻址进程，使握手成功
+   *  留存的进程正好被随后的首个回合复用（零额外拉起）。 */
+  subpath?: string;
+}
+
 /**
  * 主进程 → renderer 的回合事件推送。`event` 与服务端 SSE 的事件同形状
  * （`@/types/events` 的 `SSEEvent`），故 renderer 可把它**原样**喂给同一个
@@ -187,6 +197,7 @@ export const SIDECAR_CHANNELS = {
   respond: "sidecar:respond",
   resume: "sidecar:resume",
   listPaused: "sidecar:listPaused",
+  probe: "sidecar:probe",
   event: "sidecar:event",
   status: "sidecar:status",
 } as const;
@@ -207,6 +218,9 @@ export interface SidecarApi {
   resume(req: SidecarResumeRequest): Promise<SidecarTurnResult>;
   /** 列出某会话在本机待续跑的持久挂起帧（重开会话时拉取，渲染续跑卡）。 */
   listPaused(req: SidecarListPausedRequest): Promise<SidecarPausedTurn[]>;
+  /** 探活一个 root 的 sidecar（拉起 + initialize 握手即返回，不跑回合）。成功 = 本机环境能起
+   * 本地引擎（握手成功的进程留存、被首个回合复用）；失败 reject（诊断经 `onStatus` 推送）。 */
+  probe(req: SidecarProbeRequest): Promise<void>;
   /** 订阅本回合事件流；返回取消订阅函数。 */
   onEvent(cb: (e: SidecarEventPush) => void): () => void;
   /** 订阅 sidecar 生命周期/诊断事件；返回取消订阅函数。 */

@@ -9,6 +9,7 @@ import {
   isRetriableStreamError,
   streamErrorAction,
 } from "@/lib/errors";
+import { notifyInfo } from "@/lib/toast";
 import { pendingLocalContainerRoot } from "@/services/defaultWorkspace";
 import { loadLatestWindow } from "@/services/messages";
 import type { PlanReviewUserDecision } from "@/services/planReview";
@@ -16,6 +17,11 @@ import {
   buildSidecarHistory,
   resolveSidecarRoot,
 } from "@/services/sidecarRouting";
+import {
+  clearSidecarHealth,
+  markSidecarUnhealthy,
+  probeSidecar,
+} from "@/services/sidecarHealth";
 import {
   type OutgoingAttachment,
   attachConversation,
@@ -273,13 +279,43 @@ export async function runResume(
   const pending = usePausedTurnStore
     .getState()
     .pending.find((p) => p.messageId === messageId);
+  const sidecarResume = sidecarTarget !== null && pending !== undefined;
+
+  // A paused sidecar frame lives ONLY on this machine and can only be continued by
+  // the local engine — the cloud has no such frame, so (unlike a fresh send) resume
+  // must NOT degrade to cloud. Probe first: if the env can't start, keep the resume
+  // card (don't remove the pending frame) and raise a retry banner, so the user can
+  // fix the env and retry — never a guaranteed-404 cloud resume. (probeSidecar has
+  // marked the root bad, so subsequent fresh sends silently go cloud.)
+  if (sidecarResume && sidecarTarget) {
+    const probe = await probeSidecar(sidecarTarget);
+    if (!probe.healthy) {
+      store.setError(
+        probe.detail
+          ? `${probe.detail}，本地引擎暂不可用，无法继续这次暂停的回合，请稍后重试`
+          : "本地引擎暂不可用，无法继续这次暂停的回合，请稍后重试",
+        // 手动重试 = 用户「我修好环境了，再试一次」的明确信号——先清会话级健康缓存强制重探，
+        // 否则重试必命中刚记下的 bad 缓存、变成死按钮（与「请稍后重试」矛盾）。清空是全局的，
+        // 但这正合「重新评估本地引擎」之意（环境修复通常是全局的：关杀软 / 修 venv）。
+        () => {
+          clearSidecarHealth();
+          void runResume(messageId, decision, note, selected);
+        },
+        conversationId,
+        null,
+      );
+      return;
+    }
+  }
+
+  // Probe passed (or a cloud resume) → claim the frame: optimistically drop the
+  // resume card (the server claim is atomic, so a stale / second attempt 404s).
   usePausedTurnStore.getState().remove(messageId);
 
   // A paused sidecar turn's user message was never written to the cloud (it paused
   // before write-back), so it is absent from the reopened transcript. Inject it back
   // (with a fresh id the completion write-back will pin) so the continuation reads
   // naturally and reconciles cleanly. Cloud resume already has its user row loaded.
-  const sidecarResume = sidecarTarget !== null && pending !== undefined;
   const userMessageId = sidecarResume ? crypto.randomUUID() : "";
   if (sidecarResume && pending) {
     store.addMessage(
@@ -410,27 +446,67 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
   try {
-    // 路由（双模式工作区 §一.1）：dev 开关开 + 会话绑定本机本地根 + 无附件 → 走本地
+    // 路由（双模式工作区 §一.1）：开关开（默认开）+ 会话绑定本机本地根 + 无附件 → 走本地
     // sidecar 引擎；否则维持现状云链路（含所有 local 会话的服务端持久化/计费）。附件需
     // 服务端上传处理，Slice 1 sidecar 不接，故有附件时退回云端不丢附件。
     const sidecarTarget =
       attachments.length === 0
         ? await resolveSidecarRoot(conversationId)
         : null;
-    if (sidecarTarget) {
-      await streamConversationViaSidecar({
-        conversationId,
-        rootId: sidecarTarget.rootId,
-        subpath: sidecarTarget.subpath,
-        content,
-        history: buildSidecarHistory(conversationId, optimisticUserId),
-        optimisticUserId,
-        signal: ac.signal,
-      });
+    // 首次真正走 sidecar 前探活一次（探活增强）：拉起进程 + 握手验证本机环境能起得来。环境起
+    // 不来则本轮落到下方云分支；`probeSidecar` 已按根记下 `bad`，后续回合探活直接命中缓存
+    // （probed:false）→ 静默走云、不再打扰。故只在**首探失败**（probed）时提示一次。已探明 ok
+    // 的根命中缓存直接复用、不重探。
+    const probe = sidecarTarget ? await probeSidecar(sidecarTarget) : null;
+    if (sidecarTarget && probe && !probe.healthy && probe.probed) {
+      notifyInfo(
+        probe.detail
+          ? `${probe.detail}，已自动用云端`
+          : "本地引擎未能在此环境启动，已自动用云端",
+      );
+    }
+    if (sidecarTarget && probe?.healthy) {
+      try {
+        await streamConversationViaSidecar({
+          conversationId,
+          rootId: sidecarTarget.rootId,
+          subpath: sidecarTarget.subpath,
+          content,
+          history: buildSidecarHistory(conversationId, optimisticUserId),
+          optimisticUserId,
+          signal: ac.signal,
+        });
+      } catch (sidecarErr) {
+        // 探活已过、但回合「启动期」仍失败的边缘（拉不起 / 握手失败，一个事件都没派发 →
+        // recoverable）：本轮还没产生任何输出 / 副作用，故安全改走云链路重跑、用户无感。同时标记
+        // 该根坏 → 后续回合 resolveSidecarRoot 直接跳过、不再每轮降级（与探活共用同一「记坏 →
+        // 跳过」出口，不另起一条降级路径）。中途失败（已流式 / 已调工具）与用户停止不在此列——
+        // 照常抛给下方通用处理走「本地引擎出错」横幅 + 重试，绝不重复已发生的副作用。
+        if (
+          !(sidecarErr instanceof StreamError) ||
+          sidecarErr.kind !== "sidecar" ||
+          !sidecarErr.recoverable
+        ) {
+          throw sidecarErr;
+        }
+        markSidecarUnhealthy(sidecarTarget);
+        notifyInfo("本地引擎未能启动，已自动用云端完成这次对话");
+        store.truncateAfter(optimisticUserId, conversationId);
+        store.createAssistantMessage(conversationId);
+        const localContainerRootId =
+          await pendingLocalContainerRoot(conversationId);
+        await streamConversation({
+          conversationId,
+          content,
+          attachments,
+          localContainerRootId,
+          signal: ac.signal,
+        });
+      }
     } else {
-      // 云链路（默认）：桌面裸聊首发携带「待定本地容器根」（工作区对称化 D2），让服务端
-      // 首次产文件时把这条裸聊懒建为该容器下的 per 对话本地文件夹（D1a）。已归档 / 云端
-      // 逃生口 / 非桌面 → null（裸聊懒建走云端，现行为不变）。
+      // 云链路（默认，含探活失败的 fallthrough）：桌面裸聊首发携带「待定本地容器根」（工作区
+      // 对称化 D2），让服务端首次产文件时把这条裸聊懒建为该容器下的 per 对话本地文件夹（D1a）。
+      // 已归档 / 云端逃生口 / 非桌面 → null（裸聊懒建走云端，现行为不变）。
       const localContainerRootId =
         await pendingLocalContainerRoot(conversationId);
       await streamConversation({
@@ -446,7 +522,9 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     // A mid-stream drop no longer means the turn died (1a: it runs detached) —
     // rejoin it live (1b) rather than resending, which would duplicate the turn.
     // (A sidecar engine failure is kind "sidecar", not "network", so a local turn
-    // skips this and keeps its resend banner.)
+    // skips this and keeps its resend banner. A *startup* sidecar failure was
+    // already rerouted to cloud upstream (阶段二), so one reaching here is
+    // necessarily mid-run — never auto-rerouted, to avoid repeating side effects.)
     if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) return;
     const s = useConversationStore.getState();
     if (getRuntime(conversationId).isGenerating) {

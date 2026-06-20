@@ -174,6 +174,8 @@ function AssistantBubble({ turn, live }: { turn: Turn; live: boolean }) {
           reasoning={p.reasoning}
           citations={p.citations}
           team={team}
+          debate={p.debate}
+          debateRounds={p.debateRounds}
         />
       )}
       {/* The team view carries its own progress header; the one-line meta is the
@@ -190,13 +192,16 @@ function AssistantBubble({ turn, live }: { turn: Turn; live: boolean }) {
 // reply / 思考 / 引用 come off the authoritative top-level fields. A row with nothing to
 // show (a bare tool-only turn) renders nothing.
 function HistoryAssistant({ m }: { m: MessageDetail }) {
-  const team = useMemo(() => {
+  const { team, debate } = useMemo(() => {
     const events = m.runs?.events;
-    if (!events || events.length === 0) return undefined;
+    if (!events || events.length === 0)
+      return { team: undefined, debate: null };
     const p = fold(events);
-    return p.runs.length > 0
-      ? { agents: p.agents, runs: p.runs, progress: p.progress }
-      : undefined;
+    const team =
+      p.runs.length > 0
+        ? { agents: p.agents, runs: p.runs, progress: p.progress }
+        : undefined;
+    return { team, debate: p.debate };
   }, [m.runs]);
   const process = m.runs?.process ?? undefined;
   // A persisted message carries no cost; lazy-fetch it from the ledger when seen.
@@ -220,6 +225,7 @@ function HistoryAssistant({ m }: { m: MessageDetail }) {
         reasoning={m.reasoning_content ?? undefined}
         citations={m.citations}
         team={team}
+        debate={debate}
       />
       {cost && <div className="cost">{cost}</div>}
     </div>

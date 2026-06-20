@@ -156,8 +156,9 @@ function WorkspaceTab({
   );
 }
 
-/** A closable run-detail tab (the agent's role + a close affordance). */
-function RunTabChip({
+/** A closable run-detail tab (the agent's role + a close affordance). Exported
+ * so the full-screen graph's in-place detail panel renders the same chip. */
+export function RunTabChip({
   tab,
   active,
   onSelect,

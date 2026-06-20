@@ -42,6 +42,7 @@ import {
   HelpCircle,
   KeyRound,
   type LucideIcon,
+  MessageSquare,
   Paperclip,
   PenLine,
   Pencil,
@@ -598,9 +599,7 @@ function ProcessToolGroup({
         )}
         <span className="min-w-0 flex-1 truncate text-left">{summary}</span>
         {errorCount > 0 && (
-          <span className="shrink-0 text-destructive">
-            {errorCount} 个失败
-          </span>
+          <span className="shrink-0 text-destructive">{errorCount} 个失败</span>
         )}
       </button>
       {expanded && (
@@ -807,6 +806,8 @@ function AttachmentChip({
   const icon =
     att.kind === "dir" ? (
       <Folder size={12} className="shrink-0" />
+    ) : att.kind === "conversation" ? (
+      <MessageSquare size={12} className="shrink-0" />
     ) : (
       <Paperclip size={12} className="shrink-0" />
     );
@@ -818,7 +819,11 @@ function AttachmentChip({
       </span>
       {att.truncated && (
         <span className="shrink-0 text-muted-foreground">
-          {att.kind === "dir" ? "部分" : "已截断"}
+          {att.kind === "dir"
+            ? "部分"
+            : att.kind === "conversation"
+              ? "近期"
+              : "已截断"}
         </span>
       )}
     </>
@@ -826,7 +831,9 @@ function AttachmentChip({
 
   if (!downloadable) {
     return (
-      <SimpleTooltip label={att.path}>
+      <SimpleTooltip
+        label={att.kind === "conversation" ? "引用对话" : att.path}
+      >
         <span className={base}>
           {icon}
           {label}

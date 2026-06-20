@@ -114,8 +114,35 @@ interface GraphViewProps {
    * panel) so the narrow column is not split by a second pane.
    */
   embedded?: boolean;
-  /** Node-click handler for embedded mode; falls back to in-graph focus. */
+  /**
+   * Worker-node drill-in hand-off: when set, a node click reports the run id
+   * instead of opening the run detail itself, and it does NOT close the
+   * surrounding overlay. Both the embedded message graph (opens a docked
+   * run-detail tab) and the full-screen overlay (opens the in-place
+   * {@link GraphDetailPanel}) pass this so a drill never drops their surface.
+   * When omitted, a node click opens the run detail here then calls `onClose`.
+   * Endpoint (input / captain) clicks use {@link onEndpointSelect} instead.
+   */
   onNodeSelect?: (runId: string) => void;
+  /**
+   * Endpoint drill-in hand-off for the full-screen overlay: when set, clicking
+   * the 用户输入 / CEO 汇聚点 endpoint reports the chat message to surface (the
+   * prompt / the final answer) + a title, so the overlay shows it in the
+   * in-place panel WITHOUT leaving full-screen. The embedded graph leaves it
+   * unset and keeps the jump-to-chat focus (that bubble is already in the
+   * column, so a panel would just duplicate it).
+   */
+  onEndpointSelect?: (contentMessageId: string, title: string) => void;
+  /**
+   * Full-screen only: the chat message id currently surfaced in the in-place
+   * endpoint view ({@link GraphDetailPanel}), so the matching endpoint node
+   * (用户输入 / CEO 汇聚点) lights up like a drilled worker. Matched against the
+   * input prompt / final-answer message ids. While set, it also suppresses the
+   * worker glow (the panel shows the endpoint, not a run), so exactly one node
+   * is lit. Null / omitted → no endpoint is lit (embedded graph, or a worker
+   * run is showing instead).
+   */
+  highlightEndpointMessageId?: string | null;
   /** Embedded only: report the canvas height the graph wants (fit-to-width of
    * the laid-out bbox, clamped) so the wrapper can size its box to each graph's
    * real footprint. `overflowing` is true when the graph is taller than the
@@ -134,6 +161,8 @@ interface GraphViewProps {
 export function GraphView({
   embedded = false,
   onNodeSelect,
+  onEndpointSelect,
+  highlightEndpointMessageId = null,
   onMeasure,
   onClose,
   autoplay = false,
@@ -221,6 +250,12 @@ export function GraphView({
     const active = s.tabs.find((t) => t.id === s.activeTabId);
     return active && active.messageId === messageId ? active.runId : null;
   });
+  // While an endpoint (提问 / 最终回答) fills the in-place panel, IT — not a run —
+  // is on screen (GraphDetailPanel lets the endpoint win over an open run tab),
+  // so suppress the worker glow: exactly one node lights, matching what the panel
+  // shows. Clearing the endpoint (Esc / 收起) restores the run's glow if its tab
+  // is still open. Inert in the embedded graph (no endpoint id ever set).
+  const litRunId = highlightEndpointMessageId ? null : highlightRunId;
   // The single FX rate (§7.5) that turns each run's nano-USD total into the ¥
   // chip on its node; one rate for the whole graph keeps the money consistent.
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
@@ -436,7 +471,10 @@ export function GraphView({
     return () => {
       cancelled = true;
     };
-  }, [structuralKey, layoutKind, setLayout, messageId]);
+    // `structuralKey` already changes with the scoped message (run ids are
+    // unique), so it covers a message switch — no need to also depend on
+    // `messageId` (which is constant per graph instance anyway).
+  }, [structuralKey, layoutKind, setLayout]);
 
   // Measure the canvas width live (方案 D): it is the message column, which the
   // right detail panel / window resize can change, so the fit-to-width zoom must
@@ -496,15 +534,25 @@ export function GraphView({
       // also the "expand".
       if (id === INPUT_ID) {
         if (!taskMessage) return;
+        // Full-screen: surface the prompt in the in-place panel (no exit);
+        // embedded: jump to the prompt bubble already in the column.
+        if (onEndpointSelect) {
+          onEndpointSelect(taskMessage.id, "提问");
+          return;
+        }
         focusMessage(taskMessage.id);
         if (!embedded) onClose?.();
         return;
       }
       // The captain 汇聚点 is a real run, but its reply lives in the chat bubble
-      // (not run-scoped), so activating it jumps to the final answer — like the
-      // input node jumps to the prompt — rather than drilling a sparse detail.
+      // (not run-scoped), so activating it surfaces the final answer — like the
+      // input node surfaces the prompt — rather than drilling a sparse detail.
       if (captainRun && id === captainRun.id) {
         if (!finalAnswer) return;
+        if (onEndpointSelect) {
+          onEndpointSelect(finalAnswer.id, "最终回答");
+          return;
+        }
         focusMessage(finalAnswer.id);
         if (!embedded) onClose?.();
         return;
@@ -522,6 +570,7 @@ export function GraphView({
     },
     [
       onNodeSelect,
+      onEndpointSelect,
       showRunDetailHere,
       finalAnswer,
       taskMessage,
@@ -592,6 +641,39 @@ export function GraphView({
     return () => window.removeEventListener("keydown", onKey);
   }, [fitView]);
 
+  // Full-screen only: when the canvas width changes — the in-place run-detail
+  // panel (GraphDetailPanel) opening / closing / being resized beside it — refit
+  // so the DAG re-centers into the width it actually has instead of sliding
+  // behind the panel. Debounced so a resize-drag settles before the fit; the
+  // first (mount) observation is skipped because `fitView` already framed it,
+  // and the overlay's transform-only slide-in doesn't change layout width so it
+  // never triggers a spurious fit. Embedded mode keeps its own width effect.
+  useEffect(() => {
+    if (embedded) return;
+    const el = containerRef.current;
+    if (!el) return;
+    let lastWidth = Math.round(el.clientWidth);
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0]?.contentRect.width ?? 0);
+      if (!settled) {
+        settled = true;
+        lastWidth = w;
+        return;
+      }
+      if (w <= 0 || w === lastWidth) return;
+      lastWidth = w;
+      clearTimeout(timer);
+      timer = setTimeout(() => fitView(), 160);
+    });
+    ro.observe(el);
+    return () => {
+      clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, [embedded, fitView]);
+
   const captainStatus = useMemo<RunStatus | null>(
     () =>
       execution && captainRun
@@ -624,7 +706,7 @@ export function GraphView({
       // whole reasoning before any content, so the node falls back to this tail
       // while a running worker is still thinking (output empty) — see AgentNode.
       const reasoning = agent ? agent.reasoningChunks.join("") : "";
-      const focused = highlightRunId === run.id;
+      const focused = litRunId === run.id;
       // 乙 热修 P4: a「修订 vN」续写 node is badged as a version (not a teammate); it
       // has a worker parent too, so it must be excluded from the 子任务 check below.
       const isRevision = run.revision > 0;
@@ -695,6 +777,10 @@ export function GraphView({
             label: execution.taskSummary,
             handleDirection,
             enterIndex: 0,
+            // Lit when the panel surfaces this turn's prompt (mirrors a worker's
+            // glow); matched by the input bookend's stand-in message id.
+            focused:
+              !!taskMessage && highlightEndpointMessageId === taskMessage.id,
             onActivate: taskMessage ? () => activateNode(INPUT_ID) : undefined,
           },
         } as Node);
@@ -719,6 +805,10 @@ export function GraphView({
               preview: finalAnswer ? headText(finalAnswer.content) : "",
               handleDirection,
               enterIndex: workerRuns.length + 1,
+              // Lit when the panel surfaces the final answer; matched by the
+              // answer's bubble id (the captain's reply is bubble-scoped).
+              focused:
+                !!finalAnswer && highlightEndpointMessageId === finalAnswer.id,
               onActivate: finalAnswer
                 ? () => activateNode(captainRun.id)
                 : undefined,
@@ -734,7 +824,8 @@ export function GraphView({
     positions,
     nodeHeights,
     cnyPerUsd,
-    highlightRunId,
+    litRunId,
+    highlightEndpointMessageId,
     captainStatus,
     captainRun,
     handleDirection,
@@ -906,12 +997,7 @@ export function GraphView({
                 </ContextMenuItem>
               )}
               {menuNodeId === captainRun?.id && finalAnswer && (
-                <ContextMenuItem
-                  onSelect={() => {
-                    focusMessage(finalAnswer.id);
-                    if (!embedded) onClose?.();
-                  }}
-                >
+                <ContextMenuItem onSelect={() => activateNode(captainRun.id)}>
                   <ScanSearch size={14} className="shrink-0" />
                   <span className="flex-1 truncate">查看最终回答</span>
                 </ContextMenuItem>

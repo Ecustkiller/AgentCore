@@ -1215,11 +1215,16 @@ def test_dep_block_file_writer_becomes_pointer():
     }
     blocks = _dep_context_blocks(plan, ["u"], completed)
     assert len(blocks) == 1
-    label, body = blocks[0]
-    assert label == "构建器"
+    block = blocks[0]
+    assert block.channel == "dependency"
+    assert block.source_role == "构建器"
+    assert block.source_run_id == "u"
+    assert block.fidelity == "pointer"  # file-writer → pointer fidelity
+    body = block.body
     assert "已生成数据集" in body  # the worker's prose handoff digest is kept
     assert "data/out.csv" in body and "data/schema.json" in body  # the pointer
     assert "file_read" in body  # told how to pull the full content
+    assert block.files == ["data/out.csv", "data/schema.json"]  # artifact paths carried
 
 
 def test_dep_pointer_digests_prose_instead_of_shipping_whole():
@@ -1228,7 +1233,7 @@ def test_dep_pointer_digests_prose_instead_of_shipping_whole():
     plan = _plan(RunSpec(run_id="u", agent_id="u", role="写手", task="写报告"))
     huge = "开头摘要" + ("文" * 5_000)
     blocks = _dep_context_blocks(plan, ["u"], {"u": _state(huge, files=["report.md"])})
-    _, body = blocks[0]
+    body = blocks[0].body
     assert "开头摘要" in body  # head digest present
     assert huge not in body  # but NOT the full 5000-char product
     assert "report.md" in body
@@ -1237,7 +1242,7 @@ def test_dep_pointer_digests_prose_instead_of_shipping_whole():
 def test_dep_pointer_caps_file_list_with_elision():
     plan = _plan(RunSpec(run_id="u", agent_id="u", role="生成器", task="批量生成"))
     files = [f"f{i}.txt" for i in range(30)]
-    _, body = _dep_context_blocks(plan, ["u"], {"u": _state("done", files=files)})[0]
+    body = _dep_context_blocks(plan, ["u"], {"u": _state("done", files=files)})[0].body
     assert "f0.txt" in body  # the first ones are listed
     assert "f25.txt" not in body  # beyond DEP_POINTER_MAX_FILES (20) is elided
     assert "共 30 个文件" in body  # and the full count is disclosed
@@ -1246,8 +1251,10 @@ def test_dep_pointer_caps_file_list_with_elision():
 def test_dep_block_prose_dep_unchanged_full_text():
     # No files → the existing full-text path: a short prose dep is passed through whole.
     plan = _plan(RunSpec(run_id="u", agent_id="u", role="研究员", task="调研"))
-    _, body = _dep_context_blocks(plan, ["u"], {"u": _state("纯文字结论无文件")})[0]
-    assert body == "纯文字结论无文件"
+    block = _dep_context_blocks(plan, ["u"], {"u": _state("纯文字结论无文件")})[0]
+    assert block.body == "纯文字结论无文件"
+    assert block.fidelity == "pass_through"  # no files → prose pass_through
+    assert block.truncated is False  # short prose fits the budget whole
 
 
 async def test_dag_file_writing_upstream_passes_pointer_downstream():

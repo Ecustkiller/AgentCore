@@ -31,8 +31,9 @@ export interface BackendMessage {
     name: string;
     path: string;
     truncated: boolean;
-    kind?: "file" | "dir";
+    kind?: "file" | "dir" | "conversation";
     workspace_path?: string | null;
+    conversation_id?: string | null;
   }[];
   citations?: {
     url: string;
@@ -123,6 +124,7 @@ export function toMessage(m: BackendMessage): Message {
           truncated: a.truncated,
           kind: a.kind ?? "file",
           workspacePath: a.workspace_path ?? undefined,
+          conversationId: a.conversation_id ?? undefined,
         }))
       : undefined,
     citations: m.citations?.length ? m.citations : undefined,
