@@ -282,7 +282,13 @@
     "finishReason": "end_turn",
     "content": "我来安排团队。 团队已完成。",
     "reasoning": "",
-    "process": [],
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "我来安排团队。 团队已完成。"
+      }
+    ],
     "citations": [],
     "agents": [
       {
@@ -378,7 +384,8 @@
             "fidelity": "",
             "files": []
           }
-        ]
+        ],
+        "escalations": []
       },
       {
         "id": "r2",
@@ -460,7 +467,8 @@
             "fidelity": "",
             "files": []
           }
-        ]
+        ],
+        "escalations": []
       }
     ],
     "progress": {

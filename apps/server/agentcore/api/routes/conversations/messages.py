@@ -1,0 +1,316 @@
+"""Conversation message routes: list / delete / prompt / send / stop / attach / local-turn.
+
+Every route requires an authenticated user and is scoped to that user's own
+conversations (IDOR-safe). Sending runs the turn as a detached task tracked in the
+``TurnRunRegistry`` so a client disconnect no longer kills it (执行与请求解耦 C1).
+"""
+
+import asyncio
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, Query, Response
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from agentcore.api.dependencies import (
+    AuthUser,
+    get_conversation_repo,
+    get_cost_event_repo,
+    get_db,
+    get_message_repo,
+    get_turn_journal_repo,
+)
+from agentcore.api.schemas import (
+    MessageDetail,
+    MessageListResponse,
+    MessagePromptResponse,
+    RecordTurnRequest,
+    RecordTurnResponse,
+    RunsPayload,
+    SendMessageRequest,
+    StatusResponse,
+    StopTurnResponse,
+)
+from agentcore.api.sse import sse_attach_response, sse_response
+from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
+from agentcore.conversation.service import record_local_turn, stream_chat
+from agentcore.core.errors import NotFoundError
+from agentcore.db.repositories import (
+    ConversationRepository,
+    CostEventRepository,
+    MessageRepository,
+    TurnJournalRepository,
+)
+from agentcore.llm.byok import resolve_user_llm_credentials
+from agentcore.runtime.events import EventSink
+from agentcore.runtime.journal import runs_from_entries, system_prompt_from_journal
+from agentcore.runtime.turn_runs import turn_runs
+
+from ._helpers import _preflight_turn_llm, _require_owned_conversation
+
+router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+
+@router.get("/{conversation_id}/messages", response_model=MessageListResponse)
+async def list_messages(
+    conversation_id: str,
+    user: AuthUser,
+    limit: int = Query(100, ge=1, le=200),
+    before: datetime | None = Query(None),
+    after: datetime | None = Query(None),
+    around: str | None = Query(None),
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    repo: MessageRepository = Depends(get_message_repo),
+    journal_repo: TurnJournalRepository = Depends(get_turn_journal_repo),
+):
+    """A window of a conversation's messages (cursor-windowed, chronological).
+
+    Four mutually-exclusive modes (checked in this order):
+
+    - ``around={message_id}``: a window centered on a message — the search-hit jump
+      (load-around B). 404 if the message isn't in this conversation.
+    - ``before={iso}``: the page strictly older than the cursor (scroll up).
+    - ``after={iso}``: the page strictly newer than the cursor (scroll down).
+    - none: the latest window (conversation open).
+
+    ``has_more_before`` / ``has_more_after`` drive infinite scroll; a one-sided
+    query computes only the flag for the direction it moves in (an ``around`` window
+    computes both). ``total`` is the conversation's full message count.
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    total = await repo.count_by_conversation(conversation_id)
+
+    has_more_before = False
+    has_more_after = False
+    if around is not None:
+        window = await repo.window_around(
+            conversation_id, message_id=around, before=limit, after=limit
+        )
+        if window is None:
+            raise NotFoundError("消息不存在")
+        messages, has_more_before, has_more_after = window
+    elif before is not None:
+        messages, has_more_before = await repo.list_before(
+            conversation_id, before=before, limit=limit
+        )
+    elif after is not None:
+        messages, has_more_after = await repo.list_after(
+            conversation_id, after=after, limit=limit
+        )
+    else:
+        messages, has_more_before = await repo.list_latest(
+            conversation_id, limit=limit
+        )
+
+    # Project each assistant message's replay payload (runs) from the唯一事实源
+    # turn_journal (§18.3) — it is no longer stored on the message row. One batched
+    # query over the page's message ids (no N+1); turns with no facts stay runs=None.
+    journal_map = await journal_repo.load_map([m.id for m in messages])
+    details: list[MessageDetail] = []
+    for m in messages:
+        detail = MessageDetail.model_validate(m)
+        runs = runs_from_entries(journal_map.get(m.id))
+        if runs is not None:
+            detail.runs = RunsPayload.model_validate(runs)
+        # 回合轮次 (Tier 2 重载): rounds shares the row's usage column but has no own
+        # attribute, so project it on read (usage itself is normalized by the schema
+        # validator). Drives the bubble's「N 轮」caption alongside usage.
+        rounds = (m.usage or {}).get("rounds")
+        if rounds is not None:
+            detail.rounds = rounds
+        details.append(detail)
+
+    return MessageListResponse(
+        data=details,
+        total=total,
+        has_more_before=has_more_before,
+        has_more_after=has_more_after,
+    )
+
+
+@router.delete("/{conversation_id}/messages/{message_id}", response_model=StatusResponse)
+async def delete_message(
+    conversation_id: str,
+    message_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    repo: MessageRepository = Depends(get_message_repo),
+):
+    """Delete a single message (单条消息删除).
+
+    Owner-scoped: proving ownership of the conversation first, then deleting only
+    within it, means a guessed ``message_id`` from another user's chat can't be
+    removed (404 on a foreign/absent conversation; no-op-then-404 on an absent
+    message). Append-only ``cost_events`` are intentionally preserved — deleting a
+    message never rewrites real spend (不变量 #1).
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    deleted = await repo.delete_by_id(message_id, conversation_id=conversation_id)
+    if not deleted:
+        raise NotFoundError("消息不存在")
+    return StatusResponse()
+
+
+@router.get(
+    "/{conversation_id}/messages/{message_id}/prompt",
+    response_model=MessagePromptResponse,
+)
+async def get_message_prompt(
+    conversation_id: str,
+    message_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    journal_repo: TurnJournalRepository = Depends(get_turn_journal_repo),
+):
+    """The verbatim system prompt the CEO ran for ONE assistant turn (查看本回合提示词).
+
+    提示词透明 L3 (对所有人开放): reads the ``turn_started`` head fact from the turn
+    journal (§18.3) — the exact prompt that turn was given, dynamic bits and all — so a
+    user can see precisely what steered the reply. Owner-scoped + conversation-scoped
+    (``load_owned``) so a foreign ``message_id`` can't leak another tenant's prompt. 404
+    for a user message or a legacy turn that journaled no head fact.
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    entries = await journal_repo.load_owned(message_id, conversation_id)
+    system_prompt = system_prompt_from_journal(entries)
+    if system_prompt is None:
+        raise NotFoundError("本回合没有可查看的提示词")
+    return MessagePromptResponse(system_prompt=system_prompt)
+
+
+@router.post("/{conversation_id}/messages")
+async def send_message(
+    conversation_id: str,
+    body: SendMessageRequest,
+    user: AuthUser,
+    session: AsyncSession = Depends(get_db),
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    cost_repo: CostEventRepository = Depends(get_cost_event_repo),
+):
+    """Send a user message and get a streaming AI response via SSE.
+
+    执行与请求解耦 (C1 · slice 1a): the pipeline runs as a *detached* task tracked in
+    the ``TurnRunRegistry`` (keyed by conversation), and the SSE stream only attaches
+    to it (``detach_on_disconnect=True``). A client disconnect therefore no longer
+    kills the turn (案例 1: 7-min 断连即丢交付) — it finishes + persists in the
+    background; an explicit 停止 routes through ``POST .../stop`` instead.
+
+    Gated before the stream starts (成本配额与计费.md §一) so a refused turn gets a
+    clean error instead of a half-opened SSE: per-user rate limit first (sheds a
+    flooding account before any resource DB work), then ownership, then the
+    BYOK/quota billing gate (BYOK mode requires the user's own key; platform mode
+    enforces quota). The resolved BYOK credentials thread through the whole turn.
+    """
+    await enforce_user_message_rate_limit(user.user_id)
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    credentials = await _preflight_turn_llm(
+        session=session, user=user, cost_repo=cost_repo
+    )
+
+    sink = EventSink()
+
+    task = asyncio.create_task(
+        stream_chat(
+            conversation_id=conversation_id,
+            user_message=body.content,
+            user_id=user.user_id,
+            sink=sink,
+            attachments=[a.model_dump() for a in body.attachments],
+            llm_credentials=credentials,
+        )
+    )
+    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
+
+    return sse_response(sink, detach_on_disconnect=True)
+
+
+@router.post("/{conversation_id}/stop", response_model=StopTurnResponse)
+async def stop_message(
+    conversation_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Explicitly stop the conversation's in-flight turn (执行与请求解耦 C1 · slice 1a).
+
+    Now that a client disconnect no longer cancels a turn (it runs to completion +
+    persists in the background), the user's 「停止」 routes here instead. Cancels the
+    detached run task tracked in the ``TurnRunRegistry``, which unwinds through the
+    turn's ``CancelledError`` salvage — finished team work is kept as an incomplete
+    message (断线别白干). Idempotent: ``stopped=false`` when nothing is running
+    (already finished / never started), so a late click settles cleanly. Owner-gated.
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    stopped = turn_runs.stop(conversation_id)
+    return StopTurnResponse(stopped=stopped)
+
+
+@router.get("/{conversation_id}/stream")
+async def attach_stream(
+    conversation_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Re-attach to the conversation's in-flight turn and 续看 it live (C1 · slice 1b).
+
+    Since a disconnect no longer cancels a turn (slice 1a — it runs detached + persists
+    in the background), a client that dropped (network blip) or reopened the app can
+    rejoin the live run here: the SSE replays the transcript so far (coalesced — one
+    content / reasoning block, the team graph, finished tool calls) then tails new
+    events, all in the SAME event shape as the original stream, so the client folds it
+    through one dispatch path.
+
+    Returns ``204 No Content`` when no run is live for the conversation (already
+    finished / never started / suspended at a checkpoint) — the client then falls back
+    to the persisted transcript (reload) / durable resume. A pure observer: dropping
+    this stream detaches again (never cancels); an explicit 停止 still goes through
+    ``POST .../stop``. Owner-gated.
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    run = turn_runs.get(conversation_id)
+    if run is None or run.task.done():
+        return Response(status_code=204)
+    return sse_attach_response(run.sink)
+
+
+@router.post("/{conversation_id}/local-turns", response_model=RecordTurnResponse)
+async def record_local_turn_endpoint(
+    conversation_id: str,
+    body: RecordTurnRequest,
+    user: AuthUser,
+    session: AsyncSession = Depends(get_db),
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Persist a turn that ran on the user's machine via the sidecar (双模式工作区 §一.1).
+
+    The local engine produced the reply on the user's box (no server SSE turn ran),
+    so the desktop reports the finished turn here to land it in durable history.
+    Owner-scoped (404 for a non-owner). Spend is NOT recorded here — a sidecar turn's
+    LLM calls are metered authoritatively at the cloud inference proxy (``/v1/inference``,
+    Slice 4a); this endpoint persists content only.
+
+    Unlike ``send_message`` there is NO pre-turn billing gate — the turn already
+    happened on the user's machine; this only RECORDS its content. The write-back is
+    idempotent so the desktop can safely retry a flaky POST: messages dedupe on the
+    client-minted ``user_message_id``, so a retry after a committed-but-lost response
+    never duplicates the turn. The title is generated best-effort on the user's resolved
+    BYOK key (None → platform fallback).
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    # Best-effort credentials for the title pass — unlike send_message's preflight we
+    # never REFUSE here (the turn is already done; recording must not be blockable).
+    credentials = await resolve_user_llm_credentials(session, user.user_id)
+    result = await record_local_turn(
+        conversation_id=conversation_id,
+        user_id=user.user_id,
+        user_message=body.user_message,
+        assistant_content=body.content,
+        assistant_reasoning=body.reasoning_content,
+        citations=[c.model_dump() for c in body.citations] or None,
+        runs=body.runs.model_dump() if body.runs else None,
+        user_message_id=body.user_message_id,
+        message_id=body.message_id,
+        input_tokens=body.input_tokens,
+        output_tokens=body.output_tokens,
+        rounds=body.rounds,
+        llm_credentials=credentials,
+    )
+    return RecordTurnResponse(**result)

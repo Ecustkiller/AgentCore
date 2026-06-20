@@ -1,3 +1,5 @@
+import { getTokens } from "@/api/client";
+import { type WorkspaceSummary, listWorkspaces } from "@/api/workspaces";
 // 文件 tab home — the cross-workspace file overview (手机端布局重构 · 跨工作区文件总览).
 //
 // Lists the user's CLOUD workspaces (= folders); tapping one drills into its file tree
@@ -9,8 +11,6 @@
 // remounts), so files just produced in a chat appear without a manual refresh.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getTokens } from "@/api/client";
-import { type WorkspaceSummary, listWorkspaces } from "@/api/workspaces";
 
 export function WorkspacesPage() {
   const navigate = useNavigate();
@@ -41,7 +41,9 @@ export function WorkspacesPage() {
 
   const clouds = items?.filter((w) => w.location === "cloud") ?? [];
   const hasLocalOnly =
-    items !== null && clouds.length === 0 && items.some((w) => w.location === "local");
+    items !== null &&
+    clouds.length === 0 &&
+    items.some((w) => w.location === "local");
 
   return (
     <div className="screen">

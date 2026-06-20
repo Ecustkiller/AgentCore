@@ -138,7 +138,11 @@ function RunCard({
         <span className="run-name">{name}</span>
         <span className={`run-badge badge-${st.tone}`}>{st.label}</span>
       </div>
-      {(run.stance || run.revision >= 2 || depth > 0 || run.checkpoint) && (
+      {(run.stance ||
+        run.revision >= 2 ||
+        depth > 0 ||
+        run.checkpoint ||
+        run.escalations.length > 0) && (
         <div className="run-tags">
           {run.stance && (
             <span className="run-pill">
@@ -156,9 +160,29 @@ function RunCard({
                 : checkpointLabel(run.checkpoint.decision)}
             </span>
           )}
+          {/* 升级实时可见: a worker flagged a blocker for the CEO — a 待裁决 cue mirroring
+              the desktop node ⚠️ badge; the full ask renders below. */}
+          {run.escalations.length > 0 && (
+            <span className="run-pill pill-warn">
+              上报
+              {run.escalations.length > 1 ? ` ${run.escalations.length}` : ""}
+            </span>
+          )}
         </div>
       )}
       {run.task && <div className="run-task">{run.task}</div>}
+      {/* 升级实时可见: the worker's 向上求决策 — its self-contained 问题 + the 假设 it
+          proceeded on (escalate 非阻塞). Surfaced inline so the user sees a flagged
+          blocker without drilling into the worker's timeline. */}
+      {run.escalations.map((esc, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: per-run escalations are append-only with stable order, so the index is a stable identity here
+        <div key={i} className="run-escalation">
+          <span className="run-escalation-q">↑ {esc.question}</span>
+          {esc.assumption && (
+            <span className="run-escalation-a">暂用假设：{esc.assumption}</span>
+          )}
+        </div>
+      ))}
       {preview && <div className="run-preview">{preview}</div>}
       {run.error && <div className="run-error">{run.error}</div>}
       {run.status === "completed" && run.durationMs != null && (

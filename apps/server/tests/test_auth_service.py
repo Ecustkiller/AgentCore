@@ -306,15 +306,38 @@ async def test_refresh_rotates_token():
     assert len(rotated) == 1
 
 
-async def test_refresh_reuse_detected_revokes_family():
+async def test_refresh_reuse_beyond_grace_revokes_family():
     svc, _u, _c, tokens, invites = _make()
     await invites.create(code="C1")
     await svc.register(username="ken", password=_PW, invite_code="C1")
     _, pair = await svc.login(username="ken", password=_PW)
     await svc.refresh(refresh_token=pair.refresh_token)  # rotate once
+    # Age the rotation past the grace window so re-presenting the old token reads
+    # as a genuine leak/replay (not benign concurrency) -> family revoked.
+    rec = await tokens.get_by_hash(hash_refresh_token(pair.refresh_token))
+    rec.rotated_at = datetime.now(UTC) - timedelta(minutes=1)
     with pytest.raises(AuthenticationError):
         await svc.refresh(refresh_token=pair.refresh_token)  # reuse old token
     assert all(r.revoked_at is not None for r in tokens.records.values())
+
+
+async def test_refresh_reuse_within_grace_is_benign():
+    # The dominant cause of spurious mid-session logout: several requests 401 at
+    # once on an expired access token and refresh with the *same* cookie. Within
+    # the grace window that must NOT revoke the family — it mints a fresh successor
+    # and everyone stays logged in (认证与会话.md §五).
+    svc, _u, _c, tokens, invites = _make()
+    await invites.create(code="C1")
+    await svc.register(username="kim", password=_PW, invite_code="C1")
+    _, pair = await svc.login(username="kim", password=_PW)
+    first = await svc.refresh(refresh_token=pair.refresh_token)  # rotate once
+    second = await svc.refresh(refresh_token=pair.refresh_token)  # racing replay
+    assert second.refresh_token and second.refresh_token != first.refresh_token
+    # Nobody is revoked: the session survives the concurrent refresh.
+    assert all(r.revoked_at is None for r in tokens.records.values())
+    # Both freshly minted successors remain usable going forward.
+    assert (await svc.refresh(refresh_token=first.refresh_token)).refresh_token
+    assert (await svc.refresh(refresh_token=second.refresh_token)).refresh_token
 
 
 async def test_refresh_unknown_token_raises():

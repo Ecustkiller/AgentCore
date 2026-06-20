@@ -73,6 +73,85 @@ async def test_workspace_files_requires_auth(client):
     assert r.status_code == 401
 
 
+async def test_promote_bare_chat_workspace(client, make_invite, _fs_data_dir):
+    """POST /workspace/promote mints a folder for a 裸聊 without writing a file.
+
+    The desktop's client-side DeferredWorkspace calls this before its first panel write
+    so a 裸聊 gets a real folder to write into (工作区对称化 D1a) — the server hook that
+    keeps the panel from stranding a desktop chat's first file in the cloud. Idempotent:
+    an already-foldered chat just returns its folder. No ``local_container_root_id`` (the
+    test client sends none) → a cloud folder.
+    """
+    code = await make_invite("INV-WS-PROMOTE")
+    await _register_and_login(client, code, "wspromoter")
+    conv_id = await _new_conversation(client)
+
+    # 裸聊: no folder, and (no intent sent) no local container root.
+    r = await client.get(f"/v1/conversations/{conv_id}")
+    assert r.status_code == 200, r.text
+    assert r.json()["folder_id"] is None
+    assert r.json()["local_container_root_id"] is None
+
+    # Promote without a file write → a cloud folder (no local binding).
+    r = await client.post(f"/v1/conversations/{conv_id}/workspace/promote")
+    assert r.status_code == 200, r.text
+    folder = r.json()
+    assert folder["id"]
+    assert folder["local_root_id"] is None
+
+    # The conversation is now filed into that folder.
+    r = await client.get(f"/v1/conversations/{conv_id}")
+    assert r.json()["folder_id"] == folder["id"]
+
+    # Idempotent: promoting again returns the same folder (no second mint).
+    r = await client.post(f"/v1/conversations/{conv_id}/workspace/promote")
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == folder["id"]
+
+    # The minted workspace is real: lists empty (no phantom files), then a write lands.
+    r = await client.get(f"/v1/conversations/{conv_id}/workspace/files")
+    assert r.status_code == 200 and r.json()["data"] == []
+    r = await client.put(
+        f"/v1/conversations/{conv_id}/workspace/files/a.txt", content=b"A"
+    )
+    assert r.status_code == 200, r.text
+
+
+async def test_create_conversation_records_local_intent(
+    client, make_invite, _fs_data_dir
+):
+    """A desktop 裸聊 is born carrying its local-container intent (工作区对称化 D1a).
+
+    Storing it on the conversation (vs. per-turn) is what makes every later promotion
+    path — Agent turn or panel write — agree on locality. The field round-trips on the
+    read model; it's recorded only for a 裸聊 (a foldered chat inherits its folder's
+    binding, so the field is dropped).
+    """
+    code = await make_invite("INV-WS-INTENT")
+    await _register_and_login(client, code, "wsintent")
+
+    r = await client.post(
+        "/v1/conversations", json={"local_container_root_id": "root-abc"}
+    )
+    assert r.status_code == 201, r.text
+    conv_id = r.json()["id"]
+    assert r.json()["local_container_root_id"] == "root-abc"
+
+    r = await client.get(f"/v1/conversations/{conv_id}")
+    assert r.json()["local_container_root_id"] == "root-abc"
+
+    # Moot once foldered: a chat born into a folder inherits its binding, so the
+    # standalone intent is not recorded even if the client passes one.
+    folder = await client.post("/v1/folders", json={"name": "proj"})
+    assert folder.status_code == 201, folder.text
+    r = await client.post(
+        "/v1/conversations",
+        json={"folder_id": folder.json()["id"], "local_container_root_id": "root-xyz"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["local_container_root_id"] is None
+
+
 async def test_upload_list_download_roundtrip(client, make_invite, _fs_data_dir):
     code = await make_invite("INV-WS-1")
     await _register_and_login(client, code, "wsuser1")

@@ -1,3 +1,4 @@
+import { apiFetch } from "@/api/client";
 // Conversation REST for the mobile client (手机端落地设计 P1 · 会话管理).
 //
 // Bearer-authenticated reads/writes over the same cloud endpoints the desktop uses
@@ -6,8 +7,12 @@
 // (schemas.py) covering only the fields this skeleton renders; the desktop generates the
 // full set from OpenAPI (mobile has no gen pipeline yet — matches the existing skeleton
 // convention in stream.ts/client.ts of typing responses inline).
-import type { Citation, ProcessStep, SSEEvent } from "@agentcore/contract-types";
-import { apiFetch } from "@/api/client";
+import type {
+  Citation,
+  ContextBlockWire,
+  ProcessStep,
+  SSEEvent,
+} from "@agentcore/contract-types";
 
 export interface ConversationSummary {
   id: string;
@@ -29,6 +34,10 @@ export interface RunsPayload {
   events: SSEEvent[];
   finish_reason: string | null;
   process: ProcessStep[] | null;
+  /** 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): the captain's `run_context` blocks,
+   *  persisted turn-level so a pure-chat turn (empty `events`) still replays the CEO's
+   *  received context on reload. `null` unless the captain shipped context. */
+  captain_context?: ContextBlockWire[] | null;
 }
 
 /** A user message's attachment as persisted (composer 附件). The agent-chat send ships the

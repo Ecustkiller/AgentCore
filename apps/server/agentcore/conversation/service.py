@@ -6,7 +6,7 @@ and title generation for a conversation turn.
 
 import asyncio
 import time
-from collections.abc import Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
@@ -15,12 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.config import settings
 from agentcore.conversation.compaction import schedule_compaction
 from agentcore.conversation.history import load_chat_context
-from agentcore.core.errors import AgentCoreError
+from agentcore.core.errors import AgentCoreError, NotFoundError
 from agentcore.core.log_context import log_context, new_trace_id
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.db.base import async_session_factory
-from agentcore.db.models import Conversation
+from agentcore.db.models import Conversation, Folder
 from agentcore.db.repositories import (
     ConversationRepository,
     CostEventRepository,
@@ -42,6 +42,7 @@ from agentcore.memory import (
     TitleInput,
 )
 from agentcore.memory.consolidation import schedule_consolidation
+from agentcore.messaging.hub import default_chat_hub
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import (
     EventSink,
@@ -53,7 +54,7 @@ from agentcore.runtime.events import (
     turn_saved,
     workspace_promoted,
 )
-from agentcore.runtime.journal import persist_turn_journal
+from agentcore.runtime.journal import entries_from_runs, persist_turn_journal
 from agentcore.runtime.pipeline import resume_chat_pipeline, run_chat_pipeline
 from agentcore.runtime.session_persistence import load_run_session, save_run_session
 from agentcore.runtime.suspension import TurnSuspension
@@ -116,9 +117,7 @@ def _preview(text: str, *, limit: int = 80) -> str:
     return collapsed[:limit] + "…" if len(collapsed) > limit else collapsed
 
 
-async def _resolve_local_binding(
-    session: AsyncSession, conv: Conversation
-) -> LocalBinding | None:
+async def _resolve_local_binding(session: AsyncSession, conv: Conversation) -> LocalBinding | None:
     """Resolve a turn's local-mode binding (双模式工作区 §七), or None for cloud.
 
     Looks up the binding on the conversation's folder (文件夹即工作区: the binding
@@ -169,9 +168,7 @@ async def _unique_local_subpath(
     base = _sanitize_subpath_segment(name)
     folders = await repo.list_by_user(user_id)
     taken = {
-        f.local_subpath
-        for f in folders
-        if f.local_root_id == container_root_id and f.local_subpath
+        f.local_subpath for f in folders if f.local_root_id == container_root_id and f.local_subpath
     }
     if base not in taken:
         return base
@@ -179,6 +176,240 @@ async def _unique_local_subpath(
     while f"{base}-{i}" in taken:
         i += 1
     return f"{base}-{i}"
+
+
+def _promotion_lock_key(*, user_id: str, conversation_id: str) -> str:
+    """The lock key that serializes a 裸聊's lazy promotion — distinct from its
+    workspace lock (工作区对称化 D1a §并发提升).
+
+    Conversation-scoped (a 裸聊 has no folder yet to key on) but in a SEPARATE
+    namespace from ``workspace_storage_key`` (the ``#promote`` suffix): a turn holds
+    its workspace lock on the conversation key for its WHOLE run (§turn lock), so
+    reusing that exact key here would self-deadlock the moment the turn's own first
+    write promotes mid-run. The two locks are orthogonal — this one guards only the
+    brief mint-and-file-into step.
+    """
+    base = workspace_storage_key(user_id=user_id, folder_id=None, conversation_id=conversation_id)
+    return f"{base}#promote"
+
+
+def _container_root_lock_key(*, user_id: str, container_root_id: str) -> str:
+    """Lock key serializing per-chat subpath minting under one container root
+    (工作区对称化 D1a §并发提升).
+
+    ``_unique_local_subpath`` dedupes a new chat's folder name against the root's
+    existing subpaths, then creates it. Two *different* chats promoting at once under
+    the same container root (e.g. both still title-less → "未命名工作区") would each read
+    the pre-state and compute the SAME subpath, merging onto one on-disk directory. The
+    per-conversation promotion lock can't cover this (different conversations don't share
+    it), so the dedup+create runs under this container-root lock instead. It nests INSIDE
+    the per-conversation lock (consistent order: conversation → root), so no deadlock.
+    """
+    return f"promote-root/{user_id}/{container_root_id}"
+
+
+async def _broadcast_promotion(*, user_id: str, conversation_id: str, folder: Folder) -> None:
+    """Fan a 裸聊's promotion to the user's OTHER live surfaces via the per-user firehose
+    (跨端实时同步). The turn ``sink`` only reaches the client driving the turn, and a panel /
+    bind REST call only updates its own caller — so a second device (or the 消息/对话 page
+    open elsewhere) would keep the chat stranded in 未分组 until a refetch. Publishing here,
+    at the single promotion spine, re-groups the chat + surfaces its new workspace card on
+    every other connected device, with no manual refresh.
+
+    Best-effort and idempotent on the client (``applyConversationPromotion`` no-ops when the
+    chat is already grouped), so the driving client receiving it again (it also got the turn
+    SSE / its REST response) is harmless. The dict mirrors the ``workspace_promoted`` SSE
+    payload so the desktop folds both channels through one sink (services/realtime.ts).
+    """
+    await default_chat_hub().publish(
+        [user_id],
+        {
+            "type": "workspace_promoted",
+            "conversation_id": conversation_id,
+            "folder_id": folder.id,
+            "name": folder.name,
+            "local_root_id": folder.local_root_id,
+            "local_subpath": folder.local_subpath or "",
+        },
+    )
+
+
+async def promote_conversation_folder(
+    *,
+    conv_repo: ConversationRepository,
+    folder_repo: FolderRepository,
+    user_id: str,
+    conversation_id: str,
+    mint: Callable[[], Awaitable[Folder]],
+) -> tuple[Folder, bool]:
+    """Serialize + idempotently get-or-mint the folder a 裸聊 is promoted into
+    (工作区对称化 D1a §并发提升) — the single concurrency-safe spine under EVERY promotion.
+
+    Three call sites mint a folderless conversation's folder: the team's first file
+    write and a panel write (both via ``promote_bare_chat_to_folder``), and "打开本地文件
+    夹" binding. Each used to mint unsynchronized, so two racing first writes could each
+    create a folder and split a chat's files across both. This holds a per-conversation
+    promotion lock (deliberately NOT the workspace lock — see ``_promotion_lock_key`` —
+    so a turn that promotes mid-run can't self-deadlock) and, under it, re-reads
+    ``folder_id`` with a *fresh* scalar read (the identity map is stale under
+    ``expire_on_commit=False``):
+
+    - already promoted (the loser of a race, or an already-foldered conversation) →
+      load and return that folder, ``reused=True`` — callers MUST mint only via this;
+    - otherwise → call ``mint`` (which builds the folder however that path needs: a
+      cloud/subpath workspace for a write, a root-bound one for a bind), file the
+      conversation into it, and fan a ``workspace_promoted`` event to the user's firehose
+      so every OTHER live surface re-groups too (跨端实时同步), ``reused=False``.
+
+    Returns ``(folder, reused)``; ``reused`` lets a caller skip a duplicate side effect
+    (e.g. re-applying a binding it already minted, or re-emitting an event).
+    """
+    async with workspace_lock(
+        _promotion_lock_key(user_id=user_id, conversation_id=conversation_id)
+    ):
+        existing_folder_id = await conv_repo.get_folder_id(conversation_id)
+        if existing_folder_id is not None:
+            folder = await folder_repo.get_by_id(existing_folder_id, user_id=user_id)
+            if folder is None:
+                # folder_id points at a folder that isn't there: impossible in practice
+                # (soft-deleting a folder also clears its conversations' folder_id in the
+                # same txn, so we'd have read None above) — surface it, never fabricate.
+                raise NotFoundError("工作区不存在")
+            return folder, True
+        folder = await mint()
+        await conv_repo.set_folder(conversation_id, folder.id, user_id=user_id)
+        # Only on a real mint (not the reuse branch): the winner already broadcast, and
+        # the loser's re-group rides that one — re-publishing on reuse would just double a
+        # no-op on every device (跨端实时同步).
+        await _broadcast_promotion(user_id=user_id, conversation_id=conversation_id, folder=folder)
+        return folder, False
+
+
+def _finish_promotion(
+    *,
+    sink: EventSink | None,
+    conversation_id: str,
+    folder_id: str,
+    name: str,
+    local_root_id: str | None,
+    local_subpath: str | None,
+) -> PromotionResult:
+    """Build the ``PromotionResult`` and, on a live turn, emit ``workspace_promoted``.
+
+    Shared by both promotion outcomes — minting the folder, and idempotently reusing a
+    concurrently-minted one — so a turn that *lost* the mint race still reports the same
+    binding and notifies its client identically (the panel winner has no sink, so the
+    live turn must be the one to announce it). ``local_root_id`` set ⟹ a local folder
+    (binding carries the per-chat subpath); None ⟹ cloud (binding None, event's local
+    fields empty).
+    """
+    binding = (
+        LocalBinding(root_id=local_root_id, root_label=name, subpath=local_subpath or "")
+        if local_root_id
+        else None
+    )
+    if sink is not None:
+        # Tell the live client the 裸聊 just became a folder workspace, so it re-groups
+        # the chat + shows the new card now (else stale until refetch/reload). Local
+        # promotion carries the container root + subpath; cloud leaves root_id None.
+        sink.emit(
+            workspace_promoted(
+                conversation_id=conversation_id,
+                folder_id=folder_id,
+                name=name,
+                local_root_id=local_root_id,
+                local_subpath=local_subpath or "",
+            )
+        )
+    return PromotionResult(folder_id=folder_id, local_binding=binding)
+
+
+async def promote_bare_chat_to_folder(
+    *,
+    conv_repo: ConversationRepository,
+    folder_repo: FolderRepository,
+    user_id: str,
+    conversation_id: str,
+    title: str | None,
+    user_message: str = "",
+    local_container_root_id: str | None,
+    sink: EventSink | None = None,
+) -> PromotionResult:
+    """Mint a folder for a 裸聊 and file the conversation into it (文件夹即工作区 §懒建).
+
+    The **single** promotion path, shared by the team's first write (``DeferredWorkspace``,
+    mid-turn, with a ``sink``) and the panel's first write (REST upload/edit/dirs/clone,
+    no sink). Both source ``local_container_root_id`` from
+    ``Conversation.local_container_root_id`` (decided at creation), so a 裸聊 lands in
+    the same place whichever write fires first — the order-dependent cloud-vs-local
+    split this unification removes.
+
+    Local when ``local_container_root_id`` is set: a unique subpath under that container
+    root (工作区对称化 D1a) seeds the on-disk directory, so each file-producing desktop
+    chat is its own local card — symmetric with cloud. Otherwise a cloud folder. The
+    name comes from the title when available, else the first user message (mid-turn the
+    title is usually still absent), else a fallback.
+
+    Concurrency-safe (工作区对称化 D1a §并发提升): two first writes can race — two panel
+    ops, or a panel op vs. the turn's own deferred write. A per-conversation promotion
+    lock serializes them, and a fresh re-read of ``folder_id`` under that lock makes the
+    loser REUSE the winner's folder instead of minting a second one (which would split a
+    chat's files across two workspaces). The lock is deliberately NOT the workspace lock
+    (see ``_promotion_lock_key``) so a turn that promotes mid-run never self-deadlocks.
+
+    With a ``sink``, emits ``workspace_promoted`` so the live client re-groups the chat
+    + surfaces the new card now (without it, stale until refetch). A REST caller passes
+    no sink and refetches workspaces after its own op instead.
+    """
+
+    async def _mint() -> Folder:
+        name = default_workspace_name(title, fallback_text=user_message)
+        if not local_container_root_id:
+            return await folder_repo.create(
+                user_id=user_id, name=name, local_root_id=None, local_subpath=None
+            )
+        # Local: serialize subpath dedup + create across ALL chats under this container
+        # root (not just this conversation) so two same-named chats promoting at once
+        # can't compute the same subpath and merge onto one on-disk directory.
+        async with workspace_lock(
+            _container_root_lock_key(user_id=user_id, container_root_id=local_container_root_id)
+        ):
+            local_subpath = await _unique_local_subpath(
+                folder_repo,
+                user_id=user_id,
+                container_root_id=local_container_root_id,
+                name=name,
+            )
+            return await folder_repo.create(
+                user_id=user_id,
+                name=name,
+                local_root_id=local_container_root_id,
+                local_subpath=local_subpath,
+            )
+
+    folder, reused = await promote_conversation_folder(
+        conv_repo=conv_repo,
+        folder_repo=folder_repo,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        mint=_mint,
+    )
+    logger.info(
+        "workspace.bare_chat_promote_reused" if reused else "workspace.bare_chat_promoted",
+        conversation_id=conversation_id,
+        folder_id=folder.id,
+        location="local" if folder.local_root_id else "server",
+    )
+    # Build the result + event from the folder's actual shape, so a turn that lost the
+    # mint race still announces the winner's folder identically (mint vs reuse alike).
+    return _finish_promotion(
+        sink=sink,
+        conversation_id=conversation_id,
+        folder_id=folder.id,
+        name=folder.name,
+        local_root_id=folder.local_root_id,
+        local_subpath=folder.local_subpath,
+    )
 
 
 def _bare_chat_promote(
@@ -193,73 +424,26 @@ def _bare_chat_promote(
     """Build the lazy-promotion callback for a 裸聊 turn (文件夹即工作区 §懒建).
 
     ``DeferredWorkspace`` invokes this the first time the team (or a residency write)
-    creates a file: mint a folder named after the chat, file the conversation into
-    it, and return where it landed so the rest of the turn — and the end-of-turn
-    snapshot — target it. Runs in its own session because it fires mid-run, after the
-    turn's setup session has already closed.
-
-    Emits ``workspace_promoted`` on the turn's ``sink`` right after the conversation is
-    filed, so the live client re-groups the chat under the new folder and surfaces it
-    in the 文件 rail — without it the promotion is invisible until a manual refetch.
-
-    When ``local_container_root_id`` is set (a desktop bare chat, 工作区对称化 D1a),
-    the new folder is bound **local** at a unique subpath under that container root,
-    so each file-producing desktop chat becomes its own local workspace card —
-    symmetric with cloud. Otherwise it is a cloud folder (the original behavior). The
-    name comes from the title when available, else the first user message (the title
-    is async, usually still absent at this mid-turn moment) — and for local it also
-    seeds the on-disk directory, so a meaningful name matters.
+    creates a file. Runs in its own session because it fires mid-run, after the turn's
+    setup session has already closed, then delegates to the shared
+    ``promote_bare_chat_to_folder`` — the same path the panel's first write takes —
+    emitting ``workspace_promoted`` on the turn's ``sink``. ``local_container_root_id``
+    is the conversation's stored locality intent (工作区对称化 D1a), resolved by the
+    caller from ``Conversation.local_container_root_id``.
     """
 
     async def _promote() -> PromotionResult:
-        name = default_workspace_name(title, fallback_text=user_message)
-        local_subpath: str | None = None
         async with async_session_factory() as session:
-            repo = FolderRepository(session)
-            if local_container_root_id:
-                local_subpath = await _unique_local_subpath(
-                    repo,
-                    user_id=user_id,
-                    container_root_id=local_container_root_id,
-                    name=name,
-                )
-            folder = await repo.create(
+            return await promote_bare_chat_to_folder(
+                conv_repo=ConversationRepository(session),
+                folder_repo=FolderRepository(session),
                 user_id=user_id,
-                name=name,
-                local_root_id=local_container_root_id,
-                local_subpath=local_subpath,
-            )
-            await ConversationRepository(session).set_folder(
-                conversation_id, folder.id, user_id=user_id
-            )
-        binding = (
-            LocalBinding(
-                root_id=local_container_root_id,
-                root_label=name,
-                subpath=local_subpath or "",
-            )
-            if local_container_root_id
-            else None
-        )
-        logger.info(
-            "workspace.bare_chat_promoted",
-            conversation_id=conversation_id,
-            folder_id=folder.id,
-            location="local" if binding else "server",
-        )
-        # Tell the live client the 裸聊 just became a folder workspace, so it re-groups
-        # the chat + shows the new card now (else stale until refetch/reload). Local
-        # promotion carries the container root + subpath; cloud leaves root_id None.
-        sink.emit(
-            workspace_promoted(
                 conversation_id=conversation_id,
-                folder_id=folder.id,
-                name=name,
-                local_root_id=local_container_root_id,
-                local_subpath=local_subpath or "",
+                title=title,
+                user_message=user_message,
+                local_container_root_id=local_container_root_id,
+                sink=sink,
             )
-        )
-        return PromotionResult(folder_id=folder.id, local_binding=binding)
 
     return _promote
 
@@ -454,9 +638,7 @@ async def _run_and_persist(
             # (the SSE layer cancels this task). Salvage any finished team work into
             # an incomplete message so it is not wasted (断线别白干), then let the
             # cancellation propagate — never swallow it.
-            _salvage_incomplete_turn(
-                sink=sink, conversation_id=conversation_id, trace_id=trace_id
-            )
+            _salvage_incomplete_turn(sink=sink, conversation_id=conversation_id, trace_id=trace_id)
             raise
         finish = result.get("finish_reason")
         cost_runs = result.get("cost_runs") or []
@@ -497,6 +679,12 @@ async def _run_and_persist(
     )
 
 
+# Cap the persisted error message (报错回合 卡片) so a pathological error string can't
+# bloat the journal row; the live card already shows the full text, this is the durable
+# replay copy. Generous vs the telemetry error cap (1000) since this is user-facing.
+_RUN_ERROR_MESSAGE_CAP = 2000
+
+
 async def _persist_turn_result(
     *,
     result: dict,
@@ -534,13 +722,46 @@ async def _persist_turn_result(
     journal_entries = result.get("journal_entries")
     cost_runs = result.get("cost_runs") or []
 
+    # 回合结局 (outcome): finish_reason + an optional terminal error. Computed once here
+    # and reused by the telemetry row below. A turn ended ABNORMALLY when it errored or
+    # finished on anything but a clean end_turn (max_rounds / degraded / unproductive) —
+    # cancelled turns never reach here (the salvage path owns them). An abnormal turn is
+    # worth persisting even with NO assistant text: the empty-content 报错回合 used to
+    # vanish wholesale on reload (no row, no journal), losing「为什么报错」+ the 结束原因
+    # chip (Tier 2 a+c). Empty content is filtered from future LLM context (history.py),
+    # so the row is replay-only — it never pollutes the next turn's prompt.
+    finish = result.get("finish_reason")
+    finish_value = getattr(finish, "value", finish)
+    turn_error = result.get("error")
+    run_error = (
+        {
+            "code": result.get("error_code") or "PIPELINE_ERROR",
+            "message": str(turn_error)[:_RUN_ERROR_MESSAGE_CAP],
+        }
+        if turn_error
+        else None
+    )
+    abnormal = bool(turn_error) or (
+        finish_value is not None and finish_value != FinishReason.END_TURN.value
+    )
+    # A turn that journaled its own facts (graph / process) already carries a turn_end
+    # with finish_reason; synthesize a minimal one ONLY for an abnormal turn that built
+    # none of its own (a plain single-agent error / max_rounds), so finish_reason + the
+    # error card still replay. A clean plain-chat turn stays journal-less (storage parity).
+    synth_entries = (
+        entries_from_runs({"finish_reason": finish_value, "error": run_error})
+        if journal_entries is None and abnormal
+        else None
+    )
+
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
         conv_repo = ConversationRepository(session)
 
-        if assistant_reply:
+        if assistant_reply or abnormal:
             # The pipeline's message id pins the row so the streamed/persisted
-            # assistant ids agree on reload.
+            # assistant ids agree on reload. An abnormal turn persists its (possibly
+            # empty) bubble so the error card / chip have a row to hang on.
             await msg_repo.create(
                 conversation_id=conversation_id,
                 role="assistant",
@@ -552,6 +773,14 @@ async def _persist_turn_result(
                 metadata={
                     "input_tokens": result.get("input_tokens", 0),
                     "output_tokens": result.get("output_tokens", 0),
+                    # 回合 token 用量 重载持久化 (Tier 2): the full breakdown (思考/缓存
+                    # 命中/未命中) rides the row's usage column so the bubble's meta row
+                    # replays on reload (live, it rode message_end). Additive to the
+                    # legacy {input,output,rounds} — conversation/export.py reads this
+                    # dict, so existing keys stay put.
+                    "reasoning_tokens": result.get("reasoning_tokens", 0),
+                    "cache_hit_tokens": result.get("cache_hit_tokens", 0),
+                    "cache_miss_tokens": result.get("cache_miss_tokens", 0),
                     "rounds": result.get("rounds", 0),
                 },
             )
@@ -559,13 +788,15 @@ async def _persist_turn_result(
             # keyed by the assistant message id (§18.3). The replay payload
             # (MessageDetail.runs) is projected back from it on read — no longer
             # stored on the message. Best-effort (never breaks the committed reply).
+            # An abnormal turn with no facts of its own falls back to the synthesized
+            # turn_end (finish_reason + error) so the bubble still replays its outcome.
             await persist_turn_journal(
                 session,
                 message_id=result.get("message_id"),
                 conversation_id=conversation_id,
                 trace_id=trace_id,
                 runs=assistant_runs,
-                entries=journal_entries,
+                entries=journal_entries if journal_entries is not None else synth_entries,
             )
 
         # 落账: persist the per-run cost ledger for this turn (captain root + one
@@ -603,10 +834,8 @@ async def _persist_turn_result(
         # default ""). Written for EVERY completed turn (ok or soft-error), even
         # one that produced no assistant text. Best-effort: a telemetry write must
         # NEVER break the committed turn (同 cost ledger 铁律) — roll back the aborted
-        # statement and move on.
-        finish = result.get("finish_reason")
-        finish_value = getattr(finish, "value", finish)
-        turn_error = result.get("error")
+        # statement and move on. finish_value / turn_error were computed once above
+        # (they also drive the abnormal-turn persistence gate) and are reused here.
         # delegated = "real workers ran" (workers > 0), consistent with the
         # chat.turn_complete log — see the 档2.5 观测修正 note there.
         workers = max(len(cost_runs) - 1, 0)
@@ -619,9 +848,7 @@ async def _persist_turn_result(
                 agent_id="CEO",
                 kind=kind,
                 status=(
-                    "error"
-                    if turn_error or finish_value == FinishReason.ERROR.value
-                    else "ok"
+                    "error" if turn_error or finish_value == FinishReason.ERROR.value else "ok"
                 ),
                 finish_reason=finish_value,
                 error=str(turn_error)[:1000] if turn_error else None,
@@ -767,8 +994,7 @@ async def _persist_incomplete_turn(
     is warning-only and never escapes this detached task (文档铁律).
     """
     note = (
-        "（连接中断，本回合未完成。下面是已完成队员的产出，已为你保留；"
-        "如需继续，可重新发送消息。）"
+        "（连接中断，本回合未完成。下面是已完成队员的产出，已为你保留；如需继续，可重新发送消息。）"
     )
     try:
         async with async_session_factory() as session:
@@ -832,9 +1058,7 @@ def _salvage_incomplete_turn(
     if not journal:
         return
     # A live durable pause is the resume path's job — don't also salvage it.
-    if settings.structured_suspension_persist_enabled and _has_open_durable_pause(
-        journal
-    ):
+    if settings.structured_suspension_persist_enabled and _has_open_durable_pause(journal):
         return
     _spawn_background(
         _persist_incomplete_turn(
@@ -854,7 +1078,6 @@ async def stream_chat(
     sink: EventSink,
     attachments: list[dict] | None = None,
     llm_credentials: LLMCredentials | None = None,
-    local_container_root_id: str | None = None,
 ) -> None:
     """Main entry: persist user message, run pipeline, persist assistant reply.
 
@@ -867,12 +1090,12 @@ async def stream_chat(
     message keeps only display metadata + each file's ``workspace_path`` (never the
     raw text), and attachments are still kept out of title/memory generation.
 
-    `local_container_root_id` (工作区对称化 D1a) is the desktop's default local
-    container root: when a **裸聊** turn first produces a file, it is lazily promoted
-    into a *local* workspace under this root (a per-conversation subpath) instead of
-    a cloud folder — so desktop and cloud are symmetric (each file-producing chat is
-    its own card). ``None`` (web / mobile / explicit "云端临时对话") keeps the cloud
-    lazy-promote. Ignored once the conversation already has a folder.
+    Lazy-promotion locality (工作区对称化 D1a) is read from the conversation itself
+    (``Conversation.local_container_root_id``, set by the desktop at creation): when a
+    **裸聊** turn first produces a file, a set root promotes it into a *local* workspace
+    (a per-conversation subpath), ``None`` keeps the cloud folder — so desktop and cloud
+    are symmetric and the turn vs. panel write order no longer decides locality. Ignored
+    once the conversation already has a folder.
     """
     try:
         async with async_session_factory() as session:
@@ -883,6 +1106,10 @@ async def stream_chat(
                 return
             folder_id = conv.folder_id
             title = conv.title
+            # Locality is conversation state now (工作区对称化 D1a), not a per-turn arg,
+            # so a 裸聊 promotes to the same place whether the turn or a panel write fires
+            # first. Set by the desktop at creation; None = cloud intent.
+            local_container_root_id = conv.local_container_root_id
             local_binding = await _resolve_local_binding(session, conv)
             profile_set = await _resolve_profile_set(session, conv, user_id)
 
@@ -926,9 +1153,7 @@ async def stream_chat(
                     content=user_message,
                     attachments=to_stored_metadata(resident_attachments),
                 )
-                history = await load_chat_context(
-                    session, conversation_id, max_messages=40
-                )
+                history = await load_chat_context(session, conversation_id, max_messages=40)
 
             # Reconcile the optimistic user bubble to its real row id, so a retry
             # after a mid-stream failure regenerates from the saved turn rather
@@ -1124,9 +1349,7 @@ async def record_local_turn(
                 await provider.close()
             if title:
                 async with async_session_factory() as session:
-                    await ConversationRepository(session).update_title(
-                        conversation_id, title
-                    )
+                    await ConversationRepository(session).update_title(conversation_id, title)
 
         # Refresh long-term memory off the turn (same idle debounce as stream_chat).
         schedule_consolidation(conversation_id)
@@ -1197,6 +1420,10 @@ async def regenerate_chat(
             title=conv.title,
             sink=sink,
             local_binding=local_binding,
+            user_message=user_message,
+            # Respect the conversation's stored locality (工作区对称化 D1a) if this
+            # regenerate is what first produces a file in a still-裸聊 chat.
+            local_container_root_id=conv.local_container_root_id,
         )
 
         # Folder-level lock (决策④): same workspace serialization as stream_chat.
@@ -1266,6 +1493,9 @@ async def resume_chat(
                 return
             folder_id = conv.folder_id
             title = conv.title
+            # Stored locality (工作区对称化 D1a): if the resumed tail is what first
+            # writes a file in a still-裸聊 chat, promote where the conversation intends.
+            local_container_root_id = conv.local_container_root_id
             local_binding = await _resolve_local_binding(session, conv)
             profile_set = await _resolve_profile_set(session, conv, user_id)
             # Reload the prior context exactly as a fresh send does (load_chat_context
@@ -1273,9 +1503,7 @@ async def resume_chat(
             # history's LENGTH, so resume re-supplies the messages to splice into the
             # rebuilt CEO window (window_from_journal, Phase 2 ④). No new turn landed
             # while the turn was paused, so this tails the same window the original saw.
-            history = await load_chat_context(
-                session, conversation_id, max_messages=40
-            )
+            history = await load_chat_context(session, conversation_id, max_messages=40)
 
         backend = _build_turn_backend(
             user_id=user_id,
@@ -1284,6 +1512,7 @@ async def resume_chat(
             title=title,
             sink=sink,
             local_binding=local_binding,
+            local_container_root_id=local_container_root_id,
         )
         session_saver, session_loader = _session_callbacks(conversation_id)
         suspension_saver, suspension_deleter = _suspension_callbacks()
@@ -1408,9 +1637,7 @@ def _spawn_background(coro: Coroutine[Any, Any, None]) -> asyncio.Task:
     return task
 
 
-async def _persist_job_turn(
-    *, user_id: str, conversation_id: str, result: dict
-) -> None:
+async def _persist_job_turn(*, user_id: str, conversation_id: str, result: dict) -> None:
     """Persist a handoff job's assistant reply + cost ledger under the job conv.
 
     Same shape as the interactive turn's persistence (message + 落账), minus title
@@ -1433,6 +1660,10 @@ async def _persist_job_turn(
                 metadata={
                     "input_tokens": result.get("input_tokens", 0),
                     "output_tokens": result.get("output_tokens", 0),
+                    # Full token breakdown for reload (Tier 2, 同 _persist_turn_result).
+                    "reasoning_tokens": result.get("reasoning_tokens", 0),
+                    "cache_hit_tokens": result.get("cache_hit_tokens", 0),
+                    "cache_miss_tokens": result.get("cache_miss_tokens", 0),
                     "rounds": result.get("rounds", 0),
                 },
             )
@@ -1523,9 +1754,7 @@ async def run_handoff_job(
             approvals_enabled=False,
             llm_credentials=llm_credentials,
         )
-        await _persist_job_turn(
-            user_id=user_id, conversation_id=job_conversation_id, result=result
-        )
+        await _persist_job_turn(user_id=user_id, conversation_id=job_conversation_id, result=result)
         result_ref = await create_snapshot(
             user_id=user_id,
             folder_id=None,
@@ -1614,9 +1843,7 @@ async def dispatch_handoff(
             )
         )
     except Exception as e:
-        logger.warning(
-            "handoff.dispatch_failed", conversation_id=conversation_id, error=str(e)
-        )
+        logger.warning("handoff.dispatch_failed", conversation_id=conversation_id, error=str(e))
         sink.emit(error_event("HANDOFF_DISPATCH_FAILED", str(e)))
     finally:
         if not sink._closed:

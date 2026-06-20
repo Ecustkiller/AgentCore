@@ -1,8 +1,3 @@
-import type { CheckpointDecision, SSEEvent } from "@agentcore/contract-types";
-import type { ProjectedTurn } from "@agentcore/protocol-conformance";
-import { Folder, Menu, SquarePen } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
 import { getTokens } from "@/api/client";
 import {
   type MessageDetail,
@@ -22,6 +17,11 @@ import { PauseCard } from "@/components/PauseCard";
 import { ResumeCard } from "@/components/ResumeCard";
 import { type MessageAttachment, readTextAttachment } from "@/lib/attachments";
 import { fold } from "@/protocol/fold";
+import type { CheckpointDecision, SSEEvent } from "@agentcore/contract-types";
+import type { ProjectedTurn } from "@agentcore/protocol-conformance";
+import { Folder, Menu, SquarePen } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 
 // One-shot handoff from a draft send (at `/`) to the freshly-created conversation's first
 // stream (at `/c/:id`). 直接对话: the 对话 tab opens a draft (no server conversation); the
@@ -160,7 +160,8 @@ function AssistantBubble({ turn, live }: { turn: Turn; live: boolean }) {
   const team = isMulti
     ? { agents: p.agents, runs: p.runs, progress: p.progress }
     : undefined;
-  const empty = !isMulti && p.process.length === 0 && !p.content && !p.reasoning;
+  const empty =
+    !isMulti && p.process.length === 0 && !p.content && !p.reasoning;
   // 回合总账 — populated by message_end (null while streaming, so it appears on finish).
   const cost = formatCost(p.cost?.total);
   return (
@@ -173,6 +174,7 @@ function AssistantBubble({ turn, live }: { turn: Turn; live: boolean }) {
           content={p.content}
           reasoning={p.reasoning}
           citations={p.citations}
+          captainContext={p.captainContext}
           team={team}
           debate={p.debate}
           debateRounds={p.debateRounds}
@@ -224,6 +226,7 @@ function HistoryAssistant({ m }: { m: MessageDetail }) {
         content={m.content ?? ""}
         reasoning={m.reasoning_content ?? undefined}
         citations={m.citations}
+        captainContext={m.runs?.captain_context ?? undefined}
         team={team}
         debate={debate}
       />
@@ -344,6 +347,7 @@ export function ChatPage() {
   // Keep the view pinned to the bottom for new/streamed content, EXCEPT right after an
   // older page is prepended: then restore the prior distance-from-bottom so the messages
   // under the user's eyes stay put (useLayoutEffect → before paint, no visible jump).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on every `turns`/`history` change to re-pin/restore scroll; the body reads refs, not these values
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -447,7 +451,10 @@ export function ChatPage() {
 
   // Stream a turn into the open conversation. `override` carries a draft's first message
   // across the remount (it bypasses the input state, which the new page doesn't have).
-  async function send(override?: { text: string; attachments: MessageAttachment[] }) {
+  async function send(override?: {
+    text: string;
+    attachments: MessageAttachment[];
+  }) {
     const text = (override?.text ?? input).trim();
     if (!text || !conversationId) return;
     // The handoff send (override) is an explicit one-shot (pendingFirstSend already cleared),
@@ -524,12 +531,15 @@ export function ChatPage() {
     const ac = new AbortController();
     abortRef.current = ac;
     try {
-      const outcome = await attachStream(conversationId, appendEvent, ac.signal);
+      const outcome = await attachStream(
+        conversationId,
+        appendEvent,
+        ac.signal,
+      );
       if (outcome === "none" && abortRef.current === ac) {
         setTurns((t) => t.slice(0, -1));
-        const { messages, hasMoreBefore: more } = await getMessages(
-          conversationId,
-        );
+        const { messages, hasMoreBefore: more } =
+          await getMessages(conversationId);
         if (abortRef.current === ac) {
           setHistory(messages);
           setHasMoreBefore(more);
@@ -589,7 +599,10 @@ export function ChatPage() {
     setPaused((p) => p.filter((x) => x.message_id !== messageId));
     setError(null);
     setSending(true);
-    setTurns((t) => [...t, { id: crypto.randomUUID(), userText: null, events: [] }]);
+    setTurns((t) => [
+      ...t,
+      { id: crypto.randomUUID(), userText: null, events: [] },
+    ]);
 
     const ac = new AbortController();
     abortRef.current = ac;
@@ -691,7 +704,10 @@ export function ChatPage() {
                 <AttachmentChips items={turn.attachments ?? []} />
               </div>
             )}
-            <AssistantBubble turn={turn} live={sending && i === turns.length - 1} />
+            <AssistantBubble
+              turn={turn}
+              live={sending && i === turns.length - 1}
+            />
           </div>
         ))}
       </div>
@@ -716,7 +732,9 @@ export function ChatPage() {
           <ResumeCard
             key={p.message_id}
             paused={p}
-            onResume={(decision, note) => void resume(p.message_id, decision, note)}
+            onResume={(decision, note) =>
+              void resume(p.message_id, decision, note)
+            }
           />
         ))}
 

@@ -163,7 +163,24 @@
     "finishReason": null,
     "content": "我来分工。",
     "reasoning": "",
-    "process": [],
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "我来分工。"
+      },
+      {
+        "kind": "tool",
+        "id": "tc1",
+        "tool_name": "file_write",
+        "arguments": {
+          "path": "a.py",
+          "content": "print(1)"
+        },
+        "result": "已写入",
+        "status": "success"
+      }
+    ],
     "citations": [],
     "agents": [
       {
@@ -228,7 +245,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "r2",
@@ -253,7 +271,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       }
     ],
     "progress": {

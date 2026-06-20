@@ -86,6 +86,10 @@ _*_timeline.txt
 # Docker volumes (local dev)
 .docker-data/
 
+# Local throwaway tooling artifacts (cookie-verify harness output: cloudflared
+# binary, self-signed certs incl. private key, logs, evidence json — all regenerated)
+.tools/
+
 # Server local data (MVP long-term memory files, see apps/server/agentcore/memory/store.py)
 apps/server/data/
 data/

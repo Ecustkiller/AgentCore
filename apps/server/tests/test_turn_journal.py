@@ -86,6 +86,66 @@ def test_finish_reason_only_round_trips():
     assert runs_from_entries(entries) == runs
 
 
+def test_error_round_trips_on_turn_end():
+    # A 报错回合 (Tier 2 a): no graph/process, just finish_reason=error + the terminal
+    # error on turn_end. It round-trips so the inline error card replays on reload — the
+    # live error rode a transport-only ``error`` SSE event, never journaled, so this
+    # outcome fact is its only durable home.
+    runs = {
+        "events": [],
+        "finish_reason": "error",
+        "error": {"code": "PIPELINE_ERROR", "message": "boom"},
+    }
+    entries = entries_from_runs(runs)
+    assert [e["kind"] for e in entries] == ["turn_end"]
+    assert entries[0]["payload"] == {
+        "finish_reason": "error",
+        "error": {"code": "PIPELINE_ERROR", "message": "boom"},
+    }
+    assert runs_from_entries(entries) == runs
+
+
+def test_error_keeps_turn_non_none_despite_empty_graph_gate():
+    # An execution-sourced 报错回合 (captain failed after running, no surface): its own run
+    # events gate to [] like any non-surfaced turn, but the turn_end carries the error, so
+    # the None-gate must NOT drop the turn — the error card still replays on reload (a2).
+    entries = [
+        {"kind": "turn_started", "payload": {"user_message": "go"}, "ts": None},
+        {"kind": "run_started", "payload": {"run_id": "cap"}, "ts": "t0"},
+        {
+            "kind": "round_boundary",
+            "payload": {"round_idx": 0, "run_id": "cap", "role": "captain"},
+            "ts": None,
+        },
+        {"kind": "run_completed", "payload": {"run_id": "cap"}, "ts": "t1"},
+        {
+            "kind": "turn_end",
+            "payload": {
+                "finish_reason": "error",
+                "error": {"code": "PIPELINE_ERROR", "message": "boom"},
+            },
+            "ts": None,
+        },
+    ]
+    projected = runs_from_entries(entries)
+    assert projected is not None
+    assert projected["events"] == []  # captain run events gated (no surface)
+    assert projected["finish_reason"] == "error"
+    assert projected["error"] == {"code": "PIPELINE_ERROR", "message": "boom"}
+
+
+def test_clean_turn_carries_no_error_key():
+    # A clean turn never grows an ``error`` key on projection — parity with
+    # _build_runs_payload, which only sets it for a 报错回合.
+    runs = {
+        "events": [{"type": "run_plan", "payload": {}, "timestamp": "t0"}],
+        "finish_reason": "end_turn",
+    }
+    projected = runs_from_entries(entries_from_runs(runs))
+    assert "error" not in projected
+    assert projected == runs
+
+
 def test_process_absent_key_not_emitted_on_projection():
     # A multi-agent turn (no process) must not grow a ``process`` key when projected
     # back, so the shape matches ``_build_runs_payload`` exactly.

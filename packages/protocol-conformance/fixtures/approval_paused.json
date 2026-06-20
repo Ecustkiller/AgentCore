@@ -36,6 +36,7 @@
     "finishReason": null,
     "content": "我需要运行代码。",
     "reasoning": "",
+    "captainContext": [],
     "process": [
       {
         "kind": "content",

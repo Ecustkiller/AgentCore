@@ -333,6 +333,63 @@ describe("projectExecution (fold)", () => {
     const late = projectExecution(plan, frames, "running");
     expect(late.runs.find((s) => s.id === "run-1")?.status).toBe("completed");
   });
+
+  // 升级实时可见: a worker's escalate folds onto its run (not the agent) so the node
+  // carries a ⚠️ badge + the detail shows the 问题/假设 — surfaced the instant it fires.
+  it("appends escalations onto the raising run, in fire order", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "run_escalation",
+        runId: "run-1",
+        agentId: "agent-1",
+        question: "用 Postgres 还是 MySQL?",
+        assumption: "暂用 Postgres",
+        blocking: true,
+      },
+      {
+        t: 3,
+        kind: "run_completed",
+        runId: "run-1",
+        agentId: "agent-1",
+        outputSummary: "done",
+        durationMs: 100,
+      },
+    ];
+    const exec = projectExecution(plan, frames, "running");
+    const run1 = exec.runs.find((s) => s.id === "run-1");
+    // Non-blocking: the run still completed despite escalating.
+    expect(run1?.status).toBe("completed");
+    expect(run1?.escalations).toEqual([
+      { question: "用 Postgres 还是 MySQL?", assumption: "暂用 Postgres", blocking: true },
+    ]);
+    // A run that never escalated carries an empty list (drives "no badge").
+    expect(exec.runs.find((s) => s.id === "run-2")?.escalations).toEqual([]);
+  });
+
+  it("maps a run_escalation event into an escalation frame", () => {
+    const frame = frameFromEvent({
+      type: "run_escalation",
+      timestamp: "t",
+      payload: {
+        run_id: "run-1",
+        agent_id: "agent-1",
+        question: "Q?",
+        assumption: "A",
+        blocking: false,
+      },
+    } as SSEEvent);
+    expect(frame).toEqual({
+      t: expect.any(Number),
+      kind: "run_escalation",
+      runId: "run-1",
+      agentId: "agent-1",
+      question: "Q?",
+      assumption: "A",
+      blocking: false,
+    });
+  });
 });
 
 // 结构化挂起 2a (7.2A): a `checkpoint_after` pause folds into the graph as

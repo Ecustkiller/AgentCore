@@ -1,10 +1,3 @@
-// 找人 (/im/new) — exact-match people search to start a DM, plus 黑名单 management.
-//
-// Search is server-visibility-filtered (任意搜人 护栏: a user who isn't discoverable, or
-// who only accepts contacts, won't appear / can't be DMed — the backend enforces it and
-// ships a precise zh refusal we surface). Tapping a result opens (or reuses) the DM.
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { getTokens } from "@/api/client";
 import {
   type BlockedUser,
@@ -14,6 +7,13 @@ import {
   startDm,
   unblockUser,
 } from "@/api/messaging";
+// 找人 (/im/new) — exact-match people search to start a DM, plus 黑名单 management.
+//
+// Search is server-visibility-filtered (任意搜人 护栏: a user who isn't discoverable, or
+// who only accepts contacts, won't appear / can't be DMed — the backend enforces it and
+// ships a precise zh refusal we surface). Tapping a result opens (or reuses) the DM.
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "@/pages/im/im.css";
 
 export function NewDmPage() {
@@ -90,11 +90,16 @@ export function NewDmPage() {
           className="search-input"
           value={query}
           placeholder="按用户名或显示名精确搜索"
+          // biome-ignore lint/a11y/noAutofocus: 找人页打开即聚焦搜索框是刻意的移动端 UX（用户来此页就是为了立刻搜索）
           autoFocus
           onChange={(e) => setQuery(e.target.value)}
         />
         {query && (
-          <button type="button" className="search-clear" onClick={() => setQuery("")}>
+          <button
+            type="button"
+            className="search-clear"
+            onClick={() => setQuery("")}
+          >
             ✕
           </button>
         )}
@@ -105,7 +110,9 @@ export function NewDmPage() {
 
         {query.trim() ? (
           <>
-            {searching && results === null && <p className="muted hint">搜索中…</p>}
+            {searching && results === null && (
+              <p className="muted hint">搜索中…</p>
+            )}
             {results !== null && results.length === 0 && !searching && (
               <p className="muted hint">没有找到匹配的用户。</p>
             )}
@@ -121,7 +128,9 @@ export function NewDmPage() {
                   {(u.display_name || u.username).charAt(0).toUpperCase()}
                 </span>
                 <span className="im-result-text">
-                  <span className="im-name">{u.display_name || u.username}</span>
+                  <span className="im-name">
+                    {u.display_name || u.username}
+                  </span>
                   <span className="im-result-handle">@{u.username}</span>
                 </span>
               </button>
@@ -137,7 +146,9 @@ export function NewDmPage() {
                     {(b.display_name || b.username).charAt(0).toUpperCase()}
                   </span>
                   <span className="im-result-text">
-                    <span className="im-name">{b.display_name || b.username}</span>
+                    <span className="im-name">
+                      {b.display_name || b.username}
+                    </span>
                     <span className="im-result-handle">@{b.username}</span>
                   </span>
                   <button

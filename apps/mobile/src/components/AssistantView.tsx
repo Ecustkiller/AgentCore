@@ -1,3 +1,6 @@
+import { DebateView, LiveDebateNarrative } from "@/components/DebateView";
+import { Markdown } from "@/components/Markdown";
+import { TeamView } from "@/components/TeamView";
 // Rich assistant rendering shared by live turns and history replay (手机端落地设计 P1 ·
 // 富渲染 + 多 Agent 团队视图). One {@link AssistantContent} consumes the same fields whether
 // they come from the live fold (ProjectedTurn) or a persisted message (MessageDetail):
@@ -11,6 +14,7 @@
 // Citations render as a source list under the message either way.
 import type {
   Citation,
+  ContextBlockWire,
   DebateNarrativeRound,
   DebateResultPayload,
   ProcessStep,
@@ -20,9 +24,6 @@ import type {
   ProjectedRun,
 } from "@agentcore/protocol-conformance";
 import { useState } from "react";
-import { DebateView, LiveDebateNarrative } from "@/components/DebateView";
-import { Markdown } from "@/components/Markdown";
-import { TeamView } from "@/components/TeamView";
 
 type ToolStepData = Extract<ProcessStep, { kind: "tool" }>;
 
@@ -37,6 +38,7 @@ export function AssistantContent({
   content,
   reasoning,
   citations,
+  captainContext,
   team,
   debate,
   debateRounds,
@@ -45,6 +47,10 @@ export function AssistantContent({
   content: string;
   reasoning?: string;
   citations?: Citation[];
+  /** 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): what the CEO captain actually read this
+   *  turn (系统提示 / 对话历史 / 原始请求), rendered turn-level on its bubble — present even on a
+   *  pure-chat turn (no team). */
+  captainContext?: ContextBlockWire[];
   team?: TeamProjection;
   debate?: DebateResultPayload | null;
   /** 辩论进行中的逐轮叙事 (fold 的 `debateRounds`)：`debate` 收场产物未到时实时叠出主持人逐
@@ -64,11 +70,73 @@ export function AssistantContent({
       ) : (
         <>
           {reasoning ? <Reasoning text={reasoning} /> : null}
-          {content ? <Markdown content={content} citations={citations} /> : null}
+          {content ? (
+            <Markdown content={content} citations={citations} />
+          ) : null}
         </>
       )}
-      {citations && citations.length > 0 ? <Citations items={citations} /> : null}
+      {captainContext && captainContext.length > 0 ? (
+        <ReceivedContext blocks={captainContext} />
+      ) : null}
+      {citations && citations.length > 0 ? (
+        <Citations items={citations} />
+      ) : null}
     </>
+  );
+}
+
+/** Context channel → 中文 label (上下文传递可视化). Mirrors the desktop CONTEXT_CHANNEL_META
+ *  labels so the two ends read the same (各端全新建; labels are chrome, not shared logic). */
+const CONTEXT_CHANNEL_LABEL: Record<string, string> = {
+  system: "系统提示",
+  history: "对话历史",
+  request: "原始请求",
+  team_position: "团队位置",
+  dependency: "前置结果",
+  workspace: "工作区",
+  task: "你的任务",
+  expected_output: "预期产出",
+  requirements: "产出要求",
+  steer: "中途指示",
+  team_result: "队员回传",
+};
+
+/** 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): the structured context the CEO captain was
+ *  fed this turn (系统提示 / 对话历史 / 原始请求), shown turn-level on its bubble. Collapsible
+ *  like 思考 (secondary to the answer). 决策②: the `system` block (verbatim 系统提示) is hidden
+ *  — mobile has no 用量明细 reveal, so the full prompt stays a desktop power-user surface. */
+function ReceivedContext({ blocks }: { blocks: ContextBlockWire[] }) {
+  const visible = blocks.filter((b) => b.channel !== "system");
+  if (visible.length === 0) return null;
+  return (
+    <details className="recv">
+      <summary>收到的上下文 · {visible.length} 段</summary>
+      <div className="recv-list">
+        {visible.map((b, i) => (
+          <div key={`${b.channel}-${i}`} className="recv-item">
+            <div className="recv-head">
+              <span className="recv-channel">
+                {CONTEXT_CHANNEL_LABEL[b.channel] ?? b.channel}
+              </span>
+              {b.heading && <span className="recv-heading">{b.heading}</span>}
+            </div>
+            {b.body && <pre className="recv-body">{b.body}</pre>}
+            {b.files.length > 0 && (
+              <div className="recv-files">
+                {b.files.map((f) => (
+                  <span key={f} className="recv-file">
+                    {f}
+                  </span>
+                ))}
+              </div>
+            )}
+            {b.truncated && (
+              <div className="recv-trunc">已截断（完整内容已传给 AI）</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -194,8 +262,10 @@ function ProcessTimeline({
     <div className="timeline">
       {groupToolRuns(steps).map((node, i) => {
         if (node.kind === "content")
+          // biome-ignore lint/suspicious/noArrayIndexKey: timeline is an append-only stream; segments never reorder, so the index is stable identity
           return <Markdown key={i} content={node.text} citations={citations} />;
         if (node.kind === "reasoning")
+          // biome-ignore lint/suspicious/noArrayIndexKey: timeline is an append-only stream; segments never reorder, so the index is stable identity
           return <Reasoning key={i} text={node.text} />;
         if (node.kind === "tool-group")
           return <ToolGroup key={node.tools[0].id} tools={node.tools} />;
@@ -269,7 +339,9 @@ function ToolStep({ step }: { step: ToolStepData }) {
       </button>
       {open && (args || step.result != null) && (
         <div className="tool-body">
-          {args && <pre className="tool-pre">{JSON.stringify(args, null, 2)}</pre>}
+          {args && (
+            <pre className="tool-pre">{JSON.stringify(args, null, 2)}</pre>
+          )}
           {step.result != null && step.result !== "" && (
             <pre className="tool-pre">{step.result}</pre>
           )}

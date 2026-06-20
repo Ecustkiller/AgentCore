@@ -1,3 +1,7 @@
+import {
+  type ResolveInteractionBody,
+  resolveInteraction,
+} from "@/api/interaction";
 // The interactive pause card — the actionable surface for a turn blocked on the user
 // (手机端落地设计 P1 · 交互式暂停放行). The conformance-checked fold computes
 // `pendingInteraction`; this turns it into buttons that POST the decision to the live
@@ -18,10 +22,6 @@ import type {
   ProjectedRun,
 } from "@agentcore/protocol-conformance";
 import { type ReactNode, useState } from "react";
-import {
-  type ResolveInteractionBody,
-  resolveInteraction,
-} from "@/api/interaction";
 
 /** Friendly zh labels for the GRANTABLE built-ins; falls back to the raw name. */
 const TOOL_LABELS: Record<string, string> = {
@@ -185,7 +185,9 @@ function CheckpointBody({
     <>
       <div className="pause-title">需要你拍板</div>
       <div className="pause-question">{pending.question}</div>
-      {pending.context && <div className="pause-context">{pending.context}</div>}
+      {pending.context && (
+        <div className="pause-context">{pending.context}</div>
+      )}
       <textarea
         className="pause-note"
         rows={2}
@@ -195,7 +197,11 @@ function CheckpointBody({
         onChange={(e) => setNote(e.target.value)}
       />
       <div className="pause-actions">
-        <Btn tone="primary" disabled={busy} onClick={() => onSubmit("continue")}>
+        <Btn
+          tone="primary"
+          disabled={busy}
+          onClick={() => onSubmit("continue")}
+        >
           继续
         </Btn>
         <Btn tone="danger" disabled={busy} onClick={() => onSubmit("stop")}>
@@ -248,7 +254,11 @@ function PlanReviewBody({
         onChange={(e) => setNote(e.target.value)}
       />
       <div className="pause-actions">
-        <Btn tone="primary" disabled={busy} onClick={() => onSubmit("continue")}>
+        <Btn
+          tone="primary"
+          disabled={busy}
+          onClick={() => onSubmit("continue")}
+        >
           继续
         </Btn>
         <Btn

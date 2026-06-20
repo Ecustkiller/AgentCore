@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from agentcore.core.log_context import get_log_value
 from agentcore.runtime.facts import Fact, record_turn_fact
 
 
@@ -111,6 +112,26 @@ class EventType(StrEnum):
     # growth and deliberately NOT journaled (a reloaded run shows the finished call
     # via the journaled tool_use_start/end — live progress is moot by then).
     RUN_TOOL_PROGRESS = "run_tool_progress"
+    # 升级实时可见 (escalation 实时 SSE): a delegated worker called ``escalate`` to flag a
+    # decision/blocker for the CEO. Emitted at the CALL instant (run-scoped) so the team UI
+    # surfaces「⚠️ {worker} 上报」live, instead of the signal staying buried in that worker's
+    # process timeline (a「上报问题」tool row the user must drill into) or only reaching the
+    # user folded into the CEO's post-synthesis reply. Transport-only (NOT journaled): the
+    # escalation's durable home is RunState.escalations (harvested from the transcript,
+    # surfaced in CEO synthesis + the worker's timeline) — this is its live twin, and like
+    # the debate round events it stays in _history so a reconnect re-shows it.
+    RUN_ESCALATION = "run_escalation"
+    # 阻塞式求决策 (escalate blocking=true): a delegated worker suspended itself on a
+    # 「只有用户能定、且猜错就作废」fork and is awaiting the user's call (the CEO is parked
+    # at its delegate mid-wave, so the worker asks the user directly). ESCALATION_REQUIRED
+    # surfaces the interactive card; ESCALATION_RESOLVED settles it (answer / timeout /
+    # 按假设继续). Journaled (see _JOURNAL_EVENT_TYPES) so the question + its resolution
+    # replay inline on reload — like the ask_user checkpoint pair, this exchange is
+    # conversation, not just gating. UNLIKE the halting gates the turn never flips to
+    # paused (siblings keep running); a reload after a turn-ending disconnect replays the
+    # pair as a dormant record (设计: 07-规划/阻塞式求决策设计 §4.5/§七).
+    ESCALATION_REQUIRED = "escalation_required"
+    ESCALATION_RESOLVED = "escalation_resolved"
     # 辩论编排（debate 工具 / 主持人）：一场辩论收场时 emit 的【完整结构化产物】——逐轮
     # 焦点 / 裁判 / 小结（交锋叙事线 L1/L2）+ 决策简报（结论卡）+ 各方→辩手 run_id 映射
     # （前端据此从执行图的辩手节点取发言全文 L3，不把全文塞进本事件）。进 journal（与
@@ -153,11 +174,22 @@ class SSEEvent:
             self.timestamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
 
 
-def message_start(message_id: str, *, conversation_id: str) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.MESSAGE_START,
-        payload={"message_id": message_id, "conversation_id": conversation_id},
-    )
+def message_start(
+    message_id: str, *, conversation_id: str, trace_id: str | None = None
+) -> SSEEvent:
+    # trace_id 关联气泡↔日志: stamp the turn's log correlation id (bound in the ambient log
+    # context at turn start) onto the opening event so the client can surface it for
+    # one-step log lookup ("这个气泡坏了" → grep trace_id=...). Read from context when not
+    # passed; omitted from the payload when absent (e.g. conformance vectors built outside
+    # a turn) so the wire shape + golden stay minimal.
+    payload: dict[str, Any] = {
+        "message_id": message_id,
+        "conversation_id": conversation_id,
+    }
+    tid = trace_id if trace_id is not None else get_log_value("trace_id")
+    if tid:
+        payload["trace_id"] = tid
+    return SSEEvent(type=EventType.MESSAGE_START, payload=payload)
 
 
 def content_delta(delta: str) -> SSEEvent:
@@ -784,6 +816,105 @@ def run_tool_progress(
     )
 
 
+def escalation_raised(
+    run_id: str,
+    agent_id: str,
+    *,
+    question: str,
+    assumption: str,
+    blocking: bool,
+) -> SSEEvent:
+    """A delegated worker raised an ``escalate`` — surfaced live, the moment it is called.
+
+    Run-scoped so the team UI attributes「⚠️ 上报」to the worker's node and raises a
+    turn-level notice without the user drilling into that worker's process timeline.
+    ``question`` is the worker's self-contained ask for the CEO; ``assumption`` is what it
+    proceeds on meanwhile (escalate 非阻塞 by design — the worker keeps working); ``blocking``
+    is the worker's severity flag (a wrong guess would void its product).
+
+    Transport-only liveliness (NOT in ``_JOURNAL_EVENT_TYPES``): the escalation's
+    authoritative record is ``RunState.escalations`` (harvested from the transcript and
+    folded into ``DelegateTool._format_for_ceo`` for the CEO to resolve). A reload rebuilds
+    the escalation from that durable record + the worker's journaled ``escalate`` tool call;
+    this event only closes the DURING-the-run visibility gap (peer of the debate round
+    events — stays in ``_history`` so a reconnect re-shows it).
+    """
+    return SSEEvent(
+        type=EventType.RUN_ESCALATION,
+        payload={
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "question": question,
+            "assumption": assumption,
+            "blocking": blocking,
+        },
+    )
+
+
+def escalation_required(
+    run_id: str,
+    agent_id: str,
+    *,
+    escalation_id: str,
+    question: str,
+    assumption: str,
+) -> SSEEvent:
+    """A delegated worker suspended on a blocking ``escalate`` — surfaces the decision card.
+
+    阻塞式求决策 (设计 §4.2/§4.5): the worker hit a「只有用户能定、且猜错就作废」fork and
+    parked itself on the interaction bridge (``InteractionKind.ESCALATION``); the CEO is
+    held at its ``delegate`` mid-wave, so the worker asks the user directly. ``escalation_id``
+    keys the pending interaction for the resolve endpoint; ``question`` is the worker's
+    self-contained ask; ``assumption`` is the fallback it will proceed on if no answer comes
+    (the timeout degrade). Run-scoped so the team UI attributes the card to this worker's node.
+
+    Journaled (see ``_JOURNAL_EVENT_TYPES``) so the prompt + its resolution replay inline on
+    reload — UNLIKE the (transport-only) non-blocking ``run_escalation`` banner. The turn does
+    NOT pause (siblings keep running); the card is interactive only while the turn is live
+    (a reload after a turn-ending disconnect replays it as a dormant record).
+    """
+    return SSEEvent(
+        type=EventType.ESCALATION_REQUIRED,
+        payload={
+            "escalation_id": escalation_id,
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "question": question,
+            "assumption": assumption,
+        },
+    )
+
+
+def escalation_resolved(
+    run_id: str,
+    agent_id: str,
+    *,
+    escalation_id: str,
+    status: str,
+    answer: str,
+) -> SSEEvent:
+    """A blocking ``escalate`` settled — the worker resumes (阻塞式求决策 §4.4).
+
+    ``status`` is ``"resolved"`` (the user answered — ``answer`` carries it, fed back into
+    the worker's loop with「以用户答复为准，回改与假设冲突的已做部分」) or ``"timeout"`` (no
+    answer within the window, or the user chose 按假设继续 — the worker falls back to its
+    stated assumption, i.e. degrades to today's non-blocking behaviour). Emitted by the
+    suspending tool's awaiter ONLY (单一发射者: never by the resolve route), so the event
+    always matches what the worker actually did. Journaled as the twin of
+    ``escalation_required`` so the exchange replays inline on reload.
+    """
+    return SSEEvent(
+        type=EventType.ESCALATION_RESOLVED,
+        payload={
+            "escalation_id": escalation_id,
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "status": status,
+            "answer": answer,
+        },
+    )
+
+
 def run_completed(
     run_id: str,
     agent_id: str,
@@ -944,6 +1075,11 @@ _JOURNAL_EVENT_TYPES = frozenset(
         # its resolution replay inline on reload, same as ask_user checkpoints.
         EventType.PLAN_REVIEW_REQUIRED,
         EventType.PLAN_REVIEW_RESOLVED,
+        # Blocking escalate (worker → user 求决策): journaled so the worker's question +
+        # its resolution replay inline on reload, same as the ask_user checkpoint pair.
+        # (The non-blocking ``run_escalation`` banner stays transport-only above.)
+        EventType.ESCALATION_REQUIRED,
+        EventType.ESCALATION_RESOLVED,
     }
 )
 
@@ -1036,15 +1172,16 @@ class EventSink:
         # journal), accumulated as they are emitted so the team graph can be
         # persisted and replayed. Empty for a pure single-agent turn.
         self._journal: list[dict[str, Any]] = []
-        # Single-agent process timeline (前端UX设计.md §一B): the CEO's own thinking,
-        # reply text, and tool calls interleaved in emission order, folded into
-        # compact segments (consecutive reasoning deltas coalesce into one reasoning
-        # step, consecutive content deltas into one content step, one step per tool
-        # call). This is the Cursor 式全内联时间线 the client replays for a single-agent
-        # turn — the team-graph journal above stays None there. ``_has_run_plan`` marks
-        # the turn as multi-agent (graph instead), ``_has_tool`` gates persistence (a
-        # tool-less turn replays from reasoning_content + message content, no process
-        # payload — there is no interleaving to preserve without tools).
+        # Process timeline (前端UX设计.md §一B): the CEO's own thinking, reply text, and
+        # tool calls interleaved in emission order, folded into compact segments
+        # (consecutive reasoning deltas coalesce into one reasoning step, consecutive
+        # content deltas into one content step, one step per tool call). This is the
+        # Cursor 式全内联时间线 the client replays — for single-agent AND multi-agent turns
+        # (统一团队时间线): on a delegating turn the ``delegate`` step marks where the team
+        # graph slots in at render (worker activity rides the journal above). ``_has_tool``
+        # gates persistence (a tool-less turn replays from reasoning_content + message
+        # content, no process payload — there is no interleaving to preserve without
+        # tools); ``_has_run_plan`` marks the turn as multi-agent (used elsewhere).
         self._process: list[dict[str, Any]] = []
         self._has_run_plan = False
         self._has_tool = False
@@ -1276,20 +1413,64 @@ class EventSink:
         return self._journal if has_surface else None
 
     def process_timeline(self) -> list[dict[str, Any]] | None:
-        """This single-agent turn's「思考·正文·工具」inline timeline, or None.
+        """This turn's「思考·正文·工具」inline timeline (the CEO's steps), or None.
 
-        None for a multi-agent turn (``run_plan`` → the team graph carries the
-        activity instead) or a turn that used no tool: a tool-less turn has no
-        interleaving to preserve (reasoning always precedes the reply), so it
-        replays from ``reasoning_content`` (one thinking segment) + the message
-        content (the answer) — no process payload needed. Otherwise the ordered
-        reasoning/content/tool steps the client folds into the inline timeline,
-        persisted via the journal (projected as the message's ``runs.process``);
-        the trailing content step is the final answer.
+        Carries the CEO captain's own ordered reasoning / content / tool steps for
+        BOTH single-agent AND multi-agent turns (统一团队时间线): on a delegating turn
+        the steps are still the CEO's — the ``delegate`` tool step marks where the
+        client slots the team graph in at render, while worker activity rides
+        ``events`` (the journal), not here. Persisting it lets a reloaded team turn
+        rebuild the same inline timeline its live twin showed (前端UX设计.md §一B).
+
+        None only for a turn that used NO tool: a tool-less turn has no interleaving
+        to preserve (reasoning always precedes the reply), so it replays from
+        ``reasoning_content`` (one thinking segment) + the message content (the
+        answer) — no process payload needed. Persisted via the journal (projected as
+        the message's ``runs.process``); the trailing content step is the final answer.
         """
-        if self._has_run_plan or not self._has_tool:
+        if not self._has_tool:
             return None
         return self._process or None
+
+    def captain_context(self) -> list[dict[str, Any]] | None:
+        """The CEO captain's received context (上下文传递可视化 通道①+⑤), or None.
+
+        Scans the journal for the captain run (``run_started`` kind=``captain`` — the
+        turn's root) and CONCATENATES every ``run_context`` it emitted: the structured
+        context the CEO was fed this turn (``system`` / ``history`` / ``request``), GROWN
+        by each post-delegation team readback (``team_result`` — 通道⑤: 队员产物回流). The
+        captain emits run_context more than once (opening + once per delegate batch), so
+        the blocks accumulate in journal order — same APPEND the live/replay folds do.
+        TURN-LEVEL — the captain is the bubble *above* the graph, so this rides the message
+        itself (present even on a pure-chat turn that never delegated), NOT a graph node.
+        None when the captain shipped no context (e.g. a resume tail, whose opening rode
+        the pre-pause segment). Drives ``_build_runs_payload`` so a pure-chat turn now
+        persists a journal (otherwise None-gated) and replays its captain context on reload.
+        """
+        from agentcore.runtime.runs.types import RunKind
+
+        captain_run_id: str | None = None
+        for e in self._journal:
+            payload = e.get("payload") or {}
+            if (
+                e.get("type") == EventType.RUN_STARTED.value
+                and payload.get("kind") == RunKind.CAPTAIN.value
+            ):
+                captain_run_id = payload.get("run_id")
+                break
+        if captain_run_id is None:
+            return None
+        found = False
+        blocks: list[dict[str, Any]] = []
+        for e in self._journal:
+            payload = e.get("payload") or {}
+            if (
+                e.get("type") == EventType.RUN_CONTEXT.value
+                and payload.get("run_id") == captain_run_id
+            ):
+                found = True
+                blocks.extend(payload.get("blocks") or [])
+        return blocks if found else None
 
     def close(self) -> None:
         """Signal end-of-stream to consumer."""

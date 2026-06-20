@@ -1,17 +1,3 @@
-// 历史对话抽屉 (手机端对话页重设计 · 抽屉式直聊).
-//
-// The chat page is now「开盖即聊」(a fresh draft on the 对话 tab); the conversation history
-// that used to be the landing list lives here, as a left slide-in drawer opened from the chat
-// header's ☰. Mirrors the desktop sidebar's recent-conversations + the industry pattern
-// (ChatGPT/Claude 左抽屉历史). Hosts the same management surface the old list page had —
-// 搜索 / 已归档 / 行内 重命名·归档·删除 — reusing the shared primitives in conversations.tsx.
-//
-// Data is fetched lazily on open (and refetched when the archived view toggles), so a closed
-// drawer costs nothing. Picking a conversation routes to /c/:id and closes; ✎ starts a new
-// draft (routes to /, the draft home) and closes.
-import { useEffect, useRef, useState } from "react";
-import { SquarePen } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { getTokens } from "@/api/client";
 import {
   type ConversationSummary,
@@ -28,6 +14,20 @@ import {
   SearchResults,
   timeLabel,
 } from "@/components/conversations";
+import { SquarePen } from "lucide-react";
+// 历史对话抽屉 (手机端对话页重设计 · 抽屉式直聊).
+//
+// The chat page is now「开盖即聊」(a fresh draft on the 对话 tab); the conversation history
+// that used to be the landing list lives here, as a left slide-in drawer opened from the chat
+// header's ☰. Mirrors the desktop sidebar's recent-conversations + the industry pattern
+// (ChatGPT/Claude 左抽屉历史). Hosts the same management surface the old list page had —
+// 搜索 / 已归档 / 行内 重命名·归档·删除 — reusing the shared primitives in conversations.tsx.
+//
+// Data is fetched lazily on open (and refetched when the archived view toggles), so a closed
+// drawer costs nothing. Picking a conversation routes to /c/:id and closes; ✎ starts a new
+// draft (routes to /, the draft home) and closes.
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 export function ConversationDrawer({
   open,
@@ -214,8 +214,9 @@ export function ConversationDrawer({
       const updated = await renameConversation(conv.id, title);
       setItems(
         (xs) =>
-          xs?.map((x) => (x.id === conv.id ? { ...x, title: updated.title } : x)) ??
-          xs,
+          xs?.map((x) =>
+            x.id === conv.id ? { ...x, title: updated.title } : x,
+          ) ?? xs,
       );
       setRenaming(null);
     } catch (e) {
@@ -272,6 +273,7 @@ export function ConversationDrawer({
         className="drawer"
         ref={panelRef}
         style={drag ? { transform: `translateX(${drag.x}px)` } : undefined}
+        // biome-ignore lint/a11y/useSemanticElements: swipe/drag drawer panel; migrating to native <dialog> (showModal/::backdrop) is a separate a11y task
         role="dialog"
         aria-modal={open}
         aria-label="对话历史"
@@ -339,7 +341,9 @@ export function ConversationDrawer({
             {items === null && !error && <p className="muted hint">加载中…</p>}
             {items?.length === 0 && (
               <p className="muted hint">
-                {archivedView ? "没有已归档的对话。" : "还没有对话，点 ✎ 开始。"}
+                {archivedView
+                  ? "没有已归档的对话。"
+                  : "还没有对话，点 ✎ 开始。"}
               </p>
             )}
             {items?.map((c) => (

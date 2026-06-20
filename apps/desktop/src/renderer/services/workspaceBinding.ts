@@ -16,7 +16,7 @@ type Schemas = components["schemas"];
 /** Workspace mode (generated from backend `WorkspaceBindingResponse.mode`). */
 export type WorkspaceMode = Schemas["WorkspaceBindingResponse"]["mode"];
 /** Binding scope (generated from backend `WorkspaceBindingResponse.scope`). */
-export type BindingScope = Schemas["WorkspaceBindingResponse"]["scope"];
+type BindingScope = Schemas["WorkspaceBindingResponse"]["scope"];
 
 export interface WorkspaceBinding {
   mode: WorkspaceMode;

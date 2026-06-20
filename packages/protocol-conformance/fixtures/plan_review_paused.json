@@ -115,6 +115,7 @@
     "finishReason": null,
     "content": "",
     "reasoning": "",
+    "captainContext": [],
     "process": [],
     "citations": [],
     "agents": [
@@ -180,7 +181,8 @@
           "status": "pending",
           "decision": null
         },
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "r2",
@@ -205,7 +207,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       }
     ],
     "progress": {

@@ -113,6 +113,7 @@
     "finishReason": "end_turn",
     "content": "依据 [1] 可知……",
     "reasoning": "先查资料再作答。",
+    "captainContext": [],
     "process": [
       {
         "kind": "reasoning",

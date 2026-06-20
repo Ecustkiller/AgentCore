@@ -380,7 +380,13 @@
     "finishReason": "cancelled",
     "content": "我来组织一场多方圆桌。",
     "reasoning": "",
-    "process": [],
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "我来组织一场多方圆桌。"
+      }
+    ],
     "citations": [],
     "agents": [
       {
@@ -478,7 +484,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "rt_mod1_r1_a",
@@ -513,7 +520,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "rt_mod1_r1_b",
@@ -548,7 +556,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "rt_mod1_r1_c",
@@ -583,7 +592,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "rt_mod1_r2_a",
@@ -606,7 +616,8 @@
         "revisionOf": "rt_mod1_r1_a",
         "revision": 2,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "rt_mod1_r2_b",
@@ -629,7 +640,8 @@
         "revisionOf": "rt_mod1_r1_b",
         "revision": 2,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       }
     ],
     "progress": {

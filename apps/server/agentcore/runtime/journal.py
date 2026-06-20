@@ -73,11 +73,17 @@ def entries_from_runs(runs: dict[str, Any] | None) -> list[dict[str, Any]]:
                 "ts": None,
             }
         )
+    # turn_end (the per-turn outcome fact): finish_reason + an optional error. A 报错回合
+    # carries its error here so the inline error card replays on reload (Tier 2 a) — the
+    # live error rides a transport-only ``error`` SSE event (never journaled), so this
+    # outcome fact is its only durable home. Emitted when EITHER is present.
     finish_reason = runs.get("finish_reason")
-    if finish_reason is not None:
-        entries.append(
-            {"kind": KIND_TURN_END, "payload": {"finish_reason": finish_reason}, "ts": None}
-        )
+    run_error = runs.get("error")
+    if finish_reason is not None or run_error is not None:
+        payload: dict[str, Any] = {"finish_reason": finish_reason}
+        if run_error is not None:
+            payload["error"] = run_error
+        entries.append({"kind": KIND_TURN_END, "payload": payload, "ts": None})
     return entries
 
 
@@ -188,7 +194,16 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
     events: list[dict[str, Any]] = []
     process: list[dict[str, Any]] = []
     finish_reason: str | None = None
+    # The 报错回合 outcome (code + message) carried on turn_end, projected back so the
+    # bubble rebuilds its inline error card on reload (Tier 2 a). None for a clean turn.
+    turn_error: dict[str, Any] | None = None
     has_exec_facts = False
+    # 上下文传递可视化 通道①: the CEO captain's received context is TURN-LEVEL (the chat
+    # bubble above the graph), so it is lifted out of the node events into captain_context
+    # — present even on a pure-chat turn (no surface), where the events gate to []. Keyed
+    # by the captain run id (run_started kind=captain).
+    captain_run_id: str | None = None
+    captain_context: list[dict[str, Any]] | None = None
     # deltas 退场: a worker/revision run's full output + thinking now lives only in its
     # ``message_final`` fact (the per-token run_output_delta / run_reasoning_delta are no
     # longer journaled). Collect those finals (run_id → {content, reasoning}) and the
@@ -201,6 +216,7 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
         payload = entry.get("payload") or {}
         if kind == KIND_TURN_END:
             finish_reason = payload.get("finish_reason")
+            turn_error = payload.get("error")
         elif kind == FactKind.MESSAGE_FINAL.value:
             # An execution fact (skipped from events like its peers), BUT its full
             # text is replayed as a synthetic delta block (spliced below). Collect
@@ -227,14 +243,29 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
         else:
             # Remember each agent (worker / revision) run's agent_id so the synthetic
             # delta block can be attributed (the captain run_started is kind=captain →
-            # excluded, so its message_final never becomes a run-node delta).
-            if (
-                kind == EventType.RUN_STARTED.value
-                and payload.get("kind") == RunKind.AGENT.value
+            # excluded, so its message_final never becomes a run-node delta). The captain
+            # run id is remembered too, so its run_context lifts to captain_context below.
+            if kind == EventType.RUN_STARTED.value:
+                run_kind = payload.get("kind")
+                if run_kind == RunKind.AGENT.value:
+                    run_id = payload.get("run_id")
+                    if run_id:
+                        agent_run_ids[run_id] = payload.get("agent_id") or ""
+                elif run_kind == RunKind.CAPTAIN.value:
+                    captain_run_id = payload.get("run_id")
+            elif (
+                kind == EventType.RUN_CONTEXT.value
+                and captain_run_id is not None
+                and payload.get("run_id") == captain_run_id
             ):
-                run_id = payload.get("run_id")
-                if run_id:
-                    agent_run_ids[run_id] = payload.get("agent_id") or ""
+                # 上下文传递可视化 通道①+⑤: capture the captain's context turn-level, GROWING
+                # it across every emit (opening + each post-delegation team readback) — the
+                # same APPEND the live/replay folds do. Still appended to events below (kept
+                # for the team-graph round-trip); the client routes it off the captain node
+                # and reads it from captain_context instead.
+                if captain_context is None:
+                    captain_context = []
+                captain_context.extend(payload.get("blocks") or [])
             events.append(
                 {"type": kind, "payload": payload, "timestamp": entry.get("ts")}
             )
@@ -247,12 +278,20 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
         if not any(e["type"] in _JOURNAL_SURFACE_TYPES for e in events):
             events = []
         # None-gate: an execution-sourced turn with no graph + no process is a plain
-        # chat turn → render a plain bubble (the facts still persist for rebuild).
-        if not events and not process:
+        # chat turn → render a plain bubble (the facts still persist for rebuild). A
+        # captain_context keeps it non-None: a pure-chat turn still has「收到的上下文」to
+        # replay on the CEO bubble (上下文传递可视化 通道①), even with no graph/process.
+        # A turn_error keeps it non-None too: a 报错回合 (e.g. the captain failed after
+        # workers ran) must still replay its error card on reload (Tier 2 a).
+        if not events and not process and not captain_context and not turn_error:
             return None
     runs: dict[str, Any] = {"events": events, "finish_reason": finish_reason}
     if process:
         runs["process"] = process
+    if captain_context is not None:
+        runs["captain_context"] = captain_context
+    if turn_error is not None:
+        runs["error"] = turn_error
     return runs
 
 

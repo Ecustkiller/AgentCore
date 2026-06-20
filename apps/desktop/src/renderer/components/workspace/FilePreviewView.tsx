@@ -2,11 +2,13 @@ import { FilePreviewBody } from "@/components/files/FilePreviewBody";
 import { Centered, IconButton, InlineError } from "@/components/files/parts";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { FilePreviewResult, FileSource } from "@/lib/fileSource";
-import { notifyError } from "@/lib/toast";
+import { notifyActionError, notifyError } from "@/lib/toast";
 import {
   ChevronLeft,
   Download,
+  ExternalLink,
   FileText,
+  FolderSearch,
   Loader2,
   Pencil,
   Save,
@@ -63,6 +65,22 @@ export function FilePreviewView({
       /* transient; the header button just re-enables */
     } finally {
       setDownloading(false);
+    }
+  };
+
+  // 系统集成（仅本地源实现这两个方法 → 按存在性显隐，不按源分支）。
+  const onReveal = async () => {
+    try {
+      await source.revealInOsFileManager?.(path);
+    } catch (e) {
+      notifyActionError("无法在资源管理器中显示", e);
+    }
+  };
+  const onOpenExternal = async () => {
+    try {
+      await source.openWithOsDefaultApp?.(path);
+    } catch (e) {
+      notifyActionError("无法用默认程序打开", e);
     }
   };
 
@@ -163,6 +181,22 @@ export function FilePreviewView({
             {canEdit && (
               <IconButton title="编辑" onClick={startEdit}>
                 <Pencil size={14} />
+              </IconButton>
+            )}
+            {source.openWithOsDefaultApp && (
+              <IconButton
+                title="用默认程序打开"
+                onClick={() => void onOpenExternal()}
+              >
+                <ExternalLink size={14} />
+              </IconButton>
+            )}
+            {source.revealInOsFileManager && (
+              <IconButton
+                title="在资源管理器中显示"
+                onClick={() => void onReveal()}
+              >
+                <FolderSearch size={14} />
               </IconButton>
             )}
             {source.download && (

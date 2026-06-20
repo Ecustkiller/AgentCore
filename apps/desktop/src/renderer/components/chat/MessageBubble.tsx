@@ -9,8 +9,13 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { referencedCitationNumbers } from "@/lib/citations";
 import { copyText } from "@/lib/clipboard";
 import { errorActionForCode } from "@/lib/errors";
+import {
+  fileArtifactsFromExecution,
+  fileArtifactsFromProcess,
+  mergeArtifacts,
+} from "@/lib/fileArtifacts";
 import { formatCompact, formatCost, formatMessageTime } from "@/lib/format";
-import { groupToolRuns } from "@/lib/processTimeline";
+import { groupToolRuns, isOrchestrationTool } from "@/lib/processTimeline";
 import { notifyError } from "@/lib/toast";
 import { deleteMessage, getMessagePrompt } from "@/services/messages";
 import { runRegenerate } from "@/services/turns";
@@ -23,6 +28,8 @@ import {
   useActiveMessageFocus,
   useConversationStore,
 } from "@/stores/conversation";
+import { type ExecutionJournal, useMessageExecution } from "@/stores/execution";
+import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import type { Citation, ProcessStep } from "@/types/events";
 import {
@@ -32,11 +39,13 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  CircleOff,
   CircleSlash,
   Code2,
   Copy,
   Download,
   FileText,
+  Fingerprint,
   Folder,
   Globe,
   HelpCircle,
@@ -47,10 +56,12 @@ import {
   PenLine,
   Pencil,
   RefreshCw,
+  Repeat,
   ScrollText,
   Search,
   Terminal,
   Trash2,
+  TrendingDown,
   Users,
   Wrench,
   X,
@@ -58,10 +69,12 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { CheckpointCard } from "./CheckpointCard";
+import { FileArtifactsCard } from "./FileArtifactsCard";
 import { InlineTeamGraph } from "./InlineTeamGraph";
 import { Markdown } from "./Markdown";
 import { NonBlockingAskCard } from "./NonBlockingAskCard";
 import { PlanReviewCard } from "./PlanReviewCard";
+import { ReceivedContextSection } from "./ReceivedContext";
 import { type CitationFlash, SourceCards } from "./SourceCards";
 import {
   type ToolResultData,
@@ -687,8 +700,7 @@ function ProcessRow({
 }
 
 /**
- * The single-agent turn's「思考·正文·工具」inline timeline (前端UX设计.md §一B —
- * Cursor 式全内联).
+ * The turn's「思考·正文·工具」inline timeline (前端UX设计.md §一B — Cursor 式全内联).
  *
  * Renders the CEO's reasoning, reply text, and tool calls in their TRUE
  * chronological order as one stream: reasoning segments are muted collapsible
@@ -698,6 +710,13 @@ function ProcessRow({
  * reply. A reloaded tool-less turn carries no persisted content steps (only tools
  * journal interleaving), so it falls back to rendering `fallbackContent`
  * (message.content) as the trailing answer — the reply never disappears.
+ *
+ * 统一团队时间线: when the turn delegated (`executionId` set), the inline team
+ * graph slots IN at the `delegate`/`debate` step's chronological position — so the
+ * CEO's pre-/post-delegation thinking, reply, and own tools stay in true order
+ * around the team's work, instead of being pooled below a fixed graph. Reload now
+ * matches live (multi-agent `process[]` is persisted and replayed via `journal`);
+ * only legacy rows saved before that persistence fall back to the standalone layout.
  */
 function ProcessTimeline({
   process,
@@ -706,6 +725,9 @@ function ProcessTimeline({
   onCitationClick,
   composingTool,
   fallbackContent,
+  executionId,
+  messageId,
+  journal,
 }: {
   process: ProcessStep[];
   isStreaming: boolean;
@@ -713,6 +735,12 @@ function ProcessTimeline({
   onCitationClick: (n: number) => void;
   composingTool: { toolName: string; chars: number } | null;
   fallbackContent: string;
+  /** Set on a multi-agent turn — slots the team graph at the delegate step. */
+  executionId?: string | null;
+  /** This assistant message id — scopes the inline team graph's execution slot. */
+  messageId?: string;
+  /** Persisted journal for a reloaded team turn (live turns stream into the slot). */
+  journal?: ExecutionJournal;
 }) {
   const last = process[process.length - 1];
   // The timeline carries the reply when it has a content step; otherwise (a
@@ -733,6 +761,15 @@ function ProcessTimeline({
   // (前端UX设计.md §一B); reasoning/content stay 1:1 and break runs, so order is
   // preserved. View-only — `process[]` is untouched, so journal/conformance are not.
   const nodes = groupToolRuns(process);
+  // 统一团队时间线: a multi-agent turn slots its team graph at the FIRST orchestration
+  // step (delegate/debate). Multi-batch delegates merge into one execution/graph, so
+  // only the first step hosts it; any later orchestration step renders as a plain row.
+  const teamNodeIdx =
+    executionId && messageId
+      ? nodes.findIndex(
+          (n) => n.kind === "tool" && isOrchestrationTool(n.step.tool_name),
+        )
+      : -1;
 
   return (
     <div className="space-y-2">
@@ -740,6 +777,18 @@ function ProcessTimeline({
         // The trailing node carries the live cue (streaming cursor / dots / the
         // expanded active tool group); finished nodes stay static & collapsed.
         const live = isStreaming && i === nodes.length - 1;
+        // Team boundary: render the inline collaboration graph in place of the
+        // delegate/debate tool row, at its true chronological position.
+        if (i === teamNodeIdx && executionId && messageId) {
+          return (
+            <InlineTeamGraph
+              key={executionId}
+              messageId={messageId}
+              executionId={executionId}
+              journal={journal}
+            />
+          );
+        }
         if (node.kind === "tool-group") {
           return (
             <ProcessToolGroup
@@ -762,6 +811,16 @@ function ProcessTimeline({
           />
         );
       })}
+      {/* Defensive: a team turn whose orchestration step isn't in the timeline
+          (shouldn't happen live — delegate's tool step precedes run_plan) still shows
+          its graph below, so the team's work is never dropped. */}
+      {executionId && messageId && teamNodeIdx === -1 && (
+        <InlineTeamGraph
+          messageId={messageId}
+          executionId={executionId}
+          journal={journal}
+        />
+      )}
       {!hasContentStep && fallbackContent && (
         <Markdown
           content={fallbackContent}
@@ -1002,6 +1061,72 @@ function UserMessage({ message }: Props) {
   );
 }
 
+/** A non-normal turn ending → a quiet status chip framing the bubble (回合结束原因).
+ * `end_turn` (normal) and `error` (already framed by the inline error card) return
+ * null. The three degraded-completion endings carry the `warning` tone; a user /
+ * disconnect 中断 stays `muted` (色彩 token：cancelled → muted). */
+function finishReasonChip(
+  reason: string | undefined,
+): { label: string; Icon: LucideIcon; tone: "muted" | "warning" } | null {
+  switch (reason) {
+    case "cancelled":
+      return {
+        label: "已中断 · 已保存完成的部分",
+        Icon: CircleSlash,
+        tone: "muted",
+      };
+    case "max_rounds":
+      return {
+        label: "已达最大轮次 · 提前收尾",
+        Icon: Repeat,
+        tone: "warning",
+      };
+    case "degraded":
+      return {
+        label: "降级完成 · 模型多次空响应",
+        Icon: TrendingDown,
+        tone: "warning",
+      };
+    case "unproductive":
+      return {
+        label: "无有效进展 · 提前收尾",
+        Icon: CircleOff,
+        tone: "warning",
+      };
+    default:
+      return null;
+  }
+}
+
+const FINISH_CHIP_TONE: Record<"muted" | "warning", string> = {
+  muted: "bg-muted text-muted-foreground",
+  warning: "bg-warning/10 text-warning",
+};
+
+/**
+ * 多 Agent 回合的「本回合产出文件」卡。独立成子组件，把对 execution slot 的逐帧订阅
+ * 圈在这里 —— 团队执行流不断推进时只重渲这张卡，不连累整条答复气泡。汇总 CEO captain
+ * （也落在 process）与各 worker（落在 execution）的文件变更，去重后展示。
+ */
+function MultiAgentFileArtifacts({
+  messageId,
+  process,
+}: {
+  messageId: string;
+  process: ProcessStep[] | undefined;
+}) {
+  const execution = useMessageExecution(messageId);
+  const artifacts = useMemo(
+    () =>
+      mergeArtifacts(
+        fileArtifactsFromProcess(process),
+        fileArtifactsFromExecution(execution),
+      ),
+    [process, execution],
+  );
+  return <FileArtifactsCard artifacts={artifacts} />;
+}
+
 function AssistantMessage({ message }: Props) {
   const isGenerating = useActiveGenerating();
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
@@ -1012,6 +1137,10 @@ function AssistantMessage({ message }: Props) {
     (s) => s.messageCosts[message.id]?.cost.total ?? null,
   );
   const { copied, onCopy } = useCopyAction(() => message.content);
+  // dev-only「复制 trace id」: copy the turn's log correlation id to grep its logs.
+  const { copied: traceCopied, onCopy: onCopyTrace } = useCopyAction(
+    () => message.traceId ?? "",
+  );
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const navigate = useNavigate();
   // A config remedy for a mid-stream failure (e.g. an invalid key → 去配置); null
@@ -1021,11 +1150,15 @@ function AssistantMessage({ message }: Props) {
     : null;
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
-  // Single-agent turns render the merged 思考+工具 process timeline; a multi-agent
-  // turn (executionId set) keeps the standalone ThinkingPanel — its team graph
-  // already carries the tool activity (前端UX设计.md §一).
-  const hasProcess =
-    message.executionId === null && (message.process?.length ?? 0) > 0;
+  // 用量明细 (决策②/③): gates the captain context's `system` block + auto-expands it.
+  const usageDetail = useUIStore((s) => s.usageDetail);
+  const captainContext = message.captainContext ?? [];
+  // The inline「思考·正文·工具」timeline renders whenever we have process steps —
+  // single-agent AND multi-agent, live and reload alike, where the team graph slots
+  // in at the delegate step (统一团队时间线). Only a LEGACY multi-agent row saved before
+  // `process[]` was persisted carries none, falling through to the standalone
+  // ThinkingPanel + team graph + answer layout below.
+  const hasProcess = (message.process?.length ?? 0) > 0;
   // Stable ref so Markdown's memo holds across idle re-renders (a fresh `?? []`
   // each render would otherwise re-render the whole body needlessly).
   const citations = useMemo(() => message.citations ?? [], [message.citations]);
@@ -1038,11 +1171,22 @@ function AssistantMessage({ message }: Props) {
   const checkpoints = message.checkpoints ?? [];
   const nonBlockingAsks = message.nonBlockingAsks ?? [];
   const planReviews = message.planReviews ?? [];
-  // A turn salvaged after a disconnect / stop (断线别白干): the backend persisted the
-  // finished team work as an incomplete message, flagged via runs.finish_reason. A
-  // quiet status chip frames the bubble as interrupted, not as a normal reply.
-  const isIncomplete =
-    !message.isStreaming && message.runs?.finishReason === "cancelled";
+  // 「本回合产出文件」清单 (前端展示完善规划.md P1)。单聊直接从 process 取（无 execution）;
+  // 多 Agent 改走 <MultiAgentFileArtifacts/>（订阅 execution slot，逐帧订阅圈在子组件里）。
+  const singleAgentArtifacts = useMemo(
+    () =>
+      message.executionId === null
+        ? fileArtifactsFromProcess(message.process)
+        : [],
+    [message.executionId, message.process],
+  );
+  // 回合结束原因 chip (Tier 1): any non-normal ending (中断 / 达轮次 / 降级 / 无进展)
+  // frames the bubble with a quiet status chip instead of passing as a normal reply.
+  // Live value wins; a reloaded multi-agent turn recovers it from its journal
+  // (single-agent reloads carry no journal, so the chip is live-only there).
+  const finishChip = !message.isStreaming
+    ? finishReasonChip(message.finishReason ?? message.runs?.finishReason)
+    : null;
   // 回合成本 caption (§7.3A) — single-agent turns only. A multi-agent turn stamps
   // `executionId`, so its cost shows on the team card instead (avoids double
   // display). Live cost wins; a reloaded turn falls back to the ledger snapshot.
@@ -1051,6 +1195,24 @@ function AssistantMessage({ message }: Props) {
   const costText =
     message.executionId === null && turnTotal != null && turnTotal > 0
       ? formatCost(turnTotal, cnyPerUsd)
+      : null;
+  // 回合 token 用量 + 轮次 caption (Tier 1, §7.2 大众/Power). Unlike cost, this shows on
+  // EVERY turn — incl. multi-agent (the team card carries cost, not turn-level tokens
+  // /rounds). Live-only (a reloaded turn carries no per-turn usage snapshot). Compact
+  // by default; 用量明细 (powerMode) adds the 思考/缓存 breakdown. Rounds only when > 1.
+  const usage = message.usage;
+  const usageText = usage
+    ? usageDetail
+      ? `↑${formatCompact(usage.input)}（缓存 ${formatCompact(
+          usage.cache_hit,
+        )}） ↓${formatCompact(usage.output)}（思考 ${formatCompact(
+          usage.reasoning,
+        )}）`
+      : `↑${formatCompact(usage.input)} ↓${formatCompact(usage.output)}`
+    : null;
+  const roundsText =
+    message.rounds != null && message.rounds > 1
+      ? `${message.rounds} 轮`
       : null;
 
   // The caption is hover-revealed, so only a hovered reloaded turn pays for its
@@ -1084,11 +1246,22 @@ function AssistantMessage({ message }: Props) {
 
   return (
     <div className="group min-w-0" onMouseEnter={onPeekCost}>
+      {finishChip && (
+        // Turn-level status chip (回合结束原因) — above the whole answer so it frames
+        // single-agent (process timeline) and multi-agent (team graph) turns alike.
+        <div
+          className={`mb-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ${FINISH_CHIP_TONE[finishChip.tone]}`}
+        >
+          <finishChip.Icon size={14} />
+          {finishChip.label}
+        </div>
+      )}
       {hasProcess ? (
-        // Single-agent turn: the inline「思考·正文·工具」timeline IS the reply — it
-        // renders the reasoning, reply text, and tool calls in true order, with the
-        // trailing content step as the final answer (前端UX设计.md §一B). No separate
-        // bottom answer block / cursor here — the timeline owns them.
+        // The inline「思考·正文·工具」timeline IS the reply — reasoning, reply text, and
+        // tool calls in true order, trailing content step as the final answer
+        // (前端UX设计.md §一B). A multi-agent (live) turn slots its team graph at the
+        // delegate step. No separate bottom answer block / cursor — the timeline owns
+        // them.
         <ProcessTimeline
           process={message.process ?? []}
           isStreaming={message.isStreaming}
@@ -1100,10 +1273,13 @@ function AssistantMessage({ message }: Props) {
               : null
           }
           fallbackContent={message.content}
+          executionId={message.executionId}
+          messageId={message.id}
+          journal={message.runs}
         />
       ) : (
-        // Multi-agent turn (team graph carries the activity) or a plain/no-process
-        // turn: keep the standalone thinking panel + the answer rendered below.
+        // A legacy multi-agent row (saved before process[] was persisted) or a
+        // plain/no-process turn: standalone thinking panel + team graph + answer.
         <>
           {hasReasoning && (
             <ThinkingPanel
@@ -1117,12 +1293,6 @@ function AssistantMessage({ message }: Props) {
               executionId={message.executionId}
               journal={message.runs}
             />
-          )}
-          {isIncomplete && (
-            <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-              <CircleSlash size={14} />
-              已中断 · 已保存完成的部分
-            </div>
           )}
           <Markdown
             content={message.content}
@@ -1152,6 +1322,18 @@ function AssistantMessage({ message }: Props) {
             ))}
         </>
       )}
+      {captainContext.length > 0 && (
+        // 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): what the CEO captain actually read
+        // this turn (系统提示/对话历史/原始请求). Turn-level — shows on every assistant bubble,
+        // pure chat included. The `system` block stays hidden until 用量明细 (决策②).
+        <div className="mt-3">
+          <ReceivedContextSection
+            blocks={captainContext}
+            defaultExpanded={usageDetail}
+            powerMode={usageDetail}
+          />
+        </div>
+      )}
       {message.error && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
@@ -1177,6 +1359,18 @@ function AssistantMessage({ message }: Props) {
             重新生成
           </button>
         </div>
+      )}
+      {/* 本回合产出文件 (P1) — 产物清单排在引用来源之上（做了什么 > 参考了什么）。
+          单聊用本地 process 直算；多 Agent 交给订阅 execution 的子组件，避免逐帧重渲气泡。 */}
+      {message.executionId === null ? (
+        singleAgentArtifacts.length > 0 && (
+          <FileArtifactsCard artifacts={singleAgentArtifacts} />
+        )
+      ) : (
+        <MultiAgentFileArtifacts
+          messageId={message.id}
+          process={message.process}
+        />
       )}
       {citations.length > 0 && (
         <SourceCards
@@ -1230,6 +1424,31 @@ function AssistantMessage({ message }: Props) {
               conversationId={conversationId}
               messageId={message.id}
             />
+          )}
+          {import.meta.env.DEV && message.traceId && (
+            // dev 诊断: 复制本回合 trace_id → grep logs/dev.jsonl 关联气泡↔日志。prod 构建里
+            // import.meta.env.DEV 静态为 false，整段（含 traceId 链路）编译掉、零开销。
+            <MessageAction
+              icon={
+                traceCopied ? <Check size={13} /> : <Fingerprint size={13} />
+              }
+              label={traceCopied ? "已复制 trace id" : "复制 trace id"}
+              onClick={onCopyTrace}
+            />
+          )}
+          {usageText && (
+            <SimpleTooltip label="本回合 token 用量（输入 ↑ / 输出 ↓）">
+              <span className="ml-1 text-xs tabular-nums text-muted-foreground/70">
+                {usageText}
+              </span>
+            </SimpleTooltip>
+          )}
+          {roundsText && (
+            <SimpleTooltip label="本回合 ReAct 思考→行动轮次">
+              <span className="text-xs tabular-nums text-muted-foreground/70">
+                {roundsText}
+              </span>
+            </SimpleTooltip>
           )}
           {costText && (
             <span className="ml-1 text-xs text-muted-foreground/70">

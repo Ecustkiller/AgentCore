@@ -1,3 +1,5 @@
+import { listChats } from "@/api/messaging";
+import { usePolling } from "@/lib/usePolling";
 // Persistent bottom tab bar (手机端布局重构 · 底部 4-tab 导航).
 //
 // The mobile shell's top-level switcher: 对话 (AI) / 消息 (人际 IM) / 文件 (跨工作区文件总览) /
@@ -14,8 +16,6 @@ import type { LucideIcon } from "lucide-react";
 import { Files, Mail, MessageSquare, User } from "lucide-react";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { listChats } from "@/api/messaging";
-import { usePolling } from "@/lib/usePolling";
 
 interface TabDef {
   label: string;
@@ -68,7 +68,9 @@ export function TabBar() {
             <span className="tab-icon">
               <Icon size={22} strokeWidth={active ? 2.4 : 2} />
               {showBadge && (
-                <span className="tab-badge">{unread > 99 ? "99+" : unread}</span>
+                <span className="tab-badge">
+                  {unread > 99 ? "99+" : unread}
+                </span>
               )}
             </span>
             <span className="tab-label">{label}</span>

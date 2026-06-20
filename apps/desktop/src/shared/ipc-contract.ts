@@ -141,12 +141,16 @@ export const FS_CHANNELS = {
   writeFile: "fs:writeFile",
   rename: "fs:rename",
   move: "fs:move",
+  copy: "fs:copy",
   create: "fs:create",
   delete: "fs:delete",
   watch: "fs:watch",
   unwatch: "fs:unwatch",
   changed: "fs:changed",
   workspaceOp: "fs:workspaceOp",
+  reveal: "fs:reveal",
+  openPath: "fs:openPath",
+  copyPath: "fs:copyPath",
 } as const;
 
 /**
@@ -189,6 +193,19 @@ export interface FsApi {
     srcRelPath: string,
     destRelPath: string,
   ): Promise<FsResult>;
+  /**
+   * 复制文件/目录（目录递归）到**完整目标路径** `destRelPath`（含最终名）。
+   *
+   * 与 `move` 的语义差异：`move` 的目标是「目录」（保名移入）；`copy` 收完整目标路径，
+   * 故能表达「同目录内另存为新名」（如 `a.txt` → `a 副本.txt`）——这是去重粘贴所必需。
+   * 主进程经 `fs.cp(recursive)` 实现，拒绝覆盖已存在目标与「复制进自身子树」。失败以
+   * `FsResult` 返回。
+   */
+  copy(
+    rootId: string,
+    srcRelPath: string,
+    destRelPath: string,
+  ): Promise<FsResult>;
   create(
     rootId: string,
     relPath: string,
@@ -210,4 +227,22 @@ export interface FsApi {
     op: WorkspaceOpName,
     args: Record<string, unknown>,
   ): Promise<WorkspaceOpResult>;
+  /**
+   * 在系统文件管理器中定位该路径（Windows 资源管理器 / macOS 访达 / Linux 文件管理器）。
+   *
+   * 主进程把 `{rootId, relPath}` 解析为绝对路径并 realpath 校验在根内后调
+   * `shell.showItemInFolder`——**绝对路径不下发 renderer**，沿用本契约的安全不变量。
+   * 仅本地源有意义（云端工作区文件在服务器上，无本机路径）。失败以 `FsResult` 返回。
+   */
+  reveal(rootId: string, relPath: string): Promise<FsResult>;
+  /**
+   * 用系统默认程序打开该文件（PDF / Office / 压缩包等 in-app 预览打不开的类型）。
+   * 经 `shell.openPath`；同样在主进程解析 + 校验在根内。仅本地源有意义。
+   */
+  openPath(rootId: string, relPath: string): Promise<FsResult>;
+  /**
+   * 把该路径的**绝对路径**写入系统剪贴板。写入在主进程完成（`clipboard.writeText`），
+   * 故绝对路径不进 renderer。仅本地源有意义。
+   */
+  copyPath(rootId: string, relPath: string): Promise<FsResult>;
 }

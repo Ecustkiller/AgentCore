@@ -99,16 +99,6 @@ export function InlineTeamGraph({
   // draws its own graph exactly like the live one.
   const execution = useMessageExecution(messageId);
 
-  // Nothing to draw until the slot exists (live: first `run_plan`; reload: after
-  // the hydrate effect commits) and only for a real team turn.
-  if (
-    !execution ||
-    execution.id !== executionId ||
-    execution.planType === "single_agent"
-  ) {
-    return null;
-  }
-
   // Adaptive height (方案 D): the embedded canvas measures its own fit-to-width
   // footprint and reports the height it wants, so the box matches each graph's
   // real shape (a serial chain stays short, a parallel fan grows) and node size
@@ -130,9 +120,25 @@ export function InlineTeamGraph({
   // the estimate matches the active flow direction.
   const layoutKind = useGraphStore((s) => s.layoutKind);
   const fallbackHeight = useMemo(() => {
+    if (!execution) return 0;
     const est = estimateBbox(workerGraphShape(execution.runs), layoutKind);
     return fitWidthBox(est.width, est.height, EMBED_DEFAULT_COL_WIDTH).height;
-  }, [execution.runs, layoutKind]);
+  }, [execution, layoutKind]);
+
+  // Nothing to draw until the slot exists (live: first `run_plan`; reload: after
+  // the hydrate effect commits) and only for a real team turn. Every hook above
+  // runs unconditionally on every render (Rules of Hooks), so this is the FIRST
+  // and only early return — moving it earlier would skip the hooks below on the
+  // first (slot-less) render and crash with "rendered more hooks…" once the slot
+  // arrives.
+  if (
+    !execution ||
+    execution.id !== executionId ||
+    execution.planType === "single_agent"
+  ) {
+    return null;
+  }
+
   const graphHeight = measured?.height ?? fallbackHeight;
 
   // Scope every descendant graph hook (status strip, canvas, timeline, node

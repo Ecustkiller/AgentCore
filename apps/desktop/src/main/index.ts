@@ -74,6 +74,22 @@ function createWindow(): BrowserWindow {
   if (windowState.isMaximized) mainWindow.maximize();
   manageWindowState(mainWindow);
 
+  // Dev-only: forward the renderer's console warnings/errors to this process's
+  // stdout so a renderer crash (e.g. a React error-boundary stack logged via
+  // console.error) shows up in the `pnpm dev` terminal, not only in DevTools.
+  // Electron 33 uses the positional `console-message` signature; `level` is
+  // 0..3 = verbose/info/warning/error, so >= 2 keeps it to the signal that matters.
+  if (is.dev) {
+    mainWindow.webContents.on(
+      "console-message",
+      (_event, level, message, line, sourceId) => {
+        if (level < 2) return;
+        const tag = level >= 3 ? "renderer:error" : "renderer:warn";
+        console.log(`[${tag}] ${message} (${sourceId}:${line})`);
+      },
+    );
+  }
+
   ipcMain.on("window:minimize", () => mainWindow.minimize());
   ipcMain.on("window:maximize", () => {
     mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();

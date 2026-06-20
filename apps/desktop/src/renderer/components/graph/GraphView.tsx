@@ -756,6 +756,9 @@ export function GraphView({
           // 结构化挂起 2a (7.2A): a `checkpoint_after` pause that fired after this run
           // → drives the node's「待放行 / 已放行 / 已停止」pause badge; null otherwise.
           checkpoint: run.checkpoint,
+          // 升级实时可见: how many times this worker escalated → drives the node's ⚠️ 上报
+          // badge so a flagged blocker is visible on the graph the moment it fires.
+          escalationCount: run.escalations.length,
           // Input endpoint is index 0, so workers start at 1.
           enterIndex: i + 1,
           onActivate: () => activateNode(run.id),

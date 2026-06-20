@@ -1,3 +1,5 @@
+import { MermaidDiagram } from "@/components/MermaidDiagram";
+import { remarkCitations } from "@/components/remarkCitations";
 // Assistant-message Markdown for the mobile client (手机端落地设计 P1 · 富渲染).
 //
 // Full stack now (matches desktop coverage, minimal-deps variant): react-markdown +
@@ -15,8 +17,6 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import { MermaidDiagram } from "@/components/MermaidDiagram";
-import { remarkCitations } from "@/components/remarkCitations";
 import "katex/dist/katex.min.css";
 import "@/components/markdown.css";
 

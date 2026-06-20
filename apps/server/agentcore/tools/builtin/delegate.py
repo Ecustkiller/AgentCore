@@ -35,6 +35,7 @@ from agentcore.runtime.events import (
     content_delta,
     plan_review_required,
     plan_review_resolved,
+    run_context,
     run_plan,
     run_progress,
 )
@@ -55,7 +56,10 @@ logger = get_logger(__name__)
 
 # The CEO's synthesis reads the aggregated worker products as this tool's output;
 # raise the model-facing truncation budget well above the 4000 default so a
-# multi-worker batch isn't clipped before the CEO can integrate it.
+# multi-worker batch isn't clipped before the CEO can integrate it. ``_format_for_ceo``
+# now does the STRUCTURED bounding (per-product fidelity + a shared prose budget,
+# CEO 综述输入瘦身) so the aggregate fits comfortably under this; the cap stays only as
+# a last-resort net (the old behaviour: a blunt head-chop that dropped late workers).
 _DELEGATE_OUTPUT_LIMIT = 16000
 
 # Per-step product excerpt cap in a plan_review card (结构化挂起 2a): enough for the
@@ -492,6 +496,15 @@ class DelegateTool:
             # Lets a worker that opted in (can_delegate) lead one nested sub-team;
             # the executor enforces the depth cap, so this is inert below it.
             delegate_factory=self._make_child,
+            # 阻塞式求决策: hand each worker the suspend-for-the-user channel for
+            # escalate(blocking=true). Same bridge + window + gate as ask_user; armed
+            # only when a live interactive user is present (``_checkpoint_active``), so an
+            # autonomous / un-armed turn degrades a worker's blocking escalate to
+            # non-blocking. A nested sub-team inherits this (``_make_child`` forwards the
+            # registry / conversation / gate), so depth-2 reaches the user too (设计 §4.2).
+            interaction_bridge=self._registry,
+            escalation_timeout=self._checkpoint_timeout_seconds,
+            escalation_armed=self._checkpoint_active(),
         )
 
         total = len(plan.nodes)
@@ -1011,7 +1024,8 @@ class DelegateTool:
         levers: ask_user (user must decide), revise (recall the author with the answer),
         or a fresh delegate. The workers already delivered under their assumptions, so
         this is a steer-before-收尾, not a hard stop."""
-        items: list[tuple[bool, str]] = []  # (blocking, line) — blockers sort first
+        pending: list[tuple[bool, str]] = []  # (blocking, line) — needs CEO action
+        answered: list[str] = []  # 阻塞式求决策: already settled with the user mid-wave
         for node in plan.nodes:
             state = results.get(node.run_id)
             if not state or not state.escalations:
@@ -1021,31 +1035,61 @@ class DelegateTool:
                 question = str(e.get("question") or "").strip()
                 if not question:
                     continue
+                # 阻塞式求决策: a worker that blocked and got the user's answer mid-wave is
+                # ALREADY settled — list it as 已答 (so the CEO folds the answer in) and keep
+                # it OUT of the「请先处理」action list, so the CEO doesn't re-ask (设计 §4.5).
+                # raised (non-blocking) + timeout (blocked but no answer → fell back to its
+                # assumption) still need the CEO's attention.
+                if str(e.get("status") or "raised") == "resolved":
+                    answer = str(e.get("answer") or "").strip()
+                    answered.append(f"- {label}：{question} → 用户已答：{answer}")
+                    continue
                 blocking = bool(e.get("blocking"))
                 mark = "【关键阻塞】" if blocking else ""
                 line = f"- {mark}{label}：{question}"
                 assumption = str(e.get("assumption") or "").strip()
                 if assumption:
                     line += f"（其暂用假设：{assumption}）"
-                items.append((blocking, line))
-        if not items:
+                pending.append((blocking, line))
+        if not pending and not answered:
             return ""
-        items.sort(key=lambda it: not it[0])  # blocking=True first
-        body = "\n".join(line for _, line in items)
-        return (
-            "\n### ⚠️ 队员升级了待决问题（请先处理再收尾）\n"
-            "以下是队员无法独自拍板、需要你定夺的关键岔路 / 缺失信息。它们已按各自的暂定假设"
-            "继续交付，但你应先处理这些问题：能自己答的就在概览里给出并据此判断相关产物是否需"
-            "返工；确需用户拍板的就用 ask_user 问（可把问题 near-verbatim 转给用户）；需要原"
-            "作者据答案重做的就用 revise 唤回。\n" + body
-        )
+        out = ""
+        if pending:
+            pending.sort(key=lambda it: not it[0])  # blocking=True first
+            out += (
+                "\n### ⚠️ 队员升级了待决问题（请先处理再收尾）\n"
+                "以下是队员无法独自拍板、需要你定夺的关键岔路 / 缺失信息。它们已按各自的暂定假设"
+                "继续交付，但你应先处理这些问题：能自己答的就在概览里给出并据此判断相关产物是否需"
+                "返工；确需用户拍板的就用 ask_user 问（可把问题 near-verbatim 转给用户）；需要原"
+                "作者据答案重做的就用 revise 唤回。\n"
+                + "\n".join(line for _, line in pending)
+            )
+        if answered:
+            out += (
+                "\n### ✅ 已当场答复的升级（用户在执行中已拍板，无需再问）\n"
+                "以下升级队员已直接问到用户、拿到答复并据此续跑；把这些结论纳入你的收尾叙事即可，"
+                "不要再用 ask_user 重复问同样的问题。\n" + "\n".join(answered)
+            )
+        return out
 
     def _format_for_ceo(self, plan, results: dict) -> str:
         """Render the workers' products as the CEO's overview input.
 
-        The CEO reads the full per-worker products here so its overview is
-        accurate, but is instructed to write only a SHORT synthesis (决策①) — the
-        user reads each worker's full output in the UI, not in the CEO's reply.
+        The CEO reads each worker's product here so its overview is accurate, but is
+        instructed to write only a SHORT synthesis (决策①) — the user reads each
+        worker's FULL output in the UI, not in the CEO's reply.
+
+        CEO 综述输入瘦身: each product is sized by the shared fidelity discipline
+        (``runs/fidelity.py``) — the same one a worker's dep-injection uses, applied at
+        the OTHER fan-in (all workers → the CEO). The motive is correctness, not only
+        cost: this aggregate used to be blunt head-chopped by the single ToolResult
+        ``output_limit``, silently dropping late workers AND this method's own trailing
+        instructions (防幻觉铁律 / 收尾指引). Now a file-producer is digested (its full
+        product is on disk + shown in the UI; the CEO can ``file_read``) while prose
+        workers SHARE one water-filled budget (head+tail trimmed on overflow) — so every
+        worker stays represented and the closing instructions always survive under the
+        ``output_limit`` net. Deliberately NOT keyed on ``result_handling`` (that knob
+        only governs upstream→downstream injection, never the CEO return — §2.3).
         """
         lines = ["## 团队执行结果（据此写一段简短概览交给用户；完整详情用户自行查看）"]
         # 队员升级（worker → 你）置顶：这些是队员无法独自拍板、需要你定夺的待决问题。它们已
@@ -1053,30 +1097,20 @@ class DelegateTool:
         escalation_block = self._escalation_block(plan, results)
         if escalation_block:
             lines.append(escalation_block)
-        for node in plan.nodes:
-            state = results.get(node.run_id)
-            status = state.phase.value if state else "unknown"
-            label = node.role or node.run_id
-            if state and state.content:
-                body = state.content
-            elif state and state.error:
-                body = f"（失败：{state.error}）"
-            else:
-                body = "（无输出）"
-            if state and state.warnings:
-                warns = "；".join(state.warnings)
-                body += f"\n\n> 质检提醒（未完全达标，请判断是否需要返工）：{warns}"
-            if state and state.escalations:
-                body += (
-                    f"\n\n> 已升级 {len(state.escalations)} 项待决问题（见顶部「队员升级了"
-                    "待决问题」，请先处理再据此判断本产物是否需返工）"
-                )
-            if state and state.files_touched:
-                produced = "、".join(f"`{p}`" for p in state.files_touched)
-                body += f"\n\n> 文件产出（已写入工作区）：{produced}"
-            lines.append(f"\n### {label}（{status}） · run_id: `{node.run_id}`\n{body}")
+
+        # SINGLE SOURCE: each worker's role-attributed product (sized by the shared
+        # fidelity discipline). Consumed twice — rendered into the CEO synthesis text
+        # below AND shipped as the captain's channel⑤ run_context — so 用户看到的回传 ==
+        # LLM 此处读到的, with no second formatting path (上下文传递可视化 §一 单一源).
+        products = self._worker_products(plan, results)
+        self._emit_captain_readback(products)
+        for wp in products:
+            lines.append(
+                f"\n### {wp['role']}（{wp['status']}） · run_id: `{wp['run_id']}`\n{wp['body']}"
+            )
         lines.append(
-            "\n---\n以上为各 worker 的完整产出（用户可在界面逐个展开查看）。各成员写入工作区的"
+            "\n---\n以上为各 worker 的产出（较长或已落盘者在此为摘要 / 指针，完整内容用户可在"
+            "界面逐个展开查看，落盘文件你也可 file_read 取用）。各成员写入工作区的"
             "文件已列于其「文件产出（已写入工作区）」一行——这就是本次落盘的产物清单（地面真相）："
             "除非清单为空或明显不全，否则无需再用 file_list / file_read 去工作区核对，直接据此收尾即可。\n"
             "⚠️ 防幻觉铁律：一个 worker 是否真把文件写进了工作区，只以它有没有「文件产出」行为准。"
@@ -1091,7 +1125,140 @@ class DelegateTool:
             "做小改 / 增补、且仍由原角色来改，可用 revise（传该产物上面的 run_id + 修改"
             "意见）唤回原作者在原稿基础上续写，而不必从零重派。"
         )
-        return "\n".join(lines)
+        output = "\n".join(lines)
+        # 调度埋点量化（收尾侧）: quantify CEO 综述输入瘦身 so production confirms the blunt
+        # output_limit net no longer fires (``capped=False``) and the budget can be
+        # calibrated on real ratios. ``raw_chars`` is the unbounded all-worker total the
+        # old path concatenated before its head-chop; ``ratio`` = final / raw.
+        raw_chars = sum(len(s.content) for s in results.values() if s and s.content)
+        logger.info(
+            "delegate.synthesis",
+            call=self._calls,
+            workers=len(plan.nodes),
+            pointers=sum(1 for p in products if p["fidelity"] == "pointer"),
+            prose=sum(1 for p in products if p["fidelity"] == "pass_through"),
+            raw_chars=raw_chars,
+            final_chars=len(output),
+            ratio=round(len(output) / raw_chars, 2) if raw_chars else 1.0,
+            capped=len(output) > _DELEGATE_OUTPUT_LIMIT,
+        )
+        return output
+
+    def _worker_products(self, plan, results: dict) -> list[dict[str, Any]]:
+        """Each worker's product folded back to the CEO — the SINGLE SOURCE behind BOTH
+        the CEO synthesis input (:meth:`_format_for_ceo`) AND the captain's channel⑤
+        ``run_context`` (上下文传递可视化: 队员产物回流 CEO). One record per ``plan.nodes``
+        entry: ``{role, run_id, status, body, fidelity, truncated, files}``, sized by the
+        shared fidelity discipline (``runs/fidelity.py``) — a file-producer is digested
+        (full product on disk + in the UI → ``pointer``); prose workers SHARE one
+        water-filled budget (``pass_through``, head+tail trimmed on overflow). Deliberately
+        NOT keyed on ``result_handling`` (that knob only governs upstream→downstream
+        injection, never the CEO return — §2.3)."""
+        from agentcore.runtime.runs.constants import (
+            CEO_SYNTHESIS_BUDGET,
+            DEP_POINTER_SUMMARY_CHARS,
+        )
+        from agentcore.runtime.runs.fidelity import allocate, truncate_head_tail
+        from agentcore.runtime.workspace import summarize
+
+        # Classify each product's fidelity once (plan.nodes order): a file-producer is
+        # digested (on disk + in the UI), everything else is PROSE that shares the
+        # water-filled budget. Only the prose draws on it.
+        def _mode(node) -> str:
+            st = results.get(node.run_id)
+            if not st or not st.content:
+                return "none"  # error / 无输出 — already short, shown verbatim
+            if st.files_touched:
+                return "pointer"  # full product is on disk + in the UI → digest only
+            return "pass_through"
+
+        modes = {node.run_id: _mode(node) for node in plan.nodes}
+        # Water-fill the prose budget across the pass_through products, in plan.nodes
+        # order — the loop consumes this iterator in the SAME order (kept in sync by
+        # filtering on the same mode), exactly like _dep_context_blocks.
+        allowances = iter(
+            allocate(
+                [
+                    len(results[node.run_id].content)
+                    for node in plan.nodes
+                    if modes[node.run_id] == "pass_through"
+                ],
+                CEO_SYNTHESIS_BUDGET,
+            )
+        )
+        products: list[dict[str, Any]] = []
+        for node in plan.nodes:
+            state = results.get(node.run_id)
+            status = state.phase.value if state else "unknown"
+            label = node.role or node.run_id
+            mode = modes[node.run_id]
+            fidelity = ""
+            truncated = False
+            if mode == "pointer":
+                body = summarize(state.content, limit=DEP_POINTER_SUMMARY_CHARS)
+                fidelity, truncated = "pointer", True
+            elif mode == "pass_through":
+                allowance = next(allowances)
+                body = truncate_head_tail(state.content, allowance)
+                fidelity = "pass_through"
+                truncated = len(state.content) > allowance
+            elif state and state.error:
+                body = f"（失败：{state.error}）"
+            else:
+                body = "（无输出）"
+            if state and state.warnings:
+                warns = "；".join(state.warnings)
+                body += f"\n\n> 质检提醒（未完全达标，请判断是否需要返工）：{warns}"
+            if state and state.escalations:
+                body += (
+                    f"\n\n> 已升级 {len(state.escalations)} 项待决问题（见顶部「队员升级了"
+                    "待决问题」，请先处理再据此判断本产物是否需返工）"
+                )
+            files = list(state.files_touched) if state and state.files_touched else []
+            if files:
+                produced = "、".join(f"`{p}`" for p in files)
+                body += f"\n\n> 文件产出（已写入工作区）：{produced}"
+            products.append(
+                {
+                    "role": label,
+                    "run_id": node.run_id,
+                    "status": status,
+                    "body": body,
+                    "fidelity": fidelity,
+                    "truncated": truncated,
+                    "files": files,
+                }
+            )
+        return products
+
+    def _emit_captain_readback(self, products: list[dict[str, Any]]) -> None:
+        """上下文传递可视化 通道⑤: ship the team's products back to the CEO bubble as a
+        SECOND captain ``run_context`` (channel ``team_result``) — the captain's received
+        context GROWS by what it read back from the team. Same ``products`` as the CEO
+        synthesis text (单一源), each block carrying its provenance (来源角色 / 保真度 / 是否
+        截断 / 文件). Top-level batches only (``depth == 0`` + a real captain run id): a
+        nested sub-team's readback feeds its worker-captain, not the turn's CEO bubble, and
+        its run is kind=agent (would fold onto a node, not turn-level), so it is skipped."""
+        if self._depth != 0 or not self._captain_run_id:
+            return
+        blocks = [
+            {
+                "channel": "team_result",
+                "heading": f"{wp['role']}（{wp['status']}）",
+                "body": wp["body"],
+                "chars": len(wp["body"]),
+                "truncated": wp["truncated"],
+                "source_role": wp["role"],
+                "source_run_id": wp["run_id"],
+                "fidelity": wp["fidelity"],
+                "files": wp["files"],
+            }
+            for wp in products
+        ]
+        if blocks:
+            self._sink.emit(
+                run_context(self._captain_run_id, self._captain_run_id, blocks)
+            )
 
     def _run_payload(self, node) -> dict[str, Any]:
         """One worker's plan-time descriptor for the graph: identity + topology,

@@ -95,6 +95,12 @@ interface SidePanelState {
   /** Active tab: `WORKSPACE_TAB_ID` for the home tab, otherwise a run tab id.
    * Defaults to the workspace home so a manual open lands on the project files. */
   activeTabId: string;
+  /**
+   * A file the chat asked to preview (clicking a 产出文件 card row): the workspace
+   * file browser watches this, opens the path in its swap-style preview, then
+   * clears it. `nonce` lets the same path re-fire (re-click). Session-only.
+   */
+  pendingFilePreview: { path: string; name: string; nonce: number } | null;
 
   /** Open (or re-focus) a run-detail tab, deduped by id; reveals + activates it. */
   openTab: (tab: DetailTab, opts?: { activate?: boolean }) => void;
@@ -111,6 +117,10 @@ interface SidePanelState {
   showRunDetail: (messageId: string, runId: string, title?: string) => void;
   /** Reveal the panel on the 工作区 home tab (the chat toggle / Ctrl+J). */
   showWorkspace: () => void;
+  /** Reveal the 工作区 home tab AND request a file preview (产出文件 card click). */
+  showFile: (path: string, name: string) => void;
+  /** Consume the pending file-preview request once the files view has applied it. */
+  clearFilePreview: () => void;
   closePanel: () => void;
   togglePanel: () => void;
   setWidth: (width: number) => void;
@@ -123,6 +133,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   // Run tabs are session-level (rebuilt from the execution slot), so a fresh
   // load always starts on the workspace home rather than a dangling run id.
   activeTabId: WORKSPACE_TAB_ID,
+  pendingFilePreview: null,
 
   openTab: (tab, opts) => {
     persist(OPEN_KEY, "true");
@@ -171,6 +182,21 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     persist(OPEN_KEY, "true");
     set({ open: true, activeTabId: WORKSPACE_TAB_ID });
   },
+
+  showFile: (path, name) => {
+    persist(OPEN_KEY, "true");
+    set((s) => ({
+      open: true,
+      activeTabId: WORKSPACE_TAB_ID,
+      pendingFilePreview: {
+        path,
+        name,
+        nonce: (s.pendingFilePreview?.nonce ?? 0) + 1,
+      },
+    }));
+  },
+
+  clearFilePreview: () => set({ pendingFilePreview: null }),
 
   closePanel: () => {
     persist(OPEN_KEY, "false");

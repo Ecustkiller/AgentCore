@@ -95,6 +95,7 @@
     "finishReason": "end_turn",
     "content": "我需要运行代码。运行结果是 1。",
     "reasoning": "",
+    "captainContext": [],
     "process": [
       {
         "kind": "content",

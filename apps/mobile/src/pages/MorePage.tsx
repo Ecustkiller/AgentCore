@@ -1,3 +1,6 @@
+import { type User, logout, me } from "@/api/auth";
+import { getTokens } from "@/api/client";
+import { Avatar } from "@/pages/more/Avatar";
 // Settings hub (设置/更多) — mobile's home for account/model/usage/about.
 //
 // Desktop has a left-nav + content split (MorePage.tsx); mobile is touch-native: a hub
@@ -8,9 +11,6 @@
 // fetched here on open (matches the skeleton's per-page fetch convention).
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { type User, logout, me } from "@/api/auth";
-import { getTokens } from "@/api/client";
-import { Avatar } from "@/pages/more/Avatar";
 import "@/pages/more/more.css";
 
 export function MorePage() {
@@ -50,7 +50,9 @@ export function MorePage() {
             <span className="more-name">
               {user?.display_name || user?.username || "—"}
             </span>
-            {user?.username && <span className="more-sub">@{user.username}</span>}
+            {user?.username && (
+              <span className="more-sub">@{user.username}</span>
+            )}
           </div>
         </div>
 

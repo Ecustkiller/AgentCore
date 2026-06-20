@@ -80,6 +80,7 @@
     "finishReason": "end_turn",
     "content": "根据搜索，答案如下。",
     "reasoning": "我先搜索。",
+    "captainContext": [],
     "process": [
       {
         "kind": "reasoning",

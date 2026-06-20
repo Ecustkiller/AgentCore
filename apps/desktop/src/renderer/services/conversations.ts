@@ -1,6 +1,6 @@
 import { BASE_URL, api } from "@/services/api";
 import { type FolderMeta, toFolder } from "@/services/folders";
-import { authedFetch, saveBlob } from "@/services/workspace";
+import { authedFetch, saveBlob } from "@/services/workspaceHttp";
 import type { Conversation } from "@/stores/conversation";
 import type { components } from "@/types/api.generated";
 
@@ -29,6 +29,7 @@ function toConversation(c: BackendConversation): Conversation {
     messageCount: c.message_count ?? 0,
     lastMessagePreview: null,
     folderId: c.folder_id ?? null,
+    localContainerRootId: c.local_container_root_id ?? null,
     modelMode: c.model_mode ?? null,
     pinned: c.pinned ?? false,
     archived: c.archived ?? false,

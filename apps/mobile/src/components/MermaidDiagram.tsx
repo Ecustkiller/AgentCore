@@ -46,6 +46,8 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   if (failed) return <pre className="tool-pre">{chart}</pre>;
   if (!svg) return <div className="mermaid-wrap muted">绘制图表中…</div>;
   // svg is mermaid's own serialized output (securityLevel "strict" sanitizes it).
-  // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted, sanitized mermaid SVG
-  return <div className="mermaid-wrap" dangerouslySetInnerHTML={{ __html: svg }} />;
+  return (
+    // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted, sanitized mermaid SVG
+    <div className="mermaid-wrap" dangerouslySetInnerHTML={{ __html: svg }} />
+  );
 }

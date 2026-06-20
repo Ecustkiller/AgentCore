@@ -17,7 +17,9 @@ import { apiFetch } from "@/api/client";
  * signalled (false when nothing was running); a failed call is swallowed (worst case the
  * turn finishes server-side and is saved, never a stuck UI). The caller need not await.
  */
-export async function stopConversation(conversationId: string): Promise<boolean> {
+export async function stopConversation(
+  conversationId: string,
+): Promise<boolean> {
   try {
     const res = await apiFetch(`/v1/conversations/${conversationId}/stop`, {
       method: "POST",

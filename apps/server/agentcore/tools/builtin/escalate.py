@@ -8,21 +8,28 @@ toolset (``build_ceo_tool_registry`` derives from the builtins) or the read-only
 fork only a human / 上级 can settle, it escalates to the CEO instead of either
 silently guessing or burying a clarifying question in its prose.
 
-非阻塞 by design (设计取向：不破坏隔离与成本). The call returns immediately
-(``ToolEffect.CONTINUE``) and tells the worker to PROCEED on its best assumption — it
-is NOT a stop. The escalation is harvested from the worker's transcript
-(``runs.serialize.escalations_from_transcript``) into ``RunState.escalations`` and
-surfaced PROMINENTLY in the CEO-facing aggregate (``DelegateTool._format_for_ceo``),
-where the CEO resolves it with its OWN levers: ``ask_user`` (if the user must decide),
-``revise`` (recall the author with the answer), or a fresh ``delegate``. The worker
-keeps working so nothing hangs and the DAG isn't stalled; a wrong assumption is
-corrected at synthesis, not propagated silently down the chain.
+Two modes, one primitive — the worker picks via ``blocking`` (the dual of the CEO's
+``ask_user``). NON-BLOCKING (default, ``blocking`` false): the call returns immediately
+(``ToolEffect.CONTINUE``) and tells the worker to PROCEED on its best assumption — it is
+NOT a stop. The escalation is harvested from the worker's transcript
+(``runs.serialize.escalations_from_transcript``) into ``RunState.escalations`` and surfaced
+PROMINENTLY in the CEO-facing aggregate (``DelegateTool._format_for_ceo``), where the CEO
+resolves it at synthesis with its OWN levers: ``ask_user`` (if the user must decide),
+``revise`` (recall the author with the answer), or a fresh ``delegate``. A wrong assumption
+is corrected at synthesis, not propagated silently down the chain.
 
-This is the industry-standard「escalation pattern」(notably Claude Code's recommended
-subagent workflow: a subagent returns a structured clarification request to the main
-agent, which then asks the user) rather than a subagent talking to the user directly —
-no mainstream multi-agent product lets a parallel worker inject into the user's
-conversation. 对比与决策见 docs/03-AI核心/Agent协作模式.md（向上澄清 / 升级通道）.
+BLOCKING (阻塞式求决策, ``blocking`` true): for a「只有用户能定、且猜错你的产物基本作废」fork,
+the worker SUSPENDS in place and asks the user DIRECTLY — because the CEO is parked at its
+``delegate`` mid-wave and can't mediate (硬约束: 波内没有在跑的 CEO). It parks on the same
+interaction bridge as ``ask_user`` (``InteractionKind.ESCALATION``); the answer flows back
+into its ReAct loop and it resumes. This needs a live interactive user (the ``ask_user``
+gate) — un-armed turns (autonomous / handoff) and a full concurrency cap degrade it to the
+non-blocking path, and a timeout falls back to the stated ``assumption``. So blocking is a
+strict SUPERSET of non-blocking: 先等用户 T 秒，等不到就退回今天的行为。The mechanism (cap /
+suspend / SSE events / RunState recording) lives behind ``ToolContext.escalation`` so this
+tool stays off the event vocabulary (引擎纯化); the tool owns only the decision + the
+outcome→result mapping (:func:`escalate_tool_result`). 设计见
+docs/07-规划/阻塞式求决策设计.md; 对比见 docs/03-AI核心/Agent协作模式.md（升级通道）.
 """
 
 from __future__ import annotations
@@ -51,11 +58,13 @@ class EscalateTool:
         return ToolSchema(
             name=ESCALATE_TOOL_NAME,
             description=(
-                "把一个【必须由上级/用户拍板】的待决问题上报给主管（CEO）。你是被委派的 worker，"
-                "够不到用户，这是你唯一的向上通道。仅在遇到【缺了就会让整件事走偏的关键信息】或"
-                "【只有上级能定的关键岔路】时才用——能自行合理假设的小事不要升级。这【不会打断你、"
-                "也不是停工】：上报后请立刻按你当下最合理的假设把任务继续做完、交付最佳结果；主管会"
-                "看到你的升级并在你的产物之上纠偏（问用户 / 让你据答案重做 / 另行安排）。"
+                "把一个【必须由上级/用户拍板】的待决问题上报。你是被委派的 worker，够不到用户，"
+                "这是你唯一的向上通道。仅在遇到【缺了就会让整件事走偏的关键信息】或【只有上级/用户"
+                "能定的关键岔路】时才用——能自行合理假设的小事不要升级。两种模式：默认 "
+                "blocking=false【非阻塞】——上报后你立刻按假设继续、主管在收尾时纠偏（问用户 / 让你"
+                "据答案重做）；blocking=true【阻塞·求决策】——仅当这个岔路【只有用户能定、且猜错你的"
+                "产物基本作废】时用：你会原地挂起、把问题直接送到用户，拿到答复再继续（须同时写明 "
+                "assumption，等不到答复就按它继续）。克制使用，别为能自行决定的小事打断用户。"
             ),
             parameters={
                 "type": "object",
@@ -70,16 +79,18 @@ class EscalateTool:
                     "assumption": {
                         "type": "string",
                         "description": (
-                            "强烈建议：在拿到答复前你暂时采用的假设（你正据此继续交付）。"
-                            "写明它，主管才能判断你的产物是否需要据真实答案返工。"
+                            "在拿到答复前你暂时采用的假设（你正/将据此继续）。blocking=true 时"
+                            "【必填】：等不到用户答复时按它继续（超时回落）；blocking=false 时"
+                            "强烈建议——写明它，主管才能判断你的产物是否需要据真实答案返工。"
                         ),
                     },
                     "blocking": {
                         "type": "boolean",
                         "description": (
-                            "可选，默认 false。仅作给主管的【严重度标记】：true 表示这个岔路"
-                            "猜错会让你的产物基本作废、强烈建议先解决。注意：即便 true 也不会"
-                            "暂停你或流程——你仍要按假设把活做完。"
+                            "可选，默认 false。false=【非阻塞】：上报后你立刻按假设把活做完、"
+                            "主管收尾纠偏。true=【阻塞·求决策】：仅当这个岔路【只有用户能定、且"
+                            "猜错你的产物基本作废】时用——你会原地挂起等用户答复再继续（须写明 "
+                            "assumption；等不到/无活跃用户则自动按假设继续，绝不会把你永久卡住）。"
                         ),
                     },
                 },
@@ -102,12 +113,43 @@ class EscalateTool:
             )
         assumption = str(arguments.get("assumption") or "").strip()
         blocking = bool(arguments.get("blocking"))
+        # blocking=true 须带 assumption: it is the超时回落 (设计 §4.1, the dual of
+        # ask_user(blocking=false) requiring a fallback). Without it a timeout would have
+        # nowhere to land — so reject rather than silently guess.
+        if blocking and not assumption:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=(
+                    "escalate(blocking=true) 必须写明 assumption：等不到用户答复时你将按它继续"
+                    "（超时回落）。若你本就能自行假设、不需用户拍板，请改用 blocking=false。"
+                ),
+            )
         logger.info(
             "worker.escalate",
             run_id=context.run_id,
             blocking=blocking,
             has_assumption=bool(assumption),
         )
+        # 阻塞·求决策: suspend for the user when the turn is armed (a live interactive
+        # client). The channel owns cap / suspend / SSE / RunState recording; we only map
+        # its outcome. A ``degraded`` outcome (concurrency cap full) or an unarmed turn (no
+        # channel) falls through to the non-blocking path below — so blocking is a strict
+        # superset of non-blocking, never a regression (设计 §4.4).
+        channel = context.escalation
+        if blocking and channel is not None and channel.armed:
+            outcome = await channel.request(question, assumption)
+            if outcome.status != "degraded":
+                return escalate_tool_result(outcome.status, outcome.answer, assumption)
+        # 非阻塞 (default) / degraded / unarmed: surface the escalation live (best-effort,
+        # non-fatal — the durable transcript → RunState.escalations path is unconditional)
+        # and steer the worker to deliver under its assumption; the CEO纠偏 at synthesis.
+        if context.on_escalate is not None:
+            try:
+                context.on_escalate(question, assumption, blocking)
+            except Exception:  # noqa: BLE001 — liveliness only; never break the worker
+                logger.warning("worker.escalate.emit_failed", run_id=context.run_id)
         note = (
             "已记录你的升级，主管会在汇总你的产物时处理。"
             "这不是停工：请立刻按你当前最合理的假设把任务继续做完、交付最佳结果"
@@ -118,3 +160,37 @@ class EscalateTool:
             else "，并尽量在产出里写明你采用了什么假设，方便主管纠偏。"
         )
         return ToolResult(tool_call_id="", success=True, output=note)
+
+
+def escalate_tool_result(
+    status: str, answer: str | None, assumption: str
+) -> ToolResult:
+    """Map a blocking escalate's outcome to the CONTINUE result the worker loop consumes.
+
+    The single source of truth for the live suspend path (and any future durable resume),
+    the worker-side dual of :func:`~agentcore.tools.builtin.ask_user.ask_user_tool_result`:
+
+    - ``"resolved"`` → feed the user's ``answer`` back into the worker's loop, told to
+      prefer it over its暂定假设 and回改 any work already done under the assumption;
+    - ``"timeout"`` (no answer within the window, or the user chose 按假设继续) → steer the
+      worker to proceed on its stated ``assumption`` — exactly today's non-blocking behaviour.
+
+    Never terminal: an escalation RESUMES the worker, it never ends the turn (停回合 is the
+    CEO ``ask_user`` / 对话级 job, never a single worker's call — 设计 §4.5).
+    """
+    if status == "resolved":
+        ans = (answer or "").strip()
+        output = (
+            f"用户就你的升级问题答复：\n{ans}\n"
+            "请据此继续；与你的暂定假设冲突处以用户答复为准，并回改已按假设做出的部分。"
+        )
+        return ToolResult(tool_call_id="", success=True, output=output)
+    # timeout (含「按假设继续」): fall back to the stated assumption — today's behaviour.
+    return ToolResult(
+        tool_call_id="",
+        success=True,
+        output=(
+            "未在时限内得到用户答复（或用户选择按你的假设继续）。"
+            f"请按你写明的假设把任务继续做完：{assumption}。"
+        ),
+    )

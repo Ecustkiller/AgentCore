@@ -85,6 +85,17 @@ export interface ProjectedRunCheckpoint {
   decision: "continue" | "adjust" | "stop" | "timeout" | null;
 }
 
+/** 升级实时可见: one escalation a worker raised mid-run via `escalate` (its only upward
+ * channel to the CEO). `question` is the self-contained ask; `assumption` is what the
+ * worker proceeded on meanwhile (escalate 非阻塞 — it kept working); `blocking` flags that
+ * a wrong guess would void its product. Folded onto its {@link ProjectedRun} from the
+ * `run_escalation` event so every end's node carries the same ⚠️ signal. */
+export interface RunEscalation {
+  question: string;
+  assumption: string;
+  blocking: boolean;
+}
+
 /** One node in the team graph (mirrors desktop RunNode — stores/execution.ts). The
  * tree is encoded by `parentRunId`; `usage`/`cost` ride verbatim from run_completed. */
 export interface ProjectedRun {
@@ -113,6 +124,10 @@ export interface ProjectedRun {
    * snake_case) — the SAME data the LLM saw. Empty until that event folds in (or for a
    * run whose opening was not block-assembled). */
   receivedContext: ContextBlockWire[];
+  /** 升级实时可见: escalations this run raised via `escalate`, in fire order (`run_escalation`
+   * events). Empty for the common case; non-empty drives every end's node ⚠️ badge + live
+   * notice. Transport-only on the wire — the durable copy rides RunState.escalations. */
+  escalations: RunEscalation[];
 }
 
 /** A pending user gate — the one surface the turn is blocked on (`paused`). Only the
@@ -147,6 +162,12 @@ export interface ProjectedTurn {
    * a multi-agent turn where the captain speaks above the team graph). */
   content: string;
   reasoning: string;
+  /** 收到的上下文 · CEO 侧 (上下文传递可视化, 通道①): the structured context the CEO captain
+   * was fed at assembly time — `system` (本回合系统提示，决策②默认隐藏) / `history` / `request`
+   * — from its `run_context` event (run_started kind=`captain`). Turn-level, NOT a graph
+   * node: the captain is the bubble above the graph, so this shows on EVERY turn (pure chat
+   * included), not only when it delegates. Empty until that event folds in. */
+  captainContext: ContextBlockWire[];
   /** Single-agent 思考·正文·工具 inline timeline. Empty for a multi-agent turn (the
    * team graph carries the activity instead — parity with EventSink.process_timeline
    * returning None once run_plan fired). */

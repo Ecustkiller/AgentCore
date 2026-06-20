@@ -1,8 +1,10 @@
+import { useConversations } from "@/hooks/useConversations";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
 import type { FolderMeta } from "@/services/folders";
 import { type WorkspaceInfo, listWorkspaces } from "@/services/workspaces";
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 
 /**
  * The user's workspaces (= folders, cloud + local) as React Query data — the
@@ -25,6 +27,36 @@ export function useWorkspaces() {
     queryFn: listWorkspaces,
     staleTime: 30_000,
   });
+}
+
+/**
+ * The {@link WorkspaceInfo} backing a single conversation's side panel — the chat
+ * panel's counterpart to the hub's full rail. 文件夹即工作区: a conversation's
+ * workspace is its folder's, so we map conversationId → folderId → `folder:<id>` in
+ * the **same** `useWorkspaces` cache the hub reads. That makes cloud/local + subpath
+ * resolve identically in both surfaces, and both stay live through the one
+ * `workspace_promoted` SSE patch (it patches the conversation's folderId *and* adds
+ * the workspace) — so a 裸聊's first file write reactively surfaces its new workspace
+ * here with no manual refresh.
+ *
+ * Returns null for a 裸聊 with no folder yet (nothing written), or while the
+ * workspace list is still loading: the panel falls back to its conversation-keyed
+ * cloud source, which lists cloud files and shows an empty hint pre-promotion.
+ */
+export function useConversationWorkspace(
+  conversationId: string | null,
+): WorkspaceInfo | null {
+  const conversations = useConversations();
+  const { data: workspaces } = useWorkspaces();
+  return useMemo(() => {
+    if (!conversationId) return null;
+    const folderId = conversations.find(
+      (c) => c.id === conversationId,
+    )?.folderId;
+    if (!folderId) return null;
+    const wsId = `folder:${folderId}`;
+    return workspaces?.find((w) => w.wsId === wsId) ?? null;
+  }, [conversationId, conversations, workspaces]);
 }
 
 /** Project a folder onto its rail shape (`ws_id = folder:<id>`). A bound local

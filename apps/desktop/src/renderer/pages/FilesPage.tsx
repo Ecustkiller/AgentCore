@@ -5,6 +5,7 @@ import {
   useUpdateFolder,
 } from "@/hooks/useFolders";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
+import { notifyError } from "@/lib/toast";
 import { useFoldersStore } from "@/stores/folders";
 import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -53,8 +54,8 @@ export function FilesPage() {
         name: "新建文件夹",
       });
       setPendingRename(folder.id);
-    } catch {
-      /* create failed (offline / 401); leave the page as-is */
+    } catch (err) {
+      notifyError(err, "新建文件夹失败");
     }
   };
 
@@ -69,8 +70,8 @@ export function FilesPage() {
         name: root.name,
         localRootId: root.id,
       });
-    } catch {
-      /* picker / create failed; leave the page as-is */
+    } catch (err) {
+      notifyError(err, "添加本地文件夹失败");
     }
   };
 

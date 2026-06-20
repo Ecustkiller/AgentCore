@@ -8,6 +8,7 @@ import type {
   PlanReviewResolvedPayload,
   RunCompletedPayload,
   RunContextPayload,
+  RunEscalationPayload,
   RunFailedPayload,
   RunKind,
   RunOutputDeltaPayload,
@@ -186,6 +187,18 @@ export interface RunCheckpoint {
   decision: CheckpointDecision | null;
 }
 
+/** 升级实时可见: one escalation a worker raised mid-run via `escalate` (its only upward
+ * channel to the CEO). `question` is the self-contained ask; `assumption` is what the
+ * worker proceeded on meanwhile (escalate 非阻塞 — it kept working); `blocking` flags
+ * that a wrong guess would void its product. Folded onto its {@link RunNode} from the
+ * `run_escalation` frame so the node shows a ⚠️ badge and the card raises a turn-level
+ * notice the moment it fires — not after the CEO synthesizes. */
+export interface RunEscalation {
+  question: string;
+  assumption: string;
+  blocking: boolean;
+}
+
 export interface RunNode {
   id: string;
   agentId: string;
@@ -239,6 +252,10 @@ export interface RunNode {
    * 团队位置 / 前置结果 / 工作区 / 任务…). Empty until that frame folds in (or for a run
    * whose opening wasn't block-assembled). Drives the run detail's「收到的上下文」area. */
   receivedContext: ContextBlockWire[];
+  /** 升级实时可见: escalations this run raised via `escalate`, in fire order. Empty for
+   * the common case; non-empty drives the node's ⚠️ badge + the card's live notice.
+   * Appended on each `run_escalation` frame. */
+  escalations: RunEscalation[];
 }
 
 export interface Execution {
@@ -360,6 +377,15 @@ export type RunFrame =
   | { t: number; kind: "run_progress"; completed: number; total: number }
   | {
       t: number;
+      kind: "run_escalation";
+      runId: string;
+      agentId: string;
+      question: string;
+      assumption: string;
+      blocking: boolean;
+    }
+  | {
+      t: number;
       kind: "tool_use_start";
       toolCallId: string;
       toolName: string;
@@ -445,6 +471,8 @@ export function projectExecution(
     checkpoint: null,
     // No received context until the run_context frame folds in (上下文传递可视化).
     receivedContext: [],
+    // No escalations until a run_escalation frame folds in (升级实时可见).
+    escalations: [],
   }));
 
   const agentById = (id: string) => agents.find((a) => a.id === id);
@@ -503,6 +531,7 @@ export function projectExecution(
               revision: f.revision,
               checkpoint: null,
               receivedContext: [],
+              escalations: [],
             };
             runs.push(run);
           }
@@ -525,8 +554,10 @@ export function projectExecution(
       case "run_context": {
         // 收到的上下文 (上下文传递可视化): record the structured context this run was
         // fed onto its node, so the detail panel shows exactly what the LLM saw.
+        // The captain's own context is TURN-LEVEL (the message bubble, not a node):
+        // skip it here so a multi-agent journal replay doesn't paint the CEO node.
         const run = runById(f.runId);
-        if (run) run.receivedContext = f.blocks;
+        if (run && run.kind !== "captain") run.receivedContext = f.blocks;
         break;
       }
       case "run_output_delta": {
@@ -604,6 +635,20 @@ export function projectExecution(
         // Progress is derived from run states below so it stays correct and
         // cumulative across multiple delegate batches (the per-batch wire
         // counters would reset). The frame is kept only as a timeline marker.
+        break;
+      }
+      case "run_escalation": {
+        // 升级实时可见: a worker flagged a decision/blocker for the CEO — append it to
+        // its run so the node shows a ⚠️ badge and the card raises a live notice the
+        // instant it fires (the durable copy still rides RunState.escalations → CEO
+        // synthesis). A stray frame whose run isn't on this graph is ignored.
+        const run = runById(f.runId);
+        if (run)
+          run.escalations.push({
+            question: f.question,
+            assumption: f.assumption,
+            blocking: f.blocking,
+          });
         break;
       }
       case "tool_use_start": {
@@ -708,6 +753,8 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       return `${role(frame.agentId)} 失败`;
     case "run_progress":
       return `进度 ${frame.completed}/${frame.total}`;
+    case "run_escalation":
+      return `${role(frame.agentId)} 上报问题`;
     case "tool_use_start":
       return `调用工具 ${frame.toolName}`;
     case "tool_use_end":
@@ -1055,6 +1102,18 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         kind: "run_progress",
         completed: p.completed,
         total: p.total,
+      };
+    }
+    case "run_escalation": {
+      const p = event.payload as RunEscalationPayload;
+      return {
+        t,
+        kind: "run_escalation",
+        runId: p.run_id,
+        agentId: p.agent_id,
+        question: p.question,
+        assumption: p.assumption,
+        blocking: p.blocking,
       };
     }
     case "tool_use_start": {

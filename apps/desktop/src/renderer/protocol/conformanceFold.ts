@@ -6,9 +6,9 @@
 // AUTHENTICITY: the team-graph projection reuses desktop's REAL pure fold
 // (`projectExecution` + `planFromRunPlan` + `frameFromEvent` from stores/execution.ts)
 // — the complex, drift-prone surface is the actual production code, not a copy. The
-// single-agent process timeline (思考·正文·工具) now ALSO reuses the same pure helpers
-// production renders through (`@/lib/processTimeline`, shared with stores/
-// conversation.ts), so that lane is production-sourced too — no second coalesce rule
+// process timeline (思考·正文·工具, single-agent AND multi-agent — 统一团队时间线) now ALSO
+// reuses the same pure helpers production renders through (`@/lib/processTimeline`,
+// shared with stores/conversation.ts), so that lane is production-sourced too — no rule
 // to drift. Only the thin turn-level scalars (content / reasoning strings / citations /
 // pending gate / cost) are assembled here to build the ProjectedTurn the golden judges.
 //
@@ -37,6 +37,7 @@ import type {
   CheckpointRequiredPayload,
   CitationsPayload,
   ContentDeltaPayload,
+  ContextBlockWire,
   DebateNarrativeRound,
   DebateResultPayload,
   DebateRoundPayload,
@@ -44,7 +45,9 @@ import type {
   MessageEndPayload,
   PlanReviewRequiredPayload,
   ReasoningDeltaPayload,
+  RunContextPayload,
   RunPlanPayload,
+  RunStartedPayload,
   SSEEvent,
   ToolUseEndPayload,
   ToolUseStartPayload,
@@ -99,6 +102,11 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let debate: DebateResultPayload | null = null;
   let debateRounds: DebateNarrativeRound[] = [];
   let pending: PendingInteraction | null = null;
+  // 收到的上下文 · CEO 侧 (上下文传递可视化): the captain run id (its kind=captain
+  // run_started) + the opening context it was fed, routed turn-level — the CEO is the
+  // bubble above the graph, not a peer node, so its run_context never becomes a frame.
+  let captainRunId: string | null = null;
+  let captainContext: ContextBlockWire[] = [];
 
   // Team graph via the REAL desktop fold: build the plan + frame stream the same way
   // hydrateFromJournal does, then project.
@@ -152,14 +160,36 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         plan = plan && plan.id === next.id ? mergePlan(plan, next) : next;
         break;
       }
-      case "run_started":
-      case "run_context":
+      case "run_started": {
+        // The CEO captain is the turn's root (kind=captain); remember its run id so its
+        // run_context routes turn-level (its node still folds via the frame like any run).
+        const p = ev.payload as RunStartedPayload;
+        if (p.kind === "captain") captainRunId = p.run_id;
+        const frame = frameFromEvent(ev);
+        if (frame) frames.push(frame);
+        break;
+      }
+      case "run_context": {
+        // The CAPTAIN's context routes TURN-LEVEL onto captainContext (the CEO is the
+        // bubble above the graph, not a node — shows on every turn, pure chat included),
+        // APPENDING across emits so its context GROWS by each post-delegation team readback
+        // (通道⑤); a WORKER's stays a frame so projectExecution folds it onto its graph node.
+        const p = ev.payload as RunContextPayload;
+        if (p.run_id === captainRunId) {
+          captainContext = [...captainContext, ...p.blocks];
+          break;
+        }
+        const frame = frameFromEvent(ev);
+        if (frame) frames.push(frame);
+        break;
+      }
       case "run_output_delta":
       case "run_reasoning_delta":
       case "run_tool_progress":
       case "run_completed":
       case "run_failed":
-      case "run_progress": {
+      case "run_progress":
+      case "run_escalation": {
         const frame = frameFromEvent(ev);
         if (frame) frames.push(frame);
         break;
@@ -316,6 +346,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     revision: r.revision,
     checkpoint: r.checkpoint,
     receivedContext: r.receivedContext,
+    escalations: r.escalations,
   }));
 
   return {
@@ -323,7 +354,10 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     finishReason,
     content,
     reasoning,
-    process: plan ? [] : process,
+    captainContext,
+    // The CEO's inline timeline — for single-agent AND multi-agent turns (统一团队
+    // 时间线); the team graph slots at the `delegate` step on a delegating turn.
+    process,
     citations,
     agents,
     runs,

@@ -12,6 +12,7 @@ import {
 } from "@/stores/execution";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import {
+  ArrowUp,
   Bot,
   CheckCircle2,
   Clock,
@@ -78,6 +79,10 @@ interface AgentNodeData {
   /** 结构化挂起 2a (7.2A): a `checkpoint_after` pause that fired after this run, or
    * null. Drives the node's「待放行 / 已放行 / 已停止」pause badge. */
   checkpoint?: RunCheckpoint | null;
+  /** 升级实时可见: how many escalations this worker raised (`escalate`). >0 draws a ⚠️
+   * 上报 badge so a flagged blocker shows on the node the moment it fires — not only
+   * after the CEO synthesizes. */
+  escalationCount?: number;
   /** Position in the plan, used to stagger the entrance animation. */
   enterIndex?: number;
   /** Keyboard activation (Enter/Space) — mirrors a plain node click. */
@@ -172,7 +177,9 @@ export function AgentNode({ data }: NodeProps) {
     d.costText ? `，成本 ${d.costText}` : ""
   }${durationText ? `，用时 ${durationText}` : ""}${
     d.toolCount > 0 ? `，工具 ${d.toolCount} 次` : ""
-  }${d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""}`;
+  }${d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""}${
+    (d.escalationCount ?? 0) > 0 ? `，上报 ${d.escalationCount} 条待裁决` : ""
+  }`;
 
   return (
     <>
@@ -217,7 +224,11 @@ export function AgentNode({ data }: NodeProps) {
               {/* 第二行仅在有「立场 / 子任务 / 修订」分类标记时出现；状态不再用文字
                   重复（图标 + 色环 + 运行脉冲已表达），普通队员只剩单行角色名，不再被
                   徽章挤到截断。 */}
-              {(d.stance || d.isSubtask || d.isRevision || d.checkpoint) && (
+              {(d.stance ||
+                d.isSubtask ||
+                d.isRevision ||
+                d.checkpoint ||
+                (d.escalationCount ?? 0) > 0) && (
                 <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                   {d.stance && (
                     <span className="shrink-0 rounded-full bg-info/10 px-1.5 py-0.5 font-medium text-info">
@@ -248,6 +259,13 @@ export function AgentNode({ data }: NodeProps) {
                         </span>
                       );
                     })()}
+                  {(d.escalationCount ?? 0) > 0 && (
+                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-warning/10 px-1.5 py-0.5 font-medium text-warning">
+                      <ArrowUp size={10} />
+                      上报
+                      {(d.escalationCount ?? 0) > 1 ? ` ${d.escalationCount}` : ""}
+                    </span>
+                  )}
                 </p>
               )}
             </div>

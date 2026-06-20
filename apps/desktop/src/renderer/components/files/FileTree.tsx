@@ -13,20 +13,25 @@ import {
   joinPath,
   parentDir,
 } from "@/lib/fileSource";
-import { notifyError } from "@/lib/toast";
+import { notifyActionError, notifyError, notifySuccess } from "@/lib/toast";
 import {
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
+  ClipboardPaste,
+  Copy,
   Download,
+  ExternalLink,
   FilePlus,
   FileText,
   Folder,
   FolderOpen,
   FolderPlus,
+  FolderSearch,
   Loader2,
   Pencil,
   RefreshCw,
+  Scissors,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -72,6 +77,28 @@ function saveExpanded(id: string, set: Set<string>): void {
   } catch {
     /* unavailable — session-only */
   }
+}
+
+/** 剪贴板内容：一个待复制/剪切的源内路径 + 操作类型。 */
+type ClipboardEntry = { op: "copy" | "cut"; path: string };
+
+/**
+ * 为「复制-粘贴」算一个在目标目录中不冲突的名字：命中即追加「 副本」，再冲突则「 副本 2」…
+ * 保留扩展名（`a.txt` → `a 副本.txt`）。前导点文件（`.env`）按无扩展名整体处理。
+ */
+export function dedupeName(name: string, existing: Set<string>): string {
+  if (!existing.has(name)) return name;
+  const dot = name.lastIndexOf(".");
+  const hasExt = dot > 0; // 前导点（dot===0）不算扩展名
+  const stem = hasExt ? name.slice(0, dot) : name;
+  const ext = hasExt ? name.slice(dot) : "";
+  let candidate = `${stem} 副本${ext}`;
+  let n = 2;
+  while (existing.has(candidate)) {
+    candidate = `${stem} 副本 ${n}${ext}`;
+    n++;
+  }
+  return candidate;
 }
 
 /**
@@ -154,10 +181,18 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     const [dropTarget, setDropTarget] = useState<string | null>(null);
     const [uploading, setUploading] = useState(false);
     const [dragOver, setDragOver] = useState(false);
+    // 键盘焦点节点（复制/剪切/粘贴的作用对象）与剪贴板，均限本树内（与拖拽移动同源约束一致）。
+    const [selected, setSelected] = useState<{
+      path: string;
+      isDir: boolean;
+    } | null>(null);
+    const [clipboard, setClipboard] = useState<ClipboardEntry | null>(null);
     const uploadRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
       setExpanded(loadExpanded(source.id));
+      setSelected(null);
+      setClipboard(null);
     }, [source.id]);
 
     // Live updates: watch the root + every expanded dir (local FS only).
@@ -308,6 +343,111 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       [source, data],
     );
 
+    const onSelect = useCallback((node: FileNode) => {
+      setSelected({ path: node.path, isDir: node.isDir });
+    }, []);
+
+    const doCopy = useCallback(
+      (path: string) => {
+        if (source.copy) setClipboard({ op: "copy", path });
+      },
+      [source],
+    );
+
+    const doCut = useCallback((path: string) => {
+      setClipboard({ op: "cut", path });
+    }, []);
+
+    // 把目标目录展开（若折叠），让粘贴结果立即可见；随后由调用方 reload。
+    const revealDir = useCallback(
+      (dir: string) => {
+        if (dir === "") return;
+        setExpanded((prev) => {
+          if (prev.has(dir)) return prev;
+          const next = new Set(prev).add(dir);
+          data.ensureDir(dir);
+          saveExpanded(source.id, next);
+          return next;
+        });
+      },
+      [data, source.id],
+    );
+
+    // 把剪贴板内容粘贴进 destDir（""=根）。剪切走必备的 move（全源可用，一次性）；复制走可选
+    // copy（本地源），名字按目标目录现有项去重（副本 / 副本 2…），可重复粘贴。
+    const doPaste = useCallback(
+      async (destDir: string) => {
+        const clip = clipboard;
+        if (!clip) return;
+        if (destDir === clip.path || destDir.startsWith(`${clip.path}/`)) {
+          notifyActionError("无法粘贴", new Error("不能粘贴到自身或其子目录"));
+          return;
+        }
+        try {
+          const siblings = await source.listDir(destDir);
+          const names = new Set(siblings.map((n) => n.name));
+          const origName = baseName(clip.path);
+          if (clip.op === "cut") {
+            if (parentDir(clip.path) === destDir) return; // 原地剪切粘贴 = 空操作
+            if (names.has(origName)) {
+              notifyActionError(
+                "无法粘贴",
+                new Error("目标位置已存在同名项"),
+              );
+              return;
+            }
+            await source.move(clip.path, joinPath(destDir, origName));
+            setClipboard(null); // 剪切是一次性的
+            data.reload(parentDir(clip.path));
+          } else {
+            if (!source.copy) return;
+            await source.copy(
+              clip.path,
+              joinPath(destDir, dedupeName(origName, names)),
+            );
+            // 复制保留剪贴板，可重复粘贴（每次对最新清单去重）。
+          }
+          revealDir(destDir);
+          data.reload(destDir);
+        } catch (e) {
+          notifyActionError("粘贴失败", e);
+        }
+      },
+      [clipboard, source, data, revealDir],
+    );
+
+    // Ctrl/Cmd + C/X/V。仅当焦点在树内（行按钮）时触发；让出原生文本复制（有选区时）。
+    const onTreeKeyDown = useCallback(
+      (e: React.KeyboardEvent) => {
+        if (creating || renaming) return;
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        if (!(e.ctrlKey || e.metaKey)) return;
+        if (window.getSelection()?.toString()) return;
+        const key = e.key.toLowerCase();
+        if (key === "c") {
+          if (selected && source.copy) {
+            e.preventDefault();
+            doCopy(selected.path);
+          }
+        } else if (key === "x") {
+          if (selected) {
+            e.preventDefault();
+            doCut(selected.path);
+          }
+        } else if (key === "v" && clipboard) {
+          e.preventDefault();
+          const destDir = selected
+            ? selected.isDir
+              ? selected.path
+              : parentDir(selected.path)
+            : "";
+          void doPaste(destDir);
+        }
+      },
+      [creating, renaming, selected, clipboard, source, doCopy, doCut, doPaste],
+    );
+
     const rootStatus = data.statusOf("");
     const rootChildren = data.childrenOf("");
 
@@ -454,8 +594,12 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
               creating={creating}
               renaming={renaming}
               dropTarget={dropTarget}
+              selectedPath={selected?.path ?? null}
+              cutPath={clipboard?.op === "cut" ? clipboard.path : null}
+              hasClipboard={clipboard !== null}
               onToggle={toggle}
               onOpenFile={onOpenFile}
+              onSelect={onSelect}
               onContextCreate={openCreate}
               onStartRename={setRenaming}
               onSubmitRename={submitRename}
@@ -463,6 +607,9 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
               onSubmitCreate={submitCreate}
               onCancelCreate={() => setCreating(null)}
               onDelete={remove}
+              onCopy={doCopy}
+              onCut={doCut}
+              onPaste={doPaste}
               onMoveInto={moveInto}
               onUpload={upload}
               onDropTarget={setDropTarget}
@@ -475,6 +622,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
   if (!chrome) {
     return (
       <div
+        onKeyDown={onTreeKeyDown}
         onDragOver={onDragOverRoot}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDropRoot}
@@ -488,6 +636,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     return (
       <div
         className="flex h-full flex-col"
+        onKeyDown={onTreeKeyDown}
         onDragOver={onDragOverRoot}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDropRoot}
@@ -574,8 +723,15 @@ interface RowProps {
   creating: { dir: string; kind: "file" | "dir" } | null;
   renaming: string | null;
   dropTarget: string | null;
+  /** 当前键盘焦点行（高亮）。 */
+  selectedPath: string | null;
+  /** 已剪切待移动的行（半透明示意）。 */
+  cutPath: string | null;
+  /** 剪贴板非空（文件夹行据此显示「粘贴」）。 */
+  hasClipboard: boolean;
   onToggle: (dir: string) => void;
   onOpenFile: (path: string, name: string) => void;
+  onSelect: (node: FileNode) => void;
   onContextCreate: (dir: string, kind: "file" | "dir") => void;
   onStartRename: (path: string) => void;
   onSubmitRename: (path: string, name: string) => void;
@@ -583,6 +739,9 @@ interface RowProps {
   onSubmitCreate: (name: string) => void;
   onCancelCreate: () => void;
   onDelete: (node: FileNode) => void;
+  onCopy: (path: string) => void;
+  onCut: (path: string) => void;
+  onPaste: (destDir: string) => void;
   onMoveInto: (src: string, destDir: string) => void;
   onUpload: (files: FileList | null, destDir: string) => void;
   onDropTarget: (path: string | null) => void;
@@ -600,6 +759,8 @@ function Row(props: RowProps) {
 
   if (!node.isDir) {
     const isActive = props.activePath === node.path;
+    const isSelected = props.selectedPath === node.path;
+    const isCut = props.cutPath === node.path;
     return (
       <li>
         {props.renaming === node.path ? (
@@ -617,14 +778,17 @@ function Row(props: RowProps) {
                 draggable
                 onDragStart={startDrag}
                 className={`group flex items-center rounded-md pr-1 text-xs hover:bg-accent ${
-                  isActive ? "bg-accent text-accent-foreground" : ""
-                }`}
+                  isActive || isSelected ? "bg-accent text-accent-foreground" : ""
+                } ${isCut ? "opacity-50" : ""}`}
                 style={{ paddingLeft: indent }}
               >
                 <SimpleTooltip label={`预览 ${node.path}`}>
                   <button
                     type="button"
-                    onClick={() => props.onOpenFile(node.path, node.name)}
+                    onClick={() => {
+                      props.onSelect(node);
+                      props.onOpenFile(node.path, node.name);
+                    }}
                     className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
                   >
                     <span className="w-[13px] shrink-0" aria-hidden="true" />
@@ -647,6 +811,8 @@ function Row(props: RowProps) {
   // Directory row.
   const open = expanded.has(node.path);
   const isTarget = dropTarget === node.path;
+  const isSelected = props.selectedPath === node.path;
+  const isCut = props.cutPath === node.path;
   const status = data.statusOf(node.path);
   const children = data.childrenOf(node.path);
 
@@ -692,14 +858,21 @@ function Row(props: RowProps) {
                   props.onUpload(e.dataTransfer.files, node.path);
               }}
               className={`group flex items-center rounded-md pr-1 text-xs hover:bg-accent ${
-                isTarget ? "bg-accent ring-1 ring-inset ring-primary" : ""
-              }`}
+                isTarget
+                  ? "bg-accent ring-1 ring-inset ring-primary"
+                  : isSelected
+                    ? "bg-accent text-accent-foreground"
+                    : ""
+              } ${isCut ? "opacity-50" : ""}`}
               style={{ paddingLeft: indent }}
             >
               <SimpleTooltip label={node.path}>
                 <button
                   type="button"
-                  onClick={() => props.onToggle(node.path)}
+                  onClick={() => {
+                    props.onSelect(node);
+                    props.onToggle(node.path);
+                  }}
                   className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
                 >
                   {open ? (
@@ -782,17 +955,64 @@ function Row(props: RowProps) {
 function RowMenu({
   node,
   source,
+  hasClipboard,
   onContextCreate,
   onStartRename,
   onDelete,
   onOpenFile,
+  onCopy,
+  onCut,
+  onPaste,
 }: { node: FileNode; source: FileSource } & Pick<
   RowProps,
-  "onContextCreate" | "onStartRename" | "onDelete" | "onOpenFile"
+  | "hasClipboard"
+  | "onContextCreate"
+  | "onStartRename"
+  | "onDelete"
+  | "onOpenFile"
+  | "onCopy"
+  | "onCut"
+  | "onPaste"
 >) {
+  // 系统集成项只在源实现了对应方法时出现（本地源有、云端源无）——靠「方法是否存在」门控，
+  // 组件内不按源 if 分支。「用默认程序打开」仅给文件（对目录而言就是再次定位，与 reveal 重复）。
+  const canReveal = !!source.revealInOsFileManager;
+  const canOpenExternal = !node.isDir && !!source.openWithOsDefaultApp;
+  const canCopyPath = !!source.copyOsPath;
+  const hasOsGroup = canReveal || canOpenExternal || canCopyPath;
+  // 复制走可选 copy（本地源有、云端源无）；剪切走必备 move（全源可用）；粘贴仅文件夹行 +
+  // 剪贴板非空时出现（粘贴进该文件夹）。
+  const canCopy = !!source.copy;
+
+  const reveal = async () => {
+    try {
+      await source.revealInOsFileManager?.(node.path);
+    } catch (e) {
+      notifyActionError("无法在资源管理器中显示", e);
+    }
+  };
+  const openExternal = async () => {
+    try {
+      await source.openWithOsDefaultApp?.(node.path);
+    } catch (e) {
+      notifyActionError("无法用默认程序打开", e);
+    }
+  };
+  const copyPath = async () => {
+    try {
+      await source.copyOsPath?.(node.path);
+      notifySuccess("已复制路径");
+    } catch (e) {
+      notifyActionError("复制路径失败", e);
+    }
+  };
+
+  // Groups separated systematically (a leading separator only when both sides are
+  // non-empty) so no group ever yields a double rule. The primary group (dir →
+  // 新建; file → 打开/下载) is always present, so 系统集成 / 编辑 just prefix a rule.
   return (
     <ContextMenuContent className="min-w-36">
-      {node.isDir && (
+      {node.isDir ? (
         <>
           <ContextMenuItem onSelect={() => onContextCreate(node.path, "file")}>
             <FilePlus size={14} className="shrink-0" />
@@ -802,23 +1022,64 @@ function RowMenu({
             <FolderPlus size={14} className="shrink-0" />
             <span className="flex-1 truncate">新建文件夹</span>
           </ContextMenuItem>
-          <ContextMenuSeparator />
+        </>
+      ) : (
+        <>
+          {source.caps.transfer && source.download && (
+            <ContextMenuItem
+              onSelect={() => void source.download?.(node.path, node.name)}
+            >
+              <Download size={14} className="shrink-0" />
+              <span className="flex-1 truncate">下载</span>
+            </ContextMenuItem>
+          )}
+          <ContextMenuItem onSelect={() => onOpenFile(node.path, node.name)}>
+            <FileText size={14} className="shrink-0" />
+            <span className="flex-1 truncate">打开</span>
+          </ContextMenuItem>
         </>
       )}
-      {!node.isDir && source.caps.transfer && source.download && (
-        <ContextMenuItem
-          onSelect={() => void source.download?.(node.path, node.name)}
-        >
-          <Download size={14} className="shrink-0" />
-          <span className="flex-1 truncate">下载</span>
+      {hasOsGroup && (
+        <>
+          <ContextMenuSeparator />
+          {canOpenExternal && (
+            <ContextMenuItem onSelect={() => void openExternal()}>
+              <ExternalLink size={14} className="shrink-0" />
+              <span className="flex-1 truncate">用默认程序打开</span>
+            </ContextMenuItem>
+          )}
+          {canReveal && (
+            <ContextMenuItem onSelect={() => void reveal()}>
+              <FolderSearch size={14} className="shrink-0" />
+              <span className="flex-1 truncate">在资源管理器中显示</span>
+            </ContextMenuItem>
+          )}
+          {canCopyPath && (
+            <ContextMenuItem onSelect={() => void copyPath()}>
+              <Copy size={14} className="shrink-0" />
+              <span className="flex-1 truncate">复制路径</span>
+            </ContextMenuItem>
+          )}
+        </>
+      )}
+      <ContextMenuSeparator />
+      {canCopy && (
+        <ContextMenuItem onSelect={() => onCopy(node.path)}>
+          <Copy size={14} className="shrink-0" />
+          <span className="flex-1 truncate">复制</span>
         </ContextMenuItem>
       )}
-      {!node.isDir && (
-        <ContextMenuItem onSelect={() => onOpenFile(node.path, node.name)}>
-          <FileText size={14} className="shrink-0" />
-          <span className="flex-1 truncate">打开</span>
+      <ContextMenuItem onSelect={() => onCut(node.path)}>
+        <Scissors size={14} className="shrink-0" />
+        <span className="flex-1 truncate">剪切</span>
+      </ContextMenuItem>
+      {node.isDir && hasClipboard && (
+        <ContextMenuItem onSelect={() => onPaste(node.path)}>
+          <ClipboardPaste size={14} className="shrink-0" />
+          <span className="flex-1 truncate">粘贴到此文件夹</span>
         </ContextMenuItem>
       )}
+      <ContextMenuSeparator />
       <ContextMenuItem onSelect={() => onStartRename(node.path)}>
         <Pencil size={14} className="shrink-0" />
         <span className="flex-1 truncate">重命名</span>

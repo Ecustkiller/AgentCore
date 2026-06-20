@@ -1,9 +1,9 @@
+import { fetchAvatarObjectUrl } from "@/api/account";
+import type { User } from "@/api/auth";
 // Bearer-safe avatar: fetches the image as a blob → object URL (an <img src> can't
 // carry the Authorization header), falling back to the name initial. Shared by the
 // settings hub and the account page.
 import { useEffect, useState } from "react";
-import type { User } from "@/api/auth";
-import { fetchAvatarObjectUrl } from "@/api/account";
 
 export function Avatar({ user, size }: { user: User | null; size: number }) {
   const [url, setUrl] = useState<string | null>(null);

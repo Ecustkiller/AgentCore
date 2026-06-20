@@ -1608,6 +1608,17 @@
             "title": "Id",
             "type": "string"
           },
+          "local_container_root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Container Root Id"
+          },
           "message_count": {
             "default": 0,
             "title": "Message Count",
@@ -1706,6 +1717,18 @@
               }
             ],
             "title": "Folder Id"
+          },
+          "local_container_root_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Container Root Id"
           },
           "model_mode": {
             "anyOf": [
@@ -2730,10 +2753,42 @@
             "title": "Role",
             "type": "string"
           },
+          "rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounds"
+          },
           "runs": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/RunsPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageBreakdown"
               },
               {
                 "type": "null"
@@ -3623,9 +3678,53 @@
         "title": "RoleCostLine",
         "type": "object"
       },
-      "RunsPayload": {
-        "description": "Persisted turn replay payload for an assistant message.\n\n``events`` is a multi-agent turn's ordered run/tool SSE events; the client\nreplays them through the same fold as the live stream to reproduce the team\ngraph exactly on reload (empty ``[]`` for a single-agent turn). ``process`` is\na single-agent turn's 思考+工具 timeline (ordered reasoning/tool steps) the\nclient replays into the inline process panel; ``null`` unless the turn used a\ntool. ``null`` whole payload on messages with neither (plain chat / user).",
+      "RunError": {
+        "description": "A turn's terminal error (报错回合), projected from the journal's ``turn_end``\noutcome fact so the inline error card replays on reload (Tier 2 a).\n\nLive, the error rides a transport-only ``error`` SSE event (never journaled), so\npersisting ``code`` + ``message`` on the outcome fact is its only durable home.\n``code`` drives the bubble's retry affordance; ``message`` is the user-facing text\nthe card shows — the same pair the live ``error`` event carried.",
         "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "RunError",
+        "type": "object"
+      },
+      "RunsPayload": {
+        "description": "Persisted turn replay payload for an assistant message.\n\n``events`` is a multi-agent turn's ordered run/tool SSE events; the client\nreplays them through the same fold as the live stream to reproduce the team\ngraph exactly on reload (empty ``[]`` for a single-agent turn). ``process`` is\na single-agent turn's 思考+工具 timeline (ordered reasoning/tool steps) the\nclient replays into the inline process panel; ``null`` unless the turn used a\ntool. ``captain_context`` is the CEO captain's received context (上下文传递可视化\n通道①: ``system`` / ``history`` / ``request``), turn-level so it replays on the\nCEO bubble even for a pure-chat turn (where ``events`` is empty); ``null`` unless\nthe captain shipped context. ``error`` is a 报错回合's terminal error, replaying the\ninline error card on reload (``null`` for a clean turn). ``null`` whole payload on\nmessages with none of these.",
+        "properties": {
+          "captain_context": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captain Context"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "events": {
             "items": {
               "additionalProperties": true,
@@ -3880,18 +3979,6 @@
             "minLength": 1,
             "title": "Content",
             "type": "string"
-          },
-          "local_container_root_id": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Local Container Root Id"
           }
         },
         "required": [
@@ -9828,7 +9915,7 @@
         ]
       },
       "put": {
-        "description": "Bind the conversation's workspace to a desktop FS root (switch to local).\n\n文件夹即工作区: a binding lives on the folder (= 工作区), shared by its siblings.\nA 裸聊 has no folder yet, so \"打开本地文件夹\" lazily mints one (named after the\nchat) and files the conversation into it before binding — the explicit-promote\ncounterpart to writing a file (§懒建). Idempotent — re-binding overwrites the\nstored root id.",
+        "description": "Bind the conversation's workspace to a desktop FS root (switch to local).\n\n文件夹即工作区: a binding lives on the folder (= 工作区), shared by its siblings.\nA 裸聊 has no folder yet, so \"打开本地文件夹\" lazily mints one (named after the\nchat) and files the conversation into it before binding — the explicit-promote\ncounterpart to writing a file (§懒建). Idempotent — re-binding overwrites the\nstored root id.\n\nThe 裸聊 mint goes through the shared ``promote_conversation_folder`` so it's\nserialized + idempotent with the other promotion paths (工作区对称化 D1a §并发提升):\nif a panel write or the turn's first write already minted this chat's folder, bind\nreuses it (applying the requested root) instead of minting a second one.",
         "operationId": "bind_workspace_v1_conversations__conversation_id__workspace_binding_put",
         "parameters": [
           {
@@ -10824,6 +10911,81 @@
           }
         },
         "summary": "Move Workspace File",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
+    "/v1/conversations/{conversation_id}/workspace/promote": {
+      "post": {
+        "description": "Lazily promote a 裸聊 into its folder workspace WITHOUT writing a file — the\nserver hook for the desktop's *client-side* DeferredWorkspace (工作区对称化 D1a).\n\nA desktop 裸聊's panel can't write a **local** workspace over the cloud REST file\nroutes (those are server-backed; a local write must go through desktop IPC). So\nbefore its first panel write the client calls this to mint the folder — locality\ndecided by ``conv.local_container_root_id`` via the shared ``_conv_write_folder``\n(== the team's first write / the bind endpoint's explicit promote) — then writes\nvia IPC into the returned ``local_root_id`` + ``local_subpath``. Idempotent: an\nalready-foldered conversation just returns its existing folder. The client applies\nthe same cache patches the ``workspace_promoted`` SSE event would (re-group the\nchat + surface the new card), since a REST call carries no live stream.",
+        "operationId": "promote_workspace_v1_conversations__conversation_id__workspace_promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Promote Workspace",
         "tags": [
           "conversations"
         ]

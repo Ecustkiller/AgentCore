@@ -1,9 +1,3 @@
-// 消息线程 (/im/c/:chatId) — one human↔human thread. REST + polling (no SSE): the open
-// thread refetches the most-recent page every 4s and merges by id, so sends from the peer
-// appear within a cycle. IM list pagination is created_at ASC (page 1 = oldest), so the
-// thread lands on the LAST page and pages backward via「加载更早」.
-import { useEffect, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { me } from "@/api/auth";
 import { getTokens } from "@/api/client";
 import {
@@ -27,6 +21,12 @@ import {
 import { shareOrDownloadFile } from "@/lib/share";
 import { clock } from "@/lib/time";
 import { usePolling } from "@/lib/usePolling";
+// 消息线程 (/im/c/:chatId) — one human↔human thread. REST + polling (no SSE): the open
+// thread refetches the most-recent page every 4s and merges by id, so sends from the peer
+// appear within a cycle. IM list pagination is created_at ASC (page 1 = oldest), so the
+// thread lands on the LAST page and pages backward via「加载更早」.
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import "@/pages/im/im.css";
 
 const PAGE_SIZE = 100;
@@ -38,7 +38,9 @@ function mergeMessages(
 ): ChatMessageDetail[] {
   const byId = new Map(prev.map((m) => [m.id, m]));
   for (const m of incoming) byId.set(m.id, m);
-  return [...byId.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  return [...byId.values()].sort((a, b) =>
+    a.created_at.localeCompare(b.created_at),
+  );
 }
 
 function formatSize(bytes: number): string {
@@ -51,11 +53,14 @@ export function ChatThreadPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { chatId } = useParams<{ chatId: string }>();
-  const initialChat = (location.state as { chat?: ChatSummary } | null)?.chat ?? null;
+  const initialChat =
+    (location.state as { chat?: ChatSummary } | null)?.chat ?? null;
 
   const [chat, setChat] = useState<ChatSummary | null>(initialChat);
   const [myId, setMyId] = useState<string | null>(null);
-  const [members, setMembers] = useState<Map<string, ChatParticipant>>(new Map());
+  const [members, setMembers] = useState<Map<string, ChatParticipant>>(
+    new Map(),
+  );
   const [messages, setMessages] = useState<ChatMessageDetail[]>([]);
   const [oldestPage, setOldestPage] = useState(1);
   const [loaded, setLoaded] = useState(false);
@@ -122,7 +127,10 @@ export function ChatThreadPage() {
         initedRef.current = true;
         setLoaded(true);
       } else {
-        const lastPage = Math.max(1, Math.ceil((totalRef.current || 1) / PAGE_SIZE));
+        const lastPage = Math.max(
+          1,
+          Math.ceil((totalRef.current || 1) / PAGE_SIZE),
+        );
         const res = await listMessages(chatId, lastPage, PAGE_SIZE);
         totalRef.current = res.total;
         setMessages((prev) => mergeMessages(prev, res.messages));
@@ -151,6 +159,7 @@ export function ChatThreadPage() {
 
   // Keep pinned to the bottom for new messages — but only if the user is already there
   // (don't yank them up from reading history).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on every new `messages` batch to follow the stream; the body reads refs, not messages
   useEffect(() => {
     if (atBottomRef.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -263,18 +272,31 @@ export function ChatThreadPage() {
           ← 消息
         </button>
         <span className="viewer-name">{title}</span>
-        <button type="button" className="link" onClick={() => setSheetOpen(true)}>
+        <button
+          type="button"
+          className="link"
+          onClick={() => setSheetOpen(true)}
+        >
           ⋯
         </button>
       </header>
 
-      <div className="messages" ref={scrollRef} onScroll={(e) => {
-        const el = e.currentTarget;
-        atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-      }}>
+      <div
+        className="messages"
+        ref={scrollRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          atBottomRef.current =
+            el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+        }}
+      >
         {!loaded && <p className="muted hint">加载中…</p>}
         {loaded && oldestPage > 1 && (
-          <button type="button" className="load-older" onClick={() => void loadOlder()}>
+          <button
+            type="button"
+            className="load-older"
+            onClick={() => void loadOlder()}
+          >
             加载更早
           </button>
         )}
@@ -289,14 +311,18 @@ export function ChatThreadPage() {
             chatId={chatId ?? ""}
             isGroup={!isDm}
             senderName={
-              m.sender_user_id ? members.get(m.sender_user_id)?.display_name : undefined
+              m.sender_user_id
+                ? members.get(m.sender_user_id)?.display_name
+                : undefined
             }
           />
         ))}
       </div>
 
       {chat?.state === "pending" && (
-        <div className="im-pending-note">陌生人的消息请求：回复即表示接受。</div>
+        <div className="im-pending-note">
+          陌生人的消息请求：回复即表示接受。
+        </div>
       )}
 
       {error && <div className="error bar">{error}</div>}
@@ -356,19 +382,33 @@ export function ChatThreadPage() {
       </div>
 
       {sheetOpen && (
+        // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click-to-dismiss is a pointer convenience; the sheet is also closeable via its buttons/Esc
         <div className="sheet-backdrop" onClick={() => setSheetOpen(false)}>
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: inner panel only stops propagation; it is not an actionable control */}
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
             <div className="sheet-title">{title}</div>
             {isDm ? (
-              <button type="button" className="sheet-item sheet-danger" onClick={() => void onBlock()}>
+              <button
+                type="button"
+                className="sheet-item sheet-danger"
+                onClick={() => void onBlock()}
+              >
                 拉黑此人
               </button>
             ) : (
-              <button type="button" className="sheet-item sheet-danger" onClick={() => void onLeave()}>
+              <button
+                type="button"
+                className="sheet-item sheet-danger"
+                onClick={() => void onLeave()}
+              >
                 退出会话
               </button>
             )}
-            <button type="button" className="sheet-item sheet-cancel" onClick={() => setSheetOpen(false)}>
+            <button
+              type="button"
+              className="sheet-item sheet-cancel"
+              onClick={() => setSheetOpen(false)}
+            >
               取消
             </button>
           </div>
@@ -392,20 +432,29 @@ function MessageRow({
   senderName?: string;
 }) {
   // Server-minted official notices / system cards render centered, not as a bubble.
-  if (message.content_type === "system_card" || message.sender_type === "official") {
+  if (
+    message.content_type === "system_card" ||
+    message.sender_type === "official"
+  ) {
     return <div className="im-system">{message.content || "（系统消息）"}</div>;
   }
 
   const attachments = message.attachments ?? [];
   return (
     <div className={`im-msg ${mine ? "mine" : "theirs"}`}>
-      {!mine && isGroup && senderName && <span className="im-sender">{senderName}</span>}
+      {!mine && isGroup && senderName && (
+        <span className="im-sender">{senderName}</span>
+      )}
       <div className="im-bubble">
         {message.content}
         {attachments.length > 0 && (
           <div className="im-attachments">
             {attachments.map((a, i) => (
-              <Attachment key={a.workspace_path ?? `${a.name}-${i}`} chatId={chatId} attachment={a} />
+              <Attachment
+                key={a.workspace_path ?? `${a.name}-${i}`}
+                chatId={chatId}
+                attachment={a}
+              />
             ))}
           </div>
         )}
@@ -461,7 +510,13 @@ function Attachment({
 
   if (image && path) {
     return imgUrl ? (
-      <img className="im-attach-img" src={imgUrl} alt={attachment.name} onClick={() => void open()} />
+      <button
+        type="button"
+        className="im-attach-img-btn"
+        onClick={() => void open()}
+      >
+        <img className="im-attach-img" src={imgUrl} alt={attachment.name} />
+      </button>
     ) : (
       <div className="im-attach-file">
         <span className="im-attach-name">{attachment.name}</span>
@@ -470,11 +525,18 @@ function Attachment({
   }
 
   return (
-    <button type="button" className="im-attach-file" onClick={() => void open()} disabled={!path || busy}>
+    <button
+      type="button"
+      className="im-attach-file"
+      onClick={() => void open()}
+      disabled={!path || busy}
+    >
       <span aria-hidden>📎</span>
       <span className="im-attach-name">{attachment.name}</span>
       {attachment.size_bytes != null && (
-        <span className="im-attach-size">{formatSize(attachment.size_bytes)}</span>
+        <span className="im-attach-size">
+          {formatSize(attachment.size_bytes)}
+        </span>
       )}
     </button>
   );

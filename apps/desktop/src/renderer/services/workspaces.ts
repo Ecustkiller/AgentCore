@@ -8,7 +8,7 @@ import {
   decodePreviewResponse,
   encodePath,
   saveBlob,
-} from "@/services/workspace";
+} from "@/services/workspaceHttp";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];

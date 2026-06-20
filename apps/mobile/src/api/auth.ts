@@ -40,7 +40,10 @@ export async function login(username: string, password: string): Promise<User> {
     throw new Error(await errorMessage(res, "登录失败"));
   }
   const data = (await res.json()) as TokenResponse;
-  setTokens({ access_token: data.access_token, refresh_token: data.refresh_token });
+  setTokens({
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+  });
   // Authenticated → register this device for push (native-only, best-effort, non-blocking).
   void enablePush();
   // The token login returns the user inline (identity in one round trip); fall back
@@ -119,7 +122,8 @@ let bootstrapOnce: Promise<BootstrapResult> | null = null;
 
 export function bootstrapAuth(force = false): Promise<BootstrapResult> {
   if (force) bootstrapOnce = null;
-  return (bootstrapOnce ??= runBootstrap());
+  if (!bootstrapOnce) bootstrapOnce = runBootstrap();
+  return bootstrapOnce;
 }
 
 async function runBootstrap(): Promise<BootstrapResult> {

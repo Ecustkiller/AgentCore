@@ -1,8 +1,8 @@
+import { type VersionInfo, fetchVersion } from "@/api/system";
 // 关于 (/more/about) — version + build provenance. The desktop's 软件更新 section is
 // dropped (mobile updates ship through the App Store / Play, not an in-app updater).
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { type VersionInfo, fetchVersion } from "@/api/system";
 import "@/pages/more/more.css";
 
 export function AboutSettings() {
@@ -25,7 +25,11 @@ export function AboutSettings() {
   return (
     <div className="screen">
       <header className="bar">
-        <button type="button" className="link" onClick={() => navigate("/more")}>
+        <button
+          type="button"
+          className="link"
+          onClick={() => navigate("/more")}
+        >
           ← 设置
         </button>
         <span>关于 AgentCore</span>
@@ -43,10 +47,15 @@ export function AboutSettings() {
             <Row label="版本" value={info.version} />
             <Row
               label="构建版本"
-              value={info.gitSha === "unknown" ? "未标记（本地开发）" : info.gitSha}
+              value={
+                info.gitSha === "unknown" ? "未标记（本地开发）" : info.gitSha
+              }
               mono={info.gitSha !== "unknown"}
             />
-            <Row label="构建时间" value={info.builtAt === "unknown" ? "—" : info.builtAt} />
+            <Row
+              label="构建时间"
+              value={info.builtAt === "unknown" ? "—" : info.builtAt}
+            />
           </>
         ) : null}
       </div>
@@ -54,7 +63,11 @@ export function AboutSettings() {
   );
 }
 
-function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Row({
+  label,
+  value,
+  mono,
+}: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="about-row">
       <span className="about-label">{label}</span>

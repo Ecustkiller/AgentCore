@@ -21,6 +21,7 @@ export function relativeTime(iso: string | null | undefined): string {
   const days = Math.round((startOfDay(now) - startOfDay(d)) / 86_400_000);
   if (days <= 0) return clock(iso);
   if (days === 1) return "昨天";
-  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (d.getFullYear() === now.getFullYear())
+    return `${d.getMonth() + 1}月${d.getDate()}日`;
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
 }

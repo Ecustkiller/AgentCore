@@ -1,3 +1,8 @@
+import {
+  type DevicePlatform,
+  registerDevice,
+  unregisterDevice,
+} from "@/api/devices";
 // Native (Capacitor) push notification integration (原生推送, 手机端落地设计 P2).
 //
 // The backend already pushes a 需要你 notification when an agent durably pauses
@@ -15,7 +20,6 @@ import {
   PushNotifications,
   type Token,
 } from "@capacitor/push-notifications";
-import { type DevicePlatform, registerDevice, unregisterDevice } from "@/api/devices";
 
 // The FCM token last reported by the OS, remembered so logout can unregister it server-side
 // (DELETE /v1/devices). Null until the 'registration' event fires.

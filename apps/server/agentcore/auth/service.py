@@ -43,6 +43,15 @@ from agentcore.security import (
 _MIN_PASSWORD_LENGTH = 8
 _MAX_FAILED_ATTEMPTS = 5
 _LOCKOUT_DURATION = timedelta(minutes=15)
+# Benign-concurrency grace for refresh rotation: a just-rotated token re-presented
+# within this window is treated as the *same* logical refresh, not a leak. Clients
+# routinely fire several requests at once; when the access token has expired they
+# each 401 and refresh with the same refresh cookie before the rotated one lands,
+# so revoking the family there would log the user out mid-session for no reason
+# (认证与会话.md §五). Past the window, a rotated token reappearing is a genuine
+# reuse/replay and still nukes the family. The frontend also single-flights its
+# refresh calls (services/api.ts) so this window is a backstop, not the only guard.
+_REFRESH_REUSE_GRACE = timedelta(seconds=10)
 
 # Sentinel for "field not provided" in a partial profile update, distinct from an
 # explicit None (which clears the nullable email column).
@@ -142,11 +151,24 @@ class AuthService:
         if record is None:
             raise AuthenticationError("Invalid refresh token")
 
-        # A token already rotated or revoked being presented again means the
-        # family is compromised -> revoke the whole family (reuse detection).
-        if record.rotated_at is not None or record.revoked_at is not None:
+        # Already revoked (logout / password change / a prior reuse detection):
+        # the session is dead -> keep the family revoked, force a fresh login.
+        if record.revoked_at is not None:
             await self._refresh_tokens.revoke_family(record.token_family)
             raise AuthenticationError("Refresh token reuse detected")
+
+        # Already rotated: benign concurrent retry vs. a real replay/leak. Inside
+        # the grace window it's the same logical refresh (the access token expired
+        # and several requests refreshed with the same cookie at once) -> mint a
+        # fresh successor in the same family without revoking anyone. Outside it,
+        # a rotated token reappearing is a genuine reuse -> revoke the family.
+        if record.rotated_at is not None:
+            if now - record.rotated_at > _REFRESH_REUSE_GRACE:
+                await self._refresh_tokens.revoke_family(record.token_family)
+                raise AuthenticationError("Refresh token reuse detected")
+            return await self._issue_tokens(
+                record.user_id, family=record.token_family, now=now
+            )
 
         if record.expires_at <= now:
             raise AuthenticationError("Refresh token expired")

@@ -35,6 +35,22 @@ export async function listFolders(): Promise<FolderMeta[]> {
   return res.map(toFolder);
 }
 
+/** Lazily promote a 裸聊 into its folder workspace WITHOUT writing a file (工作区
+ * 对称化 D1a) — the server hook for the desktop's client-side DeferredWorkspace. A
+ * desktop 裸聊's panel can't write a *local* workspace over the cloud REST file routes,
+ * so before its first panel write it calls this to mint the folder (locality from the
+ * conversation's stored intent), then writes via IPC into the returned root + subpath.
+ * Idempotent: an already-foldered chat returns its existing folder. */
+export async function promoteConversationWorkspace(
+  conversationId: string,
+): Promise<FolderMeta> {
+  const res = await api.post<BackendFolder>(
+    `/v1/conversations/${encodeURIComponent(conversationId)}/workspace/promote`,
+    {},
+  );
+  return toFolder(res);
+}
+
 /** Create a folder. `localRootId` binds it to a desktop FS root at creation —
  * the file hub's "添加文件夹 = 建本地绑定项目" (文件中枢统一 F2): a picked local
  * directory becomes a local project in one step. */

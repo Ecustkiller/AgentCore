@@ -36,6 +36,8 @@ const fsApi: FsApi = {
     ipcRenderer.invoke(FS_CHANNELS.rename, { rootId, relPath, newName }),
   move: (rootId, srcRelPath, destRelPath) =>
     ipcRenderer.invoke(FS_CHANNELS.move, { rootId, srcRelPath, destRelPath }),
+  copy: (rootId, srcRelPath, destRelPath) =>
+    ipcRenderer.invoke(FS_CHANNELS.copy, { rootId, srcRelPath, destRelPath }),
   create: (rootId, relPath, kind) =>
     ipcRenderer.invoke(FS_CHANNELS.create, { rootId, relPath, kind }),
   delete: (rootId, relPath) =>
@@ -51,6 +53,12 @@ const fsApi: FsApi = {
   },
   workspaceOp: (rootId, op, args) =>
     ipcRenderer.invoke(FS_CHANNELS.workspaceOp, { rootId, op, args }),
+  reveal: (rootId, relPath) =>
+    ipcRenderer.invoke(FS_CHANNELS.reveal, { rootId, relPath }),
+  openPath: (rootId, relPath) =>
+    ipcRenderer.invoke(FS_CHANNELS.openPath, { rootId, relPath }),
+  copyPath: (rootId, relPath) =>
+    ipcRenderer.invoke(FS_CHANNELS.copyPath, { rootId, relPath }),
 };
 
 const sidecarApi: SidecarApi = {

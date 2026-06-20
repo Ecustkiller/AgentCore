@@ -1,3 +1,4 @@
+import { type UsageSummary, getUsageSummary } from "@/api/usage";
 // 用量 (/more/usage) — the account spend dashboard (mirrors desktop UsageSettings).
 //
 // Leads with quota meters (or a BYOK note when the user runs on their own key), then
@@ -7,7 +8,6 @@
 // toggle lives in a UI store there; mobile shows the core figures inline.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { type UsageSummary, getUsageSummary } from "@/api/usage";
 import "@/pages/more/more.css";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -51,7 +51,11 @@ export function UsageSettings() {
   return (
     <div className="screen">
       <header className="bar">
-        <button type="button" className="link" onClick={() => navigate("/more")}>
+        <button
+          type="button"
+          className="link"
+          onClick={() => navigate("/more")}
+        >
           ← 设置
         </button>
         <span>用量</span>
@@ -70,7 +74,11 @@ export function UsageSettings() {
         {!summary && error && (
           <div className="hint">
             <p className="error">{error}</p>
-            <button type="button" onClick={() => load()} style={{ marginTop: 12 }}>
+            <button
+              type="button"
+              onClick={() => load()}
+              style={{ marginTop: 12 }}
+            >
               重试
             </button>
           </div>
@@ -115,14 +123,29 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
             <span>本月</span>
             <span className="payroll-cost">{cny(month.cost.total, rate)}</span>
           </div>
-          <div className="payroll-row" style={{ padding: 0, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+          <div
+            className="payroll-row"
+            style={{
+              padding: 0,
+              borderTop: "1px solid var(--border)",
+              paddingTop: 12,
+            }}
+          >
             <span>今日</span>
             <span className="payroll-cost">{cny(today.cost.total, rate)}</span>
           </div>
-          <div className="payroll-row" style={{ padding: 0, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+          <div
+            className="payroll-row"
+            style={{
+              padding: 0,
+              borderTop: "1px solid var(--border)",
+              paddingTop: 12,
+            }}
+          >
             <span>今日 tokens</span>
             <span className="payroll-cost">
-              输入 {compact(today.usage.input)} · 输出 {compact(today.usage.output)}
+              输入 {compact(today.usage.input)} · 输出{" "}
+              {compact(today.usage.output)}
             </span>
           </div>
         </div>
@@ -131,7 +154,9 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
       {summary.month_by_role.length > 0 && (
         <div className="section">
           <h2 className="section-title">本月各角色花销</h2>
-          <p className="section-note">多 Agent 团队按角色拆分的花销，竞品的单 Agent 做不到。</p>
+          <p className="section-note">
+            多 Agent 团队按角色拆分的花销，竞品的单 Agent 做不到。
+          </p>
           <div className="payroll">
             {summary.month_by_role.map((line) => (
               <div key={line.role} className="payroll-row">
@@ -139,7 +164,9 @@ function Dashboard({ summary }: { summary: UsageSummary }) {
                   {ROLE_LABELS[line.role] ?? line.role}
                   <span className="payroll-turns">{line.turns} 回合</span>
                 </span>
-                <span className="payroll-cost">{cny(line.cost_total, rate)}</span>
+                <span className="payroll-cost">
+                  {cny(line.cost_total, rate)}
+                </span>
               </div>
             ))}
           </div>
@@ -177,7 +204,10 @@ function Meter({
       </div>
       <div className="meter-track">
         {!unlimited && (
-          <div className={`meter-fill${near ? " near" : ""}`} style={{ width: `${pct}%` }} />
+          <div
+            className={`meter-fill${near ? " near" : ""}`}
+            style={{ width: `${pct}%` }}
+          />
         )}
       </div>
       <span className="meter-cap">{caption}</span>
@@ -201,16 +231,46 @@ function CostTrend({
   const total = points.reduce((s, p) => s + p.cost_total, 0);
   return (
     <div className="section">
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+        }}
+      >
         <h2 className="section-title">近 7 日成本</h2>
         <span className="meter-cap">合计 {cny(total, rate)}</span>
       </div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 72, marginTop: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-end",
+          gap: 6,
+          height: 72,
+          marginTop: 12,
+        }}
+      >
         {points.map((p) => {
           const h = max > 0 ? Math.max((p.cost_total / max) * 100, 3) : 3;
           return (
-            <div key={p.date} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-              <div style={{ flex: 1, width: "100%", display: "flex", alignItems: "flex-end" }}>
+            <div
+              key={p.date}
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <div
+                style={{
+                  flex: 1,
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "flex-end",
+                }}
+              >
                 <div
                   style={{
                     width: "100%",
