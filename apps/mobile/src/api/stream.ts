@@ -1,3 +1,5 @@
+import { apiUrl, authHeader, refreshTokens } from "@/api/client";
+import type { MessageAttachment } from "@/lib/attachments";
 // SSE transport for the mobile client (手机端落地设计 P1).
 //
 // The backend streams a turn as a POST returning text/event-stream (api/sse.py):
@@ -15,8 +17,6 @@
 // still-live run after a drop / on reopen), and `resumeStream` (continue a durably
 // paused turn). An explicit 停止 is a separate JSON call (api/turn.ts).
 import type { CheckpointDecision, SSEEvent } from "@agentcore/contract-types";
-import { apiUrl, authHeader, refreshTokens } from "@/api/client";
-import type { MessageAttachment } from "@/lib/attachments";
 
 /** Read an SSE response body to completion, delivering each parsed `data:` frame to
  *  `onEvent`. `event:` lines and `:` heartbeats are ignored (the data JSON already

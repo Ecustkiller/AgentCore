@@ -2,6 +2,7 @@ import {
   type TimelineNode,
   dropTrailingContentSteps,
   groupToolRuns,
+  isOrchestrationTool,
 } from "@/lib/processTimeline";
 import type { ProcessStep } from "@/types/events";
 import { describe, expect, it } from "vitest";
@@ -110,6 +111,44 @@ describe("groupToolRuns", () => {
     const snapshot = [...process];
     groupToolRuns(process);
     expect(process).toEqual(snapshot);
+  });
+
+  it("keeps an orchestration step (delegate) as its own un-grouped boundary node", () => {
+    // The team graph slots at the delegate step, so it must stay a lone `tool` node.
+    const nodes = groupToolRuns([tool("a"), tool("d", "delegate"), tool("b")]);
+    expect(nodes.map((n) => n.kind)).toEqual(["tool", "tool", "tool"]);
+    const mid = nodes[1];
+    if (mid.kind !== "tool") throw new Error("expected tool");
+    expect(mid.step.tool_name).toBe("delegate");
+  });
+
+  it("breaks tool runs around a delegate (does not absorb it into a group)", () => {
+    const nodes = groupToolRuns([
+      tool("a"),
+      tool("b"),
+      tool("d", "delegate"),
+      tool("c"),
+      tool("e"),
+    ]);
+    // a+b group · delegate lone boundary · c+e group
+    expect(nodes.map((n) => n.kind)).toEqual([
+      "tool-group",
+      "tool",
+      "tool-group",
+    ]);
+  });
+});
+
+describe("isOrchestrationTool", () => {
+  it("flags delegate and debate as team-handoff tools", () => {
+    expect(isOrchestrationTool("delegate")).toBe(true);
+    expect(isOrchestrationTool("debate")).toBe(true);
+  });
+
+  it("is false for ordinary read/write tools", () => {
+    expect(isOrchestrationTool("file_read")).toBe(false);
+    expect(isOrchestrationTool("web_search")).toBe(false);
+    expect(isOrchestrationTool("")).toBe(false);
   });
 });
 

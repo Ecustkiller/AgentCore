@@ -165,6 +165,12 @@ export function createLocalRootSource(
       }
       throw new Error("暂不支持同时移动并改名");
     },
+    async copy(src, dst) {
+      // copy 收完整目标路径（与 move 译成 rename/move-into-dir 不同）：主进程经 fs.cp 递归
+      // 复制到该精确路径，故能在同目录内另存为新名（去重粘贴）。subpath 前缀两端同样抵消。
+      const res = await window.fsApi.copy(rootId, inPath(src), inPath(dst));
+      if (!res.ok) throw new Error(res.reason);
+    },
     async delete(path) {
       const res = await window.fsApi.delete(rootId, inPath(path));
       if (!res.ok) throw new Error(res.reason);
@@ -179,6 +185,20 @@ export function createLocalRootSource(
         void window.fsApi.unwatch(rootId, watched);
         off();
       };
+    },
+    // 系统集成：主进程把 inPath(path) 解析为绝对路径并校验在根内，再交给系统。绝对路径
+    // 不回到 renderer。失败以异常上抛，调用方 toast（与本源其他方法的 `!ok` 抛错一致）。
+    async revealInOsFileManager(path) {
+      const res = await window.fsApi.reveal(rootId, inPath(path));
+      if (!res.ok) throw new Error(res.reason);
+    },
+    async openWithOsDefaultApp(path) {
+      const res = await window.fsApi.openPath(rootId, inPath(path));
+      if (!res.ok) throw new Error(res.reason);
+    },
+    async copyOsPath(path) {
+      const res = await window.fsApi.copyPath(rootId, inPath(path));
+      if (!res.ok) throw new Error(res.reason);
     },
   };
 }

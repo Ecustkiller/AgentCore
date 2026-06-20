@@ -21,6 +21,7 @@ import type {
   CheckpointRequiredPayload,
   CheckpointResolvedPayload,
   Citation,
+  ContextBlockWire,
   CostBreakdown,
   PlanReviewPending,
   PlanReviewRequiredPayload,
@@ -31,6 +32,7 @@ import type {
   SSEEvent,
   ToolUseEndPayload,
   ToolUseStartPayload,
+  UsageBreakdown,
 } from "@/types/events";
 import { create } from "zustand";
 
@@ -210,6 +212,12 @@ export interface Conversation {
    * workspace yet). 文件夹即工作区: a chat's workspace/mode derives from its folder;
    * a 裸聊 is always cloud and owns no binding of its own. */
   folderId?: string | null;
+  /** Desktop's stored local-first intent (工作区对称化 D1a). When set and the chat is
+   * still a 裸聊 (no folderId), the panel routes its FIRST write through desktop IPC —
+   * a client-side DeferredWorkspace that lazily promotes a *local* workspace — instead
+   * of the cloud REST source (which would mis-write a local folder server-side). null /
+   * absent = cloud intent; moot once foldered. */
+  localContainerRootId?: string | null;
   /** Selected 质量档 (D2): a preset key or custom-mode id; null/absent = inherit
    * the user/operator default. The composer picker reads/writes this. */
   modelMode?: string | null;
@@ -268,12 +276,35 @@ export interface Message {
    * `cny_total` — the client converts via the single FX rate). All-zero `total`
    * renders as「—」, not「¥0.00」(§7.5). */
   cost?: CostBreakdown;
+  /** Turn-total token usage (回合 token 用量) from `message_end.usage`, normalized
+   * from the wire's long keys to the ledger {@link UsageBreakdown} short-key shape
+   * the rest of the app reads. Drives the bubble meta row's token caption (compact
+   * 大众 / 明细 Power, §7.2). Live-only — a reloaded turn carries no per-turn usage
+   * snapshot (same as `error`); absent until the turn ends. */
+  usage?: UsageBreakdown;
+  /** ReAct rounds the turn ran (回合轮次) from `message_end.rounds` — how many
+   * think→act rounds the CEO (or single agent) cycled through. Drives the meta
+   * row's「N 轮」caption (shown only when > 1). Live-only; absent until the turn ends. */
+  rounds?: number;
+  /** Turn finish reason (结束原因) from `message_end.finish_reason`. Drives the
+   * status chip for non-normal endings (max_rounds / degraded / unproductive /
+   * cancelled); `end_turn` shows nothing and `error` is framed by the error card
+   * instead. Live value; a reloaded multi-agent turn recovers it from
+   * `runs.finishReason` (single-agent reloads carry no journal — live-only there). */
+  finishReason?: string;
   /** Persisted multi-agent execution journal (the turn's ordered run/tool
    * events), set only on a *reloaded* assistant message so its team graph
    * replays on demand (the inline graph hydrates the execution slot from this).
    * Absent for user / single-agent turns and for the live turn (which streams
    * straight into the execution store). */
   runs?: ExecutionJournal;
+  /** 收到的上下文 · CEO 侧 (上下文传递可视化, 通道①): the structured context the CEO captain
+   * was fed at assembly time — `system` (本回合系统提示，决策②默认隐藏) / `history` / `request`
+   * — projected TURN-LEVEL from its `run_context` event (run_started kind=`captain`). The
+   * captain is the bubble *above* the graph, so this shows on EVERY assistant turn (pure chat
+   * included), not as a node in the team graph. Set live by `setCaptainContext`; rebuilt from
+   * `runs.captain_context` on reload. Absent for user turns / turns before the event folds in. */
+  captainContext?: ContextBlockWire[];
   /** Checkpoints the CEO raised this turn (ask_user). Set live as the SSE events
    * arrive and rebuilt from the journal on reload, so the cards render inline
    * under this assistant bubble (会话流内，不并入状态条). Absent for turns with no
@@ -294,6 +325,11 @@ export interface Message {
    * `**Error**:` line. Live-only — the backend never persisted a partial failure,
    * so it does not replay on reload (same as the previous text behavior). */
   error?: { code: string; message: string };
+  /** The turn's log correlation id (trace_id, 32-hex) — set live from `message_start`
+   * and rebuilt from `MessageDetail.trace_id` on reload. Drives a dev-only「复制 trace
+   * id」action so a bubble links one-step to its logs (grep trace_id=...). Absent for
+   * user / untraced turns. */
+  traceId?: string;
 }
 
 /**
@@ -459,6 +495,13 @@ interface ConversationState {
     tool: { toolName: string; chars: number } | null,
     conversationId?: string | null,
   ) => void;
+  /** Stamp the turn's log correlation id (trace_id) onto the live assistant message
+   * from `message_start`, so the bubble can surface a dev「复制 trace id」link. No-op if
+   * there is no streaming assistant message or the id is empty. */
+  setTraceIdOnLastMessage: (
+    traceId: string,
+    conversationId?: string | null,
+  ) => void;
   /** Append a started tool call as a `running` step on the live assistant
    * message's single-agent process timeline (前端UX设计.md §一). Runs alongside the
    * execution store's `recordFrame`: that drives the multi-agent team graph, this
@@ -482,6 +525,19 @@ interface ConversationState {
    * `message_end.cost`); no-op if there is no cost or no assistant to attach to. */
   attachCostToLastMessage: (
     cost: CostBreakdown,
+    conversationId?: string | null,
+  ) => void;
+  /** Stamp the turn-end meta (回合元信息 from `message_end`) onto the last assistant
+   * message: token `usage` (normalized to the ledger {@link UsageBreakdown} shape),
+   * ReAct `rounds`, and the `finishReason`. Sibling of {@link attachCostToLastMessage}
+   * (cost rides its own attach so existing callers stay untouched). Each field is
+   * stamped only when present; no-op if there is no assistant message to attach to. */
+  attachTurnMetaToLastMessage: (
+    meta: {
+      usage?: UsageBreakdown;
+      rounds?: number;
+      finishReason?: string;
+    },
     conversationId?: string | null,
   ) => void;
   /** Mark the last assistant message as failed mid-stream (from an `error` SSE
@@ -552,6 +608,14 @@ interface ConversationState {
    * No-op if already set or there is no assistant message. */
   setLastAssistantExecutionId: (
     executionId: string,
+    conversationId?: string | null,
+  ) => void;
+  /** Attach the CEO captain's received context (上下文传递可视化 通道①) to the last
+   * assistant message, from its `run_context` SSE event. Turn-level (the captain is the
+   * bubble above the graph, not a node), so it lands on EVERY turn including pure chat.
+   * No-op if there is no assistant message. */
+  setCaptainContext: (
+    blocks: ContextBlockWire[],
     conversationId?: string | null,
   ) => void;
   setGenerating: (v: boolean, conversationId?: string | null) => void;
@@ -723,6 +787,16 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
+    setTraceIdOnLastMessage: (traceId, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        if (!traceId) return null;
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") return null;
+        messages[messages.length - 1] = { ...last, traceId };
+        return { messages };
+      }),
+
     addProcessTool: (payload, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
@@ -776,6 +850,23 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const last = messages[messages.length - 1];
         if (last && last.role === "assistant") {
           messages[messages.length - 1] = { ...last, cost };
+        }
+        return { messages };
+      }),
+
+    attachTurnMetaToLastMessage: (meta, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (last && last.role === "assistant") {
+          messages[messages.length - 1] = {
+            ...last,
+            ...(meta.usage !== undefined ? { usage: meta.usage } : {}),
+            ...(meta.rounds !== undefined ? { rounds: meta.rounds } : {}),
+            ...(meta.finishReason !== undefined
+              ? { finishReason: meta.finishReason }
+              : {}),
+          };
         }
         return { messages };
       }),
@@ -1006,6 +1097,18 @@ export const useConversationStore = create<ConversationState>((set, get) => {
           if (messages[i].role === "assistant") {
             if (messages[i].executionId === executionId) return null;
             messages[i] = { ...messages[i], executionId };
+            return { messages };
+          }
+        }
+        return null;
+      }),
+
+    setCaptainContext: (blocks, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].role === "assistant") {
+            messages[i] = { ...messages[i], captainContext: blocks };
             return { messages };
           }
         }

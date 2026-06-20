@@ -1,10 +1,17 @@
+import { EmptyHint, IconButton } from "@/components/files/parts";
+import { useConversations } from "@/hooks/useConversations";
+import { useConversationWorkspace } from "@/hooks/useWorkspaces";
+import { createDeferredLocalSource } from "@/services/sources/deferredLocalSource";
+import {
+  createWorkspaceSource,
+  resolveWorkspaceSource,
+} from "@/services/sources/workspaceSource";
 import { useConversationStore } from "@/stores/conversation";
 import { FolderOpen, History, X } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { FilesSection } from "./FilesSection";
 import { SnapshotsSection } from "./SnapshotsSection";
 import { WorkspaceModeBar } from "./WorkspaceModeBar";
-import { EmptyHint, IconButton } from "@/components/files/parts";
 
 /**
  * Workspace mode of the conversation side panel — the file-in/out + persistence
@@ -24,6 +31,30 @@ export function WorkspaceMode() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
 
+  // 与文件中枢同一份数据 + 同一个解析器：对话→其工作区(WorkspaceInfo)→FileSource。本地走桌面
+  // IPC、云端走 REST，故 Agent 在本地写的文件这里也能列出（修复「写在本地、读在云端」）。
+  const ws = useConversationWorkspace(conversationId);
+  const conversations = useConversations();
+  const conv = conversationId
+    ? (conversations.find((c) => c.id === conversationId) ?? null)
+    : null;
+  const localIntent = conv?.localContainerRootId ?? null;
+  const title = conv?.title ?? "工作区";
+  const fsAvailable = typeof window !== "undefined" && !!window.fsApi;
+  const source = useMemo(() => {
+    // 已提升：按绑定选源（本地 IPC / 云端 REST）。
+    if (ws) return resolveWorkspaceSource(ws, fsAvailable);
+    if (!conversationId) return null;
+    // 裸聊 + 桌面本地意向：走客户端 DeferredWorkspace —— 首次写文件经 IPC 懒建本地工作区
+    // （工作区对称化 D1a），而非云端源（它会把本地文件夹误写到服务端、造成脑裂）。首写后
+    // 经 applyConversationPromotion 反应式带出工作区，面板下一帧切到真正的本地源。
+    if (fsAvailable && localIntent) {
+      return createDeferredLocalSource(conversationId, localIntent, title);
+    }
+    // 云端裸聊（web / 手机 / 云端临时对话）：conversation 维度云端源（云端文件可列、空态提示）。
+    return createWorkspaceSource(conversationId);
+  }, [ws, conversationId, fsAvailable, localIntent, title]);
+
   if (!conversationId) {
     return (
       <EmptyHint
@@ -41,12 +72,16 @@ export function WorkspaceMode() {
           的工具栏一行（文件操作经其内部 FileTree 的 ref 驱动），不再单独占一行。 */}
       <div className="min-h-0 flex-1">
         <FilesSection
-          conversationId={conversationId}
+          source={source}
           leading={<WorkspaceModeBar conversationId={conversationId} />}
           trailing={
-            <IconButton title="快照" onClick={() => setSnapshotsOpen(true)}>
-              <History size={14} />
-            </IconButton>
+            // 快照（备份/版本/恢复）是云端能力；本地源 caps.snapshots=false（本地的「备份到云」
+            // 在 WorkspaceModeBar 里），按 caps 门控，本地模式不挂这个入口。
+            source?.caps.snapshots ? (
+              <IconButton title="快照" onClick={() => setSnapshotsOpen(true)}>
+                <History size={14} />
+              </IconButton>
+            ) : undefined
           }
         />
       </div>

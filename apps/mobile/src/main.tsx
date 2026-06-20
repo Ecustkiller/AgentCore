@@ -1,10 +1,10 @@
+import { App } from "@/App";
+import { setTokenPersistence } from "@/api/client";
+import { capacitorSecureTokenPersistence } from "@/api/secureStorage";
 import { Capacitor } from "@capacitor/core";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { App } from "@/App";
-import { setTokenPersistence } from "@/api/client";
-import { capacitorSecureTokenPersistence } from "@/api/secureStorage";
 import "@/styles.css";
 
 // On a native build, persist the bearer tokens in the OS Keychain/Keystore instead of the

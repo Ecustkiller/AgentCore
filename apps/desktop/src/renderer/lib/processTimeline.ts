@@ -133,6 +133,21 @@ export type TimelineNode =
   | { kind: "tool"; step: ToolStep }
   | { kind: "tool-group"; tools: ToolStep[] };
 
+/** Tools that hand the turn off to a sub-team and open a team execution: `delegate`
+ * (emits `run_plan` type=multi_agent) and `debate`. A multi-agent bubble renders its
+ * inline team graph AT this step's position in the timeline (统一团队时间线), so
+ * {@link groupToolRuns} keeps such a step an un-grouped boundary node — never folded
+ * into a collapsed tool-group where the graph couldn't slot. */
+export const ORCHESTRATION_TOOLS: ReadonlySet<string> = new Set([
+  "delegate",
+  "debate",
+]);
+
+/** Whether a tool name hands the turn to a sub-team (see {@link ORCHESTRATION_TOOLS}). */
+export function isOrchestrationTool(toolName: string): boolean {
+  return ORCHESTRATION_TOOLS.has(toolName);
+}
+
 /**
  * Coalesce a process timeline's consecutive tool steps into render nodes: a run of
  * ≥2 adjacent `kind:"tool"` steps becomes one `tool-group`, a lone tool stays an
@@ -140,6 +155,10 @@ export type TimelineNode =
  * boundaries that break runs — so the true chronological order is fully preserved
  * (前端UX设计.md §一B). Pure & view-only: `process[]` itself is untouched, so the
  * backend / journal / conformance oracle are unaffected.
+ *
+ * An orchestration tool ({@link isOrchestrationTool}: delegate / debate) is ALSO a
+ * boundary — a multi-agent turn renders its team graph at that step, so it stays its
+ * own un-grouped `tool` node (and breaks any run around it) like reasoning/content.
  *
  * The trailing content step (the final answer) is a `content` node, never a tool —
  * the answer can never be hidden inside a collapsed group.
@@ -158,7 +177,14 @@ export function groupToolRuns(process: ProcessStep[]): TimelineNode[] {
   };
   for (const step of process) {
     if (step.kind === "tool") {
-      run.push(step);
+      if (isOrchestrationTool(step.tool_name)) {
+        // Team boundary: flush the current run and emit this delegate/debate step
+        // as its own node so the inline team graph can replace it.
+        flush();
+        nodes.push({ kind: "tool", step });
+      } else {
+        run.push(step);
+      }
     } else {
       flush();
       nodes.push(step);

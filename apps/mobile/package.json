@@ -9,6 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
     "conformance": "tsx src/protocol/conformance.run.ts",
     "shot": "node scripts/shot.cjs",
     "cap:sync": "pnpm build && cap sync",
@@ -35,6 +37,7 @@
     "remark-math": "^6.0.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
     "@capacitor/cli": "^8.4.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",

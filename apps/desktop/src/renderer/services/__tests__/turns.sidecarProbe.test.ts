@@ -30,9 +30,6 @@ vi.mock("@/services/streamConversationViaSidecar", () => ({
   resumeConversationViaSidecar: vi.fn(),
   streamConversationViaSidecar: vi.fn(),
 }));
-vi.mock("@/services/defaultWorkspace", () => ({
-  pendingLocalContainerRoot: vi.fn(() => Promise.resolve(null)),
-}));
 vi.mock("@/services/messages", () => ({ loadLatestWindow: vi.fn() }));
 vi.mock("@/lib/toast", () => ({ notifyInfo: vi.fn() }));
 

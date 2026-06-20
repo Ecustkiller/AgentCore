@@ -65,8 +65,8 @@ export interface FileSourceCaps {
   /** 面板内文本编辑经 `writeBytes` 回写。 */
   edit: boolean;
   /**
-   * 轴3 快照（备份 / 版本 / 恢复）对该源可用。**声明保留位**：当前 UI 未据此门控
-   * （工作区快照浮层无条件挂载），留待按源差异化挂叠加层时启用。
+   * 轴3 快照（备份 / 版本 / 恢复）对该源可用（云端工作区为真，本地源为假）。对话工作区
+   * 面板据此门控快照入口（见 WorkspacePanel）；文件中枢暂不挂快照面。
    */
   snapshots: boolean;
 }
@@ -103,6 +103,14 @@ export interface FileSource {
   mkdir(path: string): Promise<void>;
   /** 把 `src` 移动/改名到完整目标路径 `dst`。 */
   move(src: string, dst: string): Promise<void>;
+  /**
+   * 把 `src`（文件或目录，目录递归）复制到完整目标路径 `dst`（含最终名）。失败抛异常。
+   *
+   * 可选能力：本地源经 IPC 实现；云端源暂无（服务端尚无 copy 端点）。共用 UI 据
+   * 「方法是否存在」门控「复制」入口与复制-粘贴——剪切-粘贴走必备的 `move`，故云端仍可用。
+   * 调用方传**完整目标路径**（去重后的新名由 UI 在粘贴前算好），以表达「同目录另存为副本」。
+   */
+  copy?(src: string, dst: string): Promise<void>;
   /** 删除文件或目录（目录递归）。 */
   delete(path: string): Promise<void>;
 
@@ -132,6 +140,19 @@ export interface FileSource {
   download?(path: string, filename: string): Promise<void>;
   /** 订阅 `dir` 下变更；返回退订函数。仅当 `caps.watch`。 */
   watch?(dir: string, onChange: FileChangeHandler): () => void;
+
+  /**
+   * 系统集成（桌面本地源专属，云端源不实现 → UI 据「方法是否存在」门控菜单，组件内不按源分支）。
+   *
+   * 仅本地源有意义：文件在用户机器上、有真实 OS 路径；云端工作区文件在服务器上，故这三者一律省略。
+   * 绝对路径全程只在主进程出现（reveal/copy 在主进程完成），不下发 renderer——沿用 IPC 契约的安全约束。
+   */
+  /** 在系统文件管理器中定位该路径（资源管理器 / 访达）。`""` = 工作区根本身。失败抛异常。 */
+  revealInOsFileManager?(path: string): Promise<void>;
+  /** 用系统默认程序打开该文件（PDF/Office/压缩包等 in-app 打不开的类型）。失败抛异常。 */
+  openWithOsDefaultApp?(path: string): Promise<void>;
+  /** 把该路径的绝对路径写入系统剪贴板（写入在主进程完成）。失败抛异常。 */
+  copyOsPath?(path: string): Promise<void>;
 }
 
 /** POSIX 源路径的最后一段（显示名）。 */

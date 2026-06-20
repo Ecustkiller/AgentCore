@@ -1,3 +1,4 @@
+import type { User } from "@/api/auth";
 // Self-service account management for the mobile client (设置·账户设置).
 //
 // Profile / password / avatar / 注销 over the same endpoints the desktop uses
@@ -5,7 +6,6 @@
 // avatar is fetched as a blob → object URL (a bearer token can't ride an <img src>,
 // unlike the desktop's cookie auth), so display works under Authorization headers.
 import { apiFetch } from "@/api/client";
-import type { User } from "@/api/auth";
 
 /** Mirror of the server's avatar_upload_max_bytes so an oversized pick fails fast. */
 export const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
@@ -58,7 +58,10 @@ export async function uploadAvatar(file: File): Promise<User> {
 
 /** Remove the avatar and fall back to the initial. Returns the refreshed user. */
 export async function deleteAvatar(): Promise<User> {
-  return readUser(await apiFetch("/v1/users/me/avatar", { method: "DELETE" }), "操作失败");
+  return readUser(
+    await apiFetch("/v1/users/me/avatar", { method: "DELETE" }),
+    "操作失败",
+  );
 }
 
 /** Self-service 注销: soft-delete + anonymize behind a password re-confirm. The caller

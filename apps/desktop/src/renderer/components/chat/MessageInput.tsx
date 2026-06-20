@@ -12,8 +12,9 @@ import {
   loadFileIndex,
 } from "@/lib/fileIndex";
 import type { FileSource } from "@/lib/fileSource";
+import { notifyError } from "@/lib/toast";
 import { api } from "@/services/api";
-import { markCloudEscapeConversation } from "@/services/defaultWorkspace";
+import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import { dispatchHandoffJob } from "@/services/handoff";
 import { fetchMessageWindow, loadLatestWindow } from "@/services/messages";
 import { searchAll } from "@/services/search";
@@ -672,21 +673,25 @@ export function MessageInput() {
       // workspace-lock guard, which rejects a move once a chat has any messages
       // (双模式工作区 §九 ⑩).
       // 桌面 local-first（决策 #11 / 工作区对称化 D1a）：未显式归档时，这是一条**裸聊**——
-      // 不预塞文件夹（folder_id=null），首次产文件时由服务端在默认本地容器下懒建 per 对话
-      // 文件夹（信号由 sendTurn 经 `pendingLocalContainerRoot` 携带）。「云端临时对话」逃生口
-      // 同为裸聊，但标记后其懒建落云端（不携带容器根）。
+      // 不预塞文件夹（folder_id=null）。本地意向在此**建会话时**定型并落库
+      // （local_container_root_id），首次产文件时由服务端在该容器根下懒建 per 对话文件夹；
+      // 落到会话上而非逐回合携带，使回合 / 面板两条提升路径一致读取（不再由谁先写决定云/本地）。
       const foldersStore = useFoldersStore.getState();
       const targetFolderId = foldersStore.pendingNewChatFolderId;
       const cloudEscape = foldersStore.pendingNewChatCloud;
+      // 显式归档（继承文件夹绑定）/「云端临时对话」逃生口 / 非桌面 → null（云端懒建）；
+      // 否则取默认本地容器根（建草稿时已预热，通常即取即得）。
+      const localContainerRootId =
+        targetFolderId || cloudEscape
+          ? null
+          : await ensureDefaultContainerRoot();
       try {
         const conv = await api.post<{ id: string }>("/v1/conversations", {
           title: null,
           folder_id: targetFolderId,
+          local_container_root_id: localContainerRootId,
         });
         conversationId = conv.id;
-        // 记下逃生口意图，使后续回合的 `pendingLocalContainerRoot` 不为这条裸聊携带容器根
-        // （懒建落云端）。仅本进程内有效——逃生口是一次性的随手云问答。
-        if (cloudEscape) markCloudEscapeConversation(conv.id);
         upsertConversationFront({
           id: conv.id,
           title: "新对话",
@@ -694,13 +699,20 @@ export function MessageInput() {
           messageCount: 0,
           lastMessagePreview: null,
           folderId: targetFolderId,
+          // Carry the local-first intent into the cache now (the create response is
+          // id-only), so a panel-first write on this 裸聊 routes through IPC straight
+          // away — no refetch needed (工作区对称化 D1a).
+          localContainerRootId,
         });
         useConversationStore.getState().setCurrentConversation(conv.id);
         createdNew = true;
         // 消费后复位（folder=null + cloud=false ⇒ 下次草稿仍是桌面默认本地裸聊）。
         useFoldersStore.getState().setPendingNewChatFolder(null);
         useFoldersStore.getState().setPendingNewChatCloud(false);
-      } catch {
+      } catch (err) {
+        // 建会话失败（500 / 网络等）：弹错误提示而非静默吞掉。输入框内容此时尚未清空，
+        // 用户可直接重发；与 sendTurn 失败的内联错误条共同覆盖发送链路两段。
+        notifyError(err, "新建对话失败");
         return;
       }
     }

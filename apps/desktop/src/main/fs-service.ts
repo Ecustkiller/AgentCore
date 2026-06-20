@@ -40,8 +40,10 @@ import {
   BrowserWindow,
   type WebContents,
   app,
+  clipboard,
   dialog,
   ipcMain,
+  shell,
 } from "electron";
 import ignore, { type Ignore } from "ignore";
 import JSZip from "jszip";
@@ -646,6 +648,51 @@ async function move(
   }
 }
 
+/**
+ * 复制文件/目录到**完整目标路径** `destRelPath`（与 move 收「目标目录」不同，copy 收含
+ * 最终名的完整路径，故能在同目录内另存为新名——去重粘贴所需）。`fs.cp(recursive)` 递归
+ * 复制；拒绝复制根、覆盖已存在目标、以及把目录复制进自身或其子树（否则会自我递归）。
+ */
+async function copy(
+  rootId: string,
+  srcRelPath: string,
+  destRelPath: string,
+): Promise<FsResult> {
+  await ensureReady();
+  if (!srcRelPath) return { ok: false, reason: "不能复制根目录" };
+  const srcLoc = locate(rootId, srcRelPath);
+  if ("error" in srcLoc) return srcLoc.error;
+  const srcReal = await realInside(srcLoc.root, srcLoc.abs);
+  if (!srcReal) return { ok: false, reason: "源不存在或越界" };
+
+  // 目标可不存在：经 resolveWritable 校验在根内（含对已存在祖先的 realpath 复核）。
+  const dstTarget = await resolveWritable(srcLoc.root, destRelPath);
+  if (!dstTarget) return { ok: false, reason: "目标越界，已拒绝" };
+  if (dstTarget === srcLoc.root.absPath) {
+    return { ok: false, reason: "不能覆盖根目录" };
+  }
+
+  // 禁止把目录复制进自身或其子树（否则 fs.cp 会自我递归）。文件复制为同名兄弟不受影响。
+  const intoRel = relative(srcReal, dstTarget);
+  if (intoRel === "" || (!intoRel.startsWith("..") && !isAbsolute(intoRel))) {
+    return { ok: false, reason: "不能复制到自身或其子目录" };
+  }
+
+  try {
+    await fs.access(dstTarget);
+    return { ok: false, reason: "目标位置已存在同名项" };
+  } catch {
+    // 目标不存在 —— 符合预期
+  }
+  try {
+    await fs.mkdir(dirname(dstTarget), { recursive: true });
+    await fs.cp(srcReal, dstTarget, { recursive: true, errorOnExist: true });
+    return { ok: true, data: undefined };
+  } catch (e) {
+    return { ok: false, reason: toReason(e) };
+  }
+}
+
 async function create(
   rootId: string,
   relPath: string,
@@ -695,6 +742,49 @@ async function remove(rootId: string, relPath: string): Promise<FsResult> {
   } catch (e) {
     return { ok: false, reason: toReason(e) };
   }
+}
+
+// --- 系统集成（在资源管理器中显示 / 用默认程序打开 / 复制路径）---
+//
+// 把 renderer 的 `{rootId, relPath}` 解析为绝对路径并 realpath 校验在根内（防越界 /
+// 符号链接逃逸），再交给系统：定位 / 打开 / 写剪贴板。**绝对路径只在主进程出现**，
+// 从不下发 renderer，沿用本服务的安全不变量。仅本地源会调到这里（云端无本机路径）。
+
+/** 在系统文件管理器中定位该路径（`shell.showItemInFolder`，无成功信号，靠 realpath 校验兜存在性）。 */
+async function reveal(rootId: string, relPath: string): Promise<FsResult> {
+  await ensureReady();
+  const loc = locate(rootId, relPath);
+  if ("error" in loc) return loc.error;
+  const real = await realInside(loc.root, loc.abs);
+  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
+  shell.showItemInFolder(real);
+  return { ok: true, data: undefined };
+}
+
+/** 用系统默认程序打开该路径（`shell.openPath` 返回非空串即失败原因）。 */
+async function openWithDefaultApp(
+  rootId: string,
+  relPath: string,
+): Promise<FsResult> {
+  await ensureReady();
+  const loc = locate(rootId, relPath);
+  if ("error" in loc) return loc.error;
+  const real = await realInside(loc.root, loc.abs);
+  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
+  const err = await shell.openPath(real);
+  if (err) return { ok: false, reason: err };
+  return { ok: true, data: undefined };
+}
+
+/** 把该路径的绝对路径写入系统剪贴板（写入在主进程完成，绝对路径不进 renderer）。 */
+async function copyPath(rootId: string, relPath: string): Promise<FsResult> {
+  await ensureReady();
+  const loc = locate(rootId, relPath);
+  if ("error" in loc) return loc.error;
+  const real = await realInside(loc.root, loc.abs);
+  if (!real) return { ok: false, reason: "无法访问（不存在或越界）" };
+  clipboard.writeText(real);
+  return { ok: true, data: undefined };
 }
 
 // --- 本地工作区 op（双模式工作区 P2）---
@@ -1763,6 +1853,12 @@ export function registerFsIpc(): void {
   );
 
   ipcMain.handle(
+    FS_CHANNELS.copy,
+    (_e, p: { rootId: string; srcRelPath: string; destRelPath: string }) =>
+      copy(p.rootId, p.srcRelPath, p.destRelPath),
+  );
+
+  ipcMain.handle(
     FS_CHANNELS.create,
     (_e, p: { rootId: string; relPath: string; kind: FsCreateKind }) =>
       create(p.rootId, p.relPath, p.kind),
@@ -1793,5 +1889,23 @@ export function registerFsIpc(): void {
       _e,
       p: { rootId: string; op: WorkspaceOpName; args: Record<string, unknown> },
     ) => workspaceOp(p),
+  );
+
+  ipcMain.handle(
+    FS_CHANNELS.reveal,
+    (_e, p: { rootId: string; relPath: string }) =>
+      reveal(p.rootId, p.relPath),
+  );
+
+  ipcMain.handle(
+    FS_CHANNELS.openPath,
+    (_e, p: { rootId: string; relPath: string }) =>
+      openWithDefaultApp(p.rootId, p.relPath),
+  );
+
+  ipcMain.handle(
+    FS_CHANNELS.copyPath,
+    (_e, p: { rootId: string; relPath: string }) =>
+      copyPath(p.rootId, p.relPath),
   );
 }

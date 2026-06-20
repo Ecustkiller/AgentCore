@@ -291,7 +291,12 @@ def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict | None:
     nothing to replay (a plain chat turn with neither)."""
     journal = sink.execution_journal()
     process = sink.process_timeline()
-    if journal is None and process is None:
+    # 上下文传递可视化 通道①: the CEO captain's received context is TURN-LEVEL (the chat
+    # bubble, present even in a pure-chat turn). Carrying it makes a pure-chat turn's
+    # payload non-None, so it persists a journal (otherwise None-gated) and replays the
+    # captain context on reload — the worker-side context already rides ``events``.
+    captain_context = sink.captain_context()
+    if journal is None and process is None and captain_context is None:
         return None
     payload: dict[str, Any] = {
         "events": journal or [],
@@ -299,6 +304,8 @@ def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict | None:
     }
     if process:
         payload["process"] = process
+    if captain_context is not None:
+        payload["captain_context"] = captain_context
     return payload
 
 
@@ -590,6 +597,7 @@ async def run_chat_pipeline(
                 "message_id": message_id,
                 "content": "",
                 "error": err,
+                "error_code": "PIPELINE_ERROR",
                 "finish_reason": FinishReason.ERROR,
                 "cost_runs": cost_runs,
             }
@@ -688,6 +696,8 @@ async def run_chat_pipeline(
             "input_tokens": turn_usage.input_tokens,
             "output_tokens": turn_usage.output_tokens,
             "reasoning_tokens": turn_usage.reasoning_tokens,
+            "cache_hit_tokens": turn_usage.cache_hit_tokens,
+            "cache_miss_tokens": turn_usage.cache_miss_tokens,
             "rounds": rounds,
             "finish_reason": finish,
             "citations": citations,
@@ -711,6 +721,7 @@ async def run_chat_pipeline(
             "message_id": message_id,
             "content": "",
             "error": str(e),
+            "error_code": "PIPELINE_ERROR",
             "finish_reason": FinishReason.ERROR,
         }
     finally:
@@ -1072,6 +1083,7 @@ async def resume_chat_pipeline(
                 "message_id": message_id,
                 "content": "",
                 "error": err,
+                "error_code": "PIPELINE_ERROR",
                 "finish_reason": FinishReason.ERROR,
                 "cost_runs": cost_runs,
             }
@@ -1097,6 +1109,7 @@ async def resume_chat_pipeline(
             "message_id": message_id,
             "content": "",
             "error": str(e),
+            "error_code": "PIPELINE_ERROR",
             "finish_reason": FinishReason.ERROR,
         }
     finally:
@@ -1205,6 +1218,8 @@ def _finish_resume_turn(
         "input_tokens": turn_usage.input_tokens,
         "output_tokens": turn_usage.output_tokens,
         "reasoning_tokens": turn_usage.reasoning_tokens,
+        "cache_hit_tokens": turn_usage.cache_hit_tokens,
+        "cache_miss_tokens": turn_usage.cache_miss_tokens,
         "rounds": rounds,
         "finish_reason": finish,
         "citations": citations,
@@ -1235,6 +1250,8 @@ def _finish_terminal_resume(
         "input_tokens": 0,
         "output_tokens": 0,
         "reasoning_tokens": 0,
+        "cache_hit_tokens": 0,
+        "cache_miss_tokens": 0,
         "rounds": 0,
         "finish_reason": finish,
         "citations": [],

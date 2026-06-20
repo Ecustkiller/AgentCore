@@ -1,6 +1,6 @@
+import { login } from "@/api/auth";
 import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { login } from "@/api/auth";
 
 export function LoginPage() {
   const navigate = useNavigate();

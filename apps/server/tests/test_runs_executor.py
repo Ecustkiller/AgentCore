@@ -7,6 +7,7 @@ the ``run_*`` graph events.
 """
 
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from agentcore.core.types import ToolApproval, ToolCategory
@@ -17,17 +18,20 @@ from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.constants import DEP_CONTEXT_BUDGET
 from agentcore.runtime.runs.executor import (
-    _allocate,
+    _CONTEXT_BLOCK_BODY_CAP,
+    _build_captain_context_blocks,
+    _build_context_blocks,
     _build_messages,
+    _context_block_payloads,
     _dep_context_blocks,
     _is_hard_failure,
     _safe_index_files,
-    _truncate_head_tail,
     _workspace_manifest,
     build_agent_executor,
 )
+from agentcore.runtime.runs.fidelity import allocate, truncate_head_tail
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import RunContract, RunPhase, RunSpec, RunState
+from agentcore.runtime.runs.types import ContextBlock, RunContract, RunPhase, RunSpec, RunState
 from agentcore.runtime.runs.wave import WaveScheduler
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -1070,6 +1074,56 @@ async def test_worker_escalation_is_harvested_and_nonblocking():
     assert esc["blocking"] is True
 
 
+async def test_worker_escalation_emits_live_event_before_completion():
+    # 升级实时可见: the executor wires the worker's escalate to a run-scoped RUN_ESCALATION
+    # so the team UI surfaces it the INSTANT it is raised — well before the worker's node
+    # completes (ordering proves "live", not a post-hoc harvest at run end).
+    plan, _ = build_run_plan([{"role": "调研", "task": "查不清楚的事"}], id_prefix="t")
+    reg = ToolRegistry()
+    reg.register(EscalateTool())
+    rounds = [
+        [
+            LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(
+                        index=0,
+                        id="c1",
+                        function_name="escalate",
+                        arguments_delta=(
+                            '{"question": "用 Postgres 还是 MySQL?", '
+                            '"assumption": "暂用 Postgres", "blocking": true}'
+                        ),
+                    )
+                ]
+            )
+        ],
+        [LLMChunk(delta_content="已按 Postgres 完成调研")],
+    ]
+    sink = EventSink()
+    executor = build_agent_executor(
+        plan=plan,
+        llm=_ScriptedRounds(rounds),
+        tools=reg,
+        sink=sink,
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    await WaveScheduler().run(plan, executor)
+    sink.close()
+    events = [e async for e in sink]
+    types = [e.type for e in events]
+    assert EventType.RUN_ESCALATION in types
+    esc = next(e for e in events if e.type == EventType.RUN_ESCALATION)
+    assert esc.payload["run_id"] == "t_1"
+    assert esc.payload["question"] == "用 Postgres 还是 MySQL?"
+    assert esc.payload["assumption"] == "暂用 Postgres"
+    assert esc.payload["blocking"] is True
+    # Live, not a harvest: the escalation surfaces strictly before the run finishes.
+    assert types.index(EventType.RUN_ESCALATION) < types.index(EventType.RUN_COMPLETED)
+
+
 async def test_worker_without_escalation_has_empty_list():
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     res = await WaveScheduler().run(
@@ -1089,6 +1143,29 @@ async def test_escalate_tool_rejects_empty_question_and_acks_otherwise():
     assert "继续" in ok.output
 
 
+async def test_escalate_invokes_on_escalate_callback_with_triple():
+    # 升级实时可见: the tool hands the executor-provided live channel its (question,
+    # assumption, blocking) triple. An empty question is rejected BEFORE any emit.
+    tool = EscalateTool()
+    seen: list[tuple[str, str, bool]] = []
+    ctx = replace(_ctx(), on_escalate=lambda q, a, b: seen.append((q, a, b)))
+    await tool.execute({"question": "  "}, ctx)
+    assert seen == []  # rejected first, nothing surfaced
+    await tool.execute({"question": "Q?", "assumption": "暂定 A", "blocking": True}, ctx)
+    assert seen == [("Q?", "暂定 A", True)]
+
+
+async def test_escalate_callback_failure_is_non_fatal():
+    # The durable path (transcript → RunState.escalations) is unconditional, so a live-emit
+    # hiccup must never sink the escalation or the worker — the tool still ACKs CONTINUE.
+    def _boom(_q: str, _a: str, _b: bool) -> None:
+        raise RuntimeError("sink closed")
+
+    ctx = replace(_ctx(), on_escalate=_boom)
+    ok = await EscalateTool().execute({"question": "Q?"}, ctx)
+    assert ok.success is True and ok.is_terminal is False
+
+
 # --- upstream dependency context budget (shared, water-filled, head+tail) -------
 #
 # A downstream node's pass_through deps SHARE one budget (DEP_CONTEXT_BUDGET),
@@ -1097,29 +1174,29 @@ async def test_escalate_tool_rejects_empty_question_and_acks_otherwise():
 
 
 def test_allocate_single_dep_gets_whole_budget():
-    assert _allocate([10_000], 16_000) == [10_000]  # fits → full content
-    assert _allocate([50_000], 16_000) == [16_000]  # over → capped at the budget
+    assert allocate([10_000], 16_000) == [10_000]  # fits → full content
+    assert allocate([50_000], 16_000) == [16_000]  # over → capped at the budget
 
 
 def test_allocate_water_fills_unequal_deps():
     # The small dep takes only what it needs; the freed remainder goes to the big one
     # (not an even split that would starve the big dep and waste the small's share).
-    out = _allocate([1_000, 50_000], 16_000)
+    out = allocate([1_000, 50_000], 16_000)
     assert out == [1_000, 15_000]
     assert sum(out) == 16_000
 
 
 def test_allocate_splits_equal_large_deps_evenly():
-    assert _allocate([50_000, 50_000], 16_000) == [8_000, 8_000]
+    assert allocate([50_000, 50_000], 16_000) == [8_000, 8_000]
 
 
 def test_allocate_empty_is_empty():
-    assert _allocate([], 16_000) == []
+    assert allocate([], 16_000) == []
 
 
 def test_truncate_head_tail_keeps_both_ends():
     content = "HEAD起始" + ("x" * 5_000) + "TAIL尾注金额￥999"
-    out = _truncate_head_tail(content, 1_000)
+    out = truncate_head_tail(content, 1_000)
     assert out.startswith("HEAD起始")  # head kept
     assert "TAIL尾注金额￥999" in out  # tail kept — the fidelity fix (was dropped before)
     assert "中间省略" in out  # and the middle was elided
@@ -1127,7 +1204,7 @@ def test_truncate_head_tail_keeps_both_ends():
 
 
 def test_truncate_head_tail_short_content_unchanged():
-    assert _truncate_head_tail("short", 1_000) == "short"
+    assert truncate_head_tail("short", 1_000) == "short"
 
 
 async def test_long_upstream_injected_with_head_and_tail_preserved():
@@ -1538,3 +1615,128 @@ def test_team_position_block_four_dag_shapes():
     solo = _build_messages(solo_plan, solo_plan.by_id("s_1"), {}, "SYS", "原始请求")[1].content or ""
     assert "你在团队中的位置" not in solo
     assert "不一定全是你的活" not in solo  # a solo worker IS the whole job
+
+
+# ── 收到的上下文 / run_context 结构化投影 (上下文传递可视化) ───────────────────────
+# The team_position / dep-fidelity MECHANICS are pinned above via the rendered prompt
+# text; these pin the STRUCTURED side that feeds the frontend「收到的上下文」区: the
+# channel sequence, the 单一源/双投影 invariant (prompt text == blocks joined), each
+# dependency block's provenance, and the 决策④ body cap on the wired/journaled copy.
+
+
+async def test_context_blocks_channel_sequence_and_single_source():
+    # A solo worker (no team_position) with expected_output + contract + steer exercises
+    # the optional channels and pins their order; the rendered opening user message must
+    # be EXACTLY the same ContextBlock list joined (用户看到的 == LLM 吃到的, 双投影零漂移).
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    spec = replace(plan.by_id("t_1"), expected_output="一段结论", steer="按新方向调整")
+    contract = RunContract(required_sections=["结论"])
+    blocks = _build_context_blocks(plan, spec, {}, "原始请求", contract, [])
+    assert [b.channel for b in blocks] == [
+        "request",
+        "task",
+        "expected_output",
+        "requirements",
+        "steer",
+    ]
+    rendered = _build_messages(plan, spec, {}, "SYS", "原始请求", contract)[1].content
+    assert rendered == "\n\n".join(f"## {b.heading}\n{b.body}" for b in blocks)
+    # steer rides last + highest priority, carried verbatim.
+    assert blocks[-1].channel == "steer"
+    assert blocks[-1].body == "按新方向调整"
+
+
+async def test_context_blocks_dependency_carries_provenance():
+    # 通道③: each upstream dep becomes a `dependency` block carrying its provenance
+    # (source_role / source_run_id / fidelity / files) so the UI shows HOW a teammate's
+    # product was handed down — a prose dep → pass_through, a file-writing dep → pointer.
+    plan, _ = build_run_plan(
+        [
+            {"id": "a", "role": "研究员", "task": "调研"},
+            {"id": "b", "role": "工程师", "task": "落盘"},
+            {"id": "c", "role": "写手", "task": "撰写", "depends_on": ["a", "b"]},
+        ],
+        id_prefix="t",
+    )
+    completed = {
+        "t_a": RunState(phase=RunPhase.COMPLETED, content="关键事实 X"),
+        "t_b": RunState(
+            phase=RunPhase.COMPLETED, content="改了配置", files_touched=["out/config.json"]
+        ),
+    }
+    blocks = _build_context_blocks(plan, plan.by_id("t_c"), completed, "原始请求", None, [])
+    deps = {b.source_role: b for b in blocks if b.channel == "dependency"}
+    assert set(deps) == {"研究员", "工程师"}
+    assert deps["研究员"].source_run_id == "t_a"
+    assert deps["研究员"].fidelity == "pass_through"
+    assert deps["研究员"].files == []
+    assert deps["工程师"].source_run_id == "t_b"
+    assert deps["工程师"].fidelity == "pointer"
+    assert deps["工程师"].files == ["out/config.json"]
+
+
+def test_context_block_payloads_caps_long_body_with_flag():
+    # 决策④: the prompt feeds the LLM the FULL block, but the run_context/journal copy is
+    # head+tail capped (flagged via `truncated`, ORIGINAL size kept in `chars`) so a huge
+    # pasted request can't bloat the journal.
+    long_body = "甲" * (_CONTEXT_BLOCK_BODY_CAP + 5000)
+    blocks = [
+        ContextBlock(channel="task", heading="你的任务", body="短"),
+        ContextBlock(channel="request", heading="原始用户请求", body=long_body),
+    ]
+    payloads = _context_block_payloads(blocks)
+    # a within-budget block passes through untouched.
+    assert payloads[0]["truncated"] is False
+    assert payloads[0]["body"] == "短"
+    assert payloads[0]["chars"] == 1
+    # the over-budget block is capped + flagged, but reports its ORIGINAL size.
+    capped = payloads[1]
+    assert capped["truncated"] is True
+    assert capped["chars"] == len(long_body)
+    assert len(capped["body"]) <= _CONTEXT_BLOCK_BODY_CAP
+    assert "已保留首尾" in capped["body"]  # head+tail truncation marker
+    # the wire shape carries every field the frontend / oracle fold reads.
+    assert set(capped) == {
+        "channel",
+        "heading",
+        "body",
+        "chars",
+        "truncated",
+        "source_role",
+        "source_run_id",
+        "fidelity",
+        "files",
+    }
+
+
+# ── CEO 侧：captain 收到的上下文 (上下文传递可视化 方案3 通道①) ─────────────────────
+# The captain's prompt is a real multi-message chat (system + history + user), so its
+# ContextBlocks MIRROR that array rather than being the source one user message renders
+# from. These pin the channels/order + that the blocks carry the SAME text fed to the LLM
+# (单一源), and that history is omitted on a first turn.
+
+
+def test_captain_context_blocks_channels_order_and_single_source():
+    # A continued chat: system + a prior turn + this request → the three CEO-side channels
+    # in order, each body verbatim what the captain's `messages` array feeds the LLM.
+    history = [
+        {"role": "user", "content": "你好"},
+        {"role": "assistant", "content": "你好，有什么可以帮你？"},
+        {"role": "user", "content": ""},  # blank turns are dropped, not rendered
+    ]
+    blocks = _build_captain_context_blocks("你是 CEO。", history, "帮我润色这段话。")
+    assert [b.channel for b in blocks] == ["system", "history", "request"]
+    # system block carries the verbatim chat system prompt (决策②: hidden by default is a
+    # FRONTEND gate — the projection/block still carries it so power mode can reveal it).
+    assert blocks[0].body == "你是 CEO。"
+    # history renders the prior turns as 用户/CEO prose, blank turns dropped.
+    assert blocks[1].body == "用户：你好\n\nCEO：你好，有什么可以帮你？"
+    # the request is this turn's user message verbatim.
+    assert blocks[-1].channel == "request"
+    assert blocks[-1].body == "帮我润色这段话。"
+
+
+def test_captain_context_blocks_first_turn_omits_history():
+    # A fresh conversation (no prior turns) → only system + request, no empty history block.
+    blocks = _build_captain_context_blocks("你是 CEO。", [], "第一条消息")
+    assert [b.channel for b in blocks] == ["system", "request"]

@@ -1,14 +1,14 @@
-// `exportConversation` streams the file via workspace's raw-bytes helpers
-// (authedFetch + saveBlob); mock that pair so we can assert the request URL and,
-// crucially, the Content-Disposition filename parsing (导出对话) without touching
-// the DOM (jsdom lacks URL.createObjectURL).
+// `exportConversation` streams the file via the neutral raw-bytes helpers in
+// `services/workspaceHttp` (authedFetch + saveBlob); mock that pair so we can
+// assert the request URL and, crucially, the Content-Disposition filename parsing
+// (导出对话) without touching the DOM (jsdom lacks URL.createObjectURL).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { authedFetchMock, saveBlobMock } = vi.hoisted(() => ({
   authedFetchMock: vi.fn(),
   saveBlobMock: vi.fn(),
 }));
-vi.mock("@/services/workspace", () => ({
+vi.mock("@/services/workspaceHttp", () => ({
   authedFetch: authedFetchMock,
   saveBlob: saveBlobMock,
 }));

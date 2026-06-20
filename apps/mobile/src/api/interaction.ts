@@ -1,3 +1,4 @@
+import { apiFetch } from "@/api/client";
 // Settle a paused interaction over the LIVE SSE stream (手机端落地设计 P1 · 交互式暂停放行).
 //
 // When a turn pauses (approval / ask_user checkpoint / plan_review) the backend emits the
@@ -13,7 +14,6 @@ import type {
   ApprovalDecision,
   CheckpointDecision,
 } from "@agentcore/contract-types";
-import { apiFetch } from "@/api/client";
 
 /**
  * The user's settlement of a paused interaction, discriminated on `kind` — mirrors the

@@ -18,6 +18,24 @@
       "timestamp": "2026-01-01T00:00:00.001Z"
     },
     {
+      "type": "tool_use_start",
+      "payload": {
+        "tool_call_id": "dc1",
+        "tool_name": "delegate",
+        "arguments": {
+          "tasks": [
+            {
+              "role": "研究员"
+            },
+            {
+              "role": "撰写员"
+            }
+          ]
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
+    },
+    {
       "type": "run_plan",
       "payload": {
         "execution_id": "exec1",
@@ -56,7 +74,7 @@
           }
         ]
       },
-      "timestamp": "2026-01-01T00:00:00.002Z"
+      "timestamp": "2026-01-01T00:00:00.003Z"
     },
     {
       "type": "run_started",
@@ -67,7 +85,7 @@
         "kind": "agent",
         "revision": 0
       },
-      "timestamp": "2026-01-01T00:00:00.003Z"
+      "timestamp": "2026-01-01T00:00:00.004Z"
     },
     {
       "type": "run_output_delta",
@@ -76,7 +94,7 @@
         "agent_id": "w1",
         "delta": "调研结论"
       },
-      "timestamp": "2026-01-01T00:00:00.004Z"
+      "timestamp": "2026-01-01T00:00:00.005Z"
     },
     {
       "type": "run_completed",
@@ -102,7 +120,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.005Z"
+      "timestamp": "2026-01-01T00:00:00.006Z"
     },
     {
       "type": "run_started",
@@ -113,7 +131,7 @@
         "kind": "agent",
         "revision": 0
       },
-      "timestamp": "2026-01-01T00:00:00.006Z"
+      "timestamp": "2026-01-01T00:00:00.007Z"
     },
     {
       "type": "run_output_delta",
@@ -122,7 +140,7 @@
         "agent_id": "w2",
         "delta": "成稿"
       },
-      "timestamp": "2026-01-01T00:00:00.007Z"
+      "timestamp": "2026-01-01T00:00:00.008Z"
     },
     {
       "type": "run_completed",
@@ -148,14 +166,24 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.008Z"
+      "timestamp": "2026-01-01T00:00:00.009Z"
+    },
+    {
+      "type": "tool_use_end",
+      "payload": {
+        "tool_call_id": "dc1",
+        "tool_name": "delegate",
+        "status": "success",
+        "result": "团队完成 2 项任务。"
+      },
+      "timestamp": "2026-01-01T00:00:00.010Z"
     },
     {
       "type": "content_delta",
       "payload": {
         "delta": " 团队已完成。"
       },
-      "timestamp": "2026-01-01T00:00:00.009Z"
+      "timestamp": "2026-01-01T00:00:00.011Z"
     },
     {
       "type": "message_end",
@@ -177,7 +205,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.010Z"
+      "timestamp": "2026-01-01T00:00:00.012Z"
     }
   ],
   "projected": {
@@ -185,7 +213,34 @@
     "finishReason": "end_turn",
     "content": "我来安排团队。 团队已完成。",
     "reasoning": "",
-    "process": [],
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "我来安排团队。"
+      },
+      {
+        "kind": "tool",
+        "id": "dc1",
+        "tool_name": "delegate",
+        "arguments": {
+          "tasks": [
+            {
+              "role": "研究员"
+            },
+            {
+              "role": "撰写员"
+            }
+          ]
+        },
+        "result": "团队完成 2 项任务。",
+        "status": "success"
+      },
+      {
+        "kind": "content",
+        "text": " 团队已完成。"
+      }
+    ],
     "citations": [],
     "agents": [
       {
@@ -247,7 +302,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "r2",
@@ -284,7 +340,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       }
     ],
     "progress": {

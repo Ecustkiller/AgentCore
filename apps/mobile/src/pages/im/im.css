@@ -183,6 +183,14 @@
   margin-top: 6px;
 }
 
+.im-attach-img-btn {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
 .im-attach-img {
   display: block;
   max-width: 220px;

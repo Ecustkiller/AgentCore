@@ -77,22 +77,39 @@ export function setServiceUnavailableHandler(
 
 const isAuthPath = (path: string): boolean => path.startsWith("/v1/auth/");
 
+// A single in-flight refresh shared by every 401'd caller. The refresh token
+// rotates on first use, so concurrent requests must NOT each POST /refresh: the
+// 2nd would present an already-rotated token, the backend's reuse detection would
+// revoke the whole family, and the user would be logged out mid-session
+// (认证与会话.md §五/§七). Collapsing the burst into one promise guarantees a
+// single rotation; the backend grace window is the cross-window backstop.
+let refreshInFlight: Promise<boolean> | null = null;
+
 /**
  * Attempt a single token refresh; returns true if the session was renewed.
  *
- * Exported so non-`api` callers (e.g. the raw-fetch SSE stream) can reuse the
- * exact same refresh-once policy instead of reimplementing it.
+ * Single-flight: concurrent callers share one /refresh round-trip (see
+ * {@link refreshInFlight}). Exported so non-`api` callers (the raw-fetch SSE
+ * stream, the workspace/handoff/realtime channels) reuse the exact same
+ * refresh-once policy *and* the same dedup, instead of each racing a rotation.
  */
-export async function tryRefresh(): Promise<boolean> {
-  try {
-    const res = await fetch(`${BASE_URL}/v1/auth/refresh`, {
-      method: "POST",
-      credentials: "include",
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
+export function tryRefresh(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/v1/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  })().finally(() => {
+    // Let the next expiry start a fresh refresh once this one has settled.
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
 }
 
 async function request<T>(

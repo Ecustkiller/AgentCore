@@ -321,7 +321,13 @@
     "finishReason": "end_turn",
     "content": "我发起一场正反辩论来定夺。",
     "reasoning": "",
-    "process": [],
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "我发起一场正反辩论来定夺。"
+      }
+    ],
     "citations": [],
     "agents": [
       {
@@ -395,7 +401,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "debate_mod1_r1_pro",
@@ -430,7 +437,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "debate_mod1_r1_con",
@@ -465,7 +473,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       }
     ],
     "progress": {

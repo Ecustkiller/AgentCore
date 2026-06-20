@@ -7,7 +7,12 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import type { components } from "@/types/api.generated";
-import type { ProcessStep, SSEEvent } from "@/types/events";
+import type {
+  ContextBlockWire,
+  ProcessStep,
+  SSEEvent,
+  UsageBreakdown,
+} from "@/types/events";
 
 type Schemas = components["schemas"];
 /** A window of messages (cursor-windowed, oldest-first) from the REST endpoint. */
@@ -27,6 +32,9 @@ export interface BackendMessage {
   role: string;
   content: string | null;
   reasoning_content: string | null;
+  /** The turn's log correlation id (messages.trace_id) — replayed onto
+   * `message.traceId` so a reloaded bubble can copy it for one-step log lookup. */
+  trace_id?: string | null;
   attachments?: {
     name: string;
     path: string;
@@ -50,7 +58,25 @@ export interface BackendMessage {
     events: SSEEvent[];
     finish_reason: string | null;
     process?: ProcessStep[] | null;
+    /** 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): the captain's `run_context` blocks,
+     * persisted turn-level (the captain is the bubble above the graph, present even in pure
+     * chat where `events` is empty). Replayed onto `message.captainContext` on reload. */
+    captain_context?: ContextBlockWire[] | null;
+    /** 报错回合's terminal error (Tier 2 a): projected from the journal's `turn_end` outcome
+     * fact so the inline error card replays on reload (live, the error rode a transport-only
+     * `error` SSE event). Replayed onto `message.error` — same `{code, message}` shape the
+     * live handler attaches. null for a clean turn. */
+    error?: { code: string; message: string } | null;
   } | null;
+  /** 回合 token 用量 (Tier 2 重载持久化): the turn's token snapshot in the ledger short-key
+   * shape, projected server-side from the row's `usage` column. Replayed onto
+   * `message.usage` so the bubble's meta row caption replays on reload — live, it rode
+   * `message_end`. null for user rows and no-spend (errored/empty) turns. */
+  usage?: UsageBreakdown | null;
+  /** 回合轮次 (Tier 2 重载持久化): ReAct rounds the turn ran, projected from the same column.
+   * Replayed onto `message.rounds`; the bubble surfaces「N 轮」only when > 1. null for
+   * user / pre-feature rows. */
+  rounds?: number | null;
   created_at: string;
 }
 
@@ -88,22 +114,27 @@ export function toMessage(m: BackendMessage): Message {
   // plan_review events are journaled like ask_user checkpoints, so a reloaded turn
   // replays its structured DAG pauses inline too (结构化挂起 2a).
   const planReviews = planReviewsFromEvents(events);
-  // Single-agent 思考·正文·工具 inline timeline (前端UX设计.md §一B): prefer the persisted
-  // ordered steps (a tool-using turn — now incl. content steps), else synthesize one
-  // reasoning step from reasoning_content (a thinking-only turn, or a pre-feature row),
-  // so the inline timeline replays the shape the live turn built. Multi-agent turns omit
-  // it — the team graph carries their activity instead.
-  const process: ProcessStep[] | undefined = executionId
-    ? undefined
-    : (m.runs?.process ??
-      (m.reasoning_content
+  // 思考·正文·工具 inline timeline (前端UX设计.md §一B): prefer the persisted ordered
+  // steps — now for single-agent AND multi-agent turns (统一团队时间线: the team graph
+  // slots at the CEO's `delegate` step inside the timeline). A multi-agent turn WITHOUT
+  // persisted process (legacy rows from before it was persisted) keeps the standalone
+  // team-graph layout (undefined → no inline timeline). A tool-less single-agent turn
+  // synthesizes one reasoning step from reasoning_content so its timeline still replays.
+  const process: ProcessStep[] | undefined =
+    m.runs?.process ??
+    (executionId
+      ? undefined
+      : m.reasoning_content
         ? [{ kind: "reasoning", text: m.reasoning_content }]
-        : undefined));
+        : undefined);
   return {
     id: m.id,
     role: m.role === "assistant" ? "assistant" : "user",
     content: m.content ?? "",
     reasoning: m.reasoning_content ?? undefined,
+    // 关联气泡↔日志: replay the turn's trace_id so a reloaded bubble's dev「复制 trace id」
+    // links straight to its logs (grep trace_id=...).
+    traceId: m.trace_id ?? undefined,
     process,
     createdAt: m.created_at,
     // Stamp the plan id so the bubble renders its inline team graph; the journal
@@ -112,9 +143,30 @@ export function toMessage(m: BackendMessage): Message {
     runs: executionId
       ? { events, finishReason: m.runs?.finish_reason ?? "stop" }
       : undefined,
+    // 结束原因 chip (Tier 2 c): surface the persisted finish_reason turn-level so a
+    // single-agent abnormal turn (max_rounds / degraded / unproductive) replays its
+    // chip on reload too — the bubble reads `finishReason ?? runs?.finishReason`, and a
+    // single-agent turn has no `runs`. A clean turn carries no journal → undefined → no
+    // chip. (Multi-agent also keeps its `runs.finishReason` above; this is redundant but
+    // harmless there.)
+    finishReason: m.runs?.finish_reason ?? undefined,
+    // 报错回合 error card (Tier 2 a): replay the inline error card from the persisted
+    // outcome, mirroring the live `error` event handler's `{code, message}` attach.
+    error: m.runs?.error ?? undefined,
+    // 回合 token 用量 + 轮次 (Tier 2 重载): replay the bubble's meta row from the persisted
+    // turn snapshot, mirroring the live `attachTurnMetaToLastMessage` stamp — usage is
+    // already the ledger short-key shape (normalized server-side), rounds drives the
+    // 「N 轮」caption. Both undefined for user / no-spend turns → no meta row (live parity).
+    usage: m.usage ?? undefined,
+    rounds: m.rounds ?? undefined,
     checkpoints: checkpoints.length ? checkpoints : undefined,
     nonBlockingAsks: nonBlockingAsks.length ? nonBlockingAsks : undefined,
     planReviews: planReviews.length ? planReviews : undefined,
+    // 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): turn-level, so it replays independently
+    // of the team graph — present on pure-chat reloads (empty `events`) too.
+    captainContext: m.runs?.captain_context?.length
+      ? m.runs.captain_context
+      : undefined,
     isStreaming: false,
     attachments: m.attachments?.length
       ? m.attachments.map((a) => ({

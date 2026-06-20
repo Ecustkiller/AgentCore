@@ -10,18 +10,17 @@ import {
   streamErrorAction,
 } from "@/lib/errors";
 import { notifyInfo } from "@/lib/toast";
-import { pendingLocalContainerRoot } from "@/services/defaultWorkspace";
 import { loadLatestWindow } from "@/services/messages";
 import type { PlanReviewUserDecision } from "@/services/planReview";
-import {
-  buildSidecarHistory,
-  resolveSidecarRoot,
-} from "@/services/sidecarRouting";
 import {
   clearSidecarHealth,
   markSidecarUnhealthy,
   probeSidecar,
 } from "@/services/sidecarHealth";
+import {
+  buildSidecarHistory,
+  resolveSidecarRoot,
+} from "@/services/sidecarRouting";
 import {
   type OutgoingAttachment,
   attachConversation,
@@ -493,27 +492,21 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         notifyInfo("本地引擎未能启动，已自动用云端完成这次对话");
         store.truncateAfter(optimisticUserId, conversationId);
         store.createAssistantMessage(conversationId);
-        const localContainerRootId =
-          await pendingLocalContainerRoot(conversationId);
         await streamConversation({
           conversationId,
           content,
           attachments,
-          localContainerRootId,
           signal: ac.signal,
         });
       }
     } else {
-      // 云链路（默认，含探活失败的 fallthrough）：桌面裸聊首发携带「待定本地容器根」（工作区
-      // 对称化 D2），让服务端首次产文件时把这条裸聊懒建为该容器下的 per 对话本地文件夹（D1a）。
-      // 已归档 / 云端逃生口 / 非桌面 → null（裸聊懒建走云端，现行为不变）。
-      const localContainerRootId =
-        await pendingLocalContainerRoot(conversationId);
+      // 云链路（默认，含探活失败的 fallthrough）。本地意向已是会话状态
+      // （Conversation.local_container_root_id，建会话时定型，工作区对称化 D1a），
+      // 服务端据此在裸聊首次产文件时懒建本地 / 云端文件夹——回合不再携带容器根。
       await streamConversation({
         conversationId,
         content,
         attachments,
-        localContainerRootId,
         signal: ac.signal,
       });
     }

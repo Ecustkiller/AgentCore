@@ -108,23 +108,38 @@ export function authHeader(): Record<string, string> {
   return tokens ? { Authorization: `Bearer ${tokens.access_token}` } : {};
 }
 
+// Single in-flight refresh shared by every 401'd caller (apiFetch + the SSE
+// stream). The refresh token rotates on first use, so without this each concurrent
+// 401 would refresh with the same token: the backend grace window keeps that from
+// revoking the family, but deduping here also stops the losing request from
+// clobbering the freshly-stored pair (and saves a redundant round-trip). Mirrors
+// desktop services/api.ts; reset once settled so the next expiry refreshes anew.
+let refreshInFlight: Promise<boolean> | null = null;
+
 /** Rotate the token pair via the bearer refresh endpoint. Returns true on success;
- *  clears tokens on failure so the caller can route back to login. */
-export async function refreshTokens(): Promise<boolean> {
-  const tokens = getTokens();
-  if (!tokens) return false;
-  const res = await fetch(apiUrl("/v1/auth/token/refresh"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: tokens.refresh_token }),
+ *  clears tokens on failure so the caller can route back to login. Single-flight:
+ *  concurrent callers share one round-trip (see {@link refreshInFlight}). */
+export function refreshTokens(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const tokens = getTokens();
+    if (!tokens) return false;
+    const res = await fetch(apiUrl("/v1/auth/token/refresh"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: tokens.refresh_token }),
+    });
+    if (!res.ok) {
+      clearTokens();
+      return false;
+    }
+    const data = (await res.json()) as Tokens;
+    setTokens(data);
+    return true;
+  })().finally(() => {
+    refreshInFlight = null;
   });
-  if (!res.ok) {
-    clearTokens();
-    return false;
-  }
-  const data = (await res.json()) as Tokens;
-  setTokens(data);
-  return true;
+  return refreshInFlight;
 }
 
 /**
@@ -132,7 +147,10 @@ export async function refreshTokens(): Promise<boolean> {
  * replays; a still-401 leaves tokens cleared so the caller routes back to login.
  * The SSE stream reads the body itself and mirrors this policy (see stream.ts).
  */
-export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+export async function apiFetch(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
   const run = () =>
     fetch(apiUrl(path), {
       ...init,

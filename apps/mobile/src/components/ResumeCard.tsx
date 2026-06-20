@@ -1,3 +1,4 @@
+import type { PausedTurnSummary } from "@/api/turn";
 // Durable resume card — the actionable surface for a turn that paused at a checkpoint then
 // lost its live stream (结构化挂起 2b). Unlike PauseCard (which settles a LIVE fold
 // `pendingInteraction` over the still-open SSE via resolveInteraction), this reads a
@@ -11,7 +12,6 @@
 // 停止 (end the turn here).
 import type { CheckpointDecision } from "@agentcore/contract-types";
 import { useState } from "react";
-import type { PausedTurnSummary } from "@/api/turn";
 
 /** Read a string field defensively off a steps/pending dict (backend dict[str, Any]). */
 function str(record: Record<string, unknown>, key: string): string | null {
@@ -34,7 +34,9 @@ export function ResumeCard({
   return (
     <div className="pause">
       <div className="pause-title">
-        {isPlanReview ? "执行已暂停 · 待你决定是否继续" : "需要你拍板（已离线保留）"}
+        {isPlanReview
+          ? "执行已暂停 · 待你决定是否继续"
+          : "需要你拍板（已离线保留）"}
       </div>
       {paused.user_message && (
         <div className="pause-context">{paused.user_message}</div>

@@ -94,7 +94,9 @@ export async function downloadWorkspaceFile(
     blob,
     filename: path.split("/").pop() || "download",
     contentType:
-      res.headers.get("Content-Type") || blob.type || "application/octet-stream",
+      res.headers.get("Content-Type") ||
+      blob.type ||
+      "application/octet-stream",
   };
 }
 

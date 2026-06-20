@@ -1,5 +1,3 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
 import { bootstrapAuth } from "@/api/auth";
 import { getTokens } from "@/api/client";
 import { PushBridge } from "@/components/PushBridge";
@@ -9,15 +7,17 @@ import { FilesPage } from "@/pages/FilesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
+import { ServiceUnavailablePage } from "@/pages/ServiceUnavailablePage";
 import { WorkspaceFilesPage } from "@/pages/WorkspaceFilesPage";
 import { WorkspacesPage } from "@/pages/WorkspacesPage";
+import { ChatThreadPage } from "@/pages/im/ChatThreadPage";
+import { NewDmPage } from "@/pages/im/NewDmPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
 import { UsageSettings } from "@/pages/more/UsageSettings";
-import { ChatThreadPage } from "@/pages/im/ChatThreadPage";
-import { NewDmPage } from "@/pages/im/NewDmPage";
-import { ServiceUnavailablePage } from "@/pages/ServiceUnavailablePage";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   return getTokens() ? <>{children}</> : <Navigate to="/login" replace />;

@@ -1,3 +1,10 @@
+import type { DownloadedFile, WorkspaceFileEntry } from "@/api/workspace";
+import {
+  downloadWorkspaceFileByWs,
+  listWorkspaceFilesByWs,
+  uploadWorkspaceFileByWs,
+} from "@/api/workspaces";
+import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
 // Browse ONE cloud workspace's files (手机端布局重构 · 跨工作区文件总览).
 //
 // The drill-down from the 文件 tab (/files → /files/:wsId). Keeps the bottom tab bar (a
@@ -7,13 +14,6 @@
 // the list so the header shows it without a refetch.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import type { DownloadedFile, WorkspaceFileEntry } from "@/api/workspace";
-import {
-  downloadWorkspaceFileByWs,
-  listWorkspaceFilesByWs,
-  uploadWorkspaceFileByWs,
-} from "@/api/workspaces";
-import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
 
 export function WorkspaceFilesPage() {
   const navigate = useNavigate();
@@ -29,6 +29,7 @@ export function WorkspaceFilesPage() {
 
   // Reset to root when switching to a different workspace (the component is reused across
   // /files/:wsId param changes, so state would otherwise leak across workspaces).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: wsId is the intentional trigger — the reset must run on every workspace switch even though the body doesn't read it
   useEffect(() => {
     setCwd("");
     setUploadError(null);
@@ -66,7 +67,11 @@ export function WorkspaceFilesPage() {
   return (
     <div className="screen">
       <header className="bar">
-        <button type="button" className="link" onClick={() => navigate("/files")}>
+        <button
+          type="button"
+          className="link"
+          onClick={() => navigate("/files")}
+        >
           ← 文件
         </button>
         <span className="viewer-name">{name}</span>

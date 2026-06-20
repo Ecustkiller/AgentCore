@@ -1,4 +1,5 @@
 import { Markdown } from "@/components/chat/Markdown";
+import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
 import {
   type ToolResultData,
   ToolResultView,
@@ -8,7 +9,6 @@ import {
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
 import {
   type AgentState,
-  type ContextBlockWire,
   MODEL_TIER_META,
   type RunNode,
   type ToolCallState,
@@ -20,6 +20,7 @@ import { useSidePanelStore } from "@/stores/sidePanel";
 import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import {
+  ArrowUp,
   ChevronDown,
   ChevronRight,
   CornerDownRight,
@@ -159,6 +160,8 @@ export function RunDetailBody({
         <Markdown content={run.task} />
       </Section>
 
+      {run.escalations.length > 0 && <EscalationSection run={run} />}
+
       {run.receivedContext.length > 0 && (
         <ReceivedContextSection
           blocks={run.receivedContext}
@@ -288,6 +291,50 @@ export function RunDetailBody({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * 升级实时可见: a worker's escalations (`escalate`) — its 向上求决策 to the CEO. Shown
+ * prominently near the top because it is a 待裁决 signal the user/CEO acts on, not a
+ * buried tool row. Each carries the self-contained 问题 plus the 假设 the worker proceeded
+ * on (escalate 非阻塞 — it kept working), and a「阻断性」flag when a wrong guess would void
+ * the product. The CEO resolves it (ask_user / revise / re-delegate); this view just makes
+ * sure the human can see it the moment it surfaces.
+ */
+function EscalationSection({ run }: { run: RunNode }) {
+  return (
+    <Section title={`上报待裁决 (${run.escalations.length})`}>
+      <div className="space-y-2">
+        {run.escalations.map((esc, i) => (
+          <div
+            // Escalations are append-only and never reordered, so the index is a
+            // stable key here (no id on the wire — they ride the transcript).
+            key={i}
+            className="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs"
+          >
+            <div className="flex items-center gap-1.5 font-medium text-warning">
+              <ArrowUp size={12} className="shrink-0" />
+              <span>向上求决策</span>
+              {esc.blocking && (
+                <span className="rounded-full bg-warning/20 px-1.5 py-0.5 text-warning">
+                  阻断性
+                </span>
+              )}
+            </div>
+            <p className="mt-1 whitespace-pre-wrap break-words text-foreground">
+              {esc.question}
+            </p>
+            {esc.assumption && (
+              <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
+                <span className="text-muted-foreground/70">暂用假设：</span>
+                {esc.assumption}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </Section>
   );
 }
 
@@ -510,185 +557,6 @@ function ThinkingSection({
         </div>
       )}
     </section>
-  );
-}
-
-/** Context channel → 中文 label + one-line hint (上下文传递可视化). The single source
- * the run detail uses to title each「收到的上下文」block by its origin so the user reads
- * WHERE each piece came from, not just its raw heading. */
-const CONTEXT_CHANNEL_META: Record<string, { label: string; hint: string }> = {
-  request: { label: "原始请求", hint: "老板交给整个团队的目标" },
-  team_position: { label: "团队位置", hint: "队友与产出去向" },
-  dependency: { label: "前置结果", hint: "上游队友交付的产物" },
-  workspace: { label: "工作区", hint: "共享工作区可读文件" },
-  task: { label: "你的任务", hint: "分派给本 Agent 的具体活" },
-  expected_output: { label: "预期产出", hint: "期望交付的形态" },
-  requirements: { label: "产出要求", hint: "必须满足的硬约束" },
-  steer: { label: "中途指示", hint: "执行中追加的操舵" },
-};
-
-/** Dependency fidelity → 中文 label (递指针/摘要/全文): HOW an upstream teammate's product
- * was handed to this run. */
-const FIDELITY_META: Record<string, string> = {
-  pointer: "递指针",
-  summarize: "摘要",
-  pass_through: "全文",
-};
-
-/**
- * 收到的上下文 (上下文传递可视化) — the structured context this run was actually fed at
- * assembly time (its `run_context` blocks), so the user sees exactly what the LLM read:
- * 原始请求 / 团队位置 / 上游产物 / 工作区 / 任务…. Collapsible like the resource ledger;
- * opens by default in power mode (用量明细 on, decision③ tiered display). Each block shows
- * its channel origin; a dependency block also surfaces its provenance (来源 / 保真度 / 是否
- * 截断), so a teammate's handed-down product is legible as such.
- */
-function ReceivedContextSection({
-  blocks,
-  defaultExpanded,
-  powerMode,
-}: {
-  blocks: ContextBlockWire[];
-  defaultExpanded: boolean;
-  powerMode: boolean;
-}) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-  return (
-    <section className="mb-4 last:mb-0">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5"
-      >
-        {expanded ? (
-          <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
-        )}
-        <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
-          收到的上下文
-        </span>
-        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-          {blocks.length} 段
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="mt-2 space-y-1.5">
-          {blocks.map((b, i) => (
-            <ContextBlockCard
-              key={`${b.channel}-${i}`}
-              block={b}
-              defaultOpen={powerMode}
-            />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-/** One「收到的上下文」block: a click-to-expand card. Collapsed shows the channel origin +
- * a peek; expanded reveals the full body the LLM read (head+tail capped on the wire, flagged
- * when 截断). A dependency block adds a provenance line (来自 {role} · 保真度 · 截断) and the
- * artifact files it pointed at. Defaults open in power mode (decision③). */
-function ContextBlockCard({
-  block,
-  defaultOpen,
-}: {
-  block: ContextBlockWire;
-  defaultOpen: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  const meta = CONTEXT_CHANNEL_META[block.channel] ?? {
-    label: block.channel,
-    hint: "",
-  };
-  const isDep = block.channel === "dependency";
-  const peek = block.body.slice(0, 140);
-  return (
-    <div className="rounded-lg bg-muted px-2.5 py-1.5 text-xs">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 text-left"
-      >
-        {open ? (
-          <ChevronDown
-            size={12}
-            className="mt-0.5 shrink-0 self-start text-muted-foreground"
-          />
-        ) : (
-          <ChevronRight
-            size={12}
-            className="mt-0.5 shrink-0 self-start text-muted-foreground"
-          />
-        )}
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5">
-            <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
-              {meta.label}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-foreground">
-              {block.heading}
-            </span>
-          </span>
-          {!open && (
-            <span className="mt-0.5 block truncate text-muted-foreground/70">
-              {peek || meta.hint}
-            </span>
-          )}
-        </span>
-        <span className="shrink-0 tabular-nums text-muted-foreground/60">
-          {formatCompact(block.chars)} 字
-        </span>
-      </button>
-
-      {open && (
-        <div className="mt-1.5 space-y-1.5 pl-[18px]">
-          {isDep && (block.source_role || block.fidelity || block.truncated) && (
-            <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground/80">
-              {block.source_role && (
-                <span className="rounded bg-background px-1.5 py-0.5">
-                  来自 {block.source_role}
-                </span>
-              )}
-              {block.fidelity && (
-                <span className="rounded bg-background px-1.5 py-0.5">
-                  {FIDELITY_META[block.fidelity] ?? block.fidelity}
-                </span>
-              )}
-              {block.truncated && (
-                <span className="rounded bg-background px-1.5 py-0.5 text-amber-600 dark:text-amber-500">
-                  已截断
-                </span>
-              )}
-            </div>
-          )}
-          <div className="max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded bg-background p-2 leading-relaxed text-foreground">
-            {block.body}
-          </div>
-          {block.files.length > 0 && (
-            <div className="space-y-0.5">
-              {block.files.map((f) => (
-                <div
-                  key={f}
-                  className="flex items-center gap-1.5 text-muted-foreground"
-                >
-                  <CornerDownRight size={11} className="shrink-0" />
-                  <span className="truncate font-mono">{f}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {block.truncated && !isDep && (
-            <p className="text-muted-foreground/60">
-              （仅展示节选，完整 {formatCompact(block.chars)} 字已传给 AI）
-            </p>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 

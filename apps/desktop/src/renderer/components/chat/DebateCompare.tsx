@@ -12,7 +12,6 @@ import {
 import { useSidePanelStore } from "@/stores/sidePanel";
 import type {
   DebateBriefInfo,
-  DebateNarrativeRound,
   DebateResultPayload,
   DebateRoundInfo,
   DebateSideInfo,
@@ -22,6 +21,7 @@ import {
   ChevronRight,
   ChevronUp,
   Columns2,
+  Gavel,
   HelpCircle,
   Lightbulb,
   MessagesSquare,
@@ -139,6 +139,11 @@ function DebateProducts({
 
       {expanded && (
         <div className="space-y-4 border-t border-border p-4">
+          <DebateTopicHeader
+            debate={debate}
+            execution={execution}
+            messageId={messageId}
+          />
           {debate.narrative_first ? (
             <>
               {narrative}
@@ -151,6 +156,50 @@ function DebateProducts({
             </>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 辩题 + 主持人 (the debate's framing): the `motion` is what the whole debate argues,
+ * and the moderator is its driver (收敛裁判 + 逐轮编排). Clicking 主持人 drills into its
+ * run detail (the verdict trail). Both ride `execution.debate`, so they replay on
+ * reload alongside the brief / narrative — no extra persistence.
+ */
+function DebateTopicHeader({
+  debate,
+  execution,
+  messageId,
+}: {
+  debate: DebateResultPayload;
+  execution: Execution;
+  messageId: string;
+}) {
+  const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
+  const moderatorRun = execution.runs.find(
+    (r) => r.id === debate.moderator_run_id,
+  );
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-3">
+      <div className="flex items-start gap-2">
+        <Target size={14} className="mt-0.5 shrink-0 text-info" />
+        <div className="min-w-0 flex-1">
+          <span className="text-xs text-muted-foreground">辩题</span>
+          <p className="mt-0.5 text-sm font-medium text-foreground">
+            {debate.motion}
+          </p>
+        </div>
+      </div>
+      {moderatorRun && (
+        <button
+          type="button"
+          onClick={() => showRunDetail(messageId, moderatorRun.id, "主持人")}
+          className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-info hover:underline"
+        >
+          <Gavel size={12} />
+          主持人裁决过程
+        </button>
       )}
     </div>
   );
@@ -547,8 +596,7 @@ function LiveMultiSideDebate({
           {roundNos.map((roundNo) => {
             const runs =
               speechRounds.find((r) => r.round === roundNo)?.runs ?? [];
-            const info =
-              narrative.find((r) => r.round_no === roundNo) ?? null;
+            const info = narrative.find((r) => r.round_no === roundNo) ?? null;
             return (
               <div key={roundNo} className="space-y-1.5">
                 {/* 焦点头：主持人发言前先报本轮焦点（无叙事则裸轮号）。 */}

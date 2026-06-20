@@ -1,3 +1,4 @@
+import { notifyError } from "@/lib/toast";
 import {
   type CheckpointUserDecision,
   decideCheckpoint,
@@ -196,8 +197,7 @@ export function AskUserCard({
     if (busy) return;
     const turningOn = !otherOn[q.id];
     setOtherOn((cur) => ({ ...cur, [q.id]: turningOn }));
-    if (turningOn && !q.multiple)
-      setAnswers((cur) => ({ ...cur, [q.id]: [] }));
+    if (turningOn && !q.multiple) setAnswers((cur) => ({ ...cur, [q.id]: [] }));
   };
 
   const setOtherValue = (q: AskQuestion, value: string) => {
@@ -224,9 +224,12 @@ export function AskUserCard({
           );
     // The caller resolves / resumes; on a hard failure (live decide) re-enable so
     // the user can retry (resume unmounts the card, so the reset is a harmless no-op).
-    Promise.resolve(onSubmit(decision, composed)).catch(() =>
-      setSubmitting(null),
-    );
+    Promise.resolve(onSubmit(decision, composed)).catch((err) => {
+      // 硬失败（非 404 的 live decide）会重新点亮卡片；仅靠卡片复活太隐蔽，故 toast
+      // （同 ApprovalPrompt）。resume 路径 onSubmit=runResume 自带横幅且不抛，不会在此重复报错。
+      notifyError(err, "提交失败");
+      setSubmitting(null);
+    });
   };
 
   // How many decisions already carry a value — surfaced on the opening CTA so a
@@ -533,6 +536,7 @@ function QuestionField({
                 value={otherText}
                 onChange={(e) => onSetOther(e.target.value)}
                 disabled={disabled}
+                // biome-ignore lint/a11y/noAutofocus: 用户点开「其他」才渲染此框，聚焦到刚展开的字段是预期 UX（非页面加载时强夺焦点）。
                 autoFocus
                 placeholder="填写你的答案"
                 className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${tone.focus}`}

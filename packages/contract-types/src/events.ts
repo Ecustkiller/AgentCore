@@ -29,6 +29,7 @@ export type SSEEventType =
   | "run_completed"
   | "run_failed"
   | "run_progress"
+  | "run_escalation"
   | "debate_result"
   | "debate_round_started"
   | "debate_round"
@@ -52,6 +53,10 @@ export interface SSEEvent<T = unknown> {
 export interface MessageStartPayload {
   message_id: string;
   conversation_id: string;
+  /** The turn's log correlation id (trace_id, 32-hex), stamped so the client can surface
+   * it for one-step log lookup (复制 trace id → grep trace_id=...). Omitted when the turn
+   * ran without a trace context (e.g. conformance vectors built outside a turn). */
+  trace_id?: string;
 }
 
 export interface ContentDeltaPayload {
@@ -255,15 +260,22 @@ export interface RunStartedPayload {
 
 /** One labeled segment of context a run received at assembly time (上下文传递可视化) —
  * the wire twin of the backend `ContextBlock`, and the structured single source behind
- * both the worker prompt and this event (用户看到的 == LLM 吃到的). `channel` buckets it
- * for the UI: `request` (团队级原始请求) / `team_position` (DAG 拓扑) / `dependency` (上游
+ * both the prompt and this event (用户看到的 == LLM 吃到的). `channel` buckets it for the
+ * UI. Worker 侧: `request` (团队级原始请求) / `team_position` (DAG 拓扑) / `dependency` (上游
  * 产物注入) / `workspace` (工作区文件清单) / `task` / `expected_output` / `requirements` /
- * `steer`. A `dependency` block carries its provenance — the upstream `source_role` /
- * `source_run_id`, the `fidelity` chosen (`pointer` 递指针 / `summarize` / `pass_through`),
- * and the artifact `files` it points at. `chars` is the ORIGINAL injected size; `truncated`
- * flags that `body` was capped (budget trim OR the event's display cap). */
+ * `steer`. CEO (captain) 侧 通道①: `system` (本回合系统提示，决策②默认隐藏) / `history` (本
+ * 回合之前的往来) — these ride the turn-level `captainContext`, never a graph node. A
+ * `dependency` block carries its provenance — the upstream `source_role` / `source_run_id`,
+ * the `fidelity` chosen (`pointer` 递指针 / `summarize` / `pass_through`), and the artifact
+ * `files` it points at. `chars` is the ORIGINAL injected size; `truncated` flags that `body`
+ * was capped (budget trim OR the event's display cap). */
 export interface ContextBlockWire {
+  // CEO-side channels: `system`/`history`/`request` (opening, 通道①) and `team_result`
+  // (each delegated worker's product folded back to the CEO after a batch, 通道⑤ — carries
+  // `source_role`/`fidelity` provenance). The rest are worker-side (通道②–④).
   channel:
+    | "system"
+    | "history"
     | "request"
     | "team_position"
     | "dependency"
@@ -271,7 +283,8 @@ export interface ContextBlockWire {
     | "task"
     | "expected_output"
     | "requirements"
-    | "steer";
+    | "steer"
+    | "team_result";
   heading: string;
   body: string;
   chars: number;
@@ -282,10 +295,13 @@ export interface ContextBlockWire {
   files: string[];
 }
 
-/** The structured context a worker run was fed (上下文传递可视化, 通道 worker 侧), emitted
- * once per run right after `run_started`. `blocks` is the ordered list the opening user
- * message was rendered from, so the run detail shows exactly what fed the LLM. Journaled,
- * so a past turn replays its received context on reload through the same fold. */
+/** The structured context a run was fed (上下文传递可视化), emitted once right after
+ * `run_started`. `blocks` is the ordered list the opening was assembled from, so the UI
+ * shows exactly what fed the LLM. A WORKER's blocks fold onto its graph node
+ * (`receivedContext`); the CEO CAPTAIN's (`run_started` kind=`captain`) fold turn-level
+ * onto `captainContext` — the captain is the bubble above the graph, not a peer node, so
+ * its context shows on every turn (pure chat included), not only when it delegates.
+ * Journaled, so a past turn replays its received context on reload through the same fold. */
 export interface RunContextPayload {
   run_id: string;
   agent_id: string;
@@ -309,6 +325,23 @@ export interface RunToolProgressPayload {
   agent_id: string;
   tool_name: string;
   chars: number;
+}
+
+/** 升级实时可见: a delegated worker raised `escalate` — surfaced live at the call
+ * instant (run-scoped) so the team UI shows「⚠️ 上报」on that worker's node + a
+ * turn-level notice, instead of the signal staying buried in the worker's process
+ * timeline or only reaching the user folded into the CEO's reply. `question` is the
+ * worker's self-contained ask for the CEO; `assumption` is what it proceeds on
+ * meanwhile (escalate 非阻塞 — the worker keeps working); `blocking` flags severity
+ * (a wrong guess would void its product). Transport-only liveliness: NOT journaled —
+ * the durable record is the run's escalations (harvested into CEO synthesis), so a
+ * reload rebuilds it from the journal, not from this event. */
+export interface RunEscalationPayload {
+  run_id: string;
+  agent_id: string;
+  question: string;
+  assumption: string;
+  blocking: boolean;
 }
 
 /** Token counts in the ledger short-key form. `cache_hit + cache_miss === input`;
@@ -572,6 +605,7 @@ export type SSEPayloadMap = {
   run_completed: RunCompletedPayload;
   run_failed: RunFailedPayload;
   run_progress: RunProgressPayload;
+  run_escalation: RunEscalationPayload;
   debate_result: DebateResultPayload;
   debate_round_started: DebateRoundStartedPayload;
   debate_round: DebateRoundPayload;

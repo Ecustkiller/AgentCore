@@ -4,17 +4,19 @@ import {
   type FileTreeChromeState,
   type FileTreeHandle,
 } from "@/components/files/FileTree";
-import { IconButton } from "@/components/files/parts";
+import { EmptyHint, IconButton } from "@/components/files/parts";
 import type { FileSource } from "@/lib/fileSource";
+import { useSidePanelStore } from "@/stores/sidePanel";
 import {
   ChevronsDownUp,
   FilePlus,
   FolderPlus,
+  HardDrive,
   Loader2,
   RefreshCw,
   Upload,
 } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 /**
  * The source-agnostic file UI = a {@link FileTree} (n=1 source) that swaps to an
@@ -35,7 +37,8 @@ export function FileBrowser({
   leading,
   trailing,
 }: {
-  source: FileSource;
+  /** 已解析的文件源；为 null 时（本地源在本机不可用）保留工具栏（含选择器）但树/操作淡出、正文兜空态。 */
+  source: FileSource | null;
   /** 工具栏最左槽（如云端/本地工作区选择器），常驻、不随预览消失。 */
   leading?: ReactNode;
   /** 工具栏最右槽（如快照 / 交接入口），常驻、不随预览消失。 */
@@ -51,6 +54,19 @@ export function FileBrowser({
     loading: false,
   });
 
+  // 聊天里点「本回合产出文件」卡 → side-panel store 投一个预览意图，这里消费它：
+  // 切到该文件的 swap 预览后清除。等 `source` 就绪才应用（本地源异步解析时不丢意图）。
+  const pendingFilePreview = useSidePanelStore((s) => s.pendingFilePreview);
+  const clearFilePreview = useSidePanelStore((s) => s.clearFilePreview);
+  useEffect(() => {
+    if (!pendingFilePreview || !source) return;
+    setPreview({
+      path: pendingFilePreview.path,
+      name: pendingFilePreview.name,
+    });
+    clearFilePreview();
+  }, [pendingFilePreview, source, clearFilePreview]);
+
   // 预览时树未挂载（被 FileDetail 取代），针对树的操作此刻无的放矢 → 淡出禁用；
   // leading / trailing 是工作区级、与具体文件无关，保持常亮。
   const treeIdle = preview !== null;
@@ -61,7 +77,7 @@ export function FileBrowser({
         {leading}
         {leading && <div className="mx-1 h-4 w-px shrink-0 bg-border" />}
 
-        {source.caps.transfer && (
+        {source?.caps.transfer && (
           <button
             type="button"
             onClick={() => treeRef.current?.triggerUpload()}
@@ -76,24 +92,28 @@ export function FileBrowser({
             上传
           </button>
         )}
-        <IconButton
-          title="新建文件"
-          disabled={treeIdle}
-          onClick={() => treeRef.current?.startCreate("file")}
-        >
-          <FilePlus size={14} />
-        </IconButton>
-        <IconButton
-          title="新建文件夹"
-          disabled={treeIdle}
-          onClick={() => treeRef.current?.startCreate("dir")}
-        >
-          <FolderPlus size={14} />
-        </IconButton>
+        {source && (
+          <>
+            <IconButton
+              title="新建文件"
+              disabled={treeIdle}
+              onClick={() => treeRef.current?.startCreate("file")}
+            >
+              <FilePlus size={14} />
+            </IconButton>
+            <IconButton
+              title="新建文件夹"
+              disabled={treeIdle}
+              onClick={() => treeRef.current?.startCreate("dir")}
+            >
+              <FolderPlus size={14} />
+            </IconButton>
+          </>
+        )}
 
         <div className="min-w-0 flex-1" />
 
-        {!treeIdle && chrome.hasExpanded && (
+        {source && !treeIdle && chrome.hasExpanded && (
           <IconButton
             title="全部折叠"
             onClick={() => treeRef.current?.collapseAll()}
@@ -101,21 +121,23 @@ export function FileBrowser({
             <ChevronsDownUp size={14} />
           </IconButton>
         )}
-        <IconButton
-          title="刷新"
-          disabled={treeIdle}
-          spinning={!treeIdle && chrome.loading}
-          onClick={() => treeRef.current?.refresh()}
-        >
-          <RefreshCw size={14} />
-        </IconButton>
+        {source && (
+          <IconButton
+            title="刷新"
+            disabled={treeIdle}
+            spinning={!treeIdle && chrome.loading}
+            onClick={() => treeRef.current?.refresh()}
+          >
+            <RefreshCw size={14} />
+          </IconButton>
+        )}
 
         {trailing && <div className="mx-1 h-4 w-px shrink-0 bg-border" />}
         {trailing}
       </div>
 
       <div className="min-h-0 flex-1">
-        {preview ? (
+        {preview && source ? (
           // key=path 切文件即重挂编辑器（靠卸载冲刷未保存内容）。
           <FileDetail
             key={preview.path}
@@ -124,13 +146,21 @@ export function FileBrowser({
             name={preview.name}
             onClose={() => setPreview(null)}
           />
-        ) : (
+        ) : source ? (
           <FileTree
             ref={treeRef}
             source={source}
             hideToolbar
             onChromeState={setChrome}
             onOpenFile={(path, name) => setPreview({ path, name })}
+          />
+        ) : (
+          // 仅本地源在本机不可用时到这（如 web 构建无 fsApi）；桌面端本地源恒可解析。
+          <EmptyHint
+            inline
+            icon={<HardDrive size={22} className="text-muted-foreground/40" />}
+            title="文件在你电脑上"
+            hint="这个对话绑定了本地文件夹，请在桌面端查看其文件。"
           />
         )}
       </div>

@@ -183,6 +183,7 @@
     "finishReason": "end_turn",
     "content": "",
     "reasoning": "",
+    "captainContext": [],
     "process": [],
     "citations": [],
     "agents": [
@@ -248,7 +249,8 @@
           "status": "resolved",
           "decision": "continue"
         },
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "r2",
@@ -285,7 +287,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       }
     ],
     "progress": {

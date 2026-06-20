@@ -31,6 +31,7 @@
     "finishReason": null,
     "content": "开始处理",
     "reasoning": "",
+    "captainContext": [],
     "process": [
       {
         "kind": "content",

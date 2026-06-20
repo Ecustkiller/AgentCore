@@ -1,3 +1,4 @@
+import type { TokenPersistence, Tokens } from "@/api/client";
 // Native (Capacitor) Secure Storage backend for the bearer token pair (手机端落地设计 P2
 // 安全存储). On iOS the pair lives in the system Keychain; on Android it is AES-GCM
 // encrypted with an Android Keystore key. This is the OS-level secure replacement for the
@@ -5,7 +6,6 @@
 // (a browser has no Keychain). Injected from main.tsx behind Capacitor.isNativePlatform(),
 // so this module (and its plugin import) only runs on a native build.
 import { SecureStorage } from "@aparajita/capacitor-secure-storage";
-import type { TokenPersistence, Tokens } from "@/api/client";
 
 // The plugin namespaces keys with its own prefix (`capacitor-storage_`); one entry holds
 // the whole pair as JSON.
@@ -27,7 +27,10 @@ export const capacitorSecureTokenPersistence: TokenPersistence = {
       // error — all of which we treat as "no session" to honor the port's no-throw load.
       const value = await SecureStorage.get(KEY);
       return isTokens(value)
-        ? { access_token: value.access_token, refresh_token: value.refresh_token }
+        ? {
+            access_token: value.access_token,
+            refresh_token: value.refresh_token,
+          }
         : null;
     } catch {
       return null;

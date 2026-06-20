@@ -1,5 +1,6 @@
 import { BASE_URL, notifyUnauthorized, tryRefresh } from "@/services/api";
 import type { ChatMessageDetail } from "@/services/messaging";
+import { applyConversationPromotion } from "@/services/workspacePromotion";
 import { useMessagingStore } from "@/stores/messaging";
 
 /**
@@ -9,6 +10,12 @@ import { useMessagingStore } from "@/stores/messaging";
  * to this user (server→client; sending stays POST). It runs at the app shell for
  * the whole authenticated session — not the 消息 page — so unread badges and
  * incoming messages update even while the user is on the 对话 page.
+ *
+ * The same per-user firehose also carries `workspace_promoted` (跨端实时同步): a 裸聊
+ * promoted on ANY surface (the turn's first write, a panel write, or "打开本地文件夹")
+ * re-groups the chat + surfaces its workspace card on this device too — the turn SSE /
+ * REST response only reaches the surface that drove the promotion, so without this a
+ * second device leaves the chat stranded in 未分组 until a refetch.
  *
  * SSE can't refresh a token mid-stream, so this mirrors the POST stream's policy
  * (streamConversation.ts): on a 401, refresh once and reconnect; otherwise drop
@@ -33,6 +40,15 @@ interface ChatMessageEvent {
   message: ChatMessageDetail;
 }
 
+interface WorkspacePromotedEvent {
+  type: "workspace_promoted";
+  conversation_id: string;
+  folder_id: string;
+  name: string;
+  local_root_id: string | null;
+  local_subpath: string;
+}
+
 /** Re-sync state that may have changed while disconnected. */
 function catchUp(): void {
   const store = useMessagingStore.getState();
@@ -52,8 +68,19 @@ function handleFrame(frame: string): void {
     if (event.type === "chat_message") {
       const e = event as ChatMessageEvent;
       useMessagingStore.getState().applyIncoming(e.chat_id, e.message);
+    } else if (event.type === "workspace_promoted") {
+      // A 裸聊 promoted on another surface — re-group it + surface its card here too,
+      // via the same client-side sink the turn SSE / panel promote use (no drift).
+      const e = event as WorkspacePromotedEvent;
+      applyConversationPromotion(e.conversation_id, {
+        id: e.folder_id,
+        name: e.name,
+        localDir: null,
+        localRootId: e.local_root_id,
+        localSubpath: e.local_subpath,
+      });
     }
-    // "ready" and any future event types: no-op here.
+    // "ready" and any other event types: no-op here.
   } catch {
     /* malformed frame — skip */
   }

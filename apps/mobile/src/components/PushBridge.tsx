@@ -1,3 +1,4 @@
+import { initPush } from "@/api/push";
 // Mounts the native push listeners inside the router so a notification tap can navigate
 // (原生推送 deep-link, 手机端落地设计 P2). Renders nothing; native-only (initPush no-ops on
 // web). Mounted unconditionally at the App root (even during the auth-loading splash) so a
@@ -5,7 +6,6 @@
 // is up.
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { initPush } from "@/api/push";
 
 export function PushBridge() {
   const navigate = useNavigate();

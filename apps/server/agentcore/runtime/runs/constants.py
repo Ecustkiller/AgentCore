@@ -65,7 +65,7 @@ DEFAULT_ROSTER_MAX_CONVERSATIONS = 256
 # synthesizing upstream research deserves as much context as the CEO synthesizing the
 # batch. Replaces the old 4000 cap, which starved a research→writer chain — a long
 # upstream was head-truncated, silently dropping its tail (金额 / 法条编号). When a dep
-# must still be trimmed it is HEAD+TAIL truncated (executor `_truncate_head_tail`),
+# must still be trimmed it is HEAD+TAIL truncated (`runs/fidelity.py truncate_head_tail`),
 # not head-only, so trailing details survive.
 DEP_CONTEXT_BUDGET = 16000
 
@@ -85,6 +85,19 @@ DEP_SUMMARY_CHARS = 600
 # point at, still share it).
 DEP_POINTER_SUMMARY_CHARS = 600
 DEP_POINTER_MAX_FILES = 20
+
+# CEO 综述输入瘦身: the prose pool shared across a batch's pass_through workers when
+# their products are rendered into the CEO's synthesis input (delegate._format_for_ceo).
+# Same fidelity discipline as a worker's dep-injection budget, but applied at the OTHER
+# fan-in (all workers → the CEO's overview pass) instead of (a worker's deps → it). The
+# motive is correctness, not only cost: that aggregate used to be blunt head-chopped by a
+# single ToolResult output_limit, silently dropping late workers AND the method's own
+# trailing instructions (防幻觉铁律 / 收尾指引). File-producers (digested — their full
+# product is on disk + shown in the UI) don't draw on this pool. Sized BELOW
+# DEP_CONTEXT_BUDGET / _DELEGATE_OUTPUT_LIMIT (16000) so digests + per-worker boilerplate
+# + the closing instructions all fit under the output_limit net, i.e. the blunt tail-chop
+# effectively never fires for a normal (≤10-worker) batch.
+CEO_SYNTHESIS_BUDGET = 10000
 
 # 工作区产物清单: every worker opens with a compact manifest of files in the shared
 # workspace it can ``file_read`` — its ALREADY-FINISHED teammates' products this turn

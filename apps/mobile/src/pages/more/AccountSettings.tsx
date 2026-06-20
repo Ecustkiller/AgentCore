@@ -1,11 +1,3 @@
-// 账户设置 (/more/account) — profile / password / avatar / 注销 (mirrors desktop).
-//
-// Four independent sections, each posting on its own. No global auth store on mobile, so
-// the page loads `me()` on open and keeps the user in local state, re-syncing it after
-// each mutation that returns the refreshed user.
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { type User, logout, me } from "@/api/auth";
 import {
   AVATAR_MAX_BYTES,
   changePassword,
@@ -14,8 +6,16 @@ import {
   updateProfile,
   uploadAvatar,
 } from "@/api/account";
+import { type User, logout, me } from "@/api/auth";
 import { getTokens } from "@/api/client";
 import { Avatar } from "@/pages/more/Avatar";
+// 账户设置 (/more/account) — profile / password / avatar / 注销 (mirrors desktop).
+//
+// Four independent sections, each posting on its own. No global auth store on mobile, so
+// the page loads `me()` on open and keeps the user in local state, re-syncing it after
+// each mutation that returns the refreshed user.
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
 
 export function AccountSettings() {
@@ -39,7 +39,11 @@ export function AccountSettings() {
   return (
     <div className="screen">
       <header className="bar">
-        <button type="button" className="link" onClick={() => navigate("/more")}>
+        <button
+          type="button"
+          className="link"
+          onClick={() => navigate("/more")}
+        >
           ← 设置
         </button>
         <span>账户设置</span>
@@ -86,7 +90,10 @@ function Section({
   );
 }
 
-function AvatarSection({ user, onUser }: { user: User; onUser: (u: User) => void }) {
+function AvatarSection({
+  user,
+  onUser,
+}: { user: User; onUser: (u: User) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,11 +138,20 @@ function AvatarSection({ user, onUser }: { user: User; onUser: (u: User) => void
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <Avatar user={user} size={64} />
         <div className="btn-row">
-          <button type="button" onClick={() => inputRef.current?.click()} disabled={busy}>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={busy}
+          >
             {busy ? "处理中…" : "上传头像"}
           </button>
           {user.avatar_url && (
-            <button type="button" className="btn-outline" onClick={() => void remove()} disabled={busy}>
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() => void remove()}
+              disabled={busy}
+            >
               移除
             </button>
           )}
@@ -153,7 +169,10 @@ function AvatarSection({ user, onUser }: { user: User; onUser: (u: User) => void
   );
 }
 
-function ProfileSection({ user, onUser }: { user: User; onUser: (u: User) => void }) {
+function ProfileSection({
+  user,
+  onUser,
+}: { user: User; onUser: (u: User) => void }) {
   const [displayName, setDisplayName] = useState(user.display_name ?? "");
   const [email, setEmail] = useState(user.email ?? "");
   const [saving, setSaving] = useState(false);
@@ -162,7 +181,8 @@ function ProfileSection({ user, onUser }: { user: User; onUser: (u: User) => voi
   const trimmedName = displayName.trim();
   const trimmedEmail = email.trim();
   const dirty =
-    trimmedName !== (user.display_name ?? "") || trimmedEmail !== (user.email ?? "");
+    trimmedName !== (user.display_name ?? "") ||
+    trimmedEmail !== (user.email ?? "");
   const canSave = dirty && trimmedName.length > 0 && !saving;
 
   async function save() {
@@ -184,7 +204,10 @@ function ProfileSection({ user, onUser }: { user: User; onUser: (u: User) => voi
   }
 
   return (
-    <Section title="个人资料" note="显示名会展示给团队成员；邮箱用于后续找回密码（可选）。">
+    <Section
+      title="个人资料"
+      note="显示名会展示给团队成员；邮箱用于后续找回密码（可选）。"
+    >
       <div className="field">
         <span className="field-label">用户名</span>
         <input value={user.username} disabled />
@@ -233,7 +256,8 @@ function PasswordSection() {
       : confirm.length > 0 && next !== confirm
         ? "两次输入的新密码不一致"
         : null;
-  const canSave = current.length > 0 && next.length >= 8 && next === confirm && !saving;
+  const canSave =
+    current.length > 0 && next.length >= 8 && next === confirm && !saving;
 
   async function save() {
     setSaving(true);
@@ -282,7 +306,11 @@ function PasswordSection() {
         />
       </div>
       {(localError || error) && <p className="error">{localError ?? error}</p>}
-      {done && <p className="section-note" style={{ color: "var(--success)" }}>密码已更新，其他设备需重新登录。</p>}
+      {done && (
+        <p className="section-note" style={{ color: "var(--success)" }}>
+          密码已更新，其他设备需重新登录。
+        </p>
+      )}
       <div className="field-actions">
         <button type="button" disabled={!canSave} onClick={() => void save()}>
           {saving ? "更新中…" : "更新密码"}
@@ -318,13 +346,19 @@ function DangerSection({ onDeleted }: { onDeleted: () => void }) {
     >
       {!confirming ? (
         <div className="field-actions">
-          <button type="button" className="btn-danger-outline" onClick={() => setConfirming(true)}>
+          <button
+            type="button"
+            className="btn-danger-outline"
+            onClick={() => setConfirming(true)}
+          >
             注销账户
           </button>
         </div>
       ) : (
         <>
-          <p className="section-note">输入密码以确认注销，相关对话也会被删除。</p>
+          <p className="section-note">
+            输入密码以确认注销，相关对话也会被删除。
+          </p>
           <input
             type="password"
             value={password}

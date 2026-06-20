@@ -124,7 +124,8 @@ export function ConversationItem({ conversation }: Props) {
     // Delete server-side first so a failed delete leaves the item in place.
     try {
       await deleteMutation.mutateAsync(conversation.id);
-    } catch {
+    } catch (err) {
+      notifyError(err, "删除失败");
       return;
     }
     // The mutation dropped the row from the list cache; forget its live runtime

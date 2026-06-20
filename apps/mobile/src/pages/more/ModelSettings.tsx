@@ -1,3 +1,10 @@
+import {
+  type LlmKeyStatus,
+  clearLlmKey,
+  getLlmKey,
+  setLlmKey,
+  testLlmKey,
+} from "@/api/model";
 // 模型配置 (/more/model) — BYOK DeepSeek API key (mirrors desktop ModelSettings).
 //
 // Without a key, turns can't run (backend billing_mode "byok"), so this is the most
@@ -6,13 +13,6 @@
 // is a desktop-only capability (减法 boundary).
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  type LlmKeyStatus,
-  clearLlmKey,
-  getLlmKey,
-  setLlmKey,
-  testLlmKey,
-} from "@/api/model";
 import "@/pages/more/more.css";
 
 export function ModelSettings() {
@@ -40,7 +40,11 @@ export function ModelSettings() {
   return (
     <div className="screen">
       <header className="bar">
-        <button type="button" className="link" onClick={() => navigate("/more")}>
+        <button
+          type="button"
+          className="link"
+          onClick={() => navigate("/more")}
+        >
           ← 设置
         </button>
         <span>模型配置</span>
@@ -73,7 +77,9 @@ export function ModelSettings() {
                   setStatus(s);
                   setEditing(false);
                 }}
-                onCancel={status?.configured ? () => setEditing(false) : undefined}
+                onCancel={
+                  status?.configured ? () => setEditing(false) : undefined
+                }
               />
             )}
             <InfoNote />
@@ -90,7 +96,9 @@ function StatusBadge({ status }: { status: LlmKeyStatus }) {
   }
   if (status.status === "error") {
     return (
-      <span className="status-line status-err">● {status.message ?? "连接失败"}</span>
+      <span className="status-line status-err">
+        ● {status.message ?? "连接失败"}
+      </span>
     );
   }
   return <span className="status-line status-idle">未测试</span>;
@@ -126,7 +134,12 @@ function ConfiguredCard({
     setError(null);
     try {
       await clearLlmKey();
-      onChanged({ configured: false, status: "unconfigured", masked_key: null, message: null });
+      onChanged({
+        configured: false,
+        status: "unconfigured",
+        masked_key: null,
+        message: null,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除失败，请重试");
     } finally {
@@ -223,13 +236,22 @@ function KeyForm({
           autoComplete="off"
           spellCheck={false}
         />
-        <button type="button" className="key-reveal" onClick={() => setReveal((r) => !r)}>
+        <button
+          type="button"
+          className="key-reveal"
+          onClick={() => setReveal((r) => !r)}
+        >
           {reveal ? "隐藏" : "显示"}
         </button>
       </div>
       <div className="field-actions">
         {onCancel && (
-          <button type="button" className="btn-outline" onClick={onCancel} disabled={saving}>
+          <button
+            type="button"
+            className="btn-outline"
+            onClick={onCancel}
+            disabled={saving}
+          >
             取消
           </button>
         )}
@@ -254,7 +276,8 @@ function InfoNote() {
   return (
     <p className="section-note" style={{ marginTop: 16 }}>
       你的 Key 仅用于你自己的对话，经 AES-256-GCM 加密存储，服务端只显示后 4
-      位、不会回传完整内容。对话与后台任务（标题、记忆）都按你的 DeepSeek 额度计费。
+      位、不会回传完整内容。对话与后台任务（标题、记忆）都按你的 DeepSeek
+      额度计费。
     </p>
   );
 }

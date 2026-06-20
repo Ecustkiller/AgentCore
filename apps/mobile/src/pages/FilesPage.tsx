@@ -1,3 +1,11 @@
+import {
+  type DownloadedFile,
+  type WorkspaceFileEntry,
+  downloadWorkspaceFile,
+  listWorkspaceFiles,
+  uploadWorkspaceFile,
+} from "@/api/workspace";
+import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
 // The cloud workspace file browser for ONE conversation (手机端落地设计 P1 · 云端文件浏览).
 //
 // Reachable from the chat header (/c/:id/files) — a full-screen, conversation-scoped shortcut
@@ -7,14 +15,6 @@
 // no workspace yields an empty list.
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import {
-  type DownloadedFile,
-  type WorkspaceFileEntry,
-  downloadWorkspaceFile,
-  listWorkspaceFiles,
-  uploadWorkspaceFile,
-} from "@/api/workspace";
-import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
 
 export function FilesPage() {
   const navigate = useNavigate();

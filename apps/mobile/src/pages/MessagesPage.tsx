@@ -1,3 +1,7 @@
+import { getTokens } from "@/api/client";
+import { type ChatSummary, chatTitle, listChats } from "@/api/messaging";
+import { relativeTime } from "@/lib/time";
+import { usePolling } from "@/lib/usePolling";
 // 消息 list (人际 IM 会话列表) — the human↔human inbox, separate from the AI 对话 home.
 //
 // messages.py is REST-only, so the list POLLS (every 10s + on regaining visibility) for
@@ -5,10 +9,6 @@
 // passed via router state so the thread shows its title without a refetch.
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getTokens } from "@/api/client";
-import { type ChatSummary, chatTitle, listChats } from "@/api/messaging";
-import { usePolling } from "@/lib/usePolling";
-import { relativeTime } from "@/lib/time";
 import "@/pages/im/im.css";
 
 export function MessagesPage() {
@@ -33,7 +33,11 @@ export function MessagesPage() {
     <div className="screen">
       <header className="bar">
         <span>消息</span>
-        <button type="button" className="link" onClick={() => navigate("/im/new")}>
+        <button
+          type="button"
+          className="link"
+          onClick={() => navigate("/im/new")}
+        >
           发起
         </button>
       </header>
@@ -61,7 +65,9 @@ function ChatRow({ chat, onOpen }: { chat: ChatSummary; onOpen: () => void }) {
   const unread = chat.unread ?? 0;
   return (
     <button type="button" className="im-row" onClick={onOpen}>
-      <span className={`im-avatar${chat.type === "official" ? " official" : ""}`}>
+      <span
+        className={`im-avatar${chat.type === "official" ? " official" : ""}`}
+      >
         {chat.type === "official" ? "📣" : title.charAt(0).toUpperCase()}
       </span>
       <span className="im-row-main">
@@ -74,8 +80,12 @@ function ChatRow({ chat, onOpen }: { chat: ChatSummary; onOpen: () => void }) {
             {chat.last_message_preview || "（无消息）"}
           </span>
           <span className="im-badges">
-            {chat.state === "pending" && <span className="im-pending">请求</span>}
-            {unread > 0 && <span className="im-unread">{unread > 99 ? "99+" : unread}</span>}
+            {chat.state === "pending" && (
+              <span className="im-pending">请求</span>
+            )}
+            {unread > 0 && (
+              <span className="im-unread">{unread > 99 ? "99+" : unread}</span>
+            )}
           </span>
         </span>
       </span>

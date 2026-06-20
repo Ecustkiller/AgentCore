@@ -53,6 +53,30 @@ export function notifySuccess(message: string): void {
 }
 
 /**
+ * Surface a failed *client-side* action whose own thrown message is the
+ * user-facing detail — e.g. local FS / IPC ops (在资源管理器中显示 / 用默认程序打开 /
+ * 复制路径) whose zh reason ("没有访问权限" …) would otherwise be swallowed by
+ * {@link notifyError}'s backend-oriented {@link describeError} fallback. Title =
+ * `context`; description = the caught error's message verbatim (omitted when empty).
+ *
+ * Use this only for errors raised locally (not via the REST client / SSE turn) —
+ * those still go through {@link notifyError} so a backend `code` is phrased and
+ * actioned consistently.
+ */
+export function notifyActionError(context: string, err: unknown): void {
+  const detail =
+    err instanceof Error
+      ? err.message
+      : typeof err === "string"
+        ? err
+        : "";
+  toast.error(context, {
+    description: detail || undefined,
+    icon: errorIcon,
+  });
+}
+
+/**
  * A non-blocking warning toast with an optional one-click action.
  *
  * Distinct from {@link notifyError}: the user's primary action SUCCEEDED, this just

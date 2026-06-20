@@ -1,11 +1,12 @@
+import type { ConversationSummary } from "@/api/conversations";
+import type { SearchSection } from "@/api/search";
+import { Modal } from "@/components/Modal";
 // Shared conversation-management UI primitives (对话管理 · 复用于历史抽屉).
 //
 // Extracted from the old ConversationsPage so the 历史 drawer (ConversationDrawer) and any
 // future「全部对话」page render the same touch-native menus / dialogs / search results. Pure
 // presentational — no data fetching; the host owns state + the api calls.
 import { type ReactNode, useState } from "react";
-import type { ConversationSummary } from "@/api/conversations";
-import type { SearchSection } from "@/api/search";
 
 /** Compact recency label: time for today, else month/day. */
 export function timeLabel(iso: string): string {
@@ -78,7 +79,13 @@ function Highlight({
   start: number | null;
   end: number | null;
 }) {
-  if (start === null || end === null || start < 0 || end > text.length || start >= end) {
+  if (
+    start === null ||
+    end === null ||
+    start < 0 ||
+    end > text.length ||
+    start >= end
+  ) {
     return <>{text}</>;
   }
   return (
@@ -107,32 +114,29 @@ export function ActionSheet({
   onDelete: () => void;
 }) {
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <div
-        className="sheet"
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
+    <Modal className="sheet" onClose={onClose} label="对话操作">
+      <div className="sheet-title">{conv.title || "新对话"}</div>
+      <button type="button" className="sheet-item" onClick={onRename}>
+        重命名
+      </button>
+      <button type="button" className="sheet-item" onClick={onArchive}>
+        {archivedView ? "恢复" : "归档"}
+      </button>
+      <button
+        type="button"
+        className="sheet-item sheet-danger"
+        onClick={onDelete}
       >
-        <div className="sheet-title">{conv.title || "新对话"}</div>
-        <button type="button" className="sheet-item" onClick={onRename}>
-          重命名
-        </button>
-        <button type="button" className="sheet-item" onClick={onArchive}>
-          {archivedView ? "恢复" : "归档"}
-        </button>
-        <button
-          type="button"
-          className="sheet-item sheet-danger"
-          onClick={onDelete}
-        >
-          删除
-        </button>
-        <button type="button" className="sheet-item sheet-cancel" onClick={onClose}>
-          取消
-        </button>
-      </div>
-    </div>
+        删除
+      </button>
+      <button
+        type="button"
+        className="sheet-item sheet-cancel"
+        onClick={onClose}
+      >
+        取消
+      </button>
+    </Modal>
   );
 }
 
@@ -165,7 +169,12 @@ export function RenameDialog({
         }}
       />
       <div className="dialog-actions">
-        <button type="button" className="link" disabled={busy} onClick={onClose}>
+        <button
+          type="button"
+          className="link"
+          disabled={busy}
+          onClick={onClose}
+        >
           取消
         </button>
         <button
@@ -201,7 +210,12 @@ export function ConfirmDialog({
       <div className="dialog-title">{title}</div>
       <div className="dialog-msg">{message}</div>
       <div className="dialog-actions">
-        <button type="button" className="link" disabled={busy} onClick={onCancel}>
+        <button
+          type="button"
+          className="link"
+          disabled={busy}
+          onClick={onCancel}
+        >
           取消
         </button>
         <button
@@ -225,15 +239,8 @@ function Dialog({
   onClose: () => void;
 }) {
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
-      <div
-        className="dialog"
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
-    </div>
+    <Modal className="dialog" onClose={onClose} label="对话框">
+      {children}
+    </Modal>
   );
 }

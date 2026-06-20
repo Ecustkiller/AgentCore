@@ -1,5 +1,5 @@
 import { ApiError, BASE_URL, NetworkError, api } from "@/services/api";
-import { authedFetch, encodePath, saveBlob } from "@/services/workspace";
+import { authedFetch, encodePath, saveBlob } from "@/services/workspaceHttp";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];

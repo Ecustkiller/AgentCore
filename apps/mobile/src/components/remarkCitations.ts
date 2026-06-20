@@ -45,7 +45,8 @@ export function splitCitationText(value: string, max: number): MdNode[] {
     last = m.index + m[0].length;
   }
   if (parts.length === 0) return [{ type: "text", value }];
-  if (last < value.length) parts.push({ type: "text", value: value.slice(last) });
+  if (last < value.length)
+    parts.push({ type: "text", value: value.slice(last) });
   return parts;
 }
 

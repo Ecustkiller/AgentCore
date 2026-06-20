@@ -13,6 +13,7 @@
  */
 
 import { Markdown } from "@/components/chat/Markdown";
+import { IconButton } from "@/components/files/parts";
 import {
   MarkdownSourceEditor,
   type MarkdownSourceEditorHandle,
@@ -25,6 +26,7 @@ import type {
   FileSource,
   FileVersion,
 } from "@/lib/fileSource";
+import { notifyActionError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/services/api";
 import { rewriteSelection } from "@/services/rewrite";
@@ -32,8 +34,10 @@ import {
   AlertTriangle,
   Check,
   ChevronLeft,
+  ExternalLink,
   Eye,
   FileText,
+  FolderSearch,
   Loader2,
   PencilLine,
   Save,
@@ -333,6 +337,22 @@ export function MarkdownFileEditor({
     [content, conflict, readOnly, doSave],
   );
 
+  // 系统集成（仅本地源实现这两个方法 → 按存在性显隐，不按源分支）。
+  const onReveal = async () => {
+    try {
+      await source.revealInOsFileManager?.(path);
+    } catch (e) {
+      notifyActionError("无法在资源管理器中显示", e);
+    }
+  };
+  const onOpenExternal = async () => {
+    try {
+      await source.openWithOsDefaultApp?.(path);
+    } catch (e) {
+      notifyActionError("无法用默认程序打开", e);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-1 pr-1.5">
@@ -356,6 +376,22 @@ export function MarkdownFileEditor({
         )}
         {saveState === "saved" && !dirty && (
           <span className="shrink-0 text-xs text-muted-foreground">已保存</span>
+        )}
+        {source.openWithOsDefaultApp && (
+          <IconButton
+            title="用默认程序打开"
+            onClick={() => void onOpenExternal()}
+          >
+            <ExternalLink size={14} />
+          </IconButton>
+        )}
+        {source.revealInOsFileManager && (
+          <IconButton
+            title="在资源管理器中显示"
+            onClick={() => void onReveal()}
+          >
+            <FolderSearch size={14} />
+          </IconButton>
         )}
         {mode === "edit" && !readOnly && !reviewing && !aiOpen && (
           <button

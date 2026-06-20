@@ -198,7 +198,13 @@
     "finishReason": "end_turn",
     "content": "先调研。 再撰写。",
     "reasoning": "",
-    "process": [],
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "先调研。 再撰写。"
+      }
+    ],
     "citations": [],
     "agents": [
       {
@@ -260,7 +266,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "r2",
@@ -297,7 +304,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       }
     ],
     "progress": {

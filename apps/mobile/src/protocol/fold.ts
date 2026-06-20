@@ -9,17 +9,18 @@
 // @agentcore/contract-types breaks this build until it is handled here.
 
 import type {
-  ContentDeltaPayload,
-  CostBreakdown,
-  DebateNarrativeRound,
-  DebateResultPayload,
-  DebateRoundPayload,
-  DebateRoundStartedPayload,
   ApprovalRequiredPayload,
   ApprovalResolvedPayload,
   CheckpointRequiredPayload,
   CheckpointResolvedPayload,
   CitationsPayload,
+  ContentDeltaPayload,
+  ContextBlockWire,
+  CostBreakdown,
+  DebateNarrativeRound,
+  DebateResultPayload,
+  DebateRoundPayload,
+  DebateRoundStartedPayload,
   MessageEndPayload,
   PlanAgentPayload,
   PlanReviewRequiredPayload,
@@ -27,6 +28,7 @@ import type {
   ReasoningDeltaPayload,
   RunCompletedPayload,
   RunContextPayload,
+  RunEscalationPayload,
   RunFailedPayload,
   RunOutputDeltaPayload,
   RunPlanPayload,
@@ -116,17 +118,23 @@ function runFromPlan(s: RunPlanPayload["runs"][number]): ProjectedRun {
     checkpoint: null,
     // 收到的上下文 (上下文传递可视化): filled by the run_context event; empty until then.
     receivedContext: [],
+    // 升级实时可见: appended by the run_escalation event; empty until a worker escalates.
+    escalations: [],
   };
 }
 
 export function fold(events: SSEEvent[]): ProjectedTurn {
   let content = "";
   let reasoning = "";
+  // 收到的上下文 · CEO 侧 (上下文传递可视化): the captain run id (its kind=captain
+  // run_started) + the opening context it was fed, routed turn-level — the CEO is the
+  // bubble above the graph, not a peer node.
+  let captainRunId: string | null = null;
+  let captainContext: ContextBlockWire[] = [];
   const process: ProcessStep[] = [];
   let citations: ProjectedCitation[] = [];
   const agents: ProjectedAgent[] = [];
   const runs: ProjectedRun[] = [];
-  let hasRunPlan = false;
   let planId: string | null = null;
   let status: TurnStatus = "running";
   let finishReason: string | null = null;
@@ -211,11 +219,11 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "run_plan": {
-        hasRunPlan = true;
         const p = ev.payload as RunPlanPayload;
         if (planId === null || planId === p.execution_id) {
           planId = p.execution_id;
-          for (const a of p.agents) if (!agentById(a.id)) agents.push(agentFromPlan(a));
+          for (const a of p.agents)
+            if (!agentById(a.id)) agents.push(agentFromPlan(a));
           for (const s of p.runs) if (!runById(s.id)) runs.push(runFromPlan(s));
         } else {
           planId = p.execution_id;
@@ -228,6 +236,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "run_started": {
         const p = ev.payload as RunStartedPayload;
+        // The CEO captain is the turn's root (kind=captain); remember its run id so its
+        // run_context routes turn-level (the captain node itself comes from run_plan, or
+        // is dropped on a non-delegating turn).
+        if (p.kind === "captain") captainRunId = p.run_id;
         const revision = p.revision ?? 0;
         let run = runById(p.run_id);
         if (!run && revision > 0 && p.parent_run_id) {
@@ -275,10 +287,17 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "run_context": {
-        // 收到的上下文 (上下文传递可视化): record the structured context this run was fed
-        // onto its node, carried verbatim — the SAME data the LLM saw. Mirrors the
-        // desktop fold + backend oracle (conformance pins them equal).
+        // 收到的上下文 (上下文传递可视化): the structured context this run was fed, carried
+        // verbatim — the SAME data the LLM saw. The CAPTAIN's (kind=captain) routes
+        // TURN-LEVEL onto captainContext (the CEO is the bubble above the graph, not a
+        // node — so it shows on every turn, pure chat included), APPENDING across emits so
+        // its context GROWS by each post-delegation team readback (通道⑤); a WORKER's folds
+        // onto its graph node. Mirrors the desktop fold + backend oracle (conformance pins equal).
         const p = ev.payload as RunContextPayload;
+        if (p.run_id === captainRunId) {
+          captainContext = [...captainContext, ...p.blocks];
+          break;
+        }
         const run = runById(p.run_id);
         if (run) run.receivedContext = p.blocks;
         break;
@@ -339,6 +358,20 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         // Derived below from run states (cumulative, multi-batch safe); wire counter
         // is a timeline marker only.
         break;
+      case "run_escalation": {
+        // 升级实时可见: a worker flagged a decision/blocker for the CEO — append it to its
+        // run so the node carries a ⚠️ signal (mirrors desktop/oracle; conformance pins
+        // them equal). Transport-only; durable copy rides RunState.escalations.
+        const p = ev.payload as RunEscalationPayload;
+        const run = runById(p.run_id);
+        if (run)
+          run.escalations.push({
+            question: p.question,
+            assumption: p.assumption,
+            blocking: p.blocking,
+          });
+        break;
+      }
       // 辩论收场：整段结构化产物（简报 + 交锋叙事线）verbatim 折入 ProjectedTurn.debate，
       // 与团队图互补（图承载辩手执行/发言全文，本字段承载主持人裁判 + 决策简报）。
       case "debate_result":
@@ -382,7 +415,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "approval_resolved": {
         const p = ev.payload as ApprovalResolvedPayload;
-        if (pending?.kind === "approval" && pending.approvalId === p.approval_id) {
+        if (
+          pending?.kind === "approval" &&
+          pending.approvalId === p.approval_id
+        ) {
           pending = null;
           status = "running";
         }
@@ -401,7 +437,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "checkpoint_resolved": {
         const p = ev.payload as CheckpointResolvedPayload;
-        if (pending?.kind === "checkpoint" && pending.checkpointId === p.checkpoint_id) {
+        if (
+          pending?.kind === "checkpoint" &&
+          pending.checkpointId === p.checkpoint_id
+        ) {
           pending = null;
           status = "running";
         }
@@ -415,7 +454,11 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           const run = runById(rid);
           if (run) run.checkpoint = { status: "pending", decision: null };
         }
-        pending = { kind: "plan_review", checkpointId: p.checkpoint_id, runIds };
+        pending = {
+          kind: "plan_review",
+          checkpointId: p.checkpoint_id,
+          runIds,
+        };
         status = "paused";
         break;
       }
@@ -423,9 +466,13 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         const p = ev.payload as PlanReviewResolvedPayload;
         for (const rid of checkpointSteps.get(p.checkpoint_id) ?? []) {
           const run = runById(rid);
-          if (run) run.checkpoint = { status: "resolved", decision: p.decision };
+          if (run)
+            run.checkpoint = { status: "resolved", decision: p.decision };
         }
-        if (pending?.kind === "plan_review" && pending.checkpointId === p.checkpoint_id) {
+        if (
+          pending?.kind === "plan_review" &&
+          pending.checkpointId === p.checkpoint_id
+        ) {
           pending = null;
           status = "running";
         }
@@ -469,7 +516,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
     finishReason,
     content,
     reasoning,
-    process: hasRunPlan ? [] : process,
+    captainContext,
+    // CEO's inline timeline — single-agent AND multi-agent (统一团队时间线); the team
+    // graph slots at the `delegate` step on a delegating turn.
+    process,
     citations,
     agents,
     runs,

@@ -1,3 +1,4 @@
+import { notifyError } from "@/lib/toast";
 import {
   type PlanReviewUserDecision,
   decidePlanReview,
@@ -104,9 +105,10 @@ function PendingPlanReview({
     if (busy || !conversationId) return;
     setSubmitting(decision);
     decidePlanReview(conversationId, review.id, decision, note.trim()).catch(
-      () => {
-        // A transient (non-404) failure re-enables the card so the user retries;
-        // a successful or stale settle flips the card via its resolved state.
+      (err) => {
+        // 瞬时失败（非 404）重新点亮卡片让用户重试；仅靠复活太隐蔽，故 toast（同
+        // ApprovalPrompt）。404/stale 已在服务层 settle、不会抛到这里。
+        notifyError(err, "提交失败");
         setSubmitting(null);
       },
     );

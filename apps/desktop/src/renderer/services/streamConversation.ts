@@ -1,11 +1,10 @@
 import { patchConversationCache } from "@/hooks/useConversations";
-import { addFolderCache } from "@/hooks/useFolders";
-import { addWorkspaceFromFolder } from "@/hooks/useWorkspaces";
 import { StreamError } from "@/lib/errors";
 import { notifyUnauthorized, tryRefresh } from "@/services/api";
-import type { FolderMeta } from "@/services/folders";
 import type { PlanReviewUserDecision } from "@/services/planReview";
+import { traceSSEEvent, traceTurnEnd } from "@/services/sseTrace";
 import { performWorkspaceOp } from "@/services/workspaceOps";
+import { applyConversationPromotion } from "@/services/workspacePromotion";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   getRuntime,
@@ -25,16 +24,20 @@ import type {
   CheckpointResolvedPayload,
   CitationsPayload,
   ContentDeltaPayload,
+  ContextBlockWire,
   DebateResultPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
   ErrorPayload,
   MessageEndPayload,
+  MessageStartPayload,
   PlanReviewRequiredPayload,
   PlanReviewResolvedPayload,
   QuestionPostedPayload,
   ReasoningDeltaPayload,
+  RunContextPayload,
   RunPlanPayload,
+  RunStartedPayload,
   SSEEvent,
   TitleGeneratedPayload,
   ToolProgressPayload,
@@ -108,6 +111,19 @@ function ensureStreamingAssistant(conversationId: string): void {
  */
 const pendingContent = new Map<string, string>();
 const pendingFrame = new Map<string, number>();
+/** Per-conversation captain (CEO) run id, captured from its `run_started` (kind=captain).
+ * Lets the captain's `run_context` route TURN-LEVEL onto the message bubble (上下文传递可视化
+ * 通道①) instead of a graph node — the captain is the bubble above the graph, present even in
+ * pure chat where no execution slot exists. Overwritten each turn (run ids are per-turn UUIDs),
+ * so a worker's run_context never matches. */
+const captainRunByConv = new Map<string, string>();
+/** Per-conversation captain context accumulator (上下文传递可视化 通道①+⑤). The captain emits
+ * `run_context` more than once a turn — the opening (system/history/request) then once per
+ * delegate batch (team_result readback) — so its received context GROWS. We ACCUMULATE here and
+ * push the full list to the store (a plain REPLACE), which keeps a reconnect/replay idempotent:
+ * `message_start` resets this (the attach replay re-sends it first), so re-folding the same
+ * events rebuilds the identical list instead of doubling it. */
+const captainCtxByConv = new Map<string, ContextBlockWire[]>();
 
 /** 立即写出某会话已缓冲的 content，并取消其挂起的 frame。无缓冲时为 no-op。 */
 export function flushPendingContent(conversationId: string): void {
@@ -156,6 +172,9 @@ function queueContentDelta(conversationId: string, delta: string): void {
  * backend starts emitting them, with zero further frontend wiring.
  */
 export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
+  // Dev-only 时序探针（默认关；DevTools 执行 __sseTrace() 开）：记每个事件的到达顺序，
+  // 回合末把到达序与气泡 process[] 并排对账。no-op when disabled / in prod.
+  traceSSEEvent(event, ctx.conversationId);
   // The execution store keys each turn's graph by the assistant message it
   // produced (§9.3). Every run/tool fact of a turn belongs to the bubble opened
   // by `message_start`, so resolve that id from the conversation's live slice
@@ -168,6 +187,19 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
     case "message_start": {
       ensureStreamingAssistant(ctx.conversationId);
       useConversationStore.getState().setGenerating(true, ctx.conversationId);
+      // trace_id 关联气泡↔日志: stamp the turn's log correlation id onto the bubble so a
+      // dev「复制 trace id」link jumps straight to this turn's logs. Optional on the wire
+      // (absent on untraced turns); idempotent on a reconnect replay (re-sent first).
+      {
+        const traceId = (event.payload as MessageStartPayload).trace_id;
+        if (traceId)
+          useConversationStore
+            .getState()
+            .setTraceIdOnLastMessage(traceId, ctx.conversationId);
+      }
+      // Turn (re)start — clear the captain context accumulator so a reconnect replay
+      // (which re-sends message_start first) rebuilds it idempotently (上下文传递可视化 通道①+⑤).
+      captainCtxByConv.delete(ctx.conversationId);
       break;
     }
     case "content_delta": {
@@ -228,6 +260,28 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       if (payload.cost) {
         conv.attachCostToLastMessage(payload.cost, ctx.conversationId);
       }
+      // Stamp the rest of the turn-end meta (回合 token 用量 / 轮次 / 结束原因) so the
+      // bubble's meta row + status chip render from state. usage arrives in the
+      // wire's long-key form (`input_tokens` …) — normalize to the ledger
+      // UsageBreakdown short-key shape every other surface (RunDetailBody, the
+      // execution store) already reads, so the bubble shares one usage vocabulary.
+      const usage = payload.usage;
+      conv.attachTurnMetaToLastMessage(
+        {
+          usage: usage
+            ? {
+                input: usage.input_tokens,
+                output: usage.output_tokens,
+                reasoning: usage.reasoning_tokens,
+                cache_hit: usage.cache_hit_tokens,
+                cache_miss: usage.cache_miss_tokens,
+              }
+            : undefined,
+          rounds: payload.rounds,
+          finishReason: payload.finish_reason,
+        },
+        ctx.conversationId,
+      );
       conv.finalizeLastMessage(ctx.conversationId);
       // The turn is over — any approval still on screen is moot (all were
       // resolved to get here; this just guards a degraded/edge end).
@@ -246,6 +300,12 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       // memory bound holds (no-op for the active conversation — it reloads from
       // the server on return).
       conv.releaseBackgroundSlice(ctx.conversationId);
+      // Dev 时序探针对账（关闭时 no-op）：把气泡最终 process[] 与到达顺序并排 dump。
+      {
+        const msgs = getRuntime(ctx.conversationId).messages;
+        const lastA = [...msgs].reverse().find((m) => m.role === "assistant");
+        traceTurnEnd(ctx.conversationId, lastA?.process);
+      }
       break;
     }
     case "error": {
@@ -270,6 +330,12 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       // (a transport failure instead routes through turns.ts, which keeps the
       // slice so its retry banner survives).
       store.releaseBackgroundSlice(ctx.conversationId);
+      // Dev 时序探针对账（关闭时 no-op）：失败回合也 dump 已折出的部分时间线。
+      {
+        const msgs = getRuntime(ctx.conversationId).messages;
+        const lastA = [...msgs].reverse().find((m) => m.role === "assistant");
+        traceTurnEnd(ctx.conversationId, lastA?.process);
+      }
       break;
     }
 
@@ -402,16 +468,16 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
     // the hub was never opened (it fetches fresh on first open).
     case "workspace_promoted": {
       const p = event.payload as WorkspacePromotedPayload;
-      const folder: FolderMeta = {
+      // The same client-side promotion sink the panel's promote endpoint uses, so the
+      // live (turn) and REST (panel) paths reflect a 裸聊's promotion identically
+      // (工作区对称化 D1a) — no drift between "team wrote first" and "panel wrote first".
+      applyConversationPromotion(p.conversation_id, {
         id: p.folder_id,
         name: p.name,
         localDir: null,
         localRootId: p.local_root_id,
         localSubpath: p.local_subpath,
-      };
-      addFolderCache(folder);
-      patchConversationCache(p.conversation_id, { folderId: p.folder_id });
-      addWorkspaceFromFolder(folder);
+      });
       break;
     }
 
@@ -448,17 +514,52 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       }
       break;
     }
-    // All run facts fold the same way: map the event to a RunFrame and append it
+    // The CEO captain announces itself with run_started (kind=captain, the root run);
+    // remember its id so the captain's run_context routes turn-level (below), then fold
+    // the frame like any run (a no-plan slot ignores it).
+    case "run_started": {
+      const p = event.payload as RunStartedPayload;
+      if (p.kind === "captain")
+        captainRunByConv.set(ctx.conversationId, p.run_id);
+      const mid = execMessageId();
+      const frame = frameFromEvent(event);
+      if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+      break;
+    }
+    // 上下文传递可视化 通道①+⑤: the captain's run_context is the CEO bubble's「收到的上下文」,
+    // so it routes TURN-LEVEL onto the message (present in pure chat, where there is no
+    // execution slot), never as a graph node. The captain emits more than once a turn
+    // (opening + each post-delegation team readback), so ACCUMULATE and push the full list —
+    // its received context GROWS by what it read back from the team. A worker's run_context
+    // folds as a frame.
+    case "run_context": {
+      const p = event.payload as RunContextPayload;
+      if (p.run_id === captainRunByConv.get(ctx.conversationId)) {
+        const grown = [
+          ...(captainCtxByConv.get(ctx.conversationId) ?? []),
+          ...p.blocks,
+        ];
+        captainCtxByConv.set(ctx.conversationId, grown);
+        useConversationStore
+          .getState()
+          .setCaptainContext(grown, ctx.conversationId);
+        break;
+      }
+      const mid = execMessageId();
+      const frame = frameFromEvent(event);
+      if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+      break;
+    }
+    // All other run facts fold the same way: map the event to a RunFrame and append it
     // to this turn's journal (a no-op slot has no plan, so stray single-agent
     // facts are ignored downstream). One path for every frame kind.
-    case "run_started":
-    case "run_context":
     case "run_output_delta":
     case "run_reasoning_delta":
     case "run_tool_progress":
     case "run_completed":
     case "run_failed":
-    case "run_progress": {
+    case "run_progress":
+    case "run_escalation": {
       const mid = execMessageId();
       const frame = frameFromEvent(event);
       if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
@@ -514,7 +615,13 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
       if (mid) {
         const p = event.payload as DebateRoundStartedPayload;
         useExecutionStore.getState().recordDebateRound(
-          { round_no: p.round_no, focus: p.focus, summary: "", verdict: null, sides: [] },
+          {
+            round_no: p.round_no,
+            focus: p.focus,
+            summary: "",
+            verdict: null,
+            sides: [],
+          },
           mid,
         );
       }
@@ -770,9 +877,6 @@ export interface StreamConversationOptions {
   conversationId: string;
   content: string;
   attachments?: OutgoingAttachment[];
-  /** 「待定本地容器根」id（工作区对称化 D2）：桌面裸聊首发携带，让服务端首次产文件时把这条
-   *  裸聊懒建为该容器下的 per 对话本地文件夹（D1a）。已归档 / 云端逃生口 / 非桌面 → 省略。 */
-  localContainerRootId?: string | null;
   signal?: AbortSignal;
 }
 
@@ -780,19 +884,18 @@ export interface StreamConversationOptions {
  * Send a user message and consume the SSE response stream.
  *
  * This is the primary streaming channel for the app.
+ *
+ * 本地 vs 云端懒建的归属由会话状态（`Conversation.local_container_root_id`，建会话时
+ * 定型）决定，回合不再携带容器根——故载荷只有 content + 可选附件（工作区对称化 D1a）。
  */
 export async function streamConversation({
   conversationId,
   content,
   attachments,
-  localContainerRootId,
   signal,
 }: StreamConversationOptions): Promise<void> {
   const payload: Record<string, unknown> = { content };
   if (attachments && attachments.length > 0) payload.attachments = attachments;
-  // 仅在有信号时携带——服务端 SendMessageRequest.local_container_root_id 缺省即走云端懒建。
-  if (localContainerRootId)
-    payload.local_container_root_id = localContainerRootId;
   await runMessageStream(
     `/v1/conversations/${conversationId}/messages`,
     JSON.stringify(payload),

@@ -21,10 +21,10 @@ export function startNewConversation(
   opts?: { cloud?: boolean },
 ): void {
   // 桌面 local-first（决策 #11 / 工作区对称化 D1a）：裸聊不再预塞默认文件夹——只在这里**预热**
-  // 默认本地容器根（授权 + 缓存其 id）。真正的「待定本地容器根」信号在首发处（sendTurn 经
-  // `pendingLocalContainerRoot`）据「裸聊 + 桌面 + 非云端逃生口」决定是否携带，服务端首次产
-  // 文件时才在该容器下懒建 per 对话文件夹。显式传入的文件夹 id 一律尊重；`opts.cloud` 走纯云
-  // 逃生口（裸聊懒建落云端，不预热容器根）。
+  // 默认本地容器根（授权 + 缓存其 id），摊薄首发时的授权等待。本地意向在**建会话时**定型并
+  // 落库（MessageInput 首发处 await `ensureDefaultContainerRoot` 取 `local_container_root_id`），
+  // 服务端首次产文件时据此在该容器下懒建 per 对话文件夹。显式传入的文件夹 id 一律尊重；
+  // `opts.cloud` 走纯云逃生口（建会话即以 `local_container_root_id=null` 创建，不预热容器根）。
   const target = opts?.cloud ? null : (folderId ?? null);
   if (!opts?.cloud && folderId == null) void ensureDefaultContainerRoot();
   const foldersStore = useFoldersStore.getState();

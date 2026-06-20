@@ -16,7 +16,10 @@ export interface LlmKeyStatus {
   message: string | null;
 }
 
-async function readStatus(res: Response, fallback: string): Promise<LlmKeyStatus> {
+async function readStatus(
+  res: Response,
+  fallback: string,
+): Promise<LlmKeyStatus> {
   if (!res.ok) throw new Error(await errorMessage(res, fallback));
   return (await res.json()) as LlmKeyStatus;
 }

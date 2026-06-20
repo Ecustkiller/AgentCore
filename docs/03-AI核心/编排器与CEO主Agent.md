@@ -163,9 +163,11 @@ CEO 不指定具体模型，只表达能力需求，由运行时映射（fast/st
 
 > **默认偏全文**：「一律摘要」会丢失关键信息。执行形状由 `depends_on` 自然落定，无需离散计划类型。
 
-> **保真度预算：每 worker 共享 + 水填充 + 首尾保留 ✅ 已落地**：`pass_through` 上游注入时，**每个下游 worker 一份总预算**，在多个 pass_through 依赖间水填充公平分配；超预算时**首尾保留 + 中间省略**（避免尾部关键细节被静默丢弃）。`summarize` 另走紧凑摘要，不占该预算。→ 见代码：`runtime/runs/executor.py`、`runtime/runs/constants.py`。
+> **保真度预算：每 worker 共享 + 水填充 + 首尾保留 ✅ 已落地**：`pass_through` 上游注入时，**每个下游 worker 一份总预算**，在多个 pass_through 依赖间水填充公平分配；超预算时**首尾保留 + 中间省略**（避免尾部关键细节被静默丢弃）。`summarize` 另走紧凑摘要，不占该预算。→ 见代码：`runtime/runs/executor.py`（装配 `_dep_context_blocks`）、`runtime/runs/fidelity.py`（水填充 / 首尾保留原语）、`runtime/runs/constants.py`。
 
-> **递指针不递全文（文件产物）✅ 已落地**：上游已 `file_write` 落盘时，下游注入紧凑摘要 + 文件路径清单 +「需全文请 `file_read`」，不占 `pass_through` 预算。纯文字中间产物仍走全文注入。→ 见代码：`runtime/runs/executor.py`。
+> **递指针不递全文（文件产物）✅ 已落地**：上游已 `file_write` 落盘时，下游注入紧凑摘要 + 文件路径清单 +「需全文请 `file_read`」，不占 `pass_through` 预算。纯文字中间产物仍走全文注入。→ 见代码：`runtime/runs/executor.py`、`runtime/runs/fidelity.py`（`pointer_body`）。
+
+> **CEO 综述输入瘦身：同款保真度用于「全员 → CEO」收尾 ✅ 已落地**：`delegate` 把所有 worker 产物汇给 CEO 写概览时，过去整体被一道 `output_limit` 盲截（仅留头部）——宽扇出 / 长产物下会**静默丢掉靠后的 worker 乃至本段自带的收尾指令（防幻觉铁律）**，是正确性缺陷而非单纯成本。现把上面的保真度纪律复用到这**另一处扇入**：**落盘者递指针摘要**（全文已在工作区 + 前端可逐个展开，CEO 需要可 `file_read`），**纯文本产物共享一份预算水填充**（超额首尾保留），于是每个 worker 都留有代表、收尾指令必活在 `output_limit` 兜底之下（兜底退为最后保险，常态不触发）。**刻意不按 `result_handling`**——该旋钮只管上游→下游注入、不影响回到 CEO 的内容（见上 §「广度调查归团队」注）。并打 `delegate.synthesis` 埋点（`raw/final_chars`、压缩 `ratio`、`capped` 是否触发兜底），用于线上确认兜底常态不触发、并据真实比例校准 `CEO_SYNTHESIS_BUDGET`。→ 见代码：`tools/builtin/delegate.py`（`_format_for_ceo`）、`runtime/runs/fidelity.py`（共享原语）、`runtime/runs/constants.py`（`CEO_SYNTHESIS_BUDGET`）。
 
 > **工作区产物清单 ✅ 已落地**：每个 worker 开局注入「队友产物 + 既有文件」去重清单（经 `index_files` 云/本地一致视图），让共享工作区开局可发现；全表受文件数/字符预算封顶；列举失败退化为仅队友产物。→ 见代码：`runtime/runs/executor.py`、`workspace/protocol.py`。
 

@@ -115,8 +115,11 @@ def files_touched_from_transcript(transcript: list[LLMMessage]) -> list[str]:
 def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, Any]]:
     """Best-effort list of a worker's escalations (``escalate`` tool calls), call order.
 
-    Each item is ``{question, assumption, blocking}`` parsed from the call's arguments
-    (assumption defaults to "", blocking to False). Mirrors
+    Each item is ``{question, assumption, blocking, status, answer}`` parsed from the
+    call's arguments (assumption defaults to "", blocking to False). ``status`` defaults
+    to ``"raised"`` (a non-blocking escalate, or a blocking one that degraded) with no
+    ``answer``; the executor overrides these to ``"resolved"`` / ``"timeout"`` for a
+    blocking escalate that actually suspended for the user (阻塞式求决策 §4.7). Mirrors
     :func:`files_touched_from_transcript`: intent-level, read off the call itself; a call
     with malformed args or an empty ``question`` is skipped. The DelegateTool surfaces
     these to the CEO as「队员升级了待决问题」so it resolves them before finalizing.
@@ -144,6 +147,11 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
                     "question": question,
                     "assumption": str(parsed.get("assumption") or "").strip(),
                     "blocking": bool(parsed.get("blocking")),
+                    # 阻塞式求决策: lifecycle of a blocking escalate. Default for a
+                    # non-blocking / degraded one; the executor folds in the user's
+                    # resolution for one that suspended (设计 §4.7).
+                    "status": "raised",
+                    "answer": None,
                 }
             )
     return out

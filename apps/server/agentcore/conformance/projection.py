@@ -10,10 +10,11 @@ the oracle never invents behavior the product doesn't already have:
 - the multi-agent team graph (agents / runs / progress) mirrors desktop
   ``projectExecution`` (run_plan skeleton → run_* frames fold in; progress derived
   from run states; revisions synthesized from their run_started frame);
-- the single-agent 思考·正文·工具 ``process`` timeline mirrors
-  ``EventSink._accumulate_process`` (reasoning/content deltas coalesce; one step per
-  tool call resolved by its tool_use_end), surfaced only for a single-agent turn
-  (no run_plan), parity with ``process_timeline()`` going None once a graph exists;
+- the 思考·正文·工具 ``process`` timeline mirrors ``EventSink._accumulate_process``
+  (reasoning/content deltas coalesce; one step per tool call resolved by its
+  tool_use_end), carried for single-agent AND multi-agent turns (统一团队时间线 — the
+  CEO's own steps, with the ``delegate`` step marking the team-graph slot), parity
+  with ``process_timeline()`` (which only goes None for a tool-less turn);
 - ``content`` / ``reasoning`` accumulate the captain bubble's deltas (present even in
   a multi-agent turn — the CEO speaks above the graph);
 - ``status`` / ``pendingInteraction`` fold the gate state machine (a *_required pauses,
@@ -80,6 +81,8 @@ def _run_from_plan(s: dict[str, Any]) -> dict[str, Any]:
         "checkpoint": None,
         # 收到的上下文 (上下文传递可视化): filled by the run_context fact; empty until then.
         "receivedContext": [],
+        # 升级实时可见: appended by the run_escalation fact; empty until a worker escalates.
+        "escalations": [],
     }
 
 
@@ -87,11 +90,15 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     """Fold an ordered SSE event vector into the normalized ProjectedTurn dict."""
     content = ""
     reasoning = ""
+    # 收到的上下文 · CEO 侧 (上下文传递可视化): the captain run id (its kind=captain
+    # run_started) + the structured opening context it was fed (system/history/request),
+    # routed turn-level — the CEO is the bubble above the graph, not a peer node.
+    captain_run_id: str | None = None
+    captain_context: list[dict[str, Any]] = []
     process: list[dict[str, Any]] = []
     citations: list[dict[str, Any]] = []
     agents: list[dict[str, Any]] = []
     runs: list[dict[str, Any]] = []
-    has_run_plan = False
     plan_id: str | None = None
     status = "running"
     finish_reason: str | None = None
@@ -189,7 +196,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             citations = list(p.get("citations") or [])
 
         elif etype == "run_plan":
-            has_run_plan = True
             ip = p.get("execution_id")
             if plan_id is None or plan_id == ip:
                 plan_id = ip
@@ -211,6 +217,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             revision = p.get("revision") or 0
             parent = p.get("parent_run_id")
             kind = p.get("kind") or "agent"
+            # The CEO captain is the turn's root (kind=captain); remember its run id so its
+            # run_context routes turn-level. The captain node itself comes from run_plan (or
+            # is dropped on a non-delegating turn) — this only tracks the id.
+            if kind == "captain":
+                captain_run_id = rid
             run = run_by_id(rid)
             # 定向唤回 续写 (乙 热修 P4): a revision (>=2) is not in the plan — synthesize
             # it off the original, mirroring projectExecution.
@@ -255,13 +266,20 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 ag["toolProgress"] = None
 
         elif etype == "run_context":
-            # 收到的上下文 (上下文传递可视化): record the structured context this run was
-            # fed onto its node, carried verbatim (wire-shaped snake_case blocks) — the
-            # same data the LLM saw. Mirrors the desktop/mobile folds (conformance pins
-            # them equal).
-            run = run_by_id(p.get("run_id", ""))
-            if run is not None:
-                run["receivedContext"] = list(p.get("blocks") or [])
+            # 收到的上下文 (上下文传递可视化): the structured context this run was fed, carried
+            # verbatim (wire-shaped snake_case blocks) — the same data the LLM saw. The
+            # CAPTAIN's (kind=captain) routes TURN-LEVEL onto captainContext (the CEO is the
+            # bubble above the graph, not a node — so it shows on every turn, pure chat
+            # included), APPENDING across emits so its context GROWS by each post-delegation
+            # team readback (通道⑤); a WORKER's folds onto its graph node. Mirrors the
+            # desktop/mobile folds (conformance pins them equal).
+            rid = p.get("run_id", "")
+            if rid and rid == captain_run_id:
+                captain_context.extend(p.get("blocks") or [])
+            else:
+                run = run_by_id(rid)
+                if run is not None:
+                    run["receivedContext"] = list(p.get("blocks") or [])
 
         elif etype == "run_output_delta":
             ag = agent_by_id(p.get("agent_id", ""))
@@ -311,6 +329,21 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # Progress is derived from run states below (cumulative, multi-batch safe);
             # the wire counter is a timeline marker only.
             pass
+
+        elif etype == "run_escalation":
+            # 升级实时可见: a worker flagged a decision/blocker for the CEO — append it to
+            # its run so the node carries a ⚠️ badge (mirrors the desktop/mobile folds,
+            # conformance pins them equal). Transport-only on the wire; the durable copy
+            # rides RunState.escalations → CEO synthesis.
+            run = run_by_id(p.get("run_id", ""))
+            if run is not None:
+                run["escalations"].append(
+                    {
+                        "question": p.get("question", ""),
+                        "assumption": p.get("assumption", ""),
+                        "blocking": bool(p.get("blocking")),
+                    }
+                )
 
         elif etype == "debate_result":
             # 一场辩论收场：整段结构化产物（form/motion/rounds/brief/sides/各方 run_id）
@@ -432,8 +465,14 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         "finishReason": finish_reason,
         "content": content,
         "reasoning": reasoning,
-        # Single-agent inline timeline only; the team graph carries multi-agent activity.
-        "process": [] if has_run_plan else process,
+        # 收到的上下文 · CEO 侧 (上下文传递可视化, 通道①): turn-level, present on every turn the
+        # captain emitted run_context for (pure chat included), [] otherwise.
+        "captainContext": captain_context,
+        # The CEO's inline timeline — carried for single-agent AND multi-agent turns
+        # (统一团队时间线): a delegating turn's `delegate` step marks where the team graph
+        # slots in at render, worker activity rides `runs`/`agents`. Tool-less turns
+        # build no process (no interleaving to preserve), matching process_timeline().
+        "process": process,
         "citations": citations,
         "agents": agents,
         "runs": runs,

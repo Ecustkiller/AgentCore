@@ -25,6 +25,7 @@ from typing import Any
 
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
+from agentcore.core.types import new_id
 from agentcore.llm.config import ModelProfile, apply_overrides
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet, default_profile_set
@@ -35,6 +36,9 @@ from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
+    escalation_raised,
+    escalation_required,
+    escalation_resolved,
     run_completed,
     run_context,
     run_failed,
@@ -44,6 +48,7 @@ from agentcore.runtime.events import (
     run_tool_progress,
     tool_progress,
 )
+from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
 from agentcore.runtime.runs.constants import (
     DEFAULT_CONTRACT_RETRIES,
@@ -77,9 +82,15 @@ from agentcore.runtime.runs.types import (
     RunSpec,
     RunState,
 )
+from agentcore.runtime.ports import ClientRequestBridge
 from agentcore.runtime.suspension import captain_transcript
 from agentcore.runtime.workspace import summarize
-from agentcore.tools.protocol import Tool, ToolContext
+from agentcore.tools.protocol import (
+    EscalationChannel,
+    EscalationOutcome,
+    Tool,
+    ToolContext,
+)
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.write_claims import WriteCoordinator
 
@@ -88,6 +99,12 @@ from agentcore.workspace.write_claims import WriteCoordinator
 # as the sub-team's captain. Owned by the DelegateTool (which can import the tools
 # package), passed in here so ``runs`` stays free of a tools dependency.
 DelegateFactory = Callable[[str, int], Tool]
+
+# 阻塞式求决策 并发上限 (设计 §4.6): at most this many workers may be suspended on a
+# blocking escalate at once (per conversation). Beyond it a further blocking escalate
+# degrades to non-blocking (proceed on assumption) — caps card-flood + stops a whole
+# wave's width being parked on the user. Tunable; start conservative.
+ESCALATION_CONCURRENCY_CAP = 3
 
 logger = get_logger(__name__)
 
@@ -186,6 +203,9 @@ def build_agent_executor(
     execution_id: str,
     approval_gate: ApprovalGate | None = None,
     delegate_factory: DelegateFactory | None = None,
+    interaction_bridge: ClientRequestBridge | None = None,
+    escalation_timeout: float = 0.0,
+    escalation_armed: bool = False,
 ) -> RunExecutor:
     """Build a :class:`RunExecutor` bound to one turn's wiring.
 
@@ -211,6 +231,15 @@ def build_agent_executor(
     ``delegate`` tool, bound to itself as the sub-team's captain. Leaf workers and
     depth-capped workers never receive it, so the tree can never nest past
     CEO → worker → sub-worker.
+
+    ``interaction_bridge`` + ``escalation_timeout`` + ``escalation_armed`` wire each
+    worker's ``escalate(blocking=true)`` to suspend for the user (阻塞式求决策, 设计
+    §4.2): the bridge is the SAME process-wide registry ``ask_user`` parks on, the
+    timeout reuses ``ask_user``'s window, and ``armed`` is the live-user gate (=
+    ``ask_user``'s). All ``None`` / ``0`` / ``False`` (CEO, standalone, un-armed
+    autonomous turns) ⇒ a worker's blocking escalate degrades to non-blocking. A
+    nested sub-team inherits the same wiring (its captain's DelegateTool forwards it),
+    so a depth-2 worker can reach the user with no depth special-case.
     """
     # None (standalone / tests) = the economy base set; production passes the
     # turn's resolved 质量档 from the delegate tool.
@@ -248,6 +277,88 @@ def build_agent_executor(
                 )
             return _ambient_snapshot["paths"]
 
+    conversation_id = base_tool_context.conversation_id
+
+    def _escalation_channel(
+        run_id: str, agent_id: str, resolutions: dict[str, dict[str, Any]]
+    ) -> EscalationChannel | None:
+        """Wire one worker's ``escalate(blocking=true)`` to suspend for the user (设计 §4.2).
+
+        ``None`` when no interaction bridge is wired (CEO / standalone / tests) — then the
+        tool keeps its non-blocking behaviour. The returned channel carries ``armed`` (the
+        live-user gate) and a ``request`` that owns the whole mechanism the tool stays clear
+        of (引擎纯化): the per-turn concurrency cap, the suspend on the shared bridge, the
+        ``escalation_required`` / ``escalation_resolved`` pair (单一发射者: emitted here, the
+        awaiter, never the resolve route), and recording the disposition into ``resolutions``
+        for the CEO-facing harvest.
+        """
+        bridge = interaction_bridge
+        if bridge is None:
+            return None
+
+        async def _request(question: str, assumption: str) -> EscalationOutcome:
+            # Cap: count this conversation's already-parked blocking escalates. The check
+            # and the suspend's create() run with no await between them (single loop), so
+            # the count can't race (设计 §4.7). Over cap ⇒ degrade (proceed on assumption).
+            parked = sum(
+                1
+                for r in bridge.list_pending(conversation_id)
+                if r.kind is InteractionKind.ESCALATION
+            )
+            if parked >= ESCALATION_CONCURRENCY_CAP:
+                logger.info("worker.escalate.cap_degraded", run_id=run_id, parked=parked)
+                return EscalationOutcome(status="degraded")
+            escalation_id = new_id()
+            try:
+                result = await bridge.suspend(
+                    escalation_id,
+                    conversation_id,
+                    kind=InteractionKind.ESCALATION,
+                    payload={
+                        "escalation_id": escalation_id,
+                        "run_id": run_id,
+                        "agent_id": agent_id,
+                        "question": question,
+                        "assumption": assumption,
+                    },
+                    timeout=escalation_timeout,
+                    on_suspended=lambda: sink.emit(
+                        escalation_required(
+                            run_id,
+                            agent_id,
+                            escalation_id=escalation_id,
+                            question=question,
+                            assumption=assumption,
+                        )
+                    ),
+                )
+            except TimeoutError:
+                status, answer = "timeout", ""
+            else:
+                # The resolve body is {answer} or {use_assumption}; 按假设继续 == an early
+                # timeout (same disposition, the worker falls back to its assumption).
+                if isinstance(result, dict) and result.get("use_assumption"):
+                    status, answer = "timeout", ""
+                elif isinstance(result, dict):
+                    status, answer = "resolved", str(result.get("answer") or "").strip()
+                else:
+                    status, answer = "resolved", str(result or "").strip()
+            resolutions[question] = {"status": status, "answer": answer}
+            sink.emit(
+                escalation_resolved(
+                    run_id,
+                    agent_id,
+                    escalation_id=escalation_id,
+                    status=status,
+                    answer=answer,
+                )
+            )
+            return EscalationOutcome(
+                status=status, answer=answer if status == "resolved" else None
+            )
+
+        return EscalationChannel(armed=escalation_armed, request=_request)
+
     async def _execute_node(
         spec: RunSpec, completed: Mapping[str, RunState], agent_id: str
     ) -> RunState:
@@ -271,6 +382,12 @@ def build_agent_executor(
         run_rounds = 0
         inflight: list[TokenUsage] = []
         priced_model: str | None = None
+        # 阻塞式求决策: this worker's blocking-escalate resolutions, keyed by question, so the
+        # transcript harvest below can fold the user's answer / timeout disposition into
+        # ``RunState.escalations`` for CEO synthesis — driven by the structured channel below,
+        # NOT by re-parsing the tool result prose (防补丁绊线, 设计 §4.7). A worker is
+        # sequential, so escalates land here in call order, one at a time.
+        resolutions: dict[str, dict[str, Any]] = {}
         try:
             profile = apply_overrides(
                 profiles.agent(spec.model_preference),
@@ -285,6 +402,22 @@ def build_agent_executor(
                 execution_id=execution_id,
                 write_coordinator=write_coordinator,
                 write_ancestors=ancestors_by_id.get(spec.run_id, frozenset()),
+                # 升级实时可见: give this worker's escalate tool a live channel back to the
+                # run's SSE stream. The executor owns event shape (引擎纯化) — escalate just
+                # hands it the (question, assumption, blocking) triple. run_id/agent_id are
+                # bound here so the team UI attributes the escalation to the right node.
+                on_escalate=lambda question, assumption, blocking, _rid=spec.run_id, _aid=agent_id: sink.emit(
+                    escalation_raised(
+                        _rid,
+                        _aid,
+                        question=question,
+                        assumption=assumption,
+                        blocking=blocking,
+                    )
+                ),
+                # 阻塞式求决策: the suspend-for-the-user channel for escalate(blocking=true).
+                # None when no bridge (CEO / tests) → escalate stays non-blocking.
+                escalation=_escalation_channel(spec.run_id, agent_id, resolutions),
             )
             # 阶段2 嵌套子任务: hand this worker its own delegate tool only when it
             # opted in and is still above the depth cap — then it leads a sub-team
@@ -414,8 +547,15 @@ def build_agent_executor(
             # Upward escalations this worker raised (escalate tool calls), harvested
             # once from the transcript and carried on BOTH terminal states — a worker
             # that flags a blocker then fails its contract should still surface that
-            # blocker to the CEO.
+            # blocker to the CEO. 阻塞式求决策: fold each blocking escalate's resolution
+            # (answer / timeout) in by question, so CEO synthesis knows which were already
+            # settled with the user and must not be re-asked (设计 §4.5/§4.7).
             escalations = escalations_from_transcript(messages)
+            for esc in escalations:
+                settled = resolutions.get(esc.get("question", ""))
+                if settled is not None:
+                    esc["status"] = settled["status"]
+                    esc["answer"] = settled["answer"]
             if not verdict.ok and _is_hard_failure(content, contract):
                 reason = "；".join(verdict.failures)
                 logger.info("contract.failed", run_id=spec.run_id, failures=verdict.failures)
@@ -548,6 +688,9 @@ def build_captain_executor(
         return await _drive_captain_loop(
             spec=spec,
             messages=messages,
+            received_blocks=_build_captain_context_blocks(
+                chat_system_prompt, history, user_message
+            ),
             llm=llm,
             tools=tools,
             sink=sink,
@@ -605,6 +748,7 @@ async def _drive_captain_loop(
     *,
     spec: RunSpec,
     messages: list[LLMMessage],
+    received_blocks: list[ContextBlock] | None = None,
     llm: DeepSeekProvider,
     tools: ToolRegistry,
     sink: EventSink,
@@ -625,6 +769,15 @@ async def _drive_captain_loop(
     """
     agent_id = spec.agent_id or spec.run_id
     sink.emit(run_started(spec.run_id, agent_id, parent_run_id=None, kind=spec.kind))
+    # 上下文传递可视化 (CEO 侧 通道①): ship the captain's opening context right after its
+    # run_started so the chat bubble's「收到的上下文」lights up — every fold routes a
+    # captain run_context turn-level (kind=captain → captainContext), never onto a graph
+    # node. The resume path passes None: the opening already rode the pre-pause segment,
+    # and reading the workers' product back (通道⑤) is a separate ratchet.
+    if received_blocks is not None:
+        sink.emit(
+            run_context(spec.run_id, agent_id, _context_block_payloads(received_blocks))
+        )
     start = time.monotonic()
     token = captain_transcript.set(messages)
     # Mirrors the loop's cumulative spend so a hard captain failure still bills the
@@ -689,6 +842,7 @@ async def _drive_captain_loop(
             usage=usage_dict,
             cost=cost,
             finish_override=finish_override[0] if finish_override else None,
+            received_context=received_blocks or [],
         )
     except Exception as e:  # noqa: BLE001 — surface any captain failure to UI/state
         duration_ms = int((time.monotonic() - start) * 1000)
@@ -878,6 +1032,57 @@ def _build_context_blocks(
     return blocks
 
 
+def _format_captain_history(history: list[dict]) -> str:
+    """Render the prior-turn messages the captain carries into「用户：… / CEO：…」prose for
+    its ``history`` context block — the SAME turns fed to the LLM, made legible to the user
+    (单一源: what the user sees == what the LLM eats). Empty for a first turn."""
+    label = {"user": "用户", "assistant": "CEO"}
+    parts = [
+        f"{label.get(m.get('role', ''), m.get('role') or '')}：{m.get('content') or ''}"
+        for m in history
+        if (m.get("content") or "").strip()
+    ]
+    return "\n\n".join(parts)
+
+
+def _build_captain_context_blocks(
+    chat_system_prompt: str,
+    history: list[dict],
+    user_message: str,
+) -> list[ContextBlock]:
+    """The ordered :class:`ContextBlock` list describing the CEO captain's OPENING context
+    (上下文传递可视化, CEO 侧 通道①): its ``system`` prompt (决策②: 默认隐藏，开「用量明细」才
+    展开), the ``history`` it carries, and this turn's ``request``.
+
+    Unlike a worker — whose single user message is *rendered FROM* its blocks — the captain
+    is fed a real multi-message chat (system + history + user). So these blocks MIRROR that
+    ``messages`` array (one per channel) rather than being the source it's rendered from;
+    built from the SAME three inputs ``build_captain_executor`` assembles ``messages`` from,
+    they can't drift (用户看到的 == LLM 吃到的). Every fold routes the captain's run_context
+    turn-level (``captainContext`` on the chat bubble), never onto a graph node. 通道⑤ (the
+    CEO reading workers' products back on resume) is a separate ratchet, not this opening."""
+    blocks: list[ContextBlock] = [
+        ContextBlock(
+            channel="system",
+            heading="CEO 系统提示（本回合实际遵循的系统指令）",
+            body=chat_system_prompt,
+        )
+    ]
+    history_text = _format_captain_history(history)
+    if history_text:
+        blocks.append(
+            ContextBlock(
+                channel="history",
+                heading="对话历史（本回合之前的往来）",
+                body=history_text,
+            )
+        )
+    blocks.append(
+        ContextBlock(channel="request", heading="原始用户请求", body=user_message)
+    )
+    return blocks
+
+
 # Per-block body cap for the run_context EVENT (决策④): the prompt feeds the LLM the FULL
 # block, but the journaled/wired copy is head+tail capped so a huge pasted request / task
 # can't bloat the journal. Reuses the dep-budget magnitude; the UI shows the capped body +
@@ -978,7 +1183,7 @@ def _dep_context_blocks(
     Three fidelity policies, in priority order:
 
     - A dep that WROTE FILES to the workspace (``files_touched`` non-empty) becomes a
-      POINTER (:func:`~agentcore.runtime.runs.fidelity.pointer_body`): a tight prose digest + the artifact paths to
+      POINTER (``fidelity.pointer_body``): a tight prose digest + the artifact paths to
       ``file_read``. The product is already on disk and reachable, so re-shipping it
       whole through the prompt wastes tokens and risks tail-trimming (递指针不递全文,
       Agent协作模式.md). A pointer does NOT draw on the pass_through budget.
@@ -986,10 +1191,10 @@ def _dep_context_blocks(
       the large-fan-in token-saving case; no budget draw either.
     - ``pass_through`` PROSE deps (no file to point at — the default, for 分析/检索→写作
       链路 where 金额 / 法条编号 must survive) SHARE one per-worker total budget
-      (``DEP_CONTEXT_BUDGET``), water-filled across them (:func:`~agentcore.runtime.runs.fidelity.allocate`)
-      so a single rich upstream passes through whole while a wide fan-in stays bounded
+      (``DEP_CONTEXT_BUDGET``), water-filled across them (``fidelity.allocate``) so a
+      single rich upstream passes through whole while a wide fan-in stays bounded
       instead of multiplying. A dep that still overflows its share is HEAD+TAIL trimmed
-      (:func:`~agentcore.runtime.runs.fidelity.truncate_head_tail`) so its tail isn't silently dropped.
+      (``fidelity.truncate_head_tail``) so its tail isn't silently dropped.
 
     Order follows ``depends_on``; a dep with neither content nor files is skipped."""
     # mode ∈ {"pointer", "summarize", "pass_through"}
@@ -1039,30 +1244,6 @@ def _dep_context_blocks(
             )
         )
     return blocks
-
-
-def _pointer_body(content: str, files: list[str]) -> str:
-    """A file-producing dep's POINTER block: a tight digest of its prose handoff +
-    the artifact paths to ``file_read``.
-
-    The full product lives in the shared workspace (it called file_write), so the
-    downstream pulls only what it needs rather than carrying the whole artifact in-
-    prompt (递指针不递全文). The digest keeps the worker's own orientation note (改了
-    哪些文件 / 怎么用 / 关键取舍, per the deliverable policy); the path list is the
-    pointer. Both are bounded (``DEP_POINTER_SUMMARY_CHARS`` / ``DEP_POINTER_MAX_FILES``)."""
-    parts: list[str] = []
-    digest = summarize(content, limit=DEP_POINTER_SUMMARY_CHARS) if content.strip() else ""
-    if digest:
-        parts.append(digest)
-    listed = files[:DEP_POINTER_MAX_FILES]
-    lines = "\n".join(f"- {p}" for p in listed)
-    more = f"\n……（共 {len(files)} 个文件）" if len(files) > len(listed) else ""
-    parts.append(
-        "已写入共享工作区的文件（需要完整内容请用 file_read 读取，不要凭空臆测）：\n"
-        + lines
-        + more
-    )
-    return "\n\n".join(parts)
 
 
 async def _safe_index_files(backend: object) -> list[str]:
@@ -1161,46 +1342,6 @@ def _workspace_manifest(
     if truncated and lines:
         lines.append("……（工作区还有更多文件，需要可用 `file_list` 查看）")
     return "\n".join(lines)
-
-
-def _allocate(sizes: list[int], budget: int) -> list[int]:
-    """Fair-share ``budget`` across items of the given ``sizes`` (water-filling).
-
-    Processing smallest-first, each item gets ``min(its size, an equal split of the
-    budget still left)``: a small dep claims only what it needs and frees the rest,
-    which redistributes to the larger deps — so the budget is used fully and a lone
-    pass_through dep gets the whole of it. Returns a per-item char allowance in the
-    INPUT order. ``[]`` for no items."""
-    n = len(sizes)
-    if n == 0:
-        return []
-    allowances = [0] * n
-    remaining = budget
-    # Smallest-first so a dep that needs less than its equal share frees the
-    # remainder for the larger ones (classic water-filling).
-    for rank, i in enumerate(sorted(range(n), key=lambda i: sizes[i])):
-        share = remaining // (n - rank)
-        allowances[i] = min(sizes[i], share)
-        remaining -= allowances[i]
-    return allowances
-
-
-def _truncate_head_tail(content: str, limit: int) -> str:
-    """Trim ``content`` to ``limit`` chars keeping BOTH ends with an elision marker
-    between, so trailing details (金额 / 法条编号) survive — a head-only cut would
-    silently drop them. Returns ``content`` unchanged when it already fits, ""
-    when ``limit <= 0``."""
-    if limit <= 0:
-        return ""
-    if len(content) <= limit:
-        return content
-    marker = "\n\n……（中间省略，已保留首尾）……\n\n"
-    keep = limit - len(marker)
-    if keep <= 0:
-        return content[:limit].rstrip() + "…"
-    head = keep * 3 // 5  # bias to the head (framing) while still keeping a real tail
-    tail = keep - head
-    return content[:head].rstrip() + marker + content[len(content) - tail :].lstrip()
 
 
 async def _react_and_capture(

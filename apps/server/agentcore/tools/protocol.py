@@ -6,6 +6,7 @@ Tools declare their schema (for LLM function calling) and implement execute().
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -14,6 +15,40 @@ from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect
 if TYPE_CHECKING:
     from agentcore.workspace.protocol import WorkspaceBackend
     from agentcore.workspace.write_claims import WriteCoordinator
+
+
+@dataclass(frozen=True)
+class EscalationOutcome:
+    """The result of a worker's blocking escalate (阻塞式求决策 §4.4).
+
+    ``status`` is ``"resolved"`` (the user answered — ``answer`` carries it),
+    ``"timeout"`` (no answer within the window, or the user chose 按假设继续 — the
+    worker falls back to its stated assumption), or ``"degraded"`` (the request was
+    never suspended — the per-turn concurrency cap was full — so the caller proceeds
+    on its assumption exactly as a non-blocking escalate would).
+    """
+
+    status: str
+    answer: str | None = None
+
+
+@dataclass
+class EscalationChannel:
+    """Per-run wiring that lets a worker's ``escalate(blocking=true)`` suspend for the user.
+
+    Built by ``build_agent_executor`` for each delegated worker and ``None`` on the
+    CEO / tests / unarmed turns (then ``escalate`` keeps its non-blocking behaviour).
+    ``armed`` is the live-user gate (the SAME gate as ``ask_user`` — a live
+    interactive client). ``request`` owns the mechanism the tool must stay clear of
+    (引擎纯化): it enforces the concurrency cap, suspends on the interaction bridge,
+    emits the ``escalation_required`` / ``escalation_resolved`` pair, records the
+    resolution into the worker's ``RunState`` for CEO synthesis, and returns the
+    :class:`EscalationOutcome`. The tool only decides WHETHER to block and maps the
+    outcome to its ``ToolResult``.
+    """
+
+    armed: bool
+    request: Callable[[str, str], Awaitable[EscalationOutcome]]
 
 
 @dataclass(frozen=True)
@@ -57,6 +92,23 @@ class ToolContext:
     # by an upstream it consolidates but not one a concurrent sibling did.
     write_coordinator: WriteCoordinator | None = None
     write_ancestors: frozenset[str] = frozenset()
+    # 升级实时可见 (escalation 实时 SSE): a run-scoped live channel for the worker-only
+    # ``escalate`` tool to surface its escalation the INSTANT it is raised, called with
+    # ``(question, assumption, blocking)``. Set per delegated-worker node by
+    # ``build_agent_executor`` (it closes over the run's EventSink + run/agent id to emit
+    # ``escalation_raised``); ``None`` for the CEO / tests — the tool keeps working (escalate
+    # 非阻塞), the live banner is simply skipped, and the durable record still rides the
+    # transcript into ``RunState.escalations``. A narrow callback (not the EventSink itself)
+    # keeps tools off the event vocabulary — the executor owns event shape (引擎纯化).
+    on_escalate: Callable[[str, str, bool], None] | None = None
+    # 阻塞式求决策 (escalate blocking=true): the per-run channel that suspends this worker
+    # for the user when it hits a「只有用户能定、且猜错就作废」fork. Set per delegated-worker
+    # node by ``build_agent_executor`` (closes over the interaction bridge + EventSink +
+    # run/agent id); ``None`` for the CEO / tests / unarmed turns — then ``escalate`` stays
+    # non-blocking (its existing behaviour). The tool owns the decision (whether to block,
+    # the assumption fallback); this channel owns the mechanism (cap / suspend / events /
+    # RunState recording) so the tool stays off the event vocabulary (引擎纯化).
+    escalation: EscalationChannel | None = None
 
 
 @dataclass

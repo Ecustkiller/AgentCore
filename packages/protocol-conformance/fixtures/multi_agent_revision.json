@@ -156,6 +156,7 @@
     "finishReason": "end_turn",
     "content": "",
     "reasoning": "",
+    "captainContext": [],
     "process": [],
     "citations": [],
     "agents": [
@@ -218,7 +219,8 @@
         "revisionOf": null,
         "revision": 0,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       },
       {
         "id": "r1v2",
@@ -253,7 +255,8 @@
         "revisionOf": "r1",
         "revision": 2,
         "checkpoint": null,
-        "receivedContext": []
+        "receivedContext": [],
+        "escalations": []
       }
     ],
     "progress": {

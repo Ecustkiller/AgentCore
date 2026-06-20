@@ -27,6 +27,7 @@ from agentcore.runtime.events import (
     debate_round,
     debate_round_started,
     error_event,
+    escalation_raised,
     message_end,
     message_start,
     plan_review_required,
@@ -104,6 +105,10 @@ def _multi_agent_delegate() -> list[SSEEvent]:
     return [
         message_start("m1", conversation_id=_CONV),
         content_delta("我来安排团队。"),
+        # The CEO's `delegate` tool call: in production it emits a top-level
+        # tool_use_start (before run_plan) and resolves after the team finishes — this
+        # `delegate` step is where the client slots the inline team graph (统一团队时间线).
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "研究员"}, {"role": "撰写员"}]}),
         run_plan(
             execution_id="exec1",
             plan_type="multi_agent",
@@ -135,6 +140,8 @@ def _multi_agent_delegate() -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
+        # delegate resolves only after the whole team finishes (it blocks the CEO round).
+        tool_use_end("dc1", "delegate", success=True, output="团队完成 2 项任务。"),
         content_delta(" 团队已完成。"),
         message_end(FinishReason.END_TURN, input_tokens=4000, output_tokens=800, cost=_COST),
     ]
@@ -777,6 +784,210 @@ def _multi_agent_received_context() -> list[SSEEvent]:
     ]
 
 
+def _multi_agent_escalation() -> list[SSEEvent]:
+    """多 Agent：worker 升级实时可见 (escalation 实时 SSE)。被委派的 r1 撞到只有上级能定的关键
+    岔路，调 ``escalate`` 走唯一向上通道——执行器在【调用瞬间】emit ``run_escalation``（run 级），
+    三端 fold + oracle 把它折到 r1 的 ``escalations``（节点 ⚠️ 标记 + 回合级实时提示），r2 的
+    ``escalations`` 恒空。escalate 非阻塞：r1 报完仍按假设继续交付并 COMPLETED（升级的持久副本另走
+    RunState.escalations → CEO 综述，本事件只补「进行中可见」）。"""
+    agents = [
+        {"id": "w1", "role": "研究员", "model_preference": "strong",
+         "thinking": True, "reasoning_effort": "high"},
+        {"id": "w2", "role": "撰写员", "model_preference": "fast",
+         "thinking": True, "reasoning_effort": "high"},
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研选型", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写建议", "depends_on": ["r1"]},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="选型并给建议",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        # 调用瞬间 emit：升级先于 r1 的产出/完成（实时，非收场 harvest）。
+        escalation_raised(
+            "r1",
+            "w1",
+            question="数据库选 Postgres 还是 MySQL？这关系到后续所有选型。",
+            assumption="暂按 Postgres 推进",
+            blocking=True,
+        ),
+        run_output_delta("r1", "w1", "已按 Postgres 完成选型调研"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成选型调研（含 1 条升级）",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started("r2", "w2"),
+        run_output_delta("r2", "w2", "基于选型给出建议"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成建议",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        content_delta(" 团队已完成（有 1 条待你拍板的升级）。"),
+        message_end(FinishReason.END_TURN, input_tokens=4200, output_tokens=820, cost=_COST),
+    ]
+
+
+def _single_agent_captain_context() -> list[SSEEvent]:
+    """单聊：CEO 收到的上下文 (上下文传递可视化, CEO 侧 通道①)。纯聊天回合无 run_plan，但 captain
+    仍 emit ``run_started(kind=captain)`` + ``run_context``（system/history/request 三通道）。三端
+    fold + oracle 必须把它路由到 TURN 级 ``captainContext``（CEO 是图上方的气泡，不是节点）——故
+    ``runs`` 恒空、``process`` 照常累积，``captainContext`` 承载这三块。这正是方案 3 的关键：最高频的
+    纯聊天回合也能看见 CEO 吃进了什么（决策②: system 默认隐藏是前端门控，不影响投影）。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        run_started("c1", "c1", kind="captain"),
+        run_context(
+            "c1",
+            "c1",
+            [
+                _ctx_block(
+                    "system",
+                    "CEO 系统提示（本回合实际遵循的系统指令）",
+                    "你是 CEO，统筹团队完成用户目标。",
+                ),
+                _ctx_block(
+                    "history",
+                    "对话历史（本回合之前的往来）",
+                    "用户：你好\n\nCEO：你好，有什么可以帮你？",
+                ),
+                _ctx_block("request", "原始用户请求", "帮我把这段话润色一下。"),
+            ],
+        ),
+        reasoning_delta("先理解用户的润色诉求。"),
+        content_delta("润色后的版本如下：……"),
+        run_completed(
+            "c1",
+            "c1",
+            output_summary="完成润色",
+            duration_ms=800,
+            role="captain",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        message_end(FinishReason.END_TURN, input_tokens=1200, output_tokens=300, cost=_COST),
+    ]
+
+
+def _multi_agent_captain_context() -> list[SSEEvent]:
+    """多 Agent：CEO + worker 都 emit ``run_context`` (上下文传递可视化)。captain（c1, kind=captain，
+    在 ``run_plan`` 里声明为根 汇聚点）先于 run_plan emit ``run_started`` + ``run_context``（开场
+    system/request）——它必须路由到 TURN 级 ``captainContext``，其图节点 ``receivedContext`` 恒空
+    （「图节点复用同一份数据」，不双存）；worker（r1）的 ``run_context`` 照旧折到自身节点。
+
+    通道⑤ 队员产物回流：worker 跑完后 captain 又 emit 一条 ``run_context``（channel=team_result，
+    带来源角色/保真度），三端必须 APPEND 到 ``captainContext``——CEO 收到的上下文随团队产物增长，
+    而非被覆盖。三端 fold + oracle pin them equal。"""
+    agents = [
+        {"id": "c1", "role": "CEO", "model_preference": "strong",
+         "thinking": True, "reasoning_effort": "high"},
+        {"id": "w1", "role": "研究员", "model_preference": "strong",
+         "thinking": True, "reasoning_effort": "high"},
+    ]
+    plan_runs = [
+        {"id": "c1", "agent_id": "c1", "task": "统筹完成用户目标",
+         "depends_on": [], "kind": "captain"},
+        {"id": "r1", "agent_id": "w1", "task": "调研竞品定价",
+         "depends_on": [], "parent_run_id": "c1"},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        run_started("c1", "c1", kind="captain"),
+        run_context(
+            "c1",
+            "c1",
+            [
+                _ctx_block(
+                    "system",
+                    "CEO 系统提示（本回合实际遵循的系统指令）",
+                    "你是 CEO，统筹团队完成用户目标。",
+                ),
+                _ctx_block("request", "原始用户请求", "调研竞品定价并给建议。"),
+            ],
+        ),
+        content_delta("我来安排团队。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="竞品定价分析",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1", parent_run_id="c1"),
+        run_context(
+            "r1",
+            "w1",
+            [
+                _ctx_block(
+                    "request",
+                    "原始用户请求（老板交给整个团队的目标，不一定全是你的活；你的具体职责见下方「你的任务」）",
+                    "调研竞品定价并给建议。",
+                ),
+                _ctx_block("task", "你的任务", "调研竞品定价"),
+            ],
+        ),
+        run_output_delta("r1", "w1", "竞品定价区间……"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成调研",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        # 通道⑤: worker 跑完，captain（c1）回合内再 emit run_context 把队员产物回流到 CEO 气泡——
+        # 三端 APPEND 到 captainContext（开场 system/request 之后），其 receivedContext 仍恒空。
+        run_context(
+            "c1",
+            "c1",
+            [
+                _ctx_block(
+                    "team_result",
+                    "研究员（completed）",
+                    "竞品定价区间 99–149/月，建议定价 129/月。",
+                    source_role="研究员",
+                    source_run_id="r1",
+                    fidelity="pass_through",
+                ),
+            ],
+        ),
+        content_delta(" 已完成。"),
+        run_completed(
+            "c1",
+            "c1",
+            output_summary="汇总完成",
+            duration_ms=2000,
+            role="captain",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        message_end(FinishReason.END_TURN, input_tokens=4200, output_tokens=820, cost=_COST),
+    ]
+
+
 # name → (description, builder). The export writes one golden JSON per entry.
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "single_agent_text": ("单聊：思考+正文+总账，end_turn 完成", _single_agent_text),
@@ -803,8 +1014,20 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     ),
     "multi_agent_revision": ("多 Agent：定向唤回续写（revision 合成节点）", _multi_agent_revision),
     "multi_agent_multi_batch": ("多 Agent：同回合两批 delegate（合并 + 累计进度）", _multi_agent_multi_batch),
+    "multi_agent_escalation": (
+        "多 Agent：worker 升级实时可见（run_escalation 折到节点 escalations，非阻塞）",
+        _multi_agent_escalation,
+    ),
     "multi_agent_received_context": (
         "多 Agent：收到的上下文（run_context 三通道 + 依赖块溯源/保真度）",
         _multi_agent_received_context,
+    ),
+    "single_agent_captain_context": (
+        "单聊：CEO 收到的上下文（run_context kind=captain → 回合级 captainContext，system/history/request）",
+        _single_agent_captain_context,
+    ),
+    "multi_agent_captain_context": (
+        "多 Agent：CEO 收到的上下文路由回合级（captain 节点 receivedContext 恒空）+ worker 折到节点",
+        _multi_agent_captain_context,
     ),
 }

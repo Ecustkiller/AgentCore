@@ -95,7 +95,11 @@ async function getJson<T>(path: string, fallback: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function postJson<T>(path: string, body: unknown, fallback: string): Promise<T> {
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  fallback: string,
+): Promise<T> {
   const res = await apiFetch(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -107,7 +111,10 @@ async function postJson<T>(path: string, body: unknown, fallback: string): Promi
 
 // --- People search (任意搜人) ---
 
-export async function searchUsers(query: string, limit = 20): Promise<UserSearchResult[]> {
+export async function searchUsers(
+  query: string,
+  limit = 20,
+): Promise<UserSearchResult[]> {
   const res = await getJson<ListResponse<UserSearchResult>>(
     `/v1/messages/users/search?q=${encodeURIComponent(query)}&limit=${limit}`,
     "搜索失败",
@@ -119,13 +126,20 @@ export async function searchUsers(query: string, limit = 20): Promise<UserSearch
 
 /** This user's chat list (recent first), with unread counts and dm peers. */
 export async function listChats(): Promise<ChatSummary[]> {
-  const res = await getJson<ListResponse<ChatSummary>>("/v1/messages/chats", "加载会话失败");
+  const res = await getJson<ListResponse<ChatSummary>>(
+    "/v1/messages/chats",
+    "加载会话失败",
+  );
   return res.data;
 }
 
 /** Open (or reuse) a 1:1 chat with another user (by their user id). */
 export async function startDm(userId: string): Promise<ChatSummary> {
-  return postJson<ChatSummary>("/v1/messages/chats/dm", { user_id: userId }, "无法发起会话");
+  return postJson<ChatSummary>(
+    "/v1/messages/chats/dm",
+    { user_id: userId },
+    "无法发起会话",
+  );
 }
 
 /** A chat's members (group roster: resolves sender names for group bubbles). */
@@ -166,7 +180,12 @@ export async function listMessages(
     `/v1/messages/chats/${chatId}/messages?page=${page}&page_size=${pageSize}`,
     "加载消息失败",
   );
-  return { messages: res.data, total: res.total, page: res.page, pageSize: res.page_size };
+  return {
+    messages: res.data,
+    total: res.total,
+    page: res.page,
+    pageSize: res.page_size,
+  };
 }
 
 export interface SendMessageInput {
@@ -196,7 +215,10 @@ export async function sendMessage(
 }
 
 /** Advance this user's read cursor (drives unread counts). */
-export async function markRead(chatId: string, lastReadMessageId: string): Promise<void> {
+export async function markRead(
+  chatId: string,
+  lastReadMessageId: string,
+): Promise<void> {
   await postJson(
     `/v1/messages/chats/${chatId}/read`,
     { last_read_message_id: lastReadMessageId },
@@ -238,7 +260,10 @@ export async function fetchChatAttachmentBlob(
 // --- Blocking (任意搜人 护栏) ---
 
 export async function listBlocks(): Promise<BlockedUser[]> {
-  const res = await getJson<ListResponse<BlockedUser>>("/v1/messages/blocks", "加载失败");
+  const res = await getJson<ListResponse<BlockedUser>>(
+    "/v1/messages/blocks",
+    "加载失败",
+  );
   return res.data;
 }
 
@@ -247,7 +272,9 @@ export async function blockUser(userId: string): Promise<void> {
 }
 
 export async function unblockUser(targetId: string): Promise<void> {
-  const res = await apiFetch(`/v1/messages/blocks/${targetId}`, { method: "DELETE" });
+  const res = await apiFetch(`/v1/messages/blocks/${targetId}`, {
+    method: "DELETE",
+  });
   if (!res.ok) throw await toError(res, "取消拉黑失败");
 }
 
@@ -264,7 +291,8 @@ export function isImageAttachment(name: string): boolean {
 
 /** The display name for a chat row: dm → peer's name; group/official → its title. */
 export function chatTitle(chat: ChatSummary): string {
-  if (chat.type === "dm") return chat.peer?.display_name || chat.peer?.username || "对话";
+  if (chat.type === "dm")
+    return chat.peer?.display_name || chat.peer?.username || "对话";
   return chat.title || "群聊";
 }
 

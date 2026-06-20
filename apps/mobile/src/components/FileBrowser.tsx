@@ -1,3 +1,12 @@
+import { getTokens } from "@/api/client";
+import {
+  type DownloadedFile,
+  type FileNode,
+  type WorkspaceFileEntry,
+  buildTree,
+} from "@/api/workspace";
+import { Modal } from "@/components/Modal";
+import { canShareFiles, downloadBlob, shareOrDownloadFile } from "@/lib/share";
 // Shared workspace file browser (手机端布局重构 · 文件浏览复用).
 //
 // The crumbs + in-memory folder nav + full-screen previewer, extracted so both file surfaces
@@ -13,14 +22,6 @@
 // round-trip, instant folder nav (same as the original per-conversation browser).
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getTokens } from "@/api/client";
-import {
-  type DownloadedFile,
-  type FileNode,
-  type WorkspaceFileEntry,
-  buildTree,
-} from "@/api/workspace";
-import { canShareFiles, downloadBlob, shareOrDownloadFile } from "@/lib/share";
 
 /** The injected data source: how to list the tree and fetch one file's bytes. */
 export interface FileBrowserSource {
@@ -29,15 +30,75 @@ export interface FileBrowserSource {
 }
 
 const IMAGE_EXT = new Set([
-  "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "ico",
+  "avif",
 ]);
 const TEXT_EXT = new Set([
-  "txt", "md", "markdown", "json", "jsonl", "js", "jsx", "ts", "tsx", "mjs",
-  "cjs", "css", "scss", "less", "html", "htm", "xml", "yaml", "yml", "toml",
-  "ini", "cfg", "conf", "csv", "tsv", "log", "py", "rb", "go", "rs", "java",
-  "kt", "c", "h", "cpp", "hpp", "cc", "sh", "bash", "zsh", "sql", "env",
-  "gitignore", "dockerfile", "makefile", "vue", "svelte", "php", "lua", "r",
-  "dart", "swift", "scala", "pl", "ps1", "bat", "properties", "gradle",
+  "txt",
+  "md",
+  "markdown",
+  "json",
+  "jsonl",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "mjs",
+  "cjs",
+  "css",
+  "scss",
+  "less",
+  "html",
+  "htm",
+  "xml",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "cfg",
+  "conf",
+  "csv",
+  "tsv",
+  "log",
+  "py",
+  "rb",
+  "go",
+  "rs",
+  "java",
+  "kt",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "cc",
+  "sh",
+  "bash",
+  "zsh",
+  "sql",
+  "env",
+  "gitignore",
+  "dockerfile",
+  "makefile",
+  "vue",
+  "svelte",
+  "php",
+  "lua",
+  "r",
+  "dart",
+  "swift",
+  "scala",
+  "pl",
+  "ps1",
+  "bat",
+  "properties",
+  "gradle",
 ]);
 const TEXT_PREVIEW_MAX = 512 * 1024;
 
@@ -70,6 +131,7 @@ export function FileBrowser({
   const [error, setError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<FileNode | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey is an intentional manual-reload trigger — bumping it re-lists even though the body doesn't read it
   useEffect(() => {
     let cancelled = false;
     setTree(null);
@@ -252,11 +314,12 @@ function FileViewer({
   }
 
   async function share() {
-    if (file) await shareOrDownloadFile(file.blob, file.filename, file.contentType);
+    if (file)
+      await shareOrDownloadFile(file.blob, file.filename, file.contentType);
   }
 
   return (
-    <div className="viewer" role="dialog" aria-modal="true">
+    <Modal className="viewer" onClose={onClose} label={node.name}>
       <header className="bar">
         <button type="button" className="link" onClick={onClose}>
           ← 文件
@@ -273,7 +336,12 @@ function FileViewer({
               分享
             </button>
           )}
-          <button type="button" className="link" onClick={save} disabled={!file}>
+          <button
+            type="button"
+            className="link"
+            onClick={save}
+            disabled={!file}
+          >
             下载
           </button>
         </span>
@@ -287,10 +355,11 @@ function FileViewer({
         {view.kind === "text" && <pre className="viewer-text">{view.text}</pre>}
         {view.kind === "binary" && (
           <p className="muted hint">
-            无法预览此文件类型（{formatSize(view.size)}）。点右上角「下载」保存。
+            无法预览此文件类型（{formatSize(view.size)}
+            ）。点右上角「下载」保存。
           </p>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }

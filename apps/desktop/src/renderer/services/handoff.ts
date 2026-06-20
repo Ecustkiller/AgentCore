@@ -265,18 +265,6 @@ export async function listHandoffJobs(
   return res.data.map(toJob);
 }
 
-/** 单个交接作业的状态 + 结果快照（双模式工作区 P2e / e2）。 */
-export async function getHandoffJob(
-  conversationId: string,
-  jobId: string,
-): Promise<HandoffJob> {
-  return toJob(
-    await api.get<BackendJob>(
-      `/v1/conversations/${conversationId}/handoff/jobs/${jobId}`,
-    ),
-  );
-}
-
 /**
  * 一个已完成交接的结果 diff（双模式工作区 P2e / e3）：result 对 base 快照的变更集，
  * 每条携 base 哈希供客户端三方判定。作业未成功时后端返回 409。
