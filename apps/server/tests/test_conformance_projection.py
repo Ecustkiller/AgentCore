@@ -149,10 +149,36 @@ def test_multi_agent_worker_tool(projected):
 def test_multi_agent_debate_tags(projected):
     p = projected["multi_agent_debate"]
     assert p["status"] == "completed"
-    r1 = next(r for r in p["runs"] if r["id"] == "r1")
-    r2 = next(r for r in p["runs"] if r["id"] == "r2")
-    assert (r1["stance"], r1["group"], r1["round"]) == ("pro", "g1", 1)
-    assert (r2["stance"], r2["group"], r2["round"]) == ("con", "g1", 1)
+    # 主持人作为完成态节点 + 2 辩手 → 进度 3/3（CEO 不进图，是主气泡）。
+    assert p["progress"] == {"completed": 3, "total": 3}
+    mod = next(r for r in p["runs"] if r["id"] == "debate_mod1")
+    assert mod["status"] == "completed"
+    assert mod["role"] == "主持人"
+    pro = next(r for r in p["runs"] if r["id"] == "debate_mod1_r1_pro")
+    con = next(r for r in p["runs"] if r["id"] == "debate_mod1_r1_con")
+    # stance/group/round 从 plan 透传；辩手 parent = 主持人节点（CEO→主持人→辩手树）。
+    assert (pro["stance"], pro["group"], pro["round"]) == ("pro", "debate:debate", 1)
+    assert (con["stance"], con["group"], con["round"]) == ("con", "debate:debate", 1)
+    assert pro["parentRunId"] == "debate_mod1"
+
+
+def test_multi_agent_debate_products(projected):
+    """debate_result 折成 ProjectedTurn.debate：决策简报 + 交锋叙事线 verbatim，各方→辩手
+    run_id 映射回执行图（取发言全文）。"""
+    d = projected["multi_agent_debate"]["debate"]
+    assert d is not None
+    assert d["moderator_run_id"] == "debate_mod1"
+    assert d["form"] == "debate"
+    assert d["stop_reason"] == "converged"
+    assert d["narrative_first"] is False
+    # 决策简报（结论卡）。
+    assert d["brief"]["leaning"] == "倾向有条件采用"
+    assert d["brief"]["strongest_points"]["pro"] == "收益显著且可量化"
+    # 交锋叙事线（逐轮焦点 / 裁判 / 小结）+ 各方→辩手 run_id 映射。
+    rd = d["rounds"][0]
+    assert rd["round_no"] == 1
+    assert rd["verdict"]["converged"] is True
+    assert rd["sides"][0]["run_id"] == "debate_mod1_r1_pro"
 
 
 def test_multi_agent_revision_synthesizes_node(projected):

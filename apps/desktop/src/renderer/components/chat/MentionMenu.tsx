@@ -1,5 +1,5 @@
 import type { IndexedEntry } from "@/lib/fileIndex";
-import { File, Folder, FolderPlus, Search } from "lucide-react";
+import { File, Folder, FolderPlus, MessageSquare, Search } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 interface Props {
@@ -54,7 +54,7 @@ export function MentionMenu({
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="搜索文件…"
+            placeholder="搜索文件或对话…"
             className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
         </div>
@@ -78,7 +78,9 @@ export function MentionMenu({
         </div>
       ) : items.length === 0 ? (
         <div className="px-3 py-4 text-center text-sm text-muted-foreground">
-          {query.trim() ? "没有匹配的文件或目录" : "目录内没有可引用的内容"}
+          {query.trim()
+            ? "没有匹配的文件、目录或对话"
+            : "目录内没有可引用的内容"}
         </div>
       ) : (
         <ul ref={listRef} className="max-h-64 overflow-y-auto py-1">
@@ -103,6 +105,11 @@ export function MentionMenu({
                     size={14}
                     className="shrink-0 text-muted-foreground"
                   />
+                ) : entry.kind === "conversation" ? (
+                  <MessageSquare
+                    size={14}
+                    className="shrink-0 text-muted-foreground"
+                  />
                 ) : (
                   <File size={14} className="shrink-0 text-muted-foreground" />
                 )}
@@ -111,7 +118,7 @@ export function MentionMenu({
                   {entry.kind === "dir" ? "/" : ""}
                 </span>
                 <span className="ml-auto truncate text-xs text-muted-foreground">
-                  {entry.display}
+                  {entry.kind === "conversation" ? "对话" : entry.display}
                 </span>
               </button>
             </li>

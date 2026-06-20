@@ -225,8 +225,12 @@ async function runSidecarTurn({
 
   // 只消费本会话的事件；主进程已按 turnId 路由到本窗口，这里再按 conversationId 过滤，
   // 防一个 sidecar 服务多个会话时串台。
+  // 本回合是否派发过任何 sidecar 事件——一个都没有 = 引擎没跑起来（启动期失败，无输出 /
+  // 副作用），失败时据此标 `recoverable` 让 turns.sendTurn 安全降级回云端（阶段二）。
+  let sawAnyEvent = false;
   const unsubscribe = window.sidecarApi.onEvent((push) => {
     if (push.conversationId !== conversationId) return;
+    sawAnyEvent = true;
     dispatchSSEEvent(push.event as SSEEvent, { conversationId });
   });
 
@@ -255,7 +259,12 @@ async function runSidecarTurn({
       takeRecentSidecarFailure(rootId) ??
       describeSidecarTurnError(err) ??
       failMessage;
-    throw new StreamError("sidecar", undefined, { serverMessage: detail });
+    // 启动期失败（一个事件都没派发）= 无任何输出 / 副作用，可安全改道云端重跑（阶段二降级）；
+    // 中途失败（已开始流式 / 已调工具）则否，照常走「本地引擎出错」横幅 + 重试。
+    throw new StreamError("sidecar", undefined, {
+      serverMessage: detail,
+      recoverable: !sawAnyEvent,
+    });
   } finally {
     // Abort / engine failure skips message_end (and thus its flush); drain any
     // rAF-buffered content so a partial answer keeps its last frame of tokens.

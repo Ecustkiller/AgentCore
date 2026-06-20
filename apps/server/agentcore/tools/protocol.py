@@ -13,6 +13,7 @@ from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect
 
 if TYPE_CHECKING:
     from agentcore.workspace.protocol import WorkspaceBackend
+    from agentcore.workspace.write_claims import WriteCoordinator
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,13 @@ class ToolContext:
     # to "" for unscoped call sites (tests / evals) — a tool simply skips its
     # conversation-scoped optimisation when this is empty.
     conversation_id: str = ""
+    # Intra-batch write-conflict guard (并行写隔离·硬约束). Set per delegated-worker
+    # node by ``build_agent_executor``; ``None`` for the CEO / tests (no concurrent
+    # siblings to coordinate, so ``file_write`` skips the check). ``write_ancestors`` is
+    # this node's transitive ``depends_on`` closure, so it MAY overwrite a file written
+    # by an upstream it consolidates but not one a concurrent sibling did.
+    write_coordinator: WriteCoordinator | None = None
+    write_ancestors: frozenset[str] = frozenset()
 
 
 @dataclass

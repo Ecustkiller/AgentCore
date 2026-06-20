@@ -28,8 +28,9 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
-_FULL_TOOLS = {"delegate", "revise", "ask_user"}
-_NO_LIVE_USER = {"delegate", "revise"}  # autonomous path: no ask_user
+# debate / delegate / revise are wired on every path; ask_user is live-user only.
+_FULL_TOOLS = {"delegate", "revise", "ask_user", "debate"}
+_NO_LIVE_USER = {"delegate", "revise", "debate"}  # autonomous path: no ask_user
 
 
 def _ctx() -> ToolContext:
@@ -187,16 +188,20 @@ def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_ste
     assert "checkpoint_after" in body
 
 
-def test_debate_skill_teaches_stance_and_multi_round():
+def test_debate_skill_teaches_debate_tool_forms_and_dual_products():
+    # 重构后辩论是独立的 `debate` 工具（主持人驱动），不再是 delegate 上的 stance/round 标记。
+    # skill 教三形态选择、参与方配置、主持人自调轮数、双产物、与 delegate / ask_user 的边界。
     body = _body("debate_and_review")
-    assert "stance" in body
-    assert "pro" in body and "con" in body
-    assert "辩论" in body
-    # 真·多轮辩论: round + 跨轮 depends_on + 克制轮数.
-    assert "多轮辩论" in body
-    assert "round" in body
-    assert "跨轮" in body
-    assert "克制" in body
+    assert "debate" in body and "辩论" in body
+    # 三形态 + 红队被审方
+    assert "red_team" in body and "roundtable" in body
+    assert "is_subject" in body
+    # 你只定命题与参与方；轮数由主持人自调
+    assert "motion" in body and "sides" in body
+    # 双产物
+    assert "决策简报" in body and "交锋叙事线" in body
+    # 边界：并行调研仍用 delegate；收尾价值之争交 ask_user
+    assert "delegate" in body and "ask_user" in body
 
 
 def test_revise_skill_teaches_recall_and_delegate_fallback():

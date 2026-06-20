@@ -7,15 +7,14 @@ import type { SidecarHistoryEntry } from "@shared/sidecar-contract";
 /**
  * 会话路由判定：一个回合该走本地 sidecar，还是云端 SSE。
  *
- * 双模式工作区 / 远期规划 §一.1。**关键约束**：当前「local 模式」默认走云链路（云端引擎
- * 遥控桌面，发 `workspace_op_required` 让桌面执行 op）。sidecar 的持久化 / 计费现经回合结束
- * **回写云端**已闭环（幂等可重试，见 `streamConversationViaSidecar` / `localTurns`），故不再有
- * 「静默丢持久化/计费」之虞；但 sidecar 暂非真离线（LLM 仍经云推理代理）、被委派 worker 强制
- * 走审批门，且是较新的链路，故仍以用户开关 opt-in、不无条件改路由。
+ * 双模式工作区 / 远期规划 §一.1。sidecar 的持久化 / 计费现经回合结束**回写云端**已闭环（幂等
+ * 可重试，见 `streamConversationViaSidecar` / `localTurns`），且**启动失败会自动降级回云端**
+ * （见 `turns.sendTurn`），故本地引擎已毕业到**默认开**。
  *
- * 因此 sidecar 路由是**显式 opt-in**（用户设置开关「本地引擎」，默认关，见 `设置 → 模型配置`）：
- * 仅当开关开、会话绑定了本机存在的本地根、且本回合无附件时才走 sidecar；其余一律维持现状云
- * 链路。这样把本地引擎做成用户可发现、可控的真能力，又不动既有 local 会话的默认行为。
+ * 路由判定：会话绑定本机存在的本地根、本回合无附件、且开关有效（默认开，用户可在
+ * `设置 → 模型配置` 关闭）时走 sidecar；裸聊 / 云端文件夹 / 带附件 / 显式关闭 → 维持云链路。
+ * 注意 sidecar 暂非真离线（LLM 仍经云推理代理）、被委派 worker 仍走审批门——这些是其限制，
+ * 不再是 opt-in 的理由。
  */
 
 /**
@@ -72,27 +71,60 @@ export function isSidecarEnabled(): boolean {
 }
 
 /**
- * 解析一个会话应在其上跑 sidecar 的目标（容器根 id + 工作区子路径）；不该走 sidecar 则 null。
+ * 解析一个会话「能用本地引擎」时的目标（容器根 id + 工作区子路径），**不看开关是否已开**——
+ * 纯看会话有没有绑定一个本机确实存在的本地根。两处复用：① {@link resolveSidecarRoot} 在
+ * 开关开时据此寻址；② {@link canConversationUseSidecar} 作为「该对话能否走本地引擎」的公共
+ * 查询（与开关状态正交，供 UI 状态展示 / 启动探活等复用）。
  *
  * 取「会话 → 文件夹 → `localRootId` + `localSubpath`」（文件夹即工作区，绑定挂在文件夹上），
  * 再核对该根**确在本机**（否则属 §八「路径不存在」降级，交回云链路处理）。`subpath` 非空时
  * 主进程把 sidecar 绑定到 `容器根/子路径`（工作区对称化 D1a），故懒建的 per 对话本地工作区
- * 也能用本地引擎、且各跑在自己目录里。开关关 / 裸聊无文件夹 / 云端文件夹 → null。
+ * 也能用本地引擎、且各跑在自己目录里。裸聊无文件夹 / 云端文件夹 / 根不在本机 → null。
  */
-export async function resolveSidecarRoot(
+async function resolveLocalTarget(
   conversationId: string,
 ): Promise<SidecarTarget | null> {
-  if (!isSidecarEnabled()) return null;
   const folderId =
     getConversations().find((c) => c.id === conversationId)?.folderId ?? null;
   if (!folderId) return null;
   const folder = getFolders().find((f) => f.id === folderId) ?? null;
   const rootId = folder?.localRootId ?? null;
   if (!rootId) return null;
-  // 仅当该根确在本机才走 sidecar（缺失则交回云端，由模式栏走重连/切云降级）。
   const roots = await window.fsApi.listRoots();
   if (!roots.some((r) => r.id === rootId)) return null;
   return { rootId, subpath: folder?.localSubpath ?? "" };
+}
+
+/**
+ * 解析一个会话应在其上跑 sidecar 的目标（容器根 id + 工作区子路径）；不该走 sidecar 则 null。
+ *
+ * = 用户开了「本地引擎」开关（{@link isSidecarEnabled}）**且**该会话能用本地引擎
+ * （{@link resolveLocalTarget}）。开关关 / 裸聊无文件夹 / 云端文件夹 / 根不在本机 → null（交回
+ * 云链路）。
+ *
+ * 纯「绑定判定」，**不掺运行时健康**：本判定被新回合（`sendTurn`）、续跑（`runResume`）、列暂停
+ * 帧（`loadPausedTurns`）三处复用，而「环境能否拉起」（探活 / 降级标记，见 sidecarHealth）对三者
+ * 语义不同——对新回合是「降级走云」的理由，对续跑 / 列帧反而是「本机帧只在本地、绝不能误走云」。
+ * 故健康收敛留给各调用方按自身语义处理（`sendTurn` 探活失败走云、`runResume` 探活失败保留帧出
+ * 横幅、`loadPausedTurns` 只读本机帧不关心进程健康），不在此处统一挡掉、以免污染后两者。
+ */
+export async function resolveSidecarRoot(
+  conversationId: string,
+): Promise<SidecarTarget | null> {
+  if (!isSidecarEnabled()) return null;
+  return resolveLocalTarget(conversationId);
+}
+
+/**
+ * 该会话是否「能用本地引擎」（桌面端 + 绑定本机存在的本地根），**不看开关是否已开**——与
+ * {@link isSidecarEnabled}（开关）正交的公共查询。供 UI 判断某对话是否值得围绕本地引擎做
+ * 状态展示 / 提示（如启动探活），只有真能走 sidecar 的对话（local 模式 + 根在本机）才返回 true。
+ */
+export async function canConversationUseSidecar(
+  conversationId: string,
+): Promise<boolean> {
+  if (typeof window === "undefined" || !window.sidecarApi) return false;
+  return (await resolveLocalTarget(conversationId)) !== null;
 }
 
 /**

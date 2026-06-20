@@ -51,6 +51,7 @@ from agentcore.runtime.events import (
     message_end,
     title_generated,
     turn_saved,
+    workspace_promoted,
 )
 from agentcore.runtime.journal import persist_turn_journal
 from agentcore.runtime.pipeline import resume_chat_pipeline, run_chat_pipeline
@@ -187,6 +188,7 @@ def _bare_chat_promote(
     title: str | None,
     user_message: str,
     local_container_root_id: str | None,
+    sink: EventSink,
 ):
     """Build the lazy-promotion callback for a 裸聊 turn (文件夹即工作区 §懒建).
 
@@ -195,6 +197,10 @@ def _bare_chat_promote(
     it, and return where it landed so the rest of the turn — and the end-of-turn
     snapshot — target it. Runs in its own session because it fires mid-run, after the
     turn's setup session has already closed.
+
+    Emits ``workspace_promoted`` on the turn's ``sink`` right after the conversation is
+    filed, so the live client re-groups the chat under the new folder and surfaces it
+    in the 文件 rail — without it the promotion is invisible until a manual refetch.
 
     When ``local_container_root_id`` is set (a desktop bare chat, 工作区对称化 D1a),
     the new folder is bound **local** at a unique subpath under that container root,
@@ -241,6 +247,18 @@ def _bare_chat_promote(
             folder_id=folder.id,
             location="local" if binding else "server",
         )
+        # Tell the live client the 裸聊 just became a folder workspace, so it re-groups
+        # the chat + shows the new card now (else stale until refetch/reload). Local
+        # promotion carries the container root + subpath; cloud leaves root_id None.
+        sink.emit(
+            workspace_promoted(
+                conversation_id=conversation_id,
+                folder_id=folder.id,
+                name=name,
+                local_root_id=local_container_root_id,
+                local_subpath=local_subpath or "",
+            )
+        )
         return PromotionResult(folder_id=folder.id, local_binding=binding)
 
     return _promote
@@ -276,6 +294,7 @@ def _build_turn_backend(
                 title=title,
                 user_message=user_message,
                 local_container_root_id=local_container_root_id,
+                sink=sink,
             ),
             sink=sink,
             conversation_id=conversation_id,

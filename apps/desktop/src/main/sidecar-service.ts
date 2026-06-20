@@ -25,6 +25,7 @@ import {
   type SidecarInference,
   type SidecarListPausedRequest,
   type SidecarPausedTurn,
+  type SidecarProbeRequest,
   type SidecarRespondRequest,
   type SidecarResumeRequest,
   type SidecarStartTurnRequest,
@@ -490,6 +491,22 @@ export class SidecarManager {
   }
 
   /**
+   * 探活某 `root + subpath` 的 sidecar：拉起（或复用）进程并完成 initialize 握手即返回，不跑
+   * 任何回合。用于在首次真正走 sidecar 前提前验证本机环境（Python / venv / 引擎导入 / 工作区
+   * 绑定）能起得来；握手成功留存的进程正好被随后的首个回合复用（`ensure` 命中缓存、零额外拉
+   * 起）。失败时 `ensure` 的 `ready` 已 pushStatus(error) + 逐出该 entry，错误上抛给调用方。
+   */
+  async probe(
+    rootId: string,
+    subpath: string,
+    workspaceRoot: string,
+  ): Promise<void> {
+    // 不传 inference：探活只验证环境能起；真实回合的 startTurn 会按回合重发云代理凭据。
+    const entry = this.ensure(rootId, subpath, workspaceRoot, undefined);
+    await entry.ready;
+  }
+
+  /**
    * 续跑一个持久挂起的本地回合（结构化挂起 2b）。
    *
    * 与 `startTurn` 同构：拉起 / 复用该根 sidecar，claim 本机帧并跑 `resume_chat_pipeline`，
@@ -638,6 +655,19 @@ export function registerSidecarIpc(): void {
     SIDECAR_CHANNELS.listPaused,
     (_e, req: SidecarListPausedRequest): Promise<SidecarPausedTurn[]> =>
       manager.listPaused(req),
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.probe,
+    async (_e, req: SidecarProbeRequest): Promise<void> => {
+      const root = await getStoredRoot(req.rootId);
+      if (!root) throw new Error("本地目录未授权或已移除");
+      const workspaceRoot = await resolveWorkspaceRoot(
+        root.absPath,
+        req.subpath,
+      );
+      await manager.probe(req.rootId, req.subpath ?? "", workspaceRoot);
+    },
   );
 
   app.on("before-quit", () => manager.disposeAll());

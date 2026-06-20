@@ -20,6 +20,7 @@ import {
   appendContentStep,
   appendReasoningStep,
   appendToolStep,
+  dropTrailingContentSteps,
   resolveToolStep,
 } from "@/lib/processTimeline";
 import {
@@ -29,12 +30,17 @@ import {
   frameFromEvent,
   planFromRunPlan,
   projectExecution,
+  upsertDebateRound,
 } from "@/stores/execution";
 import type {
   ApprovalRequiredPayload,
   CheckpointRequiredPayload,
   CitationsPayload,
   ContentDeltaPayload,
+  DebateNarrativeRound,
+  DebateResultPayload,
+  DebateRoundPayload,
+  DebateRoundStartedPayload,
   MessageEndPayload,
   PlanReviewRequiredPayload,
   ReasoningDeltaPayload,
@@ -90,6 +96,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let status: TurnStatus = "running";
   let finishReason: string | null = null;
   let cost: CostBreakdown | null = null;
+  let debate: DebateResultPayload | null = null;
+  let debateRounds: DebateNarrativeRound[] = [];
   let pending: PendingInteraction | null = null;
 
   // Team graph via the REAL desktop fold: build the plan + frame stream the same way
@@ -103,6 +111,16 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         const d = (ev.payload as ContentDeltaPayload).delta || "";
         content += d;
         if (d) process = appendContentStep(process, d);
+        break;
+      }
+      // 交付前核验回炉（finish_guard）：done 轮草稿未过轻层核验，引擎丢弃这一版、发
+      // content_reset、回炉重写。content_reset 进 _history（重连回放会重发），故 fold 必须
+      // 镜像生产端（stores/conversation.ts resetStreamingContent）与后端
+      // （EventSink._accumulate_process）：清正文标量 + 弹掉 process 尾部连续 content 步，
+      // 让重写版从干净态重新累积——否则巡检 fold 会把「违规版+修正版」拼在一起、与生产漂移。
+      case "content_reset": {
+        content = "";
+        process = dropTrailingContentSteps(process);
         break;
       }
       case "reasoning_delta": {
@@ -135,6 +153,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "run_started":
+      case "run_context":
       case "run_output_delta":
       case "run_reasoning_delta":
       case "run_tool_progress":
@@ -143,6 +162,35 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "run_progress": {
         const frame = frameFromEvent(ev);
         if (frame) frames.push(frame);
+        break;
+      }
+      // 辩论收场产物（回合级单事件，非 frame）：verbatim 折入，与 oracle 一致。
+      case "debate_result": {
+        debate = ev.payload as DebateResultPayload;
+        break;
+      }
+      // 辩论逐轮增量（进行中实时叠加，非 frame）：折叠累积成 debateRounds，与 oracle / 手机
+      // fold 一致。round_started 先给焦点（verdict=null=进行中），round 补 summary/verdict/sides。
+      case "debate_round_started": {
+        const p = ev.payload as DebateRoundStartedPayload;
+        debateRounds = upsertDebateRound(debateRounds, {
+          round_no: p.round_no,
+          focus: p.focus,
+          summary: "",
+          verdict: null,
+          sides: [],
+        });
+        break;
+      }
+      case "debate_round": {
+        const p = ev.payload as DebateRoundPayload;
+        debateRounds = upsertDebateRound(debateRounds, {
+          round_no: p.round_no,
+          focus: p.focus,
+          summary: p.summary,
+          verdict: p.verdict,
+          sides: p.sides,
+        });
         break;
       }
       // plan_review gates the turn (pending) AND folds into the graph as a frame so
@@ -222,14 +270,16 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       }
       default:
         // message_start / turn_saved / title_generated / tool_progress /
-        // question_posted / workspace_op_required / handoff_* — not part of the
-        // normalized judge state.
+        // question_posted / workspace_op_required / workspace_promoted / handoff_* —
+        // not part of the normalized judge state.
         break;
     }
   }
 
   const execStatus: ExecutionStatus = status === "running" ? "running" : status;
-  const execution = plan ? projectExecution(plan, frames, execStatus) : null;
+  const execution = plan
+    ? projectExecution(plan, frames, execStatus, debate, debateRounds)
+    : null;
 
   const agents: ProjectedAgent[] = (execution?.agents ?? []).map((a) => ({
     id: a.id,
@@ -265,6 +315,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     revisionOf: r.revisionOf,
     revision: r.revision,
     checkpoint: r.checkpoint,
+    receivedContext: r.receivedContext,
   }));
 
   return {
@@ -279,5 +330,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     progress: execution ? execution.progress : { completed: 0, total: 0 },
     pendingInteraction: pending,
     cost,
+    debate,
+    debateRounds,
   };
 }

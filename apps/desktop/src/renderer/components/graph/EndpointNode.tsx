@@ -27,6 +27,11 @@ interface EndpointNodeData {
   handleDirection?: "vertical" | "horizontal";
   /** Position in the plan, used to stagger the entrance animation. */
   enterIndex?: number;
+  /** Lit (full-screen only) when the in-place panel surfaces this endpoint's
+   * message — the user's prompt (input) / the CEO's final answer (captain) — so
+   * the bookend glows like a drilled worker node. Mirrors AgentNode's `focused`;
+   * its single source is the full-screen endpoint view (see GraphView). */
+  focused?: boolean;
   /** Captain only: keyboard/mouse activation — jumps to the final answer.
    * Absent on the input node, which stays a passive label. */
   onActivate?: () => void;
@@ -73,6 +78,10 @@ export function EndpointNode({ data }: NodeProps) {
   // jumps the conversation to the real message they stand in for (the user's
   // prompt / the CEO's answer).
   const interactive = !!d.onActivate;
+  // Single highlight source: the full-screen endpoint view (projected into
+  // `d.focused` by GraphView). Mirrors AgentNode — a solid primary outline when
+  // its prompt / answer is the one showing in the in-place panel.
+  const highlighted = d.focused;
   const preview = isInput ? d.label : d.preview;
   // Only the captain node owns a live status; the input node is static, so it
   // never flashes (the hook also self-guards its already-terminal first mount).
@@ -117,10 +126,12 @@ export function EndpointNode({ data }: NodeProps) {
             isInput
               ? "border-border bg-muted/40"
               : `bg-card ring-2 ${style.ring}`
-          } ${running ? "animate-pulse" : ""} ${flashing ? "animate-graph-node-flash" : ""} ${
-            interactive
-              ? "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
-              : ""
+          } ${running ? "animate-pulse" : ""} ${flashing ? "animate-graph-node-flash" : ""} ${interactive ? "cursor-pointer" : ""} ${
+            highlighted
+              ? "outline outline-2 outline-offset-2 outline-primary"
+              : interactive
+                ? "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60"
+                : ""
           }`}
         >
           <div className="flex items-center gap-2.5">

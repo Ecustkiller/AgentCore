@@ -105,9 +105,10 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
     # folds their usage/ledger/citations — give it empty doubles.
     fake_delegate = SimpleNamespace(usage={}, run_ledger=[], citations=[])
     fake_revise = SimpleNamespace(usage={}, run_ledger=[], citations=[])
+    fake_debate = SimpleNamespace(usage={}, run_ledger=[], citations=[])
 
     def _fake_assemble(**_kwargs):
-        return fake_delegate, fake_revise, registry
+        return fake_delegate, fake_revise, fake_debate, registry
 
     monkeypatch.setattr(pipeline, "_assemble_ceo_toolset", _fake_assemble)
 

@@ -500,19 +500,24 @@ class WorkspaceListResponse(BaseModel):
 
 
 class MessageAttachment(BaseModel):
-    """A file the user referenced (@-mention or paperclip) as message context.
+    """A piece of context the user referenced (@-mention or paperclip).
 
-    Text is extracted client-side from an authorized local root; this MVP carries
-    only text-extractable files (images are out of scope until a vision model).
+    Text is extracted/materialized client-side; this MVP carries only
+    text-extractable sources (images are out of scope until a vision model).
+    ``kind="conversation"`` references another of the user's conversations: its
+    recent messages are materialized into ``text`` client-side (same as a file's
+    body), and ``conversation_id`` records which one (for the chip + later jump).
     """
 
     name: str = Field(..., min_length=1, max_length=500)
     path: str = Field(..., max_length=4000)
     # File: extracted text. Directory: a recursive file listing (paths only, no
-    # file bodies) built client-side.
+    # file bodies). Conversation: its recent messages, formatted client-side.
     text: str = Field(..., max_length=300_000)
     truncated: bool = False
-    kind: Literal["file", "dir"] = "file"
+    kind: Literal["file", "dir", "conversation"] = "file"
+    # Set only for kind="conversation": the referenced conversation's id.
+    conversation_id: str | None = None
 
 
 class StoredAttachment(BaseModel):
@@ -527,8 +532,11 @@ class StoredAttachment(BaseModel):
     name: str
     path: str
     truncated: bool = False
-    kind: Literal["file", "dir"] = "file"
+    kind: Literal["file", "dir", "conversation"] = "file"
     workspace_path: str | None = None
+    # Set only for kind="conversation": the referenced conversation's id, so the
+    # stored chip can label it and (later) jump back to that conversation.
+    conversation_id: str | None = None
     # Byte size of the stored file, surfaced for IM file chips (Stage 4 富消息).
     # None for directory listings and legacy rows created before sizing.
     size_bytes: int | None = None

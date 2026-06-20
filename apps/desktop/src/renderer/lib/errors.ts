@@ -32,17 +32,26 @@ export class StreamError extends Error {
   code?: string;
   serverMessage?: string;
   retryAfter?: number;
+  /** 本回合在产生任何可见输出 / 副作用之前就失败了——调用方可安全地改走另一条链路重跑整轮
+   * 而不重复输出 / 副作用。当前用途：sidecar 启动期失败（引擎没跑起来）自动降级回云端。 */
+  recoverable?: boolean;
 
   constructor(
     public kind: StreamErrorKind,
     public status?: number,
-    extra?: { code?: string; serverMessage?: string; retryAfter?: number },
+    extra?: {
+      code?: string;
+      serverMessage?: string;
+      retryAfter?: number;
+      recoverable?: boolean;
+    },
   ) {
     super(`stream ${kind}${status ? ` ${status}` : ""}`);
     this.name = "StreamError";
     this.code = extra?.code;
     this.serverMessage = extra?.serverMessage;
     this.retryAfter = extra?.retryAfter;
+    this.recoverable = extra?.recoverable;
   }
 }
 

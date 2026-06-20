@@ -259,7 +259,8 @@
         "round": 0,
         "revisionOf": null,
         "revision": 0,
-        "checkpoint": null
+        "checkpoint": null,
+        "receivedContext": []
       },
       {
         "id": "r2",
@@ -295,7 +296,8 @@
         "round": 0,
         "revisionOf": null,
         "revision": 0,
-        "checkpoint": null
+        "checkpoint": null,
+        "receivedContext": []
       }
     ],
     "progress": {
@@ -309,6 +311,8 @@
       "output": 120000,
       "total": 360000,
       "currency": "USD"
-    }
+    },
+    "debate": null,
+    "debateRounds": []
   }
 }

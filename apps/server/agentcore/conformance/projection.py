@@ -78,6 +78,8 @@ def _run_from_plan(s: dict[str, Any]) -> dict[str, Any]:
         "revisionOf": None,
         "revision": 0,
         "checkpoint": None,
+        # 收到的上下文 (上下文传递可视化): filled by the run_context fact; empty until then.
+        "receivedContext": [],
     }
 
 
@@ -95,6 +97,12 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     finish_reason: str | None = None
     cost: dict[str, Any] | None = None
     pending: dict[str, Any] | None = None
+    # 辩论编排收场产物（debate_result）：整段 payload verbatim 折入，与 run_plan 的辩手
+    # 节点互补（图承载执行/发言全文，本字段承载决策简报 + 交锋叙事线）。None=本回合无辩论。
+    debate: dict[str, Any] | None = None
+    # 辩论逐轮叙事（debate_round_started / debate_round）：进行中实时叠加，折叠累积按 round_no
+    # 升序。transport-only 事件 → 重载（journal 无之）恒为 []，届时全量叙事线在 debate 里。
+    debate_rounds: list[dict[str, Any]] = []
     # plan_review_resolved carries only the checkpoint id → remember the gated run ids.
     checkpoint_steps: dict[str, list[str]] = {}
 
@@ -103,6 +111,17 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
     def run_by_id(rid: str) -> dict[str, Any] | None:
         return next((r for r in runs if r["id"] == rid), None)
+
+    def upsert_round(entry: dict[str, Any]) -> None:
+        """Fold one 逐轮叙事 update by ``round_no`` (a later debate_round overwrites the
+        focus-only round_started entry — it carries focus too), kept ascending. Mirrors
+        the TS folds' ``upsertDebateRound`` (conformance pins them equal)."""
+        for i, r in enumerate(debate_rounds):
+            if r["round_no"] == entry["round_no"]:
+                debate_rounds[i] = entry
+                return
+        debate_rounds.append(entry)
+        debate_rounds.sort(key=lambda r: r["round_no"])
 
     for ev in events:
         etype = ev.get("type") or ""
@@ -116,6 +135,15 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     process[-1]["text"] += delta
                 else:
                     process.append({"kind": "content", "text": delta})
+
+        elif etype == "content_reset":
+            # 交付前核验回炉 (finish_guard)：done 轮草稿未过轻层核验，引擎丢弃这一版、发
+            # content_reset、回炉重写。该事件进 _history（重连回放重发），故 oracle 必须与三端
+            # fold 一致：清正文标量 + 弹掉 process 尾部连续 content 步（reasoning/tool 是真实
+            # 过程，保留），让重写版从干净态重累积——否则会把「违规版+修正版」拼在一起。
+            content = ""
+            while process and process[-1].get("kind") == "content":
+                process.pop()
 
         elif etype == "reasoning_delta":
             delta = p.get("delta") or ""
@@ -226,6 +254,15 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 ag["currentRunId"] = rid
                 ag["toolProgress"] = None
 
+        elif etype == "run_context":
+            # 收到的上下文 (上下文传递可视化): record the structured context this run was
+            # fed onto its node, carried verbatim (wire-shaped snake_case blocks) — the
+            # same data the LLM saw. Mirrors the desktop/mobile folds (conformance pins
+            # them equal).
+            run = run_by_id(p.get("run_id", ""))
+            if run is not None:
+                run["receivedContext"] = list(p.get("blocks") or [])
+
         elif etype == "run_output_delta":
             ag = agent_by_id(p.get("agent_id", ""))
             if ag:
@@ -274,6 +311,35 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # Progress is derived from run states below (cumulative, multi-batch safe);
             # the wire counter is a timeline marker only.
             pass
+
+        elif etype == "debate_result":
+            # 一场辩论收场：整段结构化产物（form/motion/rounds/brief/sides/各方 run_id）
+            # verbatim 存入，前端辩论视图据此取简报 + 叙事线，从执行图辩手节点取发言全文。
+            debate = p
+
+        elif etype == "debate_round_started":
+            # 一轮开场（发言前）：先给焦点，verdict=None 表示该轮进行中（仅定焦点未裁判）。
+            upsert_round(
+                {
+                    "round_no": p.get("round_no", 0),
+                    "focus": p.get("focus", ""),
+                    "summary": "",
+                    "verdict": None,
+                    "sides": [],
+                }
+            )
+
+        elif etype == "debate_round":
+            # 一轮收尾（裁判 + 小结后）：补全焦点 / 小结 / 裁判 / 各方→辩手 run_id 映射。
+            upsert_round(
+                {
+                    "round_no": p.get("round_no", 0),
+                    "focus": p.get("focus", ""),
+                    "summary": p.get("summary", ""),
+                    "verdict": p.get("verdict"),
+                    "sides": list(p.get("sides") or []),
+                }
+            )
 
         elif etype == "approval_required":
             pending = {
@@ -377,4 +443,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         },
         "pendingInteraction": pending,
         "cost": cost,
+        "debate": debate,
+        "debateRounds": debate_rounds,
     }

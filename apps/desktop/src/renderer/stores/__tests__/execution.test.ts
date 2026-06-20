@@ -1,10 +1,11 @@
-import type { SSEEvent } from "@/types/events";
+import type { DebateResultPayload, SSEEvent } from "@/types/events";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   type ExecutionJournal,
   type ExecutionPlan,
   type RunFrame,
   debateGroups,
+  debateLiveRounds,
   debateSides,
   elapsedMs,
   execRuntime,
@@ -802,6 +803,47 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
     ],
   };
 
+  const debateResult: DebateResultPayload = {
+    execution_id: "exec-d",
+    moderator_run_id: "mod-1",
+    form: "debate",
+    motion: "该不该上微服务",
+    stop_reason: "converged",
+    narrative_first: false,
+    sides: [
+      { key: "pro", name: "正方", stance: "支持上微服务", is_subject: false },
+      { key: "con", name: "反方", stance: "反对上微服务", is_subject: false },
+    ],
+    rounds: [
+      {
+        round_no: 1,
+        focus: "拆分边界与运维成本",
+        summary: "正方强调可独立扩展，反方指出运维负担重，焦点收敛到团队规模。",
+        verdict: {
+          real_clash: true,
+          new_arguments: false,
+          converged: true,
+          stop_reason: "分歧已充分暴露，无新论据",
+          rationale: "争点收敛到团队规模这一关键点",
+        },
+        sides: [
+          { key: "pro", name: "正方", run_id: "r-pro", ok: true },
+          { key: "con", name: "反方", run_id: "r-con", ok: true },
+        ],
+      },
+    ],
+    brief: {
+      crux: "团队规模是否撑得起微服务运维",
+      strongest_points: { pro: "可独立扩展", con: "运维成本高" },
+      factual_disputes: ["当前 QPS 峰值口径不一致"],
+      value_disputes: ["迭代速度优先 vs 稳定优先"],
+      leaning: "倾向暂缓",
+      confidence: "medium",
+      recommendation: "先做模块化单体，规模上来再按域拆分。",
+      open_questions: ["触发拆分的指标阈值如何设定？"],
+    },
+  };
+
   it("projectExecution carries stance/group onto the run nodes", () => {
     const exec = projectExecution(debatePlan, [], "running");
     expect(exec.runs.find((r) => r.id === "r-pro")).toMatchObject({
@@ -823,9 +865,27 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
     );
   });
 
-  it("isDebate is true only when a run carries a stance", () => {
+  it("isDebate is true when runs carry a stance OR debate products exist", () => {
     expect(isDebate(projectExecution(debatePlan, [], "running"))).toBe(true);
     expect(isDebate(projectExecution(plan, [], "running"))).toBe(false);
+    // 收场产物是辩论的强信号——即便 runs 不带 stance（旧标签缺失 / roundtable 多方）。
+    const withProducts = projectExecution(plan, [], "completed", debateResult);
+    expect(isDebate(withProducts)).toBe(true);
+  });
+
+  it("projectExecution carries the debate products (简报 + 叙事线) verbatim", () => {
+    const exec = projectExecution(debatePlan, [], "completed", debateResult);
+    expect(exec.debate).toBe(debateResult);
+    // 普通团队回合不背辩论字段（默认 null）。
+    expect(projectExecution(plan, [], "running").debate).toBeNull();
+  });
+
+  it("recordDebateResult stores the live debate products on the slot", () => {
+    // Live 路径：streamConversation 收到 debate_result → recordDebateResult 写入 slot，
+    // 之后 useMessageExecution 经 projectExecution 把它带给辩论视图。
+    store().startExecution(debatePlan, MID);
+    store().recordDebateResult(debateResult, MID);
+    expect(execRuntime(store(), MID).debate).toBe(debateResult);
   });
 
   it("debateSides splits the roster by side in plan order", () => {
@@ -890,6 +950,44 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
     expect(groups[0].key).toBe("");
     expect(groups[0].pro).toHaveLength(1);
     expect(groups[0].con).toHaveLength(1);
+  });
+
+  it("debateLiveRounds reconstructs 圆桌/红队 multi-side rounds from revision chains", () => {
+    // 多方（无 stance）：首轮是 plan 节点（group debate:*），后续轮是续写 revision
+    // (revision N == 第 N 轮)，故 debateGroups 看不到、需走 revision 链重建逐轮。
+    const roundtablePlan: ExecutionPlan = {
+      id: "exec-rt",
+      planType: "multi_agent",
+      taskSummary: "圆桌",
+      agents: [
+        { id: "a1", role: "中央视角", modelPreference: "strong" },
+        { id: "a2", role: "去中心视角", modelPreference: "strong" },
+        { id: "a3", role: "混合视角", modelPreference: "strong" },
+      ],
+      runs: [
+        { id: "d_r1_1", agentId: "a1", task: "t", dependsOn: [], group: "debate:roundtable", round: 1 },
+        { id: "d_r1_2", agentId: "a2", task: "t", dependsOn: [], group: "debate:roundtable", round: 1 },
+        { id: "d_r1_3", agentId: "a3", task: "t", dependsOn: [], group: "debate:roundtable", round: 1 },
+      ],
+    };
+
+    // 仅首轮：无 stance ⇒ debateGroups 空；debateLiveRounds 给出第 1 轮的三方。
+    const r1 = projectExecution(roundtablePlan, [], "running");
+    expect(debateGroups(r1)).toHaveLength(0);
+    const live1 = debateLiveRounds(r1);
+    expect(live1).toHaveLength(1);
+    expect(live1[0].round).toBe(1);
+    expect(live1[0].runs.map((r) => r.id)).toEqual(["d_r1_1", "d_r1_2", "d_r1_3"]);
+
+    // 第 2 轮续写：两方已续、一方未续 ⇒ 第 2 轮只含续到的两方（诚实留空，不假装）。
+    const r2 = projectExecution(
+      roundtablePlan,
+      [revised("d_r2_1", "d_r1_1", 2), revised("d_r2_2", "d_r1_2", 2)],
+      "running",
+    );
+    const live2 = debateLiveRounds(r2);
+    expect(live2.map((r) => r.round)).toEqual([1, 2]);
+    expect(live2[1].runs.map((r) => r.id)).toEqual(["d_r2_1", "d_r2_2"]);
   });
 
   it("planFromRunPlan maps the wire stance/group through to the plan", () => {

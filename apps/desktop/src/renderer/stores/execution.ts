@@ -1,9 +1,13 @@
 import type {
   CheckpointDecision,
+  ContextBlockWire,
   CostBreakdown,
+  DebateNarrativeRound,
+  DebateResultPayload,
   PlanReviewRequiredPayload,
   PlanReviewResolvedPayload,
   RunCompletedPayload,
+  RunContextPayload,
   RunFailedPayload,
   RunKind,
   RunOutputDeltaPayload,
@@ -19,6 +23,10 @@ import type {
   ToolUseStartPayload,
   UsageBreakdown,
 } from "@/types/events";
+
+// Re-exported so run-detail components render the「收到的上下文」blocks from the store's
+// contract (上下文传递可视化) without reaching into the wire types directly.
+export type { ContextBlockWire } from "@/types/events";
 import { createContext, useContext, useMemo } from "react";
 import { create } from "zustand";
 
@@ -226,16 +234,29 @@ export interface RunNode {
    * 2a); null for a run that never gated. Surfaced as a node pause badge so the
    * graph shows where the scheduler stopped for the user. */
   checkpoint: RunCheckpoint | null;
+  /** 收到的上下文 (上下文传递可视化): the structured ContextBlocks this run was fed at
+   * assembly time, from its `run_context` frame — the SAME data the LLM saw (原始请求 /
+   * 团队位置 / 前置结果 / 工作区 / 任务…). Empty until that frame folds in (or for a run
+   * whose opening wasn't block-assembled). Drives the run detail's「收到的上下文」area. */
+  receivedContext: ContextBlockWire[];
 }
 
 export interface Execution {
   id: string;
-  planType: "single_agent" | "multi_agent";
+  planType: "single_agent" | "multi_agent" | "debate";
   taskSummary: string;
   status: ExecutionStatus;
   agents: AgentState[];
   runs: RunNode[];
   progress: { completed: number; total: number };
+  /** 辩论收场产物（`debate_result`）：决策简报 + 交锋叙事线，verbatim 承载；null = 非
+   * 辩论回合。与 {@link runs} 互补——辩手发言全文在对应辩手节点，本字段是主持人的逐轮
+   * 裁判/小结 + 决策简报（{@link DebateView} 据此渲染）。 */
+  debate: DebateResultPayload | null;
+  /** 辩论进行中的逐轮叙事（`debate_round_started` / `debate_round` 折叠累积）：让进行中就叠
+   * 出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。Transport-only 事件，重载
+   * （journal 无逐轮事件）恒为 `[]`——届时全量叙事线已在 {@link debate}。非辩论恒 `[]`。 */
+  debateRounds: DebateNarrativeRound[];
 }
 
 /**
@@ -244,7 +265,7 @@ export interface Execution {
  */
 export interface ExecutionPlan {
   id: string;
-  planType: "single_agent" | "multi_agent";
+  planType: "single_agent" | "multi_agent" | "debate";
   taskSummary: string;
   agents: {
     id: string;
@@ -297,6 +318,13 @@ export type RunFrame =
       // 续写 version (乙 热修 P4): 0 for an ordinary run, >=2 for a revision (then
       // parentRunId is the original run it revises).
       revision: number;
+    }
+  | {
+      t: number;
+      kind: "run_context";
+      runId: string;
+      // 收到的上下文 (上下文传递可视化): the wire ContextBlocks this run was fed.
+      blocks: ContextBlockWire[];
     }
   | { t: number; kind: "run_output_delta"; agentId: string; delta: string }
   | { t: number; kind: "run_reasoning_delta"; agentId: string; delta: string }
@@ -369,6 +397,8 @@ export function projectExecution(
   plan: ExecutionPlan,
   frames: RunFrame[],
   status: ExecutionStatus,
+  debate: DebateResultPayload | null = null,
+  debateRounds: DebateNarrativeRound[] = [],
 ): Execution {
   const agents: AgentState[] = plan.agents.map((a) => ({
     id: a.id,
@@ -413,6 +443,8 @@ export function projectExecution(
     revision: 0,
     // No checkpoint until a plan_review frame folds in (结构化挂起 2a).
     checkpoint: null,
+    // No received context until the run_context frame folds in (上下文传递可视化).
+    receivedContext: [],
   }));
 
   const agentById = (id: string) => agents.find((a) => a.id === id);
@@ -470,6 +502,7 @@ export function projectExecution(
               revisionOf: f.parentRunId,
               revision: f.revision,
               checkpoint: null,
+              receivedContext: [],
             };
             runs.push(run);
           }
@@ -487,6 +520,13 @@ export function projectExecution(
           agent.currentRunId = f.runId;
           agent.toolProgress = null;
         }
+        break;
+      }
+      case "run_context": {
+        // 收到的上下文 (上下文传递可视化): record the structured context this run was
+        // fed onto its node, so the detail panel shows exactly what the LLM saw.
+        const run = runById(f.runId);
+        if (run) run.receivedContext = f.blocks;
         break;
       }
       case "run_output_delta": {
@@ -621,7 +661,27 @@ export function projectExecution(
       completed: runs.filter((s) => s.status === "completed").length,
       total: runs.length,
     },
+    debate,
+    debateRounds,
   };
+}
+
+/** Fold one 逐轮叙事 update (`debate_round_started` → focus only, verdict null;
+ * `debate_round` → full focus/summary/verdict/sides) into the accumulated list,
+ * keyed by `round_no` (a later `debate_round` overwrites the earlier focus-only
+ * entry — it carries focus too), kept ascending. Shared by the live store action and
+ * the conformance fold so both ends累积 identically. */
+export function upsertDebateRound(
+  rounds: DebateNarrativeRound[],
+  round: DebateNarrativeRound,
+): DebateNarrativeRound[] {
+  const idx = rounds.findIndex((r) => r.round_no === round.round_no);
+  if (idx === -1) {
+    return [...rounds, round].sort((a, b) => a.round_no - b.round_no);
+  }
+  const next = [...rounds];
+  next[idx] = round;
+  return next;
 }
 
 /** Human-readable label for a frame, used by the timeline scrubber. */
@@ -634,6 +694,8 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
   switch (frame.kind) {
     case "run_started":
       return `${role(frame.agentId)} 开始 · ${task(frame.runId)}`;
+    case "run_context":
+      return `${task(frame.runId)} · 收到上下文`;
     case "run_output_delta":
       return `${role(frame.agentId)} 输出中…`;
     case "run_reasoning_delta":
@@ -679,7 +741,11 @@ export function elapsedMs(frames: RunFrame[]): number {
  * 不是模式」), so the strip title / node badge / graph 分列 all key off it.
  */
 export function isDebate(execution: Execution): boolean {
-  return execution.runs.some((r) => r.stance != null);
+  // 收场产物是辩论的强信号（debate_result 必带）；进行中或旧 journal 无产物时退回
+  // stance 标签（辩手 run 携带）——两者任一即「这是一场辩论」。
+  return (
+    execution.debate != null || execution.runs.some((r) => r.stance != null)
+  );
 }
 
 /**
@@ -746,6 +812,58 @@ export function debateGroups(execution: Execution): DebateGroup[] {
     group.rounds.sort((a, b) => a.round - b.round);
   }
   return groups;
+}
+
+/** One round of a multi-side debate (圆桌 / 红队 / 3+方) in progress: the round number
+ * + that round's debater run per side. Unlike {@link DebateGroup} (正/反 stance pairs),
+ * multi-side rounds have no stance to pair, so each side's run just sits in the row. */
+export interface DebateLiveRound {
+  round: number;
+  runs: RunNode[];
+}
+
+/**
+ * Multi-side debate (圆桌 / 红队 / 3+方) reconstructed into rounds for the in-progress
+ * inline view — the gap {@link debateGroups} leaves (it only pairs stance-tagged 2方
+ * debates, so 圆桌/红队 showed nothing inline until 收场). Under the moderator +
+ * continue_run redesign a debater's round 1 is a plan-declared node (group `debate:*`,
+ * no stance) and every later round is a 续写 revision of it (revision N == 第 N 轮), so
+ * we walk each side's revision chain to lay the rounds out. Each cell still renders via
+ * {@link RunNode}'s agent (the revision inherits the side's role + streams its own
+ * output). Empty for 非辩论 / 2方正反 (handled by debateGroups) / 收场后.
+ */
+export function debateLiveRounds(execution: Execution): DebateLiveRound[] {
+  const sides = execution.runs.filter(
+    (r) => r.group?.startsWith("debate:") && r.stance == null && r.revisionOf == null,
+  );
+  if (sides.length === 0) return [];
+  const revisionsByOriginal = new Map<string, RunNode[]>();
+  for (const run of execution.runs) {
+    if (run.revisionOf == null) continue;
+    const list = revisionsByOriginal.get(run.revisionOf) ?? [];
+    list.push(run);
+    revisionsByOriginal.set(run.revisionOf, list);
+  }
+  let maxRound = 1;
+  for (const side of sides) {
+    for (const rev of revisionsByOriginal.get(side.id) ?? []) {
+      maxRound = Math.max(maxRound, rev.revision);
+    }
+  }
+  const rounds: DebateLiveRound[] = [];
+  for (let r = 1; r <= maxRound; r++) {
+    const runs: RunNode[] = [];
+    for (const side of sides) {
+      if (r === 1) {
+        runs.push(side);
+        continue;
+      }
+      const rev = (revisionsByOriginal.get(side.id) ?? []).find((x) => x.revision === r);
+      if (rev) runs.push(rev);
+    }
+    if (runs.length > 0) rounds.push({ round: r, runs });
+  }
+  return rounds;
 }
 
 /** One version in a revision chain (乙 热修 P4): the original is `version` 1, each
@@ -866,6 +984,15 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         parentRunId: p.parent_run_id,
         runKind: p.kind,
         revision: p.revision ?? 0,
+      };
+    }
+    case "run_context": {
+      const p = event.payload as RunContextPayload;
+      return {
+        t,
+        kind: "run_context",
+        runId: p.run_id,
+        blocks: p.blocks,
       };
     }
     case "run_output_delta": {
@@ -1016,6 +1143,13 @@ export interface ExecutionRuntime {
   /** Number of frames to project. `null` = follow the live tail. */
   playhead: number | null;
   status: ExecutionStatus;
+  /** 辩论收场产物（`debate_result` —— 回合级单事件，非 plan/非 frame）：到达即存此，
+   * {@link projectExecution} 透传到 {@link Execution.debate}。null = 非辩论/未收场。 */
+  debate: DebateResultPayload | null;
+  /** 辩论逐轮叙事（`debate_round_started` / `debate_round` —— 回合级单事件，非 frame）：
+   * 折叠累积于此，{@link projectExecution} 透传到 {@link Execution.debateRounds}。`[]` =
+   * 非辩论/无逐轮事件（含重载，逐轮事件 transport-only 不进 journal）。 */
+  debateRounds: DebateNarrativeRound[];
 }
 
 /**
@@ -1039,6 +1173,15 @@ interface ExecutionState {
   ingestPlan: (plan: ExecutionPlan, messageId: string) => void;
   clearExecution: (messageId: string) => void;
   recordFrame: (frame: RunFrame, messageId: string) => void;
+  /** Store a turn's debate 收场产物 (`debate_result`) on its slot; a no-plan slot
+   * ignores it (stray fact). Sibling of {@link recordFrame} — one accrues the frame
+   * stream, the other the debate brief/narrative (a回合级 one-shot, not a frame). */
+  recordDebateResult: (debate: DebateResultPayload, messageId: string) => void;
+  /** Fold one 逐轮叙事 update (`debate_round_started` → focus only; `debate_round` →
+   * full) into the slot's {@link ExecutionRuntime.debateRounds} via {@link
+   * upsertDebateRound}; a no-plan slot ignores it. Drives the进行中 per-round overlay
+   * before {@link recordDebateResult}'s 收场 product lands. */
+  recordDebateRound: (round: DebateNarrativeRound, messageId: string) => void;
   setStatus: (status: ExecutionStatus, messageId: string) => void;
   setPlayhead: (index: number | null, messageId: string) => void;
   goLive: (messageId: string) => void;
@@ -1057,6 +1200,8 @@ const EMPTY_EXEC: ExecutionRuntime = {
   frames: [],
   playhead: null,
   status: "planning",
+  debate: null,
+  debateRounds: [],
 };
 
 /**
@@ -1094,6 +1239,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         frames: [],
         playhead: null,
         status: "running",
+        debate: null,
+        debateRounds: [],
       })),
 
     ingestPlan: (plan, messageId) => {
@@ -1121,6 +1268,16 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         cur.plan ? { frames: [...cur.frames, frame] } : null,
       ),
 
+    recordDebateResult: (debate, messageId) =>
+      patchExec(messageId, (cur) => (cur.plan ? { debate } : null)),
+
+    recordDebateRound: (round, messageId) =>
+      patchExec(messageId, (cur) =>
+        cur.plan
+          ? { debateRounds: upsertDebateRound(cur.debateRounds, round) }
+          : null,
+      ),
+
     setStatus: (status, messageId) => patchExec(messageId, () => ({ status })),
 
     setPlayhead: (index, messageId) =>
@@ -1134,10 +1291,14 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         if (state.byId[messageId]?.plan) return {};
         let plan: ExecutionPlan | null = null;
         const frames: RunFrame[] = [];
+        let debate: DebateResultPayload | null = null;
         for (const event of journal.events) {
           if (event.type === "run_plan") {
             const next = planFromRunPlan(event.payload as RunPlanPayload);
             plan = plan ? mergePlanInto(plan, next) : next;
+          } else if (event.type === "debate_result") {
+            // 回合级单事件（非 frame）：直接捕获，回放与直播经同一 slot 渲染辩论视图。
+            debate = event.payload as DebateResultPayload;
           } else {
             const frame = frameFromEvent(event);
             if (frame) frames.push(frame);
@@ -1153,6 +1314,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               frames,
               playhead: null,
               status: statusFromFinish(journal.finishReason),
+              debate,
+              // 逐轮事件 transport-only（不进 journal）：重载无之，全量叙事线在 debate 里。
+              debateRounds: [],
             },
           },
         };
@@ -1184,7 +1348,13 @@ export function useMessageExecution(
   return useMemo(() => {
     if (!rt?.plan) return null;
     const upto = rt.playhead ?? rt.frames.length;
-    return projectExecution(rt.plan, rt.frames.slice(0, upto), rt.status);
+    return projectExecution(
+      rt.plan,
+      rt.frames.slice(0, upto),
+      rt.status,
+      rt.debate,
+      rt.debateRounds,
+    );
   }, [rt]);
 }
 

@@ -21,6 +21,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, replace
+from typing import Any
 
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
@@ -35,6 +36,7 @@ from agentcore.runtime.events import (
     EventSink,
     FinishReason,
     run_completed,
+    run_context,
     run_failed,
     run_output_delta,
     run_reasoning_delta,
@@ -43,7 +45,6 @@ from agentcore.runtime.events import (
     tool_progress,
 )
 from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
-from agentcore.runtime.runs.serialize import run_final_fact
 from agentcore.runtime.runs.constants import (
     DEFAULT_CONTRACT_RETRIES,
     DEP_CONTEXT_BUDGET,
@@ -67,13 +68,21 @@ from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.serialize import (
     escalations_from_transcript,
     files_touched_from_transcript,
+    run_final_fact,
 )
 from agentcore.runtime.runs.session import RunSession
-from agentcore.runtime.runs.types import RunContract, RunPhase, RunSpec, RunState
+from agentcore.runtime.runs.types import (
+    ContextBlock,
+    RunContract,
+    RunPhase,
+    RunSpec,
+    RunState,
+)
 from agentcore.runtime.suspension import captain_transcript
 from agentcore.runtime.workspace import summarize
 from agentcore.tools.protocol import Tool, ToolContext
 from agentcore.tools.registry import ToolRegistry
+from agentcore.workspace.write_claims import WriteCoordinator
 
 # A worker's nested-delegate factory: given (captain_run_id, captain_depth) — the
 # worker's own run id + depth — it mints a ``delegate`` tool bound to that worker
@@ -142,6 +151,29 @@ _WORKER_CAPTAIN_IDENTITY = f"""\
 {_WORKER_DELIVERABLE_POLICY}"""
 
 
+def _ancestors_by_id(plan: RunPlan) -> dict[str, frozenset[str]]:
+    """Transitive ``depends_on`` closure per node, for the write-conflict guard.
+
+    A node may overwrite a file written by an ancestor it consolidates (a real
+    upstream→downstream handoff), but never one written by an unrelated concurrent
+    sibling. Returns ``run_id -> {all transitive dep run_ids}`` (a missing dep id —
+    pruned plan — is simply skipped). O(nodes + edges)."""
+    out: dict[str, frozenset[str]] = {}
+    for node in plan.nodes:
+        seen: set[str] = set()
+        stack = list(node.depends_on)
+        while stack:
+            dep_id = stack.pop()
+            if dep_id in seen:
+                continue
+            seen.add(dep_id)
+            dep = plan.by_id(dep_id)
+            if dep is not None:
+                stack.extend(dep.depends_on)
+        out[node.run_id] = frozenset(seen)
+    return out
+
+
 def build_agent_executor(
     *,
     plan: RunPlan,
@@ -184,6 +216,14 @@ def build_agent_executor(
     # None (standalone / tests) = the economy base set; production passes the
     # turn's resolved 质量档 from the delegate tool.
     profiles = profile_set or default_profile_set()
+
+    # 并行写隔离·硬约束: one write-conflict guard for this batch (the executor's
+    # lifetime), plus each node's transitive depends_on closure. Injected onto every
+    # worker's tool context below so file_write refuses to let a concurrent sibling
+    # silently overwrite a peer's file, while a downstream consolidating an upstream's
+    # file (its ancestor) is still allowed.
+    write_coordinator = WriteCoordinator()
+    ancestors_by_id = _ancestors_by_id(plan)
 
     # Per-turn snapshot of the workspace's PRE-EXISTING files (uploads / prior turns),
     # shared by every worker in this delegate batch. "What was already on disk when the
@@ -244,6 +284,8 @@ def build_agent_executor(
                 run_id=spec.run_id,
                 agent_id=agent_id,
                 execution_id=execution_id,
+                write_coordinator=write_coordinator,
+                write_ancestors=ancestors_by_id.get(spec.run_id, frozenset()),
             )
             # 阶段2 嵌套子任务: hand this worker its own delegate tool only when it
             # opted in and is still above the depth cap — then it leads a sub-team
@@ -304,6 +346,9 @@ def build_agent_executor(
             # instead of rebuilding from scratch — so the worker sees its own prior
             # draft when correcting (修隐患), and the finished transcript is captured
             # as a recoverable RunSession for 定向唤回 (统一「续写」原语, 见 §三).
+            # received_blocks captures the SAME ContextBlocks the opening was rendered
+            # from (单一源), so the run_context event ships exactly what the LLM was fed.
+            received_blocks: list[ContextBlock] = []
             messages = _build_messages(
                 plan,
                 spec,
@@ -313,6 +358,13 @@ def build_agent_executor(
                 contract,
                 identity=identity,
                 index_paths=index_paths,
+                blocks_sink=received_blocks,
+            )
+            # 上下文传递可视化: emit the received context right after assembly (before the
+            # LLM react loop) so the frontend's run detail lights up its「收到的上下文」as
+            # soon as the worker starts thinking. Bodies capped + journaled (see run_context).
+            sink.emit(
+                run_context(spec.run_id, agent_id, _context_block_payloads(received_blocks))
             )
             attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
             for attempt in range(attempts):
@@ -382,6 +434,7 @@ def build_agent_executor(
                     usage=usage,
                     cost=cost,
                     transcript=messages,
+                    received_context=received_blocks,
                 )
             # The worker's terminal RunState is journaled at the ``execute`` choke point
             # below (run_final_fact — covers COMPLETED *and* FAILED in one place), so resume
@@ -414,6 +467,7 @@ def build_agent_executor(
                 usage=usage,
                 cost=cost,
                 transcript=messages,
+                received_context=received_blocks,
             )
         except Exception as e:  # noqa: BLE001 — surface any run failure to UI/state
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -714,6 +768,7 @@ def _build_messages(
     contract: RunContract | None = None,
     identity: str = _WORKER_IDENTITY,
     index_paths: list[str] | None = None,
+    blocks_sink: list[ContextBlock] | None = None,
 ) -> list[LLMMessage]:
     """Assemble the worker's OPENING (system, user) messages from its inline role,
     the original request, its upstream dependency products, and its task.
@@ -724,7 +779,12 @@ def _build_messages(
     same transcript by appending the shortfall (:func:`_retry_message`), so the
     worker sees its own prior draft. ``identity`` is the worker's self-awareness
     preamble — the leaf-worker default, or the captain variant for a worker
-    authorized to lead one nested sub-team."""
+    authorized to lead one nested sub-team.
+
+    单一源 (上下文传递可视化): the user message is RENDERED from the ordered ContextBlock
+    list :func:`_build_context_blocks` assembles; when ``blocks_sink`` is given, that exact
+    list is handed back so the caller can ship it as the ``run_context`` event — what the
+    user sees == what the LLM eats, one assembly, no second「展示」path to drift."""
     sys_parts = [system_prompt, identity]
     if spec.role or spec.objective:
         sys_parts.append(f"你的角色：{spec.role}\n你的目标：{spec.objective}")
@@ -732,52 +792,125 @@ def _build_messages(
         sys_parts.append(spec.system_prompt_supplement)
     system_content = "\n\n".join(p for p in sys_parts if p)
 
-    # 团队位置（DAG 拓扑感知）: the worker sees the team-level 原始用户请求 verbatim; on
-    # its own that reads as a personal mandate, so an UPSTREAM link — blind to the
-    # writer downstream — used to chase the final artifact itself (上游越权写整篇 + 无
-    # 文件名的空路径 file_write). The position block hands the node its TOPOLOGY (peers +
-    # where its output GOES), symmetric to _dep_context_blocks handing a downstream node
-    # its upstream PRODUCTS; the request header is reframed as a team goal only when the
-    # node is actually on a team (a solo worker IS the whole job).
-    user_parts: list[str] = []
+    blocks = _build_context_blocks(
+        plan, spec, completed, user_message, contract, index_paths or []
+    )
+    if blocks_sink is not None:
+        blocks_sink.extend(blocks)
+    user_content = "\n\n".join(f"## {b.heading}\n{b.body}" for b in blocks)
+    return [
+        LLMMessage(role="system", content=system_content),
+        LLMMessage(role="user", content=user_content),
+    ]
+
+
+def _build_context_blocks(
+    plan: RunPlan,
+    spec: RunSpec,
+    completed: Mapping[str, RunState],
+    user_message: str,
+    contract: RunContract | None,
+    index_paths: list[str],
+) -> list[ContextBlock]:
+    """The ordered :class:`ContextBlock` list a worker's opening user message is rendered
+    FROM — the structured single source behind both the prompt and the ``run_context``
+    event (上下文传递可视化, 5 通道之 worker 侧). Each block becomes a「## {heading}\n{body}」
+    section verbatim, so 用户看到的 == LLM 吃到的.
+
+    团队位置（DAG 拓扑感知）: the worker sees the team-level 原始用户请求 verbatim; on its own
+    that reads as a personal mandate, so an UPSTREAM link — blind to the writer downstream —
+    used to chase the final artifact itself (上游越权写整篇 + 无文件名的空路径 file_write).
+    The position block hands the node its TOPOLOGY (peers + where its output GOES), symmetric
+    to :func:`_dep_context_blocks` handing a downstream node its upstream PRODUCTS; the
+    request header is reframed as a team goal only when the node is actually on a team (a
+    solo worker IS the whole job)."""
+    blocks: list[ContextBlock] = []
     position = _team_position_block(plan, spec)
     if position:
-        user_parts.append(
-            "## 原始用户请求（老板交给整个团队的目标，不一定全是你的活；"
-            f"你的具体职责见下方「你的任务」）\n{user_message}"
+        blocks.append(
+            ContextBlock(
+                channel="request",
+                heading=(
+                    "原始用户请求（老板交给整个团队的目标，不一定全是你的活；"
+                    "你的具体职责见下方「你的任务」）"
+                ),
+                body=user_message,
+            )
         )
-        user_parts.append(position)
+        blocks.append(
+            ContextBlock(channel="team_position", heading="你在团队中的位置", body=position)
+        )
     else:
-        user_parts.append(f"## 原始用户请求\n{user_message}")
-    for label, body in _dep_context_blocks(plan, spec.depends_on, completed):
-        user_parts.append(f"## 前置结果（来自 {label}）\n{body}")
+        blocks.append(ContextBlock(channel="request", heading="原始用户请求", body=user_message))
+    blocks.extend(_dep_context_blocks(plan, spec.depends_on, completed))
     # 工作区产物清单: surface files in the shared workspace this worker can file_read —
     # peer products (role-attributed) + pre-existing files (uploads / prior turns) —
     # beyond its own deps (which got the richer block above). Omitted when empty.
-    manifest = _workspace_manifest(plan, completed, index_paths or [], set(spec.depends_on))
+    manifest = _workspace_manifest(plan, completed, index_paths, set(spec.depends_on))
     if manifest:
-        user_parts.append(
-            "## 工作区现有文件（就在共享工作区，可直接 file_read 取用，避免重复劳动）\n"
-            + manifest
+        blocks.append(
+            ContextBlock(
+                channel="workspace",
+                heading="工作区现有文件（就在共享工作区，可直接 file_read 取用，避免重复劳动）",
+                body=manifest,
+            )
         )
-    user_parts.append(f"## 你的任务\n{spec.task}")
+    blocks.append(ContextBlock(channel="task", heading="你的任务", body=spec.task))
     if spec.expected_output:
-        user_parts.append(f"## 预期产出\n{spec.expected_output}")
+        blocks.append(
+            ContextBlock(channel="expected_output", heading="预期产出", body=spec.expected_output)
+        )
     requirements = describe_contract(contract)
     if requirements:
-        user_parts.append(f"## 产出要求（必须满足）\n{requirements}")
+        blocks.append(
+            ContextBlock(channel="requirements", heading="产出要求（必须满足）", body=requirements)
+        )
     if spec.steer:
         # A mid-course user steer (plan_review adjust) injected after upstream work
         # was reviewed: stated last + highest-priority so it overrides the task
         # framing above when they conflict (结构化挂起 adjust).
-        user_parts.append(
-            f"## 用户中途调整指示（执行中追加，优先级最高，请据此调整工作）\n{spec.steer}"
+        blocks.append(
+            ContextBlock(
+                channel="steer",
+                heading="用户中途调整指示（执行中追加，优先级最高，请据此调整工作）",
+                body=spec.steer,
+            )
         )
+    return blocks
 
-    return [
-        LLMMessage(role="system", content=system_content),
-        LLMMessage(role="user", content="\n\n".join(user_parts)),
-    ]
+
+# Per-block body cap for the run_context EVENT (决策④): the prompt feeds the LLM the FULL
+# block, but the journaled/wired copy is head+tail capped so a huge pasted request / task
+# can't bloat the journal. Reuses the dep-budget magnitude; the UI shows the capped body +
+# a ``truncated`` flag. (Dependency bodies are already budgeted upstream and rarely hit it.)
+_CONTEXT_BLOCK_BODY_CAP = DEP_CONTEXT_BUDGET
+
+
+def _context_block_payloads(blocks: list[ContextBlock]) -> list[dict[str, Any]]:
+    """Serialize ContextBlocks to the ``run_context`` wire shape, capping each body to
+    :data:`_CONTEXT_BLOCK_BODY_CAP` (head+tail) so the journal stays bounded. ``chars`` is
+    the ORIGINAL injected size; ``truncated`` records the budget cap OR this display cap."""
+    payloads: list[dict[str, Any]] = []
+    for b in blocks:
+        body = b.body
+        truncated = b.truncated
+        if len(body) > _CONTEXT_BLOCK_BODY_CAP:
+            body = _truncate_head_tail(body, _CONTEXT_BLOCK_BODY_CAP)
+            truncated = True
+        payloads.append(
+            {
+                "channel": b.channel,
+                "heading": b.heading,
+                "body": body,
+                "chars": len(b.body),
+                "truncated": truncated,
+                "source_role": b.source_role,
+                "source_run_id": b.source_run_id,
+                "fidelity": b.fidelity,
+                "files": list(b.files),
+            }
+        )
+    return payloads
 
 
 def _team_position_block(plan: RunPlan, spec: RunSpec) -> str:
@@ -837,8 +970,11 @@ def _team_position_block(plan: RunPlan, spec: RunSpec) -> str:
 
 def _dep_context_blocks(
     plan: RunPlan, depends_on: list[str], completed: Mapping[str, RunState]
-) -> list[tuple[str, str]]:
-    """Render each upstream dependency's product into a ``(label, body)`` block.
+) -> list[ContextBlock]:
+    """Render each upstream dependency's product into a ``dependency`` :class:`ContextBlock`,
+    carrying its provenance (``source_role`` / ``source_run_id``), the ``fidelity`` chosen,
+    a ``truncated`` flag, and the artifact ``files`` it points at — so the UI shows HOW a
+    teammate's product was handed down, not just that it was (上下文传递可视化, 通道③).
 
     Three fidelity policies, in priority order:
 
@@ -858,7 +994,7 @@ def _dep_context_blocks(
 
     Order follows ``depends_on``; a dep with neither content nor files is skipped."""
     # mode ∈ {"pointer", "summarize", "pass_through"}
-    deps: list[tuple[str, str, list[str], str]] = []  # (label, content, files, mode)
+    deps: list[tuple[str, str, str, list[str], str]] = []  # (dep_id, label, content, files, mode)
     for dep_id in depends_on:
         state = completed.get(dep_id)
         if not state or (not state.content and not state.files_touched):
@@ -871,22 +1007,38 @@ def _dep_context_blocks(
             mode = "summarize"
         else:
             mode = "pass_through"
-        deps.append((label, state.content, list(state.files_touched), mode))
+        deps.append((dep_id, label, state.content, list(state.files_touched), mode))
 
     # Only PROSE pass_through deps draw on the shared budget; pointer / summarize deps
     # are already compact and sized independently.
     allowances = iter(
-        _allocate([len(c) for (_, c, _, m) in deps if m == "pass_through"], DEP_CONTEXT_BUDGET)
+        _allocate([len(c) for (_, _, c, _, m) in deps if m == "pass_through"], DEP_CONTEXT_BUDGET)
     )
-    blocks: list[tuple[str, str]] = []
-    for label, content, files, mode in deps:
+    blocks: list[ContextBlock] = []
+    for dep_id, label, content, files, mode in deps:
         if mode == "pointer":
             body = _pointer_body(content, files)
+            # full product is on disk (递指针); body is a digest, not a budget trim.
+            truncated = False
         elif mode == "summarize":
             body = summarize(content, limit=DEP_SUMMARY_CHARS)
+            truncated = len(content) > DEP_SUMMARY_CHARS
         else:
-            body = _truncate_head_tail(content, next(allowances))
-        blocks.append((label, body))
+            allowance = next(allowances)
+            body = _truncate_head_tail(content, allowance)
+            truncated = len(content) > allowance
+        blocks.append(
+            ContextBlock(
+                channel="dependency",
+                heading=f"前置结果（来自 {label}）",
+                body=body,
+                source_role=label,
+                source_run_id=dep_id,
+                fidelity=mode,
+                truncated=truncated,
+                files=files,
+            )
+        )
     return blocks
 
 

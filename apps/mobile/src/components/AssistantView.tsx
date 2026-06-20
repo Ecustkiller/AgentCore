@@ -9,12 +9,18 @@
 //                          history the team is re-folded from MessageDetail.runs.events.
 //
 // Citations render as a source list under the message either way.
-import type { Citation, ProcessStep } from "@agentcore/contract-types";
+import type {
+  Citation,
+  DebateNarrativeRound,
+  DebateResultPayload,
+  ProcessStep,
+} from "@agentcore/contract-types";
 import type {
   ProjectedAgent,
   ProjectedRun,
 } from "@agentcore/protocol-conformance";
 import { useState } from "react";
+import { DebateView, LiveDebateNarrative } from "@/components/DebateView";
 import { Markdown } from "@/components/Markdown";
 import { TeamView } from "@/components/TeamView";
 
@@ -32,16 +38,27 @@ export function AssistantContent({
   reasoning,
   citations,
   team,
+  debate,
+  debateRounds,
 }: {
   process?: ProcessStep[];
   content: string;
   reasoning?: string;
   citations?: Citation[];
   team?: TeamProjection;
+  debate?: DebateResultPayload | null;
+  /** 辩论进行中的逐轮叙事 (fold 的 `debateRounds`)：`debate` 收场产物未到时实时叠出主持人逐
+   *  轮焦点 / 小结 / 裁判；收场后让位给 {@link DebateView} 的全量双产物。 */
+  debateRounds?: DebateNarrativeRound[];
 }) {
   return (
     <>
       {team && team.runs.length > 0 ? <TeamView {...team} /> : null}
+      {debate ? (
+        <DebateView debate={debate} />
+      ) : debateRounds && debateRounds.length > 0 ? (
+        <LiveDebateNarrative rounds={debateRounds} />
+      ) : null}
       {process && process.length > 0 ? (
         <ProcessTimeline steps={process} citations={citations} />
       ) : (

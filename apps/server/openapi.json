@@ -2622,13 +2622,25 @@
         "type": "object"
       },
       "MessageAttachment": {
-        "description": "A file the user referenced (@-mention or paperclip) as message context.\n\nText is extracted client-side from an authorized local root; this MVP carries\nonly text-extractable files (images are out of scope until a vision model).",
+        "description": "A piece of context the user referenced (@-mention or paperclip).\n\nText is extracted/materialized client-side; this MVP carries only\ntext-extractable sources (images are out of scope until a vision model).\n``kind=\"conversation\"`` references another of the user's conversations: its\nrecent messages are materialized into ``text`` client-side (same as a file's\nbody), and ``conversation_id`` records which one (for the chip + later jump).",
         "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
           "kind": {
             "default": "file",
             "enum": [
               "file",
-              "dir"
+              "dir",
+              "conversation"
             ],
             "title": "Kind",
             "type": "string"
@@ -4057,11 +4069,23 @@
       "StoredAttachment": {
         "description": "Persisted attachment display metadata (no extracted text).\n\n``workspace_path`` is set when the attachment was written into the durable\nproject space (附件驻留): a workspace-relative path under ``attachments/`` that\nthe file-download API can serve. ``None`` for directory listings (nothing is\nwritten to disk) and for legacy rows created before residency.",
         "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
           "kind": {
             "default": "file",
             "enum": [
               "file",
-              "dir"
+              "dir",
+              "conversation"
             ],
             "title": "Kind",
             "type": "string"

@@ -15,7 +15,8 @@ import type { FileSource } from "@/lib/fileSource";
 import { api } from "@/services/api";
 import { markCloudEscapeConversation } from "@/services/defaultWorkspace";
 import { dispatchHandoffJob } from "@/services/handoff";
-import { loadLatestWindow } from "@/services/messages";
+import { fetchMessageWindow, loadLatestWindow } from "@/services/messages";
+import { searchAll } from "@/services/search";
 import { createLocalRootSource } from "@/services/sources/localRootSource";
 import { createCloudWorkspaceSource } from "@/services/sources/workspaceSource";
 import type { OutgoingAttachment } from "@/services/streamConversation";
@@ -29,7 +30,16 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
-import { Cloud, CloudUpload, Folder, Paperclip, Send, Square, X } from "lucide-react";
+import {
+  Cloud,
+  CloudUpload,
+  Folder,
+  MessageSquare,
+  Paperclip,
+  Send,
+  Square,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MentionMenu } from "./MentionMenu";
@@ -41,11 +51,13 @@ interface PendingAttachment {
   key: string;
   name: string;
   path: string;
-  /** 文件为正文；目录为「文件清单」文本。仅发送时携带，不入库。 */
+  /** 文件为正文；目录为「文件清单」；对话为最近若干条消息。仅发送时携带，不入库。 */
   text: string;
   truncated: boolean;
-  /** file=单文件正文；dir=目录文件清单。 */
+  /** file=单文件正文；dir=目录文件清单；conversation=引用对话。 */
   kind: EntryKind;
+  /** 仅 kind=conversation：被引用对话的 id。 */
+  conversationId?: string;
 }
 
 type MenuMode = "mention" | "browse" | null;
@@ -76,6 +88,35 @@ async function readDroppedFile(
     bytes.subarray(0, Math.min(bytes.length, TEXT_PREVIEW_CAP)),
   );
   return { ok: true, text, truncated: file.size > TEXT_PREVIEW_CAP };
+}
+
+// @对话引用（物化）：拉取窗口的条数上限 + 注入正文的总字符上限。取最近 N 条；整体
+// 超过字符上限则保留更靠后（更贴近当前意图）的部分并标记截断。MVP 不做 LLM 摘要。
+const CONV_MENTION_MSG_LIMIT = 40;
+const CONV_MENTION_CHAR_CAP = 60 * 1024;
+
+/**
+ * 把一段对话的消息格式化为可注入的上下文文本（每条 "用户/助手: 正文"）。返回是否因
+ * 条数或总长被截断，供 chip 标注。仅取有正文的消息；空对话返回空串。
+ */
+function formatConversationContext(
+  messages: { role: string; content: string }[],
+): { text: string; truncated: boolean } {
+  const usable = messages.filter((m) => m.content.trim());
+  const recent = usable.slice(-CONV_MENTION_MSG_LIMIT);
+  let truncated = recent.length < usable.length;
+  const body = recent
+    .map(
+      (m) => `${m.role === "assistant" ? "助手" : "用户"}: ${m.content.trim()}`,
+    )
+    .join("\n\n");
+  let text = body;
+  if (text.length > CONV_MENTION_CHAR_CAP) {
+    // 超长：从尾部回切，保留更靠后的消息（更贴近用户当前提问）。
+    text = text.slice(text.length - CONV_MENTION_CHAR_CAP);
+    truncated = true;
+  }
+  return { text: text.trim(), truncated };
 }
 
 /** 从光标向前回溯定位 `@token`：要求 `@` 在行首或空白后，且其后无空白。 */
@@ -164,6 +205,8 @@ export function MessageInput() {
   const [dirIndex, setDirIndex] = useState<IndexedEntry[]>([]);
   const [sourceCount, setSourceCount] = useState(0);
   const [indexLoading, setIndexLoading] = useState(false);
+  // @对话候选（搜索驱动，独立于本地文件索引）。
+  const [convItems, setConvItems] = useState<IndexedEntry[]>([]);
   const indexLoadedRef = useRef(false);
   // id → source, so attachEntry reads a picked file through its own source
   // (local IPC vs cloud REST) without branching on where the file lives.
@@ -179,11 +222,54 @@ export function MessageInput() {
       ),
     [dirIndex, fileIndex],
   );
-  const items = useMemo(() => filterEntries(entries, query), [entries, query]);
+  const fileItems = useMemo(
+    () => filterEntries(entries, query),
+    [entries, query],
+  );
+  // 对话候选（搜索驱动）置顶，其后接本地文件 / 目录候选。
+  const items = useMemo(
+    () => [...convItems, ...fileItems],
+    [convItems, fileItems],
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: query/menuMode are intentional re-run keys — reset the highlighted item whenever the query or menu mode changes.
   useEffect(() => {
     setActiveIndex(0);
+  }, [query, menuMode]);
+
+  // @对话候选：对话无法像文件那样预载索引，故按 query 驱动防抖查 /v1/search 的
+  // conversation 分组，映射成 IndexedEntry 复用同一菜单。query 空 / 菜单关闭即清空；
+  // cancelled + 清 timer 防抖动并丢弃过期请求结果（竞态）。
+  useEffect(() => {
+    const q = query.trim();
+    if (!menuMode || !q) {
+      setConvItems([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void searchAll(q, { types: ["conversation"], limit: 6 })
+        .then((res) => {
+          if (cancelled) return;
+          const section = res.sections.find((s) => s.type === "conversation");
+          const candidates = (section?.items ?? []).map<IndexedEntry>((it) => ({
+            sourceId: "conversation",
+            sourceLabel: "对话",
+            relPath: it.id,
+            name: it.title || "未命名对话",
+            display: it.title || "未命名对话",
+            kind: "conversation",
+          }));
+          setConvItems(candidates);
+        })
+        .catch(() => {
+          if (!cancelled) setConvItems([]);
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [query, menuMode]);
 
   const adjustHeight = useCallback(() => {
@@ -203,7 +289,7 @@ export function MessageInput() {
   // append stacks answers to multiple questions, replace overwrites. Focus so the user
   // can edit / send (a disabled textarea while generating keeps the value, ready to go).
   const draftToken = useComposerDraftStore((s) => s.token);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: draftToken is the intentional re-run key — apply the latest fill exactly once per bump.
+  // draftToken is the intentional re-run key — apply the latest fill exactly once per bump.
   useEffect(() => {
     if (draftToken === 0) return;
     const { text, mode } = useComposerDraftStore.getState();
@@ -243,7 +329,7 @@ export function MessageInput() {
   // Resolve cloud/local for the 「后台云端」 entry (shared via the backgroundTasks
   // store so the timeline feed reuses the same binding lookup). Cloud / drafts hide
   // the entry; leaving local mode also disarms any armed background mode.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is the intentional re-run key — re-resolve the mode whenever the active conversation changes.
+  // conversationId is the intentional re-run key — re-resolve the mode whenever the active conversation changes.
   useEffect(() => {
     if (!conversationId) {
       setIsLocal(false);
@@ -327,7 +413,35 @@ export function MessageInput() {
       }
 
       let next: PendingAttachment | null = null;
-      if (entry.kind === "dir") {
+      if (entry.kind === "conversation") {
+        // 物化：拉该对话最新窗口 → 格式化成「用户/助手: 正文」注入文本。用
+        // fetchMessageWindow 取返回值（而非 loadLatestWindow），不污染当前会话 store。
+        let win: Awaited<ReturnType<typeof fetchMessageWindow>>;
+        try {
+          win = await fetchMessageWindow(entry.relPath, {
+            limit: CONV_MENTION_MSG_LIMIT,
+          });
+        } catch {
+          setMenuError("读取对话失败");
+          return;
+        }
+        const { text, truncated } = formatConversationContext(win.messages);
+        if (!text) {
+          setMenuError("该对话暂无可引用的内容");
+          return;
+        }
+        next = {
+          id: crypto.randomUUID(),
+          key,
+          name: entry.name,
+          path: "对话",
+          text,
+          // 还有更早消息未拉入也视为截断。
+          truncated: truncated || win.hasMoreBefore,
+          kind: "conversation",
+          conversationId: entry.relPath,
+        };
+      } else if (entry.kind === "dir") {
         // 目录：附带「文件清单」（递归相对路径），不读取任何文件正文。
         const listing = buildDirListing(fileIndex, entry);
         if (listing.fileCount === 0) {
@@ -617,6 +731,7 @@ export function MessageInput() {
             path: a.path,
             truncated: a.truncated,
             kind: a.kind,
+            conversationId: a.conversationId,
           }))
         : undefined,
     });
@@ -642,6 +757,7 @@ export function MessageInput() {
       text: a.text,
       truncated: a.truncated,
       kind: a.kind,
+      conversation_id: a.conversationId,
     }));
 
     await sendTurn({
@@ -775,10 +891,14 @@ export function MessageInput() {
               >
                 {a.kind === "dir" ? (
                   <Folder size={12} className="shrink-0" />
+                ) : a.kind === "conversation" ? (
+                  <MessageSquare size={12} className="shrink-0" />
                 ) : (
                   <Paperclip size={12} className="shrink-0" />
                 )}
-                <SimpleTooltip label={a.path}>
+                <SimpleTooltip
+                  label={a.kind === "conversation" ? "引用对话" : a.path}
+                >
                   <span className="truncate">
                     {a.name}
                     {a.kind === "dir" ? "/" : ""}
@@ -786,7 +906,11 @@ export function MessageInput() {
                 </SimpleTooltip>
                 {a.truncated && (
                   <span className="shrink-0 text-muted-foreground">
-                    {a.kind === "dir" ? "部分" : "已截断"}
+                    {a.kind === "dir"
+                      ? "部分"
+                      : a.kind === "conversation"
+                        ? "近期"
+                        : "已截断"}
                   </span>
                 )}
                 <button

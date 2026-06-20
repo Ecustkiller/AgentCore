@@ -179,7 +179,8 @@
         "checkpoint": {
           "status": "pending",
           "decision": null
-        }
+        },
+        "receivedContext": []
       },
       {
         "id": "r2",
@@ -203,7 +204,8 @@
         "round": 0,
         "revisionOf": null,
         "revision": 0,
-        "checkpoint": null
+        "checkpoint": null,
+        "receivedContext": []
       }
     ],
     "progress": {
@@ -217,6 +219,8 @@
         "r1"
       ]
     },
-    "cost": null
+    "cost": null,
+    "debate": null,
+    "debateRounds": []
   }
 }

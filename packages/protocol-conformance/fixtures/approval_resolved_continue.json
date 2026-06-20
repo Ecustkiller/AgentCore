@@ -129,6 +129,8 @@
       "output": 120000,
       "total": 360000,
       "currency": "USD"
-    }
+    },
+    "debate": null,
+    "debateRounds": []
   }
 }

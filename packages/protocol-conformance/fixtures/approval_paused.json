@@ -58,6 +58,8 @@
         "code": "print(1)"
       }
     },
-    "cost": null
+    "cost": null,
+    "debate": null,
+    "debateRounds": []
   }
 }

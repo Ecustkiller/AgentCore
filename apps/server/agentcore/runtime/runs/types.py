@@ -219,6 +219,38 @@ class RunSpec:
 
 
 @dataclass
+class ContextBlock:
+    """One labeled segment of context a Run received at assembly time — the structured
+    twin of a「## 标题 + 正文」section in the worker prompt.
+
+    单一源 (用户看到的 == LLM 吃到的): a worker's opening user message is RENDERED from an
+    ordered list of these blocks, and the SAME list rides the ``run_context`` event so the
+    frontend shows exactly what fed the run — one assembly, two projections, no drift
+    (避开补丁绊线: no second「拼给 LLM」vs「展示给用户」path to reconcile).
+
+    ``channel`` buckets the block for the UI: ``request`` (团队级原始请求) / ``team_position``
+    (DAG 拓扑：并行队友 + 产出去向) / ``dependency`` (上游产物注入) / ``workspace`` (工作区文件
+    清单) / ``task`` / ``expected_output`` / ``requirements`` / ``steer`` (用户中途操舵). A
+    ``dependency`` block additionally records its provenance — the upstream ``source_role``
+    / ``source_run_id`` that produced it, the ``fidelity`` the executor chose (``pointer``
+    递指针 / ``summarize`` / ``pass_through``), whether it was ``truncated`` to fit budget,
+    and the artifact ``files`` it points at — so the user sees HOW a teammate's product was
+    handed down, not just that it was. Non-dependency channels leave those defaults.
+
+    → 见设计: docs/03-AI核心/上下文传递可视化.md（单一源/双投影、8 通道、决策①–④、CEO 侧 ⏳）
+    """
+
+    channel: str
+    heading: str
+    body: str
+    source_role: str = ""
+    source_run_id: str = ""
+    fidelity: str = ""
+    truncated: bool = False
+    files: list[str] = field(default_factory=list)
+
+
+@dataclass
 class RunState:
     """The mutable execution state of one Run — the live counterpart to the
     immutable :class:`RunSpec`.
@@ -285,7 +317,41 @@ class RunState:
     # run that never produced one (skipped, or failed before any LLM answer). Typed
     # under TYPE_CHECKING so this module stays import-light.
     transcript: list[LLMMessage] = field(default_factory=list)
+    # 收到的上下文 (上下文传递可视化): the ordered :class:`ContextBlock` list the executor
+    # assembled this run's opening user message FROM — the structured twin of what the LLM
+    # was fed. The executor emits it as the ``run_context`` event (the frontend's source);
+    # held here too for the run model's completeness. NOT serialized into the resume/journal
+    # seed (``state_to_json`` allow-lists fields), so it never bloats the fact log — a
+    # reload rebuilds it from the journaled ``run_context`` event instead. Empty for a run
+    # whose opening was not block-assembled (a 续写 revision continues a saved transcript).
+    received_context: list[ContextBlock] = field(default_factory=list)
 
     @property
     def is_terminal(self) -> bool:
         return self.phase in TERMINAL_PHASES
+
+
+@dataclass(frozen=True)
+class BatchMetrics:
+    """Observability snapshot of one :class:`~agentcore.runtime.runs.wave.WaveScheduler`
+    run (调度埋点量化).
+
+    Computed by the scheduler and handed back through an optional ``metrics_sink`` (the
+    pure ``usage_sink`` idiom): the scheduler stays free of a logging dependency and the
+    HOST logs the snapshot. It answers the questions the continuous scheduler exists to
+    make good on: did parallelism actually materialise (``busy_ms`` vs ``wall_ms`` →
+    average concurrency), how wide did the fan-out get (``nodes`` / ``peak_running``), and
+    was the ``width`` cap the bottleneck (``slot_starved`` > 0 — a dispatch cycle where a
+    ready node had to wait for a free slot). Outcome counts round out a one-line health
+    read. All timings are wall-clock ms; counts exclude resume-seeded nodes.
+    """
+
+    nodes: int  # nodes THIS run dispatched (seed_completed nodes excluded)
+    width: int  # the concurrency cap used this run (min of max_parallel/budget/nodes)
+    peak_running: int  # high-water mark of concurrently in-flight nodes
+    wall_ms: int  # scheduler wall time, entry → terminal
+    busy_ms: int  # Σ per-node occupancy (dispatch → finish); busy_ms/wall_ms ≈ avg concurrency
+    slot_starved: int  # dispatch cycles where ready nodes waited because width was full
+    completed: int
+    failed: int
+    skipped: int

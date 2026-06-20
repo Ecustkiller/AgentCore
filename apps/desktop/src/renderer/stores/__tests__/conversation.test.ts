@@ -246,6 +246,31 @@ describe("conversation store", () => {
       expect(msg.content).toBe("答案");
       expect(msg.process).toEqual([{ kind: "content", text: "答案" }]);
     });
+
+    // 交付前核验回炉（content_reset）：done 轮草稿未过轻层核验（如编造引用），清空已流式的
+    // 正文 + 弹掉尾部 content 步，但保留思考步——让重写版替换草稿而非追加拼接。
+    it("resetStreamingContent clears content + trailing content step, keeps reasoning", () => {
+      store().createAssistantMessage();
+      store().appendReasoningToLastMessage("先想一下");
+      store().appendToLastMessage("草稿 [9]");
+      store().resetStreamingContent();
+      const msg = rt().messages[0];
+      expect(msg.content).toBe("");
+      expect(msg.process).toEqual([{ kind: "reasoning", text: "先想一下" }]);
+    });
+
+    it("resetStreamingContent no-ops when the last message is not assistant", () => {
+      store().addMessage({
+        id: "u1",
+        role: "user",
+        content: "用户问题",
+        createdAt: "",
+        executionId: null,
+        isStreaming: false,
+      });
+      store().resetStreamingContent();
+      expect(rt().messages[0].content).toBe("用户问题");
+    });
   });
 
   describe("attachErrorToLastMessage", () => {

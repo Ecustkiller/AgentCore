@@ -32,12 +32,13 @@ degrade; skip → cascade-skip dependents; abort → drain in-flight then stop; 
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 
 from agentcore.runtime.runs.concurrency import child_budget, current_budget, set_budget
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
-from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
+from agentcore.runtime.runs.types import BatchMetrics, RunPhase, RunSpec, RunState
 
 # The most nodes this scheduler runs at once. Ready nodes beyond this stay pending
 # and ride a freed slot. Kept in step with MAX_PARALLEL_DELEGATIONS (the tree-wide
@@ -63,6 +64,7 @@ class WaveScheduler:
         on_checkpoint: (
             Callable[[Sequence[RunSpec], Mapping[str, RunState]], Awaitable[bool]] | None
         ) = None,
+        metrics_sink: list[BatchMetrics] | None = None,
     ) -> dict[str, RunState]:
         """Drive ``plan`` to completion; return each node's terminal
         :class:`RunState` by ``run_id`` (cascade-skipped nodes included).
@@ -90,6 +92,11 @@ class WaveScheduler:
           False ends scheduling like a graceful abort (partial map returned). A
           *failed* checkpoint node does not pause — its ``on_failure`` governs the
           cascade. No hook / no marked node / no pending ⇒ untouched.
+        - ``metrics_sink`` (调度埋点量化), when given, receives ONE :class:`BatchMetrics`
+          appended at terminal — concurrency / parallelism / slot-starvation / outcome
+          counts for this run — for the host to log. Kept as a sink (not a return /
+          logging call) so the scheduler stays host-agnostic. Not appended on a cancel
+          (the ``except`` re-raises first); a soft ``should_stop`` pause still records it.
 
         On external cancel (user stop) every in-flight child is cancelled and
         awaited before the cancellation propagates — a worker task is never orphaned.
@@ -113,6 +120,17 @@ class WaveScheduler:
         width = min(self._max_parallel, current_budget(), max(1, n_pending))
         per_child_budget = child_budget(width)
 
+        # 调度埋点量化 (orthogonal to scheduling — see BatchMetrics): wall start, per-node
+        # dispatch times (→ busy_ms occupancy), the concurrency high-water mark, how many
+        # nodes this run launched, and slot-starvation cycles (ready nodes blocked by width).
+        seeded_ids = set(completed)
+        wall_start = time.monotonic()
+        started_at: dict[str, float] = {}
+        busy_ms = 0
+        peak_running = 0
+        dispatched_count = 0
+        slot_starved = 0
+
         try:
             while True:
                 # Freeze dispatch while aborting, soft-stopping, or holding a completed
@@ -125,6 +143,7 @@ class WaveScheduler:
                 if not holding:
                     for spec in self._select_ready(plan, completed, skipped, dispatched):
                         if len(running) >= width:
+                            slot_starved += 1  # ready node(s) remain but width is full
                             break
                         # Snapshot the completed map per dispatch: the executor reads
                         # its deps + iterates peer products from it, and ``completed``
@@ -136,6 +155,9 @@ class WaveScheduler:
                         )
                         running[task] = spec.run_id
                         dispatched.add(spec.run_id)
+                        started_at[spec.run_id] = time.monotonic()
+                        dispatched_count += 1
+                    peak_running = max(peak_running, len(running))
 
                 if not running:
                     break  # nothing in flight and (holding, or no node is ready) ⇒ done
@@ -149,6 +171,9 @@ class WaveScheduler:
                         raise asyncio.CancelledError
                     state = task.result()
                     completed[run_id] = state
+                    started = started_at.pop(run_id, None)
+                    if started is not None:  # node occupancy: dispatch → finish
+                        busy_ms += int((time.monotonic() - started) * 1000)
                     if on_progress is not None:
                         on_progress(completed)
                     if state.phase is RunPhase.FAILED:
@@ -199,6 +224,24 @@ class WaveScheduler:
         if aborted:
             for node in plan.nodes:
                 completed.setdefault(node.run_id, RunState(phase=RunPhase.SKIPPED))
+
+        # 调度埋点量化: hand the host one snapshot of this run (counts exclude resume-seeded
+        # nodes — they didn't run here). Appended only when a sink was given.
+        if metrics_sink is not None:
+            ran = [s for rid, s in completed.items() if rid not in seeded_ids]
+            metrics_sink.append(
+                BatchMetrics(
+                    nodes=dispatched_count,
+                    width=width,
+                    peak_running=peak_running,
+                    wall_ms=int((time.monotonic() - wall_start) * 1000),
+                    busy_ms=busy_ms,
+                    slot_starved=slot_starved,
+                    completed=sum(1 for s in ran if s.phase is RunPhase.COMPLETED),
+                    failed=sum(1 for s in ran if s.phase is RunPhase.FAILED),
+                    skipped=sum(1 for s in ran if s.phase is RunPhase.SKIPPED),
+                )
+            )
         return completed
 
     async def _run_node(

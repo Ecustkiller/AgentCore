@@ -8,8 +8,10 @@ local (desktop) workspace.
 """
 
 import time
+from posixpath import splitext
 from typing import Any
 
+from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.workspace.protocol import (
@@ -24,6 +26,8 @@ from agentcore.workspace.protocol import (
     WorkspaceError,
 )
 
+logger = get_logger(__name__)
+
 
 def _error(error: str, start: float) -> ToolResult:
     """Build a failed ToolResult with elapsed timing."""
@@ -34,6 +38,14 @@ def _error(error: str, start: float) -> ToolResult:
         error=error,
         duration_ms=int((time.monotonic() - start) * 1000),
     )
+
+
+def _distinct_name_hint(path: str) -> str:
+    """A concrete renamed-path suggestion for a write-conflict error: insert a ``-1``
+    before the extension (``out/report.md`` → ``out/report-1.md``) so the worker has a
+    ready, collision-free alternative to retype."""
+    stem, ext = splitext(path)
+    return f"{stem}-1{ext}" if stem else f"{path}-1"
 
 
 class FileReadTool:
@@ -126,11 +138,36 @@ class FileWriteTool:
                 "path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start
             )
 
+        # 并行写隔离·硬约束: in a delegate batch, refuse to overwrite a file another
+        # concurrent sibling already wrote (it would silently clobber their deliverable).
+        # Claimed BEFORE the awaited write so two concurrent claims can't interleave; a
+        # downstream consolidating an upstream's file (its ancestor) is still allowed.
+        coordinator = context.write_coordinator
+        if coordinator is not None:
+            owner = coordinator.claim(rel_path, context.run_id, context.write_ancestors)
+            if owner is not None:
+                logger.info(
+                    "file_write.collision",
+                    path=rel_path,
+                    run_id=context.run_id,
+                    owner=owner,
+                )
+                return _error(
+                    f"写入冲突：`{rel_path}` 正被同一批的另一个并行队友写入——同名文件并发写"
+                    f"会互相覆盖，已拦下。请换一个不同的文件名（给它加上你的角色或编号后缀，"
+                    f"如 `{_distinct_name_hint(rel_path)}`）后重写。",
+                    start,
+                )
+
         try:
             written = await context.backend.write(rel_path, content)
         except OutsideWorkspace:
+            if coordinator is not None:
+                coordinator.release(rel_path, context.run_id)
             return _error(f"路径 '{rel_path}' 超出了工作区范围", start)
         except WorkspaceError as e:
+            if coordinator is not None:
+                coordinator.release(rel_path, context.run_id)
             return _error(f"写入文件失败：{e}", start)
 
         return ToolResult(

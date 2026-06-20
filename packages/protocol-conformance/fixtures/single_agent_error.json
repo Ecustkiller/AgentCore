@@ -45,6 +45,8 @@
       "total": 0
     },
     "pendingInteraction": null,
-    "cost": null
+    "cost": null,
+    "debate": null,
+    "debateRounds": []
   }
 }
