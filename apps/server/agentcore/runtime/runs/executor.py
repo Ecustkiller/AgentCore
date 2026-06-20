@@ -48,8 +48,6 @@ from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
 from agentcore.runtime.runs.constants import (
     DEFAULT_CONTRACT_RETRIES,
     DEP_CONTEXT_BUDGET,
-    DEP_POINTER_MAX_FILES,
-    DEP_POINTER_SUMMARY_CHARS,
     DEP_SUMMARY_CHARS,
     ESCALATE_TOOL_NAME,
     MAX_CONTRACT_RETRIES,
@@ -63,6 +61,7 @@ from agentcore.runtime.runs.contract import (
     describe_contract,
     format_feedback,
 )
+from agentcore.runtime.runs.fidelity import allocate, pointer_body, truncate_head_tail
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.serialize import (
@@ -895,7 +894,7 @@ def _context_block_payloads(blocks: list[ContextBlock]) -> list[dict[str, Any]]:
         body = b.body
         truncated = b.truncated
         if len(body) > _CONTEXT_BLOCK_BODY_CAP:
-            body = _truncate_head_tail(body, _CONTEXT_BLOCK_BODY_CAP)
+            body = truncate_head_tail(body, _CONTEXT_BLOCK_BODY_CAP)
             truncated = True
         payloads.append(
             {
@@ -979,7 +978,7 @@ def _dep_context_blocks(
     Three fidelity policies, in priority order:
 
     - A dep that WROTE FILES to the workspace (``files_touched`` non-empty) becomes a
-      POINTER (:func:`_pointer_body`): a tight prose digest + the artifact paths to
+      POINTER (:func:`~agentcore.runtime.runs.fidelity.pointer_body`): a tight prose digest + the artifact paths to
       ``file_read``. The product is already on disk and reachable, so re-shipping it
       whole through the prompt wastes tokens and risks tail-trimming (递指针不递全文,
       Agent协作模式.md). A pointer does NOT draw on the pass_through budget.
@@ -987,10 +986,10 @@ def _dep_context_blocks(
       the large-fan-in token-saving case; no budget draw either.
     - ``pass_through`` PROSE deps (no file to point at — the default, for 分析/检索→写作
       链路 where 金额 / 法条编号 must survive) SHARE one per-worker total budget
-      (``DEP_CONTEXT_BUDGET``), water-filled across them (:func:`_allocate`) so a single
-      rich upstream passes through whole while a wide fan-in stays bounded instead of
-      multiplying. A dep that still overflows its share is HEAD+TAIL trimmed
-      (:func:`_truncate_head_tail`) so its tail isn't silently dropped.
+      (``DEP_CONTEXT_BUDGET``), water-filled across them (:func:`~agentcore.runtime.runs.fidelity.allocate`)
+      so a single rich upstream passes through whole while a wide fan-in stays bounded
+      instead of multiplying. A dep that still overflows its share is HEAD+TAIL trimmed
+      (:func:`~agentcore.runtime.runs.fidelity.truncate_head_tail`) so its tail isn't silently dropped.
 
     Order follows ``depends_on``; a dep with neither content nor files is skipped."""
     # mode ∈ {"pointer", "summarize", "pass_through"}
@@ -1012,12 +1011,12 @@ def _dep_context_blocks(
     # Only PROSE pass_through deps draw on the shared budget; pointer / summarize deps
     # are already compact and sized independently.
     allowances = iter(
-        _allocate([len(c) for (_, _, c, _, m) in deps if m == "pass_through"], DEP_CONTEXT_BUDGET)
+        allocate([len(c) for (_, _, c, _, m) in deps if m == "pass_through"], DEP_CONTEXT_BUDGET)
     )
     blocks: list[ContextBlock] = []
     for dep_id, label, content, files, mode in deps:
         if mode == "pointer":
-            body = _pointer_body(content, files)
+            body = pointer_body(content, files)
             # full product is on disk (递指针); body is a digest, not a budget trim.
             truncated = False
         elif mode == "summarize":
@@ -1025,7 +1024,7 @@ def _dep_context_blocks(
             truncated = len(content) > DEP_SUMMARY_CHARS
         else:
             allowance = next(allowances)
-            body = _truncate_head_tail(content, allowance)
+            body = truncate_head_tail(content, allowance)
             truncated = len(content) > allowance
         blocks.append(
             ContextBlock(

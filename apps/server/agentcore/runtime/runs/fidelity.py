@@ -1,0 +1,89 @@
+"""Shared product-fidelity primitives — render a worker's product at a chosen size.
+
+Two layers share one discipline so a teammate's product is sized the same way
+wherever it is re-shown:
+
+- ``executor._dep_context_blocks`` — an upstream product → a downstream worker's
+  prompt (上下文传递, 通道③).
+- ``delegate._format_for_ceo`` — every worker's product → the CEO's synthesis input
+  (CEO 综述输入瘦身). Without this a wide fan-out of long products would balloon the
+  CEO's overview pass and, worse, blunt-truncate (``ToolResult`` head-chop) the tail —
+  silently dropping late workers AND the method's own closing instructions.
+
+The POLICY (file-producer → pointer; ``summarize`` deps → digest; else pass_through
+prose water-filled across a shared budget, head+tail trimmed on overflow) lives at
+each call site; this module is just the MECHANISM. All char budgets live in
+``constants.py``. ``summarize`` (workspace) is reused for the prose digests.
+"""
+
+from __future__ import annotations
+
+from agentcore.runtime.runs.constants import (
+    DEP_POINTER_MAX_FILES,
+    DEP_POINTER_SUMMARY_CHARS,
+)
+from agentcore.runtime.workspace import summarize
+
+
+def pointer_body(content: str, files: list[str]) -> str:
+    """A file-producing product's POINTER body: a tight digest of its prose handoff +
+    the artifact paths to ``file_read``.
+
+    The full product lives in the shared workspace (it called ``file_write``), so a
+    reader pulls only what it needs rather than carrying the whole artifact in-prompt
+    (递指针不递全文). The digest keeps the worker's own orientation note (改了哪些文件 /
+    怎么用 / 关键取舍); the path list is the pointer. Both are bounded
+    (``DEP_POINTER_SUMMARY_CHARS`` / ``DEP_POINTER_MAX_FILES``)."""
+    parts: list[str] = []
+    digest = summarize(content, limit=DEP_POINTER_SUMMARY_CHARS) if content.strip() else ""
+    if digest:
+        parts.append(digest)
+    listed = files[:DEP_POINTER_MAX_FILES]
+    lines = "\n".join(f"- {p}" for p in listed)
+    more = f"\n……（共 {len(files)} 个文件）" if len(files) > len(listed) else ""
+    parts.append(
+        "已写入共享工作区的文件（需要完整内容请用 file_read 读取，不要凭空臆测）：\n"
+        + lines
+        + more
+    )
+    return "\n\n".join(parts)
+
+
+def allocate(sizes: list[int], budget: int) -> list[int]:
+    """Fair-share ``budget`` across items of the given ``sizes`` (water-filling).
+
+    Processing smallest-first, each item gets ``min(its size, an equal split of the
+    budget still left)``: a small item claims only what it needs and frees the rest,
+    which redistributes to the larger items — so the budget is used fully and a lone
+    item gets the whole of it. Returns a per-item char allowance in the INPUT order.
+    ``[]`` for no items."""
+    n = len(sizes)
+    if n == 0:
+        return []
+    allowances = [0] * n
+    remaining = budget
+    # Smallest-first so an item that needs less than its equal share frees the
+    # remainder for the larger ones (classic water-filling).
+    for rank, i in enumerate(sorted(range(n), key=lambda i: sizes[i])):
+        share = remaining // (n - rank)
+        allowances[i] = min(sizes[i], share)
+        remaining -= allowances[i]
+    return allowances
+
+
+def truncate_head_tail(content: str, limit: int) -> str:
+    """Trim ``content`` to ``limit`` chars keeping BOTH ends with an elision marker
+    between, so trailing details (金额 / 法条编号) survive — a head-only cut would
+    silently drop them. Returns ``content`` unchanged when it already fits, ""
+    when ``limit <= 0``."""
+    if limit <= 0:
+        return ""
+    if len(content) <= limit:
+        return content
+    marker = "\n\n……（中间省略，已保留首尾）……\n\n"
+    keep = limit - len(marker)
+    if keep <= 0:
+        return content[:limit].rstrip() + "…"
+    head = keep * 3 // 5  # bias to the head (framing) while still keeping a real tail
+    tail = keep - head
+    return content[:head].rstrip() + marker + content[len(content) - tail :].lstrip()
