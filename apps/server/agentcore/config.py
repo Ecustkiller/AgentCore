@@ -85,6 +85,17 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     cookie_samesite: str = "lax"
 
+    # External path prefix the API is mounted under by a reverse proxy. Prod serves
+    # the API behind Nginx at `/api/` (app.fashitianxia.xyz/api → :8000), so the
+    # browser's REAL request path is `/api/v1/auth/refresh`. The refresh cookie is
+    # path-scoped to the auth endpoints (keeps the long-lived token off every other
+    # request); that scope must carry this prefix or RFC 6265 path-matching drops the
+    # cookie on refresh → silent re-login in the packaged desktop app once the access
+    # token expires (the `/api` prefix only exists in prod, so dev / same-origin never
+    # sees it). Empty in dev (API at root); set COOKIE_PATH_PREFIX=/api in production to
+    # match the proxy's location prefix. See api/routes/auth.py `_refresh_cookie_path`.
+    cookie_path_prefix: str = ""
+
     # CORS: browser/desktop origins allowed to call the API with credentials.
     # Credentialed CORS forbids "*", so each origin must be listed. Comma-separated
     # in the env var; read as a list via the `cors_origins` property. The packaged

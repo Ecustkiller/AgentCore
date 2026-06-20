@@ -58,8 +58,22 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 REFRESH_TOKEN_COOKIE = "refresh_token"
-# Refresh cookie only needs to travel to the refresh/logout endpoints.
-_REFRESH_COOKIE_PATH = "/v1/auth"
+# The refresh cookie only needs to reach the refresh/logout endpoints, so it's
+# path-scoped (keeps the long-lived token off every other request). The scope must
+# carry the API's external mount prefix (settings.cookie_path_prefix, e.g. `/api`
+# behind the prod Nginx): the browser path-matches the cookie against the REAL request
+# path `/api/v1/auth/refresh`, so a bare `/v1/auth` scope would never be sent there →
+# silent refresh failure once the access token expires (认证与会话.md §七). Empty prefix
+# (dev / same-origin) keeps the original `/v1/auth`.
+_REFRESH_COOKIE_SUFFIX = "/v1/auth"
+
+
+def _refresh_cookie_path() -> str:
+    prefix = settings.cookie_path_prefix.strip().rstrip("/")
+    if prefix and not prefix.startswith("/"):
+        prefix = f"/{prefix}"
+    return f"{prefix}{_REFRESH_COOKIE_SUFFIX}"
+
 
 RefreshCookie = Annotated[str | None, Cookie(alias=REFRESH_TOKEN_COOKIE)]
 
@@ -110,13 +124,13 @@ def _set_auth_cookies(response: Response, tokens: TokenPair) -> None:
         httponly=True,
         secure=settings.cookie_secure,
         samesite=settings.cookie_samesite,
-        path=_REFRESH_COOKIE_PATH,
+        path=_refresh_cookie_path(),
     )
 
 
 def _clear_auth_cookies(response: Response) -> None:
     response.delete_cookie(ACCESS_TOKEN_COOKIE, path="/")
-    response.delete_cookie(REFRESH_TOKEN_COOKIE, path=_REFRESH_COOKIE_PATH)
+    response.delete_cookie(REFRESH_TOKEN_COOKIE, path=_refresh_cookie_path())
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
