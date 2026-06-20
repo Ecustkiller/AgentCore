@@ -6,9 +6,12 @@ owner-scoped conversation CRUD, IDOR protection, refresh rotation + reuse
 detection, login lockout, and logout.
 """
 
+from datetime import timedelta
 from uuid import uuid4
 
 import httpx
+
+from agentcore.config import settings
 
 _PW = "password123"
 
@@ -137,7 +140,15 @@ async def test_refresh_rotates_cookie(client, make_invite):
     assert (await client.get("/v1/auth/me")).status_code == 200
 
 
-async def test_refresh_reuse_detected_revokes_family(client, new_client, make_invite):
+async def test_refresh_reuse_detected_revokes_family(
+    client, new_client, make_invite, monkeypatch
+):
+    # Close the benign-concurrency grace window so an already-rotated token reads
+    # as a genuine replay/leak (the security property under test). The within-grace
+    # benign path is covered by tests/test_auth_service.py.
+    monkeypatch.setattr(
+        "agentcore.auth.service._REFRESH_REUSE_GRACE", timedelta(0)
+    )
     code = await make_invite("INV-4")
     await _register_and_login(client, code, "erin")
 
@@ -184,6 +195,31 @@ async def test_logout_clears_cookies(client, make_invite):
     assert (await client.post("/v1/auth/logout")).status_code == 200
     # cookies cleared -> protected route is unauthenticated again
     assert (await client.get("/v1/auth/me")).status_code == 401
+
+
+async def test_refresh_cookie_path_carries_reverse_proxy_prefix(
+    client, make_invite, monkeypatch
+):
+    # Behind the prod Nginx the API is mounted at /api/, so the browser's real refresh
+    # path is /api/v1/auth/refresh. RFC 6265 path-matching only sends the cookie if its
+    # Path is a prefix of that — a bare /v1/auth scope silently drops it (forced
+    # re-login once the access token expires). COOKIE_PATH_PREFIX must carry the mount.
+    monkeypatch.setattr(settings, "cookie_path_prefix", "/api")
+    code = await make_invite("INV-PREFIX")
+    r = await client.post(
+        "/v1/auth/register",
+        json={"username": "pat", "password": _PW, "invite_code": code},
+    )
+    assert r.status_code == 201, r.text
+    r = await client.post("/v1/auth/login", json={"username": "pat", "password": _PW})
+    assert r.status_code == 200
+
+    set_cookies = r.headers.get_list("set-cookie")
+    refresh = next(c for c in set_cookies if c.startswith("refresh_token="))
+    assert "Path=/api/v1/auth" in refresh, refresh
+    # Access cookie stays at root so it rides every /api/* request.
+    access = next(c for c in set_cookies if c.startswith("access_token="))
+    assert "Path=/" in access and "Path=/api/v1/auth" not in access, access
 
 
 # --- self-service account ops (账户设置: 改密码 / 改资料 / 注销) ---
@@ -346,7 +382,14 @@ async def test_bearer_invalid_token_rejected(client):
     assert r.status_code == 401
 
 
-async def test_token_refresh_rotates_via_body_and_detects_reuse(client, make_invite):
+async def test_token_refresh_rotates_via_body_and_detects_reuse(
+    client, make_invite, monkeypatch
+):
+    # Close the grace window so the old token re-presented after rotation reads as
+    # a genuine reuse (benign within-grace concurrency is unit-tested separately).
+    monkeypatch.setattr(
+        "agentcore.auth.service._REFRESH_REUSE_GRACE", timedelta(0)
+    )
     code = await make_invite("INV-TOK-2")
     await client.post(
         "/v1/auth/register",
