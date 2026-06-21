@@ -33,7 +33,6 @@ jobs:
             ENVF="$DEPLOY/config/production.env"
             SCRIPT="$REPO/apps/server/scripts/create_admin.py"
             [[ -f "$ENVF" ]] || { echo "ERROR: $ENVF missing"; exit 1; }
-            [[ -f "$SCRIPT" ]] || { echo "ERROR: $SCRIPT missing (git clone repo on server?)"; exit 1; }
 
             ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)"
 
@@ -42,10 +41,21 @@ jobs:
               -f "$DEPLOY/docker-compose.app.yml" \
               --env-file "$ENVF" )
 
-            "${COMPOSE[@]}" run --rm \
-              -e "ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
-              -v "${SCRIPT}:/app/scripts/create_admin.py:ro" \
-              api python scripts/create_admin.py "${ADMIN_USERNAME}"
+            run_create_admin() {
+              "${COMPOSE[@]}" run --rm \
+                -e "ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
+                "$@" \
+                api python scripts/create_admin.py "${ADMIN_USERNAME}"
+            }
+
+            if "${COMPOSE[@]}" run --rm api test -f /app/scripts/create_admin.py; then
+              run_create_admin
+            elif [[ -f "$SCRIPT" ]]; then
+              run_create_admin -v "${SCRIPT}:/app/scripts/create_admin.py:ro"
+            else
+              echo "ERROR: create_admin.py not in image and not at $SCRIPT"
+              exit 1
+            fi
 
             echo ""
             echo "========== BOOTSTRAP CREDENTIALS (save now) =========="

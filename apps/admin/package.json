@@ -9,8 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "gen:api": "openapi-typescript ../server/openapi.json -o src/types/api.generated.ts",
-    "postinstall": "pnpm gen:api"
+    "gen:api": "openapi-typescript ../server/openapi.json -o src/types/api.generated.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
