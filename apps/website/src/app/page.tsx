@@ -1,12 +1,7 @@
 import CollaborationNetwork from "@/components/CollaborationNetwork";
 import FlowDiagram from "@/components/FlowDiagram";
 import Reveal from "@/components/Reveal";
-
-// 桌面安装包下载去向（electron-builder.yml publish / 部署与运维.md §7.6）：
-// 公开发布仓 Lawofall/AgentCore-releases；指向当前 Latest 正式 release。
-const DESKTOP_VERSION = "0.2.0";
-const DOWNLOAD_URL =
-  `https://github.com/Lawofall/AgentCore-releases/releases/download/v${DESKTOP_VERSION}/AgentCore-${DESKTOP_VERSION}-win-x64.exe`;
+import { DOWNLOAD_PAGE_PATH } from "@/lib/download";
 
 const NAV = [
   { href: "#value", label: "能力" },
@@ -164,12 +159,7 @@ export default function Home() {
               </li>
             ))}
           </ul>
-          <a
-            href={DOWNLOAD_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-primary px-4 py-2 text-sm"
-          >
+          <a href={DOWNLOAD_PAGE_PATH} className="btn btn-primary px-4 py-2 text-sm">
             <DownloadIcon />
             下载客户端
           </a>
@@ -228,12 +218,7 @@ export default function Home() {
               </figure>
 
               <div className="mt-9 flex flex-wrap items-center gap-3">
-                <a
-                  href={DOWNLOAD_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn-primary"
-                >
+                <a href={DOWNLOAD_PAGE_PATH} className="btn btn-primary">
                   <DownloadIcon />
                   下载客户端
                 </a>
@@ -577,12 +562,7 @@ export default function Home() {
                 AgentCore —— 让 AI 像团队一样工作。
               </p>
               <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
-                <a
-                  href={DOWNLOAD_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn-primary"
-                >
+                <a href={DOWNLOAD_PAGE_PATH} className="btn btn-primary">
                   <DownloadIcon />
                   下载客户端
                 </a>
@@ -612,12 +592,7 @@ export default function Home() {
               <p className="font-semibold">产品</p>
               <ul className="mt-3 space-y-2 text-muted-foreground">
                 <li>
-                  <a
-                    href={DOWNLOAD_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="hover:text-foreground"
-                  >
+                  <a href={DOWNLOAD_PAGE_PATH} className="hover:text-foreground">
                     下载客户端
                   </a>
                 </li>
