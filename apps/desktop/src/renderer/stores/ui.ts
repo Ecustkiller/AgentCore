@@ -3,6 +3,7 @@ import { create } from "zustand";
 const USAGE_DETAIL_KEY = "agentcore:usage-detail";
 const THEME_KEY = "agentcore:theme";
 const SIDECAR_KEY = "agentcore:sidecar-enabled";
+const GRAPH_PRIMARY_KEY = "agentcore:graph-primary";
 
 type Theme = "light" | "dark" | "system";
 
@@ -20,6 +21,29 @@ function loadUsageDetail(): boolean {
 function persistUsageDetail(v: boolean): void {
   try {
     localStorage.setItem(USAGE_DETAIL_KEY, String(v));
+  } catch {
+    /* unavailable — session-only */
+  }
+}
+
+// 「图主界面化」实验总开关（协作图主界面化设计 §六 渐进迁移）：一个开关渐进点亮该愿景的各刀——
+//   · 单 Agent 回合（`executionId === null`）把「思考·正文·工具」时间线渲染进一张 CEO 节点卡
+//     （退化 1 节点图，§九「第一刀」）；
+//   · 团队回合的内嵌协作图里，点 CEO 汇聚点 / 用户输入端点**就地展开读全文**（§三 ②读答案），
+//     而非跳转到气泡。
+// 默认关 → 现有聊天体验零回归；用户显式开启才进「图即界面」实验。同 usageDetail 的 localStorage
+// 包裹（私密模式 / 非 DOM 测试环境抛错时回退默认关）。
+function loadGraphPrimary(): boolean {
+  try {
+    return localStorage.getItem(GRAPH_PRIMARY_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistGraphPrimary(v: boolean): void {
+  try {
+    localStorage.setItem(GRAPH_PRIMARY_KEY, String(v));
   } catch {
     /* unavailable — session-only */
   }
@@ -97,6 +121,11 @@ interface UIState {
    * is never gated by this — it stays visible in both modes (§7.1). Persisted to
    * `localStorage: agentcore:usage-detail`. */
   usageDetail: boolean;
+  /** 「图主界面化」实验总开关（协作图主界面化设计 §六 渐进迁移）。开启后渐进点亮愿景各刀：
+   * 单 Agent 回合渲染成 CEO 节点卡（退化 1 节点图，§九）；团队内嵌图的 CEO 汇聚点 / 用户输入
+   * 端点支持**就地展开读全文**（§三 ②读答案）。默认关、与现有聊天体验并行验证。持久化到
+   * `localStorage: agentcore:graph-primary`。 */
+  graphPrimary: boolean;
   /** 本地引擎（sidecar）**有效**开关（双模式工作区 §一.1）：= `resolveSidecarEnabled(偏好)`，
    * 消费方（路由）只读这个 boolean。开启后，绑定本机本地文件夹的对话由用户机器上的
    * `python -m agentcore.sidecar` 跑（直连本地盘），而非云端引擎遥控桌面；裸聊 / 云端文件夹 /
@@ -114,6 +143,8 @@ interface UIState {
   setTheme: (theme: UIState["theme"]) => void;
   setUsageDetail: (v: boolean) => void;
   toggleUsageDetail: () => void;
+  setGraphPrimary: (v: boolean) => void;
+  toggleGraphPrimary: () => void;
   setSidecarEnabled: (v: boolean) => void;
 }
 
@@ -121,6 +152,7 @@ export const useUIStore = create<UIState>((set) => ({
   searchOpen: false,
   theme: loadTheme(),
   usageDetail: loadUsageDetail(),
+  graphPrimary: loadGraphPrimary(),
   sidecarPreference: loadSidecarPreference(),
   sidecarEnabled: loadSidecarEnabled(),
 
@@ -140,6 +172,16 @@ export const useUIStore = create<UIState>((set) => ({
       const usageDetail = !s.usageDetail;
       persistUsageDetail(usageDetail);
       return { usageDetail };
+    }),
+  setGraphPrimary: (graphPrimary) => {
+    persistGraphPrimary(graphPrimary);
+    set({ graphPrimary });
+  },
+  toggleGraphPrimary: () =>
+    set((s) => {
+      const graphPrimary = !s.graphPrimary;
+      persistGraphPrimary(graphPrimary);
+      return { graphPrimary };
     }),
   setSidecarEnabled: (sidecarEnabled) => {
     const sidecarPreference: SidecarPreference = sidecarEnabled ? "on" : "off";

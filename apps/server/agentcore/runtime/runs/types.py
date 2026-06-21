@@ -183,10 +183,17 @@ class RunSpec:
     # run, awaiting a user plan_review (continue / stop) over the unified
     # interaction bridge — the one thing a CEO ``ask_user`` cannot express, since a
     # ``delegate`` is atomic to the CEO (it gets no wave-boundary control). Inert by
-    # default and whenever the scheduler is driven without an ``on_checkpoint`` hook
+    # default and whenever the scheduler is driven without an ``on_boundary`` hook
     # (autonomous jobs / tests), so a plan with no checkpoint marks runs byte-for-
     # byte as before. → 见设计: docs/03-AI核心/执行引擎架构设计.md §检查点决策语义
     checkpoint_after: bool = False
+    # 晚绑定标记（受监督的波循环 / 职责晚绑定与动态再编排）：为 True 的节点其 spec 关键
+    # 字段（task/role/tools…）可先占位，依赖完成后由 CEO 在波边界经 ``replan`` 定稿再
+    # dispatch——WaveScheduler 把「依赖已完成但本节点未定稿」当一个决策边界、YIELD 回 CEO
+    # 的 ReAct 主循环（区别于 checkpoint_after 的「让给用户 plan_review」）。Inert by
+    # default：未接 on_boundary 的调度（自治 / 测试 / 当前阶段）下完全无效，故一个无晚
+    # 绑定节点的 plan 行为逐字不变。→ 见设计: docs/07-规划/职责晚绑定与动态再编排设计.md §7.1
+    bind_after_deps: bool = False
     parent_run_id: str | None = None
     depth: int = 0
     # Whether this worker may itself delegate one nested level of sub-workers

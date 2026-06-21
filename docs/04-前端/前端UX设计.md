@@ -24,7 +24,7 @@
 点图节点 → 右侧 SidePanel 新开该 run 的详情 tab（被动下钻）；面板是一条扁平 tab 栏——固定首位「工作区」tab（文件/快照）+ 按需的 run 详情 tab。右上「侧面板」开关 / Ctrl+I → 显隐（冷启动落「工作区」tab），Ctrl+J → 直达「工作区」tab
 ```
 
-**侧栏对话区（IA）**：侧栏只列**最近若干对话**（扁平、按时间，当前对话恒置顶可见）+ 底部「查看全部对话」入口；完整列表、文件夹分组与「按文件夹筛选 / 页内搜索」统一收敛到独立的**对话管理页** `/conversations`（canvas 档：左侧文件夹筛选 + 右侧对话列表，点对话进 `/conversations/:id`）；**文件夹的生命周期（新建 / 重命名 / 删除 / 添加本地文件夹）则归「文件」中枢 `/files` 管**——文件夹即工作区，项目事务单一入口，`/conversations` 只做按文件夹筛选（左下「管理文件夹」跳 `/files`）。**决策**：侧栏保持轻量、只承载高频的「最近 + 新建对话」，低频的归档/整理移交专门页面，避免侧栏被长列表与文件夹树占满。**「对话」导航即「新建对话」**：点顶部「对话」入口默认开一个空白草稿对话（与「+」/`Ctrl/Cmd+N` 一致），回到旧对话走「最近对话 / 全部对话」（对齐 ChatGPT/Claude：主入口=新建，列表=返回）；路由 `/`（无 `:id`）是「新草稿」的唯一真相——`ConversationPage` 在无 `:id` 时丢弃上次对话，故刷新/直达 `/` 也是新对话，「新建对话」意图统一收敛到 `startNewConversation`。→ 见代码 `lib/newConversation.ts`、`pages/ConversationPage.tsx`、`components/sidebar/RecentConversations.tsx`、`pages/ConversationsPage.tsx`。
+**侧栏对话区（IA · 两区混合「方案 B」）**：侧栏对话区分两区——上工作区（按文件夹的可折叠分组：组头显云/本地图标·名称·计数，组内复用 `ConversationItem` 列 Top 5、超出走「更多」跳 `/conversations` 并聚焦该组）+ 下裸聊扁平列表（仅未归属文件夹的对话，置顶优先、当前裸聊对话恒可见，**上限自适应**：无工作区分组时独占侧栏给足 15、有分组时放宽到 10，溢出均走「查看全部对话」——侧栏单层外滚，不另设嵌套滚动条）+ 底部「查看全部对话」入口。**两区无文字标题**——组头（chevron + 图标 + 计数）与裸聊平铺行视觉已足够区分；两区并存时以细分隔线隔开。**工作区 ⊥ 裸聊 · 干净二分零重复**：已归属对话只在其工作区组里、**不**在裸聊区重复（**否决**跨区「最近」列表：双显噪音>收益）；裸聊只在下方扁平区（**否决**为裸聊单设「未分组」组：徒增空组噪音）。全部对话都已归属时裸聊区整体隐藏（0 对话则走空状态）。工作区组按近活跃排序、上限 6（溢出走「查看全部对话」），每组展开态按 `folderId` 持久化（`useSidebarStore`，显式切换优先；无记录时默认折叠、唯含当前对话的组自动展开）。分组逻辑下沉纯函数 `buildWorkspaceGroups`。完整列表与「按文件夹筛选 / 页内搜索」收敛到**对话管理页** `/conversations`；文件夹生命周期归「文件」中枢 `/files`。**决策**：侧栏保持轻量——裸聊 10/15 自适应、每组 Top 5、组数 ≤6，低频整理移交专门页面。**「对话」导航即「新建对话」**：点顶部「对话」入口默认开空白草稿（`Ctrl/Cmd+N` 同效），回到旧对话走侧栏列表 /「全部对话」；路由 `/` 是新草稿唯一真相。→ 见代码 `lib/newConversation.ts`、`pages/ConversationPage.tsx`、`components/sidebar/RecentConversations.tsx`、`components/sidebar/WorkspaceGroups.tsx`、`hooks/useWorkspaceGroups.ts`、`stores/sidebar.ts`、`pages/ConversationsPage.tsx`。
 
 **团队展示并入「思考·正文·工具」时间线**：多 Agent 与单 Agent 回合都走同一条内联时间线（`ProcessTimeline`，§一B）——CEO 的思考、回复正文、工具按真实发生顺序交织。多 Agent 委派时，一张协作图（`InlineTeamGraph`）**内嵌在 `delegate`/`debate` 步的时序位置**承载团队界面：图顶状态条折进了原任务卡片的职责（状态 · N agents · M/M · 用时 · ¥合计 + 救火行），节点 face 只显角色 + 任务/输出 + 用时/工具（¥ / token 归 run 详情，§7.3B），点节点把详情下钻到右侧被动面板，右上「最大化」临时进全屏看大图/回放。CEO 委派前后的思考/正文/自调工具因此围着团队工作按真序排列，不再被压到固定图下方；单 Agent 回合不出图（无团队）。思考逐段可折叠＝零噪音，末段正文即最终答案；live 与重载一致——多 Agent `process[]` 已持久化、经 `journal` 回放，仅持久化前的旧回合回退到独立图布局。→ 见 [`前端技术与架构.md` §9.2–9.6](/docs/04-前端/前端技术与架构.md)。
 
@@ -47,7 +47,7 @@
 
 > 信息分层（Layer 0–4 模型）：单 Agent 回合 = 一条内联「思考·正文·工具」时间线（§一B，思考/工具＝Layer 1–3、末段正文＝Layer 0 输出，按真实顺序交织）；多 Agent 回合 = 内嵌图（Layer 1–3 状态/进度/协作）+ 点节点进面板看 run 全文（Layer 4）。
 
-**聊天特有元素**（检查点 / 非阻塞发问 / 结构化挂起 / 断连续跑 / 工具审批等）→ 见代码 `components/chat/`；消息载入契约见 [`前端技术与架构.md` §9.7](/docs/04-前端/前端技术与架构.md)。**已否决**：Slash 命令、Agent/Team 选择器、产物 Pill、文件夹落点 pill、常驻吵闹工具卡。
+**聊天特有元素**（检查点 / 非阻塞发问 / 结构化挂起 / 断连续跑 / 工具审批等）→ 见代码 `components/chat/`；消息载入契约见 [`前端技术与架构.md` §9.7](/docs/04-前端/前端技术与架构.md)。**已否决**：Slash 命令、Agent/Team 选择器、产物 Pill、常驻吵闹工具卡（每回合落点 pill 式噪音）。**草稿期「工作区」选择 chip 已落地**（默认「自动」零门槛、可选落点文件夹；与被否决的「每回合落点噪音」相区别，详见 §九）。
 
 > 页面宽度 → 见 `.cursor/rules/desktop-layout.mdc`；对话页 / 文件页自有布局除外。
 
@@ -142,7 +142,17 @@
 
 **嵌套子团队**：子 worker 经虚线委派边挂 captain 下，带「子任务」徽章；**否决容器嵌套盒**。→ 见代码 `lib/elk-layout.ts`。
 
-**可达性与多选**：节点 `role=button` + `tabIndex` 键盘 focus + Enter/Space 激活 + `aria-label` 播报角色/状态/模型/Token/成本/用时/工具；支持多选（修饰键加选 / 框选，`selected` 与面板下钻高亮共用 outline）。**动画 / 布局选型理由**：状态过渡用纯 CSS（**否决 Framer Motion**——零依赖、与 React Flow 定位 transform 无冲突）；ELK 仅留左右流 / 树形（径向 / 力导向曾实现、小团队下无价值已移除）；右键菜单复用 `sidebar/ContextMenu`（无需 Radix）。
+**角色身份（✅ 已落地）**：每个队员节点的头像 = 按角色名**稳定派生**的「颜色 + 首字字形」（`lib/agentIdentity.ts` 用 FNV hash → `--agent-1..8` 身份色板，CJK 角色名首字即天然字号头像「研/工/设」），让一支团队读作「一个个人」而非一排同款 Bot 图标。**身份与状态解耦**：身份在头像盘，运行状态走卡片色环 + 头像角标的「在线点」（运行/完成/失败带小字形，保留非颜色线索），故身份色永不与 6 态状态色抢色（见 `.cursor/rules/color-tokens.mdc`「分类色板」）。
+
+**信息流边（✅ 已落地）**：队员间的依赖边不再只表「先后」，而是据下游 run 的 `receivedContext`（按 `source_run_id` 精确匹配上游产物块）标注**真实交接**——仅在**有损**交接（`摘要` / `递指针` / `截断`）时挂一枚小标签，`全文`（pass_through）交接保持干净线，故标签精准落在「队友只拿到了不完整产物」处；hover 标签看「来自 X · 保真度 · N 字 · 是否截断」。纯渲染层派生（`GraphView` `flowEdges` + `StepEdge` 的 `EdgeLabelRenderer`），**不改协议 fold / conformance**。→ 见代码 `components/graph/AgentNode.tsx`、`components/graph/StepEdge.tsx`、`components/graph/GraphView.tsx`。
+
+**波次泳道（✅ 已落地）**：协作图按 `WaveScheduler` 波次（ELK 同层 = 同波）在节点后方画半透明泳道 + 「第 N 波」标签，让「团队分轮推进（并行扇出 → 汇总 → …）」一眼可读；**单波（纯并行扇出）/ 单 Agent 不出泳道**，简单回合保持干净；端点（用户输入 / CEO 汇聚点）在泳道之外。经 `ViewportPortal` 在画布坐标系渲染（泳道 z-index -1 沉底、标签浮顶），随平移/缩放联动。→ 见代码 `components/graph/GraphView.tsx`（`computeWaves`）。
+
+**hover 速览卡（✅ 已落地）**：hover 队员节点弹一张**比 face 更详、比右侧面板更轻**的速览（角色 + 状态 + 分类标记 + 任务 + 更长的「在做 / 产出」预览 + 模型·token·用时·工具 一行），补「节点 face → 完整面板」之间的渐进披露层；复用 face 同源信号、只给更多空间，不新增数据通路。模型档/深度的小徽标 tooltip 已并入此速览（避免节点内嵌套 tooltip）。→ 见代码 `components/graph/AgentNode.tsx`。
+
+**产物落点 chip（✅ 已落地）**：节点据自身**已提交**的文件工具调用（`file_write` / `str_replace`，按 `path` 去重、保首写顺序）派生「这个队员产出了哪些文件」，在 face 上挂文件 chip（📄 + 文件名，face 最多 2 个 + 「+N」溢出，hover chip 看全路径），速览卡列更多（至多 6 + 溢出）、aria-label 播报「产物 N 个」。**只算 `success` 调用**（失败/中止的写入不落产物），且与中行的「正在生成」分离——chip 是已落盘成果，中行是进行中的写入；纯渲染层派生（`GraphView` `deriveArtifacts`），不改协议。→ 见代码 `components/graph/GraphView.tsx`（`deriveArtifacts`）、`components/graph/AgentNode.tsx`。
+
+**可达性与多选**：节点 `role=button` + `tabIndex` 键盘 focus + Enter/Space 激活 + `aria-label` 播报角色/状态/模型/Token/成本/用时/工具/产物；支持多选（修饰键加选 / 框选，`selected` 与面板下钻高亮共用 outline）。**动画 / 布局选型理由**：状态过渡用纯 CSS（**否决 Framer Motion**——零依赖、与 React Flow 定位 transform 无冲突）；ELK 仅留左右流 / 树形（径向 / 力导向曾实现、小团队下无价值已移除）；右键菜单复用 `sidebar/ContextMenu`（无需 Radix）。
 
 **结构化挂起图徽标（✅ 已落地，Phase 2a）**：`plan_review_*` 事件入 journal 后，execution fold 按 step `run_id` 折进 `RunNode`；在检查点步骤的 `AgentNode` 上挂暂停徽标（⏸ + 待放行/已放行/已调整/已停止）。**否决独立 `CheckpointNode`**（step 与下游之间插入合成节点 + ELK 重布局）——视觉更突出但代价显著，徽标已满足「图上可见检查点」；独立节点留作后续 richer 形态。→ 见代码 `stores/execution.ts`（`RunCheckpoint`）、`components/graph/AgentNode.tsx`。
 
@@ -178,7 +188,7 @@
 
 **审批 UX（写操作）**：只读时尝试写引导开启；可写时写前弹审批（可「本轮内都允许」按同名工具、或「本轮内允许所有文件改动」按整类一次放行，依赖 §三工具审批三态 `grantable` 级别，避免 N 次写/改/删 = N 次弹窗）。
 
-**对话落点表达**：已选文件夹→输入框「文件夹」pill 显示项目名；未选但 Agent 自动落点→pill 标「自动」并提供「固定为文件夹」一键升级；无桌面→不挂写工具，需显式出口。
+**对话落点表达（✅ 草稿期工作区选择器）**：新对话草稿的输入框工具行挂一枚「工作区」chip（`DraftWorkspacePicker`），默认「自动」= 桌面 local-first 懒建（零门槛不变）。下拉四项：自动 / 最近项目（按近活跃 Top 6，web 仅列云项目）/ 打开本地文件夹（复用 F2 绑定）/ 云端临时对话。**选的是落点文件夹而非云/本地**——模式仍随该文件夹绑定派生（守「无云/本地开关」）。落点经 `pendingNewChat*` 草稿态传给首发建会话（消费成 `folder_id` / `local_container_root_id` / 云端意向），故不碰发送链路与后端契约；「打开本地文件夹」先弹 OS 选择器拿桌面根，按 `localRootId` 复用已有本地项目、否则建一个（`POST /v1/folders`）。首发后归属锁定（[`双模式工作区.md` §七](/docs/02-架构/双模式工作区.md)），chip 隐藏、云/本地切换交给会话内 `WorkspaceModeBar`。web/手机无 `fsApi` → 退化为「自动（云）+ 已有云项目」。→ 见代码 `components/chat/DraftWorkspacePicker.tsx`、`components/chat/MessageInput.tsx`、`lib/newConversation.ts`。
 
 **隐私承诺**：默认不留存（未备份内容不进云）；在途可用（读文件时正文临时发给模型）；备份/分享 = 显式上传（不自动同步，操作前明示）。
 

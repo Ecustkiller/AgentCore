@@ -32,6 +32,12 @@ logger = get_logger(__name__)
 # Shared so the stamper (sidecar/server.py) and the reader (api/routes/inference.py)
 # can never drift on the spelling.
 INFERENCE_CONVERSATION_HEADER = "X-AgentCore-Conversation"
+# HTTP header carrying the local turn's trace_id on every cloud-proxy LLM call, so the
+# proxy binds it into its logs and the later write-back (record_local_turn) reuses the
+# SAME id — stitching a sidecar turn's reasoning (proxy spend) + persisted reply into
+# ONE greppable trace (打通气泡↔日志). Same stamper/reader sharing as the conversation
+# header above; the desktop mints the id per turn (core/log_context.new_trace_id shape).
+INFERENCE_TRACE_HEADER = "X-AgentCore-Trace"
 
 
 @dataclass(frozen=True)

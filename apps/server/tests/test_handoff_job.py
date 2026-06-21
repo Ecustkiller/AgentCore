@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 import pytest
 
 from agentcore.config import settings
+from agentcore.conversation import handoff_jobs as handoff_jobs_mod
 from agentcore.conversation import service
 from agentcore.conversation.service import run_handoff_job
 from agentcore.storage import SnapshotRef
@@ -117,14 +118,14 @@ def _patch_job_runner(monkeypatch, events: list, *, pipeline):
             size_bytes=10,
         )
 
-    monkeypatch.setattr(service, "async_session_factory", lambda: _FakeSessionCM())
-    monkeypatch.setattr(service, "HandoffJobRepository", _FakeJobRepo)
-    monkeypatch.setattr(service, "MessageRepository", _FakeMsgRepo)
-    monkeypatch.setattr(service, "CostEventRepository", _FakeCostRepo)
-    monkeypatch.setattr(service, "restore_into_workspace", _fake_restore)
-    monkeypatch.setattr(service, "build_server_workspace", lambda **kw: object())
-    monkeypatch.setattr(service, "create_snapshot", _fake_create_snapshot)
-    monkeypatch.setattr(service, "run_chat_pipeline", pipeline)
+    monkeypatch.setattr(handoff_jobs_mod, "async_session_factory", lambda: _FakeSessionCM())
+    monkeypatch.setattr(handoff_jobs_mod, "HandoffJobRepository", _FakeJobRepo)
+    monkeypatch.setattr(handoff_jobs_mod, "MessageRepository", _FakeMsgRepo)
+    monkeypatch.setattr(handoff_jobs_mod, "CostEventRepository", _FakeCostRepo)
+    monkeypatch.setattr(handoff_jobs_mod, "restore_into_workspace", _fake_restore)
+    monkeypatch.setattr(handoff_jobs_mod, "build_server_workspace", lambda **kw: object())
+    monkeypatch.setattr(handoff_jobs_mod, "create_snapshot", _fake_create_snapshot)
+    monkeypatch.setattr(handoff_jobs_mod, "run_chat_pipeline", pipeline)
 
 
 async def test_run_handoff_job_success(monkeypatch):

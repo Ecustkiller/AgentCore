@@ -1,5 +1,7 @@
 import { DebateCompare } from "@/components/chat/DebateCompare";
+import { Markdown } from "@/components/chat/Markdown";
 import { RevisionCompare } from "@/components/chat/RevisionCompare";
+import type { EndpointView } from "@/components/graph/GraphDetailPanel";
 import { GraphView } from "@/components/graph/GraphView";
 import { TeamGraphFullscreen } from "@/components/graph/TeamGraphFullscreen";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -20,6 +22,7 @@ import {
   activeRuntime,
   selectLastAssistantCostTotal,
   useActiveGenerating,
+  useActiveMessages,
   useConversationStore,
 } from "@/stores/conversation";
 import {
@@ -36,6 +39,7 @@ import {
 } from "@/stores/execution";
 import { useGraphStore } from "@/stores/graph";
 import { useSidePanelStore } from "@/stores/sidePanel";
+import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import {
   AlertTriangle,
@@ -85,6 +89,13 @@ export function InlineTeamGraph({
   const [fullscreen, setFullscreen] = useState<false | "view" | "replay">(
     false,
   );
+  // 「图主界面化」实验（协作图主界面化设计 §三 ②读答案）：开启后，内嵌图的端点（用户输入 /
+  // CEO 汇聚点）点击不再跳转到气泡，而是在图卡内**就地展开读全文**。默认关 → 端点仍走
+  // focusMessage 跳转（GraphView 的回退），现有手感零回归。
+  const graphPrimary = useUIStore((s) => s.graphPrimary);
+  // The endpoint (提问 / 最终回答) currently surfaced in the in-place reading drawer
+  // below the canvas; null = no drawer. Only ever set while `graphPrimary` is on.
+  const [endpointView, setEndpointView] = useState<EndpointView | null>(null);
 
   // Reload path: rebuild this message's execution slot from its persisted
   // journal so the team graph replays on demand. Idempotent and a no-op for the
@@ -160,6 +171,20 @@ export function InlineTeamGraph({
             messageId={messageId}
             height={graphHeight}
             onMeasure={onMeasure}
+            endpointReading={graphPrimary}
+            endpointMessageId={endpointView?.contentMessageId ?? null}
+            onEndpointSelect={(contentMessageId, title) =>
+              setEndpointView({ contentMessageId, title })
+            }
+          />
+        )}
+        {/* ②读答案（§三）: the embedded twin of the full-screen endpoint view — read
+            the prompt / final answer in place, so the graph stands as its own
+            reading surface. Gated on the experiment + an open graph. */}
+        {expanded && graphPrimary && endpointView && (
+          <EndpointReadingDrawer
+            endpoint={endpointView}
+            onClose={() => setEndpointView(null)}
           />
         )}
         {fullscreen && (
@@ -187,17 +212,25 @@ export function InlineTeamGraph({
 
 /** The embedded graph + its drill-down wiring. Node clicks open the passive
  * right-side run detail for this message; the strip's maximize button owns
- * full-screen. */
+ * full-screen. When `endpointReading` is on (图主界面化实验), endpoint clicks
+ * (用户输入 / CEO 汇聚点) report up via {@link onEndpointSelect} for the in-place
+ * reading drawer instead of jumping the conversation. */
 function GraphArea({
   execution,
   messageId,
   height,
   onMeasure,
+  endpointReading,
+  endpointMessageId,
+  onEndpointSelect,
 }: {
   execution: Execution;
   messageId: string;
   height: number;
   onMeasure: (m: { height: number; overflowing: boolean }) => void;
+  endpointReading: boolean;
+  endpointMessageId: string | null;
+  onEndpointSelect: (contentMessageId: string, title: string) => void;
 }) {
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
 
@@ -217,7 +250,61 @@ function GraphArea({
       className="w-full select-none border-t border-border transition-[height] duration-200 motion-reduce:transition-none"
       style={{ height }}
     >
-      <GraphView embedded onNodeSelect={onNodeSelect} onMeasure={onMeasure} />
+      <GraphView
+        embedded
+        onNodeSelect={onNodeSelect}
+        onMeasure={onMeasure}
+        // 实验关 → 不传 onEndpointSelect：GraphView 回退到 focusMessage 跳转（现状）。
+        // 实验开 → 端点点击就地展开读全文，并点亮对应端点节点（highlightEndpointMessageId）。
+        onEndpointSelect={endpointReading ? onEndpointSelect : undefined}
+        highlightEndpointMessageId={endpointReading ? endpointMessageId : null}
+      />
+    </div>
+  );
+}
+
+/**
+ * In-place reading drawer for the embedded team graph's endpoints (协作图主界面化
+ * §三 ②读答案). When the「图主界面化」experiment is on, clicking the 用户输入 / CEO
+ * 汇聚点 endpoint surfaces its full text — the prompt / the CEO's final answer —
+ * right here in the graph card, instead of jumping the conversation to the bubble.
+ *
+ * This is the embedded twin of the full-screen {@link GraphDetailPanel} endpoint
+ * view: same content, read live by message id so a still-streaming answer keeps
+ * growing. It lets the graph stand as its own reading surface — the concrete step
+ * toward「图即界面」where the bubble below eventually goes away. Long answers scroll
+ * inside a capped height (前端UX设计 §五.3：长文不挤进画布，给独立阅读面).
+ */
+function EndpointReadingDrawer({
+  endpoint,
+  onClose,
+}: {
+  endpoint: EndpointView;
+  onClose: () => void;
+}) {
+  const messages = useActiveMessages();
+  const content =
+    messages.find((m) => m.id === endpoint.contentMessageId)?.content ?? "";
+  return (
+    <div className="border-t border-border">
+      <div className="flex h-10 items-center gap-2 border-b border-border pl-3 pr-1">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+          {endpoint.title}
+        </span>
+        <SimpleTooltip label="收起">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="收起"
+            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <X size={15} />
+          </button>
+        </SimpleTooltip>
+      </div>
+      <div className="max-h-[420px] overflow-y-auto p-4">
+        <Markdown content={content} />
+      </div>
     </div>
   );
 }

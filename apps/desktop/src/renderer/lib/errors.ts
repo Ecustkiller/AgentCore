@@ -1,4 +1,8 @@
 import { ApiError, NetworkError } from "@/services/api";
+import {
+  KEY_CONFIG_ERROR_CODES,
+  NON_RETRIABLE_ERROR_CODES,
+} from "@agentcore/contract-types";
 
 /**
  * One place that turns any backend / transport error into the three things the
@@ -83,22 +87,23 @@ export interface DescribedError {
 }
 
 /**
- * Map a backend error `code` to a config remedy. Single source shared by the
- * transport-error banner, the inline mid-stream error card, and REST toasts, so
- * every surface phrases the same codes identically.
+ * Map a backend error `code` to a config remedy. The set of codes whose remedy is
+ * the model-config page comes from the shared {@link KEY_CONFIG_ERROR_CODES} catalog
+ * (contract-types), so desktop and mobile offer the "去配置" route on exactly the
+ * same codes, and adding a code is a one-line change in one shared place.
  */
 export function errorActionForCode(
   code: string | undefined,
 ): ErrorAction | null {
-  switch (code) {
-    // No key configured (preflight 402) / a configured key rejected mid-stream
-    // (401/403): both are fixed in 设置·模型配置.
-    case "LLM_KEY_REQUIRED":
-    case "LLM_KEY_INVALID":
-      return { label: "去配置", href: "/more/model" };
-    default:
-      return null;
+  // No key configured (preflight 402) / a configured key rejected mid-stream
+  // (401/403): both are fixed in 设置·模型配置.
+  if (
+    code !== undefined &&
+    (KEY_CONFIG_ERROR_CODES as readonly string[]).includes(code)
+  ) {
+    return { label: "去配置", href: "/more/model" };
   }
+  return null;
 }
 
 /** The facts the message/action/retry rules read, extracted once from any error
@@ -179,7 +184,13 @@ export function describeError(err: unknown): DescribedError | null {
   return {
     message: resolveMessage(f),
     action: errorActionForCode(f.code),
-    retriable: !(f.code === "QUOTA_EXCEEDED" || f.code === "LLM_KEY_REQUIRED"),
+    // Suppress retry on refusals that an immediate re-send can't fix (quota used /
+    // key missing-or-invalid / wallet empty / server key-storage down). Sourced from
+    // the shared catalog so the desktop no longer只认 2 码 and mobile stays in lockstep.
+    retriable: !(
+      f.code !== undefined &&
+      (NON_RETRIABLE_ERROR_CODES as readonly string[]).includes(f.code)
+    ),
     code: f.code,
   };
 }

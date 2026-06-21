@@ -60,8 +60,11 @@ def test_single_agent_error(projected):
 def test_multi_agent_delegate_tree(projected):
     p = projected["multi_agent_delegate"]
     assert p["status"] == "completed"
-    # Multi-agent: the team graph carries activity; the single-agent process is empty.
-    assert p["process"] == []
+    # 统一团队时间线: the captain's OWN inline timeline rides `process` (content + the
+    # `delegate` step that marks where the team graph slots in). The only tool step is the
+    # captain's delegate — worker outputs ride `runs`/`agents`, not this lane.
+    assert [s["kind"] for s in p["process"]] == ["content", "tool", "content"]
+    assert [s["tool_name"] for s in p["process"] if s["kind"] == "tool"] == ["delegate"]
     assert p["content"] == "我来安排团队。 团队已完成。"
     assert len(p["runs"]) == 2
     assert all(r["status"] == "completed" for r in p["runs"])
@@ -136,7 +139,11 @@ def test_multi_agent_worker_tool(projected):
     # No message_end → still running; w2 frozen mid-compose so its toolProgress shows.
     assert p["status"] == "running"
     assert p["finishReason"] is None
-    assert p["process"] == []  # worker tool_use never leaks into the single-agent lane
+    # 统一团队时间线 (worker-tool 归属修): a delegated worker's tool_use carries run_id, so the
+    # process folds keep it OUT of the captain bubble — `process` is only the CEO's own intro
+    # content. The worker's tool rides the team graph (toolProgress, asserted below), never
+    # the CEO timeline.
+    assert p["process"] == [{"kind": "content", "text": "我来分工。"}]
     w1 = next(a for a in p["agents"] if a["id"] == "w1")
     w2 = next(a for a in p["agents"] if a["id"] == "w2")
     assert w1["status"] == "completed"
@@ -208,3 +215,82 @@ def test_multi_agent_multi_batch_merges(projected):
     assert all(r["status"] == "completed" for r in p["runs"])
     assert p["progress"] == {"completed": 2, "total": 2}
     assert p["content"] == "先调研。 再撰写。"
+
+
+def test_multi_agent_escalation_nonblocking_banner(projected):
+    # 非阻塞 run_escalation: folded onto the raising run as a "raised" record (drives the
+    # node ⚠️ badge); the worker kept working → COMPLETED. A sibling that never escalated
+    # carries an empty list (no badge).
+    p = projected["multi_agent_escalation"]
+    assert p["status"] == "completed"
+    r1 = next(r for r in p["runs"] if r["id"] == "r1")
+    r2 = next(r for r in p["runs"] if r["id"] == "r2")
+    assert r1["escalations"] == [
+        {
+            "question": "数据库选 Postgres 还是 MySQL？这关系到后续所有选型。",
+            "assumption": "暂按 Postgres 推进",
+            "blocking": True,
+            "status": "raised",
+            "answer": None,
+        }
+    ]
+    assert r2["escalations"] == []
+
+
+def test_multi_agent_blocking_escalate_resolved(projected):
+    # 阻塞式求决策 答复路径: escalation_required → pending → escalation_resolved(resolved)
+    # flips the run's escalation to resolved + answer. The turn NEVER pauses (non-halting).
+    p = projected["multi_agent_blocking_escalate"]
+    assert p["status"] == "completed"
+    assert p["pendingInteraction"] is None
+    r1 = next(r for r in p["runs"] if r["id"] == "r1")
+    assert r1["escalations"] == [
+        {
+            "question": "数据库选 Postgres 还是 MySQL？这关系到后续所有选型，且猜错基本要整段返工。",
+            "assumption": "暂按 Postgres 推进",
+            "blocking": True,
+            "status": "resolved",
+            "answer": "用 Postgres。",
+        }
+    ]
+
+
+def test_multi_agent_blocking_escalate_pending_does_not_pause(projected):
+    # THE 核心不变量 (设计 §4.5/§七): a pending blocking escalate keeps the turn RUNNING (not
+    # paused) and sets NO pendingInteraction — unlike approval/ask_user/plan_review halting
+    # gates. The parallel sibling r2 keeps running, proving the escalation gates only its own
+    # worker, never the wave.
+    p = projected["multi_agent_blocking_escalate_pending"]
+    assert p["status"] == "running"
+    assert p["pendingInteraction"] is None
+    r1 = next(r for r in p["runs"] if r["id"] == "r1")
+    r2 = next(r for r in p["runs"] if r["id"] == "r2")
+    assert r1["escalations"][0]["status"] == "pending"
+    assert r1["escalations"][0]["answer"] is None
+    assert r2["status"] == "running"
+
+
+def test_multi_agent_blocking_escalate_timeout_falls_back(projected):
+    # 超时降级 (安全基石 §4.4): escalation_resolved(timeout) flips the escalation to timeout
+    # (answer None); the worker fell back to its assumption and COMPLETED — blocking is a
+    # strict superset of today's non-blocking behaviour.
+    p = projected["multi_agent_blocking_escalate_timeout"]
+    assert p["status"] == "completed"
+    assert p["pendingInteraction"] is None
+    r1 = next(r for r in p["runs"] if r["id"] == "r1")
+    assert r1["escalations"][0]["status"] == "timeout"
+    assert r1["escalations"][0]["answer"] is None
+
+
+def test_multi_agent_blocking_escalate_multi_settles_each(projected):
+    # 多升级: one run raises two sequential blocking escalates — the first answered, the
+    # second timed out. Each settles independently in fire order (the "find first pending"
+    # fold is order-correct: when esc2 resolves, esc1 is already resolved so it targets esc2).
+    p = projected["multi_agent_blocking_escalate_multi"]
+    assert p["status"] == "completed"
+    assert p["pendingInteraction"] is None
+    r1 = next(r for r in p["runs"] if r["id"] == "r1")
+    assert [(e["status"], e["answer"]) for e in r1["escalations"]] == [
+        ("resolved", "用 Postgres。"),
+        ("timeout", None),
+    ]

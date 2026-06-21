@@ -33,11 +33,16 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 
 from agentcore.runtime.runs.concurrency import child_budget, current_budget, set_budget
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.scheduler import RunExecutor
+from agentcore.runtime.runs.scheduler import (
+    BoundaryOutcome,
+    BoundaryReason,
+    OnBoundary,
+    RunExecutor,
+)
 from agentcore.runtime.runs.types import BatchMetrics, RunPhase, RunSpec, RunState
 
 # The most nodes this scheduler runs at once. Ready nodes beyond this stay pending
@@ -61,9 +66,7 @@ class WaveScheduler:
         seed_completed: Mapping[str, RunState] | None = None,
         should_stop: Callable[[], bool] | None = None,
         on_progress: Callable[[Mapping[str, RunState]], None] | None = None,
-        on_checkpoint: (
-            Callable[[Sequence[RunSpec], Mapping[str, RunState]], Awaitable[bool]] | None
-        ) = None,
+        on_boundary: OnBoundary | None = None,
         metrics_sink: list[BatchMetrics] | None = None,
     ) -> dict[str, RunState]:
         """Drive ``plan`` to completion; return each node's terminal
@@ -84,14 +87,23 @@ class WaveScheduler:
           it). An in-flight node is never interrupted by it.
         - ``on_progress`` fires after *each* node finishes with the completed-so-far
           map, so the host gets smooth progress (one increment per node).
-        - ``on_checkpoint`` (结构化挂起 2a) fires once in-flight work has *drained to a
-          quiescent point* after a ``checkpoint_after`` node COMPLETED, while work
-          still remains. Draining first keeps the persisted snapshot consistent so a
-          2b resume re-runs exactly the un-run tail. It is awaited with the
-          checkpoint node(s) + the completed map and returns whether to proceed;
-          False ends scheduling like a graceful abort (partial map returned). A
-          *failed* checkpoint node does not pause — its ``on_failure`` governs the
-          cascade. No hook / no marked node / no pending ⇒ untouched.
+        - ``on_boundary`` (受监督的波循环) is the host's decision-boundary hook, fired
+          once in-flight work has *drained to a quiescent point* (draining first keeps
+          the persisted snapshot consistent so a resume re-runs exactly the un-run
+          tail). It is awaited with the :class:`BoundaryReason`, the triggering
+          node(s), and the completed map, and returns a :class:`BoundaryOutcome`:
+          ``PROCEED`` keeps scheduling, ``ABORT`` ends it like a graceful abort
+          (un-run tail materialised SKIPPED), ``YIELD`` soft-pauses like
+          ``should_stop`` (partial map, un-run tail LEFT OUT for a resume). Two
+          reasons fire it:
+          • ``CHECKPOINT`` (结构化挂起 2a) — a ``checkpoint_after`` node COMPLETED while
+            downstream remains (the user plan_review). A *failed* checkpoint node does
+            not pause — its ``on_failure`` governs the cascade.
+          • ``BIND`` (晚绑定) — a ``bind_after_deps`` node's deps are all resolved but it
+            is not yet finalised; it is never dispatched unbound, so it resolves only
+            here (the CEO ``replan`` hand-back).
+          No hook ⇒ both markers inert (a ``bind_after_deps`` node then dispatches
+          normally); no marked node / no pending ⇒ untouched.
         - ``metrics_sink`` (调度埋点量化), when given, receives ONE :class:`BatchMetrics`
           appended at terminal — concurrency / parallelism / slot-starvation / outcome
           counts for this run — for the host to log. Kept as a sink (not a return /
@@ -120,6 +132,11 @@ class WaveScheduler:
         width = min(self._max_parallel, current_budget(), max(1, n_pending))
         per_child_budget = child_budget(width)
 
+        # 晚绑定 (受监督的波循环): defer ``bind_after_deps`` nodes to the bind boundary
+        # ONLY when a host hook can resolve them; with no hook the marker is inert and
+        # such a node dispatches normally (parity with ``checkpoint_after``-without-hook).
+        defer_bind = on_boundary is not None
+
         # 调度埋点量化 (orthogonal to scheduling — see BatchMetrics): wall start, per-node
         # dispatch times (→ busy_ms occupancy), the concurrency high-water mark, how many
         # nodes this run launched, and slot-starvation cycles (ready nodes blocked by width).
@@ -140,8 +157,30 @@ class WaveScheduler:
                 if not holding and should_stop is not None and should_stop():
                     stopped = True  # soft pause: stop launching, drain in-flight
                     holding = True
+                # 晚绑定边界 (受监督的波循环): a ``bind_after_deps`` node whose deps are all
+                # resolved is NOT dispatchable — its spec must first be finalised by the
+                # host (CEO ``replan``). Once in-flight work is quiescent, yield the
+                # boundary: PROCEED (host bound it in place → next ready-scan dispatches
+                # it; if it bound nothing, no node is ready and the run reaches terminal,
+                # no spin), YIELD (soft pause → CEO takes over, a resume re-runs the tail),
+                # or ABORT. Inert unless a hook is wired AND such a node exists (none in an
+                # ordinary plan), so a plan without late-binding is byte-for-byte untouched.
+                if not holding and defer_bind and not running:
+                    bind_ready = self._bind_pending(plan, completed, skipped, dispatched)
+                    if bind_ready:
+                        outcome = await on_boundary(
+                            BoundaryReason.BIND, bind_ready, completed
+                        )
+                        if outcome is BoundaryOutcome.ABORT:
+                            aborted = True
+                            holding = True
+                        elif outcome is BoundaryOutcome.YIELD:
+                            stopped = True
+                            holding = True
                 if not holding:
-                    for spec in self._select_ready(plan, completed, skipped, dispatched):
+                    for spec in self._select_ready(
+                        plan, completed, skipped, dispatched, defer_bind=defer_bind
+                    ):
                         if len(running) >= width:
                             slot_starved += 1  # ready node(s) remain but width is full
                             break
@@ -183,7 +222,7 @@ class WaveScheduler:
                             aborted = True
                         elif on_failure == "skip":
                             self._propagate_skip(plan, run_id, skipped, dispatched)
-                    elif state.phase is RunPhase.COMPLETED and on_checkpoint is not None:
+                    elif state.phase is RunPhase.COMPLETED and on_boundary is not None:
                         # Track for the plan_review pause only when a hook is wired;
                         # without one the marker is fully inert (it must never freeze
                         # dispatch of the downstream it would have gated).
@@ -191,18 +230,24 @@ class WaveScheduler:
                         if spec is not None and spec.checkpoint_after:
                             checkpoint_pending.append(spec)
 
-                # 结构化挂起 2a: fire the plan_review only once in-flight work has fully
-                # drained (quiescent) — so the snapshot the host persists is consistent
-                # — and only while downstream work remains to gate.
-                if on_checkpoint is not None and checkpoint_pending and not running:
+                # 结构化挂起 2a (CHECKPOINT boundary): fire the plan_review only once
+                # in-flight work has fully drained (quiescent) — so the snapshot the host
+                # persists is consistent — and only while downstream work remains to gate.
+                if on_boundary is not None and checkpoint_pending and not running:
                     nodes = checkpoint_pending
                     checkpoint_pending = []
                     pending_remains = any(
                         n.run_id not in completed and n.run_id not in skipped
                         for n in plan.nodes
                     )
-                    if pending_remains and not await on_checkpoint(nodes, completed):
-                        aborted = True
+                    if pending_remains:
+                        outcome = await on_boundary(
+                            BoundaryReason.CHECKPOINT, nodes, completed
+                        )
+                        if outcome is BoundaryOutcome.ABORT:
+                            aborted = True
+                        elif outcome is BoundaryOutcome.YIELD:
+                            stopped = True
         except BaseException:
             # External cancel (user stop via task.cancel) or an unexpected crash:
             # cancel every in-flight child and let it unwind (subprocess kill, salvage)
@@ -291,14 +336,46 @@ class WaveScheduler:
         completed: Mapping[str, RunState],
         skipped: set[str],
         dispatched: set[str],
+        *,
+        defer_bind: bool = False,
     ) -> list[RunSpec]:
         """Not-yet-dispatched nodes whose deps are all resolved.
 
         ``_deps_satisfied`` may add to ``skipped`` (the skip cascade). Order follows
-        plan/declaration order (deterministic).
+        plan/declaration order (deterministic). When ``defer_bind`` (a boundary hook is
+        wired), ``bind_after_deps`` nodes are excluded — they are never dispatched
+        unbound and resolve only via the bind boundary (:meth:`_bind_pending`); with no
+        hook the marker is inert and such a node dispatches like any other.
         """
         ready: list[RunSpec] = []
         for node in plan.nodes:
+            if node.run_id in dispatched or node.run_id in skipped:
+                continue
+            if defer_bind and node.bind_after_deps:
+                continue
+            if self._deps_satisfied(plan, node, completed, skipped):
+                ready.append(node)
+        return ready
+
+    def _bind_pending(
+        self,
+        plan: RunPlan,
+        completed: Mapping[str, RunState],
+        skipped: set[str],
+        dispatched: set[str],
+    ) -> list[RunSpec]:
+        """Late-bound (``bind_after_deps``) nodes whose deps are all resolved but which
+        are not yet finalised — the host must bind / yield / abort before they run.
+
+        Mirrors :meth:`_select_ready`'s gate for the un-dispatchable late-bound nodes it
+        deliberately excludes, and shares :meth:`_deps_satisfied` (so the skip cascade
+        still reaches a late-bound node whose upstream skip-failed). Empty for any plan
+        with no ``bind_after_deps`` node, so the bind boundary stays inert there.
+        """
+        ready: list[RunSpec] = []
+        for node in plan.nodes:
+            if not node.bind_after_deps:
+                continue
             if node.run_id in dispatched or node.run_id in skipped:
                 continue
             if self._deps_satisfied(plan, node, completed, skipped):

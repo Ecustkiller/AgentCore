@@ -32,6 +32,10 @@ export interface SidecarStartTurnRequest {
   subpath?: string;
   /** 本回合 id（cancel 的寻址键；renderer 自行铸造，需在该 sidecar 内唯一）。 */
   turnId: string;
+  /** 本回合 trace_id（renderer 铸，32-hex，与服务端 new_trace_id 同形）：随每次云代理 LLM
+   *  调用作 header 上报、并随回写落库到 assistant 消息，使推理日志↔气泡归并为同一条 trace
+   *  （打通气泡↔日志）。 */
+  traceId: string;
   /** 用户本轮消息正文。 */
   userMessage: string;
   /**
@@ -119,6 +123,9 @@ export interface SidecarResumeRequest {
   conversationId: string;
   /** 挂起回合的 assistant message_id（续跑键；续跑后的回复复用它）。 */
   messageId: string;
+  /** 本次续跑的 trace_id（同 {@link SidecarStartTurnRequest.traceId}）：续跑也跑 LLM，故
+   *  随云代理调用上报、并随回写落库，使这次续跑的推理↔气泡归并为同一条 trace。 */
+  traceId: string;
   /** continue（按 CEO 方向跑门控下游）/ adjust（注入 note 转向后续跑）/ stop（就此结束）。 */
   decision: "continue" | "adjust" | "stop";
   /** adjust 的转向说明 / stop 的收尾语；continue 忽略。 */

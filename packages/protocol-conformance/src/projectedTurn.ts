@@ -85,15 +85,25 @@ export interface ProjectedRunCheckpoint {
   decision: "continue" | "adjust" | "stop" | "timeout" | null;
 }
 
-/** 升级实时可见: one escalation a worker raised mid-run via `escalate` (its only upward
- * channel to the CEO). `question` is the self-contained ask; `assumption` is what the
- * worker proceeded on meanwhile (escalate 非阻塞 — it kept working); `blocking` flags that
- * a wrong guess would void its product. Folded onto its {@link ProjectedRun} from the
- * `run_escalation` event so every end's node carries the same ⚠️ signal. */
+/** 升级实时可见 / 阻塞式求决策: one escalation a worker raised mid-run via `escalate` (its
+ * only upward channel). `question` is the self-contained ask; `assumption` is what the worker
+ * proceeds on; `blocking` flags that a wrong guess would void its product. Folded onto its
+ * {@link ProjectedRun} so every end's node carries the same signal.
+ *
+ * `status` is the lifecycle (阻塞式求决策 设计 §七): `raised` = a non-blocking `run_escalation`
+ * banner (the worker kept working — today's behaviour); `pending` = a blocking
+ * `escalation_required` parked on the user (the card is live, awaiting an answer); `resolved` =
+ * the user answered (`answer` carries it); `timeout` = no answer within the window or the user
+ * chose 按假设继续 (the worker fell back to its `assumption`). A non-blocking escalation stays
+ * `raised`; a blocking one folds `escalation_required`→`pending`, then its `escalation_resolved`
+ * →`resolved`/`timeout`. Drives the card's render states + the node's ⚠️ badge. `answer` is the
+ * user's reply when `status === "resolved"`, `null` otherwise. */
 export interface RunEscalation {
   question: string;
   assumption: string;
   blocking: boolean;
+  status: "raised" | "pending" | "resolved" | "timeout";
+  answer: string | null;
 }
 
 /** One node in the team graph (mirrors desktop RunNode — stores/execution.ts). The

@@ -16,7 +16,8 @@ from collections.abc import Callable
 from typing import Any
 
 from agentcore.config import settings
-from agentcore.core.errors import AgentCoreError
+from agentcore.core.error_codes import ErrorCode
+from agentcore.core.errors import error_fields_for
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.llm.config import ModelProfile, build_request, get_profile
@@ -302,14 +303,16 @@ async def react_loop(
             logger.error("llm.call_failed", round=round_idx, error=str(e))
             if raise_on_error:
                 raise
-            # AgentCoreError carries a curated, user-facing (zh) message + specific
-            # code (e.g. LLM_INSUFFICIENT_BALANCE), so surface those; any other
-            # exception is a raw technical string, so show a generic friendly line
-            # instead of leaking it into the chat.
-            if isinstance(e, AgentCoreError):
-                sink.emit(error_event(e.code, e.message))
-            else:
-                sink.emit(error_event("LLM_ERROR", "出了点问题，请稍后重试。"))
+            # Preserve an AgentCoreError's curated zh message + specific code (e.g.
+            # LLM_INSUFFICIENT_BALANCE) so the client can act on it; collapse any other
+            # (raw technical) exception to a generic friendly line instead of leaking
+            # it into the chat. error_fields_for = the shared coded-vs-opaque classifier.
+            code, message = error_fields_for(
+                e,
+                fallback_code=ErrorCode.LLM_ERROR,
+                fallback_message="出了点问题，请稍后重试。",
+            )
+            sink.emit(error_event(code, message))
             return final_content, final_reasoning, total_usage, round_idx + 1
 
         if usage:
@@ -875,13 +878,15 @@ async def _execute_tools(
         except json.JSONDecodeError:
             args = {}
 
-        sink.emit(tool_use_start(tc.id, name, args))
+        sink.emit(tool_use_start(tc.id, name, args, run_id=run_id))
         logger.debug("tool.execute_start", tool=name)
 
         tool = registry.get_optional(name)
         if tool is None:
             error_msg = f"Tool '{name}' not found"
-            sink.emit(tool_use_end(tc.id, name, success=False, output=error_msg))
+            sink.emit(
+                tool_use_end(tc.id, name, success=False, output=error_msg, run_id=run_id)
+            )
             logger.info("tool.execute_end", tool=name, status="not_found", duration_ms=0)
             return (
                 LLMMessage(role="tool", content=error_msg, tool_call_id=tc.id),
@@ -902,7 +907,9 @@ async def _execute_tools(
                     f"工具 '{name}' 未获用户授权，该操作未执行。"
                     "不要重试它——请调整方案或询问如何继续。"
                 )
-                sink.emit(tool_use_end(tc.id, name, success=False, output=denial))
+                sink.emit(
+                    tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id)
+                )
                 logger.info("tool.execute_end", tool=name, status="denied", duration_ms=0)
                 return (
                     LLMMessage(role="tool", content=denial, tool_call_id=tc.id),
@@ -929,7 +936,9 @@ async def _execute_tools(
                 f"工具 '{name}' 执行超过 {timeout:.0f}s 仍未完成，已中止。"
                 "请改用更快的方式、缩小处理范围，或换一种方案，不要原样重试。"
             )
-            sink.emit(tool_use_end(tc.id, name, success=False, output=timeout_msg))
+            sink.emit(
+                tool_use_end(tc.id, name, success=False, output=timeout_msg, run_id=run_id)
+            )
             logger.warning(
                 "tool.execute_end", tool=name, status="timeout", duration_ms=duration_ms
             )
@@ -960,7 +969,12 @@ async def _execute_tools(
             )
         sink.emit(
             tool_use_end(
-                tc.id, name, success=result.success, output=output, display=result.display
+                tc.id,
+                name,
+                success=result.success,
+                output=output,
+                display=result.display,
+                run_id=run_id,
             )
         )
         logger.info(

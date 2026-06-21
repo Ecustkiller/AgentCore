@@ -21,6 +21,8 @@ import type {
   DebateResultPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
+  EscalationRequiredPayload,
+  EscalationResolvedPayload,
   MessageEndPayload,
   PlanAgentPayload,
   PlanReviewRequiredPayload,
@@ -186,14 +188,19 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "tool_use_start": {
         const p = ev.payload as ToolUseStartPayload;
-        process.push({
-          kind: "tool",
-          id: p.tool_call_id,
-          tool_name: p.tool_name,
-          arguments: p.arguments ?? {},
-          result: null,
-          status: "running",
-        });
+        // A delegated worker's call (run-scoped) belongs to its run node, not the
+        // captain's inline timeline — keep it out of `process` (统一团队时间线 = the
+        // CEO's OWN steps); still clear the run's live toolProgress below.
+        if (!p.run_id) {
+          process.push({
+            kind: "tool",
+            id: p.tool_call_id,
+            tool_name: p.tool_name,
+            arguments: p.arguments ?? {},
+            result: null,
+            status: "running",
+          });
+        }
         const running = runs.find((r) => r.status === "running");
         if (running) {
           const ag = agentById(running.agentId);
@@ -203,13 +210,15 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "tool_use_end": {
         const p = ev.payload as ToolUseEndPayload;
-        for (let i = process.length - 1; i >= 0; i--) {
-          const step = process[i];
-          if (step.kind === "tool" && step.id === p.tool_call_id) {
-            step.result = p.result;
-            step.status = p.status;
-            if (p.display != null) step.display = p.display;
-            break;
+        if (!p.run_id) {
+          for (let i = process.length - 1; i >= 0; i--) {
+            const step = process[i];
+            if (step.kind === "tool" && step.id === p.tool_call_id) {
+              step.result = p.result;
+              step.status = p.status;
+              if (p.display != null) step.display = p.display;
+              break;
+            }
           }
         }
         break;
@@ -359,9 +368,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         // is a timeline marker only.
         break;
       case "run_escalation": {
-        // 升级实时可见: a worker flagged a decision/blocker for the CEO — append it to its
-        // run so the node carries a ⚠️ signal (mirrors desktop/oracle; conformance pins
-        // them equal). Transport-only; durable copy rides RunState.escalations.
+        // 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append it
+        // to its run so the node carries a ⚠️ signal (mirrors desktop/oracle; conformance
+        // pins them equal). Transport-only; durable copy rides RunState.escalations.
         const p = ev.payload as RunEscalationPayload;
         const run = runById(p.run_id);
         if (run)
@@ -369,7 +378,44 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
             question: p.question,
             assumption: p.assumption,
             blocking: p.blocking,
+            status: "raised",
+            answer: null,
           });
+        break;
+      }
+      case "escalation_required": {
+        // 阻塞式求决策: a worker SUSPENDED on a blocking escalate, awaiting the user — append
+        // a `pending` card to its run (the turn does NOT pause; siblings keep running). Twin
+        // of the run_escalation banner but journaled, so it replays on reload.
+        const p = ev.payload as EscalationRequiredPayload;
+        const run = runById(p.run_id);
+        if (run)
+          run.escalations.push({
+            question: p.question,
+            assumption: p.assumption,
+            blocking: true,
+            status: "pending",
+            answer: null,
+          });
+        break;
+      }
+      case "escalation_resolved": {
+        // 阻塞式求决策 settlement: flip this run's pending escalation to resolved/timeout (a
+        // worker is sequential ⇒ at most one pending per run, 设计 §4.7). `resolved` carries
+        // the answer; `timeout` (含按假设继续) falls back to the assumption (answer null).
+        const p = ev.payload as EscalationResolvedPayload;
+        const esc = runById(p.run_id)?.escalations.find(
+          (e) => e.status === "pending",
+        );
+        if (esc) {
+          if (p.status === "resolved") {
+            esc.status = "resolved";
+            esc.answer = p.answer;
+          } else {
+            esc.status = "timeout";
+            esc.answer = null;
+          }
+        }
         break;
       }
       // 辩论收场：整段结构化产物（简报 + 交锋叙事线）verbatim 折入 ProjectedTurn.debate，

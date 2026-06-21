@@ -16,14 +16,22 @@ import { type ProjectedTurn, foldToProjectedTurn } from "../conformanceFold";
 
 import approvalPaused from "../../../../../../packages/protocol-conformance/fixtures/approval_paused.json";
 import approvalResolvedContinue from "../../../../../../packages/protocol-conformance/fixtures/approval_resolved_continue.json";
+import multiAgentBlockingEscalate from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_blocking_escalate.json";
+import multiAgentBlockingEscalateMulti from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_blocking_escalate_multi.json";
+import multiAgentBlockingEscalatePending from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_blocking_escalate_pending.json";
+import multiAgentBlockingEscalateTimeout from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_blocking_escalate_timeout.json";
+import multiAgentCaptainContext from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_captain_context.json";
 import multiAgentDebate from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_debate.json";
 import multiAgentDelegate from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_delegate.json";
+import multiAgentEscalation from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_escalation.json";
 import multiAgentMultiBatch from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_multi_batch.json";
+import multiAgentReceivedContext from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_received_context.json";
 import multiAgentRevision from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_revision.json";
 import multiAgentRoundtableRounds from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_roundtable_rounds.json";
 import multiAgentWorkerTool from "../../../../../../packages/protocol-conformance/fixtures/multi_agent_worker_tool.json";
 import planReviewPaused from "../../../../../../packages/protocol-conformance/fixtures/plan_review_paused.json";
 import planReviewResolvedContinue from "../../../../../../packages/protocol-conformance/fixtures/plan_review_resolved_continue.json";
+import singleAgentCaptainContext from "../../../../../../packages/protocol-conformance/fixtures/single_agent_captain_context.json";
 import singleAgentCitations from "../../../../../../packages/protocol-conformance/fixtures/single_agent_citations.json";
 import singleAgentContentReset from "../../../../../../packages/protocol-conformance/fixtures/single_agent_content_reset.json";
 import singleAgentError from "../../../../../../packages/protocol-conformance/fixtures/single_agent_error.json";
@@ -43,12 +51,20 @@ const fixtures = [
   singleAgentError,
   singleAgentCitations,
   singleAgentContentReset,
+  singleAgentCaptainContext,
   multiAgentDelegate,
   multiAgentWorkerTool,
   multiAgentDebate,
   multiAgentRoundtableRounds,
   multiAgentRevision,
   multiAgentMultiBatch,
+  multiAgentReceivedContext,
+  multiAgentCaptainContext,
+  multiAgentEscalation,
+  multiAgentBlockingEscalate,
+  multiAgentBlockingEscalateMulti,
+  multiAgentBlockingEscalateTimeout,
+  multiAgentBlockingEscalatePending,
   approvalPaused,
   approvalResolvedContinue,
   planReviewPaused,

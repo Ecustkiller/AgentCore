@@ -12,6 +12,7 @@ import asyncio
 
 from agentcore.runtime.runs.concurrency import reset_budget, set_budget
 from agentcore.runtime.runs.plan import RunPlan
+from agentcore.runtime.runs.scheduler import BoundaryOutcome, BoundaryReason
 from agentcore.runtime.runs.types import BatchMetrics, RunPhase, RunPolicy, RunSpec, RunState
 from agentcore.runtime.runs.wave import WaveScheduler
 
@@ -23,6 +24,7 @@ def _spec(
     on_failure: str = "degrade",
     max_retries: int = 0,
     checkpoint_after: bool = False,
+    bind_after_deps: bool = False,
 ) -> RunSpec:
     return RunSpec(
         run_id=run_id,
@@ -31,6 +33,7 @@ def _spec(
         role=run_id,
         depends_on=list(deps),
         checkpoint_after=checkpoint_after,
+        bind_after_deps=bind_after_deps,
         policy=RunPolicy(on_failure=on_failure, max_retries=max_retries),
     )
 
@@ -247,37 +250,38 @@ async def test_nested_fanout_respects_tree_budget():
     assert peak["max"] <= 4
 
 
-# --- 结构化挂起 2a: on_checkpoint wave-boundary suspend hook ---------------------
+# --- 受监督的波循环: on_boundary CHECKPOINT arm (结构化挂起 2a) ------------------
 
 
 async def test_on_checkpoint_fires_after_marked_node_with_downstream():
-    # a (checkpoint_after) → b: the hook fires once after a's wave, seeing a as
-    # completed and a downstream node still pending; proceeding runs b.
+    # a (checkpoint_after) → b: the hook fires once after a's wave with reason
+    # CHECKPOINT, seeing a as completed and a downstream node still pending; PROCEED
+    # runs b.
     plan = RunPlan()
     plan.add(_spec("a", checkpoint_after=True))
     plan.add(_spec("b", ("a",)))
-    seen: list[tuple[list[str], set[str]]] = []
+    seen: list[tuple] = []
 
-    async def hook(nodes, completed) -> bool:
-        seen.append(([n.run_id for n in nodes], set(completed)))
-        return True
+    async def hook(reason, nodes, completed):
+        seen.append((reason, [n.run_id for n in nodes], set(completed)))
+        return BoundaryOutcome.PROCEED
 
-    res = await WaveScheduler().run(plan, _ok, on_checkpoint=hook)
-    assert seen == [(["a"], {"a"})]
+    res = await WaveScheduler().run(plan, _ok, on_boundary=hook)
+    assert seen == [(BoundaryReason.CHECKPOINT, ["a"], {"a"})]
     assert res["a"].phase is RunPhase.COMPLETED
     assert res["b"].phase is RunPhase.COMPLETED
 
 
 async def test_on_checkpoint_stop_halts_downstream():
-    # Returning False ends scheduling at the wave boundary: a is kept, b never runs.
+    # ABORT ends scheduling at the wave boundary: a is kept, b never runs.
     plan = RunPlan()
     plan.add(_spec("a", checkpoint_after=True))
     plan.add(_spec("b", ("a",)))
 
-    async def hook(_nodes, _completed) -> bool:
-        return False
+    async def hook(_reason, _nodes, _completed):
+        return BoundaryOutcome.ABORT
 
-    res = await WaveScheduler().run(plan, _ok, on_checkpoint=hook)
+    res = await WaveScheduler().run(plan, _ok, on_boundary=hook)
     assert res["a"].phase is RunPhase.COMPLETED
     # The gated downstream is materialised as SKIPPED (clean graph/overview).
     assert res["b"].phase is RunPhase.SKIPPED
@@ -289,11 +293,11 @@ async def test_on_checkpoint_not_fired_on_last_wave():
     plan.add(_spec("a", checkpoint_after=True))
     calls = {"n": 0}
 
-    async def hook(_nodes, _completed) -> bool:
+    async def hook(_reason, _nodes, _completed):
         calls["n"] += 1
-        return True
+        return BoundaryOutcome.PROCEED
 
-    res = await WaveScheduler().run(plan, _ok, on_checkpoint=hook)
+    res = await WaveScheduler().run(plan, _ok, on_boundary=hook)
     assert calls["n"] == 0
     assert res["a"].phase is RunPhase.COMPLETED
 
@@ -310,11 +314,11 @@ async def test_on_checkpoint_skips_failed_marked_node():
             return RunState(phase=RunPhase.FAILED, error="boom")
         return RunState(phase=RunPhase.COMPLETED, content="b")
 
-    async def hook(_nodes, _completed) -> bool:
+    async def hook(_reason, _nodes, _completed):
         calls["n"] += 1
-        return True
+        return BoundaryOutcome.PROCEED
 
-    res = await WaveScheduler().run(plan, ex, on_checkpoint=hook)
+    res = await WaveScheduler().run(plan, ex, on_boundary=hook)
     assert calls["n"] == 0
     assert res["a"].phase is RunPhase.FAILED
     assert res["b"].phase is RunPhase.COMPLETED  # degrade lets it proceed
@@ -327,6 +331,95 @@ async def test_checkpoint_after_inert_without_hook():
     plan.add(_spec("b", ("a",)))
     res = await WaveScheduler().run(plan, _ok)
     assert res["a"].phase is RunPhase.COMPLETED
+    assert res["b"].phase is RunPhase.COMPLETED
+
+
+# --- 受监督的波循环: on_boundary BIND arm (晚绑定 / 职责晚绑定与动态再编排) ---------
+
+
+async def test_bind_boundary_fires_then_proceeds_after_host_binds():
+    # b is late-bound (bind_after_deps): once a completes and work is quiescent, the
+    # boundary fires with reason=BIND for b (never dispatched unbound); the host
+    # finalises it in place (clears the marker) and PROCEEDs, so b then runs.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",), bind_after_deps=True))
+    seen: list[tuple] = []
+
+    async def hook(reason, nodes, completed):
+        seen.append((reason, [n.run_id for n in nodes], set(completed)))
+        for n in nodes:
+            n.bind_after_deps = False  # host finalises the spec in place
+        return BoundaryOutcome.PROCEED
+
+    res = await WaveScheduler().run(plan, _ok, on_boundary=hook)
+    assert seen == [(BoundaryReason.BIND, ["b"], {"a"})]
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert res["b"].phase is RunPhase.COMPLETED
+
+
+async def test_bind_boundary_yield_soft_pauses_for_resume():
+    # YIELD soft-pauses like should_stop: a is kept, the late-bound tail b is LEFT
+    # OUT of the result (so a resume re-runs it), not materialised as SKIPPED.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",), bind_after_deps=True))
+
+    async def hook(_reason, _nodes, _completed):
+        return BoundaryOutcome.YIELD
+
+    res = await WaveScheduler().run(plan, _ok, on_boundary=hook)
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert "b" not in res  # soft pause leaves the tail for a resume
+
+
+async def test_bind_boundary_abort_materialises_skip():
+    # ABORT ends scheduling gracefully: the un-run late-bound tail is materialised as
+    # SKIPPED (same shape as a plan_review stop), not left absent.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",), bind_after_deps=True))
+
+    async def hook(_reason, _nodes, _completed):
+        return BoundaryOutcome.ABORT
+
+    res = await WaveScheduler().run(plan, _ok, on_boundary=hook)
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert res["b"].phase is RunPhase.SKIPPED
+
+
+async def test_bind_after_deps_inert_without_hook():
+    # No on_boundary hook (autonomous / tests): the marker is inert — the node
+    # dispatches normally, exactly like checkpoint_after without a hook.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",), bind_after_deps=True))
+    res = await WaveScheduler().run(plan, _ok)
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert res["b"].phase is RunPhase.COMPLETED
+
+
+async def test_bind_boundary_not_fired_until_deps_resolve():
+    # The bind boundary waits for the late-bound node's deps: while a is still running
+    # it must not fire; it fires exactly once, after a lands (quiescent).
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",), bind_after_deps=True))
+    fires = {"n": 0}
+
+    async def slow_a(spec: RunSpec, _completed) -> RunState:
+        if spec.run_id == "a":
+            await asyncio.sleep(0.02)
+        return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+    async def hook(_reason, nodes, _completed):
+        fires["n"] += 1
+        for n in nodes:
+            n.bind_after_deps = False
+        return BoundaryOutcome.PROCEED
+
+    res = await WaveScheduler().run(plan, slow_a, on_boundary=hook)
+    assert fires["n"] == 1
     assert res["b"].phase is RunPhase.COMPLETED
 
 

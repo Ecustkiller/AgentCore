@@ -6,4 +6,5 @@
 //
 // ✅ 桌面端已并入 workspace 并迁移：其 types/events.ts 改为 `export type *` 透传本包 +
 // 仅保留 4 个桌面独有的工具富渲染类型（手机精简端不需要）。本包是两端事件类型的单一源。
+export * from "./errorCodes";
 export * from "./events";

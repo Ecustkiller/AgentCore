@@ -100,6 +100,20 @@
   --syntax-function: oklch(0.5 0.16 255);
   --syntax-attr: oklch(0.52 0.12 220);
   --syntax-builtin: oklch(0.55 0.16 25);
+
+  /* Agent identity palette (前端UX设计.md §五 角色身份): a stable per-role color for
+   * the team-graph avatar disc, hashed from the role name (lib/agentIdentity.ts).
+   * Distinct hues held in one OKLCH lightness band so a team reads as one calm
+   * family — and kept OFF the status ring (status = ring + presence dot), so
+   * identity color never competes with the 6-state run-status colors. */
+  --agent-1: oklch(0.58 0.14 20);
+  --agent-2: oklch(0.58 0.14 65);
+  --agent-3: oklch(0.58 0.14 110);
+  --agent-4: oklch(0.58 0.14 155);
+  --agent-5: oklch(0.58 0.14 200);
+  --agent-6: oklch(0.58 0.14 245);
+  --agent-7: oklch(0.58 0.14 290);
+  --agent-8: oklch(0.58 0.14 335);
 }
 
 .dark {
@@ -154,6 +168,16 @@
   --syntax-function: oklch(0.78 0.12 255);
   --syntax-attr: oklch(0.8 0.1 210);
   --syntax-builtin: oklch(0.78 0.14 25);
+
+  /* Agent identity palette — lifted lightness for dark surfaces (see :root). */
+  --agent-1: oklch(0.72 0.14 20);
+  --agent-2: oklch(0.72 0.14 65);
+  --agent-3: oklch(0.72 0.14 110);
+  --agent-4: oklch(0.72 0.14 155);
+  --agent-5: oklch(0.72 0.14 200);
+  --agent-6: oklch(0.72 0.14 245);
+  --agent-7: oklch(0.72 0.14 290);
+  --agent-8: oklch(0.72 0.14 335);
 }
 
 * {

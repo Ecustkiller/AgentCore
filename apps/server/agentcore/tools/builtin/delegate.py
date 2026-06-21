@@ -22,6 +22,7 @@ tool's output is otherwise not metered by the loop.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
@@ -267,6 +268,22 @@ _DELEGATE_PARAMETERS = {
 }
 
 
+@dataclass
+class _SupervisedRun:
+    """A delegate plan paused at a BIND boundary, awaiting the CEO's ``replan`` (受监督
+    的波循环). Holds exactly what :meth:`DelegateTool.replan` needs to finalise the
+    late-bound node(s) and resume the SAME DAG from where it yielded: the (mutable)
+    plan, the completed-so-far seeds, the turn's execution id, the original ``finalize``
+    flag, and the run_ids that triggered the yield (for reference).
+    """
+
+    plan: RunPlan
+    completed: dict[str, RunState]
+    execution_id: str
+    finalize: bool
+    boundary_run_ids: list[str]
+
+
 class DelegateTool:
     """CEO-agent tool that delegates sub-tasks to a Run plan and returns their
     products for the CEO to synthesize (non-terminal, Option 1)."""
@@ -335,7 +352,7 @@ class DelegateTool:
         # the plan_review wait bound, used to suspend the WaveScheduler at a wave
         # boundary when a delegate step is marked ``checkpoint_after``.
         # ``checkpoint_enabled`` mirrors the ask_user gate (a live interactive user);
-        # off ⇒ the marker stays inert (no ``on_checkpoint`` hook is handed to the
+        # off ⇒ the marker stays inert (no ``on_boundary`` hook is handed to the
         # scheduler, so a marked plan runs straight through). Forwarded verbatim to
         # nested sub-teams (_make_child) so a sub-DAG's checkpoint also fires.
         self._conversation_id = conversation_id
@@ -370,6 +387,14 @@ class DelegateTool:
         from agentcore.runtime.costing import WorkerResultAccumulator
 
         self._acc = WorkerResultAccumulator()
+        # 受监督的波循环 (P3): the plan currently paused at a BIND boundary, awaiting the
+        # CEO's ``replan`` to finalise late-bound node(s) and resume; None when no
+        # supervised plan is open. Set by ``_drive`` on a YIELD, consumed by ``replan``.
+        self._supervised: _SupervisedRun | None = None
+        # The late-bound node(s) the active scheduler run YIELDed on — set by the boundary
+        # hook's BIND arm, read by ``_drive`` right after ``run()`` to stash + brief. Reset
+        # at the start of every ``_drive`` so a stale signal never leaks across runs.
+        self._pending_bind: list[RunSpec] | None = None
 
     @property
     def usage(self) -> dict[str, int]:
@@ -460,9 +485,12 @@ class DelegateTool:
         ``seed_completed`` pre-seeds finished nodes (a resume): they are treated as
         done, so only the unfinished tail runs; their usage/cost/citations still ride
         in ``results`` so the (resumed) turn bills the WHOLE plan once. A downstream
-        ``checkpoint_after`` step still pauses via :meth:`_checkpoint_hook`, so a
+        ``checkpoint_after`` step still pauses via :meth:`_boundary_hook`, so a
         resume can itself re-pause (and re-persist) at a later checkpoint.
         """
+        # 受监督的波循环 (P3): clear the per-run boundary signal — the on_boundary BIND arm
+        # sets it when it YIELDs, and the block after ``run()`` reads it to stash + brief.
+        self._pending_bind = None
         from agentcore.runtime.costing import usage_metadata
         from agentcore.runtime.runs import (
             DEFAULT_MAX_PARALLEL,
@@ -513,17 +541,24 @@ class DelegateTool:
             done = sum(1 for s in completed.values() if s.phase is RunPhase.COMPLETED)
             self._sink.emit(run_progress(done, total))
 
-        # 结构化挂起: hand the scheduler a plan_review hook only when checkpoints
-        # are active this turn (gate on + bridge/conversation wired). Off ⇒ None, so
-        # a ``checkpoint_after`` marker stays inert and the plan runs straight through.
-        on_checkpoint = self._checkpoint_hook(plan) if self._checkpoint_active() else None
+        # 受监督的波循环: hand the scheduler the decision-boundary hook when EITHER the
+        # user CHECKPOINT arm is armed (live interactive user) OR the plan has late-bound
+        # nodes (the CEO BIND arm, which needs no user). Off ⇒ None, so both markers stay
+        # inert and the plan runs straight through. (No bind node is minted in production
+        # until the schema exposes it — P4 — so this is hook-wiring parity there; the BIND
+        # path is exercised by tests meanwhile.)
+        on_boundary = (
+            self._boundary_hook(plan)
+            if self._checkpoint_active() or any(n.bind_after_deps for n in plan.nodes)
+            else None
+        )
         batch_metrics: list[BatchMetrics] = []
         results = await WaveScheduler(self._max_parallel or DEFAULT_MAX_PARALLEL).run(
             plan,
             executor,
             seed_completed=seed_completed,
             on_progress=_progress,
-            on_checkpoint=on_checkpoint,
+            on_boundary=on_boundary,
             metrics_sink=batch_metrics,
         )
         if batch_metrics:
@@ -544,6 +579,37 @@ class DelegateTool:
                 completed=m.completed,
                 failed=m.failed,
                 skipped=m.skipped,
+            )
+
+        # 受监督的波循环 (P3): the scheduler YIELDed at a BIND boundary (the boundary hook
+        # set ``_pending_bind``). Stash the partial run + hand a「计划已让出」brief back to
+        # the CEO's ReAct loop (non-terminal) — it calls ``replan`` to finalise the
+        # late-bound node(s) and resume the SAME DAG. Accumulation / roster registration
+        # are DEFERRED to the terminal ``_drive`` (the resume bills seeds+tail once), so a
+        # multi-yield turn never double-bills. Edge: if the turn ends without ever resuming
+        # to terminal, the pre-yield seeds go unbilled — acceptable v1; P5 can finalise an
+        # open supervised run at turn end.
+        if self._pending_bind is not None:
+            nodes = self._pending_bind
+            self._pending_bind = None
+            self._supervised = _SupervisedRun(
+                plan=plan,
+                completed=dict(results),
+                execution_id=execution_id,
+                finalize=finalize,
+                boundary_run_ids=[n.run_id for n in nodes],
+            )
+            logger.info(
+                "delegate.yielded",
+                call=self._calls,
+                boundary=[n.run_id for n in nodes],
+                completed=len(results),
+            )
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=self._format_boundary_for_ceo(plan, results, nodes),
+                output_limit=_DELEGATE_OUTPUT_LIMIT,
             )
 
         call_usage = self._accumulate_usage(results)
@@ -600,31 +666,220 @@ class DelegateTool:
         the seeded journal); a downstream ``checkpoint_after`` can pause again via the
         normal hook (re-persisting a fresh frame).
         """
-        from agentcore.runtime.runs import RunPhase, RunState
-
         if decision is CheckpointDecision.STOP:
-            results: dict[str, RunState] = dict(seed_completed)
-            for node in plan.nodes:
-                results.setdefault(node.run_id, RunState(phase=RunPhase.SKIPPED))
-            self._accumulate_usage(results)
-            self._collect_ledger(plan, results)
-            self._collect_citations(results)
-            registered = self._register_sessions(plan, results)
-            if self._session_saver is not None:
-                for session in registered:
-                    await self._session_saver(session)
-            return ToolResult(
-                tool_call_id="",
-                success=True,
-                output=self._format_for_ceo(plan, results),
-                output_limit=_DELEGATE_OUTPUT_LIMIT,
-            )
+            return await self._finalize_stopped(plan, seed_completed)
 
         if decision is CheckpointDecision.ADJUST and note.strip():
             self._apply_steer(plan, seed_completed, checkpoint_run_ids, note.strip())
         return await self._drive(
             plan, execution_id=execution_id, seed_completed=seed_completed, finalize=False
         )
+
+    async def replan(self, arguments: dict[str, Any]) -> ToolResult:
+        """Resume a delegate plan paused at a late-binding boundary (受监督的波循环 / replan).
+
+        Called by the ``replan`` tool after a delegate「计划已让出」brief: finalises the
+        late-bound node(s) (``binds``), optionally steers other not-yet-run nodes
+        (``steers``), then resumes the SAME DAG from where it yielded — or wraps up
+        (``stop``). Non-terminal, like ``delegate``: returns the next boundary brief (a
+        further YIELD) or the terminal team result, both handed back to the CEO loop.
+        """
+        sup = self._supervised
+        if sup is None:
+            msg = (
+                "当前没有待续跑的受监督计划。replan 仅在 delegate 让出边界（输出『计划已"
+                "让出』）后可用；要发起新任务请用 delegate。"
+            )
+            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+
+        binds = arguments.get("binds") or []
+        steers = arguments.get("steers") or []
+        stop = bool(arguments.get("stop"))
+        if not isinstance(binds, list) or not isinstance(steers, list):
+            msg = "replan 的 binds / steers 必须是数组。"
+            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+        if not stop and not binds:
+            msg = (
+                "replan 需要 binds 定稿至少一个『待定稿』步骤，或设 stop=true 收口"
+                "（仅 steers 不能让待定稿步骤运行起来）。"
+            )
+            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+
+        errors = self._apply_replan(sup.plan, sup.completed, binds, steers)
+        if errors:
+            msg = "replan 无效：" + "；".join(errors)
+            logger.info("replan.rejected", errors=errors)
+            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+
+        # Consumed — a further YIELD on resume re-stashes a fresh supervised run.
+        self._supervised = None
+        # Re-snapshot the finalised DAG so a later durable pause's plan_from_journal
+        # reflects the binds/steers (frame.plan 退场, same discipline as _apply_steer).
+        self._record_plan_snapshot(sup.plan)
+        logger.info("replan.applied", binds=len(binds), steers=len(steers), stop=stop)
+        if stop:
+            return await self._finalize_stopped(sup.plan, sup.completed)
+        return await self._drive(
+            sup.plan,
+            execution_id=sup.execution_id,
+            seed_completed=sup.completed,
+            finalize=sup.finalize,
+        )
+
+    def _apply_replan(
+        self,
+        plan: RunPlan,
+        completed: dict[str, RunState],
+        binds: list,
+        steers: list,
+    ) -> list[str]:
+        """Validate then apply a replan's binds + steers to the paused plan in place.
+
+        A bind finalises a ``bind_after_deps`` placeholder (whitelisted fields; clears
+        the marker so the node becomes dispatchable); a steer appends a note to a
+        not-yet-run node's ``RunSpec.steer`` (same mechanism as a plan_review adjust).
+        All-or-nothing: any error returns the list and mutates NOTHING, so the CEO can
+        retry cleanly.
+        """
+        valid_tools = {s.name for s in self._tools.list_all()}
+        errors: list[str] = []
+        bind_ops: list[tuple[RunSpec, dict[str, Any]]] = []
+        for i, b in enumerate(binds):
+            if not isinstance(b, dict):
+                errors.append(f"binds[{i}] 必须是对象")
+                continue
+            rid = str(b.get("run_id") or "").strip()
+            node = plan.by_id(rid) if rid else None
+            if node is None:
+                errors.append(f"binds[{i}]: run_id `{rid}` 不在当前计划")
+                continue
+            if not node.bind_after_deps:
+                errors.append(f"binds[{i}]: `{rid}` 不是待定稿（晚绑定）步骤")
+                continue
+            if rid in completed:
+                errors.append(f"binds[{i}]: `{rid}` 已完成")
+                continue
+            role = b.get("role")
+            task = b.get("task")
+            final_role = role.strip() if isinstance(role, str) and role.strip() else node.role
+            final_task = task.strip() if isinstance(task, str) and task.strip() else node.task
+            if not final_role:
+                errors.append(f"binds[{i}]: `{rid}` 定稿需要 role")
+                continue
+            if not final_task:
+                errors.append(f"binds[{i}]: `{rid}` 定稿需要 task")
+                continue
+            fields: dict[str, Any] = {"role": final_role, "task": final_task}
+            objective = b.get("objective")
+            if isinstance(objective, str) and objective.strip():
+                fields["objective"] = objective.strip()
+            expected = b.get("expected_output")
+            if isinstance(expected, str) and expected.strip():
+                fields["expected_output"] = expected.strip()
+            mp = b.get("model_preference")
+            if mp in ("fast", "strong"):
+                fields["model_preference"] = mp
+            tools = b.get("tools")
+            if isinstance(tools, list):
+                named = [t for t in tools if isinstance(t, str) and t in valid_tools]
+                fields["tools"] = named or None
+            bind_ops.append((node, fields))
+
+        steer_ops: list[tuple[RunSpec, str]] = []
+        for i, s in enumerate(steers):
+            if not isinstance(s, dict):
+                errors.append(f"steers[{i}] 必须是对象")
+                continue
+            rid = str(s.get("run_id") or "").strip()
+            note = str(s.get("note") or "").strip()
+            node = plan.by_id(rid) if rid else None
+            if node is None:
+                errors.append(f"steers[{i}]: run_id `{rid}` 不在当前计划")
+                continue
+            if rid in completed:
+                errors.append(f"steers[{i}]: `{rid}` 已完成，无法操舵")
+                continue
+            if not note:
+                errors.append(f"steers[{i}]: 缺少 note")
+                continue
+            steer_ops.append((node, note))
+
+        if errors:
+            return errors
+        for node, fields in bind_ops:
+            for key, value in fields.items():
+                setattr(node, key, value)
+            node.bind_after_deps = False  # finalised → dispatchable
+        for node, note in steer_ops:
+            node.steer = f"{node.steer}\n- {note}" if node.steer else f"- {note}"
+        return []
+
+    async def _finalize_stopped(
+        self, plan: RunPlan, seed_completed: dict[str, RunState]
+    ) -> ToolResult:
+        """Wrap up a partial plan without running the tail: materialise un-run nodes as
+        SKIPPED, bill / register the seeds, and format the CEO overview. Shared by a
+        user plan_review ``stop`` (resume_plan) and a supervised ``replan(stop=true)``.
+        """
+        from agentcore.runtime.runs import RunPhase, RunState
+
+        results: dict[str, RunState] = dict(seed_completed)
+        for node in plan.nodes:
+            results.setdefault(node.run_id, RunState(phase=RunPhase.SKIPPED))
+        self._accumulate_usage(results)
+        self._collect_ledger(plan, results)
+        self._collect_citations(results)
+        registered = self._register_sessions(plan, results)
+        if self._session_saver is not None:
+            for session in registered:
+                await self._session_saver(session)
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output=self._format_for_ceo(plan, results),
+            output_limit=_DELEGATE_OUTPUT_LIMIT,
+        )
+
+    def _format_boundary_for_ceo(
+        self, plan: RunPlan, results: dict, nodes: list[RunSpec]
+    ) -> str:
+        """The CEO-facing「计划已让出」brief when a supervised plan YIELDs at a BIND
+        boundary (受监督的波循环). Shows each late-bound node's placeholder + its just-
+        completed upstream products (so the CEO can bind from them), and instructs it to
+        call ``replan`` (binds [+ steers] to finalise & resume, or stop to wrap up).
+        """
+        from agentcore.runtime.runs import RunPhase
+
+        lines = [
+            "## 计划已让出（请定稿待绑定步骤后续跑）",
+            "下列步骤声明了「依赖完成后再定稿」(bind_after_deps)：其上游已就位，现在由你"
+            "依据上游产出把它们的职责 / 任务定稿，然后用 `replan` 续跑同一计划。",
+        ]
+        for node in nodes:
+            dep_lines: list[str] = []
+            for dep_id in node.depends_on:
+                state = results.get(dep_id)
+                summary = (state.content if state else "") or ""
+                if len(summary) > _PLAN_REVIEW_SUMMARY_CHARS:
+                    summary = summary[:_PLAN_REVIEW_SUMMARY_CHARS] + "…"
+                dep = plan.by_id(dep_id)
+                dep_role = (dep.role if dep else dep_id) or dep_id
+                dep_lines.append(f"  - 上游 `{dep_id}`（{dep_role}）：{summary or '（无产出）'}")
+            lines.append(
+                f"\n### 待定稿 · run_id: `{node.run_id}`"
+                f"（占位角色：{node.role or '未填'}）\n"
+                f"占位任务：{node.task or '（未填）'}\n"
+                "依赖产出：\n" + ("\n".join(dep_lines) or "  - （无上游）")
+            )
+        pending = [n.run_id for n in plan.nodes if n.run_id not in results]
+        done = sum(1 for s in results.values() if s and s.phase is RunPhase.COMPLETED)
+        lines.append(
+            "\n---\n请调用 `replan` 定稿上述步骤："
+            "`binds=[{run_id, role, task, …}]`（定稿后该步即可运行）；可选 "
+            "`steers=[{run_id, note}]` 操舵其它未跑步骤；确无需继续则 `replan(stop=true)`。\n"
+            f"当前已完成 {done} 步；待跑：{('、'.join(f'`{p}`' for p in pending)) or '（无）'}。"
+        )
+        return "\n".join(lines)
 
     def _direct_result(self, content: str) -> ToolResult:
         """提案2a：把单个成功 worker 的产出直接作为本回合最终答复（HANDOFF 终态）。
@@ -708,18 +963,25 @@ class DelegateTool:
             self._checkpoint_enabled and self._registry and self._conversation_id
         )
 
-    def _checkpoint_hook(self, plan: RunPlan):
-        """Build the WaveScheduler ``on_checkpoint`` hook for ``plan`` (结构化挂起).
+    def _boundary_hook(self, plan: RunPlan):
+        """Build the WaveScheduler ``on_boundary`` hook for ``plan`` (受监督的波循环).
 
-        Replays the ask_user suspend-resume shape at a wave boundary: register a
-        plan_review on the interaction bridge, emit the request card, await the
-        user's answer (timeout → continue — a soft checkpoint never silently halts),
-        discard, emit the resolution. Returns whether to proceed: False only on an
-        explicit ``stop``. An ``adjust`` proceeds too, but first injects the user's
-        note as a steer onto the checkpoint's not-yet-run (transitive) dependents
-        (:meth:`_apply_steer`) so the correction redirects exactly the work that
-        builds on the reviewed output — not unrelated parallel branches. The
-        scheduler stays pure; this host hook owns the round-trip + SSE + the steer.
+        The single host-side boundary handler, switching on :class:`BoundaryReason`:
+        ``BIND`` (受监督的波循环) hands control back to the CEO — record the late-bound
+        node(s) + ``YIELD``, so ``_drive`` briefs the CEO and stashes for ``replan``;
+        ``CHECKPOINT`` (结构化挂起 2a/2b) is the user plan_review below (soft-inert =
+        proceed when the user channel isn't armed this turn, e.g. a BIND-only wiring).
+
+        CHECKPOINT replays the ask_user suspend-resume shape at a wave boundary:
+        register a plan_review on the interaction bridge, emit the request card, await
+        the user's answer (timeout → continue — a soft checkpoint never silently halts),
+        discard, emit the resolution. Maps the decision to a :class:`BoundaryOutcome`:
+        ``STOP`` → ``ABORT`` (un-run tail materialised SKIPPED), else ``PROCEED``. An
+        ``adjust`` proceeds too, but first injects the user's note as a steer onto the
+        checkpoint's not-yet-run (transitive) dependents (:meth:`_apply_steer`) so the
+        correction redirects exactly the work that builds on the reviewed output — not
+        unrelated parallel branches. The scheduler stays pure; this host hook owns the
+        round-trip + SSE + the steer.
 
         结构化挂起 2b: when this is the top-level captain's delegate and the persist
         closures are wired, a durable frame is saved to ``paused_turns`` BEFORE the
@@ -727,12 +989,27 @@ class DelegateTool:
         or a crash during the wait propagates past the drop, so the frame survives for
         ``POST .../resume`` to rebuild and continue the turn on a fresh process.
         """
+        from agentcore.runtime.runs import BoundaryOutcome, BoundaryReason
+
         registry = self._registry
         conversation_id = self._conversation_id
         timeout = self._checkpoint_timeout_seconds
-        assert registry is not None and conversation_id is not None  # _checkpoint_active
 
-        async def on_checkpoint(nodes, completed) -> bool:
+        async def on_boundary(reason, nodes, completed) -> BoundaryOutcome:
+            if reason is BoundaryReason.BIND:
+                # 受监督的波循环 (P3): hand control back to the CEO ReAct loop — record the
+                # late-bound node(s) for ``_drive`` to brief + stash, and YIELD (soft
+                # pause: drain, partial map, the un-bound tail left for the ``replan``
+                # resume). No user channel needed; the CEO resumes via the replan tool.
+                self._pending_bind = list(nodes)
+                return BoundaryOutcome.YIELD
+            # CHECKPOINT (user plan_review). When the hook is wired only for the BIND arm
+            # (no live interactive user), the user channel is absent — a checkpoint_after
+            # marker then stays soft-inert (proceed without pausing), matching its
+            # no-hook behaviour.
+            if registry is None or conversation_id is None:
+                return BoundaryOutcome.PROCEED
+
             checkpoint_id = new_id()
             steps = [self._review_step(n, completed) for n in nodes]
             pending = self._pending_preview(plan, completed)
@@ -775,9 +1052,13 @@ class DelegateTool:
                 self._apply_steer(
                     plan, completed, {n.run_id for n in nodes}, response.note.strip()
                 )
-            return response.decision is not CheckpointDecision.STOP
+            return (
+                BoundaryOutcome.ABORT
+                if response.decision is CheckpointDecision.STOP
+                else BoundaryOutcome.PROCEED
+            )
 
-        return on_checkpoint
+        return on_boundary
 
     def _can_persist_suspension(self) -> bool:
         """Whether this checkpoint should be durably persisted (结构化挂起 2b).

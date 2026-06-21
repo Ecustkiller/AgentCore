@@ -13,7 +13,8 @@ owns *when*).
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from agentcore.runtime.runs.plan import RunPlan
@@ -28,6 +29,57 @@ from agentcore.runtime.runs.types import RunSpec, RunState
 # by ``run_id``; an executor reads its node's ``depends_on`` entries from it to
 # inject upstream products (the DAG dep-context). A node with no deps ignores it.
 RunExecutor = Callable[[RunSpec, Mapping[str, RunState]], Awaitable[RunState]]
+
+
+class BoundaryReason(Enum):
+    """Why the scheduler yielded a decision boundary to the host (受监督的波循环).
+
+    The scheduler pauses at a *quiescent* point (in-flight work drained) and hands
+    control to the host's :data:`OnBoundary` hook; the reason tells the host which
+    arm is in play:
+
+    - ``CHECKPOINT``: a ``checkpoint_after`` node COMPLETED and downstream work
+      remains — the existing user ``plan_review`` (continue / adjust / stop).
+    - ``BIND``: a ``bind_after_deps`` node's deps are all resolved but its spec is
+      not yet finalised — the CEO must late-bind it (``replan``) before it can run.
+
+    → 见设计: docs/07-规划/职责晚绑定与动态再编排设计.md §7.1
+    """
+
+    CHECKPOINT = "checkpoint"
+    BIND = "bind"
+
+
+class BoundaryOutcome(Enum):
+    """The host's verdict at a decision boundary (受监督的波循环).
+
+    Generalises the old ``on_checkpoint`` bool (proceed / stop) to a three-way
+    verdict so the same seam serves both arms:
+
+    - ``PROCEED``: resolve and keep scheduling — a CHECKPOINT continues to the gated
+      downstream; a BIND means the host finalised the node(s) in place
+      (``bind_after_deps`` cleared), so the next ready-scan dispatches them.
+    - ``YIELD``: soft-pause like ``should_stop`` — drain in-flight, return the partial
+      map with the un-run tail LEFT OUT, so a resume re-runs exactly it (the CEO-arm
+      hand-back: the CEO acts on the boundary then resumes the same DAG).
+    - ``ABORT``: graceful abort — drain, then materialise the un-run tail as SKIPPED
+      (the existing plan_review ``stop`` shape).
+    """
+
+    PROCEED = "proceed"
+    YIELD = "yield"
+    ABORT = "abort"
+
+
+# The scheduler↔host decision-boundary hook (受监督的波循环). Fired at a quiescent
+# boundary with the reason, the triggering node(s), and the completed-so-far map;
+# returns the :class:`BoundaryOutcome`. Like :data:`RunExecutor` it stays a
+# host-injected callable, so the scheduler owns no interaction / LLM concern — the
+# host decides how to resolve each boundary (user plan_review or CEO late-binding).
+OnBoundary = Callable[
+    [BoundaryReason, Sequence[RunSpec], Mapping[str, RunState]],
+    Awaitable[BoundaryOutcome],
+]
 
 
 @runtime_checkable

@@ -189,7 +189,12 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "run_completed":
       case "run_failed":
       case "run_progress":
-      case "run_escalation": {
+      case "run_escalation":
+      // 阻塞式求决策: the blocking-escalate pair folds onto the run's escalations via the
+      // same frame path (projectExecution appends pending / flips resolved). The turn does
+      // NOT pause on these (siblings keep running), so unlike the gates they set no pending.
+      case "escalation_required":
+      case "escalation_resolved": {
         const frame = frameFromEvent(ev);
         if (frame) frames.push(frame);
         break;
@@ -346,7 +351,16 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     revision: r.revision,
     checkpoint: r.checkpoint,
     receivedContext: r.receivedContext,
-    escalations: r.escalations,
+    // Strip the desktop-local `id` (the resolve target): the conformance RunEscalation is the
+    // 5-field {question, assumption, blocking, status, answer} the oracle golden carries — keeping
+    // `id` out here is what lets us thread it through the store without widening the cross-end contract.
+    escalations: r.escalations.map((e) => ({
+      question: e.question,
+      assumption: e.assumption,
+      blocking: e.blocking,
+      status: e.status,
+      answer: e.answer,
+    })),
   }));
 
   return {

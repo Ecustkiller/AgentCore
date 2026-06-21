@@ -3082,6 +3082,18 @@
               }
             ]
           },
+          "trace_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Id"
+          },
           "user_message": {
             "maxLength": 32000,
             "minLength": 1,
@@ -3551,6 +3563,30 @@
           "ok"
         ],
         "title": "ResolveClientToolInteraction",
+        "type": "object"
+      },
+      "ResolveEscalationInteraction": {
+        "description": "Settle a worker's blocking escalate (``escalation`` interaction, 阻塞式求决策 §4.5).\n\nRaised when a delegated worker hit a「只有用户能定、且猜错就作废」fork and suspended\nitself to ask the user directly. The user either answers (``answer`` — fed back into the\nworker's loop, overriding its暂定假设) or chooses 按假设继续 (``use_assumption`` true —\nthe worker falls back to its stated assumption, the same disposition as a timeout). A\nlate resolve (the wait already timed out / was answered) falls through the route as 404,\nso the desktop renders it as「已关闭」rather than an error.",
+        "properties": {
+          "answer": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Answer",
+            "type": "string"
+          },
+          "kind": {
+            "const": "escalation",
+            "default": "escalation",
+            "title": "Kind",
+            "type": "string"
+          },
+          "use_assumption": {
+            "default": false,
+            "title": "Use Assumption",
+            "type": "boolean"
+          }
+        },
+        "title": "ResolveEscalationInteraction",
         "type": "object"
       },
       "ResolvePlanReviewInteraction": {
@@ -8281,6 +8317,7 @@
                     "approval": "#/components/schemas/ResolveApprovalInteraction",
                     "ask_user": "#/components/schemas/ResolveCheckpointInteraction",
                     "client_tool": "#/components/schemas/ResolveClientToolInteraction",
+                    "escalation": "#/components/schemas/ResolveEscalationInteraction",
                     "plan_review": "#/components/schemas/ResolvePlanReviewInteraction"
                   },
                   "propertyName": "kind"
@@ -8297,6 +8334,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/ResolvePlanReviewInteraction"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ResolveEscalationInteraction"
                   }
                 ],
                 "title": "Body"

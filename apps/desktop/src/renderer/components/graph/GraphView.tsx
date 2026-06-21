@@ -6,7 +6,12 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { NODE_HEIGHT, computeLayout, fitWidthBox } from "@/lib/elk-layout";
+import {
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  computeLayout,
+  fitWidthBox,
+} from "@/lib/elk-layout";
 import { estimateTokens, formatCost, headText, tailText } from "@/lib/format";
 import { useActiveMessages, useConversationStore } from "@/stores/conversation";
 import {
@@ -30,6 +35,7 @@ import {
   type NodeChange,
   ReactFlow,
   type ReactFlowInstance,
+  ViewportPortal,
 } from "@xyflow/react";
 import {
   Crosshair,
@@ -38,10 +44,17 @@ import {
   MoveHorizontal,
   ScanSearch,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { AgentNode } from "./AgentNode";
 import { EndpointNode } from "./EndpointNode";
-import { StepEdge } from "./StepEdge";
+import { type EdgeHandoff, StepEdge } from "./StepEdge";
 import { Timeline } from "./Timeline";
 
 // 节点 type 名避开 ReactFlow 内建保留名（input / output / default / group）：用
@@ -104,6 +117,150 @@ function deriveCaptainStatus(
   const allDone =
     workers.length > 0 && workers.every((r) => r.status === "completed");
   return allDone ? "running" : "pending";
+}
+
+/**
+ * The real information handoff on a teammate→teammate dependency edge (1A 信息流边):
+ * the target run's `receivedContext` dependency block whose `source_run_id` is the
+ * edge's source, exposing HOW that upstream product was passed (fidelity) and whether
+ * it was truncated. Null when no such block exists (synthetic bookends — input has no
+ * run, the captain's context folds turn-level not onto its node — or context that has
+ * not folded in yet).
+ */
+function resolveHandoff(
+  execution: Execution,
+  source: string,
+  target: string,
+): EdgeHandoff | null {
+  const targetRun = execution.runs.find((r) => r.id === target);
+  if (!targetRun) return null;
+  const block = targetRun.receivedContext.find(
+    (b) => b.channel === "dependency" && b.source_run_id === source,
+  );
+  if (!block) return null;
+  return {
+    fidelity: block.fidelity,
+    truncated: block.truncated,
+    sourceRole: block.source_role,
+    chars: block.chars,
+  };
+}
+
+// File-mutating tools whose `path` arg names an artifact this worker produced (1C
+// 产物落点). Edits (str_replace) count too — the worker still「落了产出」on that file;
+// reads/lists/moves/deletes do not yield a deliverable, so they are excluded.
+const PRODUCING_TOOLS = new Set(["file_write", "str_replace"]);
+
+/**
+ * Derive the distinct files a worker produced from its committed file-tool calls (1C
+ * 产物落点). Only `success` calls count — a failed/aborted write left no artifact — and
+ * paths are de-duped in first-seen order so the chip row stays stable as a worker edits
+ * the same file repeatedly. The live「正在生成」line (toolProgress) stays separate; chips
+ * are the committed landing points.
+ */
+function deriveArtifacts(
+  toolCalls: {
+    toolName: string;
+    arguments: Record<string, unknown>;
+    status: string;
+  }[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const tc of toolCalls) {
+    if (tc.status !== "success") continue;
+    if (!PRODUCING_TOOLS.has(tc.toolName)) continue;
+    const path = tc.arguments.path;
+    if (typeof path !== "string" || path.length === 0) continue;
+    if (seen.has(path)) continue;
+    seen.add(path);
+    out.push(path);
+  }
+  return out;
+}
+
+/**
+ * One wave band (1B 波次泳道): a translucent lane behind a single scheduler wave —
+ * the workers ELK placed in the same flow-axis layer (a 波次 of WaveScheduler). Drawn
+ * behind the nodes/edges (via ViewportPortal at z-index -1) with a「第 N 波」label, so
+ * the team's round-by-round progression (parallel fan → synthesize → …) reads at a
+ * glance. Bookends (用户输入 / CEO 汇聚点) sit outside the bands.
+ */
+interface WaveBand {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  labelX: number;
+  labelY: number;
+}
+
+// Outward padding of a wave lane past its nodes (graph units).
+const WAVE_PAD = 8;
+
+/**
+ * Group the laid-out WORKER slots into waves by their flow-axis layer (x for the
+ * left-right flow, y for the top-down tree) and size a lane for each. Returns [] when
+ * there is only one wave (a pure parallel fan needs no lane labels) or nothing laid out.
+ * The CEO captain 汇聚点 and the synthetic input endpoint are excluded — they are
+ * bookends, not team waves.
+ */
+function computeWaves(
+  execution: Execution,
+  positions: Record<string, { x: number; y: number }>,
+  bbox: { width: number; height: number },
+  layoutKind: GraphLayout,
+  captainId: string | null,
+): WaveBand[] {
+  const horizontal = layoutKind === "leftright";
+  const slots: { x: number; y: number }[] = [];
+  for (const r of execution.runs) {
+    if (r.id === captainId) continue;
+    const p = positions[r.id];
+    if (p) slots.push({ x: p.x, y: p.y });
+  }
+  if (slots.length === 0) return [];
+  // Bucket by the flow-axis coordinate (each ELK layer shares one) → one wave per layer.
+  const groups = new Map<number, { x: number; y: number }[]>();
+  for (const s of slots) {
+    const key = Math.round(horizontal ? s.x : s.y);
+    const arr = groups.get(key);
+    if (arr) arr.push(s);
+    else groups.set(key, [s]);
+  }
+  const keys = [...groups.keys()].sort((a, b) => a - b);
+  if (keys.length < 2) return [];
+  return keys.map((key, i) => {
+    const members = groups.get(key) as { x: number; y: number }[];
+    if (horizontal) {
+      const x0 = Math.min(...members.map((m) => m.x));
+      const x1 = Math.max(...members.map((m) => m.x + NODE_WIDTH));
+      return {
+        id: `wave-${i}`,
+        label: `第 ${i + 1} 波`,
+        x: x0 - WAVE_PAD,
+        y: -WAVE_PAD,
+        w: x1 - x0 + WAVE_PAD * 2,
+        h: bbox.height + WAVE_PAD * 2,
+        labelX: x0 - WAVE_PAD + 6,
+        labelY: -WAVE_PAD + 6,
+      };
+    }
+    const y0 = Math.min(...members.map((m) => m.y));
+    const y1 = Math.max(...members.map((m) => m.y + NODE_HEIGHT));
+    return {
+      id: `wave-${i}`,
+      label: `第 ${i + 1} 波`,
+      x: -WAVE_PAD,
+      y: y0 - WAVE_PAD,
+      w: bbox.width + WAVE_PAD * 2,
+      h: y1 - y0 + WAVE_PAD * 2,
+      labelX: -WAVE_PAD + 6,
+      labelY: y0 - WAVE_PAD + 6,
+    };
+  });
 }
 
 interface GraphViewProps {
@@ -737,6 +894,8 @@ export function GraphView({
           toolProgress: agent?.toolProgress ?? null,
           tokenCount: estimateTokens(output),
           toolCount: agent?.toolCalls.length ?? 0,
+          // 1C 产物落点: files this worker committed via file_write/str_replace.
+          artifacts: agent ? deriveArtifacts(agent.toolCalls) : [],
           focused,
           model: run.model,
           durationMs: run.durationMs,
@@ -756,9 +915,14 @@ export function GraphView({
           // 结构化挂起 2a (7.2A): a `checkpoint_after` pause that fired after this run
           // → drives the node's「待放行 / 已放行 / 已停止」pause badge; null otherwise.
           checkpoint: run.checkpoint,
-          // 升级实时可见: how many times this worker escalated → drives the node's ⚠️ 上报
-          // badge so a flagged blocker is visible on the graph the moment it fires.
-          escalationCount: run.escalations.length,
+          // 阻塞式求决策 §4.5B: pending blocking escalations drive the amber「待你拍板」
+          // badge (actionable, clears on resolve); non-blocking raised ones drive the
+          // muted「上报」badge (the CEO resolves these at synthesis). Settled
+          // (resolved/timeout) count toward neither, so the badge clears once handled.
+          escalationPending: run.escalations.filter((e) => e.status === "pending")
+            .length,
+          escalationRaised: run.escalations.filter((e) => e.status === "raised")
+            .length,
           // Input endpoint is index 0, so workers start at 1.
           enterIndex: i + 1,
           onActivate: () => activateNode(run.id),
@@ -844,16 +1008,42 @@ export function GraphView({
           ? captainStatus === "running"
           : execution?.runs.find((s) => s.id === e.target)?.status ===
             "running";
+      const kind = e.kind ?? "dep";
+      // 信息流边 (1A): for a teammate→teammate dependency, look up the REAL handoff
+      // fidelity from the target run's receivedContext (the dependency block whose
+      // source_run_id is this edge's source), so the edge label can mark a 摘要 /
+      // 指针 / 截断 handoff. Bookend / delegate / revision edges carry no such block.
+      const handoff =
+        kind === "dep" && execution
+          ? resolveHandoff(execution, e.source, e.target)
+          : null;
       return {
         id: e.id,
         source: e.source,
         target: e.target,
         type: "step",
         animated,
-        data: { animated, kind: e.kind ?? "dep" },
+        data: { animated, kind, handoff },
       } as Edge;
     });
   }, [edges, execution, captainStatus, captainRun]);
+
+  // 1B 波次泳道: a lane behind each scheduler wave (the laid-out worker columns), so
+  // the team's round-by-round flow reads at a glance. Empty for a single wave / single
+  // agent, so simple turns stay clean. Recomputed only on structure/layout changes.
+  const waves = useMemo<WaveBand[]>(
+    () =>
+      execution && bbox
+        ? computeWaves(
+            execution,
+            positions,
+            bbox,
+            layoutKind,
+            captainRun?.id ?? null,
+          )
+        : [],
+    [execution, positions, bbox, layoutKind, captainRun],
+  );
 
   // The embedded graph lives inside the scrollable chat column, so it behaves as
   // a static preview: no wheel/pinch/double-click zoom and no drag-pan, plus
@@ -919,6 +1109,40 @@ export function GraphView({
                 {...interactionProps}
               >
                 <Background gap={20} size={1} />
+                {/* 1B 波次泳道: rendered in flow coordinates via ViewportPortal — the
+                    translucent lane sits behind nodes/edges (z-index -1) and the
+                    「第 N 波」chip above them, both panning/zooming with the canvas. */}
+                {waves.length > 0 && (
+                  <ViewportPortal>
+                    {waves.map((w) => (
+                      <Fragment key={w.id}>
+                        <div
+                          className="rounded-xl border border-border/60 bg-muted/25"
+                          style={{
+                            position: "absolute",
+                            transform: `translate(${w.x}px, ${w.y}px)`,
+                            width: w.w,
+                            height: w.h,
+                            zIndex: -1,
+                            pointerEvents: "none",
+                          }}
+                        />
+                        <div
+                          className="rounded-full bg-card/90 px-2 py-0.5 text-xs font-medium text-muted-foreground shadow-sm"
+                          style={{
+                            position: "absolute",
+                            transform: `translate(${w.labelX}px, ${w.labelY}px)`,
+                            zIndex: 1,
+                            pointerEvents: "none",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {w.label}
+                        </div>
+                      </Fragment>
+                    ))}
+                  </ViewportPortal>
+                )}
               </ReactFlow>
             )}
 
