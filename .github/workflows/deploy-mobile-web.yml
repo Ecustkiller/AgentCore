@@ -56,8 +56,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: REDACTED_CLOUDFLARE_ACCOUNT_ID
-          workingDirectory: apps/mobile
-          command: pages deploy dist --project-name=agentcore-mobile --branch=main
+          # 勿设 workingDirectory=apps/mobile：wrangler-action 会在该目录 npm i wrangler，
+          # 而 mobile 的 workspace:* 依赖导致 npm EUNSUPPORTEDPROTOCOL。
+          command: pages deploy apps/mobile/dist --project-name=agentcore-mobile --branch=main
 
   patch-cors:
     name: Patch production CORS + restart api
