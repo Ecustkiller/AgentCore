@@ -105,7 +105,9 @@ jobs:
             ln -sfn "$NGINX_AVAIL" "$NGINX_ENABLED"
             sudo nginx -t
             sudo systemctl reload nginx
-            echo "nginx reloaded (office-admin → 127.0.0.1:8090)"
+            LOCAL_CODE="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: office.fashitianxia.xyz' http://127.0.0.1:8090/ || true)"
+            echo "nginx reloaded; local probe :8090 → HTTP ${LOCAL_CODE}"
+            echo "若公网仍 502：Cloudflare Tunnel 须将 office.fashitianxia.xyz → http://127.0.0.1:8090"
 
             [[ -f "$ENVF" ]] || { echo "ERROR: $ENVF missing"; exit 1; }
             if grep -q 'office\.fashitianxia\.xyz' "$ENVF"; then
@@ -124,3 +126,75 @@ jobs:
               --env-file "$ENVF" )
             "${COMPOSE[@]}" up -d api
             echo "api recreated for CORS"
+
+      - name: Ensure Tunnel ingress office → :8090
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: e784e487f8ab57882d4b24d845ccfad1
+          OFFICE_HOST: office.fashitianxia.xyz
+          OFFICE_SERVICE: http://127.0.0.1:8090
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          api() { curl -sS "$@" "${auth[@]}"; }
+
+          tunnels="$(api "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel")"
+          echo "$tunnels" | jq -e '.success' >/dev/null || {
+            echo "::warning::Cannot list tunnels (token may lack Tunnel Edit). Skip tunnel patch."
+            exit 0
+          }
+
+          tunnel_id=""
+          current_cfg=""
+          while IFS= read -r row; do
+            tid="$(echo "$row" | jq -r '.id')"
+            cfg="$(api "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${tid}/configurations")"
+            if echo "$cfg" | jq -e --arg h "$OFFICE_HOST" \
+              '.result.config.ingress[]? | select(.hostname == $h or .hostname | test("fashitianxia\\.xyz"))' >/dev/null 2>&1; then
+              tunnel_id="$tid"
+              current_cfg="$cfg"
+              break
+            fi
+            if echo "$cfg" | jq -e '.result.config.ingress[]? | select(.hostname | test("\\*\\.fashitianxia\\.xyz"))' >/dev/null 2>&1; then
+              tunnel_id="$tid"
+              current_cfg="$cfg"
+              break
+            fi
+          done < <(echo "$tunnels" | jq -c '.result[]')
+
+          if [[ -z "$tunnel_id" ]]; then
+            echo "::warning::No fashitianxia tunnel found; skip ingress patch"
+            exit 0
+          fi
+
+          existing="$(echo "$current_cfg" | jq -r --arg h "$OFFICE_HOST" --arg s "$OFFICE_SERVICE" \
+            '.result.config.ingress[]? | select(.hostname == $h) | .service' | head -n1)"
+          if [[ "$existing" == "$OFFICE_SERVICE" ]]; then
+            echo "Tunnel ingress already ${OFFICE_HOST} → ${OFFICE_SERVICE}"
+            exit 0
+          fi
+
+          new_body="$(echo "$current_cfg" | jq -c --arg h "$OFFICE_HOST" --arg s "$OFFICE_SERVICE" '
+            .result.config as $cfg
+            | ($cfg.ingress // []) as $ingress
+            | ($ingress | map(select((.hostname // "") != $h))) as $filtered
+            | ($filtered | to_entries | map(select(
+                (.value.hostname // "") == ""
+                or (.value.hostname | test("\\*"))
+              )) | .[0].key // ($filtered | length)) as $insertAt
+            | ($filtered[0:$insertAt]
+              + [{hostname: $h, service: $s, originRequest: {}}]
+              + $filtered[$insertAt:]) as $merged
+            | if ($merged[-1].hostname // "") != "" or ($merged[-1].service | startswith("http_status:") | not) then
+                $merged + [{service: "http_status:404"}]
+              else $merged end
+            | {config: ($cfg + {ingress: .})}
+          ')"
+
+          resp="$(api -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${tunnel_id}/configurations" \
+            -H 'Content-Type: application/json' \
+            --data "$new_body")"
+          echo "$resp" | jq .
+          echo "$resp" | jq -e '.success' >/dev/null
+          echo "Tunnel ingress patched: ${OFFICE_HOST} → ${OFFICE_SERVICE}"

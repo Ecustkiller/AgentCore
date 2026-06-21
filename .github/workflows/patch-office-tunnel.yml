@@ -1,0 +1,92 @@
+name: Patch Office Tunnel
+
+# 为 office.fashitianxia.xyz 写入 Tunnel ingress → http://127.0.0.1:8090（admin Nginx）。
+# 保留现有 ingress 规则，仅 upsert office 条目（插在通配符 / catch-all 之前）。
+# 需 CLOUDFLARE_API_TOKEN 含 Account → Cloudflare Tunnel → Edit。
+on:
+  workflow_dispatch:
+
+jobs:
+  tunnel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upsert office ingress on Cloudflare Tunnel
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: e784e487f8ab57882d4b24d845ccfad1
+          OFFICE_HOST: office.fashitianxia.xyz
+          OFFICE_SERVICE: http://127.0.0.1:8090
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          api() { curl -sS "$@" "${auth[@]}"; }
+
+          tunnels="$(api "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel")"
+          echo "$tunnels" | jq -e '.success' >/dev/null || {
+            echo "::error::Cannot list tunnels. Token needs Account → Cloudflare Tunnel → Edit."
+            echo "$tunnels" | jq .
+            exit 1
+          }
+
+          tunnel_id=""
+          tunnel_name=""
+          current_cfg=""
+          while IFS= read -r row; do
+            tid="$(echo "$row" | jq -r '.id')"
+            tname="$(echo "$row" | jq -r '.name')"
+            cfg="$(api "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${tid}/configurations")"
+            if echo "$cfg" | jq -e --arg h "$OFFICE_HOST" \
+              '.result.config.ingress[]? | select(.hostname == $h or .hostname | test("fashitianxia\\.xyz"))' >/dev/null 2>&1; then
+              tunnel_id="$tid"
+              tunnel_name="$tname"
+              current_cfg="$cfg"
+              break
+            fi
+            if echo "$cfg" | jq -e '.result.config.ingress[]? | select(.hostname | test("\\*\\.fashitianxia\\.xyz"))' >/dev/null 2>&1; then
+              tunnel_id="$tid"
+              tunnel_name="$tname"
+              current_cfg="$cfg"
+              break
+            fi
+          done < <(echo "$tunnels" | jq -c '.result[]')
+
+          if [[ -z "$tunnel_id" ]]; then
+            echo "::error::No tunnel with fashitianxia.xyz ingress found."
+            echo "$tunnels" | jq '.result[] | {id, name, status}'
+            exit 1
+          fi
+          echo "Using tunnel ${tunnel_name} (${tunnel_id})"
+
+          if [[ -z "$current_cfg" ]]; then
+            current_cfg="$(api "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${tunnel_id}/configurations")"
+          fi
+          echo "Current ingress:"
+          echo "$current_cfg" | jq '.result.config.ingress'
+
+          new_body="$(echo "$current_cfg" | jq -c --arg h "$OFFICE_HOST" --arg s "$OFFICE_SERVICE" '
+            .result.config as $cfg
+            | ($cfg.ingress // []) as $ingress
+            | ($ingress | map(select((.hostname // "") != $h))) as $filtered
+            | ($filtered | to_entries | map(select(
+                (.value.hostname // "") == ""
+                or (.value.hostname | test("\\*"))
+              )) | .[0].key // ($filtered | length)) as $insertAt
+            | ($filtered[0:$insertAt]
+              + [{hostname: $h, service: $s, originRequest: {}}]
+              + $filtered[$insertAt:]) as $merged
+            | if ($merged[-1].hostname // "") != "" or ($merged[-1].service | startswith("http_status:") | not) then
+                $merged + [{service: "http_status:404"}]
+              else $merged end
+            | {config: ($cfg + {ingress: .})}
+          ')"
+
+          echo "New ingress:"
+          echo "$new_body" | jq '.config.ingress'
+
+          resp="$(api -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${tunnel_id}/configurations" \
+            -H 'Content-Type: application/json' \
+            --data "$new_body")"
+          echo "$resp" | jq .
+          echo "$resp" | jq -e '.success' >/dev/null
+          echo "office tunnel ingress updated"
