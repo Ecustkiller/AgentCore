@@ -29,8 +29,11 @@ jobs:
           script: |
             set -euo pipefail
             DEPLOY="${AGENTCORE_DEPLOY_DIR:-/opt/agentcore/repo/deploy_f6d1637}"
+            REPO="${AGENTCORE_HOME:-/opt/agentcore}/repo"
             ENVF="$DEPLOY/config/production.env"
+            SCRIPT="$REPO/apps/server/scripts/create_admin.py"
             [[ -f "$ENVF" ]] || { echo "ERROR: $ENVF missing"; exit 1; }
+            [[ -f "$SCRIPT" ]] || { echo "ERROR: $SCRIPT missing (git clone repo on server?)"; exit 1; }
 
             ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)"
 
@@ -41,6 +44,7 @@ jobs:
 
             "${COMPOSE[@]}" run --rm \
               -e "ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
+              -v "${SCRIPT}:/app/scripts/create_admin.py:ro" \
               api python scripts/create_admin.py "${ADMIN_USERNAME}"
 
             echo ""
