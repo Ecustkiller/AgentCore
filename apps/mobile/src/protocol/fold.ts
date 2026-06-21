@@ -27,6 +27,7 @@ import type {
   PlanAgentPayload,
   PlanReviewRequiredPayload,
   PlanReviewResolvedPayload,
+  PlanRevisedPayload,
   ReasoningDeltaPayload,
   RunCompletedPayload,
   RunContextPayload,
@@ -117,6 +118,8 @@ function runFromPlan(s: RunPlanPayload["runs"][number]): ProjectedRun {
     round: s.round ?? 0,
     revisionOf: null,
     revision: 0,
+    //「计划已调整」轻痕迹 (设计 §7.2): set by the plan_revised event; null until then.
+    revised: null,
     checkpoint: null,
     // 收到的上下文 (上下文传递可视化): filled by the run_context event; empty until then.
     receivedContext: [],
@@ -367,6 +370,21 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         // Derived below from run states (cumulative, multi-batch safe); wire counter
         // is a timeline marker only.
         break;
+      case "plan_revised": {
+        //「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound / re-steered the
+        // paused plan via replan — tag each affected node (bind=据上游证据定稿待绑定步骤;
+        // steer=偏离后操舵未跑步骤) so it paints a non-interrupting trace. bind wins over
+        // steer if a node is both. A stray run_id (not on this graph) is ignored. Mirrors
+        // the desktop fold + backend oracle (conformance pins them equal).
+        const p = ev.payload as PlanRevisedPayload;
+        for (const rev of p.revisions ?? []) {
+          const run = runById(rev.run_id);
+          if (run && !(run.revised === "bind" && rev.kind === "steer")) {
+            run.revised = rev.kind;
+          }
+        }
+        break;
+      }
       case "run_escalation": {
         // 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append it
         // to its run so the node carries a ⚠️ signal (mirrors desktop/oracle; conformance

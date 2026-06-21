@@ -177,6 +177,7 @@
         "round": 0,
         "revisionOf": null,
         "revision": 0,
+        "revised": null,
         "checkpoint": {
           "status": "pending",
           "decision": null
@@ -206,6 +207,7 @@
         "round": 0,
         "revisionOf": null,
         "revision": 0,
+        "revised": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": []

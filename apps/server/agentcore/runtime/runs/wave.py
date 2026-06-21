@@ -152,6 +152,12 @@ class WaveScheduler:
         peak_running = 0
         dispatched_count = 0
         slot_starved = 0
+        # 受监督波循环埋点 (BatchMetrics §7.2): decision-boundary YIELDs fired this run, by
+        # reason —晚绑定触发数 / 计划漂移返工触发数 / checkpoint. Counts fires (on_boundary
+        # invocations), so a marked plan driven without a hook tallies zero.
+        bind_boundaries = 0
+        scope_boundaries = 0
+        checkpoint_boundaries = 0
 
         try:
             while True:
@@ -173,6 +179,7 @@ class WaveScheduler:
                 if not holding and defer_bind and not running:
                     bind_ready = self._bind_pending(plan, completed, skipped, dispatched)
                     if bind_ready:
+                        bind_boundaries += 1
                         outcome = await on_boundary(
                             BoundaryReason.BIND, bind_ready, completed
                         )
@@ -246,6 +253,7 @@ class WaveScheduler:
                         for n in plan.nodes
                     )
                     if pending_remains:
+                        checkpoint_boundaries += 1
                         outcome = await on_boundary(
                             BoundaryReason.CHECKPOINT, nodes, completed
                         )
@@ -268,6 +276,7 @@ class WaveScheduler:
                         n.run_id not in completed and n.run_id not in skipped
                         for n in plan.nodes
                     ):
+                        scope_boundaries += 1
                         outcome = await on_boundary(
                             BoundaryReason.SCOPE, scope_nodes, completed
                         )
@@ -307,6 +316,13 @@ class WaveScheduler:
         # nodes — they didn't run here). Appended only when a sink was given.
         if metrics_sink is not None:
             ran = [s for rid, s in completed.items() if rid not in seeded_ids]
+            # escalate 信号占比 (raw → host derives scope/total): count over the nodes that
+            # ran here, mirroring the outcome counts (seeded nodes' escalations belong to the
+            # run that produced them, not this resumed slice).
+            escalations = sum(len(s.escalations) for s in ran)
+            scope_escalations = sum(
+                1 for s in ran for e in s.escalations if e.get("kind") == "scope"
+            )
             metrics_sink.append(
                 BatchMetrics(
                     nodes=dispatched_count,
@@ -318,6 +334,11 @@ class WaveScheduler:
                     completed=sum(1 for s in ran if s.phase is RunPhase.COMPLETED),
                     failed=sum(1 for s in ran if s.phase is RunPhase.FAILED),
                     skipped=sum(1 for s in ran if s.phase is RunPhase.SKIPPED),
+                    bind_boundaries=bind_boundaries,
+                    scope_boundaries=scope_boundaries,
+                    checkpoint_boundaries=checkpoint_boundaries,
+                    escalations=escalations,
+                    scope_escalations=scope_escalations,
                 )
             )
         return completed

@@ -5,6 +5,8 @@ import type {
   EscalationResolvedPayload,
   PlanReviewRequiredPayload,
   PlanReviewResolvedPayload,
+  PlanRevisedPayload,
+  PlanRevisionKind,
   RunCompletedPayload,
   RunContextPayload,
   RunEscalationPayload,
@@ -137,6 +139,13 @@ export type RunFrame =
       kind: "plan_review_resolved";
       checkpointId: string;
       decision: CheckpointDecision;
+    }
+  | {
+      // 「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound / re-steered
+      // paused nodes via replan. Each entry tags an affected node's graph trace.
+      t: number;
+      kind: "plan_revised";
+      revisions: { runId: string; revisionKind: PlanRevisionKind }[];
     };
 
 /** Wall-clock time of a wire event (ms), used to label timeline frames. The
@@ -308,6 +317,17 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         kind: "plan_review_resolved",
         checkpointId: p.checkpoint_id,
         decision: p.decision,
+      };
+    }
+    case "plan_revised": {
+      const p = event.payload as PlanRevisedPayload;
+      return {
+        t,
+        kind: "plan_revised",
+        revisions: p.revisions.map((r) => ({
+          runId: r.run_id,
+          revisionKind: r.kind,
+        })),
       };
     }
     default:

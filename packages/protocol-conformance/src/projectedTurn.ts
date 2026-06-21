@@ -20,6 +20,7 @@ import type {
   CostBreakdown,
   DebateNarrativeRound,
   DebateResultPayload,
+  PlanRevisionKind,
   ProcessStep,
   RunKind,
   Stance,
@@ -31,6 +32,7 @@ export type {
   CostBreakdown,
   DebateNarrativeRound,
   DebateResultPayload,
+  PlanRevisionKind,
   ProcessStep,
   UsageBreakdown,
 };
@@ -128,6 +130,11 @@ export interface ProjectedRun {
   round: number;
   revisionOf: string | null;
   revision: number;
+  /**「计划已调整」轻痕迹 (设计 §7.2): set by `plan_revised` to "bind" (a late-bound
+   * placeholder finalised from upstream evidence) or "steer" (a not-yet-run node re-steered
+   * after a scope deviation) when the CEO autonomously adjusted this paused node mid-flight;
+   * null otherwise. Drives the node's non-interrupting trace label; bind wins over steer. */
+  revised: PlanRevisionKind | null;
   checkpoint: ProjectedRunCheckpoint | null;
   /** 收到的上下文 (上下文传递可视化): the structured context blocks this run was fed at
    * assembly time (from its `run_context` event), carried VERBATIM (wire-shaped

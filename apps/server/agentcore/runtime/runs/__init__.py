@@ -10,7 +10,7 @@ executor）是 CEO ``delegate`` 原语的执行地基：``delegate`` 用 ``build
 
 from __future__ import annotations
 
-from agentcore.runtime.runs.builder import build_run_plan
+from agentcore.runtime.runs.builder import build_added_nodes, build_run_plan
 from agentcore.runtime.runs.concurrency import (
     child_budget,
     current_budget,
@@ -47,6 +47,7 @@ from agentcore.runtime.runs.wave import DEFAULT_MAX_PARALLEL, WaveScheduler
 
 __all__ = [
     "build_run_plan",
+    "build_added_nodes",
     "build_agent_executor",
     "build_captain_executor",
     "build_captain_resumer",

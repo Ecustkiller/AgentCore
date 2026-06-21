@@ -358,6 +358,13 @@ async def run_chat_pipeline(
                 "cost_runs": cost_runs,
             }
 
+        # 受监督的波循环 P5「Edge」: if the CEO yielded at a delegate boundary (晚绑定 / scope)
+        # but ended the turn without a ``replan``, fold the已完成 workers' usage / ledger /
+        # citations in and release the dangling supervised plan (implicit stop) — else that
+        # work would be unbilled and its sources unshown. No-op when nothing is paused, so a
+        # normal turn is untouched. Must run BEFORE the turn usage / cost / citations fold.
+        await delegate_tool.dispose_open_supervised()
+
         final_content = captain_state.content
         final_reasoning = captain_state.reasoning
         rounds = captain_state.rounds

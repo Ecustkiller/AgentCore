@@ -6,10 +6,14 @@ so a session loaded from the DB replays the exact context for ``continue_run``.
 """
 
 from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
-from agentcore.runtime.runs import RunSession, RunSpec
+from agentcore.runtime.journal import completed_from_journal
+from agentcore.runtime.runs import RunPlan, RunSession, RunSpec
 from agentcore.runtime.runs.serialize import (
     escalations_from_transcript,
     files_touched_from_transcript,
+    plan_from_json,
+    plan_to_json,
+    run_final_fact,
     session_from_row,
     session_to_row,
     spec_from_json,
@@ -130,6 +134,40 @@ def test_state_json_round_trips_escalations():
     assert restored.escalations == [{"question": "q1", "assumption": "a1", "blocking": True}]
 
 
+def test_state_json_round_trips_scope_consumed_escalation():
+    # 受监督的波循环 P5: a scope escalation's ``kind`` AND the scheduler-set ``consumed``
+    # flag must survive the seed round-trip, so a re-drive does not re-fire a SCOPE boundary
+    # already handled (state_from_json/to_json copy the dicts whole — every key rides).
+    state = RunState(
+        phase=RunPhase.COMPLETED,
+        content="A 的产出",
+        escalations=[{"question": "真问题是X", "kind": "scope", "consumed": True}],
+    )
+    restored = state_from_json(state_to_json(state))
+    assert restored.escalations == [
+        {"question": "真问题是X", "kind": "scope", "consumed": True}
+    ]
+
+
+def test_run_final_fact_completed_from_journal_preserves_scope_consumed():
+    # 单一事实源 (P5 持久化): a worker's terminal RunState journaled as a message_final fact
+    # (run_final_fact) must rebuild — via completed_from_journal — with its scope escalation
+    # AND consumed flag intact, the durable twin of the in-memory seed (drive.py re-journals
+    # the consumed state at a SCOPE yield so this projection carries it).
+    state = RunState(
+        phase=RunPhase.COMPLETED,
+        content="A 的产出",
+        escalations=[{"question": "真问题是X", "kind": "scope", "consumed": True}],
+    )
+    fact = run_final_fact("a", state)
+    entry = {"kind": fact.kind, "payload": fact.payload}
+    rebuilt = completed_from_journal([entry])
+    assert set(rebuilt) == {"a"}
+    assert rebuilt["a"].escalations == [
+        {"question": "真问题是X", "kind": "scope", "consumed": True}
+    ]
+
+
 def test_transcript_round_trips_with_tool_calls_and_tool_results():
     transcript = [
         LLMMessage(role="system", content="sys"),
@@ -196,6 +234,33 @@ def test_spec_without_contract_round_trips_to_none():
     spec = RunSpec(run_id="r1", task="t", policy=RunPolicy())
     restored = spec_from_json(spec_to_json(spec))
     assert restored.policy.contract is None
+
+
+def test_plan_json_round_trips_late_bound_placeholder_node():
+    # 受监督的波循环 P5 (partial spec 往返): a bind_after_deps node carries a PLACEHOLDER spec
+    # (its real role/task land at the BIND boundary via replan). The plan must serialize +
+    # rebuild that partial node faithfully — bind_after_deps preserved, placeholders intact,
+    # deps wired — so a paused supervised plan rebuilt from its plan_snapshot still knows the
+    # node is待定稿 and never dispatches it unbound.
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="a", task="调研", role="研究员"),
+            RunSpec(
+                run_id="b",
+                task="占位",
+                role="待定",
+                depends_on=["a"],
+                bind_after_deps=True,
+            ),
+        ]
+    )
+    restored = plan_from_json(plan_to_json(plan))
+    a, b = restored.nodes
+    assert (a.run_id, a.bind_after_deps) == ("a", False)
+    assert b.run_id == "b"
+    assert b.bind_after_deps is True  # the late-bind marker survives → still待定稿
+    assert (b.role, b.task) == ("待定", "占位")  # placeholders intact
+    assert b.depends_on == ["a"]
 
 
 def test_spec_from_json_tolerates_unknown_and_missing_keys():

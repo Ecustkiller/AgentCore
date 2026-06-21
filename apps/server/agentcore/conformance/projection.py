@@ -78,6 +78,9 @@ def _run_from_plan(s: dict[str, Any]) -> dict[str, Any]:
         "round": s.get("round") or 0,
         "revisionOf": None,
         "revision": 0,
+        # 「计划已调整」轻痕迹 (设计 §7.2): set by the plan_revised fact to "bind"/"steer" when
+        # the CEO autonomously re-bound / re-steered this node mid-flight; None otherwise.
+        "revised": None,
         "checkpoint": None,
         # 收到的上下文 (上下文传递可视化): filled by the run_context fact; empty until then.
         "receivedContext": [],
@@ -335,6 +338,16 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # Progress is derived from run states below (cumulative, multi-batch safe);
             # the wire counter is a timeline marker only.
             pass
+
+        elif etype == "plan_revised":
+            # 「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound / re-steered the
+            # paused plan via replan. Fold each affected node's kind onto its run so every end
+            # paints a non-interrupting trace (mirrors the desktop/mobile folds; conformance
+            # pins them equal). A stray run_id (not on this graph) is ignored.
+            for rev in p.get("revisions") or []:
+                run = run_by_id(rev.get("run_id", ""))
+                if run is not None:
+                    run["revised"] = rev.get("kind")
 
         elif etype == "run_escalation":
             # 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append

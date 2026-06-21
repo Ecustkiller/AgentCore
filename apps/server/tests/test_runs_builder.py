@@ -6,7 +6,7 @@ summary, the tool allow-list filter, knob validation, and the reject-on-error /
 reject-when-none-valid contract.
 """
 
-from agentcore.runtime.runs.builder import build_run_plan
+from agentcore.runtime.runs.builder import build_added_nodes, build_run_plan
 from agentcore.runtime.runs.types import RunKind
 
 

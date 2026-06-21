@@ -121,7 +121,7 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: () => useUIStore.getState().toggleUsageDetail(),
     },
     {
-      // 「图主界面化」实验总开关（协作图主界面化设计 §六）：渐进点亮愿景各刀——单 Agent 回合
+      // 「图主界面化」实验总开关（前端UX设计.md §六）：渐进点亮愿景各刀——单 Agent 回合
       // 渲染成 CEO 节点卡（§九），团队内嵌图的端点支持就地展开读全文（§三 ②）。默认关。
       id: "toggle-graph-primary",
       title: "图主界面化（实验）",

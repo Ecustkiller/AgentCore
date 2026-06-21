@@ -21,6 +21,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from agentcore.core.types import new_id
 from agentcore.runtime.runs.constants import (
     DEFAULT_ON_FAILURE,
     MAX_DELEGATION_TASKS,
@@ -90,6 +91,118 @@ def build_run_plan(
     if not errors:
         _apply_sibling_summaries(plan)
     return plan, errors
+
+
+def build_added_nodes(
+    adds: list[dict[str, Any]],
+    plan: RunPlan,
+    *,
+    valid_tools: set[str] | None = None,
+    parent_run_id: str | None = None,
+    depth: int = 1,
+    max_tasks: int = MAX_DELEGATION_TASKS,
+) -> tuple[list[RunSpec], list[str]]:
+    """Build the RunSpecs for a ``replan(add=[…])`` batch the CEO appends to a paused
+    ``plan`` at a wave boundary (受监督的波循环 §7.1 续跑入口).
+
+    Returns ``(specs, errors)``. A non-empty ``errors`` means the whole replan is
+    rejected (all-or-nothing) and the caller must NOT mutate the plan; this function is
+    pure (it never touches ``plan``) so rejection leaves no trace. On success the caller
+    appends each spec via :meth:`RunPlan.add`.
+
+    id 生成 + 依赖接线 (the bit that made ``add`` its own phase):
+    - each added node gets a fresh collision-free id ``{add_<uuid>}_{raw}`` (a brand-new
+      prefix per batch, so re-adds across multiple boundary yields never reuse an id);
+    - each ``depends_on`` ref resolves against BOTH the existing plan nodes (a cross-edge
+      onto already-declared / completed work) AND the other raw ids in THIS batch
+      (intra-edge), so the CEO can append a mini-DAG that hangs off the live graph;
+    - role/task are required (like a DAG node); an unknown ``depends_on`` ref, a dup id,
+      an over-cap batch, or a cycle introduced among the new nodes is a rejected error.
+    """
+    if not adds:
+        return [], []
+    if len(adds) > max_tasks:
+        return [], [f"add 一次最多追加 {max_tasks} 个节点（收到 {len(adds)}）"]
+
+    prefix = f"add_{new_id()}"
+    existing_ids = {n.run_id for n in plan.nodes}
+    # First pass: assign each item a raw id + mint its namespaced run_id, catching dup
+    # raw ids up front (two added nodes can't share an id, and a mint must not collide
+    # with an existing node — impossible given the fresh prefix, but checked anyway).
+    raw_to_minted: dict[str, str] = {}
+    minted_ids: list[str] = []
+    errors: list[str] = []
+    for i, item in enumerate(adds):
+        if not isinstance(item, dict):
+            errors.append(f"add[{i}] 必须是对象")
+            minted_ids.append("")
+            continue
+        raw = (str(item.get("id")).strip() if item.get("id") is not None else "") or f"n{i}"
+        if raw in raw_to_minted:
+            errors.append(f"add[{i}]: 重复的 id `{raw}`")
+            minted_ids.append("")
+            continue
+        minted = f"{prefix}_{raw}"
+        if minted in existing_ids:
+            errors.append(f"add[{i}]: 生成的 run_id `{minted}` 与现有节点冲突")
+            minted_ids.append("")
+            continue
+        raw_to_minted[raw] = minted
+        minted_ids.append(minted)
+    if errors:
+        return [], errors
+
+    # Second pass: validate fields + resolve each depends_on ref (existing node id OR a
+    # raw id in this batch). Build the specs reusing the same _inline_spec / _dag_policy
+    # the up-front builder uses, so an added node is byte-for-byte a normal worker spec.
+    specs: list[RunSpec] = []
+    for i, item in enumerate(adds):
+        minted = minted_ids[i]
+        role = item.get("role")
+        task = item.get("task")
+        if not (isinstance(role, str) and role.strip()):
+            errors.append(f"add[{i}]: 缺少 role")
+            continue
+        if not (isinstance(task, str) and task.strip()):
+            errors.append(f"add[{i}]: 缺少 task")
+            continue
+        resolved_deps: list[str] = []
+        dep_ok = True
+        for dep in item.get("depends_on") or []:
+            dep_id = str(dep).strip()
+            if dep_id in raw_to_minted:
+                resolved_deps.append(raw_to_minted[dep_id])
+            elif dep_id in existing_ids:
+                resolved_deps.append(dep_id)
+            else:
+                errors.append(
+                    f"add[{i}]: depends_on `{dep_id}` 不在当前计划，也不是本次新增节点"
+                )
+                dep_ok = False
+        if not dep_ok:
+            continue
+        specs.append(
+            _inline_spec(
+                {**item, "role": role.strip(), "task": task.strip()},
+                run_id=minted,
+                depends_on=resolved_deps,
+                policy=_dag_policy(item),
+                valid_tools=valid_tools,
+                parent_run_id=parent_run_id,
+                depth=depth,
+            )
+        )
+    if errors:
+        return [], errors
+
+    # Topology pre-check on the combined graph: existing nodes never gain edges and the
+    # existing plan is already acyclic, so the only new cycle risk is among the added
+    # nodes — a throwaway combined RunPlan.waves() surfaces it without mutating `plan`.
+    try:
+        RunPlan(nodes=[*plan.nodes, *specs], origin=plan.origin).waves()
+    except RunPlanError as e:
+        return [], [f"add 拓扑无效：{e}"]
+    return specs, []
 
 
 def _flat_plan(

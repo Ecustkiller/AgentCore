@@ -217,6 +217,21 @@ def test_multi_agent_multi_batch_merges(projected):
     assert p["content"] == "先调研。 再撰写。"
 
 
+def test_multi_agent_plan_revised_trace(projected):
+    # 「计划已调整」轻痕迹 (设计 §7.2): plan_revised folds each affected node's kind onto its
+    # run's `revised` — "bind" (a late-bound node finalised from upstream) / "steer" (a
+    # not-yet-run node re-steered). A node the plan never touched stays `revised=None`. The
+    # trace NEVER pauses the turn: it completes end_turn with no pendingInteraction.
+    p = projected["multi_agent_plan_revised"]
+    assert p["status"] == "completed"
+    assert p["pendingInteraction"] is None
+    by_id = {r["id"]: r for r in p["runs"]}
+    assert by_id["r1"]["revised"] is None
+    assert by_id["r2"]["revised"] == "bind"
+    assert by_id["r3"]["revised"] == "steer"
+    assert p["progress"] == {"completed": 3, "total": 3}
+
+
 def test_multi_agent_escalation_nonblocking_banner(projected):
     # 非阻塞 run_escalation: folded onto the raising run as a "raised" record (drives the
     # node ⚠️ badge); the worker kept working → COMPLETED. A sibling that never escalated

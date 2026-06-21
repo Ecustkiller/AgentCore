@@ -89,7 +89,7 @@ export function InlineTeamGraph({
   const [fullscreen, setFullscreen] = useState<false | "view" | "replay">(
     false,
   );
-  // 「图主界面化」实验（协作图主界面化设计 §三 ②读答案）：开启后，内嵌图的端点（用户输入 /
+  // 「图主界面化」实验（前端UX设计.md §六）：开启后，内嵌图的端点（用户输入 /
   // CEO 汇聚点）点击不再跳转到气泡，而是在图卡内**就地展开读全文**。默认关 → 端点仍走
   // focusMessage 跳转（GraphView 的回退），现有手感零回归。
   const graphPrimary = useUIStore((s) => s.graphPrimary);
@@ -389,6 +389,11 @@ function StripControls({
   const isRunning = execution.status === "running";
   const canReplay =
     execution.status === "completed" || execution.status === "cancelled";
+  // 显眼入口（前端UX设计.md §六）：实验开启时，内嵌图卡上提供一个带文字的
+  // 「在作战室打开」按钮，把整个对话切到画布视图（按对话记忆），而非仅弹出临时全屏。
+  const graphPrimary = useUIStore((s) => s.graphPrimary);
+  const setConversationView = useUIStore((s) => s.setConversationView);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
   return (
     <>
       {isRunning && (
@@ -410,11 +415,22 @@ function StripControls({
         title={expanded ? "收起协作图" : "展开协作图"}
         onClick={onToggle}
       />
-      <IconButton
-        icon={<Maximize2 size={15} />}
-        title="全屏查看协作图"
-        onClick={onMaximize}
-      />
+      {graphPrimary && conversationId ? (
+        <button
+          type="button"
+          onClick={() => setConversationView(conversationId, "canvas")}
+          className="ml-0.5 inline-flex h-7 shrink-0 items-center gap-1 rounded-lg bg-primary/10 px-2 text-xs font-medium text-primary hover:bg-primary/20"
+        >
+          <Maximize2 size={13} />
+          在作战室打开
+        </button>
+      ) : (
+        <IconButton
+          icon={<Maximize2 size={15} />}
+          title="全屏查看协作图"
+          onClick={onMaximize}
+        />
+      )}
     </>
   );
 }
@@ -621,7 +637,11 @@ function FailureStrip({
  * so both surface the same actions. Owns its inline-edit state; every action
  * re-runs the turn from the last user message (whole-turn retry).
  */
-function RecoveryActions({ abandonLabel = "放弃" }: { abandonLabel?: string }) {
+export function RecoveryActions({
+  abandonLabel = "放弃",
+}: {
+  abandonLabel?: string;
+}) {
   const isGenerating = useActiveGenerating();
   const messageId = useExecutionScope();
   const [editing, setEditing] = useState(false);

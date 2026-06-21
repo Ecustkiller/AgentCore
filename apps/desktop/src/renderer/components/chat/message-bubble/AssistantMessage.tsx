@@ -129,7 +129,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
   const usageDetail = useUIStore((s) => s.usageDetail);
-  // 「图主界面化」实验（协作图主界面化设计 §九）：单 Agent「1 节点图」是它的第一刀——仅对单
+  // 「图主界面化」实验（前端UX设计.md §6.1）：单 Agent「1 节点图」是它的第一刀——仅对单
   // Agent 回合（`executionId === null`）生效（多 Agent 回合已有团队协作图）。开启时把整段回合
   // 正文（时间线 / 答案）包进一张 CEO 节点卡（退化形态）。默认关 → 零回归。
   const graphPrimary = useUIStore((s) => s.graphPrimary);

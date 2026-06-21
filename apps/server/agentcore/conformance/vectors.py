@@ -34,6 +34,7 @@ from agentcore.runtime.events import (
     message_start,
     plan_review_required,
     plan_review_resolved,
+    plan_revised,
     reasoning_delta,
     run_completed,
     run_context,
@@ -604,6 +605,82 @@ def _multi_agent_revision() -> list[SSEEvent]:
             cost=_COST,
         ),
         message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
+    ]
+
+
+def _multi_agent_plan_revised() -> list[SSEEvent]:
+    """多 Agent：自主再绑定「计划已调整」轻痕迹 (受监督的波循环, 设计 §7.2)。计划含一个待定稿的
+    下游节点（r2 撰写，``bind_after_deps``）+ 一个未跑下游（r3 复核）。r1 调研跑完触到波边界 → CEO
+    据上游产出调 ``replan``：定稿 r2 的职责（``bind``）并操舵 r3 的复核重点（``steer``），发一条
+    ``plan_revised`` → 三端把 ``revised`` 折到对应节点（r2=bind / r3=steer，r1 恒 None）；定稿/操舵
+    后同一 DAG 续跑 r2、r3。验「自我纠偏看得见不打断」：节点带轻痕迹，回合照常 end_turn。
+    ``revised`` 随 ``run_plan`` 节点默认 None，故所有既有向量的 runs 也都新增 ``revised: null``。"""
+    agents = [
+        {"id": "w1", "role": "研究员", "model_preference": "strong", "thinking": True, "reasoning_effort": "high"},
+        {"id": "w2", "role": "撰写员", "model_preference": "fast", "thinking": True, "reasoning_effort": "high"},
+        {"id": "w3", "role": "复核员", "model_preference": "fast", "thinking": True, "reasoning_effort": "high"},
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研竞品定价", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "（依赖完成后再定稿）", "depends_on": ["r1"]},
+        {"id": "r3", "agent_id": "w3", "task": "复核成稿", "depends_on": ["r2"]},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="定价分析（含晚绑定下游）",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_output_delta("r1", "w1", "竞品定价区间……"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成竞品定价调研",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        # 波边界让出 → CEO 据 r1 产出定稿 r2（bind）并操舵 r3 复核重点（steer），发轻痕迹。
+        plan_revised(
+            execution_id="exec1",
+            revisions=[
+                {"run_id": "r2", "kind": "bind"},
+                {"run_id": "r3", "kind": "steer"},
+            ],
+        ),
+        run_started("r2", "w2"),
+        run_output_delta("r2", "w2", "据调研撰写定价建议……"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成定价建议",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started("r3", "w3"),
+        run_output_delta("r3", "w3", "复核通过，补一处口径……"),
+        run_completed(
+            "r3",
+            "w3",
+            output_summary="复核完成",
+            duration_ms=700,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        content_delta(" 团队已完成（计划据中途发现调整过）。"),
+        message_end(FinishReason.END_TURN, input_tokens=4200, output_tokens=820, cost=_COST),
     ]
 
 
@@ -1241,6 +1318,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         _multi_agent_roundtable_rounds,
     ),
     "multi_agent_revision": ("多 Agent：定向唤回续写（revision 合成节点）", _multi_agent_revision),
+    "multi_agent_plan_revised": (
+        "多 Agent：自主再绑定「计划已调整」轻痕迹（plan_revised 折 bind/steer 到节点 revised）",
+        _multi_agent_plan_revised,
+    ),
     "multi_agent_multi_batch": ("多 Agent：同回合两批 delegate（合并 + 累计进度）", _multi_agent_multi_batch),
     "multi_agent_escalation": (
         "多 Agent：worker 升级实时可见（run_escalation 折到节点 escalations，非阻塞）",

@@ -548,7 +548,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
 
 /**
  * Send a plain-text turn into the ACTIVE conversation from a non-composer surface
- * (the canvas 老板命令栏, 协作图主界面化设计 §三 ①「下达指令」). A reduced twin of the
+ * (the canvas 老板命令栏, 前端UX设计.md §6.1「下达指令」). A reduced twin of the
  * message composer's full `handleSend`: it assumes an existing active conversation
  * and no attachments / background mode / new-conversation creation — just the
  * optimistic user bubble + {@link sendTurn}. No-op (returns false) for blank input,

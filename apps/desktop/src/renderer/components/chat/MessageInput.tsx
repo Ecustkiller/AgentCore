@@ -1,24 +1,5 @@
 import { DraftWorkspacePicker } from "@/components/chat/DraftWorkspacePicker";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import {
-  patchConversationCache,
-  upsertConversationFront,
-} from "@/hooks/useConversations";
-import {
-  type IndexedEntry,
-  buildDirListing,
-  filterEntries,
-  loadFileIndex,
-} from "@/lib/fileIndex";
-import type { FileSource } from "@/lib/fileSource";
-import { notifyError } from "@/lib/toast";
-import { api } from "@/services/api";
-import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
-import { dispatchHandoffJob } from "@/services/handoff";
-import { fetchMessageWindow, loadLatestWindow } from "@/services/messages";
-import { searchAll } from "@/services/search";
-import type { OutgoingAttachment } from "@/services/streamConversation";
-import { sendTurn } from "@/services/turns";
 import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { useComposerDraftStore } from "@/stores/composer";
 import {
@@ -26,123 +7,45 @@ import {
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
-import { useFoldersStore } from "@/stores/folders";
-import {
-  Cloud,
-  CloudUpload,
-  Folder,
-  MessageSquare,
-  Paperclip,
-  Send,
-  Square,
-  X,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Cloud, CloudUpload, Paperclip, Send, Square } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MentionMenu } from "./MentionMenu";
-import {
-  CONV_MENTION_MSG_LIMIT,
-  type PendingAttachment,
-  buildMentionSources,
-  detectMention,
-  formatConversationContext,
-  readDroppedFile,
-} from "./message-input/composerAttachments";
-
-type MenuMode = "mention" | "browse" | null;
+import { AttachmentChips } from "./message-input/AttachmentChips";
+import type { PendingAttachment } from "./message-input/composerAttachments";
+import { useComposerDrop } from "./message-input/useComposerDrop";
+import { useComposerSend } from "./message-input/useComposerSend";
+import { useMentionMenu } from "./message-input/useMentionMenu";
 
 export function MessageInput() {
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-  // 拖入文件：dragOver 驱动放置区高亮，dropError 临时提示被拒原因（图片/二进制/文件夹）。
-  const [dragOver, setDragOver] = useState(false);
-  const [dropError, setDropError] = useState<string | null>(null);
-  const dropErrorTimer = useRef<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isGenerating = useActiveGenerating();
-  const addMessage = useConversationStore((s) => s.addMessage);
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const navigate = useNavigate();
-  // 后台云端任务（交接「方案 B」）：本地模式对话才显示「后台」开关；开启后发送即把任务
-  // 交给云端团队后台跑（dispatchHandoffJob），而非普通发消息。
   const [isLocal, setIsLocal] = useState(false);
   const [backgroundMode, setBackgroundMode] = useState(false);
 
-  // ---- @ 提及 / 文件浏览菜单 ----
-  const [menuMode, setMenuMode] = useState<MenuMode>(null);
-  const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [menuError, setMenuError] = useState<string | null>(null);
-  const [fileIndex, setFileIndex] = useState<IndexedEntry[]>([]);
-  const [dirIndex, setDirIndex] = useState<IndexedEntry[]>([]);
-  const [sourceCount, setSourceCount] = useState(0);
-  const [indexLoading, setIndexLoading] = useState(false);
-  // @对话候选（搜索驱动，独立于本地文件索引）。
-  const [convItems, setConvItems] = useState<IndexedEntry[]>([]);
-  const indexLoadedRef = useRef(false);
-  // id → source, so attachEntry reads a picked file through its own source
-  // (local IPC vs cloud REST) without branching on where the file lives.
-  const sourcesRef = useRef<Map<string, FileSource>>(new Map());
-  const mentionRangeRef = useRef<{ start: number; end: number } | null>(null);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const mention = useMentionMenu({
+    conversationId,
+    value,
+    setValue,
+    attachments,
+    setAttachments,
+    textareaRef,
+  });
 
-  // 合并目录与文件并按路径排序：空 query 时目录与其内容相邻，便于发现「@ 目录」。
-  const entries = useMemo(
-    () =>
-      [...dirIndex, ...fileIndex].sort((a, b) =>
-        a.display.localeCompare(b.display, "zh"),
-      ),
-    [dirIndex, fileIndex],
-  );
-  const fileItems = useMemo(
-    () => filterEntries(entries, query),
-    [entries, query],
-  );
-  // 对话候选（搜索驱动）置顶，其后接本地文件 / 目录候选。
-  const items = useMemo(
-    () => [...convItems, ...fileItems],
-    [convItems, fileItems],
-  );
+  const drop = useComposerDrop(isGenerating, attachments, setAttachments);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: query/menuMode are intentional re-run keys — reset the highlighted item whenever the query or menu mode changes.
-  useEffect(() => {
-    setActiveIndex(0);
-  }, [query, menuMode]);
-
-  // @对话候选：对话无法像文件那样预载索引，故按 query 驱动防抖查 /v1/search 的
-  // conversation 分组，映射成 IndexedEntry 复用同一菜单。query 空 / 菜单关闭即清空；
-  // cancelled + 清 timer 防抖动并丢弃过期请求结果（竞态）。
-  useEffect(() => {
-    const q = query.trim();
-    if (!menuMode || !q) {
-      setConvItems([]);
-      return;
-    }
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void searchAll(q, { types: ["conversation"], limit: 6 })
-        .then((res) => {
-          if (cancelled) return;
-          const section = res.sections.find((s) => s.type === "conversation");
-          const candidates = (section?.items ?? []).map<IndexedEntry>((it) => ({
-            sourceId: "conversation",
-            sourceLabel: "对话",
-            relPath: it.id,
-            name: it.title || "未命名对话",
-            display: it.title || "未命名对话",
-            kind: "conversation",
-          }));
-          setConvItems(candidates);
-        })
-        .catch(() => {
-          if (!cancelled) setConvItems([]);
-        });
-    }, 200);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [query, menuMode]);
+  const { handleSend } = useComposerSend({
+    value,
+    setValue,
+    attachments,
+    setAttachments,
+    isGenerating,
+    backgroundMode,
+    isLocal,
+    closeMenu: mention.closeMenu,
+  });
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current;
@@ -151,17 +54,12 @@ export function MessageInput() {
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: value is an intentional re-run key — re-measure the textarea height on every input change.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: value is an intentional re-run key
   useEffect(() => {
     adjustHeight();
   }, [value, adjustHeight]);
 
-  // 回填 from a non-blocking ask card (its option chips drop the user's pick into the
-  // draft). Keyed on the store's monotonic token so an identical text still applies;
-  // append stacks answers to multiple questions, replace overwrites. Focus so the user
-  // can edit / send (a disabled textarea while generating keeps the value, ready to go).
   const draftToken = useComposerDraftStore((s) => s.token);
-  // draftToken is the intentional re-run key — apply the latest fill exactly once per bump.
   useEffect(() => {
     if (draftToken === 0) return;
     const { text, mode } = useComposerDraftStore.getState();
@@ -169,39 +67,6 @@ export function MessageInput() {
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [draftToken]);
 
-  const ensureIndex = useCallback(async () => {
-    if (indexLoadedRef.current) return;
-    setIndexLoading(true);
-    try {
-      const sources = await buildMentionSources(conversationId);
-      sourcesRef.current = new Map(sources.map((s) => [s.id, s]));
-      const { files, dirs, sourceCount } = await loadFileIndex(sources);
-      setFileIndex(files);
-      setDirIndex(dirs);
-      setSourceCount(sourceCount);
-      indexLoadedRef.current = true;
-    } catch {
-      setMenuError("读取文件列表失败");
-    } finally {
-      setIndexLoading(false);
-    }
-  }, [conversationId]);
-
-  // Switching conversations changes the @-able cloud workspace — invalidate the
-  // cached index so the next mention rebuilds against the new conversation.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is an intentional re-run key — invalidate the index whenever the active conversation changes.
-  useEffect(() => {
-    indexLoadedRef.current = false;
-    setFileIndex([]);
-    setDirIndex([]);
-    setSourceCount(0);
-    sourcesRef.current = new Map();
-  }, [conversationId]);
-
-  // Resolve cloud/local for the 「后台云端」 entry (shared via the backgroundTasks
-  // store so the timeline feed reuses the same binding lookup). Cloud / drafts hide
-  // the entry; leaving local mode also disarms any armed background mode.
-  // conversationId is the intentional re-run key — re-resolve the mode whenever the active conversation changes.
   useEffect(() => {
     if (!conversationId) {
       setIsLocal(false);
@@ -223,494 +88,34 @@ export function MessageInput() {
     };
   }, [conversationId]);
 
-  const closeMenu = useCallback(() => {
-    setMenuMode(null);
-    setMenuError(null);
-    mentionRangeRef.current = null;
-  }, []);
-
-  const openMention = useCallback(
-    (start: number, end: number, q: string) => {
-      mentionRangeRef.current = { start, end };
-      setQuery(q);
-      setMenuMode("mention");
-      setMenuError(null);
-      void ensureIndex();
-    },
-    [ensureIndex],
-  );
-
-  const openBrowse = useCallback(() => {
-    if (menuMode === "browse") {
-      closeMenu();
-      return;
-    }
-    mentionRangeRef.current = null;
-    setQuery("");
-    setMenuMode("browse");
-    setMenuError(null);
-    void ensureIndex();
-    requestAnimationFrame(() => searchInputRef.current?.focus());
-  }, [menuMode, closeMenu, ensureIndex]);
-
-  /** 根据当前光标位置同步 mention 菜单状态。 */
-  const syncMention = useCallback(
-    (text: string, caret: number) => {
-      const m = detectMention(text, caret);
-      if (m) {
-        openMention(m.start, caret, m.query);
-      } else if (menuMode === "mention") {
-        closeMenu();
-      }
-    },
-    [menuMode, openMention, closeMenu],
-  );
-
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const text = e.target.value;
       setValue(text);
-      syncMention(text, e.target.selectionStart ?? text.length);
+      mention.syncMention(text, e.target.selectionStart ?? text.length);
     },
-    [syncMention],
-  );
-
-  const attachEntry = useCallback(
-    async (entry: IndexedEntry) => {
-      const key = `${entry.kind}:${entry.sourceId}:${entry.relPath}`;
-      if (attachments.some((a) => a.key === key)) {
-        closeMenu();
-        textareaRef.current?.focus();
-        return;
-      }
-
-      let next: PendingAttachment | null = null;
-      if (entry.kind === "conversation") {
-        // 物化：拉该对话最新窗口 → 格式化成「用户/助手: 正文」注入文本。用
-        // fetchMessageWindow 取返回值（而非 loadLatestWindow），不污染当前会话 store。
-        let win: Awaited<ReturnType<typeof fetchMessageWindow>>;
-        try {
-          win = await fetchMessageWindow(entry.relPath, {
-            limit: CONV_MENTION_MSG_LIMIT,
-          });
-        } catch {
-          setMenuError("读取对话失败");
-          return;
-        }
-        const { text, truncated } = formatConversationContext(win.messages);
-        if (!text) {
-          setMenuError("该对话暂无可引用的内容");
-          return;
-        }
-        next = {
-          id: crypto.randomUUID(),
-          key,
-          name: entry.name,
-          path: "对话",
-          text,
-          // 还有更早消息未拉入也视为截断。
-          truncated: truncated || win.hasMoreBefore,
-          kind: "conversation",
-          conversationId: entry.relPath,
-        };
-      } else if (entry.kind === "dir") {
-        // 目录：附带「文件清单」（递归相对路径），不读取任何文件正文。
-        const listing = buildDirListing(fileIndex, entry);
-        if (listing.fileCount === 0) {
-          setMenuError("该目录内没有可索引的文件");
-          return;
-        }
-        next = {
-          id: crypto.randomUUID(),
-          key,
-          name: entry.name,
-          path: entry.display,
-          text: listing.text,
-          truncated: listing.truncated,
-          kind: "dir",
-        };
-      } else {
-        // Read through the entry's own source — local files over IPC, cloud
-        // workspace files over REST — without branching on where they live.
-        const source = sourcesRef.current.get(entry.sourceId);
-        if (!source) {
-          setMenuError("文件来源已失效，请重试");
-          return;
-        }
-        let res: Awaited<ReturnType<FileSource["read"]>>;
-        try {
-          res = await source.read(entry.relPath);
-        } catch {
-          setMenuError("读取文件失败");
-          return;
-        }
-        if (res.kind !== "text") {
-          setMenuError(
-            res.kind === "image"
-              ? "暂不支持图片附件（模型尚无视觉能力）"
-              : res.kind === "too-large"
-                ? "文件过大，无法作为附件"
-                : "二进制文件无法作为文本附件",
-          );
-          return;
-        }
-        next = {
-          id: crypto.randomUUID(),
-          key,
-          name: entry.name,
-          path: entry.display,
-          text: res.text,
-          truncated: res.truncated,
-          kind: "file",
-        };
-      }
-
-      const attachment = next;
-      setAttachments((prev) => [...prev, attachment]);
-
-      // mention 模式：把已消费的 `@query` 从文本中移除。
-      const range = mentionRangeRef.current;
-      if (menuMode === "mention" && range) {
-        const updated = value.slice(0, range.start) + value.slice(range.end);
-        setValue(updated);
-        requestAnimationFrame(() => {
-          const el = textareaRef.current;
-          if (el) {
-            el.focus();
-            el.selectionStart = el.selectionEnd = range.start;
-          }
-        });
-      } else {
-        textareaRef.current?.focus();
-      }
-      closeMenu();
-    },
-    [attachments, fileIndex, value, menuMode, closeMenu],
+    [mention],
   );
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
-  const flashDropError = useCallback((msg: string) => {
-    setDropError(msg);
-    if (dropErrorTimer.current) window.clearTimeout(dropErrorTimer.current);
-    dropErrorTimer.current = window.setTimeout(() => setDropError(null), 3000);
-  }, []);
-
-  const attachDroppedFile = useCallback(
-    async (file: File) => {
-      // Dropped files carry no rootId/relPath, so key on name+size to dedupe.
-      const key = `dropped:${file.name}:${file.size}`;
-      if (attachments.some((a) => a.key === key)) return;
-      const res = await readDroppedFile(file);
-      if (!res.ok) {
-        flashDropError(res.reason);
-        return;
-      }
-      setAttachments((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          key,
-          name: file.name,
-          path: file.name,
-          text: res.text,
-          truncated: res.truncated,
-          kind: "file",
-        },
-      ]);
-    },
-    [attachments, flashDropError],
-  );
-
-  const handleDragOver = useCallback(
-    (e: React.DragEvent) => {
-      // Only react to OS file drags — ignore text drags within the textarea.
-      if (isGenerating || !e.dataTransfer.types.includes("Files")) return;
-      e.preventDefault();
-      setDragOver(true);
-    },
-    [isGenerating],
-  );
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    // Leaving into a descendant still counts as inside — only clear on true exit.
-    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-    setDragOver(false);
-  }, []);
-
-  const handleDrop = useCallback(
-    async (e: React.DragEvent) => {
-      if (!e.dataTransfer.types.includes("Files")) return;
-      e.preventDefault();
-      setDragOver(false);
-      if (isGenerating) return;
-      // Prefer the items API so directories can be detected (and skipped — dirs
-      // go through the @ browser, which attaches a file listing); fall back to
-      // the flat file list when items is unavailable.
-      const dropped: File[] = [];
-      let sawDir = false;
-      const items = Array.from(e.dataTransfer.items ?? []);
-      if (items.length) {
-        for (const item of items) {
-          if (item.kind !== "file") continue;
-          if (item.webkitGetAsEntry?.()?.isDirectory) {
-            sawDir = true;
-            continue;
-          }
-          const f = item.getAsFile();
-          if (f) dropped.push(f);
-        }
-      } else {
-        dropped.push(...Array.from(e.dataTransfer.files));
-      }
-      for (const f of dropped) await attachDroppedFile(f);
-      if (sawDir) flashDropError("文件夹请用 @ 引用，拖拽仅支持文件");
-    },
-    [isGenerating, attachDroppedFile, flashDropError],
-  );
-
-  const handleAddRoot = useCallback(async () => {
-    const root = await window.fsApi.addRoot();
-    if (!root) return;
-    indexLoadedRef.current = false;
-    await ensureIndex();
-  }, [ensureIndex]);
-
   const stopGeneration = useCallback(() => {
     useConversationStore.getState().stopGeneration();
   }, []);
 
-  // 把一条任务派发为后台云端任务（交接「方案 B」/ P2e e2）：先乐观落一张「派发中」卡进
-  // 时间线，再经 dispatchHandoffJob 走 e1 打包 + 起云端作业；成功后拉权威列表换掉乐观项，
-  // 失败则把这张卡就地标红——全程不阻塞输入框（用户可继续聊）。
-  const dispatchBackgroundTask = useCallback((convId: string, task: string) => {
-    const store = useBackgroundTasksStore.getState();
-    const tempId = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const base = {
-      id: tempId,
-      sourceConversationId: convId,
-      jobConversationId: "",
-      baseSnapshotId: "",
-      resultSnapshotId: null as string | null,
-      task,
-      createdAt: now,
-      finishedAt: null as string | null,
-    };
-    store.upsert(convId, {
-      ...base,
-      status: "pending",
-      error: null,
-      updatedAt: now,
-    });
-    void dispatchHandoffJob(convId, task)
-      .then(() => store.load(convId))
-      .catch((err) => {
-        store.upsert(convId, {
-          ...base,
-          status: "failed",
-          error: err instanceof Error ? err.message : "派发失败",
-          updatedAt: new Date().toISOString(),
-        });
-      });
-  }, []);
-
-  const handleSend = useCallback(async () => {
-    const trimmed = value.trim();
-    if (!trimmed || isGenerating) return;
-
-    // 后台云端任务分支：本地模式 + 开关开启时，交给云端团队后台跑，不走普通发送。
-    // 开关只在已落库的本地对话出现，故此处必有 conversationId。
-    const activeConvId = useConversationStore.getState().currentConversationId;
-    if (backgroundMode && isLocal && activeConvId) {
-      dispatchBackgroundTask(activeConvId, trimmed);
-      setValue("");
-      closeMenu();
-      return;
-    }
-
-    const pending = attachments;
-    const store = useConversationStore.getState();
-    const isFirstMessage = getActiveRuntime().messages.length === 0;
-
-    let conversationId = store.currentConversationId;
-    let createdNew = false;
-    if (!conversationId) {
-      // A draft started from a folder header is born *in* that folder (folder_id
-      // at creation), so it shares the folder's workspace from its first turn.
-      // Filing at creation — rather than a follow-up move — avoids racing the
-      // workspace-lock guard, which rejects a move once a chat has any messages
-      // (双模式工作区 §九 ⑩).
-      // 桌面 local-first（决策 #11 / 工作区对称化 D1a）：未显式归档时，这是一条**裸聊**——
-      // 不预塞文件夹（folder_id=null）。本地意向在此**建会话时**定型并落库
-      // （local_container_root_id），首次产文件时由服务端在该容器根下懒建 per 对话文件夹；
-      // 落到会话上而非逐回合携带，使回合 / 面板两条提升路径一致读取（不再由谁先写决定云/本地）。
-      const foldersStore = useFoldersStore.getState();
-      const targetFolderId = foldersStore.pendingNewChatFolderId;
-      const cloudEscape = foldersStore.pendingNewChatCloud;
-      // 显式归档（继承文件夹绑定）/「云端临时对话」逃生口 / 非桌面 → null（云端懒建）；
-      // 否则取默认本地容器根（建草稿时已预热，通常即取即得）。
-      const localContainerRootId =
-        targetFolderId || cloudEscape
-          ? null
-          : await ensureDefaultContainerRoot();
-      try {
-        const conv = await api.post<{ id: string }>("/v1/conversations", {
-          title: null,
-          folder_id: targetFolderId,
-          local_container_root_id: localContainerRootId,
-        });
-        conversationId = conv.id;
-        upsertConversationFront({
-          id: conv.id,
-          title: "新对话",
-          updatedAt: new Date().toISOString(),
-          messageCount: 0,
-          lastMessagePreview: null,
-          folderId: targetFolderId,
-          // Carry the local-first intent into the cache now (the create response is
-          // id-only), so a panel-first write on this 裸聊 routes through IPC straight
-          // away — no refetch needed (工作区对称化 D1a).
-          localContainerRootId,
-        });
-        useConversationStore.getState().setCurrentConversation(conv.id);
-        createdNew = true;
-        // 消费后复位（folder=null + cloud=false ⇒ 下次草稿仍是桌面默认本地裸聊）。
-        useFoldersStore.getState().setPendingNewChatFolder(null);
-        useFoldersStore.getState().setPendingNewChatCloud(false);
-      } catch (err) {
-        // 建会话失败（500 / 网络等）：弹错误提示而非静默吞掉。输入框内容此时尚未清空，
-        // 用户可直接重发；与 sendTurn 失败的内联错误条共同覆盖发送链路两段。
-        notifyError(err, "新建对话失败");
-        return;
-      }
-    }
-
-    // Reading history (a search-hit jump left newer messages unloaded)? Snap back
-    // to the live head before appending, so the turn lands at the true tail rather
-    // than into a mid-conversation gap (live-head invariant, 载入模型 B).
-    if (!isFirstMessage && getActiveRuntime().hasMoreAfter) {
-      try {
-        await loadLatestWindow(conversationId);
-      } catch {
-        /* best-effort: fall through and append at the current tail */
-      }
-    }
-
-    const userMsgId = crypto.randomUUID();
-    addMessage({
-      id: userMsgId,
-      role: "user",
-      content: trimmed,
-      createdAt: new Date().toISOString(),
-      executionId: null,
-      isStreaming: false,
-      attachments: pending.length
-        ? pending.map((a) => ({
-            id: a.id,
-            name: a.name,
-            path: a.path,
-            truncated: a.truncated,
-            kind: a.kind,
-            conversationId: a.conversationId,
-          }))
-        : undefined,
-    });
-    setValue("");
-    setAttachments([]);
-    closeMenu();
-
-    if (isFirstMessage) {
-      const title = trimmed.length > 20 ? `${trimmed.slice(0, 20)}…` : trimmed;
-      patchConversationCache(conversationId, { title });
-    }
-
-    // 新建会话发送后切到带 id 的路由，保证「刚建会话直接刷新」也能从历史恢复。
-    // 此前已 setCurrentConversation + addMessage，故 ConversationPage 守卫
-    // （id===current 不清空、messages.length>0 不覆盖）会保住这条乐观消息。
-    if (createdNew) {
-      navigate(`/conversations/${conversationId}`);
-    }
-
-    const outgoing: OutgoingAttachment[] = pending.map((a) => ({
-      name: a.name,
-      path: a.path,
-      text: a.text,
-      truncated: a.truncated,
-      kind: a.kind,
-      conversation_id: a.conversationId,
-    }));
-
-    await sendTurn({
-      conversationId,
-      content: trimmed,
-      attachments: outgoing,
-      optimisticUserId: userMsgId,
-    });
-  }, [
-    value,
-    attachments,
-    isGenerating,
-    addMessage,
-    navigate,
-    closeMenu,
-    backgroundMode,
-    isLocal,
-    dispatchBackgroundTask,
-  ]);
-
   useEffect(() => {
     return () => {
       getActiveRuntime().abort?.abort();
-      if (dropErrorTimer.current) window.clearTimeout(dropErrorTimer.current);
+      drop.disposeDropTimer();
     };
-  }, []);
-
-  /** 菜单开启时拦截导航键；返回 true 表示已消费。 */
-  const handleMenuNavKey = useCallback(
-    (e: React.KeyboardEvent): boolean => {
-      if (!menuMode) return false;
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          setActiveIndex((i) => Math.min(i + 1, Math.max(items.length - 1, 0)));
-          return true;
-        case "ArrowUp":
-          e.preventDefault();
-          setActiveIndex((i) => Math.max(i - 1, 0));
-          return true;
-        case "Enter":
-          if (items[activeIndex]) {
-            e.preventDefault();
-            void attachEntry(items[activeIndex]);
-            return true;
-          }
-          return false;
-        case "Tab":
-          if (items[activeIndex]) {
-            e.preventDefault();
-            void attachEntry(items[activeIndex]);
-            return true;
-          }
-          return false;
-        case "Escape":
-          e.preventDefault();
-          closeMenu();
-          textareaRef.current?.focus();
-          return true;
-        default:
-          return false;
-      }
-    },
-    [menuMode, items, activeIndex, attachEntry, closeMenu],
-  );
+  }, [drop]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.nativeEvent.isComposing) return;
 
-    if (menuMode === "mention" && handleMenuNavKey(e)) return;
+    if (mention.menuMode && mention.handleMenuNavKey(e)) return;
 
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -720,94 +125,52 @@ export function MessageInput() {
 
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   };
 
   const charCount = value.length;
-  const menuOpen = menuMode !== null;
+  const menuOpen = mention.menuMode !== null;
 
   return (
     <div className="px-4 pb-4 pt-2">
       <div
         className={`relative rounded-xl border bg-card shadow-sm transition-colors ${
-          dragOver ? "border-primary ring-2 ring-primary/40" : "border-border"
+          drop.dragOver ? "border-primary ring-2 ring-primary/40" : "border-border"
         }`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
+        onDragOver={drop.handleDragOver}
+        onDragLeave={drop.handleDragLeave}
+        onDrop={drop.handleDrop}
       >
-        {dragOver && (
+        {drop.dragOver && (
           <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-card/80 text-sm font-medium text-primary">
             拖放文件以添加为附件
           </div>
         )}
-        {dropError && (
-          <div className="px-3 pt-2 text-xs text-destructive">{dropError}</div>
+        {drop.dropError && (
+          <div className="px-3 pt-2 text-xs text-destructive">{drop.dropError}</div>
         )}
         {menuOpen && (
           <MentionMenu
-            items={items}
-            activeIndex={activeIndex}
-            loading={indexLoading}
-            error={menuError}
-            query={query}
-            showSearch={menuMode === "browse"}
-            noRoots={indexLoadedRef.current && sourceCount === 0}
-            onQueryChange={setQuery}
+            items={mention.items}
+            activeIndex={mention.activeIndex}
+            loading={mention.indexLoading}
+            error={mention.menuError}
+            query={mention.query}
+            showSearch={mention.menuMode === "browse"}
+            noRoots={mention.indexLoadedRef.current && mention.sourceCount === 0}
+            onQueryChange={mention.setQuery}
             onKeyDown={(e) => {
-              handleMenuNavKey(e);
+              mention.handleMenuNavKey(e);
             }}
-            onSelect={(entry) => void attachEntry(entry)}
-            onHover={setActiveIndex}
-            onAddRoot={handleAddRoot}
-            searchInputRef={searchInputRef}
+            onSelect={(entry) => void mention.attachEntry(entry)}
+            onHover={mention.setActiveIndex}
+            onAddRoot={mention.handleAddRoot}
+            searchInputRef={mention.searchInputRef}
           />
         )}
 
-        {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 px-3 pt-3">
-            {attachments.map((a) => (
-              <span
-                key={a.id}
-                className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground"
-              >
-                {a.kind === "dir" ? (
-                  <Folder size={12} className="shrink-0" />
-                ) : a.kind === "conversation" ? (
-                  <MessageSquare size={12} className="shrink-0" />
-                ) : (
-                  <Paperclip size={12} className="shrink-0" />
-                )}
-                <SimpleTooltip
-                  label={a.kind === "conversation" ? "引用对话" : a.path}
-                >
-                  <span className="truncate">
-                    {a.name}
-                    {a.kind === "dir" ? "/" : ""}
-                  </span>
-                </SimpleTooltip>
-                {a.truncated && (
-                  <span className="shrink-0 text-muted-foreground">
-                    {a.kind === "dir"
-                      ? "部分"
-                      : a.kind === "conversation"
-                        ? "近期"
-                        : "已截断"}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => removeAttachment(a.id)}
-                  className="shrink-0 text-muted-foreground hover:text-foreground"
-                  aria-label="移除附件"
-                >
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
+        <AttachmentChips attachments={attachments} onRemove={removeAttachment} />
 
         <textarea
           ref={textareaRef}
@@ -815,7 +178,7 @@ export function MessageInput() {
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onSelect={(e) =>
-            syncMention(
+            mention.syncMention(
               e.currentTarget.value,
               e.currentTarget.selectionStart ?? 0,
             )
@@ -834,11 +197,11 @@ export function MessageInput() {
             {!conversationId && <DraftWorkspacePicker />}
             <button
               type="button"
-              onClick={openBrowse}
+              onClick={mention.openBrowse}
               disabled={isGenerating}
               aria-label="附加文件"
               className={`flex size-8 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-40 ${
-                menuMode === "browse"
+                mention.menuMode === "browse"
                   ? "bg-accent text-accent-foreground"
                   : "text-muted-foreground"
               }`}
@@ -887,7 +250,7 @@ export function MessageInput() {
             ) : (
               <button
                 type="button"
-                onClick={handleSend}
+                onClick={() => void handleSend()}
                 disabled={!value.trim()}
                 aria-label={backgroundMode ? "派发到云端后台" : "发送"}
                 className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"

@@ -1,0 +1,152 @@
+"""Chat-bubble and CEO tool-call SSE event factories."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from agentcore.core.log_context import get_log_value
+from agentcore.runtime.events.types import EventType, FinishReason, SSEEvent
+
+_DISPLAY_STR_CAP = 6000
+_DISPLAY_LIST_CAP = 50
+
+
+def message_start(
+    message_id: str, *, conversation_id: str, trace_id: str | None = None
+) -> SSEEvent:
+    payload: dict[str, Any] = {
+        "message_id": message_id,
+        "conversation_id": conversation_id,
+    }
+    tid = trace_id if trace_id is not None else get_log_value("trace_id")
+    if tid:
+        payload["trace_id"] = tid
+    return SSEEvent(type=EventType.MESSAGE_START, payload=payload)
+
+
+def content_delta(delta: str) -> SSEEvent:
+    return SSEEvent(type=EventType.CONTENT_DELTA, payload={"delta": delta})
+
+
+def content_reset() -> SSEEvent:
+    return SSEEvent(type=EventType.CONTENT_RESET)
+
+
+def reasoning_delta(delta: str) -> SSEEvent:
+    return SSEEvent(type=EventType.REASONING_DELTA, payload={"delta": delta})
+
+
+def tool_progress(tool_name: str, chars: int) -> SSEEvent:
+    return SSEEvent(
+        type=EventType.TOOL_PROGRESS,
+        payload={"tool_name": tool_name, "chars": chars},
+    )
+
+
+def tool_use_start(
+    tool_call_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    run_id: str = "",
+) -> SSEEvent:
+    payload: dict[str, Any] = {
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "arguments": arguments,
+    }
+    if run_id:
+        payload["run_id"] = run_id
+    return SSEEvent(type=EventType.TOOL_USE_START, payload=payload)
+
+
+def citations_event(citations: list[dict[str, Any]]) -> SSEEvent:
+    return SSEEvent(type=EventType.CITATIONS, payload={"citations": citations})
+
+
+def _cap_display_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return value[:_DISPLAY_STR_CAP] + "…" if len(value) > _DISPLAY_STR_CAP else value
+    if isinstance(value, list):
+        return [_cap_display_value(v) for v in value[:_DISPLAY_LIST_CAP]]
+    if isinstance(value, dict):
+        return {k: _cap_display_value(v) for k, v in value.items()}
+    return value
+
+
+def _cap_display(display: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not display:
+        return None
+    return {k: _cap_display_value(v) for k, v in display.items()}
+
+
+def tool_use_end(
+    tool_call_id: str,
+    tool_name: str,
+    *,
+    success: bool,
+    output: str,
+    display: dict[str, Any] | None = None,
+    run_id: str = "",
+) -> SSEEvent:
+    payload: dict[str, Any] = {
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "status": "success" if success else "error",
+        "result": output,
+    }
+    capped = _cap_display(display)
+    if capped is not None:
+        payload["display"] = capped
+    if run_id:
+        payload["run_id"] = run_id
+    return SSEEvent(type=EventType.TOOL_USE_END, payload=payload)
+
+
+def message_end(
+    finish_reason: FinishReason,
+    *,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    reasoning_tokens: int = 0,
+    cache_hit_tokens: int = 0,
+    cache_miss_tokens: int = 0,
+    rounds: int = 0,
+    cost: dict[str, Any] | None = None,
+) -> SSEEvent:
+    return SSEEvent(
+        type=EventType.MESSAGE_END,
+        payload={
+            "finish_reason": finish_reason,
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "reasoning_tokens": reasoning_tokens,
+                "cache_hit_tokens": cache_hit_tokens,
+                "cache_miss_tokens": cache_miss_tokens,
+            },
+            "cost": cost,
+            "rounds": rounds,
+        },
+    )
+
+
+def error_event(code: str, message: str) -> SSEEvent:
+    return SSEEvent(
+        type=EventType.ERROR,
+        payload={"code": code, "message": message},
+    )
+
+
+def title_generated(title: str, *, conversation_id: str) -> SSEEvent:
+    return SSEEvent(
+        type=EventType.TITLE_GENERATED,
+        payload={"conversation_id": conversation_id, "title": title},
+    )
+
+
+def turn_saved(*, user_message_id: str) -> SSEEvent:
+    return SSEEvent(
+        type=EventType.TURN_SAVED,
+        payload={"user_message_id": user_message_id},
+    )

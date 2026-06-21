@@ -6,83 +6,20 @@ import {
   loadOlderMessages,
 } from "@/services/messages";
 import {
-  useActiveError,
-  useActiveErrorAction,
   useActiveHasMoreAfter,
   useActiveHasMoreBefore,
   useActiveLoadingNewer,
   useActiveLoadingOlder,
   useActiveMessages,
-  useActiveRetry,
   useConversationStore,
 } from "@/stores/conversation";
-import {
-  AlertTriangle,
-  ArrowDown,
-  KeyRound,
-  Loader2,
-  RotateCw,
-  X,
-} from "lucide-react";
+import { ArrowDown, Loader2 } from "lucide-react";
 import { useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
 import { ResumePrompt } from "./ResumePrompt";
-
-/**
- * Banner for a failed turn (send / regenerate transport error), shown just above
- * the input. The retry closure re-runs that exact turn; the optional action routes
- * the user to fix the cause (e.g. "去配置" → model config for a missing BYOK key);
- * dismissing only hides the banner.
- */
-function RetryBanner() {
-  const error = useActiveError();
-  const retry = useActiveRetry();
-  const action = useActiveErrorAction();
-  const clearError = useConversationStore((s) => s.clearError);
-  const navigate = useNavigate();
-  if (!error) return null;
-
-  return (
-    <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-      <AlertTriangle size={15} className="shrink-0" />
-      <span className="min-w-0 flex-1">{error}</span>
-      {action && (
-        <button
-          type="button"
-          onClick={() => {
-            clearError();
-            navigate(action.href);
-          }}
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-destructive px-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
-        >
-          <KeyRound size={13} />
-          {action.label}
-        </button>
-      )}
-      {retry && (
-        <button
-          type="button"
-          onClick={() => retry()}
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-destructive px-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
-        >
-          <RotateCw size={13} />
-          重试
-        </button>
-      )}
-      <button
-        type="button"
-        onClick={() => clearError()}
-        aria-label="关闭"
-        className="shrink-0 text-destructive/70 hover:text-destructive"
-      >
-        <X size={14} />
-      </button>
-    </div>
-  );
-}
+import { RetryBanner } from "./RetryBanner";
 
 export function ChatView() {
   const messages = useActiveMessages();

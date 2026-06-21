@@ -4,6 +4,7 @@ import type {
   CostBreakdown,
   DebateNarrativeRound,
   DebateResultPayload,
+  PlanRevisionKind,
   RunKind,
   SSEEvent,
   Stance,
@@ -18,6 +19,10 @@ export type { ContextBlockWire } from "@/types/events";
 // Re-exported so graph/detail components import the debate display contract from
 // the store (alongside MODEL_TIER_META) without reaching into the wire types.
 export type { Stance } from "@/types/events";
+
+// Re-exported so the graph node renders the「计划已调整」轻痕迹 (设计 §7.2) from the
+// store's contract without reaching into the wire types directly.
+export type { PlanRevisionKind } from "@/types/events";
 
 export type RunStatus =
   | "pending"
@@ -241,6 +246,12 @@ export interface RunNode {
   /** Version number of a revision (original = v1, first revision = v2…); 0 for a
    * first-time run. From the wire `revision` flag. */
   revision: number;
+  /**「计划已调整」轻痕迹 (设计 §7.2): set by a `plan_revised` frame to "bind" (a late-bound
+   * placeholder finalised from upstream evidence) or "steer" (a not-yet-run node re-steered
+   * after a 队员 scope deviation) when the CEO autonomously adjusted this paused node
+   * mid-flight; null otherwise. Drives the node's non-interrupting「计划已调整」badge — the
+   * 自我纠偏 stays visible without ever pausing the run. bind wins over steer on one node. */
+  revised: PlanRevisionKind | null;
   /** A `checkpoint_after` pause that fired *after* this run (plan_review, 结构化挂起
    * 2a); null for a run that never gated. Surfaced as a node pause badge so the
    * graph shows where the scheduler stopped for the user. */
