@@ -2,6 +2,7 @@
 
 import {
   DESKTOP_VERSION,
+  MOBILE_WEB_URL,
   PLATFORMS,
   RELEASE_NOTES_URL,
   RELEASES_LATEST,
@@ -122,6 +123,16 @@ export default function DownloadPanel() {
         <div className="surface p-4 text-sm">
           <p className="font-semibold">其他入口</p>
           <ul className="mt-3 space-y-2 text-muted-foreground">
+            <li>
+              <a
+                href={MOBILE_WEB_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-foreground"
+              >
+                手机网页版（浏览器打开，无需安装）
+              </a>
+            </li>
             <li>
               <a
                 href={RELEASE_NOTES_URL}
