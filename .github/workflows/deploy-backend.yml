@@ -60,7 +60,8 @@ jobs:
             REPO="$HOME_DIR/repo"
             echo "==> deploy ref=${DEPLOY_REF} home=${HOME_DIR}"
             cd "$REPO"
-            git fetch --tags --quiet origin
+            # --force：避免本地陈旧 tag 与远端冲突导致 fetch 非零退出（set -e 会整段失败）。
+            git fetch --tags --force --quiet origin
             SHA="$(git rev-parse --short "${DEPLOY_REF}^{commit}")"
             echo "resolved ${DEPLOY_REF} -> ${SHA}"
             bash "$REPO/deploy/scripts/finish-server.sh" "$SHA"
