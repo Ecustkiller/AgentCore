@@ -54,7 +54,8 @@ export function RouteError() {
   const detail = is404
     ? "这个地址没有对应的页面。"
     : "应用遇到了意外错误，可以重试或返回对话。";
-  const devDetail = import.meta.env.DEV && !is404 ? describeRouteError(error) : null;
+  const devDetail =
+    import.meta.env.DEV && !is404 ? describeRouteError(error) : null;
 
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 bg-background px-6 text-center">

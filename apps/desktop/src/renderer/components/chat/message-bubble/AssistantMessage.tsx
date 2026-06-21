@@ -28,8 +28,10 @@ import { useUsageStore } from "@/stores/usage";
 import type { ProcessStep } from "@/types/events";
 import {
   AlertTriangle,
+  Check,
   CircleOff,
   CircleSlash,
+  Copy,
   Fingerprint,
   KeyRound,
   type LucideIcon,

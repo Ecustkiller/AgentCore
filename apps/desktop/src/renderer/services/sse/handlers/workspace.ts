@@ -1,6 +1,10 @@
 import { performWorkspaceOp } from "@/services/workspaceOps";
 import { applyConversationPromotion } from "@/services/workspacePromotion";
-import type { SSEEvent, WorkspaceOpRequiredPayload, WorkspacePromotedPayload } from "@/types/events";
+import type {
+  SSEEvent,
+  WorkspaceOpRequiredPayload,
+  WorkspacePromotedPayload,
+} from "@/types/events";
 import type { DispatchContext } from "../types";
 
 export function handleWorkspaceEvent(

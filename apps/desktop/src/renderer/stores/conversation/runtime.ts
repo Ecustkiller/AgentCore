@@ -47,6 +47,8 @@ export function runtimeOf(
   return state.byId[key] ?? EMPTY_RUNTIME;
 }
 
-export function activeRuntime(state: ConversationStateSlice): ConversationRuntime {
+export function activeRuntime(
+  state: ConversationStateSlice,
+): ConversationRuntime {
   return runtimeOf(state);
 }

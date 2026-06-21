@@ -58,13 +58,15 @@ class EscalateTool:
         return ToolSchema(
             name=ESCALATE_TOOL_NAME,
             description=(
-                "把一个【必须由上级/用户拍板】的待决问题上报。你是被委派的 worker，够不到用户，"
-                "这是你唯一的向上通道。仅在遇到【缺了就会让整件事走偏的关键信息】或【只有上级/用户"
-                "能定的关键岔路】时才用——能自行合理假设的小事不要升级。两种模式：默认 "
-                "blocking=false【非阻塞】——上报后你立刻按假设继续、主管在收尾时纠偏（问用户 / 让你"
-                "据答案重做）；blocking=true【阻塞·求决策】——仅当这个岔路【只有用户能定、且猜错你的"
-                "产物基本作废】时用：你会原地挂起、把问题直接送到用户，拿到答复再继续（须同时写明 "
-                "assumption，等不到答复就按它继续）。克制使用，别为能自行决定的小事打断用户。"
+                "把一个【必须由上级/用户拍板】的待决问题、或一个【职责/范围偏离】上报。你是被委派"
+                "的 worker，够不到用户，这是你唯一的向上通道。仅在遇到【缺了就会让整件事走偏的关键"
+                "信息】【只有上级/用户能定的关键岔路】或【发现真正该做的与初始计划不符】时才用——能"
+                "自行合理假设的小事不要升级。blocking 维度：默认 false【非阻塞】——上报后你立刻按假设"
+                "继续、主管在收尾时纠偏；true【阻塞·求决策】——仅当岔路【只有用户能定、且猜错你的产"
+                "物基本作废】时用：你原地挂起、把问题直送用户、拿到答复再继续（须写明 assumption）。"
+                "kind 维度（正交）：默认 normal=普通待决问题；scope=【职责偏离】——你发现真正该做的与"
+                "初始计划/你的子任务设定不符（如上游产出显示真问题是 X 不是 Y），主管会在波边界据此"
+                "校准【尚未运行】的下游步骤（你照常把当前能做的做完、不必阻塞）。克制使用。"
             ),
             parameters={
                 "type": "object",
@@ -93,6 +95,16 @@ class EscalateTool:
                             "assumption；等不到/无活跃用户则自动按假设继续，绝不会把你永久卡住）。"
                         ),
                     },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["normal", "scope"],
+                        "description": (
+                            "可选，默认 normal。scope=【职责偏离】：你发现真正要做的事与初始计划"
+                            "/你的子任务设定不符（例如上游产出显示真问题是 X 不是 Y），需要主管据此"
+                            "校准【尚未运行】的下游步骤——主管会在波边界读到你的偏离信号并操舵下游。"
+                            "你仍照常把当前能做的做完、不必阻塞。normal=普通待决问题（默认）。"
+                        ),
+                    },
                 },
                 "required": ["question"],
             },
@@ -113,6 +125,12 @@ class EscalateTool:
             )
         assumption = str(arguments.get("assumption") or "").strip()
         blocking = bool(arguments.get("blocking"))
+        # 职责晚绑定与动态再编排 §4.4: kind=scope marks a 职责/范围 deviation the WaveScheduler
+        # consumes at a wave boundary (CEO re-steers the un-run tail); orthogonal to blocking
+        # (which is the 阻塞式求决策 user axis). Unknown values degrade to "normal".
+        kind = str(arguments.get("kind") or "normal").strip().lower()
+        if kind not in ("normal", "scope"):
+            kind = "normal"
         # blocking=true 须带 assumption: it is the超时回落 (设计 §4.1, the dual of
         # ask_user(blocking=false) requiring a fallback). Without it a timeout would have
         # nowhere to land — so reject rather than silently guess.
@@ -130,6 +148,7 @@ class EscalateTool:
             "worker.escalate",
             run_id=context.run_id,
             blocking=blocking,
+            kind=kind,
             has_assumption=bool(assumption),
         )
         # 阻塞·求决策: suspend for the user when the turn is armed (a live interactive
@@ -151,7 +170,10 @@ class EscalateTool:
             except Exception:  # noqa: BLE001 — liveliness only; never break the worker
                 logger.warning("worker.escalate.emit_failed", run_id=context.run_id)
         note = (
-            "已记录你的升级，主管会在汇总你的产物时处理。"
+            "已记录你的职责偏离信号，主管会在波边界据此校准尚未运行的下游步骤。"
+            "这不是停工：请立刻按你当前最合理的假设把任务继续做完、交付最佳结果"
+            if kind == "scope"
+            else "已记录你的升级，主管会在汇总你的产物时处理。"
             "这不是停工：请立刻按你当前最合理的假设把任务继续做完、交付最佳结果"
         )
         note += (

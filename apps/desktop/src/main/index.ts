@@ -56,6 +56,7 @@ function createWindow(): BrowserWindow {
     height: windowState.height,
     x: windowState.x,
     y: windowState.y,
+    title: is.dev ? "AgentCore [DEV]" : "AgentCore",
     minWidth: 800,
     minHeight: 600,
     show: false,
@@ -77,15 +78,14 @@ function createWindow(): BrowserWindow {
   // Dev-only: forward the renderer's console warnings/errors to this process's
   // stdout so a renderer crash (e.g. a React error-boundary stack logged via
   // console.error) shows up in the `pnpm dev` terminal, not only in DevTools.
-  // Electron 33 uses the positional `console-message` signature; `level` is
-  // 0..3 = verbose/info/warning/error, so >= 2 keeps it to the signal that matters.
+  // Electron 35+ passes details on the event object; level is a string.
   if (is.dev) {
     mainWindow.webContents.on(
       "console-message",
-      (_event, level, message, line, sourceId) => {
-        if (level < 2) return;
-        const tag = level >= 3 ? "renderer:error" : "renderer:warn";
-        console.log(`[${tag}] ${message} (${sourceId}:${line})`);
+      ({ level, message, lineNumber, sourceId }) => {
+        if (level !== "warning" && level !== "error") return;
+        const tag = level === "error" ? "renderer:error" : "renderer:warn";
+        console.log(`[${tag}] ${message} (${sourceId}:${lineNumber})`);
       },
     );
   }

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FileNode } from "@/lib/fileSource";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Client-side DeferredWorkspace (工作区对称化 D1a): a desktop 裸聊's panel source that

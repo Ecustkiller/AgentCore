@@ -1,13 +1,7 @@
 import { startNewConversation } from "@/lib/newConversation";
 import { useUnreadTotal } from "@/stores/messaging";
 import { useSidebarStore } from "@/stores/sidebar";
-import {
-  Compass,
-  Files,
-  Mail,
-  MessageSquare,
-  Wrench,
-} from "lucide-react";
+import { Compass, Files, Mail, MessageSquare, Wrench } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   RecentConversations,

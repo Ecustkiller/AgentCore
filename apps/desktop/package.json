@@ -1,6 +1,6 @@
 {
   "name": "agentcore-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AgentCore Desktop - Multi-Agent AI Workspace",
   "author": "AgentCore",
   "main": "./out/main/index.js",
@@ -11,6 +11,7 @@
     "bundle:sidecar": "node scripts/bundle-sidecar.mjs",
     "build:unpack": "pnpm bundle:sidecar && electron-vite build && electron-builder --dir",
     "build:win": "pnpm bundle:sidecar && electron-vite build && electron-builder --win",
+    "build:win:cn": "node scripts/build-win-cn.mjs",
     "build:mac": "pnpm bundle:sidecar && electron-vite build && electron-builder --mac",
     "build:linux": "pnpm bundle:sidecar && electron-vite build && electron-builder --linux",
     "lint": "biome check src/",
@@ -19,7 +20,7 @@
     "conformance": "vitest run src/renderer/protocol",
     "typecheck": "tsc --noEmit",
     "gen:api": "openapi-typescript ../server/openapi.json -o src/renderer/types/api.generated.ts",
-    "postinstall": "pnpm gen:api"
+    "postinstall": "pnpm gen:api && node ./scripts/install-electron.mjs"
   },
   "dependencies": {
     "@agentcore/contract-types": "workspace:*",
@@ -73,7 +74,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.0",
-    "electron": "^33.0.0",
+    "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "jsdom": "^29.1.1",

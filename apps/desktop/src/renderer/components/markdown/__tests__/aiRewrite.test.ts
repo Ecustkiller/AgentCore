@@ -52,7 +52,11 @@ describe("isRewriteTargetIntact", () => {
 
   it("accepts the whole-document span at exact boundaries", () => {
     expect(
-      isRewriteTargetIntact(state, { from: 0, to: 10, selection: "abcdefghij" }),
+      isRewriteTargetIntact(state, {
+        from: 0,
+        to: 10,
+        selection: "abcdefghij",
+      }),
     ).toBe(true);
   });
 

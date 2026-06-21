@@ -676,7 +676,10 @@ function WorkspaceSection({
       </button>
       {source && (
         <div className="hidden shrink-0 items-center group-hover:flex">
-          <IconButton title="新建文件" onClick={() => requestTreeAction("file")}>
+          <IconButton
+            title="新建文件"
+            onClick={() => requestTreeAction("file")}
+          >
             <FilePlus size={14} />
           </IconButton>
           <IconButton

@@ -65,11 +65,7 @@ export function notifySuccess(message: string): void {
  */
 export function notifyActionError(context: string, err: unknown): void {
   const detail =
-    err instanceof Error
-      ? err.message
-      : typeof err === "string"
-        ? err
-        : "";
+    err instanceof Error ? err.message : typeof err === "string" ? err : "";
   toast.error(context, {
     description: detail || undefined,
     icon: errorIcon,

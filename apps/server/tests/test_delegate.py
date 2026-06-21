@@ -20,6 +20,7 @@ from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.tools.builtin.delegate import DelegateTool
+from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.replan import ReplanTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -1285,3 +1286,255 @@ def test_format_for_ceo_emits_uncapped_synthesis_metric():
     assert metric["capped"] is False  # 瘦身 keeps the aggregate under the output_limit net
     assert metric["workers"] == 8 and metric["prose"] == 8
     assert metric["ratio"] < 1.0  # compression actually happened
+
+
+# --- 受监督的波循环: 晚绑定 → 让出 → replan 续跑 (end-to-end) ---------------------
+
+_LATE_BIND_DAG = [
+    {"id": "a", "role": "研究员", "task": "调研"},
+    {"id": "b", "role": "待定", "task": "占位", "depends_on": ["a"], "bind_after_deps": True},
+]
+
+
+async def test_late_bind_yields_brief_then_replan_resumes_to_terminal():
+    # A bind_after_deps node defers to the BIND boundary: the upstream runs, delegate
+    # returns a NON-terminal「计划已让出」brief (with the upstream product so the CEO can
+    # bind from it), and the bind node is NOT dispatched yet. The CEO finalises it via
+    # the replan tool, which resumes the SAME DAG to terminal.
+    provider = _Provider(["AOUT", "BOUT"])
+    tool = _tool(provider)
+    first = await tool.execute({"tasks": _LATE_BIND_DAG}, _ctx())
+
+    assert first.success is True
+    assert first.is_terminal is False
+    assert "计划已让出" in first.output
+    assert "AOUT" in first.output  # upstream product shown for the CEO to bind from
+    assert "BOUT" not in first.output  # the late-bound node has not run
+    assert provider.calls == 1  # only the upstream ran; the bind node was deferred
+    sup = tool._supervised
+    assert sup is not None
+    bind_id = sup.boundary_run_ids[0]
+
+    # The CEO finalises the late-bound step through the replan TOOL (the wired wrapper).
+    replan_tool = ReplanTool(delegate=tool)
+    result = await replan_tool.execute(
+        {"binds": [{"run_id": bind_id, "role": "写手", "task": "据调研写报告"}]}, _ctx()
+    )
+
+    assert result.success is True
+    assert result.is_terminal is False
+    assert tool._supervised is None  # the paused run was consumed
+    assert "AOUT" in result.output and "BOUT" in result.output  # whole DAG present
+    assert "写手" in result.output  # the bound role, not the「待定」placeholder
+    assert provider.calls == 2  # the bound node ran exactly once on resume
+
+
+async def test_replan_binds_and_steers_pending_downstream():
+    # a → b(bind) → c. At the bind boundary c is still pending (it depends on the
+    # un-bound b), so the CEO can finalise b AND steer c in one replan; resuming runs
+    # b then c with the steer injected into c's prompt.
+    provider = _Provider(["AOUT", "BOUT", "COUT"])
+    tool = _tool(provider)
+    tasks = [
+        {"id": "a", "role": "研究员", "task": "调研"},
+        {"id": "b", "role": "待定", "task": "占位", "depends_on": ["a"], "bind_after_deps": True},
+        {"id": "c", "role": "整合", "task": "整合下游", "depends_on": ["b"]},
+    ]
+    await tool.execute({"tasks": tasks}, _ctx())
+    sup = tool._supervised
+    bind_id = sup.boundary_run_ids[0]
+    c_id = next(n.run_id for n in sup.plan.nodes if n.role == "整合")
+
+    result = await tool.replan(
+        {
+            "binds": [{"run_id": bind_id, "role": "写手", "task": "写报告"}],
+            "steers": [{"run_id": c_id, "note": "强调风险"}],
+        }
+    )
+
+    assert result.success is True
+    assert "BOUT" in result.output and "COUT" in result.output
+    c_user = next(
+        m.content
+        for req in provider.requests
+        for m in req.messages
+        if m.role == "user" and "整合下游" in (m.content or "")
+    )
+    assert "强调风险" in c_user  # the steer reached the resumed downstream worker
+
+
+async def test_replan_stop_wraps_up_partial_without_running_tail():
+    # replan(stop=true) wraps up: the completed upstream is billed + shown, the un-run
+    # late-bound tail is materialised SKIPPED, and the supervised run is consumed.
+    provider = _Provider(["AOUT", "BOUT"])
+    tool = _tool(provider)
+    await tool.execute({"tasks": _LATE_BIND_DAG}, _ctx())
+
+    result = await tool.replan({"stop": True})
+
+    assert result.success is True
+    assert result.is_terminal is False
+    assert tool._supervised is None
+    assert "AOUT" in result.output  # the completed upstream is surfaced
+    assert provider.calls == 1  # the tail never ran
+
+
+async def test_replan_without_supervised_run_errors():
+    # replan is only valid after a delegate YIELD; with no paused plan it errors and
+    # tells the CEO to use delegate instead.
+    tool = _tool(_Provider([]))
+    result = await tool.replan({"binds": [{"run_id": "x", "role": "r", "task": "t"}]})
+    assert result.success is False
+    assert "没有待续跑" in result.output
+
+
+async def test_replan_requires_binds_or_stop():
+    # A replan that neither finalises a step nor stops can't make progress — rejected,
+    # and the supervised run is LEFT OPEN so the CEO can retry cleanly.
+    tool = _tool(_Provider(["AOUT"]))
+    await tool.execute({"tasks": _LATE_BIND_DAG}, _ctx())
+    result = await tool.replan({})
+    assert result.success is False
+    assert tool._supervised is not None
+
+
+async def test_replan_rejects_unknown_bind_and_keeps_run_open():
+    # All-or-nothing validation: a bind to a run_id not in the plan is rejected and
+    # mutates nothing, so the paused run survives for a corrected retry.
+    tool = _tool(_Provider(["AOUT", "BOUT"]))
+    await tool.execute({"tasks": _LATE_BIND_DAG}, _ctx())
+    result = await tool.replan(
+        {"binds": [{"run_id": "nope", "role": "写手", "task": "写报告"}]}
+    )
+    assert result.success is False
+    assert "不在当前计划" in result.output
+    assert tool._supervised is not None  # untouched — retry stays possible
+
+
+async def test_plain_dag_runs_straight_through_without_yielding():
+    # 成本纪律 / parity guard: a plain DAG (a→b, no bind marker, no scope escalation) wires
+    # the boundary hook (the SCOPE arm is eligible because there IS downstream to redirect)
+    # but NEVER yields — no late-bound node, no checkpoint, no scope deviation surfaced ⇒ it
+    # runs straight to terminal in one delegate call (零新增回合).
+    provider = _Provider(["AOUT", "BOUT"])
+    tool = _tool(provider)
+    result = await tool.execute(
+        {
+            "tasks": [
+                {"id": "a", "role": "研究员", "task": "调研"},
+                {"id": "b", "role": "写手", "task": "撰写", "depends_on": ["a"]},
+            ]
+        },
+        _ctx(),
+    )
+    assert result.success is True
+    assert tool._supervised is None  # no boundary was ever opened
+    assert "AOUT" in result.output and "BOUT" in result.output
+
+
+# --- 受监督的波循环: 偏离信号 SCOPE arm (escalate kind=scope → 让出 → replan 续跑) --------
+
+_SCOPE_DAG = [
+    {"id": "a", "role": "研究员", "task": "调研真实需求"},
+    {"id": "b", "role": "写手", "task": "撰写最终报告", "depends_on": ["a"]},
+]
+
+
+class _ScopeProvider:
+    """Fake LLM where the upstream worker escalates a scope deviation (escalate kind=scope)
+    on its first round then produces output; downstream produces output. Records requests
+    so a test can assert the steer reached the resumed downstream worker."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.requests: list = []
+
+    async def stream(self, request):
+        self.requests.append(request)
+        self.calls += 1
+        user = next((m.content or "" for m in request.messages if m.role == "user"), "")
+        has_tool_result = any(m.role == "tool" for m in request.messages)
+        is_b = "撰写最终报告" in user
+        # The upstream "a" worker flags a scope deviation first (a tool call, no content),
+        # then on its next round (escalate result now in transcript) delivers its output.
+        if not is_b and not has_tool_result:
+            args = json.dumps(
+                {"question": "真问题是X不是Y", "assumption": "暂按X继续", "kind": "scope"}
+            )
+            yield LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(
+                        index=0, id="esc-tc", function_name="escalate", arguments_delta=args
+                    )
+                ]
+            )
+            return
+        yield LLMChunk(delta_content="BOUT" if is_b else "AOUT")
+
+
+def _scope_tool(provider: _ScopeProvider) -> DelegateTool:
+    # Workers reach escalate via the worker registry (build_worker_registry in prod); wire
+    # it so the upstream worker can actually raise its scope deviation.
+    tools = ToolRegistry()
+    tools.register(EscalateTool())
+    return DelegateTool(
+        llm=provider,
+        sink=EventSink(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        history=[],
+        tools=tools,
+        base_tool_context=_ctx(),
+    )
+
+
+async def test_scope_escalation_yields_brief_then_replan_steers_resumes():
+    # The upstream worker escalates a scope deviation while downstream b is still pending:
+    # the WaveScheduler YIELDs a SCOPE boundary, delegate returns a NON-terminal「计划已让
+    # 出」deviation brief (a's output + the deviation, NOT the bind brief), and b has not
+    # run. The CEO re-steers b via replan(steers=…), resuming the SAME DAG to terminal.
+    from agentcore.runtime.runs import BoundaryReason
+
+    provider = _ScopeProvider()
+    tool = _scope_tool(provider)
+    first = await tool.execute({"tasks": _SCOPE_DAG}, _ctx())
+
+    assert first.success is True
+    assert first.is_terminal is False
+    assert "计划已让出" in first.output
+    assert "职责偏离" in first.output  # the SCOPE brief, not the BIND「待定稿」one
+    assert "真问题是X不是Y" in first.output  # the deviation surfaced for the CEO
+    assert "BOUT" not in first.output  # downstream b has not run yet
+    sup = tool._supervised
+    assert sup is not None
+    assert sup.reason is BoundaryReason.SCOPE
+    b_id = next(n.run_id for n in sup.plan.nodes if n.role == "写手")
+
+    result = await tool.replan({"steers": [{"run_id": b_id, "note": "改写X方向"}]})
+
+    assert result.success is True
+    assert tool._supervised is None
+    assert "BOUT" in result.output  # the steered downstream ran on resume
+    b_user = next(
+        m.content
+        for req in provider.requests
+        for m in req.messages
+        if m.role == "user" and "撰写最终报告" in (m.content or "")
+    )
+    assert "改写X方向" in b_user  # the steer reached the resumed downstream worker
+
+
+async def test_scope_replan_bare_resume_runs_tail_unchanged():
+    # At a SCOPE boundary the CEO may judge no downstream change is needed: a bare replan()
+    # (no binds / steers / stop) is VALID here (unlike a BIND boundary, which must finalise
+    # a step) and resumes the tail as-is.
+    provider = _ScopeProvider()
+    tool = _scope_tool(provider)
+    await tool.execute({"tasks": _SCOPE_DAG}, _ctx())
+    assert tool._supervised is not None
+
+    result = await tool.replan({})
+
+    assert result.success is True
+    assert tool._supervised is None
+    assert "BOUT" in result.output  # the tail ran unchanged

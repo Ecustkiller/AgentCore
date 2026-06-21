@@ -1,5 +1,5 @@
-import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import type { SidecarTarget } from "@/services/sidecarRouting";
+import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 
 /**
  * 本地引擎（sidecar）会话级健康缓存 + 主动探活。

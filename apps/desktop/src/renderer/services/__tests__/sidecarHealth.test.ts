@@ -6,8 +6,8 @@ vi.mock("@/services/sidecarStatus", () => ({
   takeRecentSidecarFailure: vi.fn(() => null),
 }));
 
-import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import type { SidecarTarget } from "@/services/sidecarRouting";
+import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import {
   clearSidecarHealth,
   getSidecarHealth,

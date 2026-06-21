@@ -20,6 +20,7 @@ from agentcore.tools.builtin import build_ceo_tool_registry, build_worker_regist
 from agentcore.tools.builtin.ask_user import AskUserTool
 from agentcore.tools.builtin.consult_skill import ConsultSkillTool
 from agentcore.tools.builtin.delegate import DelegateTool
+from agentcore.tools.builtin.replan import ReplanTool
 from agentcore.tools.builtin.revise import ReviseTool
 from agentcore.tools.protocol import ToolSchema
 
@@ -49,6 +50,7 @@ class CatalogTool:
 # full repertoire.
 _CEO_ORCHESTRATION_TOOLS: tuple[type, ...] = (
     DelegateTool,
+    ReplanTool,
     ReviseTool,
     ConsultSkillTool,
     AskUserTool,

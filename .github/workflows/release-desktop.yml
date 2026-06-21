@@ -38,21 +38,22 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.28.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
-          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
       # 内置 Python 打包（方案 B）需 uv 拉独立 CPython + 装 agentcore（scripts/bundle-sidecar.mjs）。
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        working-directory: .
+        run: pnpm install --frozen-lockfile --filter agentcore-desktop...
 
       # tag 触发时校验 desktop-v<ver> 与 package.json version 一致，避免发布版本与
       # tag 漂移（workflow_dispatch 跳过，直接用 package.json version）。

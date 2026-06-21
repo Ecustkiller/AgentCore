@@ -27,7 +27,6 @@ import {
   EMPTY_RUNTIME,
   activeRuntime,
   lastAssistantMessageId,
-  runtimeOf,
 } from "./runtime";
 import type { ConversationRuntime, Message } from "./types";
 

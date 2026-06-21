@@ -93,10 +93,7 @@ export function handleExecutionEvent(
       flushPendingContent(conversationId);
       useConversationStore
         .getState()
-        .addProcessTool(
-          event.payload as ToolUseStartPayload,
-          conversationId,
-        );
+        .addProcessTool(event.payload as ToolUseStartPayload, conversationId);
       return true;
     }
     case "tool_use_end": {

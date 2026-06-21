@@ -99,7 +99,9 @@ export const useBackgroundTasksStore = create<BackgroundTasksState>(
 const EMPTY: HandoffJob[] = [];
 
 /** 选择器：某对话的后台云端任务（无 / 未加载时返回稳定空数组，避免重渲染）。 */
-export function useBackgroundTasks(conversationId: string | null): HandoffJob[] {
+export function useBackgroundTasks(
+  conversationId: string | null,
+): HandoffJob[] {
   return useBackgroundTasksStore((s) =>
     conversationId ? (s.byConversation[conversationId] ?? EMPTY) : EMPTY,
   );
@@ -110,7 +112,9 @@ export function useBackgroundTasks(conversationId: string | null): HandoffJob[] 
  * 云端结果写回本地（`readLocalShas` / `applyHandoffJob` 都按根 id 在绑定根上履行 op）。
  * 云端 / 未解析 / 解析失败为 null —— 此时卡片不提供评审入口。
  */
-export function useWorkspaceRootId(conversationId: string | null): string | null {
+export function useWorkspaceRootId(
+  conversationId: string | null,
+): string | null {
   return useBackgroundTasksStore((s) =>
     conversationId ? (s.rootIdByConversation[conversationId] ?? null) : null,
   );
@@ -142,7 +146,10 @@ export function useBackgroundTasksSync(conversationId: string | null): void {
 
   useEffect(() => {
     if (!conversationId || mode !== "local" || !inFlight) return;
-    const id = setInterval(() => void load(conversationId).catch(() => {}), 4000);
+    const id = setInterval(
+      () => void load(conversationId).catch(() => {}),
+      4000,
+    );
     return () => clearInterval(id);
   }, [conversationId, mode, inFlight, load]);
 }

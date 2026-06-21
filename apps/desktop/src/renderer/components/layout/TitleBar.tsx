@@ -21,8 +21,13 @@ export function TitleBar() {
         className={`flex items-center gap-2 px-3 transition-[width] duration-200 ${collapsed ? "w-14" : "w-60"}`}
       >
         {!collapsed && (
-          <span className="flex-1 text-sm font-semibold text-sidebar-foreground [-webkit-app-region:no-drag]">
+          <span className="flex flex-1 items-center gap-1.5 text-sm font-semibold text-sidebar-foreground [-webkit-app-region:no-drag]">
             AgentCore
+            {import.meta.env.DEV && (
+              <span className="rounded-full bg-warning/20 px-1.5 py-0.5 text-xs font-medium text-warning">
+                DEV
+              </span>
+            )}
           </span>
         )}
         <button

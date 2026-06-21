@@ -53,9 +53,6 @@ jobs:
   frontend:
     name: Frontend (lint + test)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/desktop
 
     steps:
       - uses: actions/checkout@v4
@@ -63,30 +60,30 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.28.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
-          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
+      # 桌面端已纳入 pnpm workspace（contract-types / protocol-conformance）。
+      # 须在仓库根目录 install，才能正确链接 workspace 包；子目录 cwd 虽能向上找到根，
+      # 但语义不清晰且与 mobile job 不一致。
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter agentcore-desktop...
 
       - name: Lint
-        run: pnpm lint
+        run: pnpm --filter agentcore-desktop lint
 
       - name: Test
-        run: pnpm test -- --run
+        run: pnpm --filter agentcore-desktop test -- --run
 
   mobile:
     name: Mobile (lint + typecheck + conformance)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/mobile
 
     steps:
       - uses: actions/checkout@v4
@@ -94,23 +91,23 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.28.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --filter agentcore-mobile...
 
       - name: Lint
-        run: pnpm lint
+        run: pnpm --filter agentcore-mobile lint
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: pnpm --filter agentcore-mobile typecheck
 
       - name: Conformance
-        run: pnpm conformance
+        run: pnpm --filter agentcore-mobile conformance

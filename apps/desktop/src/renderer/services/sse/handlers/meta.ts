@@ -8,7 +8,10 @@ import type {
 } from "@/types/events";
 import type { DispatchContext } from "../types";
 
-export function handleMetaEvent(event: SSEEvent, ctx: DispatchContext): boolean {
+export function handleMetaEvent(
+  event: SSEEvent,
+  ctx: DispatchContext,
+): boolean {
   const { conversationId } = ctx;
 
   switch (event.type) {

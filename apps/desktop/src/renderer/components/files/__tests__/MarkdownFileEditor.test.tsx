@@ -10,10 +10,7 @@
  * the rewrite service are faked so nothing touches IPC / the network.
  */
 
-import type {
-  FileSource,
-  FileSourceCaps,
-} from "@/lib/fileSource";
+import type { FileSource, FileSourceCaps } from "@/lib/fileSource";
 import { rewriteSelection } from "@/services/rewrite";
 import {
   act,
@@ -54,7 +51,9 @@ vi.mock("@/components/markdown/MarkdownSourceEditor", async () => {
 
 // Keep heavy children out of jsdom: the preview renderer + the toolbar.
 vi.mock("@/components/chat/Markdown", () => ({ Markdown: () => null }));
-vi.mock("@/components/markdown/sourceToolbar", () => ({ SourceToolbar: () => null }));
+vi.mock("@/components/markdown/sourceToolbar", () => ({
+  SourceToolbar: () => null,
+}));
 vi.mock("@/services/rewrite", () => ({ rewriteSelection: vi.fn() }));
 
 const CAPS: FileSourceCaps = {
@@ -81,7 +80,10 @@ function makeSource(over: Partial<FileSource> = {}): FileSource {
       encoding: "utf-8" as const,
       eol: "lf" as const,
     })),
-    writeText: vi.fn(async () => ({ ok: true as const, version: { mtimeMs: 200 } })),
+    writeText: vi.fn(async () => ({
+      ok: true as const,
+      version: { mtimeMs: 200 },
+    })),
     ...over,
   } as FileSource;
 }
@@ -208,7 +210,11 @@ describe("MarkdownFileEditor host", () => {
   it("surfaces a CAS conflict and 仍然覆盖 rewrites with the disk version as the baseline", async () => {
     const writeText = vi
       .fn()
-      .mockResolvedValueOnce({ ok: false, reason: "conflict", version: { mtimeMs: 999 } })
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: "conflict",
+        version: { mtimeMs: 999 },
+      })
       .mockResolvedValueOnce({ ok: true, version: { mtimeMs: 1000 } });
     const source = makeSource({ writeText });
     await renderLoaded(source);

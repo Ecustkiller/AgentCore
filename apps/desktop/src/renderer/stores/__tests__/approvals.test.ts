@@ -166,8 +166,16 @@ describe("autoApproveSiblings (本轮内允许所有文件改动 class放行)", 
     const self = card({ approvalId: "a1", conversationId: "conv-1" });
     const pending = [
       self,
-      card({ approvalId: "a2", toolName: "str_replace", conversationId: "conv-1" }),
-      card({ approvalId: "a3", toolName: "str_replace", conversationId: "conv-2" }),
+      card({
+        approvalId: "a2",
+        toolName: "str_replace",
+        conversationId: "conv-1",
+      }),
+      card({
+        approvalId: "a3",
+        toolName: "str_replace",
+        conversationId: "conv-2",
+      }),
     ];
     expect(
       autoApproveSiblings(pending, self, "approve_always_files").map(
