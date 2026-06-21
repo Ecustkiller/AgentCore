@@ -2,7 +2,7 @@
 
 > **定位**：在 Windows 内测发布已跑通的前提下，把 **macOS arm64** 纳入同一 `desktop-v*` 发布列车——内测档位、未签名、Win/Mac 同 tag 同步出包。
 >
-> **状态**：🗂️ 提案，**P0 + P1 TitleBar 已落地**。**0.3.0** 起 Win + Mac 同 `desktop-v*` tag 一起发（见 §8.B）。
+> **状态**：🗂️ 提案，**P0 + P1 已落地**；**0.3.0 已发布**（`Lawofall/AgentCore-releases` v0.3.0，Win + Mac arm64）。正式签名 + 公证归 P2。
 
 ---
 
