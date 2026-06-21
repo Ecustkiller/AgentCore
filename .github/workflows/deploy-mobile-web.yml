@@ -6,7 +6,7 @@ name: Deploy Mobile Web
 #
 # 触发：master 上 mobile / 共享包改动，或手动 dispatch。
 # 需 secrets：CLOUDFLARE_API_TOKEN（与 deploy-website.yml 共用）、DEPLOY_SSH_*（patch-cors job）。
-# 自定义域 m.fashitianxia.xyz：首次 deploy 后在 CF Pages 项目 agentcore-mobile 绑定（DNS 同账号自动）。
+# 自定义域 m.fashitianxia.xyz：Pages 绑定 + 显式 DNS CNAME（须压过 *.fashitianxia.xyz Tunnel 兜底）。
 
 on:
   push:
@@ -85,6 +85,36 @@ jobs:
             echo "domain bind returned HTTP $code:"
             cat /tmp/cf-domain.json
             exit 1
+          fi
+
+      - name: Ensure DNS CNAME m → Pages (override *. tunnel)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ZONE=fashitianxia.xyz
+          FQDN=m.${ZONE}
+          TARGET=agentcore-mobile.pages.dev
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          zone_id="$(curl -sS "https://api.cloudflare.com/client/v4/zones?name=${ZONE}" \
+            "${auth[@]}" | jq -r '.result[0].id')"
+          [[ -n "$zone_id" && "$zone_id" != "null" ]] || { echo "zone ${ZONE} not found"; exit 1; }
+          body="$(jq -nc --arg n m --arg c "$TARGET" \
+            '{type:"CNAME",name:$n,content:$c,proxied:true,ttl:1}')"
+          existing="$(curl -sS \
+            "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=${FQDN}" \
+            "${auth[@]}")"
+          record_id="$(echo "$existing" | jq -r '.result[0].id // empty')"
+          if [[ -n "$record_id" ]]; then
+            echo "updating DNS ${FQDN} → ${TARGET}"
+            curl -sS -X PUT \
+              "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${record_id}" \
+              "${auth[@]}" -H 'Content-Type: application/json' --data "$body" | jq '{success,errors}'
+          else
+            echo "creating DNS ${FQDN} → ${TARGET}"
+            curl -sS -X POST \
+              "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
+              "${auth[@]}" -H 'Content-Type: application/json' --data "$body" | jq '{success,errors}'
           fi
 
   patch-cors:
