@@ -1,7 +1,7 @@
 import CollaborationNetwork from "@/components/CollaborationNetwork";
 import FlowDiagram from "@/components/FlowDiagram";
 import Reveal from "@/components/Reveal";
-import { DOWNLOAD_PAGE_PATH } from "@/lib/download";
+import { DOWNLOAD_PAGE_PATH, MOBILE_WEB_URL } from "@/lib/download";
 
 const NAV = [
   { href: "#value", label: "能力" },
@@ -159,10 +159,20 @@ export default function Home() {
               </li>
             ))}
           </ul>
-          <a href={DOWNLOAD_PAGE_PATH} className="btn btn-primary px-4 py-2 text-sm">
-            <DownloadIcon />
-            下载客户端
-          </a>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <a
+              href={MOBILE_WEB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-ghost hidden px-3 py-2 text-sm sm:inline-flex"
+            >
+              手机网页版
+            </a>
+            <a href={DOWNLOAD_PAGE_PATH} className="btn btn-primary px-4 py-2 text-sm">
+              <DownloadIcon />
+              下载客户端
+            </a>
+          </div>
         </nav>
       </header>
 
@@ -222,12 +232,28 @@ export default function Home() {
                   <DownloadIcon />
                   下载客户端
                 </a>
+                <a
+                  href={MOBILE_WEB_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-ghost"
+                >
+                  手机网页版
+                </a>
                 <a href="#how" className="btn btn-ghost">
                   看团队如何协作
                 </a>
               </div>
               <p className="mt-3 text-sm text-muted-foreground">
-                支持 Windows · macOS · Linux
+                支持 Windows · macOS ·{" "}
+                <a
+                  href={MOBILE_WEB_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline-offset-2 hover:text-foreground hover:underline"
+                >
+                  手机浏览器
+                </a>
               </p>
             </div>
           </div>
@@ -566,6 +592,14 @@ export default function Home() {
                   <DownloadIcon />
                   下载客户端
                 </a>
+                <a
+                  href={MOBILE_WEB_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-ghost"
+                >
+                  手机网页版
+                </a>
                 <a href="#how" className="btn btn-ghost">
                   看团队如何协作
                 </a>
@@ -594,6 +628,16 @@ export default function Home() {
                 <li>
                   <a href={DOWNLOAD_PAGE_PATH} className="hover:text-foreground">
                     下载客户端
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href={MOBILE_WEB_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-foreground"
+                  >
+                    手机网页版
                   </a>
                 </li>
                 <li>

@@ -95,3 +95,6 @@ export const MAC_INSTALL_STEPS = [
 export const INSTALL_STEPS = WIN_INSTALL_STEPS;
 
 export const DOWNLOAD_PAGE_PATH = "/download" as const;
+
+/** 手机端 web SPA（Cloudflare Pages · deploy-mobile-web.yml） */
+export const MOBILE_WEB_URL = "https://m.fashitianxia.xyz" as const;

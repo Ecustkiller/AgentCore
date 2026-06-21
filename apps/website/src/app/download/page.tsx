@@ -2,6 +2,7 @@ import DownloadPanel from "@/components/DownloadPanel";
 import {
   DESKTOP_VERSION,
   DOWNLOAD_PAGE_PATH,
+  MOBILE_WEB_URL,
   MAC_INSTALL_STEPS,
   WIN_INSTALL_STEPS,
 } from "@/lib/download";
@@ -72,6 +73,26 @@ export default function DownloadPage() {
         <div className="mx-auto mt-12 max-w-4xl">
           <DownloadPanel />
         </div>
+
+        <section className="mx-auto mt-10 max-w-4xl">
+          <div className="surface flex flex-col gap-5 p-8 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-left">
+              <p className="eyebrow">Mobile Web</p>
+              <h2 className="mt-2 text-xl font-bold">手机网页版</h2>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
+                在手机或平板浏览器打开即可使用，无需安装。云端对话、多 Agent 协作与桌面端同源 API。
+              </p>
+            </div>
+            <a
+              href={MOBILE_WEB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-ghost shrink-0 px-6 py-3"
+            >
+              打开 m.fashitianxia.xyz
+            </a>
+          </div>
+        </section>
 
         <section className="mx-auto mt-16 max-w-3xl">
           <h2 className="text-center text-xl font-bold">安装步骤</h2>
