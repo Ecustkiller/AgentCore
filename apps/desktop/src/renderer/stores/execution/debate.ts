@@ -120,7 +120,10 @@ export interface DebateLiveRound {
  */
 export function debateLiveRounds(execution: Execution): DebateLiveRound[] {
   const sides = execution.runs.filter(
-    (r) => r.group?.startsWith("debate:") && r.stance == null && r.revisionOf == null,
+    (r) =>
+      r.group?.startsWith("debate:") &&
+      r.stance == null &&
+      r.revisionOf == null,
   );
   if (sides.length === 0) return [];
   const revisionsByOriginal = new Map<string, RunNode[]>();
@@ -144,7 +147,9 @@ export function debateLiveRounds(execution: Execution): DebateLiveRound[] {
         runs.push(side);
         continue;
       }
-      const rev = (revisionsByOriginal.get(side.id) ?? []).find((x) => x.revision === r);
+      const rev = (revisionsByOriginal.get(side.id) ?? []).find(
+        (x) => x.revision === r,
+      );
       if (rev) runs.push(rev);
     }
     if (runs.length > 0) rounds.push({ round: r, runs });

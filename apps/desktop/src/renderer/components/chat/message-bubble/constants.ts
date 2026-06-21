@@ -7,6 +7,7 @@ import {
   Folder,
   Globe,
   HelpCircle,
+  type LucideIcon,
   PenLine,
   Pencil,
   Search,
@@ -14,7 +15,6 @@ import {
   Trash2,
   Users,
   Wrench,
-  type LucideIcon,
 } from "lucide-react";
 
 /** Icon + 中文标签 for a builtin tool, by its backend name. */

@@ -117,6 +117,14 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 （写作 worker 先据调研产出【提纲】，给该提纲步骤设 `checkpoint_after=true` 让用户改 / 批）→ 同一\
 worker 据定稿提纲写全文，用 `depends_on` 串起。提纲由专家据证据产出、用户拍板，而非你在 task 里\
 凭空先写好。仅用于这类研究级大活，简单交付别套。
+- 晚绑定下游 + 波边界续跑（下游职责依证据再定，你自己拍）：当某个下游步骤【具体该做什么】必须看\
+上游产出才能定——不只是结构、而是【职责本身】（典型：先调研，调研结果才决定下一步派谁、干什么），\
+给该步设 `bind_after_deps=true`、role/task 先写占位即可；其全部上游跑完后、本步运行前，控制权会\
+交回你（delegate 输出『计划已让出』、附上游产出），你据此用 `replan` 把该步定稿（`binds`）、必要\
+时顺带操舵其它未跑步骤（`steers`），再续跑【同一张】计划；确无需继续则 `replan(stop=true)` 收口。\
+与上一条 `checkpoint_after` 的分别：checkpoint_after 是【让用户把关】中途结果，bind_after_deps 是\
+【你自己据证据再定下游职责】、不打扰用户。克制使用——只在『此刻写死下游 spec 很可能跑偏』时设；\
+上游已定、下游此刻就能写清的步骤别设（徒增一次回合）。
 </team_orchestration_advanced>"""
 
 _DEBATE_AND_REVIEW = """\

@@ -115,11 +115,15 @@ def files_touched_from_transcript(transcript: list[LLMMessage]) -> list[str]:
 def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, Any]]:
     """Best-effort list of a worker's escalations (``escalate`` tool calls), call order.
 
-    Each item is ``{question, assumption, blocking, status, answer}`` parsed from the
-    call's arguments (assumption defaults to "", blocking to False). ``status`` defaults
-    to ``"raised"`` (a non-blocking escalate, or a blocking one that degraded) with no
-    ``answer``; the executor overrides these to ``"resolved"`` / ``"timeout"`` for a
-    blocking escalate that actually suspended for the user (阻塞式求决策 §4.7). Mirrors
+    Each item is ``{question, assumption, blocking, kind, status, answer}`` parsed from
+    the call's arguments (assumption defaults to "", blocking to False, kind to
+    ``"normal"``). ``kind="scope"`` (职责晚绑定与动态再编排 §4.4) marks a 职责/范围 deviation
+    the WaveScheduler consumes at a wave boundary (``BoundaryReason.SCOPE``) so the CEO
+    re-steers the not-yet-run tail; ``"normal"`` is an ordinary 待决问题 resolved at
+    synthesis. ``status`` defaults to ``"raised"`` (a non-blocking escalate, or a blocking
+    one that degraded) with no ``answer``; the executor overrides these to ``"resolved"``
+    / ``"timeout"`` for a blocking escalate that actually suspended for the user (阻塞式求
+    决策 §4.7). Mirrors
     :func:`files_touched_from_transcript`: intent-level, read off the call itself; a call
     with malformed args or an empty ``question`` is skipped. The DelegateTool surfaces
     these to the CEO as「队员升级了待决问题」so it resolves them before finalizing.
@@ -142,11 +146,18 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
             question = str(parsed.get("question") or "").strip()
             if not question:
                 continue
+            kind = str(parsed.get("kind") or "normal").strip().lower()
+            if kind not in ("normal", "scope"):
+                kind = "normal"
             out.append(
                 {
                     "question": question,
                     "assumption": str(parsed.get("assumption") or "").strip(),
                     "blocking": bool(parsed.get("blocking")),
+                    # 职责晚绑定与动态再编排 §4.4: "scope" → a 职责/范围 deviation the scheduler
+                    # consumes at a wave boundary (CEO re-steers the un-run tail); "normal"
+                    # → an ordinary 待决问题 resolved at synthesis.
+                    "kind": kind,
                     # 阻塞式求决策: lifecycle of a blocking escalate. Default for a
                     # non-blocking / degraded one; the executor folds in the user's
                     # resolution for one that suspended (设计 §4.7).

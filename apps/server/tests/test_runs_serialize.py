@@ -74,9 +74,41 @@ def test_escalations_from_transcript_collects_in_call_order():
     ]
     out = escalations_from_transcript(transcript)
     assert out == [
-        {"question": "Postgres 还是 MySQL?", "assumption": "暂用 PG", "blocking": True},
-        {"question": "目标受众是谁?", "assumption": "", "blocking": False},
+        {
+            "question": "Postgres 还是 MySQL?",
+            "assumption": "暂用 PG",
+            "blocking": True,
+            "kind": "normal",
+            "status": "raised",
+            "answer": None,
+        },
+        {
+            "question": "目标受众是谁?",
+            "assumption": "",
+            "blocking": False,
+            "kind": "normal",
+            "status": "raised",
+            "answer": None,
+        },
     ]
+
+
+def test_escalations_from_transcript_marks_scope_kind():
+    # 职责晚绑定与动态再编排 §4.4: escalate(kind="scope") is harvested with kind="scope"
+    # (the WaveScheduler consumes it at a SCOPE boundary so the CEO re-steers the un-run
+    # tail); an unknown kind degrades to "normal", and a plain escalate defaults to it.
+    transcript = [
+        _assistant_call(
+            "c1",
+            "escalate",
+            '{"question": "真问题是X不是Y", "assumption": "暂按X", "kind": "scope"}',
+        ),
+        _assistant_call("c2", "escalate", '{"question": "未知档", "kind": "weird"}'),
+        _assistant_call("c3", "escalate", '{"question": "普通问题"}'),
+    ]
+    out = escalations_from_transcript(transcript)
+    assert [e["kind"] for e in out] == ["scope", "normal", "normal"]
+    assert out[0]["question"] == "真问题是X不是Y"
 
 
 def test_escalations_from_transcript_skips_malformed_and_empty_question():

@@ -25,7 +25,10 @@ export function MessageList() {
   // 绑定的本地根，供成功任务的内联评审写回本地（同一对话所有卡共用，故在此读取一次下传）。
   const rootId = useWorkspaceRootId(conversationId);
 
-  const items = useMemo(() => mergeTimeline(messages, tasks), [messages, tasks]);
+  const items = useMemo(
+    () => mergeTimeline(messages, tasks),
+    [messages, tasks],
+  );
 
   return (
     <div className="space-y-6">
@@ -80,8 +83,7 @@ function mergeTimeline(
   ];
   merged.sort(
     (a, b) =>
-      a.at - b.at ||
-      (a.kind === b.kind ? 0 : a.kind === "message" ? -1 : 1),
+      a.at - b.at || (a.kind === b.kind ? 0 : a.kind === "message" ? -1 : 1),
   );
   return merged;
 }

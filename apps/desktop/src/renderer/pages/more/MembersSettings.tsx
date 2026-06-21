@@ -73,10 +73,7 @@ export function MembersSettings() {
 
   if (!isAdmin) {
     return (
-      <SettingsHeader
-        title="成员"
-        description="仅管理员可生成和管理邀请码。"
-      />
+      <SettingsHeader title="成员" description="仅管理员可生成和管理邀请码。" />
     );
   }
 

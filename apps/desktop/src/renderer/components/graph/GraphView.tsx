@@ -919,8 +919,9 @@ export function GraphView({
           // badge (actionable, clears on resolve); non-blocking raised ones drive the
           // muted「上报」badge (the CEO resolves these at synthesis). Settled
           // (resolved/timeout) count toward neither, so the badge clears once handled.
-          escalationPending: run.escalations.filter((e) => e.status === "pending")
-            .length,
+          escalationPending: run.escalations.filter(
+            (e) => e.status === "pending",
+          ).length,
           escalationRaised: run.escalations.filter((e) => e.status === "raised")
             .length,
           // Input endpoint is index 0, so workers start at 1.

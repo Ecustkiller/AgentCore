@@ -1,3 +1,9 @@
+import {
+  Centered,
+  EmptyHint,
+  IconButton,
+  InlineError,
+} from "@/components/files/parts";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatBytes } from "@/lib/format";
 import {
@@ -16,12 +22,6 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import {
-  Centered,
-  EmptyHint,
-  IconButton,
-  InlineError,
-} from "@/components/files/parts";
 
 export function SnapshotsSection({
   conversationId,

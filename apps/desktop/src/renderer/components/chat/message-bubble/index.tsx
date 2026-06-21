@@ -1,8 +1,8 @@
 import { useActiveMessageFocus } from "@/stores/conversation";
 import { useEffect, useRef, useState } from "react";
 import { AssistantMessage } from "./AssistantMessage";
-import type { MessageBubbleProps } from "./types";
 import { UserMessage } from "./UserMessage";
+import type { MessageBubbleProps } from "./types";
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const focus = useActiveMessageFocus();

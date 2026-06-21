@@ -108,7 +108,10 @@ export function BackgroundTaskReview({
         rows.map((r) => r.change.path),
       );
       const selections = buildSelections(
-        rows.map((r) => ({ ...r, localSha: freshShas.get(r.change.path) ?? null })),
+        rows.map((r) => ({
+          ...r,
+          localSha: freshShas.get(r.change.path) ?? null,
+        })),
       );
       const result = await applyHandoffJob(conversationId, jobId, selections);
       if (mounted.current) setSummary(result);
@@ -148,7 +151,9 @@ export function BackgroundTaskReview({
     return (
       <Bar>
         <CheckCircle2 size={13} className="text-success" />
-        <span className="text-muted-foreground">云端结果与本地一致，无需改动。</span>
+        <span className="text-muted-foreground">
+          云端结果与本地一致，无需改动。
+        </span>
         <BarButton className="ml-auto" onClick={onClose}>
           收起
         </BarButton>
@@ -253,7 +258,8 @@ export function BackgroundTaskReview({
 
       {forced > 0 && (
         <p className="mt-2 flex items-center gap-1 text-xs text-warning">
-          <AlertTriangle size={12} />将强制覆盖 {forced} 个有本地改动的文件
+          <AlertTriangle size={12} />
+          将强制覆盖 {forced} 个有本地改动的文件
         </p>
       )}
       {applyError && (

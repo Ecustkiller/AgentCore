@@ -21,12 +21,17 @@ vi.mock("@/services/sidecarRouting", () => ({
 vi.mock("@/services/sidecarStatus", () => ({
   takeRecentSidecarFailure: vi.fn(() => null),
 }));
-vi.mock("@/hooks/useConversations", () => ({ patchConversationCache: vi.fn() }));
-vi.mock("@/lib/toast", () => ({ notifyWarning: vi.fn(), notifySuccess: vi.fn() }));
+vi.mock("@/hooks/useConversations", () => ({
+  patchConversationCache: vi.fn(),
+}));
+vi.mock("@/lib/toast", () => ({
+  notifyWarning: vi.fn(),
+  notifySuccess: vi.fn(),
+}));
 
 import { recordLocalTurn } from "@/services/localTurns";
-import { dispatchSSEEvent } from "@/services/streamConversation";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
+import { dispatchSSEEvent } from "@/services/streamConversation";
 import { useConversationStore } from "@/stores/conversation";
 import { resumeConversationViaSidecar } from "../streamConversationViaSidecar";
 
@@ -145,14 +150,19 @@ describe("resumeConversationViaSidecar", () => {
       result,
     );
 
-    expect(resumeMock).toHaveBeenCalledWith({
-      rootId: "r1",
-      conversationId: "c1",
-      messageId: "m-asst",
-      decision: "continue",
-      note: "",
-      selected: [],
-    });
+    expect(resumeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rootId: "r1",
+        conversationId: "c1",
+        messageId: "m-asst",
+        decision: "continue",
+        note: "",
+        selected: [],
+        subpath: undefined,
+        inference: undefined,
+        traceId: expect.any(String),
+      }),
+    );
     // Foreign-conversation event filtered out; only c1's reached the dispatcher.
     expect(dispatchSSEEventMock).toHaveBeenCalledTimes(1);
 
@@ -162,6 +172,7 @@ describe("resumeConversationViaSidecar", () => {
       "c1",
       "原始问题",
       "u-inj",
+      expect.any(String),
       result,
     );
 
@@ -186,7 +197,9 @@ describe("resumeConversationViaSidecar", () => {
   });
 
   it("prefers an onStatus lifecycle diagnostic over the rejection reason", async () => {
-    takeRecentSidecarFailureMock.mockReturnValue("找不到 Python，无法启动本地引擎");
+    takeRecentSidecarFailureMock.mockReturnValue(
+      "找不到 Python，无法启动本地引擎",
+    );
     resumeMock.mockRejectedValue(new Error("generic rpc error"));
 
     const err = await resumeConversationViaSidecar(baseRequest).catch(
@@ -207,7 +220,10 @@ describe("resumeConversationViaSidecar", () => {
         }),
     );
 
-    const p = resumeConversationViaSidecar({ ...baseRequest, signal: ac.signal });
+    const p = resumeConversationViaSidecar({
+      ...baseRequest,
+      signal: ac.signal,
+    });
     p.catch(() => {});
 
     // `resume` is invoked only after the abort listener is registered, so waiting

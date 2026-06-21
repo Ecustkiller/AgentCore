@@ -2,7 +2,15 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { messagingErrorMessage } from "@/services/messaging";
 import { useAuthStore } from "@/stores/auth";
 import { useChatMembers, useMessagingStore } from "@/stores/messaging";
-import { AlertTriangle, LogOut, Megaphone, Mic, MicOff, UserX, X } from "lucide-react";
+import {
+  AlertTriangle,
+  LogOut,
+  Megaphone,
+  Mic,
+  MicOff,
+  UserX,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { avatarInitial, chatDisplayName } from "./chatDisplay";
@@ -219,8 +227,7 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
           </p>
           <ul className="max-h-60 overflow-y-auto px-2 pb-2">
             {members.map((m) => {
-              const canModerate =
-                viewerIsAdmin && !m.is_admin && m.id !== myId;
+              const canModerate = viewerIsAdmin && !m.is_admin && m.id !== myId;
               return (
                 <li
                   key={m.id}

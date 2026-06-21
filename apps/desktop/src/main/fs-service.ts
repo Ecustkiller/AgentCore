@@ -1893,8 +1893,7 @@ export function registerFsIpc(): void {
 
   ipcMain.handle(
     FS_CHANNELS.reveal,
-    (_e, p: { rootId: string; relPath: string }) =>
-      reveal(p.rootId, p.relPath),
+    (_e, p: { rootId: string; relPath: string }) => reveal(p.rootId, p.relPath),
   );
 
   ipcMain.handle(

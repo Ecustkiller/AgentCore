@@ -140,8 +140,17 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
 
   it("3 父同波次各带子队：N 块整体堆叠、互不重叠、N 条主干线都干净", async () => {
     const ids = [
-      "__input__", "p1", "p2", "p3",
-      "a1", "a2", "b1", "b2", "c1", "c2", "cap",
+      "__input__",
+      "p1",
+      "p2",
+      "p3",
+      "a1",
+      "a2",
+      "b1",
+      "b2",
+      "c1",
+      "c2",
+      "cap",
     ];
     const edges: GraphEdge[] = [
       e("__input__", "p1"),
@@ -165,7 +174,15 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
     // 3 支子队 + 3 个父两两不重叠。
     expect(
       noneOverlap(positions, [
-        "p1", "p2", "p3", "a1", "a2", "b1", "b2", "c1", "c2",
+        "p1",
+        "p2",
+        "p3",
+        "a1",
+        "a2",
+        "b1",
+        "b2",
+        "c1",
+        "c2",
       ]),
     ).toEqual([]);
     // 每条「父→汇聚点」主干线行都不被任一子节点横穿。
@@ -213,7 +230,16 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
   it("B 型回归：深波次普通 worker 与子队同层仍不重叠、主干线干净", async () => {
     // input→p1⇢{s1,s2}→cap、input→p2⇢{t1,t2}→cap、input→m→n→cap（n 落到子队所在层）。
     const ids = [
-      "__input__", "p1", "p2", "s1", "s2", "t1", "t2", "m", "n", "cap",
+      "__input__",
+      "p1",
+      "p2",
+      "s1",
+      "s2",
+      "t1",
+      "t2",
+      "m",
+      "n",
+      "cap",
     ];
     const edges: GraphEdge[] = [
       e("__input__", "p1"),
@@ -239,9 +265,7 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
     );
     expect(sameLayerAsN.length).toBeGreaterThan(0);
     expect(
-      noneOverlap(positions, [
-        "p1", "p2", "s1", "s2", "t1", "t2", "m", "n",
-      ]),
+      noneOverlap(positions, ["p1", "p2", "s1", "s2", "t1", "t2", "m", "n"]),
     ).toEqual([]);
     // 两条父主干线行不被任一子节点或普通 worker n 横穿。
     for (const parent of ["p1", "p2"]) {

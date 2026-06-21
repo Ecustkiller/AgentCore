@@ -42,12 +42,18 @@ class BoundaryReason(Enum):
       remains — the existing user ``plan_review`` (continue / adjust / stop).
     - ``BIND``: a ``bind_after_deps`` node's deps are all resolved but its spec is
       not yet finalised — the CEO must late-bind it (``replan``) before it can run.
+    - ``SCOPE`` (偏离信号 / 自底向上反应臂): a COMPLETED node flagged a 职责/范围 deviation
+      (``escalate kind=scope``) while not-yet-run downstream remains — the CEO reads the
+      deviation + the node's output and re-steers the un-run tail (``replan``). The
+      reactive twin of ``BIND`` (the CEO's *proactive* late-binding): both hand control
+      back to the CEO at a wave boundary, neither needs a live user (≠ ``CHECKPOINT``).
 
-    → 见设计: docs/07-规划/职责晚绑定与动态再编排设计.md §7.1
+    → 见设计: docs/07-规划/职责晚绑定与动态再编排设计.md §4.4 / §7.1
     """
 
     CHECKPOINT = "checkpoint"
     BIND = "bind"
+    SCOPE = "scope"
 
 
 class BoundaryOutcome(Enum):

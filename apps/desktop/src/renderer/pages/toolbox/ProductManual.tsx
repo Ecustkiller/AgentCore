@@ -98,7 +98,11 @@ function Lead({ children }: { children: ReactNode }) {
 }
 
 const CALLOUT = {
-  tip: { Icon: Lightbulb, box: "border-primary/30 bg-primary/5", icon: "text-primary" },
+  tip: {
+    Icon: Lightbulb,
+    box: "border-primary/30 bg-primary/5",
+    icon: "text-primary",
+  },
   info: { Icon: Info, box: "border-info/30 bg-info/5", icon: "text-info" },
   warning: {
     Icon: AlertTriangle,
@@ -157,7 +161,9 @@ function InfoCard({
         </div>
       )}
       <p className="text-sm font-medium text-foreground">{title}</p>
-      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{desc}</p>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        {desc}
+      </p>
     </div>
   );
 }
@@ -223,7 +229,11 @@ function Faq({ items }: { items: { q: string; a: ReactNode }[] }) {
 function SettingsTable() {
   const navigate = useNavigate();
   const rows: { label: string; desc: string; to: string }[] = [
-    { label: "模型配置", desc: "填入 API Key（BYOK）、选择团队使用的模型", to: "/more/model" },
+    {
+      label: "模型配置",
+      desc: "填入 API Key（BYOK）、选择团队使用的模型",
+      to: "/more/model",
+    },
     { label: "用量", desc: "查看花费与额度", to: "/more/usage" },
     { label: "外观", desc: "明暗主题与界面偏好", to: "/more/appearance" },
     { label: "快捷键", desc: "常用操作的键盘快捷键", to: "/more/shortcuts" },
@@ -286,13 +296,20 @@ const SECTIONS: ManualSection[] = [
           团队」——你定目标，团队来分工、协作、互审，共同完成复杂任务。
         </Lead>
         <Callout variant="tip">
-          一句话记住它：<span className="font-medium">协作，是更高级的智能。</span>
+          一句话记住它：
+          <span className="font-medium">协作，是更高级的智能。</span>
           单个模型的智能有天花板，协作没有。
         </Callout>
         <p className="text-sm font-medium text-foreground">你的角色升级了</p>
         <CardGrid cols={3}>
-          <InfoCard title="在 ChatGPT / Claude" desc="你是提示者：来回追问，自己拼装结果。" />
-          <InfoCard title="在 Cursor / Codex" desc="你是指令者：逐条下达，盯着单个助手执行。" />
+          <InfoCard
+            title="在 ChatGPT / Claude"
+            desc="你是提示者：来回追问，自己拼装结果。"
+          />
+          <InfoCard
+            title="在 Cursor / Codex"
+            desc="你是指令者：逐条下达，盯着单个助手执行。"
+          />
           <InfoCard
             icon={<Crown size={16} />}
             title="在 AgentCore"
@@ -372,8 +389,8 @@ const SECTIONS: ManualSection[] = [
           ]}
         />
         <Callout variant="info">
-          CEO 是你的唯一对接人。你只和它对话，它负责调度整支团队：按需组团、用 DAG
-          安排并行 / 串行、最后把结果收口给你。
+          CEO 是你的唯一对接人。你只和它对话，它负责调度整支团队：按需组团、用
+          DAG 安排并行 / 串行、最后把结果收口给你。
         </Callout>
       </>
     ),
@@ -389,9 +406,15 @@ const SECTIONS: ManualSection[] = [
         <Lead>一切从对话开始——把它当成你和团队的指挥台。</Lead>
         <Bullets
           items={[
-            { title: "自然语言提需求", desc: "用日常说法描述目标，无需命令格式。" },
+            {
+              title: "自然语言提需求",
+              desc: "用日常说法描述目标，无需命令格式。",
+            },
             { title: "富表达", desc: "支持代码、富文本、引用工作区里的文件。" },
-            { title: "会话管理", desc: "左侧列表管理历史对话，可分组、检索、续聊。" },
+            {
+              title: "会话管理",
+              desc: "左侧列表管理历史对话，可分组、检索、续聊。",
+            },
           ]}
         />
         <Callout variant="tip">
@@ -409,22 +432,38 @@ const SECTIONS: ManualSection[] = [
     render: () => (
       <>
         <Lead>
-          这是 AgentCore 的核心。复杂任务会被拆给多个成员并行 / 协作完成，整个过程在协作图上可见。
+          这是 AgentCore 的核心。复杂任务会被拆给多个成员并行 /
+          协作完成，整个过程在协作图上可见。
         </Lead>
         <p className="text-sm font-medium text-foreground">什么时候会组团</p>
         <Lead>
-          由 CEO 自动判断：当任务需要产出 / 变更、或可拆分时才组团；纯问答会直接作答，不绕弯。
+          由 CEO 自动判断：当任务需要产出 /
+          变更、或可拆分时才组团；纯问答会直接作答，不绕弯。
         </Lead>
         <p className="text-sm font-medium text-foreground">四种协作形态</p>
         <CardGrid>
-          <InfoCard title="并行扇出" desc="多个无依赖的子任务同时开跑，最后汇总。" />
-          <InfoCard title="串行流水线" desc="调研 → 分析 → 撰写，上游产出喂给下游。" />
-          <InfoCard title="辩论 / 互审" desc="正反双方各陈观点，CEO 综合后裁决。" />
-          <InfoCard title="嵌套小队" desc="成员可再带一支小队，分层完成大任务。" />
+          <InfoCard
+            title="并行扇出"
+            desc="多个无依赖的子任务同时开跑，最后汇总。"
+          />
+          <InfoCard
+            title="串行流水线"
+            desc="调研 → 分析 → 撰写，上游产出喂给下游。"
+          />
+          <InfoCard
+            title="辩论 / 互审"
+            desc="正反双方各陈观点，CEO 综合后裁决。"
+          />
+          <InfoCard
+            title="嵌套小队"
+            desc="成员可再带一支小队，分层完成大任务。"
+          />
         </CardGrid>
         <Callout variant="info">
-          想看真实的协作图、连线与状态图例？往下翻到 <JumpLink to="legend">运行机制 · 图例</JumpLink>{" "}
-          与 <JumpLink to="scenarios">机制场景</JumpLink>——讲「系统怎么运转」，和你在对话里看到的图一模一样。
+          想看真实的协作图、连线与状态图例？往下翻到{" "}
+          <JumpLink to="legend">运行机制 · 图例</JumpLink> 与{" "}
+          <JumpLink to="scenarios">机制场景</JumpLink>
+          ——讲「系统怎么运转」，和你在对话里看到的图一模一样。
         </Callout>
       </>
     ),
@@ -438,7 +477,8 @@ const SECTIONS: ManualSection[] = [
     render: () => (
       <>
         <Lead>
-          AgentCore 不预设「代码 Agent」「写作 Agent」这类固定角色，而是按任务动态分配。
+          AgentCore 不预设「代码 Agent」「写作
+          Agent」这类固定角色，而是按任务动态分配。
         </Lead>
         <Bullets
           items={[
@@ -453,7 +493,8 @@ const SECTIONS: ManualSection[] = [
           ]}
         />
         <Callout variant="info">
-          进阶（规划中）：把「我的代码审查工作流」保存为可复用的行为模板，或自定义专属 Agent 配置。
+          进阶（规划中）：把「我的代码审查工作流」保存为可复用的行为模板，或自定义专属
+          Agent 配置。
         </Callout>
       </>
     ),
@@ -466,7 +507,9 @@ const SECTIONS: ManualSection[] = [
     title: "工具与能力",
     render: () => (
       <>
-        <Lead>工具是团队的「手」——Agent 通过它读写文件、检索资料、调用外部能力。</Lead>
+        <Lead>
+          工具是团队的「手」——Agent 通过它读写文件、检索资料、调用外部能力。
+        </Lead>
         <Bullets
           items={[
             {
@@ -555,7 +598,8 @@ const SECTIONS: ManualSection[] = [
       <>
         <Lead>
           想知道你提交任务后台发生了什么？一次请求经准备 → 执行 →
-          收尾三阶段。入口即 CEO 主 Agent：简单对话直接流式作答、零编排开销；需要产出或组队时才进入多
+          收尾三阶段。入口即 CEO 主
+          Agent：简单对话直接流式作答、零编排开销；需要产出或组队时才进入多
           Agent 编排。
         </Lead>
         <RuntimePanorama />
@@ -571,9 +615,8 @@ const SECTIONS: ManualSection[] = [
     render: () => (
       <>
         <Lead>
-          一次多 Agent
-          回合从你的提问到答案落进气泡的完整生命周期：CEO 何时组团、波次如何解锁、worker
-          如何流式产出、最后如何收尾汇报。
+          一次多 Agent 回合从你的提问到答案落进气泡的完整生命周期：CEO
+          何时组团、波次如何解锁、worker 如何流式产出、最后如何收尾汇报。
         </Lead>
         <CollaborationTurnFlow />
       </>
@@ -605,12 +648,12 @@ const SECTIONS: ManualSection[] = [
       <>
         <Lead>
           下面的图都是<span className="font-medium text-foreground">真实</span>
-          的协作图组件与 ELK
-          布局——和你在对话里看到的一模一样，覆盖并行 / 串行 / 流式 / 辩论 / 嵌套 / 多层 /
-          热修 / 超大团队各形态。
+          的协作图组件与 ELK 布局——和你在对话里看到的一模一样，覆盖并行 / 串行 /
+          流式 / 辩论 / 嵌套 / 多层 / 热修 / 超大团队各形态。
         </Lead>
         <Callout variant="info">
-          这些是实时渲染的真实节点 / 连线 / 布局，不是截图；随用随挂载（滚到才加载）。
+          这些是实时渲染的真实节点 / 连线 /
+          布局，不是截图；随用随挂载（滚到才加载）。
         </Callout>
         <MechanismScenarios />
       </>
@@ -685,7 +728,8 @@ const SECTIONS: ManualSection[] = [
             q: "费用怎么看？",
             a: (
               <>
-                在 <GoLink to="/more/usage">设置 · 用量</GoLink> 查看花费与额度。
+                在 <GoLink to="/more/usage">设置 · 用量</GoLink>{" "}
+                查看花费与额度。
               </>
             ),
           },
@@ -784,7 +828,10 @@ export function ProductManual() {
 
   const goTo = useCallback((id: string) => {
     setActiveId(id);
-    sectionRefs.current[id]?.scrollIntoView({ behavior: "smooth", block: "start" });
+    sectionRefs.current[id]?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   }, []);
 
   const groups = useMemo(
@@ -811,7 +858,9 @@ export function ProductManual() {
           <ArrowLeft size={16} />
           返回
         </button>
-        <span className="ml-1 text-sm font-medium text-foreground">产品手册</span>
+        <span className="ml-1 text-sm font-medium text-foreground">
+          产品手册
+        </span>
         <div className="flex-1" />
         {/* 自绘窗口控件：本页盖住了原生 TitleBar，故在此重建（与 TitleBar 同一 windowApi）。 */}
         <div className="flex items-center [-webkit-app-region:no-drag]">
@@ -889,7 +938,9 @@ export function ProductManual() {
                 <Sparkles size={12} />
                 协作，是更高级的智能
               </span>
-              <h1 className="mt-3 text-xl font-medium text-foreground">产品手册</h1>
+              <h1 className="mt-3 text-xl font-medium text-foreground">
+                产品手册
+              </h1>
               <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
                 从上手到玩转 AgentCore：怎么用好你的 AI
                 团队，到看懂它背后怎么运转。系统底层细节见下方{" "}
@@ -925,7 +976,8 @@ export function ProductManual() {
             })}
 
             <div className="border-t border-border pt-6 text-xs text-muted-foreground">
-              还有疑问？回到 <GoLink to="/toolbox">工具箱</GoLink> 或在对话里直接问你的团队。
+              还有疑问？回到 <GoLink to="/toolbox">工具箱</GoLink>{" "}
+              或在对话里直接问你的团队。
             </div>
           </div>
         </div>

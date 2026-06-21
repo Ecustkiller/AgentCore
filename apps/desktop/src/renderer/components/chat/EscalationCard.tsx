@@ -143,7 +143,10 @@ function DormantEscalation({
   return (
     <div className="rounded-xl border border-border bg-muted/40 p-3">
       <div className="flex items-start gap-2">
-        <HelpCircle size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+        <HelpCircle
+          size={16}
+          className="mt-0.5 shrink-0 text-muted-foreground"
+        />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-muted-foreground">
             {role} 曾请你拍板（本回合已结束）

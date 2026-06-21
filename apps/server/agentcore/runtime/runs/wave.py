@@ -94,7 +94,7 @@ class WaveScheduler:
           node(s), and the completed map, and returns a :class:`BoundaryOutcome`:
           ``PROCEED`` keeps scheduling, ``ABORT`` ends it like a graceful abort
           (un-run tail materialised SKIPPED), ``YIELD`` soft-pauses like
-          ``should_stop`` (partial map, un-run tail LEFT OUT for a resume). Two
+          ``should_stop`` (partial map, un-run tail LEFT OUT for a resume). Three
           reasons fire it:
           • ``CHECKPOINT`` (结构化挂起 2a) — a ``checkpoint_after`` node COMPLETED while
             downstream remains (the user plan_review). A *failed* checkpoint node does
@@ -102,8 +102,13 @@ class WaveScheduler:
           • ``BIND`` (晚绑定) — a ``bind_after_deps`` node's deps are all resolved but it
             is not yet finalised; it is never dispatched unbound, so it resolves only
             here (the CEO ``replan`` hand-back).
-          No hook ⇒ both markers inert (a ``bind_after_deps`` node then dispatches
-          normally); no marked node / no pending ⇒ untouched.
+          • ``SCOPE`` (偏离信号 / 自底向上反应臂) — a COMPLETED node flagged a 职责/范围
+            deviation (``escalate kind=scope``) while not-yet-run downstream remains; the
+            CEO re-steers the un-run tail. Fires once per signal (surfacing marks it
+            consumed), no live user needed (the reactive twin of ``BIND``).
+          No hook ⇒ all markers inert (a ``bind_after_deps`` node then dispatches
+          normally; a scope escalation just rides to synthesis); no marked node / no
+          pending ⇒ untouched.
         - ``metrics_sink`` (调度埋点量化), when given, receives ONE :class:`BatchMetrics`
           appended at terminal — concurrency / parallelism / slot-starvation / outcome
           counts for this run — for the host to log. Kept as a sink (not a return /
@@ -248,6 +253,34 @@ class WaveScheduler:
                             aborted = True
                         elif outcome is BoundaryOutcome.YIELD:
                             stopped = True
+
+                # 偏离信号边界 (受监督的波循环 SCOPE arm / 自底向上反应臂): a COMPLETED node
+                # flagged a 职责/范围 deviation (escalate kind=scope). Once in-flight work has
+                # drained (quiescent) and not-yet-run downstream remains to redirect, yield to
+                # the CEO — it reads the deviation + the node's output and re-steers the un-run
+                # tail (replan). Each signal fires ONCE: surfacing it marks it consumed, so a
+                # PROCEED can't spin and a YIELD's resume (which re-seeds the same completed
+                # nodes) won't re-fire. Inert unless a hook is wired AND a scope escalation
+                # surfaced — an ordinary plan never enters here (零新增回合).
+                if on_boundary is not None and not running and not aborted and not stopped:
+                    scope_nodes = self._scope_pending(plan, completed)
+                    if scope_nodes and any(
+                        n.run_id not in completed and n.run_id not in skipped
+                        for n in plan.nodes
+                    ):
+                        outcome = await on_boundary(
+                            BoundaryReason.SCOPE, scope_nodes, completed
+                        )
+                        for node in scope_nodes:
+                            state = completed.get(node.run_id)
+                            if state is not None:
+                                for e in state.escalations:
+                                    if e.get("kind") == "scope":
+                                        e["consumed"] = True
+                        if outcome is BoundaryOutcome.ABORT:
+                            aborted = True
+                        elif outcome is BoundaryOutcome.YIELD:
+                            stopped = True
         except BaseException:
             # External cancel (user stop via task.cancel) or an unexpected crash:
             # cancel every in-flight child and let it unwind (subprocess kill, salvage)
@@ -379,6 +412,29 @@ class WaveScheduler:
             if node.run_id in dispatched or node.run_id in skipped:
                 continue
             if self._deps_satisfied(plan, node, completed, skipped):
+                ready.append(node)
+        return ready
+
+    def _scope_pending(
+        self,
+        plan: RunPlan,
+        completed: Mapping[str, RunState],
+    ) -> list[RunSpec]:
+        """COMPLETED nodes carrying an unconsumed scope-deviation escalation
+        (``escalate kind=scope``) — the SCOPE boundary's triggers (偏离信号 / 自底向上反应
+        臂). A consumed signal (already surfaced to the host at a prior boundary) is
+        skipped, so each deviation yields the CEO exactly once. Empty for any plan whose
+        completed nodes raised no scope escalation, so the boundary stays inert there.
+        """
+        ready: list[RunSpec] = []
+        for node in plan.nodes:
+            state = completed.get(node.run_id)
+            if state is None or state.phase is not RunPhase.COMPLETED:
+                continue
+            if any(
+                e.get("kind") == "scope" and not e.get("consumed")
+                for e in state.escalations
+            ):
                 ready.append(node)
         return ready
 

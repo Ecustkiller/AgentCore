@@ -390,10 +390,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
           if (clip.op === "cut") {
             if (parentDir(clip.path) === destDir) return; // 原地剪切粘贴 = 空操作
             if (names.has(origName)) {
-              notifyActionError(
-                "无法粘贴",
-                new Error("目标位置已存在同名项"),
-              );
+              notifyActionError("无法粘贴", new Error("目标位置已存在同名项"));
               return;
             }
             await source.move(clip.path, joinPath(destDir, origName));
@@ -618,20 +615,20 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         </ul>
       );
 
-  // 嵌入模式：无工具栏、无自身高度/滚动，撑内容高度；横向内边距由外层左栏统一给。
-  if (!chrome) {
-    return (
-      <div
-        onKeyDown={onTreeKeyDown}
-        onDragOver={onDragOverRoot}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDropRoot}
-      >
-        {uploadInput}
-        {body}
-      </div>
-    );
-  }
+    // 嵌入模式：无工具栏、无自身高度/滚动，撑内容高度；横向内边距由外层左栏统一给。
+    if (!chrome) {
+      return (
+        <div
+          onKeyDown={onTreeKeyDown}
+          onDragOver={onDragOverRoot}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDropRoot}
+        >
+          {uploadInput}
+          {body}
+        </div>
+      );
+    }
 
     return (
       <div
@@ -662,7 +659,10 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
             <IconButton title="新建文件" onClick={() => openCreate("", "file")}>
               <FilePlus size={14} />
             </IconButton>
-            <IconButton title="新建文件夹" onClick={() => openCreate("", "dir")}>
+            <IconButton
+              title="新建文件夹"
+              onClick={() => openCreate("", "dir")}
+            >
               <FolderPlus size={14} />
             </IconButton>
             <div className="flex-1" />
@@ -778,7 +778,9 @@ function Row(props: RowProps) {
                 draggable
                 onDragStart={startDrag}
                 className={`group flex items-center rounded-md pr-1 text-xs hover:bg-accent ${
-                  isActive || isSelected ? "bg-accent text-accent-foreground" : ""
+                  isActive || isSelected
+                    ? "bg-accent text-accent-foreground"
+                    : ""
                 } ${isCut ? "opacity-50" : ""}`}
                 style={{ paddingLeft: indent }}
               >

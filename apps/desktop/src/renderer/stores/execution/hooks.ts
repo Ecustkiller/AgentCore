@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo } from "react";
 import { projectExecution } from "./project";
-import { execRuntime, useExecutionStore, type ExecutionRuntime } from "./store";
+import { type ExecutionRuntime, execRuntime, useExecutionStore } from "./store";
 import type { Execution } from "./types";
 
 /**
@@ -47,7 +47,9 @@ export function useActiveExecField<T>(
 ): T {
   const messageId = useContext(ExecutionScopeContext);
   return useExecutionStore((s) =>
-    selector((messageId ? s.byId[messageId] : undefined) ?? execRuntime(s, messageId)),
+    selector(
+      (messageId ? s.byId[messageId] : undefined) ?? execRuntime(s, messageId),
+    ),
   );
 }
 

@@ -1,5 +1,5 @@
-import { Markdown } from "@/components/chat/Markdown";
 import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
+import { Markdown } from "@/components/chat/Markdown";
 import {
   type ToolResultData,
   ToolResultView,
@@ -12,8 +12,8 @@ import type { ExecutionJournal } from "@/stores/execution";
 import type { Citation, ProcessStep } from "@/types/events";
 import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { toolDetail, toolGroupSummary, toolMeta } from "./constants";
 import { ThinkingDots, ThinkingHeader } from "./Thinking";
+import { toolDetail, toolGroupSummary, toolMeta } from "./constants";
 
 export function ComposingToolLine({
   tool,

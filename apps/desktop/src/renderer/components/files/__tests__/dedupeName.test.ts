@@ -25,8 +25,6 @@ describe("dedupeName（复制-粘贴的去重命名）", () => {
   });
 
   it("多扩展名只在最后一个点前插入「 副本」", () => {
-    expect(dedupeName("a.tar.gz", new Set(["a.tar.gz"]))).toBe(
-      "a.tar 副本.gz",
-    );
+    expect(dedupeName("a.tar.gz", new Set(["a.tar.gz"]))).toBe("a.tar 副本.gz");
   });
 });

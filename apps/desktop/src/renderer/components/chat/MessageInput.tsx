@@ -1,12 +1,10 @@
 import { DraftWorkspacePicker } from "@/components/chat/DraftWorkspacePicker";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
-  getConversations,
   patchConversationCache,
   upsertConversationFront,
 } from "@/hooks/useConversations";
 import {
-  type EntryKind,
   type IndexedEntry,
   buildDirListing,
   filterEntries,
@@ -21,7 +19,6 @@ import { fetchMessageWindow, loadLatestWindow } from "@/services/messages";
 import { searchAll } from "@/services/search";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
-import { getWorkspaceBinding } from "@/services/workspaceBinding";
 import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { useComposerDraftStore } from "@/stores/composer";
 import {
@@ -44,6 +41,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MentionMenu } from "./MentionMenu";
 import {
+  CONV_MENTION_MSG_LIMIT,
   type PendingAttachment,
   buildMentionSources,
   detectMention,

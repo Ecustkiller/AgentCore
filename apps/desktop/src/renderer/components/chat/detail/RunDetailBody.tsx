@@ -314,6 +314,15 @@ export function RunDetailBody({
 }
 
 /**
+ * Stable React key for a run escalation row. Blocking escalations carry `id`; raised
+ * banners have no wire id, so fall back to content fields (append-only list).
+ */
+function escalationRowKey(esc: RunEscalation): string {
+  if (esc.id) return esc.id;
+  return `${esc.status}:${esc.question}:${esc.assumption}:${esc.blocking}`;
+}
+
+/**
  * 升级实时可见 + 阻塞式求决策 §4.5B: a worker's escalations (`escalate`), rendered by
  * lifecycle `status` rather than a flat list:
  *
@@ -337,14 +346,12 @@ function EscalationSection({
   return (
     <Section title={`向上升级 (${run.escalations.length})`}>
       <div className="space-y-2">
-        {run.escalations.map((esc, i) =>
+        {run.escalations.map((esc) =>
           esc.status === "raised" ? (
-            // Escalations are append-only and never reordered; a raised one has no wire
-            // id, so the index is a stable key here.
-            <RaisedEscalationRow key={`r${i}`} esc={esc} />
+            <RaisedEscalationRow key={escalationRowKey(esc)} esc={esc} />
           ) : (
             <EscalationCard
-              key={esc.id ?? `b${i}`}
+              key={escalationRowKey(esc)}
               escalation={esc}
               role={role}
               conversationId={conversationId}

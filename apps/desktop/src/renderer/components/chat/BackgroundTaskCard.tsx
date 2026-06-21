@@ -117,11 +117,7 @@ function StatusBadge({ job }: { job: HandoffJob }) {
     <span
       className={`inline-flex shrink-0 items-center gap-1 text-xs font-medium ${meta.accent}`}
     >
-      {meta.spin ? (
-        <Loader2 size={11} className="animate-spin" />
-      ) : (
-        meta.icon
-      )}
+      {meta.spin ? <Loader2 size={11} className="animate-spin" /> : meta.icon}
       {meta.label}
     </span>
   );

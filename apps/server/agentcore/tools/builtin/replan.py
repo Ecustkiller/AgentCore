@@ -1,15 +1,22 @@
-"""replan: the CEO's 波边界续跑 primitive — finalise late-bound steps and resume the
-SAME delegate plan (受监督的波循环).
+"""replan: the CEO's 波边界续跑 primitive — finalise / re-steer and resume the SAME
+delegate plan (受监督的波循环).
 
-The third orchestration primitive after ``delegate`` / ``revise``. When a ``delegate``
-plan declares ``bind_after_deps`` node(s) (steps whose spec is left as a placeholder
-until their upstream lands), the ``WaveScheduler`` runs the upstream, then YIELDs control
-back to the CEO at that *decision boundary* instead of running the under-specified tail
-(§4.1/§4.2). ``delegate`` returns a non-terminal「计划已让出」brief; the CEO reads the
-just-completed upstream products and calls THIS tool to finalise the late-bound step(s)
-(``binds``), optionally steer other not-yet-run steps (``steers``), then resume the same
-DAG — or wrap up (``stop``). Non-terminal, exactly like ``delegate``: the result returns
-to the CEO loop (a further boundary brief, or the terminal team result).
+The third orchestration primitive after ``delegate`` / ``revise``. The ``WaveScheduler``
+YIELDs control back to the CEO at a *decision boundary* (instead of running an under- or
+mis-specified tail) for two reasons, both surfaced as a non-terminal「计划已让出」brief:
+
+- ``BIND`` (晚绑定, the CEO's *proactive* arm): a plan declared ``bind_after_deps``
+  node(s) — steps whose spec is a placeholder until their upstream lands. The CEO reads
+  the upstream products and finalises them (``binds``).
+- ``SCOPE`` (偏离信号, the *reactive* arm / 自底向上): a finished worker flagged a 职责/范围
+  deviation (``escalate kind=scope``) — what truly needs doing diverges from the initial
+  plan. The CEO reads the deviation + output and re-steers the not-yet-run tail
+  (``steers``).
+
+Either way the CEO calls THIS tool — ``binds`` and/or ``steers`` (a SCOPE boundary may
+also resume as-is when no change is needed), then resume the same DAG — or wrap up
+(``stop``). Non-terminal, exactly like ``delegate``: the result returns to the CEO loop
+(a further boundary brief, or the terminal team result).
 
 A thin wrapper: it holds the turn's :class:`~agentcore.tools.builtin.delegate.DelegateTool`
 and forwards to :meth:`DelegateTool.replan`, which owns the paused state (``_supervised``),
@@ -37,12 +44,14 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _REPLAN_DESCRIPTION = (
-    "在 delegate 让出的波边界续跑同一计划：当某步声明了「依赖完成后再定稿」"
-    "(bind_after_deps)，其上游跑完后控制权会交回你（delegate 输出『计划已让出』）。"
-    "据上游产出，用本工具把这些待定稿步骤的职责 / 任务定稿（binds），可选地操舵其它未跑"
-    "步骤（steers），然后续跑同一张 DAG；确无需继续则 stop=true 收口。本工具非终结：续跑"
-    "结果（下一个边界简报或最终团队结果）回到你的循环，由你照常收尾。仅在收到『计划已让"
-    "出』后可用；要发起新任务仍用 delegate。"
+    "在 delegate 让出的波边界续跑同一计划。两种让出都会把控制权交回你（delegate 输出"
+    "『计划已让出』）：①某步声明「依赖完成后再定稿」(bind_after_deps)、其上游跑完后交回你"
+    "定稿——用 binds 据上游产出补全该步的职责 / 任务；②队员报告「职责偏离」(escalate "
+    "kind=scope)、发现真正要做的与初始计划不符、交回你校准——用 steers 操舵【尚未运行】的"
+    "下游步骤。两种都可同时用 binds + steers；定稿 / 校准后续跑同一张 DAG，确认无需改动可"
+    "直接续跑，确无需继续则 stop=true 收口。本工具非终结：续跑结果（下一个边界简报或最终团"
+    "队结果）回到你的循环，由你照常收尾。仅在收到『计划已让出』后可用；要发起新任务仍用 "
+    "delegate。"
 )
 
 _REPLAN_PARAMETERS = {

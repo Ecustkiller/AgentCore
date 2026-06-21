@@ -417,8 +417,9 @@ describe("projectExecution (fold)", () => {
     ];
     // Pending: a blocking escalation with its resolve id, status pending, no answer yet.
     expect(
-      projectExecution(plan, frames, "running").runs.find((s) => s.id === "run-1")
-        ?.escalations,
+      projectExecution(plan, frames, "running").runs.find(
+        (s) => s.id === "run-1",
+      )?.escalations,
     ).toEqual([
       {
         id: "esc-1",
@@ -438,8 +439,9 @@ describe("projectExecution (fold)", () => {
       answer: "用 Postgres。",
     });
     expect(
-      projectExecution(plan, frames, "running").runs.find((s) => s.id === "run-1")
-        ?.escalations[0],
+      projectExecution(plan, frames, "running").runs.find(
+        (s) => s.id === "run-1",
+      )?.escalations[0],
     ).toEqual({
       id: "esc-1",
       question: "用哪个数据库？",
@@ -543,8 +545,9 @@ describe("projectExecution (fold)", () => {
     // The second resolve targets the only remaining pending one (esc-2), so each settles
     // independently in fire order — the "find first pending" fold is order-correct.
     expect(
-      projectExecution(plan, frames, "running").runs.find((s) => s.id === "run-1")
-        ?.escalations,
+      projectExecution(plan, frames, "running").runs.find(
+        (s) => s.id === "run-1",
+      )?.escalations,
     ).toEqual([
       {
         id: "esc-1",
@@ -579,8 +582,9 @@ describe("projectExecution (fold)", () => {
     ];
     // A stale / duplicate resolve with nothing pending must not crash or fabricate an entry.
     expect(
-      projectExecution(plan, frames, "running").runs.find((s) => s.id === "run-1")
-        ?.escalations,
+      projectExecution(plan, frames, "running").runs.find(
+        (s) => s.id === "run-1",
+      )?.escalations,
     ).toEqual([]);
   });
 });
@@ -1215,9 +1219,30 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
         { id: "a3", role: "混合视角", modelPreference: "strong" },
       ],
       runs: [
-        { id: "d_r1_1", agentId: "a1", task: "t", dependsOn: [], group: "debate:roundtable", round: 1 },
-        { id: "d_r1_2", agentId: "a2", task: "t", dependsOn: [], group: "debate:roundtable", round: 1 },
-        { id: "d_r1_3", agentId: "a3", task: "t", dependsOn: [], group: "debate:roundtable", round: 1 },
+        {
+          id: "d_r1_1",
+          agentId: "a1",
+          task: "t",
+          dependsOn: [],
+          group: "debate:roundtable",
+          round: 1,
+        },
+        {
+          id: "d_r1_2",
+          agentId: "a2",
+          task: "t",
+          dependsOn: [],
+          group: "debate:roundtable",
+          round: 1,
+        },
+        {
+          id: "d_r1_3",
+          agentId: "a3",
+          task: "t",
+          dependsOn: [],
+          group: "debate:roundtable",
+          round: 1,
+        },
       ],
     };
 
@@ -1227,7 +1252,11 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
     const live1 = debateLiveRounds(r1);
     expect(live1).toHaveLength(1);
     expect(live1[0].round).toBe(1);
-    expect(live1[0].runs.map((r) => r.id)).toEqual(["d_r1_1", "d_r1_2", "d_r1_3"]);
+    expect(live1[0].runs.map((r) => r.id)).toEqual([
+      "d_r1_1",
+      "d_r1_2",
+      "d_r1_3",
+    ]);
 
     // 第 2 轮续写：两方已续、一方未续 ⇒ 第 2 轮只含续到的两方（诚实留空，不假装）。
     const r2 = projectExecution(

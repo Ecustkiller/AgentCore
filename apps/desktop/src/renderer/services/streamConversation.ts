@@ -4,10 +4,7 @@ import type { PlanReviewUserDecision } from "@/services/planReview";
 import { useApprovalStore } from "@/stores/approvals";
 import { getRuntime } from "@/stores/conversation";
 import type { SSEEvent } from "@/types/events";
-import {
-  dispatchSSEEvent,
-  flushPendingContent,
-} from "./sse/dispatch";
+import { dispatchSSEEvent, flushPendingContent } from "./sse/dispatch";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -101,9 +98,7 @@ async function pumpSSE(
 }
 
 /** Outcome of a re-attach attempt (执行与请求解耦 C1 · slice 1b). */
-export type AttachOutcome =
-  | "attached"
-  | "none";
+export type AttachOutcome = "attached" | "none";
 
 /**
  * Re-attach to a conversation's in-flight turn and 续看 it live (C1 · slice 1b).

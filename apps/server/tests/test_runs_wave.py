@@ -423,6 +423,134 @@ async def test_bind_boundary_not_fired_until_deps_resolve():
     assert res["b"].phase is RunPhase.COMPLETED
 
 
+# --- 受监督的波循环: on_boundary SCOPE arm (偏离信号 / 职责晚绑定与动态再编排 §4.4) -----
+
+
+def _scope_state(run_id: str) -> RunState:
+    """A COMPLETED state carrying a scope-deviation escalation (escalate kind=scope)."""
+    return RunState(
+        phase=RunPhase.COMPLETED,
+        content=run_id,
+        escalations=[{"question": "真问题是X不是Y", "assumption": "暂按X", "kind": "scope"}],
+    )
+
+
+async def _scope_exec(spec: RunSpec, _completed) -> RunState:
+    # The upstream node "a" flags a scope deviation; everything else completes plainly.
+    if spec.run_id == "a":
+        return _scope_state("a")
+    return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+
+async def test_scope_boundary_fires_then_yields_leaving_tail():
+    # a flags a scope deviation while downstream b is still pending: once a lands and work
+    # is quiescent, the SCOPE boundary fires with a; a YIELD soft-pauses, leaving b OUT of
+    # the result (the CEO re-steers it via replan, then a resume re-runs it).
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+    seen: list[tuple] = []
+
+    async def hook(reason, nodes, completed):
+        seen.append((reason, [n.run_id for n in nodes], set(completed)))
+        return BoundaryOutcome.YIELD
+
+    res = await WaveScheduler().run(plan, _scope_exec, on_boundary=hook)
+    assert seen == [(BoundaryReason.SCOPE, ["a"], {"a"})]
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert "b" not in res  # soft pause leaves the tail for the CEO's replan resume
+
+
+async def test_scope_boundary_proceed_runs_tail_and_fires_once():
+    # PROCEED keeps scheduling so b runs — and the signal is consumed on surfacing, so the
+    # boundary never re-fires on the next quiescent cycle (no spin).
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+    fires = {"n": 0}
+
+    async def hook(_reason, _nodes, _completed):
+        fires["n"] += 1
+        return BoundaryOutcome.PROCEED
+
+    res = await WaveScheduler().run(plan, _scope_exec, on_boundary=hook)
+    assert fires["n"] == 1  # surfaced once → consumed → no respin
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert res["b"].phase is RunPhase.COMPLETED
+
+
+async def test_scope_boundary_abort_materialises_skip():
+    # ABORT ends scheduling gracefully: the un-run tail b is materialised SKIPPED.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+
+    async def hook(_reason, _nodes, _completed):
+        return BoundaryOutcome.ABORT
+
+    res = await WaveScheduler().run(plan, _scope_exec, on_boundary=hook)
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert res["b"].phase is RunPhase.SKIPPED
+
+
+async def test_scope_boundary_not_fired_without_downstream():
+    # A scope deviation with NO not-yet-run downstream to redirect must NOT pause: there is
+    # nothing for the CEO to re-steer, so the escalation just rides to synthesis (today's
+    # behaviour). a + an independent b both finish → quiescent but pending_remains is False.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b"))
+    seen: list[tuple] = []
+
+    async def hook(reason, nodes, _completed):
+        seen.append((reason, [n.run_id for n in nodes]))
+        return BoundaryOutcome.PROCEED
+
+    res = await WaveScheduler().run(plan, _scope_exec, on_boundary=hook)
+    assert seen == []  # no downstream → no SCOPE boundary
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert res["b"].phase is RunPhase.COMPLETED
+
+
+async def test_scope_escalation_inert_without_hook():
+    # No on_boundary hook (autonomous / tests): a scope escalation is inert — the tail runs
+    # straight through, exactly like bind_after_deps / checkpoint_after without a hook.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+    res = await WaveScheduler().run(plan, _scope_exec)
+    assert res["a"].phase is RunPhase.COMPLETED
+    assert res["b"].phase is RunPhase.COMPLETED
+
+
+async def test_scope_boundary_consumed_not_refired_on_resume():
+    # The YIELD-then-resume loop terminates: surfacing the signal marks it consumed, so a
+    # resume (seed_completed re-seeds a, escalation and all) does NOT re-fire the boundary —
+    # b runs to terminal. Guards the infinite-boundary risk across the replan resume.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+
+    async def yield_hook(_reason, _nodes, _completed):
+        return BoundaryOutcome.YIELD
+
+    paused = await WaveScheduler().run(plan, _scope_exec, on_boundary=yield_hook)
+    assert "b" not in paused
+    assert paused["a"].escalations[0]["consumed"] is True  # surfaced → consumed
+
+    refires = {"n": 0}
+
+    async def count_hook(_reason, _nodes, _completed):
+        refires["n"] += 1
+        return BoundaryOutcome.YIELD
+
+    resumed = await WaveScheduler().run(
+        plan, _scope_exec, seed_completed=paused, on_boundary=count_hook
+    )
+    assert refires["n"] == 0  # consumed signal never re-fires
+    assert resumed["b"].phase is RunPhase.COMPLETED
+
+
 # --- 调度埋点量化 (BatchMetrics) ---
 
 
