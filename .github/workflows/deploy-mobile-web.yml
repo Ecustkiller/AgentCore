@@ -5,7 +5,7 @@ name: Deploy Mobile Web
 # API：VITE_API_URL 指向 https://app.fashitianxia.xyz/api（Nginx /api 反代前缀）。
 #
 # 触发：master 上 mobile / 共享包改动，或手动 dispatch。
-# 需 secrets：CLOUDFLARE_API_TOKEN（与 deploy-website.yml 共用）、DEPLOY_SSH_*（patch-cors job）。
+# 需 secrets：CLOUDFLARE_API_TOKEN（Pages 部署 + 绑域；若含 Zone.DNS:Edit 则自动写 m CNAME）。
 # 自定义域 m.fashitianxia.xyz：Pages 绑定 + 显式 DNS CNAME（须压过 *.fashitianxia.xyz Tunnel 兜底）。
 
 on:
@@ -88,6 +88,7 @@ jobs:
           fi
 
       - name: Ensure DNS CNAME m → Pages (override *. tunnel)
+        continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
@@ -98,7 +99,10 @@ jobs:
           auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           zone_id="$(curl -sS "https://api.cloudflare.com/client/v4/zones?name=${ZONE}" \
             "${auth[@]}" | jq -r '.result[0].id')"
-          [[ -n "$zone_id" && "$zone_id" != "null" ]] || { echo "zone ${ZONE} not found"; exit 1; }
+          [[ -n "$zone_id" && "$zone_id" != "null" ]] || {
+            echo "::warning::zone ${ZONE} not visible to API token (need Zone:Read + DNS:Edit). Add CNAME m → ${TARGET} manually in CF DNS."
+            exit 0
+          }
           body="$(jq -nc --arg n m --arg c "$TARGET" \
             '{type:"CNAME",name:$n,content:$c,proxied:true,ttl:1}')"
           existing="$(curl -sS \
@@ -107,15 +111,17 @@ jobs:
           record_id="$(echo "$existing" | jq -r '.result[0].id // empty')"
           if [[ -n "$record_id" ]]; then
             echo "updating DNS ${FQDN} → ${TARGET}"
-            curl -sS -X PUT \
+            resp="$(curl -sS -X PUT \
               "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${record_id}" \
-              "${auth[@]}" -H 'Content-Type: application/json' --data "$body" | jq '{success,errors}'
+              "${auth[@]}" -H 'Content-Type: application/json' --data "$body")"
           else
             echo "creating DNS ${FQDN} → ${TARGET}"
-            curl -sS -X POST \
+            resp="$(curl -sS -X POST \
               "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
-              "${auth[@]}" -H 'Content-Type: application/json' --data "$body" | jq '{success,errors}'
+              "${auth[@]}" -H 'Content-Type: application/json' --data "$body")"
           fi
+          echo "$resp" | jq '{success,errors}'
+          echo "$resp" | jq -e '.success' >/dev/null || exit 1
 
   patch-cors:
     name: Patch production CORS + restart api
