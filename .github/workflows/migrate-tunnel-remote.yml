@@ -1,0 +1,123 @@
+name: Migrate Tunnel to Remote Config
+
+# 将 cloudflared 从本机 config.yml ingress 迁到 Cloudflare 远程配置。
+# SSH 一次完成：读 ingress → CF API PUT → 精简本机 config → 重启 → 探测。
+# 需：CLOUDFLARE_API_TOKEN（Tunnel Edit）、DEPLOY_SSH_*。
+on:
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Migrate ingress to Cloudflare remote config
+        uses: appleboy/ssh-action@v1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: REDACTED_CLOUDFLARE_ACCOUNT_ID
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
+          envs: CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID
+          script: |
+            set -euo pipefail
+            CONFIG=""
+            for f in /etc/cloudflared/config.yml /root/.cloudflared/config.yml "$HOME/.cloudflared/config.yml"; do
+              [[ -f "$f" ]] && CONFIG="$f" && break
+            done
+            [[ -n "$CONFIG" ]] || { echo "ERROR: no cloudflared config"; exit 1; }
+            cp "$CONFIG" "${CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
+            echo "Using $CONFIG"
+
+            eval "$(python3 - "$CONFIG" <<'PY'
+            import json, pathlib, re, sys
+            text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+            tunnel = re.search(r"^tunnel:\s*(\S+)", text, re.M)
+            creds = re.search(r"^credentials-file:\s*(\S+)", text, re.M)
+            if not tunnel:
+                sys.exit("no tunnel: in config")
+            ingress = []
+            block = re.split(r"^ingress:\s*$", text, maxsplit=1, flags=re.M)
+            if len(block) == 2:
+                for m in re.finditer(
+                    r"^\s*-\s*hostname:\s*'?([^'\n]+)'?\s*\n\s*service:\s*(\S+)",
+                    block[1], re.M,
+                ):
+                    ingress.append({"hostname": m.group(1), "service": m.group(2), "originRequest": {}})
+                for m in re.finditer(r"^\s*-\s*service:\s*(http_status:\d+)\s*$", block[1], re.M):
+                    ingress.append({"service": m.group(1)})
+            if not ingress:
+                sys.exit("no ingress rules")
+            if not ingress[-1].get("service", "").startswith("http_status:"):
+                ingress.append({"service": "http_status:404"})
+            print(f"TUNNEL_ID={tunnel.group(1)}")
+            print(f"CREDS_FILE={creds.group(1) if creds else ''}")
+            print("INGRESS_JSON=" + json.dumps(ingress, ensure_ascii=False))
+            PY
+            )"
+
+            body="$(python3 -c "import json,os; print(json.dumps({'config': {'ingress': json.loads(os.environ['INGRESS_JSON'])}}))")"
+            echo "Publishing remote ingress for tunnel ${TUNNEL_ID}:"
+            echo "$body" | python3 -m json.tool
+
+            resp="$(curl -sS -X PUT \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${TUNNEL_ID}/configurations" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data "$body")"
+            echo "$resp" | python3 -m json.tool
+            echo "$resp" | python3 -c "import json,sys; json.load(sys.stdin)['success']" >/dev/null
+
+            python3 - "$CONFIG" "$TUNNEL_ID" "$CREDS_FILE" <<'PY'
+            import pathlib, sys
+            path, tid, creds = sys.argv[1:4]
+            lines = [f"tunnel: {tid}"]
+            if creds:
+                lines.append(f"credentials-file: {creds}")
+            lines += ["", "# ingress: managed remotely via Cloudflare API"]
+            pathlib.Path(path).write_text("\n".join(lines) + "\n", encoding="utf-8")
+            PY
+
+            echo "Local config after migration:"
+            cat "$CONFIG"
+            systemctl restart cloudflared
+            sleep 4
+            systemctl is-active cloudflared
+
+            for probe in \
+              "office.fashitianxia.xyz|http://127.0.0.1:8090/" \
+              "relay.fashitianxia.xyz|http://127.0.0.1:36300/" \
+              "app.fashitianxia.xyz|http://127.0.0.1:8000/readyz"; do
+              host="${probe%%|*}"
+              url="${probe#*|}"
+              code="$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: ${host}" "$url" || true)"
+              echo "local ${host} → HTTP ${code}"
+            done
+
+      - name: Verify public endpoints
+        run: |
+          set -euo pipefail
+          for url in \
+            https://office.fashitianxia.xyz/ \
+            https://relay.fashitianxia.xyz/ \
+            https://app.fashitianxia.xyz/api/readyz; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' "$url" || true)"
+            echo "$url → HTTP $code"
+            [[ "$code" != "000" && "$code" != "502" ]]
+          done
+
+      - name: Show remote ingress from API
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: REDACTED_CLOUDFLARE_ACCOUNT_ID
+        run: |
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          tunnels="$(curl -sS \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel" \
+            "${auth[@]}")"
+          tid="$(echo "$tunnels" | jq -r '.result[0].id')"
+          curl -sS \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${tid}/configurations" \
+            "${auth[@]}" | jq '.result.config.ingress'
