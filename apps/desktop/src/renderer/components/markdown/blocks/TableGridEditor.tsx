@@ -5,6 +5,7 @@
  * 触发编辑器重建导致输入焦点丢失。源码未变期间 widget 的 DOM 稳定（见 cmReactWidget eq）。
  */
 
+import { Button, IconButton } from "@/components/ui";
 import { Code2, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type TableData, parseGfmTable, serializeGfmTable } from "./tableGrid";
@@ -114,14 +115,14 @@ export function TableGridEditor({
                       className="w-full bg-transparent px-2 py-1.5 font-semibold text-foreground outline-none focus:bg-accent/40"
                     />
                     {data.headers.length > 1 && (
-                      <button
-                        type="button"
+                      <IconButton
                         title="删除列"
+                        aria-label="删除列"
                         onClick={() => delCol(i)}
-                        className="shrink-0 px-1 text-muted-foreground hover:text-destructive"
+                        className="size-6 shrink-0 px-1 text-muted-foreground hover:text-destructive"
                       >
                         <Trash2 className="size-3.5" />
-                      </button>
+                      </IconButton>
                     )}
                   </div>
                 </th>
@@ -142,14 +143,14 @@ export function TableGridEditor({
                         className="w-full bg-transparent px-2 py-1.5 text-foreground outline-none focus:bg-accent/40"
                       />
                       {c === row.length - 1 && (
-                        <button
-                          type="button"
+                        <IconButton
                           title="删除行"
+                          aria-label="删除行"
                           onClick={() => delRow(r)}
-                          className="shrink-0 px-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/row:opacity-100"
+                          className="size-6 shrink-0 px-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/row:opacity-100"
                         >
                           <Trash2 className="size-3.5" />
-                        </button>
+                        </IconButton>
                       )}
                     </div>
                   </td>
@@ -173,13 +174,13 @@ function GridBtn({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       title={title}
       onClick={onClick}
-      className="inline-flex h-6 items-center gap-0.5 rounded-lg px-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+      className="h-6 gap-0.5 px-1.5 py-0 text-xs font-normal text-muted-foreground"
     >
       {children}
-    </button>
+    </Button>
   );
 }

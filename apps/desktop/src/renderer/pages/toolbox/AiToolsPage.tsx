@@ -1,5 +1,6 @@
 import { PageContainer } from "@/components/layout/PageContainer";
 import { CapabilityCatalog } from "@/components/tools/CapabilityCatalog";
+import { Button } from "@/components/ui";
 import { ChevronLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -9,14 +10,14 @@ export function AiToolsPage() {
 
   return (
     <PageContainer width="canvas">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => navigate("/toolbox")}
-        className="mb-4 inline-flex items-center gap-1 text-muted-foreground text-sm hover:text-foreground"
+        className="mb-4 h-auto gap-1 px-0 py-0 text-sm text-muted-foreground hover:text-foreground"
+        icon={<ChevronLeft size={16} />}
       >
-        <ChevronLeft size={16} />
         工具箱
-      </button>
+      </Button>
 
       <h1 className="font-semibold text-foreground text-xl">AI 能力</h1>
       <p className="mt-1 text-muted-foreground text-sm">

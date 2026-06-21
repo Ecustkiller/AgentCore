@@ -4,7 +4,9 @@ import {
   type FileTreeChromeState,
   type FileTreeHandle,
 } from "@/components/files/FileTree";
-import { EmptyHint, IconButton } from "@/components/files/parts";
+import { EmptyHint } from "@/components/files/parts";
+import { Button, IconButton } from "@/components/ui";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { FileSource } from "@/lib/fileSource";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import {
@@ -78,58 +80,70 @@ export function FileBrowser({
         {leading && <div className="mx-1 h-4 w-px shrink-0 bg-border" />}
 
         {source?.caps.transfer && (
-          <button
-            type="button"
-            onClick={() => treeRef.current?.triggerUpload()}
+          <Button
+            className="shrink-0 disabled:opacity-60"
             disabled={treeIdle || chrome.uploading}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            onClick={() => treeRef.current?.triggerUpload()}
+            icon={
+              chrome.uploading ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Upload size={13} />
+              )
+            }
           >
-            {chrome.uploading ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <Upload size={13} />
-            )}
             上传
-          </button>
+          </Button>
         )}
         {source && (
           <>
-            <IconButton
-              title="新建文件"
-              disabled={treeIdle}
-              onClick={() => treeRef.current?.startCreate("file")}
-            >
-              <FilePlus size={14} />
-            </IconButton>
-            <IconButton
-              title="新建文件夹"
-              disabled={treeIdle}
-              onClick={() => treeRef.current?.startCreate("dir")}
-            >
-              <FolderPlus size={14} />
-            </IconButton>
+            <SimpleTooltip label="新建文件">
+              <IconButton
+                disabled={treeIdle}
+                onClick={() => treeRef.current?.startCreate("file")}
+                aria-label="新建文件"
+              >
+                <FilePlus size={14} />
+              </IconButton>
+            </SimpleTooltip>
+            <SimpleTooltip label="新建文件夹">
+              <IconButton
+                disabled={treeIdle}
+                onClick={() => treeRef.current?.startCreate("dir")}
+                aria-label="新建文件夹"
+              >
+                <FolderPlus size={14} />
+              </IconButton>
+            </SimpleTooltip>
           </>
         )}
 
         <div className="min-w-0 flex-1" />
 
         {source && !treeIdle && chrome.hasExpanded && (
-          <IconButton
-            title="全部折叠"
-            onClick={() => treeRef.current?.collapseAll()}
-          >
-            <ChevronsDownUp size={14} />
-          </IconButton>
+          <SimpleTooltip label="全部折叠">
+            <IconButton
+              onClick={() => treeRef.current?.collapseAll()}
+              aria-label="全部折叠"
+            >
+              <ChevronsDownUp size={14} />
+            </IconButton>
+          </SimpleTooltip>
         )}
         {source && (
-          <IconButton
-            title="刷新"
-            disabled={treeIdle}
-            spinning={!treeIdle && chrome.loading}
-            onClick={() => treeRef.current?.refresh()}
-          >
-            <RefreshCw size={14} />
-          </IconButton>
+          <SimpleTooltip label="刷新">
+            <IconButton
+              disabled={treeIdle || chrome.loading}
+              onClick={() => treeRef.current?.refresh()}
+              aria-label="刷新"
+            >
+              {chrome.loading && !treeIdle ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <RefreshCw size={14} />
+              )}
+            </IconButton>
+          </SimpleTooltip>
         )}
 
         {trailing && <div className="mx-1 h-4 w-px shrink-0 bg-border" />}

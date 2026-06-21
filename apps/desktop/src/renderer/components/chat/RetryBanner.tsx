@@ -1,3 +1,4 @@
+import { Button, IconButton } from "@/components/ui";
 import {
   useActiveError,
   useActiveErrorAction,
@@ -33,36 +34,35 @@ export function RetryBanner() {
       <AlertTriangle size={15} className="shrink-0" />
       <span className="min-w-0 flex-1">{error}</span>
       {action && (
-        <button
-          type="button"
+        <Button
+          variant="destructive"
+          className="shrink-0"
+          icon={<KeyRound size={13} />}
           onClick={() => {
             clearError();
             navigate(action.href);
           }}
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-destructive px-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
         >
-          <KeyRound size={13} />
           {action.label}
-        </button>
+        </Button>
       )}
       {retry && (
-        <button
-          type="button"
+        <Button
+          variant="destructive"
+          className="shrink-0"
+          icon={<RotateCw size={13} />}
           onClick={() => retry()}
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-destructive px-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
         >
-          <RotateCw size={13} />
           重试
-        </button>
+        </Button>
       )}
-      <button
-        type="button"
+      <IconButton
         onClick={() => clearError()}
         aria-label="关闭"
-        className="shrink-0 text-destructive/70 hover:text-destructive"
+        className="text-destructive/70 hover:bg-transparent hover:text-destructive"
       >
         <X size={14} />
-      </button>
+      </IconButton>
     </div>
   );
 }

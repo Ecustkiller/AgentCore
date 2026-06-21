@@ -1,6 +1,7 @@
 import { ChatView } from "@/components/chat/ChatView";
 import { ConversationCanvas } from "@/components/graph/ConversationCanvas";
 import { SidePanel } from "@/components/layout/SidePanel";
+import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { fetchMessageWindow, jumpToMessage } from "@/services/messages";
 import { loadPausedTurns } from "@/services/resume";
@@ -111,48 +112,46 @@ export function ConversationPage() {
   const panelOpen = useSidePanelStore((s) => s.open);
   const togglePanel = useSidePanelStore((s) => s.togglePanel);
 
-  // 聊天 ⇄ 作战室画布双视图（前端UX设计.md §六）。默认聊天；用户在顶栏切到画布
-  // （按对话记忆）。仅在 graphPrimary 实验开启时提供入口；草稿（无 id）恒为聊天。
-  const graphPrimary = useUIStore((s) => s.graphPrimary);
+  // 聊天 ⇄ 画布双视图（前端UX设计.md §六）。默认聊天；用户在顶栏切到画布（按对话记忆、
+  // 持久化）。画布已毕业、入口恒显示；草稿（无 id）恒为聊天。
   const conversationView = useUIStore((s) =>
     id ? (s.conversationViews[id] ?? "chat") : "chat",
   );
   const setConversationView = useUIStore((s) => s.setConversationView);
-  const canvasMode = graphPrimary && !!id && conversationView === "canvas";
+  const canvasMode = !!id && conversationView === "canvas";
 
   return (
     <>
       {canvasMode ? <ConversationCanvas /> : <ChatView />}
-      {/* 视图切换段控件（聊天 ⇄ 作战室画布）。仅在 graphPrimary 实验开启时出现，置于左上，
-          与右上的侧面板开关对称。 */}
-      {graphPrimary && id && (
+      {/* 视图切换段控件（聊天 ⇄ 画布），置于左上，与右上的侧面板开关对称。 */}
+      {id && (
         <div className="absolute left-3 top-2 z-20 flex items-center gap-0.5 rounded-lg border border-border bg-card/80 p-0.5 backdrop-blur">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             onClick={() => setConversationView(id, "chat")}
             aria-pressed={!canvasMode}
-            className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs ${
+            icon={<MessageSquare size={14} />}
+            className={
               !canvasMode
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+                ? "bg-accent text-foreground hover:bg-accent"
+                : undefined
+            }
           >
-            <MessageSquare size={14} />
             聊天
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="ghost"
             onClick={() => setConversationView(id, "canvas")}
             aria-pressed={canvasMode}
-            className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs ${
+            icon={<Network size={14} />}
+            className={
               canvasMode
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
+                ? "bg-accent text-foreground hover:bg-accent"
+                : undefined
+            }
           >
-            <Network size={14} />
-            作战室
-          </button>
+            画布
+          </Button>
         </div>
       )}
       {/* Side-panel toggle — run detail opens by clicking a graph node, but the
@@ -164,19 +163,21 @@ export function ConversationPage() {
         <SimpleTooltip
           label={panelOpen ? "隐藏侧面板 (Ctrl/Cmd+I)" : "侧面板 (Ctrl/Cmd+I)"}
         >
-          <button
-            type="button"
-            onClick={togglePanel}
-            aria-pressed={panelOpen}
-            aria-label={panelOpen ? "隐藏侧面板" : "侧面板"}
-            className={`absolute right-3 top-2 z-20 flex size-8 items-center justify-center rounded-lg border border-border backdrop-blur ${
-              panelOpen
-                ? "bg-accent text-foreground"
-                : "bg-card/80 text-muted-foreground hover:bg-accent hover:text-foreground"
-            }`}
-          >
-            <PanelRight size={16} />
-          </button>
+          <div className="absolute right-3 top-2 z-20">
+            <IconButton
+              size="md"
+              onClick={togglePanel}
+              aria-pressed={panelOpen}
+              aria-label={panelOpen ? "隐藏侧面板" : "侧面板"}
+              className={`border border-border backdrop-blur ${
+                panelOpen
+                  ? "bg-accent text-foreground"
+                  : "bg-card/80"
+              }`}
+            >
+              <PanelRight size={16} />
+            </IconButton>
+          </div>
         </SimpleTooltip>
       )}
       <SidePanel />

@@ -23,7 +23,6 @@ export function ShortcutsSettings() {
   const navigate = useNavigate();
   const theme = useUIStore((s) => s.theme);
   const usageDetail = useUIStore((s) => s.usageDetail);
-  const graphPrimary = useUIStore((s) => s.graphPrimary);
   const sidebarCollapsed = useSidebarStore((s) => s.collapsed);
 
   // Built only to read each command's title / icon / shortcut for display; the
@@ -34,10 +33,9 @@ export function ShortcutsSettings() {
         navigate,
         theme,
         usageDetail,
-        graphPrimary,
         sidebarCollapsed,
       }),
-    [navigate, theme, usageDetail, graphPrimary, sidebarCollapsed],
+    [navigate, theme, usageDetail, sidebarCollapsed],
   );
 
   return (

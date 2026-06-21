@@ -1,3 +1,4 @@
+import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { logout } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
@@ -48,14 +49,14 @@ export function UserMenu() {
       >
         {collapsed ? (
           <SimpleTooltip label="账户与设置" side="right">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               onClick={goMore}
               aria-label="账户与设置"
-              className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sidebar-accent"
+              className="h-auto rounded-full p-0 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-accent"
             >
               {avatar}
-            </button>
+            </Button>
           </SimpleTooltip>
         ) : (
           <>
@@ -64,24 +65,24 @@ export function UserMenu() {
               {displayName}
             </span>
             <SimpleTooltip label="登出">
-              <button
-                type="button"
+              <IconButton
+                tone="sidebar"
                 onClick={() => void handleLogout()}
                 aria-label="登出"
-                className="flex size-7 items-center justify-center rounded-lg text-sidebar-foreground/50 outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-accent"
+                className="text-sidebar-foreground/50 outline-none hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-accent"
               >
                 <LogOut size={14} />
-              </button>
+              </IconButton>
             </SimpleTooltip>
             <SimpleTooltip label="更多">
-              <button
-                type="button"
+              <IconButton
+                tone="sidebar"
                 onClick={goMore}
                 aria-label="更多"
-                className="flex size-7 items-center justify-center rounded-lg text-sidebar-foreground/50 outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-accent"
+                className="text-sidebar-foreground/50 outline-none hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-accent"
               >
                 <MoreVertical size={14} />
-              </button>
+              </IconButton>
             </SimpleTooltip>
           </>
         )}

@@ -1,3 +1,4 @@
+import { IconButton } from "@/components/ui";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -69,8 +70,7 @@ export function DetailTabs({
               >
                 <FileText size={13} className="shrink-0 opacity-60" />
                 <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                <button
-                  type="button"
+                <IconButton
                   aria-label={`关闭 ${t.name}`}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
@@ -78,12 +78,12 @@ export function DetailTabs({
                     onClose(key);
                   }}
                   className={cn(
-                    "flex shrink-0 items-center justify-center rounded p-0.5 hover:bg-foreground/10",
+                    "size-6 shrink-0",
                     active ? "opacity-70" : "opacity-0 group-hover:opacity-70",
                   )}
                 >
                   <X size={13} />
-                </button>
+                </IconButton>
               </div>
             </ContextMenuTrigger>
             <ContextMenuContent className="min-w-40">

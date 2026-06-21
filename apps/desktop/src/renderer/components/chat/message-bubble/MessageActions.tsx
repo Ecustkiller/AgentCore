@@ -5,6 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatMessageTime } from "@/lib/format";
 import { notifyError } from "@/lib/toast";
@@ -25,14 +26,14 @@ export function MessageAction({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="neutral"
+      className="px-1.5"
+      icon={icon}
       onClick={onClick}
-      className="inline-flex h-7 items-center gap-1 rounded-lg px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
-      {icon}
-      <span>{label}</span>
-    </button>
+      {label}
+    </Button>
   );
 }
 
@@ -53,22 +54,22 @@ export function DeleteMessageAction({ messageId }: { messageId: string }) {
   if (confirming) {
     return (
       <span className="inline-flex items-center gap-0.5">
-        <button
-          type="button"
+        <Button
+          variant="danger"
+          className="px-1.5"
+          icon={<Check size={13} />}
           onClick={() => void onDelete()}
-          className="inline-flex h-7 items-center gap-1 rounded-lg px-1.5 text-xs text-destructive transition-colors hover:bg-destructive/10"
         >
-          <Check size={13} />
-          <span>确认删除</span>
-        </button>
-        <button
-          type="button"
+          确认删除
+        </Button>
+        <Button
+          variant="neutral"
+          className="px-1.5"
+          icon={<X size={13} />}
           onClick={() => setConfirming(false)}
-          className="inline-flex h-7 items-center gap-1 rounded-lg px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          <X size={13} />
-          <span>取消</span>
-        </button>
+          取消
+        </Button>
       </span>
     );
   }
@@ -140,14 +141,14 @@ export function ViewPromptAction({
             {state.status === "ready" && (
               <div className="flex h-full min-h-0 flex-col">
                 <div className="mb-2 flex justify-end">
-                  <button
-                    type="button"
+                  <Button
+                    variant="neutral"
+                    className="px-1.5"
+                    icon={copied ? <Check size={13} /> : <Copy size={13} />}
                     onClick={onCopy}
-                    className="inline-flex h-7 items-center gap-1 rounded-lg px-1.5 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
                   >
-                    {copied ? <Check size={13} /> : <Copy size={13} />}
                     {copied ? "已复制" : "复制"}
-                  </button>
+                  </Button>
                 </div>
                 <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-3 py-2 text-foreground/90 text-xs leading-relaxed">
                   {state.text}

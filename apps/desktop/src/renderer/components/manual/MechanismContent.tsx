@@ -419,7 +419,7 @@ export function GraphLegend() {
         />
         <LegendRow
           sample={
-            <span className="flex items-center gap-1 rounded-full bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
+            <span className="flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
               <History size={10} />
               修订 v2
             </span>
@@ -429,7 +429,7 @@ export function GraphLegend() {
         />
         <LegendRow
           sample={
-            <span className="rounded-full bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
+            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
               正方
             </span>
           }
@@ -612,7 +612,7 @@ const SCENARIOS: Scenario[] = [
   },
   {
     title: "辩论 / 审查（正方 · 反方）",
-    desc: "带 stance 标记的普通 AGENT DAG（非独立模式）。ELK considerModelOrder 把正 / 反分带对置，再汇聚到 CEO 裁决；立场徽章用 info 令牌、与状态色解耦。",
+    desc: "带 stance 标记的普通 AGENT DAG（非独立模式）。ELK considerModelOrder 把正 / 反分带对置，再汇聚到 CEO 裁决；立场徽章用 primary 令牌、与状态色解耦。",
     // 实现：lib/elk-layout.ts
     nodes: [
       input("评估是否采用激进重构方案"),

@@ -9,8 +9,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "lint": "biome check src/",
+    "lint": "biome check src/ && node scripts/check-ui-tokens.mjs",
     "lint:fix": "biome check --write src/",
+    "check-ui-tokens": "node scripts/check-ui-tokens.mjs",
     "conformance": "tsx src/protocol/conformance.run.ts",
     "shot": "node scripts/shot.cjs",
     "cap:sync": "pnpm build && cap sync",
@@ -18,6 +19,7 @@
   },
   "dependencies": {
     "@agentcore/contract-types": "workspace:*",
+    "@agentcore/design-tokens": "workspace:*",
     "@agentcore/protocol-conformance": "workspace:*",
     "@aparajita/capacitor-secure-storage": "^8.0.0",
     "@capacitor/android": "^8.4.0",

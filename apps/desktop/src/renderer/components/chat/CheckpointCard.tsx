@@ -1,3 +1,13 @@
+import {
+  Button,
+  DecisionCard,
+  DecisionCardFooter,
+  Textarea,
+} from "@/components/ui";
+import {
+  interactiveCheckpointTone,
+  resolvedCheckpointTone,
+} from "@/components/ui/tone-presets";
 import { notifyError } from "@/lib/toast";
 import {
   type CheckpointUserDecision,
@@ -86,35 +96,8 @@ function isOpeningFlavored(c: AskUserContent): boolean {
   );
 }
 
-/** Per-tone class sets — kept as full literal strings so Tailwind keeps them. */
-const TONE = {
-  primary: {
-    wrap: "border-primary/30 bg-primary/5",
-    accent: "text-primary",
-    badge: "bg-primary/10 text-primary",
-    optActive: "border-primary bg-primary/10 text-foreground",
-    optIdle:
-      "border-border bg-card text-muted-foreground hover:border-primary/40 hover:bg-accent hover:text-foreground",
-    markActive: "border-primary bg-primary text-primary-foreground",
-    dot: "bg-primary-foreground",
-    focus: "focus:border-primary/60",
-    ctaBar: "border-primary/15 bg-primary/10",
-    cta: "bg-primary text-primary-foreground hover:bg-primary/90",
-  },
-  warning: {
-    wrap: "border-warning/40 bg-warning/10",
-    accent: "text-warning",
-    badge: "bg-warning/10 text-warning",
-    optActive: "border-warning bg-warning/15 text-foreground",
-    optIdle:
-      "border-border bg-card text-muted-foreground hover:border-warning/40 hover:bg-accent hover:text-foreground",
-    markActive: "border-warning bg-warning text-warning-foreground",
-    dot: "bg-warning-foreground",
-    focus: "focus:border-warning/60",
-    ctaBar: "border-warning/20 bg-warning/10",
-    cta: "bg-warning text-warning-foreground hover:bg-warning/90",
-  },
-} as const;
+/** Per-tone class sets — from shared tone-presets (Tailwind literal strings). */
+const TONE = interactiveCheckpointTone;
 
 /**
  * The live, actionable ask_user card body — the single asking surface, shared by the
@@ -242,8 +225,10 @@ export function AskUserCard({
     ).length + (styleId ? 1 : 0);
 
   return (
-    <div
-      className={`animate-task-card-enter mt-2 overflow-hidden rounded-xl border ${tone.wrap}`}
+    <DecisionCard
+      tone={opening ? "primary" : "warning"}
+      animate
+      className="overflow-hidden p-0"
     >
       <div className="space-y-3 px-3 pt-3">
         <div className="flex items-start gap-2">
@@ -331,24 +316,24 @@ export function AskUserCard({
               {content.styleOptions.map((s) => {
                 const active = s.id === styleId;
                 return (
-                  <button
+                  <Button
                     key={s.id}
-                    type="button"
+                    variant="ghost"
                     disabled={busy}
                     onClick={() => !busy && setStyleId(active ? null : s.id)}
-                    className={`rounded-lg border px-2.5 py-1 text-xs transition-colors disabled:opacity-40 ${
+                    className={`h-auto rounded-lg border px-2.5 py-1 font-normal disabled:opacity-40 ${
                       active ? tone.optActive : tone.optIdle
                     }`}
                   >
                     {s.label}
-                  </button>
+                  </Button>
                 );
               })}
             </div>
           </div>
         )}
 
-        <textarea
+        <Textarea
           value={note}
           onChange={(e) => setNote(e.target.value)}
           disabled={busy}
@@ -358,42 +343,44 @@ export function AskUserCard({
               ? "可选 · 补充或修改任何一处，留空就按上面开做"
               : "可选 · 补充说明或调整方向"
           }
-          className={`w-full resize-none rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${tone.focus}`}
+          className={`w-full border-border bg-card placeholder:text-muted-foreground/70 ${tone.focus}`}
         />
       </div>
 
-      {/* CTA 区：浅分隔 + 略深底，把主路径「提交」摆到最显眼。 */}
-      <div
-        className={`mt-3 flex flex-wrap items-center gap-2.5 border-t px-3 py-2.5 ${tone.ctaBar}`}
-      >
-        <button
-          type="button"
+      <DecisionCardFooter tone={opening ? "primary" : "warning"}>
+        <Button
+          size="md"
+          variant="primary"
+          className={tone.cta}
+          disabled={busy}
           onClick={() => send("continue")}
-          disabled={busy}
-          className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium disabled:opacity-40 ${tone.cta}`}
+          icon={
+            submitting === "continue" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : opening ? (
+              <Rocket size={14} />
+            ) : (
+              <Check size={14} />
+            )
+          }
         >
-          {submitting === "continue" ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : opening ? (
-            <Rocket size={14} />
-          ) : (
-            <Check size={14} />
-          )}
-          <span>{opening ? "就这样开做" : "提交"}</span>
-        </button>
-        <button
-          type="button"
+          {opening ? "就这样开做" : "提交"}
+        </Button>
+        <Button
+          size="md"
+          variant="danger"
+          disabled={busy}
           onClick={() => send("stop")}
-          disabled={busy}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-40"
+          icon={
+            submitting === "stop" ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <OctagonX size={14} />
+            )
+          }
         >
-          {submitting === "stop" ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <OctagonX size={14} />
-          )}
-          <span>停止</span>
-        </button>
+          停止
+        </Button>
         {opening && (
           <span className="min-w-0 text-xs text-muted-foreground">
             {presetCount > 0
@@ -401,8 +388,8 @@ export function AskUserCard({
               : "也可直接在下方对话框回复"}
           </span>
         )}
-      </div>
-    </div>
+      </DecisionCardFooter>
+    </DecisionCard>
   );
 }
 
@@ -471,65 +458,69 @@ function QuestionField({
               const active = answer.includes(opt);
               const isDefault = !!question.default && opt === question.default;
               return (
-                <button
+                <Button
                   key={opt}
-                  type="button"
+                  variant="ghost"
                   disabled={disabled}
                   onClick={() => onToggleChoice(opt)}
-                  className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors disabled:opacity-40 ${
+                  className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1.5 text-left font-normal disabled:opacity-40 ${
                     active ? tone.optActive : tone.optIdle
                   }`}
                 >
-                  <span
-                    className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border-2 ${
-                      question.multiple ? "rounded-lg" : "rounded-full"
-                    } ${active ? tone.markActive : "border-border"}`}
-                  >
-                    {active &&
-                      (question.multiple ? (
-                        <Check size={11} strokeWidth={3} />
-                      ) : (
-                        <span className={`size-2 rounded-full ${tone.dot}`} />
-                      ))}
-                  </span>
-                  <span className="min-w-0 flex-1 whitespace-pre-wrap">
-                    {opt}
-                  </span>
-                  {isDefault && (
+                  <span className="flex w-full items-start gap-2">
                     <span
-                      className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-xs ${
-                        active ? tone.badge : "bg-muted text-muted-foreground"
-                      }`}
+                      className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border-2 ${
+                        question.multiple ? "rounded-lg" : "rounded-full"
+                      } ${active ? tone.markActive : "border-border"}`}
                     >
-                      默认
+                      {active &&
+                        (question.multiple ? (
+                          <Check size={11} strokeWidth={3} />
+                        ) : (
+                          <span className={`size-2 rounded-full ${tone.dot}`} />
+                        ))}
                     </span>
-                  )}
-                </button>
+                    <span className="min-w-0 flex-1 whitespace-pre-wrap">
+                      {opt}
+                    </span>
+                    {isDefault && (
+                      <span
+                        className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-xs ${
+                          active ? tone.badge : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        默认
+                      </span>
+                    )}
+                  </span>
+                </Button>
               );
             })}
             {/* 「其他」逃生口：选项不合适时就地为这一题填自定义答案，而非塞进全局补充框。 */}
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               disabled={disabled}
               onClick={onToggleOther}
-              className={`flex w-full items-start gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors disabled:opacity-40 ${
+              className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1.5 text-left font-normal disabled:opacity-40 ${
                 otherOn ? tone.optActive : tone.optIdle
               }`}
             >
-              <span
-                className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border-2 ${
-                  question.multiple ? "rounded-lg" : "rounded-full"
-                } ${otherOn ? tone.markActive : "border-border"}`}
-              >
-                {otherOn &&
-                  (question.multiple ? (
-                    <Check size={11} strokeWidth={3} />
-                  ) : (
-                    <span className={`size-2 rounded-full ${tone.dot}`} />
-                  ))}
+              <span className="flex w-full items-start gap-2">
+                <span
+                  className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border-2 ${
+                    question.multiple ? "rounded-lg" : "rounded-full"
+                  } ${otherOn ? tone.markActive : "border-border"}`}
+                >
+                  {otherOn &&
+                    (question.multiple ? (
+                      <Check size={11} strokeWidth={3} />
+                    ) : (
+                      <span className={`size-2 rounded-full ${tone.dot}`} />
+                    ))}
+                </span>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap">其他…</span>
               </span>
-              <span className="min-w-0 flex-1 whitespace-pre-wrap">其他…</span>
-            </button>
+            </Button>
             {otherOn && (
               <input
                 type="text"
@@ -608,23 +599,7 @@ function DormantCheckpoint({ checkpoint }: { checkpoint: CheckpointDisplay }) {
 
 /** Outcome tone for a settled card — a calm, semantic identity for the record (per
  * color-tokens): 继续/调整 = success (顺利推进), 停止 = destructive, 超时 = muted. */
-const RESOLVED_TONE = {
-  success: {
-    wrap: "border-success/25 bg-success/5",
-    badge: "bg-success/10 text-success",
-    label: "text-success",
-  },
-  destructive: {
-    wrap: "border-destructive/25 bg-destructive/5",
-    badge: "bg-destructive/10 text-destructive",
-    label: "text-destructive",
-  },
-  muted: {
-    wrap: "border-border bg-muted/30",
-    badge: "bg-muted text-muted-foreground",
-    label: "text-muted-foreground",
-  },
-} as const;
+const RESOLVED_TONE = resolvedCheckpointTone;
 
 /** The settled record of an ask_user card: how it was decided, plus the user's
  * answer note. Carries its outcome's tone (calm) so a glance down the history reads

@@ -1,6 +1,7 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { RunDetailBody } from "@/components/chat/detail/RunDetailBody";
 import { RunTabChip } from "@/components/layout/SidePanel";
+import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useActiveMessages } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
@@ -116,11 +117,11 @@ export function GraphDetailPanel({
       }`}
       style={{ width }}
     >
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         aria-label="拖拽调整面板宽度"
         onPointerDown={onResizeStart}
-        className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent hover:bg-primary/40"
+        className="absolute left-0 top-0 z-10 h-full w-1 min-w-0 cursor-col-resize rounded-none bg-transparent p-0 hover:bg-primary/40"
       />
 
       {endpoint ? (
@@ -130,14 +131,12 @@ export function GraphDetailPanel({
               {endpoint.title}
             </span>
             <SimpleTooltip label="收起详情">
-              <button
-                type="button"
+              <IconButton
                 onClick={onCloseEndpoint}
                 aria-label="收起详情"
-                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 <X size={15} />
-              </button>
+              </IconButton>
             </SimpleTooltip>
           </div>
           <div className="relative min-h-0 flex-1">
@@ -162,14 +161,9 @@ export function GraphDetailPanel({
                 ))}
               </div>
               <SimpleTooltip label="收起详情">
-                <button
-                  type="button"
-                  onClick={closePanel}
-                  aria-label="收起详情"
-                  className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-                >
+                <IconButton onClick={closePanel} aria-label="收起详情">
                   <X size={15} />
-                </button>
+                </IconButton>
               </SimpleTooltip>
             </div>
             <div className="relative min-h-0 flex-1">

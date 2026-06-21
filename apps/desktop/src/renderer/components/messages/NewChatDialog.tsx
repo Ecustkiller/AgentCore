@@ -1,3 +1,4 @@
+import { Button, IconButton } from "@/components/ui";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
   type UserSearchResult,
@@ -111,14 +112,13 @@ export function NewChatDialog({ open, onClose, onStarted }: Props) {
             placeholder="按用户名或 ID 精确搜索…"
             className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
           />
-          <button
-            type="button"
+          <IconButton
             onClick={onClose}
             aria-label="关闭"
-            className="shrink-0 text-muted-foreground hover:text-foreground"
+            className="shrink-0 hover:bg-transparent"
           >
             <X size={15} />
-          </button>
+          </IconButton>
         </div>
 
         <div className="max-h-80 overflow-y-auto">
@@ -144,29 +144,31 @@ export function NewChatDialog({ open, onClose, onStarted }: Props) {
             <ul className="py-1.5">
               {results.map((u) => (
                 <li key={u.id}>
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
                     disabled={starting !== null}
                     onClick={() => void handleStart(u)}
-                    className="flex w-full items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                    className="h-auto w-full justify-start gap-3 rounded-none px-4 py-2 font-normal disabled:opacity-50"
                   >
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
-                      {avatarInitial(u.display_name || u.username)}
+                    <span className="flex w-full items-center gap-3 text-left">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-medium text-primary">
+                        {avatarInitial(u.display_name || u.username)}
+                      </span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate text-sm text-foreground">
+                          {u.display_name || u.username}
+                        </span>
+                        <span className="truncate text-xs text-muted-foreground">
+                          @{u.username}
+                        </span>
+                      </span>
+                      {starting === u.id && (
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          发起中…
+                        </span>
+                      )}
                     </span>
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate text-sm text-foreground">
-                        {u.display_name || u.username}
-                      </span>
-                      <span className="truncate text-xs text-muted-foreground">
-                        @{u.username}
-                      </span>
-                    </span>
-                    {starting === u.id && (
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        发起中…
-                      </span>
-                    )}
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>

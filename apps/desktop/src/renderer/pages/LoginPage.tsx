@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { ApiError } from "@/services/api";
 import { login, register } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
@@ -86,18 +87,18 @@ export function LoginPage() {
 
         <div className="mb-4 flex gap-1 rounded-lg bg-muted p-1">
           {(["login", "register"] as const).map((m) => (
-            <button
+            <Button
               key={m}
-              type="button"
+              variant="ghost"
               onClick={() => switchMode(m)}
-              className={`h-8 flex-1 rounded-lg text-sm transition-colors ${
+              className={`h-8 flex-1 rounded-lg text-sm ${
                 mode === m
-                  ? "bg-card text-foreground shadow-sm"
+                  ? "bg-card text-foreground shadow-sm hover:bg-card"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {m === "login" ? "登录" : "注册"}
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -138,13 +139,13 @@ export function LoginPage() {
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
-          <button
+          <Button
             type="submit"
+            className="h-10 w-full"
             disabled={!canSubmit}
-            className="h-10 w-full rounded-lg bg-primary text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             {busy ? "请稍候…" : mode === "login" ? "登录" : "注册并登录"}
-          </button>
+          </Button>
 
           {/* 自助找回密码依赖邮件，属后续阶段；内测期由管理员在「成员」里重置。 */}
           {mode === "login" && (

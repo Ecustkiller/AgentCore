@@ -1,9 +1,7 @@
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { Button, SurfaceRow, surfaceRowIndent } from "@/components/ui";
+import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { type FileNode, type FileSource } from "@/lib/fileSource";
+import type { FileNode, FileSource } from "@/lib/fileSource";
 import {
   ChevronDown,
   ChevronRight,
@@ -13,17 +11,9 @@ import {
   Loader2,
 } from "lucide-react";
 import type React from "react";
-import {
-  DRAG_MIME,
-  type DragPayload,
-  parseDragPayload,
-} from "./fileTreeDrag";
-import {
-  InlineCreateRow,
-  InlineInput,
-  InlineRow,
-} from "./FileTreeInline";
+import { InlineCreateRow, InlineInput, InlineRow } from "./FileTreeInline";
 import { FileTreeRowMenu } from "./FileTreeRowMenu";
+import { DRAG_MIME, type DragPayload, parseDragPayload } from "./fileTreeDrag";
 import type { useFileTreeData } from "./useFileTreeData";
 
 export interface FileTreeRowProps {
@@ -65,6 +55,7 @@ export interface FileTreeRowProps {
 export function FileTreeRow(props: FileTreeRowProps) {
   const { node, depth, source, data, expanded, dropTarget, indentBase } = props;
   const indent = depth * 14 + 8 + indentBase;
+  const rowStyle = surfaceRowIndent(depth, indentBase);
 
   const startDrag = (e: React.DragEvent) => {
     const payload: DragPayload = { sourceId: source.id, path: node.path };
@@ -89,24 +80,23 @@ export function FileTreeRow(props: FileTreeRowProps) {
         ) : (
           <ContextMenu>
             <ContextMenuTrigger asChild>
-              <div
+              <SurfaceRow
+                variant="file"
+                active={isActive}
+                selected={isSelected}
+                cut={isCut}
                 draggable
                 onDragStart={startDrag}
-                className={`group flex items-center rounded-md pr-1 text-xs hover:bg-accent ${
-                  isActive || isSelected
-                    ? "bg-accent text-accent-foreground"
-                    : ""
-                } ${isCut ? "opacity-50" : ""}`}
-                style={{ paddingLeft: indent }}
+                style={rowStyle}
               >
                 <SimpleTooltip label={`预览 ${node.path}`}>
-                  <button
-                    type="button"
+                  <Button
+                    variant="ghost"
                     onClick={() => {
                       props.onSelect(node);
                       props.onOpenFile(node.path, node.name);
                     }}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+                    className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded-none px-0 py-1.5 text-left text-xs font-normal"
                   >
                     <span className="w-[13px] shrink-0" aria-hidden="true" />
                     <FileText
@@ -114,9 +104,9 @@ export function FileTreeRow(props: FileTreeRowProps) {
                       className="shrink-0 text-muted-foreground"
                     />
                     <span className="min-w-0 flex-1 truncate">{node.name}</span>
-                  </button>
+                  </Button>
                 </SimpleTooltip>
-              </div>
+              </SurfaceRow>
             </ContextMenuTrigger>
             <FileTreeRowMenu {...props} />
           </ContextMenu>
@@ -146,7 +136,11 @@ export function FileTreeRow(props: FileTreeRowProps) {
       ) : (
         <ContextMenu>
           <ContextMenuTrigger asChild>
-            <div
+            <SurfaceRow
+              variant="file"
+              selected={isSelected}
+              dropTarget={isTarget}
+              cut={isCut}
               draggable
               onDragStart={startDrag}
               onDragOver={(e) => {
@@ -174,23 +168,16 @@ export function FileTreeRow(props: FileTreeRowProps) {
                 if (source.caps.transfer && e.dataTransfer.files.length > 0)
                   props.onUpload(e.dataTransfer.files, node.path);
               }}
-              className={`group flex items-center rounded-md pr-1 text-xs hover:bg-accent ${
-                isTarget
-                  ? "bg-accent ring-1 ring-inset ring-primary"
-                  : isSelected
-                    ? "bg-accent text-accent-foreground"
-                    : ""
-              } ${isCut ? "opacity-50" : ""}`}
-              style={{ paddingLeft: indent }}
+              style={rowStyle}
             >
               <SimpleTooltip label={node.path}>
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
                   onClick={() => {
                     props.onSelect(node);
                     props.onToggle(node.path);
                   }}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
+                  className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded-none px-0 py-1.5 text-left text-xs font-normal"
                 >
                   {open ? (
                     <ChevronDown
@@ -215,9 +202,9 @@ export function FileTreeRow(props: FileTreeRowProps) {
                     />
                   )}
                   <span className="min-w-0 flex-1 truncate">{node.name}</span>
-                </button>
+                </Button>
               </SimpleTooltip>
-            </div>
+            </SurfaceRow>
           </ContextMenuTrigger>
           <FileTreeRowMenu {...props} />
         </ContextMenu>

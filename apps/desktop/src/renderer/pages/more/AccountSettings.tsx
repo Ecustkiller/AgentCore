@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import {
   Dialog,
   DialogContent,
@@ -151,24 +152,23 @@ function AvatarSection() {
         </div>
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
+            <Button
+              size="md"
               disabled={busy}
-              className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-40"
+              icon={busy ? <Loader2 size={14} className="animate-spin" /> : undefined}
+              onClick={() => inputRef.current?.click()}
             >
-              {busy && <Loader2 size={14} className="animate-spin" />}
               上传头像
-            </button>
+            </Button>
             {user?.avatarUrl && (
-              <button
-                type="button"
-                onClick={() => void remove()}
+              <Button
+                variant="neutral"
+                size="md"
                 disabled={busy}
-                className="h-8 rounded-lg border border-border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-40"
+                onClick={() => void remove()}
               >
                 移除
-              </button>
+              </Button>
             )}
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
@@ -265,15 +265,14 @@ function ProfileSection() {
         </label>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end">
-          <button
-            type="button"
+          <Button
+            size="md"
             disabled={!canSave}
+            icon={saving ? <Loader2 size={14} className="animate-spin" /> : undefined}
             onClick={() => void save()}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-40"
           >
-            {saving && <Loader2 size={14} className="animate-spin" />}
             保存
-          </button>
+          </Button>
         </div>
       </div>
     </Section>
@@ -364,15 +363,14 @@ function PasswordSection() {
           <p className="text-xs text-destructive">{localError ?? error}</p>
         )}
         <div className="flex justify-end">
-          <button
-            type="button"
+          <Button
+            size="md"
             disabled={!canSave}
+            icon={saving ? <Loader2 size={14} className="animate-spin" /> : undefined}
             onClick={() => void save()}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-40"
           >
-            {saving && <Loader2 size={14} className="animate-spin" />}
             更新密码
-          </button>
+          </Button>
         </div>
       </div>
     </Section>
@@ -396,13 +394,14 @@ function DangerSection() {
             永久停用此账户，并释放用户名以供重新注册。
           </p>
         </div>
-        <button
-          type="button"
+        <Button
+          variant="danger"
+          size="md"
+          className="shrink-0"
           onClick={() => setOpen(true)}
-          className="h-8 shrink-0 rounded-lg border border-destructive/50 px-3 text-sm text-destructive hover:bg-destructive/10"
         >
           注销账户
-        </button>
+        </Button>
       </div>
       <DeleteAccountDialog open={open} onOpenChange={setOpen} />
     </section>
@@ -471,23 +470,23 @@ function DeleteAccountDialog({
           {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
         </div>
         <DialogFooter>
-          <button
-            type="button"
-            onClick={close}
+          <Button
+            variant="neutral"
+            className="h-9 px-4"
             disabled={busy}
-            className="h-9 rounded-lg border border-border px-4 text-sm text-foreground hover:bg-accent disabled:opacity-50"
+            onClick={close}
           >
             取消
-          </button>
-          <button
-            type="button"
-            onClick={() => void confirm()}
+          </Button>
+          <Button
+            variant="destructive"
+            className="h-9 px-4"
             disabled={busy || password.length === 0}
-            className="flex h-9 items-center justify-center gap-1.5 rounded-lg bg-destructive px-4 text-sm font-medium text-destructive-foreground hover:opacity-90 disabled:opacity-40"
+            icon={busy ? <Loader2 size={14} className="animate-spin" /> : undefined}
+            onClick={() => void confirm()}
           >
-            {busy && <Loader2 size={14} className="animate-spin" />}
             确认注销
-          </button>
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

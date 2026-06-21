@@ -1,34 +1,23 @@
+import { Badge, Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { useComposerDraftStore } from "@/stores/composer";
 import type { NonBlockingAskDisplay } from "@/stores/conversation";
 import { CircleHelp, CornerDownLeft } from "lucide-react";
 
-/**
- * Inline non-blocking ask card — the CEO posted a question via `ask_user(blocking=false)`
- * (Cursor 式) and KEPT WORKING on its stated default. Unlike {@link CheckpointCard} it
- * does NOT gate the turn: there are no 提交/停止 CTAs and no resolve. Instead it shows
- * the question + the defaults the CEO is proceeding on (read-only), and renders each
- * option as a quick-fill chip — clicking one 回填s the composer (the user's answer then
- * rides an ordinary next-turn message). Rendered under the assistant bubble that posted
- * it (会话流内), and replayed inline on reload from the journaled `question_posted`.
- *
- * Tone is `info` (蓝, 信息提示) — calm and FYI, distinct from the blocking card's
- * primary(开场)/warning(途中) gates: this is "我已假设 X，你可改" not "等你拍板".
- */
 export function NonBlockingAskCard({ ask }: { ask: NonBlockingAskDisplay }) {
   const fill = useComposerDraftStore((s) => s.fill);
-  // With one question the option alone is unambiguous; with several, prefix the prompt
-  // so the stacked draft stays readable for the CEO (the only reader of the next message).
   const multi = ask.questions.length > 1;
   const pick = (prompt: string, value: string) =>
     fill(multi && prompt ? `${prompt}：${value}` : value);
 
   return (
-    <div className="animate-task-card-enter mt-2 overflow-hidden rounded-xl border border-info/30 bg-info/5">
+    <DecisionCard tone="primary" animate className="overflow-hidden p-0">
       <div className="space-y-3 px-3 pb-3 pt-3">
         <div className="flex items-start gap-2">
-          <CircleHelp size={16} className="mt-0.5 shrink-0 text-info" />
+          <DecisionCardIcon tone="primary">
+            <CircleHelp size={16} />
+          </DecisionCardIcon>
           <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-info">
+            <p className="text-xs font-medium text-primary">
               想跟你确认（不阻塞 · 我已按默认继续）
             </p>
             <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
@@ -42,9 +31,8 @@ export function NonBlockingAskCard({ ask }: { ask: NonBlockingAskDisplay }) {
           </div>
         </div>
 
-        {/* 我先按这些默认推进：the CEO's stated assumptions (read-only). */}
         {ask.assumptions.length > 0 && (
-          <div className="rounded-lg border-l-2 border-info/30 bg-muted/40 px-3 py-2">
+          <div className="rounded-lg border-l-2 border-primary/30 bg-muted/40 px-3 py-2">
             <p className="text-xs font-medium text-muted-foreground">
               我先按这些默认推进
             </p>
@@ -63,7 +51,6 @@ export function NonBlockingAskCard({ ask }: { ask: NonBlockingAskDisplay }) {
           </div>
         )}
 
-        {/* Each question's options as quick-fill chips (回填, not a gating form). */}
         {ask.questions.map((q) => {
           const chips =
             q.kind === "text" ? (q.default ? [q.default] : []) : q.options;
@@ -77,19 +64,19 @@ export function NonBlockingAskCard({ ask }: { ask: NonBlockingAskDisplay }) {
                   {chips.map((opt) => {
                     const isDefault = !!q.default && opt === q.default;
                     return (
-                      <button
+                      <Button
                         key={opt}
-                        type="button"
+                        variant="neutral"
+                        className="h-auto border border-border bg-card py-1 text-muted-foreground hover:border-primary/40"
                         onClick={() => pick(q.prompt, opt)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-info/40 hover:bg-accent hover:text-foreground"
                       >
                         <span className="whitespace-pre-wrap">{opt}</span>
                         {isDefault && (
-                          <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                          <Badge tone="muted" pill className="ml-1">
                             默认
-                          </span>
+                          </Badge>
                         )}
-                      </button>
+                      </Button>
                     );
                   })}
                 </div>
@@ -98,18 +85,17 @@ export function NonBlockingAskCard({ ask }: { ask: NonBlockingAskDisplay }) {
           );
         })}
 
-        {/* 风格预设 (visual products) — also quick-fill chips. */}
         {ask.styleOptions.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {ask.styleOptions.map((s) => (
-              <button
+              <Button
                 key={s.id}
-                type="button"
+                variant="neutral"
+                className="border border-border bg-card text-muted-foreground hover:border-primary/40"
                 onClick={() => pick("风格", s.label)}
-                className="rounded-lg border border-border bg-card px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-info/40 hover:bg-accent hover:text-foreground"
               >
                 {s.label}
-              </button>
+              </Button>
             ))}
           </div>
         )}
@@ -119,6 +105,6 @@ export function NonBlockingAskCard({ ask }: { ask: NonBlockingAskDisplay }) {
           点选项即回填到下方输入框，可改后发送；不回复我就按默认继续。
         </p>
       </div>
-    </div>
+    </DecisionCard>
   );
 }

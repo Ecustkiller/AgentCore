@@ -1,3 +1,4 @@
+import { IconButton } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
 import { useIsDark } from "@/lib/useIsDark";
 import {
@@ -168,15 +169,9 @@ function ToolbarButton({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-    >
+    <IconButton onClick={onClick} aria-label={label} title={label}>
       {children}
-    </button>
+    </IconButton>
   );
 }
 

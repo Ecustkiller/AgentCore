@@ -1,5 +1,17 @@
-// @agentcore/design-tokens — 占位（M0）。
-//
-// 后续把 desktop globals.css 中的 OKLCH 语义 token 提取到此处，两端共享，
-// 配合 color-tokens.mdc（两端只用语义 token，禁硬编码）。
-export const DESIGN_TOKENS_PLACEHOLDER = true;
+/** Brand hue invariant (color-tokens.mdc). */
+export const BRAND_HUE = 255;
+
+/** Semantic token names shared across desktop Tailwind + mobile usage CSS. */
+export const SEMANTIC_TOKEN_NAMES = [
+  "background",
+  "foreground",
+  "primary",
+  "success",
+  "warning",
+  "destructive",
+  "muted",
+  "accent",
+  "border",
+] as const;
+
+export type SemanticTokenName = (typeof SEMANTIC_TOKEN_NAMES)[number];

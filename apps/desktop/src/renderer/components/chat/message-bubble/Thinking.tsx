@@ -1,4 +1,5 @@
 import { Markdown } from "@/components/chat/Markdown";
+import { Button } from "@/components/ui";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -40,10 +41,10 @@ export function ThinkingHeader({
   onToggle: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onToggle}
-      className="flex w-full items-center gap-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      className="h-auto w-full justify-start gap-2 px-0 py-0 text-xs font-normal text-muted-foreground hover:text-foreground"
     >
       {isStreaming ? (
         <>
@@ -60,7 +61,7 @@ export function ThinkingHeader({
           <span>{doneLabel}</span>
         </>
       )}
-    </button>
+    </Button>
   );
 }
 

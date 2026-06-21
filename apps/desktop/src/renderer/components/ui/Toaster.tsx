@@ -31,7 +31,7 @@ export function Toaster() {
         classNames: {
           description: "text-muted-foreground!",
           actionButton:
-            "bg-primary! text-primary-foreground! rounded-md! font-medium!",
+            "bg-primary! text-primary-foreground! rounded-lg! font-medium!",
         },
       }}
     />

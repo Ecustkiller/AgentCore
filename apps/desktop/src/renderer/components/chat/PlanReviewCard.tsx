@@ -1,3 +1,10 @@
+import {
+  Badge,
+  Button,
+  DecisionCard,
+  DecisionCardIcon,
+  Textarea,
+} from "@/components/ui";
 import { notifyError } from "@/lib/toast";
 import {
   type PlanReviewUserDecision,
@@ -75,12 +82,9 @@ function PendingPreview({ review }: { review: PlanReviewDisplay }) {
       <ArrowRight size={13} className="shrink-0 text-muted-foreground" />
       <span className="text-xs text-muted-foreground">继续后将运行</span>
       {review.pending.map((n) => (
-        <span
-          key={n.run_id}
-          className="rounded-md border border-border bg-muted/50 px-1.5 py-0.5 text-xs text-foreground"
-        >
+        <Badge key={n.run_id} tone="muted">
           {n.role}
-        </span>
+        </Badge>
       ))}
     </div>
   );
@@ -106,8 +110,6 @@ function PendingPlanReview({
     setSubmitting(decision);
     decidePlanReview(conversationId, review.id, decision, note.trim()).catch(
       (err) => {
-        // 瞬时失败（非 404）重新点亮卡片让用户重试；仅靠复活太隐蔽，故 toast（同
-        // ApprovalPrompt）。404/stale 已在服务层 settle、不会抛到这里。
         notifyError(err, "提交失败");
         setSubmitting(null);
       },
@@ -125,9 +127,11 @@ function PendingPlanReview({
     );
 
   return (
-    <div className="animate-task-card-enter mt-2 rounded-xl border border-warning/40 bg-warning/10 p-3">
+    <DecisionCard tone="warning" animate>
       <div className="flex items-start gap-2">
-        <GitBranch size={16} className="mt-0.5 shrink-0 text-warning" />
+        <DecisionCardIcon tone="warning">
+          <GitBranch size={16} />
+        </DecisionCardIcon>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-warning">
             执行已暂停 · 待你放行下一步
@@ -138,41 +142,44 @@ function PendingPlanReview({
           <ReviewedSteps review={review} />
           <PendingPreview review={review} />
 
-          <textarea
+          <Textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
             disabled={busy}
             rows={2}
             placeholder="可选 · 备注（调整时作为对下游的指示；停止时作为收尾备注）"
-            className="mt-2 w-full resize-none rounded-lg border border-border bg-card/70 px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:border-warning/60 focus:outline-none disabled:opacity-40"
+            className="mt-2 w-full border-border bg-card/70 focus:border-warning/60"
           />
         </div>
       </div>
 
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-6">
-        <DecisionButton
+        <Button
+          variant="primary"
           icon={spinnerOr("continue", <Check size={13} />)}
-          label="继续"
-          tone="primary"
           disabled={busy}
           onClick={() => send("continue")}
-        />
-        <DecisionButton
+        >
+          继续
+        </Button>
+        <Button
+          variant="neutral"
           icon={spinnerOr("adjust", <Pencil size={13} />)}
-          label="调整"
-          tone="neutral"
           disabled={busy || !note.trim()}
           onClick={() => send("adjust")}
-        />
-        <DecisionButton
+        >
+          调整
+        </Button>
+        <Button
+          variant="danger"
           icon={spinnerOr("stop", <OctagonX size={13} />)}
-          label="停止"
-          tone="danger"
           disabled={busy}
           onClick={() => send("stop")}
-        />
+        >
+          停止
+        </Button>
       </div>
-    </div>
+    </DecisionCard>
   );
 }
 
@@ -180,12 +187,11 @@ function PendingPlanReview({
  * without an answer): shown as a record, not actionable. */
 function DormantPlanReview({ review }: { review: PlanReviewDisplay }) {
   return (
-    <div className="mt-2 rounded-xl border border-border bg-muted/40 p-3">
+    <DecisionCard tone="neutral">
       <div className="flex items-start gap-2">
-        <GitBranch
-          size={16}
-          className="mt-0.5 shrink-0 text-muted-foreground"
-        />
+        <DecisionCardIcon tone="neutral">
+          <GitBranch size={16} />
+        </DecisionCardIcon>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-muted-foreground">
             曾在此暂停过目（本回合已结束）
@@ -193,7 +199,7 @@ function DormantPlanReview({ review }: { review: PlanReviewDisplay }) {
           <ReviewedSteps review={review} />
         </div>
       </div>
-    </div>
+    </DecisionCard>
   );
 }
 
@@ -210,7 +216,7 @@ function ResolvedPlanReview({ review }: { review: PlanReviewDisplay }) {
   }[review.decision ?? "timeout"];
 
   return (
-    <div className="mt-2 rounded-xl border border-border bg-card/60 p-3">
+    <DecisionCard tone="neutral" className="bg-card/60">
       <div className="flex items-start gap-2">
         <span className="mt-0.5 shrink-0 text-muted-foreground">
           {meta.icon}
@@ -227,38 +233,6 @@ function ResolvedPlanReview({ review }: { review: PlanReviewDisplay }) {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function DecisionButton({
-  icon,
-  label,
-  tone,
-  disabled,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  tone: "primary" | "neutral" | "danger";
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  const toneClass = {
-    primary: "bg-primary text-primary-foreground hover:bg-primary/90",
-    neutral: "text-muted-foreground hover:bg-accent hover:text-foreground",
-    danger: "text-destructive hover:bg-destructive/10",
-  }[tone];
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-xs font-medium disabled:opacity-40 ${toneClass}`}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
+    </DecisionCard>
   );
 }

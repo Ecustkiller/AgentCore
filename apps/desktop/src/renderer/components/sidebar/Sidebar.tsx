@@ -1,3 +1,4 @@
+import { SurfaceRowButton } from "@/components/ui";
 import { startNewConversation } from "@/lib/newConversation";
 import { useUnreadTotal } from "@/stores/messaging";
 import { useSidebarStore } from "@/stores/sidebar";
@@ -6,6 +7,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   RecentConversations,
   ViewAllConversations,
+  ViewArchivedConversations,
 } from "./RecentConversations";
 import { UserMenu } from "./UserMenu";
 import { WorkspaceGroups } from "./WorkspaceGroups";
@@ -47,19 +49,15 @@ export function Sidebar() {
           const active = isNavActive(item.route);
           const showBadge = item.route === "/messages" && unread > 0;
           return (
-            <button
+            <SurfaceRowButton
               key={item.route}
-              type="button"
+              active={active}
               onClick={() =>
                 item.route === "/"
                   ? handleNewConversation()
                   : navigate(item.route)
               }
-              className={`relative flex h-9 w-full items-center gap-3 rounded-lg text-base ${collapsed ? "justify-center px-0" : "px-3"} ${
-                active
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              }`}
+              className={`relative text-base ${collapsed ? "justify-center px-0" : ""}`}
             >
               <item.icon size={18} className="shrink-0" />
               {!collapsed && (
@@ -76,7 +74,7 @@ export function Sidebar() {
                     {unread > 99 ? "99+" : unread}
                   </span>
                 ))}
-            </button>
+            </SurfaceRowButton>
           );
         })}
       </nav>
@@ -91,6 +89,7 @@ export function Sidebar() {
           <>
             <WorkspaceGroups />
             <RecentConversations />
+            <ViewArchivedConversations />
             <ViewAllConversations />
           </>
         )}

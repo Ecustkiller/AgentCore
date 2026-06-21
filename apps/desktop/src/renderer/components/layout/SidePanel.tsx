@@ -1,4 +1,5 @@
 import { RunDetailBody } from "@/components/chat/detail/RunDetailBody";
+import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
 import { useExecutionStore } from "@/stores/execution";
@@ -75,11 +76,11 @@ export function SidePanel() {
       className="relative flex shrink-0 flex-col border-l border-border bg-card"
       style={{ width }}
     >
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         aria-label="拖拽调整面板宽度"
         onPointerDown={onResizeStart}
-        className="absolute left-0 top-0 z-10 h-full w-1 cursor-col-resize bg-transparent hover:bg-primary/40"
+        className="absolute left-0 top-0 z-10 h-full w-1 min-w-0 cursor-col-resize rounded-none bg-transparent p-0 hover:bg-primary/40"
       />
 
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border pl-2 pr-1">
@@ -99,14 +100,9 @@ export function SidePanel() {
           ))}
         </div>
         <SimpleTooltip label="关闭面板 (Ctrl/Cmd+I)">
-          <button
-            type="button"
-            onClick={closePanel}
-            aria-label="关闭面板"
-            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
+          <IconButton onClick={closePanel} aria-label="关闭面板">
             <X size={15} />
-          </button>
+          </IconButton>
         </SimpleTooltip>
       </div>
 
@@ -141,18 +137,18 @@ function WorkspaceTab({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
-      className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm font-medium transition-colors ${
+      className={`shrink-0 gap-1.5 px-2.5 py-1 text-sm font-medium ${
         active
           ? "bg-accent text-foreground"
           : "text-muted-foreground hover:bg-accent/50"
       }`}
+      icon={<FolderOpen size={14} />}
     >
-      <FolderOpen size={14} />
       工作区
-    </button>
+    </Button>
   );
 }
 
@@ -177,21 +173,20 @@ export function RunTabChip({
           : "text-muted-foreground hover:bg-accent/50"
       }`}
     >
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={onSelect}
-        className="max-w-[120px] truncate py-1 pl-2.5 pr-1 text-sm"
+        className="h-auto max-w-[120px] truncate rounded-none py-1 pl-2.5 pr-1 text-sm font-normal"
       >
         {tab.title}
-      </button>
-      <button
-        type="button"
+      </Button>
+      <IconButton
         onClick={onClose}
         aria-label={`关闭 ${tab.title}`}
-        className="mr-1 flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover/tab:opacity-100"
+        className="mr-1 size-5 opacity-0 group-hover/tab:opacity-100"
       >
         <X size={12} />
-      </button>
+      </IconButton>
     </div>
   );
 }

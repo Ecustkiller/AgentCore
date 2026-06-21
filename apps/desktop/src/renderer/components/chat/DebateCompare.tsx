@@ -1,4 +1,19 @@
 import { Markdown } from "@/components/chat/Markdown";
+import { Button } from "@/components/ui";
+import {
+  brandPanelPrimary,
+  confidenceLabel,
+  confidencePill,
+  countPillMuted,
+  roundLabelPill,
+  runStatusDot,
+  statusAccentText,
+  statusPillInline,
+  surfaceMutedPanel,
+  surfaceMutedPanelLight,
+  textLinkPrimary,
+  verdictTogglePill,
+} from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   type DebateRound,
@@ -113,29 +128,27 @@ function DebateProducts({
 
   return (
     <div className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+        className="h-auto w-full justify-start rounded-none px-4 py-3 hover:bg-transparent"
       >
-        <Icon size={15} className="shrink-0 text-info" />
-        <span className="flex-1 text-sm font-medium text-foreground">
-          辩论结论
-        </span>
-        <span className="shrink-0 rounded-full bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-          {formLabel}
-        </span>
-        <SimpleTooltip label="辩论收场原因">
-          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-            {stopLabel}
+        <span className="flex w-full items-center gap-2 text-left">
+          <Icon size={15} className={`shrink-0 ${statusAccentText.primary}`} />
+          <span className="flex-1 text-sm font-medium text-foreground">
+            辩论结论
           </span>
-        </SimpleTooltip>
-        {expanded ? (
-          <ChevronUp size={15} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
-        )}
-      </button>
+          <span className={statusPillInline.primary}>{formLabel}</span>
+          <SimpleTooltip label="辩论收场原因">
+            <span className={countPillMuted}>{stopLabel}</span>
+          </SimpleTooltip>
+          {expanded ? (
+            <ChevronUp size={15} className="shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
+          )}
+        </span>
+      </Button>
 
       {expanded && (
         <div className="space-y-4 border-t border-border p-4">
@@ -181,9 +194,9 @@ function DebateTopicHeader({
     (r) => r.id === debate.moderator_run_id,
   );
   return (
-    <div className="rounded-lg border border-border bg-muted/30 p-3">
+    <div className={`${surfaceMutedPanel} p-3`}>
       <div className="flex items-start gap-2">
-        <Target size={14} className="mt-0.5 shrink-0 text-info" />
+        <Target size={14} className={`mt-0.5 shrink-0 ${statusAccentText.primary}`} />
         <div className="min-w-0 flex-1">
           <span className="text-xs text-muted-foreground">辩题</span>
           <p className="mt-0.5 text-sm font-medium text-foreground">
@@ -192,25 +205,28 @@ function DebateTopicHeader({
         </div>
       </div>
       {moderatorRun && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => showRunDetail(messageId, moderatorRun.id, "主持人")}
-          className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-info hover:underline"
+          className={`mt-2 h-auto px-0 py-0 ${textLinkPrimary} hover:bg-transparent`}
+          icon={<Gavel size={12} />}
         >
-          <Gavel size={12} />
           主持人裁决过程
-        </button>
+        </Button>
       )}
     </div>
   );
 }
 
 /** 置信度 → label + 配色 token (a classification, not a run-status color). */
-const CONFIDENCE_META: Record<string, { label: string; cls: string }> = {
-  high: { label: "高", cls: "bg-success/10 text-success" },
-  medium: { label: "中", cls: "bg-warning/10 text-warning" },
-  low: { label: "低", cls: "bg-muted text-muted-foreground" },
-};
+const CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
+type ConfidenceLevel = (typeof CONFIDENCE_LEVELS)[number];
+
+function confidenceLevel(raw: string): ConfidenceLevel {
+  return CONFIDENCE_LEVELS.includes(raw as ConfidenceLevel)
+    ? (raw as ConfidenceLevel)
+    : "medium";
+}
 
 /**
  * 决策简报 (结论卡): the moderator's verdict at a glance — 倾向 + 置信 up top, then
@@ -224,18 +240,18 @@ function BriefCard({
   brief: DebateBriefInfo;
   sides: DebateSideInfo[];
 }) {
-  const conf = CONFIDENCE_META[brief.confidence] ?? CONFIDENCE_META.medium;
+  const level = confidenceLevel(brief.confidence);
   return (
-    <section className="space-y-3 rounded-lg border border-info/30 bg-info/5 p-4">
+    <section className={brandPanelPrimary}>
       <div className="flex items-start gap-2">
-        <Scale size={16} className="mt-0.5 shrink-0 text-info" />
+        <Scale size={16} className={`mt-0.5 shrink-0 ${statusAccentText.primary}`} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground">结论倾向</span>
             <span
-              className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${conf.cls}`}
+              className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${confidencePill[level]}`}
             >
-              置信 {conf.label}
+              置信 {confidenceLabel[level]}
             </span>
           </div>
           <p className="mt-0.5 text-sm font-semibold text-foreground">
@@ -258,7 +274,9 @@ function BriefCard({
               key={s.key}
               className="rounded-lg border border-border bg-card p-2.5"
             >
-              <span className="text-xs font-medium text-info">{s.name}</span>
+              <span className={`text-xs font-medium ${statusAccentText.primary}`}>
+                {s.name}
+              </span>
               <p className="mt-1 text-sm text-foreground">
                 {brief.strongest_points[s.key] ?? "—"}
               </p>
@@ -275,7 +293,7 @@ function BriefCard({
       )}
 
       <BriefField
-        icon={<Lightbulb size={14} className="text-warning" />}
+        icon={<Lightbulb size={14} className={statusAccentText.warning} />}
         label="建议"
       >
         <p className="text-sm text-foreground">{brief.recommendation}</p>
@@ -407,14 +425,14 @@ function RoundBlock({
         )}
 
         {round.sides.length > 0 && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             onClick={() => setOpen((v) => !v)}
-            className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-info hover:underline"
+            className={`mt-2 h-auto px-0 py-0 ${textLinkPrimary} hover:bg-transparent`}
+            icon={open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           >
-            {open ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             {open ? "收起各方发言" : `展开各方发言（${round.sides.length}）`}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -444,22 +462,14 @@ function RoundBlock({
 /** 主持人对一轮的裁判 (收敛判定) as small pills: 交锋 / 新论据 / 收敛. */
 function VerdictBadges({ verdict }: { verdict: DebateRoundInfo["verdict"] }) {
   const pill = (on: boolean, onText: string, offText: string) => (
-    <span
-      className={`rounded-full px-1.5 py-0.5 text-xs ${
-        on ? "bg-info/10 text-info" : "bg-muted text-muted-foreground"
-      }`}
-    >
-      {on ? onText : offText}
-    </span>
+    <span className={verdictTogglePill(on)}>{on ? onText : offText}</span>
   );
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
       {pill(verdict.real_clash, "有交锋", "各说各话")}
       {pill(verdict.new_arguments, "有新论据", "无新论据")}
       {verdict.converged && (
-        <span className="rounded-full bg-success/10 px-1.5 py-0.5 text-xs text-success">
-          已收敛
-        </span>
+        <span className={statusPillInline.success}>已收敛</span>
       )}
     </div>
   );
@@ -486,21 +496,26 @@ function LiveDebateGroups({
 
   return (
     <div className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+        className="h-auto w-full justify-start rounded-none px-4 py-3 hover:bg-transparent"
       >
-        <Columns2 size={15} className="shrink-0 text-info" />
-        <span className="flex-1 text-sm font-medium text-foreground">
-          辩论对比
+        <span className="flex w-full items-center gap-2 text-left">
+          <Columns2
+            size={15}
+            className={`shrink-0 ${statusAccentText.primary}`}
+          />
+          <span className="flex-1 text-sm font-medium text-foreground">
+            辩论对比
+          </span>
+          {expanded ? (
+            <ChevronUp size={15} className="shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
+          )}
         </span>
-        {expanded ? (
-          <ChevronUp size={15} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
-        )}
-      </button>
+      </Button>
 
       {expanded && (
         <div className="space-y-4 border-t border-border p-4">
@@ -575,21 +590,23 @@ function LiveMultiSideDebate({
 
   return (
     <div className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+        className="h-auto w-full justify-start rounded-none px-4 py-3 hover:bg-transparent"
       >
-        <Users size={15} className="shrink-0 text-info" />
-        <span className="flex-1 text-sm font-medium text-foreground">
-          多方观点
+        <span className="flex w-full items-center gap-2 text-left">
+          <Users size={15} className={`shrink-0 ${statusAccentText.primary}`} />
+          <span className="flex-1 text-sm font-medium text-foreground">
+            多方观点
+          </span>
+          {expanded ? (
+            <ChevronUp size={15} className="shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
+          )}
         </span>
-        {expanded ? (
-          <ChevronUp size={15} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
-        )}
-      </button>
+      </Button>
 
       {expanded && (
         <div className="space-y-4 border-t border-border p-4">
@@ -601,9 +618,7 @@ function LiveMultiSideDebate({
               <div key={roundNo} className="space-y-1.5">
                 {/* 焦点头：主持人发言前先报本轮焦点（无叙事则裸轮号）。 */}
                 <div className="flex flex-wrap items-baseline gap-2">
-                  <span className="inline-block rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-                    第 {roundNo} 轮
-                  </span>
+                  <span className={roundLabelPill}>第 {roundNo} 轮</span>
                   {info?.focus && (
                     <span className="text-xs font-medium text-foreground">
                       {info.focus}
@@ -616,7 +631,7 @@ function LiveMultiSideDebate({
                     {runs.map((run) => (
                       <div
                         key={run.id}
-                        className="min-w-0 overflow-hidden rounded-lg border border-border bg-muted/30 p-3"
+                        className={`min-w-0 overflow-hidden ${surfaceMutedPanel} p-3`}
                       >
                         <OutputCell
                           run={run}
@@ -629,7 +644,7 @@ function LiveMultiSideDebate({
                 )}
                 {/* 主持人小结 + 裁判：发言后补上（verdict=null = 该轮仍在进行）。 */}
                 {info && (info.summary || info.verdict) && (
-                  <div className="rounded-lg border border-border bg-muted/20 p-2.5">
+                  <div className={`${surfaceMutedPanelLight} p-2.5`}>
                     {info.summary && (
                       <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
                         {info.summary}
@@ -661,9 +676,7 @@ function RoundRow({
 }) {
   return (
     <div className="space-y-1.5">
-      <span className="inline-block rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
-        第 {round.round} 轮
-      </span>
+      <span className={roundLabelPill}>第 {round.round} 轮</span>
       <div className="grid grid-cols-2 gap-3">
         <SideColumn
           side="pro"
@@ -696,9 +709,9 @@ function SideColumn({
   messageId: string;
 }) {
   return (
-    <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-muted/30">
+    <div className={`flex min-w-0 flex-col overflow-hidden ${surfaceMutedPanel}`}>
       <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
-        <span className="rounded-full bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
+        <span className={statusPillInline.primary}>
           {STANCE_META[side].label}
         </span>
       </div>
@@ -743,20 +756,22 @@ function OutputCell({
   return (
     <div className="min-w-0">
       <SimpleTooltip label="查看完整产出">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => showRunDetail(messageId, run.id, role)}
-          className="group/cell mb-1.5 flex w-full items-center gap-1.5 text-left"
+          className="group/cell mb-1.5 h-auto w-full justify-start gap-1.5 px-0 py-0 hover:bg-transparent"
         >
-          <StatusDot status={run.status} />
-          <span className="flex-1 truncate text-xs font-medium text-foreground">
-            {role}
+          <span className="flex w-full items-center gap-1.5 text-left">
+            <StatusDot status={run.status} />
+            <span className="flex-1 truncate text-xs font-medium text-foreground">
+              {role}
+            </span>
+            <ChevronRight
+              size={13}
+              className="shrink-0 text-muted-foreground/50 group-hover/cell:text-muted-foreground"
+            />
           </span>
-          <ChevronRight
-            size={13}
-            className="shrink-0 text-muted-foreground/50 group-hover/cell:text-muted-foreground"
-          />
-        </button>
+        </Button>
       </SimpleTooltip>
       {output ? (
         <div className="max-h-96 overflow-y-auto text-sm">
@@ -777,14 +792,7 @@ function placeholder(run: RunNode): string {
   return "（暂无输出）";
 }
 
-const STATUS_DOT: Record<RunNode["status"], string> = {
-  pending: "bg-muted-foreground/30",
-  ready: "bg-muted-foreground/30",
-  running: "bg-primary",
-  completed: "bg-success",
-  failed: "bg-destructive",
-  cancelled: "bg-muted-foreground/30",
-};
+const STATUS_DOT = runStatusDot;
 
 function StatusDot({ status }: { status: RunNode["status"] }) {
   return (

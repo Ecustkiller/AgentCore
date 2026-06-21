@@ -13,7 +13,7 @@ export function InlineRow({
 }) {
   return (
     <div
-      className="flex items-center gap-1.5 rounded-md pr-1 text-xs"
+      className="flex items-center gap-1.5 rounded-lg pr-1 text-xs"
       style={{ paddingLeft: indent }}
     >
       <span className="w-[13px] shrink-0" aria-hidden="true" />

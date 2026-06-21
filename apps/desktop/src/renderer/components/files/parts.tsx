@@ -1,3 +1,4 @@
+import { Button, IconButton as UiIconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { Loader2 } from "lucide-react";
 
@@ -22,14 +23,13 @@ export function IconButton({
 }) {
   return (
     <SimpleTooltip label={title}>
-      <button
-        type="button"
+      <UiIconButton
         onClick={onClick}
         disabled={spinning || disabled}
-        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
+        aria-label={title}
       >
         {spinning ? <Loader2 size={14} className="animate-spin" /> : children}
-      </button>
+      </UiIconButton>
     </SimpleTooltip>
   );
 }
@@ -44,13 +44,9 @@ export function InlineError({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
       <p className="text-xs text-muted-foreground">加载失败</p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent"
-      >
+      <Button variant="neutral" onClick={onRetry}>
         重试
-      </button>
+      </Button>
     </div>
   );
 }

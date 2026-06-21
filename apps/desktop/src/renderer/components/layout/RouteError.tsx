@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { AlertTriangle, Home, RotateCw } from "lucide-react";
 import { useEffect } from "react";
 import {
@@ -67,22 +68,21 @@ export function RouteError() {
         <p className="max-w-sm text-sm text-muted-foreground">{detail}</p>
       </div>
       <div className="flex items-center gap-2">
-        <button
-          type="button"
+        <Button
+          size="md"
+          icon={<Home size={15} />}
           onClick={() => navigate("/")}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
-          <Home size={15} />
           回到对话
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          variant="neutral"
+          size="md"
+          icon={<RotateCw size={15} />}
           onClick={() => window.location.reload()}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium text-foreground hover:bg-accent"
         >
-          <RotateCw size={15} />
           重新加载
-        </button>
+        </Button>
       </div>
       {/* Dev-only crash detail: the message + JS stack of whatever threw, so an
           intermittent render error is diagnosable straight from the screen. */}

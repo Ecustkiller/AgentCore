@@ -1,3 +1,4 @@
+import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { Folder, MessageSquare, Paperclip, X } from "lucide-react";
 import type { PendingAttachment } from "./composerAttachments";
@@ -42,14 +43,13 @@ export function AttachmentChips({
                   : "已截断"}
             </span>
           )}
-          <button
-            type="button"
+          <IconButton
             onClick={() => onRemove(a.id)}
-            className="shrink-0 text-muted-foreground hover:text-foreground"
             aria-label="移除附件"
+            className="size-5 shrink-0"
           >
             <X size={12} />
-          </button>
+          </IconButton>
         </span>
       ))}
     </div>

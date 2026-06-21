@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import type { IndexedEntry } from "@/lib/fileIndex";
 import { File, Folder, FolderPlus, MessageSquare, Search } from "lucide-react";
 import { useEffect, useRef } from "react";
@@ -63,14 +64,14 @@ export function MentionMenu({
       {noRoots ? (
         <div className="px-3 py-4 text-center">
           <p className="text-sm text-muted-foreground">还没有授权目录</p>
-          <button
-            type="button"
+          <Button
+            variant="neutral"
             onClick={onAddRoot}
-            className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs text-accent-foreground hover:bg-accent/80"
+            className="mt-2 bg-accent text-accent-foreground hover:bg-accent/80"
+            icon={<FolderPlus size={14} />}
           >
-            <FolderPlus size={14} />
             添加目录
-          </button>
+          </Button>
         </div>
       ) : loading ? (
         <div className="px-3 py-4 text-center text-sm text-muted-foreground">
@@ -86,41 +87,43 @@ export function MentionMenu({
         <ul ref={listRef} className="max-h-64 overflow-y-auto py-1">
           {items.map((entry, i) => (
             <li key={`${entry.kind}:${entry.sourceId}:${entry.relPath}`}>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
                 onMouseDown={(e) => {
                   // mousedown 抢在 textarea blur 之前，避免菜单先收起。
                   e.preventDefault();
                   onSelect(entry);
                 }}
                 onMouseEnter={() => onHover(i)}
-                className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
+                className={`h-auto w-full justify-start gap-2 rounded-none px-3 py-1.5 text-sm font-normal ${
                   i === activeIndex
                     ? "bg-accent text-accent-foreground"
-                    : "text-foreground"
+                    : "text-foreground hover:bg-accent"
                 }`}
               >
-                {entry.kind === "dir" ? (
-                  <Folder
-                    size={14}
-                    className="shrink-0 text-muted-foreground"
-                  />
-                ) : entry.kind === "conversation" ? (
-                  <MessageSquare
-                    size={14}
-                    className="shrink-0 text-muted-foreground"
-                  />
-                ) : (
-                  <File size={14} className="shrink-0 text-muted-foreground" />
-                )}
-                <span className="shrink-0 truncate">
-                  {entry.name}
-                  {entry.kind === "dir" ? "/" : ""}
+                <span className="flex w-full items-center gap-2 text-left">
+                  {entry.kind === "dir" ? (
+                    <Folder
+                      size={14}
+                      className="shrink-0 text-muted-foreground"
+                    />
+                  ) : entry.kind === "conversation" ? (
+                    <MessageSquare
+                      size={14}
+                      className="shrink-0 text-muted-foreground"
+                    />
+                  ) : (
+                    <File size={14} className="shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="shrink-0 truncate">
+                    {entry.name}
+                    {entry.kind === "dir" ? "/" : ""}
+                  </span>
+                  <span className="ml-auto truncate text-xs text-muted-foreground">
+                    {entry.kind === "conversation" ? "对话" : entry.display}
+                  </span>
                 </span>
-                <span className="ml-auto truncate text-xs text-muted-foreground">
-                  {entry.kind === "conversation" ? "对话" : entry.display}
-                </span>
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

@@ -1,3 +1,4 @@
+import { Button, IconButton } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
 import {
   Check,
@@ -95,24 +96,23 @@ export function CodeBlock({
           )}
         </span>
         <span className="code-block-actions">
-          <button
-            type="button"
+          <IconButton
             onClick={() => setWrap((v) => !v)}
-            className="code-block-action"
+            className="code-block-action size-auto rounded-none p-0 hover:bg-transparent"
             aria-label={wrap ? "取消自动换行" : "自动换行"}
             aria-pressed={wrap}
           >
             <WrapText size={13} />
-          </button>
-          <button
-            type="button"
+          </IconButton>
+          <Button
+            variant="ghost"
             onClick={onCopy}
-            className="code-block-action"
+            className="code-block-action h-auto gap-1 px-0 py-0 hover:bg-transparent"
             aria-label="复制代码"
+            icon={copied ? <Check size={13} /> : <Copy size={13} />}
           >
-            {copied ? <Check size={13} /> : <Copy size={13} />}
-            <span>{copied ? "已复制" : "复制"}</span>
-          </button>
+            {copied ? "已复制" : "复制"}
+          </Button>
         </span>
       </div>
       <div
@@ -128,14 +128,14 @@ export function CodeBlock({
         <pre {...props}>{children}</pre>
       </div>
       {collapsible && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => setExpanded((v) => !v)}
-          className="code-block-expand"
+          className="code-block-expand h-auto hover:bg-transparent"
+          icon={expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
         >
-          {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           {expanded ? "收起" : `展开全部 ${lineCount} 行`}
-        </button>
+        </Button>
       )}
     </div>
   );

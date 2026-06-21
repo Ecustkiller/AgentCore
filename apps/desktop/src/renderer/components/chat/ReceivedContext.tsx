@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { formatCompact } from "@/lib/format";
 import type { ContextBlockWire } from "@/types/events";
 import { ChevronDown, ChevronRight, CornerDownRight } from "lucide-react";
@@ -57,23 +58,25 @@ export function ReceivedContextSection({
   if (visible.length === 0) return null;
   return (
     <section className="mb-4 last:mb-0">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5"
+        className="h-auto w-full justify-start gap-1.5 px-0 py-0 hover:bg-transparent"
       >
-        {expanded ? (
-          <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
-        )}
-        <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
-          收到的上下文
+        <span className="flex w-full items-center gap-1.5">
+          {expanded ? (
+            <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+          )}
+          <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
+            收到的上下文
+          </span>
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {visible.length} 段
+          </span>
         </span>
-        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-          {visible.length} 段
-        </span>
-      </button>
+      </Button>
 
       {expanded && (
         <div className="mt-2 space-y-1.5">
@@ -113,41 +116,43 @@ function ContextBlockCard({
   const peek = block.body.slice(0, 140);
   return (
     <div className="rounded-lg bg-muted px-2.5 py-1.5 text-xs">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 text-left"
+        className="h-auto w-full justify-start gap-2 px-0 py-0 hover:bg-transparent"
       >
-        {open ? (
-          <ChevronDown
-            size={12}
-            className="mt-0.5 shrink-0 self-start text-muted-foreground"
-          />
-        ) : (
-          <ChevronRight
-            size={12}
-            className="mt-0.5 shrink-0 self-start text-muted-foreground"
-          />
-        )}
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5">
-            <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
-              {meta.label}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-foreground">
-              {block.heading}
-            </span>
-          </span>
-          {!open && (
-            <span className="mt-0.5 block truncate text-muted-foreground/70">
-              {peek || meta.hint}
-            </span>
+        <span className="flex w-full items-center gap-2 text-left">
+          {open ? (
+            <ChevronDown
+              size={12}
+              className="mt-0.5 shrink-0 self-start text-muted-foreground"
+            />
+          ) : (
+            <ChevronRight
+              size={12}
+              className="mt-0.5 shrink-0 self-start text-muted-foreground"
+            />
           )}
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5">
+              <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-medium text-primary">
+                {meta.label}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-foreground">
+                {block.heading}
+              </span>
+            </span>
+            {!open && (
+              <span className="mt-0.5 block truncate text-muted-foreground/70">
+                {peek || meta.hint}
+              </span>
+            )}
+          </span>
+          <span className="shrink-0 tabular-nums text-muted-foreground/60">
+            {formatCompact(block.chars)} 字
+          </span>
         </span>
-        <span className="shrink-0 tabular-nums text-muted-foreground/60">
-          {formatCompact(block.chars)} 字
-        </span>
-      </button>
+      </Button>
 
       {open && (
         <div className="mt-1.5 space-y-1.5 pl-[18px]">
@@ -165,7 +170,7 @@ function ContextBlockCard({
                   </span>
                 )}
                 {block.truncated && (
-                  <span className="rounded bg-background px-1.5 py-0.5 text-amber-600 dark:text-amber-500">
+                  <span className="rounded-lg bg-background px-1.5 py-0.5 text-warning">
                     已截断
                   </span>
                 )}

@@ -3,6 +3,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  graphBadgeMuted,
+  graphBadgePrimary,
+  graphBadgePrimaryPlain,
+  graphBadgeWarning,
+  modelTierBadge,
+  statusPillInline,
+  statusPillSoft,
+} from "@/components/ui/tone-presets";
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import { formatCompact, formatDuration } from "@/lib/format";
 import {
@@ -110,10 +119,7 @@ interface AgentNodeData {
   [key: string]: unknown;
 }
 
-const TIER_BADGE_STYLES: Record<ModelTier, string> = {
-  strong: "bg-primary/10 text-primary",
-  fast: "bg-muted text-muted-foreground",
-};
+const TIER_BADGE_STYLES: Record<ModelTier, string> = modelTierBadge;
 
 // 1C 产物 chip caps: the compact face shows a couple, the roomier hover peek more.
 const FACE_ARTIFACT_CAP = 2;
@@ -335,7 +341,7 @@ export function AgentNode({ data }: NodeProps) {
                     (d.escalationRaised ?? 0) > 0) && (
                     <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                       {d.stance && (
-                        <span className="shrink-0 rounded-full bg-info/10 px-1.5 py-0.5 font-medium text-info">
+                        <span className={graphBadgePrimaryPlain}>
                           {STANCE_META[d.stance].label}
                         </span>
                       )}
@@ -349,14 +355,14 @@ export function AgentNode({ data }: NodeProps) {
                         </span>
                       )}
                       {d.isRevision && (
-                        <span className="flex shrink-0 items-center gap-1 rounded-full bg-info/10 px-1.5 py-0.5 font-medium text-info">
+                        <span className={graphBadgePrimary}>
                           <History size={10} />
                           修订 v{d.revision ?? 2}
                         </span>
                       )}
                       {d.revised && (
                         <span
-                          className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 font-medium text-muted-foreground"
+                          className={graphBadgeMuted}
                           title={revisedBadge(d.revised).hint}
                         >
                           <GitBranch size={10} />
@@ -376,7 +382,7 @@ export function AgentNode({ data }: NodeProps) {
                           );
                         })()}
                       {(d.escalationPending ?? 0) > 0 ? (
-                        <span className="flex shrink-0 items-center gap-1 rounded-full bg-warning/10 px-1.5 py-0.5 font-medium text-warning">
+                        <span className={graphBadgeWarning}>
                           <ArrowUp size={10} />
                           待你拍板
                           {(d.escalationPending ?? 0) > 1
@@ -385,7 +391,7 @@ export function AgentNode({ data }: NodeProps) {
                         </span>
                       ) : (
                         (d.escalationRaised ?? 0) > 0 && (
-                          <span className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">
+                          <span className={graphBadgeMuted}>
                             <ArrowUp size={10} />
                             上报
                             {(d.escalationRaised ?? 0) > 1
@@ -405,7 +411,7 @@ export function AgentNode({ data }: NodeProps) {
                   </span>
                 )}
                 {d.reasoningEffort === "max" && (
-                  <span className="flex shrink-0 items-center gap-0.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
+                  <span className={`flex shrink-0 items-center gap-0.5 ${statusPillInline.primary}`}>
                     <Sparkles size={10} />
                     深度
                   </span>
@@ -459,14 +465,14 @@ export function AgentNode({ data }: NodeProps) {
                     <span
                       key={p}
                       title={p}
-                      className="flex max-w-[120px] items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                      className="flex max-w-[120px] items-center gap-1 rounded-lg bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
                     >
                       <FileText size={11} className="shrink-0" />
                       <span className="truncate">{basename(p)}</span>
                     </span>
                   ))}
                   {artifacts.length > FACE_ARTIFACT_CAP && (
-                    <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                    <span className="shrink-0 rounded-lg bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                       +{artifacts.length - FACE_ARTIFACT_CAP}
                     </span>
                   )}
@@ -553,14 +559,14 @@ export function AgentNode({ data }: NodeProps) {
                       <span
                         key={p}
                         title={p}
-                        className="flex max-w-full items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-foreground"
+                        className="flex max-w-full items-center gap-1 rounded-lg bg-muted px-1.5 py-0.5 text-foreground"
                       >
                         <FileText size={11} className="shrink-0" />
                         <span className="truncate">{basename(p)}</span>
                       </span>
                     ))}
                     {artifacts.length > PEEK_ARTIFACT_CAP && (
-                      <span className="rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground">
+                      <span className="rounded-lg bg-muted px-1.5 py-0.5 text-muted-foreground">
                         +{artifacts.length - PEEK_ARTIFACT_CAP}
                       </span>
                     )}
@@ -640,13 +646,13 @@ function revisedBadge(kind: PlanRevisionKind): { label: string; hint: string } {
  * timeout folds in as 已放行 (the engine continued). */
 function checkpointBadge(c: RunCheckpoint): { label: string; cls: string } {
   if (c.status === "pending") {
-    return { label: "待放行", cls: "bg-warning/10 text-warning" };
+    return { label: "待放行", cls: statusPillSoft.warning };
   }
   if (c.decision === "stop") {
-    return { label: "已停止", cls: "bg-destructive/10 text-destructive" };
+    return { label: "已停止", cls: statusPillSoft.destructive };
   }
   if (c.decision === "adjust") {
-    return { label: "已调整", cls: "bg-muted text-muted-foreground" };
+    return { label: "已调整", cls: statusPillSoft.muted };
   }
-  return { label: "已放行", cls: "bg-muted text-muted-foreground" };
+  return { label: "已放行", cls: statusPillSoft.muted };
 }

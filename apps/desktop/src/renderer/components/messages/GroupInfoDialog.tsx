@@ -1,4 +1,5 @@
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Button, IconButton } from "@/components/ui";
 import { messagingErrorMessage } from "@/services/messaging";
 import { useAuthStore } from "@/stores/auth";
 import { useChatMembers, useMessagingStore } from "@/stores/messaging";
@@ -32,12 +33,12 @@ function Toggle({
   label: string;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       role="switch"
       aria-checked={on}
       onClick={onToggle}
-      className="flex w-full items-center justify-between rounded-lg px-1 py-2 text-sm hover:bg-accent/50"
+      className="h-auto w-full justify-between px-1 py-2 text-sm hover:bg-accent/50"
     >
       <span className="text-foreground">{label}</span>
       <span
@@ -51,7 +52,7 @@ function Toggle({
           }`}
         />
       </span>
-    </button>
+    </Button>
   );
 }
 
@@ -168,14 +169,13 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
           <div className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangle size={15} className="shrink-0" />
             <span className="min-w-0 flex-1">{modError}</span>
-            <button
-              type="button"
+            <IconButton
               onClick={() => setModError(null)}
               aria-label="关闭"
-              className="shrink-0 text-destructive/70 hover:text-destructive"
+              className="text-destructive/70 hover:bg-transparent hover:text-destructive"
             >
               <X size={14} />
-            </button>
+            </IconButton>
           </div>
         )}
 
@@ -209,14 +209,12 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
               className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <div className="mt-2 flex justify-end">
-              <button
-                type="button"
+              <Button
                 disabled={!announcement.trim() || posting}
                 onClick={() => void handleAnnounce()}
-                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
               >
                 {posting ? "发布中…" : "发布"}
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -260,50 +258,45 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
                   {canModerate &&
                     (confirmKickId === m.id ? (
                       <div className="flex shrink-0 items-center gap-1">
-                        <button
-                          type="button"
+                        <Button
+                          variant="neutral"
                           onClick={() => setConfirmKickId(null)}
-                          className="rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
                         >
                           取消
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          variant="destructive"
                           disabled={busyId === m.id}
                           onClick={() => void handleKick(m.id)}
-                          className="rounded-lg bg-destructive px-2 py-1 text-xs font-medium text-destructive-foreground hover:opacity-90 disabled:opacity-50"
                         >
                           移出
-                        </button>
+                        </Button>
                       </div>
                     ) : (
                       <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                        <button
-                          type="button"
+                        <IconButton
                           disabled={busyId === m.id}
                           onClick={() =>
                             void handleMute(m.id, !m.muted_by_admin)
                           }
                           aria-label={m.muted_by_admin ? "解除禁言" : "禁言"}
                           title={m.muted_by_admin ? "解除禁言" : "禁言"}
-                          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
                         >
                           {m.muted_by_admin ? (
                             <Mic size={14} />
                           ) : (
                             <MicOff size={14} />
                           )}
-                        </button>
-                        <button
-                          type="button"
+                        </IconButton>
+                        <IconButton
                           disabled={busyId === m.id}
                           onClick={() => setConfirmKickId(m.id)}
                           aria-label="移出群聊"
                           title="移出群聊"
-                          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                          className="hover:bg-destructive/10 hover:text-destructive"
                         >
                           <UserX size={14} />
-                        </button>
+                        </IconButton>
                       </div>
                     ))}
                 </li>
@@ -319,32 +312,31 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
                 退出后需重新邀请才能再加入
               </span>
               <div className="flex shrink-0 gap-2">
-                <button
-                  type="button"
+                <Button
+                  variant="neutral"
                   onClick={() => setConfirmingLeave(false)}
-                  className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
                   取消
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="disabled:opacity-50"
                   disabled={leaving}
                   onClick={() => void handleLeave()}
-                  className="rounded-lg bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground hover:opacity-90 disabled:opacity-50"
                 >
                   {leaving ? "退出中…" : "确认退出"}
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
-            <button
-              type="button"
+            <Button
+              variant="danger"
+              className="h-auto w-full py-2 text-sm"
+              icon={<LogOut size={16} />}
               onClick={() => setConfirmingLeave(true)}
-              className="flex w-full items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium text-destructive hover:bg-destructive/10"
             >
-              <LogOut size={16} />
               退出群聊
-            </button>
+            </Button>
           )}
         </div>
       </DialogContent>

@@ -1,5 +1,9 @@
 import { useApprovalStore } from "@/stores/approvals";
 import {
+  useBackgroundTasks,
+  useBackgroundTasksSync,
+} from "@/stores/backgroundTasks";
+import {
   useActiveError,
   useActiveGenerating,
   useActiveMessages,
@@ -40,10 +44,10 @@ import { TeamGraphFullscreen } from "./TeamGraphFullscreen";
 import { type TurnSummaryData, TurnSummaryNode } from "./TurnSummaryNode";
 
 /**
- * 对话级作战室画布（前端UX设计.md §6.1 · 持久累积 + LOD）. The opt-in second
+ * 对话级画布（前端UX设计.md §6.1 · 持久累积 + LOD）. The opt-in second
  * view {@link import("../../pages/ConversationPage")} renders in place of {@link
- * import("../chat/ChatView")} when the conversation's view mode is "canvas" (gated by
- * `graphPrimary`).
+ * import("../chat/ChatView")} when the conversation's view mode is "canvas" (画布
+ * 已毕业，无实验开关——入口恒显示、对话页默认聊天，前端UX设计.md §六）。
  *
  * 乙-1 单张持久画布: ONE pannable surface where every turn accumulates as a node, top
  * → bottom (视觉累积), with a minimap + camera (ReactFlow Controls). Identity
@@ -192,11 +196,11 @@ export function ConversationCanvas() {
   // The team turn whose full DAG is open in the on-demand overlay (全屏 deep work).
   const [overlayTurn, setOverlayTurn] = useState<string | null>(null);
 
-  // 图上指挥 (§6.2): pending boss decisions + 救火 surface in a right-docked 指挥台.
-  // Two scopes: the focused turn's (ask_user / plan_review / 工作者上报 / 救火行) and this
-  // conversation's level (approval / resume / transport-retry), which ChatView /
-  // InlineTeamGraph host but are unmounted in canvas mode, so they'd otherwise be
-  // invisible / unactionable here.
+  // 图上指挥 (§6.2): pending boss decisions + 救火 + 后台云端任务 surface in a right-
+  // docked 指挥台. Three scopes: the focused turn's (ask_user / plan_review / 工作者上报 /
+  // 救火行), this conversation's level (approval / resume / transport-retry), and its
+  // 后台云端任务 (handoff jobs) — all hosted by ChatView / InlineTeamGraph / MessageList,
+  // which are unmounted in canvas mode, so they'd otherwise be invisible here.
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const focusedItem = useMemo(
     () => turns.find((t) => t.id === effectiveFocus) ?? null,
@@ -218,6 +222,14 @@ export function ConversationCanvas() {
   );
   const pendingTotal = turnDecisions + approvalCount + resumeCount;
 
+  // 后台云端任务 (handoff jobs, 非阻塞 · 跨对话的另一类): chat mode runs this sync in
+  // MessageList, which is unmounted here — so drive it from the always-mounted canvas
+  // (it stays alive while the 指挥台 may be closed, so the count below can still
+  // surface the panel). Non-blocking, so it is kept OUT of pendingTotal (the 待你拍板
+  // decision badge / node chip) and only feeds the panel's auto-surface separately.
+  useBackgroundTasksSync(conversationId);
+  const backgroundCount = useBackgroundTasks(conversationId).length;
+
   // 救火: a conversation-level transport error (send / resume / regenerate drop) or
   // the focused turn's terminal failure also belongs on the 指挥台 (ChatView /
   // InlineTeamGraph are unmounted here, so their RetryBanner / 救火行 would vanish).
@@ -232,13 +244,15 @@ export function ConversationCanvas() {
   useEffect(() => {
     setPanelDismissed(false);
   }, [effectiveFocus]);
-  const actionable = pendingTotal + (firefighting ? 1 : 0);
+  const actionable = pendingTotal + (firefighting ? 1 : 0) + backgroundCount;
   const prevActionable = useRef(0);
   useEffect(() => {
     if (actionable > prevActionable.current) setPanelDismissed(false);
     prevActionable.current = actionable;
   }, [actionable]);
-  const panelOpen = (pendingTotal > 0 || firefighting) && !panelDismissed;
+  const panelOpen =
+    (pendingTotal > 0 || firefighting || backgroundCount > 0) &&
+    !panelDismissed;
 
   const nodes = useMemo<Node[]>(() => {
     const out: Node[] = [];
@@ -361,7 +375,7 @@ export function ConversationCanvas() {
             view / side-panel toggles (left-3 / right-3, top-2) clear the canvas. */}
         <div className="flex h-11 shrink-0 items-center border-b border-border pl-40 pr-12">
           <span className="truncate text-sm font-medium text-foreground">
-            作战室
+            画布
           </span>
           {turns.length > 0 && (
             <span className="ml-2 shrink-0 text-xs text-muted-foreground">
@@ -405,7 +419,7 @@ export function ConversationCanvas() {
                 />
                 <p className="text-sm text-muted-foreground">
                   还没有回合。在下方下达一个需要多 Agent 协作的任务，CEO
-                  组好队后这里会画出作战室。
+                  组好队后这里就会展开画布。
                 </p>
               </div>
             </div>
@@ -414,6 +428,7 @@ export function ConversationCanvas() {
         <CanvasCommandBar
           onDispatch={() => setDispatched(true)}
           waiting={dispatched && generating}
+          allowBackground
         />
       </div>
       {/* 图上指挥指挥台 (§6.2): pending boss decisions + 救火 (turn-level + conversation-

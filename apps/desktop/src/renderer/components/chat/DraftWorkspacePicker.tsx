@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import {
   Popover,
   PopoverContent,
@@ -148,16 +149,18 @@ export function DraftWorkspacePicker() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           aria-label="选择对话工作区"
           title="选择这条对话的工作区（文件夹）"
-          className="flex min-w-0 max-w-[160px] items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="h-auto min-w-0 max-w-[160px] justify-start gap-1.5 px-2 py-1 font-medium text-muted-foreground"
         >
-          {trigger.icon}
-          <span className="min-w-0 truncate">{trigger.label}</span>
-          <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
-        </button>
+          <span className="flex min-w-0 items-center gap-1.5">
+            {trigger.icon}
+            <span className="min-w-0 truncate">{trigger.label}</span>
+            <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
+          </span>
+        </Button>
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-64 p-0">
@@ -251,22 +254,24 @@ function PickerRow({
   disabled?: boolean;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
       disabled={disabled}
-      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
+      className="h-auto w-full justify-start gap-2 rounded-lg px-2.5 py-1.5 text-left font-medium disabled:opacity-50"
     >
-      <span className="shrink-0 text-muted-foreground">{icon}</span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate">{label}</span>
-        {hint && (
-          <span className="block truncate text-xs font-normal text-muted-foreground">
-            {hint}
-          </span>
-        )}
+      <span className="flex w-full items-center gap-2">
+        <span className="shrink-0 text-muted-foreground">{icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{label}</span>
+          {hint && (
+            <span className="block truncate text-xs font-normal text-muted-foreground">
+              {hint}
+            </span>
+          )}
+        </span>
+        {selected && <Check size={14} className="shrink-0 text-primary" />}
       </span>
-      {selected && <Check size={14} className="shrink-0 text-primary" />}
-    </button>
+    </Button>
   );
 }

@@ -1,3 +1,4 @@
+import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { GraphLayout } from "@/stores/graph";
 import { Maximize2 } from "lucide-react";
@@ -21,31 +22,25 @@ export function GraphToolbar({
     >
       {LAYOUT_OPTIONS.map((opt) => (
         <SimpleTooltip key={opt.kind} label={opt.label}>
-          <button
-            type="button"
+          <IconButton
             onClick={() => onLayoutKindChange(opt.kind)}
             aria-label={opt.label}
             aria-pressed={layoutKind === opt.kind}
-            className={`flex size-7 items-center justify-center rounded-lg ${
+            className={
               layoutKind === opt.kind
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-foreground"
-            }`}
+                ? "bg-accent text-foreground hover:bg-accent hover:text-foreground"
+                : undefined
+            }
           >
             {opt.icon}
-          </button>
+          </IconButton>
         </SimpleTooltip>
       ))}
       <div className="mx-0.5 h-5 w-px bg-border" />
       <SimpleTooltip label="适应画布 (F)">
-        <button
-          type="button"
-          onClick={onFitView}
-          aria-label="适应画布"
-          className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
+        <IconButton onClick={onFitView} aria-label="适应画布">
           <Maximize2 size={14} />
-        </button>
+        </IconButton>
       </SimpleTooltip>
     </div>
   );

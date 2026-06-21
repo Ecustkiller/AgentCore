@@ -1,5 +1,6 @@
 import { FilePreviewBody } from "@/components/files/FilePreviewBody";
-import { Centered, IconButton, InlineError } from "@/components/files/parts";
+import { Centered, InlineError } from "@/components/files/parts";
+import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { FilePreviewResult, FileSource } from "@/lib/fileSource";
 import { notifyActionError, notifyError } from "@/lib/toast";
@@ -142,13 +143,9 @@ export function FilePreviewView({
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-1 pr-1">
         <SimpleTooltip label="返回文件列表">
-          <button
-            type="button"
-            onClick={requestClose}
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
+          <IconButton onClick={requestClose} aria-label="返回文件列表">
             <ChevronLeft size={16} />
-          </button>
+          </IconButton>
         </SimpleTooltip>
         <FileText size={13} className="shrink-0 text-muted-foreground" />
         <SimpleTooltip label={path}>
@@ -159,54 +156,69 @@ export function FilePreviewView({
         </SimpleTooltip>
         {editing ? (
           <>
-            <button
-              type="button"
-              onClick={() => void onSave()}
+            <Button
+              className="shrink-0 disabled:opacity-60"
               disabled={saving}
-              className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+              onClick={() => void onSave()}
+              icon={
+                saving ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Save size={13} />
+                )
+              }
             >
-              {saving ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Save size={13} />
-              )}
               保存
-            </button>
-            <IconButton title="取消编辑" onClick={cancelEdit}>
-              <X size={14} />
-            </IconButton>
+            </Button>
+            <SimpleTooltip label="取消编辑">
+              <IconButton onClick={cancelEdit} aria-label="取消编辑">
+                <X size={14} />
+              </IconButton>
+            </SimpleTooltip>
           </>
         ) : (
           <>
             {canEdit && (
-              <IconButton title="编辑" onClick={startEdit}>
-                <Pencil size={14} />
-              </IconButton>
+              <SimpleTooltip label="编辑">
+                <IconButton onClick={startEdit} aria-label="编辑">
+                  <Pencil size={14} />
+                </IconButton>
+              </SimpleTooltip>
             )}
             {source.openWithOsDefaultApp && (
-              <IconButton
-                title="用默认程序打开"
-                onClick={() => void onOpenExternal()}
-              >
-                <ExternalLink size={14} />
-              </IconButton>
+              <SimpleTooltip label="用默认程序打开">
+                <IconButton
+                  onClick={() => void onOpenExternal()}
+                  aria-label="用默认程序打开"
+                >
+                  <ExternalLink size={14} />
+                </IconButton>
+              </SimpleTooltip>
             )}
             {source.revealInOsFileManager && (
-              <IconButton
-                title="在资源管理器中显示"
-                onClick={() => void onReveal()}
-              >
-                <FolderSearch size={14} />
-              </IconButton>
+              <SimpleTooltip label="在资源管理器中显示">
+                <IconButton
+                  onClick={() => void onReveal()}
+                  aria-label="在资源管理器中显示"
+                >
+                  <FolderSearch size={14} />
+                </IconButton>
+              </SimpleTooltip>
             )}
             {source.download && (
-              <IconButton
-                title="下载文件"
-                onClick={() => void onDownload()}
-                spinning={downloading}
-              >
-                <Download size={14} />
-              </IconButton>
+              <SimpleTooltip label="下载文件">
+                <IconButton
+                  disabled={downloading}
+                  onClick={() => void onDownload()}
+                  aria-label="下载文件"
+                >
+                  {downloading ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Download size={14} />
+                  )}
+                </IconButton>
+              </SimpleTooltip>
             )}
           </>
         )}
@@ -218,7 +230,7 @@ export function FilePreviewView({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             spellCheck={false}
-            className="block h-full w-full resize-none border-0 bg-transparent px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground outline-none"
+            className="block h-full w-full resize-none border-0 bg-transparent px-3 py-2 font-mono text-xs leading-relaxed text-foreground outline-none"
           />
         ) : error ? (
           <InlineError onRetry={() => void load()} />

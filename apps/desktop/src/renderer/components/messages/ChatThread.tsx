@@ -1,3 +1,4 @@
+import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useStickToBottom } from "@/lib/useStickToBottom";
 import { useAuthStore } from "@/stores/auth";
@@ -74,14 +75,14 @@ export function ChatThread({ chatId }: Props) {
         </span>
         {isGroup && (
           <SimpleTooltip label="群信息">
-            <button
-              type="button"
+            <IconButton
+              size="md"
               onClick={() => setInfoOpen(true)}
               aria-label="群信息"
-              className="ml-auto flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="ml-auto shrink-0"
             >
               <Info size={18} />
-            </button>
+            </IconButton>
           </SimpleTooltip>
         )}
       </div>
@@ -123,14 +124,14 @@ export function ChatThread({ chatId }: Props) {
         </div>
         {hasMessages && !atBottom && (
           <SimpleTooltip label="回到底部">
-            <button
-              type="button"
+            <IconButton
+              size="md"
               onClick={jumpToBottom}
               aria-label="回到底部"
-              className="absolute bottom-3 left-1/2 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-md transition-colors hover:text-foreground"
+              className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-border bg-card text-muted-foreground shadow-md hover:text-foreground"
             >
               <ArrowDown size={16} />
-            </button>
+            </IconButton>
           </SimpleTooltip>
         )}
       </div>

@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { remarkCitations } from "@/lib/remarkCitations";
 import type { Citation } from "@/types/events";
 import {
@@ -108,15 +109,15 @@ function CitationChip({
   onClick: () => void;
 }) {
   const chip = (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
       aria-label={`跳到来源 ${n}`}
-      className="mx-0.5 inline-flex items-center gap-0.5 rounded-full bg-primary/10 px-1.5 align-super text-xs font-medium leading-none text-primary transition-colors hover:bg-primary/20"
+      className="mx-0.5 inline-flex h-auto gap-0.5 rounded-full bg-primary/10 px-1.5 align-super text-xs font-medium leading-none text-primary hover:bg-primary/20"
     >
       <ChipFavicon site={citation?.site} />
       {n}
-    </button>
+    </Button>
   );
   if (!citation) return chip;
   return (
