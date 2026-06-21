@@ -27,6 +27,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # 再拷源码并安装项目自身（不含 dev 组：pytest/ruff 不进镜像）。
 COPY agentcore ./agentcore
 COPY alembic.ini ./
+COPY scripts ./scripts
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 

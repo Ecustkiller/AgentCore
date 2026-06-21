@@ -45,7 +45,7 @@ jobs:
 
       - name: Generate API types
         working-directory: apps/admin
-        run: npx --yes openapi-typescript@7.13.0 ../server/openapi.json -o src/types/api.generated.ts
+        run: pnpm gen:api
 
       - name: Build admin SPA
         working-directory: apps/admin

@@ -1,16 +1,19 @@
 name: Patch Office Tunnel
 
-# 为 office.fashitianxia.xyz 写入 Tunnel ingress → http://127.0.0.1:8090（admin Nginx）。
-# 保留现有 ingress 规则，仅 upsert office 条目（插在通配符 / catch-all 之前）。
-# 需 CLOUDFLARE_API_TOKEN 含 Account → Cloudflare Tunnel → Edit。
+# office.fashitianxia.xyz → http://127.0.0.1:8090
+# 优先 Cloudflare API（需 Token：Account → Cloudflare Tunnel → Edit）；
+# 失败则 SSH 改本机 cloudflared config（与 deploy-admin 一致）。
 on:
   workflow_dispatch:
 
 jobs:
-  tunnel:
+  tunnel-api:
     runs-on: ubuntu-latest
+    outputs:
+      ok: ${{ steps.patch.outputs.ok }}
     steps:
-      - name: Upsert office ingress on Cloudflare Tunnel
+      - name: Upsert office ingress via Cloudflare API
+        id: patch
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: e784e487f8ab57882d4b24d845ccfad1
@@ -22,71 +25,126 @@ jobs:
           api() { curl -sS "$@" "${auth[@]}"; }
 
           tunnels="$(api "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel")"
-          echo "$tunnels" | jq -e '.success' >/dev/null || {
-            echo "::error::Cannot list tunnels. Token needs Account → Cloudflare Tunnel → Edit."
+          if ! echo "$tunnels" | jq -e '.success' >/dev/null; then
+            echo "ok=false" >>"$GITHUB_OUTPUT"
+            echo "::warning::CF API cannot list tunnels (need Tunnel Edit). Will try SSH."
             echo "$tunnels" | jq .
-            exit 1
-          }
+            exit 0
+          fi
 
           tunnel_id=""
-          tunnel_name=""
           current_cfg=""
           while IFS= read -r row; do
             tid="$(echo "$row" | jq -r '.id')"
-            tname="$(echo "$row" | jq -r '.name')"
             cfg="$(api "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${tid}/configurations")"
             if echo "$cfg" | jq -e --arg h "$OFFICE_HOST" \
               '.result.config.ingress[]? | select(.hostname == $h or .hostname | test("fashitianxia\\.xyz"))' >/dev/null 2>&1; then
-              tunnel_id="$tid"
-              tunnel_name="$tname"
-              current_cfg="$cfg"
-              break
+              tunnel_id="$tid"; current_cfg="$cfg"; break
             fi
             if echo "$cfg" | jq -e '.result.config.ingress[]? | select(.hostname | test("\\*\\.fashitianxia\\.xyz"))' >/dev/null 2>&1; then
-              tunnel_id="$tid"
-              tunnel_name="$tname"
-              current_cfg="$cfg"
-              break
+              tunnel_id="$tid"; current_cfg="$cfg"; break
             fi
           done < <(echo "$tunnels" | jq -c '.result[]')
 
           if [[ -z "$tunnel_id" ]]; then
-            echo "::error::No tunnel with fashitianxia.xyz ingress found."
-            echo "$tunnels" | jq '.result[] | {id, name, status}'
-            exit 1
+            echo "ok=false" >>"$GITHUB_OUTPUT"
+            echo "::warning::No fashitianxia tunnel via API"
+            exit 0
           fi
-          echo "Using tunnel ${tunnel_name} (${tunnel_id})"
 
-          if [[ -z "$current_cfg" ]]; then
-            current_cfg="$(api "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${tunnel_id}/configurations")"
+          existing="$(echo "$current_cfg" | jq -r --arg h "$OFFICE_HOST" --arg s "$OFFICE_SERVICE" \
+            '.result.config.ingress[]? | select(.hostname == $h) | .service' | head -n1)"
+          if [[ "$existing" == "$OFFICE_SERVICE" ]]; then
+            echo "Tunnel ingress already correct (API)"
+            echo "ok=true" >>"$GITHUB_OUTPUT"
+            exit 0
           fi
-          echo "Current ingress:"
-          echo "$current_cfg" | jq '.result.config.ingress'
 
           new_body="$(echo "$current_cfg" | jq -c --arg h "$OFFICE_HOST" --arg s "$OFFICE_SERVICE" '
             .result.config as $cfg
             | ($cfg.ingress // []) as $ingress
             | ($ingress | map(select((.hostname // "") != $h))) as $filtered
             | ($filtered | to_entries | map(select(
-                (.value.hostname // "") == ""
-                or (.value.hostname | test("\\*"))
+                (.value.hostname // "") == "" or (.value.hostname | test("\\*"))
               )) | .[0].key // ($filtered | length)) as $insertAt
             | ($filtered[0:$insertAt]
               + [{hostname: $h, service: $s, originRequest: {}}]
               + $filtered[$insertAt:]) as $merged
             | if ($merged[-1].hostname // "") != "" or ($merged[-1].service | startswith("http_status:") | not) then
-                $merged + [{service: "http_status:404"}]
-              else $merged end
+                $merged + [{service: "http_status:404"}] else $merged end
             | {config: ($cfg + {ingress: .})}
           ')"
 
-          echo "New ingress:"
-          echo "$new_body" | jq '.config.ingress'
-
           resp="$(api -X PUT \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel/${tunnel_id}/configurations" \
-            -H 'Content-Type: application/json' \
-            --data "$new_body")"
+            -H 'Content-Type: application/json' --data "$new_body")"
           echo "$resp" | jq .
-          echo "$resp" | jq -e '.success' >/dev/null
-          echo "office tunnel ingress updated"
+          if echo "$resp" | jq -e '.success' >/dev/null; then
+            echo "ok=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  tunnel-ssh:
+    needs: tunnel-api
+    if: needs.tunnel-api.outputs.ok != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Patch cloudflared ingress on production server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            OFFICE_HOST=office.fashitianxia.xyz
+            OFFICE_SERVICE=http://127.0.0.1:8090
+            CONFIG=""
+            for f in /etc/cloudflared/config.yml /etc/cloudflared/config.yaml \
+              /root/.cloudflared/config.yml "$HOME/.cloudflared/config.yml"; do
+              [[ -f "$f" ]] && CONFIG="$f" && break
+            done
+            [[ -n "$CONFIG" ]] || { echo "ERROR: no cloudflared config"; exit 1; }
+
+            if grep -q "hostname: ${OFFICE_HOST}" "$CONFIG" \
+              && grep -A1 "hostname: ${OFFICE_HOST}" "$CONFIG" | grep -q "${OFFICE_SERVICE}"; then
+              echo "cloudflared ingress already correct (SSH)"
+              exit 0
+            fi
+
+            python3 - "$CONFIG" "$OFFICE_HOST" "$OFFICE_SERVICE" <<'PY'
+            import sys, pathlib, re
+            path, host, service = sys.argv[1:4]
+            text = pathlib.Path(path).read_text(encoding="utf-8")
+            block = f"  - hostname: {host}\n    service: {service}\n"
+            if re.search(rf"hostname:\s*{re.escape(host)}\b", text):
+                text = re.sub(
+                    rf"(  - hostname: {re.escape(host)}\n    service: ).*",
+                    rf"\g<1>{service}", text)
+            elif "ingress:" in text:
+                text = re.sub(r"(ingress:\n)", r"\1" + block, text, count=1)
+            else:
+                sys.exit("no ingress section")
+            pathlib.Path(path).write_text(text, encoding="utf-8")
+            PY
+
+            if systemctl is-active --quiet cloudflared 2>/dev/null; then
+              sudo systemctl restart cloudflared
+            fi
+            CODE="$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: ${OFFICE_HOST}" http://127.0.0.1:8090/ || true)"
+            echo "local probe :8090 → HTTP ${CODE}"
+
+  verify:
+    needs: [tunnel-api, tunnel-ssh]
+    if: always() && (needs.tunnel-api.outputs.ok == 'true' || needs.tunnel-ssh.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Public probe office
+        run: |
+          code="$(curl -sS -o /dev/null -w '%{http_code}' https://office.fashitianxia.xyz/ || true)"
+          echo "https://office.fashitianxia.xyz → HTTP ${code}"
+          [[ "$code" == "200" ]]

@@ -1,0 +1,60 @@
+name: Smoke Production
+
+# 生产三入口 + office API 登录冒烟；CF Token 能力探测。
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 * * *" # 每天 08:00 UTC
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: HTTP probes (m / office / website)
+        run: |
+          set -euo pipefail
+          for url in \
+            https://m.fashitianxia.xyz/ \
+            https://office.fashitianxia.xyz/ \
+            https://fashitianxia.xyz/; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' "$url" || true)"
+            echo "$url → HTTP $code"
+            [[ "$code" == "200" ]]
+          done
+
+      - name: API readyz
+        run: |
+          code="$(curl -sS -o /dev/null -w '%{http_code}' https://app.fashitianxia.xyz/api/readyz || true)"
+          echo "readyz → HTTP $code"
+          [[ "$code" == "200" ]]
+
+      - name: Office CORS preflight
+        run: |
+          code="$(curl -sS -o /dev/null -w '%{http_code}' -X OPTIONS \
+            'https://app.fashitianxia.xyz/api/v1/auth/login' \
+            -H 'Origin: https://office.fashitianxia.xyz' \
+            -H 'Access-Control-Request-Method: POST' || true)"
+          echo "CORS preflight office → HTTP $code"
+          [[ "$code" == "200" || "$code" == "204" ]]
+
+      - name: Cloudflare token capabilities
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: e784e487f8ab57882d4b24d845ccfad1
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          check() {
+            local name="$1" url="$2"
+            if curl -sS "$url" "${auth[@]}" | jq -e '.success' >/dev/null 2>&1; then
+              echo "✅ $name"
+            else
+              echo "⚠️  $name (missing permission or misconfigured)"
+            fi
+          }
+          check "Pages projects" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects"
+          check "Tunnel list" \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/cfd_tunnel"
+          check "Zone DNS" \
+            "https://api.cloudflare.com/client/v4/zones?name=fashitianxia.xyz"
