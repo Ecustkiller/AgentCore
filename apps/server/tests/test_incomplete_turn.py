@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentcore.config import settings
-from agentcore.conversation import service
+from agentcore.conversation import service, turn_persistence
 from agentcore.runtime.events import FinishReason
 
 
@@ -81,8 +81,8 @@ def capture(monkeypatch):
         spawned.append(coro)
         return MagicMock(name="task")
 
-    monkeypatch.setattr(service, "_persist_incomplete_turn", fake_persist)
-    monkeypatch.setattr(service, "_spawn_background", fake_spawn)
+    monkeypatch.setattr(turn_persistence, "persist_incomplete_turn", fake_persist)
+    monkeypatch.setattr(turn_persistence, "spawn_background", fake_spawn)
     return spawned, persist_calls
 
 
@@ -165,9 +165,9 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
     async def fake_journal(_session, **kwargs):
         journaled.update(kwargs)
 
-    monkeypatch.setattr(service, "MessageRepository", FakeRepo)
-    monkeypatch.setattr(service, "async_session_factory", lambda: FakeSessionCM())
-    monkeypatch.setattr(service, "persist_turn_journal", fake_journal)
+    monkeypatch.setattr(turn_persistence, "MessageRepository", FakeRepo)
+    monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: FakeSessionCM())
+    monkeypatch.setattr(turn_persistence, "persist_turn_journal", fake_journal)
 
     journal = [_ev("run_plan"), _ev("run_completed")]
     await service._persist_incomplete_turn(
@@ -197,7 +197,7 @@ async def test_persist_incomplete_swallows_db_errors(monkeypatch):
         async def __aexit__(self, *_a):
             return False
 
-    monkeypatch.setattr(service, "async_session_factory", lambda: BoomCM())
+    monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: BoomCM())
     # Best-effort (文档铁律): a persistence failure must never escape this task.
     await service._persist_incomplete_turn(
         journal=[_ev("run_plan")], conversation_id="conv", trace_id="trace",

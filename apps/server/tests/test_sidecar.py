@@ -19,6 +19,11 @@ from typing import Any
 
 import pytest
 
+from agentcore.llm.byok import (
+    INFERENCE_CONVERSATION_HEADER,
+    INFERENCE_TRACE_HEADER,
+    LLMCredentials,
+)
 from agentcore.llm.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.approvals import ApprovalDecision
 from agentcore.runtime.interaction import InteractionKind, default_interaction_registry
@@ -399,3 +404,28 @@ def test_sidecar_binds_local_backend_with_approvals(tmp_path, monkeypatch):
     asyncio.run(drive())
     assert captured["location"] == "local"
     assert captured["approvals_enabled"] is True
+
+
+def test_creds_for_stamps_conversation_and_trace_headers():
+    """Each turn's proxy creds carry the conversation header (spend attribution) AND the
+    trace header (so every proxied LLM call joins the turn's trace, 打通气泡↔日志). An
+    empty trace_id (untraced caller) omits the header rather than sending a blank."""
+    server = SidecarServer(_recorder()[1])
+    server._creds = LLMCredentials(api_key="tok", base_url="https://x/v1/inference")
+
+    traced = server._creds_for("conv-1", "0123456789abcdef0123456789abcdef")
+    assert traced.extra_headers[INFERENCE_CONVERSATION_HEADER] == "conv-1"
+    assert traced.extra_headers[INFERENCE_TRACE_HEADER] == (
+        "0123456789abcdef0123456789abcdef"
+    )
+
+    untraced = server._creds_for("conv-1")
+    assert untraced.extra_headers[INFERENCE_CONVERSATION_HEADER] == "conv-1"
+    assert INFERENCE_TRACE_HEADER not in untraced.extra_headers
+
+
+def test_creds_for_none_when_no_session_creds():
+    """No session creds (dev platform-fallback, no proxy) ⇒ no per-turn creds to stamp."""
+    server = SidecarServer(_recorder()[1])
+    assert server._creds is None
+    assert server._creds_for("conv-1", "trace-1") is None

@@ -545,3 +545,47 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     useConversationStore.getState().setAbort(null, conversationId);
   }
 }
+
+/**
+ * Send a plain-text turn into the ACTIVE conversation from a non-composer surface
+ * (the canvas 老板命令栏, 协作图主界面化设计 §三 ①「下达指令」). A reduced twin of the
+ * message composer's full `handleSend`: it assumes an existing active conversation
+ * and no attachments / background mode / new-conversation creation — just the
+ * optimistic user bubble + {@link sendTurn}. No-op (returns false) for blank input,
+ * with no active conversation, or while a turn is already generating (turns don't
+ * stack — the caller disables its send affordance too); returns true once a turn
+ * was dispatched.
+ */
+export async function sendQuickTurn(content: string): Promise<boolean> {
+  const trimmed = content.trim();
+  if (!trimmed) return false;
+  const store = useConversationStore.getState();
+  const conversationId = store.currentConversationId;
+  if (!conversationId) return false;
+  if (getActiveRuntime().isGenerating) return false;
+  // Reading history (a search-hit jump left newer messages unloaded)? Snap back to
+  // the live head so the turn lands at the true tail (live-head invariant).
+  if (getActiveRuntime().hasMoreAfter) {
+    try {
+      await loadLatestWindow(conversationId);
+    } catch {
+      /* best-effort: append at the current tail */
+    }
+  }
+  const userMsgId = crypto.randomUUID();
+  store.addMessage({
+    id: userMsgId,
+    role: "user",
+    content: trimmed,
+    createdAt: new Date().toISOString(),
+    executionId: null,
+    isStreaming: false,
+  });
+  await sendTurn({
+    conversationId,
+    content: trimmed,
+    attachments: [],
+    optimisticUserId: userMsgId,
+  });
+  return true;
+}

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { FileNode } from "@/lib/fileSource";
 
 /**
  * Client-side DeferredWorkspace (工作区对称化 D1a): a desktop 裸聊's panel source that
@@ -9,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => {
   const innerCreateFile = vi.fn(() => Promise.resolve());
-  const innerListDir = vi.fn(() => Promise.resolve([]));
+  const innerListDir = vi.fn((): Promise<FileNode[]> => Promise.resolve([]));
   const innerRead = vi.fn(() =>
     Promise.resolve({ kind: "text", text: "hi", truncated: false }),
   );

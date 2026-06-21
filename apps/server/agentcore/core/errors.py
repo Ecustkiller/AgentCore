@@ -2,14 +2,18 @@
 
 All module-specific errors inherit from AgentCoreError.
 Each error carries a code, message, and retryable flag for the API layer to translate
-into appropriate HTTP responses.
+into appropriate HTTP responses. Every ``code`` is a member of the single
+:class:`~agentcore.core.error_codes.ErrorCode` catalog (the shared directory),
+so codes never drift apart from the SSE emitters or the frontend mirror.
 """
+
+from agentcore.core.error_codes import ErrorCode
 
 
 class AgentCoreError(Exception):
     """Base exception for all AgentCore errors."""
 
-    code: str = "INTERNAL_ERROR"
+    code: str = ErrorCode.INTERNAL_ERROR
     retryable: bool = False
     status_code: int = 500
 
@@ -22,14 +26,14 @@ class AgentCoreError(Exception):
 class LLMError(AgentCoreError):
     """LLM provider call failure."""
 
-    code = "LLM_ERROR"
+    code = ErrorCode.LLM_ERROR
     status_code = 502
 
 
 class LLMRateLimitError(LLMError):
     """LLM API rate limit hit (429)."""
 
-    code = "LLM_RATE_LIMIT"
+    code = ErrorCode.LLM_RATE_LIMIT
     retryable = True
 
     def __init__(self, retry_after: float | None = None, **kwargs):
@@ -40,7 +44,7 @@ class LLMRateLimitError(LLMError):
 class LLMTimeoutError(LLMError):
     """LLM API request timed out."""
 
-    code = "LLM_TIMEOUT"
+    code = ErrorCode.LLM_TIMEOUT
     retryable = True
 
 
@@ -56,7 +60,7 @@ class LLMInsufficientBalanceError(LLMError):
     AgentCore's key settings (the key is fine; the balance is not).
     """
 
-    code = "LLM_INSUFFICIENT_BALANCE"
+    code = ErrorCode.LLM_INSUFFICIENT_BALANCE
     retryable = False
 
     def __init__(
@@ -80,7 +84,7 @@ class LLMAuthError(LLMError):
     the user back to 设置·模型配置 to fix the key.
     """
 
-    code = "LLM_KEY_INVALID"
+    code = ErrorCode.LLM_KEY_INVALID
     retryable = False
 
     def __init__(
@@ -96,48 +100,48 @@ class LLMAuthError(LLMError):
 class ToolError(AgentCoreError):
     """Tool execution failure."""
 
-    code = "TOOL_ERROR"
+    code = ErrorCode.TOOL_ERROR
     status_code = 500
 
 
 class ToolNotFoundError(ToolError):
     """Requested tool not registered."""
 
-    code = "TOOL_NOT_FOUND"
+    code = ErrorCode.TOOL_NOT_FOUND
     status_code = 404
 
 
 class SandboxError(AgentCoreError):
     """Code sandbox execution failure."""
 
-    code = "SANDBOX_ERROR"
+    code = ErrorCode.SANDBOX_ERROR
     status_code = 500
 
 
 class SandboxTimeoutError(SandboxError):
     """Code execution exceeded timeout."""
 
-    code = "SANDBOX_TIMEOUT"
+    code = ErrorCode.SANDBOX_TIMEOUT
 
 
 class AuthenticationError(AgentCoreError):
     """Authentication failure."""
 
-    code = "AUTH_ERROR"
+    code = ErrorCode.AUTH_ERROR
     status_code = 401
 
 
 class AuthorizationError(AgentCoreError):
     """Authorization/permission failure."""
 
-    code = "FORBIDDEN"
+    code = ErrorCode.FORBIDDEN
     status_code = 403
 
 
 class NotFoundError(AgentCoreError):
     """Resource not found."""
 
-    code = "NOT_FOUND"
+    code = ErrorCode.NOT_FOUND
     status_code = 404
 
 
@@ -152,14 +156,14 @@ class ConflictError(AgentCoreError):
     rather than quietly switching it.
     """
 
-    code = "CONFLICT"
+    code = ErrorCode.CONFLICT
     status_code = 409
 
 
 class ValidationError(AgentCoreError):
     """Input validation failure."""
 
-    code = "VALIDATION_ERROR"
+    code = ErrorCode.VALIDATION_ERROR
     status_code = 422
 
 
@@ -175,7 +179,7 @@ class RateLimitedError(AgentCoreError):
     one rate-limit shape regardless of which layer tripped.
     """
 
-    code = "RATE_LIMITED"
+    code = ErrorCode.RATE_LIMITED
     status_code = 429
 
     def __init__(
@@ -195,7 +199,7 @@ class QuotaExceededError(AgentCoreError):
     exception for logging and tests.
     """
 
-    code = "QUOTA_EXCEEDED"
+    code = ErrorCode.QUOTA_EXCEEDED
     status_code = 429
 
     def __init__(
@@ -224,7 +228,7 @@ class BYOKKeyMissingError(AgentCoreError):
     client distinguish it from auth (401) / quota (429).
     """
 
-    code = "LLM_KEY_REQUIRED"
+    code = ErrorCode.LLM_KEY_REQUIRED
     status_code = 402
 
 
@@ -239,5 +243,27 @@ class KeyStorageUnavailableError(AgentCoreError):
     setting ENCRYPTION_KEY and restarting.
     """
 
-    code = "KEY_STORAGE_UNAVAILABLE"
+    code = ErrorCode.KEY_STORAGE_UNAVAILABLE
     status_code = 503
+
+
+def error_fields_for(
+    exc: BaseException,
+    *,
+    fallback_code: str,
+    fallback_message: str,
+) -> tuple[str, str]:
+    """Decide the ``(code, message)`` an SSE ``error`` event should carry for an
+    exception: preserve an :class:`AgentCoreError`'s structured ``code`` + curated
+    user-facing (zh) ``message``, and only collapse to ``fallback_code`` /
+    ``fallback_message`` for an unrecognized crash.
+
+    The single classifier of "coded error vs. opaque crash", shared by the chat
+    pipeline, the conversation service, and the engine so none of them flattens an
+    ``AgentCoreError`` into a generic code (统一错误码：避免 pipeline 把多种错误压成
+    PIPELINE_ERROR — 前端据 code 给精确文案/动作). ``fallback_message`` also fills in
+    for a coded error whose own ``message`` is empty.
+    """
+    if isinstance(exc, AgentCoreError):
+        return exc.code, (exc.message or fallback_message)
+    return fallback_code, fallback_message

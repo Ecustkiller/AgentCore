@@ -477,6 +477,7 @@ export class SidecarManager {
       const result = await entry.client.request("startTurn", {
         turnId: req.turnId,
         conversationId: req.conversationId,
+        traceId: req.traceId,
         userMessage: req.userMessage,
         history: req.history ?? [],
         // Re-send the current cloud-proxy token every turn: the sidecar is long-lived
@@ -532,6 +533,7 @@ export class SidecarManager {
       const result = await entry.client.request("resume", {
         messageId: req.messageId,
         conversationId: req.conversationId,
+        traceId: req.traceId,
         decision: req.decision,
         note: req.note,
         selected: req.selected ?? [],

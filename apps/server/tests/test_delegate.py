@@ -20,6 +20,7 @@ from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.tools.builtin.delegate import DelegateTool
+from agentcore.tools.builtin.replan import ReplanTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox

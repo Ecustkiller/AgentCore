@@ -1,0 +1,152 @@
+"""Split from executor.py — see executor.py module docstring."""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+
+from agentcore.llm.config import ModelProfile
+from agentcore.llm.deepseek import DeepSeekProvider
+from agentcore.llm.pricing import calculate_cost
+from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.engine import react_loop
+from agentcore.runtime.events import (
+    EventSink,
+    run_output_delta,
+    run_reasoning_delta,
+    run_tool_progress,
+)
+from agentcore.runtime.runs.types import RunContract, RunPhase, RunState
+from agentcore.tools.protocol import Tool, ToolContext
+from agentcore.tools.registry import ToolRegistry
+
+
+def _registry_with(base: ToolRegistry, extra: Tool) -> ToolRegistry:
+    """A per-worker registry = the shared team tools + one extra tool (its nested
+    delegate). Returns a fresh registry; the shared ``base`` is never mutated (it
+    backs every worker in the team and must stay delegate-free for leaf workers)."""
+    registry = ToolRegistry()
+    for schema in base.list_all():
+        registry.register(base.get(schema.name))
+    registry.register(extra)
+    return registry
+
+
+def _priced_failure(
+    error: str,
+    *,
+    model: str | None,
+    usage: TokenUsage,
+    rounds: int,
+    duration_ms: int,
+) -> RunState:
+    """A FAILED RunState that still carries the tokens the run spent before it died.
+
+    B-deep 失败计费: a hard exception used to drop a run's already-consumed usage —
+    it lived only inside the ``try`` — so a worker that failed on round 4 under-billed
+    rounds 1–3 (real spend on DeepSeek's side, invisible in the ledger). The
+    accumulated ``usage`` is priced here exactly once (via ``calculate_cost``) so a
+    failed-but-metered run produces a ledger row like any other run. ``usage``/``cost``
+    are left empty when nothing was spent (run failed before any LLM call, or before
+    the model tier resolved), so the per-run accumulator's ``if state.usage`` guard
+    still skips a never-metered failure — no spurious zero rows.
+    """
+    has_usage = bool(usage.input_tokens or usage.output_tokens)
+    return RunState(
+        phase=RunPhase.FAILED,
+        error=error,
+        model=model or "",
+        duration_ms=duration_ms,
+        rounds=rounds,
+        usage=usage.as_dict() if has_usage else {},
+        cost=asdict(calculate_cost(model, usage)) if (model and has_usage) else {},
+    )
+
+
+def _is_hard_failure(content: str, contract: RunContract | None) -> bool:
+    """Whether a contract miss should FAIL the run vs. soft-accept with a warning.
+
+    An empty product is always hard (the non-empty baseline, 决策②); any other
+    shortfall is hard only when the contract is ``strict`` (默认软提醒, 决策③)."""
+    if not content.strip():
+        return True
+    return contract is not None and contract.strict
+
+
+async def _react_and_capture(
+    messages: list[LLMMessage],
+    *,
+    llm: DeepSeekProvider,
+    tools: ToolRegistry,
+    sink: EventSink,
+    tool_ctx: ToolContext,
+    profile: ModelProfile,
+    allowed_tools: list[str] | None,
+    run_id: str,
+    agent_id: str,
+    citation_sink: list[dict],
+    approval_gate: ApprovalGate | None,
+    usage_sink: list[TokenUsage] | None = None,
+) -> tuple[str, str, TokenUsage, int]:
+    """Run one ReAct pass over ``messages`` (mutated in place — the loop appends
+    each assistant tool-call turn + tool results), then append the final assistant
+    answer so the transcript ends with the worker's product.
+
+    This is the shared core of both the initial worker run and a 续写 (auto-rework /
+    revise): ``react_loop`` returns the final no-tool answer WITHOUT appending it
+    (engine returns before the append), so we add it here — making ``messages`` a
+    complete, replayable transcript for capture and continuation.
+
+    Returns the loop's full ``reasoning`` alongside ``content`` so the caller can
+    carry it onto the worker's terminal :class:`RunState` → its ``message_final``
+    fact (执行级事件溯源: deltas 退场). The worker's thinking is the run's authoritative
+    fact there; ``run_reasoning_delta`` stays as a transport-only live signal (no
+    longer journaled), exactly like ``run_output_delta`` / ``run_tool_progress``.
+
+    ``usage_sink`` is forwarded to the loop so that when this pass raises (workers
+    run with ``raise_on_error=True``), the caller can still read the tokens spent on
+    the rounds that completed before the failure (B-deep 失败计费)."""
+    content, reasoning, usage, rounds = await react_loop(
+        messages=messages,
+        llm=llm,
+        tools=tools,
+        sink=sink,
+        tool_context=tool_ctx,
+        profile=profile,
+        allowed_tool_names=allowed_tools,
+        on_content=lambda d: sink.emit(run_output_delta(run_id, agent_id, d)),
+        on_reasoning=lambda d: sink.emit(run_reasoning_delta(run_id, agent_id, d)),
+        on_tool_progress=lambda tool, chars: sink.emit(
+            run_tool_progress(run_id, agent_id, tool, chars)
+        ),
+        raise_on_error=True,
+        citation_sink=citation_sink,
+        annotate_citations=False,
+        approval_gate=approval_gate,
+        usage_sink=usage_sink,
+        run_id=run_id,
+        role="worker",
+    )
+    messages.append(LLMMessage(role="assistant", content=content))
+    return content, reasoning, usage, rounds
+
+
+def _retry_message(feedback: str) -> LLMMessage:
+    """The auto-rework turn appended to a worker's transcript when its product
+    misses the contract. The worker now sees its own prior draft above this, so the
+    feedback ("补齐差距、其余保持原样") is finally coherent (修隐患)."""
+    return LLMMessage(role="user", content=feedback)
+
+
+def _revision_message(feedback: str) -> LLMMessage:
+    """The CEO's 热修 instruction appended to a worker's saved transcript on a
+    定向唤回 (revise) — the same author continues on its own draft."""
+    return LLMMessage(
+        role="user",
+        content=(
+            f"## 修改要求（请在你上一版产出的基础上修订）\n{feedback}\n\n"
+            "直接输出修订后的【完整最终产出】，未提及之处保持原样，"
+            "不要解释、不要复述改动清单。"
+        ),
+    )
+

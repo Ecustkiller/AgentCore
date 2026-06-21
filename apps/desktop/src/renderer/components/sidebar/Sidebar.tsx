@@ -1,4 +1,3 @@
-import { SimpleTooltip } from "@/components/ui/tooltip";
 import { startNewConversation } from "@/lib/newConversation";
 import { useUnreadTotal } from "@/stores/messaging";
 import { useSidebarStore } from "@/stores/sidebar";
@@ -7,12 +6,15 @@ import {
   Files,
   Mail,
   MessageSquare,
-  Plus,
   Wrench,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { RecentConversations } from "./RecentConversations";
+import {
+  RecentConversations,
+  ViewAllConversations,
+} from "./RecentConversations";
 import { UserMenu } from "./UserMenu";
+import { WorkspaceGroups } from "./WorkspaceGroups";
 
 const NAV_ITEMS = [
   { icon: MessageSquare, label: "对话", route: "/" },
@@ -37,8 +39,7 @@ export function Sidebar() {
       ? pathname === "/" || pathname === "/conversations"
       : pathname === route || pathname.startsWith(`${route}/`);
 
-  // 「对话」入口默认就是新建一个空白对话（与「+」一致）；回到旧对话走下方「最近对话 /
-  // 全部对话」。
+  // 「对话」入口默认就是新建一个空白对话；回到旧对话走下方列表 /「全部对话」。
   const handleNewConversation = () => startNewConversation(navigate);
 
   return (
@@ -86,29 +87,19 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Divider + Conversation header */}
+      {/* Divider — nav vs conversation list */}
       <div className="mx-3 border-t border-sidebar-border" />
-      {!collapsed && (
-        <div className="flex items-center justify-between px-4 pt-3 pb-1">
-          <span className="text-xs font-medium text-sidebar-foreground/50">
-            对话
-          </span>
-          <SimpleTooltip label="新建对话">
-            <button
-              type="button"
-              onClick={handleNewConversation}
-              aria-label="新建对话"
-              className="flex size-7 items-center justify-center rounded-lg text-sidebar-foreground/50 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            >
-              <Plus size={14} />
-            </button>
-          </SimpleTooltip>
-        </div>
-      )}
 
-      {/* Recent conversations (slim); full list + folders live on /conversations */}
+      {/* 工作区 (collapsible folder groups) + 快速对话 (裸聊 flat list); full list
+          lives on /conversations (前端UX §一 方案B). */}
       <div className="flex-1 overflow-y-auto">
-        {!collapsed && <RecentConversations />}
+        {!collapsed && (
+          <>
+            <WorkspaceGroups />
+            <RecentConversations />
+            <ViewAllConversations />
+          </>
+        )}
       </div>
 
       {/* Footer: User menu */}

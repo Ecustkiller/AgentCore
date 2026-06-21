@@ -22,6 +22,7 @@ import {
   MessagesSquare,
   Monitor,
   Moon,
+  Network,
   Palette,
   PanelLeft,
   Plus,
@@ -66,6 +67,7 @@ export interface CommandContext {
   navigate: NavigateFunction;
   theme: "light" | "dark" | "system";
   usageDetail: boolean;
+  graphPrimary: boolean;
   sidebarCollapsed: boolean;
 }
 
@@ -77,7 +79,7 @@ export interface CommandContext {
  * passed `navigate`. Grouped by {@link CommandCategory} at render time.
  */
 export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
-  const { navigate, theme, usageDetail, sidebarCollapsed } = ctx;
+  const { navigate, theme, usageDetail, graphPrimary, sidebarCollapsed } = ctx;
   const go = (path: string) => () => navigate(path);
 
   return [
@@ -117,6 +119,26 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       keywords: ["usage", "power", "token", "cost", "yongliang"],
       hint: usageDetail ? "当前：开" : "当前：关",
       run: () => useUIStore.getState().toggleUsageDetail(),
+    },
+    {
+      // 「图主界面化」实验总开关（协作图主界面化设计 §六）：渐进点亮愿景各刀——单 Agent 回合
+      // 渲染成 CEO 节点卡（§九），团队内嵌图的端点支持就地展开读全文（§三 ②）。默认关。
+      id: "toggle-graph-primary",
+      title: "图主界面化（实验）",
+      category: "操作",
+      icon: Network,
+      keywords: [
+        "graph",
+        "node",
+        "ceo",
+        "primary",
+        "experiment",
+        "xiezuotu",
+        "zhujiemian",
+        "shiyan",
+      ],
+      hint: graphPrimary ? "当前：开" : "当前：关",
+      run: () => useUIStore.getState().toggleGraphPrimary(),
     },
     {
       // Acts on the open conversation (导出对话). A draft has no server id yet, so

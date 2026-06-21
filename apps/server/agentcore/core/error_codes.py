@@ -1,0 +1,69 @@
+"""Canonical catalog of user-facing AgentCore error codes — the single backend
+directory the rest of the server references instead of bare string literals.
+
+Every ``code`` that can reach a client is declared here exactly once: the
+``code`` on an :class:`~agentcore.core.errors.AgentCoreError` HTTP body *and*
+the ``code`` of an SSE ``error`` event. Declaring them in one ``StrEnum`` makes
+the set greppable, documented, and impossible to silently drift apart across
+modules (e.g. one place emitting ``"NOT_FOUND"`` and another ``"NotFound"``).
+
+Single-source discipline:
+  - ``core/errors.py`` sets each ``AgentCoreError`` subclass's ``code`` from a
+    member here (guarded by ``tests/test_error_codes.py``).
+  - The SSE emitters (pipeline / conversation service / engine / handoff) pass
+    members here to ``error_event`` rather than literals.
+  - Frontend mirror: ``packages/contract-types/src/errorCodes.ts`` lists the same
+    codes for both desktop and mobile (hand-kept in sync — there is no codegen
+    for this yet; keep the two files aligned when adding a code).
+
+Grouping below is by ORIGIN, not HTTP status.
+"""
+
+from enum import StrEnum
+
+
+class ErrorCode(StrEnum):
+    """All user-facing error codes (SSE ``error`` events + ``AgentCoreError``).
+
+    A ``StrEnum`` so a member is a drop-in ``str`` everywhere a code is expected
+    (``==`` comparisons, ``json.dumps`` payloads, SSE/HTTP bodies) while still
+    being the one declared catalog.
+    """
+
+    # ── Generic / pipeline plumbing ──────────────────────────────────────
+    INTERNAL_ERROR = "INTERNAL_ERROR"  # AgentCoreError base; unexpected server fault
+    PIPELINE_ERROR = "PIPELINE_ERROR"  # chat pipeline crashed with no coded cause
+    STREAM_ERROR = "STREAM_ERROR"  # SSE turn crashed before a coded cause surfaced
+    INVALID = "INVALID"  # malformed request inside an already-open stream
+
+    # ── Request validation / resource (also AgentCoreError → HTTP) ───────
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    NOT_FOUND = "NOT_FOUND"
+    CONFLICT = "CONFLICT"
+
+    # ── Auth / quota / rate ──────────────────────────────────────────────
+    AUTH_ERROR = "AUTH_ERROR"
+    FORBIDDEN = "FORBIDDEN"
+    RATE_LIMITED = "RATE_LIMITED"
+    QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
+
+    # ── LLM provider (DeepSeek / BYOK) ───────────────────────────────────
+    LLM_ERROR = "LLM_ERROR"
+    LLM_RATE_LIMIT = "LLM_RATE_LIMIT"
+    LLM_TIMEOUT = "LLM_TIMEOUT"
+    LLM_INSUFFICIENT_BALANCE = "LLM_INSUFFICIENT_BALANCE"  # valid key, empty wallet (402)
+    LLM_KEY_INVALID = "LLM_KEY_INVALID"  # configured key rejected mid-turn (401/403)
+    LLM_KEY_REQUIRED = "LLM_KEY_REQUIRED"  # no BYOK key at preflight (402)
+    KEY_STORAGE_UNAVAILABLE = "KEY_STORAGE_UNAVAILABLE"  # no master encryption key (503)
+
+    # ── Tools / sandbox ──────────────────────────────────────────────────
+    TOOL_ERROR = "TOOL_ERROR"
+    TOOL_NOT_FOUND = "TOOL_NOT_FOUND"
+    SANDBOX_ERROR = "SANDBOX_ERROR"
+    SANDBOX_TIMEOUT = "SANDBOX_TIMEOUT"
+
+    # ── Handoff (跨端接力) ─────────────────────────────────────────────────
+    HANDOFF_DISPATCH_FAILED = "HANDOFF_DISPATCH_FAILED"
+    HANDOFF_FAILED = "HANDOFF_FAILED"
+    HANDOFF_SNAPSHOT_NOT_FOUND = "HANDOFF_SNAPSHOT_NOT_FOUND"
+    HANDOFF_APPLY_FAILED = "HANDOFF_APPLY_FAILED"

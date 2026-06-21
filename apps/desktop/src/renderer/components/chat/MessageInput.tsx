@@ -1,3 +1,4 @@
+import { DraftWorkspacePicker } from "@/components/chat/DraftWorkspacePicker";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   getConversations,
@@ -18,8 +19,6 @@ import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import { dispatchHandoffJob } from "@/services/handoff";
 import { fetchMessageWindow, loadLatestWindow } from "@/services/messages";
 import { searchAll } from "@/services/search";
-import { createLocalRootSource } from "@/services/sources/localRootSource";
-import { createCloudWorkspaceSource } from "@/services/sources/workspaceSource";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import { getWorkspaceBinding } from "@/services/workspaceBinding";
@@ -44,141 +43,15 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MentionMenu } from "./MentionMenu";
-
-/** 已选附件（含正文，仅发送时携带；气泡只展示元信息）。 */
-interface PendingAttachment {
-  id: string;
-  /** kind:sourceId:relPath，用于去重。 */
-  key: string;
-  name: string;
-  path: string;
-  /** 文件为正文；目录为「文件清单」；对话为最近若干条消息。仅发送时携带，不入库。 */
-  text: string;
-  truncated: boolean;
-  /** file=单文件正文；dir=目录文件清单；conversation=引用对话。 */
-  kind: EntryKind;
-  /** 仅 kind=conversation：被引用对话的 id。 */
-  conversationId?: string;
-}
+import {
+  type PendingAttachment,
+  buildMentionSources,
+  detectMention,
+  formatConversationContext,
+  readDroppedFile,
+} from "./message-input/composerAttachments";
 
 type MenuMode = "mention" | "browse" | null;
-
-// 镜像主进程 fs-service 的 TEXT_PREVIEW_CAP（256KB）：拖入文件在 renderer 直读，
-// 故同步同一截断阈值，保证「@ 引用」与「拖入」两条路径行为一致。
-const TEXT_PREVIEW_CAP = 256 * 1024;
-
-/**
- * 读取拖入的 OS 文件为文本附件。拖拽本身即用户的显式授权，故绕过「授权根」直读
- * 内容；与主进程 `readFile` 同策略：超 256KB 截断、含 NUL 字节视为二进制、图片
- * 暂不支持（模型无视觉能力）。
- */
-async function readDroppedFile(
-  file: File,
-): Promise<
-  { ok: true; text: string; truncated: boolean } | { ok: false; reason: string }
-> {
-  if (file.type.startsWith("image/")) {
-    return { ok: false, reason: "暂不支持图片附件（模型尚无视觉能力）" };
-  }
-  const head = await file.slice(0, TEXT_PREVIEW_CAP + 1).arrayBuffer();
-  const bytes = new Uint8Array(head);
-  if (bytes.includes(0)) {
-    return { ok: false, reason: "二进制文件无法作为文本附件" };
-  }
-  const text = new TextDecoder("utf-8").decode(
-    bytes.subarray(0, Math.min(bytes.length, TEXT_PREVIEW_CAP)),
-  );
-  return { ok: true, text, truncated: file.size > TEXT_PREVIEW_CAP };
-}
-
-// @对话引用（物化）：拉取窗口的条数上限 + 注入正文的总字符上限。取最近 N 条；整体
-// 超过字符上限则保留更靠后（更贴近当前意图）的部分并标记截断。MVP 不做 LLM 摘要。
-const CONV_MENTION_MSG_LIMIT = 40;
-const CONV_MENTION_CHAR_CAP = 60 * 1024;
-
-/**
- * 把一段对话的消息格式化为可注入的上下文文本（每条 "用户/助手: 正文"）。返回是否因
- * 条数或总长被截断，供 chip 标注。仅取有正文的消息；空对话返回空串。
- */
-function formatConversationContext(
-  messages: { role: string; content: string }[],
-): { text: string; truncated: boolean } {
-  const usable = messages.filter((m) => m.content.trim());
-  const recent = usable.slice(-CONV_MENTION_MSG_LIMIT);
-  let truncated = recent.length < usable.length;
-  const body = recent
-    .map(
-      (m) => `${m.role === "assistant" ? "助手" : "用户"}: ${m.content.trim()}`,
-    )
-    .join("\n\n");
-  let text = body;
-  if (text.length > CONV_MENTION_CHAR_CAP) {
-    // 超长：从尾部回切，保留更靠后的消息（更贴近用户当前提问）。
-    text = text.slice(text.length - CONV_MENTION_CHAR_CAP);
-    truncated = true;
-  }
-  return { text: text.trim(), truncated };
-}
-
-/** 从光标向前回溯定位 `@token`：要求 `@` 在行首或空白后，且其后无空白。 */
-function detectMention(
-  text: string,
-  caret: number,
-): { start: number; query: string } | null {
-  let at = -1;
-  for (let i = caret - 1; i >= 0; i--) {
-    const ch = text[i];
-    if (ch === "@") {
-      at = i;
-      break;
-    }
-    if (ch === " " || ch === "\n" || ch === "\t") return null;
-  }
-  if (at === -1) return null;
-  const before = at === 0 ? "" : text[at - 1];
-  if (before && !/\s/.test(before)) return null;
-  return { start: at, query: text.slice(at + 1, caret) };
-}
-
-/**
- * Build the {@link FileSource}s that feed the @ index for the active conversation
- * (文件中枢统一 F4): the conversation's **cloud** workspace (so its server-side
- * files become @-able) plus every authorized local OS root. A *local*-mode
- * workspace needs no extra source — it *is* one of those local roots, already
- * indexed below. A 裸聊 (no folder) has no cloud workspace yet, so it indexes local
- * only until it is promoted into a folder.
- *
- * 文件夹即工作区: the cloud workspace **is** the conversation's folder (`folder:<id>`);
- * a folderless or local chat contributes no cloud source. Failure to resolve the
- * binding degrades gracefully to local-only.
- */
-async function buildMentionSources(
-  conversationId: string | null,
-): Promise<FileSource[]> {
-  const sources: FileSource[] = [];
-
-  if (conversationId) {
-    try {
-      const binding = await getWorkspaceBinding(conversationId);
-      if (binding.mode === "cloud") {
-        const folderId =
-          getConversations().find((c) => c.id === conversationId)?.folderId ??
-          null;
-        if (folderId) {
-          sources.push(
-            createCloudWorkspaceSource(`folder:${folderId}`, "工作区"),
-          );
-        }
-      }
-    } catch {
-      // Binding unknown (e.g. a never-sent draft) — index local roots only.
-    }
-  }
-
-  const roots = (await window.fsApi?.listRoots()) ?? [];
-  for (const r of roots) sources.push(createLocalRootSource(r.id, r.name));
-  return sources;
-}
 
 export function MessageInput() {
   const [value, setValue] = useState("");
@@ -960,6 +833,7 @@ export function MessageInput() {
         />
         <div className="flex items-center justify-between px-4 pb-3">
           <div className="flex items-center gap-1">
+            {!conversationId && <DraftWorkspacePicker />}
             <button
               type="button"
               onClick={openBrowse}

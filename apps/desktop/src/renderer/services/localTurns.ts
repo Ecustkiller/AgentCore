@@ -30,6 +30,9 @@ export async function recordLocalTurn(
   userMessage: string,
   /** 本轮用户气泡的客户端 id（干净 UUID）——作为幂等锚随 body 上报。 */
   userMessageId: string,
+  /** 本回合 trace_id（32-hex）——同回合云代理 LLM 调用所带，服务端复用它落到 assistant
+   *  消息，使推理日志↔气泡同 trace（打通气泡↔日志）。 */
+  traceId: string,
   result: SidecarTurnResult,
 ): Promise<RecordTurnResponse> {
   // 与服务端 `RecordTurnRequest`（snake_case）对齐：结果里的 citations / runs 已是落库形状，
@@ -46,6 +49,7 @@ export async function recordLocalTurn(
     input_tokens: result.usage.inputTokens,
     output_tokens: result.usage.outputTokens,
     rounds: result.rounds,
+    trace_id: traceId,
   } satisfies components["schemas"]["RecordTurnRequest"];
 
   let lastError: unknown;

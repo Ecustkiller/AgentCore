@@ -49,4 +49,19 @@ describe("sidebar store", () => {
       expect(store().expandedSections["new-folder"]).toBe(true);
     });
   });
+
+  describe("setSection", () => {
+    it("sets a section to an explicit value regardless of prior state", () => {
+      store().setSection("ws-1", false);
+      expect(store().expandedSections["ws-1"]).toBe(false);
+
+      store().setSection("ws-1", true);
+      expect(store().expandedSections["ws-1"]).toBe(true);
+    });
+
+    it("leaves other sections untouched", () => {
+      store().setSection("ws-1", true);
+      expect(store().expandedSections.ungrouped).toBe(true);
+    });
+  });
 });

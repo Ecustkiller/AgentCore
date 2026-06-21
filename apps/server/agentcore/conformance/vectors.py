@@ -28,6 +28,8 @@ from agentcore.runtime.events import (
     debate_round_started,
     error_event,
     escalation_raised,
+    escalation_required,
+    escalation_resolved,
     message_end,
     message_start,
     plan_review_required,
@@ -287,10 +289,12 @@ def _single_agent_content_reset() -> list[SSEEvent]:
 
 
 def _multi_agent_worker_tool() -> list[SSEEvent]:
-    """多 Agent：worker 工具调用。``run_tool_progress`` 在 ProjectedTurn 上是唯一持久可观测
-    （→ ``agent.toolProgress``）；worker 的 ``tool_use_start/end`` 落在被丢弃的 ``process`` /
-    略去的 ``toolCalls``，故只验「一致地不泄漏」。末尾不发 ``message_end``：w2 停在「正在生成」
-    快照，故其 ``toolProgress`` 可见。"""
+    """多 Agent：worker 工具调用。worker 的 ``tool_use_start/end`` 与 CEO 的同形地走顶层流，
+    但**携 ``run_id``**——三端 process fold 据此把它**排除出 CEO 气泡时间线**（统一团队时间线
+    只放 CEO 自己的步骤）；归属由团队图按运行中 run 承载（``toolCalls``，ProjectedTurn 略去）。
+    故本向量验「worker 工具不串进 CEO ``process``」：``process`` 只剩 CEO 正文「我来分工。」。
+    ``run_tool_progress`` 是唯一持久可观测（→ ``agent.toolProgress``）。末尾不发 ``message_end``：
+    w2 停在「正在生成」快照，故其 ``toolProgress`` 可见。"""
     agents = [
         {"id": "w1", "role": "工程师", "model_preference": "strong", "thinking": True, "reasoning_effort": "high"},
         {"id": "w2", "role": "测试员", "model_preference": "fast", "thinking": True, "reasoning_effort": "high"},
@@ -311,8 +315,10 @@ def _multi_agent_worker_tool() -> list[SSEEvent]:
         ),
         run_started("r1", "w1"),
         run_tool_progress("r1", "w1", "file_write", 1200),
-        tool_use_start("tc1", "file_write", {"path": "a.py", "content": "print(1)"}),
-        tool_use_end("tc1", "file_write", success=True, output="已写入"),
+        tool_use_start(
+            "tc1", "file_write", {"path": "a.py", "content": "print(1)"}, run_id="r1"
+        ),
+        tool_use_end("tc1", "file_write", success=True, output="已写入", run_id="r1"),
         run_output_delta("r1", "w1", "代码就绪"),
         run_completed(
             "r1",
@@ -847,6 +853,228 @@ def _multi_agent_escalation() -> list[SSEEvent]:
     ]
 
 
+# 阻塞式求决策 (escalate blocking=true) 三向量共用的队伍 + 问题/假设文案，保证三条路径
+# （答复 / 超时降级 / 进行中）只在「升级如何收场」上分叉，其余完全一致。
+_ESC_Q = "数据库选 Postgres 还是 MySQL？这关系到后续所有选型，且猜错基本要整段返工。"
+_ESC_A = "暂按 Postgres 推进"
+
+
+def _blocking_escalate_team() -> tuple[list[dict], list[dict]]:
+    """The shared 2-worker plan: r1 (研究员) escalates; r2 (撰写员) depends on r1."""
+    agents = [
+        {"id": "w1", "role": "研究员", "model_preference": "strong",
+         "thinking": True, "reasoning_effort": "high"},
+        {"id": "w2", "role": "撰写员", "model_preference": "fast",
+         "thinking": True, "reasoning_effort": "high"},
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研选型", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写建议", "depends_on": ["r1"]},
+    ]
+    return agents, plan_runs
+
+
+def _multi_agent_blocking_escalate() -> list[SSEEvent]:
+    """多 Agent：阻塞式求决策 (escalate blocking=true) — 答复路径。r1 撞到「只有用户能定、且猜错
+    就作废」的关键岔路，调 escalate(blocking=true) 原地挂起 → 执行器 emit ``escalation_required``
+    （run 级，``escalation_id`` 键给 resolve 端点），三端 fold + oracle 把它折成 r1 的一条 pending
+    升级（``status="pending"``）。关键：阻塞升级【不】把回合翻 paused——兄弟仍可跑（区别于 approval/
+    ask_user/plan_review 的 halting gate），故 ``pendingInteraction`` 恒 None。用户答复 → 
+    ``escalation_resolved(status="resolved", answer)``（单一发射者：仅挂起的工具发）→ 该项翻
+    ``{status:"resolved", answer}``，r1 据答续跑并 COMPLETED。"""
+    agents, plan_runs = _blocking_escalate_team()
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="选型并给建议",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        # 阻塞挂起：把问题直接送到用户（CEO 停在 delegate、够不到用户）。
+        escalation_required(
+            "r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A
+        ),
+        # 用户答复 → 该项翻 resolved，r1 据答续跑（以用户答复为准）。
+        escalation_resolved(
+            "r1", "w1", escalation_id="esc1", status="resolved", answer="用 Postgres。"
+        ),
+        run_output_delta("r1", "w1", "已确认 Postgres，完成选型调研"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成选型调研（用户已拍板 Postgres）",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started("r2", "w2"),
+        run_output_delta("r2", "w2", "基于选型给出建议"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成建议",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        content_delta(" 团队已完成。"),
+        message_end(FinishReason.END_TURN, input_tokens=4200, output_tokens=820, cost=_COST),
+    ]
+
+
+def _multi_agent_blocking_escalate_timeout() -> list[SSEEvent]:
+    """多 Agent：阻塞式求决策 — 超时降级路径（安全基石 §4.4）。r1 阻塞挂起（``escalation_required``
+    → pending），但用户在时限内未答（或选「按假设继续」）→ 执行器 emit ``escalation_resolved(status=
+    "timeout")``（单一发射者，``answer`` 空）→ 该项翻 ``{status:"timeout", answer:null}``，r1 回落到
+    它写明的 ``assumption`` 续跑并 COMPLETED。即阻塞 escalate 是「今日非阻塞行为的严格超集」：先等
+    用户 T 秒，等不到就退回今天的样子，不可能回归。注：后端在超时分支【仍 emit】escalation_resolved
+    （单一发射者载 disposition=timeout），与设计 §七「超时变体」的真实实现一致。"""
+    agents, plan_runs = _blocking_escalate_team()
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="选型并给建议",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        escalation_required(
+            "r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A
+        ),
+        # 超时（或「按假设继续」）→ 同一 resolve 端点的 timeout disposition，answer 空。
+        escalation_resolved(
+            "r1", "w1", escalation_id="esc1", status="timeout", answer=""
+        ),
+        run_output_delta("r1", "w1", "未获答复，按 Postgres 假设完成选型调研"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成选型调研（超时按假设 Postgres 续跑）",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started("r2", "w2"),
+        run_output_delta("r2", "w2", "基于选型给出建议"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成建议",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        content_delta(" 团队已完成。"),
+        message_end(FinishReason.END_TURN, input_tokens=4200, output_tokens=820, cost=_COST),
+    ]
+
+
+def _multi_agent_blocking_escalate_pending() -> list[SSEEvent]:
+    """多 Agent：阻塞式求决策 — 进行中（卡片 live / 重载 dormant）。r1 阻塞挂起 emit
+    ``escalation_required`` 后流到此为止（无 ``escalation_resolved`` / ``message_end``，镜像
+    ``approval_paused`` 的「挂起态快照」）。关键断言：回合 ``status`` 仍为 ``running`` 且
+    ``pendingInteraction`` 恒 None——阻塞升级【非 halting gate】，不把回合翻 paused（并行兄弟 r2 仍
+    照常起跑），这正是它区别于 approval/ask_user/plan_review 的核心。r1 的升级 ``status="pending"``
+    （即 live 应答卡；断连重载时同形为 dormant 记录）。"""
+    agents, plan_runs = _blocking_escalate_team()
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="选型并给建议",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        # 并行兄弟 r2 照常起跑——证明阻塞升级不挡其它 worker、不挂起整波。
+        run_started("r2", "w2"),
+        escalation_required(
+            "r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A
+        ),
+    ]
+
+
+def _multi_agent_blocking_escalate_multi() -> list[SSEEvent]:
+    """多 Agent：阻塞式求决策 — 同一 worker 串行多次升级（多升级向量）。r1 先后撞到两个「只有用户
+    能定」的关键岔路：第一次得到答复（resolved），续跑后第二次超时降级（timeout）。验证 ``escalations``
+    可承载一个 run 的多条阻塞升级、且「找首个 pending」折叠在串行场景逐条对位结算——第二次 resolve
+    命中的是当时唯一的 pending（esc2，esc1 已 resolved）。worker 串行 ⇒ 任一时刻至多一个 pending。"""
+    agents, plan_runs = _blocking_escalate_team()
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="选型并给建议",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        # 第一个关键岔路：阻塞挂起 → 用户答复 → resolved。
+        escalation_required(
+            "r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A
+        ),
+        escalation_resolved(
+            "r1", "w1", escalation_id="esc1", status="resolved", answer="用 Postgres。"
+        ),
+        # 据首答续跑后又撞到第二个只有用户能定的点 → 再次阻塞挂起（此时 esc1 已结算，唯一 pending）。
+        escalation_required(
+            "r1",
+            "w1",
+            escalation_id="esc2",
+            question="部署用 Docker 还是裸机？这关系到运维方案。",
+            assumption="暂按 Docker 推进",
+        ),
+        # 第二次超时降级（answer 空）→ r1 回落到该假设续跑。
+        escalation_resolved(
+            "r1", "w1", escalation_id="esc2", status="timeout", answer=""
+        ),
+        run_output_delta("r1", "w1", "已确认 Postgres + Docker，完成选型调研"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成选型调研（2 次升级）",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started("r2", "w2"),
+        run_output_delta("r2", "w2", "基于选型给出建议"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成建议",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        content_delta(" 团队已完成。"),
+        message_end(FinishReason.END_TURN, input_tokens=4200, output_tokens=820, cost=_COST),
+    ]
+
+
 def _single_agent_captain_context() -> list[SSEEvent]:
     """单聊：CEO 收到的上下文 (上下文传递可视化, CEO 侧 通道①)。纯聊天回合无 run_plan，但 captain
     仍 emit ``run_started(kind=captain)`` + ``run_context``（system/history/request 三通道）。三端
@@ -1017,6 +1245,22 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_escalation": (
         "多 Agent：worker 升级实时可见（run_escalation 折到节点 escalations，非阻塞）",
         _multi_agent_escalation,
+    ),
+    "multi_agent_blocking_escalate": (
+        "多 Agent：阻塞式求决策 答复路径（escalation_required→pending→resolved，回合不 paused）",
+        _multi_agent_blocking_escalate,
+    ),
+    "multi_agent_blocking_escalate_timeout": (
+        "多 Agent：阻塞式求决策 超时降级（escalation_resolved status=timeout，按假设续跑）",
+        _multi_agent_blocking_escalate_timeout,
+    ),
+    "multi_agent_blocking_escalate_pending": (
+        "多 Agent：阻塞式求决策 进行中（escalation_required 后挂起，回合仍 running、非 paused）",
+        _multi_agent_blocking_escalate_pending,
+    ),
+    "multi_agent_blocking_escalate_multi": (
+        "多 Agent：阻塞式求决策 同一 worker 串行多次升级（多升级 escalations[]，逐条结算）",
+        _multi_agent_blocking_escalate_multi,
     ),
     "multi_agent_received_context": (
         "多 Agent：收到的上下文（run_context 三通道 + 依赖块溯源/保真度）",

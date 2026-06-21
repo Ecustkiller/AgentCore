@@ -162,15 +162,19 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     process.append({"kind": "reasoning", "text": delta})
 
         elif etype == "tool_use_start":
-            step: dict[str, Any] = {
-                "kind": "tool",
-                "id": p.get("tool_call_id", ""),
-                "tool_name": p.get("tool_name", ""),
-                "arguments": p.get("arguments") or {},
-                "result": None,
-                "status": "running",
-            }
-            process.append(step)
+            # A delegated worker's call (run-scoped) belongs to its run node, not the
+            # captain's inline timeline — keep it out of `process` (统一团队时间线 = the
+            # CEO's OWN steps); still clear the run's live toolProgress below.
+            if not p.get("run_id"):
+                step: dict[str, Any] = {
+                    "kind": "tool",
+                    "id": p.get("tool_call_id", ""),
+                    "tool_name": p.get("tool_name", ""),
+                    "arguments": p.get("arguments") or {},
+                    "result": None,
+                    "status": "running",
+                }
+                process.append(step)
             # Multi-agent: attach the executing call to the running run's agent too
             # (desktop attaches tool calls to whichever run is running). Captured on the
             # agent's currentRunId; worker tool fidelity beyond status is a later ratchet.
@@ -181,6 +185,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     ag["toolProgress"] = None
 
         elif etype == "tool_use_end":
+            if p.get("run_id"):
+                continue
             call_id = p.get("tool_call_id", "")
             result = p.get("result")
             display = p.get("display")
@@ -331,10 +337,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             pass
 
         elif etype == "run_escalation":
-            # 升级实时可见: a worker flagged a decision/blocker for the CEO — append it to
-            # its run so the node carries a ⚠️ badge (mirrors the desktop/mobile folds,
+            # 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append
+            # it to its run so the node carries a ⚠️ badge (mirrors the desktop/mobile folds,
             # conformance pins them equal). Transport-only on the wire; the durable copy
-            # rides RunState.escalations → CEO synthesis.
+            # rides RunState.escalations → CEO synthesis. Status stays "raised" (the worker
+            # kept working — today's behaviour).
             run = run_by_id(p.get("run_id", ""))
             if run is not None:
                 run["escalations"].append(
@@ -342,8 +349,46 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "question": p.get("question", ""),
                         "assumption": p.get("assumption", ""),
                         "blocking": bool(p.get("blocking")),
+                        "status": "raised",
+                        "answer": None,
                     }
                 )
+
+        elif etype == "escalation_required":
+            # 阻塞式求决策: a worker SUSPENDED on a blocking escalate, awaiting the user —
+            # append a "pending" card to its run. The turn does NOT pause (siblings keep
+            # running), so unlike the halting gates this sets no `pending` interaction.
+            # Journaled twin of the run_escalation banner, so it replays on reload.
+            run = run_by_id(p.get("run_id", ""))
+            if run is not None:
+                run["escalations"].append(
+                    {
+                        "question": p.get("question", ""),
+                        "assumption": p.get("assumption", ""),
+                        "blocking": True,
+                        "status": "pending",
+                        "answer": None,
+                    }
+                )
+
+        elif etype == "escalation_resolved":
+            # 阻塞式求决策 settlement: flip this run's pending escalation to resolved/timeout
+            # (a worker is sequential ⇒ at most one pending per run, 设计 §4.7). "resolved"
+            # carries the answer; "timeout" (含按假设继续) falls back to the assumption
+            # (answer stays None). Single-emitter: only the suspending tool sends this.
+            run = run_by_id(p.get("run_id", ""))
+            esc = (
+                next((e for e in run["escalations"] if e.get("status") == "pending"), None)
+                if run is not None
+                else None
+            )
+            if esc is not None:
+                if p.get("status") == "resolved":
+                    esc["status"] = "resolved"
+                    esc["answer"] = p.get("answer", "")
+                else:
+                    esc["status"] = "timeout"
+                    esc["answer"] = None
 
         elif etype == "debate_result":
             # 一场辩论收场：整段结构化产物（form/motion/rounds/brief/sides/各方 run_id）

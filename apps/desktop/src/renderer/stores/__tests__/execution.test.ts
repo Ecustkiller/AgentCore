@@ -361,8 +361,16 @@ describe("projectExecution (fold)", () => {
     const run1 = exec.runs.find((s) => s.id === "run-1");
     // Non-blocking: the run still completed despite escalating.
     expect(run1?.status).toBe("completed");
+    // A non-blocking `raised` banner: no resolve target (id null), `raised` status, no answer.
     expect(run1?.escalations).toEqual([
-      { question: "用 Postgres 还是 MySQL?", assumption: "暂用 Postgres", blocking: true },
+      {
+        id: null,
+        question: "用 Postgres 还是 MySQL?",
+        assumption: "暂用 Postgres",
+        blocking: true,
+        status: "raised",
+        answer: null,
+      },
     ]);
     // A run that never escalated carries an empty list (drives "no badge").
     expect(exec.runs.find((s) => s.id === "run-2")?.escalations).toEqual([]);
@@ -389,6 +397,191 @@ describe("projectExecution (fold)", () => {
       assumption: "A",
       blocking: false,
     });
+  });
+
+  // 阻塞式求决策: the blocking-escalate pair (escalation_required → escalation_resolved)
+  // folds onto the raising run's escalations[]. A worker is sequential ⇒ at most one pending
+  // at a time (设计 §4.7); a pending one gates only its own worker, never a sibling.
+  it("folds a blocking escalate: pending carries the resolve id, then resolved carries the answer", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "escalation_required",
+        escalationId: "esc-1",
+        runId: "run-1",
+        agentId: "agent-1",
+        question: "用哪个数据库？",
+        assumption: "暂用 Postgres",
+      },
+    ];
+    // Pending: a blocking escalation with its resolve id, status pending, no answer yet.
+    expect(
+      projectExecution(plan, frames, "running").runs.find((s) => s.id === "run-1")
+        ?.escalations,
+    ).toEqual([
+      {
+        id: "esc-1",
+        question: "用哪个数据库？",
+        assumption: "暂用 Postgres",
+        blocking: true,
+        status: "pending",
+        answer: null,
+      },
+    ]);
+    frames.push({
+      t: 3,
+      kind: "escalation_resolved",
+      runId: "run-1",
+      agentId: "agent-1",
+      status: "resolved",
+      answer: "用 Postgres。",
+    });
+    expect(
+      projectExecution(plan, frames, "running").runs.find((s) => s.id === "run-1")
+        ?.escalations[0],
+    ).toEqual({
+      id: "esc-1",
+      question: "用哪个数据库？",
+      assumption: "暂用 Postgres",
+      blocking: true,
+      status: "resolved",
+      answer: "用 Postgres。",
+    });
+  });
+
+  it("folds a blocking escalate timeout: status timeout, answer stays null", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "escalation_required",
+        escalationId: "esc-1",
+        runId: "run-1",
+        agentId: "agent-1",
+        question: "Q?",
+        assumption: "暂用 A",
+      },
+      {
+        t: 3,
+        kind: "escalation_resolved",
+        runId: "run-1",
+        agentId: "agent-1",
+        status: "timeout",
+        answer: "",
+      },
+    ];
+    const esc = projectExecution(plan, frames, "running").runs.find(
+      (s) => s.id === "run-1",
+    )?.escalations[0];
+    expect(esc?.status).toBe("timeout");
+    expect(esc?.answer).toBeNull();
+  });
+
+  it("a pending blocking escalate does not halt a sibling run (non-halting)", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      started("agent-2", "run-2", 2),
+      {
+        t: 3,
+        kind: "escalation_required",
+        escalationId: "esc-1",
+        runId: "run-1",
+        agentId: "agent-1",
+        question: "Q?",
+        assumption: "A",
+      },
+    ];
+    const exec = projectExecution(plan, frames, "running");
+    // run-1 is parked on a pending escalation, but run-2 keeps running — the escalation gates
+    // only its own worker, never the wave (区别于 approval/ask_user/plan_review 的 halting gate).
+    expect(exec.runs.find((s) => s.id === "run-1")?.status).toBe("running");
+    expect(exec.runs.find((s) => s.id === "run-1")?.escalations[0].status).toBe(
+      "pending",
+    );
+    expect(exec.runs.find((s) => s.id === "run-2")?.status).toBe("running");
+  });
+
+  it("folds multiple sequential blocking escalates on one run independently", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "escalation_required",
+        escalationId: "esc-1",
+        runId: "run-1",
+        agentId: "agent-1",
+        question: "Q1?",
+        assumption: "A1",
+      },
+      {
+        t: 3,
+        kind: "escalation_resolved",
+        runId: "run-1",
+        agentId: "agent-1",
+        status: "resolved",
+        answer: "答1",
+      },
+      {
+        t: 4,
+        kind: "escalation_required",
+        escalationId: "esc-2",
+        runId: "run-1",
+        agentId: "agent-1",
+        question: "Q2?",
+        assumption: "A2",
+      },
+      {
+        t: 5,
+        kind: "escalation_resolved",
+        runId: "run-1",
+        agentId: "agent-1",
+        status: "timeout",
+        answer: "",
+      },
+    ];
+    // The second resolve targets the only remaining pending one (esc-2), so each settles
+    // independently in fire order — the "find first pending" fold is order-correct.
+    expect(
+      projectExecution(plan, frames, "running").runs.find((s) => s.id === "run-1")
+        ?.escalations,
+    ).toEqual([
+      {
+        id: "esc-1",
+        question: "Q1?",
+        assumption: "A1",
+        blocking: true,
+        status: "resolved",
+        answer: "答1",
+      },
+      {
+        id: "esc-2",
+        question: "Q2?",
+        assumption: "A2",
+        blocking: true,
+        status: "timeout",
+        answer: null,
+      },
+    ]);
+  });
+
+  it("ignores an escalation_resolved with no matching pending (safe no-op)", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "escalation_resolved",
+        runId: "run-1",
+        agentId: "agent-1",
+        status: "resolved",
+        answer: "迟到的答复",
+      },
+    ];
+    // A stale / duplicate resolve with nothing pending must not crash or fabricate an entry.
+    expect(
+      projectExecution(plan, frames, "running").runs.find((s) => s.id === "run-1")
+        ?.escalations,
+    ).toEqual([]);
   });
 });
 

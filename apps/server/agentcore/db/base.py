@@ -30,6 +30,13 @@ engine = create_async_engine(
     echo=settings.db_echo,
     pool_size=10,
     max_overflow=20,
+    # Pooled connections die out-of-band (PG idle timeout, NAT/firewall drop, laptop
+    # sleep, DB restart): a stale checkout then raises asyncpg "connection is closed"
+    # as a one-off 500. pre_ping validates liveness before each use and transparently
+    # swaps in a fresh connection; recycle proactively retires connections older than
+    # 30 min so they're replaced before the server's idle timeout can drop them.
+    pool_pre_ping=True,
+    pool_recycle=1800,
 )
 
 async_session_factory = async_sessionmaker(

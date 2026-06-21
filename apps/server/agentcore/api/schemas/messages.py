@@ -437,6 +437,11 @@ class RecordTurnRequest(BaseModel):
     input_tokens: int = Field(0, ge=0)
     output_tokens: int = Field(0, ge=0)
     rounds: int = Field(0, ge=0)
+    # The local turn's trace_id (32-hex), stamped by the desktop on every cloud
+    # inference-proxy LLM call this turn made. Reusing it for the persisted reply joins
+    # the reasoning logs + the bubble under ONE trace (打通气泡↔日志). Optional for
+    # back-compat; the server mints a fresh id when an old desktop omits it.
+    trace_id: str | None = Field(None, max_length=32)
 
 
 class RecordTurnResponse(BaseModel):

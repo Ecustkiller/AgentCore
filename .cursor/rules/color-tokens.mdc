@@ -38,6 +38,13 @@ alwaysApply: false
 | `failed` | `destructive`（红） |
 | 检查点 / 待裁决 | `warning`（琥珀） |
 
+## 分类色板（非状态语义，定义在 globals.css）
+
+除上表语义 token，`globals.css` 另有**分类用途**的裸 `--*` 变量（同一 OKLCH 亮度带，读作一个家族）——**仅供对应场景内联使用**（`var(--*)`），不进 `@theme inline`、不做 Tailwind 类：
+
+- **代码高亮** `--syntax-*`：代码块着色。
+- **角色身份** `--agent-1..8`：协作图队员头像的「身份色」，按角色名 hash 取一格（`lib/agentIdentity.ts`）。**身份 ≠ 状态**——身份只画在头像盘（`bg` 取 `color-mix` 浅染、字形取整值），运行状态仍走上表状态色（卡片色环 + 头像角标「在线点」），故身份色不与 6 态状态色抢色。新增/调整身份色 → 改 `globals.css` 的 `:root` + `.dark` 两处。
+
 ## 跨端（桌面 + 手机）· 品牌不变量
 
 两端是同一产品。token 层唯一的**硬约束 = 跨端品牌不变量必须一致**：

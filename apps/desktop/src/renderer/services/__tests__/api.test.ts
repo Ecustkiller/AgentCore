@@ -13,7 +13,7 @@ describe("tryRefresh single-flight", () => {
     const pending = new Promise<Response>((r) => {
       release = r;
     });
-    const fetchMock = vi.fn(() => pending);
+    const fetchMock = vi.fn((_url?: unknown) => pending);
     vi.stubGlobal("fetch", fetchMock);
 
     const all = Promise.all([tryRefresh(), tryRefresh(), tryRefresh()]);

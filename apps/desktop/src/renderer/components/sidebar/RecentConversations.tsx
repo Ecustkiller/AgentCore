@@ -1,13 +1,17 @@
 import { useConversations } from "@/hooks/useConversations";
+import { useWorkspaceGroups } from "@/hooks/useWorkspaceGroups";
 import { type Conversation, useConversationStore } from "@/stores/conversation";
 import { ChevronRight, MessageSquare } from "lucide-react";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConversationItem } from "./ConversationItem";
 
-/** How many recent conversations the slimmed sidebar shows before「查看全部对话」.
- * The full list (with folders) lives on the /conversations management page. */
-const RECENT_LIMIT = 8;
+/** How many 裸聊 the「快速对话」zone shows before deferring to /conversations.
+ * Adaptive: with no「工作区」groups the zone owns the whole rail ({@link BARE_LIMIT_SOLO});
+ * once groups sit above it the cap relaxes to {@link BARE_LIMIT_WITH_GROUPS} because
+ * workspaces already occupy the priority fold. Overflow exits via「查看全部对话」. */
+const BARE_LIMIT_SOLO = 15;
+const BARE_LIMIT_WITH_GROUPS = 10;
 
 function byPinnedThenRecency(a: Conversation, b: Conversation): number {
   // Pinned float to the top (置顶对话); within each group, newest activity first.
@@ -16,25 +20,33 @@ function byPinnedThenRecency(a: Conversation, b: Conversation): number {
 }
 
 /**
- * The sidebar's compact conversation list: the {@link RECENT_LIMIT} most recent
- * chats (flat, folder grouping ignored) plus a「查看全部对话」entry into the
- * full management page. The currently-open chat is always pinned in even when it
- * is older than the cut-off, so the active row never disappears from the rail.
+ * The rail's bare-chat zone (前端UX §一 方案B): **裸聊 (folderless chats)** below the
+ * workspace groups, capped adaptively (see {@link BARE_LIMIT_SOLO}). Foldered chats live
+ * ONLY in their {@link useWorkspaceGroups} group (干净二分零重复). The currently-open bare
+ * chat is always pinned in even when older than the cut-off (a foldered active chat
+ * shows in its auto-expanded group instead).
+ *
+ * No section title — group headers (cloud/local icon + trailing chevron) vs flat
+ * {@link ConversationItem} rows carry the IA. When both zones exist, a hairline divider
+ * separates them. When every chat is foldered this zone renders nothing.
  */
 export function RecentConversations() {
   const conversations = useConversations();
+  const hasGroups = useWorkspaceGroups().length > 0;
   const currentId = useConversationStore((s) => s.currentConversationId);
-  const navigate = useNavigate();
 
   const recent = useMemo(() => {
-    const sorted = [...conversations].sort(byPinnedThenRecency);
-    const top = sorted.slice(0, RECENT_LIMIT);
+    const limit = hasGroups ? BARE_LIMIT_WITH_GROUPS : BARE_LIMIT_SOLO;
+    const bare = conversations
+      .filter((c) => !c.folderId)
+      .sort(byPinnedThenRecency);
+    const top = bare.slice(0, limit);
     if (currentId && !top.some((c) => c.id === currentId)) {
-      const active = sorted.find((c) => c.id === currentId);
-      if (active) top.push(active);
+      const active = bare.find((c) => c.id === currentId);
+      if (active) top.push(active); // keep an out-of-window active bare chat visible
     }
     return top;
-  }, [conversations, currentId]);
+  }, [conversations, currentId, hasGroups]);
 
   if (conversations.length === 0) {
     return (
@@ -46,15 +58,38 @@ export function RecentConversations() {
     );
   }
 
+  // Every chat is foldered → no 裸聊 to show; the「工作区」zone carries the rail.
+  if (recent.length === 0) return null;
+
   return (
-    <div className="space-y-0.5 px-2 py-1">
-      {recent.map((conv) => (
-        <ConversationItem key={conv.id} conversation={conv} />
-      ))}
+    <div
+      className={`px-2 py-1 ${hasGroups ? "mx-3 border-t border-sidebar-border pt-2" : ""}`}
+    >
+      <div className="space-y-0.5">
+        {recent.map((conv) => (
+          <ConversationItem key={conv.id} conversation={conv} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The「查看全部对话」entry into the full management page (/conversations). Lives at the
+ * very bottom of the rail's conversation area — after「工作区」+「快速对话」— so it's
+ * the single overflow exit for everything (older 裸聊, extra workspaces, per-group
+ * overflow). Hidden when there are no conversations at all.
+ */
+export function ViewAllConversations() {
+  const count = useConversations().length;
+  const navigate = useNavigate();
+  if (count === 0) return null;
+  return (
+    <div className="px-2 pb-2">
       <button
         type="button"
         onClick={() => navigate("/conversations")}
-        className="mt-1 flex h-9 w-full items-center justify-between gap-2 rounded-lg px-3 text-sm text-sidebar-foreground/55 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+        className="flex h-9 w-full items-center justify-between gap-2 rounded-lg px-3 text-sm text-sidebar-foreground/55 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
       >
         <span>查看全部对话</span>
         <ChevronRight size={14} className="shrink-0" />

@@ -227,15 +227,31 @@ def tool_progress(tool_name: str, chars: int) -> SSEEvent:
     )
 
 
-def tool_use_start(tool_call_id: str, tool_name: str, arguments: dict[str, Any]) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.TOOL_USE_START,
-        payload={
-            "tool_call_id": tool_call_id,
-            "tool_name": tool_name,
-            "arguments": arguments,
-        },
-    )
+def tool_use_start(
+    tool_call_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    run_id: str = "",
+) -> SSEEvent:
+    """A tool call started executing.
+
+    ``run_id`` tags a DELEGATED WORKER's call (the CEO's own calls leave it ""):
+    workers run ``react_loop`` on the same turn sink, so their tool_use rides the
+    top-level stream identically to the captain's. The tag lets every ``process``
+    fold (the captain bubble's inline timeline) skip a worker's call — it belongs to
+    that worker's run node, not the CEO's timeline (统一团队时间线 = the CEO's OWN
+    steps). Omitted from the payload when empty so the captain's wire shape (and its
+    goldens) are byte-for-byte unchanged.
+    """
+    payload: dict[str, Any] = {
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "arguments": arguments,
+    }
+    if run_id:
+        payload["run_id"] = run_id
+    return SSEEvent(type=EventType.TOOL_USE_START, payload=payload)
 
 
 def citations_event(citations: list[dict[str, Any]]) -> SSEEvent:
@@ -283,6 +299,7 @@ def tool_use_end(
     success: bool,
     output: str,
     display: dict[str, Any] | None = None,
+    run_id: str = "",
 ) -> SSEEvent:
     payload: dict[str, Any] = {
         "tool_call_id": tool_call_id,
@@ -293,6 +310,10 @@ def tool_use_end(
     capped = _cap_display(display)
     if capped is not None:
         payload["display"] = capped
+    # Tags a delegated worker's call so process folds skip it (see ``tool_use_start``);
+    # omitted when empty to keep the captain's wire shape unchanged.
+    if run_id:
+        payload["run_id"] = run_id
     return SSEEvent(type=EventType.TOOL_USE_END, payload=payload)
 
 
@@ -1356,6 +1377,10 @@ class EventSink:
         elif t == EventType.TOOL_USE_START:
             self._has_tool = True
             payload = event.payload
+            # A delegated worker's call (run-scoped) belongs to its run node, not the
+            # captain's inline timeline — skip it here (统一团队时间线 = the CEO's OWN steps).
+            if payload.get("run_id"):
+                return
             self._process.append(
                 {
                     "kind": "tool",
@@ -1368,6 +1393,8 @@ class EventSink:
             )
         elif t == EventType.TOOL_USE_END:
             payload = event.payload
+            if payload.get("run_id"):
+                return
             call_id = payload.get("tool_call_id", "")
             result = payload.get("result")
             if isinstance(result, str) and len(result) > _PROCESS_RESULT_CAP:

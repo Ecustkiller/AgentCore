@@ -269,7 +269,9 @@
           {
             "question": "数据库选 Postgres 还是 MySQL？这关系到后续所有选型。",
             "assumption": "暂按 Postgres 推进",
-            "blocking": true
+            "blocking": true,
+            "status": "raised",
+            "answer": null
           }
         ]
       },

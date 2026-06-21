@@ -23,6 +23,7 @@ from agentcore.api.sse import sse_response
 from agentcore.conversation.quota import QuotaLimits, enforce_quota
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import dispatch_handoff
+from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import ConflictError, NotFoundError, ValidationError
 from agentcore.core.logging import get_logger
 from agentcore.db.repositories import (
@@ -87,7 +88,7 @@ async def _run_handoff(
         )
     except Exception as e:
         logger.warning("handoff.failed", conversation_id=conversation_id, error=str(e))
-        sink.emit(error_event("HANDOFF_FAILED", str(e)))
+        sink.emit(error_event(ErrorCode.HANDOFF_FAILED, str(e)))
     finally:
         if not sink._closed:
             sink.close()
@@ -330,14 +331,14 @@ async def _run_apply(
             conversation_id=source_conversation_id,
             error=str(e),
         )
-        sink.emit(error_event("HANDOFF_SNAPSHOT_NOT_FOUND", str(e)))
+        sink.emit(error_event(ErrorCode.HANDOFF_SNAPSHOT_NOT_FOUND, str(e)))
     except Exception as e:
         logger.warning(
             "handoff.apply_failed",
             conversation_id=source_conversation_id,
             error=str(e),
         )
-        sink.emit(error_event("HANDOFF_APPLY_FAILED", str(e)))
+        sink.emit(error_event(ErrorCode.HANDOFF_APPLY_FAILED, str(e)))
     finally:
         if not sink._closed:
             sink.close()

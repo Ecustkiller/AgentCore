@@ -14,7 +14,8 @@ export type ResolveInteractionBody =
   | Schemas["ResolveApprovalInteraction"]
   | Schemas["ResolveCheckpointInteraction"]
   | Schemas["ResolveClientToolInteraction"]
-  | Schemas["ResolvePlanReviewInteraction"];
+  | Schemas["ResolvePlanReviewInteraction"]
+  | Schemas["ResolveEscalationInteraction"];
 
 /**
  * Settle a paused interaction's answer over whichever transport is running this turn.

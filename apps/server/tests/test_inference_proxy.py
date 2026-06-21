@@ -369,3 +369,94 @@ async def test_forward_stream_relays_and_records(monkeypatch):
     assert len(spend) == 1
     assert spend[0]["usage"].output_tokens == 5
     assert spend[0]["model"] == "deepseek-v4-flash"
+
+
+# --- trace stitching (打通气泡↔日志) -----------------------------------------
+
+
+async def test_record_proxy_spend_binds_trace_into_log_context(monkeypatch):
+    """The spend log must carry the turn's trace_id. _record_proxy_spend rebinds it so a
+    STREAMED call's deferred ledger write (which runs from the relay teardown, AFTER the
+    route's log scope has exited) still joins the turn's trace end-to-end."""
+    from agentcore.core.log_context import get_log_value
+
+    seen: dict = {}
+
+    class _FakeCostRepo:
+        def __init__(self, _session):
+            pass
+
+        async def record_runs(self, **_kw):
+            # Read what's bound at the moment the ledger row is written.
+            seen["trace_id"] = get_log_value("trace_id")
+            seen["conversation_id"] = get_log_value("conversation_id")
+            return 1
+
+    monkeypatch.setattr(inference, "async_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr(inference, "CostEventRepository", _FakeCostRepo)
+
+    await inference._record_proxy_spend(
+        user_id="u1",
+        conversation_id="c1",
+        model="deepseek-v4-flash",
+        usage=inference._usage_from_deepseek({"prompt_tokens": 10, "completion_tokens": 1}),
+        trace_id="trace-xyz",
+    )
+    assert seen == {"trace_id": "trace-xyz", "conversation_id": "c1"}
+
+
+async def test_forward_unary_threads_trace_id(monkeypatch):
+    """The unary path forwards the turn's trace_id to the spend recorder."""
+    spend: list = []
+    monkeypatch.setattr(inference, "_record_proxy_spend", lambda **kw: spend.append(kw))
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"model": "m", "usage": {"prompt_tokens": 1, "completion_tokens": 1}},
+        )
+
+    client = httpx.AsyncClient(
+        base_url="http://upstream", transport=httpx.MockTransport(_handler)
+    )
+    await inference._forward_unary(
+        client, {"model": "m"}, user_id="u1", conversation_id="c1", trace_id="t-abc"
+    )
+    assert spend[0]["trace_id"] == "t-abc"
+
+
+async def test_forward_stream_threads_trace_id(monkeypatch):
+    """The streamed path forwards the turn's trace_id to the deferred spend recorder."""
+    spend: list = []
+
+    async def _fake_spend(**kw):
+        spend.append(kw)
+
+    monkeypatch.setattr(inference, "_record_proxy_spend", _fake_spend)
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        async def _body():
+            yield (
+                b'data: {"choices":[{"delta":{}}],'
+                b'"usage":{"prompt_tokens":1,"completion_tokens":1},"model":"m"}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=_body()
+        )
+
+    client = httpx.AsyncClient(
+        base_url="http://upstream", transport=httpx.MockTransport(_handler)
+    )
+    resp = await inference._forward_stream(
+        client,
+        {"model": "m", "stream": True},
+        user_id="u1",
+        conversation_id="c1",
+        trace_id="t-stream",
+    )
+    async for _chunk in resp.body_iterator:
+        pass
+
+    assert spend[0]["trace_id"] == "t-stream"

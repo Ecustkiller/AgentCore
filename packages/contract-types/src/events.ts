@@ -30,6 +30,8 @@ export type SSEEventType =
   | "run_failed"
   | "run_progress"
   | "run_escalation"
+  | "escalation_required"
+  | "escalation_resolved"
   | "debate_result"
   | "debate_round_started"
   | "debate_round"
@@ -84,6 +86,12 @@ export interface ToolUseStartPayload {
   tool_call_id: string;
   tool_name: string;
   arguments: Record<string, unknown>;
+  /** Present (run id) when a DELEGATED WORKER raised this call — workers share the
+   * turn's top-level tool_use stream with the captain. Process folds (the captain
+   * bubble's inline timeline) skip a tagged call: it belongs to that worker's run
+   * node, not the CEO's timeline (统一团队时间线 = the CEO's OWN steps). Absent for the
+   * captain's own calls. */
+  run_id?: string;
 }
 
 /** A tool's OPTIONAL render-oriented payload (工具结果富渲染), distinct from the
@@ -96,6 +104,9 @@ export interface ToolUseEndPayload {
   result: string;
   status: "success" | "error";
   display?: ToolDisplay | null;
+  /** Worker-call tag; see {@link ToolUseStartPayload.run_id}. Absent for the
+   * captain's own calls. */
+  run_id?: string;
 }
 
 /** One step in a single-agent turn's 思考·正文·工具 inline timeline (前端UX设计.md
@@ -342,6 +353,39 @@ export interface RunEscalationPayload {
   question: string;
   assumption: string;
   blocking: boolean;
+}
+
+/** 阻塞式求决策 (escalate blocking=true): a delegated worker SUSPENDED itself on a
+ * 「只有用户能定、且猜错就作废」fork and is awaiting the user's call — the CEO is parked at
+ * its `delegate` mid-wave, so the worker asks the user DIRECTLY. This surfaces the interactive
+ * decision card (`EscalationCard`), keyed by `escalation_id` for the resolve endpoint. `question`
+ * is the worker's self-contained ask; `assumption` is the fallback it proceeds on if no answer
+ * arrives (the timeout degrade). Run-scoped so the card attaches to this worker's node. UNLIKE
+ * the (transport-only) non-blocking `run_escalation` banner, this is JOURNALED — the prompt + its
+ * resolution replay inline on reload, and the turn never flips to `paused` (siblings keep
+ * running). 设计: docs/07-规划/阻塞式求决策设计.md §4.2/§4.5. */
+export interface EscalationRequiredPayload {
+  escalation_id: string;
+  run_id: string;
+  agent_id: string;
+  question: string;
+  assumption: string;
+}
+
+/** 阻塞式求决策 settlement (设计 §4.4): a blocking escalate resolved and the worker resumes.
+ * `status` is `"resolved"` (the user answered — `answer` carries it, fed back into the worker's
+ * loop with「以用户答复为准，回改与假设冲突的已做部分」) or `"timeout"` (no answer within the
+ * window, or the user chose 按假设继续 — the worker falls back to its stated assumption, i.e.
+ * degrades to today's non-blocking behaviour; `answer` empty). Emitted by the suspending tool's
+ * awaiter ONLY (单一发射者: never by the resolve route), so the event always matches what the
+ * worker actually did. Journaled as the twin of `escalation_required` so the exchange replays
+ * inline on reload. */
+export interface EscalationResolvedPayload {
+  escalation_id: string;
+  run_id: string;
+  agent_id: string;
+  status: "resolved" | "timeout";
+  answer: string;
 }
 
 /** Token counts in the ledger short-key form. `cache_hit + cache_miss === input`;
@@ -606,6 +650,8 @@ export type SSEPayloadMap = {
   run_failed: RunFailedPayload;
   run_progress: RunProgressPayload;
   run_escalation: RunEscalationPayload;
+  escalation_required: EscalationRequiredPayload;
+  escalation_resolved: EscalationResolvedPayload;
   debate_result: DebateResultPayload;
   debate_round_started: DebateRoundStartedPayload;
   debate_round: DebateRoundPayload;

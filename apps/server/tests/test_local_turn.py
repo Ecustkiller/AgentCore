@@ -25,6 +25,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentcore.conversation import local_turn as local_turn_mod
 from agentcore.conversation import service
 from agentcore.conversation.service import record_local_turn
 
@@ -70,6 +71,9 @@ def _patch_persistence(
             # Separate entry so tests can assert the row was pinned to the client id
             # (the idempotency anchor) without disturbing the ("msg", …) membership checks.
             events.append(("msg_id", role, kw.get("message_id")))
+            # The assistant row's trace_id (trace 链路): the write-back reuses the
+            # client-supplied id so the reply joins its reasoning logs (打通气泡↔日志).
+            events.append(("trace", role, kw.get("trace_id")))
             return SimpleNamespace(id=f"{role}-id")
 
         async def get_by_id(self, message_id, *, conversation_id):
@@ -100,22 +104,19 @@ def _patch_persistence(
     async def _fake_journal(_session, **kw):
         events.append(("journal", kw.get("message_id")))
 
-    monkeypatch.setattr(service, "async_session_factory", lambda: _FakeSessionCM())
-    monkeypatch.setattr(service, "MessageRepository", _FakeMsgRepo)
-    monkeypatch.setattr(service, "CostEventRepository", _FakeCostRepo)
-    monkeypatch.setattr(service, "ConversationRepository", _FakeConvRepo)
-    monkeypatch.setattr(service, "persist_turn_journal", _fake_journal)
-    monkeypatch.setattr(service, "schedule_consolidation", lambda _cid: None)
+    monkeypatch.setattr(local_turn_mod, "async_session_factory", lambda: _FakeSessionCM())
+    monkeypatch.setattr(local_turn_mod, "MessageRepository", _FakeMsgRepo)
+    monkeypatch.setattr(local_turn_mod, "ConversationRepository", _FakeConvRepo)
+    monkeypatch.setattr(local_turn_mod, "persist_turn_journal", _fake_journal)
+    monkeypatch.setattr(local_turn_mod, "schedule_consolidation", lambda _cid: None)
     # Title generation: skip the LLM. A fake provider satisfies the build/close
     # dance; _generate_title is stubbed to a fixed string.
-    monkeypatch.setattr(
-        service, "build_provider", lambda *_a, **_k: SimpleNamespace(close=_noop_close)
-    )
+    monkeypatch.setattr(local_turn_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=_noop_close))
 
     async def _fake_title(**_kw):
         return "本地回合标题"
 
-    monkeypatch.setattr(service, "_generate_title", _fake_title)
+    monkeypatch.setattr(local_turn_mod, "generate_title", _fake_title)
 
 
 async def _noop_close():
@@ -219,6 +220,46 @@ async def test_record_local_turn_pins_user_row_to_client_id(monkeypatch):
     # The user row was pinned to the client id; the assistant row keeps the pipeline id.
     assert ("msg_id", "user", "u-bubble-1") in events
     assert ("msg_id", "assistant", "m9") in events
+
+
+async def test_record_local_turn_reuses_client_trace_id(monkeypatch):
+    """trace 链路 (打通气泡↔日志): the desktop mints one ``trace_id`` per local turn and
+    stamps it on every cloud inference-proxy LLM call; the write-back must REUSE it (not
+    mint a fresh one) so the persisted reply joins those reasoning logs as one trace."""
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+
+    await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="ok",
+        message_id="m1",
+        trace_id="0123456789abcdef0123456789abcdef",
+    )
+
+    # The assistant row carries the client's trace_id verbatim (not a server-minted one).
+    assert ("trace", "assistant", "0123456789abcdef0123456789abcdef") in events
+
+
+async def test_record_local_turn_mints_trace_id_when_absent(monkeypatch):
+    """Back-compat: an old desktop that omits ``trace_id`` still gets a valid 32-hex id
+    minted server-side (the reply just isn't pre-joined to its proxy reasoning logs)."""
+    import re
+
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+
+    await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="ok",
+        message_id="m1",
+    )
+
+    trace = next(e[2] for e in events if e[0] == "trace" and e[1] == "assistant")
+    assert trace and re.fullmatch(r"[0-9a-f]{32}", trace)  # freshly minted, well-formed
 
 
 async def test_record_local_turn_retry_is_idempotent_noop(monkeypatch):

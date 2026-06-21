@@ -80,6 +80,15 @@ function newTurnId(): string {
 }
 
 /**
+ * 本回合 trace_id：32-hex（去掉 UUID 连字符），与服务端 `core/log_context.new_trace_id`
+ * （`uuid4().hex`）同形、契合 `Message.trace_id` 的 `String(32)` 列。随云代理 LLM 调用上报
+ * 并随回写落库，使一次本地回合的推理日志↔气泡归并为同一条可 grep 的 trace（打通气泡↔日志）。
+ */
+function newTraceId(): string {
+  return crypto.randomUUID().replace(/-/g, "");
+}
+
+/**
  * 从一次失败的回合 RPC（`startTurn` / `resume`）拒绝里提取本地引擎真因（onStatus 没记到时的兜底）。
  *
  * 回合中途引擎报错时进程仍健康（无 `error`/`exited` 推送），真因落在 RPC 错误的 message 里；
@@ -113,6 +122,8 @@ export async function streamConversationViaSidecar({
   signal,
 }: StreamViaSidecarOptions): Promise<SidecarTurnResult> {
   const turnId = newTurnId();
+  // 本回合 trace_id：贯穿云代理推理调用 + 回写落库，使推理日志↔气泡同 trace（打通气泡↔日志）。
+  const traceId = newTraceId();
   // 云推理凭据（平台 key 不下放本机，走云端代理鉴权——Slice 4a）。取不到则带 undefined：
   // dev 下 sidecar 回退其自身配置，生产则以可重试的引擎错误失败（胜过静默跑成无计费回合）。
   const inference = (await resolveSidecarInference()) ?? undefined;
@@ -129,12 +140,19 @@ export async function streamConversationViaSidecar({
         rootId,
         subpath,
         turnId,
+        traceId,
         userMessage: content,
         history,
         inference,
       }),
     writeBack: (result) =>
-      persistAndReconcile(conversationId, content, optimisticUserId, result),
+      persistAndReconcile(
+        conversationId,
+        content,
+        optimisticUserId,
+        traceId,
+        result,
+      ),
   });
 }
 
@@ -160,6 +178,8 @@ export async function resumeConversationViaSidecar({
 }: ResumeViaSidecarOptions): Promise<SidecarTurnResult> {
   // 续跑同样要跑 LLM（重启后会新拉起引擎），故随带当前云推理凭据（同 startTurn）。
   const inference = (await resolveSidecarInference()) ?? undefined;
+  // 本次续跑的 trace_id（同 startTurn）：贯穿续跑的推理调用 + 回写落库。
+  const traceId = newTraceId();
   return runSidecarTurn({
     conversationId,
     rootId,
@@ -173,13 +193,20 @@ export async function resumeConversationViaSidecar({
         subpath,
         conversationId,
         messageId,
+        traceId,
         decision,
         note,
         selected,
         inference,
       }),
     writeBack: (result) =>
-      persistAndReconcile(conversationId, userMessage, userMessageId, result),
+      persistAndReconcile(
+        conversationId,
+        userMessage,
+        userMessageId,
+        traceId,
+        result,
+      ),
   });
 }
 
@@ -287,6 +314,7 @@ async function persistAndReconcile(
   conversationId: string,
   userMessage: string,
   optimisticUserId: string,
+  traceId: string,
   result: SidecarTurnResult,
 ): Promise<void> {
   try {
@@ -294,12 +322,19 @@ async function persistAndReconcile(
       conversationId,
       userMessage,
       optimisticUserId,
+      traceId,
       result,
     );
     applyReconcile(conversationId, optimisticUserId, saved);
   } catch (err) {
     console.error("[sidecar] 本地回合回写云端失败（历史未同步）", err);
-    warnWriteBackFailed(conversationId, userMessage, optimisticUserId, result);
+    warnWriteBackFailed(
+      conversationId,
+      userMessage,
+      optimisticUserId,
+      traceId,
+      result,
+    );
   }
 }
 
@@ -333,6 +368,7 @@ function warnWriteBackFailed(
   conversationId: string,
   userMessage: string,
   optimisticUserId: string,
+  traceId: string,
   result: SidecarTurnResult,
 ): void {
   notifyWarning("本回合未同步到云端", {
@@ -344,6 +380,7 @@ function warnWriteBackFailed(
           conversationId,
           userMessage,
           optimisticUserId,
+          traceId,
           result,
         );
       },
@@ -356,6 +393,7 @@ async function retryWriteBack(
   conversationId: string,
   userMessage: string,
   optimisticUserId: string,
+  traceId: string,
   result: SidecarTurnResult,
 ): Promise<void> {
   try {
@@ -363,12 +401,19 @@ async function retryWriteBack(
       conversationId,
       userMessage,
       optimisticUserId,
+      traceId,
       result,
     );
     applyReconcile(conversationId, optimisticUserId, saved);
     notifySuccess("已同步到云端");
   } catch (err) {
     console.error("[sidecar] 本地回合回写重试失败（历史仍未同步）", err);
-    warnWriteBackFailed(conversationId, userMessage, optimisticUserId, result);
+    warnWriteBackFailed(
+      conversationId,
+      userMessage,
+      optimisticUserId,
+      traceId,
+      result,
+    );
   }
 }

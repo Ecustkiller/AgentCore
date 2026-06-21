@@ -73,11 +73,17 @@ export function dropTrailingContentSteps(
   return steps;
 }
 
-/** Append a started tool call as a `running` step to the timeline. */
+/** Append a started tool call as a `running` step to the timeline.
+ *
+ * A DELEGATED WORKER's call (`payload.run_id` set) is skipped: workers share the
+ * turn's top-level tool_use stream, but their calls belong to their run node, not
+ * the captain bubble's inline timeline (统一团队时间线 = the CEO's OWN steps). Returns
+ * the same reference when skipped so callers can no-op. */
 export function appendToolStep(
   process: ProcessStep[] | undefined,
   payload: ToolUseStartPayload,
 ): ProcessStep[] {
+  if (payload.run_id) return process ?? [];
   const steps = process ? [...process] : [];
   steps.push({
     kind: "tool",
@@ -103,6 +109,8 @@ export function resolveToolStep(
   process: ProcessStep[] | undefined,
   payload: ToolUseEndPayload,
 ): ProcessStep[] | undefined {
+  // A worker's call never entered the captain timeline (see appendToolStep) — no-op.
+  if (payload.run_id) return process;
   if (!process) return process;
   let changed = false;
   const steps = process.map((s) => {

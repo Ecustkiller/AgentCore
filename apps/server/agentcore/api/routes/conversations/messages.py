@@ -311,6 +311,7 @@ async def record_local_turn_endpoint(
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
         rounds=body.rounds,
+        trace_id=body.trace_id,
         llm_credentials=credentials,
     )
     return RecordTurnResponse(**result)

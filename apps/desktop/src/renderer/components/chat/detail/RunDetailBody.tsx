@@ -1,3 +1,4 @@
+import { EscalationCard } from "@/components/chat/EscalationCard";
 import { Markdown } from "@/components/chat/Markdown";
 import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
 import {
@@ -7,9 +8,11 @@ import {
   toolResultPeek,
 } from "@/components/chat/toolResult/ToolResultView";
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
+import { activeRuntime, useConversationStore } from "@/stores/conversation";
 import {
   type AgentState,
   MODEL_TIER_META,
+  type RunEscalation,
   type RunNode,
   type ToolCallState,
   reasoningMeta,
@@ -107,6 +110,15 @@ export function RunDetailBody({
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const usageDetail = useUIStore((s) => s.usageDetail);
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  // 阻塞式求决策 §4.5B/§4.7: a pending escalation is answerable只在回合仍 live 时（与气泡卡
+  // 同一 interactive 门控）；重载 / 已结束的回合渲染为静态记录。按「回合非终态」(isStreaming)
+  // 取，而非单个 run —— 升级 worker 可能 parked 而其它队员仍在跑。
+  const turnInteractive = useConversationStore(
+    (s) =>
+      activeRuntime(s).messages.find((m) => m.id === messageId)?.isStreaming ??
+      false,
+  );
 
   const run = execution?.runs.find((s) => s.id === runId);
   const agent = run
@@ -160,7 +172,14 @@ export function RunDetailBody({
         <Markdown content={run.task} />
       </Section>
 
-      {run.escalations.length > 0 && <EscalationSection run={run} />}
+      {run.escalations.length > 0 && (
+        <EscalationSection
+          run={run}
+          role={agent.role}
+          conversationId={conversationId}
+          interactive={turnInteractive}
+        />
+      )}
 
       {run.receivedContext.length > 0 && (
         <ReceivedContextSection
@@ -295,46 +314,74 @@ export function RunDetailBody({
 }
 
 /**
- * 升级实时可见: a worker's escalations (`escalate`) — its 向上求决策 to the CEO. Shown
- * prominently near the top because it is a 待裁决 signal the user/CEO acts on, not a
- * buried tool row. Each carries the self-contained 问题 plus the 假设 the worker proceeded
- * on (escalate 非阻塞 — it kept working), and a「阻断性」flag when a wrong guess would void
- * the product. The CEO resolves it (ask_user / revise / re-delegate); this view just makes
- * sure the human can see it the moment it surfaces.
+ * 升级实时可见 + 阻塞式求决策 §4.5B: a worker's escalations (`escalate`), rendered by
+ * lifecycle `status` rather than a flat list:
+ *
+ *  - `raised` (非阻塞 `run_escalation`) — the worker flagged a 待决问题 but kept working
+ *    under its assumption; the CEO resolves it at synthesis. Read-only here.
+ *  - `pending` / `resolved` / `timeout` (阻塞·求决策) — reuse the SAME {@link EscalationCard}
+ *    as the assistant bubble so a pending one is 就地可应答 while the turn is live
+ *    (`interactive`), then shows the answer / 已按假设继续 / a dormant record once settled.
  */
-function EscalationSection({ run }: { run: RunNode }) {
+function EscalationSection({
+  run,
+  role,
+  conversationId,
+  interactive,
+}: {
+  run: RunNode;
+  role: string;
+  conversationId: string | null;
+  interactive: boolean;
+}) {
   return (
-    <Section title={`上报待裁决 (${run.escalations.length})`}>
+    <Section title={`向上升级 (${run.escalations.length})`}>
       <div className="space-y-2">
-        {run.escalations.map((esc, i) => (
-          <div
-            // Escalations are append-only and never reordered, so the index is a
-            // stable key here (no id on the wire — they ride the transcript).
-            key={i}
-            className="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs"
-          >
-            <div className="flex items-center gap-1.5 font-medium text-warning">
-              <ArrowUp size={12} className="shrink-0" />
-              <span>向上求决策</span>
-              {esc.blocking && (
-                <span className="rounded-full bg-warning/20 px-1.5 py-0.5 text-warning">
-                  阻断性
-                </span>
-              )}
-            </div>
-            <p className="mt-1 whitespace-pre-wrap break-words text-foreground">
-              {esc.question}
-            </p>
-            {esc.assumption && (
-              <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
-                <span className="text-muted-foreground/70">暂用假设：</span>
-                {esc.assumption}
-              </p>
-            )}
-          </div>
-        ))}
+        {run.escalations.map((esc, i) =>
+          esc.status === "raised" ? (
+            // Escalations are append-only and never reordered; a raised one has no wire
+            // id, so the index is a stable key here.
+            <RaisedEscalationRow key={`r${i}`} esc={esc} />
+          ) : (
+            <EscalationCard
+              key={esc.id ?? `b${i}`}
+              escalation={esc}
+              role={role}
+              conversationId={conversationId}
+              interactive={interactive}
+            />
+          ),
+        )}
       </div>
     </Section>
+  );
+}
+
+/** A non-blocking escalation (`run_escalation`): the worker flagged a 待决问题 but kept
+ * working under its assumption, so this is read-only — the CEO resolves it at synthesis.
+ * A「阻断性」flag marks one where a wrong guess would void the product. */
+function RaisedEscalationRow({ esc }: { esc: RunEscalation }) {
+  return (
+    <div className="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs">
+      <div className="flex items-center gap-1.5 font-medium text-warning">
+        <ArrowUp size={12} className="shrink-0" />
+        <span>向上求决策</span>
+        {esc.blocking && (
+          <span className="rounded-full bg-warning/20 px-1.5 py-0.5 text-warning">
+            阻断性
+          </span>
+        )}
+      </div>
+      <p className="mt-1 whitespace-pre-wrap break-words text-foreground">
+        {esc.question}
+      </p>
+      {esc.assumption && (
+        <p className="mt-1 whitespace-pre-wrap break-words text-muted-foreground">
+          <span className="text-muted-foreground/70">暂用假设：</span>
+          {esc.assumption}
+        </p>
+      )}
+    </div>
   );
 }
 

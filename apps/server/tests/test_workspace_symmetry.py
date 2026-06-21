@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentcore.conversation import promotion as promotion_mod
 from agentcore.conversation import service
 from agentcore.conversation.service import (
     _sanitize_subpath_segment,
@@ -118,9 +119,9 @@ def _patch_promote_db(monkeypatch) -> None:
         async def set_folder(self, conversation_id, folder_id, *, user_id):
             return None
 
-    monkeypatch.setattr(service, "async_session_factory", lambda: _FakeSession())
-    monkeypatch.setattr(service, "FolderRepository", _FakeFolderRepo)
-    monkeypatch.setattr(service, "ConversationRepository", _FakeConvRepo)
+    monkeypatch.setattr(promotion_mod, "async_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr(promotion_mod, "FolderRepository", _FakeFolderRepo)
+    monkeypatch.setattr(promotion_mod, "ConversationRepository", _FakeConvRepo)
 
 
 # --- LocalWorkspace subpath scoping -------------------------------------------
@@ -480,7 +481,7 @@ async def test_promote_conversation_folder_broadcasts_to_firehose(monkeypatch):
         async def publish(self, user_ids, event):
             published.append((tuple(user_ids), event))
 
-    monkeypatch.setattr(service, "default_chat_hub", lambda: _Hub())
+    monkeypatch.setattr(promotion_mod, "default_chat_hub", lambda: _Hub())
 
     state: dict = {"folder_id": None}
 
