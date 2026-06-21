@@ -81,8 +81,9 @@ export default function DownloadPanel() {
           </>
         ) : (
           <div className="mt-8 rounded-xl border border-border/80 bg-accent/30 px-5 py-4 text-sm text-muted-foreground">
-            {primary.label} 版尚未发布。当前仅提供 Windows 安装包，请先下载 Windows
-            版或关注后续更新。
+            {primary.id === "mac"
+              ? "macOS 版尚未随本次构建发布。请从 GitHub Releases 查看是否有新版本，或先使用 Windows 版。"
+              : `${primary.label} 版尚未发布。请先下载已提供的平台安装包，或关注后续更新。`}
           </div>
         )}
 
@@ -147,18 +148,38 @@ export default function DownloadPanel() {
 
       {/* 系统要求 */}
       <div className="surface p-6 lg:col-span-2">
-        <p className="font-semibold">系统要求 · Windows</p>
-        <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-          {SYSTEM_REQUIREMENTS.win.map((item) => (
-            <li
-              key={item}
-              className="flex items-start gap-2 text-sm text-muted-foreground"
-            >
-              <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-2" />
-              {item}
-            </li>
-          ))}
-        </ul>
+        <div className="grid gap-8 sm:grid-cols-2">
+          <div>
+            <p className="font-semibold">系统要求 · Windows</p>
+            <ul className="mt-4 grid gap-2">
+              {SYSTEM_REQUIREMENTS.win.map((item) => (
+                <li
+                  key={item}
+                  className="flex items-start gap-2 text-sm text-muted-foreground"
+                >
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-2" />
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+          {PLATFORMS.find((p) => p.id === "mac")?.available ? (
+            <div>
+              <p className="font-semibold">系统要求 · macOS</p>
+              <ul className="mt-4 grid gap-2">
+                {SYSTEM_REQUIREMENTS.mac.map((item) => (
+                  <li
+                    key={item}
+                    className="flex items-start gap-2 text-sm text-muted-foreground"
+                  >
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-2" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );

@@ -2,7 +2,8 @@ import DownloadPanel from "@/components/DownloadPanel";
 import {
   DESKTOP_VERSION,
   DOWNLOAD_PAGE_PATH,
-  INSTALL_STEPS,
+  MAC_INSTALL_STEPS,
+  WIN_INSTALL_STEPS,
 } from "@/lib/download";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -10,7 +11,7 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: `下载 AgentCore ${DESKTOP_VERSION} — 协作智能平台`,
   description:
-    "下载 AgentCore 桌面客户端 for Windows。Multi-Agent 协作工作台，自动更新，全程可见的团队执行。",
+    "下载 AgentCore 桌面客户端 for Windows 与 macOS（Apple Silicon）。Multi-Agent 协作工作台，自动更新。",
 };
 
 function BrandMark() {
@@ -24,6 +25,21 @@ function BrandMark() {
       <circle cx="20" cy="7" r="2.2" fill="var(--brand-2)" />
       <circle cx="7" cy="20" r="2.2" fill="var(--brand-2)" />
     </svg>
+  );
+}
+
+function InstallStepList({ steps }: { steps: string[] }) {
+  return (
+    <ol className="mt-6 space-y-4">
+      {steps.map((step, i) => (
+        <li key={step} className="surface flex gap-4 p-5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-sm font-bold text-primary">
+            {i + 1}
+          </span>
+          <p className="pt-1 text-muted-foreground">{step}</p>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -49,7 +65,7 @@ export default function DownloadPage() {
             下载 AgentCore 桌面客户端
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-muted-foreground">
-            面向 Windows 的 Multi-Agent 协作工作台。
+            Windows 与 macOS（Apple Silicon）Multi-Agent 协作工作台。
           </p>
         </div>
 
@@ -59,22 +75,28 @@ export default function DownloadPage() {
 
         <section className="mx-auto mt-16 max-w-3xl">
           <h2 className="text-center text-xl font-bold">安装步骤</h2>
-          <ol className="mt-8 space-y-4">
-            {INSTALL_STEPS.map((step, i) => (
-              <li key={step} className="surface flex gap-4 p-5">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-sm font-bold text-primary">
-                  {i + 1}
+          <div className="mt-10 grid gap-12 lg:grid-cols-2">
+            <div>
+              <h3 className="text-center text-base font-semibold">Windows</h3>
+              <InstallStepList steps={WIN_INSTALL_STEPS} />
+            </div>
+            <div>
+              <h3 className="text-center text-base font-semibold">
+                macOS
+                <span className="ml-1.5 text-sm font-normal text-muted-foreground">
+                  Apple Silicon · 内测
                 </span>
-                <p className="pt-1 text-muted-foreground">{step}</p>
-              </li>
-            ))}
-          </ol>
+              </h3>
+              <InstallStepList steps={MAC_INSTALL_STEPS} />
+            </div>
+          </div>
         </section>
 
         <section className="mx-auto mt-16 max-w-3xl rounded-2xl border border-border/70 bg-card/40 p-8 text-center">
           <h2 className="text-lg font-bold">已有客户端？</h2>
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
             打开 AgentCore → 设置 → 关于 → 检查更新。新版本会在后台下载，就绪后提示重启安装。
+            macOS 内测包更新安装后若无法启动，请再次右键 → 打开。
           </p>
         </section>
       </main>

@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const RELEASES_REPO = "Lawofall/AgentCore-releases";
-const FALLBACK_VERSION = "0.2.0";
+const FALLBACK_VERSION = "0.3.0";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -19,6 +19,8 @@ function fallbackArtifacts(version) {
     releaseNotesUrl: `https://github.com/${RELEASES_REPO}/releases/tag/v${version}`,
     winUrl: `${base}/AgentCore-${version}-win-x64.exe`,
     winFilename: `AgentCore-${version}-win-x64.exe`,
+    macUrl: `${base}/AgentCore-${version}-mac-arm64.dmg`,
+    macFilename: `AgentCore-${version}-mac-arm64.dmg`,
   };
 }
 
@@ -35,25 +37,28 @@ async function fetchLatest() {
     throw new Error(`Latest release ${data.tag_name} is still draft`);
   }
   const version = String(data.tag_name).replace(/^v/, "");
-  const winAsset = (data.assets ?? []).find((a) =>
-    /-win-x64\.exe$/i.test(a.name),
-  );
-  if (winAsset) {
-    return {
-      version,
-      releaseNotesUrl: data.html_url,
-      winUrl: winAsset.browser_download_url,
-      winFilename: winAsset.name,
-    };
-  }
-  return fallbackArtifacts(version);
+  const assets = data.assets ?? [];
+  const winAsset = assets.find((a) => /-win-x64\.exe$/i.test(a.name));
+  const macAsset = assets.find((a) => /-mac-arm64\.dmg$/i.test(a.name));
+  const base = fallbackArtifacts(version);
+  return {
+    version,
+    releaseNotesUrl: data.html_url,
+    winUrl: winAsset?.browser_download_url ?? base.winUrl,
+    winFilename: winAsset?.name ?? base.winFilename,
+    macUrl: macAsset?.browser_download_url ?? "",
+    macFilename: macAsset?.name ?? "",
+  };
 }
 
 async function main() {
   let artifacts = fallbackArtifacts(FALLBACK_VERSION);
   try {
     artifacts = await fetchLatest();
-    console.log(`fetch-release: latest v${artifacts.version}`);
+    console.log(
+      `fetch-release: latest v${artifacts.version}` +
+        (artifacts.macUrl ? " (win+mac)" : " (win only)"),
+    );
   } catch (err) {
     console.warn(
       `fetch-release: ${err instanceof Error ? err.message : err} — fallback v${FALLBACK_VERSION}`,
@@ -66,6 +71,8 @@ export const DESKTOP_VERSION = ${JSON.stringify(artifacts.version)};
 export const RELEASE_NOTES_URL = ${JSON.stringify(artifacts.releaseNotesUrl)};
 export const WIN_INSTALLER_URL = ${JSON.stringify(artifacts.winUrl)};
 export const WIN_INSTALLER_FILENAME = ${JSON.stringify(artifacts.winFilename)};
+export const MAC_DMG_URL = ${JSON.stringify(artifacts.macUrl)};
+export const MAC_DMG_FILENAME = ${JSON.stringify(artifacts.macFilename)};
 `;
 
   writeFileSync(join(__dir, "../src/lib/download.generated.ts"), out, "utf8");
