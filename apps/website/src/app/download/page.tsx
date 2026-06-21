@@ -49,7 +49,7 @@ export default function DownloadPage() {
             下载 AgentCore 桌面客户端
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-muted-foreground">
-            面向 Windows 的 Multi-Agent 协作工作台。安装后自动更新，无需每次来官网下载。
+            面向 Windows 的 Multi-Agent 协作工作台。
           </p>
         </div>
 
