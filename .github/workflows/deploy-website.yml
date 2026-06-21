@@ -1,9 +1,8 @@
 name: Deploy Website
 
 # 官网（apps/website）静态站自动部署到 Cloudflare Pages。
-# 仅当 apps/website 改动时触发：构建 next 静态产物（out/）后用 wrangler 直传。
-# git 触发分支 = 仓库主干 master；wrangler 直传须 --branch=main 钉到 Pages 生产分支（Pages 侧名为 main，与 git 分支无关），
-# 自定义域 fashitianxia.xyz 才跟随更新（落到其他分支名会成 preview、域名不更新）。
+# 构建时 scripts/fetch-release.mjs 从 GitHub Releases 拉 Latest 版本写 download.generated.ts。
+# 触发：master 上 website 改动 / desktop-v* 桌面发布完成后 / 手动 dispatch。
 
 on:
   push:
@@ -11,6 +10,9 @@ on:
     paths:
       - "apps/website/**"
       - ".github/workflows/deploy-website.yml"
+  workflow_run:
+    workflows: ["Release Desktop"]
+    types: [completed]
   workflow_dispatch:
 
 concurrency:
@@ -20,6 +22,8 @@ concurrency:
 jobs:
   deploy:
     name: Build & deploy to Cloudflare Pages
+    # workflow_run：仅在 Release Desktop 成功后才刷新下载页（避免 release 失败仍更新官网）。
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:

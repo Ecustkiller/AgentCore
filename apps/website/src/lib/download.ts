@@ -1,17 +1,24 @@
 /**
- * 桌面端下载单一源（部署与运维.md §7.6 / electron-builder publish）。
- * 发新版时 bump DESKTOP_VERSION → 重部署官网；应用内更新走 latest.yml，不依赖此页。
+ * 桌面端下载配置（构建时由 scripts/fetch-release.mjs 从 GitHub Releases 刷新）。
  */
-export const DESKTOP_VERSION = "0.2.0";
+import {
+  DESKTOP_VERSION,
+  RELEASE_NOTES_URL,
+  WIN_INSTALLER_FILENAME,
+  WIN_INSTALLER_URL,
+} from "./download.generated";
+
+export {
+  DESKTOP_VERSION,
+  RELEASE_NOTES_URL,
+  WIN_INSTALLER_FILENAME,
+  WIN_INSTALLER_URL,
+};
 
 export const RELEASES_REPO =
   "https://github.com/Lawofall/AgentCore-releases" as const;
 
-/** GitHub Latest 正式 release（人工转正后 electron-updater 与「所有版本」入口共用）。 */
 export const RELEASES_LATEST = `${RELEASES_REPO}/releases/latest` as const;
-
-export const RELEASE_NOTES_URL =
-  `${RELEASES_REPO}/releases/tag/v${DESKTOP_VERSION}` as const;
 
 export type PlatformId = "win" | "mac" | "linux";
 
@@ -20,12 +27,9 @@ export type PlatformDownload = {
   label: string;
   subtitle: string;
   available: boolean;
-  /** 直链安装包；未上线平台为 undefined。 */
   url?: string;
   fileLabel?: string;
 };
-
-const winInstallerUrl = `${RELEASES_REPO}/releases/download/v${DESKTOP_VERSION}/AgentCore-${DESKTOP_VERSION}-win-x64.exe`;
 
 export const PLATFORMS: PlatformDownload[] = [
   {
@@ -33,8 +37,8 @@ export const PLATFORMS: PlatformDownload[] = [
     label: "Windows",
     subtitle: "Windows 10/11 · 64 位",
     available: true,
-    url: winInstallerUrl,
-    fileLabel: `AgentCore-${DESKTOP_VERSION}-win-x64.exe`,
+    url: WIN_INSTALLER_URL,
+    fileLabel: WIN_INSTALLER_FILENAME,
   },
   {
     id: "mac",
@@ -67,5 +71,4 @@ export const INSTALL_STEPS = [
   "在设置 → 关于 可检查更新；已安装用户会自动收到新版本。",
 ];
 
-/** 首页 / 导航用的下载页入口（行业惯例：营销页 → 专用下载页 → 安装包）。 */
 export const DOWNLOAD_PAGE_PATH = "/download" as const;
