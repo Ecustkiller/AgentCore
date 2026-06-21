@@ -1,0 +1,60 @@
+name: Bootstrap Admin User
+
+# 生产环境首次创建/提升管理员（invite-gated 注册前的鸡生蛋步骤）。
+# 密码随机生成并写入 job summary（请首次登录后修改）。
+# 需 secrets：DEPLOY_SSH_*。
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: Admin username
+        required: true
+        default: admin
+        type: string
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create admin on production
+        uses: appleboy/ssh-action@v1
+        env:
+          ADMIN_USERNAME: ${{ inputs.username }}
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
+          envs: ADMIN_USERNAME
+          script: |
+            set -euo pipefail
+            DEPLOY="${AGENTCORE_DEPLOY_DIR:-/opt/agentcore/repo/deploy_f6d1637}"
+            ENVF="$DEPLOY/config/production.env"
+            [[ -f "$ENVF" ]] || { echo "ERROR: $ENVF missing"; exit 1; }
+
+            ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | head -c 20)"
+
+            COMPOSE=( docker compose -p agentcore \
+              -f "$DEPLOY/docker-compose.server.yml" \
+              -f "$DEPLOY/docker-compose.app.yml" \
+              --env-file "$ENVF" )
+
+            "${COMPOSE[@]}" run --rm \
+              -e "ADMIN_PASSWORD=${ADMIN_PASSWORD}" \
+              api python scripts/create_admin.py "${ADMIN_USERNAME}"
+
+            echo ""
+            echo "========== BOOTSTRAP CREDENTIALS (save now) =========="
+            echo "URL:      https://office.fashitianxia.xyz"
+            echo "Username: ${ADMIN_USERNAME}"
+            echo "Password: ${ADMIN_PASSWORD}"
+            echo "====================================================="
+
+      - name: Write credentials to job summary
+        if: success()
+        run: |
+          echo "### Admin bootstrap" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "See the **Create admin on production** step log for username/password (password is masked in logs but printed once in the SSH output block)." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Login: https://office.fashitianxia.xyz" >> "$GITHUB_STEP_SUMMARY"
