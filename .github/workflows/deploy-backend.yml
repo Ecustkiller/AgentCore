@@ -1,9 +1,12 @@
 name: Deploy Backend
 
 # 后端部署（部署与运维.md §7.2 发布点 / §三 CI/CD）。
-# push prod-* tag → SSH 到生产服务器 → 跑 deploy-server.sh <tag>：
-#   fetch→解析 tag 为 SHA→起基础设施→迁移前 pg_dump 快照→alembic upgrade→compose up→
-#   /readyz 健康检查→记 .last-deployed-sha（失败不记 SHA、退非零）。
+# push prod-* tag → SSH 到生产服务器 → finish-server.sh <short-sha>：
+#   解析 tag→短 SHA→拉镜像（VPC 无 short-sha 时回退 latest 并本地打 tag）→
+#   alembic upgrade→compose up→/readyz 健康检查。
+#
+# 生产机当前跑 deploy_f6d1637 快照栈（非仓库 deploy/ 蓝图），故用 finish-server.sh
+# 而非 deploy-server.sh。待生产对齐 deploy/ 蓝图后可统一。
 #
 # master 是 WIP 主干、HEAD≠可上线点（§7.2）：部署只认 prod-* 发布点，不随 master 自动上线。
 # 镜像由 build-backend.yml 在 push master 时已构建推 ACR，故 prod-* tag 指向的 SHA 必有镜像。
@@ -41,10 +44,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Trigger deploy-server.sh over SSH
+      - name: Deploy via finish-server.sh over SSH
         uses: appleboy/ssh-action@v1
         env:
-          # tag 触发用 tag 名；手动 dispatch 用输入的 ref。
           DEPLOY_REF: ${{ github.ref_type == 'tag' && github.ref_name || inputs.ref }}
         with:
           host: ${{ secrets.DEPLOY_SSH_HOST }}
@@ -52,10 +54,13 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
           envs: DEPLOY_REF
-          # 命令失败即整步失败（ssh-action 透传远端退出码）。deploy-server.sh 自身
-          # set -euo pipefail + 健康检查失败退非零，故部署不健康时本 job 会红。
           script: |
             set -euo pipefail
             HOME_DIR="${AGENTCORE_HOME:-/opt/agentcore}"
+            REPO="$HOME_DIR/repo"
             echo "==> deploy ref=${DEPLOY_REF} home=${HOME_DIR}"
-            "${HOME_DIR}/repo/deploy/scripts/deploy-server.sh" "${DEPLOY_REF}"
+            cd "$REPO"
+            git fetch --tags --quiet origin
+            SHA="$(git rev-parse --short "${DEPLOY_REF}^{commit}")"
+            echo "resolved ${DEPLOY_REF} -> ${SHA}"
+            bash "$REPO/deploy/scripts/finish-server.sh" "$SHA"

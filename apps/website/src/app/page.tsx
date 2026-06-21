@@ -3,10 +3,10 @@ import FlowDiagram from "@/components/FlowDiagram";
 import Reveal from "@/components/Reveal";
 
 // 桌面安装包下载去向（electron-builder.yml publish / 部署与运维.md §7.6）：
-// 公开发布仓 Lawofall/AgentCore-releases；/releases/latest 跳转最新正式 release。
-// ⚠️ 需该仓存在并已发布（非草稿）release 后链接才有效（P2-5 人工前置）。
+// 公开发布仓 Lawofall/AgentCore-releases；指向当前 Latest 正式 release。
+const DESKTOP_VERSION = "0.2.0";
 const DOWNLOAD_URL =
-  "https://github.com/Lawofall/AgentCore-releases/releases/latest";
+  `https://github.com/Lawofall/AgentCore-releases/releases/download/v${DESKTOP_VERSION}/AgentCore-${DESKTOP_VERSION}-win-x64.exe`;
 
 const NAV = [
   { href: "#value", label: "能力" },
