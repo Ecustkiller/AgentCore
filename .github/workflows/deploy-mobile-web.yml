@@ -5,8 +5,8 @@ name: Deploy Mobile Web
 # API：VITE_API_URL 指向 https://app.fashitianxia.xyz/api（Nginx /api 反代前缀）。
 #
 # 触发：master 上 mobile / 共享包改动，或手动 dispatch。
-# 需 secrets：CLOUDFLARE_API_TOKEN（与 deploy-website.yml 共用）。
-# 后端 CORS：生产 config/.env 须含 https://m.fashitianxia.xyz（见 production.env.example）。
+# 需 secrets：CLOUDFLARE_API_TOKEN（与 deploy-website.yml 共用）、DEPLOY_SSH_*（patch-cors job）。
+# 自定义域 m.fashitianxia.xyz：首次 deploy 后在 CF Pages 项目 agentcore-mobile 绑定（DNS 同账号自动）。
 
 on:
   push:
@@ -58,3 +58,41 @@ jobs:
           accountId: e784e487f8ab57882d4b24d845ccfad1
           workingDirectory: apps/mobile
           command: pages deploy dist --project-name=agentcore-mobile --branch=main
+
+  patch-cors:
+    name: Patch production CORS + restart api
+    needs: deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ensure mobile origin in CORS_ALLOW_ORIGINS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            ORIGIN="https://m.fashitianxia.xyz"
+            DEPLOY="${AGENTCORE_DEPLOY_DIR:-/opt/agentcore/repo/deploy_f6d1637}"
+            ENVF="$DEPLOY/config/production.env"
+            [[ -f "$ENVF" ]] || { echo "ERROR: $ENVF missing"; exit 1; }
+
+            if grep -q 'm\.fashitianxia\.xyz' "$ENVF"; then
+              echo "CORS already includes $ORIGIN"
+            elif grep -q '^CORS_ALLOW_ORIGINS=' "$ENVF"; then
+              sed -i "s|^CORS_ALLOW_ORIGINS=\(.*\)|CORS_ALLOW_ORIGINS=\1,${ORIGIN}|" "$ENVF"
+              echo "appended $ORIGIN to CORS_ALLOW_ORIGINS"
+            else
+              echo "CORS_ALLOW_ORIGINS=${ORIGIN}" >>"$ENVF"
+              echo "created CORS_ALLOW_ORIGINS with $ORIGIN"
+            fi
+            grep '^CORS_ALLOW_ORIGINS=' "$ENVF"
+
+            COMPOSE=( docker compose -p agentcore \
+              -f "$DEPLOY/docker-compose.server.yml" \
+              -f "$DEPLOY/docker-compose.app.yml" \
+              --env-file "$ENVF" )
+            "${COMPOSE[@]}" up -d api
+            echo "api container recreated with updated env"
