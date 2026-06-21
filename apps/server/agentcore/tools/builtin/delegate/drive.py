@@ -44,6 +44,7 @@ async def drive(
     from agentcore.runtime.runs import (
         DEFAULT_MAX_PARALLEL,
         BatchMetrics,
+        BoundaryReason,
         RunPhase,
         WaveScheduler,
         build_agent_executor,
@@ -111,11 +112,32 @@ async def drive(
             completed=m.completed,
             failed=m.failed,
             skipped=m.skipped,
+            # 受监督波循环埋点 (职责晚绑定与动态再编排 §7.2): boundary fires this segment +
+            # scope 信号占比 (derived from raw counts, mirroring avg_parallelism).
+            bind=m.bind_boundaries,
+            scope=m.scope_boundaries,
+            checkpoint=m.checkpoint_boundaries,
+            escalations=m.escalations,
+            scope_ratio=round(m.scope_escalations / m.escalations, 2) if m.escalations else 0.0,
         )
 
     if tool._pending_boundary is not None:
         reason, nodes = tool._pending_boundary
         tool._pending_boundary = None
+        # 单一事实源 (P5 持久化): a SCOPE yield marked the deviating nodes' escalations
+        # ``consumed`` IN PLACE (wave.py). Re-journal their terminal RunState so
+        # ``completed_from_journal`` rebuilds the resume seed WITH ``consumed`` — else a
+        # durable re-drive (a later checkpoint pause + resume of the same plan) would
+        # re-fire an already-handled SCOPE boundary. Last-write-wins per run_id makes the
+        # refreshed message_final supersede the pre-consumption one.
+        if reason is BoundaryReason.SCOPE:
+            from agentcore.runtime.facts import record_turn_fact
+            from agentcore.runtime.runs.serialize import run_final_fact
+
+            for node in nodes:
+                state = results.get(node.run_id)
+                if state is not None:
+                    record_turn_fact(run_final_fact(node.run_id, state))
         tool._supervised = SupervisedRun(
             plan=plan,
             completed=dict(results),

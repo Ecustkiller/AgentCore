@@ -1,0 +1,229 @@
+"""Parallel tool execution for one ReAct round."""
+
+import asyncio
+import json
+import time
+from typing import Any
+
+from agentcore.core.logging import get_logger
+from agentcore.core.types import ToolApproval
+from agentcore.llm.protocol import LLMMessage, ToolCall
+from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
+from agentcore.runtime.citations import annotate_tool_citations, merge_citations
+from agentcore.runtime.events import EventSink, tool_use_end, tool_use_start
+from agentcore.runtime.facts import ToolCallFact, record_turn_fact
+from agentcore.runtime.loop_controller import ToolAttempt, fingerprint_tool_call
+from agentcore.tools.protocol import ToolContext, ToolResult
+from agentcore.tools.registry import ToolRegistry
+
+from .constants import MAX_PARALLEL_TOOLS
+from .timeout import resolve_tool_timeout
+
+logger = get_logger(__name__)
+
+
+async def execute_tools(
+    tool_calls: list[ToolCall],
+    registry: ToolRegistry,
+    context: ToolContext,
+    sink: EventSink,
+    *,
+    approval_gate: ApprovalGate | None = None,
+    citation_sink: list[dict[str, Any]] | None = None,
+    annotate_citations: bool = True,
+    run_id: str = "",
+) -> tuple[list[LLMMessage], ToolResult | None, list[ToolAttempt]]:
+    """Execute tool calls (parallel, capped).
+
+    Returns ``(tool_messages, terminal, attempts)`` where ``terminal`` is the
+    first terminal-effect ToolResult (a tool that already produced the turn's
+    final answer — handoff / ask_user-stop) or ``None``, and ``attempts`` carries
+    the per-call fingerprint + success used by convergence governance to detect
+    mechanical loops.
+
+    When ``citation_sink`` is provided, web sources surfaced by successful research
+    tools are merged into it (arrival order, deduped, capped). With
+    ``annotate_citations`` (CEO chat path) each source's assigned canonical number
+    is also folded back into that tool message's model-facing output (A2); merge
+    happens in deterministic call order, not completion order, so card numbering is
+    reproducible. Workers pass ``annotate_citations=False`` — sources are collected
+    but the worker text is left un-numbered (its local numbers would be re-ordered
+    when merged into the turn card).
+    """
+
+    async def _run_one(
+        tc: ToolCall,
+    ) -> tuple[LLMMessage, ToolResult | None, ToolAttempt, list[dict[str, Any]]]:
+        name = tc.function.name
+        fingerprint = fingerprint_tool_call(name, tc.function.arguments or "")
+        try:
+            args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+        except json.JSONDecodeError:
+            args = {}
+
+        sink.emit(tool_use_start(tc.id, name, args, run_id=run_id))
+        logger.debug("tool.execute_start", tool=name)
+
+        tool = registry.get_optional(name)
+        if tool is None:
+            error_msg = f"Tool '{name}' not found"
+            sink.emit(
+                tool_use_end(tc.id, name, success=False, output=error_msg, run_id=run_id)
+            )
+            logger.info("tool.execute_end", tool=name, status="not_found", duration_ms=0)
+            return (
+                LLMMessage(role="tool", content=error_msg, tool_call_id=tc.id),
+                None,
+                ToolAttempt(fingerprint, name, success=False),
+                [],
+            )
+
+        if (
+            approval_gate is not None
+            and tool.schema.approval is ToolApproval.GRANTABLE
+        ):
+            decision = await approval_gate.authorize(
+                tool_name=name, tool_call_id=tc.id, arguments=args
+            )
+            if decision is ApprovalDecision.DENY:
+                denial = (
+                    f"工具 '{name}' 未获用户授权，该操作未执行。"
+                    "不要重试它——请调整方案或询问如何继续。"
+                )
+                sink.emit(
+                    tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id)
+                )
+                logger.info("tool.execute_end", tool=name, status="denied", duration_ms=0)
+                return (
+                    LLMMessage(role="tool", content=denial, tool_call_id=tc.id),
+                    None,
+                    ToolAttempt(fingerprint, name, success=False),
+                    [],
+                )
+
+        started = time.monotonic()
+        timeout = resolve_tool_timeout(tool.schema)
+        try:
+            if timeout is None:
+                result = await tool.execute(args, context)
+            else:
+                result = await asyncio.wait_for(tool.execute(args, context), timeout)
+        except TimeoutError:
+            # B1 backstop: the call blew its ceiling. wait_for has already cancelled
+            # the tool coroutine (a cancel-safe tool releases its side effects in
+            # turn — e.g. the sandbox kills its subprocess); surface a model-facing
+            # error so the loop adapts instead of hanging, and count it as a failed
+            # attempt so a tool that keeps timing out trips convergence governance.
+            duration_ms = int((time.monotonic() - started) * 1000)
+            timeout_msg = (
+                f"工具 '{name}' 执行超过 {timeout:.0f}s 仍未完成，已中止。"
+                "请改用更快的方式、缩小处理范围，或换一种方案，不要原样重试。"
+            )
+            sink.emit(
+                tool_use_end(tc.id, name, success=False, output=timeout_msg, run_id=run_id)
+            )
+            logger.warning(
+                "tool.execute_end", tool=name, status="timeout", duration_ms=duration_ms
+            )
+            return (
+                LLMMessage(role="tool", content=timeout_msg, tool_call_id=tc.id),
+                None,
+                ToolAttempt(fingerprint, name, success=False),
+                [],
+            )
+        result.tool_call_id = tc.id
+
+        if result.success:
+            output = result.output
+        else:
+            # Surface BOTH the terse error summary AND any diagnostic output
+            # (stdout/stderr for code_execute) so the model can self-correct
+            # instead of debugging blind: many tools put the real reason in
+            # ``output``, not the short ``error`` (e.g. code_execute's error is
+            # just "退出码 N" while the traceback / "command not found" lives in
+            # output). Either may be empty; join the non-empty parts.
+            output = (
+                "\n".join(
+                    p
+                    for p in ((result.error or "").strip(), (result.output or "").strip())
+                    if p
+                )
+                or "Unknown error"
+            )
+        sink.emit(
+            tool_use_end(
+                tc.id,
+                name,
+                success=result.success,
+                output=output,
+                display=result.display,
+                run_id=run_id,
+            )
+        )
+        logger.info(
+            "tool.execute_end",
+            tool=name,
+            status="ok" if result.success else "error",
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+
+        citations = result.citations if (result.success and result.citations) else []
+        message = LLMMessage(role="tool", content=output, tool_call_id=tc.id)
+        return (
+            message,
+            (result if result.is_terminal else None),
+            ToolAttempt(fingerprint, name, success=result.success),
+            citations,
+        )
+
+    sem = asyncio.Semaphore(MAX_PARALLEL_TOOLS)
+
+    async def _bounded(
+        tc: ToolCall,
+    ) -> tuple[LLMMessage, ToolResult | None, ToolAttempt, list[dict[str, Any]]]:
+        async with sem:
+            return await _run_one(tc)
+
+    quads = await asyncio.gather(*[_bounded(tc) for tc in tool_calls])
+    messages = [m for m, _, _, _ in quads]
+    terminal = next((t for _, t, _, _ in quads if t is not None), None)
+    attempts = [a for _, _, a, _ in quads]
+
+    # Merge web sources into the sink in deterministic call order (not completion
+    # order) so card numbering is reproducible. With annotate_citations (CEO chat
+    # path) the assigned canonical number (= source-card index) is also folded into
+    # each tool message's model-facing output so the model cites a number that
+    # lines up with the card (A2). Workers collect-only (annotate_citations=False):
+    # their sources still reach the turn card via the executor → DelegateTool →
+    # pipeline, but the worker text stays un-numbered.
+    if citation_sink is not None:
+        for message, _terminal, _attempt, message_citations in quads:
+            if not message_citations:
+                continue
+            numbers = merge_citations(citation_sink, message_citations)
+            if annotate_citations:
+                message.content = annotate_tool_citations(
+                    message.content or "", message_citations, numbers
+                )
+
+    # 执行级事件溯源 (§18.3 / Phase 2 边界①): record each completed call's FINAL
+    # model-facing result as a tool_call fact — captured HERE, after the citation
+    # annotation above, so it is byte-for-byte what the next round's window carried (the
+    # forwarded tool_use_end fires inside _run_one with the pre-annotation text). The
+    # window fold reads tool results from these facts. ``tool_calls`` is positionally
+    # aligned with ``quads`` (asyncio.gather preserves order), so zip pairs each result
+    # to its issuing call. A suspended call never reaches here (it blocks in execute), so
+    # no fact is recorded for it — the fold reads that absence as "result still pending".
+    for tc, (message, _terminal, attempt, _citations) in zip(tool_calls, quads):
+        record_turn_fact(
+            ToolCallFact(
+                run_id=run_id,
+                tool_call_id=message.tool_call_id or tc.id,
+                name=tc.function.name,
+                arguments=tc.function.arguments or "",
+                result=message.content or "",
+                success=attempt.success,
+            ).to_fact()
+        )
+
+    return messages, terminal, attempts

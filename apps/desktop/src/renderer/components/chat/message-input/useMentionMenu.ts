@@ -1,0 +1,360 @@
+import {
+  type IndexedEntry,
+  buildDirListing,
+  filterEntries,
+  loadFileIndex,
+} from "@/lib/fileIndex";
+import type { FileSource } from "@/lib/fileSource";
+import { fetchMessageWindow } from "@/services/messages";
+import { searchAll } from "@/services/search";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type KeyboardEvent,
+  type RefObject,
+  type SetStateAction,
+} from "react";
+import {
+  CONV_MENTION_MSG_LIMIT,
+  type PendingAttachment,
+  buildMentionSources,
+  detectMention,
+  formatConversationContext,
+} from "./composerAttachments";
+import type { MenuMode } from "./types";
+
+export function useMentionMenu({
+  conversationId,
+  value,
+  setValue,
+  attachments,
+  setAttachments,
+  textareaRef,
+}: {
+  conversationId: string | null;
+  value: string;
+  setValue: Dispatch<SetStateAction<string>>;
+  attachments: PendingAttachment[];
+  setAttachments: Dispatch<SetStateAction<PendingAttachment[]>>;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+}) {
+  const [menuMode, setMenuMode] = useState<MenuMode>(null);
+  const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [menuError, setMenuError] = useState<string | null>(null);
+  const [fileIndex, setFileIndex] = useState<IndexedEntry[]>([]);
+  const [dirIndex, setDirIndex] = useState<IndexedEntry[]>([]);
+  const [sourceCount, setSourceCount] = useState(0);
+  const [indexLoading, setIndexLoading] = useState(false);
+  const [convItems, setConvItems] = useState<IndexedEntry[]>([]);
+  const indexLoadedRef = useRef(false);
+  const sourcesRef = useRef<Map<string, FileSource>>(new Map());
+  const mentionRangeRef = useRef<{ start: number; end: number } | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  const entries = useMemo(
+    () =>
+      [...dirIndex, ...fileIndex].sort((a, b) =>
+        a.display.localeCompare(b.display, "zh"),
+      ),
+    [dirIndex, fileIndex],
+  );
+  const fileItems = useMemo(
+    () => filterEntries(entries, query),
+    [entries, query],
+  );
+  const items = useMemo(
+    () => [...convItems, ...fileItems],
+    [convItems, fileItems],
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: query/menuMode are intentional re-run keys
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query, menuMode]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!menuMode || !q) {
+      setConvItems([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void searchAll(q, { types: ["conversation"], limit: 6 })
+        .then((res) => {
+          if (cancelled) return;
+          const section = res.sections.find((s) => s.type === "conversation");
+          const candidates = (section?.items ?? []).map<IndexedEntry>((it) => ({
+            sourceId: "conversation",
+            sourceLabel: "对话",
+            relPath: it.id,
+            name: it.title || "未命名对话",
+            display: it.title || "未命名对话",
+            kind: "conversation",
+          }));
+          setConvItems(candidates);
+        })
+        .catch(() => {
+          if (!cancelled) setConvItems([]);
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query, menuMode]);
+
+  const ensureIndex = useCallback(async () => {
+    if (indexLoadedRef.current) return;
+    setIndexLoading(true);
+    try {
+      const sources = await buildMentionSources(conversationId);
+      sourcesRef.current = new Map(sources.map((s) => [s.id, s]));
+      const { files, dirs, sourceCount: count } = await loadFileIndex(sources);
+      setFileIndex(files);
+      setDirIndex(dirs);
+      setSourceCount(count);
+      indexLoadedRef.current = true;
+    } catch {
+      setMenuError("读取文件列表失败");
+    } finally {
+      setIndexLoading(false);
+    }
+  }, [conversationId]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is an intentional re-run key
+  useEffect(() => {
+    indexLoadedRef.current = false;
+    setFileIndex([]);
+    setDirIndex([]);
+    setSourceCount(0);
+    sourcesRef.current = new Map();
+  }, [conversationId]);
+
+  const closeMenu = useCallback(() => {
+    setMenuMode(null);
+    setMenuError(null);
+    mentionRangeRef.current = null;
+  }, []);
+
+  const openMention = useCallback(
+    (start: number, end: number, q: string) => {
+      mentionRangeRef.current = { start, end };
+      setQuery(q);
+      setMenuMode("mention");
+      setMenuError(null);
+      void ensureIndex();
+    },
+    [ensureIndex],
+  );
+
+  const openBrowse = useCallback(() => {
+    if (menuMode === "browse") {
+      closeMenu();
+      return;
+    }
+    mentionRangeRef.current = null;
+    setQuery("");
+    setMenuMode("browse");
+    setMenuError(null);
+    void ensureIndex();
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, [menuMode, closeMenu, ensureIndex]);
+
+  const syncMention = useCallback(
+    (text: string, caret: number) => {
+      const m = detectMention(text, caret);
+      if (m) {
+        openMention(m.start, caret, m.query);
+      } else if (menuMode === "mention") {
+        closeMenu();
+      }
+    },
+    [menuMode, openMention, closeMenu],
+  );
+
+  const attachEntry = useCallback(
+    async (entry: IndexedEntry) => {
+      const key = `${entry.kind}:${entry.sourceId}:${entry.relPath}`;
+      if (attachments.some((a) => a.key === key)) {
+        closeMenu();
+        textareaRef.current?.focus();
+        return;
+      }
+
+      let next: PendingAttachment | null = null;
+      if (entry.kind === "conversation") {
+        let win: Awaited<ReturnType<typeof fetchMessageWindow>>;
+        try {
+          win = await fetchMessageWindow(entry.relPath, {
+            limit: CONV_MENTION_MSG_LIMIT,
+          });
+        } catch {
+          setMenuError("读取对话失败");
+          return;
+        }
+        const { text, truncated } = formatConversationContext(win.messages);
+        if (!text) {
+          setMenuError("该对话暂无可引用的内容");
+          return;
+        }
+        next = {
+          id: crypto.randomUUID(),
+          key,
+          name: entry.name,
+          path: "对话",
+          text,
+          truncated: truncated || win.hasMoreBefore,
+          kind: "conversation",
+          conversationId: entry.relPath,
+        };
+      } else if (entry.kind === "dir") {
+        const listing = buildDirListing(fileIndex, entry);
+        if (listing.fileCount === 0) {
+          setMenuError("该目录内没有可索引的文件");
+          return;
+        }
+        next = {
+          id: crypto.randomUUID(),
+          key,
+          name: entry.name,
+          path: entry.display,
+          text: listing.text,
+          truncated: listing.truncated,
+          kind: "dir",
+        };
+      } else {
+        const source = sourcesRef.current.get(entry.sourceId);
+        if (!source) {
+          setMenuError("文件来源已失效，请重试");
+          return;
+        }
+        let res: Awaited<ReturnType<FileSource["read"]>>;
+        try {
+          res = await source.read(entry.relPath);
+        } catch {
+          setMenuError("读取文件失败");
+          return;
+        }
+        if (res.kind !== "text") {
+          setMenuError(
+            res.kind === "image"
+              ? "暂不支持图片附件（模型尚无视觉能力）"
+              : res.kind === "too-large"
+                ? "文件过大，无法作为附件"
+                : "二进制文件无法作为文本附件",
+          );
+          return;
+        }
+        next = {
+          id: crypto.randomUUID(),
+          key,
+          name: entry.name,
+          path: entry.display,
+          text: res.text,
+          truncated: res.truncated,
+          kind: "file",
+        };
+      }
+
+      const attachment = next;
+      setAttachments((prev) => [...prev, attachment]);
+
+      const range = mentionRangeRef.current;
+      if (menuMode === "mention" && range) {
+        const updated = value.slice(0, range.start) + value.slice(range.end);
+        setValue(updated);
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (el) {
+            el.focus();
+            el.selectionStart = el.selectionEnd = range.start;
+          }
+        });
+      } else {
+        textareaRef.current?.focus();
+      }
+      closeMenu();
+    },
+    [
+      attachments,
+      fileIndex,
+      value,
+      menuMode,
+      closeMenu,
+      setAttachments,
+      setValue,
+      textareaRef,
+    ],
+  );
+
+  const handleAddRoot = useCallback(async () => {
+    const root = await window.fsApi.addRoot();
+    if (!root) return;
+    indexLoadedRef.current = false;
+    await ensureIndex();
+  }, [ensureIndex]);
+
+  const handleMenuNavKey = useCallback(
+    (e: KeyboardEvent): boolean => {
+      if (!menuMode) return false;
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          setActiveIndex((i) => Math.min(i + 1, Math.max(items.length - 1, 0)));
+          return true;
+        case "ArrowUp":
+          e.preventDefault();
+          setActiveIndex((i) => Math.max(i - 1, 0));
+          return true;
+        case "Enter":
+          if (items[activeIndex]) {
+            e.preventDefault();
+            void attachEntry(items[activeIndex]);
+            return true;
+          }
+          return false;
+        case "Tab":
+          if (items[activeIndex]) {
+            e.preventDefault();
+            void attachEntry(items[activeIndex]);
+            return true;
+          }
+          return false;
+        case "Escape":
+          e.preventDefault();
+          closeMenu();
+          textareaRef.current?.focus();
+          return true;
+        default:
+          return false;
+      }
+    },
+    [menuMode, items, activeIndex, attachEntry, closeMenu, textareaRef],
+  );
+
+  return {
+    menuMode,
+    items,
+    activeIndex,
+    indexLoading,
+    menuError,
+    query,
+    sourceCount,
+    indexLoadedRef,
+    searchInputRef,
+    setQuery,
+    setActiveIndex,
+    openBrowse,
+    syncMention,
+    attachEntry,
+    closeMenu,
+    handleMenuNavKey,
+    handleAddRoot,
+  };
+}

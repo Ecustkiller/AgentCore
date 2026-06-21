@@ -8,6 +8,7 @@ import { formatCompact, formatDuration } from "@/lib/format";
 import {
   MODEL_TIER_META,
   type ModelTier,
+  type PlanRevisionKind,
   type ReasoningEffort,
   type RunCheckpoint,
   type RunStatus,
@@ -22,6 +23,7 @@ import {
   Clock,
   CornerDownRight,
   FileText,
+  GitBranch,
   History,
   Loader2,
   Pause,
@@ -82,6 +84,11 @@ interface AgentNodeData {
    * of the same worker rather than a new teammate. */
   isRevision?: boolean;
   revision?: number;
+  /**「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound ("bind"，据上游证据定稿
+   * 待绑定步骤) or re-steered ("steer"，偏离后操舵未跑步骤) this paused node mid-flight; null
+   * on a node the plan never touched. Drives a muted「计划已调整」badge so the 自我纠偏 stays
+   * visible without ever pausing the run. */
+  revised?: PlanRevisionKind | null;
   /** 辩论/审查 side (前端UX设计.md §四): badges the node 正方/反方; null/undefined on
    * an ordinary teammate. */
   stance?: Stance | null;
@@ -208,6 +215,8 @@ export function AgentNode({ data }: NodeProps) {
   }${durationText ? `，用时 ${durationText}` : ""}${
     d.toolCount > 0 ? `，工具 ${d.toolCount} 次` : ""
   }${artifacts.length > 0 ? `，产物 ${artifacts.length} 个` : ""}${
+    d.revised ? `，${revisedBadge(d.revised).label}` : ""
+  }${
     d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""
   }${
     (d.escalationPending ?? 0) > 0
@@ -245,6 +254,7 @@ export function AgentNode({ data }: NodeProps) {
   if (d.stance) peekTags.push(STANCE_META[d.stance].label);
   if (d.isSubtask) peekTags.push("子任务");
   if (d.isRevision) peekTags.push(`修订 v${d.revision ?? 2}`);
+  if (d.revised) peekTags.push(revisedBadge(d.revised).label);
   if (d.checkpoint) peekTags.push(checkpointBadge(d.checkpoint).label);
   if ((d.escalationPending ?? 0) > 0) {
     peekTags.push(
@@ -319,6 +329,7 @@ export function AgentNode({ data }: NodeProps) {
                   {(d.stance ||
                     d.isSubtask ||
                     d.isRevision ||
+                    d.revised ||
                     d.checkpoint ||
                     (d.escalationPending ?? 0) > 0 ||
                     (d.escalationRaised ?? 0) > 0) && (
@@ -341,6 +352,15 @@ export function AgentNode({ data }: NodeProps) {
                         <span className="flex shrink-0 items-center gap-1 rounded-full bg-info/10 px-1.5 py-0.5 font-medium text-info">
                           <History size={10} />
                           修订 v{d.revision ?? 2}
+                        </span>
+                      )}
+                      {d.revised && (
+                        <span
+                          className="flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 font-medium text-muted-foreground"
+                          title={revisedBadge(d.revised).hint}
+                        >
+                          <GitBranch size={10} />
+                          {revisedBadge(d.revised).label}
                         </span>
                       )}
                       {d.checkpoint &&
@@ -602,6 +622,16 @@ function statusLabel(status: RunStatus): string {
     cancelled: "已停止",
   };
   return labels[status] ?? status;
+}
+
+/** The「计划已调整」轻痕迹 label + hover hint for a node the CEO autonomously re-bound /
+ * re-steered mid-flight (设计 §7.2). One muted badge for both kinds (the 自我纠偏 reads as
+ * one event); the hint spells out which so 定稿 vs 操舵 stays legible. */
+function revisedBadge(kind: PlanRevisionKind): { label: string; hint: string } {
+  if (kind === "bind") {
+    return { label: "计划已调整", hint: "CEO 据上游产出定稿了这一步的职责" };
+  }
+  return { label: "计划已调整", hint: "CEO 据中途发现调整了这一步的方向" };
 }
 
 /** The pause-badge label + palette for a node's structured checkpoint (plan_review,

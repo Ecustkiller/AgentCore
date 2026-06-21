@@ -76,6 +76,10 @@ export function handleExecutionEvent(
     case "run_completed":
     case "run_failed":
     case "run_progress":
+    // 「计划已调整」轻痕迹 (设计 §7.2): a NON-interrupting trace — the CEO re-bound / re-steered
+    // paused nodes via replan. Folds onto the runs' `revised` via the same frame path (no
+    // conversation-store gate); journaled, so it replays on reload.
+    case "plan_revised":
     case "run_escalation":
     // 阻塞式求决策: a worker SUSPENDED on a blocking escalate (escalation_required) then settled
     // (escalation_resolved). Both fold onto the run's escalations via the same frame path

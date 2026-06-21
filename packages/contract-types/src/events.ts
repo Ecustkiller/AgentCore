@@ -20,6 +20,7 @@ export type SSEEventType =
   | "question_posted"
   | "plan_review_required"
   | "plan_review_resolved"
+  | "plan_revised"
   | "run_plan"
   | "run_started"
   | "run_context"
@@ -222,6 +223,29 @@ export interface PlanReviewResolvedPayload {
   checkpoint_id: string;
   decision: CheckpointDecision;
   note: string;
+}
+
+/** How the CEO autonomously adjusted a paused plan node (受监督的波循环, 设计 §7.2):
+ * `bind` = a late-bound placeholder (`bind_after_deps`) finalised from upstream evidence;
+ * `steer` = a not-yet-run node re-steered after a 队员 scope deviation. Drives the node's
+ *「计划已调整」trace label. */
+export type PlanRevisionKind = "bind" | "steer";
+
+/** One node the CEO re-bound / re-steered in a single `replan` (设计 §7.2). */
+export interface PlanRevision {
+  run_id: string;
+  kind: PlanRevisionKind;
+}
+
+/** 自主再绑定「计划已调整」轻痕迹 (设计 §7.2): the CEO adjusted a paused delegate plan via
+ * `replan` — finalising late-bound placeholders and/or re-steering not-yet-run nodes from
+ * mid-flight evidence (no user interruption). `revisions` names the affected graph nodes +
+ * how each changed; every end folds it onto those nodes as a non-interrupting trace. Emitted
+ * ONLY when something changed (a no-op resume sends nothing). Journaled, so it replays on
+ * reload. Always co-occurs with `run_plan` in a delegate turn. */
+export interface PlanRevisedPayload {
+  execution_id: string;
+  revisions: PlanRevision[];
 }
 
 export interface PlanAgentPayload {
@@ -640,6 +664,7 @@ export type SSEPayloadMap = {
   question_posted: QuestionPostedPayload;
   plan_review_required: PlanReviewRequiredPayload;
   plan_review_resolved: PlanReviewResolvedPayload;
+  plan_revised: PlanRevisedPayload;
   run_plan: RunPlanPayload;
   run_started: RunStartedPayload;
   run_context: RunContextPayload;

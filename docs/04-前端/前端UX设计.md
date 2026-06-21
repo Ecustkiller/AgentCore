@@ -162,6 +162,58 @@
 
 ---
 
+## 六、聊天 ⇄ 作战室画布双视图（`graphPrimary`）✅ 主体已落地
+
+多 Agent 协作图从「聊天消息里内嵌的一个组件」（`InlineTeamGraph`，§三）升级为可与聊天**平起平坐的第二视图**——一间「作战室画布」。整套藏在实验开关 `graphPrimary` 后（默认关；命令面板「图主界面化（实验）」切换，`localStorage: agentcore:graph-primary`）。
+
+**核心论点 · 一份数据两种渲染**：后端单 Agent = 只有 Captain 的退化 Team、单 / Team 同一执行路径（[`Agent协作模式.md §设计哲学`](/docs/03-AI核心/Agent协作模式.md)）这条洞察只用在**数据层**——同一份「回合 + 执行（CEO+worker DAG / journal）」既可渲染成聊天、又可渲染成画布。两视图同源 `projectExecution` fold，**切换 = 换视图不换数据，不动协议 / `turn_journal` / conformance**。
+
+| 视图 | 渲染 | 默认 |
+|---|---|---|
+| 聊天模式 | 回合 → 气泡 + 内联协作图（团队回合就地开花，§三） | ✅ 默认 |
+| 画布模式（作战室） | 同一批回合 → 单张持久空间画布 | opt-in |
+
+**默认聊天 + 显眼入口**：差异化靠「团队在该出现处就地开花 + 一步进作战室」，不靠强迫所有人上画布——聊天里一起团队即内联出图（`InlineTeamGraph`），其上「在作战室打开」主按钮一键切到画布；顶部 `聊天 / 作战室` 分段切换按对话记忆视图模式（`conversationViews`，session-only）。
+
+### 6.1 作战室画布 = 单张持久画布（视觉累积，非 worker 实体化）
+
+一个对话 = 一张可平移画布，每回合自上而下**跨回合视觉累积**成节点；「同一拨人」靠 `agentIdentity`（同角色稳定色 / 字，§五）延续，**团队仍每回合临时组、不做 worker 实体化**（真持久团队见 §6.4 否决）。
+
+**LOD「只有聚焦回合画完整 DAG」**（守 §八 ≤50 节点 / ≥60fps）：完成的团队回合塌成「回合摘要节点」（状态 / 任务摘要 / 身份头像 / 进度）、单 Agent 回合塌成竖排轻卡，**恰好一个聚焦回合**（默认最新、自动跟随新回合、点摘要可切换）就地展开完整 worker DAG；配小地图 / 相机。聚焦回合内嵌整套 `GraphView` + 就地读 CEO 答案抽屉（点汇聚点读最终回答 / 点用户端点重读提问 / 点 worker 走右坞详情），深读兜底仍可进 `TeamGraphFullscreen` 全屏 overlay。命令栏 `CanvasCommandBar` 常驻画布底栏（与全屏图共用）。退化档：单 Agent 回合在聊天模式下亦可渲染成「1 节点图」`CeoNodeCard`（`AssistantMessage` 的 `isSoloGraph` 接缝）。
+
+### 6.2 图上指挥：指挥台 `CanvasDecisionPanel`
+
+画布一旦成为管团队的地方，检查点 / 发问 / 审批 / 续跑 / 救火这些**老板权力**必须能就地行使（一个「掌管团队」的视图不可能只读）。落地**不**逐个塞进节点，而是收口到画布右侧**指挥台**（面板标题「指挥台」，徽标计待裁决数）：
+
+- **双作用域同处一面**：回合级（`ask_user` 检查点 / `plan_review` / 工作者上报 / **救火行**）随**聚焦回合**的 message + 投影执行渲染；对话级（工具放行 approval / 待恢复续跑 resume / **传输错误重试 `RetryBanner`**）自带 store + 当前对话自渲染。画布模式下 `ChatView` / `InlineTeamGraph` 未挂载，其对话级卡片与救火行本会**消失且无法操作**——故必须在画布另起一处承载。
+- **救火**（失败重试）：聚焦回合终态有失败（整轮崩 / 部分失败 / 已停止）时，指挥台渲染聊天同款 `RecoveryActions`（**重试整轮 / 调整指令 / 忽略**——重试走 `runRegenerate` 从最后一条用户消息整轮重跑、忽略清本回合执行槽，与聊天一致）；外加对话级 `RetryBanner`（发送 / 续跑 / 重生成断流的传输错误重试）。聚焦节点头另挂一枚「待救火」红牌。
+- **逐字复用聊天同款卡片**（`CheckpointCard` / `PlanReviewCard` / `EscalationCard` / `ApprovalPrompt` / `ResumePrompt` / `RetryBanner` / `RecoveryActions`，§三），操作经**同一**服务 + SSE 折叠（守单一数据源、不开第二条通路）；`interactive` 取聚焦回合 `isStreaming`，重载 / 已结束回合的卡片呈被动记录。
+- 聚焦节点头部「待你拍板 N」/「待救火」提示牌指向指挥台；有待裁决项（回合级计数 + 对话级 approval + resume）或可救火（聚焦回合失败 / 对话传输错误）时自动浮出，可 X 收起，焦点切换或新项到达再武装。
+
+### 6.3 关键决策（代码看不出的取舍）
+
+- **双视图而非「图即唯一界面」**：原方向「无模式切换、聊天 = 图的退化渲染、最终砍掉聊天列」**已撤**——强迫简单问答上画布是负体验，且整方案命悬「画布必须像聊天一样轻」的试金石。双视图（聊天默认 + 画布 opt-in）零门槛天然、风险降到「加一个视图 + 一个开关」、**聊天永不删**；「聊天 = 图的退化渲染」只保留在数据层。
+- **内嵌 DAG = 嵌套 ReactFlow**：聚焦回合把整套 `GraphView` 包进外层画布的自定义节点，靠**独立 `ReactFlowProvider` 隔离 flow store**；内层 `embedded` 弃自身平移 / 缩放、外层画布独占平移 / 缩放 / 小地图。→ 复用既有图构建，不重写第二套图。
+- **聚焦节点固定高度**（`FOCUS_NODE_HEIGHT`）：就地读答案抽屉与内嵌图**共享这块固定高度**（开抽屉图区缩、抽屉占下半），节点总高恒定 → 下方回合堆叠偏移不被挤动。**否决**抽屉撑高节点（触发动态高度 → 重算堆叠）。
+- **面板停靠 ≠ 节点弹层**：可裁决 / 救火卡片体量大（表单 / 备注 / 多按钮），浮节点上会挤爆 LOD 视图；故收口到右停靠**指挥台**、聚焦节点只留「待你拍板 / 待救火」提示牌指过去。
+
+### 6.4 守住的决策 / 被否决 / 暂不做
+
+**守住**（不因双视图推翻）：CEO 智能路由**不给选择器**（画布只让你在 CEO 组好的团队上行使老板权力，指挥 ≠ 替 CEO 组队，§十一）；节点 ≤50 / ≥60fps 靠 LOD（§八）；节点 face 极简（数字归 run 详情）；简单任务零噪音（聊天默认 + 画布退化竖排双重守住，§三）。
+
+| 方向 | 处置 | 理由 |
+|---|---|---|
+| 图即唯一界面 / 无模式切换 | 撤 | 见 §6.3 |
+| 丙 · 自适应默认（按有无团队自动切模式） | 否决 | 中途翻模式 = 错愕；「何时切」判据含糊 + 每对话模式偏好状态边界多；收益小（简单回合本就退化轻卡）。改用「显眼内联入口」达成同等「画布在相关时出现」 |
+| 乙-2 · 真持久团队（worker 实体化） | 暂不做 | 「团队跨回合」真需求 = 连续性 / 团队懂我，已由记忆模块 + CEO 跨回合记忆 + 共享工作区覆盖；worker 实体化撞「无选择器 / 每回合自适应组队」赌注（[`职责晚绑定与动态再编排设计.md`](/docs/07-规划/职责晚绑定与动态再编排设计.md)），是定位级（养成系）改动 |
+| 跨对话 / 工作区 / 公司级空间画布 | 不在范围 | 本特性只管单对话内双视图（原『公司画布』上层提案已删除） |
+
+**⏳ 未尽**（仅剩）：云端 / 后台任务卡片（`BackgroundTaskCard`，§十）入指挥台——它是非阻塞、跨对话的另一类。（**定向唤回**「修订 vN」是 CEO 驱动、无用户触发入口：其结果已作 `AgentNode` 节点画在聚焦回合 DAG 上、点 vN 节点可下钻 run 详情；侧栏式 `RevisionCompare`「版本对比」卡仍只在聊天 / 全屏读，未搬画布。）
+
+→ 见代码：`stores/ui.ts`（`graphPrimary` + `conversationViews`）、`lib/paletteCommands.ts`（实验开关命令）、`pages/ConversationPage.tsx`（视图切换）、`chat/InlineTeamGraph.tsx`（「在作战室打开」）、`graph/ConversationCanvas.tsx`（持久累积 + LOD + 裁决面容纳）、`graph/TurnSummaryNode.tsx` / `graph/SimpleTurnNode.tsx` / `graph/FocusedTurnNode.tsx`（内嵌 `GraphView` + 就地读答案 + 提示牌）、`graph/CanvasCommandBar.tsx`（常驻命令栏）、`graph/CanvasDecisionPanel.tsx`（裁决面，复用 `chat/CheckpointCard` / `PlanReviewCard` / `EscalationCard` / `ApprovalPrompt` / `ResumePrompt`）、`chat/message-bubble/CeoNodeCard.tsx`（退化 1 节点）、`lib/agentIdentity.ts`（身份延续）。
+
+---
+
 ## 八、图视图技术选型
 
 **被否决**：

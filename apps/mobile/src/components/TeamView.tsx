@@ -140,6 +140,7 @@ function RunCard({
       </div>
       {(run.stance ||
         run.revision >= 2 ||
+        run.revised ||
         depth > 0 ||
         run.checkpoint ||
         run.escalations.length > 0) && (
@@ -152,6 +153,10 @@ function RunCard({
           {run.revision >= 2 && (
             <span className="run-pill">修订 v{run.revision}</span>
           )}
+          {/* 「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound (bind) /
+              re-steered (steer) this node mid-flight — a non-interrupting cue mirroring
+              the desktop node badge. */}
+          {run.revised && <span className="run-pill">计划已调整</span>}
           {depth > 0 && <span className="run-pill">子任务</span>}
           {run.checkpoint && (
             <span className="run-pill pill-warn">

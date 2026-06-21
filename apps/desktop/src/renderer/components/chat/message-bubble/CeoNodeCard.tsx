@@ -2,7 +2,7 @@ import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import { Check, Loader2, X } from "lucide-react";
 
 /**
- * 单 Agent 回合的「1 节点图」退化渲染（协作图主界面化设计 §九「第一刀」）。
+ * 单 Agent 回合的「1 节点图」退化渲染（前端UX设计.md §6.1）。
  *
  * 核心论点（见提案 §二）：聊天本就是协作图的退化形态——单 Agent = 只有 Captain 的 Team。
  * 这张卡就是那个退化形态：当一支「团队」只剩 CEO 一个节点时，协作图坍缩成**单个节点**——

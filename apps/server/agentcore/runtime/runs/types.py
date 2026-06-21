@@ -351,6 +351,15 @@ class BatchMetrics:
     was the ``width`` cap the bottleneck (``slot_starved`` > 0 — a dispatch cycle where a
     ready node had to wait for a free slot). Outcome counts round out a one-line health
     read. All timings are wall-clock ms; counts exclude resume-seeded nodes.
+
+    受监督波循环埋点 (职责晚绑定与动态再编排 §7.2, v1 决策⑤「埋点用于调参与验证真痛」): the
+    boundary + escalation tallies the design earmarked to quantify「自我纠偏」without捞日志阻塞
+    开发. The boundary counts tally ``on_boundary`` YIELDs THIS run surfaced, split by reason —
+    they count boundaries *fired*, not markers present: a plan carrying a bind/scope marker but
+    driven with no hook (autonomous jobs / tests) fires none. The escalation counts are raw so
+    the host derives「scope 信号占比」= ``scope_escalations / escalations`` itself, mirroring how
+    it derives avg concurrency from ``busy_ms / wall_ms`` (the snapshot stays presentation-free).
+    All zero for an ordinary plan (no late-binding, no escalation, no checkpoint).
     """
 
     nodes: int  # nodes THIS run dispatched (seed_completed nodes excluded)
@@ -362,3 +371,10 @@ class BatchMetrics:
     completed: int
     failed: int
     skipped: int
+    # ── 受监督波循环边界埋点 (boundaries fired this run, by reason; see docstring) ──
+    bind_boundaries: int = 0  # 晚绑定触发次数 (BIND yields)
+    scope_boundaries: int = 0  # 计划漂移返工触发数 (SCOPE yields)
+    checkpoint_boundaries: int = 0  # CHECKPOINT yields (user plan_review)
+    # ── escalate 信号埋点 (raw → host derives scope 占比) ──
+    escalations: int = 0  # total escalations harvested across THIS run's nodes
+    scope_escalations: int = 0  # of which carried kind=scope (deviation signal)

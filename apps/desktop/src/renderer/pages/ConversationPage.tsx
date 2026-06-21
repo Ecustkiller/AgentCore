@@ -1,4 +1,5 @@
 import { ChatView } from "@/components/chat/ChatView";
+import { ConversationCanvas } from "@/components/graph/ConversationCanvas";
 import { SidePanel } from "@/components/layout/SidePanel";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { fetchMessageWindow, jumpToMessage } from "@/services/messages";
@@ -6,7 +7,8 @@ import { loadPausedTurns } from "@/services/resume";
 import { attachOnOpen } from "@/services/turns";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
-import { PanelRight } from "lucide-react";
+import { useUIStore } from "@/stores/ui";
+import { MessageSquare, Network, PanelRight } from "lucide-react";
 import { useEffect } from "react";
 import { useParams } from "react-router-dom";
 
@@ -109,9 +111,50 @@ export function ConversationPage() {
   const panelOpen = useSidePanelStore((s) => s.open);
   const togglePanel = useSidePanelStore((s) => s.togglePanel);
 
+  // 聊天 ⇄ 作战室画布双视图（前端UX设计.md §六）。默认聊天；用户在顶栏切到画布
+  // （按对话记忆）。仅在 graphPrimary 实验开启时提供入口；草稿（无 id）恒为聊天。
+  const graphPrimary = useUIStore((s) => s.graphPrimary);
+  const conversationView = useUIStore((s) =>
+    id ? (s.conversationViews[id] ?? "chat") : "chat",
+  );
+  const setConversationView = useUIStore((s) => s.setConversationView);
+  const canvasMode = graphPrimary && !!id && conversationView === "canvas";
+
   return (
     <>
-      <ChatView />
+      {canvasMode ? <ConversationCanvas /> : <ChatView />}
+      {/* 视图切换段控件（聊天 ⇄ 作战室画布）。仅在 graphPrimary 实验开启时出现，置于左上，
+          与右上的侧面板开关对称。 */}
+      {graphPrimary && id && (
+        <div className="absolute left-3 top-2 z-20 flex items-center gap-0.5 rounded-lg border border-border bg-card/80 p-0.5 backdrop-blur">
+          <button
+            type="button"
+            onClick={() => setConversationView(id, "chat")}
+            aria-pressed={!canvasMode}
+            className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs ${
+              !canvasMode
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <MessageSquare size={14} />
+            聊天
+          </button>
+          <button
+            type="button"
+            onClick={() => setConversationView(id, "canvas")}
+            aria-pressed={canvasMode}
+            className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs ${
+              canvasMode
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Network size={14} />
+            作战室
+          </button>
+        </div>
+      )}
       {/* Side-panel toggle — run detail opens by clicking a graph node, but the
           panel still needs a discoverable show/hide control, so it lives at the
           chat's top-right and mirrors Ctrl/Cmd+I. Opening restores the active tab

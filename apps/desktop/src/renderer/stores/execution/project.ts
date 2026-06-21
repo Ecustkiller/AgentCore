@@ -63,6 +63,8 @@ export function projectExecution(
     // Plan runs are never revisions; a revision is synthesized from its frame.
     revisionOf: null,
     revision: 0,
+    // No「计划已调整」trace until a plan_revised frame folds in (设计 §7.2).
+    revised: null,
     // No checkpoint until a plan_review frame folds in (结构化挂起 2a).
     checkpoint: null,
     // No received context until the run_context frame folds in (上下文传递可视化).
@@ -125,6 +127,7 @@ export function projectExecution(
               round: 0,
               revisionOf: f.parentRunId,
               revision: f.revision,
+              revised: null,
               checkpoint: null,
               receivedContext: [],
               escalations: [],
@@ -210,6 +213,19 @@ export function projectExecution(
           const run = runById(id);
           if (run) {
             run.checkpoint = { status: "resolved", decision: f.decision };
+          }
+        }
+        break;
+      }
+      case "plan_revised": {
+        // 「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound / re-steered the
+        // paused plan via replan. Tag each affected node so it paints a non-interrupting
+        // trace (bind=据上游证据定稿待绑定步骤; steer=偏离后操舵未跑步骤). bind wins over steer
+        // if a node is both. A stray run_id (not on this graph) is ignored.
+        for (const rev of f.revisions) {
+          const run = runById(rev.runId);
+          if (run && !(run.revised === "bind" && rev.revisionKind === "steer")) {
+            run.revised = rev.revisionKind;
           }
         }
         break;
@@ -388,6 +404,14 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       return frame.decision === "stop"
         ? "已停止 · 未运行下游"
         : "已放行 · 继续";
+    case "plan_revised": {
+      const bound = frame.revisions.filter((r) => r.revisionKind === "bind").length;
+      const steered = frame.revisions.filter((r) => r.revisionKind === "steer").length;
+      const parts: string[] = [];
+      if (bound) parts.push(`定稿 ${bound}`);
+      if (steered) parts.push(`操舵 ${steered}`);
+      return `计划已调整 · ${parts.join(" · ")}`;
+    }
   }
 }
 

@@ -5,13 +5,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { SimpleTooltip } from "@/components/ui/tooltip";
-import {
-  NODE_HEIGHT,
-  NODE_WIDTH,
-  computeLayout,
-  fitWidthBox,
-} from "@/lib/elk-layout";
+import { NODE_HEIGHT, computeLayout, fitWidthBox } from "@/lib/elk-layout";
 import { estimateTokens, formatCost, headText, tailText } from "@/lib/format";
 import { useActiveMessages, useConversationStore } from "@/stores/conversation";
 import {
@@ -23,7 +17,6 @@ import {
 } from "@/stores/execution";
 import {
   type GraphEdge,
-  type GraphLayout,
   useGraphStore,
 } from "@/stores/graph";
 import { useSidePanelStore } from "@/stores/sidePanel";
@@ -35,233 +28,27 @@ import {
   type NodeChange,
   ReactFlow,
   type ReactFlowInstance,
-  ViewportPortal,
 } from "@xyflow/react";
+import { Crosshair, Maximize2, ScanSearch } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Crosshair,
-  ListTree,
-  Maximize2,
-  MoveHorizontal,
-  ScanSearch,
-} from "lucide-react";
+  INPUT_ID,
+  edgeTypes,
+  isEndpointId,
+  nodeTypes,
+  prefersReducedMotion,
+} from "./constants";
+import { GraphToolbar } from "./GraphToolbar";
 import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { AgentNode } from "./AgentNode";
-import { EndpointNode } from "./EndpointNode";
-import { type EdgeHandoff, StepEdge } from "./StepEdge";
+  buildGraphStructure,
+  computeWaves,
+  deriveArtifacts,
+  deriveCaptainStatus,
+  resolveHandoff,
+  type WaveBand,
+} from "./helpers";
 import { Timeline } from "./Timeline";
-
-// 节点 type 名避开 ReactFlow 内建保留名（input / output / default / group）：用
-// 这些名会令 `@xyflow/react/dist/style.css` 的默认节点样式（1px #1a192b 黑边 +
-// width:150px + padding:10px）漏到自定义节点上，在 210px 卡片背后画出一个黑色方框。
-// 故用户输入端点用 `userInput` 而非 `input`。
-const nodeTypes = {
-  agent: AgentNode,
-  userInput: EndpointNode,
-  captain: EndpointNode,
-};
-const edgeTypes = { step: StepEdge };
-
-// The one synthetic graph-only bookend (no scheduled Run): the user's input
-// root. The sink 汇聚点 is the real CEO captain run (always declared in the
-// top-level delegate batch), so it needs no synthetic stand-in. Real run ids are
-// server UUIDs, so this never collides.
-const INPUT_ID = "__input__";
-const isEndpointId = (id: string): boolean => id === INPUT_ID;
-
-// Honor the OS "reduce motion" setting for the embedded fit animation (read
-// fresh so an OS toggle takes effect without a reload). Guards matchMedia for
-// non-DOM (test) contexts. The rest of the graph's motion is gated in globals.css.
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
-// Layout choices for the canvas toolbar (default left-right first). Each maps to
-// a distinct ELK algorithm in `computeLayout`; the active one is highlighted and
-// persisted.
-const LAYOUT_OPTIONS: {
-  kind: GraphLayout;
-  label: string;
-  icon: React.ReactNode;
-}[] = [
-  { kind: "leftright", label: "左右流", icon: <MoveHorizontal size={14} /> },
-  { kind: "tree", label: "树形布局", icon: <ListTree size={14} /> },
-];
-
-/**
- * The CEO captain root 汇聚点 emits its own run lifecycle, but its `run_started`
- * fires before the delegate batch's `run_plan` exists, so the live stream drops
- * that frame. Its node status is therefore *derived* from the team: "summarizing"
- * once every worker is done and "done" once the whole turn ends — which also
- * keeps the live and replayed graphs identical. The captain run itself is
- * excluded from the worker-completion check (it is the sink, not a worker).
- */
-function deriveCaptainStatus(
-  execution: Execution,
-  captainId: string,
-): RunStatus {
-  if (execution.status === "failed") return "failed";
-  if (execution.status === "cancelled") return "cancelled";
-  if (execution.status === "completed") return "completed";
-  const workers = execution.runs.filter((r) => r.id !== captainId);
-  const allDone =
-    workers.length > 0 && workers.every((r) => r.status === "completed");
-  return allDone ? "running" : "pending";
-}
-
-/**
- * The real information handoff on a teammate→teammate dependency edge (1A 信息流边):
- * the target run's `receivedContext` dependency block whose `source_run_id` is the
- * edge's source, exposing HOW that upstream product was passed (fidelity) and whether
- * it was truncated. Null when no such block exists (synthetic bookends — input has no
- * run, the captain's context folds turn-level not onto its node — or context that has
- * not folded in yet).
- */
-function resolveHandoff(
-  execution: Execution,
-  source: string,
-  target: string,
-): EdgeHandoff | null {
-  const targetRun = execution.runs.find((r) => r.id === target);
-  if (!targetRun) return null;
-  const block = targetRun.receivedContext.find(
-    (b) => b.channel === "dependency" && b.source_run_id === source,
-  );
-  if (!block) return null;
-  return {
-    fidelity: block.fidelity,
-    truncated: block.truncated,
-    sourceRole: block.source_role,
-    chars: block.chars,
-  };
-}
-
-// File-mutating tools whose `path` arg names an artifact this worker produced (1C
-// 产物落点). Edits (str_replace) count too — the worker still「落了产出」on that file;
-// reads/lists/moves/deletes do not yield a deliverable, so they are excluded.
-const PRODUCING_TOOLS = new Set(["file_write", "str_replace"]);
-
-/**
- * Derive the distinct files a worker produced from its committed file-tool calls (1C
- * 产物落点). Only `success` calls count — a failed/aborted write left no artifact — and
- * paths are de-duped in first-seen order so the chip row stays stable as a worker edits
- * the same file repeatedly. The live「正在生成」line (toolProgress) stays separate; chips
- * are the committed landing points.
- */
-function deriveArtifacts(
-  toolCalls: {
-    toolName: string;
-    arguments: Record<string, unknown>;
-    status: string;
-  }[],
-): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const tc of toolCalls) {
-    if (tc.status !== "success") continue;
-    if (!PRODUCING_TOOLS.has(tc.toolName)) continue;
-    const path = tc.arguments.path;
-    if (typeof path !== "string" || path.length === 0) continue;
-    if (seen.has(path)) continue;
-    seen.add(path);
-    out.push(path);
-  }
-  return out;
-}
-
-/**
- * One wave band (1B 波次泳道): a translucent lane behind a single scheduler wave —
- * the workers ELK placed in the same flow-axis layer (a 波次 of WaveScheduler). Drawn
- * behind the nodes/edges (via ViewportPortal at z-index -1) with a「第 N 波」label, so
- * the team's round-by-round progression (parallel fan → synthesize → …) reads at a
- * glance. Bookends (用户输入 / CEO 汇聚点) sit outside the bands.
- */
-interface WaveBand {
-  id: string;
-  label: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  labelX: number;
-  labelY: number;
-}
-
-// Outward padding of a wave lane past its nodes (graph units).
-const WAVE_PAD = 8;
-
-/**
- * Group the laid-out WORKER slots into waves by their flow-axis layer (x for the
- * left-right flow, y for the top-down tree) and size a lane for each. Returns [] when
- * there is only one wave (a pure parallel fan needs no lane labels) or nothing laid out.
- * The CEO captain 汇聚点 and the synthetic input endpoint are excluded — they are
- * bookends, not team waves.
- */
-function computeWaves(
-  execution: Execution,
-  positions: Record<string, { x: number; y: number }>,
-  bbox: { width: number; height: number },
-  layoutKind: GraphLayout,
-  captainId: string | null,
-): WaveBand[] {
-  const horizontal = layoutKind === "leftright";
-  const slots: { x: number; y: number }[] = [];
-  for (const r of execution.runs) {
-    if (r.id === captainId) continue;
-    const p = positions[r.id];
-    if (p) slots.push({ x: p.x, y: p.y });
-  }
-  if (slots.length === 0) return [];
-  // Bucket by the flow-axis coordinate (each ELK layer shares one) → one wave per layer.
-  const groups = new Map<number, { x: number; y: number }[]>();
-  for (const s of slots) {
-    const key = Math.round(horizontal ? s.x : s.y);
-    const arr = groups.get(key);
-    if (arr) arr.push(s);
-    else groups.set(key, [s]);
-  }
-  const keys = [...groups.keys()].sort((a, b) => a - b);
-  if (keys.length < 2) return [];
-  return keys.map((key, i) => {
-    const members = groups.get(key) as { x: number; y: number }[];
-    if (horizontal) {
-      const x0 = Math.min(...members.map((m) => m.x));
-      const x1 = Math.max(...members.map((m) => m.x + NODE_WIDTH));
-      return {
-        id: `wave-${i}`,
-        label: `第 ${i + 1} 波`,
-        x: x0 - WAVE_PAD,
-        y: -WAVE_PAD,
-        w: x1 - x0 + WAVE_PAD * 2,
-        h: bbox.height + WAVE_PAD * 2,
-        labelX: x0 - WAVE_PAD + 6,
-        labelY: -WAVE_PAD + 6,
-      };
-    }
-    const y0 = Math.min(...members.map((m) => m.y));
-    const y1 = Math.max(...members.map((m) => m.y + NODE_HEIGHT));
-    return {
-      id: `wave-${i}`,
-      label: `第 ${i + 1} 波`,
-      x: -WAVE_PAD,
-      y: y0 - WAVE_PAD,
-      w: bbox.width + WAVE_PAD * 2,
-      h: y1 - y0 + WAVE_PAD * 2,
-      labelX: -WAVE_PAD + 6,
-      labelY: y0 - WAVE_PAD + 6,
-    };
-  });
-}
+import { WaveLanes } from "./WaveLanes";
 
 interface GraphViewProps {
   /**
@@ -502,120 +289,12 @@ export function GraphView({
       viewportSettledRef.current = false;
       return;
     }
-    // Projected runs (plan runs + synthesized「修订」revisions); revisions are not
-    // in the plan, so the layout must read the projection, not plan.runs.
     const runs = projectedRunsRef.current ?? [];
-    // The CEO captain root run is the graph's 汇聚点; the worker DAG is laid out
-    // around it, and every worker with no downstream wires INTO it as the sink.
+    const debate = runs.some((r) => r.stance != null);
     const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
-    const workerRuns = runs.filter((r) => r.id !== captainId);
-    const workerIds = new Set(workerRuns.map((r) => r.id));
-    // A「修订 vN」续写 (乙 热修 P4) hangs off its original like a sub-worker, but it is
-    // a VERSION, not a delegation — it gets its own dotted edge below and stays off
-    // the bookend flow.
-    const isRevision = (r: { revision?: number }): boolean =>
-      (r.revision ?? 0) > 0;
-    // A sub-worker's parent is another WORKER on this graph (its captain worker,
-    // 阶段2 nested delegation). A top-level worker's parent is the CEO captain
-    // root — excluded from this set — so it reads as a main-wave node, not a
-    // nested sub-task. (A lone task / null parent is top-level too.) A revision
-    // also has a worker parent but is excluded — it is not a delegation.
-    const isSub = (r: {
-      id: string;
-      parentRunId?: string | null;
-      revision?: number;
-    }): boolean =>
-      !isRevision(r) &&
-      !!r.parentRunId &&
-      r.parentRunId !== r.id &&
-      workerIds.has(r.parentRunId);
-    // Bookend ONLY top-level workers: neither a nested sub-worker nor a revision is
-    // top-level, so both stay off the input → … → captain flow.
-    const topWorkers = workerRuns.filter((r) => !isSub(r) && !isRevision(r));
-    const nodeIds = workerRuns.map((s) => s.id);
-    // 辩论/审查 分列对置 (前端UX设计.md §四): when the batch carries stance tags, order
-    // the worker nodes 正方 → (untagged) → 反方 so ELK (considerModelOrder) bands the
-    // two sides into facing groups instead of interleaving them. Inert for非辩论.
-    const debate = workerRuns.some((r) => r.stance != null);
-    if (debate) {
-      const rank = (id: string) => {
-        const st = workerRuns.find((r) => r.id === id)?.stance;
-        return st === "pro" ? 0 : st === "con" ? 2 : 1;
-      };
-      nodeIds.sort((a, b) => rank(a) - rank(b));
-    }
-    const rawEdges: GraphEdge[] = workerRuns.flatMap((run) =>
-      run.dependsOn.map((depId) => ({
-        id: `${depId}->${run.id}`,
-        source: depId,
-        target: run.id,
-        kind: "dep" as const,
-      })),
-    );
-
-    // Delegation edges (阶段2 父子分组): a captain worker → each of its nested
-    // sub-workers. Drawn distinctly (dashed, see StepEdge) so a sub-team reads as
-    // grouped under its parent; the layered layout then clusters the sub-workers
-    // right after the captain. Sub-workers never touch the bookends below.
-    for (const r of workerRuns) {
-      if (isSub(r)) {
-        rawEdges.push({
-          id: `${r.parentRunId}=>${r.id}`,
-          source: r.parentRunId as string,
-          target: r.id,
-          kind: "delegate",
-        });
-      }
-    }
-
-    // Revision edges (乙 热修 P4): the original worker → each of its「修订 vN」续写,
-    // drawn dotted (StepEdge) so a re-do reads as a version of the same node. The
-    // layered layout then clusters the revisions right after their original.
-    for (const r of workerRuns) {
-      if (isRevision(r) && r.revisionOf) {
-        rawEdges.push({
-          id: `${r.revisionOf}~>${r.id}`,
-          source: r.revisionOf,
-          target: r.id,
-          kind: "revision",
-        });
-      }
-    }
-
-    // Bookend ONLY the top-level worker DAG so the graph reads as a full
-    // collaboration story: user input → team waves → CEO 汇聚点. The input root
-    // is always synthetic (the prompt has no run); the sink is the real CEO
-    // captain run. The synthetic input id is guarded everywhere a real run id is
-    // expected (clicks, run-detail, context menu).
-    if (topWorkers.length > 0 && captainId) {
-      const dependedOn = new Set<string>();
-      for (const r of topWorkers)
-        for (const dep of r.dependsOn) dependedOn.add(dep);
-      nodeIds.push(INPUT_ID, captainId);
-      for (const r of topWorkers) {
-        if (r.dependsOn.length === 0) {
-          rawEdges.push({
-            id: `${INPUT_ID}->${r.id}`,
-            source: INPUT_ID,
-            target: r.id,
-            kind: "dep",
-          });
-        }
-        if (!dependedOn.has(r.id)) {
-          rawEdges.push({
-            id: `${r.id}->${captainId}`,
-            source: r.id,
-            target: captainId,
-            kind: "dep",
-          });
-        }
-      }
-    }
+    const { nodeIds, rawEdges } = buildGraphStructure(runs, INPUT_ID);
 
     let cancelled = false;
-    // Pin the bookends so the CEO 汇聚点 sink always lands past every worker
-    // (incl. a nested sub-team's leaf sub-workers, which otherwise tie its
-    // layer). Inert when unbookended — neither id is then a node. See elk-layout.
     computeLayout(nodeIds, rawEdges, layoutKind, debate, {
       source: INPUT_ID,
       sink: captainId ?? undefined,
@@ -909,6 +588,10 @@ export function GraphView({
           // 乙 热修 P4: badge a 续写 node「修订 vN」(version number from the wire flag).
           isRevision,
           revision: run.revision,
+          //「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound (bind) /
+          // re-steered (steer) this node mid-flight → muted「计划已调整」badge; null
+          // on a node the plan never touched.
+          revised: run.revised,
           // 辩论/审查 side tag (前端UX设计.md §四): badges the node 正方/反方; null on
           // ordinary teammates.
           stance: run.stance,
@@ -1110,40 +793,7 @@ export function GraphView({
                 {...interactionProps}
               >
                 <Background gap={20} size={1} />
-                {/* 1B 波次泳道: rendered in flow coordinates via ViewportPortal — the
-                    translucent lane sits behind nodes/edges (z-index -1) and the
-                    「第 N 波」chip above them, both panning/zooming with the canvas. */}
-                {waves.length > 0 && (
-                  <ViewportPortal>
-                    {waves.map((w) => (
-                      <Fragment key={w.id}>
-                        <div
-                          className="rounded-xl border border-border/60 bg-muted/25"
-                          style={{
-                            position: "absolute",
-                            transform: `translate(${w.x}px, ${w.y}px)`,
-                            width: w.w,
-                            height: w.h,
-                            zIndex: -1,
-                            pointerEvents: "none",
-                          }}
-                        />
-                        <div
-                          className="rounded-full bg-card/90 px-2 py-0.5 text-xs font-medium text-muted-foreground shadow-sm"
-                          style={{
-                            position: "absolute",
-                            transform: `translate(${w.labelX}px, ${w.labelY}px)`,
-                            zIndex: 1,
-                            pointerEvents: "none",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {w.label}
-                        </div>
-                      </Fragment>
-                    ))}
-                  </ViewportPortal>
-                )}
+                <WaveLanes waves={waves} />
               </ReactFlow>
             )}
 
@@ -1155,42 +805,11 @@ export function GraphView({
             )}
 
             {!embedded && (
-              // Right-clicking the floating toolbar shouldn't open the canvas context
-              // menu (it isn't a node or the pane), so stop the event from reaching
-              // the ContextMenuTrigger wrapping the canvas.
-              <div
-                className="absolute right-3 top-3 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-card/95 p-1 shadow-sm backdrop-blur"
-                onContextMenu={(e) => e.stopPropagation()}
-              >
-                {LAYOUT_OPTIONS.map((opt) => (
-                  <SimpleTooltip key={opt.kind} label={opt.label}>
-                    <button
-                      type="button"
-                      onClick={() => setLayoutKind(opt.kind)}
-                      aria-label={opt.label}
-                      aria-pressed={layoutKind === opt.kind}
-                      className={`flex size-7 items-center justify-center rounded-lg ${
-                        layoutKind === opt.kind
-                          ? "bg-accent text-foreground"
-                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                      }`}
-                    >
-                      {opt.icon}
-                    </button>
-                  </SimpleTooltip>
-                ))}
-                <div className="mx-0.5 h-5 w-px bg-border" />
-                <SimpleTooltip label="适应画布 (F)">
-                  <button
-                    type="button"
-                    onClick={fitView}
-                    aria-label="适应画布"
-                    className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <Maximize2 size={14} />
-                  </button>
-                </SimpleTooltip>
-              </div>
+              <GraphToolbar
+                layoutKind={layoutKind}
+                onLayoutKindChange={setLayoutKind}
+                onFitView={fitView}
+              />
             )}
 
             {!embedded && hasFrames && (

@@ -617,3 +617,88 @@ async def test_metrics_excludes_seeded_nodes():
     m = sink[0]
     assert m.nodes == 1  # only b actually ran here
     assert m.completed == 1
+
+
+# --- 受监督波循环埋点 (boundary + escalation tallies, 职责晚绑定与动态再编排 §7.2) ---
+
+
+async def test_metrics_boundary_counts_zero_for_ordinary_plan():
+    # 成本纪律: a plain DAG with a wired hook that never trips a marker tallies no
+    # boundaries and no escalations — the埋点 stays quiet for零新增回合 plans.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+
+    async def hook(_reason, _nodes, _completed):
+        return BoundaryOutcome.PROCEED
+
+    sink: list[BatchMetrics] = []
+    await WaveScheduler().run(plan, _ok, on_boundary=hook, metrics_sink=sink)
+    m = sink[0]
+    assert (m.bind_boundaries, m.scope_boundaries, m.checkpoint_boundaries) == (0, 0, 0)
+    assert (m.escalations, m.scope_escalations) == (0, 0)
+
+
+async def test_metrics_counts_bind_boundary():
+    # 晚绑定触发次数: a late-bound b fires one BIND boundary (and nothing else).
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",), bind_after_deps=True))
+
+    async def hook(_reason, nodes, _completed):
+        for n in nodes:
+            n.bind_after_deps = False
+        return BoundaryOutcome.PROCEED
+
+    sink: list[BatchMetrics] = []
+    await WaveScheduler().run(plan, _ok, on_boundary=hook, metrics_sink=sink)
+    m = sink[0]
+    assert m.bind_boundaries == 1
+    assert (m.scope_boundaries, m.checkpoint_boundaries) == (0, 0)
+
+
+async def test_metrics_counts_checkpoint_boundary():
+    # checkpoint_after → one CHECKPOINT boundary fired (user plan_review arm).
+    plan = RunPlan()
+    plan.add(_spec("a", checkpoint_after=True))
+    plan.add(_spec("b", ("a",)))
+
+    async def hook(_reason, _nodes, _completed):
+        return BoundaryOutcome.PROCEED
+
+    sink: list[BatchMetrics] = []
+    await WaveScheduler().run(plan, _ok, on_boundary=hook, metrics_sink=sink)
+    m = sink[0]
+    assert m.checkpoint_boundaries == 1
+    assert (m.bind_boundaries, m.scope_boundaries) == (0, 0)
+
+
+async def test_metrics_counts_scope_boundary_and_escalations():
+    # 计划漂移返工触发数 + scope 信号占比: a flags a scope deviation; PROCEED runs the
+    # tail so both nodes ran. One SCOPE boundary fired; one of one escalation is scope.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+
+    async def hook(_reason, _nodes, _completed):
+        return BoundaryOutcome.PROCEED
+
+    sink: list[BatchMetrics] = []
+    await WaveScheduler().run(plan, _scope_exec, on_boundary=hook, metrics_sink=sink)
+    m = sink[0]
+    assert m.scope_boundaries == 1
+    assert (m.escalations, m.scope_escalations) == (1, 1)  # → host derives 占比 = 1.0
+    assert (m.bind_boundaries, m.checkpoint_boundaries) == (0, 0)
+
+
+async def test_metrics_scope_escalation_counted_without_hook():
+    # The escalation tally is hook-independent (it reads terminal state): a scope
+    # escalation is counted even when no hook is wired (so no boundary fires).
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+    sink: list[BatchMetrics] = []
+    await WaveScheduler().run(plan, _scope_exec, metrics_sink=sink)
+    m = sink[0]
+    assert m.scope_boundaries == 0  # no hook ⇒ no boundary fired
+    assert (m.escalations, m.scope_escalations) == (1, 1)  # but the signal is still tallied

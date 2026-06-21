@@ -483,6 +483,7 @@
         "round": 0,
         "revisionOf": null,
         "revision": 0,
+        "revised": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": []
@@ -519,6 +520,7 @@
         "round": 1,
         "revisionOf": null,
         "revision": 0,
+        "revised": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": []
@@ -555,6 +557,7 @@
         "round": 1,
         "revisionOf": null,
         "revision": 0,
+        "revised": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": []
@@ -591,6 +594,7 @@
         "round": 1,
         "revisionOf": null,
         "revision": 0,
+        "revised": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": []
@@ -615,6 +619,7 @@
         "round": 0,
         "revisionOf": "rt_mod1_r1_a",
         "revision": 2,
+        "revised": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": []
@@ -639,6 +644,7 @@
         "round": 0,
         "revisionOf": "rt_mod1_r1_b",
         "revision": 2,
+        "revised": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": []

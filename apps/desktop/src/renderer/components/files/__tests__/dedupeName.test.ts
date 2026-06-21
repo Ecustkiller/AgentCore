@@ -1,4 +1,4 @@
-import { dedupeName } from "@/components/files/FileTree";
+import { dedupeName } from "@/components/files/dedupeName";
 import { describe, expect, it } from "vitest";
 
 describe("dedupeName（复制-粘贴的去重命名）", () => {

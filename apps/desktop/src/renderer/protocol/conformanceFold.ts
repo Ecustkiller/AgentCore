@@ -189,6 +189,9 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "run_completed":
       case "run_failed":
       case "run_progress":
+      //「计划已调整」轻痕迹 (设计 §7.2): a NON-interrupting trace — folds onto the runs'
+      // `revised` via the same frame path (no gate, like the escalate banner).
+      case "plan_revised":
       case "run_escalation":
       // 阻塞式求决策: the blocking-escalate pair folds onto the run's escalations via the
       // same frame path (projectExecution appends pending / flips resolved). The turn does
@@ -349,6 +352,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     round: r.round,
     revisionOf: r.revisionOf,
     revision: r.revision,
+    revised: r.revised,
     checkpoint: r.checkpoint,
     receivedContext: r.receivedContext,
     // Strip the desktop-local `id` (the resolve target): the conformance RunEscalation is the

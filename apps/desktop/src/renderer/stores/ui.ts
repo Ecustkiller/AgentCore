@@ -26,7 +26,7 @@ function persistUsageDetail(v: boolean): void {
   }
 }
 
-// 「图主界面化」实验总开关（协作图主界面化设计 §六 渐进迁移）：一个开关渐进点亮该愿景的各刀——
+// 「图主界面化」实验总开关（前端UX设计.md §六）：一个开关渐进点亮该愿景的各刀——
 //   · 单 Agent 回合（`executionId === null`）把「思考·正文·工具」时间线渲染进一张 CEO 节点卡
 //     （退化 1 节点图，§九「第一刀」）；
 //   · 团队回合的内嵌协作图里，点 CEO 汇聚点 / 用户输入端点**就地展开读全文**（§三 ②读答案），
@@ -121,11 +121,16 @@ interface UIState {
    * is never gated by this — it stays visible in both modes (§7.1). Persisted to
    * `localStorage: agentcore:usage-detail`. */
   usageDetail: boolean;
-  /** 「图主界面化」实验总开关（协作图主界面化设计 §六 渐进迁移）。开启后渐进点亮愿景各刀：
+  /** 「图主界面化」实验总开关（前端UX设计.md §六）。开启后渐进点亮愿景各刀：
    * 单 Agent 回合渲染成 CEO 节点卡（退化 1 节点图，§九）；团队内嵌图的 CEO 汇聚点 / 用户输入
    * 端点支持**就地展开读全文**（§三 ②读答案）。默认关、与现有聊天体验并行验证。持久化到
    * `localStorage: agentcore:graph-primary`。 */
   graphPrimary: boolean;
+  /** 每对话的视图模式（聊天 ⇄ 作战室画布双视图，前端UX设计.md §六）。默认聊天
+   * （`"chat"`），用户可在对话顶栏切到画布（`"canvas"`）。仅在 {@link graphPrimary} 实验开启时
+   * 生效。**会话内存态**（不持久化、不无限增长）：刷新或重启回到默认聊天；未表态的对话取 `"chat"`。
+   * 草稿（无 id）恒为聊天。 */
+  conversationViews: Record<string, "chat" | "canvas">;
   /** 本地引擎（sidecar）**有效**开关（双模式工作区 §一.1）：= `resolveSidecarEnabled(偏好)`，
    * 消费方（路由）只读这个 boolean。开启后，绑定本机本地文件夹的对话由用户机器上的
    * `python -m agentcore.sidecar` 跑（直连本地盘），而非云端引擎遥控桌面；裸聊 / 云端文件夹 /
@@ -145,6 +150,7 @@ interface UIState {
   toggleUsageDetail: () => void;
   setGraphPrimary: (v: boolean) => void;
   toggleGraphPrimary: () => void;
+  setConversationView: (conversationId: string, mode: "chat" | "canvas") => void;
   setSidecarEnabled: (v: boolean) => void;
 }
 
@@ -153,6 +159,7 @@ export const useUIStore = create<UIState>((set) => ({
   theme: loadTheme(),
   usageDetail: loadUsageDetail(),
   graphPrimary: loadGraphPrimary(),
+  conversationViews: {},
   sidecarPreference: loadSidecarPreference(),
   sidecarEnabled: loadSidecarEnabled(),
 
@@ -183,6 +190,10 @@ export const useUIStore = create<UIState>((set) => ({
       persistGraphPrimary(graphPrimary);
       return { graphPrimary };
     }),
+  setConversationView: (conversationId, mode) =>
+    set((s) => ({
+      conversationViews: { ...s.conversationViews, [conversationId]: mode },
+    })),
   setSidecarEnabled: (sidecarEnabled) => {
     const sidecarPreference: SidecarPreference = sidecarEnabled ? "on" : "off";
     persistSidecarPreference(sidecarPreference);

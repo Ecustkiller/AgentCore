@@ -43,10 +43,30 @@ def apply_replan(
     completed: dict[str, RunState],
     binds: list,
     steers: list,
+    adds: list | None = None,
 ) -> list[str]:
-    """Validate then apply a replan's binds + steers to the paused plan in place."""
+    """Validate then apply a replan's binds + steers + adds to the paused plan in place.
+
+    All-or-nothing: every op is validated first and a non-empty error list returns
+    BEFORE any mutation, so a rejected replan leaves the paused plan untouched. ``adds``
+    appends brand-new nodes (波边界追加节点, 设计 §7.1) — id 生成 / 依赖接线 / 拓扑校验 live
+    in :func:`build_added_nodes`; here we just append the vetted specs and, because the
+    graph grew, flip the plan origin to CAPTAIN and recompute fan-out awareness so any
+    newly-parallel nodes see each other.
+    """
+    from agentcore.runtime.runs import RunOrigin, build_added_nodes
+    from agentcore.runtime.runs.builder import _apply_sibling_summaries
+
     valid_tools = {s.name for s in tool._tools.list_all()}
     errors: list[str] = []
+    new_specs, add_errors = build_added_nodes(
+        adds or [],
+        plan,
+        valid_tools=valid_tools,
+        parent_run_id=tool._captain_run_id,
+        depth=tool._depth + 1,
+    )
+    errors.extend(add_errors)
     bind_ops: list[tuple[RunSpec, dict[str, Any]]] = []
     for i, b in enumerate(binds):
         if not isinstance(b, dict):
@@ -116,6 +136,11 @@ def apply_replan(
         node.bind_after_deps = False
     for node, note in steer_ops:
         node.steer = f"{node.steer}\n- {note}" if node.steer else f"- {note}"
+    if new_specs:
+        for spec in new_specs:
+            plan.add(spec)
+        plan.origin = RunOrigin.CAPTAIN
+        _apply_sibling_summaries(plan)
     return []
 
 

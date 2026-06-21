@@ -218,6 +218,7 @@
         "round": 0,
         "revisionOf": null,
         "revision": 0,
+        "revised": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": []
@@ -254,6 +255,7 @@
         "round": 0,
         "revisionOf": "r1",
         "revision": 2,
+        "revised": null,
         "checkpoint": null,
         "receivedContext": [],
         "escalations": []
