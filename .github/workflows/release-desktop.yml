@@ -3,8 +3,8 @@ name: Release Desktop
 # 桌面端安装包发布（部署与运维.md §7.6 双仓发布；Mac 见 07-规划/Mac桌面端部署设计.md）。
 #
 # 触发方式：
-#   · push tag desktop-v<ver>  → 预建 draft → matrix 并行 Win + macOS(arm64)
-#   · workflow_dispatch        → 可选只构建 win / mac / all（补发单平台、不重打 tag）
+#   · push tag desktop-v<ver>  → 预建 draft → 并行 Win + macOS(arm64)
+#   · workflow_dispatch        → 可选只构建 win / mac / all（补发单平台）
 #
 # 跨仓发布需 PAT：secrets.RELEASE_GH_TOKEN（对 Lawofall/AgentCore-releases 有写权）。
 
@@ -60,27 +60,14 @@ jobs:
             echo "created draft $tag on $repo"
           fi
 
-  release:
-    name: Build & publish (${{ matrix.label }})
+  release-win:
+    name: Build & publish (Windows)
     needs: precreate-release
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            label: Windows
-            platform_key: win
-            builder_args: --win
-          - os: macos-latest
-            label: macOS arm64
-            platform_key: mac
-            builder_args: --mac --arm64
-    # tag push → 全平台；workflow_dispatch → 按输入筛选（可只补 Mac）
     if: >-
       github.event_name != 'workflow_dispatch' ||
       github.event.inputs.platform == 'all' ||
-      github.event.inputs.platform == matrix.platform_key
+      github.event.inputs.platform == 'win'
+    runs-on: windows-latest
     defaults:
       run:
         working-directory: apps/desktop
@@ -94,7 +81,7 @@ jobs:
           version: 10.28.1
 
       - name: Setup Node.js
-        uses: setup-node@v4
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
@@ -115,4 +102,48 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
         run: |
           pnpm build
-          pnpm exec electron-builder ${{ matrix.builder_args }} --publish always
+          pnpm exec electron-builder --win --publish always
+
+  release-mac:
+    name: Build & publish (macOS arm64)
+    needs: precreate-release
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.platform == 'all' ||
+      github.event.inputs.platform == 'mac'
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        working-directory: .
+        run: pnpm install --frozen-lockfile --filter agentcore-desktop...
+
+      - name: Bundle sidecar Python runtime
+        run: pnpm bundle:sidecar
+
+      - name: Build & publish to release repo (draft)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
+        run: |
+          pnpm build
+          pnpm exec electron-builder --mac --arm64 --publish always
