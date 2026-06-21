@@ -13,7 +13,8 @@
  */
 
 import { Markdown } from "@/components/chat/Markdown";
-import { IconButton } from "@/components/files/parts";
+import { Button, IconButton } from "@/components/ui";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   MarkdownSourceEditor,
   type MarkdownSourceEditorHandle,
@@ -356,14 +357,11 @@ export function MarkdownFileEditor({
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-1 pr-1.5">
-        <button
-          type="button"
-          onClick={onClose}
-          title="返回文件列表"
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <ChevronLeft size={16} />
-        </button>
+        <SimpleTooltip label="返回文件列表">
+          <IconButton onClick={onClose} aria-label="返回文件列表">
+            <ChevronLeft size={16} />
+          </IconButton>
+        </SimpleTooltip>
         <FileText size={13} className="shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
           {dirty && <span className="text-primary">● </span>}
@@ -378,46 +376,51 @@ export function MarkdownFileEditor({
           <span className="shrink-0 text-xs text-muted-foreground">已保存</span>
         )}
         {source.openWithOsDefaultApp && (
-          <IconButton
-            title="用默认程序打开"
-            onClick={() => void onOpenExternal()}
-          >
-            <ExternalLink size={14} />
-          </IconButton>
+          <SimpleTooltip label="用默认程序打开">
+            <IconButton
+              onClick={() => void onOpenExternal()}
+              aria-label="用默认程序打开"
+            >
+              <ExternalLink size={14} />
+            </IconButton>
+          </SimpleTooltip>
         )}
         {source.revealInOsFileManager && (
-          <IconButton
-            title="在资源管理器中显示"
-            onClick={() => void onReveal()}
-          >
-            <FolderSearch size={14} />
-          </IconButton>
+          <SimpleTooltip label="在资源管理器中显示">
+            <IconButton
+              onClick={() => void onReveal()}
+              aria-label="在资源管理器中显示"
+            >
+              <FolderSearch size={14} />
+            </IconButton>
+          </SimpleTooltip>
         )}
         {mode === "edit" && !readOnly && !reviewing && !aiOpen && (
-          <button
-            type="button"
+          <Button
+            variant="neutral"
+            className="shrink-0 border border-border"
             onClick={openRewrite}
             title="用 AI 改写选中的文本"
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+            icon={<Sparkles size={13} />}
           >
-            <Sparkles size={13} />
             AI 改写
-          </button>
+          </Button>
         )}
         {mode === "edit" && !readOnly && !reviewing && (
-          <button
-            type="button"
-            onClick={() => void doSave()}
+          <Button
+            className="shrink-0 disabled:opacity-50"
             disabled={!dirty || saveState === "saving"}
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            onClick={() => void doSave()}
+            icon={
+              saveState === "saving" ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Save size={13} />
+              )
+            }
           >
-            {saveState === "saving" ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <Save size={13} />
-            )}
             保存
-          </button>
+          </Button>
         )}
         {!reviewing && (
           <div className="flex shrink-0 items-center overflow-hidden rounded-lg border border-border">
@@ -427,20 +430,20 @@ export function MarkdownFileEditor({
                 { key: "preview", label: "预览", Icon: Eye },
               ] as const
             ).map(({ key, label, Icon }) => (
-              <button
+              <Button
                 key={key}
-                type="button"
+                variant="ghost"
                 onClick={() => switchMode(key)}
                 className={cn(
-                  "flex h-7 items-center gap-1 px-2 text-xs font-medium transition-colors",
+                  "h-7 rounded-none px-2",
                   mode === key
                     ? "bg-accent text-foreground"
                     : "text-muted-foreground hover:bg-accent/60",
                 )}
+                icon={<Icon size={13} />}
               >
-                <Icon size={13} />
                 {label}
-              </button>
+              </Button>
             ))}
           </div>
         )}
@@ -467,27 +470,28 @@ export function MarkdownFileEditor({
             disabled={aiBusy}
             className="h-7 min-w-0 flex-1 rounded-lg border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
           />
-          <button
-            type="button"
-            onClick={() => void submitRewrite()}
+          <Button
+            className="shrink-0 disabled:opacity-50"
             disabled={aiBusy || !aiInstruction.trim()}
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            onClick={() => void submitRewrite()}
+            icon={
+              aiBusy ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Sparkles size={13} />
+              )
+            }
           >
-            {aiBusy ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <Sparkles size={13} />
-            )}
             改写
-          </button>
-          <button
-            type="button"
-            onClick={() => setAiOpen(false)}
+          </Button>
+          <Button
+            variant="neutral"
+            className="shrink-0 disabled:opacity-50"
             disabled={aiBusy}
-            className="inline-flex h-7 shrink-0 items-center rounded-lg px-2 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50"
+            onClick={() => setAiOpen(false)}
           >
             取消
-          </button>
+          </Button>
         </div>
       )}
 
@@ -497,22 +501,21 @@ export function MarkdownFileEditor({
           <span className="min-w-0 flex-1">
             AI 改写已就绪——用每块的 ✓ / ✗ 逐块采纳，或：
           </span>
-          <button
-            type="button"
+          <Button
+            className="shrink-0"
             onClick={() => finishReview(true)}
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg bg-primary px-2.5 font-medium text-primary-foreground hover:bg-primary/90"
+            icon={<Check size={13} />}
           >
-            <Check size={13} />
             完成
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="neutral"
+            className="shrink-0 border border-border"
             onClick={() => finishReview(false)}
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-border px-2.5 font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+            icon={<X size={13} />}
           >
-            <X size={13} />
             全部放弃
-          </button>
+          </Button>
         </div>
       )}
 
@@ -534,20 +537,20 @@ export function MarkdownFileEditor({
         <div className="flex flex-wrap shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-foreground">
           <AlertTriangle size={14} className="shrink-0 text-destructive" />
           <span>磁盘上的文件已被改动，保存会覆盖磁盘版本。</span>
-          <button
-            type="button"
+          <Button
+            variant="danger"
             onClick={load}
-            className="font-medium text-destructive underline-offset-2 hover:underline"
+            className="h-auto px-0 py-0 underline-offset-2 hover:underline"
           >
             重新加载
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="danger"
             onClick={() => void doSave(true)}
-            className="font-medium text-destructive underline-offset-2 hover:underline"
+            className="h-auto px-0 py-0 underline-offset-2 hover:underline"
           >
             仍然覆盖
-          </button>
+          </Button>
         </div>
       )}
 

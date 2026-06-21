@@ -1,3 +1,4 @@
+import { IconButton } from "@/components/ui";
 import { isImageAttachment } from "@/services/messaging";
 import { useMessagingStore } from "@/stores/messaging";
 import {
@@ -161,17 +162,16 @@ export function ChatComposer({ chatId }: Props) {
         <div className="mb-2 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           <AlertTriangle size={15} className="shrink-0" />
           <span className="min-w-0 flex-1">{sendError ?? localError}</span>
-          <button
-            type="button"
+          <IconButton
             onClick={() => {
               clearSendError();
               setLocalError(null);
             }}
             aria-label="关闭"
-            className="shrink-0 text-destructive/70 hover:text-destructive"
+            className="text-destructive/70 hover:bg-transparent hover:text-destructive"
           >
             <X size={14} />
-          </button>
+          </IconButton>
         </div>
       )}
 
@@ -197,24 +197,23 @@ export function ChatComposer({ chatId }: Props) {
                   <img
                     src={p.previewUrl}
                     alt={p.file.name}
-                    className="size-9 rounded-md object-cover"
+                    className="size-9 rounded-lg object-cover"
                   />
                 ) : (
-                  <span className="flex size-9 items-center justify-center rounded-md bg-muted">
+                  <span className="flex size-9 items-center justify-center rounded-lg bg-muted">
                     <FileText size={16} className="text-muted-foreground" />
                   </span>
                 )}
                 <span className="max-w-[140px] truncate text-xs text-foreground">
                   {p.file.name}
                 </span>
-                <button
-                  type="button"
+                <IconButton
                   onClick={() => removePending(p.id)}
                   aria-label="移除附件"
-                  className="flex size-4 items-center justify-center rounded-full bg-muted text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
+                  className="size-4 rounded-full bg-muted text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
                 >
                   <X size={11} />
-                </button>
+                </IconButton>
               </div>
             ))}
           </div>
@@ -231,15 +230,14 @@ export function ChatComposer({ chatId }: Props) {
               e.target.value = "";
             }}
           />
-          <button
-            type="button"
+          <IconButton
+            size="md"
             onClick={() => fileInputRef.current?.click()}
             disabled={sending}
             aria-label="添加附件"
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
           >
             <Paperclip size={16} />
-          </button>
+          </IconButton>
           <textarea
             ref={textareaRef}
             value={value}
@@ -250,19 +248,19 @@ export function ChatComposer({ chatId }: Props) {
             className="max-h-40 w-full resize-none bg-transparent py-1 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
             rows={1}
           />
-          <button
-            type="button"
+          <IconButton
+            size="md"
+            tone="primary"
             onClick={handleSend}
             disabled={!canSend}
             aria-label="发送"
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
           >
             {sending ? (
               <Loader2 size={14} className="animate-spin" />
             ) : (
               <Send size={14} />
             )}
-          </button>
+          </IconButton>
         </div>
       </div>
     </div>

@@ -105,7 +105,6 @@ export function CommandPalette() {
   const close = useUIStore((s) => s.closeSearch);
   const theme = useUIStore((s) => s.theme);
   const usageDetail = useUIStore((s) => s.usageDetail);
-  const graphPrimary = useUIStore((s) => s.graphPrimary);
   const sidebarCollapsed = useSidebarStore((s) => s.collapsed);
   const switchConversation = useConversationStore((s) => s.switchConversation);
   const navigate = useNavigate();
@@ -181,10 +180,9 @@ export function CommandPalette() {
         navigate,
         theme,
         usageDetail,
-        graphPrimary,
         sidebarCollapsed,
       }),
-    [navigate, theme, usageDetail, graphPrimary, sidebarCollapsed],
+    [navigate, theme, usageDetail, sidebarCollapsed],
   );
   const matchedCommands = useMemo(
     () => commands.filter((c) => commandMatches(c, query)),

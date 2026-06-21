@@ -1,3 +1,4 @@
+import { SectionLabel, SurfaceNavLink } from "@/components/ui";
 import { useAuthStore } from "@/stores/auth";
 import {
   Gauge,
@@ -9,7 +10,7 @@ import {
   UserCog,
   Users,
 } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 
 interface NavItem {
   icon: LucideIcon;
@@ -66,9 +67,7 @@ export function MorePage() {
             if (items.length === 0) return null;
             return (
               <div key={group.label}>
-                <p className="px-3 pb-1 text-xs font-medium text-muted-foreground">
-                  {group.label}
-                </p>
+                <SectionLabel className="px-3 pb-1">{group.label}</SectionLabel>
                 <div className="space-y-0.5">
                   {items.map((item) => (
                     <NavRow key={item.path} item={item} />
@@ -95,18 +94,9 @@ export function MorePage() {
 function NavRow({ item }: { item: NavItem }) {
   const Icon = item.icon;
   return (
-    <NavLink
-      to={item.path}
-      className={({ isActive }) =>
-        `flex h-9 w-full items-center gap-3 rounded-lg px-3 text-sm ${
-          isActive
-            ? "bg-accent text-accent-foreground"
-            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-        }`
-      }
-    >
+    <SurfaceNavLink to={item.path}>
       <Icon size={16} className="shrink-0" />
       <span>{item.label}</span>
-    </NavLink>
+    </SurfaceNavLink>
   );
 }

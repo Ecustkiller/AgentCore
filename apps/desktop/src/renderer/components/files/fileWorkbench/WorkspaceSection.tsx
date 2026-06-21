@@ -1,5 +1,14 @@
 import { FileTree, type FileTreeHandle } from "@/components/files/FileTree";
 import { IconButton } from "@/components/files/parts";
+import { Button } from "@/components/ui";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -8,6 +17,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import type { FileSource } from "@/lib/fileSource";
+import { useConversations } from "@/hooks/useConversations";
 import { notifyActionError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { WorkspaceInfo } from "@/services/workspaces";
@@ -29,6 +39,9 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { folderIdOf } from "./storage";
+
+/** Matches server retention default (双模式工作区 §七). */
+const PROJECT_FILE_RETENTION_DAYS = 30;
 
 /**
  * One workspace = a **flat, collapsible section**: a header (chevron + name +
@@ -68,6 +81,10 @@ export function WorkspaceSection({
   const folderId = folderIdOf(ws.wsId);
   const isLocal = ws.location === "local";
   const localUnavailable = isLocal && !source;
+  const liveConvCount = useConversations().filter(
+    (c) => c.folderId === folderId,
+  ).length;
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const treeRef = useRef<FileTreeHandle>(null);
@@ -130,16 +147,10 @@ export function WorkspaceSection({
     onRename(folderId, name);
   };
 
-  const handleDelete = () => {
+  const confirmDeleteProject = () => {
     if (!folderId) return;
-    if (
-      !window.confirm(
-        `确定删除项目「${ws.name}」？其下对话会保留并移入「未分组」。`,
-      )
-    ) {
-      return;
-    }
     onDelete(folderId);
+    setDeleteOpen(false);
   };
 
   // 在系统文件管理器中定位整个工作区根（仅本地源——云端无本机路径，方法不存在则不挂入口）。
@@ -154,7 +165,7 @@ export function WorkspaceSection({
   if (editing) {
     return (
       <div>
-        <div className="flex items-center gap-1.5 rounded-md bg-accent px-2 py-1.5">
+        <div className="flex items-center gap-1.5 rounded-lg bg-accent px-2 py-1.5">
           <FolderOpen size={14} className="shrink-0 text-muted-foreground" />
           <input
             ref={inputRef}
@@ -188,15 +199,15 @@ export function WorkspaceSection({
   const header = (
     <div
       className={cn(
-        "group flex items-center rounded-md pr-1 text-sm",
+        "group flex items-center rounded-lg pr-1 text-sm",
         flashing && "ring-2 ring-inset ring-primary",
       )}
     >
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 pl-2 text-left"
+        className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded-none py-1.5 pl-2 pr-0 text-left text-sm font-medium"
       >
         {expanded ? (
           <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
@@ -209,7 +220,7 @@ export function WorkspaceSection({
           <Folder size={14} className="shrink-0 text-muted-foreground" />
         )}
         <span className="min-w-0 flex-1 truncate font-medium">{ws.name}</span>
-      </button>
+      </Button>
       {source && (
         <div className="hidden shrink-0 items-center group-hover:flex">
           <IconButton
@@ -310,12 +321,56 @@ export function WorkspaceSection({
             </ContextMenuItem>
           )}
           <ContextMenuSeparator />
-          <ContextMenuItem variant="danger" onSelect={handleDelete}>
+          <ContextMenuItem
+            variant="danger"
+            onSelect={() => setDeleteOpen(true)}
+          >
             <Trash2 size={14} className="shrink-0" />
-            <span className="flex-1 truncate">删除（对话保留）</span>
+            <span className="flex-1 truncate">删除项目…</span>
           </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除项目「{ws.name}」？</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                {liveConvCount > 0 ? (
+                  <p>
+                    · {liveConvCount} 条对话将移入「未分组」（对话记录不会删除）
+                  </p>
+                ) : (
+                  <p>· 此项目下暂无活跃对话</p>
+                )}
+                <p>
+                  · 项目文件将保留 {PROJECT_FILE_RETENTION_DAYS}{" "}
+                  天，之后由系统自动清理
+                </p>
+                <p className="text-xs">
+                  若只想整理聊天列表，请使用「归档对话」而非删除项目。
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="neutral"
+              className="h-9 px-4"
+              onClick={() => setDeleteOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="danger"
+              className="h-9 px-4"
+              onClick={confirmDeleteProject}
+            >
+              删除项目
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {expanded && tree}
     </div>
   );

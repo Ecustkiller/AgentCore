@@ -5,7 +5,7 @@ import {
   useMessageExecution,
 } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { useUIStore } from "@/stores/ui";
+import { Button } from "@/components/ui";
 import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -53,7 +53,6 @@ export function TeamGraphFullscreen({
   // the panel (prompt / final answer) + its title. Local to full-screen — the
   // content is a chat bubble (not run-scoped), so it needs no shared store tab.
   const [endpoint, setEndpoint] = useState<EndpointView | null>(null);
-  const graphPrimary = useUIStore((s) => s.graphPrimary);
   const messages = useActiveMessages();
   // The turn's final answer bubble for this execution (mirrors GraphView's
   // `finalAnswer`): the assistant message stamped with this execution id, once the
@@ -103,10 +102,9 @@ export function TeamGraphFullscreen({
   // Full-screen has no chat bubble alongside, so auto-surface the CEO final answer
   // in the panel — on enter for a finished turn, or when the answer appears live.
   // Fires once (ref latch) and never clobbers a run the user already drilled into.
-  // Gated by `graphPrimary`.
   const autoOpenedRef = useRef(false);
   useEffect(() => {
-    if (!graphPrimary || autoOpenedRef.current || !finalAnswerId) return;
+    if (autoOpenedRef.current || !finalAnswerId) return;
     autoOpenedRef.current = true;
     const sp = useSidePanelStore.getState();
     const onRunTab =
@@ -114,7 +112,7 @@ export function TeamGraphFullscreen({
       sp.tabs.some((t) => t.id === sp.activeTabId && t.messageId === scopeId);
     if (onRunTab) return;
     setEndpoint({ contentMessageId: finalAnswerId, title: "最终回答" });
-  }, [graphPrimary, finalAnswerId, scopeId]);
+  }, [finalAnswerId, scopeId]);
 
   // After the command bar dispatches an order, follow the new turn on this canvas —
   // switch scope when its executionId lands, or exit to conversation if the CEO
@@ -173,14 +171,14 @@ export function TeamGraphFullscreen({
         }`}
       >
         <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
-          <button
-            type="button"
+          <Button
+            variant="neutral"
+            size="md"
             onClick={onClose}
-            className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            icon={<ArrowLeft size={16} />}
           >
-            <ArrowLeft size={16} />
             返回
-          </button>
+          </Button>
           {taskSummary && (
             <span className="truncate text-sm font-medium text-foreground">
               {taskSummary}
@@ -212,12 +210,10 @@ export function TeamGraphFullscreen({
           )}
         </div>
 
-        {graphPrimary && (
-          <CanvasCommandBar
-            onDispatch={() => setFollowing(true)}
-            waiting={following && generating}
-          />
-        )}
+        <CanvasCommandBar
+          onDispatch={() => setFollowing(true)}
+          waiting={following && generating}
+        />
       </div>
     </ExecutionScopeContext.Provider>,
     document.body,

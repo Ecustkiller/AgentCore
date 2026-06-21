@@ -70,7 +70,7 @@ const mdHighlight = HighlightStyle.define([
   { tag: t.strong, fontWeight: "700", color: "var(--foreground)" },
   { tag: t.emphasis, fontStyle: "italic" },
   { tag: t.strikethrough, textDecoration: "line-through" },
-  { tag: t.link, color: "var(--info)" },
+  { tag: t.link, color: "var(--primary)" },
   { tag: t.url, color: "var(--muted-foreground)" },
   { tag: t.monospace, fontFamily: MONO, color: "var(--syntax-string)" },
   { tag: t.quote, color: "var(--muted-foreground)", fontStyle: "italic" },

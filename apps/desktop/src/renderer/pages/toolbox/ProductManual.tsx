@@ -4,6 +4,9 @@ import {
   MechanismScenarios,
   RuntimePanorama,
 } from "@/components/manual/MechanismContent";
+import { WindowControls } from "@/components/layout/WindowControls";
+import { Button, IconButton, SurfaceRowButton } from "@/components/ui";
+import { isMac, macTitleBarInsetClass } from "@/lib/platform";
 import { useUIStore } from "@/stores/ui";
 import {
   Activity,
@@ -22,16 +25,13 @@ import {
   Lightbulb,
   type LucideIcon,
   MessageSquare,
-  Minus,
   Network,
   Rocket,
   Route,
   Settings,
   Sparkles,
-  Square,
   UsersRound,
   Wrench,
-  X,
 } from "lucide-react";
 import {
   type ReactNode,
@@ -64,30 +64,30 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 function GoLink({ to, children }: { to: string; children: ReactNode }) {
   const navigate = useNavigate();
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={() => navigate(to)}
-      className="font-medium text-primary underline-offset-2 hover:underline"
+      className="h-auto px-0 py-0 font-medium text-primary underline-offset-2 hover:underline"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
 /** 段落内「跳到本页某章节」链接（同页平滑滚动，不走路由）。 */
 function JumpLink({ to, children }: { to: string; children: ReactNode }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={() =>
         document
           .getElementById(to)
           ?.scrollIntoView({ behavior: "smooth", block: "start" })
       }
-      className="font-medium text-primary underline-offset-2 hover:underline"
+      className="h-auto px-0 py-0 font-medium text-primary underline-offset-2 hover:underline"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -103,7 +103,11 @@ const CALLOUT = {
     box: "border-primary/30 bg-primary/5",
     icon: "text-primary",
   },
-  info: { Icon: Info, box: "border-info/30 bg-info/5", icon: "text-info" },
+  info: {
+    Icon: Info,
+    box: "border-primary/30 bg-primary/5",
+    icon: "text-primary",
+  },
   warning: {
     Icon: AlertTriangle,
     box: "border-warning/30 bg-warning/5",
@@ -242,18 +246,18 @@ function SettingsTable() {
   return (
     <div className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
       {rows.map((r) => (
-        <button
+        <SurfaceRowButton
           key={r.to}
-          type="button"
+          variant="settings"
           onClick={() => navigate(r.to)}
-          className="flex w-full items-center gap-3 p-3 text-left transition-colors hover:bg-accent/50"
+          className="h-auto w-full justify-start gap-3 rounded-none p-3 hover:bg-accent/50"
         >
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-foreground">{r.label}</p>
             <p className="text-xs text-muted-foreground">{r.desc}</p>
           </div>
           <ChevronRight size={16} className="shrink-0 text-muted-foreground" />
-        </button>
+        </SurfaceRowButton>
       ))}
     </div>
   );
@@ -849,46 +853,26 @@ export function ProductManual() {
     // （[-webkit-app-region:drag]）+ 自绘最小化/最大化/关闭控件，否则无边框窗口将无法
     // 移动 / 关闭。返回 / Esc 退出回工具箱。
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
-      <header className="flex h-12 shrink-0 items-center border-b border-border [-webkit-app-region:drag]">
-        <button
-          type="button"
+      <header
+        className={`flex h-12 shrink-0 items-center border-b border-border [-webkit-app-region:drag] ${isMac ? macTitleBarInsetClass : ""}`}
+      >
+        <Button
+          variant="neutral"
+          size="md"
           onClick={exit}
-          className="ml-2 flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground [-webkit-app-region:no-drag]"
+          icon={<ArrowLeft size={16} />}
+          className="ml-2 [-webkit-app-region:no-drag]"
         >
-          <ArrowLeft size={16} />
           返回
-        </button>
+        </Button>
         <span className="ml-1 text-sm font-medium text-foreground">
           产品手册
         </span>
         <div className="flex-1" />
-        {/* 自绘窗口控件：本页盖住了原生 TitleBar，故在此重建（与 TitleBar 同一 windowApi）。 */}
-        <div className="flex items-center [-webkit-app-region:no-drag]">
-          <button
-            type="button"
-            onClick={() => window.windowApi.minimize()}
-            aria-label="最小化"
-            className="flex h-12 w-12 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <Minus size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={() => window.windowApi.maximize()}
-            aria-label="最大化"
-            className="flex h-12 w-12 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <Square size={12} />
-          </button>
-          <button
-            type="button"
-            onClick={() => window.windowApi.close()}
-            aria-label="关闭"
-            className="flex h-12 w-12 items-center justify-center text-muted-foreground hover:bg-destructive hover:text-destructive-foreground"
-          >
-            <X size={14} />
-          </button>
-        </div>
+        <WindowControls
+          className="flex items-center [-webkit-app-region:no-drag]"
+          buttonClassName="size-12 rounded-none"
+        />
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -905,11 +889,12 @@ export function ProductManual() {
                     const Icon = item.Icon;
                     const active = item.id === activeId;
                     return (
-                      <button
+                      <SurfaceRowButton
                         key={item.id}
-                        type="button"
+                        variant="settings"
+                        active={active}
                         onClick={() => goTo(item.id)}
-                        className={`flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm transition-colors ${
+                        className={`h-9 gap-2.5 px-3 text-sm ${
                           active
                             ? "bg-accent font-medium text-accent-foreground"
                             : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
@@ -920,7 +905,7 @@ export function ProductManual() {
                           className={`shrink-0 ${active ? "text-primary" : ""}`}
                         />
                         <span className="truncate">{item.nav}</span>
-                      </button>
+                      </SurfaceRowButton>
                     );
                   })}
                 </div>

@@ -1,0 +1,60 @@
+name: Deploy Mobile Web
+
+# 手机端网页版（apps/mobile）静态 SPA → Cloudflare Pages。
+# 生产：https://m.fashitianxia.xyz（自定义域名在 CF Pages 项目 agentcore-mobile 绑定）。
+# API：VITE_API_URL 指向 https://app.fashitianxia.xyz/api（Nginx /api 反代前缀）。
+#
+# 触发：master 上 mobile / 共享包改动，或手动 dispatch。
+# 需 secrets：CLOUDFLARE_API_TOKEN（与 deploy-website.yml 共用）。
+# 后端 CORS：生产 config/.env 须含 https://m.fashitianxia.xyz（见 production.env.example）。
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "apps/mobile/**"
+      - "packages/design-tokens/**"
+      - "packages/contract-types/**"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/deploy-mobile-web.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-mobile-web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build & deploy to Cloudflare Pages
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.28.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter agentcore-mobile...
+
+      - name: Build mobile web SPA
+        env:
+          VITE_API_URL: https://app.fashitianxia.xyz/api
+        run: pnpm --filter agentcore-mobile build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: REDACTED_CLOUDFLARE_ACCOUNT_ID
+          workingDirectory: apps/mobile
+          command: pages deploy dist --project-name=agentcore-mobile --branch=main

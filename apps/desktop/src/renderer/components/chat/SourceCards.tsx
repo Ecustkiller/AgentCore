@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { cleanSourceTitle } from "@/lib/citations";
 import type { Citation } from "@/types/events";
 import { ChevronDown, ChevronUp, Globe } from "lucide-react";
@@ -90,25 +91,27 @@ export function SourceCards({
   return (
     <div className="mt-3">
       {hidden > 0 ? (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className="mb-1.5 h-auto gap-1.5 px-0 py-0 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground"
         >
-          <Globe size={14} className="shrink-0" />
-          <span>来源 {citations.length}</span>
-          {hasRefs && (
-            <span className="text-muted-foreground/70">
-              · {referenced?.size} 条被引用
-            </span>
-          )}
-          {expanded ? (
-            <ChevronUp size={14} className="ml-0.5" />
-          ) : (
-            <ChevronDown size={14} className="ml-0.5" />
-          )}
-        </button>
+          <span className="flex items-center gap-1.5">
+            <Globe size={14} className="shrink-0" />
+            <span>来源 {citations.length}</span>
+            {hasRefs && (
+              <span className="text-muted-foreground/70">
+                · {referenced?.size} 条被引用
+              </span>
+            )}
+            {expanded ? (
+              <ChevronUp size={14} className="ml-0.5" />
+            ) : (
+              <ChevronDown size={14} className="ml-0.5" />
+            )}
+          </span>
+        </Button>
       ) : (
         <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
           <Globe size={14} className="shrink-0" />
@@ -170,14 +173,14 @@ export function SourceCards({
             ))}
           </div>
           {hidden > 0 && (
-            <button
-              type="button"
+            <Button
+              variant="neutral"
               onClick={() => setExpanded(false)}
-              className="mt-1.5 inline-flex w-fit items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="mt-1.5 inline-flex w-fit border border-border bg-card text-muted-foreground hover:text-foreground"
+              icon={<ChevronUp size={14} />}
             >
-              <ChevronUp size={14} />
               收起
-            </button>
+            </Button>
           )}
         </div>
       ) : (
@@ -207,24 +210,26 @@ export function SourceCards({
             </SourceTooltip>
           ))}
           {hidden > 0 && (
-            <button
-              type="button"
+            <Button
+              variant="neutral"
               onClick={() => setExpanded(true)}
-              className="flex items-center gap-1.5 rounded-full border border-border bg-card py-1 pl-2 pr-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="h-auto gap-1.5 rounded-full border border-border bg-card py-1 pl-2 pr-2.5 text-xs text-muted-foreground hover:text-foreground"
             >
-              <span className="flex items-center -space-x-1.5">
-                {stack.map((c, i) => (
-                  <Favicon
-                    key={`${c.url}-stack-${i}`}
-                    site={c.site}
-                    title={c.title}
-                    size={16}
-                    className="ring-2 ring-card"
-                  />
-                ))}
+              <span className="flex items-center gap-1.5">
+                <span className="flex items-center -space-x-1.5">
+                  {stack.map((c, i) => (
+                    <Favicon
+                      key={`${c.url}-stack-${i}`}
+                      site={c.site}
+                      title={c.title}
+                      size={16}
+                      className="ring-2 ring-card"
+                    />
+                  ))}
+                </span>
+                <span className="tabular-nums">+{hidden}</span>
               </span>
-              <span className="tabular-nums">+{hidden}</span>
-            </button>
+            </Button>
           )}
         </div>
       )}

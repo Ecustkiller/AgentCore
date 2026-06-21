@@ -1,4 +1,5 @@
 import { Markdown } from "@/components/chat/Markdown";
+import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   type Execution,
@@ -30,44 +31,54 @@ import { useState } from "react";
 export function RevisionCompare({
   execution,
   messageId,
+  bare = false,
 }: {
   execution: Execution;
   messageId: string;
+  /** Drop the card chrome + collapsible header (chains only, always shown) for a host
+   * that supplies its own frame + title — e.g. the canvas focused node's foot drawer
+   * ({@link import("../graph/FocusedTurnNode")}). Verbatim reuse, no fork. */
+  bare?: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
   const chains = revisionChains(execution);
   if (chains.length === 0) return null;
 
+  const rows = (
+    <div className={bare ? "space-y-4" : "space-y-4 border-t border-border p-4"}>
+      {chains.map((chain) => (
+        <ChainRow
+          key={chain.originalId}
+          chain={chain}
+          execution={execution}
+          messageId={messageId}
+        />
+      ))}
+    </div>
+  );
+  if (bare) return rows;
+
   return (
     <div className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+        className="h-auto w-full justify-start rounded-none px-4 py-3 hover:bg-transparent"
       >
-        <History size={15} className="shrink-0 text-info" />
-        <span className="flex-1 text-sm font-medium text-foreground">
-          版本对比
+        <span className="flex w-full items-center gap-2 text-left">
+          <History size={15} className="shrink-0 text-primary" />
+          <span className="flex-1 text-sm font-medium text-foreground">
+            版本对比
+          </span>
+          {expanded ? (
+            <ChevronUp size={15} className="shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
+          )}
         </span>
-        {expanded ? (
-          <ChevronUp size={15} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
-        )}
-      </button>
+      </Button>
 
-      {expanded && (
-        <div className="space-y-4 border-t border-border p-4">
-          {chains.map((chain) => (
-            <ChainRow
-              key={chain.originalId}
-              chain={chain}
-              execution={execution}
-              messageId={messageId}
-            />
-          ))}
-        </div>
-      )}
+      {expanded && rows}
     </div>
   );
 }
@@ -135,25 +146,27 @@ function VersionColumn({
   return (
     <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-muted/30">
       <SimpleTooltip label="查看完整产出">
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => showRunDetail(messageId, run.id, role)}
-          className="group/cell flex items-center gap-1.5 border-b border-border px-3 py-2 text-left"
+          className="group/cell h-auto w-full justify-start gap-1.5 rounded-none border-b border-border px-3 py-2 hover:bg-transparent"
         >
-          <StatusDot status={run.status} />
-          <span className="flex-1 truncate text-xs font-medium text-foreground">
-            v{version.version}
-            {version.version === 1 && (
-              <span className="ml-1 font-normal text-muted-foreground">
-                原始
-              </span>
-            )}
+          <span className="flex w-full items-center gap-1.5 text-left">
+            <StatusDot status={run.status} />
+            <span className="flex-1 truncate text-xs font-medium text-foreground">
+              v{version.version}
+              {version.version === 1 && (
+                <span className="ml-1 font-normal text-muted-foreground">
+                  原始
+                </span>
+              )}
+            </span>
+            <ChevronRight
+              size={13}
+              className="shrink-0 text-muted-foreground/50 group-hover/cell:text-muted-foreground"
+            />
           </span>
-          <ChevronRight
-            size={13}
-            className="shrink-0 text-muted-foreground/50 group-hover/cell:text-muted-foreground"
-          />
-        </button>
+        </Button>
       </SimpleTooltip>
       <div className="p-3">
         {output ? (

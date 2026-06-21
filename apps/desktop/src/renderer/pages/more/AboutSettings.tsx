@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { type VersionInfo, fetchVersion } from "@/services/system";
 import { useUpdatesStore } from "@/stores/updates";
 import type { UpdaterStatus } from "@shared/updater-contract";
@@ -65,27 +66,25 @@ function UpdateSection() {
       </p>
       <div className="mt-3">
         {status.phase === "downloaded" ? (
-          <button
-            type="button"
-            onClick={() => void install()}
-            className="flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm text-primary-foreground hover:opacity-90"
-          >
+          <Button size="md" onClick={() => void install()}>
             重启安装
-          </button>
+          </Button>
         ) : (
-          <button
-            type="button"
-            onClick={() => void check()}
+          <Button
+            variant="neutral"
+            size="md"
             disabled={busy || status.phase === "unsupported"}
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-40"
+            icon={
+              busy ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <RefreshCw size={14} />
+              )
+            }
+            onClick={() => void check()}
           >
-            {busy ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <RefreshCw size={14} />
-            )}
             检查更新
-          </button>
+          </Button>
         )}
       </div>
     </section>

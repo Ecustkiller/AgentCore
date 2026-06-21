@@ -1,3 +1,4 @@
+import { Button, IconButton } from "@/components/ui";
 import {
   Dialog,
   DialogContent,
@@ -136,24 +137,21 @@ function ShareDialogBody({ conversationId }: { conversationId: string }) {
                   </div>
                 </div>
                 <SimpleTooltip label="复制链接">
-                  <button
-                    type="button"
+                  <IconButton
                     aria-label="复制链接"
                     onClick={() => void handleCopy(share)}
-                    className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
                   >
                     <Copy size={14} />
-                  </button>
+                  </IconButton>
                 </SimpleTooltip>
                 <SimpleTooltip label="撤销链接">
-                  <button
-                    type="button"
+                  <IconButton
                     aria-label="撤销链接"
                     onClick={() => void handleRevoke(share)}
-                    className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    className="hover:bg-destructive/10 hover:text-destructive"
                   >
                     <Trash2 size={14} />
-                  </button>
+                  </IconButton>
                 </SimpleTooltip>
               </li>
             ))}
@@ -162,21 +160,22 @@ function ShareDialogBody({ conversationId }: { conversationId: string }) {
       </div>
 
       <DialogFooter>
-        <button
-          type="button"
-          onClick={() => void handleCreate()}
+        <Button
+          className="h-9 px-4"
           disabled={creating || shares === null}
-          className="flex h-9 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40"
+          icon={
+            creating ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : shares && shares.length > 0 ? (
+              <Plus size={14} />
+            ) : (
+              <Check size={14} />
+            )
+          }
+          onClick={() => void handleCreate()}
         >
-          {creating ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : shares && shares.length > 0 ? (
-            <Plus size={14} />
-          ) : (
-            <Check size={14} />
-          )}
           {shares && shares.length > 0 ? "新建分享链接" : "创建分享链接"}
-        </button>
+        </Button>
       </DialogFooter>
     </DialogContent>
   );

@@ -1,6 +1,12 @@
 import { Markdown } from "@/components/chat/Markdown";
+import { RevisionCompare } from "@/components/chat/RevisionCompare";
+import { IconButton } from "@/components/ui";
 import { useActiveMessages } from "@/stores/conversation";
-import { ExecutionScopeContext, useMessageExecution } from "@/stores/execution";
+import {
+  ExecutionScopeContext,
+  hasRevisions,
+  useMessageExecution,
+} from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import {
   Handle,
@@ -8,7 +14,7 @@ import {
   Position,
   ReactFlowProvider,
 } from "@xyflow/react";
-import { AlertTriangle, Maximize2, X } from "lucide-react";
+import { AlertTriangle, History, Maximize2, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import {
   countPendingDecisions,
@@ -33,10 +39,14 @@ import { GraphView } from "./GraphView";
  *
  * Reading in place (§三 ②读答案): clicking the 用户输入 / CEO 汇聚点 endpoint surfaces
  * its full text (the prompt / the CEO's final answer) in a drawer at the foot of the
- * node — so a deliverable is read without leaving the canvas. The drawer splits the
- * fixed node height with the graph (total stays {@link FOCUS_NODE_HEIGHT}, so the
- * host's stacking offsets never shift). Worker clicks open the run in the shared
- * docked panel; the 全屏 button hands off to the on-demand full-screen overlay.
+ * node — so a deliverable is read without leaving the canvas. The same foot drawer
+ * also hosts 版本对比 ({@link RevisionCompare}, opened from the header chip when this
+ * turn revised a worker) — the chat-only compare card brought onto the canvas, reused
+ * verbatim (`bare`), each version still drilling to the shared run-detail panel. Drawer
+ * and endpoint reading are mutually exclusive; the drawer splits the fixed node height
+ * with the graph (total stays {@link FOCUS_NODE_HEIGHT}, so the host's stacking offsets
+ * never shift). Worker clicks open the run in the shared docked panel; the 全屏 button
+ * hands off to the on-demand full-screen overlay.
  */
 
 /** Fixed footprint so the host can stack turns at known offsets. */
@@ -44,6 +54,10 @@ export const FOCUS_NODE_WIDTH = 760;
 export const FOCUS_NODE_HEIGHT = 470;
 const HEADER_H = 38;
 const DRAWER_H = 180;
+// 版本对比 needs more room than an endpoint read (side-by-side version columns). It
+// still splits the fixed node height with the graph, so the node total is unchanged —
+// the inner preview just gives up rows while the comparison is open.
+const REVISION_DRAWER_H = 260;
 const BODY_H = FOCUS_NODE_HEIGHT - HEADER_H;
 
 export interface FocusedTurnData {
@@ -58,12 +72,15 @@ export function FocusedTurnNode({ data }: NodeProps) {
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
   const messages = useActiveMessages();
 
-  // In-place endpoint reading (prompt / final answer). Local — its content is a
-  // chat message, not a run, so it needs no shared side-panel tab.
+  // In-place foot drawer: either endpoint reading (prompt / final answer — a chat
+  // message, so no shared side-panel tab) OR 版本对比 (RevisionCompare). Mutually
+  // exclusive; opening one closes the other.
   const [endpoint, setEndpoint] = useState<EndpointView | null>(null);
+  const [revisionsOpen, setRevisionsOpen] = useState(false);
   const endpointContent = endpoint
     ? (messages.find((m) => m.id === endpoint.contentMessageId)?.content ?? "")
     : "";
+  const showRevisions = !!execution && hasRevisions(execution);
 
   // 图上指挥 (§6.2): on-graph awareness that THIS turn awaits a boss decision or needs
   // 救火 — the host {@link import("./ConversationCanvas")} surfaces the actionable cards
@@ -80,13 +97,16 @@ export function FocusedTurnNode({ data }: NodeProps) {
       const role = execution?.agents.find((a) => a.id === run?.agentId)?.role;
       showRunDetail(messageId, runId, role);
       setEndpoint(null);
+      setRevisionsOpen(false);
     },
     [execution, messageId, showRunDetail],
   );
 
   const onEndpointSelect = useCallback(
-    (contentMessageId: string, title: string) =>
-      setEndpoint({ contentMessageId, title }),
+    (contentMessageId: string, title: string) => {
+      setEndpoint({ contentMessageId, title });
+      setRevisionsOpen(false);
+    },
     [],
   );
 
@@ -116,15 +136,29 @@ export function FocusedTurnNode({ data }: NodeProps) {
               待救火
             </span>
           )}
-          <button
-            type="button"
+          {showRevisions && (
+            <IconButton
+              onClick={() => {
+                setEndpoint(null);
+                setRevisionsOpen((v) => !v);
+              }}
+              aria-label="版本对比"
+              title="版本对比"
+              aria-pressed={revisionsOpen}
+              className={
+                revisionsOpen ? "bg-accent text-foreground" : undefined
+              }
+            >
+              <History size={15} />
+            </IconButton>
+          )}
+          <IconButton
             onClick={onMaximize}
             aria-label="全屏查看协作图"
             title="全屏查看协作图"
-            className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <Maximize2 size={15} />
-          </button>
+          </IconButton>
         </div>
         {/* nodrag/nowheel: let the inner graph + drawer own their pointer/wheel
             surface inside the node, not the outer canvas's drag/zoom. */}
@@ -146,27 +180,36 @@ export function FocusedTurnNode({ data }: NodeProps) {
               </ExecutionScopeContext.Provider>
             </ReactFlowProvider>
           </div>
-          {endpoint && (
+          {(endpoint || revisionsOpen) && (
             <div
               className="flex flex-col border-t border-border"
-              style={{ height: DRAWER_H }}
+              style={{ height: revisionsOpen ? REVISION_DRAWER_H : DRAWER_H }}
             >
               <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1">
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                  {endpoint.title}
+                  {revisionsOpen ? "版本对比" : endpoint?.title}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => setEndpoint(null)}
+                <IconButton
+                  onClick={() => {
+                    setEndpoint(null);
+                    setRevisionsOpen(false);
+                  }}
                   aria-label="收起"
                   title="收起"
-                  className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
                   <X size={15} />
-                </button>
+                </IconButton>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                <Markdown content={endpointContent} />
+                {revisionsOpen && execution ? (
+                  <RevisionCompare
+                    execution={execution}
+                    messageId={messageId}
+                    bare
+                  />
+                ) : (
+                  <Markdown content={endpointContent} />
+                )}
               </div>
             </div>
           )}

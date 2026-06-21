@@ -1,4 +1,10 @@
 import type { FileArtifact, FileOp } from "@/lib/fileArtifacts";
+import { Button } from "@/components/ui";
+import {
+  statusAccentText,
+  statusPillSoft,
+  type StatusTone,
+} from "@/components/ui/tone-presets";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import {
   ArrowRight,
@@ -27,37 +33,32 @@ const OP_META: Record<
   {
     label: string;
     Icon: LucideIcon;
-    tint: string;
-    pill: string;
+    tone: StatusTone;
     preview: boolean;
   }
 > = {
   write: {
     label: "写入",
     Icon: FilePlus,
-    tint: "text-success",
-    pill: "bg-success/10 text-success",
+    tone: "success",
     preview: true,
   },
   edit: {
     label: "编辑",
     Icon: Pencil,
-    tint: "text-info",
-    pill: "bg-info/10 text-info",
+    tone: "primary",
     preview: true,
   },
   delete: {
     label: "删除",
     Icon: Trash2,
-    tint: "text-destructive",
-    pill: "bg-destructive/10 text-destructive",
+    tone: "destructive",
     preview: false,
   },
   move: {
     label: "移动",
     Icon: ArrowRight,
-    tint: "text-muted-foreground",
-    pill: "bg-muted text-muted-foreground",
+    tone: "muted",
     preview: true,
   },
 };
@@ -76,7 +77,10 @@ function FileRow({
   );
   const body = (
     <>
-      <meta.Icon size={14} className={`shrink-0 ${meta.tint}`} />
+      <meta.Icon
+        size={14}
+        className={`shrink-0 ${statusAccentText[meta.tone]}`}
+      />
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
         {artifact.op === "move" && artifact.fromPath ? (
           <span className="text-muted-foreground/70">
@@ -88,7 +92,7 @@ function FileRow({
         <span className="font-medium">{artifact.name}</span>
       </span>
       <span
-        className={`shrink-0 rounded-full px-1.5 py-0.5 text-[11px] leading-none ${meta.pill}`}
+        className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs leading-none ${statusPillSoft[meta.tone]}`}
       >
         {meta.label}
       </span>
@@ -103,15 +107,20 @@ function FileRow({
   }
   return (
     <li>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={onOpen}
         title={`在工作区预览 ${artifact.path}`}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-accent"
+        className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2 hover:bg-accent"
       >
-        {body}
-        <ChevronRight size={14} className="shrink-0 text-muted-foreground/50" />
-      </button>
+        <span className="flex w-full items-center gap-2 text-left">
+          {body}
+          <ChevronRight
+            size={14}
+            className="shrink-0 text-muted-foreground/50"
+          />
+        </span>
+      </Button>
     </li>
   );
 }
@@ -129,24 +138,29 @@ export function FileArtifactsCard({
 
   return (
     <div className="mt-3 overflow-hidden rounded-xl border border-border bg-card">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2.5 text-left transition-colors hover:bg-accent/50"
+        className="h-auto w-full justify-start gap-2 rounded-none px-3 py-2.5 hover:bg-accent/50"
       >
-        <FolderOpen size={15} className="shrink-0 text-info" />
-        <span className="flex-1 text-sm font-medium text-foreground">
-          本回合产出文件
+        <span className="flex w-full items-center gap-2 text-left">
+          <FolderOpen
+            size={15}
+            className={`shrink-0 ${statusAccentText.primary}`}
+          />
+          <span className="flex-1 text-sm font-medium text-foreground">
+            本回合产出文件
+          </span>
+          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs leading-none text-muted-foreground">
+            {artifacts.length}
+          </span>
+          {expanded ? (
+            <ChevronUp size={15} className="shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
+          )}
         </span>
-        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[11px] leading-none text-muted-foreground">
-          {artifacts.length}
-        </span>
-        {expanded ? (
-          <ChevronUp size={15} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown size={15} className="shrink-0 text-muted-foreground" />
-        )}
-      </button>
+      </Button>
       {expanded && (
         <ul className="divide-y divide-border border-t border-border">
           {artifacts.map((a) => (

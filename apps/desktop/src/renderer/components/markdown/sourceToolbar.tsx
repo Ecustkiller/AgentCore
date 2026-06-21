@@ -6,6 +6,7 @@
  */
 
 import type { EditorView } from "@codemirror/view";
+import { IconButton } from "@/components/ui";
 import {
   Bold,
   Code,
@@ -106,16 +107,15 @@ function Btn({
   children: ReactNode;
 }) {
   return (
-    <button
-      type="button"
+    <IconButton
       title={title}
+      aria-label={title}
       // mousedown.preventDefault 保住编辑器选区，避免点击工具栏丢失光标
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
-      className="inline-flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
     >
       {children}
-    </button>
+    </IconButton>
   );
 }
 

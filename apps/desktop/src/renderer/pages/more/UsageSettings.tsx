@@ -1,3 +1,4 @@
+import { Button, IconButton } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
@@ -55,18 +56,17 @@ export function UsageSettings() {
           // are handled by the dedicated states below, so the button shows here.
           summary ? (
             <SimpleTooltip label="刷新">
-              <button
-                type="button"
+              <IconButton
+                size="md"
                 aria-label="刷新"
                 onClick={refresh}
                 disabled={loading}
-                className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-60"
               >
                 <RefreshCw
                   size={16}
                   className={loading ? "animate-spin" : undefined}
                 />
-              </button>
+              </IconButton>
             </SimpleTooltip>
           ) : undefined
         }
@@ -115,13 +115,7 @@ function ErrorState({
   return (
     <div className="mt-6 flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
       <p className="text-sm text-muted-foreground">{message}</p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="rounded-lg bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:opacity-90"
-      >
-        重试
-      </button>
+      <Button onClick={onRetry}>重试</Button>
     </div>
   );
 }
@@ -140,13 +134,9 @@ function RefreshErrorBanner({
   return (
     <div className="mt-6 flex items-center justify-between gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-2.5">
       <p className="text-xs text-warning">{message}</p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="shrink-0 rounded-lg border border-border px-2.5 py-1 text-xs hover:bg-accent"
-      >
+      <Button variant="neutral" onClick={onRetry}>
         重试
-      </button>
+      </Button>
     </div>
   );
 }

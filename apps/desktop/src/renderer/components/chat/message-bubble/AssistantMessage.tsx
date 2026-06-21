@@ -7,6 +7,8 @@ import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
 import { type CitationFlash, SourceCards } from "@/components/chat/SourceCards";
+import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
+import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { referencedCitationNumbers } from "@/lib/citations";
 import { errorActionForCode } from "@/lib/errors";
@@ -29,19 +31,13 @@ import type { ProcessStep } from "@/types/events";
 import {
   AlertTriangle,
   Check,
-  CircleOff,
-  CircleSlash,
   Copy,
   Fingerprint,
   KeyRound,
-  type LucideIcon,
   RefreshCw,
-  Repeat,
-  TrendingDown,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CeoNodeCard, type SoloStatus } from "./CeoNodeCard";
 import {
   DeleteMessageAction,
   MessageAction,
@@ -52,44 +48,6 @@ import { ComposingToolLine, ProcessTimeline } from "./ProcessTimeline";
 import { ThinkingDots, ThinkingPanel } from "./Thinking";
 import type { MessageBubbleProps } from "./types";
 import { useCopyAction } from "./useCopyAction";
-
-function finishReasonChip(
-  reason: string | undefined,
-): { label: string; Icon: LucideIcon; tone: "muted" | "warning" } | null {
-  switch (reason) {
-    case "cancelled":
-      return {
-        label: "已中断 · 已保存完成的部分",
-        Icon: CircleSlash,
-        tone: "muted",
-      };
-    case "max_rounds":
-      return {
-        label: "已达最大轮次 · 提前收尾",
-        Icon: Repeat,
-        tone: "warning",
-      };
-    case "degraded":
-      return {
-        label: "降级完成 · 模型多次空响应",
-        Icon: TrendingDown,
-        tone: "warning",
-      };
-    case "unproductive":
-      return {
-        label: "无有效进展 · 提前收尾",
-        Icon: CircleOff,
-        tone: "warning",
-      };
-    default:
-      return null;
-  }
-}
-
-const FINISH_CHIP_TONE: Record<"muted" | "warning", string> = {
-  muted: "bg-muted text-muted-foreground",
-  warning: "bg-warning/10 text-warning",
-};
 
 function MultiAgentFileArtifacts({
   messageId,
@@ -129,10 +87,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
   const usageDetail = useUIStore((s) => s.usageDetail);
-  // 「图主界面化」实验（前端UX设计.md §6.1）：单 Agent「1 节点图」是它的第一刀——仅对单
-  // Agent 回合（`executionId === null`）生效（多 Agent 回合已有团队协作图）。开启时把整段回合
-  // 正文（时间线 / 答案）包进一张 CEO 节点卡（退化形态）。默认关 → 零回归。
-  const graphPrimary = useUIStore((s) => s.graphPrimary);
   const captainContext = message.captainContext ?? [];
   const hasProcess = (message.process?.length ?? 0) > 0;
   const citations = useMemo(() => message.citations ?? [], [message.citations]);
@@ -150,19 +104,10 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         : [],
     [message.executionId, message.process],
   );
-  const finishChip = !message.isStreaming
-    ? finishReasonChip(message.finishReason ?? message.runs?.finishReason)
-    : null;
-  // 单 Agent「1 节点图」退化渲染（§九）：CEO 节点的状态由回合态派生——流式中=执行中、
-  // 报错=失败、`cancelled` 收尾=已停止、其余=已完成（与团队图 captain 节点同口径）。
-  const isSoloGraph = graphPrimary && message.executionId === null;
-  const soloStatus: SoloStatus = message.isStreaming
-    ? "running"
-    : message.error
-      ? "failed"
-      : (message.finishReason ?? message.runs?.finishReason) === "cancelled"
-        ? "cancelled"
-        : "completed";
+  const finishReason =
+    !message.isStreaming
+      ? (message.finishReason ?? message.runs?.finishReason)
+      : undefined;
   const turnTotal = message.cost?.total ?? cachedTotal;
   const costText =
     message.executionId === null && turnTotal != null && turnTotal > 0
@@ -208,9 +153,9 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     if (userId) void runRegenerate(userId);
   };
 
-  // 回合正文（时间线或答案）。单 Agent「1 节点图」开启时整段包进 CEO 节点卡（见 §九），
-  // 否则原样平铺。回合级附件（收到的上下文 / 错误卡 / 产物 / 引用 / 检查点 / 操作行）始终在
-  // 节点卡之外——它们是回合 chrome，不属于 CEO 节点本身。
+  // 回合正文（时间线或答案）：对话页恒为传统聊天平铺（单 Agent 回合不再退化成 CEO 节点卡——
+  // 那条「图主界面化」第一刀已撤，图相关体验只在画布；多 Agent 回合仍在答案上方内嵌
+  // 团队协作图）。回合级附件（收到的上下文 / 错误卡 / 产物 / 引用 / 检查点 / 操作行）随后平铺。
   const turnBody = hasProcess ? (
     <ProcessTimeline
       process={message.process ?? []}
@@ -265,19 +210,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
 
   return (
     <div className="group min-w-0" onMouseEnter={onPeekCost}>
-      {finishChip && (
-        <div
-          className={`mb-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs ${FINISH_CHIP_TONE[finishChip.tone]}`}
-        >
-          <finishChip.Icon size={14} />
-          {finishChip.label}
-        </div>
-      )}
-      {isSoloGraph ? (
-        <CeoNodeCard status={soloStatus}>{turnBody}</CeoNodeCard>
-      ) : (
-        turnBody
-      )}
+      <FinishReasonChip reason={finishReason} />
+      {turnBody}
       {captainContext.length > 0 && (
         <div className="mt-3">
           <ReceivedContextSection
@@ -294,23 +228,23 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
             {message.error.message}
           </p>
           {errorAction && (
-            <button
-              type="button"
+            <Button
+              variant="destructive"
+              className="shrink-0"
+              icon={<KeyRound size={13} />}
               onClick={() => navigate(errorAction.href)}
-              className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg bg-destructive px-2 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
             >
-              <KeyRound size={13} />
               {errorAction.label}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
+          <Button
+            variant="danger"
+            className="shrink-0 border border-destructive/40"
+            icon={<RefreshCw size={13} />}
             onClick={handleRegenerate}
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-destructive/40 px-2 text-xs font-medium text-destructive hover:bg-destructive/10"
           >
-            <RefreshCw size={13} />
             重新生成
-          </button>
+          </Button>
         </div>
       )}
       {message.executionId === null ? (

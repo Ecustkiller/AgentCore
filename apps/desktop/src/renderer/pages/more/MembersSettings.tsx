@@ -1,3 +1,4 @@
+import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { type Invite, createInvite, listInvites } from "@/services/invites";
 import { useAuthStore } from "@/stores/auth";
@@ -83,15 +84,15 @@ export function MembersSettings() {
         title="成员"
         description="生成邀请码邀请新成员注册。每个邀请码仅可使用一次。"
         action={
-          <button
-            type="button"
-            onClick={() => void handleCreate()}
+          <Button
+            size="md"
+            className="shrink-0"
             disabled={creating}
-            className="flex h-8 shrink-0 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+            icon={<Plus size={16} />}
+            onClick={() => void handleCreate()}
           >
-            <Plus size={16} />
             {creating ? "生成中…" : "生成邀请码"}
-          </button>
+          </Button>
         }
       />
 
@@ -119,19 +120,18 @@ export function MembersSettings() {
                 {STATUS_LABEL[invite.status]}
               </span>
               <SimpleTooltip label="复制邀请码">
-                <button
-                  type="button"
+                <IconButton
                   onClick={() => void handleCopy(invite.code)}
                   disabled={invite.status !== "active"}
                   aria-label="复制邀请码"
-                  className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
+                  className="outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {copied === invite.code ? (
                     <Check size={14} />
                   ) : (
                     <Copy size={14} />
                   )}
-                </button>
+                </IconButton>
               </SimpleTooltip>
             </div>
           ))

@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { EscalationCard } from "@/components/chat/EscalationCard";
 import { Markdown } from "@/components/chat/Markdown";
 import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
@@ -52,38 +53,40 @@ function RunToolRow({ tc }: { tc: ToolCallState }) {
         : "text-muted-foreground";
   return (
     <div className="rounded-lg bg-muted px-2.5 py-1.5 text-xs">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => hasBody && setOpen((v) => !v)}
-        className={`flex w-full items-center gap-2 text-left ${
+        className={`h-auto w-full justify-start gap-2 px-0 py-0 hover:bg-transparent ${
           hasBody ? "cursor-pointer" : "cursor-default"
         }`}
       >
-        <Wrench size={12} className="shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-mono text-foreground">
-            {tc.toolName}
-          </span>
-          {hasBody && !open && (
-            <span
-              className={`block truncate ${
-                tc.status === "error"
-                  ? "text-destructive/80"
-                  : "text-muted-foreground/70"
-              }`}
-            >
-              {toolResultPeek(data)}
+        <span className="flex w-full items-center gap-2 text-left">
+          <Wrench size={12} className="shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-mono text-foreground">
+              {tc.toolName}
             </span>
-          )}
+            {hasBody && !open && (
+              <span
+                className={`block truncate ${
+                  tc.status === "error"
+                    ? "text-destructive/80"
+                    : "text-muted-foreground/70"
+                }`}
+              >
+                {toolResultPeek(data)}
+              </span>
+            )}
+          </span>
+          <span className={`shrink-0 ${statusClass}`}>
+            {tc.status === "running"
+              ? "执行中"
+              : tc.status === "error"
+                ? "失败"
+                : "完成"}
+          </span>
         </span>
-        <span className={`shrink-0 ${statusClass}`}>
-          {tc.status === "running"
-            ? "执行中"
-            : tc.status === "error"
-              ? "失败"
-              : "完成"}
-        </span>
-      </button>
+      </Button>
       {open && hasBody && <ToolResultView data={data} />}
     </div>
   );
@@ -492,23 +495,25 @@ function SubtaskTree({
         const role = agents.find((a) => a.id === r.agentId)?.role ?? r.agentId;
         return (
           <div key={r.id} className="space-y-1">
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               onClick={() => onSelect(r.id, role)}
-              className="flex w-full items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-left text-xs hover:bg-accent"
+              className="h-auto w-full justify-start gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs hover:bg-accent"
             >
-              <CornerDownRight
-                size={12}
-                className="shrink-0 text-muted-foreground/60"
-              />
-              <RunStatusDot status={r.status} />
-              <span className="shrink-0 font-medium text-foreground">
-                {role}
+              <span className="flex w-full items-center gap-2 text-left">
+                <CornerDownRight
+                  size={12}
+                  className="shrink-0 text-muted-foreground/60"
+                />
+                <RunStatusDot status={r.status} />
+                <span className="shrink-0 font-medium text-foreground">
+                  {role}
+                </span>
+                <span className="flex-1 truncate text-muted-foreground">
+                  {r.task}
+                </span>
               </span>
-              <span className="flex-1 truncate text-muted-foreground">
-                {r.task}
-              </span>
-            </button>
+            </Button>
             <SubtaskTree
               parentId={r.id}
               runs={runs}
@@ -545,20 +550,22 @@ function RunRefGroup({
           const role =
             agents.find((a) => a.id === r.agentId)?.role ?? r.agentId;
           return (
-            <button
+            <Button
               key={r.id}
-              type="button"
+              variant="ghost"
               onClick={() => onSelect(r.id, role)}
-              className="flex w-full items-center gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-left text-xs hover:bg-accent"
+              className="h-auto w-full justify-start gap-2 rounded-lg bg-muted px-2.5 py-1.5 text-xs hover:bg-accent"
             >
-              <RunStatusDot status={r.status} />
-              <span className="shrink-0 font-medium text-foreground">
-                {role}
+              <span className="flex w-full items-center gap-2 text-left">
+                <RunStatusDot status={r.status} />
+                <span className="shrink-0 font-medium text-foreground">
+                  {role}
+                </span>
+                <span className="flex-1 truncate text-muted-foreground">
+                  {r.task}
+                </span>
               </span>
-              <span className="flex-1 truncate text-muted-foreground">
-                {r.task}
-              </span>
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -584,21 +591,25 @@ function ThinkingSection({
 
   return (
     <section className="mb-4 last:mb-0">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5"
+        className="h-auto w-full justify-start gap-1.5 px-0 py-0 hover:bg-transparent"
       >
-        {expanded ? (
-          <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
-        )}
-        <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
-          思考过程
+        <span className="flex w-full items-center gap-1.5">
+          {expanded ? (
+            <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+          )}
+          <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
+            思考过程
+          </span>
+          {live && (
+            <span className="shrink-0 text-xs text-primary">思考中…</span>
+          )}
         </span>
-        {live && <span className="shrink-0 text-xs text-primary">思考中…</span>}
-      </button>
+      </Button>
 
       {expanded && (
         <div className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
@@ -641,25 +652,27 @@ function ResourceSection({
 
   return (
     <section className="mb-4 last:mb-0">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5"
+        className="h-auto w-full justify-start gap-1.5 px-0 py-0 hover:bg-transparent"
       >
-        {expanded ? (
-          <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
-        )}
-        <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
-          资源消耗
-        </span>
-        {cost && (
-          <span className="text-xs tabular-nums text-muted-foreground">
-            {formatCost(cost.total, cnyPerUsd)}
+        <span className="flex w-full items-center gap-1.5">
+          {expanded ? (
+            <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+          )}
+          <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
+            资源消耗
           </span>
-        )}
-      </button>
+          {cost && (
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {formatCost(cost.total, cnyPerUsd)}
+            </span>
+          )}
+        </span>
+      </Button>
 
       {expanded && (
         <div className="mt-2 space-y-2 rounded-lg bg-muted p-3">

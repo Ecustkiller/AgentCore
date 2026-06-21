@@ -1,6 +1,7 @@
 import { FileDetail } from "@/components/files/FileDetail";
 import { EmptyHint, IconButton, InlineError } from "@/components/files/parts";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
+import { IconButton as UiIconButton } from "@/components/ui";
 import {
   clampRail,
   loadExpandedWs,
@@ -292,14 +293,13 @@ export function FileWorkbench({
                   className="h-8 w-full rounded-lg border border-border bg-background pl-7 pr-7 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
                 />
                 {filter && (
-                  <button
-                    type="button"
+                  <UiIconButton
                     onClick={() => setFilter("")}
                     aria-label="清除筛选"
-                    className="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center justify-center rounded p-0.5 text-muted-foreground hover:bg-accent"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2"
                   >
                     <X size={13} />
-                  </button>
+                  </UiIconButton>
                 )}
               </div>
             </div>

@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import {
   Popover,
   PopoverContent,
@@ -184,9 +185,9 @@ export function WorkspaceModeBar({
       }}
     >
       <PopoverTrigger asChild>
-        <button
-          type="button"
-          className={`flex min-w-0 shrink items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium hover:bg-accent ${
+        <Button
+          variant="ghost"
+          className={`h-auto min-w-0 shrink gap-1.5 px-2 py-1 text-xs font-medium ${
             isLocal && rootMissing ? "text-warning" : "text-foreground"
           }`}
         >
@@ -201,13 +202,13 @@ export function WorkspaceModeBar({
             {isLocal ? (rootName ?? "本地") : "云端"}
           </span>
           <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
-        </button>
+        </Button>
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-64 p-0">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
           <span
-            className={`flex size-7 shrink-0 items-center justify-center rounded-md ${
+            className={`flex size-7 shrink-0 items-center justify-center rounded-lg ${
               isLocal
                 ? "bg-primary/10 text-primary"
                 : "bg-muted text-muted-foreground"
@@ -238,7 +239,7 @@ export function WorkspaceModeBar({
                 {/* §八 degradation: the bound root isn't on this device (removed,
                     or bound on another machine — local projects don't follow you
                     across devices). */}
-                <div className="mb-1 flex items-start gap-2 rounded-md bg-warning/10 px-2.5 py-2 text-xs text-warning-foreground">
+                <div className="mb-1 flex items-start gap-2 rounded-lg bg-warning/10 px-2.5 py-2 text-xs text-warning-foreground">
                   <AlertTriangle
                     size={14}
                     className="mt-px shrink-0 text-warning"
@@ -290,20 +291,19 @@ export function WorkspaceModeBar({
                         : "切回云端工作区"}
                     </p>
                     <div className="flex items-center gap-1">
-                      <button
-                        type="button"
+                      <Button
+                        variant="danger"
+                        className="flex-1"
                         onClick={() => void disconnect()}
-                        className="flex-1 rounded-md px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10"
                       >
                         确认切回云端
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="neutral"
                         onClick={() => setConfirmDisconnect(false)}
-                        className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
                       >
                         取消
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 ) : (
@@ -357,14 +357,14 @@ function ModeAction({
   disabled?: boolean;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
       disabled={disabled}
-      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
+      className="h-auto w-full justify-start gap-2 px-2.5 py-1.5 text-left text-xs font-medium"
+      icon={<span className="shrink-0 text-muted-foreground">{icon}</span>}
     >
-      <span className="shrink-0 text-muted-foreground">{icon}</span>
       {label}
-    </button>
+    </Button>
   );
 }

@@ -78,6 +78,9 @@ jobs:
       - name: Lint
         run: pnpm --filter agentcore-desktop lint
 
+      - name: UI token gate
+        run: pnpm --filter agentcore-desktop check-ui-tokens
+
       - name: Test
         run: pnpm --filter agentcore-desktop test -- --run
 
@@ -105,6 +108,9 @@ jobs:
 
       - name: Lint
         run: pnpm --filter agentcore-mobile lint
+
+      - name: UI token gate
+        run: pnpm --filter agentcore-mobile check-ui-tokens
 
       - name: Typecheck
         run: pnpm --filter agentcore-mobile typecheck

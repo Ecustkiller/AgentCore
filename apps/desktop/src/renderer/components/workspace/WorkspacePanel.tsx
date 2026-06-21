@@ -1,4 +1,5 @@
 import { EmptyHint, IconButton } from "@/components/files/parts";
+import { Button } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import { createDeferredLocalSource } from "@/services/sources/deferredLocalSource";
@@ -89,11 +90,11 @@ export function WorkspaceMode() {
       {/* 快照：从常驻 tab 降级为按需 slide-over（低频 / 恢复型操作）。 */}
       {snapshotsOpen && (
         <div className="absolute inset-0 z-20 flex">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             aria-label="关闭快照"
             onClick={() => setSnapshotsOpen(false)}
-            className="min-w-0 flex-1 bg-overlay/40"
+            className="min-w-0 flex-1 rounded-none bg-overlay/40 p-0"
           />
           <div className="flex w-[85%] max-w-[420px] flex-col border-l border-border bg-card shadow-lg animate-dropdown-in">
             <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-3 pr-1">

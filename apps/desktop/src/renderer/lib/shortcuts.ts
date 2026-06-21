@@ -1,10 +1,8 @@
 import { startNewConversation } from "@/lib/newConversation";
+import { isMac } from "@/lib/platform";
 import { useSidebarStore } from "@/stores/sidebar";
 import { useUIStore } from "@/stores/ui";
 import type { NavigateFunction } from "react-router-dom";
-
-const isMac =
-  typeof navigator !== "undefined" && /mac/i.test(navigator.userAgent);
 
 function keyLabel(key: string): string {
   return key === "\\" ? "\\" : key.toUpperCase();

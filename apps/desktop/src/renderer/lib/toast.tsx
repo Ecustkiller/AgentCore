@@ -8,7 +8,7 @@ import { toast } from "sonner";
 const errorIcon = <AlertTriangle size={16} className="text-destructive" />;
 const successIcon = <CheckCircle2 size={16} className="text-success" />;
 const warningIcon = <AlertTriangle size={16} className="text-warning" />;
-const infoIcon = <Info size={16} className="text-info" />;
+const infoIcon = <Info size={16} className="text-primary" />;
 
 /**
  * Surface any caught error as a toast, phrased by the shared error map
@@ -98,7 +98,7 @@ export function notifyWarning(
  * A neutral informational toast with an optional one-click action and duration.
  *
  * Distinct from success/warning: neither "操作成功" nor "降级警告" — a heads-up the
- * user may act on (e.g. "新版本已就绪 → 重启安装"). Blue info icon on the neutral
+ * user may act on (e.g. "新版本已就绪 → 重启安装"). Brand-primary icon on the neutral
  * surface (color-tokens). Pass `duration: Infinity` for a sticky notice that stays
  * until dismissed or acted on.
  */

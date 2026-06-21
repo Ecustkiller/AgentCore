@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { type Theme, resolveDark } from "@/lib/theme";
 import { useUIStore } from "@/stores/ui";
 import { Check, type LucideIcon, Monitor, Moon, Sun } from "lucide-react";
@@ -84,11 +85,11 @@ function ThemeRow({
       : null;
 
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`flex w-full items-center gap-3 rounded-xl border bg-card px-3 py-2.5 text-left transition-colors ${
+      className={`h-auto w-full justify-start gap-3 rounded-xl border bg-card px-3 py-2.5 text-left font-normal ${
         selected ? "border-primary" : "border-border hover:bg-accent"
       }`}
     >
@@ -109,6 +110,6 @@ function ThemeRow({
         </span>
       </span>
       {selected && <Check size={16} className="shrink-0 text-primary" />}
-    </button>
+    </Button>
   );
 }

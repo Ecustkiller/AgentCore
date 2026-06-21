@@ -1,4 +1,5 @@
 import { DraftWorkspacePicker } from "@/components/chat/DraftWorkspacePicker";
+import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { useComposerDraftStore } from "@/stores/composer";
@@ -195,19 +196,19 @@ export function MessageInput() {
         <div className="flex items-center justify-between px-4 pb-3">
           <div className="flex items-center gap-1">
             {!conversationId && <DraftWorkspacePicker />}
-            <button
-              type="button"
+            <IconButton
+              size="md"
               onClick={mention.openBrowse}
               disabled={isGenerating}
               aria-label="附加文件"
-              className={`flex size-8 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-40 ${
+              className={
                 mention.menuMode === "browse"
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground"
-              }`}
+                  ? "bg-accent text-accent-foreground hover:bg-accent hover:text-accent-foreground"
+                  : undefined
+              }
             >
               <Paperclip size={16} />
-            </button>
+            </IconButton>
             {isLocal && (
               <SimpleTooltip
                 label={
@@ -216,20 +217,20 @@ export function MessageInput() {
                     : "切到「后台云端」：把任务交给云端团队后台跑，结果回来再应用"
                 }
               >
-                <button
-                  type="button"
+                <IconButton
+                  size="md"
                   onClick={() => setBackgroundMode((v) => !v)}
                   disabled={isGenerating}
                   aria-label="切换后台云端任务"
                   aria-pressed={backgroundMode}
-                  className={`flex size-8 items-center justify-center rounded-lg hover:bg-accent disabled:opacity-40 ${
+                  className={
                     backgroundMode
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground"
-                  }`}
+                      ? "bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary"
+                      : undefined
+                  }
                 >
                   <Cloud size={16} />
-                </button>
+                </IconButton>
               </SimpleTooltip>
             )}
           </div>
@@ -240,27 +241,28 @@ export function MessageInput() {
               </span>
             )}
             {isGenerating ? (
-              <button
-                type="button"
+              <IconButton
+                size="md"
+                tone="destructive"
                 onClick={stopGeneration}
-                className="flex size-8 items-center justify-center rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                aria-label="停止生成"
               >
                 <Square size={14} />
-              </button>
+              </IconButton>
             ) : (
-              <button
-                type="button"
+              <IconButton
+                size="md"
+                tone="primary"
                 onClick={() => void handleSend()}
                 disabled={!value.trim()}
                 aria-label={backgroundMode ? "派发到云端后台" : "发送"}
-                className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
               >
                 {backgroundMode ? (
                   <CloudUpload size={14} />
                 ) : (
                   <Send size={14} />
                 )}
-              </button>
+              </IconButton>
             )}
           </div>
         </div>

@@ -1,33 +1,86 @@
 name: Release Desktop
 
-# 桌面端安装包发布（部署与运维.md §7.6 双仓发布）。
-# 源码仓打 desktop-v<ver> tag → 在发布仓预建空草稿 → 构建 Windows 安装包 →
-# electron-builder --publish 把产物上传到该草稿（draft，保留人工转正门槛），
-# electron-updater 零 token 自动更新、源码仓保持私有。
-# 预建草稿是为规避 electron-builder 多产物并行上传时「竞相创建重复草稿」的竞态
-# （详见下方 Pre-create 步骤注释）。
+# 桌面端安装包发布（部署与运维.md §7.6 双仓发布；Mac 见 07-规划/Mac桌面端部署设计.md）。
 #
-# 跨仓发布需 PAT：本 workflow 跑在源码仓，默认 GITHUB_TOKEN 对公开发布仓无写权，
-# 故用 secrets.RELEASE_GH_TOKEN（对发布仓有 Contents:write 的 PAT）。
+# 触发方式：
+#   · push tag desktop-v<ver>  → 预建 draft → matrix 并行 Win + macOS(arm64)
+#   · workflow_dispatch        → 可选只构建 win / mac / all（补发单平台、不重打 tag）
 #
-# 前置（一次性人工，见 §7.6）：
-#   1. 建公开仓（electron-builder.yml 的 publish.owner/repo，默认 Lawofall/AgentCore-releases）。
-#   2. 建 PAT（classic: repo  /  fine-grained: 该仓 Contents=Read+Write）
-#      → 源码仓 Settings → Secrets and variables → Actions → 新增 RELEASE_GH_TOKEN。
-#   3. 发布：bump apps/desktop/package.json version → 打 tag desktop-v<ver> → push tag。
+# 跨仓发布需 PAT：secrets.RELEASE_GH_TOKEN（对 Lawofall/AgentCore-releases 有写权）。
 
 on:
   push:
     tags:
       - "desktop-v*"
-  workflow_dispatch: # 手动重跑（按 package.json version 发布，跳过 tag 校验）
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Build platform (tag push always builds all)"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - win
+          - mac
 
 jobs:
-  # MVP 仅 Windows（Win 优先，部署与运维.md §7.6）。后续加 macOS(DMG)/Linux(AppImage)
-  # 时改为 matrix（windows-latest→--win / macos-latest→--mac / ubuntu-latest→--linux）。
-  release-win:
-    name: Build & publish Windows installer
-    runs-on: windows-latest
+  precreate-release:
+    name: Pre-create draft release
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          pkg_ver="$(node -p "require('./package.json').version")"
+          tag_ver="${GITHUB_REF_NAME#desktop-v}"
+          if [[ "$pkg_ver" != "$tag_ver" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME (=$tag_ver) != package.json version $pkg_ver"
+            exit 1
+          fi
+          echo "version ok: $pkg_ver"
+
+      - name: Pre-create draft release (avoid parallel-upload race)
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
+        run: |
+          ver="$(node -p "require('./package.json').version")"
+          tag="v${ver}"
+          repo="Lawofall/AgentCore-releases"
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            echo "release $tag already exists on $repo — reuse it"
+          else
+            gh release create "$tag" --repo "$repo" --draft --title "$ver" --notes "AgentCore $ver"
+            echo "created draft $tag on $repo"
+          fi
+
+  release:
+    name: Build & publish (${{ matrix.label }})
+    needs: precreate-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            platform_key: win
+            builder_args: --win
+          - os: macos-latest
+            label: macOS arm64
+            platform_key: mac
+            builder_args: --mac --arm64
+    # tag push → 全平台；workflow_dispatch → 按输入筛选（可只补 Mac）
+    if: >-
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.platform == 'all' ||
+      github.event.inputs.platform == matrix.platform_key
     defaults:
       run:
         working-directory: apps/desktop
@@ -41,13 +94,12 @@ jobs:
           version: 10.28.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      # 内置 Python 打包（方案 B）需 uv 拉独立 CPython + 装 agentcore（scripts/bundle-sidecar.mjs）。
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
 
@@ -55,54 +107,12 @@ jobs:
         working-directory: .
         run: pnpm install --frozen-lockfile --filter agentcore-desktop...
 
-      # tag 触发时校验 desktop-v<ver> 与 package.json version 一致，避免发布版本与
-      # tag 漂移（workflow_dispatch 跳过，直接用 package.json version）。
-      - name: Verify tag matches package version
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        run: |
-          pkg_ver="$(node -p "require('./package.json').version")"
-          tag_ver="${GITHUB_REF_NAME#desktop-v}"
-          if [[ "$pkg_ver" != "$tag_ver" ]]; then
-            echo "::error::tag $GITHUB_REF_NAME (=$tag_ver) != package.json version $pkg_ver"
-            exit 1
-          fi
-          echo "version ok: $pkg_ver"
-
-      # ⚠️ 防「重复草稿」竞态：electron-builder 的 GitHub publisher 会把 3 个产物
-      # （installer.exe / .blockmap / latest.yml）并行上传，各自「找不到 release 就创建」。
-      # 草稿不校验 tag 唯一性 → 并行创建出多个同 tag 草稿、资产被拆散（曾出现一个草稿
-      # 只含 .blockmap）。修法：先建好空草稿，令后续并行上传都落到同一个已存在 release，
-      # 不再竞相创建（electron-builder#6676）。releaseType 必须保持 draft（与此草稿类型
-      # 匹配；预建若为 published 会被判「类型不兼容」跳过全部资产，见 electron-builder#2393）。
-      # 幂等：workflow_dispatch 重跑时草稿已存在则复用。
-      - name: Pre-create draft release (avoid parallel-upload race)
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
-        shell: bash
-        run: |
-          ver="$(node -p "require('./package.json').version")"
-          tag="v${ver}"
-          repo="Lawofall/AgentCore-releases"
-          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
-            echo "release $tag already exists on $repo — reuse it"
-          else
-            gh release create "$tag" --repo "$repo" --draft --title "$ver" --notes "AgentCore $ver"
-            echo "created draft $tag on $repo"
-          fi
-
-      # 先把内置 Python 运行时构建到 resources/sidecar/（方案 B；electron-builder 经
-      # extraResources 拷入安装包）。每个 OS runner 各自构建自己平台的运行时（原生 wheel/
-      # 解释器不可交叉编译）。
       - name: Bundle sidecar Python runtime
         run: pnpm bundle:sidecar
 
-      # electron-vite 产物 → electron-builder 打 NSIS 并 --publish 上传到上面预建的草稿。
-      # GH_TOKEN 必须是对公开发布仓有写权的 PAT（非默认 GITHUB_TOKEN）。
-      # GitHub Actions 网络直连，无需 ELECTRON_MIRROR（国内本地构建才需要）。
       - name: Build & publish to release repo (draft)
         env:
           GH_TOKEN: ${{ secrets.RELEASE_GH_TOKEN }}
         run: |
           pnpm build
-          pnpm exec electron-builder --win --publish always
+          pnpm exec electron-builder ${{ matrix.builder_args }} --publish always

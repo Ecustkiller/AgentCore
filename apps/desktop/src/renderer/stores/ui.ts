@@ -3,7 +3,7 @@ import { create } from "zustand";
 const USAGE_DETAIL_KEY = "agentcore:usage-detail";
 const THEME_KEY = "agentcore:theme";
 const SIDECAR_KEY = "agentcore:sidecar-enabled";
-const GRAPH_PRIMARY_KEY = "agentcore:graph-primary";
+const CONVERSATION_VIEWS_KEY = "agentcore:conversation-views";
 
 type Theme = "light" | "dark" | "system";
 
@@ -26,24 +26,32 @@ function persistUsageDetail(v: boolean): void {
   }
 }
 
-// 「图主界面化」实验总开关（前端UX设计.md §六）：一个开关渐进点亮该愿景的各刀——
-//   · 单 Agent 回合（`executionId === null`）把「思考·正文·工具」时间线渲染进一张 CEO 节点卡
-//     （退化 1 节点图，§九「第一刀」）；
-//   · 团队回合的内嵌协作图里，点 CEO 汇聚点 / 用户输入端点**就地展开读全文**（§三 ②读答案），
-//     而非跳转到气泡。
-// 默认关 → 现有聊天体验零回归；用户显式开启才进「图即界面」实验。同 usageDetail 的 localStorage
-// 包裹（私密模式 / 非 DOM 测试环境抛错时回退默认关）。
-function loadGraphPrimary(): boolean {
+// 每对话的视图偏好（聊天 ⇄ 画布，前端UX设计.md §六）。只存「切到画布」的对话——聊天是
+// 默认、不落键，故这张表恒收敛在用户偏好画布的那批对话上（守原「不无限增长」约束）。同 usageDetail
+// 的 localStorage 包裹（私密模式 / 非 DOM 测试环境抛错时回退空表、退化为会话内存态）。
+function loadConversationViews(): Record<string, "chat" | "canvas"> {
   try {
-    return localStorage.getItem(GRAPH_PRIMARY_KEY) === "true";
+    const raw = localStorage.getItem(CONVERSATION_VIEWS_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, "chat" | "canvas"> = {};
+    for (const [id, mode] of Object.entries(
+      parsed as Record<string, unknown>,
+    )) {
+      if (mode === "canvas") out[id] = "canvas";
+    }
+    return out;
   } catch {
-    return false;
+    return {};
   }
 }
 
-function persistGraphPrimary(v: boolean): void {
+function persistConversationViews(
+  views: Record<string, "chat" | "canvas">,
+): void {
   try {
-    localStorage.setItem(GRAPH_PRIMARY_KEY, String(v));
+    localStorage.setItem(CONVERSATION_VIEWS_KEY, JSON.stringify(views));
   } catch {
     /* unavailable — session-only */
   }
@@ -121,15 +129,10 @@ interface UIState {
    * is never gated by this — it stays visible in both modes (§7.1). Persisted to
    * `localStorage: agentcore:usage-detail`. */
   usageDetail: boolean;
-  /** 「图主界面化」实验总开关（前端UX设计.md §六）。开启后渐进点亮愿景各刀：
-   * 单 Agent 回合渲染成 CEO 节点卡（退化 1 节点图，§九）；团队内嵌图的 CEO 汇聚点 / 用户输入
-   * 端点支持**就地展开读全文**（§三 ②读答案）。默认关、与现有聊天体验并行验证。持久化到
-   * `localStorage: agentcore:graph-primary`。 */
-  graphPrimary: boolean;
-  /** 每对话的视图模式（聊天 ⇄ 作战室画布双视图，前端UX设计.md §六）。默认聊天
-   * （`"chat"`），用户可在对话顶栏切到画布（`"canvas"`）。仅在 {@link graphPrimary} 实验开启时
-   * 生效。**会话内存态**（不持久化、不无限增长）：刷新或重启回到默认聊天；未表态的对话取 `"chat"`。
-   * 草稿（无 id）恒为聊天。 */
+  /** 每对话的视图模式（聊天 ⇄ 画布双视图，前端UX设计.md §六）。默认聊天（`"chat"`），
+   * 用户可在对话顶栏切到画布（`"canvas"`）。画布已毕业（无实验开关），入口恒显示。
+   * **持久化**到 `localStorage: agentcore:conversation-views`，但只落「切到画布」的对话（切回聊天
+   * 即删键）→ 表恒收敛、不无限增长；未表态 / 草稿（无 id）恒为聊天。 */
   conversationViews: Record<string, "chat" | "canvas">;
   /** 本地引擎（sidecar）**有效**开关（双模式工作区 §一.1）：= `resolveSidecarEnabled(偏好)`，
    * 消费方（路由）只读这个 boolean。开启后，绑定本机本地文件夹的对话由用户机器上的
@@ -148,8 +151,6 @@ interface UIState {
   setTheme: (theme: UIState["theme"]) => void;
   setUsageDetail: (v: boolean) => void;
   toggleUsageDetail: () => void;
-  setGraphPrimary: (v: boolean) => void;
-  toggleGraphPrimary: () => void;
   setConversationView: (conversationId: string, mode: "chat" | "canvas") => void;
   setSidecarEnabled: (v: boolean) => void;
 }
@@ -158,8 +159,7 @@ export const useUIStore = create<UIState>((set) => ({
   searchOpen: false,
   theme: loadTheme(),
   usageDetail: loadUsageDetail(),
-  graphPrimary: loadGraphPrimary(),
-  conversationViews: {},
+  conversationViews: loadConversationViews(),
   sidecarPreference: loadSidecarPreference(),
   sidecarEnabled: loadSidecarEnabled(),
 
@@ -180,20 +180,16 @@ export const useUIStore = create<UIState>((set) => ({
       persistUsageDetail(usageDetail);
       return { usageDetail };
     }),
-  setGraphPrimary: (graphPrimary) => {
-    persistGraphPrimary(graphPrimary);
-    set({ graphPrimary });
-  },
-  toggleGraphPrimary: () =>
-    set((s) => {
-      const graphPrimary = !s.graphPrimary;
-      persistGraphPrimary(graphPrimary);
-      return { graphPrimary };
-    }),
   setConversationView: (conversationId, mode) =>
-    set((s) => ({
-      conversationViews: { ...s.conversationViews, [conversationId]: mode },
-    })),
+    set((s) => {
+      const conversationViews = { ...s.conversationViews };
+      // Chat is the default → store only canvas overrides so the persisted map
+      // stays bounded (switching back to chat drops the key).
+      if (mode === "canvas") conversationViews[conversationId] = "canvas";
+      else delete conversationViews[conversationId];
+      persistConversationViews(conversationViews);
+      return { conversationViews };
+    }),
   setSidecarEnabled: (sidecarEnabled) => {
     const sidecarPreference: SidecarPreference = sidecarEnabled ? "on" : "off";
     persistSidecarPreference(sidecarPreference);

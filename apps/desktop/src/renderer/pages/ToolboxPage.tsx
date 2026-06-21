@@ -1,4 +1,5 @@
 import { PageContainer } from "@/components/layout/PageContainer";
+import { Badge, Button, Card, SectionLabel } from "@/components/ui";
 import {
   AppWindow,
   BookOpen,
@@ -32,8 +33,6 @@ interface ToolboxGroup {
   entries: ToolboxEntry[];
 }
 
-// 卡片网格按「创作工具 / 能力」轻量分组（小标题，非 Tab）。
-// 模型见 docs/03-AI核心/工具与能力系统.md §8.4，IA 见 docs/04-前端/前端UX设计.md §十二。
 const GROUPS: ToolboxGroup[] = [
   {
     id: "creation",
@@ -101,15 +100,15 @@ const GROUPS: ToolboxGroup[] = [
         to: "/toolbox/ai-tools",
       },
       {
-        id: "integration",
-        title: "集成 / 连接器",
-        description: "接入 MCP 与第三方 DB / API",
+        id: "connectors",
+        title: "集成 · 连接器",
+        description: "MCP 与第三方服务接入",
         icon: Plug,
       },
       {
         id: "workflow",
         title: "工作流",
-        description: "编排工具与 Agent 成流程",
+        description: "编排工具与 Agent 协作流程",
         icon: Workflow,
       },
     ],
@@ -156,9 +155,9 @@ function ToolboxCard({ entry }: { entry: ToolboxEntry }) {
               className="shrink-0 text-muted-foreground"
             />
           ) : (
-            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+            <Badge tone="muted" pill>
               即将上线
-            </span>
+            </Badge>
           )}
         </div>
         <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
@@ -169,21 +168,19 @@ function ToolboxCard({ entry }: { entry: ToolboxEntry }) {
   );
 
   if (!to) {
-    return (
-      <div className="flex items-start gap-3 rounded-xl border border-border bg-card p-4">
-        {inner}
-      </div>
-    );
+    return <Card className="flex items-start gap-3 p-4">{inner}</Card>;
   }
 
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={() => navigate(to)}
-      className="flex items-start gap-3 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent/40"
+      className="h-auto w-full justify-start p-0 text-left font-normal"
     >
-      {inner}
-    </button>
+      <Card variant="interactive" className="flex w-full items-start gap-3 p-4">
+        {inner}
+      </Card>
+    </Button>
   );
 }
 
@@ -198,9 +195,7 @@ export function ToolboxPage() {
       <div className="mt-6 space-y-6">
         {GROUPS.map((group) => (
           <section key={group.id}>
-            <h2 className="mb-2 text-xs font-medium text-muted-foreground">
-              {group.label}
-            </h2>
+            <SectionLabel className="mb-2">{group.label}</SectionLabel>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3">
               {group.entries.map((entry) => (
                 <ToolboxCard key={entry.id} entry={entry} />

@@ -1,3 +1,4 @@
+import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useChats, useMessagingStore } from "@/stores/messaging";
 import { Search, SquarePen, X } from "lucide-react";
@@ -36,14 +37,13 @@ export function ChatList({ activeChatId, onSelect, onNewChat }: Props) {
       <div className="flex items-center justify-between px-4 py-3">
         <span className="text-base font-medium text-foreground">消息</span>
         <SimpleTooltip label="发起会话">
-          <button
-            type="button"
+          <IconButton
             aria-label="发起会话"
             onClick={onNewChat}
-            className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground [-webkit-app-region:no-drag]"
+            className="[-webkit-app-region:no-drag]"
           >
             <SquarePen size={16} />
-          </button>
+          </IconButton>
         </SimpleTooltip>
       </div>
 
@@ -58,14 +58,13 @@ export function ChatList({ activeChatId, onSelect, onNewChat }: Props) {
               className="min-w-0 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
             />
             {query && (
-              <button
-                type="button"
+              <IconButton
                 onClick={() => setQuery("")}
                 aria-label="清除搜索"
-                className="shrink-0 text-muted-foreground/60 hover:text-foreground"
+                className="size-6 text-muted-foreground/60 hover:text-foreground"
               >
                 <X size={13} />
-              </button>
+              </IconButton>
             )}
           </div>
         </div>

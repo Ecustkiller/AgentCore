@@ -1,3 +1,4 @@
+import { Button, IconButton } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { ApiError } from "@/services/api";
@@ -240,32 +241,32 @@ function ConfiguredCard({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
+          <Button
+            variant="neutral"
+            size="md"
+            disabled={testing || removing}
+            icon={testing ? <Loader2 size={14} className="animate-spin" /> : undefined}
             onClick={() => void test()}
-            disabled={testing || removing}
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-50"
           >
-            {testing && <Loader2 size={14} className="animate-spin" />}
             测试连接
-          </button>
-          <button
-            type="button"
-            onClick={onReplace}
+          </Button>
+          <Button
+            variant="neutral"
+            size="md"
             disabled={testing || removing}
-            className="h-8 rounded-lg border border-border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-50"
+            onClick={onReplace}
           >
             更换
-          </button>
-          <button
-            type="button"
-            onClick={() => void remove()}
+          </Button>
+          <Button
+            variant="danger"
+            size="md"
             disabled={testing || removing}
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+            icon={removing ? <Loader2 size={14} className="animate-spin" /> : undefined}
+            onClick={() => void remove()}
           >
-            {removing && <Loader2 size={14} className="animate-spin" />}
             删除
-          </button>
+          </Button>
         </div>
       </div>
       {actionError && (
@@ -327,34 +328,34 @@ function KeyForm({
             className="h-8 w-full rounded-lg border border-input bg-background pl-2 pr-9 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <SimpleTooltip label={reveal ? "隐藏" : "显示"}>
-            <button
-              type="button"
+            <IconButton
               onClick={() => setReveal((r) => !r)}
               aria-label={reveal ? "隐藏" : "显示"}
-              className="absolute right-1 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="absolute right-1 top-1/2 size-6 -translate-y-1/2"
             >
               {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
-            </button>
+            </IconButton>
           </SimpleTooltip>
         </div>
-        <button
-          type="button"
+        <Button
+          size="md"
+          className="shrink-0"
           disabled={!canSave}
+          icon={saving ? <Loader2 size={14} className="animate-spin" /> : undefined}
           onClick={() => void save()}
-          className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm text-primary-foreground hover:opacity-90 disabled:opacity-40"
         >
-          {saving && <Loader2 size={14} className="animate-spin" />}
           保存
-        </button>
+        </Button>
         {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
+          <Button
+            variant="neutral"
+            size="md"
+            className="shrink-0"
             disabled={saving}
-            className="h-8 shrink-0 rounded-lg border border-border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-50"
+            onClick={onCancel}
           >
             取消
-          </button>
+          </Button>
         )}
       </div>
       {error && <p className="mt-3 text-xs text-destructive">{error}</p>}

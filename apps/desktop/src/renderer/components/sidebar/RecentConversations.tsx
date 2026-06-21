@@ -1,7 +1,11 @@
-import { useConversations } from "@/hooks/useConversations";
+import { SurfaceRowButton } from "@/components/ui";
+import {
+  useArchivedConversations,
+  useConversations,
+} from "@/hooks/useConversations";
 import { useWorkspaceGroups } from "@/hooks/useWorkspaceGroups";
 import { type Conversation, useConversationStore } from "@/stores/conversation";
-import { ChevronRight, MessageSquare } from "lucide-react";
+import { Archive, ChevronRight, MessageSquare } from "lucide-react";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConversationItem } from "./ConversationItem";
@@ -75,6 +79,35 @@ export function RecentConversations() {
 }
 
 /**
+ * Jump to `/conversations` with the「已归档」filter pre-selected. Shown above
+ *「查看全部对话」when there is at least one archived chat.
+ */
+export function ViewArchivedConversations() {
+  const archived = useArchivedConversations(true).data ?? [];
+  const navigate = useNavigate();
+  if (archived.length === 0) return null;
+  return (
+    <div className="px-2 pt-1">
+      <SurfaceRowButton
+        onClick={() =>
+          navigate("/conversations", { state: { focusArchived: true } })
+        }
+        className="justify-between text-sidebar-foreground/55 hover:text-sidebar-foreground"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <Archive size={14} className="shrink-0" />
+          <span>已归档</span>
+          <span className="text-xs text-sidebar-foreground/40">
+            {archived.length}
+          </span>
+        </span>
+        <ChevronRight size={14} className="shrink-0" />
+      </SurfaceRowButton>
+    </div>
+  );
+}
+
+/**
  * The「查看全部对话」entry into the full management page (/conversations). Lives at the
  * very bottom of the rail's conversation area — after「工作区」+「快速对话」— so it's
  * the single overflow exit for everything (older 裸聊, extra workspaces, per-group
@@ -86,14 +119,13 @@ export function ViewAllConversations() {
   if (count === 0) return null;
   return (
     <div className="px-2 pb-2">
-      <button
-        type="button"
+      <SurfaceRowButton
         onClick={() => navigate("/conversations")}
-        className="flex h-9 w-full items-center justify-between gap-2 rounded-lg px-3 text-sm text-sidebar-foreground/55 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+        className="justify-between text-sidebar-foreground/55 hover:text-sidebar-foreground"
       >
         <span>查看全部对话</span>
         <ChevronRight size={14} className="shrink-0" />
-      </button>
+      </SurfaceRowButton>
     </div>
   );
 }

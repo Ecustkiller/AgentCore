@@ -1,3 +1,4 @@
+import { IconButton, SurfaceRow } from "@/components/ui";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -6,6 +7,14 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   useArchiveConversation,
@@ -13,9 +22,10 @@ import {
   useMoveConversation,
   useRenameConversation,
   useTogglePin,
+  useUnarchiveConversation,
 } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
-import { notifyError } from "@/lib/toast";
+import { notifyError, notifyInfo } from "@/lib/toast";
 import {
   type ExportFormat,
   exportConversation,
@@ -36,6 +46,7 @@ import {
   Folder,
   Inbox,
   Lock,
+  MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
@@ -52,6 +63,7 @@ interface Props {
 
 export function ConversationItem({ conversation }: Props) {
   const [hovered, setHovered] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [draft, setDraft] = useState(conversation.title);
@@ -67,13 +79,9 @@ export function ConversationItem({ conversation }: Props) {
   const deleteMutation = useDeleteConversation();
   const pinMutation = useTogglePin();
   const archiveMutation = useArchiveConversation();
+  const unarchiveMutation = useUnarchiveConversation();
   const folders = useFolders();
   const isGenerating = useConversationGenerating(conversation.id);
-  // A conversation's workspace is fixed once it starts (双模式工作区 §九 ⑩): its
-  // folder decides which workspace dir it runs in, so re-filing a started chat
-  // would silently switch its workspace. Lock the folder-move actions once it has
-  // any messages — the server count (live after a reload) plus this session's live
-  // runtime cover both a reloaded chat and one just sent in this session.
   const hasLiveMessages = useConversationStore(
     (s) => runtimeOf(s, conversation.id).messages.length > 0,
   );
@@ -84,10 +92,11 @@ export function ConversationItem({ conversation }: Props) {
   const navigate = useNavigate();
   const isActive = conversation.id === currentId;
   const currentFolderId = conversation.folderId ?? null;
+  const showRowActions = hovered || confirmingDelete || moreOpen;
+  const deleteConfirmLabel = currentFolderId
+    ? "确认永久删除（项目文件会保留）"
+    : "确认永久删除（无法恢复）";
 
-  // Sidebar status dot (§七): 待审批 takes priority over 执行中. Both read THIS
-  // conversation's own runtime (not the active one), so a background turn that
-  // keeps streaming after the user switches away still shows its dot.
   const status: "running" | "awaiting" | null = awaitingApproval
     ? "awaiting"
     : isGenerating
@@ -111,7 +120,6 @@ export function ConversationItem({ conversation }: Props) {
     setEditing(false);
     const title = draft.trim();
     if (!title || title === conversation.title) return;
-    // Optimistic title + rollback live in the mutation; add a toast on failure.
     renameMutation.mutate(
       { id: conversation.id, title },
       { onError: (err) => notifyError(err, "重命名失败") },
@@ -121,21 +129,16 @@ export function ConversationItem({ conversation }: Props) {
   const handleDelete = async () => {
     setConfirmingDelete(false);
     const wasActive = conversation.id === currentId;
-    // Delete server-side first so a failed delete leaves the item in place.
     try {
       await deleteMutation.mutateAsync(conversation.id);
     } catch (err) {
       notifyError(err, "删除失败");
       return;
     }
-    // The mutation dropped the row from the list cache; forget its live runtime
-    // (and clear the current pointer if it was open), then leave the route.
     dropConversationRuntime(conversation.id);
     if (wasActive) navigate("/");
   };
 
-  // Pin / unpin (置顶对话): optimistic + rollback live in the mutation; lists
-  // re-sort pinned-first so the row jumps to / from the top at once.
   const togglePin = () => {
     pinMutation.mutate(
       { id: conversation.id, pinned: !conversation.pinned },
@@ -143,10 +146,9 @@ export function ConversationItem({ conversation }: Props) {
     );
   };
 
-  // Archive (归档对话): hide from the live list (recoverable from「已归档」). Like
-  // delete, leave the open chat when it was the archived one — the row is gone now.
   const handleArchive = async () => {
     const wasActive = conversation.id === currentId;
+    const title = conversation.title;
     try {
       await archiveMutation.mutateAsync(conversation.id);
     } catch (err) {
@@ -155,17 +157,25 @@ export function ConversationItem({ conversation }: Props) {
     }
     dropConversationRuntime(conversation.id);
     if (wasActive) navigate("/");
+    notifyInfo("已归档", {
+      description: title,
+      duration: 5000,
+      action: {
+        label: "撤销",
+        onClick: () => {
+          unarchiveMutation.mutate(conversation.id, {
+            onError: (err) => notifyError(err, "取消归档失败"),
+          });
+        },
+      },
+    });
   };
 
-  // Move with an optimistic cache update, rolling back to the previous folder if
-  // the server rejects the move (both live in the mutation).
   const moveTo = (folderId: string | null) => {
     if (folderId === currentFolderId) return;
     moveMutation.mutate({ id: conversation.id, folderId });
   };
 
-  // Export (导出对话): stream the transcript to a file via the service (it picks the
-  // server-sanitized filename); a failed download surfaces as a toast.
   const handleExport = async (format: ExportFormat) => {
     try {
       await exportConversation(conversation.id, format);
@@ -173,6 +183,83 @@ export function ConversationItem({ conversation }: Props) {
       notifyError(err, "导出失败");
     }
   };
+
+  const requestPermanentDelete = () => {
+    setMoreOpen(false);
+    setConfirmingDelete(true);
+  };
+
+  const openConversation = () => {
+    switchConversation(conversation.id);
+    navigate(`/conversations/${conversation.id}`);
+  };
+
+  const rowActionClass =
+    "size-6 text-sidebar-foreground/40 hover:text-sidebar-foreground";
+
+  const moveMenuSection = workspaceLocked ? (
+  <>
+    <DropdownMenuSeparator />
+    <DropdownMenuItem disabled>
+      <Lock size={14} className="shrink-0" />
+      <span className="flex-1 truncate">开始后不可更换工作区</span>
+    </DropdownMenuItem>
+  </>
+) : folders.length > 0 || currentFolderId ? (
+  <>
+    <DropdownMenuSeparator />
+    <DropdownMenuLabel>移到</DropdownMenuLabel>
+    <div className="max-h-52 overflow-y-auto">
+      {folders.map((f) => (
+        <DropdownMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
+          <Folder size={14} className="shrink-0" />
+          <span className="flex-1 truncate">{f.name}</span>
+          {f.id === currentFolderId && (
+            <Check size={13} className="shrink-0" />
+          )}
+        </DropdownMenuItem>
+      ))}
+    </div>
+    {currentFolderId && (
+      <DropdownMenuItem onSelect={() => void moveTo(null)}>
+        <Inbox size={14} className="shrink-0" />
+        <span className="flex-1 truncate">移出文件夹</span>
+      </DropdownMenuItem>
+    )}
+  </>
+) : null;
+
+  const contextMoveSection = workspaceLocked ? (
+    <>
+      <ContextMenuSeparator />
+      <ContextMenuItem disabled>
+        <Lock size={14} className="shrink-0" />
+        <span className="flex-1 truncate">开始后不可更换工作区</span>
+      </ContextMenuItem>
+    </>
+  ) : folders.length > 0 || currentFolderId ? (
+    <>
+      <ContextMenuSeparator />
+      <ContextMenuLabel>移到</ContextMenuLabel>
+      <div className="max-h-52 overflow-y-auto">
+        {folders.map((f) => (
+          <ContextMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
+            <Folder size={14} className="shrink-0" />
+            <span className="flex-1 truncate">{f.name}</span>
+            {f.id === currentFolderId && (
+              <Check size={13} className="shrink-0" />
+            )}
+          </ContextMenuItem>
+        ))}
+      </div>
+      {currentFolderId && (
+        <ContextMenuItem onSelect={() => void moveTo(null)}>
+          <Inbox size={14} className="shrink-0" />
+          <span className="flex-1 truncate">移出文件夹</span>
+        </ContextMenuItem>
+      )}
+    </>
+  ) : null;
 
   if (editing) {
     return (
@@ -211,142 +298,166 @@ export function ConversationItem({ conversation }: Props) {
       }}
     >
       <ContextMenuTrigger asChild>
-        <button
-          type="button"
-          className={`group flex h-9 w-full items-center gap-2 rounded-lg px-3 text-sm transition-colors ${
-            isActive
-              ? "bg-sidebar-accent text-sidebar-accent-foreground"
-              : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-          }`}
-          onClick={() => {
-            switchConversation(conversation.id);
-            navigate(`/conversations/${conversation.id}`);
-          }}
-          onDoubleClick={(e) => {
-            e.preventDefault();
-            startEdit();
-          }}
+        <SurfaceRow
+          variant="sidebar"
+          active={isActive}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => {
             setHovered(false);
-            setConfirmingDelete(false);
+            if (!moreOpen) setConfirmingDelete(false);
           }}
         >
-          {status && (
-            <SimpleTooltip label={status === "running" ? "执行中" : "待审批"}>
-              <span
-                aria-label={status === "running" ? "执行中" : "待审批"}
-                className={`size-1.5 shrink-0 rounded-full ${
-                  status === "running"
-                    ? "animate-pulse bg-primary"
-                    : "bg-warning"
-                }`}
-              />
-            </SimpleTooltip>
-          )}
-          <span className="flex-1 truncate text-left">
-            {conversation.title}
-          </span>
+          <div
+            role="button"
+            tabIndex={0}
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            onClick={openConversation}
+            onDoubleClick={(e) => {
+              e.preventDefault();
+              startEdit();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                openConversation();
+              }
+            }}
+          >
+            {status && (
+              <SimpleTooltip label={status === "running" ? "执行中" : "待审批"}>
+                <span
+                  aria-label={status === "running" ? "执行中" : "待审批"}
+                  className={`size-1.5 shrink-0 rounded-full ${
+                    status === "running"
+                      ? "animate-pulse bg-primary"
+                      : "bg-warning"
+                  }`}
+                />
+              </SimpleTooltip>
+            )}
+            <span className="truncate">{conversation.title}</span>
+          </div>
           {confirmingDelete ? (
             <span className="flex shrink-0 items-center gap-0.5">
-              <SimpleTooltip label="确认删除">
-                {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  aria-label="确认删除"
-                  className="flex size-6 items-center justify-center rounded-lg text-destructive hover:bg-destructive/10"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.stopPropagation();
-                      void handleDelete();
-                    }
-                  }}
+              <SimpleTooltip label={deleteConfirmLabel}>
+                <IconButton
+                  tone="sidebar"
+                  aria-label={deleteConfirmLabel}
+                  className="size-6 text-destructive hover:bg-destructive/10 hover:text-destructive"
                   onClick={(e) => {
                     e.stopPropagation();
                     void handleDelete();
                   }}
                 >
                   <Check size={13} />
-                </span>
+                </IconButton>
               </SimpleTooltip>
               <SimpleTooltip label="取消">
-                {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  aria-label="取消删除"
-                  className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.stopPropagation();
-                      setConfirmingDelete(false);
-                    }
-                  }}
+                <IconButton
+                  tone="sidebar"
+                  aria-label="取消"
+                  className={rowActionClass}
                   onClick={(e) => {
                     e.stopPropagation();
                     setConfirmingDelete(false);
                   }}
                 >
                   <X size={13} />
-                </span>
+                </IconButton>
               </SimpleTooltip>
             </span>
-          ) : hovered ? (
+          ) : showRowActions ? (
             <span className="flex shrink-0 items-center gap-0.5">
               <SimpleTooltip label="重命名">
-                {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  aria-label="重命名对话"
-                  className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-sidebar-foreground"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.stopPropagation();
-                      startEdit();
-                    }
-                  }}
+                <IconButton
+                  tone="sidebar"
+                  aria-label="重命名"
+                  className={rowActionClass}
                   onClick={(e) => {
                     e.stopPropagation();
                     startEdit();
                   }}
                 >
                   <Pencil size={13} />
-                </span>
+                </IconButton>
               </SimpleTooltip>
-              <SimpleTooltip label="删除">
-                {/* biome-ignore lint/a11y/useSemanticElements: must remain a span — a real <button> here would nest inside the parent conversation <button>, which is invalid HTML. */}
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  aria-label="删除对话"
-                  className="flex size-6 items-center justify-center rounded-lg text-sidebar-foreground/40 hover:text-destructive"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.stopPropagation();
-                      setConfirmingDelete(true);
-                    }
-                  }}
+              <SimpleTooltip label="归档">
+                <IconButton
+                  tone="sidebar"
+                  aria-label="归档"
+                  className={rowActionClass}
                   onClick={(e) => {
                     e.stopPropagation();
-                    setConfirmingDelete(true);
+                    void handleArchive();
                   }}
                 >
-                  <Trash2 size={13} />
-                </span>
+                  <Archive size={13} />
+                </IconButton>
               </SimpleTooltip>
+              <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
+                <DropdownMenuTrigger asChild>
+                  <IconButton
+                    tone="sidebar"
+                    aria-label="更多操作"
+                    title="更多"
+                    className={rowActionClass}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MoreHorizontal size={13} />
+                  </IconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="min-w-52"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <DropdownMenuItem onSelect={() => togglePin()}>
+                    {conversation.pinned ? (
+                      <PinOff size={14} className="shrink-0" />
+                    ) : (
+                      <Pin size={14} className="shrink-0" />
+                    )}
+                    <span className="flex-1 truncate">
+                      {conversation.pinned ? "取消置顶" : "置顶"}
+                    </span>
+                  </DropdownMenuItem>
+                  {moveMenuSection}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() =>
+                      useShareStore.getState().open(conversation.id)
+                    }
+                  >
+                    <Share2 size={14} className="shrink-0" />
+                    <span className="flex-1 truncate">分享…</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void handleExport("md")}>
+                    <Download size={14} className="shrink-0" />
+                    <span className="flex-1 truncate">导出 Markdown</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void handleExport("json")}>
+                    <FileJson size={14} className="shrink-0" />
+                    <span className="flex-1 truncate">导出 JSON</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="danger"
+                    onSelect={requestPermanentDelete}
+                  >
+                    <Trash2 size={14} className="shrink-0" />
+                    <span className="flex-1 truncate">永久删除</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </span>
           ) : conversation.pinned ? (
-            // Idle + pinned: a quiet pin glyph marks 置顶 (the hover actions and
-            // confirm UI take precedence above).
             <Pin
               size={12}
               className="shrink-0 text-sidebar-foreground/40"
               aria-label="已置顶"
             />
           ) : null}
-        </button>
+        </SurfaceRow>
       </ContextMenuTrigger>
 
       <ContextMenuContent className="min-w-52">
@@ -354,6 +465,11 @@ export function ConversationItem({ conversation }: Props) {
           <Pencil size={14} className="shrink-0" />
           <span className="flex-1 truncate">重命名</span>
         </ContextMenuItem>
+        <ContextMenuItem onSelect={() => void handleArchive()}>
+          <Archive size={14} className="shrink-0" />
+          <span className="flex-1 truncate">归档</span>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => togglePin()}>
           {conversation.pinned ? (
             <PinOff size={14} className="shrink-0" />
@@ -364,42 +480,7 @@ export function ConversationItem({ conversation }: Props) {
             {conversation.pinned ? "取消置顶" : "置顶"}
           </span>
         </ContextMenuItem>
-        {workspaceLocked ? (
-          // Started chat: its workspace is pinned to its current folder, so the
-          // move actions are replaced by an explanatory locked hint (§九 ⑩).
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem disabled>
-              <Lock size={14} className="shrink-0" />
-              <span className="flex-1 truncate">开始后不可更换工作区</span>
-            </ContextMenuItem>
-          </>
-        ) : folders.length > 0 || currentFolderId ? (
-          // Filing into an *existing* folder only — folder creation lives on the
-          // 文件 hub now (文件夹即工作区), so there's no "新建文件夹" entry here. With
-          // no folders yet, the whole "移到" section is hidden (nothing to file into).
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuLabel>移到</ContextMenuLabel>
-            <div className="max-h-52 overflow-y-auto">
-              {folders.map((f) => (
-                <ContextMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
-                  <Folder size={14} className="shrink-0" />
-                  <span className="flex-1 truncate">{f.name}</span>
-                  {f.id === currentFolderId && (
-                    <Check size={13} className="shrink-0" />
-                  )}
-                </ContextMenuItem>
-              ))}
-            </div>
-            {currentFolderId && (
-              <ContextMenuItem onSelect={() => void moveTo(null)}>
-                <Inbox size={14} className="shrink-0" />
-                <span className="flex-1 truncate">移出文件夹</span>
-              </ContextMenuItem>
-            )}
-          </>
-        ) : null}
+        {contextMoveSection}
         <ContextMenuSeparator />
         <ContextMenuItem
           onSelect={() => useShareStore.getState().open(conversation.id)}
@@ -416,13 +497,9 @@ export function ConversationItem({ conversation }: Props) {
           <span className="flex-1 truncate">导出 JSON</span>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => void handleArchive()}>
-          <Archive size={14} className="shrink-0" />
-          <span className="flex-1 truncate">归档</span>
-        </ContextMenuItem>
-        <ContextMenuItem variant="danger" onSelect={() => void handleDelete()}>
+        <ContextMenuItem variant="danger" onSelect={requestPermanentDelete}>
           <Trash2 size={14} className="shrink-0" />
-          <span className="flex-1 truncate">删除</span>
+          <span className="flex-1 truncate">永久删除</span>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

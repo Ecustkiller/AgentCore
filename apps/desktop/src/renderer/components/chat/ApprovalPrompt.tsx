@@ -1,3 +1,4 @@
+import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { notifyError } from "@/lib/toast";
 import { decideApproval, isFileOpTool } from "@/services/approvals";
@@ -16,8 +17,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-/** Friendly zh label for the GRANTABLE built-ins; falls back to the raw name so
- * any future grantable tool still renders sensibly. */
 const TOOL_LABELS: Record<string, string> = {
   file_write: "写入文件",
   str_replace: "修改文件",
@@ -30,8 +29,6 @@ function toolLabel(name: string): string {
   return TOOL_LABELS[name] ?? name;
 }
 
-/** The single most relevant argument to headline on the card, if recognisable
- * (path of a write, command/code of an exec). */
 function primaryArg(args: Record<string, unknown>): string | null {
   for (const key of ["path", "file_path", "command", "code"]) {
     const value = args[key];
@@ -40,17 +37,7 @@ function primaryArg(args: Record<string, unknown>): string | null {
   return null;
 }
 
-/**
- * Inline approval prompt for paused GRANTABLE tool calls (CEO chat path).
- *
- * Rendered above the composer, where it is always visible while the turn is
- * blocked (the composer is disabled mid-generation, so acting on the card is the
- * user's only move). One card per pending call; resolving any settles it via the
- * resolve endpoint and the backend resumes the tool. Renders nothing when idle.
- */
 export function ApprovalPrompt() {
-  // Only the conversation on screen owns the composer, so only its paused calls
-  // belong above it — other conversations' prompts wait until you switch back.
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const pending = useApprovalStore((s) => s.pending);
   const visible = pending.filter((p) => p.conversationId === conversationId);
@@ -67,23 +54,16 @@ export function ApprovalPrompt() {
 
 function ApprovalCard({ approval }: { approval: PendingApproval }) {
   const [expanded, setExpanded] = useState(false);
-  // Which button was clicked, so its spinner shows while the resolve is in flight
-  // (a transient failure re-enables the card and `resolving` returns to false).
   const [clicked, setClicked] = useState<ApprovalDecision | null>(null);
 
   const headline = primaryArg(approval.arguments);
   const argEntries = Object.entries(approval.arguments);
   const busy = approval.resolving;
-  // file_write / str_replace / file_delete / file_move share one turn-grant; their
-  // cards offer it so a multi-file or mixed-op task clears in one click. code_execute
-  // is outside the class and keeps only its own per-tool grant.
   const isFileOp = isFileOpTool(approval.toolName);
 
   const onDecide = (decision: ApprovalDecision) => {
     setClicked(decision);
     void decideApproval(approval, decision).catch((err) => {
-      // settleOne re-enables the card on a transient failure; toast so the user
-      // knows the click didn't land (the card going live again alone is subtle).
       notifyError(err, "操作失败");
     });
   };
@@ -96,9 +76,11 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
     );
 
   return (
-    <div className="animate-task-card-enter rounded-xl border border-warning/40 bg-warning/10 p-3">
+    <DecisionCard tone="warning" animate className="mx-0">
       <div className="flex items-start gap-2">
-        <ShieldAlert size={16} className="mt-0.5 shrink-0 text-warning" />
+        <DecisionCardIcon tone="warning">
+          <ShieldAlert size={16} />
+        </DecisionCardIcon>
         <div className="min-w-0 flex-1">
           <p className="text-sm text-foreground">
             <span className="font-medium">Agent 请求执行</span>
@@ -113,18 +95,20 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
             </SimpleTooltip>
           )}
           {argEntries.length > 0 && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               onClick={() => setExpanded((v) => !v)}
-              className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              className="mt-1 h-auto gap-1 px-0 py-0 text-xs text-muted-foreground hover:text-foreground"
+              icon={
+                expanded ? (
+                  <ChevronDown size={13} />
+                ) : (
+                  <ChevronRight size={13} />
+                )
+              }
             >
-              {expanded ? (
-                <ChevronDown size={13} />
-              ) : (
-                <ChevronRight size={13} />
-              )}
               {expanded ? "收起参数" : "查看参数"}
-            </button>
+            </Button>
           )}
           {expanded && argEntries.length > 0 && (
             <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/70 p-2 font-mono text-xs text-foreground">
@@ -135,69 +119,41 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
       </div>
 
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-        <DecisionButton
+        <Button
+          variant="primary"
           icon={spinnerOr("approve", <Check size={13} />)}
-          label="允许一次"
-          tone="primary"
           disabled={busy}
           onClick={() => onDecide("approve")}
-        />
-        <DecisionButton
+        >
+          允许一次
+        </Button>
+        <Button
+          variant="neutral"
           icon={spinnerOr("approve_always", <CheckCheck size={13} />)}
-          label="本轮内都允许"
-          tone="neutral"
           disabled={busy}
           onClick={() => onDecide("approve_always")}
-        />
+        >
+          本轮内都允许
+        </Button>
         {isFileOp && (
-          <DecisionButton
+          <Button
+            variant="neutral"
             icon={spinnerOr("approve_always_files", <FileCheck size={13} />)}
-            label="本轮内允许所有文件改动"
-            tone="neutral"
             disabled={busy}
             onClick={() => onDecide("approve_always_files")}
-          />
+          >
+            本轮内允许所有文件改动
+          </Button>
         )}
-        <DecisionButton
+        <Button
+          variant="danger"
           icon={spinnerOr("deny", <X size={13} />)}
-          label="拒绝"
-          tone="danger"
           disabled={busy}
           onClick={() => onDecide("deny")}
-        />
+        >
+          拒绝
+        </Button>
       </div>
-    </div>
-  );
-}
-
-function DecisionButton({
-  icon,
-  label,
-  tone,
-  disabled,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  tone: "primary" | "neutral" | "danger";
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  const toneClass = {
-    primary: "bg-primary text-primary-foreground hover:bg-primary/90",
-    neutral: "text-muted-foreground hover:bg-accent hover:text-foreground",
-    danger: "text-destructive hover:bg-destructive/10",
-  }[tone];
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-xs font-medium disabled:opacity-40 ${toneClass}`}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
+    </DecisionCard>
   );
 }

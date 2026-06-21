@@ -24,7 +24,7 @@
 点图节点 → 右侧 SidePanel 新开该 run 的详情 tab（被动下钻）；面板是一条扁平 tab 栏——固定首位「工作区」tab（文件/快照）+ 按需的 run 详情 tab。右上「侧面板」开关 / Ctrl+I → 显隐（冷启动落「工作区」tab），Ctrl+J → 直达「工作区」tab
 ```
 
-**侧栏对话区（IA · 两区混合「方案 B」）**：侧栏对话区分两区——上工作区（按文件夹的可折叠分组：组头显云/本地图标·名称·计数，组内复用 `ConversationItem` 列 Top 5、超出走「更多」跳 `/conversations` 并聚焦该组）+ 下裸聊扁平列表（仅未归属文件夹的对话，置顶优先、当前裸聊对话恒可见，**上限自适应**：无工作区分组时独占侧栏给足 15、有分组时放宽到 10，溢出均走「查看全部对话」——侧栏单层外滚，不另设嵌套滚动条）+ 底部「查看全部对话」入口。**两区无文字标题**——组头（chevron + 图标 + 计数）与裸聊平铺行视觉已足够区分；两区并存时以细分隔线隔开。**工作区 ⊥ 裸聊 · 干净二分零重复**：已归属对话只在其工作区组里、**不**在裸聊区重复（**否决**跨区「最近」列表：双显噪音>收益）；裸聊只在下方扁平区（**否决**为裸聊单设「未分组」组：徒增空组噪音）。全部对话都已归属时裸聊区整体隐藏（0 对话则走空状态）。工作区组按近活跃排序、上限 6（溢出走「查看全部对话」），每组展开态按 `folderId` 持久化（`useSidebarStore`，显式切换优先；无记录时默认折叠、唯含当前对话的组自动展开）。分组逻辑下沉纯函数 `buildWorkspaceGroups`。完整列表与「按文件夹筛选 / 页内搜索」收敛到**对话管理页** `/conversations`；文件夹生命周期归「文件」中枢 `/files`。**决策**：侧栏保持轻量——裸聊 10/15 自适应、每组 Top 5、组数 ≤6，低频整理移交专门页面。**「对话」导航即「新建对话」**：点顶部「对话」入口默认开空白草稿（`Ctrl/Cmd+N` 同效），回到旧对话走侧栏列表 /「全部对话」；路由 `/` 是新草稿唯一真相。→ 见代码 `lib/newConversation.ts`、`pages/ConversationPage.tsx`、`components/sidebar/RecentConversations.tsx`、`components/sidebar/WorkspaceGroups.tsx`、`hooks/useWorkspaceGroups.ts`、`stores/sidebar.ts`、`pages/ConversationsPage.tsx`。
+**侧栏对话区（IA · 两区混合「方案 B」）**：侧栏对话区分两区——上工作区（按文件夹的可折叠分组：组头显云/本地图标·名称·计数，组内复用 `ConversationItem` 列 Top 5、超出走「更多」跳 `/conversations` 并聚焦该组）+ 下裸聊扁平列表（仅未归属文件夹的对话，置顶优先、当前裸聊对话恒可见，**上限自适应**：无工作区分组时独占侧栏给足 15、有分组时放宽到 10，溢出均走「查看全部对话」——侧栏单层外滚，不另设嵌套滚动条）+ 底部「已归档 (n)」（有归档时显示，跳转 `/conversations` 并聚焦已归档视图）+「查看全部对话」入口。**对话行操作**：hover 为整理主路径——重命名 + 归档 +「更多」（置顶 / 移到 / 分享 / 导出 / 永久删除）；归档成功 toast 5s 内可撤销；右键菜单同集。**归档 vs 删除**：归档可取消、仅从活跃列表隐藏；删除对用户为永久（后端 soft-delete 保留期不暴露回收站 UI）。批量归档 / 永久删除与「30 天未活跃」快筛仅在 `/conversations`。**两区无文字标题**——组头（chevron + 图标 + 计数）与裸聊平铺行视觉已足够区分；两区并存时以细分隔线隔开。**工作区 ⊥ 裸聊 · 干净二分零重复**：已归属对话只在其工作区组里、**不**在裸聊区重复（**否决**跨区「最近」列表：双显噪音>收益）；裸聊只在下方扁平区（**否决**为裸聊单设「未分组」组：徒增空组噪音）。全部对话都已归属时裸聊区整体隐藏（0 对话则走空状态）。工作区组按近活跃排序、上限 6（溢出走「查看全部对话」），每组展开态按 `folderId` 持久化（`useSidebarStore`，显式切换优先；无记录时默认折叠、唯含当前对话的组自动展开）。分组逻辑下沉纯函数 `buildWorkspaceGroups`。完整列表与「按文件夹筛选 / 页内搜索」收敛到**对话管理页** `/conversations`；文件夹生命周期归「文件」中枢 `/files`。**决策**：侧栏保持轻量——裸聊 10/15 自适应、每组 Top 5、组数 ≤6，低频整理移交专门页面。**「对话」导航即「新建对话」**：点顶部「对话」入口默认开空白草稿（`Ctrl/Cmd+N` 同效），回到旧对话走侧栏列表 /「全部对话」；路由 `/` 是新草稿唯一真相。→ 见代码 `lib/newConversation.ts`、`pages/ConversationPage.tsx`、`components/sidebar/RecentConversations.tsx`、`components/sidebar/WorkspaceGroups.tsx`、`hooks/useWorkspaceGroups.ts`、`stores/sidebar.ts`、`pages/ConversationsPage.tsx`。
 
 **团队展示并入「思考·正文·工具」时间线**：多 Agent 与单 Agent 回合都走同一条内联时间线（`ProcessTimeline`，§一B）——CEO 的思考、回复正文、工具按真实发生顺序交织。多 Agent 委派时，一张协作图（`InlineTeamGraph`）**内嵌在 `delegate`/`debate` 步的时序位置**承载团队界面：图顶状态条折进了原任务卡片的职责（状态 · N agents · M/M · 用时 · ¥合计 + 救火行），节点 face 只显角色 + 任务/输出 + 用时/工具（¥ / token 归 run 详情，§7.3B），点节点把详情下钻到右侧被动面板，右上「最大化」临时进全屏看大图/回放。CEO 委派前后的思考/正文/自调工具因此围着团队工作按真序排列，不再被压到固定图下方；单 Agent 回合不出图（无团队）。思考逐段可折叠＝零噪音，末段正文即最终答案；live 与重载一致——多 Agent `process[]` 已持久化、经 `journal` 回放，仅持久化前的旧回合回退到独立图布局。→ 见 [`前端技术与架构.md` §9.2–9.6](/docs/04-前端/前端技术与架构.md)。
 
@@ -82,7 +82,7 @@
 
 > **为何两态而非三态**（决策理由）：「继续/调整」效果同一，合并为「提交」；保留「停止」安全阀。详见 [`编排器与CEO主Agent.md` §四](/docs/03-AI核心/编排器与CEO主Agent.md)。
 
-**非阻塞发问卡片 `NonBlockingAskCard`（✅ 已落地）**：CEO 调 `ask_user(blocking=false)` 时**不挂起回合**——语气取**信息蓝 `info`**，展示问题 + 默认假设 + 选项 **回填 chips**（点 chip 写进输入框，随下一条消息发回）。从不挂起、无 pending/resolved 态。
+**非阻塞发问卡片 `NonBlockingAskCard`（✅ 已落地）**：CEO 调 `ask_user(blocking=false)` 时**不挂起回合**——语气取**品牌蓝 `primary`**，展示问题 + 默认假设 + 选项 **回填 chips**（点 chip 写进输入框，随下一条消息发回）。从不挂起、无 pending/resolved 态。
 
 → 见代码 `components/chat/NonBlockingAskCard.tsx`；语义见 [`编排器与CEO主Agent.md` §四](/docs/03-AI核心/编排器与CEO主Agent.md)。
 
@@ -121,7 +121,7 @@
 | 处 | 现状 |
 |----|------|
 | 范式标题 | 内嵌图状态条显「辩论」pill、完成态作「辩论完成」（普通为「团队完成」）——`InlineTeamGraph`（`isDebate` = 有 `debate` 产物或有 `stance` runs） |
-| 节点 badge | 对立节点显「正方/反方」徽章（`info` 令牌，与 6 态状态色解耦）——`AgentNode` |
+| 节点 badge | 对立节点显「正方/反方」徽章（`primary` 令牌，与 6 态状态色解耦）——`AgentNode` |
 | 图分列对置 | 正/反节点按 `stance` 排序 + ELK `considerModelOrder`，分两带对置——`GraphView` / `lib/elk-layout.ts` |
 | 节点层级 | CEO（主气泡，不进图）→ 主持人（完成态节点）→ 辩手（挂主持人下），见 [`辩论编排设计.md §7.3`](/docs/03-AI核心/辩论编排设计.md) |
 | 产物卡 | 图卡下方一张辩论产物卡（§4.1）：收场渲染【简报 + 三层叙事线】；进行中 / 旧 journal 回落「按 `group` 分组、`正方 \| 反方` 两栏并排」实时对比兜底——`DebateCompare` |
@@ -162,39 +162,41 @@
 
 ---
 
-## 六、聊天 ⇄ 作战室画布双视图（`graphPrimary`）✅ 主体已落地
+## 六、聊天 ⇄ 画布双视图 ✅ 已落地
 
-多 Agent 协作图从「聊天消息里内嵌的一个组件」（`InlineTeamGraph`，§三）升级为可与聊天**平起平坐的第二视图**——一间「作战室画布」。整套藏在实验开关 `graphPrimary` 后（默认关；命令面板「图主界面化（实验）」切换，`localStorage: agentcore:graph-primary`）。
+多 Agent 协作图从「聊天消息里内嵌的一个组件」（`InlineTeamGraph`，§三）升级为可与聊天**平起平坐的第二视图**——一块「画布」。已**毕业**（原实验开关 `canvasEnabled` 已撤）：入口恒显示、无需开启；**对话页恒为传统聊天**（早期把对话页也卡片化的第一刀已撤，见 §6.4），画布是按对话 opt-in 的第二视图。
 
 **核心论点 · 一份数据两种渲染**：后端单 Agent = 只有 Captain 的退化 Team、单 / Team 同一执行路径（[`Agent协作模式.md §设计哲学`](/docs/03-AI核心/Agent协作模式.md)）这条洞察只用在**数据层**——同一份「回合 + 执行（CEO+worker DAG / journal）」既可渲染成聊天、又可渲染成画布。两视图同源 `projectExecution` fold，**切换 = 换视图不换数据，不动协议 / `turn_journal` / conformance**。
 
 | 视图 | 渲染 | 默认 |
 |---|---|---|
 | 聊天模式 | 回合 → 气泡 + 内联协作图（团队回合就地开花，§三） | ✅ 默认 |
-| 画布模式（作战室） | 同一批回合 → 单张持久空间画布 | opt-in |
+| 画布模式 | 同一批回合 → 单张持久空间画布 | opt-in |
 
-**默认聊天 + 显眼入口**：差异化靠「团队在该出现处就地开花 + 一步进作战室」，不靠强迫所有人上画布——聊天里一起团队即内联出图（`InlineTeamGraph`），其上「在作战室打开」主按钮一键切到画布；顶部 `聊天 / 作战室` 分段切换按对话记忆视图模式（`conversationViews`，session-only）。
+**默认聊天 + 显眼入口**：差异化靠「团队在该出现处就地开花 + 一步进画布」，不靠强迫所有人上画布——聊天里一起团队即内联出图（`InlineTeamGraph`），其上「在画布打开」主按钮一键切到画布；顶部 `聊天 / 画布` 分段切换按对话记忆视图模式（`conversationViews`，**持久化** `localStorage: agentcore:conversation-views`、只落画布 override 切回即删键）。
 
-### 6.1 作战室画布 = 单张持久画布（视觉累积，非 worker 实体化）
+### 6.1 画布 = 单张持久画布（视觉累积，非 worker 实体化）
 
 一个对话 = 一张可平移画布，每回合自上而下**跨回合视觉累积**成节点；「同一拨人」靠 `agentIdentity`（同角色稳定色 / 字，§五）延续，**团队仍每回合临时组、不做 worker 实体化**（真持久团队见 §6.4 否决）。
 
-**LOD「只有聚焦回合画完整 DAG」**（守 §八 ≤50 节点 / ≥60fps）：完成的团队回合塌成「回合摘要节点」（状态 / 任务摘要 / 身份头像 / 进度）、单 Agent 回合塌成竖排轻卡，**恰好一个聚焦回合**（默认最新、自动跟随新回合、点摘要可切换）就地展开完整 worker DAG；配小地图 / 相机。聚焦回合内嵌整套 `GraphView` + 就地读 CEO 答案抽屉（点汇聚点读最终回答 / 点用户端点重读提问 / 点 worker 走右坞详情），深读兜底仍可进 `TeamGraphFullscreen` 全屏 overlay。命令栏 `CanvasCommandBar` 常驻画布底栏（与全屏图共用）。退化档：单 Agent 回合在聊天模式下亦可渲染成「1 节点图」`CeoNodeCard`（`AssistantMessage` 的 `isSoloGraph` 接缝）。
+**LOD「只有聚焦回合画完整 DAG」**（守 §八 ≤50 节点 / ≥60fps）：完成的团队回合塌成「回合摘要节点」（状态 / 任务摘要 / 身份头像 / 进度）、单 Agent 回合塌成竖排轻卡，**恰好一个聚焦回合**（默认最新、自动跟随新回合、点摘要可切换）就地展开完整 worker DAG；配小地图 / 相机。聚焦回合内嵌整套 `GraphView` + 就地脚抽屉（点汇聚点读最终回答 / 点用户端点重读提问 / 表头 chip 开「版本对比」；点 worker 走右坞详情），深读兜底仍可进 `TeamGraphFullscreen` 全屏 overlay。命令栏 `CanvasCommandBar` 常驻画布底栏（与全屏图共用）。**对话页（聊天视图）恒为传统聊天**——不再把单 Agent 回合渲染成节点卡，图相关体验收敛在画布（原「对话页卡片化」第一刀已撤，见 §6.4）。
 
 ### 6.2 图上指挥：指挥台 `CanvasDecisionPanel`
 
 画布一旦成为管团队的地方，检查点 / 发问 / 审批 / 续跑 / 救火这些**老板权力**必须能就地行使（一个「掌管团队」的视图不可能只读）。落地**不**逐个塞进节点，而是收口到画布右侧**指挥台**（面板标题「指挥台」，徽标计待裁决数）：
 
-- **双作用域同处一面**：回合级（`ask_user` 检查点 / `plan_review` / 工作者上报 / **救火行**）随**聚焦回合**的 message + 投影执行渲染；对话级（工具放行 approval / 待恢复续跑 resume / **传输错误重试 `RetryBanner`**）自带 store + 当前对话自渲染。画布模式下 `ChatView` / `InlineTeamGraph` 未挂载，其对话级卡片与救火行本会**消失且无法操作**——故必须在画布另起一处承载。
+- **双作用域同处一面**：回合级（`ask_user` 检查点 / `plan_review` / 工作者上报 / **救火行**）随**聚焦回合**的 message + 投影执行渲染；对话级（工具放行 approval / 待恢复续跑 resume / **传输错误重试 `RetryBanner`** / **后台云端任务 `BackgroundTaskCard`**）自带 store + 当前对话自渲染。画布模式下 `ChatView` / `InlineTeamGraph` / `MessageList` 未挂载，其对话级卡片、救火行与时间线内的后台任务卡本会**消失且无法操作**——故必须在画布另起一处承载。
 - **救火**（失败重试）：聚焦回合终态有失败（整轮崩 / 部分失败 / 已停止）时，指挥台渲染聊天同款 `RecoveryActions`（**重试整轮 / 调整指令 / 忽略**——重试走 `runRegenerate` 从最后一条用户消息整轮重跑、忽略清本回合执行槽，与聊天一致）；外加对话级 `RetryBanner`（发送 / 续跑 / 重生成断流的传输错误重试）。聚焦节点头另挂一枚「待救火」红牌。
-- **逐字复用聊天同款卡片**（`CheckpointCard` / `PlanReviewCard` / `EscalationCard` / `ApprovalPrompt` / `ResumePrompt` / `RetryBanner` / `RecoveryActions`，§三），操作经**同一**服务 + SSE 折叠（守单一数据源、不开第二条通路）；`interactive` 取聚焦回合 `isStreaming`，重载 / 已结束回合的卡片呈被动记录。
-- 聚焦节点头部「待你拍板 N」/「待救火」提示牌指向指挥台；有待裁决项（回合级计数 + 对话级 approval + resume）或可救火（聚焦回合失败 / 对话传输错误）时自动浮出，可 X 收起，焦点切换或新项到达再武装。
+- **后台云端任务**（非阻塞 · 跨对话的「另一类」）：本地模式对话的云端交接任务（`BackgroundTaskCard`，§十）原按时间戳并入聊天时间线；画布无时间线，故收进指挥台**末尾**（卡片自带派发 / 运行 / 失败状态 + 完成后「查看并应用」内联评审）。**不计入「待你拍板」**（非决策、不污染节点徽标），但其存在 / 新到一项会自动浮出指挥台；轮询同步由常驻的 `ConversationCanvas` 驱动（指挥台收起时仍刷新，故计数能反过来浮出面板）。发起侧：画布命令栏 `CanvasCommandBar` 也带「后台云端」开关（仅本地模式对话亮出），可在画布里直接派发，走与聊天**同一** `dispatchBackgroundTask` 通路、结果即落本指挥台。
+- **逐字复用聊天同款卡片**（`CheckpointCard` / `PlanReviewCard` / `EscalationCard` / `ApprovalPrompt` / `ResumePrompt` / `RetryBanner` / `RecoveryActions` / `BackgroundTaskCard`，§三），操作经**同一**服务 + SSE 折叠（守单一数据源、不开第二条通路）；`interactive` 取聚焦回合 `isStreaming`，重载 / 已结束回合的卡片呈被动记录。
+- 聚焦节点头部「待你拍板 N」/「待救火」提示牌指向指挥台；有待裁决项（回合级计数 + 对话级 approval + resume）、可救火（聚焦回合失败 / 对话传输错误）或有后台云端任务时自动浮出，可 X 收起，焦点切换或新项到达再武装。
 
 ### 6.3 关键决策（代码看不出的取舍）
 
 - **双视图而非「图即唯一界面」**：原方向「无模式切换、聊天 = 图的退化渲染、最终砍掉聊天列」**已撤**——强迫简单问答上画布是负体验，且整方案命悬「画布必须像聊天一样轻」的试金石。双视图（聊天默认 + 画布 opt-in）零门槛天然、风险降到「加一个视图 + 一个开关」、**聊天永不删**；「聊天 = 图的退化渲染」只保留在数据层。
+- **画布已毕业（撤实验开关）**：原 `canvasEnabled` 实验门为开发期守「画布像聊天一样轻」试金石而设；试金石已过（聊天默认零回归 + 画布 opt-in 顺滑），故撤门——入口恒显示、无需开启，免「藏命令面板后没人发现 + 永远 dogfood 不到」。每对话视图偏好随之由会话内存态**升为持久化**（`localStorage: agentcore:conversation-views`，只落画布 override、切回即删键 → 表恒收敛），刷新 / 重开对话记得上次停在画布还是聊天。
 - **内嵌 DAG = 嵌套 ReactFlow**：聚焦回合把整套 `GraphView` 包进外层画布的自定义节点，靠**独立 `ReactFlowProvider` 隔离 flow store**；内层 `embedded` 弃自身平移 / 缩放、外层画布独占平移 / 缩放 / 小地图。→ 复用既有图构建，不重写第二套图。
-- **聚焦节点固定高度**（`FOCUS_NODE_HEIGHT`）：就地读答案抽屉与内嵌图**共享这块固定高度**（开抽屉图区缩、抽屉占下半），节点总高恒定 → 下方回合堆叠偏移不被挤动。**否决**抽屉撑高节点（触发动态高度 → 重算堆叠）。
+- **聚焦节点固定高度**（`FOCUS_NODE_HEIGHT`）：脚抽屉（读答案 / 版本对比，二者互斥）与内嵌图**共享这块固定高度**（开抽屉图区缩、抽屉占下半；版本对比要并列版本列、抽屉更高 `REVISION_DRAWER_H`、图区相应再缩），节点总高恒定 → 下方回合堆叠偏移不被挤动。**否决**抽屉撑高节点（触发动态高度 → 重算堆叠）。
 - **面板停靠 ≠ 节点弹层**：可裁决 / 救火卡片体量大（表单 / 备注 / 多按钮），浮节点上会挤爆 LOD 视图；故收口到右停靠**指挥台**、聚焦节点只留「待你拍板 / 待救火」提示牌指过去。
 
 ### 6.4 守住的决策 / 被否决 / 暂不做
@@ -204,13 +206,14 @@
 | 方向 | 处置 | 理由 |
 |---|---|---|
 | 图即唯一界面 / 无模式切换 | 撤 | 见 §6.3 |
+| 对话页卡片化（单 Agent → CEO 节点卡 / 团队图聊天内就地读，原画布实验第一刀） | 撤 | 把传统对话页改成卡片是早期理解偏差；图相关体验收敛到「画布」opt-in，对话页恒为传统聊天（删 `CeoNodeCard` + `AssistantMessage.isSoloGraph` + `InlineTeamGraph` 聊天就地读） |
 | 丙 · 自适应默认（按有无团队自动切模式） | 否决 | 中途翻模式 = 错愕；「何时切」判据含糊 + 每对话模式偏好状态边界多；收益小（简单回合本就退化轻卡）。改用「显眼内联入口」达成同等「画布在相关时出现」 |
 | 乙-2 · 真持久团队（worker 实体化） | 暂不做 | 「团队跨回合」真需求 = 连续性 / 团队懂我，已由记忆模块 + CEO 跨回合记忆 + 共享工作区覆盖；worker 实体化撞「无选择器 / 每回合自适应组队」赌注（[`职责晚绑定与动态再编排设计.md`](/docs/07-规划/职责晚绑定与动态再编排设计.md)），是定位级（养成系）改动 |
 | 跨对话 / 工作区 / 公司级空间画布 | 不在范围 | 本特性只管单对话内双视图（原『公司画布』上层提案已删除） |
 
-**⏳ 未尽**（仅剩）：云端 / 后台任务卡片（`BackgroundTaskCard`，§十）入指挥台——它是非阻塞、跨对话的另一类。（**定向唤回**「修订 vN」是 CEO 驱动、无用户触发入口：其结果已作 `AgentNode` 节点画在聚焦回合 DAG 上、点 vN 节点可下钻 run 详情；侧栏式 `RevisionCompare`「版本对比」卡仍只在聊天 / 全屏读，未搬画布。）
+**✅ 收口**：图上指挥与比对卡片已全数上画布——`BackgroundTaskCard`（云端 / 后台任务卡片，非阻塞 · 跨对话的另一类）入指挥台（见 §6.2）；`RevisionCompare`「版本对比」由聚焦回合表头 chip 唤出、就地落在脚抽屉（与读答案互斥、逐字复用聊天同款卡的 `bare` 形态，逐版本仍下钻右坞 run 详情）。至此聊天侧的指挥 / 比对卡片在画布均有归处（**定向唤回**「修订 vN」本身仍 CEO 驱动、无用户触发入口，其结果另作 `AgentNode` 节点画在聚焦回合 DAG 上）。
 
-→ 见代码：`stores/ui.ts`（`graphPrimary` + `conversationViews`）、`lib/paletteCommands.ts`（实验开关命令）、`pages/ConversationPage.tsx`（视图切换）、`chat/InlineTeamGraph.tsx`（「在作战室打开」）、`graph/ConversationCanvas.tsx`（持久累积 + LOD + 裁决面容纳）、`graph/TurnSummaryNode.tsx` / `graph/SimpleTurnNode.tsx` / `graph/FocusedTurnNode.tsx`（内嵌 `GraphView` + 就地读答案 + 提示牌）、`graph/CanvasCommandBar.tsx`（常驻命令栏）、`graph/CanvasDecisionPanel.tsx`（裁决面，复用 `chat/CheckpointCard` / `PlanReviewCard` / `EscalationCard` / `ApprovalPrompt` / `ResumePrompt`）、`chat/message-bubble/CeoNodeCard.tsx`（退化 1 节点）、`lib/agentIdentity.ts`（身份延续）。
+→ 见代码：`stores/ui.ts`（`conversationViews` 持久化、只落画布 override）、`pages/ConversationPage.tsx`（视图切换 + 偏好读取）、`chat/StatusStrip.tsx`（团队回合「在画布打开」入口）、`graph/ConversationCanvas.tsx`（持久累积 + LOD + 裁决面容纳 + 后台任务同步驱动）、`graph/TurnSummaryNode.tsx` / `graph/SimpleTurnNode.tsx` / `graph/FocusedTurnNode.tsx`（内嵌 `GraphView` + 就地读答案 / 版本对比脚抽屉 + 提示牌）、`graph/CanvasCommandBar.tsx`（常驻命令栏 + 后台云端派发）、`graph/CanvasDecisionPanel.tsx`（裁决面，复用 `chat/CheckpointCard` / `PlanReviewCard` / `EscalationCard` / `ApprovalPrompt` / `ResumePrompt` / `RetryBanner` / `RecoveryActions` / `BackgroundTaskCard`）、`chat/RevisionCompare.tsx`（`bare` 形态嵌画布脚抽屉）、`lib/agentIdentity.ts`（身份延续）。
 
 ---
 
@@ -238,6 +241,8 @@
 | 拖拽移动 | 落点校验（非原父/非自身子树） |
 | 右键菜单 | 普通节点：新建/下载/打开/重命名/删除（共用 `FileTree`）；**工作区根节点**（文件中枢 `FileWorkbench`）：重命名/删除/新建文件·文件夹/上传/查看对话（跳 `/conversations` 筛该项目）；根级「设为项目」已隐含（加文件夹即建项目），「连接/断开」本地目录 ⏳（待文件夹级绑定端点） |
 
+**工作区删除 vs 对话整理（✅ 已确定 · 对标 ChatGPT/Codex 分层）**：**对话层**——归档（可恢复，隐藏活跃列表）/ 永久删除（用户视角不可恢复），见 §一；**工作区（Folder）层**——**不做「归档项目」**（行业亦无独立概念），侧栏降噪靠归档对话或在 `/conversations` 按文件夹批量归档。**删除项目**（`/files` · 现有 `folders` soft-delete）：仅删容器——其下对话 `folder_id` 清空并落入「未分组」、**不**删对话记录；项目文件归 Folder 所有，保留至保留期（默认 30 天，见 [`双模式工作区.md` §七](/docs/02-架构/双模式工作区.md)）后 sweeper 物理清理。**否决** ChatGPT 式「删 Project 级联删全部聊天+文件」——真实工作区（本地盘 + OSS）下对话是索引、文件是资产，级联过狠。**否决** `Folder.archived` 第三整理层。**⏳ 删除确认增强**（`WorkspaceSection`）：✅ Phase 1 — Dialog 展示「N 条对话将移入未分组」+ 项目文件 30 天保留期 + 引导用归档整理；⏳ Phase 2 — 可选勾「同时归档其下全部对话」（默认勾选）。**⏳ 「彻底删除项目」**（核按钮、另入口）：一次性清对话+文件+快照，对齐 ChatGPT Delete Project，与日常 soft-delete 分开。→ 见代码 `components/files/fileWorkbench/WorkspaceSection.tsx`、`folders.py` `soft_delete`。
+
 **审批 UX（写操作）**：只读时尝试写引导开启；可写时写前弹审批（可「本轮内都允许」按同名工具、或「本轮内允许所有文件改动」按整类一次放行，依赖 §三工具审批三态 `grantable` 级别，避免 N 次写/改/删 = N 次弹窗）。
 
 **对话落点表达（✅ 草稿期工作区选择器）**：新对话草稿的输入框工具行挂一枚「工作区」chip（`DraftWorkspacePicker`），默认「自动」= 桌面 local-first 懒建（零门槛不变）。下拉四项：自动 / 最近项目（按近活跃 Top 6，web 仅列云项目）/ 打开本地文件夹（复用 F2 绑定）/ 云端临时对话。**选的是落点文件夹而非云/本地**——模式仍随该文件夹绑定派生（守「无云/本地开关」）。落点经 `pendingNewChat*` 草稿态传给首发建会话（消费成 `folder_id` / `local_container_root_id` / 云端意向），故不碰发送链路与后端契约；「打开本地文件夹」先弹 OS 选择器拿桌面根，按 `localRootId` 复用已有本地项目、否则建一个（`POST /v1/folders`）。首发后归属锁定（[`双模式工作区.md` §七](/docs/02-架构/双模式工作区.md)），chip 隐藏、云/本地切换交给会话内 `WorkspaceModeBar`。web/手机无 `fsApi` → 退化为「自动（云）+ 已有云项目」。→ 见代码 `components/chat/DraftWorkspacePicker.tsx`、`components/chat/MessageInput.tsx`、`lib/newConversation.ts`。
@@ -252,7 +257,7 @@
 
 > **实现现状**：对话右侧收敛为**单一侧面板** `SidePanel`，建模为**一条扁平 tab 栏**（外壳：拖拽 resize + tab 栏 + 关闭）——固定首位「工作区」home tab（永不关闭：**文件即主体**——头栏模式 pill（点开 popover 承载云/本地切换·绑定/重连/备份到云）+ 🕘 快照（右侧 slide-over）图标浮层；交接已下沉为对话时间线卡片，不再占面板入口，见下；section 子页 tab 已删，文件树即面板主体）+ 按需的 run-detail tab（点内嵌协作图节点把该 run 钉为 tab，可并存对比，上限 6；进度/协作图已折进内嵌图，不再设 `task-progress`/`task-graph` tab）。取代原先**并排会挤爆聊天**的两个独立右坞（详情面板 + 工作区面板），并**取消早期「详情 / 工作区」段控互斥模式**——工作区本身即常驻首 tab、run 与它同栏并列，故面板永不出现空详情占位。工作区 body 首次激活才懒挂载、之后 keep-alive 不卸载（文件不重拉）。面板共享一份 `open` / `width`（280–560px）（均持久化；`section` 已删——文件常驻，快照为面板本地瞬态），run tab 集为会话级、按 `messageId` 投影对应回合执行槽。协作图节点高亮派生自当前激活 tab：激活某 run tab→高亮其节点，激活「工作区」tab（不在 run tab 集）→无高亮（守「一面一个高亮源」）；关 run tab 回退到相邻 run tab、否则落回「工作区」tab（面板不因此关闭）。打开入口：点图节点→新开 run tab、右上「侧面板」开关（`PanelRight` 图标，常驻、开启时高亮）/ `Ctrl/Cmd+I`→显隐（记忆激活 tab、**冷启动落「工作区」tab**，故手动打开即落在项目文件）、`Ctrl/Cmd+J`→直达「工作区」tab；`Ctrl/Cmd+B` 留给左侧栏折叠避免双触发。（→ 见代码 `stores/sidePanel.ts`、`components/layout/SidePanel.tsx`、`components/chat/detail/RunDetailBody.tsx`、`components/workspace/WorkspacePanel.tsx`（`WorkspaceMode`）、[`前端技术与架构.md` §9.2 / §9.4](/docs/04-前端/前端技术与架构.md)）。本节为关键决策。
 
-> **交接 = 时间线卡片（交接「方案 B」）✅ 已落地**：「把活交给云端团队」不再是工作区面板里的居中宽模态，而是对话时间线里的「后台云端任务」卡。本地模式对话在 `MessageInput` 的「后台云端」开关下派发任务（`dispatchHandoffJob`），随即落一张卡（派发中 / 运行中 / 已完成 / 失败，按时间戳并入时间线、随对话重开重放）；完成后卡内「查看并应用」就地展开**内联简化评审**——默认全部接受（干净变更直接应用），只把真冲突逐个列出选「云端覆盖 / 保留本地」、可展开预览，应用回本地（写回前重读本地哈希、服务端按快照哈希权威复核冲突）。三段式后端契约（snapshot / 云作业 / diff 三方判定回写，`HandoffJob` 专表）不变，仅前端入口从侧栏孤岛下沉进对话。→ 见代码 `components/chat/BackgroundTaskCard.tsx`、`components/chat/BackgroundTaskReview.tsx`、`stores/backgroundTasks.ts`、`components/chat/MessageInput.tsx`。
+> **交接 = 时间线卡片（交接「方案 B」）✅ 已落地**：「把活交给云端团队」不再是工作区面板里的居中宽模态，而是对话时间线里的「后台云端任务」卡。本地模式对话在 `MessageInput`（及画布命令栏 `CanvasCommandBar`）的「后台云端」开关下派发任务（`dispatchHandoffJob`），随即落一张卡（派发中 / 运行中 / 已完成 / 失败，按时间戳并入时间线、随对话重开重放）；完成后卡内「查看并应用」就地展开**内联简化评审**——默认全部接受（干净变更直接应用），只把真冲突逐个列出选「云端覆盖 / 保留本地」、可展开预览，应用回本地（写回前重读本地哈希、服务端按快照哈希权威复核冲突）。三段式后端契约（snapshot / 云作业 / diff 三方判定回写，`HandoffJob` 专表）不变，仅前端入口从侧栏孤岛下沉进对话。→ 见代码 `components/chat/BackgroundTaskCard.tsx`、`components/chat/BackgroundTaskReview.tsx`、`stores/backgroundTasks.ts`、`components/chat/MessageInput.tsx`、`components/graph/CanvasCommandBar.tsx`（画布同款开关）、`components/graph/CanvasDecisionPanel.tsx`（画布模式承载卡片）。
 
 聊天右侧详情面板 = Agent 执行的「点开看详情」查看器：正文气泡保持简报（思考折叠条 + 内嵌协作图信号），点图节点后右侧推入该 run 完整详情。**核心价值**：Multi-Agent 一次交互信息量大，正文保持简报、细节按需点开。
 

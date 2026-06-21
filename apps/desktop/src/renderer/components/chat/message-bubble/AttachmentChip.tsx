@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { downloadWorkspaceFile } from "@/services/workspace";
 import type { MessageAttachmentMeta } from "@/stores/conversation";
@@ -76,10 +77,10 @@ export function AttachmentChip({
     <SimpleTooltip
       label={state === "error" ? "下载失败，点击重试" : `下载 ${att.name}`}
     >
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={onDownload}
-        className={`${base} transition-colors hover:bg-accent/70 ${
+        className={`${base} h-auto transition-colors hover:bg-accent/70 ${
           state === "error" ? "text-destructive" : ""
         }`}
       >
@@ -89,7 +90,7 @@ export function AttachmentChip({
           size={12}
           className={`shrink-0 ${state === "loading" ? "animate-pulse" : "opacity-60"}`}
         />
-      </button>
+      </Button>
     </SimpleTooltip>
   );
 }

@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatMessageTime } from "@/lib/format";
 import {
@@ -87,13 +88,13 @@ function ChatImageAttachment({
     return <div className="size-24 animate-pulse rounded-lg bg-muted" />;
   }
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={() =>
         originalPath &&
         void downloadChatAttachment(chatId, originalPath, attachment.name)
       }
-      className="block overflow-hidden rounded-lg border border-border focus:outline-none focus:ring-2 focus:ring-ring"
+      className="block h-auto overflow-hidden rounded-lg border border-border p-0 hover:bg-transparent focus:outline-none focus:ring-2 focus:ring-ring"
       title={attachment.name}
     >
       <img
@@ -101,7 +102,7 @@ function ChatImageAttachment({
         alt={attachment.name}
         className="max-h-60 max-w-[260px] object-cover"
       />
-    </button>
+    </Button>
   );
 }
 
@@ -175,9 +176,9 @@ export function ChatBubble({ message, mine, senderName }: Props) {
         {files.map((a) => {
           const downloadable = a.kind !== "dir" && Boolean(a.workspace_path);
           return (
-            <button
+            <Button
               key={a.workspace_path ?? a.path}
-              type="button"
+              variant="ghost"
               disabled={!downloadable}
               onClick={() =>
                 downloadable &&
@@ -188,38 +189,40 @@ export function ChatBubble({ message, mine, senderName }: Props) {
                   a.name,
                 )
               }
-              className={`flex w-full max-w-[260px] items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 text-left ${
+              className={`h-auto w-full max-w-[260px] justify-start gap-2 rounded-xl border border-border bg-card px-3 py-2 text-left font-normal ${
                 downloadable ? "hover:bg-accent" : "opacity-70"
               }`}
             >
-              {a.kind === "dir" ? (
-                <Folder size={16} className="shrink-0 text-muted-foreground" />
-              ) : (
-                <FileText
-                  size={16}
-                  className="shrink-0 text-muted-foreground"
-                />
-              )}
-              <span className="min-w-0 flex-1">
-                <SimpleTooltip label={a.name}>
-                  <span className="block truncate text-sm text-foreground">
-                    {a.name}
-                    {a.kind === "dir" ? "/" : ""}
-                  </span>
-                </SimpleTooltip>
-                {a.size_bytes != null && (
-                  <span className="block text-xs text-muted-foreground">
-                    {formatBytes(a.size_bytes)}
-                  </span>
+              <span className="flex w-full items-center gap-2">
+                {a.kind === "dir" ? (
+                  <Folder size={16} className="shrink-0 text-muted-foreground" />
+                ) : (
+                  <FileText
+                    size={16}
+                    className="shrink-0 text-muted-foreground"
+                  />
+                )}
+                <span className="min-w-0 flex-1">
+                  <SimpleTooltip label={a.name}>
+                    <span className="block truncate text-sm text-foreground">
+                      {a.name}
+                      {a.kind === "dir" ? "/" : ""}
+                    </span>
+                  </SimpleTooltip>
+                  {a.size_bytes != null && (
+                    <span className="block text-xs text-muted-foreground">
+                      {formatBytes(a.size_bytes)}
+                    </span>
+                  )}
+                </span>
+                {downloadable && (
+                  <Download
+                    size={14}
+                    className="shrink-0 text-muted-foreground"
+                  />
                 )}
               </span>
-              {downloadable && (
-                <Download
-                  size={14}
-                  className="shrink-0 text-muted-foreground"
-                />
-              )}
-            </button>
+            </Button>
           );
         })}
       </div>

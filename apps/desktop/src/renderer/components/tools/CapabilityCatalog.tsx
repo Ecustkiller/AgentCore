@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import {
   type Capabilities,
   type CapabilitySkill,
@@ -119,10 +120,10 @@ function ToolCard({ tool }: { tool: CapabilityTool }) {
   const Icon = CATEGORY_META[tool.category]?.icon ?? Wrench;
   return (
     <div className="flex flex-col rounded-xl border border-border bg-card p-4">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-start justify-between gap-2 text-left"
+        className="h-auto w-full justify-between gap-2 p-0 text-left font-normal"
       >
         <div className="flex min-w-0 items-center gap-2">
           <Icon size={16} className="shrink-0 text-muted-foreground" />
@@ -140,19 +141,21 @@ function ToolCard({ tool }: { tool: CapabilityTool }) {
             {APPROVAL_LABEL[tool.approval]}
           </span>
         </div>
-      </button>
+      </Button>
       <p className="mt-2 text-muted-foreground text-xs">{tool.description}</p>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        className="mt-2 inline-flex items-center gap-1 self-start text-muted-foreground text-xs hover:text-foreground"
+        className="mt-2 h-auto self-start gap-1 px-0 py-0 text-muted-foreground hover:text-foreground"
+        icon={
+          <ChevronRight
+            size={12}
+            className={`transition-transform ${open ? "rotate-90" : ""}`}
+          />
+        }
       >
-        <ChevronRight
-          size={12}
-          className={`transition-transform ${open ? "rotate-90" : ""}`}
-        />
         调用参数
-      </button>
+      </Button>
       {open && (
         <div className="mt-2 border-border/60 border-t pt-2">
           <ToolParams parameters={tool.parameters} />
@@ -167,10 +170,10 @@ function SkillCard({ skill }: { skill: CapabilitySkill }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="flex flex-col rounded-xl border border-border bg-card p-4">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-start gap-2 text-left"
+        className="h-auto w-full items-start gap-2 p-0 text-left font-normal"
       >
         <BookOpen size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
@@ -187,7 +190,7 @@ function SkillCard({ skill }: { skill: CapabilitySkill }) {
             open ? "rotate-90" : ""
           }`}
         />
-      </button>
+      </Button>
       {open && (
         <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-3 py-2 text-foreground/90 text-xs leading-relaxed">
           {skill.body}
@@ -211,10 +214,10 @@ function GuidelineBlock({
   const [open, setOpen] = useState(false);
   return (
     <div className="rounded-xl border border-border bg-card">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-4 py-3 text-left"
+        className="h-auto w-full justify-start gap-2 px-4 py-3 text-left font-normal"
       >
         <ScrollText size={16} className="shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
@@ -231,7 +234,7 @@ function GuidelineBlock({
             open ? "rotate-90" : ""
           }`}
         />
-      </button>
+      </Button>
       {open && (
         <pre className="mx-4 mb-4 max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-muted/50 px-3 py-2 text-foreground/90 text-xs leading-relaxed">
           {text}
@@ -292,13 +295,7 @@ export function CapabilityCatalog() {
     return (
       <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-border border-dashed py-16 text-center">
         <p className="text-muted-foreground text-sm">能力列表加载失败</p>
-        <button
-          type="button"
-          onClick={() => load()}
-          className="rounded-lg bg-primary px-3 py-1.5 text-primary-foreground text-sm hover:opacity-90"
-        >
-          重试
-        </button>
+        <Button onClick={() => load()}>重试</Button>
       </div>
     );
   }

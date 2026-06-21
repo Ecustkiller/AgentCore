@@ -1,3 +1,4 @@
+import { Button, IconButton } from "@/components/ui";
 import { StreamError } from "@/lib/errors";
 import {
   type ReviewRow,
@@ -188,7 +189,7 @@ export function BackgroundTaskReview({
     <div className="mt-2 rounded-lg border border-border bg-card/60 p-2.5">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <span className="text-success">+{counts.added}</span>
-        <span className="text-info">~{counts.modified}</span>
+        <span className="text-primary">~{counts.modified}</span>
         <span className="text-destructive">-{counts.deleted}</span>
         {conflicts.length > 0 ? (
           <span className="flex items-center gap-1 text-warning">
@@ -211,22 +212,21 @@ export function BackgroundTaskReview({
             return (
               <li
                 key={row.change.path}
-                className="rounded-md border border-warning/40 bg-warning/5"
+                className="rounded-lg border border-warning/40 bg-warning/5"
               >
                 <div className="flex items-center gap-1.5 px-2 py-1.5">
-                  <button
-                    type="button"
+                  <IconButton
                     onClick={() => toggleExpand(row.change.path)}
                     disabled={!canPreview}
                     aria-label="展开预览"
-                    className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent disabled:opacity-30"
+                    className="size-5 rounded disabled:opacity-30"
                   >
                     {open ? (
                       <ChevronDown size={13} />
                     ) : (
                       <ChevronRight size={13} />
                     )}
-                  </button>
+                  </IconButton>
                   <span
                     className="min-w-0 flex-1 truncate text-xs"
                     title={row.change.path}
@@ -267,28 +267,25 @@ export function BackgroundTaskReview({
       )}
 
       <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void onApply()}
+        <Button
+          className="flex-1"
+          icon={
+            applying ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <CloudUpload size={13} />
+            )
+          }
           disabled={applying}
-          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+          onClick={() => void onApply()}
         >
-          {applying ? (
-            <Loader2 size={13} className="animate-spin" />
-          ) : (
-            <CloudUpload size={13} />
-          )}
           {conflicts.length === 0
             ? `全部接受并应用（${rows.length} 个文件）`
             : "应用所选改动"}
-        </button>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg border border-border px-2.5 py-1.5 text-xs hover:bg-accent"
-        >
+        </Button>
+        <Button variant="neutral" className="border border-border" onClick={onClose}>
           收起
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -313,13 +310,13 @@ function BarButton({
   className?: string;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="neutral"
       onClick={onClick}
-      className={`rounded-md border border-border px-2 py-0.5 hover:bg-accent ${className}`}
+      className={`h-auto border border-border px-2 py-0.5 font-normal ${className}`}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -340,12 +337,12 @@ function DecisionToggle({
       : "border-primary bg-primary/10 text-primary"
     : "border-transparent text-muted-foreground hover:bg-accent";
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       onClick={onClick}
-      className={`shrink-0 rounded-md border px-2 py-0.5 text-xs font-medium ${cls}`}
+      className={`h-auto shrink-0 rounded-lg border px-2 py-0.5 text-xs font-medium ${cls}`}
     >
       {label}
-    </button>
+    </Button>
   );
 }

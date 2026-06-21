@@ -1,36 +1,44 @@
 import { ApprovalPrompt } from "@/components/chat/ApprovalPrompt";
+import { BackgroundTaskCard } from "@/components/chat/BackgroundTaskCard";
 import { CheckpointCard } from "@/components/chat/CheckpointCard";
 import { EscalationCards } from "@/components/chat/EscalationCard";
-import { RecoveryActions } from "@/components/chat/InlineTeamGraph";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { ResumePrompt } from "@/components/chat/ResumePrompt";
 import { RetryBanner } from "@/components/chat/RetryBanner";
+import { RecoveryActions } from "@/components/chat/StatusStrip";
+import { IconButton } from "@/components/ui";
+import {
+  useBackgroundTasks,
+  useWorkspaceRootId,
+} from "@/stores/backgroundTasks";
 import type { Message } from "@/stores/conversation";
 import { type Execution, ExecutionScopeContext } from "@/stores/execution";
 import { AlertTriangle, Gavel, X } from "lucide-react";
 
 /**
- * 作战室「图上指挥」指挥台 (前端UX设计.md §6.2). The boss powers散落在聊天流里
+ * 画布「图上指挥」指挥台 (前端UX设计.md §6.2). The boss powers散落在聊天流里
  * (前端UX设计.md §三): ask_user / plan_review / 工作者上报 (turn level) + 工具放行
  * approval / 待恢复续跑 resume + 救火 (conversation / turn level). On the canvas they
  * belong where they happen, but the actionable cards are sizable, so this docks them
  * on the right — the war room's 指挥台 — rather than floating popovers over nodes. It
  * renders the SAME cards the chat surfaces do ({@link CheckpointCard} /
  * {@link PlanReviewCard} / {@link EscalationCards} / {@link ApprovalPrompt} /
- * {@link ResumePrompt} / {@link RetryBanner} / {@link RecoveryActions}), reused
- * verbatim, so a decision read / made / 救火 here is identical to one in chat and
- * folds through the very same service + SSE (no second data path — 设计 §二 单一数据源).
+ * {@link ResumePrompt} / {@link RetryBanner} / {@link RecoveryActions} /
+ * {@link BackgroundTaskCard}), reused verbatim, so a decision read / made / 救火 /
+ * 应用 here is identical to one in chat and folds through the very same service + SSE
+ * (no second data path — 设计 §二 单一数据源).
  *
- * Why every scope lives here: in canvas mode `ChatView` + `InlineTeamGraph` are
- * unmounted, so their conversation-level approval / resume / transport-retry prompts
- * and the team strip's 救火行 would be invisible (unactionable) without this. The
- * turn-level cards + recovery scope to the focused turn (`message` + projected
- * `execution`); approval / resume / RetryBanner are self-contained (own store +
- * active conversation) so they ride along regardless of `message`. `interactive` is
- * the focused turn's live, non-terminal state; a reloaded / ended turn renders its
- * cards as passive records. The host {@link import("./ConversationCanvas")} shows
- * this only while something is pending or recoverable (auto-surfaced — the boss must
- * decide / 救火).
+ * Why every scope lives here: in canvas mode `ChatView` + `InlineTeamGraph` +
+ * `MessageList` are unmounted, so their conversation-level approval / resume /
+ * transport-retry prompts, the team strip's 救火行, and the timeline's 后台云端任务
+ * cards would be invisible (unactionable) without this. The turn-level cards +
+ * recovery scope to the focused turn (`message` + projected `execution`); approval /
+ * resume / RetryBanner / 后台任务 are self-contained (own store + active conversation)
+ * so they ride along regardless of `message`. `interactive` is the focused turn's
+ * live, non-terminal state; a reloaded / ended turn renders its cards as passive
+ * records. The host {@link import("./ConversationCanvas")} shows this while something
+ * is pending / recoverable / a background task exists (auto-surfaced); 后台云端任务 是
+ * 非阻塞的「另一类」, so it renders last and never inflates the 待你拍板 decision count.
  */
 
 /** Count of UNANSWERED boss decisions on ONE turn (ask_user + plan_review + 工作者上报).
@@ -110,15 +118,13 @@ export function CanvasDecisionPanel({
             </span>
           )}
         </span>
-        <button
-          type="button"
+        <IconButton
           onClick={onClose}
           aria-label="收起指挥台"
           title="收起指挥台"
-          className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <X size={15} />
-        </button>
+        </IconButton>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-3">
         {/* 救火 (firefighting): a conversation-level transport error (send / resume /
@@ -169,7 +175,36 @@ export function CanvasDecisionPanel({
             />
           )}
         </div>
+        {/* 后台云端任务 (handoff jobs, 非阻塞 · 跨对话的另一类): last, below every
+            blocking decision. */}
+        <CanvasBackgroundTasks conversationId={conversationId} />
       </div>
     </aside>
+  );
+}
+
+/**
+ * Self-contained feed of this conversation's 后台云端任务 (handoff jobs, 双模式工作区
+ * 交接「方案 B」). In chat mode these merge into the message timeline ({@link
+ * import("../chat/MessageList")}); in canvas mode that timeline is unmounted, so the
+ * 指挥台 is the only place they can be seen / 应用 (前端UX设计.md §6.2). The host {@link
+ * import("./ConversationCanvas")} runs `useBackgroundTasksSync` (it stays mounted
+ * while this panel may be closed, so the job list keeps polling); this just reads the
+ * already-synced store + the bound local root id (which a succeeded job's inline
+ * 评审 needs to write the result back). Renders nothing when there are no jobs. */
+function CanvasBackgroundTasks({
+  conversationId,
+}: {
+  conversationId: string | null;
+}) {
+  const tasks = useBackgroundTasks(conversationId);
+  const rootId = useWorkspaceRootId(conversationId);
+  if (tasks.length === 0) return null;
+  return (
+    <div className="mx-4 mt-2 space-y-2">
+      {tasks.map((job) => (
+        <BackgroundTaskCard key={job.id} job={job} rootId={rootId} />
+      ))}
+    </div>
   );
 }

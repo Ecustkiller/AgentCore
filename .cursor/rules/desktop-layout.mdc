@@ -67,6 +67,10 @@ alwaysApply: false
 
 导航项使用 `h-9`（36px）为专用例外。
 
+## UI Primitive 层
+
+交互按钮/图标按钮优先用 `components/ui/` 的 `Button` / `IconButton`（sm h-7 / md h-8），而非手写 `rounded-lg` 类。→ 见 [`UI-Pattern索引.md`](../../docs/04-前端/UI-Pattern索引.md) 与 `components/ui/index.ts`。
+
 ## 图标尺寸
 
 | 场景 | lucide size | 像素 | 说明 |

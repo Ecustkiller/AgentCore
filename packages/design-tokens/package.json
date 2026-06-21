@@ -1,11 +1,13 @@
 {
   "name": "@agentcore/design-tokens",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "桌面/手机两端共享的设计 token（OKLCH 语义色等，现位于 desktop globals.css）",
+  "description": "AgentCore 跨端 OKLCH 语义 token 单源（desktop globals.css + mobile styles.css）",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./tokens.css": "./src/tokens.css",
+    "./mobile-light.css": "./src/mobile-light.css"
   },
   "types": "./src/index.ts"
 }

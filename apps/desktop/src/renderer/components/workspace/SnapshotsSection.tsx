@@ -1,9 +1,9 @@
 import {
   Centered,
   EmptyHint,
-  IconButton,
   InlineError,
 } from "@/components/files/parts";
+import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatBytes } from "@/lib/format";
 import {
@@ -75,30 +75,37 @@ export function SnapshotsSection({
           }}
           placeholder="版本名（可选）"
           maxLength={200}
-          className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-primary"
+          className="min-w-0 flex-1 rounded-lg border border-border bg-background px-2 py-1 text-xs outline-none focus:border-primary"
         />
         <SimpleTooltip label="为当前工作区留一个快照版本">
-          <button
-            type="button"
-            onClick={() => void onCreate()}
+          <Button
+            className="shrink-0 disabled:opacity-60"
             disabled={creating}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+            onClick={() => void onCreate()}
+            icon={
+              creating ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <Camera size={13} />
+              )
+            }
           >
-            {creating ? (
-              <Loader2 size={13} className="animate-spin" />
-            ) : (
-              <Camera size={13} />
-            )}
             留版本
-          </button>
+          </Button>
         </SimpleTooltip>
-        <IconButton
-          title="刷新"
-          onClick={() => void reload()}
-          spinning={loading}
-        >
-          <RefreshCw size={14} />
-        </IconButton>
+        <SimpleTooltip label="刷新">
+          <IconButton
+            disabled={loading}
+            onClick={() => void reload()}
+            aria-label="刷新"
+          >
+            {loading ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <RefreshCw size={14} />
+            )}
+          </IconButton>
+        </SimpleTooltip>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
@@ -175,7 +182,7 @@ function SnapshotRow({
   };
 
   return (
-    <li className="rounded-md border border-border px-2.5 py-2">
+    <li className="rounded-lg border border-border px-2.5 py-2">
       <div className="flex items-center gap-2">
         {snap.label ? (
           <SimpleTooltip label={snap.label}>
@@ -188,22 +195,34 @@ function SnapshotRow({
             自动备份
           </span>
         )}
-        <IconButton
-          title="下载快照 (zip)"
-          onClick={() => void onDownload()}
-          spinning={busy === "download"}
-        >
-          <Download size={13} />
-        </IconButton>
-        <IconButton
-          title="恢复到此快照"
-          onClick={() => void onRestore()}
-          spinning={busy === "restore"}
-        >
-          <RotateCcw size={13} />
-        </IconButton>
+        <SimpleTooltip label="下载快照 (zip)">
+          <IconButton
+            disabled={busy === "download"}
+            onClick={() => void onDownload()}
+            aria-label="下载快照 (zip)"
+          >
+            {busy === "download" ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <Download size={13} />
+            )}
+          </IconButton>
+        </SimpleTooltip>
+        <SimpleTooltip label="恢复到此快照">
+          <IconButton
+            disabled={busy === "restore"}
+            onClick={() => void onRestore()}
+            aria-label="恢复到此快照"
+          >
+            {busy === "restore" ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <RotateCcw size={13} />
+            )}
+          </IconButton>
+        </SimpleTooltip>
       </div>
-      <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+      <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
         <span>{formatWhen(snap.createdAt)}</span>
         <span>·</span>
         <span>{formatBytes(snap.sizeBytes)}</span>

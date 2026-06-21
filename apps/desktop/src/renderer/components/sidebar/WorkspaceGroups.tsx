@@ -1,3 +1,4 @@
+import { SurfaceRowButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useWorkspaceGroups } from "@/hooks/useWorkspaceGroups";
 import { useConversationStore } from "@/stores/conversation";
@@ -47,11 +48,10 @@ export function WorkspaceGroups() {
         const overflow = convs.length - MAX_PER_GROUP;
         return (
           <div key={folder.id}>
-            <button
-              type="button"
+            <SurfaceRowButton
               onClick={() => setSection(folder.id, !expanded)}
               aria-expanded={expanded}
-              className="group flex h-9 w-full items-center gap-1.5 rounded-lg px-2 text-sm text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+              className="group h-9 px-2 text-sidebar-foreground/70 hover:text-sidebar-foreground"
             >
               {folder.localRootId ? (
                 <HardDrive size={14} className="shrink-0 text-primary" />
@@ -73,25 +73,24 @@ export function WorkspaceGroups() {
                     : "opacity-0 group-hover:opacity-100"
                 }`}
               />
-            </button>
+            </SurfaceRowButton>
             {expanded && (
               <div className="space-y-0.5 pl-2">
                 {convs.slice(0, MAX_PER_GROUP).map((c) => (
                   <ConversationItem key={c.id} conversation={c} />
                 ))}
                 {overflow > 0 && (
-                  <button
-                    type="button"
+                  <SurfaceRowButton
                     onClick={() =>
                       navigate("/conversations", {
                         state: { focusFolderId: folder.id },
                       })
                     }
-                    className="flex h-8 w-full items-center gap-1 rounded-lg px-3 text-xs text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    className="h-8 px-3 text-xs text-sidebar-foreground/50 hover:text-sidebar-foreground"
                   >
                     <MoreHorizontal size={13} className="shrink-0" />
                     更多（{overflow}）
-                  </button>
+                  </SurfaceRowButton>
                 )}
               </div>
             )}

@@ -13,6 +13,9 @@ importers:
       '@agentcore/contract-types':
         specifier: workspace:*
         version: link:../../packages/contract-types
+      '@agentcore/design-tokens':
+        specifier: workspace:*
+        version: link:../../packages/design-tokens
       '@agentcore/protocol-conformance':
         specifier: workspace:*
         version: link:../../packages/protocol-conformance
@@ -197,6 +200,9 @@ importers:
       '@agentcore/contract-types':
         specifier: workspace:*
         version: link:../../packages/contract-types
+      '@agentcore/design-tokens':
+        specifier: workspace:*
+        version: link:../../packages/design-tokens
       '@agentcore/protocol-conformance':
         specifier: workspace:*
         version: link:../../packages/protocol-conformance

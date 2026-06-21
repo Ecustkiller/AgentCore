@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui";
 import { runRegenerate } from "@/services/turns";
 import {
   useActiveGenerating,
@@ -77,23 +78,16 @@ export function UserMessage({ message }: MessageBubbleProps) {
             rows={1}
           />
           <div className="flex items-center justify-end gap-1.5 pt-1">
-            <button
-              type="button"
-              onClick={() => setEditing(false)}
-              className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <X size={13} />
-              <span>取消</span>
-            </button>
-            <button
-              type="button"
+            <Button variant="neutral" icon={<X size={13} />} onClick={() => setEditing(false)}>
+              取消
+            </Button>
+            <Button
+              icon={<Check size={13} />}
               onClick={submitEdit}
               disabled={!draft.trim()}
-              className="inline-flex h-7 items-center gap-1 rounded-lg bg-primary px-2 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
             >
-              <Check size={13} />
-              <span>发送</span>
-            </button>
+              发送
+            </Button>
           </div>
         </div>
       </div>
@@ -113,7 +107,7 @@ export function UserMessage({ message }: MessageBubbleProps) {
           ))}
         </div>
       )}
-      <div className="max-w-[80%] rounded-xl rounded-br-none bg-secondary px-4 py-3 text-sm text-secondary-foreground">
+      <div className="max-w-[80%] rounded-xl rounded-br-none bg-muted px-4 py-3 text-sm text-foreground">
         <p className="whitespace-pre-wrap">{message.content}</p>
       </div>
       {!isGenerating && (

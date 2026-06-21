@@ -28,7 +28,9 @@ import type {
 } from "./fileTreeTypes";
 import { InlineCreateRow } from "./FileTreeInline";
 import { FileTreeRow } from "./FileTreeRow";
-import { Centered, EmptyHint, IconButton, InlineError } from "./parts";
+import { Button, IconButton } from "@/components/ui";
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import { Centered, EmptyHint, InlineError } from "./parts";
 import { useFileTreeData } from "./useFileTreeData";
 
 export { dedupeName } from "./dedupeName";
@@ -442,13 +444,13 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         style={{ paddingLeft: indent + 8 }}
       >
         加载失败
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => data.reload("")}
-          className="underline-offset-2 hover:underline"
+          className="h-auto px-0 py-0 underline-offset-2 hover:underline"
         >
           重试
-        </button>
+        </Button>
       </div>
     );
 
@@ -554,42 +556,58 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         {!hideToolbar && (
           <div className="flex shrink-0 items-center gap-1 px-3 py-2">
             {source.caps.transfer && (
-              <button
-                type="button"
-                onClick={() => uploadRef.current?.click()}
+              <Button
+                className="disabled:opacity-60"
                 disabled={uploading}
-                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+                onClick={() => uploadRef.current?.click()}
+                icon={
+                  uploading ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Upload size={13} />
+                  )
+                }
               >
-                {uploading ? (
-                  <Loader2 size={13} className="animate-spin" />
-                ) : (
-                  <Upload size={13} />
-                )}
                 上传
-              </button>
+              </Button>
             )}
-            <IconButton title="新建文件" onClick={() => openCreate("", "file")}>
-              <FilePlus size={14} />
-            </IconButton>
-            <IconButton
-              title="新建文件夹"
-              onClick={() => openCreate("", "dir")}
-            >
-              <FolderPlus size={14} />
-            </IconButton>
+            <SimpleTooltip label="新建文件">
+              <IconButton
+                onClick={() => openCreate("", "file")}
+                aria-label="新建文件"
+              >
+                <FilePlus size={14} />
+              </IconButton>
+            </SimpleTooltip>
+            <SimpleTooltip label="新建文件夹">
+              <IconButton
+                onClick={() => openCreate("", "dir")}
+                aria-label="新建文件夹"
+              >
+                <FolderPlus size={14} />
+              </IconButton>
+            </SimpleTooltip>
             <div className="flex-1" />
             {expanded.size > 0 && (
-              <IconButton title="全部折叠" onClick={collapseAll}>
-                <ChevronsDownUp size={14} />
-              </IconButton>
+              <SimpleTooltip label="全部折叠">
+                <IconButton onClick={collapseAll} aria-label="全部折叠">
+                  <ChevronsDownUp size={14} />
+                </IconButton>
+              </SimpleTooltip>
             )}
-            <IconButton
-              title="刷新"
-              onClick={refresh}
-              spinning={rootStatus === "loading"}
-            >
-              <RefreshCw size={14} />
-            </IconButton>
+            <SimpleTooltip label="刷新">
+              <IconButton
+                disabled={rootStatus === "loading"}
+                onClick={refresh}
+                aria-label="刷新"
+              >
+                {rootStatus === "loading" ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={14} />
+                )}
+              </IconButton>
+            </SimpleTooltip>
             {headerExtra}
           </div>
         )}
