@@ -63,7 +63,17 @@ jobs:
           username: ${{ secrets.DEPLOY_SSH_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
-          source: "admin-dist.tgz,deploy/nginx/office-admin.conf"
+          source: admin-dist.tgz
+          target: /tmp
+
+      - name: Upload nginx site config
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_SSH_PORT || 22 }}
+          source: deploy/nginx/office-admin.conf
           target: /tmp
 
       - name: Install static files, nginx site, CORS
@@ -89,8 +99,9 @@ jobs:
             rm -f /tmp/admin-dist.tgz
             echo "admin static → $ADMIN_ROOT/dist ($(find "$ADMIN_ROOT/dist" -type f | wc -l) files)"
 
-            sudo install -D -m 644 /tmp/office-admin.conf "$NGINX_AVAIL"
-            rm -f /tmp/office-admin.conf
+            sudo install -D -m 644 /tmp/office-admin.conf "$NGINX_AVAIL" 2>/dev/null \
+              || sudo install -D -m 644 /tmp/deploy/nginx/office-admin.conf "$NGINX_AVAIL"
+            rm -f /tmp/office-admin.conf /tmp/deploy/nginx/office-admin.conf
             ln -sfn "$NGINX_AVAIL" "$NGINX_ENABLED"
             sudo nginx -t
             sudo systemctl reload nginx
