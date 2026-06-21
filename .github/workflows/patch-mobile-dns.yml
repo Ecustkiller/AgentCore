@@ -1,0 +1,46 @@
+name: Patch Mobile DNS
+
+# 一次性/按需：为 m.fashitianxia.xyz 写 CNAME → agentcore-mobile.pages.dev，
+# 压过 *.fashitianxia.xyz Tunnel 兜底。需 CLOUDFLARE_API_TOKEN 含 Zone:Read + DNS:Edit。
+on:
+  workflow_dispatch:
+
+jobs:
+  dns:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Upsert m CNAME → Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ZONE=fashitianxia.xyz
+          FQDN=m.${ZONE}
+          TARGET=agentcore-mobile.pages.dev
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
+          zone_id="$(curl -sS "https://api.cloudflare.com/client/v4/zones?name=${ZONE}" \
+            "${auth[@]}" | jq -r '.result[0].id')"
+          if [[ -z "$zone_id" || "$zone_id" == "null" ]]; then
+            echo "::error::Cannot read zone ${ZONE}. Token needs Zone:Read + DNS:Edit on this zone."
+            curl -sS "https://api.cloudflare.com/client/v4/zones?name=${ZONE}" "${auth[@]}" | jq .
+            exit 1
+          fi
+          body="$(jq -nc --arg n m --arg c "$TARGET" \
+            '{type:"CNAME",name:$n,content:$c,proxied:true,ttl:1}')"
+          existing="$(curl -sS \
+            "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records?name=${FQDN}" \
+            "${auth[@]}")"
+          record_id="$(echo "$existing" | jq -r '.result[0].id // empty')"
+          if [[ -n "$record_id" ]]; then
+            echo "updating ${FQDN} → ${TARGET}"
+            resp="$(curl -sS -X PUT \
+              "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records/${record_id}" \
+              "${auth[@]}" -H 'Content-Type: application/json' --data "$body")"
+          else
+            echo "creating ${FQDN} → ${TARGET}"
+            resp="$(curl -sS -X POST \
+              "https://api.cloudflare.com/client/v4/zones/${zone_id}/dns_records" \
+              "${auth[@]}" -H 'Content-Type: application/json' --data "$body")"
+          fi
+          echo "$resp" | jq .
+          echo "$resp" | jq -e '.success' >/dev/null
