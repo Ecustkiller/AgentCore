@@ -36,9 +36,7 @@ async def _create_admin(username: str, password: str) -> None:
 
         user = await users.get_by_username(username)
         if user is None:
-            user = await users.create(
-                username=username, display_name=username, role="admin"
-            )
+            user = await users.create(username=username, display_name=username, role="admin")
             print(f"created admin {username!r} (id={user.user_id})")
         elif user.role != "admin":
             await users.set_role(user.user_id, "admin")
@@ -54,9 +52,7 @@ async def _create_admin(username: str, password: str) -> None:
             print(f"marked {username!r} is_unlimited (no quota cap)")
 
         if await creds.get_by_user_id(user.user_id) is None:
-            await creds.create(
-                user_id=user.user_id, password_hash=hash_password(password)
-            )
+            await creds.create(user_id=user.user_id, password_hash=hash_password(password))
             print(f"set password for {username!r}")
         else:
             print(f"{username!r} already has a password (left unchanged)")

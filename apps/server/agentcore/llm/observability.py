@@ -94,9 +94,7 @@ def log_llm_call(
     if not settings.log_llm_bodies:
         return
     if messages is not None:
-        logger.debug(
-            "llm.request", scenario=scenario, model=model, prompt=_format_prompt(messages)
-        )
+        logger.debug("llm.request", scenario=scenario, model=model, prompt=_format_prompt(messages))
     if content is not None or reasoning is not None:
         logger.debug(
             "llm.response",

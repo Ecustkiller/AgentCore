@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from agentcore.runtime.facts import Fact, record_turn_fact
 from agentcore.runtime.events.journal_config import (
     _HISTORY_COALESCE_RUN,
     _HISTORY_COALESCE_TURN,
@@ -15,6 +14,7 @@ from agentcore.runtime.events.journal_config import (
     _PROCESS_RESULT_CAP,
 )
 from agentcore.runtime.events.types import EventType, SSEEvent
+from agentcore.runtime.facts import Fact, record_turn_fact
 
 
 class EventSink:
@@ -74,11 +74,7 @@ class EventSink:
                 return
             run_id = event.payload.get("run_id")
             last = self._history[-1] if self._history else None
-            if (
-                last is not None
-                and last.type == t
-                and last.payload.get("run_id") == run_id
-            ):
+            if last is not None and last.type == t and last.payload.get("run_id") == run_id:
                 last.payload["delta"] = (last.payload.get("delta") or "") + delta
             else:
                 self._history.append(
@@ -90,13 +86,9 @@ class EventSink:
             result = payload.get("result")
             if isinstance(result, str) and len(result) > _PROCESS_RESULT_CAP:
                 payload["result"] = result[:_PROCESS_RESULT_CAP] + "…"
-            self._history.append(
-                SSEEvent(type=t, payload=payload, timestamp=event.timestamp)
-            )
+            self._history.append(SSEEvent(type=t, payload=payload, timestamp=event.timestamp))
             return
-        self._history.append(
-            SSEEvent(type=t, payload=event.payload, timestamp=event.timestamp)
-        )
+        self._history.append(SSEEvent(type=t, payload=event.payload, timestamp=event.timestamp))
 
     def detach(self) -> None:
         self._detached = True
@@ -173,9 +165,7 @@ class EventSink:
         self._journal.extend(events)
 
     def execution_journal(self) -> list[dict[str, Any]] | None:
-        has_surface = any(
-            e["type"] in _JOURNAL_SURFACE_TYPES for e in self._journal
-        )
+        has_surface = any(e["type"] in _JOURNAL_SURFACE_TYPES for e in self._journal)
         return self._journal if has_surface else None
 
     def process_timeline(self) -> list[dict[str, Any]] | None:

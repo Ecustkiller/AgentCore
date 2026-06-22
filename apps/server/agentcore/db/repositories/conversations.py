@@ -118,17 +118,13 @@ class ConversationRepository:
 
         # Pinned float to the top (置顶对话), then most-recent activity.
         result = await self._session.execute(
-            base_query.order_by(
-                Conversation.pinned.desc(), Conversation.updated_at.desc()
-            )
+            base_query.order_by(Conversation.pinned.desc(), Conversation.updated_at.desc())
             .limit(limit)
             .offset(offset)
         )
         return result.scalars().all(), total
 
-    async def search(
-        self, user_id: str, query: str, *, limit: int
-    ) -> Sequence[Conversation]:
+    async def search(self, user_id: str, query: str, *, limit: int) -> Sequence[Conversation]:
         """Owner-scoped title substring search (全局搜索 Tier 1).
 
         ILIKE over ``title``, newest-activity first, capped at ``limit``. Excludes
@@ -201,9 +197,7 @@ class ConversationRepository:
             await self._session.refresh(conv)
         return conv
 
-    async def soft_delete(
-        self, conversation_id: str, *, user_id: str | None = None
-    ) -> bool:
+    async def soft_delete(self, conversation_id: str, *, user_id: str | None = None) -> bool:
         conv = await self.get_by_id(conversation_id, user_id=user_id)
         if conv:
             conv.deleted_at = datetime.now()
@@ -229,9 +223,7 @@ class ConversationRepository:
         await self._session.commit()
         return int(result.rowcount or 0)
 
-    async def list_purgeable(
-        self, *, before: datetime, limit: int
-    ) -> Sequence[Conversation]:
+    async def list_purgeable(self, *, before: datetime, limit: int) -> Sequence[Conversation]:
         """Soft-deleted conversations whose ``deleted_at`` is at/older than ``before``.
 
         Backs retention cleanup (决策⑦): these have outlived the grace period and
@@ -281,14 +273,10 @@ class ConversationRepository:
             delete(CostEvent).where(CostEvent.conversation_id == conversation_id)
         )
         await delete_journal_for_conversation(self._session, conversation_id)
-        await self._session.execute(
-            delete(Conversation).where(Conversation.id == conversation_id)
-        )
+        await self._session.execute(delete(Conversation).where(Conversation.id == conversation_id))
         await self._session.commit()
 
-    async def set_memory_synced_at(
-        self, conversation_id: str, synced_at: datetime
-    ) -> None:
+    async def set_memory_synced_at(self, conversation_id: str, synced_at: datetime) -> None:
         """Advance the long-term-memory consolidation watermark (Agent记忆 §1.5).
 
         ``synced_at`` is the created_at of the last message folded into the user's

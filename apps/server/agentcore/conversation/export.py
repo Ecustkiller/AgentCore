@@ -36,11 +36,7 @@ def _visible_messages(messages: Sequence[Message]) -> list[Message]:
     tool calls) would render as an empty section, so it is dropped — export shows
     what the user can read.
     """
-    return [
-        m
-        for m in messages
-        if m.role in _EXPORTED_ROLES and (m.content or "").strip()
-    ]
+    return [m for m in messages if m.role in _EXPORTED_ROLES and (m.content or "").strip()]
 
 
 def _fmt_ts(value: datetime | None) -> str:
@@ -50,9 +46,7 @@ def _fmt_ts(value: datetime | None) -> str:
     return value.strftime("%Y-%m-%d %H:%M")
 
 
-def conversation_to_markdown(
-    conversation: Conversation, messages: Sequence[Message]
-) -> str:
+def conversation_to_markdown(conversation: Conversation, messages: Sequence[Message]) -> str:
     """Render a conversation as a clean Markdown transcript (the default export).
 
     Each turn becomes a ``##`` section headed by its author and time, followed by
@@ -102,9 +96,7 @@ def conversation_to_markdown(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def conversation_to_json(
-    conversation: Conversation, messages: Sequence[Message]
-) -> dict:
+def conversation_to_json(conversation: Conversation, messages: Sequence[Message]) -> dict:
     """Render a conversation as a full-fidelity JSON document (power-user export).
 
     Carries every human-meaningful field of the user/assistant rows so the export

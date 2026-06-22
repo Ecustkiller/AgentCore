@@ -58,9 +58,7 @@ async def _run(
 ):
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
     sink = EventSink()
-    profile = ModelProfile(
-        model="m", thinking=False, reasoning_effort=None, max_rounds=max_rounds
-    )
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=max_rounds)
     result = await react_loop(
         messages=messages,
         llm=provider,
@@ -92,11 +90,7 @@ async def test_out_of_range_citation_reworks_then_clean_finish():
     assert rounds == 2
     assert provider.calls == 2
     # 恰好注入了一条 finish_guard 修正提示，且锚定到具体越界角标 [1]。
-    steers = [
-        m
-        for m in messages
-        if m.role == "user" and m.content and "核验未通过" in m.content
-    ]
+    steers = [m for m in messages if m.role == "user" and m.content and "核验未通过" in m.content]
     assert len(steers) == 1
     assert "[1]" in steers[0].content
     # 发出了一次 content_reset（清空已流式到气泡的违规正文）。

@@ -58,26 +58,18 @@ def main() -> None:
     only_py = sorted(py_events - payload_keys)
     only_ts = sorted(payload_keys - py_events)
     if only_py:
-        errors.append(
-            f"EventType missing from SSEPayloadMap: {', '.join(only_py)}"
-        )
+        errors.append(f"EventType missing from SSEPayloadMap: {', '.join(only_py)}")
     if only_ts:
-        errors.append(
-            f"SSEPayloadMap keys missing from EventType: {', '.join(only_ts)}"
-        )
+        errors.append(f"SSEPayloadMap keys missing from EventType: {', '.join(only_ts)}")
 
     generated_text = GENERATED_TS.read_text(encoding="utf-8")
     gen_events = _parse_generated_union(generated_text)
     only_py_gen = sorted(py_events - gen_events)
     only_gen = sorted(gen_events - py_events)
     if only_py_gen:
-        errors.append(
-            f"EventType missing from eventTypes.generated.ts: {', '.join(only_py_gen)}"
-        )
+        errors.append(f"EventType missing from eventTypes.generated.ts: {', '.join(only_py_gen)}")
     if only_gen:
-        errors.append(
-            f"eventTypes.generated.ts extras not in EventType: {', '.join(only_gen)}"
-        )
+        errors.append(f"eventTypes.generated.ts extras not in EventType: {', '.join(only_gen)}")
 
     if errors:
         for e in errors:

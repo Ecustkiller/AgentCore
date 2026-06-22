@@ -15,8 +15,13 @@ from agentcore.runtime.events import (
 
 
 def test_message_end_exposes_cache_split_and_cost():
-    cost = {"input": 142_800_000, "cached": 2_800_000, "output": 280_000_000,
-            "total": 422_800_000, "currency": "USD"}
+    cost = {
+        "input": 142_800_000,
+        "cached": 2_800_000,
+        "output": 280_000_000,
+        "total": 422_800_000,
+        "currency": "USD",
+    }
     ev = message_end(
         FinishReason.END_TURN,
         input_tokens=2_000_000,
@@ -74,8 +79,16 @@ def test_run_completed_defaults_to_full_zeroed_shapes():
     assert ev.payload["role"] == "member"
     assert ev.payload["model"] == ""
     assert ev.payload["usage"] == {
-        "input": 0, "output": 0, "reasoning": 0, "cache_hit": 0, "cache_miss": 0,
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache_hit": 0,
+        "cache_miss": 0,
     }
     assert ev.payload["cost"] == {
-        "input": 0, "cached": 0, "output": 0, "total": 0, "currency": "USD",
+        "input": 0,
+        "cached": 0,
+        "output": 0,
+        "total": 0,
+        "currency": "USD",
     }

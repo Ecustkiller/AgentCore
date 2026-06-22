@@ -41,9 +41,7 @@ class CostEvent(Base):
         Index("ix_cost_events_message", "message_id"),
     )
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     # The assistant turn this run belongs to (== the persisted Message.id), or
@@ -51,9 +49,7 @@ class CostEvent(Base):
     # belong to no turn, so they SUM into the account/conversation totals but stay
     # out of any single turn's per-message 工资单 (queried by message_id) and do
     # not inflate the「请求数」(COUNT(DISTINCT message_id) ignores NULL).
-    message_id: Mapped[str | None] = mapped_column(
-        PG_UUID(as_uuid=False), nullable=True
-    )
+    message_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
     # Idempotency: a retry of the same run must not double-bill, so run_id is
     # unique and the ledger write is an upsert-by-run_id.
     #
@@ -69,26 +65,16 @@ class CostEvent(Base):
     role: Mapped[str] = mapped_column(String(20))
     model: Mapped[str] = mapped_column(String(50))
     # Token counts ({input, output, reasoning, cache_hit, cache_miss}).
-    tokens: Mapped[dict] = mapped_column(
-        JSONB, default=dict, server_default=text("'{}'::jsonb")
-    )
+    tokens: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     # Money is always integer nano-USD (1 USD = 1e9), never float.
     # cost = {input, cached, output, total}.
-    cost: Mapped[dict] = mapped_column(
-        JSONB, default=dict, server_default=text("'{}'::jsonb")
-    )
+    cost: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     # Redundant scalar total so window SUMs run on an integer column (precise +
     # index-friendly), instead of digging into the JSONB each time.
-    cost_total_nano: Mapped[int] = mapped_column(
-        BigInteger, default=0, server_default=text("0")
-    )
-    currency: Mapped[str] = mapped_column(
-        String(8), default="USD", server_default=text("'USD'")
-    )
+    cost_total_nano: Mapped[int] = mapped_column(BigInteger, default=0, server_default=text("0"))
+    currency: Mapped[str] = mapped_column(String(8), default="USD", server_default=text("'USD'"))
     rounds: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
-    duration_ms: Mapped[int] = mapped_column(
-        Integer, default=0, server_default=text("0")
-    )
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     # Correlation key to the turn's runtime logs: joins a spend row to its trace
     # (per-run `run_id` already correlates to worker logs; trace_id gives the
     # turn-level join). NULL on untraced (handoff) turns. See core/log_context.py.

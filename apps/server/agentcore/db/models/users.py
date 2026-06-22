@@ -28,9 +28,7 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint("role in ('user', 'admin')", name="ck_users_role"),
-        CheckConstraint(
-            "status in ('active', 'disabled')", name="ck_users_status"
-        ),
+        CheckConstraint("status in ('active', 'disabled')", name="ck_users_status"),
     )
 
     user_id: Mapped[str] = mapped_column(
@@ -38,9 +36,7 @@ class User(Base):
     )
     # Login identifier (D1: username + password). Unique, required.
     username: Mapped[str] = mapped_column(String(100), unique=True)
-    display_name: Mapped[str] = mapped_column(
-        String(200), server_default=text("''")
-    )
+    display_name: Mapped[str] = mapped_column(String(200), server_default=text("''"))
     # Optional, reserved for future password recovery / OAuth.
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     # Object-storage key of the user's avatar (头像), e.g.
@@ -49,9 +45,7 @@ class User(Base):
     # (UserResponse.avatar_url) so the backend stays agnostic of its public origin.
     # The bytes live in object storage (storage/assets.py), never in the row.
     avatar_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    role: Mapped[str] = mapped_column(
-        String(20), default="user", server_default=text("'user'")
-    )
+    role: Mapped[str] = mapped_column(String(20), default="user", server_default=text("'user'"))
     status: Mapped[str] = mapped_column(
         String(20), default="active", server_default=text("'active'")
     )
@@ -61,9 +55,7 @@ class User(Base):
     # threshold for that dimension; a non-null value (including 0 = unlimited)
     # overrides it. Monthly cost mirrors the config unit (float USD), converted to
     # nano-USD at check time. Resolved by `QuotaLimits.for_user`.
-    is_unlimited: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default=text("false")
-    )
+    is_unlimited: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     quota_daily_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     quota_monthly_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     quota_daily_requests: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -84,18 +76,14 @@ class User(Base):
     # Distinct from `status='disabled'` (admin-disabled, recoverable): a deleted
     # account is terminal. `get_current_user` already refuses non-active users, so a
     # deletion also sets status='disabled' to kill live tokens on the next request.
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class UserBlock(Base):
     __tablename__ = "user_blocks"
 
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
-    blocked_user_id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True
-    )
+    blocked_user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

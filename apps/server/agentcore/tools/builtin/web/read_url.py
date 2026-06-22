@@ -363,9 +363,11 @@ class ReadUrlTool:
             # seen in the team evals (the failure text is what the model reads, so the
             # guidance must ride the runtime error, not only the tool description).
             hint = ""
-            if (
-                isinstance(e, httpx.HTTPStatusError)
-                and e.response.status_code in (401, 403, 429, 451)
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code in (
+                401,
+                403,
+                429,
+                451,
             ):
                 hint = (
                     "。该站点反爬 / 拒绝访问，换 URL 或重试都读不到——"
@@ -404,7 +406,5 @@ class ReadUrlTool:
             duration_ms=int((time.monotonic() - start) * 1000),
             output_limit=max_chars + 1024,
             metadata={"title": title, "content_chars": len(text)},
-            citations=[
-                {"url": url, "title": title, "snippet": snippet, "site": site}
-            ],
+            citations=[{"url": url, "title": title, "snippet": snippet, "site": site}],
         )

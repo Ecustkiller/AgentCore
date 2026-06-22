@@ -49,9 +49,7 @@ class PushNotification:
 
 @runtime_checkable
 class PushSender(Protocol):
-    async def send(
-        self, tokens: Sequence[str], notification: PushNotification
-    ) -> list[str]:
+    async def send(self, tokens: Sequence[str], notification: PushNotification) -> list[str]:
         """Deliver ``notification`` to each token; return the tokens the provider
         reported STALE (unregistered/invalid) so the caller prunes them. Best-effort:
         a transport error logs and is swallowed (a missing push must never break a turn).
@@ -62,9 +60,7 @@ class PushSender(Protocol):
 class NullPushSender:
     """No-op sender (push disabled / unconfigured). Delivers nothing, prunes nothing."""
 
-    async def send(
-        self, tokens: Sequence[str], notification: PushNotification
-    ) -> list[str]:
+    async def send(self, tokens: Sequence[str], notification: PushNotification) -> list[str]:
         return []
 
 
@@ -83,9 +79,7 @@ class FcmPushSender:
         self._client_email = client_email
         self._private_key = private_key
         self._token_uri = token_uri or _DEFAULT_TOKEN_URI
-        self._send_url = (
-            f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
-        )
+        self._send_url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
         self._access_token: str | None = None
         self._access_token_exp = 0.0
         self._token_lock = Lock()
@@ -136,9 +130,7 @@ class FcmPushSender:
                 logger.warning("push.fcm_token_error", error=str(e))
                 return None
 
-    async def send(
-        self, tokens: Sequence[str], notification: PushNotification
-    ) -> list[str]:
+    async def send(self, tokens: Sequence[str], notification: PushNotification) -> list[str]:
         if not tokens:
             return []
         bearer = await self._bearer()

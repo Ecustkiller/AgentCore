@@ -15,10 +15,12 @@ from agentcore.runtime.runs.executor import build_agent_executor
 from agentcore.runtime.runs.types import RunPhase
 from agentcore.runtime.runs.wave import WaveScheduler
 from agentcore.tools.registry import ToolRegistry
-
 from tests.runs_executor.conftest import (
     _ContentProvider,
+    _ctx,
+    _executor,
     _FileWriteTool,
+    _gate,
     _GrantableTool,
     _MeteredRoundThenBoom,
     _OfferRecorder,
@@ -26,9 +28,6 @@ from tests.runs_executor.conftest import (
     _ScriptedRounds,
     _ToolCallThenContent,
     _UsageProvider,
-    _ctx,
-    _executor,
-    _gate,
 )
 
 
@@ -158,9 +157,7 @@ async def test_completed_worker_run_final_fact_carries_full_output_and_reasoning
     log = TurnFactLog()
     token = current_fact_log.set(log)
     try:
-        res = await WaveScheduler().run(
-            plan, _executor(plan, _ReasoningProvider(), EventSink())
-        )
+        res = await WaveScheduler().run(plan, _executor(plan, _ReasoningProvider(), EventSink()))
     finally:
         current_fact_log.reset(token)
 
@@ -172,8 +169,7 @@ async def test_completed_worker_run_final_fact_carries_full_output_and_reasoning
     finals = [
         e
         for e in log.entries()
-        if e["kind"] == FactKind.MESSAGE_FINAL.value
-        and e["payload"].get("run_id") == "t_1"
+        if e["kind"] == FactKind.MESSAGE_FINAL.value and e["payload"].get("run_id") == "t_1"
     ]
     assert len(finals) == 1
     assert finals[0]["payload"]["content"] == "结论"

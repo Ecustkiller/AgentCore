@@ -142,8 +142,7 @@ async def test_revise_emits_revision_node_on_graph():
     events = [e async for e in sink]
     started = [e for e in events if e.type == EventType.RUN_STARTED]
     assert any(
-        e.payload["run_id"] == "t_1_rev1" and e.payload["parent_run_id"] == "t_1"
-        for e in started
+        e.payload["run_id"] == "t_1_rev1" and e.payload["parent_run_id"] == "t_1" for e in started
     )
 
 

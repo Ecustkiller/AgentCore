@@ -356,9 +356,7 @@ class TurnFactLog:
 # loop and every worker append to the SAME ordered log (single source per turn). Reset
 # at turn end. ``None`` outside a turn (standalone engine calls, tests) → recording is
 # a no-op, so the engine's behavior is unchanged when no log is bound.
-current_fact_log: ContextVar[TurnFactLog | None] = ContextVar(
-    "current_fact_log", default=None
-)
+current_fact_log: ContextVar[TurnFactLog | None] = ContextVar("current_fact_log", default=None)
 
 
 def record_turn_fact(fact: Fact) -> None:

@@ -72,9 +72,7 @@ _COMPACT_SYSTEM_PROMPT = """\
 保持紧凑：合并同类项，越早期的越精炼；总长控制在约 __BUDGET__ 字以内。"""
 
 
-def _select_fold(
-    batch: Sequence[Message], *, recency: int, min_fold: int
-) -> list[Message]:
+def _select_fold(batch: Sequence[Message], *, recency: int, min_fold: int) -> list[Message]:
     """The oldest messages to fold this pass: all but the most recent ``recency``.
 
     Returns ``[]`` (a no-op signal — fold nothing, spend no LLM call) unless at least
@@ -163,9 +161,7 @@ async def compact_conversation(
             batch_cap = settings.compaction_max_fold_messages + recency
             msg_repo = MessageRepository(session)
             if conv.compacted_through is None:
-                rows, _total = await msg_repo.list_by_conversation(
-                    conversation_id, limit=batch_cap
-                )
+                rows, _total = await msg_repo.list_by_conversation(conversation_id, limit=batch_cap)
                 batch = list(rows)
             else:
                 rows, _more = await msg_repo.list_after(
@@ -219,9 +215,7 @@ async def compact_conversation(
         )
         return True
     except Exception as e:  # never break anything — the turn already completed
-        logger.warning(
-            "compaction.failed", conversation_id=conversation_id, error=str(e)
-        )
+        logger.warning("compaction.failed", conversation_id=conversation_id, error=str(e))
         return False
 
 
@@ -255,9 +249,7 @@ def schedule_compaction(conversation_id: str, input_tokens: int) -> None:
 
 async def _run(conversation_id: str, input_tokens: int) -> None:
     try:
-        await compact_conversation(
-            conversation_id, trigger_input_tokens=input_tokens
-        )
+        await compact_conversation(conversation_id, trigger_input_tokens=input_tokens)
     finally:
         _inflight.discard(conversation_id)
 

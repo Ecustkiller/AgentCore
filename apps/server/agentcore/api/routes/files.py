@@ -59,9 +59,7 @@ async def rewrite_file_selection(
     无状态、无路径：入参携带选区与前后文文本，返回改写后的选区，交前端用 merge view
     逐块评审。全程不落库。
     """
-    credentials = await _resolve_assist_credentials(
-        session=session, user=user, cost_repo=cost_repo
-    )
+    credentials = await _resolve_assist_credentials(session=session, user=user, cost_repo=cost_repo)
     provider = build_provider(credentials)
     rewritten = await rewrite_selection(
         provider,

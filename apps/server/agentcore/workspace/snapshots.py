@@ -54,9 +54,7 @@ async def create_snapshot(
     return ref
 
 
-async def purge_snapshots(
-    *, user_id: str, folder_id: str | None, conversation_id: str
-) -> None:
+async def purge_snapshots(*, user_id: str, folder_id: str | None, conversation_id: str) -> None:
     """Delete the entire snapshot history for a conversation's workspace (决策⑦)."""
     key = workspace_storage_key(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id

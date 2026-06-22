@@ -29,9 +29,7 @@ _VALID_BODY = {"selection": "今天天气不错", "instruction": "改得更正�
 _REWRITTEN = "改写后的文本"
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> str:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
@@ -66,9 +64,7 @@ def _run(run_id: str, *, total: int) -> dict:
     }
 
 
-async def _seed_spend(
-    session_factory, *, user_id: str, conversation_id: str, total: int
-) -> None:
+async def _seed_spend(session_factory, *, user_id: str, conversation_id: str, total: int) -> None:
     async with session_factory() as session:
         await CostEventRepository(session).record_runs(
             user_id=user_id,

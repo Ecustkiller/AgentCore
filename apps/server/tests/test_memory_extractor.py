@@ -133,9 +133,7 @@ async def test_extractor_returns_parsed_ops():
 async def test_extractor_uses_flash_non_thinking():
     provider = _FakeProvider('{"ops": []}')
     extractor = LLMMemoryExtractor(provider)
-    await extractor.extract(
-        MemoryExtractInput(user_id="u1", current_memory="", messages=[])
-    )
+    await extractor.extract(MemoryExtractInput(user_id="u1", current_memory="", messages=[]))
     req = provider.requests[0]
     assert req.model == "deepseek-v4-flash"
     assert req.thinking is False
@@ -160,9 +158,7 @@ async def test_extractor_prompt_includes_current_memory_and_convo():
 async def test_extractor_malformed_output_yields_no_ops():
     provider = _FakeProvider("I think you prefer Python, but this is prose not JSON.")
     extractor = LLMMemoryExtractor(provider)
-    ops = await extractor.extract(
-        MemoryExtractInput(user_id="u1", current_memory="", messages=[])
-    )
+    ops = await extractor.extract(MemoryExtractInput(user_id="u1", current_memory="", messages=[]))
     assert ops == []
 
 

@@ -196,9 +196,7 @@ async def test_repeated_failure_nudge_is_failure_flavored():
     # the distinctive repeated-failure nudge (anchored to the exact-repeat count) is
     # injected exactly once
     nudges = [
-        m
-        for m in messages
-        if m.role == "user" and m.content and "已用相同方式失败" in m.content
+        m for m in messages if m.role == "user" and m.content and "已用相同方式失败" in m.content
     ]
     assert len(nudges) == 1
 
@@ -241,9 +239,7 @@ async def test_max_rounds_exhaustion_forces_nonempty_answer():
 
 async def test_clean_answer_has_no_governance_injection():
     # A normal tool-then-answer turn must not inject any governance messages.
-    provider = _ScriptedProvider(
-        [[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]]
-    )
+    provider = _ScriptedProvider([[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]])
     tool = _StubTool()
     (content, *_), messages = await _run(provider, tool, max_rounds=20)
 
@@ -255,9 +251,7 @@ async def test_clean_answer_has_no_governance_injection():
 async def test_research_tool_citations_collected_into_sink():
     # A successful research tool's citations land in the caller's sink.
     cites = [{"url": "https://a.com", "title": "A", "snippet": "s", "site": "a.com"}]
-    provider = _ScriptedProvider(
-        [[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]]
-    )
+    provider = _ScriptedProvider([[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]])
     sink_list: list[dict] = []
     (content, *_), _ = await _run(
         provider, _StubTool(citations=cites), max_rounds=20, citation_sink=sink_list
@@ -292,9 +286,7 @@ async def test_citation_numbers_injected_into_tool_output():
         {"url": "https://a.com", "title": "A", "snippet": "", "site": "a.com"},
         {"url": "https://b.com", "title": "B", "snippet": "", "site": "b.com"},
     ]
-    provider = _ScriptedProvider(
-        [[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]]
-    )
+    provider = _ScriptedProvider([[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]])
     sink_list: list[dict] = []
     (content, *_), messages = await _run(
         provider, _StubTool(citations=cites), max_rounds=20, citation_sink=sink_list
@@ -364,9 +356,7 @@ async def test_worker_path_collects_citations_without_annotating():
         {"url": "https://a.com", "title": "A", "snippet": "", "site": "a.com"},
         {"url": "https://b.com", "title": "B", "snippet": "", "site": "b.com"},
     ]
-    provider = _ScriptedProvider(
-        [[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]]
-    )
+    provider = _ScriptedProvider([[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]])
     sink_list: list[dict] = []
     (content, *_), messages = await _run(
         provider,
@@ -477,8 +467,7 @@ def test_resolve_tool_timeout_by_category():
         == settings.tool_execution_timeout_seconds
     )
     assert (
-        resolve_tool_timeout(_schema(ToolCategory.SEARCH))
-        == settings.tool_default_timeout_seconds
+        resolve_tool_timeout(_schema(ToolCategory.SEARCH)) == settings.tool_default_timeout_seconds
     )
     assert (
         resolve_tool_timeout(_schema(ToolCategory.FILESYSTEM))
@@ -517,9 +506,7 @@ async def test_tool_timeout_aborts_and_loop_recovers():
     # A tool that blows its (tiny) ceiling is aborted by the engine: the model gets a
     # timeout tool result it can adapt to, and the turn reaches an answer instead of
     # hanging on the wedged call. The tool's own body is cancelled (never completes).
-    provider = _ScriptedProvider(
-        [[_tool_chunk("slow", "{}")], [_content_chunk("recovered")]]
-    )
+    provider = _ScriptedProvider([[_tool_chunk("slow", "{}")], [_content_chunk("recovered")]])
     tool = _SlowTool(delay=5.0, timeout_seconds=0.05)
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
     profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
@@ -721,9 +708,7 @@ async def test_reflection_injected_on_long_run_cadence():
     # periodic reflection fires, on the round_idx 3 / 6 cadence (the 4th / 7th round),
     # anchored to the round number. A non-investigation tool (EXECUTION, not a read) keeps
     # the convergence safety net dormant so this stays an isolated reflection-cadence check.
-    rounds: list[list[LLMChunk]] = [
-        [_tool_chunk("compute", '{"q": "%d"}' % i)] for i in range(8)
-    ]
+    rounds: list[list[LLMChunk]] = [[_tool_chunk("compute", '{"q": "%d"}' % i)] for i in range(8)]
     rounds.append([_content_chunk("final")])
     provider = _ScriptedProvider(rounds)
     (content, *_), messages = await _run(
@@ -731,11 +716,7 @@ async def test_reflection_injected_on_long_run_cadence():
     )
 
     assert content == "final"
-    reviews = [
-        m
-        for m in messages
-        if m.role == "user" and m.content and "进度复盘" in m.content
-    ]
+    reviews = [m for m in messages if m.role == "user" and m.content and "进度复盘" in m.content]
     assert len(reviews) == 2  # injected after round_idx 3 and 6
     assert any("已进行 4 轮" in (m.content or "") for m in reviews)
     assert any("已进行 7 轮" in (m.content or "") for m in reviews)
@@ -800,7 +781,9 @@ async def _run_with_registry(provider: _ScriptedProvider, reg: ToolRegistry):
 
 
 def _finalizes(messages: list[LLMMessage]) -> list[LLMMessage]:
-    return [m for m in messages if m.role == "user" and m.content and "停止使用任何工具" in m.content]
+    return [
+        m for m in messages if m.role == "user" and m.content and "停止使用任何工具" in m.content
+    ]
 
 
 def _convergence_steers(messages: list[LLMMessage]) -> list[LLMMessage]:

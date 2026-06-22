@@ -11,12 +11,11 @@ from agentcore.runtime.runs.wave import WaveScheduler
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.protocol import ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
-
 from tests.runs_executor.conftest import (
     _ContentProvider,
-    _ScriptedRounds,
     _ctx,
     _executor,
+    _ScriptedRounds,
 )
 
 
@@ -211,9 +210,7 @@ async def test_worker_escalation_emits_live_event_before_completion():
 
 async def test_worker_without_escalation_has_empty_list():
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
-    res = await WaveScheduler().run(
-        plan, _executor(plan, _ContentProvider(["OUT"]), EventSink())
-    )
+    res = await WaveScheduler().run(plan, _executor(plan, _ContentProvider(["OUT"]), EventSink()))
     assert res["t_1"].escalations == []
 
 

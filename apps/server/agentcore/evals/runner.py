@@ -136,7 +136,5 @@ async def run_suite(
             path=case.path,
             samples=case.samples,
         )
-        all_reports.extend(
-            await run_case_report(case, runner_harness, judge=judge, layer=layer)
-        )
+        all_reports.extend(await run_case_report(case, runner_harness, judge=judge, layer=layer))
     return EvalReport(cases=all_reports)

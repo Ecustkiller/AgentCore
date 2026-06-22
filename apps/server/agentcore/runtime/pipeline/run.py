@@ -1,37 +1,33 @@
 """Fresh-turn chat pipeline: Prepare -> Execute -> Finalize."""
 
-from agentcore.runtime.pipeline.prepare import _assemble_ceo_toolset, _build_attachment_context
-from agentcore.runtime.pipeline.finalize import _build_runs_payload, _durable_journal_entries
-import agentcore.runtime.pipeline as pipeline_pkg
-
 import contextlib
 from dataclasses import asdict
-from typing import Any, NamedTuple
 
+import agentcore.runtime.pipeline as pipeline_pkg
 from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolEffect, new_id
+from agentcore.core.types import new_id
 from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.modes import ProfileSet, default_profile_set
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.protocol import TokenUsage
 from agentcore.memory import default_memory_store
 from agentcore.runtime.approvals import ApprovalGate
-from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.citations import merge_citations, out_of_range_markers
+from agentcore.runtime.context import (
+    ContextAssembler,
+    SectionOrder,
+    build_workspace_overview,
+)
 from agentcore.runtime.costing import aggregate_cost, captain_run_cost_from_state
-from agentcore.runtime.engine import join_segments
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
-    checkpoint_resolved,
     citations_event,
-    content_delta,
     error_event,
     message_end,
     message_start,
-    plan_review_resolved,
 )
 from agentcore.runtime.facts import (
     TurnFactLog,
@@ -39,18 +35,9 @@ from agentcore.runtime.facts import (
     current_fact_log,
     record_turn_fact,
 )
-from agentcore.runtime.context import (
-    ContextAssembler,
-    SectionOrder,
-    build_workspace_overview,
-)
 from agentcore.runtime.interaction import default_interaction_registry
-from agentcore.runtime.journal import (
-    completed_from_journal,
-    entries_from_runs,
-    plan_from_journal,
-    window_from_journal,
-)
+from agentcore.runtime.pipeline.finalize import _build_runs_payload, _durable_journal_entries
+from agentcore.runtime.pipeline.prepare import _assemble_ceo_toolset, _build_attachment_context
 from agentcore.runtime.prompt import (
     assemble_system_prompt,
     compose_ceo_chat_prompt,
@@ -60,7 +47,6 @@ from agentcore.runtime.runs import (
     RunPhase,
     RunSpec,
     build_captain_executor,
-    build_captain_resumer,
 )
 from agentcore.runtime.sessions import (
     SessionLoader,
@@ -68,33 +54,23 @@ from agentcore.runtime.sessions import (
     default_session_registry,
 )
 from agentcore.runtime.skills import (
-    SkillRegistry,
     build_system_skill_registry,
 )
 from agentcore.runtime.suspension import (
-    AskUserSuspension,
-    PlanReviewSuspension,
     SuspensionDeleter,
     SuspensionSaver,
-    TurnSuspension,
-    captain_transcript,
     turn_history,
 )
 from agentcore.tools.builtin import (
-    build_ceo_tool_registry,
     build_worker_registry,
     file_mutation_tool_names,
 )
-from agentcore.tools.builtin.ask_user import AskUserTool, ask_user_tool_result
-from agentcore.tools.builtin.consult_skill import ConsultSkillTool
-from agentcore.tools.builtin.debate import DebateTool
-from agentcore.tools.builtin.delegate import DelegateTool
-from agentcore.tools.builtin.revise import ReviseTool
 from agentcore.tools.protocol import ToolContext
-from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
+
+
 async def run_chat_pipeline(
     *,
     conversation_id: str,
@@ -169,9 +145,7 @@ async def run_chat_pipeline(
         # assembly (assemble joins with "\n"), so the delegated team still sees the
         # user's files while the worker's own stable prefix (base) stays cacheable.
         worker_base_prompt = (
-            f"{system_prompt}\n{attachment_context}"
-            if attachment_context
-            else system_prompt
+            f"{system_prompt}\n{attachment_context}" if attachment_context else system_prompt
         )
         worker_tools = build_worker_registry()
         # System skills (提示词瘦身 P2): the advanced-mechanism guidance the CEO pulls
@@ -400,9 +374,7 @@ async def run_chat_pipeline(
             + TokenUsage.from_usage_dict(debate_tool.usage)
         )
         finish = captain_state.finish_override or (
-            FinishReason.END_TURN
-            if rounds < profile.max_rounds
-            else FinishReason.MAX_ROUNDS
+            FinishReason.END_TURN if rounds < profile.max_rounds else FinishReason.MAX_ROUNDS
         )
 
         # Per-run cost ledger for 落账 (决策②: captain root + one row per member).

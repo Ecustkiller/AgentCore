@@ -43,9 +43,7 @@ class FolderRepository:
         await self._session.refresh(folder)
         return folder
 
-    async def get_by_id(
-        self, folder_id: str, *, user_id: str | None = None
-    ) -> Folder | None:
+    async def get_by_id(self, folder_id: str, *, user_id: str | None = None) -> Folder | None:
         conditions = [Folder.id == folder_id, Folder.deleted_at.is_(None)]
         if user_id is not None:
             conditions.append(Folder.user_id == user_id)
@@ -61,9 +59,7 @@ class FolderRepository:
         )
         return result.scalars().all()
 
-    async def search(
-        self, user_id: str, query: str, *, limit: int
-    ) -> Sequence[Folder]:
+    async def search(self, user_id: str, query: str, *, limit: int) -> Sequence[Folder]:
         """Owner-scoped folder-name substring search (全局搜索 Tier 1).
 
         ILIKE over ``name``, most-recently-updated first, capped at ``limit``;
@@ -138,9 +134,7 @@ class FolderRepository:
         await self._session.commit()
         return True
 
-    async def list_purgeable(
-        self, *, before: datetime, limit: int
-    ) -> Sequence[Folder]:
+    async def list_purgeable(self, *, before: datetime, limit: int) -> Sequence[Folder]:
         """Soft-deleted folders whose ``deleted_at`` is at/older than ``before``.
 
         Backs retention cleanup (决策⑦). A deleted folder's conversations were

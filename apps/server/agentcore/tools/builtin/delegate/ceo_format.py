@@ -65,8 +65,7 @@ def escalation_block(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
             "以下是队员无法独自拍板、需要你定夺的关键岔路 / 缺失信息。它们已按各自的暂定假设"
             "继续交付，但你应先处理这些问题：能自己答的就在概览里给出并据此判断相关产物是否需"
             "返工；确需用户拍板的就用 ask_user 问（可把问题 near-verbatim 转给用户）；需要原"
-            "作者据答案重做的就用 revise 唤回。\n"
-            + "\n".join(line for _, line in pending)
+            "作者据答案重做的就用 revise 唤回。\n" + "\n".join(line for _, line in pending)
         )
     if answered:
         out += (

@@ -16,17 +16,13 @@ from agentcore.db.repositories import HandoffJobRepository
 _PW = "password123"
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> str:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
     )
     assert r.status_code == 201, r.text
-    r = await client.post(
-        "/v1/auth/login", json={"username": username, "password": _PW}
-    )
+    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
     assert r.status_code == 200, r.text
     return r.json()["id"]
 
@@ -45,9 +41,7 @@ async def test_handoff_requires_auth(client):
             json={"task": "x"},
         )
     ).status_code == 401
-    assert (
-        await client.get(f"/v1/conversations/{cid}/handoff/jobs")
-    ).status_code == 401
+    assert (await client.get(f"/v1/conversations/{cid}/handoff/jobs")).status_code == 401
     assert (
         await client.post(
             f"/v1/conversations/{cid}/handoff/jobs/{cid}/apply",
@@ -80,17 +74,13 @@ async def test_jobs_list_empty_unknown_and_idor(client, make_invite, new_client)
     assert r.json() == {"data": [], "total": 0}
 
     # An unknown job id under the conversation is a 404.
-    assert (
-        await client.get(f"/v1/conversations/{conv}/handoff/jobs/{conv}")
-    ).status_code == 404
+    assert (await client.get(f"/v1/conversations/{conv}/handoff/jobs/{conv}")).status_code == 404
 
     # IDOR: a non-owner cannot list another user's conversation jobs.
     code2 = await make_invite("INV-H3")
     async with new_client() as other:
         await _register_and_login(other, code2, "hjintruder")
-        assert (
-            await other.get(f"/v1/conversations/{conv}/handoff/jobs")
-        ).status_code == 404
+        assert (await other.get(f"/v1/conversations/{conv}/handoff/jobs")).status_code == 404
 
 
 async def _seed_job(session_factory, *, user_id, source_conversation_id, succeeded=False):

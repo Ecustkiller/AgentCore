@@ -52,9 +52,7 @@ class HandoffJobRepository:
         await self._session.refresh(job)
         return job
 
-    async def get_by_id(
-        self, job_id: str, *, user_id: str | None = None
-    ) -> HandoffJob | None:
+    async def get_by_id(self, job_id: str, *, user_id: str | None = None) -> HandoffJob | None:
         conditions = [HandoffJob.id == job_id]
         if user_id is not None:
             conditions.append(HandoffJob.user_id == user_id)
@@ -77,9 +75,7 @@ class HandoffJobRepository:
 
     async def mark_running(self, job_id: str) -> None:
         await self._session.execute(
-            update(HandoffJob)
-            .where(HandoffJob.id == job_id)
-            .values(status="running")
+            update(HandoffJob).where(HandoffJob.id == job_id).values(status="running")
         )
         await self._session.commit()
 
@@ -321,9 +317,7 @@ class TurnJournalRepository:
         full, current fact stream without duplicating the pre-pause prefix. A no-op
         for empty ``entries`` after clearing any stale rows.
         """
-        await self._session.execute(
-            delete(TurnJournalRow).where(TurnJournalRow.turn_id == turn_id)
-        )
+        await self._session.execute(delete(TurnJournalRow).where(TurnJournalRow.turn_id == turn_id))
         if entries:
             self._session.add_all(
                 [
@@ -348,10 +342,7 @@ class TurnJournalRepository:
             .where(TurnJournalRow.turn_id == turn_id)
             .order_by(TurnJournalRow.seq.asc())
         )
-        return [
-            {"kind": r.kind, "payload": r.payload, "ts": r.ts}
-            for r in result.scalars().all()
-        ]
+        return [{"kind": r.kind, "payload": r.payload, "ts": r.ts} for r in result.scalars().all()]
 
     async def load_owned(self, turn_id: str, conversation_id: str) -> list[dict]:
         """One turn's facts, scoped to its conversation (IDOR-safe read).
@@ -369,10 +360,7 @@ class TurnJournalRepository:
             )
             .order_by(TurnJournalRow.seq.asc())
         )
-        return [
-            {"kind": r.kind, "payload": r.payload, "ts": r.ts}
-            for r in result.scalars().all()
-        ]
+        return [{"kind": r.kind, "payload": r.payload, "ts": r.ts} for r in result.scalars().all()]
 
     async def load_map(self, turn_ids: Sequence[str]) -> dict[str, list[dict]]:
         """Several turns' facts keyed by ``turn_id`` (ordered entries), batched.
@@ -482,9 +470,7 @@ class TurnMetricsRepository:
             .label("p95_duration"),
             func.coalesce(func.avg(TurnMetricsRow.rounds), 0).label("avg_rounds"),
             func.coalesce(func.sum(TurnMetricsRow.input_tokens), 0).label("input_tokens"),
-            func.coalesce(func.sum(TurnMetricsRow.output_tokens), 0).label(
-                "output_tokens"
-            ),
+            func.coalesce(func.sum(TurnMetricsRow.output_tokens), 0).label("output_tokens"),
         ).where(TurnMetricsRow.created_at >= since)
         row = (await self._session.execute(stmt)).one()
         return {
@@ -540,9 +526,7 @@ class TurnMetricsRepository:
         )
         return result.scalars().all()
 
-    async def list_for_conversation(
-        self, conversation_id: str
-    ) -> Sequence[TurnMetricsRow]:
+    async def list_for_conversation(self, conversation_id: str) -> Sequence[TurnMetricsRow]:
         """Every turn's telemetry for one conversation, oldest-first (会话复盘).
 
         The 复盘 timeline joins these to the conversation's messages by ``trace_id``;

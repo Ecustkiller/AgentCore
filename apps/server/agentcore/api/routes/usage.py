@@ -143,16 +143,12 @@ async def get_usage_summary(
 
     today = await repo.aggregate_for_window(user_id=user.user_id, since=day_start)
     month = await repo.aggregate_for_window(user_id=user.user_id, since=month_start)
-    month_by_role = await repo.aggregate_by_role_for_window(
-        user_id=user.user_id, since=month_start
-    )
+    month_by_role = await repo.aggregate_by_role_for_window(user_id=user.user_id, since=month_start)
 
     # 近 7 日趋势: zero-fill the daily map into a fixed, oldest-first series ending
     # today, so the sparkline is a stable length even for sparse spend.
     trend_start = day_start - timedelta(days=_TREND_DAYS - 1)
-    daily = await repo.aggregate_daily_for_window(
-        user_id=user.user_id, since=trend_start
-    )
+    daily = await repo.aggregate_daily_for_window(user_id=user.user_id, since=trend_start)
     recent_daily_cost = []
     for i in range(_TREND_DAYS):
         iso = (trend_start + timedelta(days=i)).date().isoformat()

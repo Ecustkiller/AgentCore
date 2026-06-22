@@ -76,9 +76,7 @@ async def _round_trip(coro, sink: EventSink, registry: InteractionRegistry, resp
     """Drive one op: start it, answer it as the desktop would, return (result, event)."""
     task = asyncio.create_task(coro)
     event = await _await_request(sink)
-    assert registry.resolve(
-        event.payload["request_id"], response, conversation_id=CONV
-    )
+    assert registry.resolve(event.payload["request_id"], response, conversation_id=CONV)
     return await task, event
 
 
@@ -133,9 +131,7 @@ async def test_index_files_parses_paths_and_truncation():
 async def test_index_files_tolerates_empty_envelope():
     local, registry, sink = _make()
     # A not-yet-promoted / empty workspace answers with a bare ok — degrade to ([], False).
-    (paths, truncated), _ = await _round_trip(
-        local.index_files(), sink, registry, {"ok": True}
-    )
+    (paths, truncated), _ = await _round_trip(local.index_files(), sink, registry, {"ok": True})
     assert paths == [] and truncated is False
 
 
@@ -216,9 +212,7 @@ async def test_ambiguous_match_carries_count():
     local, registry, sink = _make()
     response = {"ok": False, "error": {"kind": "AmbiguousMatch", "count": 4}}
     with pytest.raises(AmbiguousMatch) as ei:
-        await _round_trip(
-            local.replace("a.py", "x", "y", all_=False), sink, registry, response
-        )
+        await _round_trip(local.replace("a.py", "x", "y", all_=False), sink, registry, response)
     assert ei.value.count == 4
 
 

@@ -34,6 +34,4 @@ FINALIZE_INSTRUCTION = (
 # their own lifecycle instead — delegate/revise drive sub-DAGs (each constituent
 # tool call is itself bounded), ask_user waits on the user behind its own checkpoint
 # timeout. A flat ceiling here would wrongly kill a legitimate long wait.
-TIMEOUT_EXEMPT_CATEGORIES = frozenset(
-    {ToolCategory.ORCHESTRATION, ToolCategory.INTERACTION}
-)
+TIMEOUT_EXEMPT_CATEGORIES = frozenset({ToolCategory.ORCHESTRATION, ToolCategory.INTERACTION})

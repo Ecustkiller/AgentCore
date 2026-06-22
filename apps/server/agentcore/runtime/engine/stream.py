@@ -63,9 +63,7 @@ async def stream_llm_round(
                     name = tc_accumulators[idx]["name"]
                     chars = len(tc_accumulators[idx]["arguments"])
                     last = tc_progress_at.get(idx)
-                    if name and (
-                        last is None or chars - last >= TOOL_PROGRESS_STEP
-                    ):
+                    if name and (last is None or chars - last >= TOOL_PROGRESS_STEP):
                         tc_progress_at[idx] = chars
                         on_tool_progress(name, chars)
 

@@ -65,9 +65,7 @@ class LLMInsufficientBalanceError(LLMError):
 
     def __init__(
         self,
-        message: str = (
-            "DeepSeek 账户余额不足，请前往 DeepSeek 开放平台充值后重试。"
-        ),
+        message: str = ("DeepSeek 账户余额不足，请前往 DeepSeek 开放平台充值后重试。"),
         **kwargs,
     ):
         super().__init__(message, **kwargs)
@@ -89,9 +87,7 @@ class LLMAuthError(LLMError):
 
     def __init__(
         self,
-        message: str = (
-            "DeepSeek API Key 无效或无权限，请在「设置 · 模型配置」中更新后重试。"
-        ),
+        message: str = ("DeepSeek API Key 无效或无权限，请在「设置 · 模型配置」中更新后重试。"),
         **kwargs,
     ):
         super().__init__(message, **kwargs)
@@ -182,9 +178,7 @@ class RateLimitedError(AgentCoreError):
     code = ErrorCode.RATE_LIMITED
     status_code = 429
 
-    def __init__(
-        self, message: str = "", *, retry_after: float | None = None, **kwargs
-    ):
+    def __init__(self, message: str = "", *, retry_after: float | None = None, **kwargs):
         self.retry_after = retry_after
         super().__init__(message, retry_after=retry_after, **kwargs)
 

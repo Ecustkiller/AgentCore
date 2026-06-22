@@ -37,9 +37,7 @@ def process_avatar(data: bytes) -> bytes:
             )
             img = img.convert("RGBA" if has_alpha else "RGB")
             # fit = center-crop to the target aspect (square) then resize to exact size.
-            square = ImageOps.fit(
-                img, (AVATAR_SIZE, AVATAR_SIZE), Image.Resampling.LANCZOS
-            )
+            square = ImageOps.fit(img, (AVATAR_SIZE, AVATAR_SIZE), Image.Resampling.LANCZOS)
             buffer = io.BytesIO()
             square.save(buffer, format="WEBP", quality=_WEBP_QUALITY, method=4)
             return buffer.getvalue()

@@ -178,9 +178,7 @@ def fingerprint_tool_call(name: str, arguments: str) -> str:
     """
     try:
         parsed = json.loads(arguments) if arguments else {}
-        normalized = json.dumps(
-            parsed, sort_keys=True, ensure_ascii=False, separators=(",", ":")
-        )
+        normalized = json.dumps(parsed, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     except (json.JSONDecodeError, TypeError):
         normalized = arguments or ""
     return hashlib.sha1(f"{name}\x00{normalized}".encode()).hexdigest()
@@ -326,9 +324,7 @@ class LoopController:
         the streak, so only a sustained all-failing-no-output run escalates.
         """
         unproductive = had_tool_calls and all_failed and not had_content
-        self._consecutive_unproductive = (
-            self._consecutive_unproductive + 1 if unproductive else 0
-        )
+        self._consecutive_unproductive = self._consecutive_unproductive + 1 if unproductive else 0
 
     def unproductive_early_stop(self) -> bool:
         """True once the consecutive-unproductive streak hits the threshold."""

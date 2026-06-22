@@ -27,6 +27,7 @@ import asyncio
 import json
 from pathlib import Path
 
+from agentcore.core.types import ToolCategory  # noqa: F401 — parity with engine-facts harness
 from agentcore.llm.config import ModelProfile
 from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
@@ -42,7 +43,6 @@ from agentcore.runtime.journal import (
 )
 from agentcore.runtime.runs.serialize import plan_to_json, state_map_to_json
 from agentcore.runtime.suspension import captain_transcript
-from agentcore.core.types import ToolCategory  # noqa: F401 — parity with engine-facts harness
 from agentcore.tools.builtin.ask_user import AskUserTool
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.protocol import ToolContext
@@ -79,9 +79,7 @@ class _ResolveBridge:
     def __init__(self, decision: CheckpointDecision) -> None:
         self._decision = decision
 
-    async def suspend(
-        self, request_id, conversation_id, *, kind, payload, timeout, on_suspended
-    ):  # noqa: ANN001 - duck-typed for AskUserTool
+    async def suspend(self, request_id, conversation_id, *, kind, payload, timeout, on_suspended):  # noqa: ANN001 - duck-typed for AskUserTool
         assert kind is InteractionKind.ASK_USER
         on_suspended()
         return CheckpointResponse(decision=self._decision, note="stop", selected=[])
@@ -187,9 +185,7 @@ async def test_pause_journal_projects_to_captain_transcript():
         LLMMessage(role="system", content=system_prompt),
         LLMMessage(role="user", content=user_message),
     ]
-    profile = ModelProfile(
-        model="m", thinking=False, reasoning_effort=None, max_rounds=5
-    )
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=5)
     log = TurnFactLog()
     log.record_fact(
         TurnStartedFact(
@@ -276,16 +272,21 @@ async def test_pause_journal_after_completed_tool_round():
             [
                 LLMChunk(
                     delta_tool_calls=[
-                        ToolCallDelta(index=0, id="c_search", function_name="search",
-                                      arguments_delta="{}")
+                        ToolCallDelta(
+                            index=0, id="c_search", function_name="search", arguments_delta="{}"
+                        )
                     ]
                 )
             ],
             [
                 LLMChunk(
                     delta_tool_calls=[
-                        ToolCallDelta(index=0, id="call_ask", function_name="ask_user",
-                                      arguments_delta=f'{{"message": "{user_message}"}}')
+                        ToolCallDelta(
+                            index=0,
+                            id="call_ask",
+                            function_name="ask_user",
+                            arguments_delta=f'{{"message": "{user_message}"}}',
+                        )
                     ]
                 )
             ],
@@ -307,8 +308,14 @@ async def test_pause_journal_after_completed_tool_round():
     ct_token = captain_transcript.set(messages)
     try:
         await react_loop(
-            messages=messages, llm=provider, tools=reg, sink=sink,
-            tool_context=_context(), profile=profile, run_id="cap", role="captain",
+            messages=messages,
+            llm=provider,
+            tools=reg,
+            sink=sink,
+            tool_context=_context(),
+            profile=profile,
+            run_id="cap",
+            role="captain",
         )
     finally:
         captain_transcript.reset(ct_token)
@@ -323,7 +330,11 @@ async def test_pause_journal_after_completed_tool_round():
     # The shape: system, user, assistant(search), tool(found), assistant(ask_user).
     transcript = captured["transcript"]
     assert [m.role for m in transcript] == [  # type: ignore[union-attr]
-        "system", "user", "assistant", "tool", "assistant"
+        "system",
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
     ]
     assert transcript[3].content == "found it"  # type: ignore[index]
     assert transcript[4].tool_calls[0].function.name == "ask_user"  # type: ignore[index]
@@ -510,6 +521,7 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript():
     assert plan_to_json(projected_plan) == captured["plan_json"]
     # Both nodes (s1 ran, s2 pending) survive with their minted ids + dependency edge.
     assert [n.run_id for n in projected_plan.nodes] == [
-        n["run_id"] for n in captured["plan_json"]["nodes"]  # type: ignore[index]
+        n["run_id"]
+        for n in captured["plan_json"]["nodes"]  # type: ignore[index]
     ]
     assert projected_plan.nodes[1].depends_on == [projected_plan.nodes[0].run_id]

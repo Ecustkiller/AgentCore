@@ -348,7 +348,9 @@ class DelegateTool:
 
         return can_persist_suspension(self)
 
-    async def _persist_suspension(self, checkpoint_id, plan, completed, steps, pending, required_event):
+    async def _persist_suspension(
+        self, checkpoint_id, plan, completed, steps, pending, required_event
+    ):
         from agentcore.tools.builtin.delegate.suspension import persist_suspension
 
         await persist_suspension(

@@ -5,10 +5,10 @@ The ``pytest_configure`` hook here is the single owner of pytest's temp-dir loca
 the Windows WinError 5 traps it dodges.
 """
 
+import contextlib
 import os
 import shutil
 import stat
-import sys
 import tempfile
 import time
 import uuid
@@ -40,13 +40,8 @@ def _rmtree_quiet(path: Path) -> None:
         except OSError:
             pass
 
-    try:
-        if sys.version_info >= (3, 12):
-            shutil.rmtree(path, onexc=_retry)
-        else:  # pragma: no cover - project runs on 3.13
-            shutil.rmtree(path, onerror=lambda f, p, _e: _retry(f, p, None))
-    except OSError:
-        pass
+    with contextlib.suppress(OSError):
+        shutil.rmtree(path, onexc=_retry)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -81,9 +76,7 @@ def pytest_configure(config: pytest.Config) -> None:
         except OSError:
             continue
         _rmtree_quiet(stale)
-    config.option.basetemp = str(
-        root / f"{_TMP_PREFIX}{os.getpid()}_{uuid.uuid4().hex[:8]}"
-    )
+    config.option.basetemp = str(root / f"{_TMP_PREFIX}{os.getpid()}_{uuid.uuid4().hex[:8]}")
 
 
 @pytest.fixture

@@ -45,9 +45,7 @@ async def list_conversation_snapshots(
     )
 
 
-@router.post(
-    "/{conversation_id}/snapshots", response_model=SnapshotSummary, status_code=201
-)
+@router.post("/{conversation_id}/snapshots", response_model=SnapshotSummary, status_code=201)
 async def create_conversation_snapshot(
     conversation_id: str,
     body: CreateSnapshotRequest,
@@ -71,9 +69,7 @@ async def create_conversation_snapshot(
     return SnapshotSummary.model_validate(ref)
 
 
-@router.post(
-    "/{conversation_id}/snapshots/{snapshot_id}/restore", response_model=StatusResponse
-)
+@router.post("/{conversation_id}/snapshots/{snapshot_id}/restore", response_model=StatusResponse)
 async def restore_conversation_snapshot(
     conversation_id: str,
     snapshot_id: str,

@@ -154,9 +154,7 @@ class InteractionRegistry:
         """Forget a request once its awaiter is done with it."""
         self._pending.pop(request_id, None)
 
-    def list_pending(
-        self, conversation_id: str | None = None
-    ) -> list[InteractionRequest]:
+    def list_pending(self, conversation_id: str | None = None) -> list[InteractionRequest]:
         """All un-settled interactions, optionally scoped to one conversation."""
         items = [r for r in self._pending.values() if not r.future.done()]
         if conversation_id is not None:

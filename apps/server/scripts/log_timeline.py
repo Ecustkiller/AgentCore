@@ -45,10 +45,7 @@ async def fetch_conversation(conn: Any, conv_id: str) -> dict | None:
 
     row = (
         await conn.execute(
-            text(
-                "SELECT id, title, agent_id, created_at FROM conversations "
-                "WHERE id = :cid"
-            ),
+            text("SELECT id, title, agent_id, created_at FROM conversations WHERE id = :cid"),
             {"cid": conv_id},
         )
     ).first()

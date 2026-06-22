@@ -66,9 +66,7 @@ class MessageRepository:
         )
         return result.scalar_one()
 
-    async def counts_for_conversations(
-        self, conversation_ids: Sequence[str]
-    ) -> dict[str, int]:
+    async def counts_for_conversations(self, conversation_ids: Sequence[str]) -> dict[str, int]:
         """Message counts keyed by conversation id, for the ids given.
 
         One GROUP BY for the whole sidebar so per-conversation counts don't fan out
@@ -126,9 +124,7 @@ class MessageRepository:
         )
         return result.scalars().all(), total
 
-    async def list_all_for_conversation(
-        self, conversation_id: str
-    ) -> Sequence[Message]:
+    async def list_all_for_conversation(self, conversation_id: str) -> Sequence[Message]:
         """Every message of a conversation, oldest-first — the full transcript.
 
         Backs export (导出对话) and the share snapshot (分享对话): both freeze/serialize
@@ -143,9 +139,7 @@ class MessageRepository:
         )
         return result.scalars().all()
 
-    async def list_recent(
-        self, conversation_id: str, *, limit: int
-    ) -> Sequence[Message]:
+    async def list_recent(self, conversation_id: str, *, limit: int) -> Sequence[Message]:
         """The most recent ``limit`` messages, returned in chronological order.
 
         Unlike ``list_by_conversation`` (oldest-first page), this tails the
@@ -198,13 +192,17 @@ class MessageRepository:
     ) -> tuple[Sequence[Message], bool]:
         """The newest ``limit`` messages, chronological. ``(messages, has_more_before)``."""
         rows = (
-            await self._session.execute(
-                select(Message)
-                .where(Message.conversation_id == conversation_id)
-                .order_by(Message.created_at.desc())
-                .limit(limit + 1)
+            (
+                await self._session.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conversation_id)
+                    .order_by(Message.created_at.desc())
+                    .limit(limit + 1)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         has_more_before = len(rows) > limit
         return list(reversed(rows[:limit])), has_more_before
 
@@ -216,16 +214,20 @@ class MessageRepository:
         ``(messages, has_more_before)`` — whether even older messages remain.
         """
         rows = (
-            await self._session.execute(
-                select(Message)
-                .where(
-                    Message.conversation_id == conversation_id,
-                    Message.created_at < before,
+            (
+                await self._session.execute(
+                    select(Message)
+                    .where(
+                        Message.conversation_id == conversation_id,
+                        Message.created_at < before,
+                    )
+                    .order_by(Message.created_at.desc())
+                    .limit(limit + 1)
                 )
-                .order_by(Message.created_at.desc())
-                .limit(limit + 1)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         has_more_before = len(rows) > limit
         return list(reversed(rows[:limit])), has_more_before
 
@@ -237,16 +239,20 @@ class MessageRepository:
         ``(messages, has_more_after)`` — whether even newer messages remain.
         """
         rows = (
-            await self._session.execute(
-                select(Message)
-                .where(
-                    Message.conversation_id == conversation_id,
-                    Message.created_at > after,
+            (
+                await self._session.execute(
+                    select(Message)
+                    .where(
+                        Message.conversation_id == conversation_id,
+                        Message.created_at > after,
+                    )
+                    .order_by(Message.created_at.asc())
+                    .limit(limit + 1)
                 )
-                .order_by(Message.created_at.asc())
-                .limit(limit + 1)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         has_more_after = len(rows) > limit
         return rows[:limit], has_more_after
 
@@ -277,15 +283,11 @@ class MessageRepository:
         than the stored watermark, and stamps the watermark to it after a pass.
         """
         result = await self._session.execute(
-            select(func.max(Message.created_at)).where(
-                Message.conversation_id == conversation_id
-            )
+            select(func.max(Message.created_at)).where(Message.conversation_id == conversation_id)
         )
         return result.scalar_one_or_none()
 
-    async def get_by_id(
-        self, message_id: str, *, conversation_id: str
-    ) -> Message | None:
+    async def get_by_id(self, message_id: str, *, conversation_id: str) -> Message | None:
         result = await self._session.execute(
             select(Message).where(
                 Message.id == message_id,
@@ -300,9 +302,7 @@ class MessageRepository:
         )
         await self._session.commit()
 
-    async def delete_after(
-        self, conversation_id: str, *, after_created_at: datetime
-    ) -> int:
+    async def delete_after(self, conversation_id: str, *, after_created_at: datetime) -> int:
         """Hard-delete messages created strictly after a point in time.
 
         Used by regenerate / edit-and-resend to drop the superseded assistant
@@ -324,9 +324,7 @@ class MessageRepository:
         await self._session.commit()
         return result.rowcount or 0
 
-    async def delete_by_id(
-        self, message_id: str, *, conversation_id: str
-    ) -> bool:
+    async def delete_by_id(self, message_id: str, *, conversation_id: str) -> bool:
         """Hard-delete one message (单条消息删除). Returns whether a row was removed.
 
         Scoped to ``conversation_id`` so a guessed id from another conversation

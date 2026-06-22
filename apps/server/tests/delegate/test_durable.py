@@ -7,7 +7,6 @@ from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
-
 from tests.delegate.conftest import (
     CKPT_DAG,
     Provider,
@@ -121,9 +120,7 @@ async def test_durable_resume_drives_tail_from_journal_not_frame():
     async def _drop(mid):
         pass
 
-    pause_tool = tool_durable(
-        Provider(["S1OUT", "S2OUT"]), EventSink(), registry, _save, _drop
-    )
+    pause_tool = tool_durable(Provider(["S1OUT", "S2OUT"]), EventSink(), registry, _save, _drop)
     transcript = [
         LLMMessage(role="user", content="原始请求"),
         LLMMessage(

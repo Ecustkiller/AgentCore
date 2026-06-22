@@ -78,16 +78,14 @@ class GrepTool:
                     "files_only": {
                         "type": "boolean",
                         "description": (
-                            "只返回匹配到的文件列表及每个文件的匹配数，而非匹配行"
-                            "（默认 false）。"
+                            "只返回匹配到的文件列表及每个文件的匹配数，而非匹配行（默认 false）。"
                         ),
                         "default": False,
                     },
                     "max_results": {
                         "type": "integer",
                         "description": (
-                            "返回的最大匹配行数（files_only 模式下为文件数）。"
-                            "默认 50，最多 200。"
+                            "返回的最大匹配行数（files_only 模式下为文件数）。默认 50，最多 200。"
                         ),
                     },
                 },

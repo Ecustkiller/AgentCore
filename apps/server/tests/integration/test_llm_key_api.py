@@ -30,9 +30,7 @@ _MASTER_KEY = "a" * 64
 _OVER_MONTHLY_NANO = 6_000_000_000  # above the default $5 monthly cap
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> str:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
@@ -92,9 +90,7 @@ def byok(monkeypatch):
 
 async def test_llm_key_routes_require_auth(client):
     assert (await client.get("/v1/users/me/llm-key")).status_code == 401
-    assert (
-        await client.put("/v1/users/me/llm-key", json={"api_key": "x"})
-    ).status_code == 401
+    assert (await client.put("/v1/users/me/llm-key", json={"api_key": "x"})).status_code == 401
     assert (await client.delete("/v1/users/me/llm-key")).status_code == 401
     assert (await client.post("/v1/users/me/llm-key/test")).status_code == 401
 
@@ -116,9 +112,7 @@ async def test_set_key_stores_and_masks(client, make_invite, byok):
     code = await make_invite("INV-KEY-SET")
     await _register_and_login(client, code, "keyuser2")
 
-    r = await client.put(
-        "/v1/users/me/llm-key", json={"api_key": "sk-deepseek-abcd1234"}
-    )
+    r = await client.put("/v1/users/me/llm-key", json={"api_key": "sk-deepseek-abcd1234"})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["configured"] is True
@@ -215,16 +209,12 @@ async def test_test_key_without_key_returns_402(client, make_invite, byok):
 # --- billing preflight (route + gate) ---
 
 
-async def test_send_message_refused_without_byok_key(
-    client, make_invite, session_factory, byok
-):
+async def test_send_message_refused_without_byok_key(client, make_invite, session_factory, byok):
     code = await make_invite("INV-KEY-PREFLIGHT")
     user_id = await _register_and_login(client, code, "keyuser8")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
 
-    r = await client.post(
-        f"/v1/conversations/{conv_id}/messages", json={"content": "hi"}
-    )
+    r = await client.post(f"/v1/conversations/{conv_id}/messages", json={"content": "hi"})
     assert r.status_code == 402, r.text
     assert r.json()["error"]["code"] == "LLM_KEY_REQUIRED"
 
@@ -251,9 +241,7 @@ async def test_preflight_byok_skips_quota_when_key_present(
     assert creds.api_key == "sk-byok-user-1234"
 
 
-async def test_preflight_platform_enforces_quota(
-    client, make_invite, session_factory, monkeypatch
-):
+async def test_preflight_platform_enforces_quota(client, make_invite, session_factory, monkeypatch):
     # Same over-quota ledger, but platform billing → the quota gate fires.
     monkeypatch.setattr(settings, "billing_mode", "platform")
     code = await make_invite("INV-KEY-PLATQ")

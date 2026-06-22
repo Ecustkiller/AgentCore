@@ -71,9 +71,7 @@ def test_pro_prices():
 
 def test_unknown_model_falls_back_to_flash():
     usage = _usage(output_tokens=1_000_000)
-    assert calculate_cost("totally-unknown", usage) == calculate_cost(
-        DEEPSEEK_V4_FLASH, usage
-    )
+    assert calculate_cost("totally-unknown", usage) == calculate_cost(DEEPSEEK_V4_FLASH, usage)
 
 
 # --- cache-split reconciliation: the input bill always matches the prompt ---

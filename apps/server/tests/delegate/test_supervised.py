@@ -4,7 +4,6 @@ from agentcore.runtime.events import EventSink
 from agentcore.runtime.events.types import EventType, SSEEvent
 from agentcore.runtime.runs import BoundaryReason
 from agentcore.tools.builtin.replan import ReplanTool
-
 from tests.delegate.conftest import (
     LATE_BIND_DAG,
     SCOPE_DAG,
@@ -124,9 +123,7 @@ async def test_replan_requires_binds_or_stop():
 async def test_replan_rejects_unknown_bind_and_keeps_run_open():
     t = tool(Provider(["AOUT", "BOUT"]))
     await t.execute({"tasks": LATE_BIND_DAG}, ctx())
-    result = await t.replan(
-        {"binds": [{"run_id": "nope", "role": "写手", "task": "写报告"}]}
-    )
+    result = await t.replan({"binds": [{"run_id": "nope", "role": "写手", "task": "写报告"}]})
     assert result.success is False
     assert "不在当前计划" in result.output
     assert t._supervised is not None
@@ -280,9 +277,7 @@ async def test_dispose_open_supervised_folds_completed_work_then_releases():
     # (implicit stop) so it isn't stranded unbilled, then release the dangling plan.
     from agentcore.llm.protocol import TokenUsage
 
-    provider = Provider(
-        ["AOUT", "BOUT"], usage=TokenUsage(input_tokens=100, output_tokens=20)
-    )
+    provider = Provider(["AOUT", "BOUT"], usage=TokenUsage(input_tokens=100, output_tokens=20))
     t = tool(provider)
     first = await t.execute({"tasks": LATE_BIND_DAG}, ctx())
     assert first.is_terminal is False

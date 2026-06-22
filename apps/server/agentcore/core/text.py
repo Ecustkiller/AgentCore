@@ -16,9 +16,7 @@ from __future__ import annotations
 DEFAULT_ELISION_MARKER = "\n\n……（中间省略，已保留首尾）……\n\n"
 
 
-def truncate_head_tail(
-    content: str, limit: int, *, marker: str = DEFAULT_ELISION_MARKER
-) -> str:
+def truncate_head_tail(content: str, limit: int, *, marker: str = DEFAULT_ELISION_MARKER) -> str:
     """Trim ``content`` to ``limit`` chars, keeping head + tail with ``marker`` between.
 
     Returns ``content`` unchanged when it already fits, ``""`` when ``limit <= 0``. The

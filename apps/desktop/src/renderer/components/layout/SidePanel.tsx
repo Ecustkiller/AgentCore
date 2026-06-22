@@ -1,7 +1,9 @@
+import { Markdown } from "@/components/chat/Markdown";
 import { RunDetailBody } from "@/components/chat/detail/RunDetailBody";
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
+import { useActiveMessages } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
 import {
   type DetailTab,
@@ -32,19 +34,24 @@ export function SidePanel() {
   const setActiveTab = useSidePanelStore((s) => s.setActiveTab);
   const closeTab = useSidePanelStore((s) => s.closeTab);
   const byId = useExecutionStore((s) => s.byId);
+  const messages = useActiveMessages();
 
-  // A run tab survives only while its message's execution slot still holds the
-  // run (§9.3); stale ones are filtered so a reclaimed slot drops its tab.
-  const visibleRunTabs = tabs.filter((t) =>
-    byId[t.messageId]?.plan?.runs.some((r) => r.id === t.runId),
+  // A detail tab survives only while it belongs to the live conversation: a run
+  // tab while its message's execution slot still holds the run (§9.3); a content
+  // tab while its turn slot is loaded — so a reclaimed slot / a switched
+  // conversation drops the stale tab.
+  const visibleTabs = tabs.filter((t) =>
+    t.kind === "run"
+      ? byId[t.messageId]?.plan?.runs.some((r) => r.id === t.runId)
+      : !!byId[t.messageId]?.plan,
   );
-  const activeRunTab =
+  const activeTab =
     activeTabId === WORKSPACE_TAB_ID
       ? null
-      : (visibleRunTabs.find((t) => t.id === activeTabId) ?? null);
-  // Workspace shows whenever no run tab is active (the home, or the active run
+      : (visibleTabs.find((t) => t.id === activeTabId) ?? null);
+  // Workspace shows whenever no detail tab is active (the home, or the active tab
   // went stale and dropped out).
-  const workspaceActive = activeRunTab === null;
+  const workspaceActive = activeTab === null;
 
   // Pay for the workspace body's first fetch only once it's actually shown; keep
   // it mounted afterwards so switching back is instant and state survives.
@@ -89,11 +96,11 @@ export function SidePanel() {
             active={workspaceActive}
             onClick={() => setActiveTab(WORKSPACE_TAB_ID)}
           />
-          {visibleRunTabs.map((tab) => (
+          {visibleTabs.map((tab) => (
             <RunTabChip
               key={tab.id}
               tab={tab}
-              active={tab.id === activeRunTab?.id}
+              active={tab.id === activeTab?.id}
               onSelect={() => setActiveTab(tab.id)}
               onClose={() => closeTab(tab.id)}
             />
@@ -114,12 +121,24 @@ export function SidePanel() {
             <WorkspaceMode />
           </div>
         )}
-        {activeRunTab && (
+        {activeTab?.kind === "run" && (
           <div className="absolute inset-0 overflow-y-auto">
             <RunDetailBody
-              key={activeRunTab.id}
-              messageId={activeRunTab.messageId}
-              runId={activeRunTab.runId}
+              key={activeTab.id}
+              messageId={activeTab.messageId}
+              runId={activeTab.runId}
+            />
+          </div>
+        )}
+        {activeTab?.kind === "content" && (
+          // An endpoint bubble (提问 / 最终回答) surfaced from the canvas — the
+          // deliverable read as plain Markdown, no run-detail chrome.
+          <div className="absolute inset-0 overflow-y-auto p-4">
+            <Markdown
+              content={
+                messages.find((m) => m.id === activeTab.contentMessageId)
+                  ?.content ?? ""
+              }
             />
           </div>
         )}

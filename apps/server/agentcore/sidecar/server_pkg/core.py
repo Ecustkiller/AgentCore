@@ -47,6 +47,7 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         self._pending_sends: set[asyncio.Task[None]] = set()
         # Flipped by ``shutdown`` so the process loop can exit cleanly.
         self.shutdown_requested = asyncio.Event()
+
     async def handle_line(self, line: str) -> None:
         """Parse and dispatch one inbound line. Never raises (loop-safe)."""
         line = line.strip()
@@ -65,9 +66,7 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
             # A response/notification we did not expect, or a malformed request.
             if request_id is not None:
                 await self._send(
-                    protocol.make_error(
-                        request_id, protocol.INVALID_REQUEST, "missing method"
-                    )
+                    protocol.make_error(request_id, protocol.INVALID_REQUEST, "missing method")
                 )
             return
 
@@ -76,9 +75,7 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         except Exception as e:  # a dispatch bug must not kill the read loop
             logger.error("sidecar.dispatch_failed", method=method, error=str(e), exc_info=True)
             if request_id is not None:
-                await self._send(
-                    protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e))
-                )
+                await self._send(protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e)))
 
     async def _dispatch(self, request_id: Any, method: str, params: dict[str, Any]) -> None:
         if method == "initialize":
@@ -102,6 +99,7 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
                     request_id, protocol.METHOD_NOT_FOUND, f"unknown method: {method}"
                 )
             )
+
     def _make_backend(self) -> ServerWorkspace:
         """Build the local-disk workspace backend for a turn / resume.
 
@@ -154,6 +152,7 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         if trace_id:
             extra[INFERENCE_TRACE_HEADER] = trace_id
         return replace(self._creds, extra_headers=extra)
+
     async def _send(self, message: dict[str, Any]) -> None:
         await self._write_line(protocol.encode_line(message))
 

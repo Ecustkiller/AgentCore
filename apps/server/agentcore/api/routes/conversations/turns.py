@@ -59,9 +59,7 @@ async def regenerate_message(
     """
     await enforce_user_message_rate_limit(user.user_id)
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    credentials = await _preflight_turn_llm(
-        session=session, user=user, cost_repo=cost_repo
-    )
+    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
 
     sink = EventSink()
 
@@ -140,9 +138,7 @@ async def resume_message(
     """
     await enforce_user_message_rate_limit(user.user_id)
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    credentials = await _preflight_turn_llm(
-        session=session, user=user, cost_repo=cost_repo
-    )
+    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
 
     suspension = await claim_paused_turn(message_id, conversation_id=conversation_id)
     if suspension is None:

@@ -96,6 +96,5 @@ def file_mutation_tool_names() -> frozenset[str]:
     return frozenset(
         schema.name
         for schema in full.list_all()
-        if schema.approval is ToolApproval.GRANTABLE
-        and schema.category is ToolCategory.FILESYSTEM
+        if schema.approval is ToolApproval.GRANTABLE and schema.category is ToolCategory.FILESYSTEM
     )

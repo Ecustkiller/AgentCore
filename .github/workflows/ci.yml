@@ -134,6 +134,17 @@ jobs:
       # real components in a headless browser (#/preview) and fail if any AI state
       # crashes on render. Catches component changes that silently break a state —
       # zero backend/LLM, same vectors as `pnpm conformance`. See scripts/shoot.mjs.
+      # Cache the ~130MB browser download keyed on the lockfile; restore-keys lets an
+      # unrelated dep bump still reuse it (playwright install then skips the download
+      # when the cached build matches and only ensures OS deps).
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
       - name: Install Chromium for preview shots
         run: pnpm --filter agentcore-desktop exec playwright install --with-deps chromium
 

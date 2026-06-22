@@ -20,14 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.db.models import Message, TurnJournalRow
 
 
-async def delete_journal_for_conversation(
-    session: AsyncSession, conversation_id: str
-) -> None:
+async def delete_journal_for_conversation(session: AsyncSession, conversation_id: str) -> None:
     """Drop every journal row of a conversation (whole-conversation hard delete)."""
     await session.execute(
-        delete(TurnJournalRow).where(
-            TurnJournalRow.conversation_id == conversation_id
-        )
+        delete(TurnJournalRow).where(TurnJournalRow.conversation_id == conversation_id)
     )
 
 

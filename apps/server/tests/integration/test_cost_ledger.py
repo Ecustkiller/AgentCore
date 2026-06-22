@@ -51,12 +51,16 @@ async def test_record_runs_persists_with_envelope(session_factory):
 
     async with session_factory() as session:
         rows = (
-            await session.execute(
-                select(CostEvent)
-                .where(CostEvent.message_id == msg_id)
-                .order_by(CostEvent.cost_total_nano)
+            (
+                await session.execute(
+                    select(CostEvent)
+                    .where(CostEvent.message_id == msg_id)
+                    .order_by(CostEvent.cost_total_nano)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     assert len(rows) == 2
     captain, member = rows[0], rows[1]  # ordered by total asc (300, 1200)
@@ -101,10 +105,10 @@ async def test_record_runs_persists_namespaced_worker_ids(session_factory):
 
     async with session_factory() as session:
         rows = (
-            await session.execute(
-                select(CostEvent).where(CostEvent.message_id == msg_id)
-            )
-        ).scalars().all()
+            (await session.execute(select(CostEvent).where(CostEvent.message_id == msg_id)))
+            .scalars()
+            .all()
+        )
     by_id = {r.run_id: r for r in rows}
     assert set(by_id) == {cap_id, worker_id, revision_id}
     # the revision row hangs off its original worker (version chain reconstructable)
@@ -133,10 +137,10 @@ async def test_record_runs_is_idempotent_by_run_id(session_factory):
 
     async with session_factory() as session:
         rows = (
-            await session.execute(
-                select(CostEvent).where(CostEvent.run_id == run["run_id"])
-            )
-        ).scalars().all()
+            (await session.execute(select(CostEvent).where(CostEvent.run_id == run["run_id"])))
+            .scalars()
+            .all()
+        )
     assert len(rows) == 1
 
 

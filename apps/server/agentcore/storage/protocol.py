@@ -65,9 +65,7 @@ class StorageProvider(Protocol):
         """Return snapshots under ``storage_key``, newest first."""
         ...
 
-    async def restore(
-        self, storage_key: str, snapshot_id: str, workspace_root: Path
-    ) -> None:
+    async def restore(self, storage_key: str, snapshot_id: str, workspace_root: Path) -> None:
         """Extract a snapshot over ``workspace_root`` (raises ``SnapshotNotFound``)."""
         ...
 

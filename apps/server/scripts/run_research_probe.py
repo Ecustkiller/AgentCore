@@ -173,7 +173,7 @@ async def main() -> None:
 
     try:
         summary = await asyncio.wait_for(_drain(sink, producer), timeout=TIMEOUT_S)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         producer.cancel()
         print(f"\n[timeout] exceeded {TIMEOUT_S:.0f}s — cancelling.")
         summary = {"timeout": True}
@@ -187,8 +187,7 @@ async def main() -> None:
     rp = summary.get("run_plan")
     if rp:
         print(
-            f"delegate fan-out: plan_type={rp['plan_type']} "
-            f"agents={rp['agents']} runs={rp['runs']}"
+            f"delegate fan-out: plan_type={rp['plan_type']} agents={rp['agents']} runs={rp['runs']}"
         )
     else:
         print("delegate fan-out: NONE (CEO did not call delegate / no run_plan)")

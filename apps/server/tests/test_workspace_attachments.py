@@ -94,9 +94,7 @@ async def test_persist_dedups_same_name(tmp_path: Path):
 
 async def test_persist_sanitizes_traversal_name(tmp_path: Path):
     ws = _ws(tmp_path)
-    out = await persist_attachments(
-        ws, [{"name": "../../evil.sh", "path": "/x", "text": "rm -rf"}]
-    )
+    out = await persist_attachments(ws, [{"name": "../../evil.sh", "path": "/x", "text": "rm -rf"}])
     # Directory parts are stripped: lands directly inside attachments/.
     assert out[0]["workspace_path"] == "attachments/evil.sh"
     assert (tmp_path / "attachments" / "evil.sh").exists()

@@ -209,9 +209,7 @@ async def list_handoff_jobs(
     return HandoffJobListResponse(data=data, total=len(data))
 
 
-@router.get(
-    "/{conversation_id}/handoff/jobs/{job_id}", response_model=HandoffJobSummary
-)
+@router.get("/{conversation_id}/handoff/jobs/{job_id}", response_model=HandoffJobSummary)
 async def get_handoff_job(
     conversation_id: str,
     job_id: str,
@@ -388,9 +386,7 @@ async def apply_handoff_job(
         raise ValidationError("该对话不是本地模式")
 
     selections = [
-        ApplySelection(
-            path=s.path, decision=s.decision, local_sha=s.local_sha, force=s.force
-        )
+        ApplySelection(path=s.path, decision=s.decision, local_sha=s.local_sha, force=s.force)
         for s in body.selections
     ]
     sink = EventSink()

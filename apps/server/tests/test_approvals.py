@@ -137,9 +137,7 @@ async def test_gate_authorize_times_out_to_deny():
     gate = _gate(sink, reg, timeout_seconds=0.01)
 
     # No resolver — the request is never answered and must auto-deny.
-    decision = await gate.authorize(
-        tool_name="code_execute", tool_call_id="x", arguments={}
-    )
+    decision = await gate.authorize(tool_name="code_execute", tool_call_id="x", arguments={})
 
     assert decision is ApprovalDecision.DENY
     resolved = [e for e in _drain(sink) if e.type is EventType.APPROVAL_RESOLVED]
@@ -154,17 +152,13 @@ async def test_gate_approve_always_skips_second_prompt():
     resolver = asyncio.create_task(
         _resolve_when_ready(reg, "id1", ApprovalDecision.APPROVE_ALWAYS, "conv-1")
     )
-    first = await gate.authorize(
-        tool_name="file_write", tool_call_id="id1", arguments={}
-    )
+    first = await gate.authorize(tool_name="file_write", tool_call_id="id1", arguments={})
     await resolver
     assert first is ApprovalDecision.APPROVE_ALWAYS
 
     _drain(sink)  # clear the first pair
     # Second call to the SAME tool returns immediately, with no new prompt.
-    second = await gate.authorize(
-        tool_name="file_write", tool_call_id="id2", arguments={}
-    )
+    second = await gate.authorize(tool_name="file_write", tool_call_id="id2", arguments={})
     assert second is ApprovalDecision.APPROVE
     assert _drain(sink) == []
 
@@ -183,12 +177,8 @@ async def test_approve_always_sweeps_pending_same_tool():
     gate = _gate(sink, reg)
 
     # Two file_writes + one code_execute suspended in parallel on the SAME gate.
-    a = asyncio.create_task(
-        gate.authorize(tool_name="file_write", tool_call_id="a", arguments={})
-    )
-    b = asyncio.create_task(
-        gate.authorize(tool_name="file_write", tool_call_id="b", arguments={})
-    )
+    a = asyncio.create_task(gate.authorize(tool_name="file_write", tool_call_id="a", arguments={}))
+    b = asyncio.create_task(gate.authorize(tool_name="file_write", tool_call_id="b", arguments={}))
     c = asyncio.create_task(
         gate.authorize(tool_name="code_execute", tool_call_id="c", arguments={})
     )
@@ -226,12 +216,8 @@ async def test_approve_always_files_grants_whole_class():
     )
 
     # A file_write (the clicked card), a parallel str_replace, and a code_execute.
-    w = asyncio.create_task(
-        gate.authorize(tool_name="file_write", tool_call_id="w", arguments={})
-    )
-    r = asyncio.create_task(
-        gate.authorize(tool_name="str_replace", tool_call_id="r", arguments={})
-    )
+    w = asyncio.create_task(gate.authorize(tool_name="file_write", tool_call_id="w", arguments={}))
+    r = asyncio.create_task(gate.authorize(tool_name="str_replace", tool_call_id="r", arguments={}))
     x = asyncio.create_task(
         gate.authorize(tool_name="code_execute", tool_call_id="x", arguments={})
     )
@@ -242,9 +228,7 @@ async def test_approve_always_files_grants_whole_class():
     assert len(reg.list_pending("conv-1")) == 3
 
     # Click "allow all file edits" on the file_write card.
-    assert reg.resolve(
-        "w", ApprovalDecision.APPROVE_ALWAYS_FILES, conversation_id="conv-1"
-    )
+    assert reg.resolve("w", ApprovalDecision.APPROVE_ALWAYS_FILES, conversation_id="conv-1")
     assert await w is ApprovalDecision.APPROVE_ALWAYS_FILES
     # str_replace (in the class) was swept to APPROVE without its own resolve.
     assert await r is ApprovalDecision.APPROVE
@@ -254,18 +238,12 @@ async def test_approve_always_files_grants_whole_class():
 
     # A LATER file_delete (also in the class) is now auto-approved, no new prompt.
     _drain(sink)
-    later = await gate.authorize(
-        tool_name="file_delete", tool_call_id="d", arguments={}
-    )
+    later = await gate.authorize(tool_name="file_delete", tool_call_id="d", arguments={})
     assert later is ApprovalDecision.APPROVE
     assert _drain(sink) == []
     # But a LATER code_execute still prompts (the class grant never covered it).
-    resolver = asyncio.create_task(
-        _resolve_when_ready(reg, "x2", ApprovalDecision.DENY, "conv-1")
-    )
-    later_exec = await gate.authorize(
-        tool_name="code_execute", tool_call_id="x2", arguments={}
-    )
+    resolver = asyncio.create_task(_resolve_when_ready(reg, "x2", ApprovalDecision.DENY, "conv-1"))
+    later_exec = await gate.authorize(tool_name="code_execute", tool_call_id="x2", arguments={})
     await resolver
     assert later_exec is ApprovalDecision.DENY
 
@@ -276,12 +254,8 @@ async def test_gate_truncates_large_argument_preview():
     gate = _gate(sink, reg)
 
     big = "x" * 5000
-    resolver = asyncio.create_task(
-        _resolve_when_ready(reg, "id1", ApprovalDecision.DENY, "conv-1")
-    )
-    await gate.authorize(
-        tool_name="file_write", tool_call_id="id1", arguments={"content": big}
-    )
+    resolver = asyncio.create_task(_resolve_when_ready(reg, "id1", ApprovalDecision.DENY, "conv-1"))
+    await gate.authorize(tool_name="file_write", tool_call_id="id1", arguments={"content": big})
     await resolver
 
     required = next(e for e in _drain(sink) if e.type is EventType.APPROVAL_REQUIRED)
@@ -418,9 +392,7 @@ async def test_engine_gates_grantable_tool_skips_on_deny():
     gate = _gate(sink, reg)
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
 
-    resolver = asyncio.create_task(
-        _resolve_when_ready(reg, "c", ApprovalDecision.DENY, "conv-1")
-    )
+    resolver = asyncio.create_task(_resolve_when_ready(reg, "c", ApprovalDecision.DENY, "conv-1"))
     content, *_ = await react_loop(
         messages=messages,
         llm=provider,
@@ -435,16 +407,12 @@ async def test_engine_gates_grantable_tool_skips_on_deny():
     assert content == "ok"
     assert tool.calls == 0  # denied → never executed
     # The model was told, via a tool message, that the call was not authorized.
-    denial = [
-        m for m in messages if m.role == "tool" and "未获用户授权" in (m.content or "")
-    ]
+    denial = [m for m in messages if m.role == "tool" and "未获用户授权" in (m.content or "")]
     assert len(denial) == 1
 
 
 async def test_engine_does_not_gate_non_grantable_tool():
-    provider = _ScriptedProvider(
-        [[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]]
-    )
+    provider = _ScriptedProvider([[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]])
     tool = _NeverGatedTool()
     sink = EventSink()
     # Gate present but the SEARCH tool is not GRANTABLE → must run un-gated.

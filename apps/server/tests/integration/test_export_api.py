@@ -14,17 +14,13 @@ from agentcore.db.models import Message
 _PW = "password123"
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> None:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
     )
     assert r.status_code == 201, r.text
-    r = await client.post(
-        "/v1/auth/login", json={"username": username, "password": _PW}
-    )
+    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
     assert r.status_code == 200, r.text
 
 
@@ -75,9 +71,7 @@ async def test_export_json_roundtrip(client, make_invite, session_factory):
     code = await make_invite("INV-EX-2")
     await _register_and_login(client, code, "exjson")
     conv_id = await _new_conversation(client, "J")
-    await _seed_messages(
-        session_factory, conv_id, [("user", "q"), ("assistant", "a")]
-    )
+    await _seed_messages(session_factory, conv_id, [("user", "q"), ("assistant", "a")])
 
     r = await client.get(f"/v1/conversations/{conv_id}/export?format=json")
     assert r.status_code == 200, r.text

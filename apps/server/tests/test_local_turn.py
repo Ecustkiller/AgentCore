@@ -26,7 +26,6 @@ from types import SimpleNamespace
 import pytest
 
 from agentcore.conversation import local_turn as local_turn_mod
-from agentcore.conversation import service
 from agentcore.conversation.service import record_local_turn
 
 pytestmark = pytest.mark.anyio
@@ -111,7 +110,9 @@ def _patch_persistence(
     monkeypatch.setattr(local_turn_mod, "schedule_consolidation", lambda _cid: None)
     # Title generation: skip the LLM. A fake provider satisfies the build/close
     # dance; _generate_title is stubbed to a fixed string.
-    monkeypatch.setattr(local_turn_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=_noop_close))
+    monkeypatch.setattr(
+        local_turn_mod, "build_provider", lambda *_a, **_k: SimpleNamespace(close=_noop_close)
+    )
 
     async def _fake_title(**_kw):
         return "本地回合标题"

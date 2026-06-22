@@ -134,9 +134,7 @@ class FileWriteTool:
         # leaks the absolute server path and gives the model nothing to act on. Fail
         # fast with the required-arg message instead (parity with str_replace/move).
         if not rel_path:
-            return _error(
-                "path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start
-            )
+            return _error("path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start)
 
         # 并行写隔离·硬约束: in a delegate batch, refuse to overwrite a file another
         # concurrent sibling already wrote (it would silently clobber their deliverable).
@@ -254,9 +252,7 @@ class StrReplaceTool:
                     },
                     "old_string": {
                         "type": "string",
-                        "description": (
-                            "要替换的精确文本，需带足够的上下文以在文件中唯一。"
-                        ),
+                        "description": ("要替换的精确文本，需带足够的上下文以在文件中唯一。"),
                     },
                     "new_string": {
                         "type": "string",
@@ -264,9 +260,7 @@ class StrReplaceTool:
                     },
                     "replace_all": {
                         "type": "boolean",
-                        "description": (
-                            "替换所有出现处，而非要求唯一匹配（默认 false）。"
-                        ),
+                        "description": ("替换所有出现处，而非要求唯一匹配（默认 false）。"),
                         "default": False,
                     },
                 },
@@ -286,9 +280,7 @@ class StrReplaceTool:
         if not old_string:
             return _error("old_string 不能为空", start)
         if old_string == new_string:
-            return _error(
-                "old_string 与 new_string 相同，没有需要改动的内容", start
-            )
+            return _error("old_string 与 new_string 相同，没有需要改动的内容", start)
 
         try:
             outcome = await context.backend.replace(
@@ -304,8 +296,7 @@ class StrReplaceTool:
             return _error(f"无法编辑二进制 / 非 UTF-8 文件：{rel_path}", start)
         except NoMatch:
             return _error(
-                f"在 {rel_path} 中找不到 old_string；它必须与文件完全一致，"
-                "包括空白与缩进。",
+                f"在 {rel_path} 中找不到 old_string；它必须与文件完全一致，包括空白与缩进。",
                 start,
             )
         except AmbiguousMatch as e:
@@ -413,9 +404,7 @@ class FileMoveTool:
         if not source or not destination:
             return _error("'source' 与 'destination' 均为必填", start)
         if source == destination:
-            return _error(
-                "source 与 destination 相同，无需移动", start
-            )
+            return _error("source 与 destination 相同，无需移动", start)
 
         try:
             await context.backend.move(source, destination)

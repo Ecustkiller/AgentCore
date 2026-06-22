@@ -43,12 +43,7 @@ def test_contribute_accepts_a_contributor_object():
 
 
 def test_equal_order_keeps_contribution_order_stable():
-    out = (
-        ContextAssembler()
-        .add("first", "1", 500)
-        .add("second", "2", 500)
-        .render()
-    )
+    out = ContextAssembler().add("first", "1", 500).add("second", "2", 500).render()
     assert out == "1\n2"
 
 

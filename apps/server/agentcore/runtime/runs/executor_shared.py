@@ -149,4 +149,3 @@ def _revision_message(feedback: str) -> LLMMessage:
             "不要解释、不要复述改动清单。"
         ),
     )
-

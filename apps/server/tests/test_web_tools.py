@@ -17,6 +17,7 @@ from agentcore.tools.builtin.web import _net
 from agentcore.tools.builtin.web import read_url as read_url_mod
 from agentcore.tools.builtin.web import search as search_mod
 from agentcore.tools.builtin.web import search_backend as search_backend_mod
+from agentcore.tools.builtin.web import search_cache as search_cache_mod
 from agentcore.tools.builtin.web._net import (
     EgressError,
     circuit_remaining,
@@ -35,7 +36,6 @@ from agentcore.tools.builtin.web.read_url import (
     _URLBlock,
 )
 from agentcore.tools.builtin.web.search import WebSearchTool
-from agentcore.tools.builtin.web import search_cache as search_cache_mod
 from agentcore.tools.builtin.web.search_backend import (
     FallbackSearchBackend,
     SearchResult,
@@ -978,9 +978,7 @@ async def test_web_search_emits_structured_display(monkeypatch):
 
 def test_merge_citations_dedups_across_rounds_by_normalized_url():
     sink: list[dict] = []
-    first = merge_citations(
-        sink, [{"url": "https://a.com/p", "title": "A", "site": "a.com"}]
-    )
+    first = merge_citations(sink, [{"url": "https://a.com/p", "title": "A", "site": "a.com"}])
     assert first == {"https://a.com/p": 1}
     # same page (trailing slash + fragment) from a later round + a fresh source
     second = merge_citations(

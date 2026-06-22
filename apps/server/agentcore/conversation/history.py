@@ -5,7 +5,6 @@ Only user/assistant text messages are replayed — tool I/O is not included
 to avoid burning tokens on cross-turn accumulated tool output.
 """
 
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.config import settings
@@ -92,6 +91,4 @@ async def load_chat_context(
                 history.append({"role": msg.role, "content": msg.content})
         return history
 
-    return await load_recent_history(
-        session, conversation_id, max_messages=max_messages
-    )
+    return await load_recent_history(session, conversation_id, max_messages=max_messages)

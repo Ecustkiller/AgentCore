@@ -24,6 +24,7 @@ from agentcore.runtime.workspace import summarize
 
 logger = get_logger(__name__)
 
+
 def _ancestors_by_id(plan: RunPlan) -> dict[str, frozenset[str]]:
     """Transitive ``depends_on`` closure per node, for the write-conflict guard.
 
@@ -80,9 +81,7 @@ def _build_messages(
         sys_parts.append(spec.system_prompt_supplement)
     system_content = "\n\n".join(p for p in sys_parts if p)
 
-    blocks = _build_context_blocks(
-        plan, spec, completed, user_message, contract, index_paths or []
-    )
+    blocks = _build_context_blocks(plan, spec, completed, user_message, contract, index_paths or [])
     if blocks_sink is not None:
         blocks_sink.extend(blocks)
     user_content = "\n\n".join(f"## {b.heading}\n{b.body}" for b in blocks)
@@ -212,9 +211,7 @@ def _build_captain_context_blocks(
                 body=history_text,
             )
         )
-    blocks.append(
-        ContextBlock(channel="request", heading="原始用户请求", body=user_message)
-    )
+    blocks.append(ContextBlock(channel="request", heading="原始用户请求", body=user_message))
     return blocks
 
 
@@ -276,7 +273,8 @@ def _team_position_block(plan: RunPlan, spec: RunSpec) -> str:
     its whole job).
 
     Branches on shape, in priority order:
-      - has dependents    → upstream link:  hands off, "别自己产最终交付物" + 中间产物落盘起名许可（A1）
+      - has dependents    → upstream link: hands off, "别自己产最终交付物" +
+        中间产物落盘起名许可（A1）
       - else has upstream  → terminal node:  "你是终端环，据上游产出最终交付物"
     Parallel-peer awareness (``sibling_summary``, computed by the builder) is prepended
     in every team shape; a node with none (a lone pipeline link) skips that line."""
@@ -482,7 +480,6 @@ def _workspace_manifest(
     if truncated and lines:
         lines.append("……（工作区还有更多文件，需要可用 `file_list` 查看）")
     return "\n".join(lines)
-
 
 
 # Re-export for tests via executor facade

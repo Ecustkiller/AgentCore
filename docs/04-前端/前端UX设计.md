@@ -246,7 +246,7 @@ skip_if:
 
 **✅ 收口**：图上指挥与比对卡片已全数上画布——`BackgroundTaskCard`（云端 / 后台任务卡片，非阻塞 · 跨对话的另一类）入指挥台（见 §6.2）；`RevisionCompare`「版本对比」由聚焦回合表头 chip 唤出、就地落在脚抽屉（与读答案互斥、逐字复用聊天同款卡的 `bare` 形态，逐版本仍下钻右坞 run 详情）。至此聊天侧的指挥 / 比对卡片在画布均有归处（**定向唤回**「修订 vN」本身仍 CEO 驱动、无用户触发入口，其结果另作 `AgentNode` 节点画在聚焦回合 DAG 上）。
 
-→ 见代码：`stores/ui.ts`（`conversationViews` 持久化、只落画布 override）、`pages/ConversationPage.tsx`（视图切换 + 偏好读取）、`chat/StatusStrip.tsx`（团队回合「在画布打开」入口）、`graph/ConversationCanvas.tsx`（持久累积 + LOD + 裁决面容纳 + 后台任务同步驱动）、`graph/TurnSummaryNode.tsx` / `graph/SimpleTurnNode.tsx` / `graph/FocusedTurnNode.tsx`（内嵌 `GraphView` + 就地读答案 / 版本对比脚抽屉 + 提示牌）、`graph/CanvasCommandBar.tsx`（常驻命令栏 + 后台云端派发）、`graph/CanvasDecisionPanel.tsx`（裁决面，复用 `chat/CheckpointCard` / `PlanReviewCard` / `EscalationCard` / `ApprovalPrompt` / `ResumePrompt` / `RetryBanner` / `RecoveryActions` / `BackgroundTaskCard`）、`chat/RevisionCompare.tsx`（`bare` 形态嵌画布脚抽屉）、`lib/agentIdentity.ts`（身份延续）。
+→ 见代码：`stores/ui.ts`（`conversationViews` 持久化、只落画布 override）、`pages/ConversationPage.tsx`（视图切换 + 偏好读取）、`chat/StatusStrip.tsx`（团队回合「在画布打开」入口）、`graph/ConversationCanvas.tsx`（持久累积 + LOD + 裁决面容纳 + 后台任务同步驱动）、`graph/TurnSummaryNode.tsx` / `graph/SimpleTurnNode.tsx` / `graph/FocusedTurnNode.tsx`（内嵌 `GraphView` + 就地读答案 / 版本对比脚抽屉 + 提示牌）、`graph/CanvasCommandBar.tsx`（常驻命令栏 + 后台云端派发）、`graph/CanvasDecisionPanel.tsx`（裁决面，复用 §三 同款决策卡片）、`chat/RevisionCompare.tsx`（`bare` 形态嵌画布脚抽屉）、`lib/agentIdentity.ts`（身份延续）。
 
 ---
 

@@ -16,9 +16,7 @@ from agentcore.config import settings
 from agentcore.workspace import git as gitmod
 from agentcore.workspace.git import CloneError, _derive_dest_name, _git_clone, clone_repo
 
-pytestmark = pytest.mark.skipif(
-    not __import__("shutil").which("git"), reason="git not installed"
-)
+pytestmark = pytest.mark.skipif(not __import__("shutil").which("git"), reason="git not installed")
 
 
 def _init_source_repo(path: Path) -> None:
@@ -69,9 +67,7 @@ async def test_git_clone_failure_raises(tmp_path: Path):
 async def test_clone_repo_rejects_non_http_urls(url: str, tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     with pytest.raises(ValueError):
-        await clone_repo(
-            user_id="u1", folder_id=None, conversation_id="c1", repo_url=url
-        )
+        await clone_repo(user_id="u1", folder_id=None, conversation_id="c1", repo_url=url)
 
 
 async def test_clone_repo_rejects_existing_nonempty_dest(tmp_path: Path, monkeypatch):

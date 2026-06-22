@@ -194,9 +194,7 @@ async def react_loop(
         logger.debug("react.round_start", round=round_idx, messages=len(messages))
         # 执行级事件溯源 (§18.3): mark this ReAct round edge — the seam `round_boundary.
         # fold` later cuts the LLM window / pause snapshot on. No-op outside a turn.
-        record_turn_fact(
-            RoundBoundaryFact(round_idx=round_idx, run_id=run_id, role=role).to_fact()
-        )
+        record_turn_fact(RoundBoundaryFact(round_idx=round_idx, run_id=run_id, role=role).to_fact())
         # 交付前核验回炉用（finish_guard）：记下本轮 LLM 输出累加前的正文；若本轮自报 done 但
         # 轻层未过需回炉，把 final_content 退回这里（丢掉这一版待修正的正文），让模型下一轮重写
         # 完整答案，而非续接在违规版后面。
@@ -210,10 +208,8 @@ async def react_loop(
         )
 
         try:
-            round_content, round_reasoning, round_tool_calls, usage = (
-                await stream_llm_round(
-                    llm, request, emit_content, emit_reasoning, on_tool_progress
-                )
+            round_content, round_reasoning, round_tool_calls, usage = await stream_llm_round(
+                llm, request, emit_content, emit_reasoning, on_tool_progress
             )
         except Exception as e:
             logger.error("llm.call_failed", round=round_idx, error=str(e))
@@ -294,10 +290,7 @@ async def react_loop(
                     if annotate_citations
                     else []
                 )
-                if (
-                    reworks
-                    and finish_guard_reworks < settings.engine_finish_guard_max_reworks
-                ):
+                if reworks and finish_guard_reworks < settings.engine_finish_guard_max_reworks:
                     finish_guard_reworks += 1
                     steer = format_guard_steer(reworks)
                     logger.info(
@@ -330,9 +323,7 @@ async def react_loop(
                 and fallback_model is not None
                 and fallback_model != (active_model or profile.model)
             )
-            action = controller.empty_response_action(
-                fallback_available=fallback_available
-            )
+            action = controller.empty_response_action(fallback_available=fallback_available)
             if action is Intervention.FALLBACK:
                 active_model = fallback_model
                 logger.warning(
@@ -445,9 +436,7 @@ async def react_loop(
             # 执行级事件溯源 (§18.3): the injected NUDGE is part of the real LLM window
             # (the next round sees it), so the window fold needs it as a fact.
             record_turn_fact(
-                NoteFact(
-                    role="user", content=reflection, reason="nudge", run_id=run_id
-                ).to_fact()
+                NoteFact(role="user", content=reflection, reason="nudge", run_id=run_id).to_fact()
             )
             continue
         if signal is not None and action is Intervention.FINALIZE:
@@ -477,9 +466,7 @@ async def react_loop(
         # tool failing and nothing written — bail to a forced tool-free answer rather
         # than burning the rest of the budget, and surface the turn as UNPRODUCTIVE.
         if controller.unproductive_early_stop():
-            logger.warning(
-                "engine.unproductive_stop", round=round_idx, attempts=len(attempts)
-            )
+            logger.warning("engine.unproductive_stop", round=round_idx, attempts=len(attempts))
             if finish_override_sink is not None:
                 finish_override_sink.append(FinishReason.UNPRODUCTIVE)
             return await force_finalize(
@@ -533,9 +520,7 @@ async def react_loop(
             messages.append(LLMMessage(role="user", content=review))
             # 执行级事件溯源 (§18.3): injected into the real window → journaled as a fact.
             record_turn_fact(
-                NoteFact(
-                    role="user", content=review, reason="reflection", run_id=run_id
-                ).to_fact()
+                NoteFact(role="user", content=review, reason="reflection", run_id=run_id).to_fact()
             )
 
     # Round budget exhausted while still tool-calling: force a tool-free answer

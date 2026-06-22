@@ -64,9 +64,7 @@ async def consolidate_conversation(
             if user_id is None:
                 return False
             async with async_session_factory() as session:
-                latest = await MessageRepository(session).latest_created_at(
-                    conversation_id
-                )
+                latest = await MessageRepository(session).latest_created_at(conversation_id)
                 conv = await ConversationRepository(session).get_by_id(conversation_id)
                 if conv is None or latest is None:
                     return False
@@ -105,9 +103,7 @@ async def consolidate_conversation(
                     await provider.close()
 
             async with async_session_factory() as session:
-                await ConversationRepository(session).set_memory_synced_at(
-                    conversation_id, latest
-                )
+                await ConversationRepository(session).set_memory_synced_at(conversation_id, latest)
             logger.info(
                 "memory.consolidated",
                 conversation_id=conversation_id,
@@ -116,9 +112,7 @@ async def consolidate_conversation(
             )
             return changed
     except Exception as e:
-        logger.warning(
-            "memory.consolidation_failed", conversation_id=conversation_id, error=str(e)
-        )
+        logger.warning("memory.consolidation_failed", conversation_id=conversation_id, error=str(e))
         return False
 
 
@@ -168,9 +162,7 @@ class MemoryConsolidationScheduler:
     ``consolidate_conversation``.
     """
 
-    def __init__(
-        self, *, idle_seconds: float, turn_cap: int, runner: Runner
-    ) -> None:
+    def __init__(self, *, idle_seconds: float, turn_cap: int, runner: Runner) -> None:
         self._idle = idle_seconds
         self._turn_cap = turn_cap
         self._runner = runner
@@ -186,9 +178,7 @@ class MemoryConsolidationScheduler:
             return
         self._cancel_timer(conversation_id)
         loop = asyncio.get_running_loop()
-        self._timers[conversation_id] = loop.call_later(
-            self._idle, self._fire, conversation_id
-        )
+        self._timers[conversation_id] = loop.call_later(self._idle, self._fire, conversation_id)
 
     def _fire(self, conversation_id: str) -> None:
         self._cancel_timer(conversation_id)
@@ -259,9 +249,7 @@ async def consolidation_sweep_once() -> int:
     Returns the number of conversations processed. Each runs through the same
     watermark-gated, per-user-locked runner, so overlap with a live debounce is safe.
     """
-    cutoff = datetime.now(UTC) - timedelta(
-        seconds=settings.memory_consolidation_idle_seconds
-    )
+    cutoff = datetime.now(UTC) - timedelta(seconds=settings.memory_consolidation_idle_seconds)
     async with async_session_factory() as session:
         pending = await ConversationRepository(session).list_pending_memory_consolidation(
             idle_before=cutoff,

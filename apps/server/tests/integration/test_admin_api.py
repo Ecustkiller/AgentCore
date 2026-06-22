@@ -26,9 +26,7 @@ from agentcore.llm.pricing import NANO_PER_USD
 _PW = "password123"
 
 
-async def _seed_spend(
-    session_factory, *, user_id: str, total: int, role: str = "captain"
-) -> None:
+async def _seed_spend(session_factory, *, user_id: str, total: int, role: str = "captain") -> None:
     """Seed one priced turn (one distinct message_id) for ``user_id`` into the
     ledger, landing in today's + this month's windows (created_at server-defaults
     to now). The write path itself is covered by test_cost_ledger.py."""
@@ -62,15 +60,11 @@ async def _seed_spend(
 
 
 async def _login(client: httpx.AsyncClient, username: str, password: str) -> None:
-    r = await client.post(
-        "/v1/auth/login", json={"username": username, "password": password}
-    )
+    r = await client.post("/v1/auth/login", json={"username": username, "password": password})
     assert r.status_code == 200, r.text
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> None:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
@@ -101,9 +95,7 @@ async def _soft_delete_user(session_factory, user_id: str) -> None:
 
 async def test_admin_users_require_auth(client):
     assert (await client.get("/v1/admin/users")).status_code == 401
-    assert (
-        await client.patch("/v1/admin/users/anyone", json={"role": "admin"})
-    ).status_code == 401
+    assert (await client.patch("/v1/admin/users/anyone", json={"role": "admin"})).status_code == 401
 
 
 async def test_non_admin_cannot_access_admin_users(client, make_invite):
@@ -113,9 +105,7 @@ async def test_non_admin_cannot_access_admin_users(client, make_invite):
 
     assert (await client.get("/v1/admin/users")).status_code == 403
     # a non-admin can't even self-escalate: the gate rejects before the service runs
-    assert (
-        await client.patch(f"/v1/admin/users/{me}", json={"role": "admin"})
-    ).status_code == 403
+    assert (await client.patch(f"/v1/admin/users/{me}", json={"role": "admin"})).status_code == 403
 
 
 # --- roster: listing, filter, pagination ---
@@ -156,9 +146,7 @@ async def test_admin_roster_filter_and_pagination(client, make_admin, session_fa
     assert body["page_size"] == 2 and len(body["data"]) == 2 and body["total"] == 4
 
 
-async def test_admin_roster_hides_deleted_by_default(
-    client, make_admin, session_factory
-):
+async def test_admin_roster_hides_deleted_by_default(client, make_admin, session_factory):
     """注销 (soft-deleted, anonymized) accounts are tombstones: excluded from the
     roster (and its total) by default, surfaced only with ``include_deleted`` — and
     when surfaced they carry the ``deleted_at`` flag + anonymized username."""
@@ -190,9 +178,7 @@ async def test_admin_roster_hides_deleted_by_default(
 # --- roster: cumulative cost + sort + role/status filters ---
 
 
-async def test_admin_roster_carries_cost_and_sorts_by_spend(
-    client, make_admin, session_factory
-):
+async def test_admin_roster_carries_cost_and_sorts_by_spend(client, make_admin, session_factory):
     """Each roster row carries its all-time spend (``cost_total``), and ``sort=cost``
     orders by it; the response ships the FX rate for ¥ display. A never-spent account
     reads 0 (LEFT JOIN onto the ledger)."""
@@ -215,22 +201,20 @@ async def test_admin_roster_carries_cost_and_sorts_by_spend(
     assert costs[admin_id] == 0  # never spent
 
     # sort=cost desc: biggest spender first; the zero-spend admin sinks to the end.
-    desc = (
-        await client.get("/v1/admin/users", params={"sort": "cost", "order": "desc"})
-    ).json()["data"]
+    desc = (await client.get("/v1/admin/users", params={"sort": "cost", "order": "desc"})).json()[
+        "data"
+    ]
     assert [u["id"] for u in desc][:2] == [alice, bob]
     assert desc[-1]["cost_total"] == 0
 
     # sort=cost asc: mirror — biggest spender last.
-    asc = (
-        await client.get("/v1/admin/users", params={"sort": "cost", "order": "asc"})
-    ).json()["data"]
+    asc = (await client.get("/v1/admin/users", params={"sort": "cost", "order": "asc"})).json()[
+        "data"
+    ]
     assert [u["id"] for u in asc][-2:] == [bob, alice]
 
 
-async def test_admin_roster_sorts_by_created_at_order(
-    client, make_admin, session_factory
-):
+async def test_admin_roster_sorts_by_created_at_order(client, make_admin, session_factory):
     """``order`` flips the default ``created_at`` sort: desc is newest-first, asc is
     oldest-first. The admin is seeded first, so it leads asc and trails desc."""
     username, password = await make_admin()
@@ -239,16 +223,12 @@ async def test_admin_roster_sorts_by_created_at_order(
     await _seed_user(session_factory, "bob")
 
     desc = (await client.get("/v1/admin/users")).json()["data"]
-    asc = (
-        await client.get("/v1/admin/users", params={"order": "asc"})
-    ).json()["data"]
+    asc = (await client.get("/v1/admin/users", params={"order": "asc"})).json()["data"]
     assert desc[-1]["username"] == username  # oldest account trails newest-first
     assert asc[0]["username"] == username  # …and leads oldest-first
 
 
-async def test_admin_roster_filters_by_role_and_status(
-    client, make_admin, session_factory
-):
+async def test_admin_roster_filters_by_role_and_status(client, make_admin, session_factory):
     """``role`` / ``status`` pin those dimensions, AND-combined with each other."""
     username, password = await make_admin()
     await _login(client, username, password)
@@ -266,17 +246,13 @@ async def test_admin_roster_filters_by_role_and_status(
     assert {u["username"] for u in plain["data"]} == {"alice", "dave"}
 
     # status=disabled → only dave.
-    disabled = (
-        await client.get("/v1/admin/users", params={"status": "disabled"})
-    ).json()
+    disabled = (await client.get("/v1/admin/users", params={"status": "disabled"})).json()
     assert {u["username"] for u in disabled["data"]} == {"dave"}
     assert disabled["total"] == 1
 
     # AND-combined: role=user & status=active → alice alone.
     combo = (
-        await client.get(
-            "/v1/admin/users", params={"role": "user", "status": "active"}
-        )
+        await client.get("/v1/admin/users", params={"role": "user", "status": "active"})
     ).json()
     assert {u["username"] for u in combo["data"]} == {"alice"}
 
@@ -310,9 +286,7 @@ async def test_admin_changes_role(client, make_admin, session_factory):
     assert r.json()["role"] == "user"
 
 
-async def test_admin_disable_revokes_target_access(
-    client, new_client, make_admin
-):
+async def test_admin_disable_revokes_target_access(client, new_client, make_admin):
     username, password = await make_admin()
     await _login(client, username, password)
     code = (await client.post("/v1/auth/invites", json={})).json()["code"]
@@ -352,9 +326,7 @@ async def test_admin_resets_user_password(client, new_client, make_admin):
     # the old password no longer logs in; the one-off temp password does
     async with new_client() as fresh:
         assert (
-            await fresh.post(
-                "/v1/auth/login", json={"username": "forgetful", "password": _PW}
-            )
+            await fresh.post("/v1/auth/login", json={"username": "forgetful", "password": _PW})
         ).status_code == 401
         assert (
             await fresh.post(
@@ -367,9 +339,7 @@ async def test_admin_resets_user_password(client, new_client, make_admin):
 async def test_reset_password_unknown_user_404(client, make_admin):
     username, password = await make_admin()
     await _login(client, username, password)
-    assert (
-        await client.post(f"/v1/admin/users/{uuid4()}/reset-password")
-    ).status_code == 404
+    assert (await client.post(f"/v1/admin/users/{uuid4()}/reset-password")).status_code == 404
 
 
 async def test_reset_password_requires_admin(client, make_invite):
@@ -377,17 +347,13 @@ async def test_reset_password_requires_admin(client, make_invite):
     await _register_and_login(client, code, "plainuser")
     me = (await client.get("/v1/auth/me")).json()["id"]
     # even targeting self, the role gate refuses a non-admin before the service runs
-    assert (
-        await client.post(f"/v1/admin/users/{me}/reset-password")
-    ).status_code == 403
+    assert (await client.post(f"/v1/admin/users/{me}/reset-password")).status_code == 403
 
 
 # --- 注销账号 (admin-initiated deletion, 用户管理 强操作) ---
 
 
-async def test_admin_deletes_user_anonymizes_and_cascades(
-    client, make_admin, session_factory
-):
+async def test_admin_deletes_user_anonymizes_and_cascades(client, make_admin, session_factory):
     """DELETE 注销s an account: anonymizes + disables it (returns the tombstone with
     ``deleted_at``), drops it from the default roster + the system tallies, and
     cascades cross-domain cleanup (the user's conversations are soft-deleted)."""
@@ -479,9 +445,7 @@ async def test_admin_cannot_self_demote_or_self_disable(client, make_admin):
     await _login(client, username, password)
     me = (await client.get("/v1/auth/me")).json()["id"]
 
-    assert (
-        await client.patch(f"/v1/admin/users/{me}", json={"role": "user"})
-    ).status_code == 422
+    assert (await client.patch(f"/v1/admin/users/{me}", json={"role": "user"})).status_code == 422
     assert (
         await client.patch(f"/v1/admin/users/{me}", json={"status": "disabled"})
     ).status_code == 422
@@ -531,9 +495,7 @@ async def test_non_admin_cannot_access_usage_or_system(client, make_invite):
 # --- 全站用量看板: cross-user aggregation ---
 
 
-async def test_admin_usage_summary_aggregates_across_users(
-    client, make_admin, session_factory
-):
+async def test_admin_usage_summary_aggregates_across_users(client, make_admin, session_factory):
     username, password = await make_admin()
     await _login(client, username, password)
     alice = await _seed_user(session_factory, "alice")
@@ -603,9 +565,7 @@ async def test_admin_system_status_reports_config_health_and_counts(
     assert b["cny_per_usd"] == settings.cny_per_usd
     assert b["quota"]["daily_tokens"] == settings.quota_daily_tokens
     assert b["quota"]["daily_requests"] == settings.quota_daily_requests
-    assert b["quota"]["monthly_cost_nano"] == int(
-        settings.quota_monthly_cost_usd * NANO_PER_USD
-    )
+    assert b["quota"]["monthly_cost_nano"] == int(settings.quota_monthly_cost_usd * NANO_PER_USD)
     # Health + provenance: the request itself proves the DB is reachable.
     assert b["database_ok"] is True
     assert isinstance(b["version"], str) and b["version"]
@@ -616,9 +576,7 @@ async def test_admin_system_status_reports_config_health_and_counts(
     assert b["admins"] == 2
 
 
-async def test_admin_system_counts_exclude_deleted(
-    client, make_admin, session_factory
-):
+async def test_admin_system_counts_exclude_deleted(client, make_admin, session_factory):
     """注销 accounts drop out of every system tally — they're anonymized tombstones,
     not part of the live population (so ``total`` no longer over-counts them)."""
     username, password = await make_admin()
@@ -692,9 +650,7 @@ async def test_non_admin_cannot_access_observability(client, make_invite):
     ).status_code == 403
 
 
-async def test_admin_observability_summary_aggregates(
-    client, make_admin, session_factory
-):
+async def test_admin_observability_summary_aggregates(client, make_admin, session_factory):
     username, password = await make_admin()
     await _login(client, username, password)
     alice = await _seed_user(session_factory, "alice")
@@ -781,9 +737,7 @@ async def _seed_conversation_with_turn(
     ``(conversation_id, assistant_message_id)`` for the assertions."""
     trace_id = uuid4().hex
     async with session_factory() as session:
-        conv = await ConversationRepository(session).create(
-            user_id=user_id, title="复盘会话"
-        )
+        conv = await ConversationRepository(session).create(user_id=user_id, title="复盘会话")
         # Production stamps trace_id only on the assistant reply; the user prompt's
         # is NULL — so a trace overlays exactly one message in the replay.
         await MessageRepository(session).create(
@@ -879,9 +833,7 @@ async def _seed_conversation_with_turn(
     return conv.id, assistant.id
 
 
-async def test_admin_conversation_replay_merges_timeline(
-    client, make_admin, session_factory
-):
+async def test_admin_conversation_replay_merges_timeline(client, make_admin, session_factory):
     username, password = await make_admin()
     await _login(client, username, password)
     alice = await _seed_user(session_factory, "alice")
@@ -951,9 +903,7 @@ async def test_admin_conversation_replay_surfaces_textless_error_turn(
     alice = await _seed_user(session_factory, "alice")
     trace_id = uuid4().hex
     async with session_factory() as session:
-        conv = await ConversationRepository(session).create(
-            user_id=alice, title="空回合"
-        )
+        conv = await ConversationRepository(session).create(user_id=alice, title="空回合")
         conv_id = conv.id
         # Only the user prompt is persisted (no assistant reply for this failed turn).
         await MessageRepository(session).create(
@@ -1017,15 +967,11 @@ async def test_non_admin_cannot_access_user_detail(client, make_invite):
 async def test_admin_user_detail_unknown_404(client, make_admin):
     username, password = await make_admin()
     await _login(client, username, password)
-    r = await client.get(
-        "/v1/admin/users/00000000-0000-0000-0000-000000000000/detail"
-    )
+    r = await client.get("/v1/admin/users/00000000-0000-0000-0000-000000000000/detail")
     assert r.status_code == 404
 
 
-async def test_admin_user_detail_composes_account_view(
-    client, make_admin, session_factory
-):
+async def test_admin_user_detail_composes_account_view(client, make_admin, session_factory):
     """The drill-down stitches one account's record + its own usage (today/month/
     trend/by-role) + recent conversations (with message counts) + recent turns —
     all scoped to that account (another user's spend/turns never leak in)."""

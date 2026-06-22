@@ -101,9 +101,7 @@ class LlmKeyService:
             )
         ciphertext = enc.encrypt(api_key.encode())
         row = await self._repo.upsert(user_id=user_id, api_key_enc=ciphertext)
-        return LlmKeyStatus(
-            configured=True, status=row.status, masked_key=_mask_key(api_key)
-        )
+        return LlmKeyStatus(configured=True, status=row.status, masked_key=_mask_key(api_key))
 
     async def clear_key(self, user_id: str) -> None:
         """Delete the user's key (idempotent — no error if there was none)."""

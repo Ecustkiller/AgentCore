@@ -75,9 +75,7 @@ def build_run_plan(
         return RunPlan(), ["'tasks' array is required and cannot be empty"]
     prefix = id_prefix or f"del_{int(time.time() * 1000)}"
     if any(item.get("depends_on") for item in tasks_raw):
-        plan, errors = _dag_plan(
-            tasks_raw, valid_tools, prefix, max_tasks, parent_run_id, depth
-        )
+        plan, errors = _dag_plan(tasks_raw, valid_tools, prefix, max_tasks, parent_run_id, depth)
     else:
         plan, errors = _flat_plan(
             tasks_raw, valid_tools, prefix, counter_start, max_tasks, parent_run_id, depth
@@ -175,9 +173,7 @@ def build_added_nodes(
             elif dep_id in existing_ids:
                 resolved_deps.append(dep_id)
             else:
-                errors.append(
-                    f"add[{i}]: depends_on `{dep_id}` 不在当前计划，也不是本次新增节点"
-                )
+                errors.append(f"add[{i}]: depends_on `{dep_id}` 不在当前计划，也不是本次新增节点")
                 dep_ok = False
         if not dep_ok:
             continue
@@ -219,11 +215,7 @@ def _flat_plan(
     batch is an error."""
     plan = RunPlan()
     counter = counter_start
-    valid = [
-        item
-        for item in tasks_raw[:max_tasks]
-        if item.get("task") and item.get("role")
-    ]
+    valid = [item for item in tasks_raw[:max_tasks] if item.get("task") and item.get("role")]
     for item in valid:
         counter += 1
         run_id = f"{prefix}_{counter}"
@@ -331,9 +323,7 @@ def _inline_spec(
         group=group_raw.strip() if isinstance(group_raw, str) else "",
         round=(
             round_raw
-            if isinstance(round_raw, int)
-            and not isinstance(round_raw, bool)
-            and round_raw > 0
+            if isinstance(round_raw, int) and not isinstance(round_raw, bool) and round_raw > 0
             else 0
         ),
         depends_on=depends_on or [],

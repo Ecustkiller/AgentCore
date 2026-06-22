@@ -192,9 +192,7 @@ class Moderator:
             if on_round_start is not None:
                 await on_round_start(round_no, focus)
             turns = list(
-                await run_round(
-                    round_no=round_no, focus=focus, sides=config.sides, history=rounds
-                )
+                await run_round(round_no=round_no, focus=focus, sides=config.sides, history=rounds)
             )
             if not any(t.ok for t in turns):
                 # 全员失败：无可裁判内容，主持人提前终止并出降级简报（别假装辩成了）。
@@ -242,7 +240,7 @@ class Moderator:
                 f"{_form_guidance(config.form)}\n\n"
                 "请把命题拆成【第一轮】各方应集中交锋的一个最核心争议焦点。"
                 "焦点必须是【一句短语、不超过 30 字】、像一个小标题，聚焦【单一】具体可辩的争议点——"
-                "不要复述命题、不要泛泛、不要用分号堆叠多个点。只输出 JSON：{\"focus\": \"...\"}"
+                '不要复述命题、不要泛泛、不要用分号堆叠多个点。只输出 JSON：{"focus": "..."}'
             )
         else:
             last = history[-1]
@@ -257,7 +255,7 @@ class Moderator:
                 "请据上轮【仍未决的分歧】设【本轮】应聚焦的争议点：必须【正交于上方已覆盖焦点】——"
                 "换一个尚未谈透的维度或更深一层，而非换个说法重谈同一点。"
                 "焦点必须是【一句短语、不超过 30 字】、像一个小标题，聚焦单一争议点。"
-                "只输出 JSON：{\"focus\": \"...\"}"
+                '只输出 JSON：{"focus": "..."}'
             )
         data = await self._complete_json(_FRAME_SYSTEM, user, "frame")
         focus = _as_str(data.get("focus"))
@@ -341,7 +339,7 @@ class Moderator:
         user = (
             f"辩论命题：{config.motion}\n本轮焦点：{focus}\n\n本轮各方发言：\n{_turns_block(turns)}\n\n"
             "请写一句【本轮小结】（≤80 字）：本轮交锋推进了什么、达成了什么共识、仍存什么分歧。"
-            "面向速读者，串起认知推进线。只输出 JSON：{\"summary\": \"...\"}"
+            '面向速读者，串起认知推进线。只输出 JSON：{"summary": "..."}'
         )
         data = await self._complete_json(_SUMMARY_SYSTEM, user, "summary")
         summary = _as_str(data.get("summary"))

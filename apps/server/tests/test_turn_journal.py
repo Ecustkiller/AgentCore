@@ -174,8 +174,11 @@ def test_execution_sourced_plain_chat_turn_projects_to_none():
     entries = [
         {"kind": "turn_started", "payload": {"user_message": "hi"}, "ts": None},
         {"kind": "run_started", "payload": {"run_id": "cap"}, "ts": "t0"},
-        {"kind": "round_boundary",
-         "payload": {"round_idx": 0, "run_id": "cap", "role": "captain"}, "ts": None},
+        {
+            "kind": "round_boundary",
+            "payload": {"round_idx": 0, "run_id": "cap", "role": "captain"},
+            "ts": None,
+        },
         {"kind": "llm_call", "payload": {"content": "hello", "round_idx": 0}, "ts": None},
         {"kind": "run_completed", "payload": {"run_id": "cap"}, "ts": "t1"},
         {"kind": "message_final", "payload": {"run_id": "cap", "content": "hello"}, "ts": None},
@@ -189,8 +192,11 @@ def test_execution_sourced_surfaced_turn_keeps_graph_drops_exec_facts():
     # interleaved execution facts are skipped (they are not client-foldable).
     entries = [
         {"kind": "turn_started", "payload": {"user_message": "go"}, "ts": None},
-        {"kind": "round_boundary",
-         "payload": {"round_idx": 0, "run_id": "cap", "role": "captain"}, "ts": None},
+        {
+            "kind": "round_boundary",
+            "payload": {"round_idx": 0, "run_id": "cap", "role": "captain"},
+            "ts": None,
+        },
         {"kind": "llm_call", "payload": {"tool_calls": [{"id": "d"}]}, "ts": None},
         {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t0"},
         {"kind": "run_started", "payload": {"run_id": "w1"}, "ts": "t1"},
@@ -215,22 +221,40 @@ def test_execution_sourced_single_agent_tool_turn_drops_captain_events_keeps_pro
     entries = [
         {"kind": "turn_started", "payload": {"user_message": "find x"}, "ts": None},
         {"kind": "run_started", "payload": {"run_id": "cap"}, "ts": "t0"},
-        {"kind": "round_boundary",
-         "payload": {"round_idx": 0, "run_id": "cap", "role": "captain"}, "ts": None},
+        {
+            "kind": "round_boundary",
+            "payload": {"round_idx": 0, "run_id": "cap", "role": "captain"},
+            "ts": None,
+        },
         {"kind": "llm_call", "payload": {"tool_calls": [{"id": "c1"}]}, "ts": None},
         {"kind": "tool_use_start", "payload": {"tool_call_id": "c1"}, "ts": "t1"},
         {"kind": "tool_use_end", "payload": {"tool_call_id": "c1"}, "ts": "t2"},
         {"kind": "run_completed", "payload": {"run_id": "cap"}, "ts": "t3"},
-        {"kind": "process_tool",
-         "payload": {"kind": "tool", "id": "c1", "tool_name": "web_search",
-                     "result": "r", "status": "success"}, "ts": None},
+        {
+            "kind": "process_tool",
+            "payload": {
+                "kind": "tool",
+                "id": "c1",
+                "tool_name": "web_search",
+                "result": "r",
+                "status": "success",
+            },
+            "ts": None,
+        },
         {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
     ]
     assert runs_from_entries(entries) == {
         "events": [],
         "finish_reason": "end_turn",
-        "process": [{"kind": "tool", "id": "c1", "tool_name": "web_search",
-                     "result": "r", "status": "success"}],
+        "process": [
+            {
+                "kind": "tool",
+                "id": "c1",
+                "tool_name": "web_search",
+                "result": "r",
+                "status": "success",
+            }
+        ],
     }
 
 
@@ -246,34 +270,66 @@ def test_execution_sourced_single_agent_tool_turn_drops_captain_events_keeps_pro
 def test_worker_output_and_reasoning_synthesized_before_run_completed():
     entries = [
         {"kind": "turn_started", "payload": {"user_message": "go"}, "ts": None},
-        {"kind": "run_started",
-         "payload": {"run_id": "cap", "agent_id": "cap", "kind": "captain"}, "ts": "t0"},
+        {
+            "kind": "run_started",
+            "payload": {"run_id": "cap", "agent_id": "cap", "kind": "captain"},
+            "ts": "t0",
+        },
         {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t1"},
-        {"kind": "run_started",
-         "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"}, "ts": "t2"},
+        {
+            "kind": "run_started",
+            "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"},
+            "ts": "t2",
+        },
         {"kind": "run_completed", "payload": {"run_id": "w1", "agent_id": "w1"}, "ts": "t3"},
-        {"kind": "message_final",
-         "payload": {"run_id": "w1", "phase": "completed",
-                     "content": "worker输出", "reasoning": "worker思考"}, "ts": None},
+        {
+            "kind": "message_final",
+            "payload": {
+                "run_id": "w1",
+                "phase": "completed",
+                "content": "worker输出",
+                "reasoning": "worker思考",
+            },
+            "ts": None,
+        },
         {"kind": "run_completed", "payload": {"run_id": "cap", "agent_id": "cap"}, "ts": "t4"},
-        {"kind": "message_final",
-         "payload": {"run_id": "cap", "content": "汇总回复", "reasoning": "captain思考"}, "ts": None},
+        {
+            "kind": "message_final",
+            "payload": {"run_id": "cap", "content": "汇总回复", "reasoning": "captain思考"},
+            "ts": None,
+        },
         {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
     ]
     # Reasoning precedes content (live order), both inherit the run_completed timestamp,
     # and they land immediately before the worker's run_completed.
     assert runs_from_entries(entries)["events"] == [
-        {"type": "run_started",
-         "payload": {"run_id": "cap", "agent_id": "cap", "kind": "captain"}, "timestamp": "t0"},
+        {
+            "type": "run_started",
+            "payload": {"run_id": "cap", "agent_id": "cap", "kind": "captain"},
+            "timestamp": "t0",
+        },
         {"type": "run_plan", "payload": {"execution_id": "e1"}, "timestamp": "t1"},
-        {"type": "run_started",
-         "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"}, "timestamp": "t2"},
-        {"type": "run_reasoning_delta",
-         "payload": {"run_id": "w1", "agent_id": "w1", "delta": "worker思考"}, "timestamp": "t3"},
-        {"type": "run_output_delta",
-         "payload": {"run_id": "w1", "agent_id": "w1", "delta": "worker输出"}, "timestamp": "t3"},
+        {
+            "type": "run_started",
+            "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"},
+            "timestamp": "t2",
+        },
+        {
+            "type": "run_reasoning_delta",
+            "payload": {"run_id": "w1", "agent_id": "w1", "delta": "worker思考"},
+            "timestamp": "t3",
+        },
+        {
+            "type": "run_output_delta",
+            "payload": {"run_id": "w1", "agent_id": "w1", "delta": "worker输出"},
+            "timestamp": "t3",
+        },
         {"type": "run_completed", "payload": {"run_id": "w1", "agent_id": "w1"}, "timestamp": "t3"},
-        {"type": "run_completed", "payload": {"run_id": "cap", "agent_id": "cap"}, "timestamp": "t4"},
+        {
+            "type": "run_completed",
+            "payload": {"run_id": "cap", "agent_id": "cap"},
+            "timestamp": "t4",
+        },
     ]
 
 
@@ -281,18 +337,22 @@ def test_captain_message_final_is_not_synthesized_onto_a_run_node():
     # The captain's reply is the bubble (turn-level content_delta), so its message_final
     # must never become a run_output_delta — even though the captain has a run node.
     entries = [
-        {"kind": "run_started",
-         "payload": {"run_id": "cap", "agent_id": "cap", "kind": "captain"}, "ts": "t0"},
+        {
+            "kind": "run_started",
+            "payload": {"run_id": "cap", "agent_id": "cap", "kind": "captain"},
+            "ts": "t0",
+        },
         {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t1"},
         {"kind": "run_completed", "payload": {"run_id": "cap", "agent_id": "cap"}, "ts": "t2"},
-        {"kind": "message_final",
-         "payload": {"run_id": "cap", "content": "回复", "reasoning": "想"}, "ts": None},
+        {
+            "kind": "message_final",
+            "payload": {"run_id": "cap", "content": "回复", "reasoning": "想"},
+            "ts": None,
+        },
         {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
     ]
     events = runs_from_entries(entries)["events"]
-    assert not any(
-        e["type"] in ("run_output_delta", "run_reasoning_delta") for e in events
-    )
+    assert not any(e["type"] in ("run_output_delta", "run_reasoning_delta") for e in events)
 
 
 def test_failed_worker_partial_output_synthesized_before_run_failed():
@@ -301,25 +361,51 @@ def test_failed_worker_partial_output_synthesized_before_run_failed():
     # delta replay, which showed a failed run's partial output too).
     entries = [
         {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t0"},
-        {"kind": "run_started",
-         "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"}, "ts": "t1"},
-        {"kind": "run_failed",
-         "payload": {"run_id": "w1", "agent_id": "w1", "error": "boom"}, "ts": "t2"},
-        {"kind": "message_final",
-         "payload": {"run_id": "w1", "phase": "failed", "content": "半成品",
-                     "reasoning": "中途思考", "error": "boom"}, "ts": None},
+        {
+            "kind": "run_started",
+            "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"},
+            "ts": "t1",
+        },
+        {
+            "kind": "run_failed",
+            "payload": {"run_id": "w1", "agent_id": "w1", "error": "boom"},
+            "ts": "t2",
+        },
+        {
+            "kind": "message_final",
+            "payload": {
+                "run_id": "w1",
+                "phase": "failed",
+                "content": "半成品",
+                "reasoning": "中途思考",
+                "error": "boom",
+            },
+            "ts": None,
+        },
         {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
     ]
     assert runs_from_entries(entries)["events"] == [
         {"type": "run_plan", "payload": {"execution_id": "e1"}, "timestamp": "t0"},
-        {"type": "run_started",
-         "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"}, "timestamp": "t1"},
-        {"type": "run_reasoning_delta",
-         "payload": {"run_id": "w1", "agent_id": "w1", "delta": "中途思考"}, "timestamp": "t2"},
-        {"type": "run_output_delta",
-         "payload": {"run_id": "w1", "agent_id": "w1", "delta": "半成品"}, "timestamp": "t2"},
-        {"type": "run_failed",
-         "payload": {"run_id": "w1", "agent_id": "w1", "error": "boom"}, "timestamp": "t2"},
+        {
+            "type": "run_started",
+            "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"},
+            "timestamp": "t1",
+        },
+        {
+            "type": "run_reasoning_delta",
+            "payload": {"run_id": "w1", "agent_id": "w1", "delta": "中途思考"},
+            "timestamp": "t2",
+        },
+        {
+            "type": "run_output_delta",
+            "payload": {"run_id": "w1", "agent_id": "w1", "delta": "半成品"},
+            "timestamp": "t2",
+        },
+        {
+            "type": "run_failed",
+            "payload": {"run_id": "w1", "agent_id": "w1", "error": "boom"},
+            "timestamp": "t2",
+        },
     ]
 
 
@@ -328,12 +414,22 @@ def test_synthesis_skips_empty_content_or_reasoning():
     # (no empty run_reasoning_delta is injected).
     entries = [
         {"kind": "run_plan", "payload": {"execution_id": "e1"}, "ts": "t0"},
-        {"kind": "run_started",
-         "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"}, "ts": "t1"},
+        {
+            "kind": "run_started",
+            "payload": {"run_id": "w1", "agent_id": "w1", "kind": "agent"},
+            "ts": "t1",
+        },
         {"kind": "run_completed", "payload": {"run_id": "w1", "agent_id": "w1"}, "ts": "t2"},
-        {"kind": "message_final",
-         "payload": {"run_id": "w1", "phase": "completed", "content": "只有输出",
-                     "reasoning": ""}, "ts": None},
+        {
+            "kind": "message_final",
+            "payload": {
+                "run_id": "w1",
+                "phase": "completed",
+                "content": "只有输出",
+                "reasoning": "",
+            },
+            "ts": None,
+        },
         {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None},
     ]
     types = [e["type"] for e in runs_from_entries(entries)["events"]]
@@ -352,9 +448,15 @@ def _fact(kind: str, payload: dict, ts=None) -> dict:
 
 
 def _started(system_prompt="S", user_message="go", history_len=0) -> dict:
-    return _fact("turn_started", {
-        "system_prompt": system_prompt, "user_message": user_message,
-        "model_profile": "m", "history_len": history_len})
+    return _fact(
+        "turn_started",
+        {
+            "system_prompt": system_prompt,
+            "user_message": user_message,
+            "model_profile": "m",
+            "history_len": history_len,
+        },
+    )
 
 
 def _boundary(run_id="cap", round_idx=0, role="captain") -> dict:
@@ -362,23 +464,38 @@ def _boundary(run_id="cap", round_idx=0, role="captain") -> dict:
 
 
 def _llm(run_id="cap", round_idx=0, *, content="", reasoning="", tool_calls=None) -> dict:
-    return _fact("llm_call", {
-        "run_id": run_id, "round_idx": round_idx, "content": content,
-        "reasoning_content": reasoning, "tool_calls": tool_calls or [],
-        "usage": {}, "finish_reason": "tool_calls" if tool_calls else "stop"})
+    return _fact(
+        "llm_call",
+        {
+            "run_id": run_id,
+            "round_idx": round_idx,
+            "content": content,
+            "reasoning_content": reasoning,
+            "tool_calls": tool_calls or [],
+            "usage": {},
+            "finish_reason": "tool_calls" if tool_calls else "stop",
+        },
+    )
 
 
 def _tc(call_id: str, name: str, arguments: str) -> dict:
-    return {"id": call_id, "type": "function",
-            "function": {"name": name, "arguments": arguments}}
+    return {"id": call_id, "type": "function", "function": {"name": name, "arguments": arguments}}
 
 
 def _tool_call(call_id: str, result: str, run_id="cap", name="t") -> dict:
     # The execution tool_call fact the window fold reads its tool result from (the FULL
     # post-annotation text); the display tool_use_start/end pair rides separately.
-    return _fact("tool_call",
-                 {"run_id": run_id, "tool_call_id": call_id, "name": name,
-                  "arguments": "{}", "result": result, "success": True})
+    return _fact(
+        "tool_call",
+        {
+            "run_id": run_id,
+            "tool_call_id": call_id,
+            "name": name,
+            "arguments": "{}",
+            "result": result,
+            "success": True,
+        },
+    )
 
 
 def test_window_folds_head_assistant_tool_drops_final_answer():
@@ -401,8 +518,13 @@ def test_window_folds_head_assistant_tool_drops_final_answer():
         LLMMessage(
             role="assistant",
             content=None,
-            tool_calls=[ToolCall(id="c1", type="function",
-                                 function=ToolCallFunction(name="search", arguments='{"q":"x"}'))],
+            tool_calls=[
+                ToolCall(
+                    id="c1",
+                    type="function",
+                    function=ToolCallFunction(name="search", arguments='{"q":"x"}'),
+                )
+            ],
             reasoning_content="thinking",
         ),
         LLMMessage(role="tool", content="the result", tool_call_id="c1"),
@@ -429,8 +551,11 @@ def test_window_splices_caller_history_between_system_and_user():
         LLMMessage(role="user", content="earlier"),
         LLMMessage(role="assistant", content="earlier reply"),
     ]
-    entries = [_started(system_prompt="SYS", user_message="now"), _boundary(round_idx=0),
-               _llm(round_idx=0, content="done")]
+    entries = [
+        _started(system_prompt="SYS", user_message="now"),
+        _boundary(round_idx=0),
+        _llm(round_idx=0, content="done"),
+    ]
     assert window_from_journal(entries, history=history) == [
         LLMMessage(role="system", content="SYS"),
         LLMMessage(role="user", content="earlier"),
@@ -488,8 +613,13 @@ def test_window_scopes_to_captain_ignoring_worker_facts():
         LLMMessage(
             role="assistant",
             content=None,
-            tool_calls=[ToolCall(id="d1", type="function",
-                                 function=ToolCallFunction(name="delegate", arguments="{}"))],
+            tool_calls=[
+                ToolCall(
+                    id="d1",
+                    type="function",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
             reasoning_content=None,
         ),
         LLMMessage(role="tool", content="team product", tool_call_id="d1"),
@@ -498,10 +628,17 @@ def test_window_scopes_to_captain_ignoring_worker_facts():
     # worker's own task-prompt head is Phase 2; here we only assert run isolation).
     worker_window = window_from_journal(entries, run_id="w1")
     assert worker_window[2] == LLMMessage(
-        role="assistant", content=None,
-        tool_calls=[ToolCall(id="fw", type="function",
-                             function=ToolCallFunction(name="file_write", arguments="{}"))],
-        reasoning_content=None)
+        role="assistant",
+        content=None,
+        tool_calls=[
+            ToolCall(
+                id="fw",
+                type="function",
+                function=ToolCallFunction(name="file_write", arguments="{}"),
+            )
+        ],
+        reasoning_content=None,
+    )
     assert worker_window[3] == LLMMessage(role="tool", content="written", tool_call_id="fw")
 
 
@@ -521,24 +658,37 @@ def test_window_captain_note_mid_delegate_attributed_by_run_id():
         _fact("message_final", {"run_id": "w1", "content": "worker done"}),
         _tool_call("d1", "team product"),  # delegate returns to the captain
         # captain force-finalize note, injected while the active run is STILL w1.
-        _fact("note", {"role": "user", "content": "请基于已有信息给出最终答复。",
-                       "reason": "finalize", "run_id": "cap"}),
+        _fact(
+            "note",
+            {
+                "role": "user",
+                "content": "请基于已有信息给出最终答复。",
+                "reason": "finalize",
+                "run_id": "cap",
+            },
+        ),
     ]
     assert window_from_journal(entries) == [
         LLMMessage(role="system", content="SYS"),
         LLMMessage(role="user", content="build it"),
-        LLMMessage(role="assistant", content=None,
-                   tool_calls=[ToolCall(id="d1", type="function",
-                                        function=ToolCallFunction(name="delegate", arguments="{}"))],
-                   reasoning_content=None),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="d1",
+                    type="function",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+            reasoning_content=None,
+        ),
         LLMMessage(role="tool", content="team product", tool_call_id="d1"),
         LLMMessage(role="user", content="请基于已有信息给出最终答复。"),
     ]
     # Contrast: the SAME note WITHOUT a run_id falls back to the active run (w1), so it is
     # NOT attributed to the captain window — the exact pre-fix 边界② bug, now gated.
-    legacy = entries[:-1] + [
-        _fact("note", {"role": "user", "content": "X", "reason": "finalize"})
-    ]
+    legacy = entries[:-1] + [_fact("note", {"role": "user", "content": "X", "reason": "finalize"})]
     assert window_from_journal(legacy)[-1] == LLMMessage(
         role="tool", content="team product", tool_call_id="d1"
     )
@@ -563,8 +713,13 @@ def test_window_paused_turn_ends_at_suspended_call_no_phantom_tool():
         LLMMessage(
             role="assistant",
             content=None,
-            tool_calls=[ToolCall(id="call_ask", type="function",
-                                 function=ToolCallFunction(name="ask_user", arguments='{"q":"A/B"}'))],
+            tool_calls=[
+                ToolCall(
+                    id="call_ask",
+                    type="function",
+                    function=ToolCallFunction(name="ask_user", arguments='{"q":"A/B"}'),
+                )
+            ],
             reasoning_content=None,
         ),
     ]
@@ -588,13 +743,29 @@ def test_window_prior_completed_tool_kept_but_suspended_one_dropped():
     assert window == [
         LLMMessage(role="system", content="SYS"),
         LLMMessage(role="user", content="build"),
-        LLMMessage(role="assistant", content=None,
-                   tool_calls=[ToolCall(id="c1", type="function",
-                                        function=ToolCallFunction(name="search", arguments="{}"))],
-                   reasoning_content=None),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="c1",
+                    type="function",
+                    function=ToolCallFunction(name="search", arguments="{}"),
+                )
+            ],
+            reasoning_content=None,
+        ),
         LLMMessage(role="tool", content="found it", tool_call_id="c1"),
-        LLMMessage(role="assistant", content=None,
-                   tool_calls=[ToolCall(id="d1", type="function",
-                                        function=ToolCallFunction(name="delegate", arguments="{}"))],
-                   reasoning_content=None),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="d1",
+                    type="function",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+            reasoning_content=None,
+        ),
     ]

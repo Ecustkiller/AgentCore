@@ -64,7 +64,5 @@ def test_format_steer_empty_when_clean():
 
 def test_guard_to_steer_roundtrip():
     # finish_guard 命中 → format_guard_steer 出一条非空提示；干净 → 空串。
-    assert format_guard_steer(finish_guard("坏引用 [9]", citation_count=1)).startswith(
-        "[系统提示]"
-    )
+    assert format_guard_steer(finish_guard("坏引用 [9]", citation_count=1)).startswith("[系统提示]")
     assert format_guard_steer(finish_guard("好引用 [1]", citation_count=1)) == ""

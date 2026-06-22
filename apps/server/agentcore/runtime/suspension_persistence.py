@@ -179,9 +179,7 @@ async def claim_paused_turn(
     """
     try:
         async with async_session_factory() as db:
-            row = await PausedTurnRepository(db).claim(
-                message_id, conversation_id=conversation_id
-            )
+            row = await PausedTurnRepository(db).claim(message_id, conversation_id=conversation_id)
             if row is None:
                 return None
             suspension = suspension_from_json(row.frame)
@@ -207,8 +205,6 @@ async def list_paused_turns(conversation_id: str) -> list[TurnSuspension]:
         async with async_session_factory() as db:
             rows = await PausedTurnRepository(db).list_pending(conversation_id)
     except Exception as e:  # noqa: BLE001 — a list failure degrades to "none pending"
-        logger.warning(
-            "suspension.list_failed", conversation_id=conversation_id, error=str(e)
-        )
+        logger.warning("suspension.list_failed", conversation_id=conversation_id, error=str(e))
         return []
     return [suspension_from_json(r.frame) for r in rows]

@@ -36,6 +36,7 @@ from agentcore.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
 
+
 def build_captain_executor(
     *,
     llm: DeepSeekProvider,
@@ -167,9 +168,7 @@ async def _drive_captain_loop(
     # node. The resume path passes None: the opening already rode the pre-pause segment,
     # and reading the workers' product back (通道⑤) is a separate ratchet.
     if received_blocks is not None:
-        sink.emit(
-            run_context(spec.run_id, agent_id, _context_block_payloads(received_blocks))
-        )
+        sink.emit(run_context(spec.run_id, agent_id, _context_block_payloads(received_blocks)))
     start = time.monotonic()
     token = captain_transcript.set(messages)
     # Mirrors the loop's cumulative spend so a hard captain failure still bills the
@@ -208,9 +207,7 @@ async def _drive_captain_loop(
         # 执行级事件溯源 (§18.3): the captain's FULL reply (vs the run_completed
         # summary) so the turn's reply is reconstructable from the journal alone.
         record_turn_fact(
-            MessageFinalFact(
-                run_id=spec.run_id, content=content, reasoning=reasoning
-            ).to_fact()
+            MessageFinalFact(run_id=spec.run_id, content=content, reasoning=reasoning).to_fact()
         )
         sink.emit(
             run_completed(
@@ -250,4 +247,3 @@ async def _drive_captain_loop(
         )
     finally:
         captain_transcript.reset(token)
-

@@ -52,9 +52,7 @@ class _FakeProvider:
         self, root: Path, storage_key: str, *, label: str | None = None
     ) -> SnapshotRef:
         files = {
-            p.relative_to(root).as_posix(): p.read_text()
-            for p in root.rglob("*")
-            if p.is_file()
+            p.relative_to(root).as_posix(): p.read_text() for p in root.rglob("*") if p.is_file()
         }
         self.captured = {"key": storage_key, "label": label, "files": files}
         return SnapshotRef(
@@ -77,9 +75,7 @@ async def _await_request(sink: EventSink) -> SSEEvent:
 async def _drive(monkeypatch, archive_value: dict) -> tuple[asyncio.Task, _FakeProvider]:
     """Start a handoff and answer its ARCHIVE op as the desktop would."""
     provider = _FakeProvider()
-    monkeypatch.setattr(
-        "agentcore.workspace.handoff.build_storage_provider", lambda: provider
-    )
+    monkeypatch.setattr("agentcore.workspace.handoff.build_storage_provider", lambda: provider)
     sink = EventSink()
     task = asyncio.create_task(
         snapshot_local(
@@ -138,9 +134,7 @@ async def test_snapshot_local_rejects_zip_slip(monkeypatch):
 
 async def test_snapshot_local_rejects_empty_archive(monkeypatch):
     # A desktop that returns no archive (e.g. an unbound/old client) fails cleanly.
-    task, provider = await _drive(
-        monkeypatch, {"archive": "", "file_count": 0, "total_bytes": 0}
-    )
+    task, provider = await _drive(monkeypatch, {"archive": "", "file_count": 0, "total_bytes": 0})
     with pytest.raises(WorkspaceIOError):
         await task
     assert provider.captured is None

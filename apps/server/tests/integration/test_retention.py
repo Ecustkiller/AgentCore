@@ -30,9 +30,7 @@ from agentcore.workspace.snapshots import create_snapshot
 
 
 def _seed_space(uid: str, folder_id: str | None, conv_id: str) -> None:
-    root = resolve_workspace_root(
-        user_id=uid, folder_id=folder_id, conversation_id=conv_id
-    )
+    root = resolve_workspace_root(user_id=uid, folder_id=folder_id, conversation_id=conv_id)
     (root / "file.txt").write_text("data", encoding="utf-8")
 
 
@@ -87,9 +85,7 @@ async def test_retention_sweep_purges_aged_soft_deletes(
     async with session_factory() as s:
         await s.execute(update(Folder).where(Folder.id == fa).values(deleted_at=aged))
         await s.execute(
-            update(Conversation)
-            .where(Conversation.id.in_([gid, ugid]))
-            .values(deleted_at=aged)
+            update(Conversation).where(Conversation.id.in_([gid, ugid])).values(deleted_at=aged)
         )
         await s.commit()
 
@@ -109,14 +105,8 @@ async def test_retention_sweep_purges_aged_soft_deletes(
 
     # Folder A's shared space is gone; folder B's survives; the ungrouped conv's
     # own space is gone.
-    assert not workspace_root_path(
-        user_id=uid, folder_id=fa, conversation_id="x"
-    ).exists()
-    assert workspace_root_path(
-        user_id=uid, folder_id=fb, conversation_id="x"
-    ).exists()
-    assert not workspace_root_path(
-        user_id=uid, folder_id=None, conversation_id=ugid
-    ).exists()
+    assert not workspace_root_path(user_id=uid, folder_id=fa, conversation_id="x").exists()
+    assert workspace_root_path(user_id=uid, folder_id=fb, conversation_id="x").exists()
+    assert not workspace_root_path(user_id=uid, folder_id=None, conversation_id=ugid).exists()
 
     build_storage_provider.cache_clear()

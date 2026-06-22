@@ -67,9 +67,7 @@ class ClientRequestBridge(Protocol):
         payload: dict[str, Any] | None = None,
     ) -> asyncio.Future[Any]: ...
 
-    def resolve(
-        self, request_id: str, result: Any, *, conversation_id: str
-    ) -> bool: ...
+    def resolve(self, request_id: str, result: Any, *, conversation_id: str) -> bool: ...
 
     async def suspend(
         self,
@@ -86,9 +84,7 @@ class ClientRequestBridge(Protocol):
 
     def discard(self, request_id: str) -> None: ...
 
-    def list_pending(
-        self, conversation_id: str | None = None
-    ) -> list[InteractionRequest]: ...
+    def list_pending(self, conversation_id: str | None = None) -> list[InteractionRequest]: ...
 
 
 @runtime_checkable
@@ -115,6 +111,4 @@ class Journal(Protocol):
 
     async def load(self, turn_id: str) -> list[dict[str, Any]]: ...
 
-    async def load_map(
-        self, turn_ids: Sequence[str]
-    ) -> dict[str, list[dict[str, Any]]]: ...
+    async def load_map(self, turn_ids: Sequence[str]) -> dict[str, list[dict[str, Any]]]: ...

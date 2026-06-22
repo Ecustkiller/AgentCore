@@ -39,13 +39,9 @@ async def test_purge_folder_space_removes_dir_and_snapshots(fs_storage):
 
     await purge_folder_space(user_id="u1", folder_id="f1")
 
-    assert not workspace_root_path(
-        user_id="u1", folder_id="f1", conversation_id="x"
-    ).exists()
+    assert not workspace_root_path(user_id="u1", folder_id="f1", conversation_id="x").exists()
     # Snapshot history for the folder key is gone too.
-    assert (
-        await list_snapshots(user_id="u1", folder_id="f1", conversation_id="x") == []
-    )
+    assert await list_snapshots(user_id="u1", folder_id="f1", conversation_id="x") == []
 
 
 async def test_purge_conversation_space_removes_own_space(fs_storage):
@@ -55,12 +51,8 @@ async def test_purge_conversation_space_removes_own_space(fs_storage):
 
     await _purge_conversation_space(user_id="u1", conversation_id="c9")
 
-    assert not workspace_root_path(
-        user_id="u1", folder_id=None, conversation_id="c9"
-    ).exists()
-    assert (
-        await list_snapshots(user_id="u1", folder_id=None, conversation_id="c9") == []
-    )
+    assert not workspace_root_path(user_id="u1", folder_id=None, conversation_id="c9").exists()
+    assert await list_snapshots(user_id="u1", folder_id=None, conversation_id="c9") == []
 
 
 async def test_purge_is_idempotent_on_missing(fs_storage):

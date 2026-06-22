@@ -1,3 +1,4 @@
+import { loadOlderMessages } from "@/services/messages";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   useBackgroundTasks,
@@ -6,6 +7,8 @@ import {
 import {
   useActiveError,
   useActiveGenerating,
+  useActiveHasMoreBefore,
+  useActiveLoadingOlder,
   useActiveMessages,
   useConversationStore,
 } from "@/stores/conversation";
@@ -25,8 +28,15 @@ import {
   ReactFlow,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import { Network } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, Loader2, Network } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { CanvasCommandBar } from "./CanvasCommandBar";
 import {
   CanvasDecisionPanel,
@@ -77,6 +87,10 @@ const TURN_NODE_WIDTH = 320;
 const TEAM_NODE_HEIGHT = 132;
 const SIMPLE_NODE_HEIGHT = 96;
 const GAP_Y = 40;
+// 上滚加载更早历史 (§六): the spine always lays out from flow y=0, so the oldest turn's
+// on-screen Y equals the viewport's Y offset. Treat "within this of the pane top" as
+// 近顶 → page the previous window. Mirrors the 聊天态 useChatScroll TOP_LOAD_THRESHOLD_PX.
+const TOP_LOAD_THRESHOLD_PX = 240;
 
 const turnNodeTypes = {
   focusedTurn: FocusedTurnNode,
@@ -142,6 +156,11 @@ export function ConversationCanvas() {
   const messages = useActiveMessages();
   const generating = useActiveGenerating();
   const byId = useExecutionStore((s) => s.byId);
+  // 上滚加载更早历史: the canvas is a SECOND consumer of the same cursor-paged window the
+  // 聊天态 uses — reuse its flags + loader, no store/service change. The conversation id
+  // drives the loader call (and guards a load against a mid-fetch conversation switch).
+  const hasMoreBefore = useActiveHasMoreBefore();
+  const loadingOlder = useActiveLoadingOlder();
 
   // Hydrate reloaded team turns from their persisted journal so their summary
   // projects even though the chat view's InlineTeamGraph isn't mounted here.
@@ -361,6 +380,10 @@ export function ConversationCanvas() {
   const nodes = useMemo<Node[]>(() => {
     const out: Node[] = [];
     let y = 0;
+    // 轻入场 only the tail: a genuinely new turn always arrives LAST (appended), while
+    // 上滚加载更早 prepends OLD turns at the head — gating to the last id keeps those
+    // history pages from wrongly animating in at the top.
+    const lastTurnId = turns[turns.length - 1]?.id;
     for (const t of turns) {
       const focused = t.kind === "team" && t.id === effectiveFocus;
       const width = focused ? FOCUS_NODE_WIDTH : TURN_NODE_WIDTH;
@@ -407,7 +430,10 @@ export function ConversationCanvas() {
           prompt: t.prompt,
           answer: t.answer,
           running: t.running,
-          enter: !firstSpineRef.current && !seenTurnsRef.current.has(t.id),
+          enter:
+            t.id === lastTurnId &&
+            !firstSpineRef.current &&
+            !seenTurnsRef.current.has(t.id),
         };
         out.push({
           id: t.id,
@@ -492,17 +518,97 @@ export function ConversationCanvas() {
     [openZoom],
   );
 
-  // Camera: fit on first paint, then keep the focused turn framed by FITTING the node
-  // (not a fixed zoom) — covers a manual focus switch and a newly-arrived turn (which
-  // auto-follows into focus). Fit-to-node replaces the old constant 0.75: the 760px-wide
-  // focus node overflowed horizontally on narrow windows / with the side panel open, so
-  // fit zooms out just enough, capped at 1 so it never over-magnifies a single node.
+  // Shared ReactFlow instance handle (camera control) + the surface box (resize refit).
   const rfRef = useRef<ReactFlowInstance | null>(null);
   const canvasBoxRef = useRef<HTMLDivElement>(null);
+
+  // ── 上滚加载更早历史 (§六) ────────────────────────────────────────────────────
+  // The 聊天态 anchors a prepend via DOM scrollTop; the canvas owns its geometry instead
+  // (vertical stack, fixed slot heights), so it anchors the CAMERA. Capture the oldest
+  // turn + viewport when a page is requested; once it lands, shift the viewport up by the
+  // inserted turns' total height × zoom so the turn the boss was reading stays put. The
+  // anchor ref doubles as the in-flight lock (one page at a time).
+  const pagingAnchorRef = useRef<{
+    oldestId: string;
+    vpX: number;
+    vpY: number;
+    zoom: number;
+  } | null>(null);
+  // Live snapshot so the move handler can bind once yet read fresh flags / edges.
+  const pagingStateRef = useRef({
+    hasMoreBefore,
+    loadingOlder,
+    conversationId,
+    turns,
+  });
+  pagingStateRef.current = {
+    hasMoreBefore,
+    loadingOlder,
+    conversationId,
+    turns,
+  };
+
+  const requestOlder = useCallback(() => {
+    const rf = rfRef.current;
+    const s = pagingStateRef.current;
+    if (!rf || !s.hasMoreBefore || s.loadingOlder || pagingAnchorRef.current)
+      return;
+    const oldestId = s.turns[0]?.id;
+    if (!s.conversationId || !oldestId) return;
+    const vp = rf.getViewport();
+    pagingAnchorRef.current = { oldestId, vpX: vp.x, vpY: vp.y, zoom: vp.zoom };
+    void loadOlderMessages(s.conversationId);
+  }, []);
+
+  // Pan / zoom near the top edge → page. The oldest turn sits at flow y=0, so its
+  // on-screen Y equals viewport.y; within TOP_LOAD_THRESHOLD_PX of the pane top (or
+  // above it) is 近顶. The anchor ref de-dupes the burst of move events.
+  const onMove = useCallback(
+    (_: unknown, viewport: { x: number; y: number; zoom: number }) => {
+      if (viewport.y <= -TOP_LOAD_THRESHOLD_PX) return;
+      requestOlder();
+    },
+    [requestOlder],
+  );
+
+  // Older page landed: shift the camera up by the inserted height so the anchored turn
+  // doesn't jump (instant — reads as "more appeared above"). Prepended turns are never
+  // the focus (focus follows the tail), so they use the collapsed slot heights. A load
+  // that finished with nothing new (stale flag / failure) just releases the lock.
+  useLayoutEffect(() => {
+    const a = pagingAnchorRef.current;
+    if (!a) return;
+    const newOldest = turns[0]?.id;
+    const rf = rfRef.current;
+    if (rf && newOldest && newOldest !== a.oldestId) {
+      let deltaY = 0;
+      for (const t of turns) {
+        if (t.id === a.oldestId) break;
+        deltaY +=
+          (t.kind === "team" ? TEAM_NODE_HEIGHT : SIMPLE_NODE_HEIGHT) + GAP_Y;
+      }
+      rf.setViewport({ x: a.vpX, y: a.vpY - deltaY * a.zoom, zoom: a.zoom });
+      pagingAnchorRef.current = null;
+    } else if (!loadingOlder) {
+      pagingAnchorRef.current = null;
+    }
+  }, [turns, loadingOlder]);
+
+  // Camera: frame the focused turn by FITTING the node (not a fixed zoom — the 760px focus
+  // node overflows narrow windows / with the side panel open, so fit zooms out just enough,
+  // capped at 1). Fires ONLY on a real focus change (manual switch / new turn auto-follow),
+  // not on every `nodes` rebuild: streaming frames and 上滚 prepends both churn `nodes`
+  // without needing a reframe, and re-fitting on a prepend would yank the camera off the
+  // older page the anchor just pinned.
+  const prevFitFocusRef = useRef<string | null>(null);
   useEffect(() => {
     const rf = rfRef.current;
     if (!rf || !effectiveFocus) return;
+    if (pagingAnchorRef.current) return;
+    if (prevFitFocusRef.current === effectiveFocus) return;
+    // `nodes` stays a dep so this retries once ReactFlow has ingested the focus node.
     if (!nodes.some((x) => x.id === effectiveFocus)) return;
+    prevFitFocusRef.current = effectiveFocus;
     rf.fitView({
       nodes: [{ id: effectiveFocus }],
       padding: 0.2,
@@ -540,6 +646,8 @@ export function ConversationCanvas() {
         const rf = rfRef.current;
         const focus = effectiveFocusRef.current;
         if (!rf || !focus || !rf.getNode(focus)) return;
+        // Don't fight an in-flight 上滚加载 anchor (a panel toggle mid-page-load).
+        if (pagingAnchorRef.current) return;
         rf.fitView({
           nodes: [{ id: focus }],
           padding: 0.2,
@@ -589,6 +697,7 @@ export function ConversationCanvas() {
               nodeTypes={turnNodeTypes}
               onNodeClick={onNodeClick}
               onNodeDoubleClick={onNodeDoubleClick}
+              onMove={onMove}
               onInit={(inst) => {
                 rfRef.current = inst;
                 inst.fitView({ padding: 0.2, maxZoom: 1 });
@@ -602,6 +711,31 @@ export function ConversationCanvas() {
               proOptions={{ hideAttribution: true }}
             >
               <Background />
+              {/* 上滚加载更早历史 (§六): the canvas has no scrollbar, so surface the
+                  "还有更早" affordance + a manual fallback. Pan to the top auto-loads;
+                  this chip self-hides once the head is reached (!hasMoreBefore). */}
+              {hasMoreBefore && (
+                <Panel position="top-center">
+                  <button
+                    type="button"
+                    onClick={requestOlder}
+                    disabled={loadingOlder}
+                    className="flex items-center gap-1.5 rounded-full border border-border bg-card/90 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
+                  >
+                    {loadingOlder ? (
+                      <>
+                        <Loader2 size={12} className="animate-spin" />
+                        载入更早…
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUp size={12} />
+                        更早
+                      </>
+                    )}
+                  </button>
+                </Panel>
+              )}
               {/* 缩放/适应控件：替换 ReactFlow 默认 Controls（其浅底硬编码样式不走设计 token）。
                   MiniMap 已去掉——竖直单链的小地图信息量低、只添堵。 */}
               <Panel position="bottom-left">

@@ -23,24 +23,47 @@ def _fact(kind: str, payload: dict, ts=None) -> dict:
 
 
 def _started(model_profile="chat") -> dict:
-    return _fact("turn_started", {
-        "system_prompt": "S", "user_message": "go",
-        "model_profile": model_profile, "history_len": 0})
+    return _fact(
+        "turn_started",
+        {
+            "system_prompt": "S",
+            "user_message": "go",
+            "model_profile": model_profile,
+            "history_len": 0,
+        },
+    )
 
 
 def _run_started(run_id, agent_id, *, kind="agent", parent=None, revision=0, ts="t") -> dict:
-    return _fact("run_started", {
-        "run_id": run_id, "agent_id": agent_id, "parent_run_id": parent,
-        "kind": kind, "revision": revision}, ts=ts)
+    return _fact(
+        "run_started",
+        {
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "parent_run_id": parent,
+            "kind": kind,
+            "revision": revision,
+        },
+        ts=ts,
+    )
 
 
-def _run_completed(run_id, agent_id, *, duration_ms=0, model="", role="member",
-                   usage=None, cost=None, ts="t") -> dict:
-    return _fact("run_completed", {
-        "run_id": run_id, "agent_id": agent_id, "duration_ms": duration_ms,
-        "model": model, "role": role,
-        "usage": usage or {"input": 0, "output": 0, "reasoning": 0},
-        "cost": cost or {"total": 0, "currency": "USD"}}, ts=ts)
+def _run_completed(
+    run_id, agent_id, *, duration_ms=0, model="", role="member", usage=None, cost=None, ts="t"
+) -> dict:
+    return _fact(
+        "run_completed",
+        {
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "duration_ms": duration_ms,
+            "model": model,
+            "role": role,
+            "usage": usage or {"input": 0, "output": 0, "reasoning": 0},
+            "cost": cost or {"total": 0, "currency": "USD"},
+        },
+        ts=ts,
+    )
 
 
 def _by_id(root: Span) -> dict[str, Span]:
@@ -57,23 +80,56 @@ def test_delegated_turn_builds_root_captain_worker_tool_tree():
         _started(),
         _run_started("cap", "cap", kind="captain", parent=None, ts="t0"),
         _fact("round_boundary", {"round_idx": 0, "run_id": "cap", "role": "captain"}),
-        _fact("llm_call", {"run_id": "cap", "round_idx": 0,
-                           "tool_calls": [{"id": "d1"}], "usage": {"input_tokens": 100,
-                           "output_tokens": 20}}),
+        _fact(
+            "llm_call",
+            {
+                "run_id": "cap",
+                "round_idx": 0,
+                "tool_calls": [{"id": "d1"}],
+                "usage": {"input_tokens": 100, "output_tokens": 20},
+            },
+        ),
         _fact("run_plan", {"execution_id": "e1"}, ts="t1"),
         _run_started("w1", "researcher", kind="agent", parent="cap", ts="t2"),
         _fact("round_boundary", {"round_idx": 0, "run_id": "w1", "role": "worker"}),
         _fact("llm_call", {"run_id": "w1", "round_idx": 0, "tool_calls": [{"id": "c1"}]}),
-        _fact("tool_use_start", {"tool_call_id": "c1", "tool_name": "web_search"},
-              ts="2026-06-18T08:00:00.000Z"),
-        _fact("tool_call", {"run_id": "w1", "tool_call_id": "c1", "name": "web_search",
-                            "result": "r", "success": True}),
-        _fact("tool_use_end", {"tool_call_id": "c1", "status": "success"},
-              ts="2026-06-18T08:00:03.000Z"),
-        _run_completed("w1", "researcher", duration_ms=4200, model="deepseek-v4-flash",
-                       usage={"input": 500, "output": 300}, cost={"total": 1234}, ts="t3"),
-        _run_completed("cap", "cap", duration_ms=9000, model="deepseek-v4-flash",
-                       usage={"input": 100, "output": 50}, ts="t4"),
+        _fact(
+            "tool_use_start",
+            {"tool_call_id": "c1", "tool_name": "web_search"},
+            ts="2026-06-18T08:00:00.000Z",
+        ),
+        _fact(
+            "tool_call",
+            {
+                "run_id": "w1",
+                "tool_call_id": "c1",
+                "name": "web_search",
+                "result": "r",
+                "success": True,
+            },
+        ),
+        _fact(
+            "tool_use_end",
+            {"tool_call_id": "c1", "status": "success"},
+            ts="2026-06-18T08:00:03.000Z",
+        ),
+        _run_completed(
+            "w1",
+            "researcher",
+            duration_ms=4200,
+            model="deepseek-v4-flash",
+            usage={"input": 500, "output": 300},
+            cost={"total": 1234},
+            ts="t3",
+        ),
+        _run_completed(
+            "cap",
+            "cap",
+            duration_ms=9000,
+            model="deepseek-v4-flash",
+            usage={"input": 100, "output": 50},
+            ts="t4",
+        ),
         _fact("turn_end", {"finish_reason": "end_turn"}),
     ]
     root = spans_from_entries(entries)
@@ -117,8 +173,16 @@ def test_single_agent_tool_turn_nests_tool_under_captain():
         _run_started("cap", "cap", kind="captain", ts="t0"),
         _fact("round_boundary", {"round_idx": 0, "run_id": "cap", "role": "captain"}),
         _fact("llm_call", {"run_id": "cap", "round_idx": 0, "tool_calls": [{"id": "c1"}]}),
-        _fact("tool_call", {"run_id": "cap", "tool_call_id": "c1", "name": "read_url",
-                            "result": "r", "success": True}),
+        _fact(
+            "tool_call",
+            {
+                "run_id": "cap",
+                "tool_call_id": "c1",
+                "name": "read_url",
+                "result": "r",
+                "success": True,
+            },
+        ),
         _run_completed("cap", "cap", duration_ms=1500, ts="t1"),
         _fact("turn_end", {"finish_reason": "end_turn"}),
     ]
@@ -149,8 +213,16 @@ def test_failed_tool_marks_run_tool_failures():
     entries = [
         _started(),
         _run_started("cap", "cap", kind="captain", ts="t0"),
-        _fact("tool_call", {"run_id": "cap", "tool_call_id": "c1", "name": "read_url",
-                            "result": "err", "success": False}),
+        _fact(
+            "tool_call",
+            {
+                "run_id": "cap",
+                "tool_call_id": "c1",
+                "name": "read_url",
+                "result": "err",
+                "success": False,
+            },
+        ),
         _run_completed("cap", "cap", ts="t1"),
         _fact("turn_end", {"finish_reason": "end_turn"}),
     ]
@@ -238,8 +310,10 @@ def test_flatten_is_preorder_depth_first():
         _started(),
         _run_started("cap", "cap", kind="captain", ts="t0"),
         _run_started("w1", "w1", kind="agent", parent="cap", ts="t1"),
-        _fact("tool_call", {"run_id": "w1", "tool_call_id": "c1", "name": "t",
-                            "result": "r", "success": True}),
+        _fact(
+            "tool_call",
+            {"run_id": "w1", "tool_call_id": "c1", "name": "t", "result": "r", "success": True},
+        ),
         _run_completed("w1", "w1", ts="t2"),
         _run_completed("cap", "cap", ts="t3"),
         _fact("turn_end", {"finish_reason": "end_turn"}),
@@ -297,9 +371,7 @@ def test_export_turn_spans_is_best_effort_on_exporter_error():
         _fact("turn_end", {"finish_reason": "end_turn"}),
     ]
     # Must NOT raise — observability never breaks the turn.
-    export_turn_spans(
-        entries, trace_id="tr", conversation_id="c1", turn_id="m1", exporter=_Boom()
-    )
+    export_turn_spans(entries, trace_id="tr", conversation_id="c1", turn_id="m1", exporter=_Boom())
 
 
 def test_export_turn_spans_noop_on_empty():
@@ -308,16 +380,16 @@ def test_export_turn_spans_noop_on_empty():
         def export(self, root, **kwargs):
             raise AssertionError("should not export an empty tree")
 
-    export_turn_spans(
-        [], trace_id="tr", conversation_id="c1", turn_id="m1", exporter=_Boom()
-    )
+    export_turn_spans([], trace_id="tr", conversation_id="c1", turn_id="m1", exporter=_Boom())
 
 
 def test_noop_exporter_returns_none():
-    root = spans_from_entries([
-        _started(),
-        _run_started("cap", "cap", kind="captain", ts="t0"),
-        _run_completed("cap", "cap", ts="t1"),
-        _fact("turn_end", {"finish_reason": "end_turn"}),
-    ])
+    root = spans_from_entries(
+        [
+            _started(),
+            _run_started("cap", "cap", kind="captain", ts="t0"),
+            _run_completed("cap", "cap", ts="t1"),
+            _fact("turn_end", {"finish_reason": "end_turn"}),
+        ]
+    )
     assert NoopSpanExporter().export(root, trace_id="t", conversation_id="c", turn_id="m") is None

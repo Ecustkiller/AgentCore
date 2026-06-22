@@ -74,9 +74,7 @@ class ConversationShareRepository:
         )
         return result.scalars().all()
 
-    async def revoke(
-        self, share_id: str, *, conversation_id: str, user_id: str
-    ) -> bool:
+    async def revoke(self, share_id: str, *, conversation_id: str, user_id: str) -> bool:
         """Revoke one share (owner + conversation scoped). Returns False when the id
         is unknown / already revoked / not the user's, so a stale revoke 404s."""
         result = await self._session.execute(

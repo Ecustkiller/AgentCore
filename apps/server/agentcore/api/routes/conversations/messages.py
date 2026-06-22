@@ -92,13 +92,9 @@ async def list_messages(
             conversation_id, before=before, limit=limit
         )
     elif after is not None:
-        messages, has_more_after = await repo.list_after(
-            conversation_id, after=after, limit=limit
-        )
+        messages, has_more_after = await repo.list_after(conversation_id, after=after, limit=limit)
     else:
-        messages, has_more_before = await repo.list_latest(
-            conversation_id, limit=limit
-        )
+        messages, has_more_before = await repo.list_latest(conversation_id, limit=limit)
 
     # Project each assistant message's replay payload (runs) from the唯一事实源
     # turn_journal (§18.3) — it is no longer stored on the message row. One batched
@@ -174,9 +170,7 @@ async def send_message(
     """
     await enforce_user_message_rate_limit(user.user_id)
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    credentials = await _preflight_turn_llm(
-        session=session, user=user, cost_repo=cost_repo
-    )
+    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
 
     sink = EventSink()
 

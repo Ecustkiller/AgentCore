@@ -52,23 +52,17 @@ def _png(width: int = 80, height: int = 120) -> bytes:
     return buffer.getvalue()
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> None:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
     )
     assert r.status_code == 201, r.text
-    r = await client.post(
-        "/v1/auth/login", json={"username": username, "password": _PW}
-    )
+    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
     assert r.status_code == 200, r.text
 
 
-async def test_avatar_upload_serve_and_delete_roundtrip(
-    client, new_client, make_invite, assets
-):
+async def test_avatar_upload_serve_and_delete_roundtrip(client, new_client, make_invite, assets):
     code = await make_invite("INV-AV-1")
     await _register_and_login(client, code, "ava")
 
@@ -130,9 +124,7 @@ async def test_avatar_upload_rejects_empty_body(client, make_invite, assets):
     assert r.status_code == 422
 
 
-async def test_avatar_upload_rejects_oversized(
-    client, make_invite, assets, monkeypatch
-):
+async def test_avatar_upload_rejects_oversized(client, make_invite, assets, monkeypatch):
     code = await make_invite("INV-AV-4")
     await _register_and_login(client, code, "dan")
     # Shrink the cap below the test image so the size guard trips (Content-Length).

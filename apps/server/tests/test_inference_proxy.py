@@ -131,18 +131,14 @@ async def test_resolve_credentials_byok_missing_key_refuses(monkeypatch):
 
     monkeypatch.setattr(inference, "resolve_user_llm_credentials", _fake_resolve)
     with pytest.raises(BYOKKeyMissingError):
-        await inference._resolve_inference_credentials(
-            None, None, SimpleNamespace(user_id="u1")
-        )
+        await inference._resolve_inference_credentials(None, None, SimpleNamespace(user_id="u1"))
 
 
 async def test_resolve_credentials_platform_enforces_quota_then_uses_global(monkeypatch):
     monkeypatch.setattr(inference.settings, "billing_mode", "platform")
     monkeypatch.setattr(inference.settings, "deepseek_api_key", "sk-platform")
     monkeypatch.setattr(inference.settings, "deepseek_base_url", "https://api.deepseek.com")
-    monkeypatch.setattr(
-        inference, "QuotaLimits", SimpleNamespace(for_user=lambda _u: "LIMITS")
-    )
+    monkeypatch.setattr(inference, "QuotaLimits", SimpleNamespace(for_user=lambda _u: "LIMITS"))
     seen = {}
 
     async def _fake_enforce(cost_repo, user_id, *, limits):
@@ -159,18 +155,14 @@ async def test_resolve_credentials_platform_enforces_quota_then_uses_global(monk
 
 async def test_resolve_credentials_platform_quota_exceeded_propagates(monkeypatch):
     monkeypatch.setattr(inference.settings, "billing_mode", "platform")
-    monkeypatch.setattr(
-        inference, "QuotaLimits", SimpleNamespace(for_user=lambda _u: "LIMITS")
-    )
+    monkeypatch.setattr(inference, "QuotaLimits", SimpleNamespace(for_user=lambda _u: "LIMITS"))
 
     async def _fake_enforce(_cost_repo, _user_id, *, limits):
         raise QuotaExceededError("over budget")
 
     monkeypatch.setattr(inference, "enforce_quota", _fake_enforce)
     with pytest.raises(QuotaExceededError):
-        await inference._resolve_inference_credentials(
-            None, None, SimpleNamespace(user_id="u1")
-        )
+        await inference._resolve_inference_credentials(None, None, SimpleNamespace(user_id="u1"))
 
 
 # --- authoritative metering --------------------------------------------------
@@ -291,9 +283,7 @@ async def test_forward_unary_passes_through_and_records(monkeypatch):
             },
         )
 
-    client = httpx.AsyncClient(
-        base_url="http://upstream", transport=httpx.MockTransport(_handler)
-    )
+    client = httpx.AsyncClient(base_url="http://upstream", transport=httpx.MockTransport(_handler))
     resp = await inference._forward_unary(
         client, {"model": "deepseek-v4-flash"}, user_id="u1", conversation_id="c1"
     )
@@ -309,16 +299,12 @@ async def test_forward_unary_passes_through_and_records(monkeypatch):
 
 async def test_forward_unary_passes_error_status_through(monkeypatch):
     spend: list = []
-    monkeypatch.setattr(
-        inference, "_record_proxy_spend", lambda **kw: spend.append(kw)
-    )
+    monkeypatch.setattr(inference, "_record_proxy_spend", lambda **kw: spend.append(kw))
 
     def _handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(402, json={"error": "insufficient balance"})
 
-    client = httpx.AsyncClient(
-        base_url="http://upstream", transport=httpx.MockTransport(_handler)
-    )
+    client = httpx.AsyncClient(base_url="http://upstream", transport=httpx.MockTransport(_handler))
     resp = await inference._forward_unary(
         client, {"model": "deepseek-v4-flash"}, user_id="u1", conversation_id="c1"
     )
@@ -347,13 +333,9 @@ async def test_forward_stream_relays_and_records(monkeypatch):
             )
             yield b"data: [DONE]\n\n"
 
-        return httpx.Response(
-            200, headers={"content-type": "text/event-stream"}, content=_body()
-        )
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_body())
 
-    client = httpx.AsyncClient(
-        base_url="http://upstream", transport=httpx.MockTransport(_handler)
-    )
+    client = httpx.AsyncClient(base_url="http://upstream", transport=httpx.MockTransport(_handler))
     resp = await inference._forward_stream(
         client, {"model": "deepseek-v4-flash", "stream": True}, user_id="u1", conversation_id="c1"
     )
@@ -416,9 +398,7 @@ async def test_forward_unary_threads_trace_id(monkeypatch):
             json={"model": "m", "usage": {"prompt_tokens": 1, "completion_tokens": 1}},
         )
 
-    client = httpx.AsyncClient(
-        base_url="http://upstream", transport=httpx.MockTransport(_handler)
-    )
+    client = httpx.AsyncClient(base_url="http://upstream", transport=httpx.MockTransport(_handler))
     await inference._forward_unary(
         client, {"model": "m"}, user_id="u1", conversation_id="c1", trace_id="t-abc"
     )
@@ -442,13 +422,9 @@ async def test_forward_stream_threads_trace_id(monkeypatch):
             )
             yield b"data: [DONE]\n\n"
 
-        return httpx.Response(
-            200, headers={"content-type": "text/event-stream"}, content=_body()
-        )
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_body())
 
-    client = httpx.AsyncClient(
-        base_url="http://upstream", transport=httpx.MockTransport(_handler)
-    )
+    client = httpx.AsyncClient(base_url="http://upstream", transport=httpx.MockTransport(_handler))
     resp = await inference._forward_stream(
         client,
         {"model": "m", "stream": True},

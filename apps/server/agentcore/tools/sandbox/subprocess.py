@@ -63,7 +63,11 @@ async def _reap_tree(process: asyncio.subprocess.Process, pid: int) -> None:
         # live so the tree is intact (it reparents nothing on Windows once dead).
         with contextlib.suppress(Exception):
             killer = await asyncio.create_subprocess_exec(
-                "taskkill", "/F", "/T", "/PID", str(pid),
+                "taskkill",
+                "/F",
+                "/T",
+                "/PID",
+                str(pid),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )

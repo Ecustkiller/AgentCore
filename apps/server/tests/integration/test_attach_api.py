@@ -24,17 +24,13 @@ from agentcore.runtime.turn_runs import turn_runs
 _PW = "password123"
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> str:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
     )
     assert r.status_code == 201, r.text
-    r = await client.post(
-        "/v1/auth/login", json={"username": username, "password": _PW}
-    )
+    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
     assert r.status_code == 200, r.text
     return r.json()["id"]
 
@@ -49,9 +45,7 @@ async def _never() -> None:
     await asyncio.Event().wait()
 
 
-async def _read_until(
-    lines: AsyncIterator[str], needle: str, timeout: float = 3.0
-) -> str:
+async def _read_until(lines: AsyncIterator[str], needle: str, timeout: float = 3.0) -> str:
     """Accumulate SSE lines from a shared ``resp.aiter_lines()`` iterator until
     ``needle`` appears, or fail on timeout. Takes the iterator (not the response) so
     repeated calls keep draining the *same* stream — re-iterating a real network
@@ -86,9 +80,7 @@ async def live_server(session_factory):
     structlog mid-suite, which would otherwise strand capsys-based logging assertions
     in later tests.
     """
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=0, log_level="warning", lifespan="off"
-    )
+    config = uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning", lifespan="off")
     server = uvicorn.Server(config)
     # serve() runs as a task on this loop, so don't let it install process signal
     # handlers (main-thread-only, and they'd fight pytest's own).
@@ -148,9 +140,7 @@ async def test_attach_replays_history_then_tails(live_client, make_invite):
     task = asyncio.create_task(_never())
     turn_runs.register(conversation_id=conv, task=task, sink=sink)
     try:
-        async with live_client.stream(
-            "GET", f"/v1/conversations/{conv}/stream"
-        ) as resp:
+        async with live_client.stream("GET", f"/v1/conversations/{conv}/stream") as resp:
             assert resp.status_code == 200
             assert resp.headers["content-type"].startswith("text/event-stream")
             lines = resp.aiter_lines()  # one shared iterator (real streams consume once)
@@ -182,6 +172,4 @@ async def test_attach_rejects_non_owner(client, make_invite, new_client):
     code2 = await make_invite("INV-ATT4")
     async with new_client() as other:
         await _register_and_login(other, code2, "attachintruder")
-        assert (
-            await other.get(f"/v1/conversations/{conv}/stream")
-        ).status_code == 404
+        assert (await other.get(f"/v1/conversations/{conv}/stream")).status_code == 404

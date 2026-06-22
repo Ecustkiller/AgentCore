@@ -12,11 +12,10 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
-
 from tests.runs_executor.conftest import (
+    _WS_ROOT,
     _ContentProvider,
     _CountingIndexBackend,
-    _WS_ROOT,
     _plan,
     _state,
 )
@@ -141,12 +140,8 @@ async def test_safe_index_files_swallows_backend_failure():
 async def test_preexisting_index_snapshotted_once_per_turn():
     # Three workers in one batch share a SINGLE workspace index walk (the per-turn
     # snapshot cache), not one walk per worker — so the mtime stat cost doesn't multiply.
-    backend = _CountingIndexBackend(
-        ServerWorkspace(root=_WS_ROOT, sandbox=SubprocessSandbox())
-    )
-    ctx = ToolContext(
-        execution_id="e", run_id="s", agent_id="a", backend=backend, user_id="u"
-    )
+    backend = _CountingIndexBackend(ServerWorkspace(root=_WS_ROOT, sandbox=SubprocessSandbox()))
+    ctx = ToolContext(execution_id="e", run_id="s", agent_id="a", backend=backend, user_id="u")
     plan, _ = build_run_plan(
         [
             {"role": "A", "task": "a"},

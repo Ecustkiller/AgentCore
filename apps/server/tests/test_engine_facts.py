@@ -12,6 +12,7 @@ executor / pipeline, not the bare loop, so they are out of scope here.
 
 from pathlib import Path
 
+from agentcore.core.types import ToolCategory
 from agentcore.llm.config import ModelProfile
 from agentcore.llm.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.engine import react_loop
@@ -26,7 +27,6 @@ from agentcore.runtime.facts import (
 )
 from agentcore.runtime.journal import runs_from_entries, window_from_journal
 from agentcore.runtime.pipeline import _durable_journal_entries
-from agentcore.core.types import ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -126,9 +126,7 @@ async def _run(provider: _ScriptedProvider, tool: _StubTool, *, max_rounds: int 
     reg = ToolRegistry()
     reg.register(tool)
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
-    profile = ModelProfile(
-        model="m", thinking=False, reasoning_effort=None, max_rounds=max_rounds
-    )
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=max_rounds)
     log = TurnFactLog()
     token = current_fact_log.set(log)
     try:
@@ -150,9 +148,7 @@ async def _run(provider: _ScriptedProvider, tool: _StubTool, *, max_rounds: int 
 async def test_loop_records_round_boundary_and_llm_call_per_round():
     # Round 0 issues a tool call; round 1 answers with text → two rounds, so two
     # round_boundary + two llm_call facts, with the tool's display facts between them.
-    provider = _ScriptedProvider(
-        [[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]]
-    )
+    provider = _ScriptedProvider([[_tool_chunk("search", '{"q": "x"}')], [_content_chunk("done")]])
     facts, content, _messages = await _run(provider, _StubTool())
 
     assert content == "done"
@@ -161,8 +157,10 @@ async def test_loop_records_round_boundary_and_llm_call_per_round():
     assert len(boundaries) == 2
     assert [b["payload"]["round_idx"] for b in boundaries] == [0, 1]
     # run_id / role scope every round to the captain (multi-agent turns split per run).
-    assert all(b["payload"] == {"round_idx": i, "run_id": "cap", "role": "captain"}
-               for i, b in enumerate(boundaries))
+    assert all(
+        b["payload"] == {"round_idx": i, "run_id": "cap", "role": "captain"}
+        for i, b in enumerate(boundaries)
+    )
 
     calls = [f for f in facts if f["kind"] == FactKind.LLM_CALL]
     assert len(calls) == 2
@@ -173,8 +171,7 @@ async def test_loop_records_round_boundary_and_llm_call_per_round():
     assert tool_round["content"] == ""
     assert tool_round["finish_reason"] == "tool_calls"
     assert tool_round["tool_calls"] == [
-        {"id": "c1", "type": "function",
-         "function": {"name": "search", "arguments": '{"q": "x"}'}}
+        {"id": "c1", "type": "function", "function": {"name": "search", "arguments": '{"q": "x"}'}}
     ]
 
     # Round 1: the textual answer, no tool calls, finish_reason "stop".
@@ -187,9 +184,7 @@ async def test_loop_records_round_boundary_and_llm_call_per_round():
 async def test_single_ordered_log_interleaves_display_and_execution_facts():
     # The sink's display facts (tool_use_start/end) and the engine's execution facts
     # land in ONE log, in emission order: rb0, llm0(tool), tool_use_start/end, rb1, llm1.
-    provider = _ScriptedProvider(
-        [[_tool_chunk("search", "{}")], [_content_chunk("ok")]]
-    )
+    provider = _ScriptedProvider([[_tool_chunk("search", "{}")], [_content_chunk("ok")]])
     facts, _content, _messages = await _run(provider, _StubTool())
 
     kinds = [f["kind"] for f in facts]
@@ -225,7 +220,9 @@ async def test_loop_records_note_fact_on_nudge():
     assert notes[0]["payload"]["reason"] == "nudge"
     assert notes[0]["payload"]["role"] == "user"
     # The note's content is the exact reflection injected into the transcript.
-    injected = [m for m in messages if m.role == "user" and m.content == notes[0]["payload"]["content"]]
+    injected = [
+        m for m in messages if m.role == "user" and m.content == notes[0]["payload"]["content"]
+    ]
     assert len(injected) == 1
 
 
@@ -234,8 +231,9 @@ def test_durable_journal_entries_gates_on_runs_none():
     # writes NO journal, so storage + the None-gate match the pre-cutover behavior even
     # though the fact log accumulated.
     log = TurnFactLog()
-    log.record_fact(TurnStartedFact(system_prompt="s", user_message="hi",
-                                    model_profile="m").to_fact())
+    log.record_fact(
+        TurnStartedFact(system_prompt="s", user_message="hi", model_profile="m").to_fact()
+    )
     log.record_fact(RoundBoundaryFact(round_idx=0, run_id="cap", role="captain").to_fact())
     assert _durable_journal_entries(log, None) is None
 
@@ -245,22 +243,25 @@ def test_durable_journal_entries_composes_log_plus_tail_and_projects_gated():
     # the process/turn_end tail read off ``runs``. runs.events is NOT re-appended (it
     # already rides the log); the read-side projection re-gates to the team graph.
     log = TurnFactLog()
-    log.record_fact(TurnStartedFact(system_prompt="s", user_message="go",
-                                    model_profile="m").to_fact())
+    log.record_fact(
+        TurnStartedFact(system_prompt="s", user_message="go", model_profile="m").to_fact()
+    )
     log.record_fact(RoundBoundaryFact(round_idx=0, run_id="cap", role="captain").to_fact())
     # The forwarded display events that would ride the log (surfaced: run_plan present).
     from agentcore.runtime.facts import Fact
+
     log.record_fact(Fact(kind="run_plan", payload={"execution_id": "e1"}, ts="t0"))
     log.record_fact(Fact(kind="run_completed", payload={"run_id": "w1"}, ts="t1"))
     log.record_fact(MessageFinalFact(run_id="cap", content="done").to_fact())
 
-    runs = {"events": [{"type": "run_plan", "payload": {"execution_id": "e1"},
-                        "timestamp": "t0"}], "finish_reason": "end_turn"}
+    runs = {
+        "events": [{"type": "run_plan", "payload": {"execution_id": "e1"}, "timestamp": "t0"}],
+        "finish_reason": "end_turn",
+    }
     durable = _durable_journal_entries(log, runs)
 
     # Tail = just turn_end (no process); the log's own entries come first verbatim.
-    assert durable[-1] == {"kind": "turn_end",
-                           "payload": {"finish_reason": "end_turn"}, "ts": None}
+    assert durable[-1] == {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None}
     assert durable[: len(log.entries())] == log.entries()
 
     # Projecting the durable journal back yields the gated team graph (exec facts
@@ -293,9 +294,7 @@ async def test_window_from_journal_reconstructs_live_transcript():
         LLMMessage(role="system", content=system_prompt),
         LLMMessage(role="user", content="go"),
     ]
-    profile = ModelProfile(
-        model="m", thinking=False, reasoning_effort=None, max_rounds=20
-    )
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
     log = TurnFactLog()
     token = current_fact_log.set(log)
     try:
@@ -316,9 +315,9 @@ async def test_window_from_journal_reconstructs_live_transcript():
     # it to the loop's facts to form the full turn journal, capturing the verbatim
     # system prompt + user message exactly as the executor seeded the transcript.
     facts = [
-        TurnStartedFact(
-            system_prompt=system_prompt, user_message="go", model_profile="m"
-        ).to_fact().entry()
+        TurnStartedFact(system_prompt=system_prompt, user_message="go", model_profile="m")
+        .to_fact()
+        .entry()
     ] + log.entries()
 
     # The live transcript after the loop = system, user, assistant(tool+reasoning),
@@ -334,18 +333,14 @@ async def test_tool_call_fact_captures_post_annotation_text_ceo_path():
     # reproduces the EXACT annotated tool message the next round saw — proving the window no
     # longer reads the diverging tool_use_end text.
     system_prompt = "You are the CEO."
-    provider = _ScriptedProvider(
-        [[_tool_chunk("search", "{}")], [_content_chunk("done")]]
-    )
+    provider = _ScriptedProvider([[_tool_chunk("search", "{}")], [_content_chunk("done")]])
     reg = ToolRegistry()
     reg.register(_CitingTool())
     messages = [
         LLMMessage(role="system", content=system_prompt),
         LLMMessage(role="user", content="go"),
     ]
-    profile = ModelProfile(
-        model="m", thinking=False, reasoning_effort=None, max_rounds=20
-    )
+    profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20)
     log = TurnFactLog()
     citations: list[dict] = []
     token = current_fact_log.set(log)
@@ -377,9 +372,9 @@ async def test_tool_call_fact_captures_post_annotation_text_ceo_path():
 
     # The window folds the annotated text back, reproducing the live transcript exactly.
     facts = [
-        TurnStartedFact(
-            system_prompt=system_prompt, user_message="go", model_profile="m"
-        ).to_fact().entry()
+        TurnStartedFact(system_prompt=system_prompt, user_message="go", model_profile="m")
+        .to_fact()
+        .entry()
     ] + log.entries()
     assert window_from_journal(facts) == messages
 

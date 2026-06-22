@@ -19,9 +19,7 @@ from ._helpers import _get_owned_conversation
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
-def _binding_response(
-    conv: Conversation, folder: object | None
-) -> WorkspaceBindingResponse:
+def _binding_response(conv: Conversation, folder: object | None) -> WorkspaceBindingResponse:
     """Render a conversation's resolved workspace mode (§七) as the API response.
 
     文件夹即工作区: a binding lives on the folder (shared by its siblings), so a filed
@@ -39,9 +37,7 @@ def _binding_response(
     return WorkspaceBindingResponse(mode="local", scope=scope, root_id=binding.root_id)
 
 
-@router.get(
-    "/{conversation_id}/workspace/binding", response_model=WorkspaceBindingResponse
-)
+@router.get("/{conversation_id}/workspace/binding", response_model=WorkspaceBindingResponse)
 async def get_workspace_binding(
     conversation_id: str,
     user: AuthUser,
@@ -62,9 +58,7 @@ async def get_workspace_binding(
     return _binding_response(conv, folder)
 
 
-@router.put(
-    "/{conversation_id}/workspace/binding", response_model=WorkspaceBindingResponse
-)
+@router.put("/{conversation_id}/workspace/binding", response_model=WorkspaceBindingResponse)
 async def bind_workspace(
     conversation_id: str,
     body: BindLocalWorkspaceRequest,
@@ -101,23 +95,15 @@ async def bind_workspace(
         if reused and folder.local_root_id != body.root_id:
             # Lost the mint race to a concurrent first write — apply the requested
             # binding to the folder it minted so "打开本地文件夹" still takes effect.
-            await folder_repo.set_local_root_id(
-                folder.id, body.root_id, user_id=user.user_id
-            )
-        return WorkspaceBindingResponse(
-            mode="local", scope="folder", root_id=body.root_id
-        )
-    folder = await folder_repo.set_local_root_id(
-        conv.folder_id, body.root_id, user_id=user.user_id
-    )
+            await folder_repo.set_local_root_id(folder.id, body.root_id, user_id=user.user_id)
+        return WorkspaceBindingResponse(mode="local", scope="folder", root_id=body.root_id)
+    folder = await folder_repo.set_local_root_id(conv.folder_id, body.root_id, user_id=user.user_id)
     if not folder:
         raise NotFoundError("文件夹不存在")
     return WorkspaceBindingResponse(mode="local", scope="folder", root_id=body.root_id)
 
 
-@router.delete(
-    "/{conversation_id}/workspace/binding", response_model=WorkspaceBindingResponse
-)
+@router.delete("/{conversation_id}/workspace/binding", response_model=WorkspaceBindingResponse)
 async def unbind_workspace(
     conversation_id: str,
     user: AuthUser,
@@ -132,12 +118,8 @@ async def unbind_workspace(
     """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     if not conv.folder_id:
-        return WorkspaceBindingResponse(
-            mode="cloud", scope="conversation", root_id=None
-        )
-    folder = await folder_repo.set_local_root_id(
-        conv.folder_id, None, user_id=user.user_id
-    )
+        return WorkspaceBindingResponse(mode="cloud", scope="conversation", root_id=None)
+    folder = await folder_repo.set_local_root_id(conv.folder_id, None, user_id=user.user_id)
     if not folder:
         raise NotFoundError("文件夹不存在")
     return WorkspaceBindingResponse(mode="cloud", scope="folder", root_id=None)

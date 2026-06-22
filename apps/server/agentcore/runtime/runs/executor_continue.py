@@ -30,6 +30,7 @@ from agentcore.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
 
+
 async def continue_run(
     *,
     session: RunSession,
@@ -160,9 +161,7 @@ async def _continue_run_scoped(
         # run_output_delta / run_reasoning_delta from here once the live deltas stop
         # being journaled (deltas 退场).
         record_turn_fact(
-            MessageFinalFact(
-                run_id=revision_run_id, content=content, reasoning=reasoning
-            ).to_fact()
+            MessageFinalFact(run_id=revision_run_id, content=content, reasoning=reasoning).to_fact()
         )
         sink.emit(
             run_completed(

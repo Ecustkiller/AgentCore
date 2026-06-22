@@ -135,9 +135,7 @@ class DeferredWorkspace:
             self._folder_id = result.folder_id
             if result.local_binding is not None:
                 if self._sink is None:
-                    raise RuntimeError(
-                        "local promotion requires the turn's sink for its channel"
-                    )
+                    raise RuntimeError("local promotion requires the turn's sink for its channel")
                 self._inner = build_local_workspace(
                     binding=result.local_binding,
                     sink=self._sink,
@@ -175,9 +173,7 @@ class DeferredWorkspace:
             raise PathNotFound(path)
         return await self._inner.read_bytes(path)
 
-    async def replace(
-        self, path: str, old: str, new: str, *, all_: bool
-    ) -> ReplaceOutcome:
+    async def replace(self, path: str, old: str, new: str, *, all_: bool) -> ReplaceOutcome:
         if self._inner is None:
             raise PathNotFound(path)
         return await self._inner.replace(path, old, new, all_=all_)

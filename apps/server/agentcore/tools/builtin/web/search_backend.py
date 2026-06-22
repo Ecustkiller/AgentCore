@@ -68,8 +68,7 @@ class SearchResult:
 class SearchBackend(Protocol):
     async def search(
         self, query: str, max_results: int = DEFAULT_MAX_RESULTS
-    ) -> list[SearchResult]:
-        ...
+    ) -> list[SearchResult]: ...
 
 
 def _parse_results(data: dict[str, Any], max_results: int) -> list[SearchResult]:
@@ -313,7 +312,7 @@ class FallbackSearchBackend:
                     reason=describe_net_error(fb_exc),
                     error_repr=repr(fb_exc),
                 )
-                raise primary_exc
+                raise primary_exc from fb_exc
             logger.info("search.fallback_succeeded", result_count=len(results))
             return results
 

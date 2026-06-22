@@ -23,9 +23,7 @@ def _citation_key(citation: dict[str, Any]) -> str:
     return (citation.get("url") or "").split("#", 1)[0].rstrip("/")
 
 
-def merge_citations(
-    sink: list[dict[str, Any]], new: list[dict[str, Any]]
-) -> dict[str, int]:
+def merge_citations(sink: list[dict[str, Any]], new: list[dict[str, Any]]) -> dict[str, int]:
     """把 ``new`` 合并进 ``sink``（按到达顺序、去重、限量），返回 ``new`` 中那些在
     ``sink`` 里占到位置的来源的 ``{归一化url: 规范编号}`` 映射。
 
@@ -56,9 +54,7 @@ def merge_citations(
 # A2 引用编号：每条 web 工具结果都被标注上 engine 为其来源分配的规范编号（= 来源卡
 # 序号）。模型用这些确切编号引用，于是正文 [n] 总能解析到正确的卡片——而非自己猜一个
 # 后端按到达顺序独立分配的序号（那在乱序使用、子集、去重与限量时都会错位）。
-_CITATION_NUMBER_HINT = (
-    "\n\n[来源编号] 上述来源对应的引用号，正文中用方括号角标引用（如 [1]）："
-)
+_CITATION_NUMBER_HINT = "\n\n[来源编号] 上述来源对应的引用号，正文中用方括号角标引用（如 [1]）："
 
 
 def annotate_tool_citations(
@@ -112,8 +108,6 @@ def out_of_range_markers(content: str, citation_count: int) -> list[int]:
     scannable = _INLINE_CODE_RE.sub(" ", scannable)
     scannable = _MD_LINK_RE.sub(" ", scannable)
     bad = {
-        n
-        for n in (int(x) for x in _MARKER_RE.findall(scannable))
-        if n < 1 or n > citation_count
+        n for n in (int(x) for x in _MARKER_RE.findall(scannable)) if n < 1 or n > citation_count
     }
     return sorted(bad)

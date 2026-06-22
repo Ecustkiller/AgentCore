@@ -40,9 +40,7 @@ _FOLDER_SCOPE = "(folder)"
 
 async def purge_folder_space(*, user_id: str, folder_id: str) -> None:
     """Delete a folder's shared workspace directory + its snapshot history."""
-    key = workspace_storage_key(
-        user_id=user_id, folder_id=folder_id, conversation_id=_FOLDER_SCOPE
-    )
+    key = workspace_storage_key(user_id=user_id, folder_id=folder_id, conversation_id=_FOLDER_SCOPE)
     async with workspace_lock(key):
         shutil.rmtree(
             workspace_root_path(
@@ -50,26 +48,18 @@ async def purge_folder_space(*, user_id: str, folder_id: str) -> None:
             ),
             ignore_errors=True,
         )
-        await purge_snapshots(
-            user_id=user_id, folder_id=folder_id, conversation_id=_FOLDER_SCOPE
-        )
+        await purge_snapshots(user_id=user_id, folder_id=folder_id, conversation_id=_FOLDER_SCOPE)
 
 
 async def _purge_conversation_space(*, user_id: str, conversation_id: str) -> None:
     """Delete an ungrouped conversation's own workspace directory + snapshots."""
-    key = workspace_storage_key(
-        user_id=user_id, folder_id=None, conversation_id=conversation_id
-    )
+    key = workspace_storage_key(user_id=user_id, folder_id=None, conversation_id=conversation_id)
     async with workspace_lock(key):
         shutil.rmtree(
-            workspace_root_path(
-                user_id=user_id, folder_id=None, conversation_id=conversation_id
-            ),
+            workspace_root_path(user_id=user_id, folder_id=None, conversation_id=conversation_id),
             ignore_errors=True,
         )
-        await purge_snapshots(
-            user_id=user_id, folder_id=None, conversation_id=conversation_id
-        )
+        await purge_snapshots(user_id=user_id, folder_id=None, conversation_id=conversation_id)
 
 
 async def run_retention_sweep() -> dict[str, int]:
@@ -87,17 +77,13 @@ async def run_retention_sweep() -> dict[str, int]:
     limit = settings.workspace_retention_batch_limit
 
     async with async_session_factory() as session:
-        folders = await FolderRepository(session).list_purgeable(
-            before=before, limit=limit
-        )
+        folders = await FolderRepository(session).list_purgeable(before=before, limit=limit)
     purged_folders = 0
     for folder in folders:
         try:
             await purge_folder_space(user_id=folder.user_id, folder_id=folder.id)
         except Exception as e:
-            logger.warning(
-                "retention.folder_purge_failed", folder_id=folder.id, error=str(e)
-            )
+            logger.warning("retention.folder_purge_failed", folder_id=folder.id, error=str(e))
             continue
         async with async_session_factory() as session:
             await FolderRepository(session).hard_delete(folder.id)
@@ -113,9 +99,7 @@ async def run_retention_sweep() -> dict[str, int]:
             # A grouped conversation's files belong to the (shared) folder space;
             # only an ungrouped one owns a space to delete.
             if conv.folder_id is None:
-                await _purge_conversation_space(
-                    user_id=conv.user_id, conversation_id=conv.id
-                )
+                await _purge_conversation_space(user_id=conv.user_id, conversation_id=conv.id)
         except Exception as e:
             logger.warning(
                 "retention.conversation_purge_failed",

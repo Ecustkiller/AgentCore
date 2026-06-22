@@ -27,9 +27,7 @@ router = APIRouter(prefix="/devices", tags=["devices"])
 
 def _summary(device: PushDeviceRow) -> DeviceSummary:
     # The raw token is a delivery secret — never echoed back to the client.
-    return DeviceSummary(
-        id=device.id, platform=device.platform, created_at=device.created_at
-    )
+    return DeviceSummary(id=device.id, platform=device.platform, created_at=device.created_at)
 
 
 @router.post("", response_model=StatusResponse)
@@ -43,9 +41,7 @@ async def register_device(
     Idempotent: upsert on the token, so re-registering after a token rotation or a new
     login simply moves the token to the current user instead of creating duplicates.
     """
-    await repo.upsert(
-        user_id=user.user_id, token=body.token, platform=body.platform
-    )
+    await repo.upsert(user_id=user.user_id, token=body.token, platform=body.platform)
     return StatusResponse()
 
 

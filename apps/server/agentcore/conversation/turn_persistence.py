@@ -2,7 +2,8 @@
 
 from agentcore.config import settings
 from agentcore.conversation.background import spawn_background
-from agentcore.conversation.common import generate_title as mint_title, log_cost_recorded
+from agentcore.conversation.common import generate_title as mint_title
+from agentcore.conversation.common import log_cost_recorded
 from agentcore.conversation.compaction import schedule_compaction
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger

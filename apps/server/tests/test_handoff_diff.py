@@ -42,12 +42,8 @@ def _sha(data: bytes) -> str:
 
 
 def test_diff_archives_detects_add_modify_delete():
-    base = _zip(
-        {"a.py": b"old", "keep.py": b"same", "gone.py": b"bye"}
-    )
-    result = _zip(
-        {"a.py": b"new", "keep.py": b"same", "added.py": b"hi"}
-    )
+    base = _zip({"a.py": b"old", "keep.py": b"same", "gone.py": b"bye"})
+    result = _zip({"a.py": b"new", "keep.py": b"same", "added.py": b"hi"})
 
     changes = {c.path: c for c in diff_archives(base, result)}
 
@@ -112,9 +108,7 @@ def test_diff_archives_identical_is_empty():
 )
 def test_classify_three_way(base_sha, result_sha, local_sha, expected):
     assert (
-        classify_three_way(
-            base_sha=base_sha, result_sha=result_sha, local_sha=local_sha
-        )
+        classify_three_way(base_sha=base_sha, result_sha=result_sha, local_sha=local_sha)
         == expected
     )
 

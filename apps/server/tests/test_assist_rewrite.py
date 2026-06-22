@@ -82,9 +82,7 @@ class _FakeProvider:
 async def test_rewrite_returns_content_verbatim():
     # 不做清洗：哪怕模型多套了围栏也原样返回（清洗会损坏合法的代码块/图表选区）。
     provider = _FakeProvider("```\n改写后\n```")
-    out = await rewrite_selection(
-        provider, RewriteInput(selection="原文", instruction="改")
-    )
+    out = await rewrite_selection(provider, RewriteInput(selection="原文", instruction="改"))
     assert out == "```\n改写后\n```"
 
 
@@ -108,6 +106,4 @@ async def test_rewrite_times_out_raises(monkeypatch):
 
     monkeypatch.setattr(rewrite_mod, "_REWRITE_TIMEOUT_SECONDS", 0.01)
     with pytest.raises(LLMTimeoutError):
-        await rewrite_selection(
-            _StallProvider(), RewriteInput(selection="原文", instruction="改")
-        )
+        await rewrite_selection(_StallProvider(), RewriteInput(selection="原文", instruction="改"))

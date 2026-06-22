@@ -46,8 +46,7 @@ class S3StorageProvider:
             from botocore.config import Config
         except ImportError as e:  # pragma: no cover - exercised only without boto3
             raise StorageError(
-                "boto3 is required for S3 storage; install it or use the "
-                "filesystem storage backend"
+                "boto3 is required for S3 storage; install it or use the filesystem storage backend"
             ) from e
 
         self._bucket = bucket
@@ -97,9 +96,7 @@ class S3StorageProvider:
     async def snapshot(
         self, workspace_root: Path, storage_key: str, *, label: str | None = None
     ) -> SnapshotRef:
-        return await asyncio.to_thread(
-            self._snapshot_sync, workspace_root, storage_key, label
-        )
+        return await asyncio.to_thread(self._snapshot_sync, workspace_root, storage_key, label)
 
     def _snapshot_sync(
         self, workspace_root: Path, storage_key: str, label: str | None
@@ -125,14 +122,10 @@ class S3StorageProvider:
         refs = manifest_from_bytes(self._get_bytes(self._key(storage_key, MANIFEST_NAME)))
         return sorted(refs, key=lambda r: r.created_at, reverse=True)
 
-    async def restore(
-        self, storage_key: str, snapshot_id: str, workspace_root: Path
-    ) -> None:
+    async def restore(self, storage_key: str, snapshot_id: str, workspace_root: Path) -> None:
         await asyncio.to_thread(self._restore_sync, storage_key, snapshot_id, workspace_root)
 
-    def _restore_sync(
-        self, storage_key: str, snapshot_id: str, workspace_root: Path
-    ) -> None:
+    def _restore_sync(self, storage_key: str, snapshot_id: str, workspace_root: Path) -> None:
         data = self._get_bytes(self._key(storage_key, f"{snapshot_id}.zip"))
         if data is None:
             raise SnapshotNotFound(snapshot_id)
@@ -179,13 +172,9 @@ class S3StorageProvider:
                     batch.append({"Key": obj["Key"]})
                     # delete_objects caps at 1000 keys per request.
                     if len(batch) == 1000:
-                        self._client.delete_objects(
-                            Bucket=self._bucket, Delete={"Objects": batch}
-                        )
+                        self._client.delete_objects(Bucket=self._bucket, Delete={"Objects": batch})
                         batch = []
             if batch:
-                self._client.delete_objects(
-                    Bucket=self._bucket, Delete={"Objects": batch}
-                )
+                self._client.delete_objects(Bucket=self._bucket, Delete={"Objects": batch})
         except ClientError as e:
             raise StorageError(f"S3 purge failed: {e}") from e

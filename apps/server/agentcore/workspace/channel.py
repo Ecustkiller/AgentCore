@@ -168,9 +168,7 @@ class WorkspaceChannel:
             )
         except TimeoutError as e:
             logger.info("workspace.op_timeout", op=op_name, request_id=request_id)
-            raise WorkspaceIOError(
-                f"local workspace op '{op_name}' timed out"
-            ) from e
+            raise WorkspaceIOError(f"local workspace op '{op_name}' timed out") from e
 
         if not isinstance(result, dict) or not result.get("ok"):
             error = result.get("error") if isinstance(result, dict) else None

@@ -75,16 +75,12 @@ class CostEventRepository:
             }
             for r in runs
         ]
-        stmt = pg_insert(CostEvent).values(rows).on_conflict_do_nothing(
-            index_elements=["run_id"]
-        )
+        stmt = pg_insert(CostEvent).values(rows).on_conflict_do_nothing(index_elements=["run_id"])
         result = await self._session.execute(stmt)
         await self._session.commit()
         return result.rowcount or 0
 
-    async def list_for_message(
-        self, message_id: str, *, user_id: str
-    ) -> Sequence[CostEvent]:
+    async def list_for_message(self, message_id: str, *, user_id: str) -> Sequence[CostEvent]:
         """The per-run rows for one assistant turn — the team payroll (工资单).
 
         Scoped by ``user_id`` so a non-owner gets an empty list (never another
@@ -139,18 +135,14 @@ class CostEventRepository:
             "turns": int(row.turns),
         }
 
-    async def aggregate_for_conversation(
-        self, conversation_id: str, *, user_id: str
-    ) -> dict:
+    async def aggregate_for_conversation(self, conversation_id: str, *, user_id: str) -> dict:
         """Cumulative spend for one conversation (对话累计)."""
         return await self._aggregate(
             CostEvent.conversation_id == conversation_id,
             CostEvent.user_id == user_id,
         )
 
-    async def aggregate_for_window(
-        self, *, user_id: str | None = None, since: datetime
-    ) -> dict:
+    async def aggregate_for_window(self, *, user_id: str | None = None, since: datetime) -> dict:
         """Spend since a cutoff. ``user_id`` scopes to one account (account dashboard
         today / month window, hits ``ix_cost_events_user_created``); ``None``
         aggregates platform-wide (admin 全站用量看板 — every account).
@@ -160,9 +152,7 @@ class CostEventRepository:
             conditions.append(CostEvent.user_id == user_id)
         return await self._aggregate(*conditions)
 
-    async def aggregate_by_role_for_window(
-        self, *, user_id: str, since: datetime
-    ) -> list[dict]:
+    async def aggregate_by_role_for_window(self, *, user_id: str, since: datetime) -> list[dict]:
         """Per-role spend for a user since a cutoff (本月各角色花销 — 团队工资单 by role).
 
         Groups the window by the ledger ``role`` and SUMs the scalar
@@ -217,9 +207,7 @@ class CostEventRepository:
         rows = (await self._session.execute(stmt)).all()
         return {row.day.date().isoformat(): int(row.c_total) for row in rows}
 
-    async def aggregate_by_user_for_window(
-        self, *, since: datetime, limit: int = 20
-    ) -> list[dict]:
+    async def aggregate_by_user_for_window(self, *, since: datetime, limit: int = 20) -> list[dict]:
         """Per-user spend since a cutoff — the platform 工资单 by user (admin 全站看板).
 
         The cross-user counterpart of ``aggregate_by_role_for_window``: groups the

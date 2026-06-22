@@ -17,9 +17,7 @@ def test_none_and_empty_return_none():
 
 
 def test_unresident_file_uses_local_path_no_hint():
-    out = _build_attachment_context(
-        [{"name": "a.py", "path": "/local/a.py", "text": "print(1)"}]
-    )
+    out = _build_attachment_context([{"name": "a.py", "path": "/local/a.py", "text": "print(1)"}])
     assert out is not None
     assert "--- File: a.py (/local/a.py) ---" in out
     assert "print(1)" in out

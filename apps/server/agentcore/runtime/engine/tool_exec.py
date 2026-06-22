@@ -67,9 +67,7 @@ async def execute_tools(
         tool = registry.get_optional(name)
         if tool is None:
             error_msg = f"Tool '{name}' not found"
-            sink.emit(
-                tool_use_end(tc.id, name, success=False, output=error_msg, run_id=run_id)
-            )
+            sink.emit(tool_use_end(tc.id, name, success=False, output=error_msg, run_id=run_id))
             logger.info("tool.execute_end", tool=name, status="not_found", duration_ms=0)
             return (
                 LLMMessage(role="tool", content=error_msg, tool_call_id=tc.id),
@@ -78,10 +76,7 @@ async def execute_tools(
                 [],
             )
 
-        if (
-            approval_gate is not None
-            and tool.schema.approval is ToolApproval.GRANTABLE
-        ):
+        if approval_gate is not None and tool.schema.approval is ToolApproval.GRANTABLE:
             decision = await approval_gate.authorize(
                 tool_name=name, tool_call_id=tc.id, arguments=args
             )
@@ -90,9 +85,7 @@ async def execute_tools(
                     f"工具 '{name}' 未获用户授权，该操作未执行。"
                     "不要重试它——请调整方案或询问如何继续。"
                 )
-                sink.emit(
-                    tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id)
-                )
+                sink.emit(tool_use_end(tc.id, name, success=False, output=denial, run_id=run_id))
                 logger.info("tool.execute_end", tool=name, status="denied", duration_ms=0)
                 return (
                     LLMMessage(role="tool", content=denial, tool_call_id=tc.id),
@@ -119,12 +112,8 @@ async def execute_tools(
                 f"工具 '{name}' 执行超过 {timeout:.0f}s 仍未完成，已中止。"
                 "请改用更快的方式、缩小处理范围，或换一种方案，不要原样重试。"
             )
-            sink.emit(
-                tool_use_end(tc.id, name, success=False, output=timeout_msg, run_id=run_id)
-            )
-            logger.warning(
-                "tool.execute_end", tool=name, status="timeout", duration_ms=duration_ms
-            )
+            sink.emit(tool_use_end(tc.id, name, success=False, output=timeout_msg, run_id=run_id))
+            logger.warning("tool.execute_end", tool=name, status="timeout", duration_ms=duration_ms)
             return (
                 LLMMessage(role="tool", content=timeout_msg, tool_call_id=tc.id),
                 None,
@@ -144,9 +133,7 @@ async def execute_tools(
             # output). Either may be empty; join the non-empty parts.
             output = (
                 "\n".join(
-                    p
-                    for p in ((result.error or "").strip(), (result.output or "").strip())
-                    if p
+                    p for p in ((result.error or "").strip(), (result.output or "").strip()) if p
                 )
                 or "Unknown error"
             )
@@ -214,7 +201,7 @@ async def execute_tools(
     # aligned with ``quads`` (asyncio.gather preserves order), so zip pairs each result
     # to its issuing call. A suspended call never reaches here (it blocks in execute), so
     # no fact is recorded for it — the fold reads that absence as "result still pending".
-    for tc, (message, _terminal, attempt, _citations) in zip(tool_calls, quads):
+    for tc, (message, _terminal, attempt, _citations) in zip(tool_calls, quads, strict=False):
         record_turn_fact(
             ToolCallFact(
                 run_id=run_id,

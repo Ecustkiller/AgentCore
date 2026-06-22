@@ -11,7 +11,7 @@ from agentcore.db.errors import is_schema_error
 
 def _programming_error() -> ProgrammingError:
     # Mirrors what asyncpg raises for a missing table, wrapped by SQLAlchemy.
-    orig = Exception("relation \"run_sessions\" does not exist")
+    orig = Exception('relation "run_sessions" does not exist')
     return ProgrammingError("SELECT 1", {}, orig)
 
 

@@ -16,9 +16,7 @@ def record_plan_snapshot(plan: RunPlan) -> None:
     record_turn_fact(plan_snapshot_fact(plan))
 
 
-def apply_steer(
-    plan: RunPlan, completed: dict, checkpoint_ids: set[str], note: str
-) -> None:
+def apply_steer(plan: RunPlan, completed: dict, checkpoint_ids: set[str], note: str) -> None:
     """Inject a plan_review ``adjust`` note onto checkpoint nodes' transitive dependents."""
     targets = downstream_of(plan, checkpoint_ids)
     block = f"- {note}"

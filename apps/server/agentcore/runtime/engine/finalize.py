@@ -61,7 +61,5 @@ async def force_finalize(
         total_usage = total_usage + usage
 
     combined_content = join_segments(final_content, content)
-    combined_reasoning = (
-        f"{final_reasoning}{reasoning}" if final_reasoning else reasoning
-    )
+    combined_reasoning = f"{final_reasoning}{reasoning}" if final_reasoning else reasoning
     return combined_content, combined_reasoning, total_usage, rounds

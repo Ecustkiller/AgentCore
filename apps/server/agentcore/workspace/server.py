@@ -167,9 +167,7 @@ class ServerWorkspace:
         self._dirty = True
         return len(data)
 
-    async def read_for_edit(
-        self, path: str
-    ) -> tuple[str, int, Literal["lf", "crlf"]]:
+    async def read_for_edit(self, path: str) -> tuple[str, int, Literal["lf", "crlf"]]:
         """Read a text file for in-panel editing: ``(text, mtime_ms, eol)``.
 
         Unlike the preview download (truncated), this returns the **whole** file so
@@ -339,9 +337,7 @@ class ServerWorkspace:
             raise WorkspaceIOError(str(e)) from e
         self._dirty = True
 
-    async def replace(
-        self, path: str, old: str, new: str, *, all_: bool
-    ) -> ReplaceOutcome:
+    async def replace(self, path: str, old: str, new: str, *, all_: bool) -> ReplaceOutcome:
         target = self._safe(path)
         if not target.exists():
             raise PathNotFound(path)

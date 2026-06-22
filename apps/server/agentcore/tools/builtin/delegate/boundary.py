@@ -68,9 +68,7 @@ def boundary_hook(tool: DelegateTool, plan: RunPlan):
             steps=steps,
             pending=pending,
         )
-        await persist_suspension(
-            tool, checkpoint_id, plan, completed, steps, pending, required
-        )
+        await persist_suspension(tool, checkpoint_id, plan, completed, steps, pending, required)
         try:
             response = await registry.suspend(
                 checkpoint_id,

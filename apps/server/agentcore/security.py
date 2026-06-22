@@ -41,15 +41,10 @@ def verify_password(password: str, password_hash: str) -> bool:
 # --- Access tokens (stateless JWT) ---
 
 
-def create_access_token(
-    user_id: str, *, expires_delta: timedelta | None = None
-) -> str:
+def create_access_token(user_id: str, *, expires_delta: timedelta | None = None) -> str:
     """Mint a short-lived access JWT carrying ``user_id`` as the subject."""
     now = datetime.now(UTC)
-    expire = now + (
-        expires_delta
-        or timedelta(minutes=settings.jwt_access_token_expire_minutes)
-    )
+    expire = now + (expires_delta or timedelta(minutes=settings.jwt_access_token_expire_minutes))
     claims = {
         "sub": user_id,
         "type": "access",
@@ -66,9 +61,7 @@ def decode_access_token(token: str) -> str:
     wrong-type token so callers can translate it to a 401 uniformly.
     """
     try:
-        claims = jwt.decode(
-            token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM]
-        )
+        claims = jwt.decode(token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM])
     except JWTError as exc:
         raise AuthenticationError("Invalid or expired token") from exc
 
@@ -83,9 +76,7 @@ def decode_access_token(token: str) -> str:
 # --- Inference tokens (scoped JWT for the sidecar's cloud-proxy LLM calls) ---
 
 
-def create_inference_token(
-    user_id: str, *, expires_delta: timedelta | None = None
-) -> str:
+def create_inference_token(user_id: str, *, expires_delta: timedelta | None = None) -> str:
     """Mint a scoped token authorizing a local sidecar's LLM calls through the cloud
     inference proxy (双模式工作区 §一.1 / Slice 4a).
 
@@ -98,10 +89,7 @@ def create_inference_token(
     can never be confused (a leaked inference token can't drive the cookie-auth API).
     """
     now = datetime.now(UTC)
-    expire = now + (
-        expires_delta
-        or timedelta(minutes=settings.inference_token_expire_minutes)
-    )
+    expire = now + (expires_delta or timedelta(minutes=settings.inference_token_expire_minutes))
     claims = {
         "sub": user_id,
         "type": "inference",
@@ -119,9 +107,7 @@ def decode_inference_token(token: str) -> str:
     translates it to a 401 uniformly.
     """
     try:
-        claims = jwt.decode(
-            token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM]
-        )
+        claims = jwt.decode(token, settings.jwt_secret_key, algorithms=[_JWT_ALGORITHM])
     except JWTError as exc:
         raise AuthenticationError("Invalid or expired inference token") from exc
 
@@ -163,18 +149,13 @@ def generate_invite_code() -> str:
 # A one-off password handed to a user after an admin reset. Readable (drops the
 # ambiguous 0/O/1/l/I) and long enough to clear the registration policy (≥8) with
 # margin, so it survives being copied out of the console and typed back in.
-_TEMP_PASSWORD_ALPHABET = (
-    "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-)
+_TEMP_PASSWORD_ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _TEMP_PASSWORD_LENGTH = 14
 
 
 def generate_temp_password() -> str:
     """Return a high-entropy, human-readable one-off password (admin reset)."""
-    return "".join(
-        secrets.choice(_TEMP_PASSWORD_ALPHABET)
-        for _ in range(_TEMP_PASSWORD_LENGTH)
-    )
+    return "".join(secrets.choice(_TEMP_PASSWORD_ALPHABET) for _ in range(_TEMP_PASSWORD_LENGTH))
 
 
 # --- Symmetric encryption (at-rest secrets: BYOK provider keys) ---

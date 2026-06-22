@@ -106,8 +106,7 @@ _DEBATE_PARAMETERS = {
                     "key": {
                         "type": "string",
                         "description": (
-                            "机器标识（如 pro/con/red1，"
-                            "唯一英文短词，用于跨轮定位）。"
+                            "机器标识（如 pro/con/red1，唯一英文短词，用于跨轮定位）。"
                         ),
                     },
                     "name": {
@@ -121,8 +120,7 @@ _DEBATE_PARAMETERS = {
                     "is_subject": {
                         "type": "boolean",
                         "description": (
-                            "仅红队形态：标记被审的【方案方】"
-                            "（承受单向攻击并回应修补）。"
+                            "仅红队形态：标记被审的【方案方】（承受单向攻击并回应修补）。"
                         ),
                     },
                 },
@@ -131,7 +129,10 @@ _DEBATE_PARAMETERS = {
         },
         "thorough": {
             "type": "boolean",
-            "description": "是否认真辩透（默认 true，最小 3 轮）；false=快速单轮对碰。圆桌恒多轮（默认最小 2 轮）。",
+            "description": (
+                "是否认真辩透（默认 true，最小 3 轮）；false=快速单轮对碰。"
+                "圆桌恒多轮（默认最小 2 轮）。"
+            ),
         },
     },
     "required": ["motion", "form", "sides"],
@@ -272,9 +273,7 @@ class DebateTool:
                 parent_run_id=self._captain_run_id,
             )
         )
-        logger.info(
-            "debate.started", form=form.value, sides=len(sides), motion=motion[:80]
-        )
+        logger.info("debate.started", form=form.value, sides=len(sides), motion=motion[:80])
 
         moderator = Moderator(provider=self._llm, model=moderator_model)
         runner = self._make_round_runner(execution_id, moderator_run_id, config)
@@ -312,9 +311,7 @@ class DebateTool:
             return _err(f"辩论执行失败：{exc}。可重试，或改用 delegate 单独处理。")
 
         duration_ms = int((time.monotonic() - started_at) * 1000)
-        self._account_moderator(
-            moderator, moderator_run_id, moderator_model, result, duration_ms
-        )
+        self._account_moderator(moderator, moderator_run_id, moderator_model, result, duration_ms)
         # 收场广播完整辩论结构（简报 + 叙事线），前端据此渲染辩论视图；进 journal 可重载回放。
         self._sink.emit(
             debate_result(
@@ -323,9 +320,7 @@ class DebateTool:
                 payload=result.to_event_payload(),
             )
         )
-        logger.info(
-            "debate.done", rounds=len(result.rounds), stop=result.stop_reason
-        )
+        logger.info("debate.done", rounds=len(result.rounds), stop=result.stop_reason)
         return ToolResult(
             tool_call_id="",
             success=True,
@@ -398,9 +393,7 @@ class DebateTool:
 
         self._sink.emit(self._debater_plan_event(execution_id, moderator_run_id, plan))
         worker_gate = (
-            self._approval_gate
-            if self._base_tool_context.backend.location == "local"
-            else None
+            self._approval_gate if self._base_tool_context.backend.location == "local" else None
         )
         executor = build_agent_executor(
             plan=plan,
@@ -447,9 +440,7 @@ class DebateTool:
                     transcript=state.transcript,
                     content=state.content,
                 )
-                turns.append(
-                    SideTurn(side.key, side.name, node.run_id, state.content, ok=True)
-                )
+                turns.append(SideTurn(side.key, side.name, node.run_id, state.content, ok=True))
             else:
                 turns.append(self._failed_turn(side, node.run_id))
         return turns
@@ -476,9 +467,7 @@ class DebateTool:
         sides = list(sides)
         last_round: RoundResult = history[-1]
         worker_gate = (
-            self._approval_gate
-            if self._base_tool_context.backend.location == "local"
-            else None
+            self._approval_gate if self._base_tool_context.backend.location == "local" else None
         )
         semaphore = asyncio.Semaphore(self._max_parallel or DEFAULT_MAX_PARALLEL)
 
@@ -518,9 +507,7 @@ class DebateTool:
                 session.transcript = state.transcript
                 session.content = state.content
                 session.recall_count += 1
-                turns.append(
-                    SideTurn(side.key, side.name, revision_run_id, state.content, ok=True)
-                )
+                turns.append(SideTurn(side.key, side.name, revision_run_id, state.content, ok=True))
             else:
                 turns.append(self._failed_turn(side, revision_run_id))
         return turns
@@ -565,7 +552,8 @@ class DebateTool:
         focus: str,
         last_round: RoundResult,
     ) -> str:
-        """后续轮喂给 continue_run 的 feedback：本轮焦点 + 对方上轮论点 +「只补新论点、勿重述」约束。
+        """后续轮喂给 continue_run 的 feedback：本轮焦点 + 对方上轮论点 +
+        「只补新论点、勿重述」约束。
 
         辩手在【自己的 transcript】上续写（已带自己上轮全文），故无需也不应重述自己上轮——明令
         「只补本轮焦点下的新论点 / 新回应」根治冗余轮的「修订 v2 内容相似」（与 ``_frame`` 的焦点

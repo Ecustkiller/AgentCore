@@ -30,7 +30,9 @@ def _assistant_call(call_id: str, name: str, arguments: str) -> LLMMessage:
     return LLMMessage(
         role="assistant",
         content=None,
-        tool_calls=[ToolCall(id=call_id, function=ToolCallFunction(name=name, arguments=arguments))],
+        tool_calls=[
+            ToolCall(id=call_id, function=ToolCallFunction(name=name, arguments=arguments))
+        ],
     )
 
 
@@ -40,7 +42,9 @@ def test_files_touched_from_transcript_collects_produced_paths_in_order():
         _assistant_call("c1", "file_write", '{"path": "index.html", "content": "<html>"}'),
         LLMMessage(role="tool", content="已写入", tool_call_id="c1"),
         _assistant_call("c2", "web_search", '{"query": "x"}'),  # non-mutating → ignored
-        _assistant_call("c3", "str_replace", '{"path": "index.html", "old_string": "a", "new_string": "b"}'),
+        _assistant_call(
+            "c3", "str_replace", '{"path": "index.html", "old_string": "a", "new_string": "b"}'
+        ),
         _assistant_call("c4", "file_move", '{"source": "a.txt", "destination": "docs/b.txt"}'),
         LLMMessage(role="assistant", content="完成"),
     ]
@@ -144,9 +148,7 @@ def test_state_json_round_trips_scope_consumed_escalation():
         escalations=[{"question": "真问题是X", "kind": "scope", "consumed": True}],
     )
     restored = state_from_json(state_to_json(state))
-    assert restored.escalations == [
-        {"question": "真问题是X", "kind": "scope", "consumed": True}
-    ]
+    assert restored.escalations == [{"question": "真问题是X", "kind": "scope", "consumed": True}]
 
 
 def test_run_final_fact_completed_from_journal_preserves_scope_consumed():

@@ -61,9 +61,7 @@ class ToolArgsValidCheck:
     name: str = "ToolArgsValid"
 
     def run(self, case: EvalCase, outcome: TurnOutcome) -> CheckOutcome:
-        matched = [
-            (n, a) for (n, a) in outcome.tool_calls if self.tool is None or n == self.tool
-        ]
+        matched = [(n, a) for (n, a) in outcome.tool_calls if self.tool is None or n == self.tool]
         if not matched:
             return CheckOutcome(self.name, False, f"no call to {self.tool!r}")
         for n, raw in matched:

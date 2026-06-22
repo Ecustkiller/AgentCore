@@ -106,9 +106,7 @@ class ProfileSet:
         return self.get(f"agent.{pref}")
 
 
-def _clamp_to_ceiling(
-    assignments: Assignments, ceiling: frozenset[str]
-) -> Assignments:
+def _clamp_to_ceiling(assignments: Assignments, ceiling: frozenset[str]) -> Assignments:
     """Keep only role→model entries that are configurable AND within the ceiling.
 
     Defence in depth: writes are validated up front (route), but a mode persisted
@@ -122,9 +120,7 @@ def _clamp_to_ceiling(
     }
 
 
-def build_profile_set(
-    assignments: Assignments, *, ceiling: frozenset[str]
-) -> ProfileSet:
+def build_profile_set(assignments: Assignments, *, ceiling: frozenset[str]) -> ProfileSet:
     """Apply a mode's (ceiling-clamped) role→model overrides onto the base profiles."""
     safe = _clamp_to_ceiling(assignments, ceiling)
     profiles = dict(PROFILES)
@@ -171,9 +167,7 @@ def default_profile_set() -> ProfileSet:
     return ProfileSet(profiles=dict(PROFILES))
 
 
-def sanitize_assignments(
-    raw: dict[str, str], *, ceiling: frozenset[str]
-) -> Assignments:
+def sanitize_assignments(raw: dict[str, str], *, ceiling: frozenset[str]) -> Assignments:
     """Validate a user-submitted assignments map for persistence (route layer).
 
     Keeps only configurable roles assigned to a model within the operator ceiling.

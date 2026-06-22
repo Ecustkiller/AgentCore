@@ -86,9 +86,7 @@ class TraceCoalescer:
         if self._kind is None:
             return
         label = "reasoning" if self._kind == "reasoning_delta" else "content"
-        print(
-            f"  {self._t0_ms:>7}ms  ~ {label:<14} x{self._count:<4} {self._chars} chars"
-        )
+        print(f"  {self._t0_ms:>7}ms  ~ {label:<14} x{self._count:<4} {self._chars} chars")
         self._kind = None
         self._chars = 0
         self._count = 0
@@ -106,10 +104,7 @@ def _format_event(t_ms: int, ev_type: str, payload: dict[str, Any], *, raw: bool
     if ev_type == "tool_use_start":
         return f"{head}  [tool>] {payload.get('tool_name', '?')}"
     if ev_type == "tool_use_end":
-        return (
-            f"{head}  [tool<] {payload.get('tool_name', '?')}"
-            f" ({payload.get('status', '?')})"
-        )
+        return f"{head}  [tool<] {payload.get('tool_name', '?')} ({payload.get('status', '?')})"
     if ev_type == "tool_progress":
         name = payload.get("tool_name", "?")
         return f"{head}  .. composing {name} ({payload.get('chars', 0)} chars)"
@@ -206,9 +201,7 @@ def print_folded_timeline(process: list[dict[str, Any]], *, multi_agent: bool) -
 
 
 async def _login(client: httpx.AsyncClient, base_url: str, user: str, pw: str) -> str:
-    r = await client.post(
-        f"{base_url}/v1/auth/token", json={"username": user, "password": pw}
-    )
+    r = await client.post(f"{base_url}/v1/auth/token", json={"username": user, "password": pw})
     if r.status_code == 401:
         raise SystemExit(
             "登录失败 (401)。先建 dev 账号：uv run python scripts/seed_dev_user.py"
@@ -331,13 +324,9 @@ def main() -> None:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--user", default=DEFAULT_USERNAME)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
-    parser.add_argument(
-        "--conversation", default=None, help="复用已有会话 id (默认新建)"
-    )
+    parser.add_argument("--conversation", default=None, help="复用已有会话 id (默认新建)")
     parser.add_argument("--raw", action="store_true", help="逐个打印 delta，不合批")
-    parser.add_argument(
-        "--max-seconds", type=float, default=300.0, help="最长跟读秒数 (默认 300)"
-    )
+    parser.add_argument("--max-seconds", type=float, default=300.0, help="最长跟读秒数 (默认 300)")
     args = parser.parse_args()
     asyncio.run(probe(args))
 

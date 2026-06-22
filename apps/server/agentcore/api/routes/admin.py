@@ -190,9 +190,7 @@ def _admin_user_response(user: User) -> AdminUserResponse:
 
 def _admin_user_list_item(user: User, cost_total: int) -> AdminUserListItem:
     """A roster row = the account record + its all-time cumulative spend (nano-USD)."""
-    return AdminUserListItem(
-        **_admin_user_response(user).model_dump(), cost_total=cost_total
-    )
+    return AdminUserListItem(**_admin_user_response(user).model_dump(), cost_total=cost_total)
 
 
 @router.get("/overview", response_model=AdminOverview)
@@ -216,9 +214,7 @@ async def overview(
     week_start = day_start - timedelta(days=_TREND_DAYS - 1)
 
     today_health = await metrics_repo.aggregate_health_for_window(since=day_start)
-    active_users_today = await metrics_repo.count_distinct_users_for_window(
-        since=day_start
-    )
+    active_users_today = await metrics_repo.count_distinct_users_for_window(since=day_start)
     today_cost = await cost_repo.aggregate_for_window(since=day_start)
 
     # 近 7 日成本趋势 (zero-filled, oldest-first ending today).
@@ -339,9 +335,7 @@ async def update_user(
     return _admin_user_response(updated)
 
 
-@router.post(
-    "/users/{user_id}/reset-password", response_model=AdminResetPasswordResponse
-)
+@router.post("/users/{user_id}/reset-password", response_model=AdminResetPasswordResponse)
 async def reset_user_password(
     user_id: str,
     admin: AdminUser,
@@ -421,16 +415,12 @@ async def user_detail(
 
     today = await cost_repo.aggregate_for_window(user_id=user_id, since=day_start)
     month = await cost_repo.aggregate_for_window(user_id=user_id, since=month_start)
-    month_by_role = await cost_repo.aggregate_by_role_for_window(
-        user_id=user_id, since=month_start
-    )
+    month_by_role = await cost_repo.aggregate_by_role_for_window(user_id=user_id, since=month_start)
 
     # 近 7 日趋势: zero-fill into a fixed, oldest-first series ending today (same
     # shape as /v1/usage/summary) so the sparkline is stable even for sparse spend.
     trend_start = day_start - timedelta(days=_TREND_DAYS - 1)
-    daily = await cost_repo.aggregate_daily_for_window(
-        user_id=user_id, since=trend_start
-    )
+    daily = await cost_repo.aggregate_daily_for_window(user_id=user_id, since=trend_start)
     recent_daily_cost = []
     for i in range(_TREND_DAYS):
         iso = (trend_start + timedelta(days=i)).date().isoformat()
@@ -451,9 +441,7 @@ async def user_detail(
         for c in convs
     ]
 
-    recent_turns = await metrics_repo.list_recent_for_user(
-        user_id, limit=_USER_RECENT_TURNS
-    )
+    recent_turns = await metrics_repo.list_recent_for_user(user_id, limit=_USER_RECENT_TURNS)
 
     return AdminUserDetail(
         user=_admin_user_response(user),
@@ -503,9 +491,7 @@ async def usage_summary(
 
     today = await repo.aggregate_for_window(since=day_start)
     month = await repo.aggregate_for_window(since=month_start)
-    month_by_user = await repo.aggregate_by_user_for_window(
-        since=month_start, limit=_TOP_USERS
-    )
+    month_by_user = await repo.aggregate_by_user_for_window(since=month_start, limit=_TOP_USERS)
 
     # 近 7 日趋势: zero-fill the daily map into a fixed, oldest-first series ending
     # today so the sparkline is a stable length even for sparse spend.
@@ -651,22 +637,16 @@ async def observability_conversation(
         raise NotFoundError("对话不存在")
 
     owner = await users.get_by_id(conv.user_id)
-    rows, _ = await messages_repo.list_by_conversation(
-        conversation_id, limit=_REPLAY_MAX_MESSAGES
-    )
+    rows, _ = await messages_repo.list_by_conversation(conversation_id, limit=_REPLAY_MAX_MESSAGES)
     metrics = await metrics_repo.list_for_conversation(conversation_id)
     # Only the assistant reply carries a trace_id (the user prompt's is NULL), so a
     # trace overlays exactly one message — its turn's outcome/quality.
     metrics_by_trace = {m.trace_id: m for m in metrics if m.trace_id}
-    cost_by_message = await cost_repo.aggregate_cost_by_message_for_conversation(
-        conversation_id
-    )
+    cost_by_message = await cost_repo.aggregate_cost_by_message_for_conversation(conversation_id)
     # Each turn's execution spans live in turn_journal keyed by turn_id == the
     # assistant message id (NOT turn_metrics.turn_id, a separate id). Batch-load all
     # assistant turns' journals in one query (no N+1); a plain chat journaled nothing.
-    journals = await journal_repo.load_map(
-        [m.id for m in rows if m.role == "assistant"]
-    )
+    journals = await journal_repo.load_map([m.id for m in rows if m.role == "assistant"])
 
     # The timeline is the messages ⟕ turns outer-join: a turn with a text reply rides
     # that assistant message (overlay); a text-less turn (e.g. an early hard error

@@ -12,7 +12,7 @@ tests assert they DON'T survive to_json.
 """
 
 from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
-from agentcore.runtime.runs import RunPlan, RunPhase, RunSpec, RunState
+from agentcore.runtime.runs import RunPhase, RunPlan, RunSpec, RunState
 from agentcore.runtime.runs.serialize import (
     plan_from_json,
     plan_to_json,
@@ -168,7 +168,9 @@ def test_ask_user_suspension_round_trips():
             tool_calls=[
                 ToolCall(
                     id="call_ask_1",
-                    function=ToolCallFunction(name="ask_user", arguments='{"question":"A 还是 B?"}'),
+                    function=ToolCallFunction(
+                        name="ask_user", arguments='{"question":"A 还是 B?"}'
+                    ),
                 )
             ],
         ),
@@ -253,7 +255,9 @@ def test_find_tool_call_id_picks_trailing_matching_call():
             role="assistant",
             content=None,
             tool_calls=[
-                ToolCall(id="call_search", function=ToolCallFunction(name="web_search", arguments="{}")),
+                ToolCall(
+                    id="call_search", function=ToolCallFunction(name="web_search", arguments="{}")
+                ),
             ],
         ),
         LLMMessage(role="tool", content="…", tool_call_id="call_search"),

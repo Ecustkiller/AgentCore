@@ -146,9 +146,7 @@ async def make_invite(session_factory) -> Callable:
 async def make_admin(session_factory) -> Callable:
     """Return an async helper that seeds an admin user (with credentials)."""
 
-    async def _make(
-        username: str = "admin", password: str = "adminpass123"
-    ) -> tuple[str, str]:
+    async def _make(username: str = "admin", password: str = "adminpass123") -> tuple[str, str]:
         async with session_factory() as session:
             user = await UserRepository(session).create(
                 username=username, display_name=username, role="admin"

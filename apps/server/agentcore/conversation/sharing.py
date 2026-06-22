@@ -116,9 +116,7 @@ footer {
 """
 
 
-def render_share_html(
-    *, title: str, snapshot: Sequence[dict], created_at: datetime | None
-) -> str:
+def render_share_html(*, title: str, snapshot: Sequence[dict], created_at: datetime | None) -> str:
     """Render the public read-only HTML page for a shared conversation.
 
     Self-contained (inline CSS, no external assets) so it renders for anyone with the

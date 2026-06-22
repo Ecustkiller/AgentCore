@@ -1,13 +1,10 @@
 """Durable resume pipeline for plan_review / ask_user checkpoints."""
 
-from agentcore.runtime.pipeline.prepare import _assemble_ceo_toolset
-from agentcore.runtime.pipeline.finalize import _build_runs_payload
-import agentcore.runtime.pipeline as pipeline_pkg
-
 import contextlib
 from dataclasses import asdict
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
+import agentcore.runtime.pipeline as pipeline_pkg
 from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
@@ -16,7 +13,6 @@ from agentcore.core.types import ToolEffect, new_id
 from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.protocol import LLMMessage, TokenUsage
-from agentcore.memory import default_memory_store
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.citations import merge_citations, out_of_range_markers
@@ -33,28 +29,18 @@ from agentcore.runtime.events import (
     message_start,
     plan_review_resolved,
 )
-from agentcore.runtime.facts import (
-    TurnFactLog,
-    TurnStartedFact,
-    current_fact_log,
-    record_turn_fact,
-)
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.journal import (
     completed_from_journal,
-    entries_from_runs,
     plan_from_journal,
     window_from_journal,
 )
-from agentcore.runtime.prompt import (
-    assemble_system_prompt,
-    compose_ceo_chat_prompt,
-)
+from agentcore.runtime.pipeline.finalize import _build_runs_payload
+from agentcore.runtime.pipeline.prepare import _assemble_ceo_toolset
 from agentcore.runtime.runs import (
     RunKind,
     RunPhase,
     RunSpec,
-    build_captain_executor,
     build_captain_resumer,
 )
 from agentcore.runtime.sessions import (
@@ -63,7 +49,6 @@ from agentcore.runtime.sessions import (
     default_session_registry,
 )
 from agentcore.runtime.skills import (
-    SkillRegistry,
     build_system_skill_registry,
 )
 from agentcore.runtime.suspension import (
@@ -76,20 +61,19 @@ from agentcore.runtime.suspension import (
     turn_history,
 )
 from agentcore.tools.builtin import (
-    build_ceo_tool_registry,
     build_worker_registry,
     file_mutation_tool_names,
 )
-from agentcore.tools.builtin.ask_user import AskUserTool, ask_user_tool_result
-from agentcore.tools.builtin.consult_skill import ConsultSkillTool
+from agentcore.tools.builtin.ask_user import ask_user_tool_result
 from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.revise import ReviseTool
 from agentcore.tools.protocol import ToolContext
-from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
+
+
 def _append_resumed_tool_results(
     messages: list[LLMMessage], tool_call_id: str, output: str
 ) -> None:
@@ -105,16 +89,12 @@ def _append_resumed_tool_results(
     """
     last = messages[-1] if messages else None
     if last is None or last.role != "assistant" or not last.tool_calls:
-        messages.append(
-            LLMMessage(role="tool", content=output, tool_call_id=tool_call_id)
-        )
+        messages.append(LLMMessage(role="tool", content=output, tool_call_id=tool_call_id))
         return
     target = tool_call_id or (last.tool_calls[0].id if last.tool_calls else "")
     for tc in last.tool_calls:
         if tc.id == target:
-            messages.append(
-                LLMMessage(role="tool", content=output, tool_call_id=tc.id)
-            )
+            messages.append(LLMMessage(role="tool", content=output, tool_call_id=tc.id))
         else:
             messages.append(
                 LLMMessage(
@@ -193,9 +173,7 @@ async def _settle_resumed_suspension(
         # the旁路 blob. Falls back to the in-memory `completed` for a same-process resume
         # (tests) whose journal was not hydrated; a claimed frame always carries the facts
         # (else `_resumed_captain_window` already raised on the empty journal upstream).
-        seed_completed = (
-            completed_from_journal(suspension.journal_entries) or suspension.completed
-        )
+        seed_completed = completed_from_journal(suspension.journal_entries) or suspension.completed
         # Rebuild the DAG from the journal's plan_snapshot fact (执行级事件溯源 Phase 2 —
         # `plan_from_journal` == the dropped `frame.plan`, gated by the conformance golden),
         # so the resumed drive re-mints nothing and its run_ids match `seed_completed`. Same
@@ -237,9 +215,7 @@ def _resumed_captain_window(
     was lost): fail LOUD rather than resume on a silently empty window.
     """
     history_msgs = (
-        [LLMMessage(role=h["role"], content=h["content"]) for h in history]
-        if history
-        else None
+        [LLMMessage(role=h["role"], content=h["content"]) for h in history] if history else None
     )
     window = window_from_journal(suspension.journal_entries, history=history_msgs)
     if window:
@@ -536,9 +512,7 @@ def _finish_resume_turn(
         + TokenUsage.from_usage_dict(debate_tool.usage)
     )
     finish = captain_state.finish_override or (
-        FinishReason.END_TURN
-        if rounds < profile.max_rounds
-        else FinishReason.MAX_ROUNDS
+        FinishReason.END_TURN if rounds < profile.max_rounds else FinishReason.MAX_ROUNDS
     )
     captain_cost = captain_run_cost_from_state(captain_run_id, captain_state)
     cost_runs = [

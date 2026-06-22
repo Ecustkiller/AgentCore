@@ -51,9 +51,7 @@ class HandoffJob(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     # The local-mode conversation that dispatched this handoff: its workspace is
     # the source of truth the base snapshot was taken from. App-level FK.
@@ -78,9 +76,7 @@ class HandoffJob(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # --- Recoverable worker runs (留人 跨进程落盘: 乙 热修 P3) ---
@@ -106,9 +102,7 @@ class RunSessionRow(Base):
     conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     # The source RunSpec (role / model tier / allowed tools / contract) as JSON, so a
     # cross-process continuation runs as the same author under the same policy.
-    spec: Mapped[dict] = mapped_column(
-        JSONB, default=dict, server_default=text("'{}'::jsonb")
-    )
+    spec: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     # The worker's full, replayable message transcript (list of LLMMessage dicts).
     transcript: Mapped[list] = mapped_column(
         JSONB, default=list, server_default=text("'[]'::jsonb")
@@ -116,9 +110,7 @@ class RunSessionRow(Base):
     # The latest answer, mirrored for quick display without rehydrating the spec.
     content: Mapped[str] = mapped_column(Text, default="", server_default=text("''"))
     # 改次闸 counter, persisted so the revise cap holds across processes.
-    recall_count: Mapped[int] = mapped_column(
-        Integer, default=0, server_default=text("0")
-    )
+    recall_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     # Originating turn's log trace_id, set on first persist and NOT overwritten on a
     # later revise (a revise is a new turn) — links a recoverable worker back to the
     # interaction that spawned it. NULL when untraced. See core/log_context.py.
@@ -159,9 +151,7 @@ class PausedTurnRow(Base):
 
     # The paused turn's assistant ``message_id`` (== the pipeline's minted id), so a
     # resume reuses the same id when it finally persists the assistant message.
-    message_id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True
-    )
+    message_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
     # No column-level index=True: the conversation lookup is served by the explicit
     # ix_paused_turns_conversation in __table_args__ above; a second auto-named index
     # (ix_paused_turns_conversation_id) would drift from the migration.
@@ -170,9 +160,7 @@ class PausedTurnRow(Base):
     # The resumable CONTROL snapshot (runtime/suspension.py TurnSuspension): plan +
     # seed_completed + CEO context + pending checkpoint payload. The journal-so-far is
     # NOT here — it rides turn_journal (唯一事实源, §18.3), re-hydrated on claim.
-    frame: Mapped[dict] = mapped_column(
-        JSONB, default=dict, server_default=text("'{}'::jsonb")
-    )
+    frame: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     # Originating turn's log trace_id, so the resumed continuation joins back to the
     # interaction that spawned it. NULL when untraced. See core/log_context.py.
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -218,9 +206,7 @@ class TurnJournalRow(Base):
     # The fact kind: an SSE event type (run_plan / tool_use_start / checkpoint_* …),
     # a single-agent process step (process_reasoning / process_tool), or turn_end.
     kind: Mapped[str] = mapped_column(String(40))
-    payload: Mapped[dict] = mapped_column(
-        JSONB, default=dict, server_default=text("'{}'::jsonb")
-    )
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     # The fact's own emission timestamp (the SSE event's), preserved so the projected
     # replay keeps the original ordering metadata. NULL for derived rows (process / end).
     ts: Mapped[str | None] = mapped_column(String(40), nullable=True)
@@ -271,9 +257,7 @@ class TurnMetricsRow(Base):
         Index("ix_turn_metrics_conversation_created", "conversation_id", "created_at"),
     )
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     # The turn id minted at chat.turn_start (core.types.new_id == str(uuid4())); the
     # log correlation handle, not the assistant message id (that is the journal's key).
     turn_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
@@ -284,30 +268,18 @@ class TurnMetricsRow(Base):
     # Join key to the runtime logs + cost_events + messages (one per interaction).
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     # turn = fresh send / regenerate; resume = 结构化挂起 continuation.
-    kind: Mapped[str] = mapped_column(
-        String(16), default="turn", server_default=text("'turn'")
-    )
-    status: Mapped[str] = mapped_column(
-        String(8), default="ok", server_default=text("'ok'")
-    )
+    kind: Mapped[str] = mapped_column(String(16), default="turn", server_default=text("'turn'"))
+    status: Mapped[str] = mapped_column(String(8), default="ok", server_default=text("'ok'"))
     # The turn's terminal finish_reason (FinishReason value), e.g. stop / length / error.
     finish_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # A soft error surfaced in the turn result (truncated); NULL on success.
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     rounds: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
-    duration_ms: Mapped[int] = mapped_column(
-        Integer, default=0, server_default=text("0")
-    )
-    delegated: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default=text("false")
-    )
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    delegated: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     workers: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
-    input_tokens: Mapped[int] = mapped_column(
-        Integer, default=0, server_default=text("0")
-    )
-    output_tokens: Mapped[int] = mapped_column(
-        Integer, default=0, server_default=text("0")
-    )
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

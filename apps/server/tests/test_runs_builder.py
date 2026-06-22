@@ -6,7 +6,7 @@ summary, the tool allow-list filter, knob validation, and the reject-on-error /
 reject-when-none-valid contract.
 """
 
-from agentcore.runtime.runs.builder import build_added_nodes, build_run_plan
+from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.types import RunKind
 
 
@@ -256,9 +256,7 @@ def test_all_invalid_tools_falls_back_to_no_restriction():
 def test_explicit_empty_tools_is_no_restriction():
     # An explicit empty list is meaningless for a worker (a tool-less worker can do
     # nothing), so it too means "no restriction", not "no tools".
-    plan, _ = build_run_plan(
-        [{"role": "A", "task": "a", "tools": []}], id_prefix="t"
-    )
+    plan, _ = build_run_plan([{"role": "A", "task": "a", "tools": []}], id_prefix="t")
     assert plan.nodes[0].tools is None
 
 
@@ -294,9 +292,7 @@ def test_stance_and_group_parsed_onto_spec():
 
 def test_invalid_stance_dropped():
     # Lenient like tier/effort: an unknown side leaves no tag (no debate signal).
-    plan, _ = build_run_plan(
-        [{"role": "A", "task": "a", "stance": "maybe"}], id_prefix="t"
-    )
+    plan, _ = build_run_plan([{"role": "A", "task": "a", "stance": "maybe"}], id_prefix="t")
     assert plan.nodes[0].stance == ""
 
 
