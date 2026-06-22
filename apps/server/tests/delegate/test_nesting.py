@@ -5,7 +5,6 @@ import json
 from agentcore.llm.protocol import LLMChunk, TokenUsage, ToolCallDelta
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs.types import RunPhase, RunState
-
 from tests.delegate.conftest import NestingProvider, Provider, ctx, nesting_tool, tool
 
 
@@ -40,9 +39,7 @@ async def test_nested_delegation_runs_subteam_links_tree_and_rolls_up():
     cap_id = by_parent["CEO"][0]
     assert len(by_parent[cap_id]) == 2
 
-    plan_runs = [
-        r for e in events if e.type == EventType.RUN_PLAN for r in e.payload["runs"]
-    ]
+    plan_runs = [r for e in events if e.type == EventType.RUN_PLAN for r in e.payload["runs"]]
     parents = {r["id"]: r["parent_run_id"] for r in plan_runs}
     assert parents[cap_id] == "CEO"
     assert all(parents[sub_id] == cap_id for sub_id in by_parent[cap_id])
@@ -62,9 +59,7 @@ async def test_nested_delegation_runs_subteam_links_tree_and_rolls_up():
 async def test_depth_two_subworker_cannot_delegate_further():
     class DeepProvider(NestingProvider):
         async def stream(self, request):
-            system = next(
-                (m.content or "" for m in request.messages if m.role == "system"), ""
-            )
+            system = next((m.content or "" for m in request.messages if m.role == "system"), "")
             is_captain = self.CAPTAIN_MARK in system
             has_result = any(m.role == "tool" for m in request.messages)
             if is_captain and not has_result:

@@ -61,9 +61,7 @@ class TurnRunRegistry:
     def __init__(self) -> None:
         self._runs: dict[str, TurnRun] = {}
 
-    def register(
-        self, *, conversation_id: str, task: asyncio.Task, sink: EventSink
-    ) -> str:
+    def register(self, *, conversation_id: str, task: asyncio.Task, sink: EventSink) -> str:
         """Track ``task`` as the conversation's active run; returns its ``run_id``.
 
         Installs a done-callback that drops the run from the registry when it ends —
@@ -110,9 +108,7 @@ class TurnRunRegistry:
         if run is None or run.task.done():
             return False
         run.task.cancel()
-        logger.info(
-            "turn_run.stop", conversation_id=conversation_id, run_id=run.run_id
-        )
+        logger.info("turn_run.stop", conversation_id=conversation_id, run_id=run.run_id)
         return True
 
 

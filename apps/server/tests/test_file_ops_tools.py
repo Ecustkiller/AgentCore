@@ -40,9 +40,7 @@ async def test_write_rejects_empty_path(tmp_path: Path):
     # a backend write onto the workspace root dir (the real-world file_write failure:
     # path=None → root → "[Errno 13] Permission denied: <abs server path>").
     (tmp_path / "keep.txt").write_text("keep", encoding="utf-8")
-    result = await FileWriteTool().execute(
-        {"path": "", "content": "x" * 5000}, _ctx(tmp_path)
-    )
+    result = await FileWriteTool().execute({"path": "", "content": "x" * 5000}, _ctx(tmp_path))
     assert result.success is False
     assert "path 不能为空" in result.error
     # the root must be untouched (no clobber, no stray file)
@@ -58,9 +56,7 @@ async def test_write_rejects_missing_path(tmp_path: Path):
 async def test_write_rejects_path_outside_workspace(tmp_path: Path):
     ws = tmp_path / "ws"
     ws.mkdir()
-    result = await FileWriteTool().execute(
-        {"path": "../escaped.md", "content": "leak"}, _ctx(ws)
-    )
+    result = await FileWriteTool().execute({"path": "../escaped.md", "content": "leak"}, _ctx(ws))
     assert result.success is False
     assert "超出了工作区范围" in result.error
     assert not (tmp_path / "escaped.md").exists()
@@ -139,9 +135,7 @@ async def test_move_creates_destination_parents(tmp_path: Path):
 async def test_move_directory(tmp_path: Path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "a.txt").write_text("a", encoding="utf-8")
-    result = await FileMoveTool().execute(
-        {"source": "src", "destination": "dst"}, _ctx(tmp_path)
-    )
+    result = await FileMoveTool().execute({"source": "src", "destination": "dst"}, _ctx(tmp_path))
     assert result.success is True
     assert (tmp_path / "dst" / "a.txt").read_text(encoding="utf-8") == "a"
     assert not (tmp_path / "src").exists()

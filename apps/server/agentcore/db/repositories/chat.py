@@ -46,12 +46,8 @@ class ChatRepository:
             dm_key=self.dm_key(creator_id, peer_id),
         )
         self._session.add(chat)
-        self._session.add(
-            ChatMember(chat_id=chat.id, user_id=creator_id, state="accepted")
-        )
-        self._session.add(
-            ChatMember(chat_id=chat.id, user_id=peer_id, state=peer_state)
-        )
+        self._session.add(ChatMember(chat_id=chat.id, user_id=creator_id, state="accepted"))
+        self._session.add(ChatMember(chat_id=chat.id, user_id=peer_id, state=peer_state))
         await self._session.commit()
         await self._session.refresh(chat)
         return chat
@@ -66,9 +62,7 @@ class ChatRepository:
         Queried at registration to enroll the new account; a handful of rows in
         practice (the 内测群, later an official broadcast channel).
         """
-        result = await self._session.execute(
-            select(Chat).where(Chat.auto_join.is_(True))
-        )
+        result = await self._session.execute(select(Chat).where(Chat.auto_join.is_(True)))
         return result.scalars().all()
 
     async def add_member(
@@ -103,9 +97,7 @@ class ChatRepository:
     async def remove_member(self, chat_id: str, user_id: str) -> None:
         """Remove a user from a chat (leave-group / admin-kick). Idempotent."""
         await self._session.execute(
-            delete(ChatMember).where(
-                ChatMember.chat_id == chat_id, ChatMember.user_id == user_id
-            )
+            delete(ChatMember).where(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id)
         )
         await self._session.commit()
 
@@ -132,9 +124,7 @@ class ChatRepository:
         )
         await self._session.commit()
 
-    async def set_admin_mute(
-        self, chat_id: str, user_id: str, *, muted_by_admin: bool
-    ) -> None:
+    async def set_admin_mute(self, chat_id: str, user_id: str, *, muted_by_admin: bool) -> None:
         """Set/clear a member's admin-imposed 禁言 (Stage 3 审核治理).
 
         Separate column from the member's own ``muted`` so moderation and
@@ -149,9 +139,7 @@ class ChatRepository:
 
     async def get_member(self, chat_id: str, user_id: str) -> ChatMember | None:
         result = await self._session.execute(
-            select(ChatMember).where(
-                ChatMember.chat_id == chat_id, ChatMember.user_id == user_id
-            )
+            select(ChatMember).where(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id)
         )
         return result.scalar_one_or_none()
 

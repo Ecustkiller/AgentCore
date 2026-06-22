@@ -60,9 +60,7 @@ async def test_delete_after_clears_only_truncated_turns_journal(session_factory)
         # Pin created_at: keep at t0, drop one minute later (strictly after t0).
         await s.execute(update(Message).where(Message.id == keep).values(created_at=t0))
         await s.execute(
-            update(Message)
-            .where(Message.id == drop)
-            .values(created_at=t0 + timedelta(minutes=1))
+            update(Message).where(Message.id == drop).values(created_at=t0 + timedelta(minutes=1))
         )
         await s.commit()
 

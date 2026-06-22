@@ -39,21 +39,15 @@ def test_fingerprint_ignores_key_order():
 
 
 def test_fingerprint_differs_on_args_and_name():
-    assert fingerprint_tool_call("t", '{"q": "x"}') != fingerprint_tool_call(
-        "t", '{"q": "y"}'
-    )
+    assert fingerprint_tool_call("t", '{"q": "x"}') != fingerprint_tool_call("t", '{"q": "y"}')
     assert fingerprint_tool_call("a", "{}") != fingerprint_tool_call("b", "{}")
 
 
 def test_fingerprint_malformed_json_falls_back_to_raw():
     # Identical malformed strings still collide (verbatim repeat caught);
     # different malformed strings do not.
-    assert fingerprint_tool_call("t", "not json") == fingerprint_tool_call(
-        "t", "not json"
-    )
-    assert fingerprint_tool_call("t", "not json") != fingerprint_tool_call(
-        "t", "other junk"
-    )
+    assert fingerprint_tool_call("t", "not json") == fingerprint_tool_call("t", "not json")
+    assert fingerprint_tool_call("t", "not json") != fingerprint_tool_call("t", "other junk")
 
 
 def test_fingerprint_empty_args_stable():
@@ -359,10 +353,14 @@ def test_safety_net_counts_rounds_not_calls_so_a_batch_is_one():
     # THE batch-robustness invariant: a parallel fan-out of N reads in ONE round bumps
     # the clock by one, so a worker can't be guillotined right after fanning out wide.
     c = _worker(finalize_rounds=6)
-    c.record([
-        _ok("a", "web_search"), _ok("b", "web_search"),
-        _ok("c", "web_search"), _ok("d", "web_search"),
-    ])  # batch of 4 → still 1 investigation round
+    c.record(
+        [
+            _ok("a", "web_search"),
+            _ok("b", "web_search"),
+            _ok("c", "web_search"),
+            _ok("d", "web_search"),
+        ]
+    )  # batch of 4 → still 1 investigation round
     assert c.investigation_calls == 4
     assert c.investigation_rounds == 1
     assert c.convergence_action() is Intervention.CONTINUE  # 1 ≪ 6

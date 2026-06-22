@@ -35,9 +35,9 @@ def _paused_journal() -> list[dict]:
     preserve byte-for-byte."""
     annotated = "结果正文\n\n[来源编号] 上述来源对应的引用号：[1]=https://example.com/a"
     return [
-        TurnStartedFact(
-            system_prompt="你是 CEO。", user_message="调研并撰写", model_profile="chat"
-        ).to_fact().entry(),
+        TurnStartedFact(system_prompt="你是 CEO。", user_message="调研并撰写", model_profile="chat")
+        .to_fact()
+        .entry(),
         RoundBoundaryFact(round_idx=0, run_id="cap", role="captain").to_fact().entry(),
         LlmCallFact(
             run_id="cap",
@@ -45,35 +45,61 @@ def _paused_journal() -> list[dict]:
             content="",
             reasoning_content="让我先查一下",
             tool_calls=[
-                {"id": "c1", "type": "function",
-                 "function": {"name": "search", "arguments": '{"q": "x"}'}}
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "search", "arguments": '{"q": "x"}'},
+                }
             ],
             finish_reason="tool_calls",
-        ).to_fact().entry(),
+        )
+        .to_fact()
+        .entry(),
         # display tool card (skipped by the window, kept by display)
-        {"kind": "tool_use_start", "payload": {"tool_call_id": "c1", "tool_name": "search"},
-         "ts": None},
+        {
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "c1", "tool_name": "search"},
+            "ts": None,
+        },
         ToolCallFact(
-            run_id="cap", tool_call_id="c1", name="search",
-            arguments='{"q": "x"}', result=annotated, success=True,
-        ).to_fact().entry(),
+            run_id="cap",
+            tool_call_id="c1",
+            name="search",
+            arguments='{"q": "x"}',
+            result=annotated,
+            success=True,
+        )
+        .to_fact()
+        .entry(),
         NoteFact(role="user", content="换个角度再想想", reason="nudge", run_id="cap")
-        .to_fact().entry(),
+        .to_fact()
+        .entry(),
         RoundBoundaryFact(round_idx=1, run_id="cap", role="captain").to_fact().entry(),
         LlmCallFact(
             run_id="cap",
             round_idx=1,
             tool_calls=[
-                {"id": "d1", "type": "function",
-                 "function": {"name": "delegate", "arguments": "{}"}}
+                {
+                    "id": "d1",
+                    "type": "function",
+                    "function": {"name": "delegate", "arguments": "{}"},
+                }
             ],
             finish_reason="tool_calls",
-        ).to_fact().entry(),
+        )
+        .to_fact()
+        .entry(),
         # suspended INSIDE delegate: a display tool_use_start but NO tool_call fact.
-        {"kind": "tool_use_start", "payload": {"tool_call_id": "d1", "tool_name": "delegate"},
-         "ts": None},
-        {"kind": "plan_review_required",
-         "payload": {"checkpoint_id": "ck1", "steps": [], "pending": []}, "ts": None},
+        {
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "d1", "tool_name": "delegate"},
+            "ts": None,
+        },
+        {
+            "kind": "plan_review_required",
+            "payload": {"checkpoint_id": "ck1", "steps": [], "pending": []},
+            "ts": None,
+        },
     ]
 
 
@@ -84,8 +110,13 @@ def _expected_window(annotated: str) -> list[LLMMessage]:
         LLMMessage(
             role="assistant",
             content=None,
-            tool_calls=[ToolCall(id="c1", type="function",
-                                 function=ToolCallFunction(name="search", arguments='{"q": "x"}'))],
+            tool_calls=[
+                ToolCall(
+                    id="c1",
+                    type="function",
+                    function=ToolCallFunction(name="search", arguments='{"q": "x"}'),
+                )
+            ],
             reasoning_content="让我先查一下",
         ),
         LLMMessage(role="tool", content=annotated, tool_call_id="c1"),
@@ -93,8 +124,13 @@ def _expected_window(annotated: str) -> list[LLMMessage]:
         LLMMessage(
             role="assistant",
             content=None,
-            tool_calls=[ToolCall(id="d1", type="function",
-                                 function=ToolCallFunction(name="delegate", arguments="{}"))],
+            tool_calls=[
+                ToolCall(
+                    id="d1",
+                    type="function",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
             reasoning_content=None,
         ),
     ]

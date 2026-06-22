@@ -62,9 +62,7 @@ def _clean_assignments(raw: dict[str, str]) -> dict[str, str]:
     return dict(raw)
 
 
-async def validate_mode_ref(
-    mode: str | None, *, user_id: str, repo: ModelModeRepository
-) -> None:
+async def validate_mode_ref(mode: str | None, *, user_id: str, repo: ModelModeRepository) -> None:
     """Ensure a mode ref is a known preset or an owned custom mode (else 400).
 
     ``None`` (= inherit default) is always valid. Validated on write for clear UX;

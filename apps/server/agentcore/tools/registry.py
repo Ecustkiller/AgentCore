@@ -39,11 +39,7 @@ class ToolRegistry:
 
     def list_by_category(self, category: ToolCategory) -> list[ToolSchema]:
         """Return schemas of tools in a given category."""
-        return [
-            tool.schema
-            for tool in self._tools.values()
-            if tool.schema.category == category
-        ]
+        return [tool.schema for tool in self._tools.values() if tool.schema.category == category]
 
     def get_openai_definitions(self, tool_names: list[str] | None = None) -> list[dict]:
         """Return tool definitions in OpenAI function calling format.

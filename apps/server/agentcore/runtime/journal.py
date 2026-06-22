@@ -90,9 +90,7 @@ def entries_from_runs(runs: dict[str, Any] | None) -> list[dict[str, Any]]:
 # A run node's terminal display event: the deltas-退场 synthesis splices the run's full
 # output/thinking right before it. Both COMPLETED and FAILED qualify — a failed worker
 # can still have produced (partial) output worth showing on reload.
-_RUN_TERMINAL_TYPES = frozenset(
-    {EventType.RUN_COMPLETED.value, EventType.RUN_FAILED.value}
-)
+_RUN_TERMINAL_TYPES = frozenset({EventType.RUN_COMPLETED.value, EventType.RUN_FAILED.value})
 
 
 def _splice_synthetic_deltas(
@@ -266,9 +264,7 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
                 if captain_context is None:
                     captain_context = []
                 captain_context.extend(payload.get("blocks") or [])
-            events.append(
-                {"type": kind, "payload": payload, "timestamp": entry.get("ts")}
-            )
+            events.append({"type": kind, "payload": payload, "timestamp": entry.get("ts")})
     if final_outputs:
         events = _splice_synthetic_deltas(events, final_outputs, agent_run_ids)
     if has_exec_facts:
@@ -413,8 +409,7 @@ def window_from_journal(
                             type=tc.get("type") or "function",
                             function=ToolCallFunction(
                                 name=(tc.get("function") or {}).get("name") or "",
-                                arguments=(tc.get("function") or {}).get("arguments")
-                                or "",
+                                arguments=(tc.get("function") or {}).get("arguments") or "",
                             ),
                         )
                         for tc in tool_calls

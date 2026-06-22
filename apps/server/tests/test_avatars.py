@@ -9,9 +9,7 @@ from agentcore.avatars import AVATAR_SIZE, avatar_key, process_avatar
 from agentcore.core.errors import ValidationError
 
 
-def _image_bytes(
-    width: int, height: int, *, mode: str = "RGB", fmt: str = "PNG"
-) -> bytes:
+def _image_bytes(width: int, height: int, *, mode: str = "RGB", fmt: str = "PNG") -> bytes:
     color = (10, 120, 220, 128) if mode == "RGBA" else (10, 120, 220)
     img = Image.new(mode, (width, height), color)
     buffer = io.BytesIO()

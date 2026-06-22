@@ -93,11 +93,7 @@ class QuotaLimits:
 
     @property
     def all_unlimited(self) -> bool:
-        return (
-            self.daily_tokens <= 0
-            and self.monthly_cost_nano <= 0
-            and self.daily_requests <= 0
-        )
+        return self.daily_tokens <= 0 and self.monthly_cost_nano <= 0 and self.daily_requests <= 0
 
 
 async def enforce_quota(
@@ -142,8 +138,7 @@ async def enforce_quota(
         used = int(today["turns"])
         if used >= limits.daily_requests:
             raise QuotaExceededError(
-                f"已达每日请求上限（{used} / {limits.daily_requests}），"
-                "明日 0 点（UTC）重置。",
+                f"已达每日请求上限（{used} / {limits.daily_requests}），明日 0 点（UTC）重置。",
                 dimension="daily_requests",
                 used=used,
                 limit=limits.daily_requests,
@@ -157,8 +152,7 @@ async def enforce_quota(
             spent_cny = nano_usd_to_cny(used, settings.cny_per_usd)
             cap_cny = nano_usd_to_cny(limits.monthly_cost_nano, settings.cny_per_usd)
             raise QuotaExceededError(
-                f"已达本月成本上限（约 ¥{spent_cny:.2f} / ¥{cap_cny:.2f}），"
-                "下月 1 号重置。",
+                f"已达本月成本上限（约 ¥{spent_cny:.2f} / ¥{cap_cny:.2f}），下月 1 号重置。",
                 dimension="monthly_cost",
                 used=used,
                 limit=limits.monthly_cost_nano,

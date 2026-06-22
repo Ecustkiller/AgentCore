@@ -21,9 +21,7 @@ from ._helpers import _new_uuid
 class ModelMode(Base):
     __tablename__ = "model_modes"
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     # Team-role → model id (e.g. {"ceo": "deepseek-v4-pro"}). Roles not present
@@ -38,6 +36,4 @@ class ModelMode(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

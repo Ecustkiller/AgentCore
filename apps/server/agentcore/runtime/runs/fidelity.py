@@ -44,9 +44,7 @@ def pointer_body(content: str, files: list[str]) -> str:
     lines = "\n".join(f"- {p}" for p in listed)
     more = f"\n……（共 {len(files)} 个文件）" if len(files) > len(listed) else ""
     parts.append(
-        "已写入共享工作区的文件（需要完整内容请用 file_read 读取，不要凭空臆测）：\n"
-        + lines
-        + more
+        "已写入共享工作区的文件（需要完整内容请用 file_read 读取，不要凭空臆测）：\n" + lines + more
     )
     return "\n\n".join(parts)
 

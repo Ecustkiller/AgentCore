@@ -78,9 +78,7 @@ async def test_folder_conversations_share_snapshots(fs_storage):
 async def test_label_is_preserved(fs_storage):
     root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
     (root / "a.txt").write_text("x", encoding="utf-8")
-    await create_snapshot(
-        user_id="u1", folder_id="f1", conversation_id="c1", label="milestone"
-    )
+    await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1", label="milestone")
     listed = await list_snapshots(user_id="u1", folder_id="f1", conversation_id="c1")
     assert listed[0].label == "milestone"
 
@@ -99,8 +97,7 @@ async def test_auto_snapshot_cap_prunes_oldest(fs_storage, monkeypatch):
     (root / "f.txt").write_text("x", encoding="utf-8")
 
     refs = [
-        await create_snapshot(user_id="u1", folder_id=None, conversation_id="cap")
-        for _ in range(5)
+        await create_snapshot(user_id="u1", folder_id=None, conversation_id="cap") for _ in range(5)
     ]
     listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="cap")
     # Only the 3 newest auto snapshots survive; the 2 oldest were pruned.
@@ -112,9 +109,7 @@ async def test_labeled_snapshots_survive_cap(fs_storage, monkeypatch):
     root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="kept")
     (root / "f.txt").write_text("x", encoding="utf-8")
 
-    kept = await create_snapshot(
-        user_id="u1", folder_id=None, conversation_id="kept", label="v1"
-    )
+    kept = await create_snapshot(user_id="u1", folder_id=None, conversation_id="kept", label="v1")
     # Several auto snapshots that would blow past the cap of 1.
     for _ in range(3):
         await create_snapshot(user_id="u1", folder_id=None, conversation_id="kept")
@@ -130,9 +125,7 @@ async def test_purge_snapshots_clears_history(fs_storage):
     root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
     (root / "a.txt").write_text("x", encoding="utf-8")
     await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1")
-    await create_snapshot(
-        user_id="u1", folder_id="f1", conversation_id="c1", label="v1"
-    )
+    await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1", label="v1")
 
     await purge_snapshots(user_id="u1", folder_id="f1", conversation_id="c1")
     listed = await list_snapshots(user_id="u1", folder_id="f1", conversation_id="c1")

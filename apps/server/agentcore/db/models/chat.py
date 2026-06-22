@@ -31,17 +31,13 @@ from ._helpers import _new_uuid
 class Chat(Base):
     __tablename__ = "chats"
     __table_args__ = (
-        CheckConstraint(
-            "type in ('dm', 'group', 'official')", name="ck_chats_type"
-        ),
+        CheckConstraint("type in ('dm', 'group', 'official')", name="ck_chats_type"),
         # Per-user chat list ordering: chats a user belongs to (chat_members join),
         # ordered by recency. Index the sort key.
         Index("ix_chats_last_message_at", "last_message_at"),
     )
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     type: Mapped[str] = mapped_column(String(20))
     # Group title; NULL for dm (client renders the peer's name) and official.
     title: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -60,9 +56,7 @@ class Chat(Base):
     # channel later. dm/regular group chats stay false.
     auto_join: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     # Denormalized list-row preview, refreshed on each message.
-    last_message_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_message_preview: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
@@ -75,35 +69,23 @@ class Chat(Base):
 class ChatMember(Base):
     __tablename__ = "chat_members"
     __table_args__ = (
-        CheckConstraint(
-            "role in ('owner', 'admin', 'member')", name="ck_chat_members_role"
-        ),
+        CheckConstraint("role in ('owner', 'admin', 'member')", name="ck_chat_members_role"),
         # state=pending is the stranger "message request" gate: a DM from a
         # non-contact lands pending for the recipient until accepted.
-        CheckConstraint(
-            "state in ('accepted', 'pending')", name="ck_chat_members_state"
-        ),
+        CheckConstraint("state in ('accepted', 'pending')", name="ck_chat_members_state"),
     )
 
     chat_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
     # Index for the hot "list my chats" query.
-    user_id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, index=True
-    )
-    role: Mapped[str] = mapped_column(
-        String(20), default="member", server_default=text("'member'")
-    )
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, index=True)
+    role: Mapped[str] = mapped_column(String(20), default="member", server_default=text("'member'"))
     state: Mapped[str] = mapped_column(
         String(20), default="accepted", server_default=text("'accepted'")
     )
     # Read cursor for unread counts (count messages created after this) and the
     # sender-side read receipt (last message id this member has seen).
-    last_read_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    last_read_message_id: Mapped[str | None] = mapped_column(
-        PG_UUID(as_uuid=False), nullable=True
-    )
+    last_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_read_message_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
     muted: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     # Admin-imposed 禁言 (Stage 3 审核治理): a moderator silenced this member — they
     # can still read but a send is refused (403). Distinct from `muted` (the
@@ -139,14 +121,10 @@ class ChatMessage(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     chat_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
     # NULL = system/official sender. App-level FK → users.
-    sender_user_id: Mapped[str | None] = mapped_column(
-        PG_UUID(as_uuid=False), nullable=True
-    )
+    sender_user_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
     sender_type: Mapped[str] = mapped_column(
         String(20), default="user", server_default=text("'user'")
     )
@@ -160,9 +138,7 @@ class ChatMessage(Base):
     )
     # system_card deep-link payload (e.g. {kind, conversation_id}); NULL otherwise.
     payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    reply_to_message_id: Mapped[str | None] = mapped_column(
-        PG_UUID(as_uuid=False), nullable=True
-    )
+    reply_to_message_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
     # Client-minted dedup key for retry-safe sends.
     client_msg_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

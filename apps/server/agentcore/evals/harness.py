@@ -209,9 +209,7 @@ class EvalHarness:
     async def run_case(self, case: EvalCase) -> TurnOutcome:
         sink = RecordingSink()
         backend = ServerWorkspace(root=self._fixture_root(case), sandbox=SubprocessSandbox())
-        profiles = resolve_profile_set(
-            case.mode, custom_modes={}, ceiling=_EVAL_CEILING
-        )
+        profiles = resolve_profile_set(case.mode, custom_modes={}, ceiling=_EVAL_CEILING)
         t0 = time.monotonic()
         try:
             if case.path == "single":
@@ -287,8 +285,6 @@ class EvalHarness:
         if case.workspace_fixture:
             root = self._fixtures_dir / case.workspace_fixture
             if not root.is_dir():
-                raise EvalConfigError(
-                    f"[{case.id}] workspace_fixture 目录不存在: {root}"
-                )
+                raise EvalConfigError(f"[{case.id}] workspace_fixture 目录不存在: {root}")
             return root
         return Path(tempfile.mkdtemp(prefix="agentcore-eval-"))

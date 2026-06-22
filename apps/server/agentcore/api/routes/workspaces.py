@@ -537,9 +537,7 @@ async def create_workspace_snapshot(
     return SnapshotSummary.model_validate(ref)
 
 
-@router.post(
-    "/{ws_id}/snapshots/{snapshot_id}/restore", response_model=StatusResponse
-)
+@router.post("/{ws_id}/snapshots/{snapshot_id}/restore", response_model=StatusResponse)
 async def restore_workspace_snapshot(
     ws_id: str,
     snapshot_id: str,

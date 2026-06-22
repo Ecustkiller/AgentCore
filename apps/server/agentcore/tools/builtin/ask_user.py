@@ -113,8 +113,9 @@ class AskUserTool:
                 "向用户发问。默认【暂停回合】等 ta 回应后回到你的循环继续（用户选「停止」则结束"
                 "本回合）；也可设 blocking=false 做【非阻塞发问】——抛出问题但你按既定默认继续、"
                 "不等待，用户答复会作为新消息在后续轮次并入。这是你唯一的「问用户」原语，开场引导"
-                "与执行途中拍板共用。克制使用，别为能自行决定的小事打断用户；何时该问 / 该不该阻塞、"
-                "开工提案卡怎么分档、途中拍板怎么给选项，见 consult_skill(asking_the_user)。"
+                "与执行途中拍板共用。克制使用，别为能自行决定的小事打断用户；"
+                "何时该问 / 该不该阻塞、开工提案卡怎么分档、途中拍板怎么给选项，"
+                "见 consult_skill(asking_the_user)。"
             ),
             parameters={
                 "type": "object",
@@ -233,9 +234,7 @@ class AskUserTool:
             approval=ToolApproval.NEVER,
         )
 
-    async def execute(
-        self, arguments: dict[str, Any], context: ToolContext
-    ) -> ToolResult:
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         message = str(arguments.get("message") or "").strip()
         if not message:
             return ToolResult(
@@ -254,9 +253,7 @@ class AskUserTool:
         blocking_arg = arguments.get("blocking")
         blocking = True if blocking_arg is None else bool(blocking_arg)
         if not blocking:
-            return self._post_nonblocking(
-                message, ctx_text, assumptions, questions, style_options
-            )
+            return self._post_nonblocking(message, ctx_text, assumptions, questions, style_options)
 
         checkpoint_id = new_id()
         required = checkpoint_required(
@@ -273,7 +270,14 @@ class AskUserTool:
         # the frame for ``POST .../resume``; the in-memory resolve still settles a
         # live turn even if the save failed.
         await self._persist_suspension(
-            checkpoint_id, context, message, ctx_text, assumptions, questions, style_options, required
+            checkpoint_id,
+            context,
+            message,
+            ctx_text,
+            assumptions,
+            questions,
+            style_options,
+            required,
         )
         try:
             response = await self.registry.suspend(
@@ -382,9 +386,7 @@ class AskUserTool:
 
         The turn's ``message_id`` + the persist closure must be wired (the live CEO
         path) — a standalone / un-wired construction (tests) keeps 2a in-memory only."""
-        return bool(
-            self.message_id and self.suspension_saver is not None and self.conversation_id
-        )
+        return bool(self.message_id and self.suspension_saver is not None and self.conversation_id)
 
     async def _persist_suspension(
         self,
@@ -540,9 +542,7 @@ def _normalize_assumptions(raw: Any) -> list[dict[str, Any]]:
         label = str(it.get("label") or "").strip()
         if not label:
             continue
-        out.append(
-            {"id": f"a{i}", "label": label, "value": str(it.get("value") or "").strip()}
-        )
+        out.append({"id": f"a{i}", "label": label, "value": str(it.get("value") or "").strip()})
     return out
 
 
@@ -563,9 +563,9 @@ def _normalize_questions(raw: Any) -> list[dict[str, Any]]:
             continue
         kind = "text" if str(it.get("kind") or "").strip() == "text" else "choice"
         if kind == "choice":
-            options = [
-                str(o).strip() for o in (it.get("options") or []) if str(o).strip()
-            ][:_MAX_OPTIONS]
+            options = [str(o).strip() for o in (it.get("options") or []) if str(o).strip()][
+                :_MAX_OPTIONS
+            ]
             multiple = bool(it.get("multiple") or False)
         else:
             options = []

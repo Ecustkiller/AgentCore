@@ -27,19 +27,24 @@ def _delegate_pause_journal() -> list[dict]:
     """A captain paused at a `delegate`: head + one captain round issuing the suspended
     tool call (no tool_call fact — the wave is parked), the shape the golden pins."""
     return [
-        TurnStartedFact(
-            system_prompt="你是 CEO。", user_message="调研", model_profile="m"
-        ).to_fact().entry(),
+        TurnStartedFact(system_prompt="你是 CEO。", user_message="调研", model_profile="m")
+        .to_fact()
+        .entry(),
         RoundBoundaryFact(round_idx=0, run_id="cap", role="captain").to_fact().entry(),
         LlmCallFact(
             run_id="cap",
             round_idx=0,
             tool_calls=[
-                {"id": "call_del", "type": "function",
-                 "function": {"name": "delegate", "arguments": "{}"}}
+                {
+                    "id": "call_del",
+                    "type": "function",
+                    "function": {"name": "delegate", "arguments": "{}"},
+                }
             ],
             finish_reason="tool_calls",
-        ).to_fact().entry(),
+        )
+        .to_fact()
+        .entry(),
     ]
 
 

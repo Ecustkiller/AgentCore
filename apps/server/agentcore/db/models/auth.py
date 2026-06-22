@@ -27,12 +27,8 @@ class Credentials(Base):
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     # Brute-force lockout bookkeeping.
-    failed_attempts: Mapped[int] = mapped_column(
-        Integer, default=0, server_default=text("0")
-    )
-    locked_until: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -81,28 +77,18 @@ class UserLlmKey(Base):
 class Invite(Base):
     __tablename__ = "invites"
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     code: Mapped[str] = mapped_column(String(64), unique=True)
     created_by: Mapped[str | None] = mapped_column(
         PG_UUID(as_uuid=False), index=True, nullable=True
     )
-    used_by: Mapped[str | None] = mapped_column(
-        PG_UUID(as_uuid=False), index=True, nullable=True
-    )
-    expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    used_by: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), index=True, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Admin revocation (邀请码撤销): set when an admin kills an unused code so it can
     # no longer register an account. Distinct from expiry (time-based) and use
     # (consumed) — a revoked code was deliberately retired before either happened.
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -114,19 +100,13 @@ class Invite(Base):
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     token_hash: Mapped[str] = mapped_column(String(255))
     token_family: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    rotated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

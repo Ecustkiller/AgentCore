@@ -47,9 +47,7 @@ def workspace_promoted(
     )
 
 
-def handoff_snapshot_done(
-    *, snapshot_id: str, conversation_id: str, size_bytes: int
-) -> SSEEvent:
+def handoff_snapshot_done(*, snapshot_id: str, conversation_id: str, size_bytes: int) -> SSEEvent:
     return SSEEvent(
         type=EventType.HANDOFF_SNAPSHOT_DONE,
         payload={
@@ -60,9 +58,7 @@ def handoff_snapshot_done(
     )
 
 
-def handoff_job_started(
-    *, job_id: str, conversation_id: str, job_conversation_id: str
-) -> SSEEvent:
+def handoff_job_started(*, job_id: str, conversation_id: str, job_conversation_id: str) -> SSEEvent:
     return SSEEvent(
         type=EventType.HANDOFF_JOB_STARTED,
         payload={

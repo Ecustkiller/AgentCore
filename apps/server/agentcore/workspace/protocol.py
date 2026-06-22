@@ -213,9 +213,7 @@ class WorkspaceBackend(Protocol):
         """
         ...
 
-    async def replace(
-        self, path: str, old: str, new: str, *, all_: bool
-    ) -> ReplaceOutcome:
+    async def replace(self, path: str, old: str, new: str, *, all_: bool) -> ReplaceOutcome:
         """Replace exact span(s) ``old`` -> ``new`` in ``path`` atomically.
 
         Raises ``OutsideWorkspace`` / ``PathNotFound`` / ``NotAFile`` /

@@ -64,9 +64,7 @@ async def test_grep_rejects_path_outside_workspace(tmp_path: Path):
 
 
 async def test_grep_rejects_missing_path(tmp_path: Path):
-    result = await GrepTool().execute(
-        {"pattern": "x", "path": "nope.txt"}, _ctx(tmp_path)
-    )
+    result = await GrepTool().execute({"pattern": "x", "path": "nope.txt"}, _ctx(tmp_path))
     assert result.success is False
     assert "不存在" in result.error
 
@@ -93,9 +91,7 @@ async def test_grep_prunes_noise_dirs(tmp_path: Path):
 
 async def test_grep_glob_filters_by_name(tmp_path: Path):
     _seed(tmp_path)
-    result = await GrepTool().execute(
-        {"pattern": "TODO", "glob": "*.py"}, _ctx(tmp_path)
-    )
+    result = await GrepTool().execute({"pattern": "TODO", "glob": "*.py"}, _ctx(tmp_path))
     assert "app.py" in result.output
     assert "main.ts" not in result.output
     assert "notes.md" not in result.output
@@ -103,27 +99,21 @@ async def test_grep_glob_filters_by_name(tmp_path: Path):
 
 async def test_grep_glob_strips_recursive_prefix(tmp_path: Path):
     _seed(tmp_path)
-    result = await GrepTool().execute(
-        {"pattern": "TODO", "glob": "**/*.ts"}, _ctx(tmp_path)
-    )
+    result = await GrepTool().execute({"pattern": "TODO", "glob": "**/*.ts"}, _ctx(tmp_path))
     assert "src/main.ts" in result.output
     assert "app.py" not in result.output
 
 
 async def test_grep_case_insensitive(tmp_path: Path):
     _seed(tmp_path)
-    result = await GrepTool().execute(
-        {"pattern": "todo", "case_insensitive": True}, _ctx(tmp_path)
-    )
+    result = await GrepTool().execute({"pattern": "todo", "case_insensitive": True}, _ctx(tmp_path))
     assert "util.py:2" in result.output  # 'todo later'
     assert "app.py:2" in result.output  # 'TODO: validate'
 
 
 async def test_grep_scopes_to_subdirectory(tmp_path: Path):
     _seed(tmp_path)
-    result = await GrepTool().execute(
-        {"pattern": "TODO", "path": "src"}, _ctx(tmp_path)
-    )
+    result = await GrepTool().execute({"pattern": "TODO", "path": "src"}, _ctx(tmp_path))
     assert "src/main.ts" in result.output
     assert "app.py" not in result.output
 
@@ -131,9 +121,7 @@ async def test_grep_scopes_to_subdirectory(tmp_path: Path):
 async def test_grep_path_can_be_single_file(tmp_path: Path):
     """``path`` may name a single file (rg PATTERN FILE) — scan just that file."""
     _seed(tmp_path)
-    result = await GrepTool().execute(
-        {"pattern": "TODO", "path": "app.py"}, _ctx(tmp_path)
-    )
+    result = await GrepTool().execute({"pattern": "TODO", "path": "app.py"}, _ctx(tmp_path))
     assert result.success is True
     assert "app.py:2: return a + b  # TODO: validate" in result.output
     # scoped to the one file — sibling matches must not leak in
@@ -153,9 +141,7 @@ async def test_grep_single_file_path_ignores_glob(tmp_path: Path):
 
 async def test_grep_files_only_lists_files_with_counts(tmp_path: Path):
     _seed(tmp_path)
-    result = await GrepTool().execute(
-        {"pattern": "TODO", "files_only": True}, _ctx(tmp_path)
-    )
+    result = await GrepTool().execute({"pattern": "TODO", "files_only": True}, _ctx(tmp_path))
     assert result.success is True
     assert "个文件匹配" in result.output
     assert "app.py: 1" in result.output
@@ -181,9 +167,7 @@ async def test_grep_skips_binary_files(tmp_path: Path):
 
 async def test_grep_truncates_at_max_results(tmp_path: Path):
     (tmp_path / "many.txt").write_text("hit\n" * 10, encoding="utf-8")
-    result = await GrepTool().execute(
-        {"pattern": "hit", "max_results": 3}, _ctx(tmp_path)
-    )
+    result = await GrepTool().execute({"pattern": "hit", "max_results": 3}, _ctx(tmp_path))
     assert "[结果已截断" in result.output
     # 3 matching lines + summary header + truncation note
     body_lines = [ln for ln in result.output.splitlines() if ln.startswith("many.txt:")]

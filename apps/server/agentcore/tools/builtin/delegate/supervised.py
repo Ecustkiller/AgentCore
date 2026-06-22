@@ -149,13 +149,13 @@ async def finalize_stopped(
 ) -> ToolResult:
     """Wrap up a partial plan without running the tail."""
     from agentcore.runtime.runs import RunPhase, RunState
-    from agentcore.tools.builtin.delegate.ceo_format import format_for_ceo
     from agentcore.tools.builtin.delegate.accumulate import (
         accumulate_usage,
         collect_citations,
         collect_ledger,
         register_sessions,
     )
+    from agentcore.tools.builtin.delegate.ceo_format import format_for_ceo
 
     results: dict[str, RunState] = dict(seed_completed)
     for node in plan.nodes:

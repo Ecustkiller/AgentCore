@@ -96,8 +96,7 @@ async def search(
                 SearchSection(
                     type="conversation",
                     items=[
-                        SearchItem(id=c.id, title=c.title, updated_at=c.updated_at)
-                        for c in convs
+                        SearchItem(id=c.id, title=c.title, updated_at=c.updated_at) for c in convs
                     ],
                 )
             )
@@ -129,8 +128,7 @@ async def search(
                 SearchSection(
                     type="folder",
                     items=[
-                        SearchItem(id=f.id, title=f.name, updated_at=f.updated_at)
-                        for f in folders
+                        SearchItem(id=f.id, title=f.name, updated_at=f.updated_at) for f in folders
                     ],
                 )
             )

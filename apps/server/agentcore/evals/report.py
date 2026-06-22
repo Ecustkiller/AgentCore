@@ -30,9 +30,7 @@ def _case_to_dict(c: CaseReport) -> dict:
         "case_id": c.case_id,
         "category": c.category,
         "passed": c.passed,
-        "checks": [
-            {"name": ck.name, "passed": ck.passed, "detail": ck.detail} for ck in c.checks
-        ],
+        "checks": [{"name": ck.name, "passed": ck.passed, "detail": ck.detail} for ck in c.checks],
         "judge": (
             None
             if c.judge is None
@@ -96,8 +94,6 @@ def format_report(report: EvalReport) -> str:
     lines.append("-" * 64)
     total_cost = sum(c.outcome.cost_usd for c in report.cases)
     pct = report.pass_rate * 100
-    lines.append(
-        f"总计: {report.passed}/{report.total} 通过 ({pct:.0f}%)   成本 ${total_cost:.4f}"
-    )
+    lines.append(f"总计: {report.passed}/{report.total} 通过 ({pct:.0f}%)   成本 ${total_cost:.4f}")
     lines.append("=" * 64)
     return "\n".join(lines)

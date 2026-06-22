@@ -117,9 +117,7 @@ def test_directory_empty_when_nothing_available():
     # A registry whose every skill is gated behind an un-wired tool renders nothing,
     # so the caller appends nothing (no empty <能力目录> block).
     reg = SkillRegistry()
-    reg.register(
-        SystemSkill(name="x", summary="s", body="b", requires_tools=("missing_tool",))
-    )
+    reg.register(SystemSkill(name="x", summary="s", body="b", requires_tools=("missing_tool",)))
     assert render_skill_directory(reg, set()) == ""
 
 

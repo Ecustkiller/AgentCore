@@ -121,9 +121,7 @@ async def test_runner_failure_is_swallowed():
 def test_schedule_consolidation_is_noop_when_disabled(monkeypatch):
     # The production entry point must do nothing (and not build the scheduler) when
     # the feature flag is off.
-    monkeypatch.setattr(
-        consolidation.settings, "memory_consolidation_enabled", False, raising=True
-    )
+    monkeypatch.setattr(consolidation.settings, "memory_consolidation_enabled", False, raising=True)
     saved = consolidation._default_scheduler
     consolidation._default_scheduler = None
     try:

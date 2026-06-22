@@ -166,9 +166,7 @@ async def apply_handoff(
                 error=str(e),
             )
             outcomes.append(
-                ApplyOutcome(
-                    sel.path, "error", change.change_type, f"{type(e).__name__}: {e}"
-                )
+                ApplyOutcome(sel.path, "error", change.change_type, f"{type(e).__name__}: {e}")
             )
             continue
 

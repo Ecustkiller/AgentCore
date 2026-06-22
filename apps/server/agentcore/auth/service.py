@@ -99,9 +99,7 @@ class AuthService:
         if not username:
             raise ValidationError("请输入用户名")
         if len(password) < _MIN_PASSWORD_LENGTH:
-            raise ValidationError(
-                f"密码至少需要 {_MIN_PASSWORD_LENGTH} 个字符"
-            )
+            raise ValidationError(f"密码至少需要 {_MIN_PASSWORD_LENGTH} 个字符")
 
         invite = await self._invites.get_by_code(invite_code.strip())
         if not _invite_is_valid(invite, datetime.now(UTC)):
@@ -113,17 +111,13 @@ class AuthService:
         user = await self._users.create(
             username=username, display_name=display_name or username, email=email
         )
-        await self._credentials.create(
-            user_id=user.user_id, password_hash=hash_password(password)
-        )
+        await self._credentials.create(user_id=user.user_id, password_hash=hash_password(password))
         await self._invites.mark_used(invite.id, used_by=user.user_id)
         return user
 
     async def login(self, *, username: str, password: str) -> tuple[User, TokenPair]:
         user = await self._users.get_by_username(username.strip())
-        creds = (
-            await self._credentials.get_by_user_id(user.user_id) if user else None
-        )
+        creds = await self._credentials.get_by_user_id(user.user_id) if user else None
         # Uniform failure: never reveal whether the username exists.
         if user is None or creds is None:
             raise AuthenticationError("用户名或密码错误")
@@ -143,9 +137,7 @@ class AuthService:
         return user, tokens
 
     async def refresh(self, *, refresh_token: str) -> TokenPair:
-        record = await self._refresh_tokens.get_by_hash(
-            hash_refresh_token(refresh_token)
-        )
+        record = await self._refresh_tokens.get_by_hash(hash_refresh_token(refresh_token))
         now = datetime.now(UTC)
 
         if record is None:
@@ -166,30 +158,22 @@ class AuthService:
             if now - record.rotated_at > _REFRESH_REUSE_GRACE:
                 await self._refresh_tokens.revoke_family(record.token_family)
                 raise AuthenticationError("Refresh token reuse detected")
-            return await self._issue_tokens(
-                record.user_id, family=record.token_family, now=now
-            )
+            return await self._issue_tokens(record.user_id, family=record.token_family, now=now)
 
         if record.expires_at <= now:
             raise AuthenticationError("Refresh token expired")
 
         await self._refresh_tokens.mark_rotated(record.id)
-        return await self._issue_tokens(
-            record.user_id, family=record.token_family, now=now
-        )
+        return await self._issue_tokens(record.user_id, family=record.token_family, now=now)
 
     async def logout(self, *, refresh_token: str) -> None:
-        record = await self._refresh_tokens.get_by_hash(
-            hash_refresh_token(refresh_token)
-        )
+        record = await self._refresh_tokens.get_by_hash(hash_refresh_token(refresh_token))
         if record is not None:
             await self._refresh_tokens.revoke_family(record.token_family)
 
     # --- invites (admin) ---
 
-    async def create_invite(
-        self, *, created_by: str, expires_in_days: int | None = None
-    ) -> Invite:
+    async def create_invite(self, *, created_by: str, expires_in_days: int | None = None) -> Invite:
         """Mint a single-use invite code (D6). ``expires_in_days`` is optional."""
         expires_at = (
             datetime.now(UTC) + timedelta(days=expires_in_days)
@@ -246,9 +230,7 @@ class AuthService:
         await self._refresh_tokens.revoke_all_for_user(user_id)
         return temp_password
 
-    async def admin_delete_account(
-        self, *, actor_id: str, user_id: str
-    ) -> tuple[User, str | None]:
+    async def admin_delete_account(self, *, actor_id: str, user_id: str) -> tuple[User, str | None]:
         """Admin-initiated 注销 (account deletion): soft-delete + anonymize the target
         and revoke its sessions — no password (the admin role gate + the client's
         二次确认 prove intent, and the operator can't know the target's password).
@@ -288,9 +270,7 @@ class AuthService:
         password is wrong, ``ValidationError`` if the new password is too weak/unchanged.
         """
         creds = await self._credentials.get_by_user_id(user_id)
-        if creds is None or not verify_password(
-            current_password, creds.password_hash
-        ):
+        if creds is None or not verify_password(current_password, creds.password_hash):
             raise AuthenticationError("当前密码不正确")
         if len(new_password) < _MIN_PASSWORD_LENGTH:
             raise ValidationError(f"密码至少需要 {_MIN_PASSWORD_LENGTH} 个字符")
@@ -298,9 +278,7 @@ class AuthService:
             raise ValidationError("新密码不能与当前密码相同")
         await self._credentials.set_password(user_id, hash_password(new_password))
         await self._refresh_tokens.revoke_all_for_user(user_id)
-        return await self._issue_tokens(
-            user_id, family=new_id(), now=datetime.now(UTC)
-        )
+        return await self._issue_tokens(user_id, family=new_id(), now=datetime.now(UTC))
 
     async def update_profile(
         self,
@@ -362,9 +340,7 @@ class AuthService:
 
     # --- internals ---
 
-    async def _issue_tokens(
-        self, user_id: str, *, family: str, now: datetime
-    ) -> TokenPair:
+    async def _issue_tokens(self, user_id: str, *, family: str, now: datetime) -> TokenPair:
         raw, token_hash = generate_refresh_token()
         expires_at = now + timedelta(days=settings.jwt_refresh_token_expire_days)
         await self._refresh_tokens.create(
@@ -373,17 +349,11 @@ class AuthService:
             token_family=family,
             expires_at=expires_at,
         )
-        return TokenPair(
-            access_token=create_access_token(user_id), refresh_token=raw
-        )
+        return TokenPair(access_token=create_access_token(user_id), refresh_token=raw)
 
-    async def _register_failure(
-        self, user_id: str, current_attempts: int, now: datetime
-    ) -> None:
+    async def _register_failure(self, user_id: str, current_attempts: int, now: datetime) -> None:
         new_attempts = current_attempts + 1
-        locked_until = (
-            now + _LOCKOUT_DURATION if new_attempts >= _MAX_FAILED_ATTEMPTS else None
-        )
+        locked_until = now + _LOCKOUT_DURATION if new_attempts >= _MAX_FAILED_ATTEMPTS else None
         await self._credentials.set_failure_state(
             user_id, failed_attempts=new_attempts, locked_until=locked_until
         )

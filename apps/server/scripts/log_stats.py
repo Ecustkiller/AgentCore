@@ -87,7 +87,9 @@ def main() -> None:
         out_tok = [t.get("output_tokens", 0) for t in turn_completes]
         delegated = sum(1 for t in turn_completes if t.get("delegated"))
         if durations:
-            print(f"  Duration   avg={_avg(durations):.0f}ms  min={min(durations)}  max={max(durations)}")
+            print(
+                f"  Duration   avg={_avg(durations):.0f}ms  min={min(durations)}  max={max(durations)}"
+            )
         if rounds:
             print(f"  Rounds     avg={_avg(rounds):.1f}  min={min(rounds)}  max={max(rounds)}")
         print(f"  Tokens     in avg={_avg(in_tok):.0f}  out avg={_avg(out_tok):.0f}")
@@ -99,8 +101,12 @@ def main() -> None:
         rtok = [r.get("reasoning_tokens", 0) for r in round_ends]
         otok = [r.get("output_tokens", 0) for r in round_ends]
         spinning = sum(1 for n in tools_per if n >= 3)
-        print(f"  Tools/round    avg={_avg(tools_per):.1f}  max={max(tools_per)}  ({spinning} rounds ≥3 tools)")
-        print(f"  Reasoning tok  avg={_avg(rtok):.0f}/round   Output tok avg={_avg(otok):.0f}/round")
+        print(
+            f"  Tools/round    avg={_avg(tools_per):.1f}  max={max(tools_per)}  ({spinning} rounds ≥3 tools)"
+        )
+        print(
+            f"  Reasoning tok  avg={_avg(rtok):.0f}/round   Output tok avg={_avg(otok):.0f}/round"
+        )
 
     if llm_calls:
         print(f"\n── LLM Calls (llm.call: {len(llm_calls)}) ──")
@@ -144,11 +150,17 @@ def main() -> None:
         # denied) — denials and bad tool names are real quality signals, not just raises.
         errs = sum(1 for t in tool_calls if t.get("status") not in ("ok", None))
         durs = [t["duration_ms"] for t in tool_calls if t.get("duration_ms")]
-        print(f"  Success rate: {(len(tool_calls) - errs) / len(tool_calls) * 100:.1f}%  ({errs} failed)")
+        print(
+            f"  Success rate: {(len(tool_calls) - errs) / len(tool_calls) * 100:.1f}%  ({errs} failed)"
+        )
         if durs:
             print(f"  Duration   avg={_avg(durs):.0f}ms  max={max(durs)}ms")
         for name, c in names.most_common(15):
-            ne = sum(1 for t in tool_calls if t.get("tool") == name and t.get("status") not in ("ok", None))
+            ne = sum(
+                1
+                for t in tool_calls
+                if t.get("tool") == name and t.get("status") not in ("ok", None)
+            )
             print(f"    {c:>4}x  {name}{f'  ({ne} err)' if ne else ''}")
 
         # Per-worker split: agent_id/run_id/depth ride on every worker's logs (bound
@@ -169,9 +181,12 @@ def main() -> None:
                 meta = f"d{depth}" if depth is not None else "—"
                 dur = f"avg {_avg(a_durs):.0f}ms" if a_durs else "—"
                 top = ", ".join(
-                    f"{n}×{cnt}" for n, cnt in Counter(t.get("tool", "?") for t in calls).most_common(4)
+                    f"{n}×{cnt}"
+                    for n, cnt in Counter(t.get("tool", "?") for t in calls).most_common(4)
                 )
-                print(f"    {label:<16} {meta:<3} {len(calls):>3} calls  {ok_pct:5.1f}% ok  {dur:<11} {top}")
+                print(
+                    f"    {label:<16} {meta:<3} {len(calls):>3} calls  {ok_pct:5.1f}% ok  {dur:<11} {top}"
+                )
 
     if cost_records:
         print(f"\n── Cost (cost.recorded: {len(cost_records)} turns) ──")

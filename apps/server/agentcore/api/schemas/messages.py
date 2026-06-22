@@ -209,9 +209,7 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
     if isinstance(body, ResolveApprovalInteraction):
         return body.decision
     if isinstance(body, ResolveCheckpointInteraction):
-        return CheckpointResponse(
-            decision=body.decision, note=body.note, selected=body.selected
-        )
+        return CheckpointResponse(decision=body.decision, note=body.note, selected=body.selected)
     if isinstance(body, ResolvePlanReviewInteraction):
         return CheckpointResponse(decision=body.decision, note=body.note)
     if isinstance(body, ResolveClientToolInteraction):

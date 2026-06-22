@@ -43,9 +43,7 @@ class FilesystemStorageProvider:
     async def snapshot(
         self, workspace_root: Path, storage_key: str, *, label: str | None = None
     ) -> SnapshotRef:
-        return await asyncio.to_thread(
-            self._snapshot_sync, workspace_root, storage_key, label
-        )
+        return await asyncio.to_thread(self._snapshot_sync, workspace_root, storage_key, label)
 
     def _snapshot_sync(
         self, workspace_root: Path, storage_key: str, label: str | None
@@ -73,14 +71,10 @@ class FilesystemStorageProvider:
         refs = manifest_from_bytes(self._read(self._key_dir(storage_key) / MANIFEST_NAME))
         return sorted(refs, key=lambda r: r.created_at, reverse=True)
 
-    async def restore(
-        self, storage_key: str, snapshot_id: str, workspace_root: Path
-    ) -> None:
+    async def restore(self, storage_key: str, snapshot_id: str, workspace_root: Path) -> None:
         await asyncio.to_thread(self._restore_sync, storage_key, snapshot_id, workspace_root)
 
-    def _restore_sync(
-        self, storage_key: str, snapshot_id: str, workspace_root: Path
-    ) -> None:
+    def _restore_sync(self, storage_key: str, snapshot_id: str, workspace_root: Path) -> None:
         data = self._read(self._key_dir(storage_key) / f"{snapshot_id}.zip")
         if data is None:
             raise SnapshotNotFound(snapshot_id)

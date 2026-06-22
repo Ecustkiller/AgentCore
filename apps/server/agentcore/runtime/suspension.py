@@ -79,9 +79,7 @@ captain_transcript: ContextVar[list[LLMMessage] | None] = ContextVar(
 # stores only history's LENGTH). Symmetric with :data:`captain_transcript`: a contextvar
 # because the faces run deep inside the captain loop with no handle on the history list.
 # ``None`` outside a turn (tests / standalone) → the face captures no history.
-turn_history: ContextVar[list[dict[str, Any]] | None] = ContextVar(
-    "turn_history", default=None
-)
+turn_history: ContextVar[list[dict[str, Any]] | None] = ContextVar("turn_history", default=None)
 
 
 class SuspensionKind(StrEnum):
@@ -193,9 +191,7 @@ class TurnSuspension:
             "user_id": data.get("user_id", ""),
             "captain_run_id": data.get("captain_run_id", ""),
             "checkpoint_id": data.get("checkpoint_id", ""),
-            "tool_call_id": (
-                data.get("tool_call_id") or data.get("delegate_tool_call_id") or ""
-            ),
+            "tool_call_id": (data.get("tool_call_id") or data.get("delegate_tool_call_id") or ""),
             "base_system_prompt": data.get("base_system_prompt", "") or "",
             "user_message": data.get("user_message", "") or "",
             # NOTE: ``transcript`` / ``history`` / ``journal`` / ``journal_entries`` are NOT

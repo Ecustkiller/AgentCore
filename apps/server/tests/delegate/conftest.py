@@ -234,7 +234,9 @@ def tool_ckpt(
     )
 
 
-def tool_durable(provider: Provider, sink: EventSink, registry: InteractionRegistry, saver, deleter):
+def tool_durable(
+    provider: Provider, sink: EventSink, registry: InteractionRegistry, saver, deleter
+):
     return DelegateTool(
         llm=provider,
         sink=sink,

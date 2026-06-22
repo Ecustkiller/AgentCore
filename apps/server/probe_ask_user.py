@@ -53,11 +53,28 @@ class Case:
 
 # 产出类（甲案 → 期望 ASK，测触发率）：能做但都没说全。
 PRODUCE: list[Case] = [
-    Case("P1-web", "帮我做一个个人作品集网站。", "ASK", "经典产出类，多个未言明决策（风格/页面/技术栈）。"),
-    Case("P2-doc", "帮我写一份面向初学者的 Python 入门教程文档。", "ASK", "成篇文档；上一轮单次跑出过 DELEGATE。"),
-    Case("P3-ppt", "帮我做一份面向投资人的产品介绍 PPT。", "ASK", "高风险受众，篇幅/侧重/数据都未定。"),
+    Case(
+        "P1-web",
+        "帮我做一个个人作品集网站。",
+        "ASK",
+        "经典产出类，多个未言明决策（风格/页面/技术栈）。",
+    ),
+    Case(
+        "P2-doc",
+        "帮我写一份面向初学者的 Python 入门教程文档。",
+        "ASK",
+        "成篇文档；上一轮单次跑出过 DELEGATE。",
+    ),
+    Case(
+        "P3-ppt",
+        "帮我做一份面向投资人的产品介绍 PPT。",
+        "ASK",
+        "高风险受众，篇幅/侧重/数据都未定。",
+    ),
     Case("P4-app", "帮我设计一个手机记账 App。", "ASK", "产品设计，功能范围/平台/风格未定。"),
-    Case("P5-event", "帮我策划一场 200 人的公司年会。", "ASK", "非软件产出类，预算/主题/流程未定。"),
+    Case(
+        "P5-event", "帮我策划一场 200 人的公司年会。", "ASK", "非软件产出类，预算/主题/流程未定。"
+    ),
 ]
 
 # 对照组（守住不过度发问）。
@@ -121,8 +138,9 @@ def classify(events: list[tuple[str, dict]]) -> Obs:
         all_default = bool(questions) and n_no_default == 0
         opening = bool(assumptions or styles or all_default)
         wall = (not opening) and len(questions) >= 3
-        return Obs("ASK", opening, wall, len(questions), len(assumptions),
-                   investigation=investigation)
+        return Obs(
+            "ASK", opening, wall, len(questions), len(assumptions), investigation=investigation
+        )
     if delegated:
         plan = next((p for t, p in events if t == "run_plan"), None)
         agents = len(plan.get("agents") or plan.get("runs") or []) if plan else 0
@@ -170,7 +188,9 @@ async def _run_once(user_id: str, creds: object, prompt: str, created: list[str]
     )
     waiter = asyncio.create_task(sink.decisive.wait())
     try:
-        await asyncio.wait({task, waiter}, timeout=CASE_TIMEOUT, return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait(
+            {task, waiter}, timeout=CASE_TIMEOUT, return_when=asyncio.FIRST_COMPLETED
+        )
     finally:
         waiter.cancel()
         if not task.done():
@@ -213,7 +233,9 @@ async def _cleanup(ids: list[str]) -> list[str]:
 def _rate_line(case: Case, counts: Counter, asks: list[Obs]) -> str:
     n = sum(counts.values())
     hit = counts.get(case.expect, 0)
-    dist = " ".join(f"{k}:{counts.get(k, 0)}" for k in ("ASK", "DELEGATE", "ANSWER", "UNKNOWN") if counts.get(k))
+    dist = " ".join(
+        f"{k}:{counts.get(k, 0)}" for k in ("ASK", "DELEGATE", "ANSWER", "UNKNOWN") if counts.get(k)
+    )
     extra = ""
     if case.expect == "ASK" and asks:
         opening = sum(1 for o in asks if o.opening)
@@ -229,7 +251,9 @@ async def main() -> None:
 
     print("=" * 84)
     print(f"ask_user 触发率探针 · 每条 ×{REPEATS} · 策略基线=甲(产出类→应开提案卡)")
-    print(f"billing_mode={settings.billing_mode} · checkpoint_gate_enabled={settings.checkpoint_gate_enabled}")
+    print(
+        f"billing_mode={settings.billing_mode} · checkpoint_gate_enabled={settings.checkpoint_gate_enabled}"
+    )
     print("=" * 84)
     if not settings.checkpoint_gate_enabled:
         print("✗ checkpoint_gate_enabled=False → ask_user 不装配，先开启。")
@@ -246,7 +270,7 @@ async def main() -> None:
         counts: Counter = Counter()
         asks: list[Obs] = []
         marks: list[str] = []
-        for r in range(REPEATS):
+        for _r in range(REPEATS):
             try:
                 obs = await _run_once(user_id, creds, case.prompt, created)
             except Exception as e:
@@ -275,7 +299,7 @@ async def main() -> None:
     prod_ask = sum(per_case[c.id][1].get("ASK", 0) for c in PRODUCE)
     prod_total = sum(sum(per_case[c.id][1].values()) for c in PRODUCE)
     print("-" * 84)
-    print(f"产出类整体 ASK 触发率：{prod_ask}/{prod_total} = {prod_ask / max(prod_total,1):.0%}")
+    print(f"产出类整体 ASK 触发率：{prod_ask}/{prod_total} = {prod_ask / max(prod_total, 1):.0%}")
     print("=" * 84)
 
     print(f"\n清理 {len(created)} 个临时会话…")
@@ -283,9 +307,7 @@ async def main() -> None:
     async with async_session_factory() as s:
         left = (
             await s.execute(
-                select(func.count())
-                .select_from(Conversation)
-                .where(Conversation.id.in_(created))
+                select(func.count()).select_from(Conversation).where(Conversation.id.in_(created))
             )
         ).scalar()
     print(f"清理完成：残留 {left} 个（清理失败 id：{failed or '无'}）")

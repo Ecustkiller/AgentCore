@@ -50,9 +50,7 @@ def _fs_data_dir(tmp_path: Path, monkeypatch):
         build_storage_provider.cache_clear()
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> None:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
@@ -111,15 +109,11 @@ async def test_promote_bare_chat_workspace(client, make_invite, _fs_data_dir):
     # The minted workspace is real: lists empty (no phantom files), then a write lands.
     r = await client.get(f"/v1/conversations/{conv_id}/workspace/files")
     assert r.status_code == 200 and r.json()["data"] == []
-    r = await client.put(
-        f"/v1/conversations/{conv_id}/workspace/files/a.txt", content=b"A"
-    )
+    r = await client.put(f"/v1/conversations/{conv_id}/workspace/files/a.txt", content=b"A")
     assert r.status_code == 200, r.text
 
 
-async def test_create_conversation_records_local_intent(
-    client, make_invite, _fs_data_dir
-):
+async def test_create_conversation_records_local_intent(client, make_invite, _fs_data_dir):
     """A desktop 裸聊 is born carrying its local-container intent (工作区对称化 D1a).
 
     Storing it on the conversation (vs. per-turn) is what makes every later promotion
@@ -130,9 +124,7 @@ async def test_create_conversation_records_local_intent(
     code = await make_invite("INV-WS-INTENT")
     await _register_and_login(client, code, "wsintent")
 
-    r = await client.post(
-        "/v1/conversations", json={"local_container_root_id": "root-abc"}
-    )
+    r = await client.post("/v1/conversations", json={"local_container_root_id": "root-abc"})
     assert r.status_code == 201, r.text
     conv_id = r.json()["id"]
     assert r.json()["local_container_root_id"] == "root-abc"
@@ -186,9 +178,7 @@ async def test_delete_and_move_workspace_files(client, make_invite, _fs_data_dir
     conv_id = await _new_conversation(client)
 
     await client.put(f"/v1/conversations/{conv_id}/workspace/files/a.txt", content=b"A")
-    await client.put(
-        f"/v1/conversations/{conv_id}/workspace/files/keep.txt", content=b"K"
-    )
+    await client.put(f"/v1/conversations/{conv_id}/workspace/files/keep.txt", content=b"K")
 
     # Rename a.txt -> docs/b.txt (move creates the parent dir).
     r = await client.post(
@@ -229,9 +219,7 @@ async def test_create_workspace_dir(client, make_invite, _fs_data_dir):
     conv_id = await _new_conversation(client)
 
     # Create a nested folder (parents are created).
-    r = await client.post(
-        f"/v1/conversations/{conv_id}/workspace/dirs", json={"path": "src/lib"}
-    )
+    r = await client.post(f"/v1/conversations/{conv_id}/workspace/dirs", json={"path": "src/lib"})
     assert r.status_code == 200, r.text
 
     r = await client.get(
@@ -241,9 +229,7 @@ async def test_create_workspace_dir(client, make_invite, _fs_data_dir):
     assert {"src", "src/lib"} <= dirs
 
     # Recreating an existing folder is refused (422).
-    r = await client.post(
-        f"/v1/conversations/{conv_id}/workspace/dirs", json={"path": "src/lib"}
-    )
+    r = await client.post(f"/v1/conversations/{conv_id}/workspace/dirs", json={"path": "src/lib"})
     assert r.status_code == 422, r.text
 
     # A freshly made folder is a valid move destination.
@@ -263,12 +249,8 @@ async def test_snapshot_create_list_restore_download(client, make_invite, _fs_da
     conv_id = await _new_conversation(client)
 
     # Seed v1, snapshot it, then overwrite with v2.
-    await client.put(
-        f"/v1/conversations/{conv_id}/workspace/files/doc.txt", content=b"v1"
-    )
-    r = await client.post(
-        f"/v1/conversations/{conv_id}/snapshots", json={"label": "milestone"}
-    )
+    await client.put(f"/v1/conversations/{conv_id}/workspace/files/doc.txt", content=b"v1")
+    r = await client.post(f"/v1/conversations/{conv_id}/snapshots", json={"label": "milestone"})
     assert r.status_code == 201, r.text
     snap = r.json()
     assert snap["label"] == "milestone"
@@ -278,9 +260,7 @@ async def test_snapshot_create_list_restore_download(client, make_invite, _fs_da
     assert r.status_code == 200
     assert sid in {s["snapshot_id"] for s in r.json()["data"]}
 
-    await client.put(
-        f"/v1/conversations/{conv_id}/workspace/files/doc.txt", content=b"v2"
-    )
+    await client.put(f"/v1/conversations/{conv_id}/workspace/files/doc.txt", content=b"v2")
 
     # Restore brings v1 back.
     r = await client.post(f"/v1/conversations/{conv_id}/snapshots/{sid}/restore")
@@ -303,9 +283,7 @@ async def test_snapshot_create_list_restore_download(client, make_invite, _fs_da
     ).status_code == 404
 
 
-async def test_clone_repo_into_workspace(
-    client, make_invite, _fs_data_dir, tmp_path, monkeypatch
-):
+async def test_clone_repo_into_workspace(client, make_invite, _fs_data_dir, tmp_path, monkeypatch):
     if shutil.which("git") is None:
         pytest.skip("git not installed")
     src = tmp_path / "source-repo"
@@ -328,9 +306,7 @@ async def test_clone_repo_into_workspace(
     assert r.status_code == 200, r.text
     assert r.json()["path"] == "imported"
 
-    r = await client.get(
-        f"/v1/conversations/{conv_id}/workspace/files/imported/README.md"
-    )
+    r = await client.get(f"/v1/conversations/{conv_id}/workspace/files/imported/README.md")
     assert r.status_code == 200
     # Normalize EOL: git on Windows may apply autocrlf on checkout.
     assert r.content.replace(b"\r\n", b"\n") == b"hello clone\n"
@@ -343,36 +319,24 @@ async def test_clone_repo_into_workspace(
     assert r.status_code == 422, r.text
 
 
-async def test_other_user_cannot_touch_workspace(
-    client, new_client, make_invite, _fs_data_dir
-):
+async def test_other_user_cannot_touch_workspace(client, new_client, make_invite, _fs_data_dir):
     """A conversation's workspace is scoped to its owner (IDOR-safe → 404)."""
     code_a = await make_invite("INV-WS-A")
     await _register_and_login(client, code_a, "owner")
     conv_id = await _new_conversation(client)
-    await client.put(
-        f"/v1/conversations/{conv_id}/workspace/files/secret.txt", content=b"top"
-    )
+    await client.put(f"/v1/conversations/{conv_id}/workspace/files/secret.txt", content=b"top")
 
     code_b = await make_invite("INV-WS-B")
     async with new_client() as other:
         await _register_and_login(other, code_b, "intruder")
+        assert (await other.get(f"/v1/conversations/{conv_id}/workspace/files")).status_code == 404
         assert (
-            await other.get(f"/v1/conversations/{conv_id}/workspace/files")
+            await other.get(f"/v1/conversations/{conv_id}/workspace/files/secret.txt")
         ).status_code == 404
-        assert (
-            await other.get(
-                f"/v1/conversations/{conv_id}/workspace/files/secret.txt"
-            )
-        ).status_code == 404
-        assert (
-            await other.get(f"/v1/conversations/{conv_id}/snapshots")
-        ).status_code == 404
+        assert (await other.get(f"/v1/conversations/{conv_id}/snapshots")).status_code == 404
         # Mutating routes are owner-scoped too (404, not a silent delete/move).
         assert (
-            await other.delete(
-                f"/v1/conversations/{conv_id}/workspace/files/secret.txt"
-            )
+            await other.delete(f"/v1/conversations/{conv_id}/workspace/files/secret.txt")
         ).status_code == 404
         assert (
             await other.post(

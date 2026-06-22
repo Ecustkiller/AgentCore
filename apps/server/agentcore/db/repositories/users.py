@@ -19,15 +19,11 @@ class UserRepository:
         self._session = session
 
     async def get_by_id(self, user_id: str) -> User | None:
-        result = await self._session.execute(
-            select(User).where(User.user_id == user_id)
-        )
+        result = await self._session.execute(select(User).where(User.user_id == user_id))
         return result.scalar_one_or_none()
 
     async def get_by_username(self, username: str) -> User | None:
-        result = await self._session.execute(
-            select(User).where(User.username == username)
-        )
+        result = await self._session.execute(select(User).where(User.username == username))
         return result.scalar_one_or_none()
 
     async def get_by_email(self, email: str) -> User | None:
@@ -47,9 +43,7 @@ class UserRepository:
         """
         if not user_ids:
             return {}
-        result = await self._session.execute(
-            select(User).where(User.user_id.in_(user_ids))
-        )
+        result = await self._session.execute(select(User).where(User.user_id.in_(user_ids)))
         return {u.user_id: u for u in result.scalars().all()}
 
     async def search(self, query: str, *, limit: int = 20) -> Sequence[User]:
@@ -105,9 +99,7 @@ class UserRepository:
         q = (query or "").strip()
         if q:
             pattern = _ilike_pattern(q)
-            conditions.append(
-                or_(User.username.ilike(pattern), User.display_name.ilike(pattern))
-            )
+            conditions.append(or_(User.username.ilike(pattern), User.display_name.ilike(pattern)))
         if role is not None:
             conditions.append(User.role == role)
         if status is not None:
@@ -144,9 +136,7 @@ class UserRepository:
                 User.created_at.asc() if order == "asc" else User.created_at.desc()
             )
 
-        rows = (
-            await self._session.execute(list_stmt.limit(limit).offset(offset))
-        ).all()
+        rows = (await self._session.execute(list_stmt.limit(limit).offset(offset))).all()
         return [(row[0], int(row[1])) for row in rows], int(total or 0)
 
     async def count_overview(self) -> dict[str, int]:
@@ -194,9 +184,7 @@ class UserRepository:
         return user
 
     async def set_role(self, user_id: str, role: str) -> None:
-        await self._session.execute(
-            update(User).where(User.user_id == user_id).values(role=role)
-        )
+        await self._session.execute(update(User).where(User.user_id == user_id).values(role=role))
         await self._session.commit()
 
     async def set_status(self, user_id: str, status: str) -> None:
@@ -208,9 +196,7 @@ class UserRepository:
         )
         await self._session.commit()
 
-    async def set_default_model_mode(
-        self, user_id: str, mode: str | None
-    ) -> None:
+    async def set_default_model_mode(self, user_id: str, mode: str | None) -> None:
         """Set (or clear, with ``None``) a user's default 质量档 (llm/modes.py).
 
         ``None`` clears it back to「inherit the operator default」. The value is an
@@ -250,9 +236,7 @@ class UserRepository:
             values["quota_daily_requests"] = daily_requests
         if not values:
             return
-        await self._session.execute(
-            update(User).where(User.user_id == user_id).values(**values)
-        )
+        await self._session.execute(update(User).where(User.user_id == user_id).values(**values))
         await self._session.commit()
 
     async def update(
@@ -380,9 +364,7 @@ class UserDirectoryRepository:
 
     async def get(self, user_id: str) -> UserDirectorySettings | None:
         result = await self._session.execute(
-            select(UserDirectorySettings).where(
-                UserDirectorySettings.user_id == user_id
-            )
+            select(UserDirectorySettings).where(UserDirectorySettings.user_id == user_id)
         )
         return result.scalar_one_or_none()
 

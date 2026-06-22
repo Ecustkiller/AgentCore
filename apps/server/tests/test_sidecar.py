@@ -96,11 +96,7 @@ def _response(sent: list[dict[str, Any]], request_id: Any) -> dict[str, Any]:
 
 
 def _events(sent: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        m["params"]["event"]
-        for m in sent
-        if m.get("method") == "turn/event"
-    ]
+    return [m["params"]["event"] for m in sent if m.get("method") == "turn/event"]
 
 
 def test_initialize_rejects_missing_root(tmp_path):
@@ -181,9 +177,7 @@ def test_sidecar_runs_a_turn_on_the_local_dir(tmp_path, monkeypatch):
     )
     # The engine builds its provider internally — swap it for the scripted one
     # (mirrors the eval harness note: team path has no provider injection seam).
-    monkeypatch.setattr(
-        "agentcore.runtime.pipeline.build_provider", lambda *a, **k: provider
-    )
+    monkeypatch.setattr("agentcore.runtime.pipeline.build_provider", lambda *a, **k: provider)
 
     sent, write_line = _recorder()
     server = SidecarServer(write_line)
@@ -415,9 +409,7 @@ def test_creds_for_stamps_conversation_and_trace_headers():
 
     traced = server._creds_for("conv-1", "0123456789abcdef0123456789abcdef")
     assert traced.extra_headers[INFERENCE_CONVERSATION_HEADER] == "conv-1"
-    assert traced.extra_headers[INFERENCE_TRACE_HEADER] == (
-        "0123456789abcdef0123456789abcdef"
-    )
+    assert traced.extra_headers[INFERENCE_TRACE_HEADER] == ("0123456789abcdef0123456789abcdef")
 
     untraced = server._creds_for("conv-1")
     assert untraced.extra_headers[INFERENCE_CONVERSATION_HEADER] == "conv-1"

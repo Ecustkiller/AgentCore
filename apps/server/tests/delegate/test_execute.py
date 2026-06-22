@@ -3,7 +3,6 @@
 from agentcore.core.types import ToolEffect
 from agentcore.llm.protocol import TokenUsage
 from agentcore.runtime.events import EventSink, EventType
-
 from tests.delegate.conftest import Provider, ctx, tool
 
 
@@ -60,9 +59,7 @@ async def test_finalize_single_worker_surfaces_directly_as_terminal():
     assert t.usage["input"] == 10
     assert "input_tokens" not in result.metadata
     sink.close()
-    deltas = [
-        e.payload["delta"] async for e in sink if e.type == EventType.CONTENT_DELTA
-    ]
+    deltas = [e.payload["delta"] async for e in sink if e.type == EventType.CONTENT_DELTA]
     assert deltas == ["DIRECT"]
 
 
@@ -166,9 +163,7 @@ async def test_run_plan_carries_stance_and_group_tags():
         ctx(),
     )
     sink.close()
-    plan_runs = [
-        r async for e in sink if e.type == EventType.RUN_PLAN for r in e.payload["runs"]
-    ]
+    plan_runs = [r async for e in sink if e.type == EventType.RUN_PLAN for r in e.payload["runs"]]
     by_task = {r["task"]: r for r in plan_runs}
     assert by_task["支持"]["stance"] == "pro"
     assert by_task["支持"]["group"] == "g1"
@@ -196,9 +191,7 @@ async def test_run_plan_carries_round_tag():
         ctx(),
     )
     sink.close()
-    plan_runs = [
-        r async for e in sink if e.type == EventType.RUN_PLAN for r in e.payload["runs"]
-    ]
+    plan_runs = [r async for e in sink if e.type == EventType.RUN_PLAN for r in e.payload["runs"]]
     by_task = {r["task"]: r for r in plan_runs}
     assert by_task["首轮"]["round"] == 1
     assert by_task["次轮"]["round"] == 2
@@ -207,18 +200,11 @@ async def test_run_plan_carries_round_tag():
 async def test_run_plan_omits_tags_for_ordinary_batch():
     sink = EventSink()
     t = tool(Provider(["X", "Y"]), sink=sink)
-    await t.execute(
-        {"tasks": [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}]}, ctx()
-    )
+    await t.execute({"tasks": [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}]}, ctx())
     sink.close()
-    plan_runs = [
-        r async for e in sink if e.type == EventType.RUN_PLAN for r in e.payload["runs"]
-    ]
+    plan_runs = [r async for e in sink if e.type == EventType.RUN_PLAN for r in e.payload["runs"]]
     assert plan_runs
-    assert all(
-        "stance" not in r and "group" not in r and "round" not in r
-        for r in plan_runs
-    )
+    assert all("stance" not in r and "group" not in r and "round" not in r for r in plan_runs)
 
 
 def test_task_description_matches_what_worker_actually_receives():
@@ -232,9 +218,7 @@ def test_task_description_matches_what_worker_actually_receives():
 
 def test_strict_description_separates_rework_from_disposition():
     t = tool(Provider([]))
-    contract_props = t.schema.parameters["properties"]["tasks"]["items"]["properties"][
-        "contract"
-    ]
+    contract_props = t.schema.parameters["properties"]["tasks"]["items"]["properties"]["contract"]
     strict_desc = contract_props["properties"]["strict"]["description"]
     assert "硬退" in strict_desc
     assert "软" in strict_desc

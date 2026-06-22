@@ -60,9 +60,7 @@ async def test_under_all_limits_passes():
         today=_agg(input_=400, output=100, turns=5),
         month=_agg(cost_total=NANO_PER_USD),  # $1 of $5
     )
-    limits = QuotaLimits(
-        daily_tokens=1000, monthly_cost_nano=5 * NANO_PER_USD, daily_requests=10
-    )
+    limits = QuotaLimits(daily_tokens=1000, monthly_cost_nano=5 * NANO_PER_USD, daily_requests=10)
     await enforce_quota(repo, "u1", now=_NOW, limits=limits)
 
 
@@ -113,9 +111,7 @@ async def test_at_limit_counts_as_exceeded():
 async def test_month_window_not_queried_when_daily_fails():
     # Daily tokens already blown → the month window must never be read.
     repo = _FakeRepo(today=_agg(input_=2000, output=0, turns=1))
-    limits = QuotaLimits(
-        daily_tokens=1000, monthly_cost_nano=5 * NANO_PER_USD, daily_requests=0
-    )
+    limits = QuotaLimits(daily_tokens=1000, monthly_cost_nano=5 * NANO_PER_USD, daily_requests=0)
     with pytest.raises(QuotaExceededError):
         await enforce_quota(repo, "u1", now=_NOW, limits=limits)
     assert all(since.day != 1 for since in repo.windows)
@@ -178,9 +174,7 @@ def test_for_user_per_dimension_override_is_isolated():
 
 def test_for_user_explicit_zero_unlimits_that_dimension():
     # An explicit 0 override = unlimited for that dimension (same 0-semantics as config).
-    limits = QuotaLimits.for_user(
-        _user(daily_tokens=0, monthly_cost_usd=0, daily_requests=0)
-    )
+    limits = QuotaLimits.for_user(_user(daily_tokens=0, monthly_cost_usd=0, daily_requests=0))
     assert limits == QuotaLimits(0, 0, 0)
 
 

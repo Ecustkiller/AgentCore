@@ -4,6 +4,7 @@ from typing import Any
 
 from agentcore.runtime.checkpoints import CheckpointDecision
 
+
 def parse_decision(raw: Any) -> CheckpointDecision:
     """Coerce the desktop's decision string into a :class:`CheckpointDecision`.
 

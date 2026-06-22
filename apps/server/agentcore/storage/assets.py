@@ -173,11 +173,7 @@ def _use_s3() -> bool:
         return True
     if backend == "filesystem":
         return False
-    return bool(
-        settings.s3_bucket
-        and settings.s3_access_key_id
-        and settings.s3_secret_access_key
-    )
+    return bool(settings.s3_bucket and settings.s3_access_key_id and settings.s3_secret_access_key)
 
 
 @lru_cache(maxsize=1)

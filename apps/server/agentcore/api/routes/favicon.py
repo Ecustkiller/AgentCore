@@ -126,8 +126,10 @@ def _sniff_media_type(data: bytes, header_ct: str) -> str | None:
     for magic, media_type in _IMAGE_MAGIC:
         if data.startswith(magic):
             return media_type
-    is_svg = header_ct.startswith("image/svg") or head[:4].lower() == b"<svg" or (
-        head[:5].lower() == b"<?xml" and b"<svg" in data[:512].lower()
+    is_svg = (
+        header_ct.startswith("image/svg")
+        or head[:4].lower() == b"<svg"
+        or (head[:5].lower() == b"<?xml" and b"<svg" in data[:512].lower())
     )
     if is_svg:
         return "image/svg+xml"

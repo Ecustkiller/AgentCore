@@ -219,12 +219,24 @@ def test_single_outcome_finish_override_wins_over_rounds():
     sink = RecordingSink()
     usage = TokenUsage()
     degraded = single_outcome(
-        "", usage, 3, profile=profile, sink=sink, citations=[], latency_ms=1,
+        "",
+        usage,
+        3,
+        profile=profile,
+        sink=sink,
+        citations=[],
+        latency_ms=1,
         finish_override=FinishReason.DEGRADED,
     )
     assert degraded.finish_reason == "degraded"
     unproductive = single_outcome(
-        "salvaged", usage, 3, profile=profile, sink=sink, citations=[], latency_ms=1,
+        "salvaged",
+        usage,
+        3,
+        profile=profile,
+        sink=sink,
+        citations=[],
+        latency_ms=1,
         finish_override=FinishReason.UNPRODUCTIVE,
     )
     assert unproductive.finish_reason == "unproductive"

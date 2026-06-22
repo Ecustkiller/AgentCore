@@ -48,9 +48,7 @@ def _suspension(
         question="要继续吗？",
         context="背景",
     )
-    susp.journal = [
-        {"type": "checkpoint_required", "payload": {"id": "cp"}, "timestamp": None}
-    ]
+    susp.journal = [{"type": "checkpoint_required", "payload": {"id": "cp"}, "timestamp": None}]
     if journal_entries is not None:
         susp.journal_entries = journal_entries
     return susp
@@ -96,9 +94,7 @@ def test_store_round_trips_journal_entries_and_history(tmp_path):
     ]
 
     async def drive() -> Any:
-        await store.save(
-            _suspension("m1", "c1", journal_entries=entries, history=history)
-        )
+        await store.save(_suspension("m1", "c1", journal_entries=entries, history=history))
         return await store.claim("m1", conversation_id="c1")
 
     claimed = asyncio.run(drive())

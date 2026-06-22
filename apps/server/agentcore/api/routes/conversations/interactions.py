@@ -17,9 +17,7 @@ from ._helpers import _require_owned_conversation
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
-@router.post(
-    "/{conversation_id}/interactions/{interaction_id}", response_model=StatusResponse
-)
+@router.post("/{conversation_id}/interactions/{interaction_id}", response_model=StatusResponse)
 async def resolve_interaction(
     conversation_id: str,
     interaction_id: str,
@@ -49,14 +47,8 @@ async def resolve_interaction(
 
     registry = default_interaction_registry()
     pending = registry.get(interaction_id)
-    if (
-        pending is None
-        or pending.conversation_id != conversation_id
-        or pending.kind != body.kind
-    ):
+    if pending is None or pending.conversation_id != conversation_id or pending.kind != body.kind:
         raise NotFoundError("交互请求不存在或已处理")
-    if not registry.resolve(
-        interaction_id, result, conversation_id=conversation_id
-    ):
+    if not registry.resolve(interaction_id, result, conversation_id=conversation_id):
         raise NotFoundError("交互请求不存在或已处理")
     return StatusResponse()

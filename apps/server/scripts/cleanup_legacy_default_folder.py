@@ -88,12 +88,12 @@ def _parse_args() -> argparse.Namespace:
 async def _count_conversations(session, folder_id: str) -> tuple[int, int]:
     """Return ``(live, total)`` conversation counts bound to ``folder_id``."""
     total = await session.scalar(
-        select(func.count()).select_from(Conversation).where(
-            Conversation.folder_id == folder_id
-        )
+        select(func.count()).select_from(Conversation).where(Conversation.folder_id == folder_id)
     )
     live = await session.scalar(
-        select(func.count()).select_from(Conversation).where(
+        select(func.count())
+        .select_from(Conversation)
+        .where(
             Conversation.folder_id == folder_id,
             Conversation.deleted_at.is_(None),
         )
@@ -159,9 +159,7 @@ async def _run(args: argparse.Namespace) -> None:
         for f in folders:
             # Re-parent ALL conversations (incl. soft-deleted) so no folder_id dangles.
             await session.execute(
-                update(Conversation)
-                .where(Conversation.folder_id == f.id)
-                .values(folder_id=None)
+                update(Conversation).where(Conversation.folder_id == f.id).values(folder_id=None)
             )
             if args.soft:
                 f.deleted_at = datetime.now()

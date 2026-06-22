@@ -129,9 +129,7 @@ class LocalPausedTurnStore:
         try:
             await asyncio.to_thread(self._unlink_sync, self._path(message_id))
         except Exception as e:  # noqa: BLE001 — cleanup must never break the turn
-            logger.warning(
-                "sidecar.paused_delete_failed", message_id=message_id, error=str(e)
-            )
+            logger.warning("sidecar.paused_delete_failed", message_id=message_id, error=str(e))
 
     @staticmethod
     def _unlink_sync(path: Path) -> None:
@@ -154,21 +152,15 @@ class LocalPausedTurnStore:
         if not _is_safe_message_id(message_id):
             return None
         try:
-            record = await asyncio.to_thread(
-                self._claim_sync, message_id, conversation_id
-            )
+            record = await asyncio.to_thread(self._claim_sync, message_id, conversation_id)
         except Exception as e:  # noqa: BLE001 — a claim failure reads as "not resumable"
-            logger.warning(
-                "sidecar.paused_claim_failed", message_id=message_id, error=str(e)
-            )
+            logger.warning("sidecar.paused_claim_failed", message_id=message_id, error=str(e))
             return None
         if record is None:
             return None
         return _suspension_from_record(record)
 
-    def _claim_sync(
-        self, message_id: str, conversation_id: str | None
-    ) -> dict[str, Any] | None:
+    def _claim_sync(self, message_id: str, conversation_id: str | None) -> dict[str, Any] | None:
         target = self._path(message_id)
         claimed = target.with_suffix(".json.claimed")
         try:
@@ -185,8 +177,7 @@ class LocalPausedTurnStore:
         # frame (claim nothing) rather than consume it — so a stray / cross-conversation
         # resume can't destroy a valid pause (IDOR-safe, like the cloud DELETE...WHERE).
         if not isinstance(record, dict) or (
-            conversation_id is not None
-            and record.get("conversation_id") != conversation_id
+            conversation_id is not None and record.get("conversation_id") != conversation_id
         ):
             with contextlib.suppress(OSError):
                 os.replace(claimed, target)

@@ -18,17 +18,13 @@ from agentcore.runtime.turn_runs import turn_runs
 _PW = "password123"
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> str:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
     )
     assert r.status_code == 201, r.text
-    r = await client.post(
-        "/v1/auth/login", json={"username": username, "password": _PW}
-    )
+    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
     assert r.status_code == 200, r.text
     return r.json()["id"]
 
@@ -86,6 +82,4 @@ async def test_stop_rejects_non_owner(client, make_invite, new_client):
     async with new_client() as other:
         await _register_and_login(other, code2, "stopintruder")
         # Not owned → 404 (mirrors the handoff IDOR contract).
-        assert (
-            await other.post(f"/v1/conversations/{conv}/stop")
-        ).status_code == 404
+        assert (await other.post(f"/v1/conversations/{conv}/stop")).status_code == 404

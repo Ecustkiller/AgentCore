@@ -1,9 +1,8 @@
+from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.constants import DEP_CONTEXT_BUDGET
 from agentcore.runtime.runs.fidelity import allocate, truncate_head_tail
 from agentcore.runtime.runs.wave import WaveScheduler
-from agentcore.runtime.events import EventSink
-
 from tests.runs_executor.conftest import _ContentProvider, _executor
 
 

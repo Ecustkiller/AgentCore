@@ -11,15 +11,6 @@ export const INPUT_ID = "__input__";
 
 export const isEndpointId = (id: string): boolean => id === INPUT_ID;
 
-/** An endpoint (用户输入 / CEO 汇聚点) read in place: the chat message to surface
- * (the prompt / the CEO's final answer) + its drawer title. Its content is a chat
- * bubble (not a run), so it rides local component state rather than the shared
- * run-detail panel. Consumed by the canvas focused node + zoomed-turn foot drawer. */
-export interface EndpointView {
-  contentMessageId: string;
-  title: string;
-}
-
 export const nodeTypes = {
   agent: AgentNode,
   userInput: EndpointNode,

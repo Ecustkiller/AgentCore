@@ -24,9 +24,9 @@ from contextlib import asynccontextmanager
 
 # loop -> {storage_key: Lock}. WeakKeyDictionary so a finished loop's locks are
 # garbage-collected with it (no stale-loop reuse, no id() collisions).
-_registries: weakref.WeakKeyDictionary[
-    asyncio.AbstractEventLoop, dict[str, asyncio.Lock]
-] = weakref.WeakKeyDictionary()
+_registries: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def _get_lock(key: str) -> asyncio.Lock:

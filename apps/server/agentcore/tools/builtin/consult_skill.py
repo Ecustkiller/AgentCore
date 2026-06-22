@@ -66,17 +66,13 @@ class ConsultSkillTool:
             approval=ToolApproval.NEVER,
         )
 
-    async def execute(
-        self, arguments: dict[str, Any], context: ToolContext
-    ) -> ToolResult:
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         name = str(arguments.get("name") or "").strip()
         skill = self.registry.get(name) if name else None
         if skill is None:
             available = "、".join(s.name for s in self.registry.list_all())
             msg = (
-                f"没有名为 '{name}' 的能力。"
-                if name
-                else "缺少 name 参数。"
+                f"没有名为 '{name}' 的能力。" if name else "缺少 name 参数。"
             ) + f" 可查阅的能力：{available}。"
             logger.info("consult_skill.miss", name=name)
             return ToolResult(tool_call_id="", success=False, output=msg, error=msg)

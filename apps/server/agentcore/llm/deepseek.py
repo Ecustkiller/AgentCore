@@ -255,9 +255,7 @@ class DeepSeekProvider:
                     raise LLMInsufficientBalanceError()
 
                 if response.status_code >= 500:
-                    raise LLMError(
-                        f"DeepSeek 服务端错误（{response.status_code}），请稍后再试"
-                    )
+                    raise LLMError(f"DeepSeek 服务端错误（{response.status_code}），请稍后再试")
 
                 response.raise_for_status()
                 return response.json()
@@ -275,6 +273,7 @@ class DeepSeekProvider:
                     error=str(e),
                 )
                 import asyncio
+
                 await asyncio.sleep(wait)
                 backoff *= _BACKOFF_MULTIPLIER
 
@@ -284,6 +283,7 @@ class DeepSeekProvider:
                     raise last_error from e
                 logger.warning("llm.timeout_retry", attempt=attempt + 1)
                 import asyncio
+
                 await asyncio.sleep(backoff)
                 backoff *= _BACKOFF_MULTIPLIER
 
@@ -312,9 +312,7 @@ class DeepSeekProvider:
                         raise LLMInsufficientBalanceError()
 
                     if response.status_code >= 500:
-                        raise LLMError(
-                            f"DeepSeek 服务端错误（{response.status_code}），请稍后再试"
-                        )
+                        raise LLMError(f"DeepSeek 服务端错误（{response.status_code}），请稍后再试")
 
                     response.raise_for_status()
 
@@ -330,6 +328,7 @@ class DeepSeekProvider:
                 wait = retry_after or backoff
                 logger.warning("llm.stream_retry", attempt=attempt + 1, wait_seconds=wait)
                 import asyncio
+
                 await asyncio.sleep(wait)
                 backoff *= _BACKOFF_MULTIPLIER
 
@@ -338,6 +337,7 @@ class DeepSeekProvider:
                 if attempt == _MAX_RETRIES - 1:
                     raise last_error from e
                 import asyncio
+
                 await asyncio.sleep(backoff)
                 backoff *= _BACKOFF_MULTIPLIER
 

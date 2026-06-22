@@ -8,7 +8,6 @@ property that makes adding them a pure, non-disturbing change.
 
 from agentcore.runtime.facts import (
     EXECUTION_ONLY_KINDS,
-    Fact,
     FactKind,
     FactRecorder,
     LlmCallFact,
@@ -51,15 +50,19 @@ def test_llm_call_fact_preserves_reasoning_and_tool_calls():
     # thinking echo), so the fact must carry both verbatim.
     tool_calls = [{"id": "c1", "function": {"name": "delegate", "arguments": "{}"}}]
     usage = {"input_tokens": 10, "output_tokens": 20}
-    entry = LlmCallFact(
-        run_id="captain",
-        round_idx=0,
-        content="先规划",
-        reasoning_content="让我想想",
-        tool_calls=tool_calls,
-        usage=usage,
-        finish_reason="tool_calls",
-    ).to_fact().entry()
+    entry = (
+        LlmCallFact(
+            run_id="captain",
+            round_idx=0,
+            content="先规划",
+            reasoning_content="让我想想",
+            tool_calls=tool_calls,
+            usage=usage,
+            finish_reason="tool_calls",
+        )
+        .to_fact()
+        .entry()
+    )
     assert entry["kind"] == "llm_call"
     assert entry["payload"]["content"] == "先规划"
     assert entry["payload"]["reasoning_content"] == "让我想想"
@@ -71,7 +74,9 @@ def test_llm_call_fact_preserves_reasoning_and_tool_calls():
 def test_llm_call_fact_defaults_empty_collections():
     # A tool-free final round carries no tool_calls / usage — they normalize to empty
     # containers (never None) so the stored payload shape is stable.
-    payload = LlmCallFact(run_id="captain", round_idx=1, content="答案").to_fact().entry()["payload"]
+    payload = (
+        LlmCallFact(run_id="captain", round_idx=1, content="答案").to_fact().entry()["payload"]
+    )
     assert payload["tool_calls"] == []
     assert payload["usage"] == {}
     assert payload["reasoning_content"] == ""
@@ -81,14 +86,18 @@ def test_llm_call_fact_defaults_empty_collections():
 def test_tool_call_fact_entry_shape():
     # The execution tool_call fact carries the FULL model-facing result (post-annotation)
     # the window folds, scoped by run_id and paired by tool_call_id (执行级落地 边界①).
-    entry = ToolCallFact(
-        run_id="captain",
-        tool_call_id="c1",
-        name="search",
-        arguments='{"q": "x"}',
-        result="结果全文\n\n[来源编号] [1]=https://e.com",
-        success=True,
-    ).to_fact().entry()
+    entry = (
+        ToolCallFact(
+            run_id="captain",
+            tool_call_id="c1",
+            name="search",
+            arguments='{"q": "x"}',
+            result="结果全文\n\n[来源编号] [1]=https://e.com",
+            success=True,
+        )
+        .to_fact()
+        .entry()
+    )
     assert entry["kind"] == "tool_call"
     assert entry["payload"] == {
         "run_id": "captain",
@@ -101,9 +110,11 @@ def test_tool_call_fact_entry_shape():
 
 
 def test_note_and_message_final_fact_shapes():
-    note = NoteFact(
-        role="user", content="停止使用工具", reason="finalize", run_id="captain"
-    ).to_fact().entry()
+    note = (
+        NoteFact(role="user", content="停止使用工具", reason="finalize", run_id="captain")
+        .to_fact()
+        .entry()
+    )
     assert note["kind"] == "note"
     # run_id rides the note so a captain note injected mid-delegate folds into the captain
     # window (边界②); it defaults to "" for a note recorded outside a scoped run.
@@ -114,7 +125,9 @@ def test_note_and_message_final_fact_shapes():
         "run_id": "captain",
     }
 
-    final = MessageFinalFact(run_id="w1", content="全文产出", reasoning="思考全文").to_fact().entry()
+    final = (
+        MessageFinalFact(run_id="w1", content="全文产出", reasoning="思考全文").to_fact().entry()
+    )
     assert final["kind"] == "message_final"
     assert final["payload"] == {"run_id": "w1", "content": "全文产出", "reasoning": "思考全文"}
 
@@ -126,7 +139,7 @@ def test_to_fact_accepts_optional_timestamp():
 
 
 def test_execution_only_kinds_match_enum():
-    assert EXECUTION_ONLY_KINDS == {
+    assert {
         "turn_started",
         "round_boundary",
         "llm_call",
@@ -136,8 +149,8 @@ def test_execution_only_kinds_match_enum():
         # 执行级事件溯源 Phase 2 (frame.plan 退场): the delegate's DAG snapshot — a value
         # distinct from the display ``run_plan`` event so the display gate is untouched.
         "plan_snapshot",
-    }
-    assert EXECUTION_ONLY_KINDS == frozenset(k.value for k in FactKind)
+    } == EXECUTION_ONLY_KINDS
+    assert frozenset(k.value for k in FactKind) == EXECUTION_ONLY_KINDS
 
 
 def test_turn_fact_log_records_in_order():

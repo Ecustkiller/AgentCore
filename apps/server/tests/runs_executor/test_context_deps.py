@@ -5,12 +5,11 @@ from agentcore.runtime.runs.executor import _dep_context_blocks, build_agent_exe
 from agentcore.runtime.runs.types import RunPhase, RunSpec
 from agentcore.runtime.runs.wave import WaveScheduler
 from agentcore.tools.registry import ToolRegistry
-
 from tests.runs_executor.conftest import (
-    _FileWriteTool,
-    _ScriptedRounds,
     _ctx,
+    _FileWriteTool,
     _plan,
+    _ScriptedRounds,
     _state,
 )
 

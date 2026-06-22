@@ -30,15 +30,15 @@ def _platform_billing():
     settings.billing_mode = "platform"
     yield
     settings.billing_mode = original
+
+
 # Above the default monthly cap (quota_monthly_cost_usd = $5 → 5e9 nano-USD).
 _OVER_MONTHLY_NANO = 6_000_000_000
 # Under the global $5 cap, but enough to trip a tightened per-user override.
 _UNDER_GLOBAL_NANO = 3_000_000_000
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> str:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
@@ -83,9 +83,7 @@ async def _make_conversation(session_factory, *, user_id: str) -> str:
         return conv.id
 
 
-async def test_send_message_blocked_when_over_monthly_quota(
-    client, make_invite, session_factory
-):
+async def test_send_message_blocked_when_over_monthly_quota(client, make_invite, session_factory):
     code = await make_invite("INV-QUOTA")
     user_id = await _register_and_login(client, code, "quotauser")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
@@ -93,17 +91,13 @@ async def test_send_message_blocked_when_over_monthly_quota(
         session_factory, user_id=user_id, conversation_id=conv_id, total=_OVER_MONTHLY_NANO
     )
 
-    r = await client.post(
-        f"/v1/conversations/{conv_id}/messages", json={"content": "hi"}
-    )
+    r = await client.post(f"/v1/conversations/{conv_id}/messages", json={"content": "hi"})
 
     assert r.status_code == 429, r.text
     assert r.json()["error"]["code"] == "QUOTA_EXCEEDED"
 
 
-async def test_regenerate_blocked_when_over_monthly_quota(
-    client, make_invite, session_factory
-):
+async def test_regenerate_blocked_when_over_monthly_quota(client, make_invite, session_factory):
     code = await make_invite("INV-QUOTA-REGEN")
     user_id = await _register_and_login(client, code, "quotaregen")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
@@ -113,9 +107,7 @@ async def test_regenerate_blocked_when_over_monthly_quota(
 
     # A re-run is a fresh turn, so it passes the same gate (target message need not
     # exist — the quota check runs before the message is even loaded).
-    r = await client.post(
-        f"/v1/conversations/{conv_id}/messages/{new_id()}/regenerate", json={}
-    )
+    r = await client.post(f"/v1/conversations/{conv_id}/messages/{new_id()}/regenerate", json={})
 
     assert r.status_code == 429, r.text
     assert r.json()["error"]["code"] == "QUOTA_EXCEEDED"
@@ -134,9 +126,7 @@ async def test_per_user_override_tightens_cap(client, make_invite, session_facto
     async with session_factory() as session:
         await UserRepository(session).set_quota(user_id, monthly_cost_usd=2.0)
 
-    r = await client.post(
-        f"/v1/conversations/{conv_id}/messages", json={"content": "hi"}
-    )
+    r = await client.post(f"/v1/conversations/{conv_id}/messages", json={"content": "hi"})
 
     assert r.status_code == 429, r.text
     assert r.json()["error"]["code"] == "QUOTA_EXCEEDED"
@@ -152,8 +142,6 @@ async def test_ownership_check_precedes_quota(client, make_invite, session_facto
         session_factory, user_id=user_id, conversation_id=owned, total=_OVER_MONTHLY_NANO
     )
 
-    r = await client.post(
-        f"/v1/conversations/{new_id()}/messages", json={"content": "hi"}
-    )
+    r = await client.post(f"/v1/conversations/{new_id()}/messages", json={"content": "hi"})
 
     assert r.status_code == 404, r.text

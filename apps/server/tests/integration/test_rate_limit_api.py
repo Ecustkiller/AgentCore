@@ -23,9 +23,7 @@ from agentcore.middleware.rate_limit import message_rate_limiter
 _PW = "password123"
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> str:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
@@ -50,9 +48,7 @@ def _saturate(user_id: str) -> None:
         message_rate_limiter.check(user_id)
 
 
-async def test_send_message_blocked_when_rate_limited(
-    client, make_invite, session_factory
-):
+async def test_send_message_blocked_when_rate_limited(client, make_invite, session_factory):
     code = await make_invite("INV-RATE")
     user_id = await _register_and_login(client, code, "rateuser")
     conv_id = await _make_conversation(session_factory, user_id=user_id)
@@ -62,18 +58,14 @@ async def test_send_message_blocked_when_rate_limited(
     settings.rate_limit_enabled = True
     _saturate(user_id)
 
-    r = await client.post(
-        f"/v1/conversations/{conv_id}/messages", json={"content": "hi"}
-    )
+    r = await client.post(f"/v1/conversations/{conv_id}/messages", json={"content": "hi"})
 
     assert r.status_code == 429, r.text
     assert r.json()["error"]["code"] == "RATE_LIMITED"
     assert r.headers.get("retry-after")
 
 
-async def test_rate_limit_precedes_ownership_check(
-    client, make_invite, session_factory
-):
+async def test_rate_limit_precedes_ownership_check(client, make_invite, session_factory):
     # Rate limiting is the outermost gate: a saturated account hitting a
     # conversation it doesn't own still gets 429 (not 404), shedding load before
     # any resource-specific DB work.
@@ -83,9 +75,7 @@ async def test_rate_limit_precedes_ownership_check(
     settings.rate_limit_enabled = True
     _saturate(user_id)
 
-    r = await client.post(
-        f"/v1/conversations/{new_id()}/messages", json={"content": "hi"}
-    )
+    r = await client.post(f"/v1/conversations/{new_id()}/messages", json={"content": "hi"})
 
     assert r.status_code == 429, r.text
     assert r.json()["error"]["code"] == "RATE_LIMITED"

@@ -6,6 +6,7 @@ import {
   SIDE_PANEL_MAX_WIDTH,
   SIDE_PANEL_MIN_WIDTH,
   WORKSPACE_TAB_ID,
+  contentDetailTabId,
   runDetailTabId,
   useSidePanelStore,
 } from "../sidePanel";

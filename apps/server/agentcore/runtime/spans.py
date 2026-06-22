@@ -29,7 +29,7 @@ swaps in via the same port.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from agentcore.core.logging import get_logger
@@ -74,7 +74,7 @@ def _parse_ts_ms(ts: str | None) -> float | None:
     except (ValueError, TypeError):
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.timestamp() * 1000.0
 
 
@@ -144,6 +144,7 @@ def _usage_tokens(usage: dict[str, Any]) -> tuple[int, int, int]:
     The ``llm_call`` fact carries the long-key usage (``input_tokens`` …); a
     ``run_completed`` event carries the ledger short-key form (``input`` …). Read either.
     """
+
     def pick(*keys: str) -> int:
         for k in keys:
             v = usage.get(k)
@@ -380,7 +381,7 @@ def spans_from_entries(entries: list[dict[str, Any]] | None) -> Span | None:
     if total_tools:
         root.attributes["agentcore.tool_calls"] = total_tools
     # Root duration ≈ the captain run's wall clock (the turn's root run node).
-    for rid, span in runs.items():
+    for _rid, span in runs.items():
         if span.attributes.get("agentcore.run.kind") == RunKind.CAPTAIN.value:
             root.duration_ms = span.duration_ms
             break

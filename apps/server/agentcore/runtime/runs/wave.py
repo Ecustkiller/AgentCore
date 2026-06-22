@@ -180,9 +180,7 @@ class WaveScheduler:
                     bind_ready = self._bind_pending(plan, completed, skipped, dispatched)
                     if bind_ready:
                         bind_boundaries += 1
-                        outcome = await on_boundary(
-                            BoundaryReason.BIND, bind_ready, completed
-                        )
+                        outcome = await on_boundary(BoundaryReason.BIND, bind_ready, completed)
                         if outcome is BoundaryOutcome.ABORT:
                             aborted = True
                             holding = True
@@ -213,9 +211,7 @@ class WaveScheduler:
                 if not running:
                     break  # nothing in flight and (holding, or no node is ready) ⇒ done
 
-                done, _ = await asyncio.wait(
-                    set(running), return_when=asyncio.FIRST_COMPLETED
-                )
+                done, _ = await asyncio.wait(set(running), return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
                     run_id = running.pop(task)
                     if task.cancelled():  # a pause/cancel must never be swallowed
@@ -249,14 +245,11 @@ class WaveScheduler:
                     nodes = checkpoint_pending
                     checkpoint_pending = []
                     pending_remains = any(
-                        n.run_id not in completed and n.run_id not in skipped
-                        for n in plan.nodes
+                        n.run_id not in completed and n.run_id not in skipped for n in plan.nodes
                     )
                     if pending_remains:
                         checkpoint_boundaries += 1
-                        outcome = await on_boundary(
-                            BoundaryReason.CHECKPOINT, nodes, completed
-                        )
+                        outcome = await on_boundary(BoundaryReason.CHECKPOINT, nodes, completed)
                         if outcome is BoundaryOutcome.ABORT:
                             aborted = True
                         elif outcome is BoundaryOutcome.YIELD:
@@ -273,13 +266,10 @@ class WaveScheduler:
                 if on_boundary is not None and not running and not aborted and not stopped:
                     scope_nodes = self._scope_pending(plan, completed)
                     if scope_nodes and any(
-                        n.run_id not in completed and n.run_id not in skipped
-                        for n in plan.nodes
+                        n.run_id not in completed and n.run_id not in skipped for n in plan.nodes
                     ):
                         scope_boundaries += 1
-                        outcome = await on_boundary(
-                            BoundaryReason.SCOPE, scope_nodes, completed
-                        )
+                        outcome = await on_boundary(BoundaryReason.SCOPE, scope_nodes, completed)
                         for node in scope_nodes:
                             state = completed.get(node.run_id)
                             if state is not None:
@@ -452,10 +442,7 @@ class WaveScheduler:
             state = completed.get(node.run_id)
             if state is None or state.phase is not RunPhase.COMPLETED:
                 continue
-            if any(
-                e.get("kind") == "scope" and not e.get("consumed")
-                for e in state.escalations
-            ):
+            if any(e.get("kind") == "scope" and not e.get("consumed") for e in state.escalations):
                 ready.append(node)
         return ready
 

@@ -107,9 +107,7 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
         async def load(self, _user_id: str) -> str:
             return ""
 
-    monkeypatch.setattr(
-        "agentcore.runtime.pipeline.run.default_memory_store", lambda: _FakeStore()
-    )
+    monkeypatch.setattr("agentcore.runtime.pipeline.run.default_memory_store", lambda: _FakeStore())
 
     # delegate / revise / debate are unused on this single-agent path, but the pipeline
     # tail folds their usage/ledger/citations — give them empty doubles. The delegate
@@ -127,19 +125,13 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
     def _fake_assemble(**_kwargs):
         return fake_delegate, fake_revise, fake_debate, registry
 
-    monkeypatch.setattr(
-        "agentcore.runtime.pipeline.run._assemble_ceo_toolset", _fake_assemble
-    )
+    monkeypatch.setattr("agentcore.runtime.pipeline.run._assemble_ceo_toolset", _fake_assemble)
 
 
-async def _run_pipeline(
-    monkeypatch, provider: _ScriptedProvider, registry: ToolRegistry
-):
+async def _run_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegistry):
     _patch_pipeline(monkeypatch, provider, registry)
     sink = EventSink()
-    profile = ModelProfile(
-        model="chat-model", thinking=False, reasoning_effort=None, max_rounds=20
-    )
+    profile = ModelProfile(model="chat-model", thinking=False, reasoning_effort=None, max_rounds=20)
     # The stub tool never touches the backend, so the root is inert — a plain path
     # (no tmp_path fixture) keeps this hermetic and dodges the Windows temp-symlink
     # teardown crash in pytest's tmp_path cleanup.

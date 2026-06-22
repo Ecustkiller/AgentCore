@@ -76,9 +76,7 @@ async def _record_proxy_spend(
 
     with log_context(trace_id=trace_id, conversation_id=conversation_id):
         if not conversation_id:
-            logger.warning(
-                "inference.proxy_spend_no_conversation", user_id=user_id, model=model
-            )
+            logger.warning("inference.proxy_spend_no_conversation", user_id=user_id, model=model)
             return
         run = inf.background_run_cost(inf.ROLE_CAPTAIN, model or "", usage)
         try:
@@ -110,9 +108,7 @@ async def inference_chat_completions(
     conversation_id = request.headers.get(_CONVERSATION_HEADER) or None
     trace_id = request.headers.get(_TRACE_HEADER) or None
 
-    with log_context(
-        trace_id=trace_id, conversation_id=conversation_id, user_id=user.user_id
-    ):
+    with log_context(trace_id=trace_id, conversation_id=conversation_id, user_id=user.user_id):
         try:
             credentials = await _resolve_inference_credentials(session, cost_repo, user)
         except (QuotaExceededError, BYOKKeyMissingError) as e:

@@ -5,7 +5,6 @@ from structlog.testing import capture_logs
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 from agentcore.tools.builtin.delegate import _DELEGATE_OUTPUT_LIMIT
-
 from tests.delegate.conftest import Provider, tool
 
 
@@ -57,12 +56,16 @@ def test_format_for_ceo_surfaces_escalations_blockers_first():
         "w1": RunState(
             phase=RunPhase.COMPLETED,
             content="软的备注",
-            escalations=[{"question": "目标受众是谁?", "assumption": "暂按大众", "blocking": False}],
+            escalations=[
+                {"question": "目标受众是谁?", "assumption": "暂按大众", "blocking": False}
+            ],
         ),
         "w2": RunState(
             phase=RunPhase.COMPLETED,
             content="后端骨架",
-            escalations=[{"question": "用 Postgres 还是 MySQL?", "assumption": "暂用 PG", "blocking": True}],
+            escalations=[
+                {"question": "用 Postgres 还是 MySQL?", "assumption": "暂用 PG", "blocking": True}
+            ],
         ),
     }
     out = t._format_for_ceo(plan, results)
@@ -88,9 +91,7 @@ def test_format_for_ceo_digests_file_producer_not_full_content():
     long_body = "开头摘要。" + ("废" * 5_000) + "结尾独特标记XYZ"
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="写报告", role="撰稿")])
     results = {
-        "w1": RunState(
-            phase=RunPhase.COMPLETED, content=long_body, files_touched=["report.md"]
-        )
+        "w1": RunState(phase=RunPhase.COMPLETED, content=long_body, files_touched=["report.md"])
     }
     out = t._format_for_ceo(plan, results)
     assert "`report.md`" in out
@@ -103,9 +104,7 @@ def test_format_for_ceo_bounds_wide_fanout_keeping_all_workers_and_closing():
     nodes = [RunSpec(run_id=f"w{i}", task="分析", role=f"分析{i}") for i in range(8)]
     plan = RunPlan(nodes=nodes)
     results = {
-        f"w{i}": RunState(
-            phase=RunPhase.COMPLETED, content=f"头{i}" + ("数" * 8_000) + f"尾{i}"
-        )
+        f"w{i}": RunState(phase=RunPhase.COMPLETED, content=f"头{i}" + ("数" * 8_000) + f"尾{i}")
         for i in range(8)
     }
     out = t._format_for_ceo(plan, results)

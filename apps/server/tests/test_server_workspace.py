@@ -191,9 +191,7 @@ async def test_failed_write_does_not_dirty(tmp_path: Path):
 
 async def test_execute_marks_dirty(tmp_path: Path):
     ws = _ws(tmp_path)
-    await ws.execute(
-        ExecutionRequest(code="print('hi')", language="python", timeout_seconds=15)
-    )
+    await ws.execute(ExecutionRequest(code="print('hi')", language="python", timeout_seconds=15))
     assert ws.dirty is True
 
 
@@ -381,7 +379,7 @@ async def test_mkdir_escape_raises_outside_workspace(tmp_path: Path):
 async def test_read_for_edit_returns_text_mtime_and_eol(tmp_path: Path):
     # write_bytes (not write_text): on Windows write_text would translate \n→\r\n and
     # flip the detected eol; we want a genuine LF fixture here.
-    (tmp_path / "a.md").write_bytes("# 标题\n正文".encode("utf-8"))
+    (tmp_path / "a.md").write_bytes("# 标题\n正文".encode())
     text, mtime_ms, eol = await _ws(tmp_path).read_for_edit("a.md")
     assert text == "# 标题\n正文"
     assert eol == "lf"
@@ -421,9 +419,7 @@ async def test_write_text_cas_new_file_succeeds(tmp_path: Path):
 
 async def test_write_text_cas_new_file_conflict_when_exists(tmp_path: Path):
     (tmp_path / "x.md").write_text("old", encoding="utf-8")
-    ok, disk_ms = await _ws(tmp_path).write_text_cas(
-        "x.md", "new", baseline_mtime_ms=0, eol="lf"
-    )
+    ok, disk_ms = await _ws(tmp_path).write_text_cas("x.md", "new", baseline_mtime_ms=0, eol="lf")
     assert ok is False  # baseline 0 = "new file", but it already exists
     assert disk_ms > 0
     assert (tmp_path / "x.md").read_text(encoding="utf-8") == "old"  # not clobbered
@@ -431,12 +427,8 @@ async def test_write_text_cas_new_file_conflict_when_exists(tmp_path: Path):
 
 async def test_write_text_cas_matching_baseline_overwrites(tmp_path: Path):
     ws = _ws(tmp_path)
-    _text, baseline, _eol = await (
-        _seed_and_read(ws, tmp_path, "doc.md", "v1")
-    )
-    ok, new_ms = await ws.write_text_cas(
-        "doc.md", "v2", baseline_mtime_ms=baseline, eol="lf"
-    )
+    _text, baseline, _eol = await _seed_and_read(ws, tmp_path, "doc.md", "v1")
+    ok, new_ms = await ws.write_text_cas("doc.md", "v2", baseline_mtime_ms=baseline, eol="lf")
     assert ok is True
     assert new_ms >= baseline
     assert (tmp_path / "doc.md").read_text(encoding="utf-8") == "v2"
@@ -470,9 +462,7 @@ async def test_write_text_cas_detects_external_change(tmp_path: Path):
 
 
 async def test_write_text_cas_restores_crlf(tmp_path: Path):
-    ok, _ms = await _ws(tmp_path).write_text_cas(
-        "win.md", "a\nb", baseline_mtime_ms=0, eol="crlf"
-    )
+    ok, _ms = await _ws(tmp_path).write_text_cas("win.md", "a\nb", baseline_mtime_ms=0, eol="crlf")
     assert ok is True
     assert (tmp_path / "win.md").read_bytes() == b"a\r\nb"
 

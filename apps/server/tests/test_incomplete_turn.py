@@ -90,9 +90,7 @@ def test_salvage_spawns_on_finished_work(monkeypatch, capture):
     spawned, persist_calls = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
     journal = [_ev("run_plan"), _ev("run_completed")]
-    service._salvage_incomplete_turn(
-        sink=_Sink(journal), conversation_id="conv", trace_id="trace"
-    )
+    service._salvage_incomplete_turn(sink=_Sink(journal), conversation_id="conv", trace_id="trace")
     assert len(spawned) == 1
     assert persist_calls[0]["conversation_id"] == "conv"
     assert persist_calls[0]["trace_id"] == "trace"
@@ -111,9 +109,7 @@ def test_salvage_skips_when_gate_off(monkeypatch, capture):
 def test_salvage_skips_when_no_journal(monkeypatch, capture):
     spawned, _ = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
-    service._salvage_incomplete_turn(
-        sink=_Sink(None), conversation_id="conv", trace_id="trace"
-    )
+    service._salvage_incomplete_turn(sink=_Sink(None), conversation_id="conv", trace_id="trace")
     assert spawned == []
 
 
@@ -122,9 +118,7 @@ def test_salvage_defers_to_resume_on_durable_pause(monkeypatch, capture):
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
     monkeypatch.setattr(settings, "structured_suspension_persist_enabled", True)
     journal = [_ev("run_plan"), _ev("plan_review_required", "p1")]
-    service._salvage_incomplete_turn(
-        sink=_Sink(journal), conversation_id="conv", trace_id="trace"
-    )
+    service._salvage_incomplete_turn(sink=_Sink(journal), conversation_id="conv", trace_id="trace")
     assert spawned == []  # a paused_turns frame owns this turn's continuation
 
 
@@ -134,9 +128,7 @@ def test_salvage_runs_on_pause_when_persistence_disabled(monkeypatch, capture):
     monkeypatch.setattr(settings, "structured_suspension_persist_enabled", False)
     # No durable frame exists (2a in-memory only) ⇒ salvage the finished work instead.
     journal = [_ev("run_plan"), _ev("plan_review_required", "p1")]
-    service._salvage_incomplete_turn(
-        sink=_Sink(journal), conversation_id="conv", trace_id="trace"
-    )
+    service._salvage_incomplete_turn(sink=_Sink(journal), conversation_id="conv", trace_id="trace")
     assert len(spawned) == 1
 
 
@@ -200,6 +192,8 @@ async def test_persist_incomplete_swallows_db_errors(monkeypatch):
     monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: BoomCM())
     # Best-effort (文档铁律): a persistence failure must never escape this task.
     await service._persist_incomplete_turn(
-        journal=[_ev("run_plan")], conversation_id="conv", trace_id="trace",
+        journal=[_ev("run_plan")],
+        conversation_id="conv",
+        trace_id="trace",
         message_id=None,
     )

@@ -267,9 +267,7 @@ def resolve_local_binding(
     )
 
 
-def default_workspace_name(
-    title: str | None, *, fallback_text: str | None = None
-) -> str:
+def default_workspace_name(title: str | None, *, fallback_text: str | None = None) -> str:
     """Name for an auto-created workspace when a 裸聊 first produces files (B 懒建).
 
     Uses the conversation's title so the new folder reads as "this chat's project".

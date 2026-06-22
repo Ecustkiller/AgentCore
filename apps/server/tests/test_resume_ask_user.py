@@ -156,7 +156,8 @@ async def test_settle_ask_user_drops_off_menu_picks():
     assert "A" in settled.output
     assert "HACK" not in settled.output
     resolved = [
-        e for e in (sink.execution_journal() or [])
+        e
+        for e in (sink.execution_journal() or [])
         if e["type"] == EventType.CHECKPOINT_RESOLVED.value
     ]
     assert resolved and resolved[0]["payload"]["selected"] == ["A"]

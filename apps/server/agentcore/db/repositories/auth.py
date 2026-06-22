@@ -53,9 +53,7 @@ class CredentialsRepository:
         await self._session.execute(
             update(Credentials)
             .where(Credentials.user_id == user_id)
-            .values(
-                password_hash=password_hash, failed_attempts=0, locked_until=None
-            )
+            .values(password_hash=password_hash, failed_attempts=0, locked_until=None)
         )
         await self._session.commit()
 
@@ -92,16 +90,12 @@ class UserLlmKeyRepository:
 
     async def update_status(self, user_id: str, status: str) -> None:
         await self._session.execute(
-            update(UserLlmKey)
-            .where(UserLlmKey.user_id == user_id)
-            .values(status=status)
+            update(UserLlmKey).where(UserLlmKey.user_id == user_id).values(status=status)
         )
         await self._session.commit()
 
     async def delete(self, user_id: str) -> None:
-        await self._session.execute(
-            delete(UserLlmKey).where(UserLlmKey.user_id == user_id)
-        )
+        await self._session.execute(delete(UserLlmKey).where(UserLlmKey.user_id == user_id))
         await self._session.commit()
 
 
@@ -189,15 +183,11 @@ class InviteRepository:
         return invite
 
     async def get_by_code(self, code: str) -> Invite | None:
-        result = await self._session.execute(
-            select(Invite).where(Invite.code == code)
-        )
+        result = await self._session.execute(select(Invite).where(Invite.code == code))
         return result.scalar_one_or_none()
 
     async def get_by_id(self, invite_id: str) -> Invite | None:
-        result = await self._session.execute(
-            select(Invite).where(Invite.id == invite_id)
-        )
+        result = await self._session.execute(select(Invite).where(Invite.id == invite_id))
         return result.scalar_one_or_none()
 
     async def list_recent(self, *, limit: int = 100) -> Sequence[Invite]:

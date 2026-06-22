@@ -106,9 +106,11 @@ class _ScriptedRounds:
     async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
         user = next((m.content for m in request.messages if m.role == "user"), "")
         self.user_messages.append(user or "")
-        chunks = self._rounds[self.calls] if self.calls < len(self._rounds) else [
-            LLMChunk(delta_content="done")
-        ]
+        chunks = (
+            self._rounds[self.calls]
+            if self.calls < len(self._rounds)
+            else [LLMChunk(delta_content="done")]
+        )
         self.calls += 1
         for chunk in chunks:
             yield chunk
@@ -229,9 +231,7 @@ class _ResearchTool:
 
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
         self.calls += 1
-        return ToolResult(
-            tool_call_id="", success=True, output="result", citations=self._citations
-        )
+        return ToolResult(tool_call_id="", success=True, output="result", citations=self._citations)
 
 
 class _MeteredRoundThenBoom:
@@ -276,9 +276,7 @@ class _CountingIndexBackend:
 
 
 def _state(content: str = "", *, files: list[str] | None = None) -> RunState:
-    return RunState(
-        phase=RunPhase.COMPLETED, content=content, files_touched=list(files or [])
-    )
+    return RunState(phase=RunPhase.COMPLETED, content=content, files_touched=list(files or []))
 
 
 def _plan(*specs: RunSpec) -> RunPlan:

@@ -14,17 +14,13 @@ _PW = "password123"
 _ROOT = "11111111-2222-3333-4444-555555555555"
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> None:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> None:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
     )
     assert r.status_code == 201, r.text
-    r = await client.post(
-        "/v1/auth/login", json={"username": username, "password": _PW}
-    )
+    r = await client.post("/v1/auth/login", json={"username": username, "password": _PW})
     assert r.status_code == 200, r.text
 
 
@@ -52,9 +48,7 @@ async def test_create_and_list_folders(client, make_invite):
     code = await make_invite("INV-F1")
     await _register_and_login(client, code, "folderuser1")
 
-    r = await client.post(
-        "/v1/folders", json={"name": "Work", "local_dir": "/tmp/work"}
-    )
+    r = await client.post("/v1/folders", json={"name": "Work", "local_dir": "/tmp/work"})
     assert r.status_code == 201, r.text
     folder = r.json()
     assert folder["name"] == "Work"
@@ -72,9 +66,7 @@ async def test_create_folder_with_local_binding(client, make_invite):
     code = await make_invite("INV-F12")
     await _register_and_login(client, code, "folderuser12")
 
-    r = await client.post(
-        "/v1/folders", json={"name": "Local Proj", "local_root_id": _ROOT}
-    )
+    r = await client.post("/v1/folders", json={"name": "Local Proj", "local_root_id": _ROOT})
     assert r.status_code == 201, r.text
     folder = r.json()
     assert folder["name"] == "Local Proj"
@@ -111,18 +103,14 @@ async def test_grouped_reflects_membership(client, make_invite):
     assert [c["id"] for c in body["ungrouped"]] == [loose_conv]
 
     # Move it back out.
-    r = await client.patch(
-        f"/v1/conversations/{grouped_conv}/folder", json={"folder_id": None}
-    )
+    r = await client.patch(f"/v1/conversations/{grouped_conv}/folder", json={"folder_id": None})
     assert r.status_code == 200, r.text
     body = (await client.get("/v1/conversations/grouped")).json()
     assert body["folders"][0]["conversations"] == []
     assert {c["id"] for c in body["ungrouped"]} == {grouped_conv, loose_conv}
 
 
-async def test_started_conversation_cannot_change_folder(
-    client, make_invite, session_factory
-):
+async def test_started_conversation_cannot_change_folder(client, make_invite, session_factory):
     """A chat with messages has a pinned workspace, so filing it is refused (§九 ⑩)."""
     code = await make_invite("INV-F7")
     await _register_and_login(client, code, "folderuser7")
@@ -130,9 +118,7 @@ async def test_started_conversation_cannot_change_folder(
     conv = await _new_conversation(client, "started")
     await _seed_message(session_factory, conv)
 
-    r = await client.patch(
-        f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id}
-    )
+    r = await client.patch(f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id})
     assert r.status_code == 409, r.text
 
     # It stays exactly where it was — ungrouped, folder empty.
@@ -141,9 +127,7 @@ async def test_started_conversation_cannot_change_folder(
     assert body["folders"][0]["conversations"] == []
 
 
-async def test_started_conversation_noop_move_allowed(
-    client, make_invite, session_factory
-):
+async def test_started_conversation_noop_move_allowed(client, make_invite, session_factory):
     """Re-sending the *current* membership never switches the workspace, so it is
     allowed even for a started chat (idempotent no-op)."""
     code = await make_invite("INV-F8")
@@ -151,9 +135,7 @@ async def test_started_conversation_noop_move_allowed(
     conv = await _new_conversation(client, "started loose")
     await _seed_message(session_factory, conv)
 
-    r = await client.patch(
-        f"/v1/conversations/{conv}/folder", json={"folder_id": None}
-    )
+    r = await client.patch(f"/v1/conversations/{conv}/folder", json={"folder_id": None})
     assert r.status_code == 200, r.text
 
 
@@ -163,9 +145,7 @@ async def test_create_in_folder_files_at_creation(client, make_invite):
     await _register_and_login(client, code, "folderuser9")
     folder_id = (await client.post("/v1/folders", json={"name": "Born"})).json()["id"]
 
-    r = await client.post(
-        "/v1/conversations", json={"title": "in folder", "folder_id": folder_id}
-    )
+    r = await client.post("/v1/conversations", json={"title": "in folder", "folder_id": folder_id})
     assert r.status_code == 201, r.text
     conv_id = r.json()["id"]
     assert r.json()["folder_id"] == folder_id
@@ -214,9 +194,9 @@ async def test_move_to_missing_folder_404(client, make_invite):
 async def test_update_folder_clears_local_dir(client, make_invite):
     code = await make_invite("INV-F4")
     await _register_and_login(client, code, "folderuser4")
-    folder_id = (
-        await client.post("/v1/folders", json={"name": "A", "local_dir": "/d"})
-    ).json()["id"]
+    folder_id = (await client.post("/v1/folders", json={"name": "A", "local_dir": "/d"})).json()[
+        "id"
+    ]
 
     # Rename without touching local_dir (omitted field is preserved).
     r = await client.patch(f"/v1/folders/{folder_id}", json={"name": "B"})
@@ -236,9 +216,7 @@ async def test_delete_folder_keeps_conversations(client, make_invite):
     await _register_and_login(client, code, "folderuser5")
     folder_id = (await client.post("/v1/folders", json={"name": "Temp"})).json()["id"]
     conv = await _new_conversation(client, "keep me")
-    await client.patch(
-        f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id}
-    )
+    await client.patch(f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id})
 
     r = await client.delete(f"/v1/folders/{folder_id}")
     assert r.status_code == 200, r.text
@@ -262,9 +240,7 @@ async def test_permanent_delete_folder_removes_conversations(
     await _register_and_login(client, code, "folderuser7")
     folder_id = (await client.post("/v1/folders", json={"name": "Gone"})).json()["id"]
     conv = await _new_conversation(client, "erase me")
-    await client.patch(
-        f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id}
-    )
+    await client.patch(f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id})
 
     r = await client.delete(f"/v1/folders/{folder_id}/permanent")
     assert r.status_code == 200, r.text
@@ -289,9 +265,7 @@ async def test_folder_isolation_between_users(client, make_invite, new_client):
         assert (
             await other.patch(f"/v1/folders/{folder_id}", json={"name": "x"})
         ).status_code == 404
-        assert (
-            await other.delete(f"/v1/folders/{folder_id}")
-        ).status_code == 404
+        assert (await other.delete(f"/v1/folders/{folder_id}")).status_code == 404
 
         # Nor can they file a conversation into it.
         intruder_conv = await _new_conversation(other, "theirs")

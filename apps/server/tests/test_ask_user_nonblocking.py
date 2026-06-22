@@ -65,9 +65,7 @@ async def test_nonblocking_returns_continue_and_does_not_suspend():
     res = await tool.execute(
         {
             "message": "我先按响应式单页来做",
-            "questions": [
-                {"prompt": "要不要双语?", "options": ["要", "不要"], "default": "不要"}
-            ],
+            "questions": [{"prompt": "要不要双语?", "options": ["要", "不要"], "default": "不要"}],
             "blocking": False,
         },
         _ctx(),

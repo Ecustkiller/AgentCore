@@ -24,9 +24,7 @@ _FULL_CEILING = frozenset({DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO})
 
 
 def _resolve(ref, custom_modes=None, ceiling=_FULL_CEILING):
-    return resolve_profile_set(
-        ref, custom_modes=custom_modes or {}, ceiling=ceiling
-    )
+    return resolve_profile_set(ref, custom_modes=custom_modes or {}, ceiling=ceiling)
 
 
 def test_economy_default_is_all_flash():
@@ -61,17 +59,13 @@ def test_custom_mode_resolves_by_id():
 def test_ceiling_clamps_forbidden_model():
     # Pro pulled from the ceiling (e.g. tightened during内测): a Pro pick degrades
     # back to the base model rather than serving a now-forbidden model.
-    ps = build_profile_set(
-        {ROLE_CEO: DEEPSEEK_V4_PRO}, ceiling=frozenset({DEEPSEEK_V4_FLASH})
-    )
+    ps = build_profile_set({ROLE_CEO: DEEPSEEK_V4_PRO}, ceiling=frozenset({DEEPSEEK_V4_FLASH}))
     assert ps.get("chat").model == DEEPSEEK_V4_FLASH
 
 
 def test_worker_economy_assignment_is_ignored():
     # 经济worker is not a configurable role → an override on it is dropped (locked).
-    ps = build_profile_set(
-        {ROLE_WORKER_ECONOMY: DEEPSEEK_V4_PRO}, ceiling=_FULL_CEILING
-    )
+    ps = build_profile_set({ROLE_WORKER_ECONOMY: DEEPSEEK_V4_PRO}, ceiling=_FULL_CEILING)
     assert ps.agent("fast").model == DEEPSEEK_V4_FLASH
 
 

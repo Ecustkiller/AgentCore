@@ -104,7 +104,7 @@ class LocalWorkspace:
         if path == self._base:
             return ""
         prefix = f"{self._base}/"
-        return path[len(prefix):] if path.startswith(prefix) else path
+        return path[len(prefix) :] if path.startswith(prefix) else path
 
     async def read(self, path: str) -> str:
         value = await self._channel.request(WorkspaceOp.READ, {"path": self._in(path)})
@@ -119,9 +119,7 @@ class LocalWorkspace:
 
     async def read_bytes(self, path: str) -> bytes:
         # The desktop returns base64 (JSON has no byte type); decode back to raw.
-        value = await self._channel.request(
-            WorkspaceOp.READ_BYTES, {"path": self._in(path)}
-        )
+        value = await self._channel.request(WorkspaceOp.READ_BYTES, {"path": self._in(path)})
         return base64.b64decode(str(value))
 
     async def write_bytes(self, path: str, data: bytes) -> int:
@@ -167,14 +165,10 @@ class LocalWorkspace:
         self._dirty = True
 
     async def move(self, src: str, dst: str) -> None:
-        await self._channel.request(
-            WorkspaceOp.MOVE, {"src": self._in(src), "dst": self._in(dst)}
-        )
+        await self._channel.request(WorkspaceOp.MOVE, {"src": self._in(src), "dst": self._in(dst)})
         self._dirty = True
 
-    async def replace(
-        self, path: str, old: str, new: str, *, all_: bool
-    ) -> ReplaceOutcome:
+    async def replace(self, path: str, old: str, new: str, *, all_: bool) -> ReplaceOutcome:
         value = await self._channel.request(
             WorkspaceOp.REPLACE,
             {"path": self._in(path), "old": old, "new": new, "all": all_},

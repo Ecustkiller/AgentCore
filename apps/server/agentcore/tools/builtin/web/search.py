@@ -82,9 +82,7 @@ class WebSearchTool:
         if cache is not None:
             hit = cache.get(query, min_results=max_results)
             if hit is not None:
-                logger.info(
-                    "tool.web_search_cache_hit", query=query, result_count=len(hit.results)
-                )
+                logger.info("tool.web_search_cache_hit", query=query, result_count=len(hit.results))
                 return self._success_result(query, hit.results, start, cached=True)
 
         try:
@@ -92,9 +90,7 @@ class WebSearchTool:
             results = await backend.search(query, max_results=max_results)
         except Exception as e:
             reason = describe_net_error(e)
-            logger.warning(
-                "tool.web_search_error", query=query, error=reason, error_repr=repr(e)
-            )
+            logger.warning("tool.web_search_error", query=query, error=reason, error_repr=repr(e))
             return ToolResult(
                 tool_call_id="",
                 success=False,

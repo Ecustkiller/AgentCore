@@ -71,6 +71,7 @@ from agentcore.workspace.write_claims import WriteCoordinator
 
 logger = get_logger(__name__)
 
+
 def build_agent_executor(
     *,
     plan: RunPlan,
@@ -153,9 +154,7 @@ def build_agent_executor(
             return _ambient_snapshot["paths"]
         async with _ambient_lock:
             if "paths" not in _ambient_snapshot:  # double-check after awaiting the lock
-                _ambient_snapshot["paths"] = await _safe_index_files(
-                    base_tool_context.backend
-                )
+                _ambient_snapshot["paths"] = await _safe_index_files(base_tool_context.backend)
             return _ambient_snapshot["paths"]
 
     conversation_id = base_tool_context.conversation_id
@@ -234,9 +233,7 @@ def build_agent_executor(
                     answer=answer,
                 )
             )
-            return EscalationOutcome(
-                status=status, answer=answer if status == "resolved" else None
-            )
+            return EscalationOutcome(status=status, answer=answer if status == "resolved" else None)
 
         return EscalationChannel(armed=escalation_armed, request=_request)
 
@@ -287,13 +284,15 @@ def build_agent_executor(
                 # run's SSE stream. The executor owns event shape (引擎纯化) — escalate just
                 # hands it the (question, assumption, blocking) triple. run_id/agent_id are
                 # bound here so the team UI attributes the escalation to the right node.
-                on_escalate=lambda question, assumption, blocking, _rid=spec.run_id, _aid=agent_id: sink.emit(
-                    escalation_raised(
-                        _rid,
-                        _aid,
-                        question=question,
-                        assumption=assumption,
-                        blocking=blocking,
+                on_escalate=lambda question, assumption, blocking, _rid=spec.run_id, _aid=agent_id: (  # noqa: E501
+                    sink.emit(
+                        escalation_raised(
+                            _rid,
+                            _aid,
+                            question=question,
+                            assumption=assumption,
+                            blocking=blocking,
+                        )
                     )
                 ),
                 # 阻塞式求决策: the suspend-for-the-user channel for escalate(blocking=true).
@@ -320,9 +319,7 @@ def build_agent_executor(
                 # worker_tools, so "offer all" already includes it. A restricted list
                 # must explicitly gain the delegate name to keep it callable.
                 allowed_tools = (
-                    None
-                    if spec.tools is None
-                    else [*spec.tools, child_delegate.schema.name]
+                    None if spec.tools is None else [*spec.tools, child_delegate.schema.name]
                 )
                 identity = _WORKER_CAPTAIN_IDENTITY
             # escalate is a worker's always-available upward channel — a safety primitive,
@@ -376,9 +373,7 @@ def build_agent_executor(
             # 上下文传递可视化: emit the received context right after assembly (before the
             # LLM react loop) so the frontend's run detail lights up its「收到的上下文」as
             # soon as the worker starts thinking. Bodies capped + journaled (see run_context).
-            sink.emit(
-                run_context(spec.run_id, agent_id, _context_block_payloads(received_blocks))
-            )
+            sink.emit(run_context(spec.run_id, agent_id, _context_block_payloads(received_blocks)))
             attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
             for attempt in range(attempts):
                 content, reasoning, round_usage, round_rounds = await _react_and_capture(
@@ -523,5 +518,3 @@ def build_agent_executor(
             return state
 
     return execute
-
-

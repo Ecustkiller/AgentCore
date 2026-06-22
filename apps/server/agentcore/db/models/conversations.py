@@ -25,18 +25,14 @@ from ._helpers import _new_uuid
 class Conversation(Base):
     __tablename__ = "conversations"
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     agent_id: Mapped[str] = mapped_column(
         PG_UUID(as_uuid=False),
         default="00000000-0000-0000-0000-000000000000",
         server_default=text("'00000000-0000-0000-0000-000000000000'"),
     )
-    title: Mapped[str] = mapped_column(
-        String(500), nullable=False, server_default=text("''")
-    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False, server_default=text("''"))
     # Sidebar housekeeping (对话基础功能补齐):
     # - ``pinned`` floats a conversation to the top of the sidebar / list (ordered
     #   pinned-first, then by recency).
@@ -44,15 +40,11 @@ class Conversation(Base):
     #   without deleting it; surfaced only in the「已归档」view, reversible.
     pinned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     archived: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
-    mode: Mapped[str] = mapped_column(
-        String(20), default="chat", server_default=text("'chat'")
-    )
+    mode: Mapped[str] = mapped_column(String(20), default="chat", server_default=text("'chat'"))
     # User folder this conversation lives in; NULL = ungrouped. App-level FK
     # (no DB constraint, per repo convention); cleared back to NULL when the
     # folder is deleted so the conversation survives as ungrouped.
-    folder_id: Mapped[str | None] = mapped_column(
-        PG_UUID(as_uuid=False), index=True, nullable=True
-    )
+    folder_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), index=True, nullable=True)
     # Per-conversation 质量档 override (llm/modes.py): a preset name or custom
     # ModelMode id. NULL = inherit the user's default_model_mode → operator default.
     model_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -63,9 +55,7 @@ class Conversation(Base):
     # folder, so BOTH promotion paths agree on locality regardless of which writes first
     # (previously whichever wrote first — turn vs panel — decided cloud-vs-local). Read
     # by every promotion path; ignored once the conversation already has a folder.
-    local_container_root_id: Mapped[str | None] = mapped_column(
-        String(200), nullable=True
-    )
+    local_container_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Long-term memory consolidation watermark (Agent记忆与知识系统 §1.5): the
     # created_at of the last message folded into the user's memory file by the
     # offline consolidation pass. NULL = never consolidated. The runner skips when
@@ -97,9 +87,7 @@ class Conversation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # --- Folders ---
@@ -110,9 +98,7 @@ class Conversation(Base):
 class Folder(Base):
     __tablename__ = "folders"
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     # Optional bound local directory; stored as opaque metadata (no FS coupling).
@@ -138,9 +124,7 @@ class Folder(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 # --- Messages ---
@@ -149,9 +133,7 @@ class Folder(Base):
 class Message(Base):
     __tablename__ = "messages"
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -207,9 +189,7 @@ class ConversationShare(Base):
 
     # PK doubles as the public share token (uuid4, unguessable) — the public URL is
     # ``/shared/<id>``. No separate token column needed (consistent with repo PKs).
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     # The shared conversation + its owner (app-level FKs, per repo convention).
     conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
@@ -228,6 +208,4 @@ class ConversationShare(Base):
     # Set when the owner revokes the link (or a cascade does); a revoked share 404s
     # on the public page. Soft (not a row delete) so revocation is observable and the
     # link can never silently reactivate.
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

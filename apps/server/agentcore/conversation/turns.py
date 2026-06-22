@@ -135,9 +135,7 @@ async def regenerate_chat(
 
             target = await msg_repo.get_by_id(message_id, conversation_id=conversation_id)
             if not target or target.role != "user":
-                sink.emit(
-                    error_event(ErrorCode.INVALID, "Can only regenerate from a user message")
-                )
+                sink.emit(error_event(ErrorCode.INVALID, "Can only regenerate from a user message"))
                 sink.emit(message_end(FinishReason.ERROR))
                 return
 

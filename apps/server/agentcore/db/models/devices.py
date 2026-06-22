@@ -32,18 +32,14 @@ class PushDeviceRow(Base):
 
     __tablename__ = "push_devices"
     __table_args__ = (
-        CheckConstraint(
-            "platform in ('ios', 'android', 'web')", name="ck_push_devices_platform"
-        ),
+        CheckConstraint("platform in ('ios', 'android', 'web')", name="ck_push_devices_platform"),
         # One row per device token (the upsert key); a token belongs to one user.
         UniqueConstraint("token", name="uq_push_devices_token"),
         # Fan-out lookup: a user's tokens when a push fires.
         Index("ix_push_devices_user", "user_id"),
     )
 
-    id: Mapped[str] = mapped_column(
-        PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid
-    )
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
     # The FCM registration token (long, opaque); Text since it has no fixed bound.
     token: Mapped[str] = mapped_column(Text)

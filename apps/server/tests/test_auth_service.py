@@ -30,11 +30,7 @@ class FakeUsers:
     async def get_by_email(self, email):
         target = email.strip().lower()
         return next(
-            (
-                u
-                for u in self._by_id.values()
-                if u.email and u.email.lower() == target
-            ),
+            (u for u in self._by_id.values() if u.email and u.email.lower() == target),
             None,
         )
 
@@ -125,9 +121,7 @@ class FakeRefreshTokens:
         return rec
 
     async def get_by_hash(self, token_hash):
-        return next(
-            (r for r in self.records.values() if r.token_hash == token_hash), None
-        )
+        return next((r for r in self.records.values() if r.token_hash == token_hash), None)
 
     async def mark_rotated(self, token_id):
         self.records[token_id].rotated_at = datetime.now(UTC)
@@ -186,9 +180,7 @@ def _make():
     creds = FakeCredentials()
     tokens = FakeRefreshTokens()
     invites = FakeInvites()
-    svc = AuthService(
-        users=users, credentials=creds, refresh_tokens=tokens, invites=invites
-    )
+    svc = AuthService(users=users, credentials=creds, refresh_tokens=tokens, invites=invites)
     return svc, users, creds, tokens, invites
 
 
@@ -517,9 +509,7 @@ async def test_change_password_weak_new_raises():
     await invites.create(code="C1")
     user = await svc.register(username="rob", password=_PW, invite_code="C1")
     with pytest.raises(ValidationError):
-        await svc.change_password(
-            user_id=user.user_id, current_password=_PW, new_password="short"
-        )
+        await svc.change_password(user_id=user.user_id, current_password=_PW, new_password="short")
 
 
 async def test_change_password_same_as_current_raises():
@@ -527,9 +517,7 @@ async def test_change_password_same_as_current_raises():
     await invites.create(code="C1")
     user = await svc.register(username="sue", password=_PW, invite_code="C1")
     with pytest.raises(ValidationError):
-        await svc.change_password(
-            user_id=user.user_id, current_password=_PW, new_password=_PW
-        )
+        await svc.change_password(user_id=user.user_id, current_password=_PW, new_password=_PW)
 
 
 # --- update profile (个人资料编辑) ---

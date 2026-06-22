@@ -48,16 +48,12 @@ def _share_summary(share: ConversationShare) -> ShareSummary:
     )
 
 
-async def _require_owned(
-    conversation_id: str, user_id: str, repo: ConversationRepository
-) -> None:
+async def _require_owned(conversation_id: str, user_id: str, repo: ConversationRepository) -> None:
     if await repo.get_by_id(conversation_id, user_id=user_id) is None:
         raise NotFoundError("对话不存在")
 
 
-@router.post(
-    "/{conversation_id}/shares", response_model=ShareSummary, status_code=201
-)
+@router.post("/{conversation_id}/shares", response_model=ShareSummary, status_code=201)
 async def create_share(
     conversation_id: str,
     user: AuthUser,
@@ -95,16 +91,12 @@ async def list_shares(
 ):
     """List a conversation's live share links (owner-scoped) — the manage view."""
     await _require_owned(conversation_id, user.user_id, conv_repo)
-    shares = await share_repo.list_active_for_conversation(
-        conversation_id, user_id=user.user_id
-    )
+    shares = await share_repo.list_active_for_conversation(conversation_id, user_id=user.user_id)
     data = [_share_summary(s) for s in shares]
     return ShareListResponse(data=data, total=len(data))
 
 
-@router.delete(
-    "/{conversation_id}/shares/{share_id}", response_model=StatusResponse
-)
+@router.delete("/{conversation_id}/shares/{share_id}", response_model=StatusResponse)
 async def revoke_share(
     conversation_id: str,
     share_id: str,
@@ -126,7 +118,7 @@ async def revoke_share(
 def _not_found_page() -> str:
     """Minimal public 404 page for a revoked / unknown share token."""
     return (
-        "<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n"
+        '<!doctype html>\n<html lang="zh-CN">\n<head>\n'
         '<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         '<meta name="robots" content="noindex, nofollow">\n'

@@ -9,7 +9,6 @@ from agentcore.runtime.runs.executor import (
     _context_block_payloads,
 )
 from agentcore.runtime.runs.types import ContextBlock, RunContract, RunPhase, RunSpec, RunState
-
 from tests.runs_executor.conftest import _plan
 
 
@@ -74,7 +73,9 @@ def test_team_position_block_four_dag_shapes():
 
     # (4) SOLO single worker (no team): no position block, plain request header.
     solo_plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="s")
-    solo = _build_messages(solo_plan, solo_plan.by_id("s_1"), {}, "SYS", "原始请求")[1].content or ""
+    solo = (
+        _build_messages(solo_plan, solo_plan.by_id("s_1"), {}, "SYS", "原始请求")[1].content or ""
+    )
     assert "你在团队中的位置" not in solo
     assert "不一定全是你的活" not in solo  # a solo worker IS the whole job
 

@@ -73,7 +73,7 @@ def test_sniff_rejects_unknown_bytes_without_image_header():
 
 def test_icon_link_parser_collects_icon_rels_only():
     html = (
-        '<head>'
+        "<head>"
         '<link rel="stylesheet" href="/s.css">'
         '<link rel="icon" href="/fav.png">'
         '<link rel="shortcut icon" href="/legacy.ico">'

@@ -13,9 +13,7 @@ _resolved_parents = Path(__file__).resolve().parents
 # Container layout (Dockerfile COPY agentcore /app/agentcore): only 3 parents
 # exist, so fall back to /app (parents[1]) instead of IndexError-crashing on
 # import — relative LOG_FILE/data paths then resolve under the app dir.
-_PROJECT_ROOT = (
-    _resolved_parents[3] if len(_resolved_parents) > 3 else _resolved_parents[1]
-)
+_PROJECT_ROOT = _resolved_parents[3] if len(_resolved_parents) > 3 else _resolved_parents[1]
 
 # The backend's dotenv lives beside the package at apps/server/.env (parents[1]).
 # Anchor it to an ABSOLUTE path: pydantic resolves a bare relative "env_file"
@@ -478,9 +476,7 @@ class Settings(BaseSettings):
     @property
     def selectable_models(self) -> frozenset[str]:
         """Operator ceiling: the set of models a user may pick in a custom mode."""
-        return frozenset(
-            m.strip() for m in self.user_selectable_models.split(",") if m.strip()
-        )
+        return frozenset(m.strip() for m in self.user_selectable_models.split(",") if m.strip())
 
     model_config = SettingsConfigDict(env_file=_ENV_FILE, env_file_encoding="utf-8")
 

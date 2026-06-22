@@ -88,9 +88,7 @@ def run_reasoning_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
     )
 
 
-def run_tool_progress(
-    run_id: str, agent_id: str, tool_name: str, chars: int
-) -> SSEEvent:
+def run_tool_progress(run_id: str, agent_id: str, tool_name: str, chars: int) -> SSEEvent:
     return SSEEvent(
         type=EventType.RUN_TOOL_PROGRESS,
         payload={

@@ -91,8 +91,14 @@ def test_nonblocking_ask_alone_is_a_journal_surface():
             conversation_id="c1",
             question="要不要双语?",
             questions=[
-                {"id": "q0", "prompt": "要不要双语?", "kind": "choice",
-                 "options": ["要", "不要"], "multiple": False, "default": "不要"}
+                {
+                    "id": "q0",
+                    "prompt": "要不要双语?",
+                    "kind": "choice",
+                    "options": ["要", "不要"],
+                    "multiple": False,
+                    "default": "不要",
+                }
             ],
         )
     )

@@ -127,6 +127,4 @@ async def write_file_text(
     backend = build_server_workspace(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    return await backend.write_text_cas(
-        path, content, baseline_mtime_ms=baseline_mtime_ms, eol=eol
-    )
+    return await backend.write_text_cas(path, content, baseline_mtime_ms=baseline_mtime_ms, eol=eol)

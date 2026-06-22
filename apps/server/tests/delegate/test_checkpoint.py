@@ -5,7 +5,6 @@ import asyncio
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
-
 from tests.delegate.conftest import CKPT_DAG, CKPT_FORK_DAG, Provider, ctx, tool, tool_ckpt
 
 
@@ -141,12 +140,8 @@ def test_plan_review_resolve_body_discriminates():
         ResolvePlanReviewInteraction,
     )
 
-    adapter = TypeAdapter(
-        Annotated[ResolveInteractionRequest, Field(discriminator="kind")]
-    )
-    body = adapter.validate_python(
-        {"kind": "plan_review", "decision": "stop", "note": "halt"}
-    )
+    adapter = TypeAdapter(Annotated[ResolveInteractionRequest, Field(discriminator="kind")])
+    body = adapter.validate_python({"kind": "plan_review", "decision": "stop", "note": "halt"})
     assert isinstance(body, ResolvePlanReviewInteraction)
     assert body.decision is CheckpointDecision.STOP
     assert body.note == "halt"

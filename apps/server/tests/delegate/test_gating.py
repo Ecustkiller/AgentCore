@@ -1,8 +1,15 @@
 """Local-mode worker gating tests."""
 
 from agentcore.runtime.events import EventSink, EventType
-
-from tests.delegate.conftest import Provider, capture_gate, ctx, gate, local_ctx, tool, tool_with_gate
+from tests.delegate.conftest import (
+    Provider,
+    capture_gate,
+    ctx,
+    gate,
+    local_ctx,
+    tool,
+    tool_with_gate,
+)
 
 
 async def test_workers_gated_in_local_mode(monkeypatch):

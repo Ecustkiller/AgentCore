@@ -9,7 +9,7 @@ spend — a no-spend / errored turn stored zeros, which the live bubble also omi
 it is not exercised here.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from agentcore.api.schemas.messages import MessageDetail
 
@@ -20,7 +20,7 @@ def _row(usage: dict | None) -> dict:
         "conversation_id": "c1",
         "role": "assistant",
         "content": "hi",
-        "created_at": datetime.now(timezone.utc),
+        "created_at": datetime.now(UTC),
         "usage": usage,
     }
 

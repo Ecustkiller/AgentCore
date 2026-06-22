@@ -48,9 +48,7 @@ from ._helpers import _get_owned_conversation
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
-def _summary_with_count(
-    conv: Conversation, counts: dict[str, int]
-) -> ConversationSummary:
+def _summary_with_count(conv: Conversation, counts: dict[str, int]) -> ConversationSummary:
     """Build a conversation summary, filling ``message_count`` from a counts map.
 
     The list/grouped endpoints precompute counts in one query (see
@@ -88,9 +86,7 @@ async def create_conversation(
         # Desktop's local-first lazy-promote intent (工作区对称化 D1a), stored so every
         # promotion path (turn / panel) later agrees on locality. Moot once foldered —
         # a foldered chat inherits its folder's binding — so only record it for a 裸聊.
-        local_container_root_id=(
-            body.local_container_root_id if body.folder_id is None else None
-        ),
+        local_container_root_id=(body.local_container_root_id if body.folder_id is None else None),
     )
     return ConversationSummary.model_validate(conv)
 
@@ -189,18 +185,14 @@ async def update_conversation(
         conv = await repo.update_title(conversation_id, body.title, user_id=user.user_id)
     if "model_mode" in fields:
         await validate_mode_ref(body.model_mode, user_id=user.user_id, repo=mode_repo)
-        conv = await repo.set_model_mode(
-            conversation_id, body.model_mode, user_id=user.user_id
-        )
+        conv = await repo.set_model_mode(conversation_id, body.model_mode, user_id=user.user_id)
     # Sidebar housekeeping toggles (对话基础功能补齐): pin floats the row to the top,
     # archive hides it from the live list (both reversible, no tri-state → a null is
     # ignored as「unchanged」).
     if "pinned" in fields and body.pinned is not None:
         conv = await repo.set_pinned(conversation_id, body.pinned, user_id=user.user_id)
     if "archived" in fields and body.archived is not None:
-        conv = await repo.set_archived(
-            conversation_id, body.archived, user_id=user.user_id
-        )
+        conv = await repo.set_archived(conversation_id, body.archived, user_id=user.user_id)
     return ConversationSummary.model_validate(conv)
 
 
@@ -235,9 +227,7 @@ async def move_conversation_to_folder(
                 raise NotFoundError("文件夹不存在")
         if await msg_repo.count_by_conversation(conversation_id) > 0:
             raise ConflictError("对话开始后不可更换工作区")
-        conv = await conv_repo.set_folder(
-            conversation_id, body.folder_id, user_id=user.user_id
-        )
+        conv = await conv_repo.set_folder(conversation_id, body.folder_id, user_id=user.user_id)
         if not conv:
             raise NotFoundError("对话不存在")
     return ConversationSummary.model_validate(conv)
@@ -271,7 +261,7 @@ def _download_headers(filename: str) -> dict[str, str]:
     quoted = quote(filename, safe="")
     return {
         "Content-Disposition": (
-            f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{quoted}'
+            f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quoted}"
         )
     }
 

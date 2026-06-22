@@ -185,8 +185,20 @@ def _approval_resolved_continue() -> list[SSEEvent]:
 
 def _plan_review_paused() -> list[SSEEvent]:
     agents = [
-        {"id": "w1", "role": "调研", "model_preference": "strong", "thinking": True, "reasoning_effort": "high"},
-        {"id": "w2", "role": "执行", "model_preference": "fast", "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "w1",
+            "role": "调研",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "执行",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     plan_runs = [
         {"id": "r1", "agent_id": "w1", "task": "出方案", "depends_on": []},
@@ -251,8 +263,18 @@ def _single_agent_citations() -> list[SSEEvent]:
         content_delta("结论是 X。"),
         citations_event(
             [
-                {"url": "https://a.example/x", "title": "来源 A", "snippet": "片段 A", "site": "a.example"},
-                {"url": "https://b.example/y", "title": "来源 B", "snippet": "片段 B", "site": "b.example"},
+                {
+                    "url": "https://a.example/x",
+                    "title": "来源 A",
+                    "snippet": "片段 A",
+                    "site": "a.example",
+                },
+                {
+                    "url": "https://b.example/y",
+                    "title": "来源 B",
+                    "snippet": "片段 B",
+                    "site": "b.example",
+                },
             ]
         ),
         message_end(FinishReason.END_TURN, input_tokens=1800, output_tokens=260, cost=_COST),
@@ -297,8 +319,20 @@ def _multi_agent_worker_tool() -> list[SSEEvent]:
     ``run_tool_progress`` 是唯一持久可观测（→ ``agent.toolProgress``）。末尾不发 ``message_end``：
     w2 停在「正在生成」快照，故其 ``toolProgress`` 可见。"""
     agents = [
-        {"id": "w1", "role": "工程师", "model_preference": "strong", "thinking": True, "reasoning_effort": "high"},
-        {"id": "w2", "role": "测试员", "model_preference": "fast", "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "w1",
+            "role": "工程师",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "测试员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     plan_runs = [
         {"id": "r1", "agent_id": "w1", "task": "写代码", "depends_on": []},
@@ -316,9 +350,7 @@ def _multi_agent_worker_tool() -> list[SSEEvent]:
         ),
         run_started("r1", "w1"),
         run_tool_progress("r1", "w1", "file_write", 1200),
-        tool_use_start(
-            "tc1", "file_write", {"path": "a.py", "content": "print(1)"}, run_id="r1"
-        ),
+        tool_use_start("tc1", "file_write", {"path": "a.py", "content": "print(1)"}, run_id="r1"),
         tool_use_end("tc1", "file_write", success=True, output="已写入", run_id="r1"),
         run_output_delta("r1", "w1", "代码就绪"),
         run_completed(
@@ -346,26 +378,60 @@ def _multi_agent_debate() -> list[SSEEvent]:
     cap, mod = "captain1", "debate_mod1"
     pro_run, con_run = f"{mod}_r1_pro", f"{mod}_r1_con"
     mod_agents = [
-        {"id": mod, "role": "主持人", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": mod,
+            "role": "主持人",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     mod_runs = [
-        {"id": mod, "agent_id": mod, "task": "主持正反辩论：是否采用方案 A",
-         "depends_on": [], "parent_run_id": cap},
+        {
+            "id": mod,
+            "agent_id": mod,
+            "task": "主持正反辩论：是否采用方案 A",
+            "depends_on": [],
+            "parent_run_id": cap,
+        },
     ]
     debater_agents = [
-        {"id": "d_pro", "role": "支持方", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
-        {"id": "d_con", "role": "反对方", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "d_pro",
+            "role": "支持方",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "d_con",
+            "role": "反对方",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     debater_runs = [
-        {"id": pro_run, "agent_id": "d_pro", "task": "论证支持采用方案 A",
-         "depends_on": [], "parent_run_id": mod,
-         "stance": "pro", "group": "debate:debate", "round": 1},
-        {"id": con_run, "agent_id": "d_con", "task": "论证反对采用方案 A",
-         "depends_on": [], "parent_run_id": mod,
-         "stance": "con", "group": "debate:debate", "round": 1},
+        {
+            "id": pro_run,
+            "agent_id": "d_pro",
+            "task": "论证支持采用方案 A",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "stance": "pro",
+            "group": "debate:debate",
+            "round": 1,
+        },
+        {
+            "id": con_run,
+            "agent_id": "d_con",
+            "task": "论证反对采用方案 A",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "stance": "con",
+            "group": "debate:debate",
+            "round": 1,
+        },
     ]
     debate_payload = {
         "form": "debate",
@@ -481,28 +547,74 @@ def _multi_agent_roundtable_rounds() -> list[SSEEvent]:
     r1a, r1b, r1c = f"{mod}_r1_a", f"{mod}_r1_b", f"{mod}_r1_c"
     r2a, r2b = f"{mod}_r2_a", f"{mod}_r2_b"
     mod_agents = [
-        {"id": mod, "role": "主持人", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": mod,
+            "role": "主持人",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     mod_runs = [
-        {"id": mod, "agent_id": mod, "task": "主持多方圆桌：AI 该如何治理",
-         "depends_on": [], "parent_run_id": cap},
+        {
+            "id": mod,
+            "agent_id": mod,
+            "task": "主持多方圆桌：AI 该如何治理",
+            "depends_on": [],
+            "parent_run_id": cap,
+        },
     ]
     debater_agents = [
-        {"id": "rt_a", "role": "技术视角", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
-        {"id": "rt_b", "role": "监管视角", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
-        {"id": "rt_c", "role": "产业视角", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "rt_a",
+            "role": "技术视角",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "rt_b",
+            "role": "监管视角",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "rt_c",
+            "role": "产业视角",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     debater_runs = [
-        {"id": r1a, "agent_id": "rt_a", "task": "从技术视角谈 AI 治理",
-         "depends_on": [], "parent_run_id": mod, "group": "debate:roundtable", "round": 1},
-        {"id": r1b, "agent_id": "rt_b", "task": "从监管视角谈 AI 治理",
-         "depends_on": [], "parent_run_id": mod, "group": "debate:roundtable", "round": 1},
-        {"id": r1c, "agent_id": "rt_c", "task": "从产业视角谈 AI 治理",
-         "depends_on": [], "parent_run_id": mod, "group": "debate:roundtable", "round": 1},
+        {
+            "id": r1a,
+            "agent_id": "rt_a",
+            "task": "从技术视角谈 AI 治理",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:roundtable",
+            "round": 1,
+        },
+        {
+            "id": r1b,
+            "agent_id": "rt_b",
+            "task": "从监管视角谈 AI 治理",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:roundtable",
+            "round": 1,
+        },
+        {
+            "id": r1c,
+            "agent_id": "rt_c",
+            "task": "从产业视角谈 AI 治理",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:roundtable",
+            "round": 1,
+        },
     ]
     round1_payload = {
         "round_no": 1,
@@ -557,20 +669,46 @@ def _multi_agent_roundtable_rounds() -> list[SSEEvent]:
         ),
         run_started(r1a, "rt_a", parent_run_id=mod),
         run_output_delta(r1a, "rt_a", "技术视角：能力外溢是根因。"),
-        run_completed(r1a, "rt_a", output_summary="技术视角发言完成", duration_ms=800,
-                      role="member", model="deepseek-v4-flash", usage=_USAGE, cost=_COST),
+        run_completed(
+            r1a,
+            "rt_a",
+            output_summary="技术视角发言完成",
+            duration_ms=800,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
         run_started(r1b, "rt_b", parent_run_id=mod),
         run_output_delta(r1b, "rt_b", "监管视角：问责缺位才是关键。"),
-        run_completed(r1b, "rt_b", output_summary="监管视角发言完成", duration_ms=820,
-                      role="member", model="deepseek-v4-flash", usage=_USAGE, cost=_COST),
+        run_completed(
+            r1b,
+            "rt_b",
+            output_summary="监管视角发言完成",
+            duration_ms=820,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
         run_started(r1c, "rt_c", parent_run_id=mod),
         run_output_delta(r1c, "rt_c", "产业视角：别忽视落地成本。"),
-        run_completed(r1c, "rt_c", output_summary="产业视角发言完成", duration_ms=810,
-                      role="member", model="deepseek-v4-flash", usage=_USAGE, cost=_COST),
+        run_completed(
+            r1c,
+            "rt_c",
+            output_summary="产业视角发言完成",
+            duration_ms=810,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
         debate_round(execution_id="exec1", moderator_run_id=mod, payload=round1_payload),
         # 第 2 轮：开场报焦点（verdict 仍 None=进行中），辩手续写（revision=2）发言中被取消。
         debate_round_started(
-            execution_id="exec1", moderator_run_id=mod, round_no=2,
+            execution_id="exec1",
+            moderator_run_id=mod,
+            round_no=2,
             focus="第二轮：三方就『问责机制』正面交锋",
         ),
         run_started(r2a, "rt_a2", parent_run_id=r1a, revision=2),
@@ -585,7 +723,13 @@ def _multi_agent_revision() -> list[SSEEvent]:
     """多 Agent：定向唤回续写 (乙 热修 P4)。修订 run(``revision=2`` + ``parent_run_id``)不在
     plan 里——三端都从其 ``run_started`` 帧合成出一个修订节点 + 继承原 agent 身份的新 agent。"""
     agents = [
-        {"id": "w1", "role": "撰写员", "model_preference": "strong", "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "w1",
+            "role": "撰写员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     plan_runs = [
         {"id": "r1", "agent_id": "w1", "task": "起草", "depends_on": []},
@@ -635,9 +779,27 @@ def _multi_agent_plan_revised() -> list[SSEEvent]:
     后同一 DAG 续跑 r2、r3。验「自我纠偏看得见不打断」：节点带轻痕迹，回合照常 end_turn。
     ``revised`` 随 ``run_plan`` 节点默认 None，故所有既有向量的 runs 也都新增 ``revised: null``。"""
     agents = [
-        {"id": "w1", "role": "研究员", "model_preference": "strong", "thinking": True, "reasoning_effort": "high"},
-        {"id": "w2", "role": "撰写员", "model_preference": "fast", "thinking": True, "reasoning_effort": "high"},
-        {"id": "w3", "role": "复核员", "model_preference": "fast", "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w3",
+            "role": "复核员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     plan_runs = [
         {"id": "r1", "agent_id": "w1", "task": "调研竞品定价", "depends_on": []},
@@ -707,11 +869,23 @@ def _multi_agent_multi_batch() -> list[SSEEvent]:
     """多 Agent：同一回合两批 ``delegate``（同 ``execution_id``）。第二批合并进现有图（不重置），
     进度跨批累计（来自 run 状态、非每批 run_progress 计数器）。"""
     batch1_agents = [
-        {"id": "w1", "role": "研究员", "model_preference": "strong", "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     batch1_runs = [{"id": "r1", "agent_id": "w1", "task": "调研", "depends_on": []}]
     batch2_agents = [
-        {"id": "w2", "role": "撰写员", "model_preference": "fast", "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     batch2_runs = [{"id": "r2", "agent_id": "w2", "task": "撰写", "depends_on": ["r1"]}]
     return [
@@ -795,10 +969,20 @@ def _multi_agent_received_context() -> list[SSEEvent]:
     （``truncated``）。三端 fold + oracle 必须把 blocks verbatim 折到对应 run 的 ``receivedContext``
     （conformance pins them equal）。"""
     agents = [
-        {"id": "w1", "role": "研究员", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
-        {"id": "w2", "role": "撰写员", "model_preference": "fast",
-         "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     plan_runs = [
         {"id": "r1", "agent_id": "w1", "task": "调研竞品定价", "depends_on": []},
@@ -893,10 +1077,20 @@ def _multi_agent_escalation() -> list[SSEEvent]:
     ``escalations`` 恒空。escalate 非阻塞：r1 报完仍按假设继续交付并 COMPLETED（升级的持久副本另走
     RunState.escalations → CEO 综述，本事件只补「进行中可见」）。"""
     agents = [
-        {"id": "w1", "role": "研究员", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
-        {"id": "w2", "role": "撰写员", "model_preference": "fast",
-         "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     plan_runs = [
         {"id": "r1", "agent_id": "w1", "task": "调研选型", "depends_on": []},
@@ -958,10 +1152,20 @@ _ESC_A = "暂按 Postgres 推进"
 def _blocking_escalate_team() -> tuple[list[dict], list[dict]]:
     """The shared 2-worker plan: r1 (研究员) escalates; r2 (撰写员) depends on r1."""
     agents = [
-        {"id": "w1", "role": "研究员", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
-        {"id": "w2", "role": "撰写员", "model_preference": "fast",
-         "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     plan_runs = [
         {"id": "r1", "agent_id": "w1", "task": "调研选型", "depends_on": []},
@@ -975,7 +1179,7 @@ def _multi_agent_blocking_escalate() -> list[SSEEvent]:
     就作废」的关键岔路，调 escalate(blocking=true) 原地挂起 → 执行器 emit ``escalation_required``
     （run 级，``escalation_id`` 键给 resolve 端点），三端 fold + oracle 把它折成 r1 的一条 pending
     升级（``status="pending"``）。关键：阻塞升级【不】把回合翻 paused——兄弟仍可跑（区别于 approval/
-    ask_user/plan_review 的 halting gate），故 ``pendingInteraction`` 恒 None。用户答复 → 
+    ask_user/plan_review 的 halting gate），故 ``pendingInteraction`` 恒 None。用户答复 →
     ``escalation_resolved(status="resolved", answer)``（单一发射者：仅挂起的工具发）→ 该项翻
     ``{status:"resolved", answer}``，r1 据答续跑并 COMPLETED。"""
     agents, plan_runs = _blocking_escalate_team()
@@ -991,9 +1195,7 @@ def _multi_agent_blocking_escalate() -> list[SSEEvent]:
         ),
         run_started("r1", "w1"),
         # 阻塞挂起：把问题直接送到用户（CEO 停在 delegate、够不到用户）。
-        escalation_required(
-            "r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A
-        ),
+        escalation_required("r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A),
         # 用户答复 → 该项翻 resolved，r1 据答续跑（以用户答复为准）。
         escalation_resolved(
             "r1", "w1", escalation_id="esc1", status="resolved", answer="用 Postgres。"
@@ -1045,13 +1247,9 @@ def _multi_agent_blocking_escalate_timeout() -> list[SSEEvent]:
             runs=plan_runs,
         ),
         run_started("r1", "w1"),
-        escalation_required(
-            "r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A
-        ),
+        escalation_required("r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A),
         # 超时（或「按假设继续」）→ 同一 resolve 端点的 timeout disposition，answer 空。
-        escalation_resolved(
-            "r1", "w1", escalation_id="esc1", status="timeout", answer=""
-        ),
+        escalation_resolved("r1", "w1", escalation_id="esc1", status="timeout", answer=""),
         run_output_delta("r1", "w1", "未获答复，按 Postgres 假设完成选型调研"),
         run_completed(
             "r1",
@@ -1101,9 +1299,7 @@ def _multi_agent_blocking_escalate_pending() -> list[SSEEvent]:
         run_started("r1", "w1"),
         # 并行兄弟 r2 照常起跑——证明阻塞升级不挡其它 worker、不挂起整波。
         run_started("r2", "w2"),
-        escalation_required(
-            "r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A
-        ),
+        escalation_required("r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A),
     ]
 
 
@@ -1125,9 +1321,7 @@ def _multi_agent_blocking_escalate_multi() -> list[SSEEvent]:
         ),
         run_started("r1", "w1"),
         # 第一个关键岔路：阻塞挂起 → 用户答复 → resolved。
-        escalation_required(
-            "r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A
-        ),
+        escalation_required("r1", "w1", escalation_id="esc1", question=_ESC_Q, assumption=_ESC_A),
         escalation_resolved(
             "r1", "w1", escalation_id="esc1", status="resolved", answer="用 Postgres。"
         ),
@@ -1140,9 +1334,7 @@ def _multi_agent_blocking_escalate_multi() -> list[SSEEvent]:
             assumption="暂按 Docker 推进",
         ),
         # 第二次超时降级（answer 空）→ r1 回落到该假设续跑。
-        escalation_resolved(
-            "r1", "w1", escalation_id="esc2", status="timeout", answer=""
-        ),
+        escalation_resolved("r1", "w1", escalation_id="esc2", status="timeout", answer=""),
         run_output_delta("r1", "w1", "已确认 Postgres + Docker，完成选型调研"),
         run_completed(
             "r1",
@@ -1223,16 +1415,36 @@ def _multi_agent_captain_context() -> list[SSEEvent]:
     带来源角色/保真度），三端必须 APPEND 到 ``captainContext``——CEO 收到的上下文随团队产物增长，
     而非被覆盖。三端 fold + oracle pin them equal。"""
     agents = [
-        {"id": "c1", "role": "CEO", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
-        {"id": "w1", "role": "研究员", "model_preference": "strong",
-         "thinking": True, "reasoning_effort": "high"},
+        {
+            "id": "c1",
+            "role": "CEO",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
     ]
     plan_runs = [
-        {"id": "c1", "agent_id": "c1", "task": "统筹完成用户目标",
-         "depends_on": [], "kind": "captain"},
-        {"id": "r1", "agent_id": "w1", "task": "调研竞品定价",
-         "depends_on": [], "parent_run_id": "c1"},
+        {
+            "id": "c1",
+            "agent_id": "c1",
+            "task": "统筹完成用户目标",
+            "depends_on": [],
+            "kind": "captain",
+        },
+        {
+            "id": "r1",
+            "agent_id": "w1",
+            "task": "调研竞品定价",
+            "depends_on": [],
+            "parent_run_id": "c1",
+        },
     ]
     return [
         message_start("m1", conversation_id=_CONV),
@@ -1327,7 +1539,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "单聊：交付前核验回炉 (finish_guard) content_reset 丢弃违规版正文、重写修正版",
         _single_agent_content_reset,
     ),
-    "multi_agent_worker_tool": ("多 Agent：worker 工具调用 + run_tool_progress 实时态", _multi_agent_worker_tool),
+    "multi_agent_worker_tool": (
+        "多 Agent：worker 工具调用 + run_tool_progress 实时态",
+        _multi_agent_worker_tool,
+    ),
     "multi_agent_debate": (
         "多 Agent：辩论（debate 工具）主持人→辩手 + 决策简报/叙事线双产物",
         _multi_agent_debate,
@@ -1341,7 +1556,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "多 Agent：自主再绑定「计划已调整」轻痕迹（plan_revised 折 bind/steer 到节点 revised）",
         _multi_agent_plan_revised,
     ),
-    "multi_agent_multi_batch": ("多 Agent：同回合两批 delegate（合并 + 累计进度）", _multi_agent_multi_batch),
+    "multi_agent_multi_batch": (
+        "多 Agent：同回合两批 delegate（合并 + 累计进度）",
+        _multi_agent_multi_batch,
+    ),
     "multi_agent_escalation": (
         "多 Agent：worker 升级实时可见（run_escalation 折到节点 escalations，非阻塞）",
         _multi_agent_escalation,

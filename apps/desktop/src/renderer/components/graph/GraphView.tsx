@@ -68,22 +68,13 @@ interface GraphViewProps {
   /**
    * Endpoint drill-in hand-off: when set, clicking the 用户输入 / CEO 汇聚点
    * endpoint reports the chat message to surface (the prompt / the final answer)
-   * + a title, so the host (canvas focused node / 放大态) shows it in its foot
-   * drawer WITHOUT leaving the canvas. The in-chat embedded graph leaves it unset
-   * and keeps the jump-to-chat focus (that bubble is already in the column, so a
-   * drawer would just duplicate it).
+   * + a title, so the host (canvas focused node / 放大态) opens it in the shared
+   * right-docked SidePanel as a content tab — like a worker drill, WITHOUT leaving
+   * the canvas. The endpoint node then lights from that active content tab (same
+   * one-source highlight as workers). The in-chat embedded graph leaves it unset
+   * and keeps the jump-to-chat focus (that bubble is already in the column).
    */
   onEndpointSelect?: (contentMessageId: string, title: string) => void;
-  /**
-   * The chat message id currently surfaced in the host's endpoint drawer (canvas
-   * focused node / 放大态), so the matching endpoint node (用户输入 / CEO 汇聚点)
-   * lights up like a drilled worker. Matched against the input prompt /
-   * final-answer message ids. While set, it also suppresses the worker glow (the
-   * drawer shows the endpoint, not a run), so exactly one node is lit. Null /
-   * omitted → no endpoint is lit (in-chat embedded graph, or a worker run is
-   * showing instead).
-   */
-  highlightEndpointMessageId?: string | null;
   /** Embedded only: report the canvas height the graph wants (fit-to-width of
    * the laid-out bbox, clamped) so the wrapper can size its box to each graph's
    * real footprint. `overflowing` is true when the graph is taller than the
@@ -103,7 +94,6 @@ export function GraphView({
   embedded = false,
   onNodeSelect,
   onEndpointSelect,
-  highlightEndpointMessageId = null,
   onMeasure,
   onClose,
   autoplay = false,
@@ -180,23 +170,27 @@ export function GraphView({
     },
     [execution, messageId, showRunDetail],
   );
-  // Node highlight has one source: the side panel's active run tab for THIS
-  // turn. Both the embedded graph and the full-screen overlay drill into that
-  // single panel (the overlay then steps aside), so the lit node is whatever the
-  // panel currently shows — switching / closing tabs, selecting the 工作区 home
-  // tab (not in `tabs`, so this returns null), or hiding the panel moves or
-  // drops the highlight automatically.
-  const highlightRunId = useSidePanelStore((s) => {
+  // Node highlight has one source: the side panel's active detail tab for THIS
+  // turn. Both the embedded graph and the canvas 放大态 drill into that single
+  // panel, so the lit node is whatever the panel currently shows — switching /
+  // closing tabs, selecting the 工作区 home tab (not in `tabs`), or hiding the
+  // panel moves or drops the highlight automatically. A run tab lights its worker;
+  // a content tab (提问 / 最终回答) lights its endpoint node. The two are mutually
+  // exclusive (one active tab is one kind), so exactly one node ever lights.
+  const litRunId = useSidePanelStore((s) => {
     if (!s.open) return null;
     const active = s.tabs.find((t) => t.id === s.activeTabId);
-    return active && active.messageId === messageId ? active.runId : null;
+    return active?.kind === "run" && active.messageId === messageId
+      ? active.runId
+      : null;
   });
-  // While an endpoint (提问 / 最终回答) fills the host's foot drawer, IT — not a run —
-  // is on screen, so suppress the worker glow: exactly one node lights, matching
-  // what the drawer shows. Clearing the endpoint (Esc / 收起) restores the run's
-  // glow if its tab is still open. Inert in the in-chat embedded graph (no endpoint
-  // id passed).
-  const litRunId = highlightEndpointMessageId ? null : highlightRunId;
+  const litEndpointMessageId = useSidePanelStore((s) => {
+    if (!s.open) return null;
+    const active = s.tabs.find((t) => t.id === s.activeTabId);
+    return active?.kind === "content" && active.messageId === messageId
+      ? active.contentMessageId
+      : null;
+  });
   // The single FX rate (§7.5) that turns each run's nano-USD total into the ¥
   // chip on its node; one rate for the whole graph keeps the money consistent.
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
@@ -627,7 +621,7 @@ export function GraphView({
             // Lit when the panel surfaces this turn's prompt (mirrors a worker's
             // glow); matched by the input bookend's stand-in message id.
             focused:
-              !!taskMessage && highlightEndpointMessageId === taskMessage.id,
+              !!taskMessage && litEndpointMessageId === taskMessage.id,
             onActivate: taskMessage ? () => activateNode(INPUT_ID) : undefined,
           },
         } as Node);
@@ -655,7 +649,7 @@ export function GraphView({
               // Lit when the panel surfaces the final answer; matched by the
               // answer's bubble id (the captain's reply is bubble-scoped).
               focused:
-                !!finalAnswer && highlightEndpointMessageId === finalAnswer.id,
+                !!finalAnswer && litEndpointMessageId === finalAnswer.id,
               onActivate: finalAnswer
                 ? () => activateNode(captainRun.id)
                 : undefined,
@@ -672,7 +666,7 @@ export function GraphView({
     nodeHeights,
     cnyPerUsd,
     litRunId,
-    highlightEndpointMessageId,
+    litEndpointMessageId,
     captainStatus,
     captainRun,
     handleDirection,

@@ -492,7 +492,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "status": "resolved",
                         "decision": p.get("decision"),
                     }
-            if pending and pending.get("kind") == "plan_review" and pending.get("checkpointId") == cid:
+            if (
+                pending
+                and pending.get("kind") == "plan_review"
+                and pending.get("checkpointId") == cid
+            ):
                 pending = None
                 status = "running"
 

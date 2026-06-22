@@ -18,9 +18,7 @@ from agentcore.db.repositories import ConversationRepository, CostEventRepositor
 _PW = "password123"
 
 
-async def _register_and_login(
-    client: httpx.AsyncClient, invite_code: str, username: str
-) -> str:
+async def _register_and_login(client: httpx.AsyncClient, invite_code: str, username: str) -> str:
     r = await client.post(
         "/v1/auth/register",
         json={"username": username, "password": _PW, "invite_code": invite_code},
@@ -58,14 +56,10 @@ def _run(
 async def test_usage_endpoints_require_auth(client):
     assert (await client.get("/v1/usage/summary")).status_code == 401
     assert (await client.get(f"/v1/messages/{new_id()}/cost")).status_code == 401
-    assert (
-        await client.get(f"/v1/conversations/{new_id()}/cost")
-    ).status_code == 401
+    assert (await client.get(f"/v1/conversations/{new_id()}/cost")).status_code == 401
 
 
-async def test_message_cost_returns_payroll_and_turn_total(
-    client, make_invite, session_factory
-):
+async def test_message_cost_returns_payroll_and_turn_total(client, make_invite, session_factory):
     code = await make_invite("INV-PAYROLL")
     user_id = await _register_and_login(client, code, "payrolluser")
 
@@ -190,9 +184,7 @@ async def test_usage_summary_windows_and_quota(client, make_invite, session_fact
     assert body["today"]["requests"] == 1
     assert body["today"]["usage"]["input"] == 100
     # The single captain row also lands in this month's per-role payroll.
-    assert body["month_by_role"] == [
-        {"role": "captain", "cost_total": 2500, "turns": 1}
-    ]
+    assert body["month_by_role"] == [{"role": "captain", "cost_total": 2500, "turns": 1}]
     # The 7-day trend is a fixed-length series; today's spend is its last point.
     trend = body["recent_daily_cost"]
     assert len(trend) == 7

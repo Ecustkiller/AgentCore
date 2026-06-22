@@ -32,9 +32,7 @@ async def test_upload_then_download_roundtrip():
 
 
 async def test_uploaded_file_appears_in_listing():
-    await upload_file(
-        user_id="u1", folder_id="f1", conversation_id="c1", path="top.txt", data=b"x"
-    )
+    await upload_file(user_id="u1", folder_id="f1", conversation_id="c1", path="top.txt", data=b"x")
     await upload_file(
         user_id="u1", folder_id="f1", conversation_id="c1", path="sub/deep.txt", data=b"y"
     )
@@ -52,9 +50,7 @@ async def test_uploaded_file_appears_in_listing():
 
 async def test_download_missing_raises():
     with pytest.raises(PathNotFound):
-        await download_file(
-            user_id="u1", folder_id="f1", conversation_id="c1", path="ghost.bin"
-        )
+        await download_file(user_id="u1", folder_id="f1", conversation_id="c1", path="ghost.bin")
 
 
 async def test_download_directory_raises_not_a_file():
@@ -62,9 +58,7 @@ async def test_download_directory_raises_not_a_file():
         user_id="u1", folder_id="f1", conversation_id="c1", path="d/inner.txt", data=b"x"
     )
     with pytest.raises(NotAFile):
-        await download_file(
-            user_id="u1", folder_id="f1", conversation_id="c1", path="d"
-        )
+        await download_file(user_id="u1", folder_id="f1", conversation_id="c1", path="d")
 
 
 async def test_upload_traversal_is_blocked():
@@ -83,7 +77,5 @@ async def test_folder_conversations_share_files():
     await upload_file(
         user_id="u1", folder_id="f1", conversation_id="c1", path="shared.txt", data=b"v"
     )
-    got = await download_file(
-        user_id="u1", folder_id="f1", conversation_id="c2", path="shared.txt"
-    )
+    got = await download_file(user_id="u1", folder_id="f1", conversation_id="c2", path="shared.txt")
     assert got == b"v"

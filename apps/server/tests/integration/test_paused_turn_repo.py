@@ -207,9 +207,7 @@ async def test_retention_sweep_prunes_aged_and_batches(session_factory, monkeypa
     async with session_factory() as s:
         repo = PausedTurnRepository(s)
         for mid in (*aged_ids, fresh_id):
-            await repo.upsert(
-                message_id=mid, conversation_id=cid, user_id=uid, frame={"v": 1}
-            )
+            await repo.upsert(message_id=mid, conversation_id=cid, user_id=uid, frame={"v": 1})
 
     # Age the three past the 7-day window; leave `fresh` at now().
     aged = datetime.now(UTC) - timedelta(days=10)
@@ -253,9 +251,7 @@ async def test_retention_sweep_clears_orphan_turn_journal(session_factory, monke
     aged = datetime.now(UTC) - timedelta(days=10)
     async with session_factory() as s:
         await s.execute(
-            update(PausedTurnRow)
-            .where(PausedTurnRow.message_id == mid)
-            .values(updated_at=aged)
+            update(PausedTurnRow).where(PausedTurnRow.message_id == mid).values(updated_at=aged)
         )
         await s.commit()
     deleted = await retention_mod.run_paused_turn_retention_sweep()

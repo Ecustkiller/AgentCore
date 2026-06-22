@@ -16,20 +16,14 @@ class ModelModeRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
-    async def create(
-        self, *, user_id: str, name: str, assignments: dict[str, str]
-    ) -> ModelMode:
-        mode = ModelMode(
-            id=new_id(), user_id=user_id, name=name, assignments=assignments
-        )
+    async def create(self, *, user_id: str, name: str, assignments: dict[str, str]) -> ModelMode:
+        mode = ModelMode(id=new_id(), user_id=user_id, name=name, assignments=assignments)
         self._session.add(mode)
         await self._session.commit()
         await self._session.refresh(mode)
         return mode
 
-    async def get_by_id(
-        self, mode_id: str, *, user_id: str | None = None
-    ) -> ModelMode | None:
+    async def get_by_id(self, mode_id: str, *, user_id: str | None = None) -> ModelMode | None:
         conditions = [ModelMode.id == mode_id, ModelMode.deleted_at.is_(None)]
         if user_id is not None:
             conditions.append(ModelMode.user_id == user_id)

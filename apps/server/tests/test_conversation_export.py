@@ -155,9 +155,7 @@ def test_share_html_rejects_javascript_link():
 
 
 def test_share_html_escapes_title_xss():
-    page = render_share_html(
-        title="<script>alert(1)</script>", snapshot=[], created_at=_TS
-    )
+    page = render_share_html(title="<script>alert(1)</script>", snapshot=[], created_at=_TS)
     assert "<script>alert(1)</script>" not in page
     assert "&lt;script&gt;" in page
     assert "（空对话）" in page

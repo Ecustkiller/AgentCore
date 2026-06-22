@@ -6,11 +6,13 @@ import { create } from "zustand";
  *
  *  - a fixed, non-closable 「工作区」 home tab (the cloud↔local mode bar + the
  *    files body, with 快照 / 交接 as on-demand overlays), always first;
- *  - a closable run-detail tab for each inline-graph node the user drills into.
+ *  - a closable detail tab per drill: a run-detail tab for each inline-graph
+ *    worker node, or a content tab for an endpoint bubble (提问 / 最终回答) the
+ *    canvas surfaces here (no chat column alongside, 前端UX设计.md §五/§六).
  *
- * There is no separate "detail mode" — the run tabs ARE the detail, so the panel
- * never shows an empty detail placeholder. `open` / `width` are persisted; the run
- * tabs are session-level (rebuilt from the execution slot).
+ * There is no separate "detail mode" — the detail tabs ARE the detail, so the panel
+ * never shows an empty detail placeholder. `open` / `width` are persisted; the detail
+ * tabs are session-level (rebuilt from the execution slot / live messages).
  */
 
 /** Resize bounds for the panel. */
@@ -69,7 +71,9 @@ function persist(key: string, value: string): void {
  * pins that run here (前端UX设计.md §十). Scoped by message so two turns that
  * each pin a run never collide in the strip (§9.3).
  */
-export interface DetailTab {
+export interface RunDetailTab {
+  /** Discriminator: a worker run's structured detail (RunDetailBody). */
+  kind: "run";
   /** Dedup identity: `run-detail:<messageId>:<runId>`. */
   id: string;
   /** Label shown in the tab strip (the agent's role). */
@@ -80,19 +84,48 @@ export interface DetailTab {
   runId: string;
 }
 
+/**
+ * A content tab — the turn's endpoint chat bubble (the user's prompt or the CEO's
+ * final answer) surfaced in the docked panel. The canvas (放大态 / 聚焦节点) has no
+ * chat column alongside, so an endpoint reads here — like a worker drill — instead
+ * of a foot drawer (前端UX设计.md §五/§六). Endpoints are bubbles, not runs, so they
+ * ride this kind rather than RunDetailBody. Scoped by the turn (`messageId`) so it
+ * lights that graph's endpoint node; `contentMessageId` is the bubble rendered.
+ */
+export interface ContentDetailTab {
+  /** Discriminator: a chat bubble rendered as Markdown (no run). */
+  kind: "content";
+  /** Dedup identity: `content-detail:<messageId>:<contentMessageId>`. */
+  id: string;
+  /** Label shown in the tab strip (提问 / 最终回答). */
+  title: string;
+  /** The turn (assistant message owning the execution) this endpoint belongs to. */
+  messageId: string;
+  /** The chat message whose content is rendered (the prompt / the final answer). */
+  contentMessageId: string;
+}
+
+/** A side-panel detail tab: a worker run, or an endpoint chat bubble. */
+export type DetailTab = RunDetailTab | ContentDetailTab;
+
 export const runDetailTabId = (messageId: string, runId: string): string =>
   `run-detail:${messageId}:${runId}`;
+
+export const contentDetailTabId = (
+  messageId: string,
+  contentMessageId: string,
+): string => `content-detail:${messageId}:${contentMessageId}`;
 
 interface SidePanelState {
   /** Panel visibility (persisted). */
   open: boolean;
   /** Docked width in px, clamped to [280, 560] (persisted). */
   width: number;
-  /** Open run-detail tabs, left→right (session-level; stale tabs are filtered at
-   * render against the live projection). The 工作区 home tab is implicit and is
-   * NOT part of this array. */
+  /** Open detail tabs (run or content), left→right (session-level; stale tabs are
+   * filtered at render against the live projection). The 工作区 home tab is implicit
+   * and is NOT part of this array. */
   tabs: DetailTab[];
-  /** Active tab: `WORKSPACE_TAB_ID` for the home tab, otherwise a run tab id.
+  /** Active tab: `WORKSPACE_TAB_ID` for the home tab, otherwise a detail tab id.
    * Defaults to the workspace home so a manual open lands on the project files. */
   activeTabId: string;
   /**
@@ -102,12 +135,12 @@ interface SidePanelState {
    */
   pendingFilePreview: { path: string; name: string; nonce: number } | null;
 
-  /** Open (or re-focus) a run-detail tab, deduped by id; reveals + activates it. */
+  /** Open (or re-focus) a detail tab, deduped by id; reveals + activates it. */
   openTab: (tab: DetailTab, opts?: { activate?: boolean }) => void;
-  /** Close a run tab; falls back to a neighbour run tab, else the 工作区 home.
+  /** Close a detail tab; falls back to a neighbour tab, else the 工作区 home.
    * Never closes the panel (the home tab is always there). */
   closeTab: (id: string) => void;
-  /** Activate a tab (`WORKSPACE_TAB_ID` or a run tab id). */
+  /** Activate a tab (`WORKSPACE_TAB_ID` or a detail tab id). */
   setActiveTab: (id: string) => void;
   /**
    * Pin a run (of a specific message's turn) and reveal it. The inline graph
@@ -115,6 +148,16 @@ interface SidePanelState {
    * / closing tabs keeps the graph in sync (§9.3).
    */
   showRunDetail: (messageId: string, runId: string, title?: string) => void;
+  /**
+   * Pin an endpoint chat bubble (the turn's prompt / final answer) and reveal it.
+   * The canvas surfaces an endpoint here (no chat column alongside); the inline
+   * graph lights the matching endpoint node while its content tab is active.
+   */
+  showContentDetail: (
+    messageId: string,
+    contentMessageId: string,
+    title: string,
+  ) => void;
   /** Reveal the panel on the 工作区 home tab (the chat toggle / Ctrl+J). */
   showWorkspace: () => void;
   /** Reveal the 工作区 home tab AND request a file preview (产出文件 card click). */
@@ -130,8 +173,9 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   open: loadOpen(),
   width: loadWidth(),
   tabs: [],
-  // Run tabs are session-level (rebuilt from the execution slot), so a fresh
-  // load always starts on the workspace home rather than a dangling run id.
+  // Detail tabs are session-level (rebuilt from the execution slot / live
+  // messages), so a fresh load always starts on the workspace home rather than a
+  // dangling tab id.
   activeTabId: WORKSPACE_TAB_ID,
   pendingFilePreview: null,
 
@@ -139,8 +183,10 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     persist(OPEN_KEY, "true");
     set((s) => {
       const exists = s.tabs.some((t) => t.id === tab.id);
+      // A re-open replaces the tab wholesale (same id ⇒ same kind, namespaced
+      // prefixes guarantee it), refreshing its title/scope without merging kinds.
       let tabs = exists
-        ? s.tabs.map((t) => (t.id === tab.id ? { ...t, ...tab } : t))
+        ? s.tabs.map((t) => (t.id === tab.id ? tab : t))
         : [...s.tabs, tab];
       // Cap the run-tab strip: a new tab beyond the limit pushes out the oldest.
       if (tabs.length > MAX_TABS) tabs = tabs.slice(tabs.length - MAX_TABS);
@@ -159,7 +205,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       const tabs = s.tabs.filter((t) => t.id !== id);
       let activeTabId = s.activeTabId;
       if (s.activeTabId === id) {
-        // Fall back to the neighbour run tab (next, else previous), else home.
+        // Fall back to the neighbour detail tab (next, else previous), else home.
         const next = tabs[idx] ?? tabs[idx - 1] ?? null;
         activeTabId = next ? next.id : WORKSPACE_TAB_ID;
       }
@@ -171,10 +217,21 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
 
   showRunDetail: (messageId, runId, title) => {
     get().openTab({
+      kind: "run",
       id: runDetailTabId(messageId, runId),
       title: title ?? "详情",
       messageId,
       runId,
+    });
+  },
+
+  showContentDetail: (messageId, contentMessageId, title) => {
+    get().openTab({
+      kind: "content",
+      id: contentDetailTabId(messageId, contentMessageId),
+      title,
+      messageId,
+      contentMessageId,
     });
   },
 

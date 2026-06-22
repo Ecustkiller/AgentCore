@@ -109,9 +109,7 @@ async def _promoted_workspace(
     folder_id = await _conv_write_folder(
         conv, conv_repo=conv_repo, folder_repo=folder_repo, user_id=user_id
     )
-    key = workspace_storage_key(
-        user_id=user_id, folder_id=folder_id, conversation_id=conv.id
-    )
+    key = workspace_storage_key(user_id=user_id, folder_id=folder_id, conversation_id=conv.id)
     async with workspace_lock(key):
         yield folder_id
 
@@ -171,9 +169,7 @@ async def list_workspace_files(
     )
 
 
-@router.put(
-    "/{conversation_id}/workspace/files/{path:path}", response_model=UploadFileResponse
-)
+@router.put("/{conversation_id}/workspace/files/{path:path}", response_model=UploadFileResponse)
 async def upload_workspace_file(
     conversation_id: str,
     path: str,
@@ -330,9 +326,7 @@ async def download_workspace_file(
     )
 
 
-@router.delete(
-    "/{conversation_id}/workspace/files/{path:path}", response_model=StatusResponse
-)
+@router.delete("/{conversation_id}/workspace/files/{path:path}", response_model=StatusResponse)
 async def delete_workspace_file(
     conversation_id: str,
     path: str,

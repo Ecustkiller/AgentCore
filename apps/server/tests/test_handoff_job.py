@@ -19,7 +19,6 @@ import pytest
 
 from agentcore.config import settings
 from agentcore.conversation import handoff_jobs as handoff_jobs_mod
-from agentcore.conversation import service
 from agentcore.conversation.service import run_handoff_job
 from agentcore.storage import SnapshotRef
 from agentcore.workspace.locate import workspace_root_path, workspace_storage_key
@@ -28,9 +27,7 @@ from agentcore.workspace.snapshots import restore_into_workspace
 pytestmark = pytest.mark.anyio
 
 
-async def test_restore_into_workspace_uses_source_key_and_dest_root(
-    monkeypatch, tmp_path
-):
+async def test_restore_into_workspace_uses_source_key_and_dest_root(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     captured: dict = {}
 

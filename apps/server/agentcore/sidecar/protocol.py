@@ -85,9 +85,7 @@ def make_result(request_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": JSONRPC_VERSION, "id": request_id, "result": result}
 
 
-def make_error(
-    request_id: Any, code: int, message: str, *, data: Any = None
-) -> dict[str, Any]:
+def make_error(request_id: Any, code: int, message: str, *, data: Any = None) -> dict[str, Any]:
     """Build an error response for ``request_id`` (``data`` is optional detail)."""
     error: dict[str, Any] = {"code": code, "message": message}
     if data is not None:

@@ -8,7 +8,7 @@ factory + repositories + provider all faked, so no DB is required).
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import agentcore.conversation.compaction as compaction
@@ -137,9 +137,7 @@ class _FakeProvider:
 
 
 async def test_summarize_uses_flash_non_thinking_and_injects_budget(monkeypatch):
-    monkeypatch.setattr(
-        compaction.settings, "compaction_summary_char_budget", 4000, raising=True
-    )
+    monkeypatch.setattr(compaction.settings, "compaction_summary_char_budget", 4000, raising=True)
     provider = _FakeProvider("## 已确立的事实\n- X")
     out = await _summarize(provider, "", [_msg("user", "hi")])
     assert out == "## 已确立的事实\n- X"
@@ -152,9 +150,7 @@ async def test_summarize_uses_flash_non_thinking_and_injects_budget(monkeypatch)
 
 
 async def test_summarize_truncates_overlong_output(monkeypatch):
-    monkeypatch.setattr(
-        compaction.settings, "compaction_summary_char_budget", 100, raising=True
-    )
+    monkeypatch.setattr(compaction.settings, "compaction_summary_char_budget", 100, raising=True)
     provider = _FakeProvider("H" + "x" * 500 + "T")
     out = await _summarize(provider, "", [_msg("user", "hi")])
     assert len(out) <= 100
@@ -177,9 +173,7 @@ async def test_summarize_returns_empty_on_timeout(monkeypatch):
 
 async def test_schedule_fires_above_threshold(monkeypatch):
     monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
-    monkeypatch.setattr(
-        compaction.settings, "compaction_trigger_input_tokens", 100, raising=True
-    )
+    monkeypatch.setattr(compaction.settings, "compaction_trigger_input_tokens", 100, raising=True)
     calls: list[tuple[str, int | None]] = []
     fired = asyncio.Event()
 
@@ -198,9 +192,7 @@ async def test_schedule_fires_above_threshold(monkeypatch):
 
 async def test_schedule_noop_below_threshold(monkeypatch):
     monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
-    monkeypatch.setattr(
-        compaction.settings, "compaction_trigger_input_tokens", 64000, raising=True
-    )
+    monkeypatch.setattr(compaction.settings, "compaction_trigger_input_tokens", 64000, raising=True)
     calls: list[str] = []
 
     async def _rec(conversation_id, *, trigger_input_tokens=None):
@@ -227,9 +219,7 @@ async def test_schedule_noop_when_disabled(monkeypatch):
 
 async def test_schedule_dedupes_while_inflight(monkeypatch):
     monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
-    monkeypatch.setattr(
-        compaction.settings, "compaction_trigger_input_tokens", 100, raising=True
-    )
+    monkeypatch.setattr(compaction.settings, "compaction_trigger_input_tokens", 100, raising=True)
     calls: list[str] = []
 
     async def _rec(conversation_id, *, trigger_input_tokens=None):
@@ -268,14 +258,12 @@ class _CloseProvider(_FakeProvider):
 
 
 def _conv(*, summary: str | None, watermark: datetime | None) -> SimpleNamespace:
-    return SimpleNamespace(
-        user_id="u1", compaction_summary=summary, compacted_through=watermark
-    )
+    return SimpleNamespace(user_id="u1", compaction_summary=summary, compacted_through=watermark)
 
 
 def _msgs(n: int) -> list[SimpleNamespace]:
     """``n`` alternating user/assistant messages with increasing datetime created_at."""
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     return [
         _msg("user" if i % 2 == 0 else "assistant", f"m{i}", base + timedelta(minutes=i))
         for i in range(n)
@@ -328,18 +316,10 @@ def _wire_runner(monkeypatch, *, conv, messages, provider) -> dict:
     monkeypatch.setattr(compaction, "build_provider", _build)
     monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
     monkeypatch.setattr(compaction.settings, "billing_mode", "platform", raising=True)
-    monkeypatch.setattr(
-        compaction.settings, "compaction_recency_messages", 20, raising=True
-    )
-    monkeypatch.setattr(
-        compaction.settings, "compaction_min_fold_messages", 4, raising=True
-    )
-    monkeypatch.setattr(
-        compaction.settings, "compaction_max_fold_messages", 200, raising=True
-    )
-    monkeypatch.setattr(
-        compaction.settings, "compaction_summary_char_budget", 4000, raising=True
-    )
+    monkeypatch.setattr(compaction.settings, "compaction_recency_messages", 20, raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_min_fold_messages", 4, raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_max_fold_messages", 200, raising=True)
+    monkeypatch.setattr(compaction.settings, "compaction_summary_char_budget", 4000, raising=True)
     return rec
 
 

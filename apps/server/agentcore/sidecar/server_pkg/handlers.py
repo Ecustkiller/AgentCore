@@ -215,9 +215,7 @@ class HandlerMixin:
                 )
             )
             return
-        suspension = await self._paused_store.claim(
-            message_id, conversation_id=conversation_id
-        )
+        suspension = await self._paused_store.claim(message_id, conversation_id=conversation_id)
         if suspension is None:
             await self._send(
                 protocol.make_error(

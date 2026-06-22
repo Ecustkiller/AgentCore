@@ -114,9 +114,7 @@ class EscalateTool:
             approval=ToolApproval.NEVER,
         )
 
-    async def execute(
-        self, arguments: dict[str, Any], context: ToolContext
-    ) -> ToolResult:
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         question = str(arguments.get("question") or "").strip()
         if not question:
             return ToolResult(
@@ -127,8 +125,8 @@ class EscalateTool:
             )
         assumption = str(arguments.get("assumption") or "").strip()
         blocking = bool(arguments.get("blocking"))
-        # 执行引擎架构设计.md §受监督的波循环: kind=scope marks a 职责/范围 deviation the WaveScheduler
-        # consumes at a wave boundary (CEO re-steers the un-run tail); orthogonal to blocking
+        # 执行引擎架构设计.md §受监督的波循环: kind=scope marks a 职责/范围 deviation
+        # the WaveScheduler consumes at a wave boundary (CEO re-steers the un-run tail);
         # (which is the 阻塞式求决策 user axis). Unknown values degrade to "normal".
         kind = str(arguments.get("kind") or "normal").strip().lower()
         if kind not in ("normal", "scope"):
@@ -186,9 +184,7 @@ class EscalateTool:
         return ToolResult(tool_call_id="", success=True, output=note)
 
 
-def escalate_tool_result(
-    status: str, answer: str | None, assumption: str
-) -> ToolResult:
+def escalate_tool_result(status: str, answer: str | None, assumption: str) -> ToolResult:
     """Map a blocking escalate's outcome to the CONTINUE result the worker loop consumes.
 
     The single source of truth for the live suspend path (and any future durable resume),
