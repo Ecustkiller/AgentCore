@@ -27,6 +27,7 @@ const plan: ExecutionPlan = {
 };
 
 const runDetail = (runId: string): DetailTab => ({
+  kind: "run",
   id: runDetailTabId(MID, runId),
   title: runId,
   messageId: MID,
@@ -164,5 +165,30 @@ describe("showRunDetail", () => {
     expect(panel().open).toBe(true);
     expect(panel().activeTabId).toBe(tabId("run-1"));
     expect(panel().tabs[0].title).toBe("研究员");
+  });
+});
+
+describe("showContentDetail", () => {
+  it("pins an endpoint bubble as a content tab, reveals + activates it", () => {
+    panel().showContentDetail(MID, "answer-msg", "最终回答");
+    const id = contentDetailTabId(MID, "answer-msg");
+    expect(panel().open).toBe(true);
+    expect(panel().activeTabId).toBe(id);
+    const tab = panel().tabs[0];
+    expect(tab.kind).toBe("content");
+    expect(tab.title).toBe("最终回答");
+    // The content tab carries the bubble to render, not a runId.
+    if (tab.kind === "content") {
+      expect(tab.contentMessageId).toBe("answer-msg");
+    }
+  });
+
+  it("coexists with run tabs and dedups by its own id", () => {
+    panel().showRunDetail(MID, "run-1", "研究员");
+    panel().showContentDetail(MID, "answer-msg", "最终回答");
+    panel().showContentDetail(MID, "answer-msg", "最终回答");
+    // One run tab + one content tab; the re-open dedups rather than appends.
+    expect(panel().tabs).toHaveLength(2);
+    expect(panel().tabs.map((t) => t.kind)).toEqual(["run", "content"]);
   });
 });

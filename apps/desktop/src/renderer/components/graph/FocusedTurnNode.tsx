@@ -147,7 +147,6 @@ export function FocusedTurnNode({ data }: NodeProps) {
           {showDebate && (
             <IconButton
               onClick={() => {
-                setEndpoint(null);
                 setRevisionsOpen(false);
                 setDebateOpen((v) => !v);
               }}
@@ -162,7 +161,6 @@ export function FocusedTurnNode({ data }: NodeProps) {
           {showRevisions && (
             <IconButton
               onClick={() => {
-                setEndpoint(null);
                 setDebateOpen(false);
                 setRevisionsOpen((v) => !v);
               }}

@@ -620,8 +620,7 @@ export function GraphView({
             enterIndex: 0,
             // Lit when the panel surfaces this turn's prompt (mirrors a worker's
             // glow); matched by the input bookend's stand-in message id.
-            focused:
-              !!taskMessage && litEndpointMessageId === taskMessage.id,
+            focused: !!taskMessage && litEndpointMessageId === taskMessage.id,
             onActivate: taskMessage ? () => activateNode(INPUT_ID) : undefined,
           },
         } as Node);
@@ -648,8 +647,7 @@ export function GraphView({
               enterIndex: workerRuns.length + 1,
               // Lit when the panel surfaces the final answer; matched by the
               // answer's bubble id (the captain's reply is bubble-scoped).
-              focused:
-                !!finalAnswer && litEndpointMessageId === finalAnswer.id,
+              focused: !!finalAnswer && litEndpointMessageId === finalAnswer.id,
               onActivate: finalAnswer
                 ? () => activateNode(captainRun.id)
                 : undefined,

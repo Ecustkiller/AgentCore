@@ -11,11 +11,14 @@
 // process exits non-zero, so a component change can't silently break an AI state.
 //
 // Usage:
-//   node scripts/shoot.mjs                 # shoot every scenario
+//   node scripts/shoot.mjs                 # terminal state of every scenario
 //   node scripts/shoot.mjs debate          # only scenarios whose name includes "debate"
+//   SHOOT_FRAMES=3 node scripts/shoot.mjs  # + 3 mid-stream frames per scenario
 //   SHOOT_SETTLE_MS=1200 node scripts/shoot.mjs   # longer settle for async graphs
 //
-// Env knobs: SHOOT_SETTLE_MS (default 800), SHOOT_WIDTH (1440), SHOOT_HEIGHT (900),
+// Env knobs: SHOOT_FRAMES (default 0 = terminal only; N = N evenly-spaced in-progress
+// frames per scenario via #/preview?s=…&k=<count>, file `<name>.f<k>.png`),
+// SHOOT_SETTLE_MS (default 800), SHOOT_WIDTH (1440), SHOOT_HEIGHT (900),
 // SHOOT_SCALE (2), SHOOT_THEME ("light" | "dark", default light).
 
 import { mkdir, readFile, readdir, rm } from "node:fs/promises";
@@ -37,7 +40,18 @@ const VIEWPORT = {
 };
 const SCALE = Number(process.env.SHOOT_SCALE ?? 2);
 const THEME = process.env.SHOOT_THEME === "dark" ? "dark" : "light";
+const FRAMES = Math.max(0, Number(process.env.SHOOT_FRAMES ?? 0) | 0);
 const filter = (process.argv[2] ?? "").toLowerCase();
+
+/** Up to `frames` evenly-spaced event counts in (0, total) for mid-stream frames. */
+function evenCuts(total, frames) {
+  const cuts = new Set();
+  for (let i = 1; i <= frames; i++) {
+    const k = Math.round((total * i) / (frames + 1));
+    if (k > 0 && k < total) cuts.add(k);
+  }
+  return [...cuts].sort((a, b) => a - b);
+}
 
 async function loadScenarios() {
   const files = (await readdir(fixturesDir))
@@ -45,10 +59,15 @@ async function loadScenarios() {
     .sort();
   const scenarios = [];
   for (const file of files) {
-    const { name, description } = JSON.parse(
+    const { name, description, events } = JSON.parse(
       await readFile(resolve(fixturesDir, file), "utf8"),
     );
-    if (name) scenarios.push({ name, description: description ?? "" });
+    if (name)
+      scenarios.push({
+        name,
+        description: description ?? "",
+        events: Array.isArray(events) ? events.length : 0,
+      });
   }
   return scenarios;
 }
@@ -105,28 +124,46 @@ async function main() {
     deviceScaleFactor: SCALE,
     colorScheme: THEME,
   });
-  // Collect uncaught renderer errors per scenario. An error means the AI state
-  // failed to render even if the tree didn't fully unmount, so the smoke gate
-  // counts it as a failure.
+  // Collect uncaught renderer errors per shot. An error means the AI state failed
+  // to render even if the tree didn't fully unmount, so the smoke gate counts it
+  // as a failure.
   const pageErrors = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
 
+  // Flatten to a shot list: the terminal state of every scenario, plus sampled
+  // mid-stream frames when SHOOT_FRAMES>0 so the streaming intermediate states
+  // (tool running, run started-not-completed…) are gated too, not just the end.
+  const shots = [];
+  for (const s of scenarios) {
+    shots.push({ name: s.name, k: null, file: `${s.name}.png` });
+    if (FRAMES > 0) {
+      for (const k of evenCuts(s.events, FRAMES)) {
+        shots.push({ name: s.name, k, file: `${s.name}.f${k}.png` });
+      }
+    }
+  }
+
   let ok = 0;
   const failures = [];
-  for (const [i, s] of scenarios.entries()) {
-    const label = `[${i + 1}/${scenarios.length}] ${s.name}`;
+  for (const [i, shot] of shots.entries()) {
+    const label = `[${i + 1}/${shots.length}] ${shot.file}`;
     pageErrors.length = 0;
     let failure = null;
     try {
-      // A distinct search param forces a full reload per scenario (hash-only
-      // changes don't reload), so every shot starts from a clean app boot.
+      // A distinct search param forces a full reload per shot (hash-only changes
+      // don't reload), so every shot starts from a clean app boot.
       const url = new URL("index.web.html", base);
       url.searchParams.set("shoot", String(i));
-      url.hash = `/preview?s=${encodeURIComponent(s.name)}`;
+      url.hash =
+        shot.k === null
+          ? `/preview?s=${encodeURIComponent(shot.name)}`
+          : `/preview?s=${encodeURIComponent(shot.name)}&k=${shot.k}`;
       await page.goto(url.href, { waitUntil: "load", timeout: 30_000 });
-      await page.waitForSelector(`[data-preview-scenario="${s.name}"]`, {
-        timeout: 15_000,
-      });
+      const frameSel = shot.k === null ? "full" : String(shot.k);
+      await page.waitForSelector(
+        `[data-preview-scenario="${shot.name}"][data-preview-frame="${frameSel}"]`,
+        { timeout: 15_000 },
+      );
       await page.evaluate(() => document.fonts?.ready).catch(() => {});
       // Let async renderers (elk team-graph layout, mermaid, katex) settle.
       await page.waitForTimeout(SETTLE_MS);
@@ -135,14 +172,12 @@ async function main() {
     }
     // Always shoot — even on failure — so a red CI gate has visual evidence (e.g.
     // the RouteError fallback) to upload as an artifact.
-    await page
-      .screenshot({ path: resolve(outDir, `${s.name}.png`) })
-      .catch(() => {});
+    await page.screenshot({ path: resolve(outDir, shot.file) }).catch(() => {});
     if (pageErrors.length) {
       failure = `${failure ? `${failure}; ` : ""}page error: ${pageErrors.join(" | ")}`;
     }
     if (failure) {
-      failures.push({ name: s.name, error: failure });
+      failures.push({ name: shot.file, error: failure });
       console.error(`  \u2717 ${label} — ${failure}`);
     } else {
       ok += 1;
@@ -153,7 +188,7 @@ async function main() {
   await browser.close();
   await server.close();
 
-  console.log(`\nDone: ${ok}/${scenarios.length} → ${outDir}`);
+  console.log(`\nDone: ${ok}/${shots.length} → ${outDir}`);
   if (failures.length) {
     console.error(`${failures.length} failed:`);
     for (const f of failures) console.error(`  - ${f.name}: ${f.error}`);

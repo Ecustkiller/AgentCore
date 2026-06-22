@@ -152,8 +152,8 @@ export function CanvasZoomedTurn({
   }, [onClose, scopeId]);
 
   return (
-    // Re-scope the subtree to the followed turn so GraphView + foot drawer render
-    // whichever round this view tracks.
+    // Re-scope the subtree to the followed turn so the GraphView renders whichever
+    // round this view tracks.
     <ExecutionScopeContext.Provider value={scopeId}>
       <div className="flex h-full flex-col bg-background">
         <div className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
@@ -206,7 +206,7 @@ export function CanvasZoomedTurn({
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {showClash && execution ? (
             // 交锋叙事页：决策简报 + 叙事线全高阅读区；各方发言点角色钻右侧详情面板
-            // (与图节点钻取同一 SidePanel)。无脚抽屉——它是图页读 endpoint 的概念。
+            // (与图节点 / 端点钻取同一 SidePanel)。
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <DebateBody execution={execution} messageId={scopeId} />
             </div>
