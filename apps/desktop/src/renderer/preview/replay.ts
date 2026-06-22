@@ -45,6 +45,28 @@ export function replayFixtureNow(
 }
 
 /**
+ * Replay only the first `count` events → a mid-stream (in-progress) frame, e.g.
+ * a tool still running or a run started-but-not-completed. Drives the screenshot
+ * harness's frame scrubber and the `#/preview?s=…&k=<count>` deep link, so the
+ * streaming intermediate states are eyeball-able and gate-able, not just terminal.
+ */
+export function replayFixturePrefix(
+  conversationId: string,
+  events: SSEEvent[],
+  count: number,
+  userPrompt?: string,
+): void {
+  seedSlice(conversationId, userPrompt);
+  const n = Math.max(0, Math.min(count, events.length));
+  for (let i = 0; i < n; i++) {
+    dispatchSSEEvent(events[i], { conversationId });
+  }
+  // content_delta is rAF-buffered; flush so a paused mid-stream frame lands its
+  // partial text synchronously before the harness screenshots.
+  flushPendingContent(conversationId);
+}
+
+/**
  * Replay with a per-event delay so the turn animates in like a live stream.
  * Returns a canceller (call on unmount / when switching fixtures).
  */

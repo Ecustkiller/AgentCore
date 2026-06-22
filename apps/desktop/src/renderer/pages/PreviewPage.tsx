@@ -1,7 +1,11 @@
 import { ChatView } from "@/components/chat/ChatView";
 import { Button } from "@/components/ui";
 import { PREVIEW_FIXTURES, type PreviewFixture } from "@/preview/fixtures";
-import { replayFixtureNow, replayFixtureStreamed } from "@/preview/replay";
+import {
+  replayFixtureNow,
+  replayFixturePrefix,
+  replayFixtureStreamed,
+} from "@/preview/replay";
 import { useConversationStore } from "@/stores/conversation";
 import { FlaskConical, Play, Radio } from "lucide-react";
 import { useEffect, useRef } from "react";
@@ -30,6 +34,15 @@ export function PreviewPage() {
     null;
   const selected = current?.name ?? null;
 
+  // Mid-stream frame index (`#/preview?s=…&k=<n>`): replay only the first n events
+  // instead of the terminal state. Drives the harness's streaming frame scrubber;
+  // null = full/terminal. Invalid / ≤0 → treated as full.
+  const frameRaw = searchParams.get("k");
+  const parsedFrame =
+    frameRaw === null ? Number.NaN : Number.parseInt(frameRaw, 10);
+  const frame =
+    Number.isFinite(parsedFrame) && parsedFrame > 0 ? parsedFrame : null;
+
   const stopStreamed = () => {
     cancelRef.current?.();
     cancelRef.current = null;
@@ -55,22 +68,26 @@ export function PreviewPage() {
     );
   };
 
-  // Replay the selected scenario's terminal state whenever the selection changes
-  // (driven by the URL `?s=` param). Kept free of component-scope closures — it
-  // talks to the cancel ref directly and re-looks up the fixture — so `[selected]`
-  // is honestly exhaustive.
+  // Replay on selection / frame change (driven by the URL `?s=` + `?k=` params):
+  // a frame index replays only the first k events (mid-stream), otherwise the full
+  // terminal state. Kept free of component-scope closures — it talks to the cancel
+  // ref directly and re-looks up the fixture — so the dep array is honestly exhaustive.
   useEffect(() => {
     cancelRef.current?.();
     cancelRef.current = null;
     const fx = PREVIEW_FIXTURES.find((f) => f.name === selected);
     if (fx) {
-      replayFixtureNow(convIdFor(fx), fx.events, fx.description);
+      if (frame !== null) {
+        replayFixturePrefix(convIdFor(fx), fx.events, frame, fx.description);
+      } else {
+        replayFixtureNow(convIdFor(fx), fx.events, fx.description);
+      }
     }
     return () => {
       cancelRef.current?.();
       cancelRef.current = null;
     };
-  }, [selected]);
+  }, [selected, frame]);
 
   // Drop the synthetic slice when leaving so it never lingers as the active
   // conversation.
@@ -81,7 +98,11 @@ export function PreviewPage() {
   }, []);
 
   return (
-    <div className="flex h-full min-h-0" data-preview-scenario={selected ?? ""}>
+    <div
+      className="flex h-full min-h-0"
+      data-preview-scenario={selected ?? ""}
+      data-preview-frame={frame !== null ? String(frame) : "full"}
+    >
       <aside className="flex w-72 shrink-0 flex-col border-r border-border">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <FlaskConical size={18} className="text-primary" />
