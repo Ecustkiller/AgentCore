@@ -1,15 +1,14 @@
 "use client";
 
 import {
-  DESKTOP_VERSION,
   MOBILE_WEB_URL,
-  PLATFORMS,
-  RELEASE_NOTES_URL,
   RELEASES_LATEST,
   SYSTEM_REQUIREMENTS,
+  platformsFromArtifacts,
   type PlatformId,
 } from "@/lib/download";
-import { useEffect, useState } from "react";
+import { useDesktopRelease } from "@/hooks/useDesktopRelease";
+import { useEffect, useMemo, useState } from "react";
 
 function detectPlatform(): PlatformId {
   if (typeof navigator === "undefined") return "win";
@@ -44,12 +43,18 @@ function DownloadIcon() {
 
 export default function DownloadPanel() {
   const [platform, setPlatform] = useState<PlatformId>("win");
+  const { artifacts } = useDesktopRelease();
+
+  const platforms = useMemo(
+    () => platformsFromArtifacts(artifacts),
+    [artifacts],
+  );
 
   useEffect(() => {
     setPlatform(detectPlatform());
   }, []);
 
-  const primary = PLATFORMS.find((p) => p.id === platform) ?? PLATFORMS[0];
+  const primary = platforms.find((p) => p.id === platform) ?? platforms[0];
   const primaryReady = primary.available && primary.url;
 
   return (
@@ -60,7 +65,7 @@ export default function DownloadPanel() {
         <h2 className="mt-3 text-2xl font-bold sm:text-3xl">
           {primary.label}
           <span className="ml-2 text-base font-normal text-muted-foreground">
-            v{DESKTOP_VERSION}
+            v{artifacts.version}
           </span>
         </h2>
         <p className="mt-2 text-muted-foreground">{primary.subtitle}</p>
@@ -96,7 +101,7 @@ export default function DownloadPanel() {
       {/* 全平台列表 + 其他入口 */}
       <div className="space-y-4">
         <p className="text-sm font-semibold">所有平台</p>
-        {PLATFORMS.map((p) => (
+        {platforms.map((p) => (
           <div
             key={p.id}
             className="surface flex items-center justify-between gap-4 p-4"
@@ -135,12 +140,12 @@ export default function DownloadPanel() {
             </li>
             <li>
               <a
-                href={RELEASE_NOTES_URL}
+                href={artifacts.releaseNotesUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:text-foreground"
               >
-                查看 v{DESKTOP_VERSION} 发布说明
+                查看 v{artifacts.version} 发布说明
               </a>
             </li>
             <li>
@@ -174,7 +179,7 @@ export default function DownloadPanel() {
               ))}
             </ul>
           </div>
-          {PLATFORMS.find((p) => p.id === "mac")?.available ? (
+          {platforms.find((p) => p.id === "mac")?.available ? (
             <div>
               <p className="font-semibold">系统要求 · macOS</p>
               <ul className="mt-4 grid gap-2">

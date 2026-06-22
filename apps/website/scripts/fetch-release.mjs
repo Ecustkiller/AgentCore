@@ -1,60 +1,25 @@
 #!/usr/bin/env node
 /**
  * 构建前从 GitHub Releases 拉取 Latest 正式版，生成 download.generated.ts。
- * 公开 API、无需 token；失败时回退到 FALLBACK_VERSION（离线 dev 可用）。
+ * 线上 /download 还会在运行时经 Pages Function /api/desktop-release 再拉一次；
+ * 此脚本仅作 SSG 首屏与 metadata 回退。
  */
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  artifactUrlsForVersion,
+  fetchLatestReleaseArtifacts,
+} from "../functions/_lib/releaseArtifacts.mjs";
 
-const RELEASES_REPO = "Lawofall/AgentCore-releases";
-const FALLBACK_VERSION = "0.3.0";
+const FALLBACK_VERSION = "0.3.1";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
-function fallbackArtifacts(version) {
-  const base = `https://github.com/${RELEASES_REPO}/releases/download/v${version}`;
-  return {
-    version,
-    releaseNotesUrl: `https://github.com/${RELEASES_REPO}/releases/tag/v${version}`,
-    winUrl: `${base}/AgentCore-${version}-win-x64.exe`,
-    winFilename: `AgentCore-${version}-win-x64.exe`,
-    macUrl: `${base}/AgentCore-${version}-mac-arm64.dmg`,
-    macFilename: `AgentCore-${version}-mac-arm64.dmg`,
-  };
-}
-
-async function fetchLatest() {
-  const res = await fetch(
-    `https://api.github.com/repos/${RELEASES_REPO}/releases/latest`,
-    { headers: { "User-Agent": "agentcore-website-build" } },
-  );
-  if (!res.ok) {
-    throw new Error(`GitHub API ${res.status}`);
-  }
-  const data = await res.json();
-  if (data.draft) {
-    throw new Error(`Latest release ${data.tag_name} is still draft`);
-  }
-  const version = String(data.tag_name).replace(/^v/, "");
-  const assets = data.assets ?? [];
-  const winAsset = assets.find((a) => /-win-x64\.exe$/i.test(a.name));
-  const macAsset = assets.find((a) => /-mac-arm64\.dmg$/i.test(a.name));
-  const base = fallbackArtifacts(version);
-  return {
-    version,
-    releaseNotesUrl: data.html_url,
-    winUrl: winAsset?.browser_download_url ?? base.winUrl,
-    winFilename: winAsset?.name ?? base.winFilename,
-    macUrl: macAsset?.browser_download_url ?? "",
-    macFilename: macAsset?.name ?? "",
-  };
-}
-
 async function main() {
-  let artifacts = fallbackArtifacts(FALLBACK_VERSION);
+  let artifacts = artifactUrlsForVersion(FALLBACK_VERSION);
   try {
-    artifacts = await fetchLatest();
+    artifacts = await fetchLatestReleaseArtifacts(FALLBACK_VERSION);
     console.log(
       `fetch-release: latest v${artifacts.version}` +
         (artifacts.macUrl ? " (win+mac)" : " (win only)"),

@@ -37,30 +37,46 @@ export type PlatformDownload = {
 
 const macAvailable = Boolean(MAC_DMG_URL);
 
-export const PLATFORMS: PlatformDownload[] = [
-  {
-    id: "win",
-    label: "Windows",
-    subtitle: "Windows 10/11 · 64 位",
-    available: true,
-    url: WIN_INSTALLER_URL,
-    fileLabel: WIN_INSTALLER_FILENAME,
-  },
-  {
-    id: "mac",
-    label: "macOS",
-    subtitle: "Apple Silicon（M 系列 / arm64）",
-    available: macAvailable,
-    url: macAvailable ? MAC_DMG_URL : undefined,
-    fileLabel: macAvailable ? MAC_DMG_FILENAME : undefined,
-  },
-  {
-    id: "linux",
-    label: "Linux",
-    subtitle: "AppImage",
-    available: false,
-  },
-];
+/** Build platform rows from release artifact URLs (runtime or build-time). */
+export function platformsFromArtifacts(artifacts: {
+  winUrl: string;
+  winFilename: string;
+  macUrl: string;
+  macFilename: string;
+}): PlatformDownload[] {
+  const macReady = Boolean(artifacts.macUrl);
+  return [
+    {
+      id: "win",
+      label: "Windows",
+      subtitle: "Windows 10/11 · 64 位",
+      available: true,
+      url: artifacts.winUrl,
+      fileLabel: artifacts.winFilename,
+    },
+    {
+      id: "mac",
+      label: "macOS",
+      subtitle: "Apple Silicon（M 系列 / arm64）",
+      available: macReady,
+      url: macReady ? artifacts.macUrl : undefined,
+      fileLabel: macReady ? artifacts.macFilename : undefined,
+    },
+    {
+      id: "linux",
+      label: "Linux",
+      subtitle: "AppImage",
+      available: false,
+    },
+  ];
+}
+
+export const PLATFORMS: PlatformDownload[] = platformsFromArtifacts({
+  winUrl: WIN_INSTALLER_URL,
+  winFilename: WIN_INSTALLER_FILENAME,
+  macUrl: MAC_DMG_URL,
+  macFilename: MAC_DMG_FILENAME,
+});
 
 export const SYSTEM_REQUIREMENTS: Record<PlatformId, string[]> = {
   win: [
