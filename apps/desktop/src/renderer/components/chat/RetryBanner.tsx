@@ -1,4 +1,6 @@
 import { Button, IconButton } from "@/components/ui";
+import { statusAccentText, statusChip } from "@/components/ui/tone-presets";
+import { cn } from "@/lib/utils";
 import {
   useActiveError,
   useActiveErrorAction,
@@ -17,6 +19,9 @@ import { useNavigate } from "react-router-dom";
  * optional action routes the user to fix the cause (e.g. "去配置" → model config
  * for a missing BYOK key); dismissing only hides the banner.
  *
+ * Tone: config remedy (去配置) → amber `warning` (needs user setup, not a crash);
+ * transport / service failures → red `destructive`.
+ *
  * Conversation-scoped (reads the active conversation's error state) and therefore
  * self-contained wherever it mounts — mirrors {@link import("./ApprovalPrompt").ApprovalPrompt}
  * / {@link import("./ResumePrompt").ResumePrompt}.
@@ -29,13 +34,28 @@ export function RetryBanner() {
   const navigate = useNavigate();
   if (!error) return null;
 
+  const configRemedy = action != null;
+
   return (
-    <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-      <AlertTriangle size={15} className="shrink-0" />
+    <div
+      className={cn(
+        "mx-4 mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+        configRemedy ? statusChip.warning : statusChip.destructive,
+      )}
+    >
+      <AlertTriangle
+        size={15}
+        className={cn(
+          "shrink-0",
+          configRemedy
+            ? statusAccentText.warning
+            : statusAccentText.destructive,
+        )}
+      />
       <span className="min-w-0 flex-1">{error}</span>
       {action && (
         <Button
-          variant="destructive"
+          variant="warning"
           className="shrink-0"
           icon={<KeyRound size={13} />}
           onClick={() => {
@@ -59,7 +79,11 @@ export function RetryBanner() {
       <IconButton
         onClick={() => clearError()}
         aria-label="关闭"
-        className="text-destructive/70 hover:bg-transparent hover:text-destructive"
+        className={
+          configRemedy
+            ? "text-warning/70 hover:bg-transparent hover:text-warning"
+            : "text-destructive/70 hover:bg-transparent hover:text-destructive"
+        }
       >
         <X size={14} />
       </IconButton>

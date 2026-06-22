@@ -1,4 +1,4 @@
-"""Curated conformance vectors — representative SSE event sequences (手机端落地设计 §六).
+"""Curated conformance vectors — representative SSE event sequences (前端技术与架构 §十二).
 
 Built with the REAL event builders (:mod:`agentcore.runtime.events`) so every payload
 shape matches production exactly; the export step projects each via the oracle into the
@@ -392,6 +392,13 @@ def _multi_agent_debate() -> list[SSEEvent]:
                     {"key": "pro", "name": "支持方", "run_id": pro_run, "ok": True},
                     {"key": "con", "name": "反对方", "run_id": con_run, "ok": True},
                 ],
+                "clashes": [
+                    {
+                        "from_key": "con",
+                        "to_key": "pro",
+                        "point": "收益可量化但未对冲风险敞口，量化口径回避了尾部风险。",
+                    },
+                ],
             },
         ],
         "brief": {
@@ -512,6 +519,18 @@ def _multi_agent_roundtable_rounds() -> list[SSEEvent]:
             {"key": "a", "name": "技术视角", "run_id": r1a, "ok": True},
             {"key": "b", "name": "监管视角", "run_id": r1b, "ok": True},
             {"key": "c", "name": "产业视角", "run_id": r1c, "ok": True},
+        ],
+        "clashes": [
+            {
+                "from_key": "b",
+                "to_key": "a",
+                "point": "能力外溢说回避了问责主体，技术归因不能替代责任分配。",
+            },
+            {
+                "from_key": "c",
+                "to_key": "b",
+                "point": "强问责会抬高合规成本，产业落地承受不起一刀切立法。",
+            },
         ],
     }
     return [

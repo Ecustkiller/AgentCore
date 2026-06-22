@@ -5,8 +5,8 @@
  * 当前选区。AI 改写不在此（其触发按钮由宿主放在头部，见 `MarkdownFileEditor`）。
  */
 
-import type { EditorView } from "@codemirror/view";
 import { IconButton } from "@/components/ui";
+import type { EditorView } from "@codemirror/view";
 import {
   Bold,
   Code,

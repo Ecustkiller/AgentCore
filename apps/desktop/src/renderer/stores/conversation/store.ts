@@ -1,11 +1,13 @@
 import type { ErrorAction } from "@/lib/errors";
 import {
-  appendContentStep,
-  appendReasoningStep,
-  appendToolStep,
-  dropTrailingContentSteps,
-  resolveToolStep,
-} from "@/lib/processTimeline";
+  foldCitations,
+  foldContentDelta,
+  foldContentReset,
+  foldReasoningDelta,
+  foldToolUseEnd,
+  foldToolUseStart,
+  messageLaneFromMessage,
+} from "@/lib/foldMessageLane";
 import { stopConversation } from "@/services/stopTurn";
 import { useApprovalStore } from "@/stores/approvals";
 import { execRuntime, useExecutionStore } from "@/stores/execution";
@@ -68,6 +70,10 @@ export interface ConversationState {
   ) => void;
   setTraceIdOnLastMessage: (
     traceId: string,
+    conversationId?: string | null,
+  ) => void;
+  attachWorkspacePromotionToLastMessage: (
+    promotion: { folderId: string; name: string },
     conversationId?: string | null,
   ) => void;
   addProcessTool: (
@@ -236,10 +242,11 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (!last) return null;
+        const lane = foldContentDelta(messageLaneFromMessage(last), chunk);
         messages[messages.length - 1] = {
           ...last,
-          content: last.content + chunk,
-          process: appendContentStep(last.process, chunk),
+          content: lane.content,
+          process: lane.process,
           composingTool: null,
         };
         return { messages };
@@ -250,10 +257,11 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (!last || last.role !== "assistant") return null;
+        const lane = foldContentReset(messageLaneFromMessage(last));
         messages[messages.length - 1] = {
           ...last,
-          content: "",
-          process: dropTrailingContentSteps(last.process),
+          content: lane.content,
+          process: lane.process,
         };
         return { messages };
       }),
@@ -263,10 +271,11 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (!last) return null;
+        const lane = foldReasoningDelta(messageLaneFromMessage(last), chunk);
         messages[messages.length - 1] = {
           ...last,
-          reasoning: (last.reasoning ?? "") + chunk,
-          process: appendReasoningStep(last.process, chunk),
+          reasoning: lane.reasoning,
+          process: lane.process,
         };
         return { messages };
       }),
@@ -290,14 +299,28 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         return { messages };
       }),
 
-    addProcessTool: (payload, conversationId) =>
+    attachWorkspacePromotionToLastMessage: (promotion, conversationId) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (!last || last.role !== "assistant") return null;
         messages[messages.length - 1] = {
           ...last,
-          process: appendToolStep(last.process, payload),
+          workspacePromotion: promotion,
+        };
+        return { messages };
+      }),
+
+    addProcessTool: (payload, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") return null;
+        const lane = foldToolUseStart(messageLaneFromMessage(last), payload);
+        if (lane.process === last.process) return null;
+        messages[messages.length - 1] = {
+          ...last,
+          process: lane.process,
           composingTool: null,
         };
         return { messages };
@@ -308,9 +331,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (!last || last.role !== "assistant") return null;
-        const process = resolveToolStep(last.process, payload);
-        if (process === last.process) return null;
-        messages[messages.length - 1] = { ...last, process };
+        const lane = foldToolUseEnd(messageLaneFromMessage(last), payload);
+        if (lane.process === last.process) return null;
+        messages[messages.length - 1] = { ...last, process: lane.process };
         return { messages };
       }),
 
@@ -319,9 +342,9 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         if (citations.length === 0) return null;
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
-        if (last && last.role === "assistant") {
-          messages[messages.length - 1] = { ...last, citations };
-        }
+        if (!last || last.role !== "assistant") return null;
+        const lane = foldCitations(messageLaneFromMessage(last), citations);
+        messages[messages.length - 1] = { ...last, citations: lane.citations };
         return { messages };
       }),
 

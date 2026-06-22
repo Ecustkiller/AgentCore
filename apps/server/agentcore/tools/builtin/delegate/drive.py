@@ -112,7 +112,7 @@ async def drive(
             completed=m.completed,
             failed=m.failed,
             skipped=m.skipped,
-            # 受监督波循环埋点 (职责晚绑定与动态再编排 §7.2): boundary fires this segment +
+            # 受监督波循环埋点 (执行引擎架构设计.md §受监督的波循环): boundary fires this segment +
             # scope 信号占比 (derived from raw counts, mirroring avg_parallelism).
             bind=m.bind_boundaries,
             scope=m.scope_boundaries,

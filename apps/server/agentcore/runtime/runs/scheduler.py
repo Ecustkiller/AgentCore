@@ -48,7 +48,7 @@ class BoundaryReason(Enum):
       reactive twin of ``BIND`` (the CEO's *proactive* late-binding): both hand control
       back to the CEO at a wave boundary, neither needs a live user (≠ ``CHECKPOINT``).
 
-    → 见设计: docs/07-规划/职责晚绑定与动态再编排设计.md §4.4 / §7.1
+    → 见设计: docs/03-AI核心/执行引擎架构设计.md §受监督的波循环
     """
 
     CHECKPOINT = "checkpoint"

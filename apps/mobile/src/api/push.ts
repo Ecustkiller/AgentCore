@@ -3,7 +3,7 @@ import {
   registerDevice,
   unregisterDevice,
 } from "@/api/devices";
-// Native (Capacitor) push notification integration (原生推送, 手机端落地设计 P2).
+// Native (Capacitor) push notification integration (原生推送, 前端技术与架构 §七).
 //
 // The backend already pushes a 需要你 notification when an agent durably pauses
 // (runtime/suspension_persistence.py _notify_pause → push/notify.py notify_user), carrying

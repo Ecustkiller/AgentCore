@@ -26,7 +26,7 @@ import { useState } from "react";
  * Pure projection: reads the same per-message {@link Execution} the graph does
  * (revisions are synthesized into it from their `run_started` frames), so live and
  * replayed turns render identically with no second source of truth — exactly like
- * {@link DebateCompare} for debates.
+ * {@link DebateBody} for debates.
  */
 export function RevisionCompare({
   execution,
@@ -45,7 +45,9 @@ export function RevisionCompare({
   if (chains.length === 0) return null;
 
   const rows = (
-    <div className={bare ? "space-y-4" : "space-y-4 border-t border-border p-4"}>
+    <div
+      className={bare ? "space-y-4" : "space-y-4 border-t border-border p-4"}
+    >
       {chains.map((chain) => (
         <ChainRow
           key={chain.originalId}

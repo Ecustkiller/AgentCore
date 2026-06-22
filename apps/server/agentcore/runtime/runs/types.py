@@ -187,12 +187,12 @@ class RunSpec:
     # (autonomous jobs / tests), so a plan with no checkpoint marks runs byte-for-
     # byte as before. → 见设计: docs/03-AI核心/执行引擎架构设计.md §检查点决策语义
     checkpoint_after: bool = False
-    # 晚绑定标记（受监督的波循环 / 职责晚绑定与动态再编排）：为 True 的节点其 spec 关键
+    # 晚绑定标记（受监督的波循环）：为 True 的节点其 spec 关键
     # 字段（task/role/tools…）可先占位，依赖完成后由 CEO 在波边界经 ``replan`` 定稿再
     # dispatch——WaveScheduler 把「依赖已完成但本节点未定稿」当一个决策边界、YIELD 回 CEO
     # 的 ReAct 主循环（区别于 checkpoint_after 的「让给用户 plan_review」）。Inert by
     # default：未接 on_boundary 的调度（自治 / 测试 / 当前阶段）下完全无效，故一个无晚
-    # 绑定节点的 plan 行为逐字不变。→ 见设计: docs/07-规划/职责晚绑定与动态再编排设计.md §7.1
+    # 绑定节点的 plan 行为逐字不变。→ 见设计: docs/03-AI核心/执行引擎架构设计.md §受监督的波循环
     bind_after_deps: bool = False
     parent_run_id: str | None = None
     depth: int = 0
@@ -352,7 +352,7 @@ class BatchMetrics:
     ready node had to wait for a free slot). Outcome counts round out a one-line health
     read. All timings are wall-clock ms; counts exclude resume-seeded nodes.
 
-    受监督波循环埋点 (职责晚绑定与动态再编排 §7.2, v1 决策⑤「埋点用于调参与验证真痛」): the
+    受监督波循环埋点 (执行引擎架构设计.md §受监督的波循环, v1 决策「埋点用于调参与验证真痛」): the
     boundary + escalation tallies the design earmarked to quantify「自我纠偏」without捞日志阻塞
     开发. The boundary counts tally ``on_boundary`` YIELDs THIS run surfaced, split by reason —
     they count boundaries *fired*, not markers present: a plan carrying a bind/scope marker but

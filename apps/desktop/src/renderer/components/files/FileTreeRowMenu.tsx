@@ -3,7 +3,7 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
 } from "@/components/ui/context-menu";
-import { type FileNode, type FileSource } from "@/lib/fileSource";
+import type { FileNode, FileSource } from "@/lib/fileSource";
 import { notifyActionError, notifySuccess } from "@/lib/toast";
 import {
   ClipboardPaste,

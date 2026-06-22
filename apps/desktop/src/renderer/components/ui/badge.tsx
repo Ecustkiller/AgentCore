@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import type { HTMLAttributes } from "react";
-import { statusChip, type StatusTone } from "./tone-presets";
+import { type StatusTone, statusChip } from "./tone-presets";
 
 export type BadgeTone = StatusTone;
 

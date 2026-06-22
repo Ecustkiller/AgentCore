@@ -151,7 +151,7 @@ def _assemble_ceo_toolset(
     # 受监督的波循环 (replan): delegate 的伴生工具——在波边界把晚绑定步骤定稿并续跑同一张
     # 暂停的计划。共享当回合的 DelegateTool 实例（其 ``_supervised`` 暂停态 + 累加器），故
     # 自身无用量面；与 revise 一样恒注册，仅在某次 delegate 让出「计划已让出」简报后才有效，
-    # 否则返回友好错误。→ docs/07-规划/职责晚绑定与动态再编排设计.md §7.1
+    # 否则返回友好错误。→ docs/03-AI核心/编排器与CEO主Agent.md §一 replan 原语
     chat_tools.register(ReplanTool(delegate=delegate_tool))
     revise_gate = approval_gate if backend_location == "local" else None
     revise_tool = ReviseTool(

@@ -8,12 +8,9 @@ import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import { loadLatestWindow } from "@/services/messages";
 import type { OutgoingAttachment } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
-import {
-  getActiveRuntime,
-  useConversationStore,
-} from "@/stores/conversation";
+import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
-import { useCallback, type Dispatch, type SetStateAction } from "react";
+import { type Dispatch, type SetStateAction, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import type { PendingAttachment } from "./composerAttachments";
 import { dispatchBackgroundTask } from "./dispatchBackgroundTask";
@@ -82,7 +79,7 @@ export function useComposerSend({
           folderId: targetFolderId,
           localContainerRootId,
         });
-        useConversationStore.getState().setCurrentConversation(conv.id);
+        useConversationStore.getState().switchConversation(conv.id);
         createdNew = true;
         useFoldersStore.getState().setPendingNewChatFolder(null);
         useFoldersStore.getState().setPendingNewChatCloud(false);

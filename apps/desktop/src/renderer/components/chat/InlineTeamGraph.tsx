@@ -1,25 +1,24 @@
-import { DebateCompare } from "@/components/chat/DebateCompare";
 import { RevisionCompare } from "@/components/chat/RevisionCompare";
 import { StatusStrip } from "@/components/chat/StatusStrip";
 import { GraphView } from "@/components/graph/GraphView";
-import { TeamGraphFullscreen } from "@/components/graph/TeamGraphFullscreen";
 import {
   EMBED_DEFAULT_COL_WIDTH,
   estimateBbox,
   fitWidthBox,
   workerGraphShape,
 } from "@/lib/elk-layout";
+import { useConversationStore } from "@/stores/conversation";
 import {
   type Execution,
   type ExecutionJournal,
   ExecutionScopeContext,
   hasRevisions,
-  isDebate,
   useExecutionStore,
   useMessageExecution,
 } from "@/stores/execution";
 import { useGraphStore } from "@/stores/graph";
 import { useSidePanelStore } from "@/stores/sidePanel";
+import { useUIStore } from "@/stores/ui";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 /** Re-export for canvas 指挥台 and other consumers. */
@@ -39,7 +38,8 @@ export { RecoveryActions } from "@/components/chat/StatusStrip";
  * (historical) multi-agent turns render identically — the live turn streams into
  * the slot, a reloaded turn hydrates it from the persisted journal (`runs`), and
  * both project through the same fold. Node clicks drill into the passive
- * right-side panel; the maximize button opens the full-screen graph (replay).
+ * right-side panel; 「在画布打开」/「回放」switch to the canvas zoomed into this turn
+ * (放大态, Route A) — there is no separate full-screen overlay.
  */
 export function InlineTeamGraph({
   messageId,
@@ -51,8 +51,19 @@ export function InlineTeamGraph({
   journal?: ExecutionJournal;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const [fullscreen, setFullscreen] = useState<false | "view" | "replay">(
-    false,
+  const setConversationView = useUIStore((s) => s.setConversationView);
+  const requestCanvasFocus = useUIStore((s) => s.requestCanvasFocus);
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  // 「在画布打开」/「回放」统一通向画布的放大态（Route A，再无独立全屏）：把目标回合（+ 是否
+  // 自动回放）塞进 UI store 后切到画布视图，画布挂载即放大该回合。会话 id 在首发即赋值，故协作图
+  // 出现时一定已有 id；defensively 无 id 则不切。
+  const openInCanvas = useCallback(
+    (autoplay: boolean) => {
+      if (!conversationId) return;
+      requestCanvasFocus(messageId, autoplay);
+      setConversationView(conversationId, "canvas");
+    },
+    [conversationId, messageId, requestCanvasFocus, setConversationView],
   );
   const hydrateFromJournal = useExecutionStore((s) => s.hydrateFromJournal);
   useEffect(() => {
@@ -93,8 +104,8 @@ export function InlineTeamGraph({
           execution={execution}
           expanded={expanded}
           onToggle={() => setExpanded((v) => !v)}
-          onMaximize={() => setFullscreen("view")}
-          onReplay={() => setFullscreen("replay")}
+          onMaximize={() => openInCanvas(false)}
+          onReplay={() => openInCanvas(true)}
         />
         {expanded && (
           <GraphArea
@@ -104,16 +115,10 @@ export function InlineTeamGraph({
             onMeasure={onMeasure}
           />
         )}
-        {fullscreen && (
-          <TeamGraphFullscreen
-            autoplay={fullscreen === "replay"}
-            onClose={() => setFullscreen(false)}
-          />
-        )}
       </div>
-      {isDebate(execution) && (
-        <DebateCompare execution={execution} messageId={messageId} />
-      )}
+      {/* 辩论双产物 (决策简报 + 交锋叙事线) 不再内联聊天——它是「过程」，归画布放大态的
+          「交锋叙事」页 (DebateBody)，入口是上方状态条的「在画布打开」。聊天只留状态条的
+          辩论 pill 作信号 (前端UX设计.md §四/§六)。 */}
       {hasRevisions(execution) && (
         <RevisionCompare execution={execution} messageId={messageId} />
       )}

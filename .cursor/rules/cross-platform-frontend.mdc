@@ -9,16 +9,14 @@ alwaysApply: false
 
 # 前端跨端架构（各端全新建 + 极小共享）
 
-桌面 + 手机是**同一产品**：手机端 = 桌面端 − 手机物理做不到的能力层。**实现策略 = 各端全新建，零共享业务逻辑。** 蓝图与理由见 [`手机端落地设计`](/docs/07-规划/手机端落地设计.md)。
+桌面 + 手机是**同一产品**：手机端 = 桌面端 − 手机物理做不到的能力层。**实现策略 = 各端全新建，零共享业务逻辑。** 权威蓝图 → [`前端技术与架构.md` §七/§十二](/docs/04-前端/前端技术与架构.md)；原生壳余项 → [`远期规划`](/docs/07-规划/远期规划.md) §3.2。
 
-> **过渡期**：`apps/mobile` / `packages/` ⏳ 未落地（当前无 pnpm workspace）。落地前，写新前端逻辑时不必预共享，但**协议 fold 须可被 conformance 测**（见下）。
-
-## 目标结构
+## 结构（✅ 已落地）
 
 ```
-apps/desktop/   现有渲染层 — 独立演进，不动
-apps/mobile/    全新实现：自己的 stores/services/协议 fold/组件 + Capacitor 壳
-packages/       protocol-conformance(规范) + contract-types(事件类型) + design-tokens
+apps/desktop/   渲染层 — 独立演进；conformanceFold + 共享 processTimeline
+apps/mobile/    全新实现：stores/services/协议 fold/组件 + Capacitor 壳
+packages/       protocol-conformance + contract-types + design-tokens (+ contract-rest-types)
 ```
 
 ## 硬规则

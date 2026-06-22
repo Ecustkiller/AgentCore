@@ -7,7 +7,12 @@
 export type BrandTone = "primary" | "warning";
 
 /** Execution / outcome chips and resolved records. */
-export type StatusTone = "primary" | "success" | "warning" | "destructive" | "muted";
+export type StatusTone =
+  | "primary"
+  | "success"
+  | "warning"
+  | "destructive"
+  | "muted";
 
 export type DecisionShellTone = BrandTone | "neutral";
 
@@ -91,12 +96,34 @@ export const countPillMuted =
 export const roundLabelPill =
   "inline-block rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground";
 
+/**
+ * Debate round signal dot —— verdict-derived (clash → converge progression), NOT run
+ * status (color-tokens.mdc: this is a debate-domain classification). Shared by the
+ * narrative timeline rail and the convergence band so a round reads the same in both.
+ *  - inflight  当前在飞那轮（尚未裁判）→ 品牌蓝脉动
+ *  - converged 收敛终点 → 成功绿
+ *  - clash     有真交锋 → 品牌蓝实心
+ *  - quiet     各说各话 / 无交锋 → 中性灰
+ */
+export type DebateSignal = "inflight" | "converged" | "clash" | "quiet";
+export const debateSignalDot: Record<DebateSignal, string> = {
+  inflight: "bg-primary animate-pulse",
+  converged: "bg-success",
+  clash: "bg-primary",
+  quiet: "bg-muted-foreground/30",
+};
+export const debateSignalText: Record<DebateSignal, string> = {
+  inflight: "text-primary",
+  converged: "text-success",
+  clash: "text-primary",
+  quiet: "text-muted-foreground",
+};
+
 /** Brand-tinted panel (brief card, highlighted sections). */
 export const brandPanelPrimary = `space-y-3 rounded-lg border p-4 ${surfaceSubtle.primary}`;
 
 /** Neutral inset panels. */
-export const surfaceMutedPanel =
-  "rounded-lg border border-border bg-muted/30";
+export const surfaceMutedPanel = "rounded-lg border border-border bg-muted/30";
 export const surfaceMutedPanelLight =
   "rounded-lg border border-border bg-muted/20";
 

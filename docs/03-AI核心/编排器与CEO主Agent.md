@@ -1,8 +1,18 @@
+---
+status: landed
+code: apps/server/agentcore/tools/builtin/delegate/
+related:
+  - docs/03-AI核心/运行时总览.md
+  - docs/03-AI核心/执行引擎架构设计.md
+skip_if:
+  - 只改 WaveScheduler 内核（读执行引擎）
+---
+
 # 编排器与 CEO 主 Agent
 
 > **状态**：已确定并落地（CEO 主 Agent + `delegate` 原语 + 协调者工具边界 档2.5：CEO 仅持只读/检索工具，且这些工具只供**侦察/收尾**——生产变更与**成规模的广度调查**都委派）；CEO/worker 的 system prompt 已确立「身份 + 边界」结构，委派判据已重画为**活的规模与结构**（轻量即时自答 / 有规模即组团），细节（worker 角色模板 / 各 Skill 正文打磨）待迭代
 >
-> → 见代码：`apps/server/agentcore/tools/builtin/delegate.py`
+> → 见代码：`apps/server/agentcore/tools/builtin/delegate/`（已由单文件拆为包）、`tools/builtin/replan.py`
 
 ---
 
@@ -37,29 +47,29 @@ CEO 是**管理者**（不是调查员）：它只直接持有「只读 / 检索
 | CEO 直接做（路由） | 【轻量即时】：单点确认（一两处文件 / 一条事实就能答）、读已知的少量文件、纯问答 / 闲聊 / 解释、分析推理类的**简短回应**，以及**开工前的轻量探路**——零团队开销，首字即时 |
 | 一律委派（路由） | 【有规模 / 有结构】：① 实质交付物（代码 / 应用 / 网页、脚本、配置、**成篇**报告 / 文档；哪怕只写一个文件、改一行；task 里点明落盘、成篇文字写 `.md`）；② **成规模的广度调查**（要横扫大量文件 / 来源、可拆多角度并行、需多视角对比 / 辩论、产生大量中间内容）——**哪怕只读、哪怕最终只回一段话** |
 
-> **委派判据：活的规模与结构，而非「产出是不是文件」也非「有没有工具」✅ 已落地**：轻量 / 单点的只读请求 CEO 直答；一旦是**有规模或多角度**的活——实质交付物，**或成规模的广度只读调查**——就 `delegate` 交团队，哪怕答复只是一段话。关键转变：判据看**活的形态**，不看**答复形态**；一个只读调查（「项目哪些功能没完善」「X 怎么实现」「对比这几个模块」）也是团队的活，CEO 自己逐个读既慢（串行）又把大量正文堆进回合内上下文。**运行期软护栏**：引擎对「持 `delegate` 却自己累计 ≥N 次只读、仍未委派」的回合注入一次委派提醒（`engine.delegation_nudge`），把判据从纯靠提示词升级为代码侧兜底。配套防泄漏铁律：CEO 绝不为省委派把整份代码/文件贴进正文。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`、`runtime/engine.py`、`runtime/loop_controller.py`。
+> **委派判据：活的规模与结构，而非「产出是不是文件」也非「有没有工具」✅ 已落地**：轻量 / 单点的只读请求 CEO 直答；一旦是**有规模或多角度**的活——实质交付物，**或成规模的广度只读调查**——就 `delegate` 交团队，哪怕答复只是一段话。关键转变：判据看**活的形态**，不看**答复形态**；一个只读调查（「项目哪些功能没完善」「X 怎么实现」「对比这几个模块」）也是团队的活，CEO 自己逐个读既慢（串行）又把大量正文堆进回合内上下文。**运行期软护栏**：引擎对「持 `delegate` 却自己累计 ≥N 次只读、仍未委派」的回合注入一次委派提醒（`engine.delegation_nudge`），把判据从纯靠提示词升级为代码侧兜底。配套防泄漏铁律：CEO 绝不为省委派把整份代码/文件贴进正文。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`、`runtime/engine/`、`runtime/loop_controller.py`。
+
+> **团队形态判据：双向、广度调查归团队 ✅ 已落地**：上面的委派判据定「要不要委派」；这条定「委派后团队多大、调研谁来跑」。**① 判据双向**：拆几个看【活的自然结构】——过度拆碎与塌缩成一个都是偏差；落单 worker / 自己埋头查前先自检，拿不准先 `consult_skill(team_orchestration_advanced)`。**② 广度调查归团队（不限交付级，哪怕只回一段话）**：任何要横扫大量文件 / 来源、可拆多角度的只读调查，都把各角度作为**并行调研 worker** 一次 `delegate`，task 里点明「回报**精炼结论 + 证据指引**、不回贴整段正文」，再由 CEO 综述（需写成篇产物时用 `depends_on` 汇入下游写手）。CEO 的只读工具只用于**开工前轻量探路 + 收尾综述**，不替团队跑调查腿脚活。**注意**：`result_handling`（`pass_through`/`summarize`）只管**上游→下游**注入保真度，**不**影响回到 CEO 的内容——后者由 task 措辞决定。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`、`runtime/engine/`。
+
+> **认知分工判据：约束归 CEO、专业方案归专家 ✅ 已落地**：前两条定「要不要委派」「团队多大」；这条定**委派时 task 里该写什么、不该写什么**。**正确边界**：task 交【需求与约束】（目标、硬指标、关键前提、验收底线），交付物的【专业方案】（章节结构、模块划分、设计布局）默认归专家 worker，除非用户已明确指定结构。`contract`（`required_sections` 等）是**验收契约**而非结构蓝图。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`、`tools/builtin/delegate/`。
+
+> **worker 侧认知分工**：结构所有权、团队拓扑位置、上游落盘许可——→ 见 [`Agent协作模式.md` §二](/docs/03-AI核心/Agent协作模式.md)。
+
+> **结构跟着证据走：提纲作为可把关的流水线步骤 ✅ 已落地**：对需大量调研的成篇交付，用 `depends_on` + `checkpoint_after` 把「定结构」摆到调研之后——并行调研 worker → 写作 worker 先产出提纲（`checkpoint_after` 让用户改批）→ 据定稿提纲写全文。不新增 schema。→ 见代码：`runtime/skills.py`、`tools/builtin/delegate/`。
+
+> **轻量直出（finalize）✅ 已落地**：单 worker 且 `finalize=true` 时，worker 产出直接作为回合答复（`ToolEffect.HANDOFF`），省掉 CEO 合成轮；多 worker 或失败时回落 CEO 收尾。→ 见代码：`tools/builtin/delegate/`。
+
+> **产出形态：文件落盘 vs 文字直出 ✅ 已落地**：worker 按交付【形态】判定写文件还是写正文；CEO 在 task 里点明落盘要求，`ask_user` 开工卡也说明最终交付是工作区实文件。→ 见代码：`runtime/runs/executor.py`、`runtime/prompt.py`、`runtime/skills.py`。
+
+> **落盘契约门 `requires_files` ✅ 已落地**：CEO 设 `contract.requires_files=true` 声明文件交付；执行器用 `files_touched` 确定性判定，未达标自动返工一次。→ 见代码：`runtime/runs/contract.py`、`tools/builtin/delegate/`。
+
+> **CEO 提示词形态：精简核心 + 能力目录 + 按需 consult ✅ 已落地**：常驻只保留路由脊柱 + 能力目录；进阶机制做成系统 Skill，用时 `consult_skill`。**分层不变量**：同一条知识只在唯一所有者出现。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`、`tools/builtin/`。
 
 **为什么是档2.5（结构取档2；档1「全能 CEO」、档3「纯编排 CEO」被否决）：**
 
 - **档1（CEO 持全套工具，仅复杂任务才委派）**——CEO 上下文易被大块工具输出污染，长会话越来越贵，「团队协作」心智被弱化。
 - **档3（CEO 只剩 `delegate`，连检索都过 worker）**——仍否决：把**高频的轻量只读**（单点确认 / 探路）也压上 worker 往返，会给 95% 的轻量路径平白加一层延迟与成本。**但原否决理由里「检索大输出不进 CEO 上下文」一句须修正**：历史重建（工具 I/O 不跨轮回放）只清理**跨轮**残留；**回合内**一场广度调查的几十次只读仍会实打实堆进 CEO 当前窗口、把它撑大。这恰恰说明「广度调查该扇给团队」——但这归**委派判据**解决（即 2.5 的路由细化 + 运行期软护栏），而非靠抽走 CEO 的检索工具（那会误伤高频轻量路径）来解决。
 - **档2.5 取中**：保留档2 结构的两份收益（团队心智 + CEO 上下文洁净），同时把路由判据从「交付物 vs 对话」纠正为「轻量即时 vs 有规模/有结构」——既不让轻量只读背上委派税，也不再放任 CEO 把成规模的广度调查独自串行做完。
-
-> **团队形态判据：双向、广度调查归团队 ✅ 已落地**：上面的委派判据定「要不要委派」；这条定「委派后团队多大、调研谁来跑」。**① 判据双向**：拆几个看【活的自然结构】——过度拆碎与塌缩成一个都是偏差；落单 worker / 自己埋头查前先自检，拿不准先 `consult_skill(team_orchestration_advanced)`。**② 广度调查归团队（不限交付级，哪怕只回一段话）**：任何要横扫大量文件 / 来源、可拆多角度的只读调查，都把各角度作为**并行调研 worker** 一次 `delegate`，task 里点明「回报**精炼结论 + 证据指引**、不回贴整段正文」，再由 CEO 综述（需写成篇产物时用 `depends_on` 汇入下游写手）。CEO 的只读工具只用于**开工前轻量探路 + 收尾综述**，不替团队跑调查腿脚活。**注意**：`result_handling`（`pass_through`/`summarize`）只管**上游→下游**注入保真度，**不**影响回到 CEO 的内容——后者由 task 措辞决定。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`、`runtime/engine.py`。
-
-> **认知分工判据：约束归 CEO、专业方案归专家 ✅ 已落地**：前两条定「要不要委派」「团队多大」；这条定**委派时 task 里该写什么、不该写什么**。**正确边界**：task 交【需求与约束】（目标、硬指标、关键前提、验收底线），交付物的【专业方案】（章节结构、模块划分、设计布局）默认归专家 worker，除非用户已明确指定结构。`contract`（`required_sections` 等）是**验收契约**而非结构蓝图。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`、`tools/builtin/delegate.py`。
-
-> **worker 侧认知分工**：结构所有权、团队拓扑位置、上游落盘许可——→ 见 [`Agent协作模式.md` §二](/docs/03-AI核心/Agent协作模式.md)。
-
-> **结构跟着证据走：提纲作为可把关的流水线步骤 ✅ 已落地**：对需大量调研的成篇交付，用 `depends_on` + `checkpoint_after` 把「定结构」摆到调研之后——并行调研 worker → 写作 worker 先产出提纲（`checkpoint_after` 让用户改批）→ 据定稿提纲写全文。不新增 schema。→ 见代码：`runtime/skills.py`、`tools/builtin/delegate.py`。
-
-> **轻量直出（finalize）✅ 已落地**：单 worker 且 `finalize=true` 时，worker 产出直接作为回合答复（`ToolEffect.HANDOFF`），省掉 CEO 合成轮；多 worker 或失败时回落 CEO 收尾。→ 见代码：`tools/builtin/delegate.py`。
-
-> **产出形态：文件落盘 vs 文字直出 ✅ 已落地**：worker 按交付【形态】判定写文件还是写正文；CEO 在 task 里点明落盘要求，`ask_user` 开工卡也说明最终交付是工作区实文件。→ 见代码：`runtime/runs/executor.py`、`runtime/prompt.py`、`runtime/skills.py`。
-
-> **落盘契约门 `requires_files` ✅ 已落地**：CEO 设 `contract.requires_files=true` 声明文件交付；执行器用 `files_touched` 确定性判定，未达标自动返工一次。→ 见代码：`runtime/runs/contract.py`、`tools/builtin/delegate.py`。
-
-> **CEO 提示词形态：精简核心 + 能力目录 + 按需 consult ✅ 已落地**：常驻只保留路由脊柱 + 能力目录；进阶机制做成系统 Skill，用时 `consult_skill`。**分层不变量**：同一条知识只在唯一所有者出现。→ 见代码：`runtime/prompt.py`、`runtime/skills.py`、`tools/builtin/`。
 
 ### 实现方案：自研编排，不依赖第三方框架 ✅ 已确定
 
@@ -108,13 +118,32 @@ CEO 在自己的 ReAct 循环里调用单一的 `delegate` 工具把一批子任
 >
 > **被否决：SYNTHESIS 合稿节点**（在 plan 末尾挂一个独立合稿 Agent）。合稿仍是「循环外一趟」，正是 CEO 模型想溶解的形态；`react_loop` 现成支持「工具返回后继续循环」，无需独立节点。
 
-> **文件产出清单（收敛免回工作区核对）✅**：`delegate` 汇总附各 worker「文件产出」行，CEO 据此收尾、不必再 `file_list` 回工作区核对。→ 见代码：`runtime/runs/executor.py`、`tools/builtin/delegate.py`。
+> **文件产出清单（收敛免回工作区核对）✅**：`delegate` 汇总附各 worker「文件产出」行，CEO 据此收尾、不必再 `file_list` 回工作区核对。→ 见代码：`runtime/runs/executor.py`、`tools/builtin/delegate/`。
 >
-> **同一清单兼作防幻觉凭据（footer 守卫）✅**：清单为空时 CEO 不得报「已创建/已完成」，应 `revise` 唤回或重派。→ 见代码：`tools/builtin/delegate.py`。
+> **同一清单兼作防幻觉凭据（footer 守卫）✅**：清单为空时 CEO 不得报「已创建/已完成」，应 `revise` 唤回或重派。→ 见代码：`tools/builtin/delegate/`。
 
 ### execute 流程（概念）
 
-→ 见 [`执行引擎架构设计.md` §十三](/docs/03-AI核心/执行引擎架构设计.md)（`delegate` → `build_run_plan` → `WaveScheduler`）。
+→ 见 [`执行引擎架构设计.md` §三](/docs/03-AI核心/执行引擎架构设计.md)（`delegate` → `build_run_plan` → `WaveScheduler`）。
+
+### `replan`：波边界续跑（第三编排原语）✅ 已落地
+
+`delegate` / `revise` 之外的第三个编排原语。当计划含**晚绑定节点**（`bind_after_deps`）或队员报告**职责偏离**（`escalate kind=scope`）时，`WaveScheduler` 在决策边界把控制权交回 CEO——`delegate` 输出**非终态**「计划已让出」简报，CEO 调 `replan` 定稿 / 纠偏 / 追加 / 收口后**续跑同一张 DAG**。执行语义（边界判据、`YIELD` 软暂停、晚绑定、成本纪律、被否决项）见 [`执行引擎架构设计.md` §受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)；此处只记 CEO 侧的工具形态与设计理由。
+
+| 参数 | 语义 |
+|---|---|
+| `binds` | 把 `bind_after_deps` 占位节点定稿（据上游产出补全 role / task / tools…），定稿后该步即可运行 |
+| `steers` | 给【尚未运行】的下游追加操舵说明（同 `plan_review` adjust 机制，运行前注入）；已完成步骤不可操舵 |
+| `add` | 追加初始计划没预见的【全新】节点——`build_added_nodes` 管 id 生成（每批新前缀、绝不复用）、依赖接线（可指向现有节点或本批内其它新节点）、拓扑校验（未知依赖 / 重复 id / 超额 / 成环即整批拒绝） |
+| `stop` | 确认无需继续——未跑步骤记 SKIPPED、已完成产出交回 CEO 收尾 |
+
+> **all-or-nothing**：一次 `replan` 的 binds + steers + add 先全量校验，任一非法则整批拒绝、暂停计划零改动（`apply_replan`）。
+>
+> **薄封装、共享账目**：`ReplanTool` 持本回合的 `DelegateTool` 并转发 `DelegateTool.replan`——后者持暂停态（`_supervised`）、校验、in-place 再绑定与续跑驱动；故 worker usage / 账目 / 来源累加在**同一个 `DelegateTool` 实例**上、被回合总账折算，`replan` 自身无账目面。
+>
+> **被否决**：① 重载 `delegate`（语义混淆「发起新任务」与「续跑旧计划」）；② 复用 `revise`（那是在 worker transcript 上续写、非计划续跑，见 [`多轮编排与队员热修.md`](/docs/03-AI核心/多轮编排与队员热修.md)）——故 `replan` 独立成工具。`add` 早期曾计划推迟，现已与 binds / steers / stop 一并落地。
+>
+> → 见代码：`tools/builtin/replan.py`、`tools/builtin/delegate/supervised.py`（`apply_replan` / `finalize_stopped` / 边界简报）、`runtime/runs/builder.py`（`build_added_nodes`）。
 
 ---
 
@@ -167,11 +196,11 @@ CEO 不指定具体模型，只表达能力需求，由运行时映射（fast/st
 
 > **递指针不递全文（文件产物）✅ 已落地**：上游已 `file_write` 落盘时，下游注入紧凑摘要 + 文件路径清单 +「需全文请 `file_read`」，不占 `pass_through` 预算。纯文字中间产物仍走全文注入。→ 见代码：`runtime/runs/executor.py`、`runtime/runs/fidelity.py`（`pointer_body`）。
 
-> **CEO 综述输入瘦身：同款保真度用于「全员 → CEO」收尾 ✅ 已落地**：`delegate` 把所有 worker 产物汇给 CEO 写概览时，过去整体被一道 `output_limit` 盲截（仅留头部）——宽扇出 / 长产物下会**静默丢掉靠后的 worker 乃至本段自带的收尾指令（防幻觉铁律）**，是正确性缺陷而非单纯成本。现把上面的保真度纪律复用到这**另一处扇入**：**落盘者递指针摘要**（全文已在工作区 + 前端可逐个展开，CEO 需要可 `file_read`），**纯文本产物共享一份预算水填充**（超额首尾保留），于是每个 worker 都留有代表、收尾指令必活在 `output_limit` 兜底之下（兜底退为最后保险，常态不触发）。**刻意不按 `result_handling`**——该旋钮只管上游→下游注入、不影响回到 CEO 的内容（见上 §「广度调查归团队」注）。并打 `delegate.synthesis` 埋点（`raw/final_chars`、压缩 `ratio`、`capped` 是否触发兜底），用于线上确认兜底常态不触发、并据真实比例校准 `CEO_SYNTHESIS_BUDGET`。→ 见代码：`tools/builtin/delegate.py`（`_format_for_ceo`）、`runtime/runs/fidelity.py`（共享原语）、`runtime/runs/constants.py`（`CEO_SYNTHESIS_BUDGET`）。
+> **CEO 综述输入瘦身：同款保真度用于「全员 → CEO」收尾 ✅**：`delegate` 汇所有 worker 产物给 CEO 写概览时，过去被一道 `output_limit` 盲截（仅留头部）——宽扇出 / 长产物下会**静默丢掉靠后的 worker 乃至本段自带的收尾指令（防幻觉铁律）**，是**正确性缺陷而非单纯成本**。修复：复用上面的保真度纪律到这另一处扇入——**落盘者递指针摘要**（全文在工作区、CEO 需要可 `file_read`）+ **纯文本产物共享一份预算水填充**（超额首尾保留），于是每个 worker 都留有代表、收尾指令必活在 `output_limit` 兜底之下（兜底退为最后保险，常态不触发）。**刻意不按 `result_handling`**——该旋钮只管上游→下游注入、不影响回到 CEO 的内容（见上 §「广度调查归团队」注）。`delegate.synthesis` 埋点用于线上确认兜底常态不触发、校准 `CEO_SYNTHESIS_BUDGET`。→ 见代码：`tools/builtin/delegate/tool.py`（`_format_for_ceo`）、`runtime/runs/fidelity.py`、`runtime/runs/constants.py`（`CEO_SYNTHESIS_BUDGET`）。
 
 > **工作区产物清单 ✅ 已落地**：每个 worker 开局注入「队友产物 + 既有文件」去重清单（经 `index_files` 云/本地一致视图），让共享工作区开局可发现；全表受文件数/字符预算封顶；列举失败退化为仅队友产物。→ 见代码：`runtime/runs/executor.py`、`workspace/protocol.py`。
 
-> **并行写隔离：软提示 + 硬守卫 ✅ 已落地**：同扇出并行兄弟共享同一工作区 backend、且**不**受跨会话文件夹锁约束（任务内并行小队不锁），而 `file_write` 是覆盖语义——两个兄弟写同名路径会互相覆盖。**第一线是软提示**：兄弟感知块追加一句「若都要写文件，各自用不同文件 / 子目录，避免互相覆盖」。**兜底是硬守卫**：每批（一次 `WaveScheduler` run）一个 `WriteCoordinator`，记录每个路径的「在飞认领」`path -> run_id`；某 worker `file_write` 的路径已被**同批的另一并行兄弟**写过，则直接报错并引导改名（如 `report-1.md`），而非静默覆盖——撞名从「丢数据」变成「响错」。**只挡并发兄弟**：下游消费上游产物（其 ancestor）的覆盖、以及 CEO 主导的后续批次覆盖前批文件（不同 coordinator）都不受影响；claim 同步先于 await 写入，单线程 asyncio 下 check-and-claim 原子。选了冲突守卫而非子目录命名空间：不动共享工作区的路径模型（`files_touched` / 清单 / 读语义全不变），血量最小。→ 见代码：`workspace/write_claims.py`（`WriteCoordinator`）、`runtime/runs/executor.py`（每批建 coordinator + 注入 ancestor 闭包）、`tools/builtin/file_ops.py`（`FileWriteTool` 守卫）。
+> **并行写隔离：软提示 + 硬守卫 ✅**：同扇出并行兄弟共享工作区、不受文件夹锁约束（任务内小队不锁），而 `file_write` 是覆盖语义——两兄弟写同名路径会互相覆盖。**第一线软提示**：兄弟感知块加一句「各自用不同文件 / 子目录」。**兜底硬守卫**：每批一个 `WriteCoordinator` 记录在飞认领 `path -> run_id`，撞上**同批并行兄弟**已认领的路径则报错引导改名（如 `report-1.md`）——撞名从「丢数据」变成「响错」。**只挡并发兄弟**：下游覆盖 ancestor 产物、CEO 后续批次覆盖前批（不同 coordinator）都不受影响。选冲突守卫而非子目录命名空间：不动共享工作区路径模型、血量最小。→ 见代码：`workspace/write_claims.py`（`WriteCoordinator`）、`runtime/runs/executor.py`、`tools/builtin/file_ops.py`（`FileWriteTool` 守卫）。
 
 ### 2.4 `can_delegate` — 嵌套委派开关（一层）✅ 已落地
 
@@ -257,10 +286,11 @@ worker 默认是**叶子**：拿不到 `delegate`、不能再向下拆。当某�
 
 ## 六、待定事项（Phase 2 及以后）
 
-| 议题 | 说明 |
+> 仅列**真残留**；已落地项已迁入各正文，不在此复述（落地即出表）。
+
+| 议题 | 残留 |
 |------|------|
-| CEO / worker system prompt 内容调试 | 「身份 + 边界」结构 + 提示词瘦身（精简核心 + 能力目录 + `consult_skill`）已落地（见 §核心定位）；**CEO 委派判据已从「有没有工具」/「交付物 vs 对话」重画为「活的规模与结构」（轻量即时自答 / 有规模即组团，含广度只读调查）+ 交付物落盘 + 防泄漏铁律 + 运行期 `delegation_nudge` 软护栏**（见 §协调者工具边界 档2.5）；剩余为内容调试：worker 角色模板、各系统 Skill 正文打磨、`delegation_nudge` 阈值（默认 4 次只读 / 第 2 轮起）的实测校准 |
+| system prompt 内容调试 | 结构（身份+边界）/ 委派判据 / `delegation_nudge` 软护栏本身已落地（见 §核心定位 / §协调者工具边界）；剩内容调试——worker 角色模板、各系统 Skill 正文、`delegation_nudge` 阈值（默认 4 次只读 / 第 2 轮起）实测校准 |
 | Agent 实体化 | Phase 1 worker 为内联角色（`agent_id == run_id`）；Phase 2 收敛到 `agent_id` + `AgentResolver` + 委派白名单 |
-| 增量声明优化 | 批次预声明（`run_plan` 带 `parent_run_id`，供图在 run 开跑前成组）+ `run_started` 带 `parent_run_id`/`kind` + **嵌套委派一层均已落地**（见 §2.4）；剩余为更细粒度的增量重声明 / 跨波动态重排（未定） |
-| 交互原语回归 | `ask_user` 统一发问（开工提案卡 + 途中拍板；默认挂起、可选 `blocking=false` 非阻塞）✅ 已落地（见 §四 / §五）；`plan_review` / `checkpoint_after` 波间挂起 ✅ 2a + 持久续跑 2b ✅ 已落地（见 §五）；剩余 preflight / 契约闸门 / 治理强制层（远期）⏳ |
-| 多轮编排 | **✅ 已落地**：后续消息沿用 / 修改之前的委派结果——CEO 经 `revise` 唤回原队员带现场记忆续写（内存 + 跨进程落盘留人，双 miss 回落重派），图上挂「修订 vN」版本链。详见 [`多轮编排与队员热修.md`](/docs/03-AI核心/多轮编排与队员热修.md) |
+| 增量声明优化 | 批次预声明 + 跨波重排 + 晚绑定续跑均已落地（见 §一 `replan`）；剩更细粒度的增量重声明 |
+| 交互原语回归 | `ask_user` / `plan_review` / `checkpoint_after` 已落地（见 §四 / §五）；剩 preflight / 契约闸门 / 治理强制层（远期）⏳ |

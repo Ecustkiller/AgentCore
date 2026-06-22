@@ -1,4 +1,12 @@
-import { type FileNode, type FileSource, baseName, joinPath, parentDir } from "@/lib/fileSource";
+import { Button, IconButton } from "@/components/ui";
+import { SimpleTooltip } from "@/components/ui/tooltip";
+import {
+  type FileNode,
+  type FileSource,
+  baseName,
+  joinPath,
+  parentDir,
+} from "@/lib/fileSource";
 import { notifyActionError, notifyError } from "@/lib/toast";
 import {
   ChevronsDownUp,
@@ -18,6 +26,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { InlineCreateRow } from "./FileTreeInline";
+import { FileTreeRow } from "./FileTreeRow";
 import { dedupeName } from "./dedupeName";
 import { DRAG_MIME, parseDragPayload } from "./fileTreeDrag";
 import { loadExpanded, saveExpanded } from "./fileTreeExpanded";
@@ -26,10 +36,6 @@ import type {
   FileTreeChromeState,
   FileTreeHandle,
 } from "./fileTreeTypes";
-import { InlineCreateRow } from "./FileTreeInline";
-import { FileTreeRow } from "./FileTreeRow";
-import { Button, IconButton } from "@/components/ui";
-import { SimpleTooltip } from "@/components/ui/tooltip";
 import { Centered, EmptyHint, InlineError } from "./parts";
 import { useFileTreeData } from "./useFileTreeData";
 

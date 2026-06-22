@@ -375,17 +375,6 @@ class MessageDetail(BaseModel):
         return v
 
 
-class MessagePromptResponse(BaseModel):
-    """The verbatim system prompt ONE assistant turn ran with (本回合提示词, 提示词透明).
-
-    Surfaces the ``turn_started`` head fact captured in the turn journal (§18.3) — the
-    exact CEO system prompt for that turn, dynamic bits (date / 能力目录 / attachments)
-    and all. Read-only, owner-scoped; absent for user messages or legacy turns (404).
-    """
-
-    system_prompt: str
-
-
 class MessageListResponse(BaseModel):
     """A window of a conversation's messages (chronological, oldest-first).
 

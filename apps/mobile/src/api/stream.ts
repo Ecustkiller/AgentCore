@@ -1,6 +1,6 @@
 import { apiUrl, authHeader, refreshTokens } from "@/api/client";
 import type { MessageAttachment } from "@/lib/attachments";
-// SSE transport for the mobile client (手机端落地设计 P1).
+// SSE transport for the mobile client (前端技术与架构 §七).
 //
 // The backend streams a turn as a POST returning text/event-stream (api/sse.py):
 // frames are `event: <type>\ndata: {type,timestamp,payload}\n\n`, with `: ping`

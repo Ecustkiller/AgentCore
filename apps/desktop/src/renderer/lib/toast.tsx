@@ -31,19 +31,30 @@ export function notifyError(err: unknown, context?: string): void {
   const described = describeError(err);
   if (!described) return; // auth etc. — the redirect already handles it
   const action = described.action;
-  toast.error(context ?? described.message, {
-    description: context ? described.message : undefined,
+  const toastAction = action
+    ? {
+        label: action.label,
+        // Hash-router navigation from non-component code: setting the hash
+        // drives createHashRouter exactly like a <Link> click.
+        onClick: () => {
+          window.location.hash = action.href;
+        },
+      }
+    : undefined;
+  const title = context ?? described.message;
+  const description = context ? described.message : undefined;
+  // Config remedy (去配置) — amber warning, same tone as RetryBanner for BYOK key errors.
+  if (action) {
+    toast.warning(title, {
+      description,
+      icon: warningIcon,
+      action: toastAction,
+    });
+    return;
+  }
+  toast.error(title, {
+    description,
     icon: errorIcon,
-    action: action
-      ? {
-          label: action.label,
-          // Hash-router navigation from non-component code: setting the hash
-          // drives createHashRouter exactly like a <Link> click.
-          onClick: () => {
-            window.location.hash = action.href;
-          },
-        }
-      : undefined,
   });
 }
 

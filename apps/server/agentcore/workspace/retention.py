@@ -38,7 +38,7 @@ logger = get_logger(__name__)
 _FOLDER_SCOPE = "(folder)"
 
 
-async def _purge_folder_space(*, user_id: str, folder_id: str) -> None:
+async def purge_folder_space(*, user_id: str, folder_id: str) -> None:
     """Delete a folder's shared workspace directory + its snapshot history."""
     key = workspace_storage_key(
         user_id=user_id, folder_id=folder_id, conversation_id=_FOLDER_SCOPE
@@ -93,7 +93,7 @@ async def run_retention_sweep() -> dict[str, int]:
     purged_folders = 0
     for folder in folders:
         try:
-            await _purge_folder_space(user_id=folder.user_id, folder_id=folder.id)
+            await purge_folder_space(user_id=folder.user_id, folder_id=folder.id)
         except Exception as e:
             logger.warning(
                 "retention.folder_purge_failed", folder_id=folder.id, error=str(e)

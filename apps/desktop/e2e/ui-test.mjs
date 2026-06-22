@@ -53,11 +53,13 @@ async function main() {
   await win.waitForTimeout(1200);
   await shot(win, "01-welcome.png");
 
-  // Scenario 1: simple Q&A from the initial draft chat (create + send, no 404).
+  // Scenario 1: draft first send — creates conversation, navigates #/ → #/conversations/:id,
+  // and must still stream the reply (regression: MessageInput unmount used to abort POST).
   const q1 = "用一句话介绍你自己，并用中文回答。";
   await input.fill(q1);
   await input.press("Enter");
   await win.getByText(q1).first().waitFor({ timeout: 15000 });
+  await win.waitForURL(/#\/conversations\/[0-9a-f-]+/i, { timeout: 15000 });
   const md1 = win.locator(".markdown-body").last();
   await md1.waitFor({ timeout: 45000 });
   await waitStable(win, md1, 45000);

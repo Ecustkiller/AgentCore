@@ -92,25 +92,44 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
     """Swap ONLY the LLM provider, the memory load, and the CEO toolset assembly for
     controlled doubles — everything that carries the finish_reason (captain executor,
     react_loop, LoopController governance, finish-mapping, message_end, runs payload)
-    stays REAL."""
+    stays REAL.
+
+    Patch each seam WHERE IT IS LOOKED UP (pytest convention): ``run_chat_pipeline``
+    reads ``build_provider`` off the package facade (``pipeline_pkg.build_provider`` —
+    a deliberate package-level seam in run.py), but it imports ``default_memory_store``
+    and ``_assemble_ceo_toolset`` by name into the ``pipeline.run`` submodule and calls
+    them as locals — so those two must be patched on ``run``, not on the package
+    (patching the facade would silently miss the local call, and the facade doesn't even
+    re-export ``default_memory_store``)."""
     monkeypatch.setattr(pipeline, "build_provider", lambda *a, **k: provider)
 
     class _FakeStore:
         async def load(self, _user_id: str) -> str:
             return ""
 
-    monkeypatch.setattr(pipeline, "default_memory_store", lambda: _FakeStore())
+    monkeypatch.setattr(
+        "agentcore.runtime.pipeline.run.default_memory_store", lambda: _FakeStore()
+    )
 
-    # delegate / revise are unused on this single-agent path, but the pipeline tail
-    # folds their usage/ledger/citations — give it empty doubles.
-    fake_delegate = SimpleNamespace(usage={}, run_ledger=[], citations=[])
+    # delegate / revise / debate are unused on this single-agent path, but the pipeline
+    # tail folds their usage/ledger/citations — give them empty doubles. The delegate
+    # double also needs ``dispose_open_supervised`` (受监督的波循环 P5 Edge): the tail
+    # awaits it to release any dangling supervised plan before the usage fold.
+    async def _noop_dispose() -> None:
+        return None
+
+    fake_delegate = SimpleNamespace(
+        usage={}, run_ledger=[], citations=[], dispose_open_supervised=_noop_dispose
+    )
     fake_revise = SimpleNamespace(usage={}, run_ledger=[], citations=[])
     fake_debate = SimpleNamespace(usage={}, run_ledger=[], citations=[])
 
     def _fake_assemble(**_kwargs):
         return fake_delegate, fake_revise, fake_debate, registry
 
-    monkeypatch.setattr(pipeline, "_assemble_ceo_toolset", _fake_assemble)
+    monkeypatch.setattr(
+        "agentcore.runtime.pipeline.run._assemble_ceo_toolset", _fake_assemble
+    )
 
 
 async def _run_pipeline(

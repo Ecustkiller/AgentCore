@@ -91,6 +91,11 @@ export interface Message {
   planReviews?: PlanReviewDisplay[];
   error?: { code: string; message: string };
   traceId?: string;
+  /** P2 工作区升级提示 (前端UX设计.md §九): set when THIS turn's first file write
+   * promoted a bare chat into a folder-backed workspace (`workspace_promoted`).
+   * Drives the bubble's inline「已升级为工作区」notice. Live-only — never persisted
+   * (on reload the folder is simply already there, no longer news). */
+  workspacePromotion?: { folderId: string; name: string };
 }
 
 export interface ConversationRuntime {

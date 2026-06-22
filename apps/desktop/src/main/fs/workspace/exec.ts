@@ -3,11 +3,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
-import {
-  EXEC_CAPTURE_CAP,
-  EXEC_LANGS,
-  EXEC_TIMEOUT_CAP_S,
-} from "../constants";
+import { EXEC_CAPTURE_CAP, EXEC_LANGS, EXEC_TIMEOUT_CAP_S } from "../constants";
 import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
 import { opErr, opOk } from "./result";

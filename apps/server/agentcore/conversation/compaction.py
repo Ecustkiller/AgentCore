@@ -34,6 +34,7 @@ from collections.abc import Sequence
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
+from agentcore.core.text import truncate_head_tail
 from agentcore.db.base import async_session_factory
 from agentcore.db.models import Message
 from agentcore.db.repositories import ConversationRepository, MessageRepository
@@ -103,19 +104,16 @@ def _render_fold(old_summary: str, messages: Sequence[Message]) -> str:
     )
 
 
+# Compaction's own elision marker (domain voice); the head+tail mechanism is shared.
+_COMPACT_ELISION_MARKER = "\n\n……（摘要过长，已保留首尾）……\n\n"
+
+
 def _truncate_head_tail(content: str, limit: int) -> str:
     """Safety net if the model overruns the budget: keep BOTH ends (the trailing
     『涉及的文件与标识符』section carries the verbatim identifiers we most want to
-    survive). Returns ``content`` unchanged when it already fits."""
-    if limit <= 0 or len(content) <= limit:
-        return content
-    marker = "\n\n……（摘要过长，已保留首尾）……\n\n"
-    keep = limit - len(marker)
-    if keep <= 0:
-        return content[:limit].rstrip()
-    head = keep * 3 // 5
-    tail = keep - head
-    return content[:head].rstrip() + marker + content[len(content) - tail :].lstrip()
+    survive). Thin binding of ``core.text.truncate_head_tail`` with the compaction
+    marker."""
+    return truncate_head_tail(content, limit, marker=_COMPACT_ELISION_MARKER)
 
 
 async def _summarize(provider, old_summary: str, messages: Sequence[Message]) -> str:

@@ -27,11 +27,11 @@ pnpm build    # 产物输出到 out/（静态文件）
 src/
   app/
     layout.tsx        # SEO 元信息 + 全局样式
-    page.tsx          # 单页：Hero / 痛点 / 能力 / 理念 / 协作流程 / 角色 / 对比 / 生态
+    page.tsx          # 单页：Hero（左文右图 + 协作步骤）/ 痛点 / 能力 / 理念 / 角色 / 对比 / 生态
     globals.css       # 品牌 OKLCH token + 工具类 + 动画
   components/
-    CollaborationNetwork.tsx  # Hero 协作网络动效（canvas，尊重 reduced-motion）
-    FlowDiagram.tsx           # 协作 DAG 示意图（SVG）
+    CollaborationNetwork.tsx  # Hero 背景协作网络动效（canvas，尊重 reduced-motion）
+    HeroFlow.tsx              # Hero 右侧「一次协作」竖向流程图（SVG）
     Reveal.tsx                # 滚动入场封装
 ```
 

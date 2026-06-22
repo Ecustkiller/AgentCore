@@ -7,7 +7,7 @@
    底层复用 ``build_agent_executor`` / ``continue_run``（辩手跨轮带记忆）——本类不关心怎么派。
 3. **裁判本轮**（:meth:`_judge`）：辩论领域内的交锋质量与收敛判定（真交锋？还在产生新论点？）。
 4. **写本轮小结**（:meth:`_summarize`）：焦点 / 共识 / 分歧，过程产物「叙事线」的骨架。
-5. **决策下一步**（:meth:`run` 循环体）：达最小轮门槛且收敛 → 出简报收场；否则进下一轮 / 触上限。
+5. **决策下一步**（:meth:`run` 循环体）：裁判判收敛 → 出简报收场；否则进下一轮 / 触安全上限兜底。
 
 裁判 / 小结 / 简报 / 定议题都走 ``provider.complete`` 出结构化 JSON + 坏 JSON 容错（借鉴
 ``evals/judge.py``）；单测注入返回脚本化 JSON 的 fake provider，零成本验证循环 / 收敛 / 双产物。
@@ -29,6 +29,7 @@ from agentcore.runtime.debate.types import (
     STOP_MAX_ROUNDS,
     STOP_REASONS,
     DebateBrief,
+    DebateClash,
     DebateConfig,
     DebateForm,
     DebateResult,
@@ -178,9 +179,10 @@ class Moderator:
     ) -> DebateResult:
         """驱动整场辩论到收敛 / 上限，返回双产物（决策简报 + 交锋叙事线）。
 
-        循环把「最小轮门槛」叠在裁判的 ``converged`` 之上（防过早收敛，辩论编排设计.md §五）：
-        即使裁判首轮就判收敛，也要跑满 ``policy.min_rounds`` 才允许收场；裁判持续不收敛则跑到
-        ``policy.max_rounds`` 兜底停。每轮成功产出后触发 ``on_round``（emit 事件 / 老板检查点）。
+        收敛【完全由裁判逐轮自判】（``verdict.converged`` 即收场）——无最小轮门槛强制多轮。
+        「别过早收敛」的智慧在裁判标准里（:meth:`_judge`：第 1 轮开场默认继续、除非命题空泛），
+        不再靠外部计数。``policy.max_rounds`` 是纯安全上限（裁判持续不收敛时的断路器兜底）。每轮
+        成功产出后触发 ``on_round``（emit 事件 / 老板检查点）。
         """
         rounds: list[RoundResult] = []
         stop_reason = STOP_MAX_ROUNDS  # 循环跑满未 break ⇒ 触上限兜底
@@ -223,7 +225,7 @@ class Moderator:
             if on_round is not None:
                 await on_round(rr)
 
-            if round_no >= config.policy.min_rounds and verdict.converged:
+            if verdict.converged:
                 stop_reason = (
                     verdict.stop_reason if verdict.stop_reason in STOP_REASONS else STOP_CONVERGED
                 )
@@ -238,17 +240,23 @@ class Moderator:
             user = (
                 f"辩论命题：{config.motion}\n\n参与方：\n{_sides_block(config)}\n\n"
                 f"{_form_guidance(config.form)}\n\n"
-                "请把命题拆成【第一轮】各方应集中交锋的一个最核心争议焦点（一句话，具体可辩，"
-                "不要泛泛）。只输出 JSON：{\"focus\": \"...\"}"
+                "请把命题拆成【第一轮】各方应集中交锋的一个最核心争议焦点。"
+                "焦点必须是【一句短语、不超过 30 字】、像一个小标题，聚焦【单一】具体可辩的争议点——"
+                "不要复述命题、不要泛泛、不要用分号堆叠多个点。只输出 JSON：{\"focus\": \"...\"}"
             )
         else:
             last = history[-1]
+            # 已覆盖焦点清单（全部历史轮，非仅上轮）：让主持人据【整场】已谈维度挑下一轮焦点，
+            # 强制【正交】——根治「焦点换汤不换药 → 续写者输入几乎相同 → 输出相似」的冗余轮。
+            covered = "\n".join(f"- 第 {rr.round_no} 轮：{rr.focus}" for rr in history)
             user = (
-                f"辩论命题：{config.motion}\n\n上一轮焦点：{last.focus}\n"
+                f"辩论命题：{config.motion}\n\n已覆盖焦点（本轮须正交、勿换说法重谈）：\n{covered}\n\n"
                 f"上一轮小结：{_clip(last.summary, _SUMMARY_CLIP)}\n"
                 f"裁判判定：真交锋={last.verdict.real_clash}、新论点={last.verdict.new_arguments}、"
                 f"建议焦点={last.verdict.next_focus}\n\n"
-                "请据上轮【仍未决的分歧】设【本轮】应聚焦的争议点（一句话，比上轮更深入，避免重复）。"
+                "请据上轮【仍未决的分歧】设【本轮】应聚焦的争议点：必须【正交于上方已覆盖焦点】——"
+                "换一个尚未谈透的维度或更深一层，而非换个说法重谈同一点。"
+                "焦点必须是【一句短语、不超过 30 字】、像一个小标题，聚焦单一争议点。"
                 "只输出 JSON：{\"focus\": \"...\"}"
             )
         data = await self._complete_json(_FRAME_SYSTEM, user, "frame")
@@ -269,26 +277,42 @@ class Moderator:
         history: list[RoundResult],
     ) -> JudgeVerdict:
         round_no = len(history) + 1
-        min_rounds = config.policy.min_rounds
-        if round_no < min_rounds:
-            gate_hint = "门槛未到，请如实判定但默认倾向继续（除非各方已明显重复）。"
+        max_rounds = config.policy.max_rounds
+        # 「别过早收敛」从机械楼层搬进裁判标准：第 1 轮开场各方往往尚未接火（real_clash=false
+        # 是常态），默认继续以逼出下一轮交锋，仅当命题空泛到开场即无新论点才收；快速单轮模式
+        # （max=1）本就一次对碰即收；多轮模式按 thorough 调收敛松紧。
+        if max_rounds <= 1:
+            gate_hint = "这是【快速单轮】：用户只想一次对碰即收，核心立场已亮出即可判【收敛】。"
+        elif round_no == 1:
+            gate_hint = (
+                "这是第 1 轮（开场立论）：各方通常只是各自亮出立场、尚未真正接火（这正常），"
+                "默认判【未收敛、继续】以逼出下一轮真交锋；【仅当】命题空泛到开场就无新论点、"
+                "无可再辩时才判收敛。"
+            )
+        elif config.policy.thorough:
+            gate_hint = "【认真辩透】：仍有新论点 / 未决的关键交锋时不要轻易收敛，挖尽实质分歧。"
         else:
-            gate_hint = "门槛已到，可据实判收敛。"
-        gate_note = f"注意：当前是第 {round_no} 轮，最小轮门槛为 {min_rounds} 轮。{gate_hint}"
+            gate_hint = "核心交锋一旦清晰、无强未决分歧即可收敛，不必恋战。"
+        gate_note = f"注意：当前是第 {round_no} 轮（安全上限 {max_rounds} 轮）。{gate_hint}"
         user = (
             f"辩论命题：{config.motion}\n本轮焦点：{focus}\n{_form_guidance(config.form)}\n{gate_note}\n\n"
             f"本轮各方发言：\n{_turns_block(turns)}\n\n"
             "请做【辩论领域内】的交锋质量与收敛判定（不是判谁写得好），只输出 JSON：\n"
             '{"real_clash": true/false, "new_arguments": true/false, "converged": true/false, '
             '"stop_reason": "converged|focus_clarified|red_team_exhausted", '
-            '"next_focus": "若未收敛，下一轮应聚焦的点", "rationale": "一句话理由"}\n'
+            '"next_focus": "若未收敛，下一轮应聚焦的点", "rationale": "一句话理由", '
+            '"clashes": [{"from": "<side_key>", "to": "<被反驳方 side_key>", '
+            '"point": "这条反驳的要点（一句话）"}]}\n'
             "- real_clash：各方是否真针锋相对回应了彼此（而非各说各话）。\n"
             "- new_arguments：本轮是否还在产生【新】论点（开始重复=false）。\n"
-            "- converged：是否可以收场（无新论点 / 焦点已澄清为价值之争 / 红队风险已挖尽）。"
+            "- converged：是否可以收场（无新论点 / 焦点已澄清为价值之争 / 红队风险已挖尽）。\n"
+            "- clashes：本轮谁【针对性反驳】了谁、驳的要点（只列真正针锋相对的边，"
+            "各说各话别列）。最多 4 条；from/to 用发言标题里的 [side_key]，from≠to；"
+            "本轮无真交锋则给 []。"
         )
         data = await self._complete_json(_JUDGE_SYSTEM, user, "judge")
         if not data:
-            # 坏 JSON 容错：保守地判「未收敛」（安全侧——宁可多辩一轮也不草草收场，呼应防过早收敛）。
+            # 坏 JSON 容错：保守地判「未收敛」（安全侧——解析失败时宁可多辩一轮也不草草收场）。
             logger.warning("debate.judge.parse_failed", round_no=round_no)
             return JudgeVerdict(
                 real_clash=True,
@@ -303,6 +327,7 @@ class Moderator:
             stop_reason=_as_str(data.get("stop_reason")),
             next_focus=_as_str(data.get("next_focus")),
             rationale=_as_str(data.get("rationale")),
+            clashes=_as_clashes(data.get("clashes"), {s.key for s in config.sides}),
         )
 
     # ── 第4步：写本轮小结 ────────────────────────────────────────────────
@@ -386,6 +411,33 @@ class Moderator:
         return _parse_json_object(response.content or "")
 
 
+def _as_clashes(value: Any, valid_keys: set[str], *, limit: int = 4) -> list[DebateClash]:
+    """把裁判返回的 clashes 规整为校验过的 :class:`DebateClash` 列表（L3 谁驳谁）。
+
+    防 LLM 幻觉：``from``/``to`` 必须命中真实 side_key、且 ``from≠to``、``point`` 非空；同一
+    (from,to) 去重、整体截到 ``limit`` 条（保叙事线轻量）。容忍 ``from_key``/``to_key`` 别名。
+    """
+    if not isinstance(value, list):
+        return []
+    out: list[DebateClash] = []
+    seen: set[tuple[str, str]] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        frm = _as_str(item.get("from") or item.get("from_key"))
+        to = _as_str(item.get("to") or item.get("to_key"))
+        point = _as_str(item.get("point") or item.get("rebuttal"))
+        if frm not in valid_keys or to not in valid_keys or frm == to or not point:
+            continue
+        if (frm, to) in seen:
+            continue
+        seen.add((frm, to))
+        out.append(DebateClash(from_key=frm, to_key=to, point=point))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _as_str_dict(value: Any) -> dict[str, str]:
     """把 strongest_points 规整为 {side_key: str}（容忍 LLM 返回 list[{key,point}] 等变体）。"""
     if isinstance(value, dict):
@@ -404,7 +456,8 @@ def _as_str_dict(value: Any) -> dict[str, str]:
 
 _FRAME_SYSTEM = (
     "你是一场结构化辩论的主持人。你的职责之一是为每一轮设定一个【具体、可辩、不重复】的争议"
-    "焦点，推动各方真正交锋而非各说各话。严格只输出要求的 JSON。"
+    "焦点，推动各方真正交锋而非各说各话。焦点要精炼成【一句不超过 30 字的短语】、像一个小标题，"
+    "而非完整长句或对命题的复述。严格只输出要求的 JSON。"
 )
 _JUDGE_SYSTEM = (
     "你是一场结构化辩论的主持人兼裁判。你做的是【辩论领域内】的判定——是否真针锋相对、是否还在"

@@ -518,7 +518,9 @@ function QuestionField({
                       <span className={`size-2 rounded-full ${tone.dot}`} />
                     ))}
                 </span>
-                <span className="min-w-0 flex-1 whitespace-pre-wrap">其他…</span>
+                <span className="min-w-0 flex-1 whitespace-pre-wrap">
+                  其他…
+                </span>
               </span>
             </Button>
             {otherOn && (

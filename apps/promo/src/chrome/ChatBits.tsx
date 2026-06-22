@@ -1,5 +1,4 @@
-import { Paperclip, Send, SlidersHorizontal } from "lucide-react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Cloud, HardDrive, Paperclip, Send } from "lucide-react";
 
 /*
  * Chat surface bits, re-stated from ChatView / MessageInput / MessageBubble with
@@ -8,6 +7,11 @@ import { ChevronDown } from "lucide-react";
  * (same Tailwind classes), driven by plain props so scenes can animate them by
  * frame.
  */
+
+export type InputBarWorkspace =
+  | { mode: "none" }
+  | { mode: "folder"; name: string; local?: boolean }
+  | { mode: "cloud" };
 
 /** ChatView's empty state — centered 今天想解决什么问题？ */
 export function ChatEmptyState({ style }: { style?: React.CSSProperties }) {
@@ -26,9 +30,11 @@ export function ChatEmptyState({ style }: { style?: React.CSSProperties }) {
 export function InputBar({
   text,
   caret,
+  workspace = { mode: "none" },
 }: {
   text: string;
   caret: boolean;
+  workspace?: InputBarWorkspace;
 }) {
   const empty = text.length === 0;
   return (
@@ -51,11 +57,7 @@ export function InputBar({
             <span className="flex size-8 items-center justify-center rounded-lg text-muted-foreground">
               <Paperclip size={16} />
             </span>
-            <span className="flex h-8 max-w-[180px] items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground">
-              <SlidersHorizontal size={14} className="shrink-0" />
-              <span className="truncate">跟随默认</span>
-              <ChevronDown size={12} className="shrink-0 opacity-60" />
-            </span>
+            <DraftWorkspaceChrome workspace={workspace} />
           </div>
           <div className="flex items-center gap-3">
             {!empty && (
@@ -76,6 +78,36 @@ export function InputBar({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Static mirror of draft `DraftWorkspacePicker` (B3+): link or confirmation chip. */
+function DraftWorkspaceChrome({ workspace }: { workspace: InputBarWorkspace }) {
+  if (workspace.mode === "none") {
+    return (
+      <span className="flex h-8 items-center px-2 text-xs font-medium text-muted-foreground">
+        归入项目…
+      </span>
+    );
+  }
+
+  const icon =
+    workspace.mode === "cloud" ? (
+      <Cloud size={14} className="shrink-0 text-muted-foreground" />
+    ) : workspace.local ? (
+      <HardDrive size={14} className="shrink-0 text-primary" />
+    ) : (
+      <Cloud size={14} className="shrink-0 text-muted-foreground" />
+    );
+
+  const label = workspace.mode === "cloud" ? "云端" : workspace.name;
+
+  return (
+    <span className="flex h-auto max-w-[200px] items-center gap-1.5 px-2 py-1 text-xs font-medium text-muted-foreground">
+      {icon}
+      <span className="min-w-0 truncate">{label}</span>
+      <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
+    </span>
   );
 }
 

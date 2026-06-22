@@ -184,8 +184,8 @@ const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
  * dense charts / wide mind maps. Content size is read via offsetWidth/Height
  * (layout px, unaffected by the CSS transform), so re-centering math stays
  * simple; a ResizeObserver keeps it centered while async SVGs settle, until the
- * user first interacts. Close via the X button or Esc (mirrors
- * TeamGraphFullscreen) — no click-to-dismiss backdrop, which would need a
+ * user first interacts. Close via the X button or Esc (mirrors the canvas
+ * 放大态) — no click-to-dismiss backdrop, which would need a
  * keyboard equivalent. */
 function DiagramLightbox({
   label,

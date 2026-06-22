@@ -1,4 +1,4 @@
-// The mobile protocol fold: SSE events → normalized ProjectedTurn (手机端落地设计 §六).
+// The mobile protocol fold: SSE events → normalized ProjectedTurn (前端技术与架构 §十二).
 //
 // This is the ONE dangerous surface the conformance巡检 guards (cross-platform-
 // frontend.mdc §四): it must match the backend oracle's golden for every vector
@@ -451,6 +451,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           summary: "",
           verdict: null,
           sides: [],
+          clashes: [],
         });
         break;
       }
@@ -462,6 +463,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           summary: p.summary,
           verdict: p.verdict,
           sides: p.sides,
+          clashes: p.clashes,
         });
         break;
       }

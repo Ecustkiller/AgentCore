@@ -13,8 +13,8 @@ from __future__ import annotations
 from agentcore.runtime.debate.moderator import Moderator
 from agentcore.runtime.debate.types import (
     DEFAULT_MAX_ROUNDS,
-    DEFAULT_MIN_ROUNDS_QUICK,
-    DEFAULT_MIN_ROUNDS_THOROUGH,
+    DEFAULT_MAX_ROUNDS_QUICK,
+    DEFAULT_MAX_ROUNDS_ROUNDTABLE,
     STOP_ALL_FAILED,
     STOP_CONVERGED,
     STOP_FOCUS_CLARIFIED,
@@ -46,8 +46,8 @@ __all__ = [
     "DebateResult",
     "RoundRunner",
     "DEFAULT_MAX_ROUNDS",
-    "DEFAULT_MIN_ROUNDS_THOROUGH",
-    "DEFAULT_MIN_ROUNDS_QUICK",
+    "DEFAULT_MAX_ROUNDS_QUICK",
+    "DEFAULT_MAX_ROUNDS_ROUNDTABLE",
     "STOP_CONVERGED",
     "STOP_FOCUS_CLARIFIED",
     "STOP_RED_TEAM_EXHAUSTED",

@@ -53,6 +53,7 @@ OKLCH 语义色单源：**`packages/design-tokens/`**
 
 - **代码高亮** `--syntax-*`：代码块着色。
 - **角色身份** `--agent-1..8`：协作图队员头像的「身份色」，按角色名 hash 取一格（`lib/agentIdentity.ts`）。**身份 ≠ 状态**——身份只画在头像盘，运行状态仍走上表状态色。新增/调整 → 改 `packages/design-tokens/tokens.css`。
+- **产物 / 目录分类** `--artifact-*` `--catalog-*`：工具箱创作工具磁贴、能力图鉴分类图标（`lib/catalogColors.ts`）。**分类 ≠ 状态**——仅启动器/目录层扫视识别，不进 Tailwind 类、内联 `var(--*)` + `color-mix`。
 
 ## 跨端（桌面 + 手机）· 品牌不变量
 

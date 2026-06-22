@@ -133,10 +133,14 @@ export async function computeLayout(
     positions[child.id] = { x: child.x ?? 0, y: child.y ?? 0 };
   }
 
+  // 二叉分叉对称：ELK 在同层双子女（如 方案决策→产品设计/技术架构）上常把一侧贴
+  // 中轴、另一侧甩远；在子队下沉之前把两支刚体分支镜像到父节点交叉轴两侧等距。
+  balanceBinaryForks(positions, edges, layout);
+
   // 子团队下沉后处理 (阶段2 嵌套委派): drop each delegated sub-team onto the cross
-  // axis *below* its parent so the parent's solid 父→CEO 汇聚点 main edge is not
+  // axis *beside* its parent so the parent's solid 父→CEO 汇聚点 main edge is not
   // occluded, stacking multiple same-wave parent blocks so their sub-teams never
-  // collide. Runs first because it can push lower parents down. See its doc.
+  // collide. Tree 布局按父相对汇聚点的左右选择 -X / +X 让位。See its doc.
   dropSubTeamsBelowParent(positions, edges, layout);
 
   // 端点居中后处理：ELK 的 NETWORK_SIMPLEX 在子节点为偶数时，把独占一层的纯源/纯汇
@@ -144,6 +148,29 @@ export async function computeLayout(
   // 偏离正中，使其扇形边一长一短。这里把这类节点在交叉轴上拉到所连节点的正中（仅交叉轴、
   // 不动层坐标）。放在下沉之后：多父下沉会把靠下的父下推，端点须按父的**最终**跨度居中。
   centerLoneEndpoints(positions, edges, layout);
+
+  // 修订对齐后处理：把每个续写/修订节点拉回其「源」所在的交叉轴车道，恢复「修订边笔直」不变
+  // 量（圆桌逐轮 / 热修版本链都读作「同一发言人·下一轮」一条车道）。放在所有位移之后：下沉
+  // 只搬了 delegate 子队、漏掉挂在子 worker 下游的修订节点（它们不在 delegate 子树里），于是
+  // 修订被留在源的**旧**车道上 → 第三波漂移。在此统一对齐，不管是谁移动了源都能复位。
+  alignRevisionChains(positions, edges, layout);
+
+  // Post-processing can push nodes negative on the cross axis; shift the whole
+  // graph so the bbox origin stays at ELK padding (keeps promo stills / fit-to-width sane).
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  for (const id of Object.keys(positions)) {
+    minX = Math.min(minX, positions[id].x);
+    minY = Math.min(minY, positions[id].y);
+  }
+  const normDx = minX < PADDING ? PADDING - minX : 0;
+  const normDy = minY < PADDING ? PADDING - minY : 0;
+  if (normDx !== 0 || normDy !== 0) {
+    for (const id of Object.keys(positions)) {
+      positions[id].x += normDx;
+      positions[id].y += normDy;
+    }
+  }
 
   // ELK stamps the laid-out root with its total size (content + the padding set
   // above), but the post-processing above can push a sub-team past ELK's bbox, so
@@ -231,7 +258,96 @@ function centerLoneEndpoints(
 }
 
 /**
- * Drop each delegated sub-team (阶段2 嵌套委派) onto the cross axis *below* its
+ * Mirror a parent's two same-layer `dep` children symmetrically around the parent's
+ * cross-axis center — fixes ELK packing one fork flush to the spine and the other
+ * flung wide (tree 方案决策→左产品/右技术 reads as a Y, not an L).
+ *
+ * Wing assignment follows **edge declaration order**: first `dep` child → left,
+ * second → right (so `decide→pd` then `decide→arch` always reads 产品左/技术右).
+ *
+ * Only exactly-two-child forks; 1→N fans and debate 1→4 are left to ELK /
+ * `preserveOrder`. Each child moves as a rigid branch (all descendants) so
+ * delegate sub-teams stay attached. Cross-axis only; main-axis layers untouched.
+ */
+function balanceBinaryForks(
+  positions: Record<string, { x: number; y: number }>,
+  edges: GraphEdge[],
+  layout: GraphLayout,
+): void {
+  const horizontal = layout === "leftright";
+  const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
+  const mainOf = (id: string) =>
+    horizontal ? positions[id].x : positions[id].y;
+  const crossCenterOf = (id: string) =>
+    (horizontal ? positions[id].y : positions[id].x) + crossSize / 2;
+  const moveCross = (id: string, delta: number) => {
+    if (horizontal) positions[id].y += delta;
+    else positions[id].x += delta;
+  };
+
+  const outgoingDep = new Map<string, string[]>();
+  for (const e of edges) {
+    if ((e.kind ?? "dep") !== "dep") continue;
+    if (!positions[e.source] || !positions[e.target]) continue;
+    const arr = outgoingDep.get(e.source);
+    if (arr) {
+      if (!arr.includes(e.target)) arr.push(e.target);
+    } else outgoingDep.set(e.source, [e.target]);
+  }
+
+  const branchOf = (root: string, forkParent: string): string[] => {
+    const inBranch = new Set([forkParent, root]);
+    const out = [root];
+    const stack = [root];
+    while (stack.length > 0) {
+      const n = stack.pop() as string;
+      for (const e of edges) {
+        if (e.source !== n) continue;
+        const t = e.target;
+        if (!positions[t] || inBranch.has(t)) continue;
+        // Fan-in merge (e.g. both parents → CEO 汇聚点): never absorb into one side.
+        const externalIn = edges.some(
+          (ei) =>
+            ei.target === t && ei.source !== n && !inBranch.has(ei.source),
+        );
+        if (externalIn) continue;
+        inBranch.add(t);
+        out.push(t);
+        stack.push(t);
+      }
+    }
+    return out;
+  };
+
+  for (const [parent, children] of outgoingDep) {
+    if (children.length !== 2 || !positions[parent]) continue;
+    const [left, right] = children;
+    if (!positions[left] || !positions[right]) continue;
+    if (Math.round(mainOf(left)) !== Math.round(mainOf(right))) continue;
+
+    const parentCenter = crossCenterOf(parent);
+    const leftCenter = crossCenterOf(left);
+    const rightCenter = crossCenterOf(right);
+    // First `dep` child → left wing, second → right wing (edge declaration order).
+    const spread = Math.max(
+      Math.abs(parentCenter - leftCenter),
+      Math.abs(parentCenter - rightCenter),
+    );
+    if (spread <= 1) continue;
+
+    const leftDelta = parentCenter - spread - leftCenter;
+    const rightDelta = parentCenter + spread - rightCenter;
+    if (Math.abs(leftDelta) > 0.01) {
+      for (const id of branchOf(left, parent)) moveCross(id, leftDelta);
+    }
+    if (Math.abs(rightDelta) > 0.01) {
+      for (const id of branchOf(right, parent)) moveCross(id, rightDelta);
+    }
+  }
+}
+
+/**
+ * Drop each delegated sub-team (阶段2 嵌套委派) onto the cross axis *beside* its
  * parent worker, so the parent's solid 父→CEO 汇聚点 main edge stays clear.
  *
  * Why: a captain worker links its sub-workers by a lone dashed `delegate` edge
@@ -242,10 +358,9 @@ function centerLoneEndpoints(
  * `父 → 子任务 → 汇聚点` chain. ELK edge-priority tweaks don't dislodge it.
  *
  * Fix: shift each parent's whole delegate subtree along the cross axis until it
- * starts one node-gap below the parent's box. The sub-team then reads as a dashed
- * branch hanging under its parent and the main line is unobstructed. Cross-axis
- * only (y for the left-right flow, x for the tree); the main-axis layers are
- * untouched, so the bbox only grows on the cross axis (handled by the caller).
+ * clears the parent's column on the **outward** side — tree 布局里父在汇聚点左侧
+ * 则子队往 -X 挂，右侧则往 +X；leftright 仍一律往 +Y。The sub-team then reads as a
+ * dashed branch hanging beside its parent and the main line is unobstructed.
  *
  * Multiple same-wave parents (后端组长 + 前端组长 both sub-delegating): dropping
  * each subtree below its *own* parent independently makes the two dropped bands
@@ -256,6 +371,10 @@ function centerLoneEndpoints(
  * previous block. A single delegating parent has one block and never moves, so the
  * earlier flat/1-level/2-level cases are unchanged. Cross-axis only; the bbox grows
  * on the cross axis (handled by the caller) and the bookends recenter afterwards.
+ *
+ * 主干线门控：只对**确有非 delegate 主干出边**（父→汇聚点 / 父→其它 worker）的父下沉；父若只
+ * 委派、无主干线（无 CEO 汇聚点的圆桌）则不动。子队下游的修订节点不在此函数职责内，由随后的
+ * {@link alignRevisionChains} 统一拉回源车道。
  */
 function dropSubTeamsBelowParent(
   positions: Record<string, { x: number; y: number }>,
@@ -297,37 +416,145 @@ function dropSubTeamsBelowParent(
     return out;
   };
 
+  // 主干线门控：下沉的唯一目的是让「父→汇聚点」实线不被子队横穿。只有当父确有一条会被横穿
+  // 的**非 delegate 出边**（父→CEO 汇聚点 / 父→其它 worker）时才下沉；若父的出边全是 delegate
+  // （典型：无 CEO 汇聚点的圆桌——主持人只委派辩手、没有要保护的主干线），下沉只会把图摊开并把
+  // 修订节点甩出车道，故跳过，让 ELK 的自然居中（主持人居中于子队、修订与源齐平）直接成立。
+  const hasMainLine = new Set<string>();
+  for (const e of edges) {
+    if (e.kind === "delegate") continue;
+    if (positions[e.source]) hasMainLine.add(e.source);
+  }
+
   // Top-level delegating parents (a parent that is not itself a sub-worker):
   // dropping a root subtree carries its nested teams with it, so roots suffice.
   const roots = [...childrenOf.keys()].filter(
-    (p) => !isSub.has(p) && (childrenOf.get(p)?.length ?? 0) > 0,
+    (p) =>
+      !isSub.has(p) &&
+      (childrenOf.get(p)?.length ?? 0) > 0 &&
+      hasMainLine.has(p),
   );
   if (roots.length === 0) return;
-  // Stack the parent blocks in cross-axis (reading) order so a lower block always
-  // lands clear of the one above it.
-  roots.sort((a, b) => crossOf(a) - crossOf(b));
 
-  // Cross-axis bottom of the last placed block; the next block must start below it.
-  let floor = Number.NEGATIVE_INFINITY;
-  for (const parent of roots) {
-    const subtree = subtreeOf(parent);
-    // 1) Push the parent itself down if the previous block would overlap its row.
-    const parentShift = floor + NODE_SPACING - crossOf(parent);
-    if (parentShift > 0) moveCross(parent, parentShift);
-    const parentBottom = crossOf(parent) + crossSize;
-    // 2) Drop the whole subtree to start one gap below the parent's (new) row.
-    //    Anchor on the topmost of the WHOLE subtree (not just direct subs): a
-    //    nested grandchild can sit higher than its parent sub, so this guarantees
-    //    the entire block clears the parent's row (>1-level nesting).
-    const bandTop = Math.min(...subtree.map(crossOf));
-    const subShift = parentBottom + NODE_SPACING - bandTop;
-    if (subShift > 0) for (const id of subtree) moveCross(id, subShift);
-    // 3) Advance the floor to this block's lowest edge (parent or any descendant).
-    let blockBottom = parentBottom;
-    for (const id of subtree) {
-      blockBottom = Math.max(blockBottom, crossOf(id) + crossSize);
+  /** Tree: -1 = hang subteam on the left (-X), +1 = right (+X). Leftright: +1 = down (+Y). */
+  const dropSignOf = (parent: string): number => {
+    if (horizontal) return 1;
+    const parentCenter = crossOf(parent) + crossSize / 2;
+    const mains = edges
+      .filter((e) => e.source === parent && e.kind !== "delegate")
+      .map((e) => e.target)
+      .filter((t) => positions[t]);
+    if (mains.length === 0) return 1;
+    const sink = mains.reduce((a, b) =>
+      positions[a].y > positions[b].y ? a : b,
+    );
+    const sinkCenter = crossOf(sink) + crossSize / 2;
+    return parentCenter <= sinkCenter ? -1 : 1;
+  };
+
+  const shiftSubtree = (
+    subtree: string[],
+    parent: string,
+    sign: number,
+  ): void => {
+    if (subtree.length === 0) return;
+    if (sign > 0) {
+      const parentBottom = crossOf(parent) + crossSize;
+      const bandTop = Math.min(...subtree.map(crossOf));
+      const subShift = parentBottom + NODE_SPACING - bandTop;
+      if (subShift > 0) for (const id of subtree) moveCross(id, subShift);
+    } else {
+      const parentTop = crossOf(parent);
+      const bandRight = Math.max(
+        ...subtree.map((id) => crossOf(id) + crossSize),
+      );
+      const subShift = bandRight + NODE_SPACING - parentTop;
+      if (subShift > 0) for (const id of subtree) moveCross(id, -subShift);
     }
-    floor = blockBottom;
+  };
+
+  // Process +sign and -sign blocks separately so opposite-flank parents don't
+  // share a one-sided floor (pd left / arch right in tree).
+  for (const sign of [1, -1] as const) {
+    const signed = roots.filter((p) => dropSignOf(p) === sign);
+    if (signed.length === 0) continue;
+    signed.sort((a, b) =>
+      sign > 0 ? crossOf(a) - crossOf(b) : crossOf(b) - crossOf(a),
+    );
+
+    let floor = sign > 0 ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
+    for (const parent of signed) {
+      const subtree = subtreeOf(parent);
+      if (sign > 0) {
+        const parentShift = floor + NODE_SPACING - crossOf(parent);
+        if (parentShift > 0) moveCross(parent, parentShift);
+      } else {
+        const parentShift =
+          floor - NODE_SPACING - (crossOf(parent) + crossSize);
+        if (parentShift < 0) moveCross(parent, parentShift);
+      }
+      shiftSubtree(subtree, parent, sign);
+
+      const parentBottom = crossOf(parent) + crossSize;
+      let blockBottom = parentBottom;
+      for (const id of subtree) {
+        blockBottom = Math.max(blockBottom, crossOf(id) + crossSize);
+      }
+      if (sign > 0) {
+        floor = blockBottom;
+      } else {
+        const blockTop = Math.min(crossOf(parent), ...subtree.map(crossOf));
+        floor = blockTop;
+      }
+    }
+  }
+}
+
+/**
+ * Snap each 修订/续写 revision node onto its source's cross-axis lane so the
+ * `原始 → 修订 vN` edge stays straight — the invariant that makes a 圆桌逐轮 /
+ * 热修版本链 read as「同一发言人·下一轮」in one lane.
+ *
+ * ELK already aligns a revision with its source (a revision edge is a normal edge
+ * it keeps short), but {@link dropSubTeamsBelowParent} can move the SOURCE (a
+ * delegated sub-worker) without its revisions — they hang off the sub-worker by a
+ * `revision` edge, not the `delegate` subtree it moves — leaving the revision
+ * stranded in the source's OLD lane（第三波漂移 bug）. Re-establishing the invariant
+ * here, after every prior move, fixes it no matter what shifted the source.
+ *
+ * Cross-axis only (y for the left-right flow, x for the tree). A chain (v2→v3…)
+ * is processed shallow-first so each link inherits its parent's already-settled
+ * lane. Inert when there are no revision edges (the flat / nested-delegate cases).
+ */
+function alignRevisionChains(
+  positions: Record<string, { x: number; y: number }>,
+  edges: GraphEdge[],
+  layout: GraphLayout,
+): void {
+  const horizontal = layout === "leftright";
+  const sourceOf = new Map<string, string>();
+  for (const e of edges) {
+    if (e.kind !== "revision") continue;
+    if (!positions[e.source] || !positions[e.target]) continue;
+    sourceOf.set(e.target, e.source);
+  }
+  if (sourceOf.size === 0) return;
+
+  // Revision-chain depth from a non-revision origin, so v2 settles before v3
+  // reads it (a cycle guard keeps a malformed chain from looping forever).
+  const depthOf = (id: string, seen: Set<string>): number => {
+    const src = sourceOf.get(id);
+    if (src == null || seen.has(id)) return 0;
+    seen.add(id);
+    return 1 + depthOf(src, seen);
+  };
+  const targets = [...sourceOf.keys()].sort(
+    (a, b) => depthOf(a, new Set()) - depthOf(b, new Set()),
+  );
+  for (const target of targets) {
+    const src = sourceOf.get(target) as string;
+    if (horizontal) positions[target].y = positions[src].y;
+    else positions[target].x = positions[src].x;
   }
 }
 

@@ -164,6 +164,27 @@ def test_context_block_payloads_caps_long_body_with_flag():
     }
 
 
+def test_context_block_payloads_exempts_system_block_from_cap():
+    # The captain `system` block (verbatim CEO system prompt) is EXEMPT from the 决策④ cap:
+    # the desktop「收到的上下文」dialog shows it in full (having folded in the old「提示词」
+    # button), and it's bounded internal content — not the unbounded user/dep body the cap
+    # guards. A non-system block of the same size is still capped, proving the carve-out is
+    # channel-scoped.
+    long_prompt = "甲" * (_CONTEXT_BLOCK_BODY_CAP + 5000)
+    blocks = [
+        ContextBlock(channel="system", heading="CEO 系统提示", body=long_prompt),
+        ContextBlock(channel="request", heading="原始用户请求", body=long_prompt),
+    ]
+    payloads = _context_block_payloads(blocks)
+    # system: full body, never flagged, even far past the cap.
+    assert payloads[0]["truncated"] is False
+    assert payloads[0]["body"] == long_prompt
+    assert payloads[0]["chars"] == len(long_prompt)
+    # request of identical size: still capped + flagged.
+    assert payloads[1]["truncated"] is True
+    assert len(payloads[1]["body"]) <= _CONTEXT_BLOCK_BODY_CAP
+
+
 def test_captain_context_blocks_channels_order_and_single_source():
     # A continued chat: system + a prior turn + this request → the three CEO-side channels
     # in order, each body verbatim what the captain's `messages` array feeds the LLM.
@@ -174,8 +195,9 @@ def test_captain_context_blocks_channels_order_and_single_source():
     ]
     blocks = _build_captain_context_blocks("你是 CEO。", history, "帮我润色这段话。")
     assert [b.channel for b in blocks] == ["system", "history", "request"]
-    # system block carries the verbatim chat system prompt (决策②: hidden by default is a
-    # FRONTEND gate — the projection/block still carries it so power mode can reveal it).
+    # system block carries the verbatim chat system prompt (决策②: visibility is a FRONTEND
+    # concern — the desktop「收到的上下文」dialog shows it to all, mobile hides it; the
+    # projection/block always carries it verbatim, and is exempt from the 决策④ body cap).
     assert blocks[0].body == "你是 CEO。"
     # history renders the prior turns as 用户/CEO prose, blank turns dropped.
     assert blocks[1].body == "用户：你好\n\nCEO：你好，有什么可以帮你？"

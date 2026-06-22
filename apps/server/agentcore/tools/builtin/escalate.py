@@ -127,7 +127,7 @@ class EscalateTool:
             )
         assumption = str(arguments.get("assumption") or "").strip()
         blocking = bool(arguments.get("blocking"))
-        # 职责晚绑定与动态再编排 §4.4: kind=scope marks a 职责/范围 deviation the WaveScheduler
+        # 执行引擎架构设计.md §受监督的波循环: kind=scope marks a 职责/范围 deviation the WaveScheduler
         # consumes at a wave boundary (CEO re-steers the un-run tail); orthogonal to blocking
         # (which is the 阻塞式求决策 user axis). Unknown values degrade to "normal".
         kind = str(arguments.get("kind") or "normal").strip().lower()

@@ -25,14 +25,11 @@ from enum import StrEnum
 from typing import Protocol
 
 # ── 轮次治理默认（辩论编排设计.md §五） ──────────────────────────────────────
-# 轮数永不暴露给用户设定：用户只选形态，轮数由主持人据收敛判据自调。这些是「兜底」与「防
-# 过早收敛」的安全边界，不是目标值。
-DEFAULT_MAX_ROUNDS = 5  # 安全上限：达到即停（防失控兜底，非目标）
-DEFAULT_MIN_ROUNDS_THOROUGH = 3  # 「辩透」形态最小轮门槛：达此门槛才允许判收敛
-DEFAULT_MIN_ROUNDS_QUICK = 1  # 「快速对碰」：单轮即可出简报
-# 圆桌（探讨型）轻于「辩透」：min 2 仍保证至少一次跨轮交锋（非退化单轮），max 4 比辩论略紧
-# 防探讨型空转——典型「看一下光谱」无需 3 轮起步的对抗强度。
-DEFAULT_MIN_ROUNDS_ROUNDTABLE = 2
+# 轮数永不暴露给用户设定：用户只选形态，收敛由主持人逐轮自判（无最小轮门槛强制多轮）。这些
+# 是纯「安全上限」（防失控的断路器），不是目标值——收敛永远可早于它发生。
+DEFAULT_MAX_ROUNDS = 5  # 安全上限（正反/红队）：达到即停（防失控兜底，非目标）
+DEFAULT_MAX_ROUNDS_QUICK = 1  # 「快速对碰」上限：单轮即收
+# 圆桌（探讨型）上限略紧于辩论（铺满观点光谱即可，无需正反那种对抗强度的轮数）。
 DEFAULT_MAX_ROUNDS_ROUNDTABLE = 4
 
 
@@ -63,44 +60,40 @@ class DebateSide:
 class RoundPolicy:
     """轮次治理参数（辩论编排设计.md §五）。
 
-    ``min_rounds`` 是「防过早收敛」门槛：达此门槛前主持人不允许判收敛，保护过程质量；
-    ``max_rounds`` 是安全上限：到顶即停。两者把「轮数」收进主持人内部，对用户全隐藏。
+    收敛由主持人【每轮自判】（:meth:`Moderator._judge` 的 ``converged``）决定——本类【不再设
+    最小轮门槛】强制多轮（旧法的机械楼层不看内容、把 trivial 命题也逼满 N 轮、产出冗余「修订
+    v2」）。「别过早收敛」的智慧已搬进裁判的逐轮标准（第 1 轮开场默认继续、除非命题空泛无可
+    再辩），不再靠外部计数兜底。
+
+    ``thorough`` 是喂给裁判的【深度偏好】：True=未挖尽实质分歧不轻易收，False=核心交锋清晰即
+    收；``max_rounds`` 是纯【安全上限】（防失控的断路器，非目标值），收敛永远可早于它发生。
     """
 
-    min_rounds: int = DEFAULT_MIN_ROUNDS_THOROUGH
+    thorough: bool = True
     max_rounds: int = DEFAULT_MAX_ROUNDS
 
     def __post_init__(self) -> None:
-        # 防御非法配置：min/max 至少 1，且 min ≤ max（否则循环语义崩坏）。
-        object.__setattr__(self, "min_rounds", max(1, self.min_rounds))
-        object.__setattr__(self, "max_rounds", max(self.min_rounds, self.max_rounds))
-
-    @classmethod
-    def thorough(cls) -> RoundPolicy:
-        """「认真辩透」：最小 3 轮、上限 5（辩论编排设计.md §五 默认）。"""
-        return cls(min_rounds=DEFAULT_MIN_ROUNDS_THOROUGH, max_rounds=DEFAULT_MAX_ROUNDS)
+        # 安全上限至少 1 轮（否则循环空转）。
+        object.__setattr__(self, "max_rounds", max(1, self.max_rounds))
 
     @classmethod
     def quick(cls) -> RoundPolicy:
-        """「快速对碰」：单轮正反 + 直接出简报。"""
-        return cls(min_rounds=DEFAULT_MIN_ROUNDS_QUICK, max_rounds=DEFAULT_MIN_ROUNDS_QUICK)
-
-    @classmethod
-    def roundtable(cls) -> RoundPolicy:
-        """圆桌（探讨型）：轻于「辩透」——最小 2 轮（仍保证跨轮交锋）、上限 4。"""
-        return cls(
-            min_rounds=DEFAULT_MIN_ROUNDS_ROUNDTABLE,
-            max_rounds=DEFAULT_MAX_ROUNDS_ROUNDTABLE,
-        )
+        """「快速对碰」：单轮即收（上限 1）——裁判一次对碰即判收敛，不强制多轮。"""
+        return cls(thorough=False, max_rounds=DEFAULT_MAX_ROUNDS_QUICK)
 
     @classmethod
     def for_form(cls, form: DebateForm, *, thorough: bool = True) -> RoundPolicy:
-        """形态默认 policy：圆桌探讨（恒多轮、轻于辩透）、正反/红队可选快速对碰。"""
-        if form is DebateForm.ROUNDTABLE:
-            return cls.roundtable()
+        """形态默认 policy。
+
+        ``thorough=False`` 对**所有形态**（含圆桌）一律快速单轮——「测试一下 / 简单看看 / 随便
+        聊聊」不该被强制多轮（旧实现圆桌恒多轮、忽略 ``thorough``，trivial 命题也产出冗余「修订
+        v2」）。``thorough=True`` 时圆桌探讨上限略紧（铺光谱即可）、正反/红队认真辩透；轮数仍由
+        主持人逐轮自判收敛，``max_rounds`` 只是安全上限。"""
         if not thorough:
             return cls.quick()
-        return cls.thorough()
+        if form is DebateForm.ROUNDTABLE:
+            return cls(thorough=True, max_rounds=DEFAULT_MAX_ROUNDS_ROUNDTABLE)
+        return cls(thorough=True, max_rounds=DEFAULT_MAX_ROUNDS)
 
 
 @dataclass
@@ -139,14 +132,29 @@ class SideTurn:
     ok: bool = True
 
 
+@dataclass(frozen=True)
+class DebateClash:
+    """论点级交锋边（叙事线 L3「谁驳谁」）—— 裁判逐轮抽取的针锋相对关系。
+
+    ``from_key`` 一方针对性反驳了 ``to_key`` 一方，``point`` 是这条反驳的要点（一句话）。
+    ``from_key``/``to_key`` 是 :class:`DebateSide` 的 ``key``（语义键，非 run_id）。只抽**真正
+    针锋相对**的边（各说各话不算），让前端把「平铺发言」升级为可读的交锋图（而非靠用户脑补）。
+    """
+
+    from_key: str
+    to_key: str
+    point: str
+
+
 @dataclass
 class JudgeVerdict:
     """收敛裁判结果（辩论编排设计.md §二 第3步 + §五）。
 
     主持人的「裁判」是**辩论领域内**的交锋质量与收敛判定（非通用产物质量门，见设计 §二）：
     ``real_clash`` 各方是否真针锋相对（而非各说各话）、``new_arguments`` 本轮是否还在产生新
-    论点。``converged`` 是裁判建议「可终止」（受最小轮门槛二次约束于主持人循环）；终止时
-    ``stop_reason`` 取 :data:`STOP_REASONS` 之一，继续时 ``next_focus`` 给下一轮焦点。
+    论点。``converged`` 是裁判判「可终止」——主持人循环【直接据此收场】（无最小轮门槛二次约束，
+    「别过早收敛」已内化进裁判的逐轮标准）；终止时 ``stop_reason`` 取 :data:`STOP_REASONS` 之一，
+    继续时 ``next_focus`` 给下一轮焦点。
     """
 
     real_clash: bool
@@ -155,6 +163,7 @@ class JudgeVerdict:
     stop_reason: str = ""
     next_focus: str = ""
     rationale: str = ""
+    clashes: list[DebateClash] = field(default_factory=list)
 
 
 # 终止条件词表（辩论编排设计.md §五）——裁判判收敛时给出的归因，前端可据此呈现「为何收场」。
@@ -220,6 +229,11 @@ class RoundResult:
                 }
                 for t in self.turns
             ],
+            # L3 论点级交锋边（谁驳谁）—— 裁判逐轮抽取，与 sides 平级（key 引 sides[*].key）。
+            "clashes": [
+                {"from_key": c.from_key, "to_key": c.to_key, "point": c.point}
+                for c in self.verdict.clashes
+            ],
         }
 
 
@@ -261,6 +275,16 @@ class DebateResult:
         """呈现顺序（辩论编排设计.md §4.3）：探讨/学习类（圆桌）过程叙事线先行，决策类
         （正反/红队）决策简报先行。前端据此排版，CEO 收尾文本也据此调整侧重。"""
         return self.config.form is DebateForm.ROUNDTABLE
+
+    @property
+    def node_summary(self) -> str:
+        """团队图上主持人节点的一行预览：「N 轮 · 收敛归因」。
+
+        节点是「一眼概览」位——详尽的争议焦点 / 倾向 / 建议在 debate_result 卡片里，故节点只
+        给【轮数 + 为何收场】（``stop_reason`` 的人话）：比塞 ``brief.crux`` 更稳定、信息密度更
+        高（crux 可能为空 / 冗长、且已在卡片重复，旧法 crux 落空时退化成「辩论收场：N 轮」的
+        近空预览）。复用 :func:`_stop_label`（与 CEO 文本头、前端「为何收场」同一词表）。"""
+        return f"{len(self.rounds)} 轮 · {_stop_label(self.stop_reason)}"
 
     def to_ceo_output(self) -> str:
         """折算回 CEO 循环的 markdown：决策简报 + L1 焦点小结流（按形态调顺序）。"""

@@ -1,4 +1,4 @@
-"""Push transport port + FCM v1 adapter (原生推送下发, 手机端落地设计 P2).
+"""Push transport port + FCM v1 adapter (原生推送下发, 认证与会话 §十).
 
 A :class:`PushSender` is pure transport: given device tokens + a notification it
 delivers, and returns the tokens the provider rejected as *unregistered* so the caller

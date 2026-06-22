@@ -1,10 +1,10 @@
-import type { FileArtifact, FileOp } from "@/lib/fileArtifacts";
 import { Button } from "@/components/ui";
 import {
+  type StatusTone,
   statusAccentText,
   statusPillSoft,
-  type StatusTone,
 } from "@/components/ui/tone-presets";
+import type { FileArtifact, FileOp } from "@/lib/fileArtifacts";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import {
   ArrowRight,
@@ -21,7 +21,7 @@ import { useState } from "react";
 
 /**
  * 「本回合产出文件」卡 —— 把一回合内成功的文件写/改/删/移聚合成一张回合级清单，挂在
- * 答复正文下方（前端展示完善规划.md P1）。点任一可预览行 → 经 {@link useSidePanelStore}
+ * 答复正文下方（前端UX设计.md §九「回合内文件呈现」）。点任一可预览行 → 经 {@link useSidePanelStore}
  * 的 `showFile` 把右侧工作区面板切到该文件预览，与文件树/详情共用同一套预览（不另起编辑器）。
  *
  * 删除态无文件可看 → 该行不可点（仅留痕）。卡只读已折好的运行时状态、不持久化，真相仍以

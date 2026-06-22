@@ -79,12 +79,12 @@ ignore = ["B008", "A002", "E402"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-# Pin tmp dirs to a fixed, project-local basetemp (gitignored via .pytest_*/). The
-# default auto-numbered base (<tmp>/pytest-of-<user>/) keeps a `pytest-current`
-# symlink whose session-finish cleanup throws PermissionError [WinError 5] on Windows
-# (symlink stat denied), making the run exit non-zero even when every test passed. A
-# fixed --basetemp skips that numbered-dir + symlink machinery entirely.
-addopts = "--basetemp=.pytest_tmp"
+# tmp dirs: routed to a unique-per-session folder under the OS temp dir by
+# tests/conftest.py::pytest_configure (NOT pinned here). Both the default base (a
+# `pytest-current` symlink whose cleanup throws WinError 5 on Windows) and a fixed
+# shared --basetemp (unsuppressed rm_rf-reset at session start → WinError 5 the moment
+# a prior run leaked a file handle) make a fully-passing run exit non-zero on Windows;
+# a fresh per-session basetemp needs no reset and is never auto-cleaned. See conftest.
 # Per-test wall-clock guard (pytest-timeout): a hung test — e.g. an asyncio await on
 # an event that never fires — would otherwise stall the whole suite for minutes (CI /
 # parallel agents just see a silent hang). This converts that into a fast, faulthandler-

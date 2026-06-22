@@ -1,5 +1,5 @@
 import { apiFetch } from "@/api/client";
-// Conversation REST for the mobile client (手机端落地设计 P1 · 会话管理).
+// Conversation REST for the mobile client (前端技术与架构 §七 · 会话管理).
 //
 // Bearer-authenticated reads/writes over the same cloud endpoints the desktop uses
 // (api/routes/conversations.py). Pure data fetch — the chat transport (SSE) lives in

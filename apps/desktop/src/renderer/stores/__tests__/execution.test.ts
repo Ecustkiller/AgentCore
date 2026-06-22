@@ -1084,6 +1084,13 @@ describe("辩论/审查 display tags (前端UX设计.md §四)", () => {
           { key: "pro", name: "正方", run_id: "r-pro", ok: true },
           { key: "con", name: "反方", run_id: "r-con", ok: true },
         ],
+        clashes: [
+          {
+            from_key: "con",
+            to_key: "pro",
+            point: "可独立扩展的前提是团队规模够大，当前规模撑不起运维。",
+          },
+        ],
       },
     ],
     brief: {

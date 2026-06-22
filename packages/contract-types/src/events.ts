@@ -1,51 +1,10 @@
-// SSE event contract — the single shared source for both desktop and mobile folds
-// (手机端落地设计 §六 支柱2). Extracted from apps/desktop/src/renderer/types/events.ts
-// (the prior hand-written source); ideally generated from the backend
-// runtime/events.py EventType + payload builders. Both ends import THIS union and
-// fold with a `switch` + `assertNever`, so a new backend event type breaks the
-// build until every fold handles it.
+// SSE event contract — shared source for desktop + mobile folds (前端技术与架构 §十二).
+// Event names: generated from backend EventType (`eventTypes.generated.ts`).
+// Payload shapes: hand-maintained here until a richer codegen lands.
 
-export type SSEEventType =
-  | "message_start"
-  | "content_delta"
-  | "content_reset"
-  | "reasoning_delta"
-  | "tool_progress"
-  | "tool_use_start"
-  | "tool_use_end"
-  | "approval_required"
-  | "approval_resolved"
-  | "checkpoint_required"
-  | "checkpoint_resolved"
-  | "question_posted"
-  | "plan_review_required"
-  | "plan_review_resolved"
-  | "plan_revised"
-  | "run_plan"
-  | "run_started"
-  | "run_context"
-  | "run_output_delta"
-  | "run_reasoning_delta"
-  | "run_tool_progress"
-  | "run_completed"
-  | "run_failed"
-  | "run_progress"
-  | "run_escalation"
-  | "escalation_required"
-  | "escalation_resolved"
-  | "debate_result"
-  | "debate_round_started"
-  | "debate_round"
-  | "message_end"
-  | "error"
-  | "title_generated"
-  | "turn_saved"
-  | "citations"
-  | "workspace_op_required"
-  | "workspace_promoted"
-  | "handoff_snapshot_done"
-  | "handoff_job_started"
-  | "handoff_apply_done";
+import type { SSEEventType } from "./eventTypes.generated";
+
+export type { SSEEventType } from "./eventTypes.generated";
 
 export interface SSEEvent<T = unknown> {
   type: SSEEventType;
@@ -488,25 +447,38 @@ export interface DebateVerdict {
   rationale: string;
 }
 
-/** 叙事线的一轮（L1 焦点 + 裁判 / L2 小结）：`sides` 是本轮各方→辩手 run 的映射。 */
+/** 论点级交锋边（L3 谁驳谁）：`from_key` 一方针对性反驳了 `to_key` 一方，`point` 是反驳要点
+ * （一句话）。`from_key`/`to_key` 是 {@link DebateSideInfo.key}（语义键，非 run_id）。主持人裁判
+ * 步逐轮抽取（仅真正针锋相对的、≤4 条），让前端把「各说各话」升级为可读的交锋关系。 */
+export interface DebateClash {
+  from_key: string;
+  to_key: string;
+  point: string;
+}
+
+/** 叙事线的一轮（L1 焦点 + 裁判 / L2 小结 / L3 交锋边）：`sides` 是本轮各方→辩手 run 的映射，
+ * `clashes` 是本轮论点级谁驳谁。 */
 export interface DebateRoundInfo {
   round_no: number;
   focus: string;
   summary: string;
   verdict: DebateVerdict;
   sides: DebateRoundSide[];
+  clashes: DebateClash[];
 }
 
 /** 进行中实时叠加的一轮叙事态（debate_round_started / debate_round 折叠累积，进 ProjectedTurn
  * .debateRounds）：`debate_round_started` 先给 `focus`（`verdict=null` ⇒ 该轮只定了焦点、尚未
- * 裁判，即进行中），`debate_round` 补 `summary`/`verdict`/`sides`。收场后由 `debate_result` 的
- * 全量 `rounds`（{@link DebateRoundInfo}，`verdict` 必有）接管——本类型是「进行中」的孪生。 */
+ * 裁判，即进行中，`clashes` 恒空），`debate_round` 补 `summary`/`verdict`/`sides`/`clashes`。收场后
+ * 由 `debate_result` 的全量 `rounds`（{@link DebateRoundInfo}，`verdict` 必有）接管——本类型是
+ * 「进行中」的孪生。 */
 export interface DebateNarrativeRound {
   round_no: number;
   focus: string;
   summary: string;
   verdict: DebateVerdict | null;
   sides: DebateRoundSide[];
+  clashes: DebateClash[];
 }
 
 /** 决策简报（结论卡）：交锋焦点、各方最强论点、事实/价值分歧、倾向与置信、建议、待解问题。 */

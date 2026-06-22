@@ -6,6 +6,7 @@ export type ButtonVariant =
   | "neutral"
   | "danger"
   | "destructive"
+  | "warning"
   | "ghost";
 export type ButtonSize = "sm" | "md";
 
@@ -16,6 +17,7 @@ const variantClass: Record<ButtonVariant, string> = {
   danger: "text-destructive hover:bg-destructive/10",
   destructive:
     "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+  warning: "bg-warning text-warning-foreground hover:bg-warning/90",
   ghost: "text-foreground hover:bg-accent",
 };
 
@@ -53,7 +55,7 @@ export function Button({
       {...props}
     >
       {icon}
-      {children != null && <span>{children}</span>}
+      {children}
     </button>
   );
 }

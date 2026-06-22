@@ -1,4 +1,4 @@
-// Push device registration REST for the mobile client (原生推送设备注册, 手机端落地设计 P2).
+// Push device registration REST for the mobile client (原生推送设备注册, 前端技术与架构 §七).
 //
 // Thin bearer-authenticated wrappers over the backend device endpoints
 // (api/routes/devices.py). Pure REST — the native FCM token lifecycle (permission, OS

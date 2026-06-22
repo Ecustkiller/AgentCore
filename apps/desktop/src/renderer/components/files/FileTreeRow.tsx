@@ -96,7 +96,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
                       props.onSelect(node);
                       props.onOpenFile(node.path, node.name);
                     }}
-                    className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded-none px-0 py-1.5 text-left text-xs font-normal"
+                    className="h-auto min-w-0 flex-1 justify-start gap-1.5 overflow-hidden rounded-none px-0 py-1.5 text-left text-xs font-normal"
                   >
                     <span className="w-[13px] shrink-0" aria-hidden="true" />
                     <FileText
@@ -177,7 +177,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
                     props.onSelect(node);
                     props.onToggle(node.path);
                   }}
-                  className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded-none px-0 py-1.5 text-left text-xs font-normal"
+                  className="h-auto min-w-0 flex-1 justify-start gap-1.5 overflow-hidden rounded-none px-0 py-1.5 text-left text-xs font-normal"
                 >
                   {open ? (
                     <ChevronDown

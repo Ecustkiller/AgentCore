@@ -5,10 +5,10 @@ import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
 import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
-import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
+import { ReceivedContextDialog } from "@/components/chat/ReceivedContext";
 import { type CitationFlash, SourceCards } from "@/components/chat/SourceCards";
-import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
 import { Button } from "@/components/ui";
+import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { referencedCitationNumbers } from "@/lib/citations";
 import { errorActionForCode } from "@/lib/errors";
@@ -33,6 +33,7 @@ import {
   Check,
   Copy,
   Fingerprint,
+  FolderUp,
   KeyRound,
   RefreshCw,
 } from "lucide-react";
@@ -42,7 +43,6 @@ import {
   DeleteMessageAction,
   MessageAction,
   MessageTime,
-  ViewPromptAction,
 } from "./MessageActions";
 import { ComposingToolLine, ProcessTimeline } from "./ProcessTimeline";
 import { ThinkingDots, ThinkingPanel } from "./Thinking";
@@ -68,6 +68,26 @@ function MultiAgentFileArtifacts({
   return <FileArtifactsCard artifacts={artifacts} />;
 }
 
+/**
+ * P2 工作区升级提示 (前端UX设计.md §九) — a lightweight, live-only inline notice
+ * stamped onto the turn whose first file write promoted a bare chat into a
+ * folder-backed workspace (`workspace_promoted`). Explains WHY a 工作区/文件夹 just
+ * appeared, so the jump from「随手聊」to「有文件的工作区」isn't silent. Not persisted:
+ * on reload the folder is simply there, no longer news.
+ */
+function WorkspacePromotionNotice({ name }: { name: string }) {
+  return (
+    <div className="mt-2 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm text-foreground">
+      <FolderUp size={15} className="mt-0.5 shrink-0 text-primary" />
+      <p className="min-w-0 flex-1">
+        本对话已升级为工作区
+        <span className="font-medium">「{name}」</span>
+        ，之后生成的文件都会保存在这里。
+      </p>
+    </div>
+  );
+}
+
 export function AssistantMessage({ message }: MessageBubbleProps) {
   const isGenerating = useActiveGenerating();
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
@@ -87,6 +107,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
   const usageDetail = useUIStore((s) => s.usageDetail);
+  const diagnosticMode = useUIStore((s) => s.diagnosticMode);
   const captainContext = message.captainContext ?? [];
   const hasProcess = (message.process?.length ?? 0) > 0;
   const citations = useMemo(() => message.citations ?? [], [message.citations]);
@@ -104,10 +125,9 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         : [],
     [message.executionId, message.process],
   );
-  const finishReason =
-    !message.isStreaming
-      ? (message.finishReason ?? message.runs?.finishReason)
-      : undefined;
+  const finishReason = !message.isStreaming
+    ? (message.finishReason ?? message.runs?.finishReason)
+    : undefined;
   const turnTotal = message.cost?.total ?? cachedTotal;
   const costText =
     message.executionId === null && turnTotal != null && turnTotal > 0
@@ -212,15 +232,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     <div className="group min-w-0" onMouseEnter={onPeekCost}>
       <FinishReasonChip reason={finishReason} />
       {turnBody}
-      {captainContext.length > 0 && (
-        <div className="mt-3">
-          <ReceivedContextSection
-            blocks={captainContext}
-            defaultExpanded={usageDetail}
-            powerMode={usageDetail}
-          />
-        </div>
-      )}
       {message.error && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
@@ -256,6 +267,9 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           messageId={message.id}
           process={message.process}
         />
+      )}
+      {message.workspacePromotion && (
+        <WorkspacePromotionNotice name={message.workspacePromotion.name} />
       )}
       {citations.length > 0 && (
         <SourceCards
@@ -303,13 +317,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
             onClick={handleRegenerate}
           />
           <DeleteMessageAction messageId={message.id} />
-          {conversationId && (
-            <ViewPromptAction
-              conversationId={conversationId}
-              messageId={message.id}
-            />
-          )}
-          {import.meta.env.DEV && message.traceId && (
+          <ReceivedContextDialog blocks={captainContext} />
+          {(import.meta.env.DEV || diagnosticMode) && message.traceId && (
             <MessageAction
               icon={
                 traceCopied ? <Check size={13} /> : <Fingerprint size={13} />

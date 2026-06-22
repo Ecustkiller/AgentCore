@@ -892,23 +892,27 @@ async def test_web_search_cache_refetches_when_more_results_needed(monkeypatch):
 # --- ToolResult.output_limit ---
 
 
-def test_tool_result_default_truncates_at_4000():
-    r = ToolResult(tool_call_id="", success=True, output="a" * 5000)
-    assert r.output.endswith("[output truncated]")
-    assert len(r.output) < 5000
+def test_tool_result_default_truncates_head_and_tail_at_4000():
+    body = "HEAD起始" + ("a" * 5000) + "TAIL尾注金额￥999"
+    r = ToolResult(tool_call_id="", success=True, output=body)
+    assert r.output.startswith("HEAD起始")  # head kept
+    assert r.output.endswith("TAIL尾注金额￥999")  # tail kept — head-only used to drop it
+    assert "保留首尾" in r.output  # elision marker between the ends
+    assert len(r.output) <= 4000
 
 
 def test_tool_result_respects_higher_output_limit():
     body = "a" * 5000
     r = ToolResult(tool_call_id="", success=True, output=body, output_limit=8000)
-    assert r.output == body
+    assert r.output == body  # under budget → untouched
 
 
-@pytest.mark.parametrize("limit", [10, 50])
-def test_tool_result_custom_lower_limit(limit: int):
-    r = ToolResult(tool_call_id="", success=True, output="a" * 100, output_limit=limit)
-    assert r.output.startswith("a" * limit)
-    assert r.output.endswith("[output truncated]")
+def test_tool_result_custom_lower_limit_keeps_both_ends():
+    body = "HEAD" + ("a" * 1000) + "TAIL"
+    r = ToolResult(tool_call_id="", success=True, output=body, output_limit=200)
+    assert r.output.startswith("HEAD")
+    assert r.output.endswith("TAIL")
+    assert len(r.output) <= 200
 
 
 # --- citations: site_of + tool wiring + cross-round dedup ---

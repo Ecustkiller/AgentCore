@@ -1,0 +1,75 @@
+"""Tests for the CEO workspace overview (``runtime.context.workspace_overview``).
+
+Pins the ``<workspace_context>`` contract: best-effort (no backend / empty / failing /
+index-less → "" so the caller omits the block), newest-first listing as the backend
+returns it, and bounded by BOTH a file count and a char budget with an elision line
+when more remain — so a large workspace can't bloat the CEO prompt. No DB / HTTP
+(asyncio_mode=auto).
+"""
+
+from agentcore.runtime.context import build_workspace_overview
+from agentcore.runtime.context.workspace_overview import (
+    OVERVIEW_CHAR_BUDGET,
+    OVERVIEW_MAX_FILES,
+)
+
+
+class _FakeBackend:
+    """Minimal WorkspaceBackend stand-in answering only ``index_files``."""
+
+    def __init__(self, paths: list[str], *, fail: bool = False) -> None:
+        self._paths = paths
+        self._fail = fail
+
+    async def index_files(self, cap: int | None = None, *, order: str = "path"):
+        assert order == "recent"  # the overview asks for newest-first
+        if self._fail:
+            raise RuntimeError("backend unavailable")
+        return list(self._paths), False
+
+
+async def test_none_backend_yields_empty():
+    assert await build_workspace_overview(None) == ""
+
+
+async def test_empty_workspace_yields_empty():
+    assert await build_workspace_overview(_FakeBackend([])) == ""
+
+
+async def test_listing_failure_degrades_to_empty():
+    assert await build_workspace_overview(_FakeBackend([], fail=True)) == ""
+
+
+async def test_backend_without_index_support_yields_empty():
+    assert await build_workspace_overview(object()) == ""  # no index_files attr
+
+
+async def test_lists_files_in_backend_order_under_caps():
+    paths = ["报告.md", "data/input.csv", "src/main.py"]
+    out = await build_workspace_overview(_FakeBackend(paths))
+    assert out.startswith("<workspace_context>")
+    assert out.rstrip().endswith("</workspace_context>")
+    for p in paths:
+        assert f"- {p}" in out
+    # Order preserved (backend already sorted newest-first).
+    assert out.index("报告.md") < out.index("input.csv") < out.index("main.py")
+    assert "另有" not in out  # nothing elided under the caps
+
+
+async def test_count_cap_elides_remaining():
+    paths = [f"f{i}.py" for i in range(OVERVIEW_MAX_FILES + 10)]
+    out = await build_workspace_overview(_FakeBackend(paths))
+    listed = [ln for ln in out.splitlines() if ln.startswith("- ")]
+    assert len(listed) == OVERVIEW_MAX_FILES
+    assert "另有 10 个文件未列出" in out
+
+
+async def test_char_budget_binds_before_count():
+    # Long paths blow the char budget well before the 40-file count cap.
+    paths = [f"deep/nested/dir/{'x' * 180}/file{i}.py" for i in range(OVERVIEW_MAX_FILES)]
+    out = await build_workspace_overview(_FakeBackend(paths))
+    listed = [ln for ln in out.splitlines() if ln.startswith("- ")]
+    assert len(listed) < OVERVIEW_MAX_FILES  # budget bound first
+    body_chars = sum(len(ln) + 1 for ln in listed)
+    assert body_chars <= OVERVIEW_CHAR_BUDGET
+    assert "未列出" in out

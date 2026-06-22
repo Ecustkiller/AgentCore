@@ -1,13 +1,15 @@
+import { DraftWorkspaceAssignPrompt } from "@/components/chat/DraftWorkspaceAssignPrompt";
 import { DraftWorkspacePicker } from "@/components/chat/DraftWorkspacePicker";
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useFolders } from "@/hooks/useFolders";
 import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { useComposerDraftStore } from "@/stores/composer";
 import {
-  getActiveRuntime,
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
+import { useFoldersStore } from "@/stores/folders";
 import { Cloud, CloudUpload, Paperclip, Send, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MentionMenu } from "./MentionMenu";
@@ -15,6 +17,7 @@ import { AttachmentChips } from "./message-input/AttachmentChips";
 import type { PendingAttachment } from "./message-input/composerAttachments";
 import { useComposerDrop } from "./message-input/useComposerDrop";
 import { useComposerSend } from "./message-input/useComposerSend";
+import type { AttachmentProjectHint } from "./message-input/useMentionMenu";
 import { useMentionMenu } from "./message-input/useMentionMenu";
 
 export function MessageInput() {
@@ -25,6 +28,28 @@ export function MessageInput() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const [isLocal, setIsLocal] = useState(false);
   const [backgroundMode, setBackgroundMode] = useState(false);
+  const folders = useFolders();
+  const pendingFolderId = useFoldersStore((s) => s.pendingNewChatFolderId);
+  const dismissedAssignRef = useRef<Set<string>>(new Set());
+  const [assignHint, setAssignHint] = useState<AttachmentProjectHint | null>(
+    null,
+  );
+
+  const handleAttachmentProjectHint = useCallback(
+    (hint: AttachmentProjectHint) => {
+      const store = useFoldersStore.getState();
+      if (store.pendingNewChatFolderId === hint.folderId) return;
+      if (
+        !store.pendingNewChatFolderId &&
+        !store.pendingNewChatCloud &&
+        dismissedAssignRef.current.has(hint.folderId)
+      ) {
+        return;
+      }
+      setAssignHint(hint);
+    },
+    [],
+  );
 
   const mention = useMentionMenu({
     conversationId,
@@ -33,6 +58,9 @@ export function MessageInput() {
     attachments,
     setAttachments,
     textareaRef,
+    onAttachmentProjectHint: conversationId
+      ? undefined
+      : handleAttachmentProjectHint,
   });
 
   const drop = useComposerDrop(isGenerating, attachments, setAttachments);
@@ -67,6 +95,37 @@ export function MessageInput() {
     setValue((v) => (mode === "append" && v.trim() ? `${v}\n${text}` : text));
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [draftToken]);
+
+  useEffect(() => {
+    if (!conversationId) {
+      dismissedAssignRef.current = new Set();
+    }
+    setAssignHint(null);
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (assignHint && pendingFolderId === assignHint.folderId) {
+      setAssignHint(null);
+    }
+  }, [assignHint, pendingFolderId]);
+
+  const currentProjectName = pendingFolderId
+    ? (folders.find((f) => f.id === pendingFolderId)?.name ?? null)
+    : null;
+
+  const acceptAssignHint = useCallback(() => {
+    if (!assignHint) return;
+    const store = useFoldersStore.getState();
+    store.setPendingNewChatFolder(assignHint.folderId);
+    store.setPendingNewChatCloud(false);
+    setAssignHint(null);
+  }, [assignHint]);
+
+  const dismissAssignHint = useCallback(() => {
+    if (!assignHint) return;
+    dismissedAssignRef.current.add(assignHint.folderId);
+    setAssignHint(null);
+  }, [assignHint]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -108,7 +167,10 @@ export function MessageInput() {
 
   useEffect(() => {
     return () => {
-      getActiveRuntime().abort?.abort();
+      // 回合 AbortController 挂在会话 slice 上，由 stop 按钮 / sendTurn 自己管理。
+      // 勿在组件卸载时 abort：首条消息会从 `/` navigate 到 `/conversations/:id`，
+      // 两个 ConversationPage 实例会卸载再挂载 MessageInput——若此处 abort 会把
+      // 刚发出的 POST 掐断（DB 0 消息 + UI 僵尸「正在思考」）。
       drop.disposeDropTimer();
     };
   }, [drop]);
@@ -137,7 +199,9 @@ export function MessageInput() {
     <div className="px-4 pb-4 pt-2">
       <div
         className={`relative rounded-xl border bg-card shadow-sm transition-colors ${
-          drop.dragOver ? "border-primary ring-2 ring-primary/40" : "border-border"
+          drop.dragOver
+            ? "border-primary ring-2 ring-primary/40"
+            : "border-border"
         }`}
         onDragOver={drop.handleDragOver}
         onDragLeave={drop.handleDragLeave}
@@ -149,7 +213,9 @@ export function MessageInput() {
           </div>
         )}
         {drop.dropError && (
-          <div className="px-3 pt-2 text-xs text-destructive">{drop.dropError}</div>
+          <div className="px-3 pt-2 text-xs text-destructive">
+            {drop.dropError}
+          </div>
         )}
         {menuOpen && (
           <MentionMenu
@@ -159,7 +225,9 @@ export function MessageInput() {
             error={mention.menuError}
             query={mention.query}
             showSearch={mention.menuMode === "browse"}
-            noRoots={mention.indexLoadedRef.current && mention.sourceCount === 0}
+            noRoots={
+              mention.indexLoadedRef.current && mention.sourceCount === 0
+            }
             onQueryChange={mention.setQuery}
             onKeyDown={(e) => {
               mention.handleMenuNavKey(e);
@@ -171,7 +239,19 @@ export function MessageInput() {
           />
         )}
 
-        <AttachmentChips attachments={attachments} onRemove={removeAttachment} />
+        {!conversationId && assignHint && (
+          <DraftWorkspaceAssignPrompt
+            attachmentProjectName={assignHint.folderName}
+            currentProjectName={currentProjectName}
+            onAssign={acceptAssignHint}
+            onKeep={dismissAssignHint}
+          />
+        )}
+
+        <AttachmentChips
+          attachments={attachments}
+          onRemove={removeAttachment}
+        />
 
         <textarea
           ref={textareaRef}

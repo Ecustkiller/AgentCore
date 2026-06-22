@@ -32,6 +32,7 @@ import {
   resumeConversationViaSidecar,
   streamConversationViaSidecar,
 } from "@/services/streamConversationViaSidecar";
+import { traceTurnEnd, traceTurnMilestone } from "@/services/turnTrace";
 import { useApprovalStore } from "@/stores/approvals";
 import {
   type Message,
@@ -445,6 +446,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
   try {
+    traceTurnMilestone(conversationId, "send_start");
     // 路由（双模式工作区 §一.1）：开关开（默认开）+ 会话绑定本机本地根 + 无附件 → 走本地
     // sidecar 引擎；否则维持现状云链路（含所有 local 会话的服务端持久化/计费）。附件需
     // 服务端上传处理，Slice 1 sidecar 不接，故有附件时退回云端不丢附件。
@@ -452,11 +454,22 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
       attachments.length === 0
         ? await resolveSidecarRoot(conversationId)
         : null;
+    traceTurnMilestone(conversationId, "sidecar_resolve", {
+      target: sidecarTarget
+        ? { rootId: sidecarTarget.rootId, subpath: sidecarTarget.subpath }
+        : null,
+    });
     // 首次真正走 sidecar 前探活一次（探活增强）：拉起进程 + 握手验证本机环境能起得来。环境起
     // 不来则本轮落到下方云分支；`probeSidecar` 已按根记下 `bad`，后续回合探活直接命中缓存
     // （probed:false）→ 静默走云、不再打扰。故只在**首探失败**（probed）时提示一次。已探明 ok
     // 的根命中缓存直接复用、不重探。
     const probe = sidecarTarget ? await probeSidecar(sidecarTarget) : null;
+    if (probe) {
+      traceTurnMilestone(conversationId, "sidecar_probe", {
+        healthy: probe.healthy,
+        probed: probe.probed,
+      });
+    }
     if (sidecarTarget && probe && !probe.healthy && probe.probed) {
       notifyInfo(
         probe.detail
@@ -465,6 +478,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
       );
     }
     if (sidecarTarget && probe?.healthy) {
+      traceTurnMilestone(conversationId, "stream_path", { via: "sidecar" });
       try {
         await streamConversationViaSidecar({
           conversationId,
@@ -492,6 +506,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         notifyInfo("本地引擎未能启动，已自动用云端完成这次对话");
         store.truncateAfter(optimisticUserId, conversationId);
         store.createAssistantMessage(conversationId);
+        traceTurnMilestone(conversationId, "stream_path", {
+          via: "cloud",
+          reason: "sidecar_fallback",
+        });
         await streamConversation({
           conversationId,
           content,
@@ -500,6 +518,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         });
       }
     } else {
+      traceTurnMilestone(conversationId, "stream_path", { via: "cloud" });
       // 云链路（默认，含探活失败的 fallthrough）。本地意向已是会话状态
       // （Conversation.local_container_root_id，建会话时定型，工作区对称化 D1a），
       // 服务端据此在裸聊首次产文件时懒建本地 / 云端文件夹——回合不再携带容器根。
@@ -510,15 +529,26 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         signal: ac.signal,
       });
     }
+    traceTurnEnd(conversationId, "ok");
   } catch (err) {
-    if (isAbort(err)) return;
+    if (isAbort(err)) {
+      const s = useConversationStore.getState();
+      if (getRuntime(conversationId).isGenerating) {
+        s.finalizeLastMessage(conversationId);
+      }
+      traceTurnEnd(conversationId, "abort");
+      return;
+    }
     // A mid-stream drop no longer means the turn died (1a: it runs detached) —
     // rejoin it live (1b) rather than resending, which would duplicate the turn.
     // (A sidecar engine failure is kind "sidecar", not "network", so a local turn
     // skips this and keeps its resend banner. A *startup* sidecar failure was
     // already rerouted to cloud upstream (阶段二), so one reaching here is
     // necessarily mid-run — never auto-rerouted, to avoid repeating side effects.)
-    if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) return;
+    if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) {
+      traceTurnEnd(conversationId, "ok");
+      return;
+    }
     const s = useConversationStore.getState();
     if (getRuntime(conversationId).isGenerating) {
       s.finalizeLastMessage(conversationId);
@@ -541,6 +571,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         : null;
       s.setError(msg, retry, conversationId, streamErrorAction(err));
     }
+    traceTurnEnd(conversationId, "error");
   } finally {
     useConversationStore.getState().setAbort(null, conversationId);
   }

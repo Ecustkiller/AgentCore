@@ -1,6 +1,8 @@
 import { AgentNode } from "@/components/graph/AgentNode";
 import { EndpointNode } from "@/components/graph/EndpointNode";
 import { StepEdge } from "@/components/graph/StepEdge";
+import { WaveLanes } from "@/components/graph/WaveLanes";
+import { type WaveBand, computeWaves } from "@/components/graph/helpers";
 import {
   EMBED_MIN_HEIGHT,
   type LayoutResult,
@@ -8,7 +10,11 @@ import {
   computeLayout,
   fitWidthBox,
 } from "@/lib/elk-layout";
-import { MODEL_TIER_META, type RunStatus } from "@/stores/execution";
+import {
+  type Execution,
+  MODEL_TIER_META,
+  type RunStatus,
+} from "@/stores/execution";
 import type { GraphEdge, GraphLayout } from "@/stores/graph";
 import {
   Background,
@@ -21,11 +27,13 @@ import {
 import {
   Bot,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CornerDownRight,
   History,
   Loader2,
   Package,
+  RotateCcw,
   Sparkles,
   UserRound,
   Workflow,
@@ -48,10 +56,14 @@ import {
  * 左侧目录 / Esc 退出都归手册页。原「团队运行机制」独立页（`/toolbox/mechanism`）已并入
  * 产品手册（IA 见 `docs/04-前端/前端UX设计.md §十二`）。
  *
- * 四件：① `RuntimePanorama` 运行时全景 ② `CollaborationTurnFlow` 协作回合主线
- * ③ `GraphLegend` 图例 ④ `MechanismScenarios` 机制场景——后者是 **真实**
- * `AgentNode`/`EndpointNode`/`StepEdge` + **真实** ELK 布局 + 内嵌 fit-to-width（所见即聊天
- * 内嵌协作图），单列呈现并按需懒挂载（`LazyMount`）避免一次性挂 8 个 ReactFlow。
+ * 五件：① `HeroGraph` 看团队跑一遍（领衔活图：真实节点跑一遍 pending→running→completed
+ * 生命周期，逐波点亮 + 入边粒子 + 终态闪，narration 随波推进）② `GraphLegend` 图例
+ * ③ `RuntimePanorama` 运行时全景 ④ `CollaborationTurnFlow` 协作回合主线
+ * ⑤ `MechanismScenarios` 机制场景——后三/四件都是 **真实**
+ * `AgentNode`/`EndpointNode`/`StepEdge` + **真实** ELK 布局 + **真实** `WaveLanes` 波次泳道 +
+ * 内嵌 fit-to-width（所见即聊天内嵌协作图）。共用 `EmbeddedGraphCanvas` 渲染核（hero 喂动态
+ * statuses、场景喂静态 statuses）；机制场景 4 个常用形态常驻、其余「更多形态」点开再挂，
+ * 按需懒挂载（`LazyMount`）避免一次性挂多个 ReactFlow。
  *
  * 开发 / AI 价值靠源码自身：各数据块（PHASES / TURN_FLOW / SCENARIOS）旁以注释保留实现入口。
  * SSE 事件族见 `docs/03-AI核心/执行引擎架构设计.md §十二` + `runtime/events.py`·
@@ -456,6 +468,9 @@ interface Scenario {
   desc: string;
   /** ELK 布局；缺省走左右流（与产品默认一致）。串行链用 "tree" 自上而下读。 */
   layout?: GraphLayout;
+  /** 进阶形态：默认折进「更多形态」（执行中态 / 多层嵌套 / 热修 / 超大团队），常用四式
+   * （并行 / 串行 / 辩论 / 嵌套小队）常驻，避免画廊读起来像测试网格。 */
+  advanced?: boolean;
   nodes: PreviewNode[];
   edges: GraphEdge[];
 }
@@ -577,6 +592,7 @@ const SCENARIOS: Scenario[] = [
   },
   {
     title: "执行中（流式输出 · 待定 · 深度思考）",
+    advanced: true,
     desc: "运行中节点带脉冲 + run_output 流式预览 + 光标，入边走 primary 粒子流；未解锁节点灰显 pending；reasoning=max 的 worker 带「深度」徽章。",
     // 实现：runtime/events.py
     nodes: [
@@ -680,6 +696,7 @@ const SCENARIOS: Scenario[] = [
   },
   {
     title: "多层嵌套（depth ≤ 2）+ 子树整体下沉",
+    advanced: true,
     desc: "CEO(0) → worker(1) → sub-worker(2)：深度 2 永不再获 delegate（硬上限封死递归）。整条委派子树作为整体下沉到主干线之下，CEO 汇聚点恒在末层、不被横穿。",
     // 实现：runs/constants.py
     nodes: [
@@ -723,6 +740,7 @@ const SCENARIOS: Scenario[] = [
   },
   {
     title: "多轮热修（修订 vN 版本链）",
+    advanced: true,
     desc: "后续消息要求返工时，CEO 经 revise 唤回原队员带现场记忆续写，图上挂一条点线「修订 vN」版本链——是同一节点的新版本，不是新队员（留人双 miss 才回落重派）。",
     // 实现：tools/builtin/revise.py
     nodes: [
@@ -751,6 +769,7 @@ const SCENARIOS: Scenario[] = [
   },
   {
     title: "超大团队（9 路并行 · 执行中）",
+    advanced: true,
     desc: "并行度拉满（max_parallel = 10 上限内）：横向填满列宽、纵向超过内嵌高度上限(520) → 顶对齐 + 底部渐隐示意「还有更多」，看全图进全屏。也用来检验小缩放下节点是否仍可读。",
     // 实现：runs/wave.py
     nodes: [
@@ -813,8 +832,23 @@ const SCENARIOS: Scenario[] = [
   },
 ];
 
-/** 单个场景的内嵌画布：跑真实 ELK 布局 + 内嵌 fit-to-width 定高，复刻聊天内嵌形态。 */
-function ScenarioGraph({ scenario }: { scenario: Scenario }) {
+/**
+ * 共享内嵌画布：跑真实 ELK 布局 + 真实 `WaveLanes` 波次泳道 + 内嵌 fit-to-width 定高，
+ * 复刻聊天内嵌协作图。节点形态（`nodes`/`edges`）静态，运行状态由 `statuses` 外注 ——
+ * 机制场景喂一份静态 statuses，hero 活图喂逐波推进的动态 statuses（布局不依赖 statuses，
+ * 故只算一次、状态变化只重绘节点/连线/粒子，与 GraphView 同源行为）。
+ */
+function EmbeddedGraphCanvas({
+  nodes,
+  edges,
+  layoutKind,
+  statuses,
+}: {
+  nodes: PreviewNode[];
+  edges: GraphEdge[];
+  layoutKind: GraphLayout;
+  statuses: Record<string, RunStatus>;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [colWidth, setColWidth] = useState(0);
   const [layout, setLayout] = useState<LayoutResult | null>(null);
@@ -838,7 +872,7 @@ function ScenarioGraph({ scenario }: { scenario: Scenario }) {
     });
   }, []);
 
-  const debate = scenario.nodes.some(
+  const debate = nodes.some(
     (n) => n.type === "agent" && (n.data as { stance?: string }).stance != null,
   );
 
@@ -855,20 +889,19 @@ function ScenarioGraph({ scenario }: { scenario: Scenario }) {
     return () => ro.disconnect();
   }, []);
 
-  const layoutKind = scenario.layout ?? "leftright";
-
   // 真实 ELK 布局（含收紧间距）；辩论场景传 preserveOrder 让正反分带，并把端点（用户
-  // 输入 / CEO 汇聚点）钉到首 / 末层，复刻 GraphView 的端点约束。
+  // 输入 / CEO 汇聚点）钉到首 / 末层，复刻 GraphView 的端点约束。布局只依赖形态，不依赖
+  // statuses，故 hero 逐波改状态时不会重排。
   useEffect(() => {
     let cancelled = false;
     computeLayout(
-      scenario.nodes.map((n) => n.id),
-      scenario.edges,
+      nodes.map((n) => n.id),
+      edges,
       layoutKind,
       debate,
       {
-        source: scenario.nodes.find((n) => n.type === "userInput")?.id,
-        sink: scenario.nodes.find((n) => n.type === "captain")?.id,
+        source: nodes.find((n) => n.type === "userInput")?.id,
+        sink: nodes.find((n) => n.type === "captain")?.id,
       },
     ).then((res) => {
       if (!cancelled) setLayout(res);
@@ -876,7 +909,7 @@ function ScenarioGraph({ scenario }: { scenario: Scenario }) {
     return () => {
       cancelled = true;
     };
-  }, [scenario, debate, layoutKind]);
+  }, [nodes, edges, layoutKind, debate]);
 
   const fit =
     layout && colWidth > 0
@@ -903,22 +936,25 @@ function ScenarioGraph({ scenario }: { scenario: Scenario }) {
       const h = nodeHeights[id];
       return h ? { x: slot.x, y: slot.y + (NODE_HEIGHT - h) / 2 } : slot;
     };
-    return scenario.nodes.map(
-      (n, i) =>
-        ({
-          id: n.id,
-          type: n.type,
-          position: placed(n.id, layout.positions[n.id] ?? { x: 0, y: 0 }),
-          data: { ...n.data, handleDirection, enterIndex: i },
-        }) as Node,
-    );
-  }, [scenario, layout, layoutKind, nodeHeights]);
+    return nodes.map((n, i) => {
+      const status = statuses[n.id] ?? (n.data.status as RunStatus);
+      return {
+        id: n.id,
+        type: n.type,
+        position: placed(n.id, layout.positions[n.id] ?? { x: 0, y: 0 }),
+        data: {
+          ...n.data,
+          status,
+          isAnimating: status === "running",
+          handleDirection,
+          enterIndex: i,
+        },
+      } as Node;
+    });
+  }, [nodes, layout, layoutKind, nodeHeights, statuses]);
 
   const flowEdges = useMemo<Edge[]>(() => {
-    const statusOf = new Map(
-      scenario.nodes.map((n) => [n.id, n.data.status as string]),
-    );
-    return scenario.edges.map(
+    return edges.map(
       (e) =>
         ({
           id: e.id,
@@ -927,48 +963,247 @@ function ScenarioGraph({ scenario }: { scenario: Scenario }) {
           type: "step",
           data: {
             kind: e.kind ?? "dep",
-            animated: statusOf.get(e.target) === "running",
+            // 入边粒子流：目标节点运行中即点亮（与 GraphView 同规则）。
+            animated: statuses[e.target] === "running",
           },
         }) as Edge,
     );
-  }, [scenario]);
+  }, [edges, statuses]);
 
+  // 波次泳道（与 GraphView 同源）：computeWaves 只读 execution.runs[].id，喂一份最小
+  // runs 形状即可。worker 列 ≥2 才出泳道（纯并行扇出 / 单 Agent 自动不出，复刻产品）。
+  const waves = useMemo<WaveBand[]>(() => {
+    if (!layout) return [];
+    const captainId = nodes.find((n) => n.type === "captain")?.id ?? null;
+    const runs = nodes
+      .filter((n) => n.type === "agent")
+      .map((n) => ({ id: n.id }));
+    return computeWaves(
+      { runs } as unknown as Execution,
+      layout.positions,
+      { width: layout.width, height: layout.height },
+      layoutKind,
+      captainId,
+    );
+  }, [nodes, layout, layoutKind]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative overflow-hidden rounded-xl border border-border bg-card"
+      style={{ height: fit?.height ?? EMBED_MIN_HEIGHT }}
+    >
+      {layout && colWidth > 0 && (
+        <ReactFlow
+          nodes={flowNodes}
+          edges={flowEdges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onInit={setInst}
+          onNodesChange={onNodesChange}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          nodesFocusable={false}
+          zoomOnScroll={false}
+          zoomOnPinch={false}
+          zoomOnDoubleClick={false}
+          panOnDrag={false}
+          preventScrolling={false}
+          minZoom={0.05}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background gap={20} size={1} />
+          <WaveLanes waves={waves} />
+        </ReactFlow>
+      )}
+      {/* 与 GraphView 内嵌一致：超过高度上限(520)时顶对齐 + 底部渐隐示意「还有更多」。 */}
+      {fit?.overflowing && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card to-transparent" />
+      )}
+    </div>
+  );
+}
+
+/** 单个场景：标题 + 说明 + 静态 statuses 喂入共享画布。 */
+function ScenarioGraph({ scenario }: { scenario: Scenario }) {
+  const statuses = useMemo(
+    () =>
+      Object.fromEntries(
+        scenario.nodes.map((n) => [n.id, n.data.status as RunStatus]),
+      ),
+    [scenario],
+  );
   return (
     <div>
       <h3 className="text-sm font-medium text-foreground">{scenario.title}</h3>
       <p className="mb-2 mt-0.5 text-xs leading-relaxed text-muted-foreground">
         {scenario.desc}
       </p>
-      <div
-        ref={containerRef}
-        className="relative overflow-hidden rounded-xl border border-border bg-card"
-        style={{ height: fit?.height ?? EMBED_MIN_HEIGHT }}
-      >
-        {layout && colWidth > 0 && (
-          <ReactFlow
-            nodes={flowNodes}
-            edges={flowEdges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            onInit={setInst}
-            onNodesChange={onNodesChange}
-            nodesDraggable={false}
-            nodesConnectable={false}
-            nodesFocusable={false}
-            zoomOnScroll={false}
-            zoomOnPinch={false}
-            zoomOnDoubleClick={false}
-            panOnDrag={false}
-            preventScrolling={false}
-            minZoom={0.05}
-            proOptions={{ hideAttribution: true }}
+      <EmbeddedGraphCanvas
+        nodes={scenario.nodes}
+        edges={scenario.edges}
+        layoutKind={scenario.layout ?? "leftright"}
+        statuses={statuses}
+      />
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// ⓪ 看团队跑一遍（hero 活图）——领衔「看懂协作」章，让人一眼看到图怎么「活」
+// ────────────────────────────────────────────────────────────────────────────
+
+// 一个有代表性的「2 路并行 → 汇入分析 → CEO 汇总」回合：横向 2 波 worker 列 → 出波次
+// 泳道；逐波点亮演示生命周期。形态静态，状态由 HERO_PHASES 逐帧外注。
+const HERO_NODES: PreviewNode[] = [
+  input("帮我做一份近 7 日成本分析报告"),
+  // outputPreview 刻意压成一行（≈ 卡片单行宽）：running 显流式预览、完成回落 task，两者
+  // 同为一行 → 逐帧切状态时节点不变高、不重排，循环播放稳。
+  agent("ha", "调研员", "pending", {
+    task: "检索成本数据源与口径",
+    outputPreview: "正在检索数据源…",
+    modelPreference: "fast",
+  }),
+  agent("hb", "调研员", "pending", {
+    task: "收集历史基准与区间",
+    outputPreview: "正在拉取基准区间…",
+    modelPreference: "fast",
+  }),
+  agent("han", "数据分析师", "pending", {
+    task: "汇总趋势、定位异常点",
+    outputPreview: "正在比对、定位异常…",
+    modelPreference: "strong",
+    reasoningEffort: "max",
+  }),
+  captain(
+    "hcap",
+    "pending",
+    "近 7 日成本分析已完成：趋势摘要 + 异常点标注，文件已在工作区。",
+  ),
+];
+
+const HERO_EDGES: GraphEdge[] = [
+  edge("__input__", "ha"),
+  edge("__input__", "hb"),
+  edge("ha", "han"),
+  edge("hb", "han"),
+  edge("han", "hcap"),
+];
+
+// 生命周期分帧：输入恒 completed；worker 逐波 pending→running→completed，CEO 末位汇总。
+// narration 把每一帧讲成一句人话——这才是 hero 的教学价值。
+const HERO_PHASES: { label: string; statuses: Record<string, RunStatus> }[] = [
+  {
+    label: "你发出目标，团队就位",
+    statuses: { ha: "pending", hb: "pending", han: "pending", hcap: "pending" },
+  },
+  {
+    label: "第 1 波 · 两名调研员并行开跑",
+    statuses: { ha: "running", hb: "running", han: "pending", hcap: "pending" },
+  },
+  {
+    label: "第 2 波 · 调研产出汇入分析师",
+    statuses: {
+      ha: "completed",
+      hb: "completed",
+      han: "running",
+      hcap: "pending",
+    },
+  },
+  {
+    label: "CEO 汇总，答案落进气泡",
+    statuses: {
+      ha: "completed",
+      hb: "completed",
+      han: "completed",
+      hcap: "running",
+    },
+  },
+  {
+    label: "本回合完成",
+    statuses: {
+      ha: "completed",
+      hb: "completed",
+      han: "completed",
+      hcap: "completed",
+    },
+  },
+];
+
+const HERO_INPUT_DONE: Record<string, RunStatus> = { __input__: "completed" };
+
+/** 系统「减少动态效果」开关：尊重它就停在终帧静态展示，不自动播放。 */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(mq.matches);
+    const on = (e: MediaQueryListEvent) => setReduced(e.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return reduced;
+}
+
+/** ⓪ hero 活图：自动循环播放一回合生命周期 + 逐帧 narration + 重播。 */
+export function HeroGraph() {
+  const reduced = usePrefersReducedMotion();
+  const [phase, setPhase] = useState(0);
+  const last = HERO_PHASES.length - 1;
+
+  useEffect(() => {
+    if (reduced) {
+      setPhase(last);
+      return;
+    }
+    // 终帧多停一会儿让人看清「完成」，其余帧匀速推进；setTimeout 以 phase 为键自然续帧。
+    const delay = phase === last ? 2600 : 1500;
+    const t = setTimeout(
+      () => setPhase((p) => (p + 1) % HERO_PHASES.length),
+      delay,
+    );
+    return () => clearTimeout(t);
+  }, [phase, reduced, last]);
+
+  const statuses = useMemo(
+    () => ({ ...HERO_INPUT_DONE, ...HERO_PHASES[phase].statuses }),
+    [phase],
+  );
+  const done = phase === last;
+
+  return (
+    <div>
+      <EmbeddedGraphCanvas
+        nodes={HERO_NODES}
+        edges={HERO_EDGES}
+        layoutKind="leftright"
+        statuses={statuses}
+      />
+      <div className="mt-2 flex items-center gap-2.5">
+        <span className="relative flex size-2 shrink-0">
+          {!done && !reduced && (
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/60" />
+          )}
+          <span
+            className={`relative inline-flex size-2 rounded-full ${done ? "bg-success" : "bg-primary"}`}
+          />
+        </span>
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          <span className="tabular-nums text-muted-foreground/60">
+            {phase + 1}/{HERO_PHASES.length}
+          </span>
+          {" · "}
+          <span className="text-foreground">{HERO_PHASES[phase].label}</span>
+        </p>
+        {!reduced && (
+          <button
+            type="button"
+            onClick={() => setPhase(0)}
+            className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            <Background gap={20} size={1} />
-          </ReactFlow>
-        )}
-        {/* 与 GraphView 内嵌一致：超过高度上限(520)时顶对齐 + 底部渐隐示意「还有更多」。 */}
-        {fit?.overflowing && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card to-transparent" />
+            <RotateCcw size={12} />
+            重播
+          </button>
         )}
       </div>
     </div>
@@ -976,7 +1211,7 @@ function ScenarioGraph({ scenario }: { scenario: Scenario }) {
 }
 
 /**
- * 视口懒挂载：滚动进入（提前 200px）才挂子树，避免一次性挂 8 个 ReactFlow。
+ * 视口懒挂载：滚动进入（提前 200px）才挂子树，避免一次性挂多个 ReactFlow。
  * 占位用 minHeight 防跳动。
  */
 function LazyMount({
@@ -1011,15 +1246,38 @@ function LazyMount({
   );
 }
 
-/** ④ 机制场景：8 个真实协作图，单列呈现、按需懒挂载。 */
+/**
+ * ⑤ 机制场景：真实协作图画廊，单列、按需懒挂载。四个常用形态（并行 / 串行 / 辩论 /
+ * 嵌套小队）常驻；进阶形态（执行中态 / 多层嵌套 / 热修 / 超大团队）折进「更多形态」，
+ * 点开再挂，避免画廊读起来像测试网格、也省掉一次性挂多个 ReactFlow。
+ */
 export function MechanismScenarios() {
+  const [showMore, setShowMore] = useState(false);
+  const canonical = SCENARIOS.filter((s) => !s.advanced);
+  const more = SCENARIOS.filter((s) => s.advanced);
   return (
     <div className="space-y-8">
-      {SCENARIOS.map((s) => (
+      {canonical.map((s) => (
         <LazyMount key={s.title} minHeight={EMBED_MIN_HEIGHT + 56}>
           <ScenarioGraph scenario={s} />
         </LazyMount>
       ))}
+      {!showMore ? (
+        <button
+          type="button"
+          onClick={() => setShowMore(true)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-border bg-card py-3 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ChevronDown size={16} />
+          展开更多形态（{more.length}）
+        </button>
+      ) : (
+        more.map((s) => (
+          <LazyMount key={s.title} minHeight={EMBED_MIN_HEIGHT + 56}>
+            <ScenarioGraph scenario={s} />
+          </LazyMount>
+        ))
+      )}
     </div>
   );
 }

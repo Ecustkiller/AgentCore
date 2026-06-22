@@ -10,7 +10,11 @@ import type { ProcessStep } from "@/types/events";
 import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ThinkingDots } from "./message-bubble/Thinking";
-import { toolDetail, toolGroupSummary, toolMeta } from "./message-bubble/constants";
+import {
+  toolDetail,
+  toolGroupSummary,
+  toolMeta,
+} from "./message-bubble/constants";
 
 /** Live transport line while the model streams tool-call JSON (不持久化). */
 export function ComposingToolLine({

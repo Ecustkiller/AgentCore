@@ -162,9 +162,12 @@ def single_outcome(
 def team_outcome(result: dict, sink: RecordingSink, *, latency_ms: int) -> TurnOutcome:
     """把 ``run_chat_pipeline`` 的返回 dict + sink 截获的 roster 归一化成 :class:`TurnOutcome`.
 
-    ``delegated`` 读 ``runs``（非空即委派；eval 关挂起，故 runs 非空 ⇔ 委派）；成本读
-    ``cost_runs`` 经 ``aggregate_cost`` 求和（worker 与 captain 可能不同档，只能加各自已定价
-    的行）。错误路径返回的 dict 缺多数键，故全部用 ``.get`` 带默认。纯函数，便于单测。
+    ``delegated`` 以 roster 里是否出现**非 CEO 角色**为准（roster 来自 ``run_plan`` 的委派
+    计划）。**不能**用 ``bool(runs)``——实测发现 CEO 直接作答 / 反问澄清（rounds=1、零
+    ``delegate`` 调用、roster 空）时 ``runs`` 仍非空（含 CEO 自身的 run 记录），会把「零
+    编排的直接回答」误判为委派、令 ``Delegated``/``NotDelegated`` 失真。成本读 ``cost_runs``
+    经 ``aggregate_cost`` 求和（worker 与 captain 可能不同档，只能加各自已定价的行）。错误
+    路径返回的 dict 缺多数键，故全部用 ``.get`` 带默认。纯函数，便于单测。
     """
     finish = result.get("finish_reason")
     finish_str = finish.value if hasattr(finish, "value") else str(finish or "error")
@@ -181,7 +184,7 @@ def team_outcome(result: dict, sink: RecordingSink, *, latency_ms: int) -> TurnO
         rounds=int(result.get("rounds", 0)),
         tool_calls=list(sink.tool_calls),
         citations=list(result.get("citations") or []),
-        delegated=bool(result.get("runs")),
+        delegated=any(role != "CEO" for role in sink.roster),
         roster=list(sink.roster),
         usage=usage,
         cost_usd=cost_nano / NANO_PER_USD,

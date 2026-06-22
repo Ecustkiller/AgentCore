@@ -1,5 +1,5 @@
-import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 import { dispatchHandoffJob } from "@/services/handoff";
+import { useBackgroundTasksStore } from "@/stores/backgroundTasks";
 
 /** 把一条任务派发为后台云端任务（交接「方案 B」/ P2e e2）。 */
 export function dispatchBackgroundTask(convId: string, task: string): void {

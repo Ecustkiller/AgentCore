@@ -9,11 +9,13 @@ import { useUIStore } from "@/stores/ui";
 import {
   BarChart3,
   BookOpen,
+  Bug,
   Cloud,
   Compass,
   Cpu,
   Download,
   Files,
+  FlaskConical,
   Gauge,
   Info,
   Keyboard,
@@ -66,6 +68,7 @@ export interface CommandContext {
   navigate: NavigateFunction;
   theme: "light" | "dark" | "system";
   usageDetail: boolean;
+  diagnosticMode: boolean;
   sidebarCollapsed: boolean;
 }
 
@@ -77,10 +80,11 @@ export interface CommandContext {
  * passed `navigate`. Grouped by {@link CommandCategory} at render time.
  */
 export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
-  const { navigate, theme, usageDetail, sidebarCollapsed } = ctx;
+  const { navigate, theme, usageDetail, diagnosticMode, sidebarCollapsed } =
+    ctx;
   const go = (path: string) => () => navigate(path);
 
-  return [
+  const commands: PaletteCommand[] = [
     // ---- 操作 (actions) ----
     {
       id: "new-conversation",
@@ -92,12 +96,12 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: () => startNewConversation(navigate),
     },
     {
-      // 「云端临时对话」逃生口（决策 #11）：桌面默认本地后，纯云随手问答的显式入口。
+      // 「云端随手聊」逃生口（决策 #11）：桌面默认本地后，纯云随手问答的显式入口。
       id: "new-cloud-conversation",
-      title: "云端临时对话",
+      title: "云端随手聊",
       category: "操作",
       icon: Cloud,
-      keywords: ["cloud", "temp", "yunduan", "linshi", "new", "chat"],
+      keywords: ["cloud", "suishou", "yunduan", "linshi", "new", "chat"],
       run: () => startNewConversation(navigate, null, { cloud: true }),
     },
     {
@@ -117,6 +121,24 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       keywords: ["usage", "power", "token", "cost", "yongliang"],
       hint: usageDetail ? "当前：开" : "当前：关",
       run: () => useUIStore.getState().toggleUsageDetail(),
+    },
+    {
+      // 开发者 / 诊断模式 (前端UX设计.md §十): independent of 用量明细 — surfaces
+      // low-level run / trace ids for debugging, off by default.
+      id: "toggle-diagnostic-mode",
+      title: "开发者 / 诊断模式",
+      category: "操作",
+      icon: Bug,
+      keywords: [
+        "diagnostic",
+        "developer",
+        "debug",
+        "trace",
+        "zhenduan",
+        "kaifazhe",
+      ],
+      hint: diagnosticMode ? "当前：开" : "当前：关",
+      run: () => useUIStore.getState().toggleDiagnosticMode(),
     },
     {
       // Acts on the open conversation (导出对话). A draft has no server id yet, so
@@ -206,7 +228,7 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       category: "前往",
       icon: Workflow,
       keywords: ["team", "mechanism", "graph", "tuandui"],
-      run: go("/toolbox/manual?s=panorama"),
+      run: go("/toolbox/manual/mechanism?s=panorama"),
     },
     {
       id: "nav-explore",
@@ -318,6 +340,33 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: () => useUIStore.getState().setTheme("system"),
     },
   ];
+
+  // Dev-only doorway to the 前端预览 harness (#/preview): the route is hidden (no nav
+  // item), so the palette is how you reach it. Stripped from production builds.
+  if (import.meta.env.DEV) {
+    commands.push({
+      id: "nav-preview",
+      title: "前端预览（开发）",
+      category: "前往",
+      icon: FlaskConical,
+      keywords: [
+        "preview",
+        "fixtures",
+        "yulan",
+        "qianduan",
+        "dev",
+        "harness",
+        "ai",
+        "xunjian",
+        "巡检",
+        "截图",
+      ],
+      hint: "离线回放 AI 态",
+      run: go("/preview"),
+    });
+  }
+
+  return commands;
 }
 
 /** Local substring matcher: every whitespace-separated token of the query must

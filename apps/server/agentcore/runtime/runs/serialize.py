@@ -117,7 +117,7 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
 
     Each item is ``{question, assumption, blocking, kind, status, answer}`` parsed from
     the call's arguments (assumption defaults to "", blocking to False, kind to
-    ``"normal"``). ``kind="scope"`` (职责晚绑定与动态再编排 §4.4) marks a 职责/范围 deviation
+    ``"normal"``). ``kind="scope"`` (执行引擎架构设计.md §受监督的波循环) marks a 职责/范围 deviation
     the WaveScheduler consumes at a wave boundary (``BoundaryReason.SCOPE``) so the CEO
     re-steers the not-yet-run tail; ``"normal"`` is an ordinary 待决问题 resolved at
     synthesis. ``status`` defaults to ``"raised"`` (a non-blocking escalate, or a blocking
@@ -154,7 +154,7 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
                     "question": question,
                     "assumption": str(parsed.get("assumption") or "").strip(),
                     "blocking": bool(parsed.get("blocking")),
-                    # 职责晚绑定与动态再编排 §4.4: "scope" → a 职责/范围 deviation the scheduler
+                    # 执行引擎架构设计.md §受监督的波循环: "scope" → a 职责/范围 deviation the scheduler
                     # consumes at a wave boundary (CEO re-steers the un-run tail); "normal"
                     # → an ordinary 待决问题 resolved at synthesis.
                     "kind": kind,

@@ -248,6 +248,22 @@ class ConversationRepository:
         )
         return result.scalars().all()
 
+    async def list_ids_by_folder(self, folder_id: str, *, user_id: str) -> list[str]:
+        """Every non-deleted conversation filed in ``folder_id`` (incl. archived).
+
+        Used by permanent project delete to cascade hard-delete all member chats.
+        Handoff-host conversations are excluded (hidden infra rows).
+        """
+        result = await self._session.execute(
+            select(Conversation.id).where(
+                Conversation.user_id == user_id,
+                Conversation.folder_id == folder_id,
+                Conversation.deleted_at.is_(None),
+                Conversation.mode != "handoff",
+            )
+        )
+        return list(result.scalars().all())
+
     async def hard_delete(self, conversation_id: str) -> None:
         """Physically remove a conversation and all its rows (messages + cost ledger
         + turn journal).

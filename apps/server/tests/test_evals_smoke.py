@@ -173,6 +173,29 @@ def test_team_outcome_handles_error_result():
     assert oc.cost_usd == 0.0
 
 
+def test_team_outcome_delegated_derives_from_roster_not_runs():
+    # bool(runs) is a false-positive proxy: a CEO that answers directly / asks a
+    # clarifying question still yields a non-empty ``runs`` (its own run record),
+    # which mislabels zero-orchestration as delegation. ``delegated`` must derive
+    # from an actual delegation plan — a non-CEO role in the roster.
+    direct = RecordingSink()  # empty roster = CEO handled it itself
+    oc = team_outcome(
+        {"content": "直接回答", "finish_reason": "end_turn", "rounds": 1, "runs": {"x": 1}},
+        direct,
+        latency_ms=1,
+    )
+    assert oc.delegated is False  # would be True under the old bool(runs) proxy
+
+    team = RecordingSink()
+    team.roster = ["CEO", "研究员"]
+    oc2 = team_outcome(
+        {"content": "团队产出", "finish_reason": "end_turn", "rounds": 2, "runs": {}},
+        team,
+        latency_ms=1,
+    )
+    assert oc2.delegated is True
+
+
 def test_single_outcome_derives_finish_and_cost():
     profile = ModelProfile(
         model="deepseek-v4-flash", thinking=False, reasoning_effort=None, max_rounds=10

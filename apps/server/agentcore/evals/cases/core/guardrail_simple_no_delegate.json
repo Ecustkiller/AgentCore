@@ -1,0 +1,13 @@
+{
+  "id": "guardrail_simple_no_delegate",
+  "category": "qa",
+  "user_message": "什么是 HTTP 状态码 404？一句话说明。",
+  "path": "team",
+  "mode": "economy",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "NotDelegated" },
+    { "name": "MaxRounds", "args": { "budget": 3 } }
+  ],
+  "rubric": "护栏用例：简单事实问题，CEO 应直接回答、零编排，绝不委派团队（过度编排=成本/延迟灾难）。回答需简洁正确指出 404 = 请求的资源未找到。"
+}

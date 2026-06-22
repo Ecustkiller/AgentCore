@@ -1,7 +1,19 @@
 import { Button } from "@/components/ui";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { formatCompact } from "@/lib/format";
 import type { ContextBlockWire } from "@/types/events";
-import { ChevronDown, ChevronRight, CornerDownRight } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  CornerDownRight,
+  Layers,
+} from "lucide-react";
 import { useState } from "react";
 
 /** Context channel → 中文 label + one-line hint (上下文传递可视化). The single source both
@@ -67,7 +79,10 @@ export function ReceivedContextSection({
           {expanded ? (
             <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
           ) : (
-            <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+            <ChevronRight
+              size={14}
+              className="shrink-0 text-muted-foreground"
+            />
           )}
           <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
             收到的上下文
@@ -90,6 +105,58 @@ export function ReceivedContextSection({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * 收到的上下文 · CEO 气泡入口 (上下文传递可视化) — the on-demand dialog the chat bubble's
+ * hover action row opens to reveal the structured context the turn was actually fed. Unlike
+ * the worker-side {@link ReceivedContextSection} (inline in the run detail panel), the CEO
+ * bubble keeps this OFF the conversation flow: a turn no longer auto-expands a context block
+ * on send; the user clicks「收到的上下文」to inspect it on demand.
+ *
+ * 决策② retired here: the verbatim 系统提示 (channel `system`) block is shown to EVERYONE in
+ * this dialog (no 用量明细 gating). Being on-demand removes the「信息过载」concern, and the
+ * prompt was already user-openable — so this also folds the old standalone「提示词」button in
+ * (its content == the `system` block). Renders nothing when the turn carried no context
+ * (legacy turns with empty `captainContext`).
+ */
+export function ReceivedContextDialog({
+  blocks,
+}: { blocks: ContextBlockWire[] }) {
+  const [open, setOpen] = useState(false);
+  if (blocks.length === 0) return null;
+  return (
+    <>
+      <Button
+        variant="neutral"
+        className="px-1.5"
+        icon={<Layers size={13} />}
+        onClick={() => setOpen(true)}
+      >
+        收到的上下文 · {blocks.length} 段
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col">
+          <DialogHeader>
+            <DialogTitle>收到的上下文</DialogTitle>
+            <DialogDescription>
+              本回合 AI 实际读到的上下文，与喂给模型的逐字一致（系统提示 /
+              对话历史 / 原始请求 …）。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-5 pb-5">
+            {blocks.map((b, i) => (
+              <ContextBlockCard
+                key={`${b.channel}-${i}`}
+                block={b}
+                defaultOpen={false}
+              />
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

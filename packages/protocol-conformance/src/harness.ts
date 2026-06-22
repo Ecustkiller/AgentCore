@@ -1,5 +1,5 @@
 // Conformance harness — runs a frontend `fold` against the backend-exported golden
-// vectors and reports ProjectedTurn drift (手机端落地设计 §六 支柱1+3).
+// vectors and reports ProjectedTurn drift (前端技术与架构 §十二).
 //
 // Vectors + golden are committed JSON under ./fixtures/, produced by the backend
 // oracle (the single source: runtime/conformance/export.py). This package holds NO

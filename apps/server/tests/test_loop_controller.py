@@ -10,7 +10,6 @@ from agentcore.runtime.loop_controller import (
     LoopController,
     StuckReason,
     ToolAttempt,
-    delegation_nudge_prompt,
     fingerprint_tool_call,
     progress_review_prompt,
 )
@@ -329,89 +328,96 @@ def test_progress_review_prompt_is_anchored_to_round():
     assert "已进行 4 轮" in msg
 
 
-# --- 档2.5: manager-CEO delegation breadth nudge ---
+# --- over-investigation safety net (收敛治理, 保险丝: finalize-only runaway backstop) ---
+#
+# The soft nudge that once lived here was removed: a 3-sample A/B showed it was ignored
+# AND net-negative (cost ↑, no call reduction). Routine convergence now lives in the
+# system prompt + the read_url failure guidance; this knob only force-finalizes a TRUE
+# runaway past a HIGH bar, keyed on investigation *rounds* (a parallel batch counts once).
 
 
-def _ceo(threshold: int = 4) -> LoopController:
-    # A delegation-capable run (CEO captain): read-only investigation tools + delegate.
+def _worker(finalize_rounds: int = 6) -> LoopController:
+    # A run whose read-only investigation tools advance the safety-net clock. Flavor /
+    # delegation no longer matter — the backstop is flavor-agnostic.
     return LoopController(
-        delegation_nudge_threshold=threshold,
-        investigation_tools=frozenset({"file_read", "file_list", "grep"}),
-        delegation_tools=frozenset({"delegate", "revise"}),
+        convergence_finalize_rounds=finalize_rounds,
+        investigation_tools=frozenset({"web_search", "read_url", "file_read"}),
     )
 
 
-def test_delegation_nudge_disabled_by_default():
-    # The plain controller (workers / tests) has no threshold → never nudges, even
-    # after many reads.
-    c = LoopController()
-    c.record([_ok("a", "file_read"), _ok("b", "file_read"), _ok("c", "file_read")])
-    assert c.delegation_nudge_due() is False
-    assert c.investigation_calls == 0  # not even tracked without the tool sets
+def test_safety_net_disabled_by_default():
+    # The plain controller (finalize_rounds 0) never intervenes, however much it searches —
+    # rounds are still tracked, but the net stays dormant.
+    c = LoopController(investigation_tools=frozenset({"web_search"}))
+    for i in range(20):
+        c.record([_ok(f"s{i}", "web_search")])
+    assert c.investigation_rounds == 20
+    assert c.convergence_action() is Intervention.CONTINUE
 
 
-def test_delegation_nudge_fires_once_when_breadth_crosses_threshold():
-    c = _ceo(threshold=4)
-    c.record([_ok("a", "file_read"), _ok("b", "file_list")])  # 2 < 4
-    assert c.delegation_nudge_due() is False
-    c.record([_ok("c", "grep"), _ok("d", "file_read")])  # now 4 ≥ 4
+def test_safety_net_counts_rounds_not_calls_so_a_batch_is_one():
+    # THE batch-robustness invariant: a parallel fan-out of N reads in ONE round bumps
+    # the clock by one, so a worker can't be guillotined right after fanning out wide.
+    c = _worker(finalize_rounds=6)
+    c.record([
+        _ok("a", "web_search"), _ok("b", "web_search"),
+        _ok("c", "web_search"), _ok("d", "web_search"),
+    ])  # batch of 4 → still 1 investigation round
     assert c.investigation_calls == 4
-    assert c.delegation_nudge_due() is True
-    # One-shot: a delegation-capable run is nudged at most once per run.
-    assert c.delegation_nudge_due() is False
+    assert c.investigation_rounds == 1
+    assert c.convergence_action() is Intervention.CONTINUE  # 1 ≪ 6
 
 
-def test_delegation_nudge_suppressed_once_run_has_delegated():
-    # A run that already delegated is behaving as a manager → never nudged, even with
-    # plenty of read breadth (the delegate attempt latches it off).
-    c = _ceo(threshold=2)
-    c.record([_ok("a", "file_read"), _ok("b", "grep"), _ok("c", "delegate")])
-    assert c.investigation_calls == 2  # ≥ threshold
-    assert c.delegation_nudge_due() is False
+def test_safety_net_continues_below_the_bar_no_soft_nudge():
+    # Below the high bar there is NO intervention at all (the old soft NUDGE is gone):
+    # every round under finalize_rounds is a plain CONTINUE.
+    c = _worker(finalize_rounds=6)
+    for i in range(5):  # rounds 1..5, all below 6
+        c.record([_ok(f"s{i}", "web_search")])
+        assert c.convergence_action() is Intervention.CONTINUE
+    assert c.investigation_rounds == 5
 
 
-def test_delegation_nudge_never_fires_for_a_run_that_cannot_delegate():
-    # A leaf worker (no orchestration tool) investigating broadly is doing its job —
-    # the controller's own guard keeps the nudge dormant regardless of threshold.
+def test_safety_net_finalizes_a_true_runaway_at_the_bar():
+    c = _worker(finalize_rounds=6)
+    for i in range(5):
+        c.record([_ok(f"s{i}", "web_search")])
+    assert c.convergence_action() is Intervention.CONTINUE  # round 5 < 6
+    c.record([_ok("s5", "web_search")])  # round 6 ≥ 6
+    assert c.investigation_rounds == 6
+    assert c.convergence_action() is Intervention.FINALIZE
+
+
+def test_safety_net_is_flavor_agnostic():
+    # A run that ALSO has an orchestration tool is reined in by the SAME backstop — the
+    # old leaf-only convergence let such a worker run to the cap (17 rounds observed).
     c = LoopController(
-        delegation_nudge_threshold=2,
-        investigation_tools=frozenset({"file_read"}),
-        delegation_tools=frozenset(),
+        convergence_finalize_rounds=6,
+        investigation_tools=frozenset({"file_read", "grep"}),
     )
-    c.record([_ok("a", "file_read"), _ok("b", "file_read"), _ok("c", "file_read")])
-    assert c.investigation_calls == 3
-    assert c.delegation_nudge_due() is False
+    for i in range(6):
+        c.record([_ok(f"r{i}", "file_read")])
+    assert c.investigation_rounds == 6
+    assert c.convergence_action() is Intervention.FINALIZE
 
 
-def test_delegation_nudge_ignores_non_investigation_tools():
-    # Only the configured investigation tools count toward breadth; consult_skill /
-    # ask_user / a write tool a captain-worker might hold do not.
-    c = _ceo(threshold=3)
-    c.record([_ok("a", "consult_skill"), _ok("b", "ask_user"), _ok("c", "file_write")])
-    assert c.investigation_calls == 0
-    assert c.delegation_nudge_due() is False
+def test_safety_net_ignores_non_investigation_tools():
+    # Only read-only investigation tools advance the clock — a worker writing files /
+    # asking the user / consulting a skill is making progress, not over-investigating.
+    c = _worker(finalize_rounds=6)
+    c.record([_ok("a", "file_write"), _ok("b", "ask_user")])
+    c.record([_ok("c", "consult_skill")])
+    assert c.investigation_rounds == 0
+    assert c.convergence_action() is Intervention.CONTINUE
 
 
-def test_delegation_nudge_counts_failed_reads_too():
-    # A wide scan is breadth whether or not each call succeeds, so failures count.
-    c = _ceo(threshold=3)
-    c.record([_fail("a", "file_read"), _ok("b", "grep"), _fail("c", "file_list")])
-    assert c.investigation_calls == 3
-    assert c.delegation_nudge_due() is True
-
-
-def test_delegation_nudge_tally_survives_nudge_window_clear():
-    # The cumulative investigation tally is run-scoped (like the failure tally): a
-    # stuck-loop NUDGE clears the sliding window but must NOT reset the breadth count.
-    c = _ceo(threshold=4)
-    c.record([_ok("a", "file_read"), _ok("a", "file_read"), _ok("a", "file_read")])
+def test_safety_net_round_clock_survives_nudge_window_clear():
+    # The investigation-round clock is run-scoped (like the failure tally): a stuck-loop
+    # NUDGE clears the sliding window but must NOT reset the safety-net clock.
+    c = _worker(finalize_rounds=6)
+    c.record([_ok("a", "web_search"), _ok("a", "web_search"), _ok("a", "web_search")])
     assert c.decide(c.detect()) is Intervention.NUDGE  # clears the window
-    assert c.investigation_calls == 3  # survived the clear
-    c.record([_ok("b", "grep")])  # 4th
-    assert c.delegation_nudge_due() is True
-
-
-def test_delegation_nudge_prompt_is_anchored_to_count():
-    msg = delegation_nudge_prompt(6)
-    assert "6 次" in msg
-    assert "delegate" in msg
+    assert c.investigation_rounds == 1  # survived the clear
+    c.record([_ok("b", "read_url")])  # 2nd round
+    assert c.investigation_rounds == 2
+    assert c.convergence_action() is Intervention.CONTINUE  # still ≪ 6

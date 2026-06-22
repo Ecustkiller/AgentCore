@@ -334,7 +334,7 @@ async def test_checkpoint_after_inert_without_hook():
     assert res["b"].phase is RunPhase.COMPLETED
 
 
-# --- 受监督的波循环: on_boundary BIND arm (晚绑定 / 职责晚绑定与动态再编排) ---------
+# --- 受监督的波循环: on_boundary BIND arm (晚绑定) ---------
 
 
 async def test_bind_boundary_fires_then_proceeds_after_host_binds():
@@ -423,7 +423,7 @@ async def test_bind_boundary_not_fired_until_deps_resolve():
     assert res["b"].phase is RunPhase.COMPLETED
 
 
-# --- 受监督的波循环: on_boundary SCOPE arm (偏离信号 / 职责晚绑定与动态再编排 §4.4) -----
+# --- 受监督的波循环: on_boundary SCOPE arm (偏离信号) -----
 
 
 def _scope_state(run_id: str) -> RunState:
@@ -619,7 +619,7 @@ async def test_metrics_excludes_seeded_nodes():
     assert m.completed == 1
 
 
-# --- 受监督波循环埋点 (boundary + escalation tallies, 职责晚绑定与动态再编排 §7.2) ---
+# --- 受监督波循环埋点 (boundary + escalation tallies) ---
 
 
 async def test_metrics_boundary_counts_zero_for_ordinary_plan():

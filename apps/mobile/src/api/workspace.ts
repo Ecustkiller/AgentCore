@@ -1,4 +1,4 @@
-// Workspace file REST for the mobile client (手机端落地设计 P1 · 云端文件浏览).
+// Workspace file REST for the mobile client (前端技术与架构 §七 · 云端文件浏览).
 //
 // The conversation's cloud workspace, read over the same endpoints the desktop uses
 // (api/routes/conversations.py). The list endpoint only does「顶层」(glob *) or「整树」

@@ -1,4 +1,4 @@
-// 消息 (人际 IM) REST client for the mobile shell (手机端落地设计 · 人际消息).
+// 消息 (人际 IM) REST client for the mobile shell (前端技术与架构 §七 · 人际消息).
 //
 // The 消息 page is human↔human, a domain separate from the 对话 page's AI conversations,
 // so this is its own service with its own types. messages.py is REST-only (no SSE), so the

@@ -29,7 +29,6 @@ from agentcore.runtime.facts import (
 from agentcore.runtime.loop_controller import (
     Intervention,
     LoopController,
-    delegation_nudge_prompt,
     progress_review_prompt,
 )
 from agentcore.runtime.verify import finish_guard, format_guard_steer
@@ -150,26 +149,20 @@ async def react_loop(
     final_content = ""
     final_reasoning = ""
 
-    # Manager-CEO breadth nudge (档2.5): classify this run's available tools so the
-    # controller can tell when a delegation-capable run (CEO captain / can_delegate
-    # worker) keeps investigating solo and should fan the breadth out to a research
-    # team. Investigation = read-only info-gathering (NEVER-approval FILESYSTEM /
-    # SEARCH / RESEARCH); delegation = ORCHESTRATION (delegate / revise). A leaf
-    # worker has no ORCHESTRATION tool → empty delegation set → the controller's own
-    # guard keeps the nudge dormant, so workers are never told to delegate work they own.
+    # Over-investigation safety net (收敛治理): classify this run's read-only info-gathering
+    # tools (NEVER-approval FILESYSTEM / SEARCH / RESEARCH) so the controller can clock how
+    # many ROUNDS the run spends investigating and force-finalize a true runaway. (Routine
+    # convergence is handled upstream in the system prompt, not here — see config.)
     available_names = (
         set(allowed_tool_names) if allowed_tool_names is not None else set(tools.names)
     )
     schema_by_name = {schema.name: schema for schema in tools.list_all()}
     investigation_tools: set[str] = set()
-    delegation_tools: set[str] = set()
     for name in available_names:
         schema = schema_by_name.get(name)
         if schema is None:
             continue
-        if schema.category is ToolCategory.ORCHESTRATION:
-            delegation_tools.add(name)
-        elif schema.approval is ToolApproval.NEVER and schema.category in (
+        if schema.approval is ToolApproval.NEVER and schema.category in (
             ToolCategory.FILESYSTEM,
             ToolCategory.SEARCH,
             ToolCategory.RESEARCH,
@@ -184,9 +177,8 @@ async def react_loop(
         unproductive_threshold=settings.engine_unproductive_threshold,
         reflection_start_round=settings.engine_reflection_start_round,
         reflection_interval=settings.engine_reflection_interval,
-        delegation_nudge_threshold=settings.engine_delegation_nudge_threshold,
+        convergence_finalize_rounds=settings.engine_convergence_finalize_rounds,
         investigation_tools=frozenset(investigation_tools),
-        delegation_tools=frozenset(delegation_tools),
     )
     # B2 degraded fallback: the model the next round runs on. None = the profile's
     # own model; set to profile.fallback_model after an empty round to retry once on
@@ -504,42 +496,38 @@ async def react_loop(
                 run_id=run_id,
             )
 
-        # Manager-CEO breadth nudge (档2.5 纯粹管理者 CEO): a delegation-capable run that
-        # keeps doing read-only investigation itself (breadth crossing the threshold, no
-        # delegate yet) gets ONE steer to fan the investigation out to a parallel research
-        # team — broad investigation is the team's job even when the final answer is
-        # conversational. Gated on round so a legitimate opening scout batch (pre-delegation
-        # 探路) doesn't trip it, and skipped when a circuit-breaker steer already landed so
-        # we never stack two system prompts in one round. Injected into the real window →
-        # journaled as a fact like the other steers.
-        delegation_nudged = (
-            breaker_message is None
-            and round_idx >= settings.engine_delegation_nudge_min_round
-            and controller.delegation_nudge_due()
-        )
-        if delegation_nudged:
-            steer = delegation_nudge_prompt(controller.investigation_calls)
-            logger.info(
-                "engine.delegation_nudge",
+        # Over-investigation safety net (收敛治理, 保险丝): a pure runaway backstop. Routine
+        # convergence is handled upstream (the system-prompt <tool_use> doctrine + the
+        # read_url anti-crawl failure guidance), because a 3-sample A/B falsified the soft
+        # nudge that once lived here (ignored AND net-negative). This only force-finalizes a
+        # TRUE runaway that keeps investigating past the HIGH safety bar (keyed on
+        # investigation rounds), rather than letting it spin toward the round cap. Skipped
+        # when a circuit-breaker steer already landed this round.
+        if breaker_message is None and controller.convergence_action() is Intervention.FINALIZE:
+            logger.warning(
+                "engine.convergence_finalize",
                 round=round_idx,
+                investigation_rounds=controller.investigation_rounds,
                 investigation_calls=controller.investigation_calls,
             )
-            messages.append(LLMMessage(role="user", content=steer))
-            record_turn_fact(
-                NoteFact(
-                    role="user", content=steer, reason="delegation_nudge", run_id=run_id
-                ).to_fact()
+            return await force_finalize(
+                messages=messages,
+                llm=llm,
+                profile=profile,
+                emit_content=emit_content,
+                emit_reasoning=emit_reasoning,
+                final_content=final_content,
+                final_reasoning=final_reasoning,
+                total_usage=total_usage,
+                rounds=round_idx + 1,
+                reason="convergence",
+                run_id=run_id,
             )
 
         # B2 reflection injection: on a long run, inject a periodic progress-review
         # steer (proactive re-plan beat, not loop-triggered). Skip when a circuit-
-        # breaker or delegation-breadth steer already landed this round so we don't
-        # stack two system prompts.
-        if (
-            breaker_message is None
-            and not delegation_nudged
-            and controller.reflection_due(round_idx)
-        ):
+        # breaker steer already landed this round so we don't stack two system prompts.
+        if breaker_message is None and controller.reflection_due(round_idx):
             review = progress_review_prompt(round_idx + 1)
             logger.info("engine.reflection_inject", round=round_idx)
             messages.append(LLMMessage(role="user", content=review))

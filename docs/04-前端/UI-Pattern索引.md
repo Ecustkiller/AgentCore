@@ -1,3 +1,13 @@
+---
+status: reference
+code: apps/desktop/src/renderer/components/ui/
+related:
+  - .cursor/rules/color-tokens.mdc
+  - docs/04-前端/前端UX设计.md
+skip_if:
+  - 只改业务逻辑不涉及组件层
+---
+
 # UI Pattern 索引
 
 > **状态**：✅ 已落地（primitive 层 + lint 门禁）
@@ -46,8 +56,8 @@ Radix overlay（dialog / popover / tooltip 等）仍在 `components/ui/`，与 p
 ## Lint 门禁
 
 ```bash
-pnpm -C apps/desktop check-ui-tokens
-pnpm -C apps/mobile check-ui-tokens
+node scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer
+node scripts/check-ui-tokens.mjs --src apps/mobile/src
 ```
 
 禁止：`rounded-md/sm/2xl`、自定义 px 字号（10/11/13）、Tailwind 调色板类、hex 任意色。已接入两端 `pnpm lint` 与 CI。

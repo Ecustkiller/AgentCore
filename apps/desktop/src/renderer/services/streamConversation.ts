@@ -1,12 +1,44 @@
 import { StreamError } from "@/lib/errors";
 import { notifyUnauthorized, tryRefresh } from "@/services/api";
 import type { PlanReviewUserDecision } from "@/services/planReview";
+import { traceTurnMilestone } from "@/services/turnTrace";
 import { useApprovalStore } from "@/stores/approvals";
 import { getRuntime } from "@/stores/conversation";
 import type { SSEEvent } from "@/types/events";
 import { dispatchSSEEvent, flushPendingContent } from "./sse/dispatch";
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+/** Max wait for response headers (connect + server accept). Distinct from {@link pumpSSE}'s
+ *  idle timeout, which only applies once the body is streaming. */
+const CONNECT_TIMEOUT_MS = 30_000;
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
+
+/** `fetch` with a connect-phase ceiling; user `signal` abort still propagates as AbortError. */
+async function fetchWithConnectTimeout(
+  init: (signal: AbortSignal) => Promise<Response>,
+  userSignal?: AbortSignal,
+): Promise<Response> {
+  const fetchAc = new AbortController();
+  const timer = setTimeout(() => fetchAc.abort(), CONNECT_TIMEOUT_MS);
+  const onUserAbort = () => fetchAc.abort();
+  userSignal?.addEventListener("abort", onUserAbort);
+  try {
+    return await init(fetchAc.signal);
+  } catch (err) {
+    if (isAbortError(err)) {
+      if (userSignal?.aborted) throw err;
+      throw new StreamError("network");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    userSignal?.removeEventListener("abort", onUserAbort);
+  }
+}
 
 /** Build a {@link StreamError} from a non-OK response. A refused turn (e.g. 429
  * for quota / rate limit) arrives as a plain JSON `{error:{code,message}}` body
@@ -107,7 +139,7 @@ export async function attachConversation(
   conversationId: string,
   signal?: AbortSignal,
 ): Promise<AttachOutcome> {
-  const doFetch = () =>
+  const doFetch = (signal: AbortSignal) =>
     fetch(`${BASE_URL}/v1/conversations/${conversationId}/stream`, {
       method: "GET",
       credentials: "include",
@@ -116,10 +148,10 @@ export async function attachConversation(
     });
 
   try {
-    let response = await doFetch();
+    let response = await fetchWithConnectTimeout(doFetch, signal);
     if (response.status === 401) {
       if (await tryRefresh()) {
-        response = await doFetch();
+        response = await fetchWithConnectTimeout(doFetch, signal);
       }
       if (response.status === 401) {
         notifyUnauthorized();
@@ -157,7 +189,7 @@ async function runMessageStream(
 ): Promise<void> {
   useApprovalStore.getState().clear(conversationId);
 
-  const doFetch = () =>
+  const doFetch = (signal: AbortSignal) =>
     fetch(`${BASE_URL}${path}`, {
       method: "POST",
       credentials: "include",
@@ -170,10 +202,15 @@ async function runMessageStream(
     });
 
   try {
-    let response = await doFetch();
+    traceTurnMilestone(conversationId, "fetch_start", { path });
+    let response = await fetchWithConnectTimeout(doFetch, signal);
+    traceTurnMilestone(conversationId, "fetch_response", {
+      status: response.status,
+      ok: response.ok,
+    });
     if (response.status === 401) {
       if (await tryRefresh()) {
-        response = await doFetch();
+        response = await fetchWithConnectTimeout(doFetch, signal);
       }
       if (response.status === 401) {
         notifyUnauthorized();

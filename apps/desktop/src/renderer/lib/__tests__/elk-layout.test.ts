@@ -18,7 +18,7 @@ const NH = 110;
 const e = (
   source: string,
   target: string,
-  kind: "dep" | "delegate" = "dep",
+  kind: "dep" | "delegate" | "revision" = "dep",
 ): GraphEdge => ({ id: `${source}->${target}`, source, target, kind });
 
 /** 两节点盒（NW×NH）是否相交。 */
@@ -275,5 +275,146 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
       );
       expect(onLine).toEqual([]);
     }
+  });
+
+  // 圆桌逐轮（主持人 ⇢ 三视角 ⇢ 各自修订 v2）：修订节点必须与其源同一交叉轴车道（修订边笔直），
+  // 守住「第三波漂移」回归——下沉只搬 delegate 子队、漏掉挂其下的修订，曾把第三波留在源旧车道。
+  it("圆桌逐轮·无汇聚点：不下沉、三方修订各与源同车道、互不重叠", async () => {
+    const ids = ["mod", "s_a", "s_b", "s_c", "s_a2", "s_b2", "s_c2"];
+    const edges: GraphEdge[] = [
+      e("mod", "s_a", "delegate"),
+      e("mod", "s_b", "delegate"),
+      e("mod", "s_c", "delegate"),
+      e("s_a", "s_a2", "revision"),
+      e("s_b", "s_b2", "revision"),
+      e("s_c", "s_c2", "revision"),
+    ];
+    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+      source: "__input__",
+    });
+
+    // 每个修订与其源同 y（同车道）——核心不变量，杜绝第三波漂移。
+    for (const [src, rev] of [
+      ["s_a", "s_a2"],
+      ["s_b", "s_b2"],
+      ["s_c", "s_c2"],
+    ]) {
+      expect(positions[rev].y).toBeCloseTo(positions[src].y, 5);
+    }
+    // 全员两两不重叠。
+    expect(noneOverlap(positions, ids)).toEqual([]);
+    // 无主干线 → 不下沉：主持人居中于三子队（与首子、末子的 y 中点对齐）。
+    const subYs = ["s_a", "s_b", "s_c"].map((id) => positions[id].y);
+    const mid = (Math.min(...subYs) + Math.max(...subYs)) / 2;
+    expect(positions.mod.y).toBeCloseTo(mid, 0);
+  });
+
+  it("圆桌逐轮·带汇聚点：下沉避让主干线后，三方修订仍各与源同车道、汇聚点钉末层", async () => {
+    const ids = [
+      "__input__",
+      "mod",
+      "s_a",
+      "s_b",
+      "s_c",
+      "s_a2",
+      "s_b2",
+      "s_c2",
+      "cap",
+    ];
+    const edges: GraphEdge[] = [
+      e("__input__", "mod"),
+      e("mod", "s_a", "delegate"),
+      e("mod", "s_b", "delegate"),
+      e("mod", "s_c", "delegate"),
+      e("s_a", "s_a2", "revision"),
+      e("s_b", "s_b2", "revision"),
+      e("s_c", "s_c2", "revision"),
+      e("mod", "cap"),
+    ];
+    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+      source: "__input__",
+      sink: "cap",
+    });
+
+    // 修订与源同车道（下沉搬了源、修订必须跟上）。
+    for (const [src, rev] of [
+      ["s_a", "s_a2"],
+      ["s_b", "s_b2"],
+      ["s_c", "s_c2"],
+    ]) {
+      expect(positions[rev].y).toBeCloseTo(positions[src].y, 5);
+    }
+    // 汇聚点钉末层。
+    const maxX = Math.max(...ids.map((id) => positions[id].x));
+    expect(positions.cap.x).toBe(maxX);
+    // 主干线 mod 行不被任一子队 / 修订横穿（整块落其下方）。
+    const row = positions.mod.y;
+    for (const id of ["s_a", "s_b", "s_c", "s_a2", "s_b2", "s_c2"]) {
+      expect(positions[id].y).toBeGreaterThan(row);
+    }
+    expect(
+      noneOverlap(positions, ["s_a", "s_b", "s_c", "s_a2", "s_b2", "s_c2"]),
+    ).toEqual([]);
+  });
+});
+
+describe("computeLayout · 树形分叉对称", () => {
+  it("1→2 双父 + 各自子队：两支镜像等距、左支子队往 -X、右支往 +X", async () => {
+    const ids = [
+      "__input__",
+      "decide",
+      "pd",
+      "arch",
+      "ix",
+      "vd",
+      "be",
+      "dm",
+      "cap",
+    ];
+    const edges: GraphEdge[] = [
+      e("__input__", "decide"),
+      e("decide", "pd"),
+      e("decide", "arch"),
+      e("pd", "ix", "delegate"),
+      e("pd", "vd", "delegate"),
+      e("arch", "be", "delegate"),
+      e("arch", "dm", "delegate"),
+      e("pd", "cap"),
+      e("arch", "cap"),
+    ];
+    const { positions } = await computeLayout(ids, edges, "tree", false, {
+      source: "__input__",
+      sink: "cap",
+    });
+
+    const cx = (id: string) => positions[id].x + NW / 2;
+    const decideC = cx("decide");
+    const pdDist = decideC - cx("pd");
+    const archDist = cx("arch") - decideC;
+    expect(pdDist).toBeCloseTo(archDist, 0);
+    expect(pdDist).toBeGreaterThan(NW * 0.5);
+    expect(archDist).toBeGreaterThan(NW * 0.5);
+
+    // 左支子队在父左侧，右支子队在父右侧。
+    expect(cx("ix")).toBeLessThan(cx("pd"));
+    expect(cx("vd")).toBeLessThan(cx("pd"));
+    expect(cx("be")).toBeGreaterThan(cx("arch"));
+    expect(cx("dm")).toBeGreaterThan(cx("arch"));
+
+    // 竖列不被子队占。
+    const pdCol = positions.pd.x;
+    for (const id of ["ix", "vd"]) {
+      expect(Math.abs(positions[id].x - pdCol)).toBeGreaterThanOrEqual(NW);
+    }
+    const archCol = positions.arch.x;
+    for (const id of ["be", "dm"]) {
+      expect(Math.abs(positions[id].x - archCol)).toBeGreaterThanOrEqual(NW);
+    }
+
+    expect(
+      noneOverlap(positions, ["pd", "arch", "ix", "vd", "be", "dm"]),
+    ).toEqual([]);
+    const maxY = Math.max(...ids.map((id) => positions[id].y));
+    expect(positions.cap.y).toBe(maxY);
   });
 });

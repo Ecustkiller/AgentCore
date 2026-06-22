@@ -12,7 +12,7 @@ from agentcore.db.models import PushDeviceRow
 
 
 class PushDeviceRepository:
-    """Push device tokens for native notifications (原生推送设备, 手机端落地设计 P2)."""
+    """Push device tokens for native notifications (原生推送设备, 认证与会话 §十)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session

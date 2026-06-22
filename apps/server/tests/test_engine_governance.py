@@ -717,15 +717,18 @@ async def test_unproductive_rounds_early_stop_and_salvage_answer():
 
 async def test_reflection_injected_on_long_run_cadence():
     # Distinct SUCCESSFUL tool calls each round (no repeat / failure / unproductive /
-    # circuit-breaker interference) over a long run → only the periodic reflection
-    # fires, on the round_idx 3 / 6 cadence (the 4th / 7th round), anchored to the
-    # round number.
+    # circuit-breaker / over-investigation interference) over a long run → only the
+    # periodic reflection fires, on the round_idx 3 / 6 cadence (the 4th / 7th round),
+    # anchored to the round number. A non-investigation tool (EXECUTION, not a read) keeps
+    # the convergence safety net dormant so this stays an isolated reflection-cadence check.
     rounds: list[list[LLMChunk]] = [
-        [_tool_chunk("search", '{"q": "%d"}' % i)] for i in range(8)
+        [_tool_chunk("compute", '{"q": "%d"}' % i)] for i in range(8)
     ]
     rounds.append([_content_chunk("final")])
     provider = _ScriptedProvider(rounds)
-    (content, *_), messages = await _run(provider, _StubTool(), max_rounds=20)
+    (content, *_), messages = await _run(
+        provider, _StubTool(name="compute", category=ToolCategory.EXECUTION), max_rounds=20
+    )
 
     assert content == "final"
     reviews = [
@@ -761,12 +764,20 @@ async def test_productive_round_resets_unproductive_streak():
     assert finish_override == []
 
 
-# --- 档2.5: manager-CEO delegation breadth nudge (engine wiring) -----------------
+# --- over-investigation safety net (收敛治理, 保险丝: engine wiring) ----------------
+#
+# The soft nudge was removed (A/B: ignored + net-negative); only a HIGH-bar finalize
+# remains, keyed on investigation *rounds* and flavor-agnostic. These tests pin a LOW bar
+# via monkeypatch so the wiring is exercised without scripting a dozen rounds — the real
+# default is high enough never to fire on normal broad research. Each `_read_then_answer(n)`
+# round does exactly one read, so n reads == n investigation rounds.
 
 
 def _read_then_answer(reads: int) -> _ScriptedProvider:
     # `reads` rounds of a read with DISTINCT args (so the repeated-call detector never
-    # trips — isolating the breadth nudge), then a tool-free answer.
+    # trips — isolating the safety net), then a tool-free answer. One read per round, so
+    # `reads` == investigation rounds. When the net finalizes mid-run, force_finalize
+    # consumes the trailing answer round.
     rounds: list[list[LLMChunk]] = [
         [_tool_chunk("file_read", '{"p": "%d"}' % i)] for i in range(reads)
     ]
@@ -788,56 +799,57 @@ async def _run_with_registry(provider: _ScriptedProvider, reg: ToolRegistry):
     return content, messages
 
 
-async def test_delegation_breadth_nudge_fires_for_capable_run_investigating_solo():
-    # A delegation-capable run (holds an ORCHESTRATION tool) that keeps doing read-only
-    # investigation itself — read breadth crossing the default threshold (4) without a
-    # delegate — gets exactly ONE breadth nudge to fan it out to a research team.
+def _finalizes(messages: list[LLMMessage]) -> list[LLMMessage]:
+    return [m for m in messages if m.role == "user" and m.content and "停止使用任何工具" in m.content]
+
+
+def _convergence_steers(messages: list[LLMMessage]) -> list[LLMMessage]:
+    # Any over-investigation steer at all (the removed soft nudge used to live here);
+    # excludes the periodic reflection ("进度复盘"), which is a separate cadence.
+    return [
+        m
+        for m in messages
+        if m.role == "user"
+        and m.content
+        and "[系统提示]" in m.content
+        and "进度复盘" not in m.content
+    ]
+
+
+async def test_safety_net_dormant_below_the_bar_no_soft_nudge(monkeypatch):
+    # Below the high bar there is NO convergence intervention — the soft nudge is gone.
+    # A run that reads a few times (under the bar) then answers gets zero convergence steers.
+    monkeypatch.setattr(settings, "engine_convergence_finalize_rounds", 6)
     reg = ToolRegistry()
     reg.register(_StubTool(name="file_read"))  # investigation (SEARCH + NEVER approval)
-    reg.register(_StubTool(name="delegate", category=ToolCategory.ORCHESTRATION))
-    content, messages = await _run_with_registry(_read_then_answer(4), reg)
+    content, messages = await _run_with_registry(_read_then_answer(3), reg)
 
     assert content == "done"
-    nudges = [
-        m for m in messages if m.role == "user" and m.content and "成规模的调查" in m.content
-    ]
-    assert len(nudges) == 1
-    assert "4 次" in nudges[0].content and "delegate" in nudges[0].content
-    # the periodic reflection (due at round_idx 3, the same round the nudge fires) is
-    # suppressed so two steers don't stack in one round.
-    assert not any(m.content and "进度复盘" in m.content for m in messages if m.content)
+    assert _finalizes(messages) == []
+    assert _convergence_steers(messages) == []  # no soft nudge, no finalize
 
 
-async def test_no_breadth_nudge_for_a_run_that_cannot_delegate():
-    # A leaf worker (no ORCHESTRATION tool in its set) investigating broadly is doing
-    # its own job — it must never be told to delegate, no matter how much it reads.
+async def test_safety_net_finalizes_a_true_runaway(monkeypatch):
+    # A run that keeps investigating to the (lowered) bar is force-finalized into a
+    # tool-free answer rather than spinning to the round cap.
+    monkeypatch.setattr(settings, "engine_convergence_finalize_rounds", 6)
     reg = ToolRegistry()
     reg.register(_StubTool(name="file_read"))
-    content, messages = await _run_with_registry(_read_then_answer(5), reg)
+    content, messages = await _run_with_registry(_read_then_answer(6), reg)
 
-    assert content == "done"
-    assert not any(m.content and "成规模的调查" in m.content for m in messages if m.content)
+    assert content == "done"  # the forced-finalize round produced the answer
+    assert len(_finalizes(messages)) == 1  # the hard backstop landed exactly once
 
 
-async def test_no_breadth_nudge_once_the_run_delegates():
-    # A capable run that DOES delegate early is behaving as a manager: a couple of
-    # scout reads before the delegate, then more reads after the result comes back,
-    # must not trip the nudge (the delegate latches it off for the rest of the run).
+async def test_safety_net_is_flavor_agnostic_finalizes_a_delegation_capable_run(monkeypatch):
+    # THE fix the A/B drove: a run that ALSO holds an ORCHESTRATION tool (the old storm
+    # source) gets NO special delegate steer — it is reined in by the SAME flavor-agnostic
+    # finalize backstop. The old leaf-only convergence left such runs uncurbed (17 rounds).
+    monkeypatch.setattr(settings, "engine_convergence_finalize_rounds", 6)
     reg = ToolRegistry()
     reg.register(_StubTool(name="file_read"))
     reg.register(_StubTool(name="delegate", category=ToolCategory.ORCHESTRATION))
-    provider = _ScriptedProvider(
-        [
-            [_tool_chunk("file_read", '{"p": "scout"}')],  # 1 scout read
-            [_tool_chunk("delegate", "{}")],  # delegates → behaving as a manager
-            [_tool_chunk("file_read", '{"p": "a"}')],  # post-result reads...
-            [_tool_chunk("file_read", '{"p": "b"}')],
-            [_tool_chunk("file_read", '{"p": "c"}')],
-            [_tool_chunk("file_read", '{"p": "d"}')],
-            [_content_chunk("done")],
-        ]
-    )
-    content, messages = await _run_with_registry(provider, reg)
+    content, messages = await _run_with_registry(_read_then_answer(6), reg)
 
     assert content == "done"
-    assert not any(m.content and "成规模的调查" in m.content for m in messages if m.content)
+    assert len(_finalizes(messages)) == 1  # same backstop, regardless of delegate capability

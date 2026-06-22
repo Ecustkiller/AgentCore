@@ -1,7 +1,7 @@
 ---
 description: 桌面端页面布局宽度规范——新增/修改页面时参考
 globs:
-  - "**/*.tsx"
+  - "apps/desktop/src/renderer/**/*.tsx"
 alwaysApply: false
 ---
 

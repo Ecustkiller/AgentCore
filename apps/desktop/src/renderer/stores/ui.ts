@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 const USAGE_DETAIL_KEY = "agentcore:usage-detail";
+const DIAGNOSTIC_MODE_KEY = "agentcore:diagnostic-mode";
 const THEME_KEY = "agentcore:theme";
 const SIDECAR_KEY = "agentcore:sidecar-enabled";
 const CONVERSATION_VIEWS_KEY = "agentcore:conversation-views";
@@ -21,6 +22,27 @@ function loadUsageDetail(): boolean {
 function persistUsageDetail(v: boolean): void {
   try {
     localStorage.setItem(USAGE_DETAIL_KEY, String(v));
+  } catch {
+    /* unavailable — session-only */
+  }
+}
+
+// 开发者 / 诊断模式 (前端UX设计.md §十): a SEPARATE gate from usageDetail.
+// usageDetail reveals 大众-facing 用量明细 (token / cache detail); diagnosticMode
+// surfaces dev-only low-level execution facts (run / trace ids) that are noise—or
+// confusing—for a normal user, so it gets its own toggle, off by default. Same
+// localStorage wrapper (private-mode / non-DOM test safe) as usageDetail.
+function loadDiagnosticMode(): boolean {
+  try {
+    return localStorage.getItem(DIAGNOSTIC_MODE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistDiagnosticMode(v: boolean): void {
+  try {
+    localStorage.setItem(DIAGNOSTIC_MODE_KEY, String(v));
   } catch {
     /* unavailable — session-only */
   }
@@ -129,11 +151,25 @@ interface UIState {
    * is never gated by this — it stays visible in both modes (§7.1). Persisted to
    * `localStorage: agentcore:usage-detail`. */
   usageDetail: boolean;
+  /** 开发者 / 诊断模式 (前端UX设计.md §十). When true, low-level execution
+   * diagnostics (run / trace ids 等) surface in run detail + the bubble's trace-id
+   * action — dev-only noise kept off the 大众 path. Independent of `usageDetail`
+   * (用量明细 for power users). Persisted to `localStorage: agentcore:diagnostic-mode`. */
+  diagnosticMode: boolean;
   /** 每对话的视图模式（聊天 ⇄ 画布双视图，前端UX设计.md §六）。默认聊天（`"chat"`），
    * 用户可在对话顶栏切到画布（`"canvas"`）。画布已毕业（无实验开关），入口恒显示。
    * **持久化**到 `localStorage: agentcore:conversation-views`，但只落「切到画布」的对话（切回聊天
    * 即删键）→ 表恒收敛、不无限增长；未表态 / 草稿（无 id）恒为聊天。 */
   conversationViews: Record<string, "chat" | "canvas">;
+  /** 聊天侧「在画布打开 / 回放」→ 画布「放大某回合」的一次性请求（前端UX设计.md §六）。
+   * 聊天里的内嵌图按钮把目标回合（+ 是否自动回放）塞进这里并切到画布视图；`ConversationCanvas`
+   * 挂载后消费并立即清空（用完即清，避免下次进画布误触发放大）。null = 无待处理请求。 */
+  pendingCanvasFocus: { turnId: string; autoplay: boolean } | null;
+  /** 画布「放大态」桥（前端UX设计.md §六）：`ConversationCanvas` 进入某回合放大态时置 true，
+   * 退出 / 卸载时复位 false。`ConversationPage` 据此在放大态隐藏对话级浮动开关（聊天/画布、
+   * 侧面板）——它们与放大态自带的顶栏（返回、图工具栏）同处两角且同层，不隐藏会盖住「返回」。
+   * 仅会话内存态、不持久化。 */
+  canvasZoomed: boolean;
   /** 本地引擎（sidecar）**有效**开关（双模式工作区 §一.1）：= `resolveSidecarEnabled(偏好)`，
    * 消费方（路由）只读这个 boolean。开启后，绑定本机本地文件夹的对话由用户机器上的
    * `python -m agentcore.sidecar` 跑（直连本地盘），而非云端引擎遥控桌面；裸聊 / 云端文件夹 /
@@ -151,7 +187,15 @@ interface UIState {
   setTheme: (theme: UIState["theme"]) => void;
   setUsageDetail: (v: boolean) => void;
   toggleUsageDetail: () => void;
-  setConversationView: (conversationId: string, mode: "chat" | "canvas") => void;
+  setDiagnosticMode: (v: boolean) => void;
+  toggleDiagnosticMode: () => void;
+  setConversationView: (
+    conversationId: string,
+    mode: "chat" | "canvas",
+  ) => void;
+  requestCanvasFocus: (turnId: string, autoplay: boolean) => void;
+  clearCanvasFocus: () => void;
+  setCanvasZoomed: (v: boolean) => void;
   setSidecarEnabled: (v: boolean) => void;
 }
 
@@ -159,7 +203,10 @@ export const useUIStore = create<UIState>((set) => ({
   searchOpen: false,
   theme: loadTheme(),
   usageDetail: loadUsageDetail(),
+  diagnosticMode: loadDiagnosticMode(),
   conversationViews: loadConversationViews(),
+  pendingCanvasFocus: null,
+  canvasZoomed: false,
   sidecarPreference: loadSidecarPreference(),
   sidecarEnabled: loadSidecarEnabled(),
 
@@ -180,6 +227,16 @@ export const useUIStore = create<UIState>((set) => ({
       persistUsageDetail(usageDetail);
       return { usageDetail };
     }),
+  setDiagnosticMode: (diagnosticMode) => {
+    persistDiagnosticMode(diagnosticMode);
+    set({ diagnosticMode });
+  },
+  toggleDiagnosticMode: () =>
+    set((s) => {
+      const diagnosticMode = !s.diagnosticMode;
+      persistDiagnosticMode(diagnosticMode);
+      return { diagnosticMode };
+    }),
   setConversationView: (conversationId, mode) =>
     set((s) => {
       const conversationViews = { ...s.conversationViews };
@@ -190,6 +247,10 @@ export const useUIStore = create<UIState>((set) => ({
       persistConversationViews(conversationViews);
       return { conversationViews };
     }),
+  requestCanvasFocus: (turnId, autoplay) =>
+    set({ pendingCanvasFocus: { turnId, autoplay } }),
+  clearCanvasFocus: () => set({ pendingCanvasFocus: null }),
+  setCanvasZoomed: (canvasZoomed) => set({ canvasZoomed }),
   setSidecarEnabled: (sidecarEnabled) => {
     const sidecarPreference: SidecarPreference = sidecarEnabled ? "on" : "off";
     persistSidecarPreference(sidecarPreference);

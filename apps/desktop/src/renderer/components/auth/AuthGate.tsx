@@ -39,6 +39,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Offline web preview (pnpm dev:web / scripts/shoot.mjs) has no backend; skip
+    // auth bootstrap entirely so #/preview renders fully offline.
+    if (typeof window !== "undefined" && window.__WEB_PREVIEW__) return;
     setUnauthorizedHandler(() => useAuthStore.getState().setUnauthenticated());
     // Mid-session outage: a non-auth call hit a 5xx/network error. Confirm with
     // /readyz before taking over the screen so a one-off endpoint 500 on a
@@ -64,6 +67,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (status === "authenticated") void ensureDefaultContainerRoot();
   }, [status]);
+
+  // Offline web preview: render the app without ever gating on auth.
+  if (typeof window !== "undefined" && window.__WEB_PREVIEW__) {
+    return <>{children}</>;
+  }
 
   if (status === "loading") {
     return (

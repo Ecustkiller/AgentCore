@@ -1,4 +1,4 @@
-"""Push device registration (原生推送设备注册: FCM token, 手机端落地设计 P2) schemas."""
+"""Push device registration (原生推送设备注册: FCM token, 认证与会话 §十) schemas."""
 
 from datetime import datetime
 from typing import Literal

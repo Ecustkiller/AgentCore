@@ -8,22 +8,7 @@ import {
   type FsWriteInput,
   type WorkspaceOpName,
 } from "@shared/ipc-contract";
-import {
-  BrowserWindow,
-  app,
-  dialog,
-  ipcMain,
-} from "electron";
-import { copyPath, openWithDefaultApp, reveal } from "./shell";
-import {
-  create,
-  copy,
-  listDir,
-  listFiles,
-  move,
-  remove,
-  rename,
-} from "./tree";
+import { BrowserWindow, app, dialog, ipcMain } from "electron";
 import { readFile, readTextFile, writeTextFile } from "./preview";
 import {
   deleteRoot,
@@ -34,6 +19,8 @@ import {
   saveRoots,
   setRoot,
 } from "./roots";
+import { copyPath, openWithDefaultApp, reveal } from "./shell";
+import { copy, create, listDir, listFiles, move, remove, rename } from "./tree";
 import { closeWatchersForRoot, unwatchDir, watchDir } from "./watch";
 import { workspaceOp } from "./workspace/dispatch";
 

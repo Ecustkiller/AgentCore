@@ -1,10 +1,10 @@
 import { cn } from "@/lib/utils";
 import type { HTMLAttributes, ReactNode } from "react";
 import {
+  type DecisionShellTone,
   decisionAccentText,
   decisionCtaBarAll,
   decisionShell,
-  type DecisionShellTone,
 } from "./tone-presets";
 
 /** Semantic tone for boss-decision cards (ask_user / plan_review / approval). */

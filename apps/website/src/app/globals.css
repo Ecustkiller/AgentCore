@@ -51,6 +51,17 @@
   /* 装饰性辉光（Hero/分区背景），作为正式 token 而非就地造色。 */
   --glow-1: oklch(0.45 0.16 262 / 0.32);
   --glow-2: oklch(0.55 0.13 220 / 0.18);
+
+  /* 协作图 Agent 身份色：仅协作图内联 var() 使用，非状态语义。
+     冷色家族为主体队员，辩论正/反用暖色对比，体现「一支多元的团队」。 */
+  --agent-1: oklch(0.72 0.15 255);
+  --agent-2: oklch(0.75 0.13 222);
+  --agent-3: oklch(0.76 0.12 192);
+  --agent-4: oklch(0.78 0.14 162);
+  --agent-5: oklch(0.73 0.16 292);
+  --agent-6: oklch(0.75 0.15 322);
+  --agent-7: oklch(0.82 0.13 96);
+  --agent-8: oklch(0.72 0.17 28);
 }
 
 * {
@@ -223,6 +234,74 @@ body {
   }
 }
 
+/* ── 协作图（多 Agent 作战地图）动效 ──
+ * 任务流向上叠加流动短划、共享枢纽呼吸、运行态状态环旋转、
+ * 阻塞升级路径闪烁、产物 token 沿路径游走。全部在 reduced-motion 下停用。 */
+@keyframes am-flow {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+@keyframes am-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes am-blink {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes am-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes am-token {
+  0% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  12%,
+  88% {
+    opacity: 1;
+  }
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+.am-flow {
+  stroke-dasharray: 5 9;
+  animation: am-flow 1.1s linear infinite;
+}
+.am-comm {
+  stroke-dasharray: 3 6;
+  animation: am-flow 1.7s linear infinite reverse;
+}
+.am-pulse {
+  animation: am-pulse 2.6s ease-in-out infinite;
+}
+.am-blink {
+  animation: am-blink 1.2s ease-in-out infinite;
+}
+.am-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: am-spin 1.5s linear infinite;
+}
+.am-token {
+  animation: am-token 3.2s linear infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -234,5 +313,16 @@ body {
   }
   .float-in {
     animation: none;
+  }
+  .am-flow,
+  .am-comm,
+  .am-pulse,
+  .am-blink,
+  .am-spin,
+  .am-token {
+    animation: none;
+  }
+  .am-token {
+    display: none;
   }
 }

@@ -195,7 +195,10 @@ export function ChatBubble({ message, mine, senderName }: Props) {
             >
               <span className="flex w-full items-center gap-2">
                 {a.kind === "dir" ? (
-                  <Folder size={16} className="shrink-0 text-muted-foreground" />
+                  <Folder
+                    size={16}
+                    className="shrink-0 text-muted-foreground"
+                  />
                 ) : (
                   <FileText
                     size={16}

@@ -127,6 +127,7 @@ export function handleExecutionEvent(
             summary: "",
             verdict: null,
             sides: [],
+            clashes: [],
           },
           mid,
         );
@@ -144,6 +145,7 @@ export function handleExecutionEvent(
             summary: p.summary,
             verdict: p.verdict,
             sides: p.sides,
+            clashes: p.clashes,
           },
           mid,
         );

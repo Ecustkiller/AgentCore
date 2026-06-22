@@ -1,4 +1,4 @@
-// Lazy mermaid renderer for the mobile Markdown stack (手机端落地设计 P1 · 富渲染).
+// Lazy mermaid renderer for the mobile Markdown stack (前端技术与架构 §七 · 富渲染).
 //
 // mermaid is heavy (~500KB), so it is dynamically imported only when a ```mermaid block
 // actually appears — it never lands in the main bundle (the "minimal deps / lazy mermaid"

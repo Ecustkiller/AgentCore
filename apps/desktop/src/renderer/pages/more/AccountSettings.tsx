@@ -155,7 +155,11 @@ function AvatarSection() {
             <Button
               size="md"
               disabled={busy}
-              icon={busy ? <Loader2 size={14} className="animate-spin" /> : undefined}
+              icon={
+                busy ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : undefined
+              }
               onClick={() => inputRef.current?.click()}
             >
               上传头像
@@ -268,7 +272,11 @@ function ProfileSection() {
           <Button
             size="md"
             disabled={!canSave}
-            icon={saving ? <Loader2 size={14} className="animate-spin" /> : undefined}
+            icon={
+              saving ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : undefined
+            }
             onClick={() => void save()}
           >
             保存
@@ -366,7 +374,11 @@ function PasswordSection() {
           <Button
             size="md"
             disabled={!canSave}
-            icon={saving ? <Loader2 size={14} className="animate-spin" /> : undefined}
+            icon={
+              saving ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : undefined
+            }
             onClick={() => void save()}
           >
             更新密码
@@ -482,7 +494,9 @@ function DeleteAccountDialog({
             variant="destructive"
             className="h-9 px-4"
             disabled={busy || password.length === 0}
-            icon={busy ? <Loader2 size={14} className="animate-spin" /> : undefined}
+            icon={
+              busy ? <Loader2 size={14} className="animate-spin" /> : undefined
+            }
             onClick={() => void confirm()}
           >
             确认注销

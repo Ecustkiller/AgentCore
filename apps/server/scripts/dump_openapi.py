@@ -1,12 +1,7 @@
 """Dump the FastAPI OpenAPI spec to ``apps/server/openapi.json``.
 
-This committed spec is the single source of truth for the desktop's generated TS
-types (``apps/desktop/src/renderer/types/api.generated.ts``): the frontend never
-hand-writes REST types — it runs ``pnpm gen:api`` off this file (API 开发规范).
-Keys are sorted so the artifact diffs cleanly. Run after any schema / route change,
-then regenerate the TS types::
-
-    uv run python scripts/dump_openapi.py   # then: cd ../desktop && pnpm gen:api
+This committed spec is the single source of truth for REST TS types
+(``packages/contract-rest-types``). Regenerate via ``pnpm gen:types`` at repo root.
 """
 
 from __future__ import annotations

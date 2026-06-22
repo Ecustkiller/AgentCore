@@ -98,7 +98,7 @@ def test_escalations_from_transcript_collects_in_call_order():
 
 
 def test_escalations_from_transcript_marks_scope_kind():
-    # 职责晚绑定与动态再编排 §4.4: escalate(kind="scope") is harvested with kind="scope"
+    # 受监督的波循环: escalate(kind="scope") is harvested with kind="scope"
     # (the WaveScheduler consumes it at a SCOPE boundary so the CEO re-steers the un-run
     # tail); an unknown kind degrades to "normal", and a plain escalate defaults to it.
     transcript = [

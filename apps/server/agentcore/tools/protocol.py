@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from agentcore.core.text import truncate_head_tail
 from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect
 
 if TYPE_CHECKING:
@@ -131,7 +132,9 @@ class ToolResult:
     ``output_limit`` overrides the default model-facing truncation budget for the
     ``output`` string. Most tools leave it ``None`` (4000 chars); read-heavy tools
     (e.g. ``read_url``) raise it so a full page body is not truncated into invalid
-    JSON. ``final_text`` is never subject to this cap.
+    JSON. An over-budget output is HEAD+TAIL trimmed (``core.text.truncate_head_tail``)
+    so trailing details survive rather than being head-chopped. ``final_text`` is never
+    subject to this cap.
 
     ``citations`` carries structured web sources a tool consulted (each a
     ``{url, title, snippet, site}`` dict). Research tools (``web_search`` /
@@ -177,7 +180,10 @@ class ToolResult:
     def __post_init__(self):
         limit = self.output_limit if self.output_limit is not None else self._MAX_OUTPUT_LEN
         if len(self.output) > limit:
-            self.output = self.output[:limit] + "\n... [output truncated]"
+            # HEAD+TAIL, not a head-only chop: an agentic CEO leans on grep / file_read,
+            # whose hits / numbers / 法条编号 often sit at the END — a head cut drops them
+            # silently. Same primitive the dep-injection / compaction paths already use.
+            self.output = truncate_head_tail(self.output, limit)
 
 
 class Tool(Protocol):

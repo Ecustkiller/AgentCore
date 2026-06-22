@@ -8,13 +8,19 @@ Executes code in a restricted subprocess with:
 """
 
 import asyncio
+import contextlib
+import os
 import shutil
+import signal
+import sys
 import tempfile
 import time
 from pathlib import Path
 
 from agentcore.core.errors import SandboxError, SandboxTimeoutError
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
+
+_IS_WINDOWS = sys.platform == "win32"
 
 _LANGUAGE_COMMANDS: dict[str, list[str]] = {
     "python": ["python", "-u"],
@@ -27,6 +33,47 @@ _FILE_EXTENSIONS: dict[str, str] = {
     "javascript": ".js",
     "bash": ".sh",
 }
+
+
+def _new_group_kwargs() -> dict:
+    """Spawn kwargs that make the child the head of its own killable group.
+
+    Killing only the direct child (``process.kill()``) leaves any helper it spawned
+    running as an orphan — and on Windows an orphan keeps its inherited cwd (the
+    workspace / temp dir) locked in "delete-pending" limbo, so that directory can
+    never be removed until the stray handle closes. POSIX: ``start_new_session`` makes
+    the child a process-group leader so cleanup can ``killpg`` the whole group. Windows
+    needs no flag — ``taskkill /T`` walks the live parent→child tree by pid.
+    """
+    return {} if _IS_WINDOWS else {"start_new_session": True}
+
+
+async def _reap_tree(process: asyncio.subprocess.Process, pid: int) -> None:
+    """Kill the child AND every descendant it spawned, then reap the child.
+
+    Only fires while the child is still alive (``returncode is None``) — its own
+    timeout, an external cancel, or a hang — so the pid is unambiguously ours and not
+    yet recycled (no risk of signalling an unrelated process). A child that already
+    exited cleanly is left alone. Best-effort throughout: never raises.
+    """
+    if process.returncode is not None:
+        return
+    if _IS_WINDOWS:
+        # /T = whole descendant tree, /F = force; run while the parent pid is still
+        # live so the tree is intact (it reparents nothing on Windows once dead).
+        with contextlib.suppress(Exception):
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill", "/F", "/T", "/PID", str(pid),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await killer.wait()
+    else:
+        # SIGKILL the child's whole process group (pgid == leader pid).
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(pid, signal.SIGKILL)
+    with contextlib.suppress(Exception):
+        await process.wait()
 
 
 async def _cleanup_tempdir(path: str) -> None:
@@ -83,7 +130,11 @@ class SubprocessSandbox:
                     # Run in the caller's workspace when given (so code sees the
                     # same files as the file tools); else the throwaway temp dir.
                     cwd=request.cwd or tmpdir,
+                    **_new_group_kwargs(),
                 )
+                # Capture the pid up front: after a clean exit asyncio reaps the child
+                # and its pid can be recycled, so the cleanup keys off this snapshot.
+                child_pid = process.pid
 
                 stdin_bytes = request.stdin.encode() if request.stdin else None
 
@@ -98,14 +149,13 @@ class SubprocessSandbox:
                         f"Execution exceeded {request.timeout_seconds}s timeout"
                     ) from None
                 finally:
-                    # Kill the child on ANY non-normal exit — its own timeout OR an
-                    # external cancel (the engine's tool-timeout backstop or a user
-                    # stop propagating CancelledError into this await) — so a runaway
-                    # process never outlives the call as an orphan (B1 取消安全). A
-                    # clean completion has already set returncode, so this is a no-op.
-                    if process.returncode is None:
-                        process.kill()
-                        await process.wait()
+                    # Reap the child's WHOLE tree on ANY non-normal exit — its own
+                    # timeout OR an external cancel (the engine's tool-timeout backstop
+                    # or a user stop propagating CancelledError) — so neither the child
+                    # nor any helper it spawned outlives the call as an orphan holding
+                    # the workspace open (B1 取消安全). ``shield`` keeps a cancel from
+                    # abandoning the reap mid-flight; a clean completion is a no-op.
+                    await asyncio.shield(_reap_tree(process, child_pid))
 
                 duration_ms = int((time.monotonic() - start) * 1000)
 

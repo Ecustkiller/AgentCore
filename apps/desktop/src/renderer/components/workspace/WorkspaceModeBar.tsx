@@ -187,7 +187,7 @@ export function WorkspaceModeBar({
       <PopoverTrigger asChild>
         <Button
           variant="ghost"
-          className={`h-auto min-w-0 shrink gap-1.5 px-2 py-1 text-xs font-medium ${
+          className={`h-auto min-w-0 shrink gap-1.5 overflow-hidden px-2 py-1 text-xs font-medium ${
             isLocal && rootMissing ? "text-warning" : "text-foreground"
           }`}
         >

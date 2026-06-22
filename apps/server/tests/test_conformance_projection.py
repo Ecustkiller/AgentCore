@@ -1,4 +1,4 @@
-"""Independent guard for the ProjectedTurn oracle (手机端落地设计 §六 支柱1).
+"""Independent guard for the ProjectedTurn oracle (前端技术与架构 §十二).
 
 The `pnpm conformance` gate proves "mobile fold == oracle golden"; this proves the
 oracle itself is correct with HAND-VERIFIED expectations, so a correlated bug (oracle

@@ -53,7 +53,10 @@ export function ChatListItem({ chat, active, onSelect }: Props) {
               {preview}
             </span>
             {chat.muted ? (
-              <BellOff size={12} className="shrink-0 text-muted-foreground/60" />
+              <BellOff
+                size={12}
+                className="shrink-0 text-muted-foreground/60"
+              />
             ) : (
               chat.unread > 0 && (
                 <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-xs font-medium text-primary-foreground">

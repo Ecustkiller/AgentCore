@@ -17,7 +17,6 @@ import type {
 type Schemas = components["schemas"];
 /** A window of messages (cursor-windowed, oldest-first) from the REST endpoint. */
 type BackendMessageListResponse = Schemas["MessageListResponse"];
-type MessagePromptResponse = Schemas["MessagePromptResponse"];
 
 /**
  * A persisted message as the REST endpoint shapes it. Mirrors the generated
@@ -354,20 +353,4 @@ export async function deleteMessage(
 ): Promise<void> {
   await api.delete(`/v1/conversations/${conversationId}/messages/${messageId}`);
   useConversationStore.getState().removeMessage(messageId, conversationId);
-}
-
-/**
- * The verbatim system prompt one assistant turn ran with (查看本回合提示词, 提示词透明
- * L3). Read straight from the turn journal's `turn_started` head fact, so it is exactly
- * what steered that reply. Throws (404) for a user message or a legacy turn that
- * journaled no prompt — the caller renders an empty state.
- */
-export async function getMessagePrompt(
-  conversationId: string,
-  messageId: string,
-): Promise<string> {
-  const res = await api.get<MessagePromptResponse>(
-    `/v1/conversations/${conversationId}/messages/${messageId}/prompt`,
-  );
-  return res.system_prompt;
 }
