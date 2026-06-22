@@ -10,6 +10,7 @@
  * the rewrite service are faked so nothing touches IPC / the network.
  */
 
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { FileSource, FileSourceCaps } from "@/lib/fileSource";
 import { rewriteSelection } from "@/services/rewrite";
 import {
@@ -90,12 +91,14 @@ function makeSource(over: Partial<FileSource> = {}): FileSource {
 
 function renderEditor(source: FileSource) {
   return render(
-    <MarkdownFileEditor
-      source={source}
-      path="a.md"
-      name="a.md"
-      onClose={() => {}}
-    />,
+    <TooltipProvider>
+      <MarkdownFileEditor
+        source={source}
+        path="a.md"
+        name="a.md"
+        onClose={() => {}}
+      />
+    </TooltipProvider>,
   );
 }
 

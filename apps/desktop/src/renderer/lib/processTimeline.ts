@@ -1,9 +1,8 @@
 // 单聊 process timeline 的纯 fold helpers（思考·正文·工具内联时间线，前端UX设计.md §一B）。
 //
-// 生产实时渲染（stores/conversation.ts 的 append*/endProcessTool mutator）与跨端协议
-// 巡检（protocol/conformanceFold.ts）共用这一组纯函数——单聊标量道由此「生产/巡检同源」，
-// 杜绝两份 coalesce 规则漂移。三者都镜像后端 EventSink._accumulate_process（runtime/
-// events.py），故 live 流、reload 回放、conformance golden 读到同一形状。
+// 生产实时渲染（stores/conversation.ts 经 foldMessageLane）与跨端协议巡检
+// （protocol/conformanceFold.ts）共用 processTimeline + foldMessageLane 纯函数——
+// live 流、reload 回放、conformance golden 读到同一形状。
 //
 // 不可变：每个 append* 返回新 process 数组；resolveToolStep 在无匹配时返回原引用，便于
 // store 做 no-op 短路。

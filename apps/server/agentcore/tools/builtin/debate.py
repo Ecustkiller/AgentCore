@@ -381,6 +381,21 @@ class DebateTool:
             logger.warning("debate.round1.build_failed", errors=errors)
             return [self._failed_turn(side, f"{moderator_run_id}_r1_{side.key}") for side in sides]
 
+        # run_id 命名统一：首轮辩手改用语义后缀 `_r1_{side.key}`，与后续轮 continue_run 的
+        # `_r{n}_{side.key}` 同构（旧法用 build_run_plan 给扁平批的位置序号 `_r1_1`，与后续轮
+        # 漂移）。纯展示口径统一、零行为变化：血缘不靠 run_id 解析（续写经 session.run_id 显式
+        # 带 parent_run_id 链回原始 run），key 已由 _parse_sides 保证非空且唯一，sides 与
+        # plan.nodes 按声明序一一对应（与下方留人 zip 同前提）。首轮无 depends_on（扁平批），
+        # 重命名无内部边需改。这也让真实产物对齐 conformance 向量记载的 `_r1_pro` 契约。
+        plan.nodes = [
+            replace(
+                node,
+                run_id=f"{moderator_run_id}_r1_{side.key}",
+                agent_id=f"{moderator_run_id}_r1_{side.key}",
+            )
+            for side, node in zip(sides, plan.nodes, strict=False)
+        ]
+
         self._sink.emit(self._debater_plan_event(execution_id, moderator_run_id, plan))
         worker_gate = (
             self._approval_gate
@@ -550,7 +565,11 @@ class DebateTool:
         focus: str,
         last_round: RoundResult,
     ) -> str:
-        """后续轮喂给 continue_run 的 feedback：本轮焦点 + 对方上轮论点。"""
+        """后续轮喂给 continue_run 的 feedback：本轮焦点 + 对方上轮论点 +「只补新论点、勿重述」约束。
+
+        辩手在【自己的 transcript】上续写（已带自己上轮全文），故无需也不应重述自己上轮——明令
+        「只补本轮焦点下的新论点 / 新回应」根治冗余轮的「修订 v2 内容相似」（与 ``_frame`` 的焦点
+        正交约束一上一下夹击：换维度提问 + 只答新东西）。"""
         opponents = [t for t in last_round.ok_turns if t.side_key != side.key]
         if opponents:
             opp_block = "\n\n".join(f"### {t.side_name}\n{t.content}" for t in opponents)
@@ -561,7 +580,8 @@ class DebateTool:
             f"{self._role_directive(config, side)}\n\n"
             f"对方上一轮的论点如下，请【针对性回应】（驳斥站不住的、承认确有道理的、推进你的立场）：\n"
             f"{opp_block}\n\n"
-            f"直接输出你本轮的【完整发言】，不要复述对方原话、不要罗列改动清单。{_LENGTH_HINT}"
+            f"直接输出你本轮的【完整发言】：**只补本轮焦点下的新论点 / 新回应**，不要重述你上一轮"
+            f"已说过的内容、不要复述对方原话、不要罗列改动清单。{_LENGTH_HINT}"
         )
 
     def _side_system(self, config: DebateConfig, side: DebateSide) -> str:
@@ -600,14 +620,14 @@ class DebateTool:
         result: DebateResult,
         duration_ms: int,
     ) -> None:
-        """主持人节点收尾：emit run_completed（耗时 + 成本 + 简报摘要，团队图据此标完成），并把
-        主持人自身 LLM 调用（议题 / 裁判 / 小结 / 简报）折算成一条主持人节点账目。"""
+        """主持人节点收尾：emit run_completed（耗时 + 成本 + 「N 轮·收敛归因」概览，团队图据此
+        标完成），并把主持人自身 LLM 调用（议题 / 裁判 / 小结 / 简报）折算成一条主持人节点账目。"""
         from agentcore.llm.pricing import calculate_cost
         from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
         usage = moderator.usage
         cost = calculate_cost(model, usage)
-        summary = result.brief.crux or f"辩论收场：{len(result.rounds)} 轮"
+        summary = result.node_summary
         self._sink.emit(
             run_completed(
                 moderator_run_id,

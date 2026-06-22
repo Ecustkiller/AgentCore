@@ -100,6 +100,21 @@ class DelegatedCheck:
 
 
 @dataclass
+class NotDelegatedCheck:
+    """本回合**没有**委派团队（``DelegatedCheck`` 的护栏逆否）。
+
+    探测「过度编排」——简单问题本该 CEO 直接答，却拆成一支团队，是 Multi-Agent 产品
+    最典型的体验/成本灾难。须走 ``path="team"`` 才有意义（``single`` 路径恒不委派、
+    断言会平凡通过）；功能套件据此守住「简单问题零编排」这条护栏。
+    """
+
+    name: str = "NotDelegated"
+
+    def run(self, case: EvalCase, outcome: TurnOutcome) -> CheckOutcome:
+        return CheckOutcome(self.name, not outcome.delegated, f"delegated={outcome.delegated}")
+
+
+@dataclass
 class RosterMatchesCheck:
     """实际委派出的角色覆盖期望角色（``roster ⊇ expected``）。"""
 
@@ -123,6 +138,23 @@ class MaxRoundsCheck:
     def run(self, case: EvalCase, outcome: TurnOutcome) -> CheckOutcome:
         ok = outcome.rounds <= self.budget
         return CheckOutcome(self.name, ok, f"rounds={outcome.rounds} (budget {self.budget})")
+
+
+@dataclass
+class MaxToolCallsCheck:
+    """工具调用总数不超过预算（探测检索 / 工具滥用——团队任务尤甚）。
+
+    读 ``outcome.tool_calls`` 长度（含被委派 worker 的调用，由 ``RecordingSink`` 全量截获）。
+    与 ``MaxRounds`` 正交：轮数看 ReAct 节奏，工具数看「检索 / 读取是否泛滥」——一道团队任务
+    打数十次 ``web_search`` 的成本 / 延迟灾难，靠它才可量化、可回归。
+    """
+
+    budget: int = 24
+    name: str = "MaxToolCalls"
+
+    def run(self, case: EvalCase, outcome: TurnOutcome) -> CheckOutcome:
+        n = len(outcome.tool_calls)
+        return CheckOutcome(self.name, n <= self.budget, f"tool_calls={n} (budget {self.budget})")
 
 
 @dataclass
@@ -152,8 +184,10 @@ _REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
     ),
     "HasCitations": lambda a: HasCitationsCheck(min_count=int(a.get("min", 1))),
     "Delegated": lambda a: DelegatedCheck(),
+    "NotDelegated": lambda a: NotDelegatedCheck(),
     "RosterMatches": lambda a: RosterMatchesCheck(expected=list(a.get("expected", []))),
     "MaxRounds": lambda a: MaxRoundsCheck(budget=int(a.get("budget", 16))),
+    "MaxToolCalls": lambda a: MaxToolCallsCheck(budget=int(a.get("budget", 24))),
     "NoFabricationMarker": lambda a: NoFabricationMarkerCheck(
         forbidden=list(a.get("forbidden", []))
     ),

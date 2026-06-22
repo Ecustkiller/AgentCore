@@ -68,23 +68,6 @@ def progress_review_prompt(round_number: int) -> str:
     )
 
 
-def delegation_nudge_prompt(investigation_calls: int) -> str:
-    """The manager-CEO breadth steer (档2.5), anchored to the observed read count.
-
-    Fires once when a delegation-capable run keeps doing read-only investigation
-    itself. Like every other injected steer it is anchored to a concrete fact ("you
-    have run N read-only calls") rather than open-ended doubt, then points at the
-    concrete next action — fan the breadth out to a parallel research team.
-    """
-    return (
-        f"[系统提示] 你已亲自做了 {investigation_calls} 次只读检索来查这件事——这已是一项"
-        "「成规模的调查」，正是团队该干的活，而不该由你独自串行读完。与其自己把文件逐个读下去"
-        "（既慢，又把大量文件正文堆进你当前的上下文），不如把调查按几个独立角度拆开，用 "
-        "`delegate` 一次派出并行调研 worker（它们同样持检索工具），让各自的发现汇总回来由你"
-        "综述——哪怕最终答案只是一段话。若你其实已掌握足够信息，也可以现在就给出最终答案。"
-    )
-
-
 class StuckReason(StrEnum):
     """Which mechanical loop pattern was observed."""
 
@@ -221,9 +204,8 @@ class LoopController:
         unproductive_threshold: int = DEFAULT_UNPRODUCTIVE_THRESHOLD,
         reflection_start_round: int = DEFAULT_REFLECTION_START_ROUND,
         reflection_interval: int = DEFAULT_REFLECTION_INTERVAL,
-        delegation_nudge_threshold: int = 0,
+        convergence_finalize_rounds: int = 0,
         investigation_tools: frozenset[str] = frozenset(),
-        delegation_tools: frozenset[str] = frozenset(),
     ) -> None:
         self._window = window
         self._threshold = threshold
@@ -235,17 +217,19 @@ class LoopController:
         self._reflection_interval = max(1, reflection_interval)
         self._recent: deque[ToolAttempt] = deque(maxlen=window)
         self._nudged = False
-        # Manager-CEO breadth nudge (档2.5): cumulative read-only investigation call
-        # count (run-scoped, never cleared by the nudge window reset — "how broad has
-        # this gone" is a whole-run signal) + a "已委派" latch + a one-shot fire latch.
-        # ``threshold <= 0`` (default) or an empty ``delegation_tools`` (a leaf worker
-        # that *cannot* delegate) keeps it dormant — only a delegation-capable run fires.
-        self._delegation_nudge_threshold = max(0, delegation_nudge_threshold)
         self._investigation_tools = investigation_tools
-        self._delegation_tools = delegation_tools
+        # ``investigation_calls`` = cumulative read-only calls (run-scoped); ``investigation
+        # _rounds`` = rounds with >=1 such call. The over-investigation safety net triggers
+        # on ROUNDS, not calls, so a parallel batch (several reads in one round) counts once
+        # and can't guillotine a worker after a single fan-out. Both feed the finalize log.
         self._investigation_calls = 0
-        self._delegated = False
-        self._delegation_nudged = False
+        self._investigation_rounds = 0
+        # Over-investigation safety net (收敛治理, 保险丝): a pure runaway backstop. The soft
+        # nudge that once lived here was empirically ignored AND net-negative in A/B (cost ↑,
+        # no call reduction), so convergence discipline moved into the system prompt (frame
+        # from round 0) + the read_url failure guidance; this only FINALIZEs a true runaway
+        # that keeps investigating past ``finalize_rounds``. ``finalize_rounds <= 0`` disables.
+        self._convergence_finalize_rounds = max(0, convergence_finalize_rounds)
         # B2 empty-response sub-policy: a separate consecutive-empty-round counter
         # (NOT the tool-attempt window) and a one-shot "已用过 fallback" latch.
         self._consecutive_empty = 0
@@ -267,18 +251,21 @@ class LoopController:
         circuit breaker — independent of the sliding window (which the nudge reset
         clears), since "this tool keeps failing" is a whole-run signal.
         """
+        round_investigated = False
         for attempt in attempts:
             self._recent.append(attempt)
             if not attempt.success:
                 self._tool_failures[attempt.tool_name] += 1
-            # Manager-CEO breadth nudge bookkeeping (档2.5): tally read-only
-            # investigation breadth and latch once the run has delegated (after which
-            # it is behaving as a manager and must not be nudged). Counts every call
-            # (incl. failures) — a wide scan is breadth regardless of per-call success.
+            # Over-investigation bookkeeping (收敛治理): tally read-only investigation
+            # breadth. Counts every call (incl. failures) — a wide scan is breadth
+            # regardless of per-call success.
             if attempt.tool_name in self._investigation_tools:
                 self._investigation_calls += 1
-            if attempt.tool_name in self._delegation_tools:
-                self._delegated = True
+                round_investigated = True
+        # Rounds, not raw calls, drive the safety net: a parallel batch of N reads in one
+        # round bumps this once, so fanning out can't guillotine the worker.
+        if round_investigated:
+            self._investigation_rounds += 1
 
     def note_empty_round(self, is_empty: bool) -> None:
         """Track consecutive empty-response rounds (B2).
@@ -362,32 +349,30 @@ class LoopController:
 
     @property
     def investigation_calls(self) -> int:
-        """Cumulative read-only investigation calls this run (for the nudge message)."""
+        """Cumulative read-only investigation calls this run (finalize-log diagnostic)."""
         return self._investigation_calls
 
-    def delegation_nudge_due(self) -> bool:
-        """One-shot: a delegation-capable run keeps investigating solo (档2.5).
+    @property
+    def investigation_rounds(self) -> int:
+        """Rounds with >=1 read-only investigation call (the safety net's batch-robust clock)."""
+        return self._investigation_rounds
 
-        True the first time cumulative read-only investigation calls cross the
-        threshold while the run has NOT delegated — the manager-CEO steer to fan a
-        broad investigation out to a parallel research team instead of reading it all
-        itself. Latches so it fires at most once per run; returns False forever once
-        the run has delegated (it is now managing) or when disabled (threshold ≤ 0 /
-        a run that cannot delegate, both modelled as threshold 0 by the engine).
-        Caller still gates the *timing* (a min-round guard) so an opening scout batch
-        does not trip it — kept in the engine since rounds live there.
+    def convergence_action(self) -> Intervention:
+        """Over-investigation safety net: ``FINALIZE`` a true runaway, else ``CONTINUE``.
+
+        Keyed on investigation *rounds* (:attr:`investigation_rounds`) so a parallel
+        batch counts once. Returns ``FINALIZE`` only once the run keeps investigating past
+        ``finalize_rounds`` — a deliberately HIGH bar (a pure runaway backstop, e.g. the
+        17-round pathology), not a routine convergence tool: the soft nudge that once lived
+        here was empirically ignored and net-negative, so convergence discipline now lives
+        in the system prompt + the read_url failure guidance. Dormant (``CONTINUE``) when
+        ``finalize_rounds <= 0``.
         """
-        if self._delegation_nudge_threshold <= 0 or self._delegation_nudged:
-            return False
-        # A run that cannot delegate (no orchestration tool — a leaf worker) is never
-        # nudged to delegate: this is the authoritative guard, so the engine can pass
-        # the threshold unconditionally and rely on the empty set here.
-        if not self._delegation_tools:
-            return False
-        if self._delegated or self._investigation_calls < self._delegation_nudge_threshold:
-            return False
-        self._delegation_nudged = True
-        return True
+        if self._convergence_finalize_rounds <= 0:
+            return Intervention.CONTINUE
+        if self._investigation_rounds >= self._convergence_finalize_rounds:
+            return Intervention.FINALIZE
+        return Intervention.CONTINUE
 
     def detect(self) -> StuckSignal | None:
         """Return the strongest stuck signal in the window, or ``None``.

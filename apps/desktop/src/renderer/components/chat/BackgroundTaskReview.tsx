@@ -283,7 +283,11 @@ export function BackgroundTaskReview({
             ? `全部接受并应用（${rows.length} 个文件）`
             : "应用所选改动"}
         </Button>
-        <Button variant="neutral" className="border border-border" onClick={onClose}>
+        <Button
+          variant="neutral"
+          className="border border-border"
+          onClick={onClose}
+        >
           收起
         </Button>
       </div>

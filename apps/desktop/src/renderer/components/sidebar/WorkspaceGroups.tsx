@@ -3,10 +3,11 @@ import { useConversations } from "@/hooks/useConversations";
 import { useWorkspaceGroups } from "@/hooks/useWorkspaceGroups";
 import { useConversationStore } from "@/stores/conversation";
 import { useSidebarStore } from "@/stores/sidebar";
-import { ChevronRight, Cloud, HardDrive, MoreHorizontal } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConversationItem } from "./ConversationItem";
+import { WorkspaceGroupHeader } from "./WorkspaceGroupHeader";
 
 /** Conversations shown inside an expanded group before its「更多」overflow row. */
 const MAX_PER_GROUP = 5;
@@ -22,7 +23,9 @@ const MAX_PER_GROUP = 5;
  * folderId): an explicit user toggle always wins; with no stored choice a group
  * defaults collapsed, except the one holding the active conversation (so its
  * siblings are visible while you work). Each group reuses {@link ConversationItem}
- * so rows keep the same status dot / rename / move / archive behavior.
+ * so rows keep the same status dot / rename / move / archive behavior. Group
+ * headers expose project actions (view / browse / archive-all / delete) via
+ * {@link WorkspaceGroupHeader}.
  */
 export function WorkspaceGroups() {
   const groups = useWorkspaceGroups();
@@ -48,32 +51,12 @@ export function WorkspaceGroups() {
         const overflow = convs.length - MAX_PER_GROUP;
         return (
           <div key={folder.id}>
-            <SurfaceRowButton
-              onClick={() => setSection(folder.id, !expanded)}
-              aria-expanded={expanded}
-              className="group h-9 px-2 text-sidebar-foreground/70 hover:text-sidebar-foreground"
-            >
-              {folder.localRootId ? (
-                <HardDrive size={14} className="shrink-0 text-primary" />
-              ) : (
-                <Cloud
-                  size={14}
-                  className="shrink-0 text-sidebar-foreground/40"
-                />
-              )}
-              <span className="min-w-0 flex-1 truncate text-left">
-                {folder.name}
-              </span>
-              <ChevronRight
-                size={14}
-                aria-hidden
-                className={`shrink-0 text-sidebar-foreground/40 transition-[opacity,transform] ${
-                  expanded
-                    ? "rotate-90 opacity-100"
-                    : "opacity-0 group-hover:opacity-100"
-                }`}
-              />
-            </SurfaceRowButton>
+            <WorkspaceGroupHeader
+              folder={folder}
+              convs={convs}
+              expanded={expanded}
+              onToggleExpanded={() => setSection(folder.id, !expanded)}
+            />
             {expanded && (
               <div className="space-y-0.5 pl-2">
                 {convs.slice(0, MAX_PER_GROUP).map((c) => (

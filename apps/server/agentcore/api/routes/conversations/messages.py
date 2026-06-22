@@ -1,4 +1,4 @@
-"""Conversation message routes: list / delete / prompt / send / stop / attach / local-turn.
+"""Conversation message routes: list / delete / send / stop / attach / local-turn.
 
 Every route requires an authenticated user and is scoped to that user's own
 conversations (IDOR-safe). Sending runs the turn as a detached task tracked in the
@@ -22,7 +22,6 @@ from agentcore.api.dependencies import (
 from agentcore.api.schemas import (
     MessageDetail,
     MessageListResponse,
-    MessagePromptResponse,
     RecordTurnRequest,
     RecordTurnResponse,
     RunsPayload,
@@ -42,7 +41,7 @@ from agentcore.db.repositories import (
 )
 from agentcore.llm.byok import resolve_user_llm_credentials
 from agentcore.runtime.events import EventSink
-from agentcore.runtime.journal import runs_from_entries, system_prompt_from_journal
+from agentcore.runtime.journal import runs_from_entries
 from agentcore.runtime.turn_runs import turn_runs
 
 from ._helpers import _preflight_turn_llm, _require_owned_conversation
@@ -148,33 +147,6 @@ async def delete_message(
     if not deleted:
         raise NotFoundError("消息不存在")
     return StatusResponse()
-
-
-@router.get(
-    "/{conversation_id}/messages/{message_id}/prompt",
-    response_model=MessagePromptResponse,
-)
-async def get_message_prompt(
-    conversation_id: str,
-    message_id: str,
-    user: AuthUser,
-    conv_repo: ConversationRepository = Depends(get_conversation_repo),
-    journal_repo: TurnJournalRepository = Depends(get_turn_journal_repo),
-):
-    """The verbatim system prompt the CEO ran for ONE assistant turn (查看本回合提示词).
-
-    提示词透明 L3 (对所有人开放): reads the ``turn_started`` head fact from the turn
-    journal (§18.3) — the exact prompt that turn was given, dynamic bits and all — so a
-    user can see precisely what steered the reply. Owner-scoped + conversation-scoped
-    (``load_owned``) so a foreign ``message_id`` can't leak another tenant's prompt. 404
-    for a user message or a legacy turn that journaled no head fact.
-    """
-    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    entries = await journal_repo.load_owned(message_id, conversation_id)
-    system_prompt = system_prompt_from_journal(entries)
-    if system_prompt is None:
-        raise NotFoundError("本回合没有可查看的提示词")
-    return MessagePromptResponse(system_prompt=system_prompt)
 
 
 @router.post("/{conversation_id}/messages")

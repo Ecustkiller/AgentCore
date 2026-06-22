@@ -78,7 +78,11 @@ export function UserMessage({ message }: MessageBubbleProps) {
             rows={1}
           />
           <div className="flex items-center justify-end gap-1.5 pt-1">
-            <Button variant="neutral" icon={<X size={13} />} onClick={() => setEditing(false)}>
+            <Button
+              variant="neutral"
+              icon={<X size={13} />}
+              onClick={() => setEditing(false)}
+            >
               取消
             </Button>
             <Button

@@ -1,5 +1,7 @@
 import { Button } from "@/components/ui";
+import { Switch } from "@/components/ui/Switch";
 import { type VersionInfo, fetchVersion } from "@/services/system";
+import { useUIStore } from "@/stores/ui";
 import { useUpdatesStore } from "@/stores/updates";
 import type { UpdaterStatus } from "@shared/updater-contract";
 import { Loader2, RefreshCw } from "lucide-react";
@@ -91,6 +93,38 @@ function UpdateSection() {
   );
 }
 
+/**
+ * 开发者 / 诊断模式 (前端UX设计.md §十) — an advanced, off-by-default toggle that
+ * surfaces low-level execution diagnostics (run / trace ids in run detail, the
+ * bubble's trace-id copy action) for debugging. Lives on 关于 — next to build
+ * 溯源 — so this dev affordance stays off the 大众-facing 偏好 pages.
+ */
+function DiagnosticModeSection() {
+  const diagnosticMode = useUIStore((s) => s.diagnosticMode);
+  const setDiagnosticMode = useUIStore((s) => s.setDiagnosticMode);
+
+  return (
+    <section className="mt-8 border-t border-border pt-6">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-foreground">
+            开发者 / 诊断模式
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            显示运行 / 追踪 ID 等底层诊断信息（运行详情面板、消息的 trace
+            复制），便于排查问题。普通使用无需开启。
+          </p>
+        </div>
+        <Switch
+          checked={diagnosticMode}
+          onCheckedChange={setDiagnosticMode}
+          label="开发者 / 诊断模式"
+        />
+      </div>
+    </section>
+  );
+}
+
 export function AboutSettings() {
   const [info, setInfo] = useState<VersionInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -144,6 +178,7 @@ export function AboutSettings() {
       </div>
 
       <UpdateSection />
+      <DiagnosticModeSection />
     </div>
   );
 }

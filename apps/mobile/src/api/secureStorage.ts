@@ -1,5 +1,5 @@
 import type { TokenPersistence, Tokens } from "@/api/client";
-// Native (Capacitor) Secure Storage backend for the bearer token pair (手机端落地设计 P2
+// Native (Capacitor) Secure Storage backend for the bearer token pair (前端技术与架构 §七
 // 安全存储). On iOS the pair lives in the system Keychain; on Android it is AES-GCM
 // encrypted with an Android Keystore key. This is the OS-level secure replacement for the
 // web localStorage backend (api/client.ts) — the only place real at-rest secrecy exists

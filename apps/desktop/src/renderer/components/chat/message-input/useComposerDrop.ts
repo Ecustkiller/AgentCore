@@ -1,8 +1,11 @@
-import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
-  type PendingAttachment,
-  readDroppedFile,
-} from "./composerAttachments";
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useRef,
+  useState,
+} from "react";
+import { type PendingAttachment, readDroppedFile } from "./composerAttachments";
 
 export function useComposerDrop(
   isGenerating: boolean,

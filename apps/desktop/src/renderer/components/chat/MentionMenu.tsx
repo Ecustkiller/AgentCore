@@ -113,7 +113,10 @@ export function MentionMenu({
                       className="shrink-0 text-muted-foreground"
                     />
                   ) : (
-                    <File size={14} className="shrink-0 text-muted-foreground" />
+                    <File
+                      size={14}
+                      className="shrink-0 text-muted-foreground"
+                    />
                   )}
                   <span className="shrink-0 truncate">
                     {entry.name}

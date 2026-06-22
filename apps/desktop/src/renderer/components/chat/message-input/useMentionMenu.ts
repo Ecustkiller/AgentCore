@@ -8,15 +8,15 @@ import type { FileSource } from "@/lib/fileSource";
 import { fetchMessageWindow } from "@/services/messages";
 import { searchAll } from "@/services/search";
 import {
+  type Dispatch,
+  type KeyboardEvent,
+  type RefObject,
+  type SetStateAction,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type Dispatch,
-  type KeyboardEvent,
-  type RefObject,
-  type SetStateAction,
 } from "react";
 import {
   CONV_MENTION_MSG_LIMIT,
@@ -25,7 +25,13 @@ import {
   detectMention,
   formatConversationContext,
 } from "./composerAttachments";
+import { resolveFolderFromIndexedEntry } from "./resolveAttachmentFolder";
 import type { MenuMode } from "./types";
+
+export type AttachmentProjectHint = {
+  folderId: string;
+  folderName: string;
+};
 
 export function useMentionMenu({
   conversationId,
@@ -34,6 +40,7 @@ export function useMentionMenu({
   attachments,
   setAttachments,
   textareaRef,
+  onAttachmentProjectHint,
 }: {
   conversationId: string | null;
   value: string;
@@ -41,6 +48,8 @@ export function useMentionMenu({
   attachments: PendingAttachment[];
   setAttachments: Dispatch<SetStateAction<PendingAttachment[]>>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
+  /** Draft-only: @ / browse attach from a project → suggest filing into it (B4). */
+  onAttachmentProjectHint?: (hint: AttachmentProjectHint) => void;
 }) {
   const [menuMode, setMenuMode] = useState<MenuMode>(null);
   const [query, setQuery] = useState("");
@@ -265,6 +274,11 @@ export function useMentionMenu({
       const attachment = next;
       setAttachments((prev) => [...prev, attachment]);
 
+      if (!conversationId && onAttachmentProjectHint) {
+        const resolved = resolveFolderFromIndexedEntry(entry);
+        if (resolved) onAttachmentProjectHint(resolved);
+      }
+
       const range = mentionRangeRef.current;
       if (menuMode === "mention" && range) {
         const updated = value.slice(0, range.start) + value.slice(range.end);
@@ -283,10 +297,12 @@ export function useMentionMenu({
     },
     [
       attachments,
+      conversationId,
       fileIndex,
       value,
       menuMode,
       closeMenu,
+      onAttachmentProjectHint,
       setAttachments,
       setValue,
       textareaRef,

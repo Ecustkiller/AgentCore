@@ -1,5 +1,6 @@
 import { performWorkspaceOp } from "@/services/workspaceOps";
 import { applyConversationPromotion } from "@/services/workspacePromotion";
+import { useConversationStore } from "@/stores/conversation";
 import type {
   SSEEvent,
   WorkspaceOpRequiredPayload,
@@ -28,6 +29,15 @@ export function handleWorkspaceEvent(
         localRootId: p.local_root_id,
         localSubpath: p.local_subpath,
       });
+      // P2 工作区升级提示 (前端UX设计.md §九): stamp the live turn's assistant
+      // bubble so it shows an inline「已升级为工作区」notice. Live-only — the stamp
+      // rides the in-flight message and is never journaled.
+      useConversationStore
+        .getState()
+        .attachWorkspacePromotionToLastMessage(
+          { folderId: p.folder_id, name: p.name },
+          p.conversation_id,
+        );
       return true;
     }
     default:

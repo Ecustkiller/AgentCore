@@ -3,14 +3,11 @@ import {
   useBackgroundTasksSync,
   useWorkspaceRootId,
 } from "@/stores/backgroundTasks";
-import {
-  useActiveMessages,
-  useConversationStore,
-} from "@/stores/conversation";
+import { useActiveMessages, useConversationStore } from "@/stores/conversation";
 import { useMemo } from "react";
 import { BackgroundTaskCard } from "./BackgroundTaskCard";
-import { mergeTimeline } from "./messageTimeline";
 import { MessageBubble } from "./MessageBubble";
+import { mergeTimeline } from "./messageTimeline";
 
 // Auto-scroll lives in ChatView's useStickToBottom: it owns the scroll container
 // and only follows new content while the user is already at the bottom.

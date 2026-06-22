@@ -10,6 +10,7 @@
 import type {
   DebateNarrativeRound,
   DebateResultPayload,
+  DebateRoundInfo,
 } from "@agentcore/contract-types";
 import type { ReactNode } from "react";
 
@@ -126,10 +127,36 @@ function Narrative({ debate }: { debate: DebateResultPayload }) {
             {r.summary && (
               <div className="debate-round-summary">{r.summary}</div>
             )}
+            <RoundClashes round={r} />
           </div>
         ))}
       </div>
     </details>
+  );
+}
+
+/** L3 论点级交锋边（谁驳谁）：把本轮裁判抽取的针对性反驳渲染成「来源方 → 被驳方  要点」列表。
+ *  `from_key`/`to_key` 是语义 side key，据本轮 `sides` 解析成展示名（解析不到则原样退化）。
+ *  收场与进行中两路同构（{@link DebateRoundInfo} / {@link DebateNarrativeRound} 都带 `clashes`）。 */
+function RoundClashes({
+  round,
+}: {
+  round: DebateRoundInfo | DebateNarrativeRound;
+}) {
+  if (round.clashes.length === 0) return null;
+  const nameOf = (key: string) =>
+    round.sides.find((s) => s.key === key)?.name ?? key;
+  return (
+    <ul className="debate-clashes">
+      {round.clashes.map((c, i) => (
+        <li key={`${c.from_key}-${c.to_key}-${i}`} className="debate-clash">
+          <span className="debate-clash-edge">
+            {nameOf(c.from_key)} → {nameOf(c.to_key)}
+          </span>
+          <span className="debate-clash-point">{c.point}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -172,6 +199,7 @@ export function LiveDebateNarrative({
             {r.summary && (
               <div className="debate-round-summary">{r.summary}</div>
             )}
+            <RoundClashes round={r} />
           </div>
         ))}
       </div>

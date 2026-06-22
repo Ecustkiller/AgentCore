@@ -1,7 +1,7 @@
 import { DebateView, LiveDebateNarrative } from "@/components/DebateView";
 import { Markdown } from "@/components/Markdown";
 import { TeamView } from "@/components/TeamView";
-// Rich assistant rendering shared by live turns and history replay (手机端落地设计 P1 ·
+// Rich assistant rendering shared by live turns and history replay (前端技术与架构 §七 ·
 // 富渲染 + 多 Agent 团队视图). One {@link AssistantContent} consumes the same fields whether
 // they come from the live fold (ProjectedTurn) or a persisted message (MessageDetail):
 //

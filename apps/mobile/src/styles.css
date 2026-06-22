@@ -1161,6 +1161,32 @@ button.link {
   color: var(--fg);
 }
 
+/* L3 论点级交锋边（谁驳谁）：每行「来源方 → 被驳方  要点」，名加粗、要点弱化。 */
+.debate-clashes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.debate-clash {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.debate-clash-edge {
+  margin-right: 6px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.debate-clash-point {
+  color: var(--muted);
+}
+
 .composer {
   display: flex;
   gap: 8px;

@@ -7,6 +7,7 @@ delete-keeps-conversations contract, and IDOR isolation between users.
 
 import httpx
 
+import agentcore.folders.permanent_delete as permanent_delete_mod
 from agentcore.db.repositories import MessageRepository
 
 _PW = "password123"
@@ -246,6 +247,32 @@ async def test_delete_folder_keeps_conversations(client, make_invite):
     assert body["folders"] == []
     # Conversation survives the folder deletion, falling back to ungrouped.
     assert [c["id"] for c in body["ungrouped"]] == [conv]
+
+
+async def test_permanent_delete_folder_removes_conversations(
+    client, make_invite, session_factory, monkeypatch
+):
+    # permanent_delete_folder uses async_session_factory directly (not the
+    # request-scoped get_db) — it spans two short DB sessions around the slow
+    # workspace purge, so it can't hold the request transaction. Repoint it at the
+    # test schema (same pattern as test_retention.py), else it opens a session on
+    # the global engine's default schema and can't see the folder created here → 404.
+    monkeypatch.setattr(permanent_delete_mod, "async_session_factory", session_factory)
+    code = await make_invite("INV-F7")
+    await _register_and_login(client, code, "folderuser7")
+    folder_id = (await client.post("/v1/folders", json={"name": "Gone"})).json()["id"]
+    conv = await _new_conversation(client, "erase me")
+    await client.patch(
+        f"/v1/conversations/{conv}/folder", json={"folder_id": folder_id}
+    )
+
+    r = await client.delete(f"/v1/folders/{folder_id}/permanent")
+    assert r.status_code == 200, r.text
+
+    body = (await client.get("/v1/conversations/grouped")).json()
+    assert body["folders"] == []
+    assert body["ungrouped"] == []
+    assert (await client.get(f"/v1/conversations/{conv}")).status_code == 404
 
 
 async def test_folder_isolation_between_users(client, make_invite, new_client):

@@ -1,3 +1,15 @@
+---
+status: landed
+code: apps/server/agentcore/runtime/runs/
+related:
+  - docs/03-AI核心/运行时总览.md
+  - docs/03-AI核心/编排器与CEO主Agent.md
+  - docs/03-AI核心/执行引擎架构设计.md
+skip_if:
+  - 只改 CEO delegate 字段（读编排器）
+  - 只改 SSE fold（读执行引擎 §二）
+---
+
 # Agent 协作模式
 
 > **状态**：已确定（编排器架构、协作范式、通信机制、冲突解决均已定）
@@ -63,6 +75,23 @@ Agent 间**不直接通信**——上游产物经调度器中转注入下游；�
 - 通信内容平台看不到，失去控制和可观测性
 - 经产物中转更简单，且天然支持任意范式
 
+### worker `escalate` 升级通道 ✅ 已落地
+
+worker 唯一的向上通道。`blocking=false`（默认）= 上报后按 `assumption` 继续交付，CEO 收尾纠偏；`run_escalation` SSE 让升级进行中可见。
+
+**阻塞式求决策（`blocking=true`）✅**：worker 撞上「只有用户能定、猜错就作废」的岔路时，经 `ToolContext.escalation` 端口挂起等用户；超时回落非阻塞行为（按 `assumption` 续跑）。**采纳 worker→用户**（复用 `InteractionRegistry` + `ESCALATION` kind），**否决 worker→CEO 波内重入**——CEO 调 `delegate` 后 ReAct 停在工具调用上，波内无活着的 CEO。
+
+| 约束 | 取值 |
+|---|---|
+| 武装门 | 与 `ask_user` 同闸（`checkpoint_enabled` + live client）；无 live user 时自动退化非阻塞 |
+| 超时 | 复用 `checkpoint_timeout_seconds` |
+| 同回合并发阻塞上限 | 3（超出退化非阻塞） |
+| 回合状态 | 阻塞升级**不**翻 `paused`（兄弟继续跑）；`escalation_required`/`escalation_resolved` 单一发射者 = awaiter |
+
+`kind=scope`（非阻塞）在波边界被 CEO 消费，用于计划漂移纠偏——见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard`、图节点「待你拍板」角标；⏳ 手机交互层（fold 已有、应答卡未落地）。
+
+→ 见代码：`tools/builtin/escalate.py`、`runtime/interaction.py`（`ESCALATION`）、`runtime/runs/executor_agent.py`（`_escalation_channel`）
+
 ---
 
 ## 三、冲突解决 ✅ 已确定
@@ -118,7 +147,7 @@ Captain 委派的两阶段「提案 + 审计 + 确认执行」流程；有界预
 
 ### 7.3 Team 编排（Orchestration）⏳ 未实现
 
-Team 实体 + `orchestration` 字段为 Phase 2；执行形状语义 → 见 [`执行引擎架构设计.md` §18.4](/docs/03-AI核心/执行引擎架构设计.md)。
+Team 实体 + `orchestration` 字段为 Phase 2；执行形状语义 → 见 [`执行引擎架构设计.md` §8.4](/docs/03-AI核心/执行引擎架构设计.md)。
 
 ### 7.4 辩论 / 审查：主持人驱动 ✅（详见专题文档）
 
@@ -142,7 +171,7 @@ Team 实体 + `orchestration` 字段为 Phase 2；执行形状语义 → 见 [`�
 
 ### 7.6 运行时基础设施
 
-波次调度、挂起续跑、收敛治理等机制见 [`执行引擎架构设计.md`](/docs/03-AI核心/执行引擎架构设计.md) §十四、§十八。
+波次调度、挂起续跑、收敛治理等机制见 [`执行引擎架构设计.md`](/docs/03-AI核心/执行引擎架构设计.md) §四、§八。
 
 **并发预算被否决方案**：树级共享 Semaphore——父持槽 await 子、子又抢同一信号量 → 必然死锁。
 

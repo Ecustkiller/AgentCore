@@ -245,7 +245,11 @@ function ConfiguredCard({
             variant="neutral"
             size="md"
             disabled={testing || removing}
-            icon={testing ? <Loader2 size={14} className="animate-spin" /> : undefined}
+            icon={
+              testing ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : undefined
+            }
             onClick={() => void test()}
           >
             测试连接
@@ -262,7 +266,11 @@ function ConfiguredCard({
             variant="danger"
             size="md"
             disabled={testing || removing}
-            icon={removing ? <Loader2 size={14} className="animate-spin" /> : undefined}
+            icon={
+              removing ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : undefined
+            }
             onClick={() => void remove()}
           >
             删除
@@ -341,7 +349,9 @@ function KeyForm({
           size="md"
           className="shrink-0"
           disabled={!canSave}
-          icon={saving ? <Loader2 size={14} className="animate-spin" /> : undefined}
+          icon={
+            saving ? <Loader2 size={14} className="animate-spin" /> : undefined
+          }
           onClick={() => void save()}
         >
           保存

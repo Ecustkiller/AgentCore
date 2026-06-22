@@ -28,7 +28,7 @@ folds into the turn totals — this tool adds no accumulator of its own.
 范围：binds（定稿晚绑定节点）+ steers（操舵未跑节点）+ add（追加新节点，id 生成 / 依赖接线
 见 ``build_added_nodes``）+ stop（收口）。
 
-→ 见设计: docs/07-规划/职责晚绑定与动态再编排设计.md §7.1（续跑入口=专用 replan 工具）
+→ 见设计: docs/03-AI核心/编排器与CEO主Agent.md §一 replan 原语（续跑入口=专用 replan 工具）
 """
 
 from __future__ import annotations

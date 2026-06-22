@@ -298,6 +298,18 @@
             "run_id": "rt_mod1_r1_c",
             "ok": true
           }
+        ],
+        "clashes": [
+          {
+            "from_key": "b",
+            "to_key": "a",
+            "point": "能力外溢说回避了问责主体，技术归因不能替代责任分配。"
+          },
+          {
+            "from_key": "c",
+            "to_key": "b",
+            "point": "强问责会抬高合规成本，产业落地承受不起一刀切立法。"
+          }
         ]
       },
       "timestamp": "2026-01-01T00:00:00.015Z"
@@ -694,6 +706,18 @@
             "run_id": "rt_mod1_r1_c",
             "ok": true
           }
+        ],
+        "clashes": [
+          {
+            "from_key": "b",
+            "to_key": "a",
+            "point": "能力外溢说回避了问责主体，技术归因不能替代责任分配。"
+          },
+          {
+            "from_key": "c",
+            "to_key": "b",
+            "point": "强问责会抬高合规成本，产业落地承受不起一刀切立法。"
+          }
         ]
       },
       {
@@ -701,7 +725,8 @@
         "focus": "第二轮：三方就『问责机制』正面交锋",
         "summary": "",
         "verdict": null,
-        "sides": []
+        "sides": [],
+        "clashes": []
       }
     ]
   }

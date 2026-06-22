@@ -1,4 +1,5 @@
-import { Button } from "@/components/ui";
+import { Button, IconButton } from "@/components/ui";
+import { Input } from "@/components/ui/input";
 import {
   Popover,
   PopoverContent,
@@ -7,6 +8,7 @@ import {
 import { useGroupedConversations } from "@/hooks/useConversations";
 import { getFolders, useCreateFolder } from "@/hooks/useFolders";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
+import type { FolderMeta } from "@/services/folders";
 import { useFoldersStore } from "@/stores/folders";
 import {
   Check,
@@ -15,32 +17,28 @@ import {
   FolderOpen,
   HardDrive,
   Loader2,
-  Sparkles,
+  MessageSquarePlus,
+  Search,
+  X,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 
 const isDesktop = typeof window !== "undefined" && !!window.fsApi;
+const RECENT_WHEN_IDLE = 3;
+const SEARCH_RESULT_CAP = 12;
 
 /**
- * 草稿期「对话工作区」选择器（双模式工作区 §六 / 前端UX §九「对话落点表达」）。
+ * 草稿期「对话归属」选择器（双模式工作区 §六 / 前端UX §九）。
  *
- * 只在新对话草稿（尚未落库、`MessageInput` 里 `conversationId == null`）的输入框工具行
- * 出现，把「这条对话落到哪个文件夹=工作区」从隐藏路径（/conversations 先筛文件夹、/files
- * 加文件夹）提升为一等入口控件。选的是**落点文件夹**而非「云/本地」——模式仍由该文件夹的
- * 绑定派生（守「无云/本地开关」）。默认「自动」= 现状的桌面 local-first 懒建，零门槛不变。
- *
- * 落点经草稿态 `pendingNewChat*` 字段传给 `MessageInput.handleSend`（首发建会话时消费成
- * `folder_id` / `local_container_root_id` / 云端意向），故本控件不碰发送链路与后端契约。
- * 「打开本地文件夹」复用 F2（`POST /v1/folders { local_root_id }`）：先弹 OS 选择器拿到桌面
- * 根，再按 `localRootId` 复用已有本地项目、否则建一个，最后预填为落点文件夹。
- *
- * 首发后归属锁定（§七），故本控件**仅草稿期**渲染；已落库对话改由会话内 `WorkspaceModeBar`
- * 承担云/本地切换。web / 手机无 `fsApi`：退化为「自动（云）+ 已有云项目」。
+ * B3+：默认不选 = 输入框只露轻量「归入项目…」；选了才显示确认 chip。不选 ≡ 旧「自动」
+ * （桌面 local-first 懒建），但不再用 Sparkles「自动」占主视觉。落点经 `pendingNewChat*`
+ * 传给首发建会话；首发后锁定，改由 `WorkspaceModeBar` 承担。
  */
 export function DraftWorkspacePicker() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const grouped = useGroupedConversations().data;
   const folders = useMemo(() => grouped?.folders ?? [], [grouped]);
@@ -53,41 +51,59 @@ export function DraftWorkspacePicker() {
 
   const createFolderMut = useCreateFolder();
 
-  // 「最近项目」：按各文件夹下对话的最新活跃时间降序取前 6。web 只列云项目
-  // （本地绑定项目在 web 无法运行）。
-  const recent = useMemo(() => {
-    const lastActivity = new Map<string, number>();
+  const eligibleFolders = useMemo(
+    () => folders.filter((f) => isDesktop || f.localRootId == null),
+    [folders],
+  );
+
+  const lastActivity = useMemo(() => {
+    const map = new Map<string, number>();
     for (const c of conversations) {
       if (!c.folderId) continue;
       const t = Date.parse(c.updatedAt) || 0;
-      lastActivity.set(
-        c.folderId,
-        Math.max(lastActivity.get(c.folderId) ?? 0, t),
-      );
+      map.set(c.folderId, Math.max(map.get(c.folderId) ?? 0, t));
     }
-    return [...folders]
-      .filter((f) => isDesktop || f.localRootId == null)
+    return map;
+  }, [conversations]);
+
+  const recentFolders = useMemo(
+    () =>
+      [...eligibleFolders]
+        .sort(
+          (a, b) =>
+            (lastActivity.get(b.id) ?? 0) - (lastActivity.get(a.id) ?? 0),
+        )
+        .slice(0, RECENT_WHEN_IDLE),
+    [eligibleFolders, lastActivity],
+  );
+
+  const listedFolders = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return recentFolders;
+    return [...eligibleFolders]
+      .filter((f) => f.name.toLowerCase().includes(q))
       .sort(
         (a, b) => (lastActivity.get(b.id) ?? 0) - (lastActivity.get(a.id) ?? 0),
       )
-      .slice(0, 6);
-  }, [folders, conversations]);
+      .slice(0, SEARCH_RESULT_CAP);
+  }, [query, eligibleFolders, recentFolders, lastActivity]);
 
   const selectedFolder = pendingFolderId
     ? (folders.find((f) => f.id === pendingFolderId) ?? null)
     : null;
 
-  const pickFolder = (id: string) => {
-    setFolder(id);
+  const hasSelection = !!selectedFolder || pendingCloud;
+
+  const pickNone = () => {
+    setFolder(null);
     setCloud(false);
+    if (isDesktop) void ensureDefaultContainerRoot();
     setOpen(false);
   };
 
-  const pickAuto = () => {
-    setFolder(null);
+  const pickFolder = (id: string) => {
+    setFolder(id);
     setCloud(false);
-    // 预热默认容器根，摊薄首发时的授权等待（与 newConversation 同款预热）。
-    if (isDesktop) void ensureDefaultContainerRoot();
     setOpen(false);
   };
 
@@ -97,7 +113,12 @@ export function DraftWorkspacePicker() {
     setOpen(false);
   };
 
-  // 「打开本地文件夹」= F2：选目录 → 按 root 复用/新建本地项目 → 预填为落点。
+  const clearSelection = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    pickNone();
+  };
+
   const openLocalFolder = async () => {
     const fsApi = window.fsApi;
     if (!fsApi) return;
@@ -105,7 +126,7 @@ export function DraftWorkspacePicker() {
     setError(null);
     try {
       const root = await fsApi.addRoot();
-      if (!root) return; // 用户取消选择器
+      if (!root) return;
       const existing = getFolders().find((f) => f.localRootId === root.id);
       const folder =
         existing ??
@@ -117,127 +138,263 @@ export function DraftWorkspacePicker() {
       setCloud(false);
       setOpen(false);
     } catch {
-      setError("打开文件夹失败，请重试");
+      setError("选择文件夹失败，请重试");
     } finally {
       setBusy(false);
     }
   };
 
-  // chip 显示态：选定项目→项目名（本地 HardDrive/primary、云 Cloud/muted）；
-  // 云端临时→Cloud；自动→Sparkles（muted）。
-  const trigger: { icon: ReactNode; label: string } = selectedFolder
-    ? {
-        icon: selectedFolder.localRootId ? (
-          <HardDrive size={14} className="shrink-0 text-primary" />
-        ) : (
-          <Cloud size={14} className="shrink-0 text-muted-foreground" />
-        ),
-        label: selectedFolder.name,
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) {
+      setQuery("");
+      setError(null);
+    }
+  };
+
+  const panel = (
+    <PickerPanel
+      query={query}
+      onQueryChange={setQuery}
+      noneSelected={!selectedFolder && !pendingCloud}
+      onPickNone={pickNone}
+      listedFolders={listedFolders}
+      selectedFolderId={selectedFolder?.id ?? null}
+      onPickFolder={pickFolder}
+      pendingCloud={pendingCloud}
+      onPickCloud={pickCloud}
+      onOpenLocalFolder={() => void openLocalFolder()}
+      busy={busy}
+      error={error}
+      showRecentLabel={!query.trim() && recentFolders.length > 0}
+      noSearchHits={
+        !!query.trim() &&
+        listedFolders.length === 0 &&
+        eligibleFolders.length > 0
       }
-    : pendingCloud
-      ? {
-          icon: <Cloud size={14} className="shrink-0 text-muted-foreground" />,
-          label: "云端临时",
-        }
-      : {
-          icon: (
-            <Sparkles size={14} className="shrink-0 text-muted-foreground" />
-          ),
-          label: "自动",
-        };
+    />
+  );
+
+  if (!hasSelection) {
+    return (
+      <Popover open={open} onOpenChange={handleOpenChange}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            aria-label="归入项目"
+            className="h-8 px-2 text-xs font-medium text-muted-foreground"
+          >
+            归入项目…
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-72 p-0">
+          {panel}
+        </PopoverContent>
+      </Popover>
+    );
+  }
+
+  const chipIcon = selectedFolder ? (
+    selectedFolder.localRootId ? (
+      <HardDrive size={14} className="shrink-0 text-primary" />
+    ) : (
+      <Cloud size={14} className="shrink-0 text-muted-foreground" />
+    )
+  ) : (
+    <Cloud size={14} className="shrink-0 text-muted-foreground" />
+  );
+
+  const chipLabel = selectedFolder ? selectedFolder.name : "云端";
+  const chipTitle = selectedFolder
+    ? `归入：${selectedFolder.name}（${folderLocationHint(selectedFolder.localRootId, selectedFolder.localSubpath)}）`
+    : "仅云端存储，不创建本地项目";
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          aria-label="选择对话工作区"
-          title="选择这条对话的工作区（文件夹）"
-          className="h-auto min-w-0 max-w-[160px] justify-start gap-1.5 px-2 py-1 font-medium text-muted-foreground"
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <div className="flex max-w-[200px] items-center gap-0.5">
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            aria-label="更改对话归属"
+            title={chipTitle}
+            className="h-auto min-w-0 flex-1 justify-start gap-1.5 px-2 py-1 font-medium text-muted-foreground"
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              {chipIcon}
+              <span className="min-w-0 truncate">{chipLabel}</span>
+              <ChevronDown
+                size={12}
+                className="shrink-0 text-muted-foreground"
+              />
+            </span>
+          </Button>
+        </PopoverTrigger>
+        <IconButton
+          size="md"
+          aria-label="清除归入"
+          title="清除归入"
+          onClick={clearSelection}
+          className="shrink-0 text-muted-foreground"
         >
-          <span className="flex min-w-0 items-center gap-1.5">
-            {trigger.icon}
-            <span className="min-w-0 truncate">{trigger.label}</span>
-            <ChevronDown size={12} className="shrink-0 text-muted-foreground" />
-          </span>
-        </Button>
-      </PopoverTrigger>
-
-      <PopoverContent align="start" className="w-64 p-0">
-        <div className="border-b border-border px-3 py-2.5">
-          <div className="text-xs font-medium text-foreground">对话工作区</div>
-          <div className="text-xs text-muted-foreground">
-            选择这条对话在哪里工作
-          </div>
-        </div>
-
-        <div className="max-h-[320px] overflow-y-auto p-1.5">
-          <PickerRow
-            icon={<Sparkles size={14} />}
-            label="自动"
-            hint={isDesktop ? "首次产生文件时在本地新建项目" : "在云端新建项目"}
-            selected={!selectedFolder && !pendingCloud}
-            onClick={pickAuto}
-          />
-
-          {recent.length > 0 && (
-            <>
-              <div className="px-2.5 pt-2 pb-1 text-xs text-muted-foreground">
-                最近项目
-              </div>
-              {recent.map((f) => (
-                <PickerRow
-                  key={f.id}
-                  icon={
-                    f.localRootId ? (
-                      <HardDrive size={14} className="text-primary" />
-                    ) : (
-                      <Cloud size={14} />
-                    )
-                  }
-                  label={f.name}
-                  selected={selectedFolder?.id === f.id}
-                  onClick={() => pickFolder(f.id)}
-                />
-              ))}
-            </>
-          )}
-
-          <div className="my-1 border-t border-border" />
-
-          {isDesktop && (
-            <PickerRow
-              icon={<FolderOpen size={14} />}
-              label="打开本地文件夹…"
-              onClick={() => void openLocalFolder()}
-              disabled={busy}
-            />
-          )}
-          {isDesktop && (
-            <PickerRow
-              icon={<Cloud size={14} />}
-              label="云端临时对话"
-              selected={pendingCloud}
-              onClick={pickCloud}
-            />
-          )}
-
-          {busy && (
-            <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
-              <Loader2 size={14} className="animate-spin" />
-              处理中…
-            </div>
-          )}
-          {error && (
-            <p className="px-2.5 py-1.5 text-xs text-destructive">{error}</p>
-          )}
-        </div>
+          <X size={14} />
+        </IconButton>
+      </div>
+      <PopoverContent align="start" className="w-72 p-0">
+        {panel}
       </PopoverContent>
     </Popover>
   );
 }
 
-/** A full-width action row inside the picker popover. */
+function folderLocationHint(
+  localRootId: string | null,
+  localSubpath: string,
+): string {
+  if (localRootId) {
+    return localSubpath ? `本地 · ${localSubpath}` : "本地";
+  }
+  return "云端";
+}
+
+function PickerPanel({
+  query,
+  onQueryChange,
+  noneSelected,
+  onPickNone,
+  listedFolders,
+  selectedFolderId,
+  onPickFolder,
+  pendingCloud,
+  onPickCloud,
+  onOpenLocalFolder,
+  busy,
+  error,
+  showRecentLabel,
+  noSearchHits,
+}: {
+  query: string;
+  onQueryChange: (q: string) => void;
+  noneSelected: boolean;
+  onPickNone: () => void;
+  listedFolders: FolderMeta[];
+  selectedFolderId: string | null;
+  onPickFolder: (id: string) => void;
+  pendingCloud: boolean;
+  onPickCloud: () => void;
+  onOpenLocalFolder: () => void;
+  busy: boolean;
+  error: string | null;
+  showRecentLabel: boolean;
+  noSearchHits: boolean;
+}) {
+  const idleHint = isDesktop
+    ? "不选则先聊；需要写文件时在本机自动建项目"
+    : "不选则先聊；需要时在云端建项目";
+
+  return (
+    <>
+      <div className="border-b border-border px-3 py-2.5">
+        <div className="text-xs font-medium text-foreground">对话归属</div>
+        <div className="text-xs text-muted-foreground">{idleHint}</div>
+      </div>
+
+      <div className="max-h-[360px] overflow-y-auto p-1.5">
+        <PickerRow
+          icon={<MessageSquarePlus size={14} />}
+          label="不归入项目"
+          hint="先聊到再说"
+          selected={noneSelected}
+          onClick={onPickNone}
+        />
+
+        <div className="relative mx-2.5 mt-2 mb-1">
+          <Search
+            size={14}
+            className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+            placeholder="搜索项目…"
+            className="h-8 pl-8 text-xs"
+            aria-label="搜索项目"
+          />
+        </div>
+
+        {showRecentLabel && (
+          <div className="px-2.5 pt-1 pb-1 text-xs text-muted-foreground">
+            最近项目
+          </div>
+        )}
+
+        {listedFolders.map((f) => (
+          <PickerRow
+            key={f.id}
+            icon={
+              f.localRootId ? (
+                <HardDrive size={14} className="text-primary" />
+              ) : (
+                <Cloud size={14} />
+              )
+            }
+            label={f.name}
+            hint={folderLocationHint(f.localRootId, f.localSubpath)}
+            selected={selectedFolderId === f.id}
+            onClick={() => onPickFolder(f.id)}
+          />
+        ))}
+
+        {noSearchHits && (
+          <p className="px-2.5 py-2 text-xs text-muted-foreground">
+            没有匹配的项目
+          </p>
+        )}
+
+        {isDesktop ? (
+          <>
+            <div className="my-1 border-t border-border" />
+            <PickerRow
+              icon={<FolderOpen size={14} />}
+              label="选择本地文件夹…"
+              hint="在电脑上指定目录作为项目"
+              onClick={onOpenLocalFolder}
+              disabled={busy}
+            />
+            <PickerRow
+              icon={<Cloud size={14} />}
+              label="仅云端（随手聊）"
+              hint="文件只存云端，不创建本地项目"
+              selected={pendingCloud}
+              onClick={onPickCloud}
+            />
+          </>
+        ) : (
+          <>
+            <div className="my-1 border-t border-border" />
+            <PickerRow
+              icon={<Cloud size={14} />}
+              label="仅云端（随手聊）"
+              hint="文件只存云端"
+              selected={pendingCloud}
+              onClick={onPickCloud}
+            />
+          </>
+        )}
+
+        {busy && (
+          <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground">
+            <Loader2 size={14} className="animate-spin" />
+            处理中…
+          </div>
+        )}
+        {error && (
+          <p className="px-2.5 py-1.5 text-xs text-destructive">{error}</p>
+        )}
+      </div>
+    </>
+  );
+}
+
 function PickerRow({
   icon,
   label,

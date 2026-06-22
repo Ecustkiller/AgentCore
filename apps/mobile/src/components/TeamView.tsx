@@ -1,4 +1,4 @@
-// The multi-agent team view for the mobile client (手机端落地设计 P1 · 多 Agent 团队视图).
+// The multi-agent team view for the mobile client (前端技术与架构 §七 · 多 Agent 团队视图).
 //
 // A mobile-native, VERTICAL reduction of the desktop React-Flow team graph
 // (InlineTeamGraph / GraphView): the same ProjectedTurn.{agents, runs, progress} fields,

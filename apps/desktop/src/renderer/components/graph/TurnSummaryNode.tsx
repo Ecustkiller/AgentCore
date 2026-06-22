@@ -1,7 +1,14 @@
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import type { ExecutionStatus } from "@/stores/execution";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
-import { CheckCircle2, Loader2, Pause, Sparkles, XCircle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  Pause,
+  Sparkles,
+  XCircle,
+} from "lucide-react";
 
 /**
  * 回合摘要节点（前端UX设计.md §6.1）: a completed / running TEAM turn folded
@@ -23,6 +30,14 @@ export interface TurnSummaryData {
   agentCount: number;
   completed: number;
   total: number;
+  /** 图上指挥扫视 (前端UX设计.md §6.2): unanswered boss decisions on this folded turn
+   * (ask_user / plan_review / 工作者上报). >0 → a warning「待你拍板」chip so the spine
+   * shows which folded turns await you without focusing each. */
+  pendingDecisions: number;
+  /** 图上指挥扫视: this folded turn has recoverable terminal trouble (failed / cancelled
+   * / 部分失败). Drives a destructive「待救火」chip; shown only when no decision pends
+   * (an actionable decision outranks a recoverable failure). */
+  recoverable: boolean;
   [key: string]: unknown;
 }
 
@@ -81,22 +96,45 @@ export function TurnSummaryNode({ data }: NodeProps) {
           <p className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
             {d.taskSummary || "团队回合"}
           </p>
+          {/* 图上指挥扫视 (§6.2): mirror the focused node's chips on the FOLDED summary so
+              a long spine flags which turns need the boss. 待你拍板 (actionable) outranks
+              待救火 (terminal) when both apply; the title truncates to make room. */}
+          {d.pendingDecisions > 0 ? (
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+              <AlertTriangle size={11} />
+              待你拍板{d.pendingDecisions > 1 ? ` ${d.pendingDecisions}` : ""}
+            </span>
+          ) : (
+            d.recoverable && (
+              <span className="flex shrink-0 items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
+                <AlertTriangle size={11} />
+                待救火
+              </span>
+            )
+          )}
         </div>
 
         <div className="mt-2.5 flex items-center gap-1.5">
-          {shown.map((role, i) => (
-            <div
-              key={`${role}-${i}`}
-              title={role}
-              className="flex size-6 items-center justify-center rounded-full text-xs font-semibold"
-              style={{
-                backgroundColor: `color-mix(in oklab, ${agentColorVar(role)} 18%, transparent)`,
-                color: agentColorVar(role),
-              }}
-            >
-              {agentGlyph(role)}
-            </div>
-          ))}
+          {(() => {
+            const seen = new Map<string, number>();
+            return shown.map((role) => {
+              const n = seen.get(role) ?? 0;
+              seen.set(role, n + 1);
+              return (
+                <div
+                  key={`${role}:${n}`}
+                  title={role}
+                  className="flex size-6 items-center justify-center rounded-full text-xs font-semibold"
+                  style={{
+                    backgroundColor: `color-mix(in oklab, ${agentColorVar(role)} 18%, transparent)`,
+                    color: agentColorVar(role),
+                  }}
+                >
+                  {agentGlyph(role)}
+                </div>
+              );
+            });
+          })()}
           {overflow > 0 && (
             <div className="flex size-6 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
               +{overflow}

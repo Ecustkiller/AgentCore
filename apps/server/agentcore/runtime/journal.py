@@ -295,25 +295,6 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
     return runs
 
 
-def system_prompt_from_journal(entries: list[dict[str, Any]] | None) -> str | None:
-    """The verbatim CEO system prompt this turn ran with (本回合提示词, 提示词透明 L3).
-
-    Reads the ``turn_started`` head fact's ``system_prompt`` — captured verbatim at turn
-    start because it is dynamic (date / 能力目录 / attachments), so re-rendering it would
-    drift (facts §18.3). Returns ``None`` when there is no head fact to read (a legacy /
-    display-only journal, a user message, or a turn whose best-effort journal write was
-    lost) so the caller can 404. The prompt is an execution fact (``EXECUTION_ONLY_KINDS``)
-    deliberately kept out of the display ``runs`` projection; this is the one read path
-    that surfaces it — to the turn's owner.
-    """
-    if not entries:
-        return None
-    for entry in entries:
-        if (entry.get("kind") or "") == FactKind.TURN_STARTED.value:
-            return (entry.get("payload") or {}).get("system_prompt")
-    return None
-
-
 def window_from_journal(
     entries: list[dict[str, Any]] | None,
     *,

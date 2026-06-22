@@ -15,7 +15,7 @@ from agentcore.storage.factory import build_storage_provider
 from agentcore.workspace.locate import resolve_workspace_root, workspace_root_path
 from agentcore.workspace.retention import (
     _purge_conversation_space,
-    _purge_folder_space,
+    purge_folder_space,
     run_retention_sweep,
 )
 from agentcore.workspace.snapshots import create_snapshot, list_snapshots
@@ -37,7 +37,7 @@ async def test_purge_folder_space_removes_dir_and_snapshots(fs_storage):
     (root / "proj.txt").write_text("data", encoding="utf-8")
     await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1")
 
-    await _purge_folder_space(user_id="u1", folder_id="f1")
+    await purge_folder_space(user_id="u1", folder_id="f1")
 
     assert not workspace_root_path(
         user_id="u1", folder_id="f1", conversation_id="x"
@@ -65,7 +65,7 @@ async def test_purge_conversation_space_removes_own_space(fs_storage):
 
 async def test_purge_is_idempotent_on_missing(fs_storage):
     # Purging a never-created space must not raise (idempotent cleanup).
-    await _purge_folder_space(user_id="u1", folder_id="ghost")
+    await purge_folder_space(user_id="u1", folder_id="ghost")
     await _purge_conversation_space(user_id="u1", conversation_id="ghost")
 
 

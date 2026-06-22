@@ -2,7 +2,7 @@
 
 This is the backend-authoritative twin of the frontend folds (mobile
 ``src/protocol/fold.ts``; desktop ``stores/execution.ts`` + ``streamConversation``).
-Its output IS the golden every端 must match (手机端落地设计 §六 支柱1).
+Its output IS the golden every端 must match (前端技术与架构 §十二).
 
 Semantics are deliberately a port of the two PROVEN frontend/runtime projections, so
 the oracle never invents behavior the product doesn't already have:
@@ -409,7 +409,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             debate = p
 
         elif etype == "debate_round_started":
-            # 一轮开场（发言前）：先给焦点，verdict=None 表示该轮进行中（仅定焦点未裁判）。
+            # 一轮开场（发言前）：先给焦点，verdict=None 表示该轮进行中（仅定焦点未裁判，
+            # clashes 恒空——交锋边由裁判步产出）。
             upsert_round(
                 {
                     "round_no": p.get("round_no", 0),
@@ -417,11 +418,12 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "summary": "",
                     "verdict": None,
                     "sides": [],
+                    "clashes": [],
                 }
             )
 
         elif etype == "debate_round":
-            # 一轮收尾（裁判 + 小结后）：补全焦点 / 小结 / 裁判 / 各方→辩手 run_id 映射。
+            # 一轮收尾（裁判+小结后）：焦点/小结/裁判/各方→辩手 run_id 映射/L3 交锋边。
             upsert_round(
                 {
                     "round_no": p.get("round_no", 0),
@@ -429,6 +431,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "summary": p.get("summary", ""),
                     "verdict": p.get("verdict"),
                     "sides": list(p.get("sides") or []),
+                    "clashes": list(p.get("clashes") or []),
                 }
             )
 

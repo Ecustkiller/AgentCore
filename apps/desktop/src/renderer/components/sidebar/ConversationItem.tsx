@@ -198,36 +198,36 @@ export function ConversationItem({ conversation }: Props) {
     "size-6 text-sidebar-foreground/40 hover:text-sidebar-foreground";
 
   const moveMenuSection = workspaceLocked ? (
-  <>
-    <DropdownMenuSeparator />
-    <DropdownMenuItem disabled>
-      <Lock size={14} className="shrink-0" />
-      <span className="flex-1 truncate">开始后不可更换工作区</span>
-    </DropdownMenuItem>
-  </>
-) : folders.length > 0 || currentFolderId ? (
-  <>
-    <DropdownMenuSeparator />
-    <DropdownMenuLabel>移到</DropdownMenuLabel>
-    <div className="max-h-52 overflow-y-auto">
-      {folders.map((f) => (
-        <DropdownMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
-          <Folder size={14} className="shrink-0" />
-          <span className="flex-1 truncate">{f.name}</span>
-          {f.id === currentFolderId && (
-            <Check size={13} className="shrink-0" />
-          )}
-        </DropdownMenuItem>
-      ))}
-    </div>
-    {currentFolderId && (
-      <DropdownMenuItem onSelect={() => void moveTo(null)}>
-        <Inbox size={14} className="shrink-0" />
-        <span className="flex-1 truncate">移出文件夹</span>
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem disabled>
+        <Lock size={14} className="shrink-0" />
+        <span className="flex-1 truncate">开始后不可更换工作区</span>
       </DropdownMenuItem>
-    )}
-  </>
-) : null;
+    </>
+  ) : folders.length > 0 || currentFolderId ? (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel>移到</DropdownMenuLabel>
+      <div className="max-h-52 overflow-y-auto">
+        {folders.map((f) => (
+          <DropdownMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
+            <Folder size={14} className="shrink-0" />
+            <span className="flex-1 truncate">{f.name}</span>
+            {f.id === currentFolderId && (
+              <Check size={13} className="shrink-0" />
+            )}
+          </DropdownMenuItem>
+        ))}
+      </div>
+      {currentFolderId && (
+        <DropdownMenuItem onSelect={() => void moveTo(null)}>
+          <Inbox size={14} className="shrink-0" />
+          <span className="flex-1 truncate">移出文件夹</span>
+        </DropdownMenuItem>
+      )}
+    </>
+  ) : null;
 
   const contextMoveSection = workspaceLocked ? (
     <>
@@ -307,6 +307,7 @@ export function ConversationItem({ conversation }: Props) {
             if (!moreOpen) setConfirmingDelete(false);
           }}
         >
+          {/* biome-ignore lint/a11y/useSemanticElements: 行内另有 DropdownMenuTrigger 的真 <button>，此可点击区不可套 <button>。 */}
           <div
             role="button"
             tabIndex={0}

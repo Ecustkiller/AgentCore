@@ -39,6 +39,11 @@ from agentcore.runtime.facts import (
     current_fact_log,
     record_turn_fact,
 )
+from agentcore.runtime.context import (
+    ContextAssembler,
+    SectionOrder,
+    build_workspace_overview,
+)
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.journal import (
     completed_from_journal,
@@ -275,11 +280,24 @@ async def run_chat_pipeline(
             skill_registry=skill_registry,
             ceo_tool_names=ceo_tool_names,
         )
-        # Attachments LAST — after the whole stable hint stack — so the CEO prefix
-        # (base + hints) stays byte-identical across turns and rides the prefix cache
-        # even on a turn that carries (variable) attached files.
-        if attachment_context:
-            chat_system_prompt = f"{chat_system_prompt}\n{attachment_context}"
+        # Real-time workspace overview (工作区上下文): a compact, newest-first listing of
+        # the files already on disk in this conversation's workspace, so the CEO can
+        # triage / delegate without spending a blind file_list round. Generated fresh
+        # each turn from the live backend (never indexed → never stale); "" when empty /
+        # unavailable. Workers don't get this — they already receive the richer per-run
+        # manifest (runs/executor_context._workspace_manifest).
+        workspace_overview = await build_workspace_overview(backend)
+        # Variable tail AFTER the stable hint stack (workspace overview + attachments) so
+        # the CEO prefix (base + hints) stays byte-identical across turns and rides the
+        # prefix cache even when the workspace / attachments change. Empty sections are
+        # dropped, so a turn with neither is byte-identical to the bare CEO prompt.
+        chat_system_prompt = (
+            ContextAssembler()
+            .add("ceo_prompt", chat_system_prompt, SectionOrder.BASE)
+            .add("workspace_context", workspace_overview, SectionOrder.WORKSPACE_OVERVIEW)
+            .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
+            .render()
+        )
 
         # --- Phase 3: Execute ---
         sink.emit(message_start(message_id, conversation_id=conversation_id))

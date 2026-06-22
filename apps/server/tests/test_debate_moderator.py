@@ -15,11 +15,15 @@ from agentcore.runtime.debate import (
     STOP_CONVERGED,
     STOP_FOCUS_CLARIFIED,
     STOP_MAX_ROUNDS,
+    DebateBrief,
     DebateConfig,
     DebateForm,
+    DebateResult,
     DebateSide,
+    JudgeVerdict,
     Moderator,
     RoundPolicy,
+    RoundResult,
     SideTurn,
 )
 
@@ -124,7 +128,7 @@ def _config(*, form=DebateForm.DEBATE, policy=None, sides=None):
         motion="该不该做 X",
         form=form,
         sides=sides or _two_sides(),
-        policy=policy or RoundPolicy(min_rounds=3, max_rounds=5),
+        policy=policy or RoundPolicy(max_rounds=5),
     )
 
 
@@ -135,19 +139,105 @@ def _run(llm, runner, config):
 # --- 收敛 / 轮次治理 ---------------------------------------------------------
 
 
-def test_min_rounds_gate_prevents_early_stop():
-    """裁判每轮都判收敛，但最小轮门槛=3 → 必须跑满 3 轮（防过早收敛，§五）。"""
+def test_for_form_thorough_false_is_single_round_for_all_forms():
+    """thorough=False 对所有形态（含圆桌）都降为快速单轮（max=1）——「测试/简单看看」不被强制多轮。
+
+    回归：旧实现圆桌恒多轮、忽略 thorough，trivial 命题也跑满多轮、产出冗余「修订 v2」。
+    thorough=True 时形态默认仅【安全上限】各异（圆桌 4、正反/红队 5）；轮数由主持人逐轮自判收敛。
+    """
+    for form in (DebateForm.DEBATE, DebateForm.RED_TEAM, DebateForm.ROUNDTABLE):
+        quick = RoundPolicy.for_form(form, thorough=False)
+        assert (quick.thorough, quick.max_rounds) == (False, 1), form
+    assert RoundPolicy.for_form(DebateForm.ROUNDTABLE).max_rounds == 4
+    assert RoundPolicy.for_form(DebateForm.DEBATE).max_rounds == 5
+    assert RoundPolicy.for_form(DebateForm.DEBATE).thorough is True
+
+
+def test_node_summary_is_rounds_and_stop_label():
+    """主持人节点预览 = 「N 轮 · 收敛归因」（复用 stop_reason 词表），取代旧的 brief.crux 近空预览。"""
+
+    def _result(rounds_n: int, stop_reason: str) -> DebateResult:
+        verdict = JudgeVerdict(real_clash=True, new_arguments=False, converged=True)
+        rounds = [
+            RoundResult(i, f"焦点{i}", [], verdict, summary=f"小结{i}")
+            for i in range(1, rounds_n + 1)
+        ]
+        return DebateResult(
+            config=_config(),
+            rounds=rounds,
+            brief=DebateBrief(crux="争议焦点"),
+            stop_reason=stop_reason,
+        )
+
+    assert _result(2, STOP_CONVERGED).node_summary == "2 轮 · 已收敛"
+    assert _result(3, STOP_FOCUS_CLARIFIED).node_summary == "3 轮 · 焦点已澄清为价值之争"
+    assert _result(5, STOP_MAX_ROUNDS).node_summary == "5 轮 · 达轮数上限"
+
+
+def test_frame_followup_injects_covered_focuses_and_orthogonality():
+    """后续轮定焦点：注入【全部历史轮】已覆盖焦点清单 + 强制正交，降「换汤不换药」冗余轮。"""
+    captured: list = []
+
+    class _CaptureLLM:
+        async def complete(self, request):  # noqa: ANN001
+            captured.append(request)
+            return LLMResponse(content=json.dumps({"focus": "新焦点"}))
+
+    mod = Moderator(provider=_CaptureLLM(), model="m")
+    verdict = JudgeVerdict(real_clash=True, new_arguments=True, converged=False)
+    history = [
+        RoundResult(1, "焦点甲", [], verdict, summary="一轮小结"),
+        RoundResult(2, "焦点乙", [], verdict, summary="二轮小结"),
+    ]
+    focus = asyncio.run(mod._frame(_config(), history))
+
+    assert focus == "新焦点"
+    prompt = captured[-1].messages[-1].content
+    assert "已覆盖焦点" in prompt and "正交" in prompt
+    # 全部历史轮的焦点都在清单里（非仅上一轮），主持人才能挑一个正交于整场的新维度。
+    assert "焦点甲" in prompt and "焦点乙" in prompt
+
+
+def test_judge_gate_hint_round1_continue_and_quick_converge():
+    """「别过早收敛」内化进裁判标准：多轮模式第 1 轮默认继续（除非命题空泛）；快速单轮则一次即收。"""
+    captured: list = []
+
+    class _CaptureLLM:
+        async def complete(self, request):  # noqa: ANN001
+            captured.append(request)
+            return LLMResponse(content=json.dumps(_KEEP_GOING))
+
+    mod = Moderator(provider=_CaptureLLM(), model="m")
+    turns = [
+        SideTurn("pro", "正方", "r1_pro", "正方开场"),
+        SideTurn("con", "反方", "r1_con", "反方开场"),
+    ]
+    # 多轮模式第 1 轮：默认继续、仅命题空泛才收（楼层智慧搬进了 prompt）。
+    asyncio.run(mod._judge(_config(policy=RoundPolicy(max_rounds=5)), "焦点", turns, []))
+    multi = captured[-1].messages[-1].content
+    assert "第 1 轮" in multi and "默认" in multi and "继续" in multi and "空泛" in multi
+    # 快速单轮（max=1）：一次对碰即判收敛（避免错误兜底成 达轮数上限）。
+    asyncio.run(mod._judge(_config(policy=RoundPolicy.quick()), "焦点", turns, []))
+    assert "快速单轮" in captured[-1].messages[-1].content
+
+
+def test_judge_converged_stops_immediately_no_floor():
+    """裁判第 1 轮即判收敛 → 立即收场（无最小轮门槛强制多轮）——收敛治理交给裁判逐轮自判。
+
+    回归：旧实现有机械楼层（min_rounds），裁判首轮判收敛也被逼跑满 N 轮。现在拆掉楼层，
+    「别过早收敛」内化进裁判标准（第 1 轮默认继续，由 _judge prompt 注入，假 LLM 不受其约束）。
+    """
     llm = _ScriptedLLM(judge_results=[_CONVERGE])
     runner = _RecordingRunner()
-    result = _run(llm, runner, _config(policy=RoundPolicy(min_rounds=3, max_rounds=5)))
+    result = _run(llm, runner, _config(policy=RoundPolicy(max_rounds=5)))
 
-    assert len(result.rounds) == 3
-    assert len(runner.calls) == 3
+    assert len(result.rounds) == 1
+    assert len(runner.calls) == 1
     assert result.stop_reason == STOP_CONVERGED
 
 
 def test_quick_single_round():
-    """快速对碰（min=max=1）：第 1 轮收敛即收场。"""
+    """快速对碰（max=1）：第 1 轮收敛即收场。"""
     llm = _ScriptedLLM(judge_results=[_CONVERGE])
     runner = _RecordingRunner()
     result = _run(llm, runner, _config(policy=RoundPolicy.quick()))
@@ -160,7 +250,7 @@ def test_runs_to_max_when_never_converges():
     """裁判持续不收敛 → 跑到安全上限兜底停，归因 max_rounds。"""
     llm = _ScriptedLLM(judge_results=[_KEEP_GOING])
     runner = _RecordingRunner()
-    result = _run(llm, runner, _config(policy=RoundPolicy(min_rounds=2, max_rounds=4)))
+    result = _run(llm, runner, _config(policy=RoundPolicy(max_rounds=4)))
 
     assert len(result.rounds) == 4
     assert result.stop_reason == STOP_MAX_ROUNDS
@@ -171,7 +261,7 @@ def test_converged_stop_reason_propagates():
     verdict = {**_CONVERGE, "stop_reason": "focus_clarified"}
     llm = _ScriptedLLM(judge_results=[verdict])
     runner = _RecordingRunner()
-    result = _run(llm, runner, _config(policy=RoundPolicy(min_rounds=1, max_rounds=5)))
+    result = _run(llm, runner, _config(policy=RoundPolicy(max_rounds=5)))
 
     assert len(result.rounds) == 1
     assert result.stop_reason == STOP_FOCUS_CLARIFIED
@@ -184,7 +274,7 @@ def test_round_runner_receives_growing_history():
     """第 k 轮 run_round 应看到前 k-1 轮 —— 辩手跨轮带记忆的输入（§7.2）。"""
     llm = _ScriptedLLM(judge_results=[_KEEP_GOING])
     runner = _RecordingRunner()
-    _run(llm, runner, _config(policy=RoundPolicy(min_rounds=3, max_rounds=3)))
+    _run(llm, runner, _config(policy=RoundPolicy(max_rounds=3)))
 
     assert [c["history_len"] for c in runner.calls] == [0, 1, 2]
 
@@ -193,7 +283,7 @@ def test_judge_bad_json_is_conservative():
     """裁判输出坏 JSON → 保守判未收敛（宁可多辩一轮也不草草收场），跑到上限。"""
     llm = _ScriptedLLM(judge_content="嗯……我觉得还能再辩，但这里没有 JSON。")
     runner = _RecordingRunner()
-    result = _run(llm, runner, _config(policy=RoundPolicy(min_rounds=2, max_rounds=3)))
+    result = _run(llm, runner, _config(policy=RoundPolicy(max_rounds=3)))
 
     assert len(result.rounds) == 3
     assert result.stop_reason == STOP_MAX_ROUNDS
@@ -218,7 +308,7 @@ def test_dual_products_present():
     """收场交付双产物：结论（决策简报字段齐全）+ 过程（每轮含小结 L1 与各方发言 L2/L3）。"""
     llm = _ScriptedLLM(judge_results=[_CONVERGE])
     runner = _RecordingRunner()
-    result = _run(llm, runner, _config(policy=RoundPolicy(min_rounds=2, max_rounds=5)))
+    result = _run(llm, runner, _config(policy=RoundPolicy(max_rounds=5)))
 
     # 结论产物
     assert result.brief.crux
@@ -235,7 +325,7 @@ def test_to_ceo_output_has_brief_and_narrative():
     """CEO 折算文本同时含决策简报与交锋叙事线（双产物都交回 CEO 收尾）。"""
     llm = _ScriptedLLM(judge_results=[_CONVERGE])
     runner = _RecordingRunner()
-    result = _run(llm, runner, _config(policy=RoundPolicy(min_rounds=2, max_rounds=5)))
+    result = _run(llm, runner, _config(policy=RoundPolicy(max_rounds=5)))
     out = result.to_ceo_output()
 
     assert "决策简报" in out
@@ -259,7 +349,7 @@ def test_roundtable_narrative_first():
         _config(
             form=DebateForm.ROUNDTABLE,
             sides=sides,
-            policy=RoundPolicy(min_rounds=1, max_rounds=3),
+            policy=RoundPolicy(max_rounds=3),
         ),
     )
     out = result.to_ceo_output()
@@ -308,8 +398,9 @@ def test_round_hooks_order_start_before_speak_before_round():
         order.append(f"round{rr.round_no}")
         seen.append(rr)
 
-    llm = _ScriptedLLM(judge_results=[_CONVERGE])
-    config = _config(policy=RoundPolicy(min_rounds=2, max_rounds=2))
+    # 裁判持续不收敛（无楼层强制多轮了）→ 跑到 max_rounds=2 兜底，拿到稳定的 2 轮做钩子序断言。
+    llm = _ScriptedLLM(judge_results=[_KEEP_GOING])
+    config = _config(policy=RoundPolicy(max_rounds=2))
     asyncio.run(
         Moderator(provider=llm, model="m").run(
             config, run_round=runner, on_round_start=on_start, on_round=on_round
@@ -331,7 +422,7 @@ def test_round_to_event_payload_matches_result_round_unit():
     单元：round_no/focus/summary/verdict/各方→辩手 run_id，且与收场全量 payload 的该轮逐字一致。"""
     llm = _ScriptedLLM(judge_results=[_CONVERGE])
     runner = _RecordingRunner()
-    result = _run(llm, runner, _config(policy=RoundPolicy(min_rounds=1, max_rounds=1)))
+    result = _run(llm, runner, _config(policy=RoundPolicy(max_rounds=1)))
     payload = result.rounds[0].to_event_payload()
 
     assert payload["round_no"] == 1

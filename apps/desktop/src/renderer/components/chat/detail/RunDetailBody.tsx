@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui";
 import { EscalationCard } from "@/components/chat/EscalationCard";
 import { Markdown } from "@/components/chat/Markdown";
 import { ReceivedContextSection } from "@/components/chat/ReceivedContext";
@@ -8,6 +7,7 @@ import {
   hasToolResultBody,
   toolResultPeek,
 } from "@/components/chat/toolResult/ToolResultView";
+import { Button } from "@/components/ui";
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
 import { activeRuntime, useConversationStore } from "@/stores/conversation";
 import {
@@ -112,8 +112,17 @@ export function RunDetailBody({
   const execution = useMessageExecution(messageId);
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
   const usageDetail = useUIStore((s) => s.usageDetail);
+  const diagnosticMode = useUIStore((s) => s.diagnosticMode);
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
   const conversationId = useConversationStore((s) => s.currentConversationId);
+  // 诊断模式 (前端UX设计.md §十): the turn's trace id, read from its message so the
+  // diagnostic panel can show the single key that ties this run back to the server
+  // logs. Null unless the message carried one (DEV / live turns).
+  const traceId = useConversationStore(
+    (s) =>
+      activeRuntime(s).messages.find((m) => m.id === messageId)?.traceId ??
+      null,
+  );
   // 阻塞式求决策 §4.5B/§4.7: a pending escalation is answerable只在回合仍 live 时（与气泡卡
   // 同一 interactive 门控）；重载 / 已结束的回合渲染为静态记录。按「回合非终态」(isStreaming)
   // 取，而非单个 run —— 升级 worker 可能 parked 而其它队员仍在跑。
@@ -310,6 +319,14 @@ export function RunDetailBody({
           agent={agent}
           cnyPerUsd={cnyPerUsd}
           defaultExpanded={usageDetail}
+        />
+      )}
+
+      {diagnosticMode && (
+        <DiagnosticSection
+          run={run}
+          executionId={execution.id}
+          traceId={traceId}
         />
       )}
     </div>
@@ -600,7 +617,10 @@ function ThinkingSection({
           {expanded ? (
             <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
           ) : (
-            <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+            <ChevronRight
+              size={14}
+              className="shrink-0 text-muted-foreground"
+            />
           )}
           <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
             思考过程
@@ -661,7 +681,10 @@ function ResourceSection({
           {expanded ? (
             <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
           ) : (
-            <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+            <ChevronRight
+              size={14}
+              className="shrink-0 text-muted-foreground"
+            />
           )}
           <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
             资源消耗
@@ -743,6 +766,79 @@ function MetricRow({
       <span
         className={`text-right text-xs tabular-nums text-foreground ${mono ? "font-mono" : ""}`}
       >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * 诊断 / 开发者面板 (前端UX设计.md §十) — gated behind 诊断模式, never shown to 大众.
+ * Surfaces the low-level identifiers that tie this run to the server journal + logs
+ * (run / agent / execution / trace ids, the run's wire shape): noise for normal use,
+ * but the first thing you reach for when debugging a turn. Display-only, selectable
+ * mono text; the message bubble carries the one-click trace-id copy.
+ */
+function DiagnosticSection({
+  run,
+  executionId,
+  traceId,
+}: {
+  run: RunNode;
+  executionId: string;
+  traceId: string | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <section className="mb-4 last:mb-0">
+      <Button
+        variant="ghost"
+        onClick={() => setExpanded((v) => !v)}
+        className="h-auto w-full justify-start gap-1.5 px-0 py-0 hover:bg-transparent"
+      >
+        <span className="flex w-full items-center gap-1.5">
+          {expanded ? (
+            <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight
+              size={14}
+              className="shrink-0 text-muted-foreground"
+            />
+          )}
+          <span className="flex-1 text-left text-xs font-medium text-muted-foreground">
+            诊断信息
+          </span>
+        </span>
+      </Button>
+
+      {expanded && (
+        <div className="mt-2 select-text space-y-2 rounded-lg bg-muted p-3">
+          <DiagRow label="运行 ID" value={run.id} />
+          <DiagRow label="Agent ID" value={run.agentId} />
+          <DiagRow label="类型" value={run.kind} />
+          {run.parentRunId && (
+            <DiagRow label="上级运行" value={run.parentRunId} />
+          )}
+          {run.dependsOn.length > 0 && (
+            <DiagRow label="依赖" value={run.dependsOn.join(", ")} />
+          )}
+          {run.model && <DiagRow label="模型" value={run.model} />}
+          <DiagRow label="执行 ID" value={executionId} />
+          <DiagRow label="Trace ID" value={traceId ?? "—"} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** One diagnostic id row — left label, right mono value that wraps (`break-all`)
+ * so a long UUID never overflows the narrow run-detail column. */
+function DiagRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+      <span className="break-all text-right font-mono text-xs text-foreground">
         {value}
       </span>
     </div>

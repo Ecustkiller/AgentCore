@@ -1,4 +1,4 @@
-"""Native push notifications (原生推送, 手机端落地设计 P2).
+"""Native push notifications (原生推送, 认证与会话 §十).
 
 A best-effort backstop for the *attention* signal when the mobile client is gone
 (SSE dropped, app backgrounded): when an agent durably pauses for the user

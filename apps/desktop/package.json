@@ -6,6 +6,8 @@
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:web": "vite --config vite.web.config.ts",
+    "shoot": "node scripts/shoot.mjs",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "bundle:sidecar": "node scripts/bundle-sidecar.mjs",
@@ -14,16 +16,16 @@
     "build:win:cn": "node scripts/build-win-cn.mjs",
     "build:mac": "pnpm bundle:sidecar && electron-vite build && electron-builder --mac --arm64",
     "build:linux": "pnpm bundle:sidecar && electron-vite build && electron-builder --linux",
-    "lint": "biome check src/ && node scripts/check-ui-tokens.mjs",
+    "lint": "biome check src/ && node ../../scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer",
     "lint:fix": "biome check --write src/",
-    "check-ui-tokens": "node scripts/check-ui-tokens.mjs",
+    "check-ui-tokens": "node ../../scripts/check-ui-tokens.mjs --src apps/desktop/src/renderer",
     "test": "vitest",
     "conformance": "vitest run src/renderer/protocol",
     "typecheck": "tsc --noEmit",
-    "gen:api": "openapi-typescript ../server/openapi.json -o src/renderer/types/api.generated.ts",
-    "postinstall": "pnpm gen:api && node ./scripts/install-electron.mjs"
+    "postinstall": "node ./scripts/install-electron.mjs"
   },
   "dependencies": {
+    "@agentcore/contract-rest-types": "workspace:*",
     "@agentcore/contract-types": "workspace:*",
     "@agentcore/design-tokens": "workspace:*",
     "@agentcore/protocol-conformance": "workspace:*",
@@ -80,7 +82,6 @@
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "jsdom": "^29.1.1",
-    "openapi-typescript": "^7.13.0",
     "playwright": "^1.60.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^4.0.0",

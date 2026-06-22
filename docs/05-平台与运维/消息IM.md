@@ -1,3 +1,12 @@
+---
+status: landed
+code: apps/server/agentcore/messaging/
+related:
+  - docs/05-平台与运维/认证与会话.md
+skip_if:
+  - 只改 AI 对话（读 03-AI / 04-前端）
+---
+
 # 消息 IM（找人）
 
 > **状态**：**P0（人 ↔ 人单聊）✅ + 内测全员群 MVP & 自助管理（退群/静音/置顶/成员面板）& 审核治理 & 富消息（图/文件）✅ 已落地**；⏳ 官方号推送、P1（已读 UI / 在线态 / 联系人 / 隐私设置面）、P2 余项（通用建群 + 群审核；人+AI 混合群见远期规划）、多 worker 实时。
@@ -43,7 +52,7 @@
 
 - **传输**：`GET /v1/realtime` 每用户一条长连 SSE firehose（server→client），发送走上面的 POST。鉴权复用 Cookie；此流自带 401→刷新→重连（[认证与会话 §六](/docs/05-平台与运维/认证与会话.md)），前端客户端见 `renderer/services/realtime.ts`（§六）。
 - **fan-out**：A 发 → 落库 `chat_messages` → 经 `HubChatEventPublisher`（`messaging/hub.py` 进程内 pub/sub）推送给在线成员的 firehose。
-- **多载事件**：这条 firehose 不止 IM 消息——它是该用户的通用「跨端 server→client」管线。除 `chat_message` 外，还载 `workspace_promoted`：裸聊在**任一端**懒建工作区时（回合首写 / 面板写 / 「打开本地文件夹」），由提升收口 `promote_conversation_folder` 经同一 `ChatHub.publish` 广播给该用户所有在线连接，使第二设备 / 消息页 / 对话页实时重组该会话（[双模式工作区 §对话级路由](/docs/02-架构/双模式工作区.md)）。新事件类型只需在 `_format_event` 透传 + 前端 `handleFrame` 加一分支，无需新通道。
+- **多载事件**：这条 firehose 不止 IM 消息——是该用户通用的「跨端 server→client」管线。除 `chat_message` 外，还载 `workspace_promoted`（裸聊任一端懒建工作区时由提升收口广播，重组机制见 [双模式工作区 §对话级路由](/docs/02-架构/双模式工作区.md)）。**扩展性**：新事件类型只需 `_format_event` 透传 + 前端 `handleFrame` 加一分支，无需新通道。
 - **离线补偿**：不另建表，上线时按 `last_read_message_id` 拉 `chat_messages` 增量。
 - **多 worker（⏳）**：换 Redis / NATS pub-sub——`ChatEventPublisher` Protocol 已抽象（`events.py`），届时为 seam 局部替换，不动业务逻辑（同限流 / 审批门的多机化路径）。
 

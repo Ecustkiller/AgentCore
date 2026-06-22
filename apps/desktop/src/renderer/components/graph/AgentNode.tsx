@@ -1,9 +1,4 @@
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
   graphBadgeMuted,
   graphBadgePrimary,
   graphBadgePrimaryPlain,
@@ -12,6 +7,11 @@ import {
   statusPillInline,
   statusPillSoft,
 } from "@/components/ui/tone-presets";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import { formatCompact, formatDuration } from "@/lib/format";
 import {
@@ -222,9 +222,7 @@ export function AgentNode({ data }: NodeProps) {
     d.toolCount > 0 ? `，工具 ${d.toolCount} 次` : ""
   }${artifacts.length > 0 ? `，产物 ${artifacts.length} 个` : ""}${
     d.revised ? `，${revisedBadge(d.revised).label}` : ""
-  }${
-    d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""
-  }${
+  }${d.checkpoint ? `，检查点${checkpointBadge(d.checkpoint).label}` : ""}${
     (d.escalationPending ?? 0) > 0
       ? `，${d.escalationPending} 项待你拍板`
       : (d.escalationRaised ?? 0) > 0
@@ -411,7 +409,9 @@ export function AgentNode({ data }: NodeProps) {
                   </span>
                 )}
                 {d.reasoningEffort === "max" && (
-                  <span className={`flex shrink-0 items-center gap-0.5 ${statusPillInline.primary}`}>
+                  <span
+                    className={`flex shrink-0 items-center gap-0.5 ${statusPillInline.primary}`}
+                  >
                     <Sparkles size={10} />
                     深度
                   </span>

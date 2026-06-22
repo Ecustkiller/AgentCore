@@ -1,4 +1,4 @@
-"""Push device registration routes (原生推送设备注册, 手机端落地设计 P2).
+"""Push device registration routes (原生推送设备注册, 认证与会话 §十).
 
 A mobile (Capacitor) client registers its FCM device token so the backend can push when
 an agent durably pauses for the user (plan_review / ask_user) while the app is gone.

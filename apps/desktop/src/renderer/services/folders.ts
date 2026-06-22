@@ -83,3 +83,8 @@ export async function updateFolder(
 export async function deleteFolder(id: string): Promise<void> {
   await api.delete(`/v1/folders/${id}`);
 }
+
+/** Hard-delete a folder and every member conversation + cloud workspace (彻底删除项目). */
+export async function permanentDeleteFolder(id: string): Promise<void> {
+  await api.delete(`/v1/folders/${id}/permanent`);
+}

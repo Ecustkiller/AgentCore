@@ -76,6 +76,11 @@ def test_delegated():
     assert not _run({"name": "Delegated"}, _outcome(delegated=False)).passed
 
 
+def test_not_delegated():
+    assert _run({"name": "NotDelegated"}, _outcome(delegated=False)).passed
+    assert not _run({"name": "NotDelegated"}, _outcome(delegated=True)).passed
+
+
 def test_roster_matches_superset():
     oc = _outcome(roster=["研究员", "撰稿人", "CEO"])
     assert _run({"name": "RosterMatches", "args": {"expected": ["研究员", "撰稿人"]}}, oc).passed
@@ -87,6 +92,12 @@ def test_roster_matches_superset():
 def test_max_rounds_budget():
     assert _run({"name": "MaxRounds", "args": {"budget": 3}}, _outcome(rounds=2)).passed
     assert not _run({"name": "MaxRounds", "args": {"budget": 3}}, _outcome(rounds=5)).passed
+
+
+def test_max_tool_calls_budget():
+    oc = _outcome(tool_calls=[("web_search", "{}")] * 5)
+    assert _run({"name": "MaxToolCalls", "args": {"budget": 5}}, oc).passed
+    assert not _run({"name": "MaxToolCalls", "args": {"budget": 4}}, oc).passed
 
 
 def test_no_fabrication_marker():

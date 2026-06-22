@@ -268,6 +268,13 @@
                 "run_id": "debate_mod1_r1_con",
                 "ok": true
               }
+            ],
+            "clashes": [
+              {
+                "from_key": "con",
+                "to_key": "pro",
+                "point": "收益可量化但未对冲风险敞口，量化口径回避了尾部风险。"
+              }
             ]
           }
         ],
@@ -537,6 +544,13 @@
               "name": "反对方",
               "run_id": "debate_mod1_r1_con",
               "ok": true
+            }
+          ],
+          "clashes": [
+            {
+              "from_key": "con",
+              "to_key": "pro",
+              "point": "收益可量化但未对冲风险敞口，量化口径回避了尾部风险。"
             }
           ]
         }

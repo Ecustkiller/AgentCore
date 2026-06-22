@@ -9,16 +9,12 @@ import { NODE_HEIGHT, computeLayout, fitWidthBox } from "@/lib/elk-layout";
 import { estimateTokens, formatCost, headText, tailText } from "@/lib/format";
 import { useActiveMessages, useConversationStore } from "@/stores/conversation";
 import {
-  type Execution,
   type RunStatus,
   useActiveExecField,
   useExecutionScope,
   useProjectedExecution,
 } from "@/stores/execution";
-import {
-  type GraphEdge,
-  useGraphStore,
-} from "@/stores/graph";
+import { type GraphEdge, useGraphStore } from "@/stores/graph";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { useUsageStore } from "@/stores/usage";
 import {
@@ -31,6 +27,10 @@ import {
 } from "@xyflow/react";
 import { Crosshair, Maximize2, ScanSearch } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CanvasZoomControls } from "./CanvasZoomControls";
+import { GraphToolbar } from "./GraphToolbar";
+import { Timeline } from "./Timeline";
+import { WaveLanes } from "./WaveLanes";
 import {
   INPUT_ID,
   edgeTypes,
@@ -38,17 +38,14 @@ import {
   nodeTypes,
   prefersReducedMotion,
 } from "./constants";
-import { GraphToolbar } from "./GraphToolbar";
 import {
+  type WaveBand,
   buildGraphStructure,
   computeWaves,
   deriveArtifacts,
   deriveCaptainStatus,
   resolveHandoff,
-  type WaveBand,
 } from "./helpers";
-import { Timeline } from "./Timeline";
-import { WaveLanes } from "./WaveLanes";
 
 interface GraphViewProps {
   /**
@@ -61,30 +58,30 @@ interface GraphViewProps {
   /**
    * Worker-node drill-in hand-off: when set, a node click reports the run id
    * instead of opening the run detail itself, and it does NOT close the
-   * surrounding overlay. Both the embedded message graph (opens a docked
-   * run-detail tab) and the full-screen overlay (opens the in-place
-   * {@link GraphDetailPanel}) pass this so a drill never drops their surface.
-   * When omitted, a node click opens the run detail here then calls `onClose`.
-   * Endpoint (input / captain) clicks use {@link onEndpointSelect} instead.
+   * surrounding surface. Both the embedded message graph and the canvas 放大态
+   * ({@link import("./CanvasZoomedTurn")}) pass this so a drill opens the shared
+   * docked run-detail tab without dropping their surface. When omitted, a node
+   * click opens the run detail here then calls `onClose`. Endpoint (input /
+   * captain) clicks use {@link onEndpointSelect} instead.
    */
   onNodeSelect?: (runId: string) => void;
   /**
-   * Endpoint drill-in hand-off for the full-screen overlay: when set, clicking
-   * the 用户输入 / CEO 汇聚点 endpoint reports the chat message to surface (the
-   * prompt / the final answer) + a title, so the overlay shows it in the
-   * in-place panel WITHOUT leaving full-screen. The embedded graph leaves it
-   * unset and keeps the jump-to-chat focus (that bubble is already in the
-   * column, so a panel would just duplicate it).
+   * Endpoint drill-in hand-off: when set, clicking the 用户输入 / CEO 汇聚点
+   * endpoint reports the chat message to surface (the prompt / the final answer)
+   * + a title, so the host (canvas focused node / 放大态) shows it in its foot
+   * drawer WITHOUT leaving the canvas. The in-chat embedded graph leaves it unset
+   * and keeps the jump-to-chat focus (that bubble is already in the column, so a
+   * drawer would just duplicate it).
    */
   onEndpointSelect?: (contentMessageId: string, title: string) => void;
   /**
-   * Full-screen only: the chat message id currently surfaced in the in-place
-   * endpoint view ({@link GraphDetailPanel}), so the matching endpoint node
-   * (用户输入 / CEO 汇聚点) lights up like a drilled worker. Matched against the
-   * input prompt / final-answer message ids. While set, it also suppresses the
-   * worker glow (the panel shows the endpoint, not a run), so exactly one node
-   * is lit. Null / omitted → no endpoint is lit (embedded graph, or a worker
-   * run is showing instead).
+   * The chat message id currently surfaced in the host's endpoint drawer (canvas
+   * focused node / 放大态), so the matching endpoint node (用户输入 / CEO 汇聚点)
+   * lights up like a drilled worker. Matched against the input prompt /
+   * final-answer message ids. While set, it also suppresses the worker glow (the
+   * drawer shows the endpoint, not a run), so exactly one node is lit. Null /
+   * omitted → no endpoint is lit (in-chat embedded graph, or a worker run is
+   * showing instead).
    */
   highlightEndpointMessageId?: string | null;
   /** Embedded only: report the canvas height the graph wants (fit-to-width of
@@ -92,13 +89,13 @@ interface GraphViewProps {
    * real footprint. `overflowing` is true when the graph is taller than the
    * clamp ceiling, so the wrapper can hint there is more (fade + 全屏). */
   onMeasure?: (m: { height: number; overflowing: boolean }) => void;
-  /** Dismiss the surrounding temporary full-screen (non-embedded only); set by
-   * the inline graph's fullscreen wrapper. Endpoint jumps + node drill-ins call
-   * it so the overlay steps aside to reveal the chat (where the run detail and
-   * the jumped-to bubble live). */
+  /** Exit the surrounding canvas 放大态 (non-embedded only); set by
+   * {@link import("./CanvasZoomedTurn")}. Inert when `onNodeSelect` /
+   * `onEndpointSelect` are also set (every drill is handed off in place), so the
+   * zoomed view never closes itself on a drill. */
   onClose?: () => void;
-  /** Start the replay timeline playing on mount — the full-screen "回放" entry
-   * (non-embedded only). */
+  /** Start the replay timeline playing on mount — the 回放 entry into the canvas
+   * 放大态 (non-embedded only). */
   autoplay?: boolean;
 }
 
@@ -194,11 +191,11 @@ export function GraphView({
     const active = s.tabs.find((t) => t.id === s.activeTabId);
     return active && active.messageId === messageId ? active.runId : null;
   });
-  // While an endpoint (提问 / 最终回答) fills the in-place panel, IT — not a run —
-  // is on screen (GraphDetailPanel lets the endpoint win over an open run tab),
-  // so suppress the worker glow: exactly one node lights, matching what the panel
-  // shows. Clearing the endpoint (Esc / 收起) restores the run's glow if its tab
-  // is still open. Inert in the embedded graph (no endpoint id ever set).
+  // While an endpoint (提问 / 最终回答) fills the host's foot drawer, IT — not a run —
+  // is on screen, so suppress the worker glow: exactly one node lights, matching
+  // what the drawer shows. Clearing the endpoint (Esc / 收起) restores the run's
+  // glow if its tab is still open. Inert in the in-chat embedded graph (no endpoint
+  // id passed).
   const litRunId = highlightEndpointMessageId ? null : highlightRunId;
   // The single FX rate (§7.5) that turns each run's nano-USD total into the ¥
   // chip on its node; one rate for the whole graph keeps the money consistent.
@@ -477,13 +474,12 @@ export function GraphView({
     return () => window.removeEventListener("keydown", onKey);
   }, [fitView]);
 
-  // Full-screen only: when the canvas width changes — the in-place run-detail
-  // panel (GraphDetailPanel) opening / closing / being resized beside it — refit
-  // so the DAG re-centers into the width it actually has instead of sliding
-  // behind the panel. Debounced so a resize-drag settles before the fit; the
-  // first (mount) observation is skipped because `fitView` already framed it,
-  // and the overlay's transform-only slide-in doesn't change layout width so it
-  // never triggers a spurious fit. Embedded mode keeps its own width effect.
+  // Non-embedded (canvas 放大态) only: when the graph's width changes — the shared
+  // right-docked run-detail panel opening / closing / being resized beside it, or
+  // the window resizing — refit so the DAG re-centers into the width it actually
+  // has instead of sliding behind the panel. Debounced so a resize-drag settles
+  // before the fit; the first (mount) observation is skipped because `fitView`
+  // already framed it. Embedded mode keeps its own width effect.
   useEffect(() => {
     if (embedded) return;
     const el = containerRef.current;
@@ -808,8 +804,20 @@ export function GraphView({
               <GraphToolbar
                 layoutKind={layoutKind}
                 onLayoutKindChange={setLayoutKind}
-                onFitView={fitView}
               />
+            )}
+
+            {/* Zoom cluster — shared with the 总览态 for a unified look (统一观感). Layout
+                selection stays in GraphToolbar (top-right); zoom + fit live here. */}
+            {!embedded && (
+              <div className="absolute bottom-3 left-3 z-10">
+                <CanvasZoomControls
+                  onZoomIn={() => rfRef.current?.zoomIn({ duration: 200 })}
+                  onZoomOut={() => rfRef.current?.zoomOut({ duration: 200 })}
+                  onFit={fitView}
+                  fitLabel="适应画布 (F)"
+                />
+              </div>
             )}
 
             {!embedded && hasFrames && (

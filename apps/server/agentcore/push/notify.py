@@ -1,4 +1,4 @@
-"""User-level push orchestration (原生推送下发, 手机端落地设计 P2).
+"""User-level push orchestration (原生推送下发, 认证与会话 §十).
 
 :func:`notify_user` is the single best-effort entry the attention triggers call: it
 resolves a user's device tokens, hands them to the configured :class:`PushSender`, and

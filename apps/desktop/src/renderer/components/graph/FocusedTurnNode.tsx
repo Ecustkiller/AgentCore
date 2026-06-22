@@ -1,3 +1,4 @@
+import { DebateBody } from "@/components/chat/DebateCompare";
 import { Markdown } from "@/components/chat/Markdown";
 import { RevisionCompare } from "@/components/chat/RevisionCompare";
 import { IconButton } from "@/components/ui";
@@ -5,6 +6,7 @@ import { useActiveMessages } from "@/stores/conversation";
 import {
   ExecutionScopeContext,
   hasRevisions,
+  isDebate,
   useMessageExecution,
 } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
@@ -14,14 +16,20 @@ import {
   Position,
   ReactFlowProvider,
 } from "@xyflow/react";
-import { AlertTriangle, History, Maximize2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  History,
+  Maximize2,
+  MessagesSquare,
+  X,
+} from "lucide-react";
 import { useCallback, useState } from "react";
 import {
   countPendingDecisions,
   isTurnRecoverable,
 } from "./CanvasDecisionPanel";
-import type { EndpointView } from "./GraphDetailPanel";
 import { GraphView } from "./GraphView";
+import type { EndpointView } from "./constants";
 
 /**
  * The FOCUSED team turn on the persistent conversation canvas (前端UX设计.md
@@ -39,14 +47,15 @@ import { GraphView } from "./GraphView";
  *
  * Reading in place (§三 ②读答案): clicking the 用户输入 / CEO 汇聚点 endpoint surfaces
  * its full text (the prompt / the CEO's final answer) in a drawer at the foot of the
- * node — so a deliverable is read without leaving the canvas. The same foot drawer
- * also hosts 版本对比 ({@link RevisionCompare}, opened from the header chip when this
- * turn revised a worker) — the chat-only compare card brought onto the canvas, reused
- * verbatim (`bare`), each version still drilling to the shared run-detail panel. Drawer
- * and endpoint reading are mutually exclusive; the drawer splits the fixed node height
- * with the graph (total stays {@link FOCUS_NODE_HEIGHT}, so the host's stacking offsets
- * never shift). Worker clicks open the run in the shared docked panel; the 全屏 button
- * hands off to the on-demand full-screen overlay.
+ * node — so a deliverable is read without leaving the canvas. The same foot drawer also
+ * hosts 版本对比 ({@link RevisionCompare}, header chip when this turn revised a worker)
+ * and, for a 辩论 turn, 交锋叙事 ({@link DebateBody}: 决策简报 + 叙事线, header chip) —
+ * the debate's full surface lives in 放大态, this is the overview-node peek. The three
+ * (endpoint / 版本对比 / 交锋叙事) are mutually exclusive; the drawer splits the fixed
+ * node height with the graph (total stays {@link FOCUS_NODE_HEIGHT}, so the host's
+ * stacking offsets never shift). Worker clicks open the run in the shared docked panel;
+ * the 放大 button hands off to the canvas 放大态 ({@link
+ * import("./CanvasZoomedTurn").CanvasZoomedTurn}, Route A — not a separate overlay).
  */
 
 /** Fixed footprint so the host can stack turns at known offsets. */
@@ -77,10 +86,12 @@ export function FocusedTurnNode({ data }: NodeProps) {
   // exclusive; opening one closes the other.
   const [endpoint, setEndpoint] = useState<EndpointView | null>(null);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
+  const [debateOpen, setDebateOpen] = useState(false);
   const endpointContent = endpoint
     ? (messages.find((m) => m.id === endpoint.contentMessageId)?.content ?? "")
     : "";
   const showRevisions = !!execution && hasRevisions(execution);
+  const showDebate = !!execution && isDebate(execution);
 
   // 图上指挥 (§6.2): on-graph awareness that THIS turn awaits a boss decision or needs
   // 救火 — the host {@link import("./ConversationCanvas")} surfaces the actionable cards
@@ -98,6 +109,7 @@ export function FocusedTurnNode({ data }: NodeProps) {
       showRunDetail(messageId, runId, role);
       setEndpoint(null);
       setRevisionsOpen(false);
+      setDebateOpen(false);
     },
     [execution, messageId, showRunDetail],
   );
@@ -106,6 +118,7 @@ export function FocusedTurnNode({ data }: NodeProps) {
     (contentMessageId: string, title: string) => {
       setEndpoint({ contentMessageId, title });
       setRevisionsOpen(false);
+      setDebateOpen(false);
     },
     [],
   );
@@ -136,10 +149,26 @@ export function FocusedTurnNode({ data }: NodeProps) {
               待救火
             </span>
           )}
+          {showDebate && (
+            <IconButton
+              onClick={() => {
+                setEndpoint(null);
+                setRevisionsOpen(false);
+                setDebateOpen((v) => !v);
+              }}
+              aria-label="交锋叙事"
+              title="交锋叙事"
+              aria-pressed={debateOpen}
+              className={debateOpen ? "bg-accent text-foreground" : undefined}
+            >
+              <MessagesSquare size={15} />
+            </IconButton>
+          )}
           {showRevisions && (
             <IconButton
               onClick={() => {
                 setEndpoint(null);
+                setDebateOpen(false);
                 setRevisionsOpen((v) => !v);
               }}
               aria-label="版本对比"
@@ -154,8 +183,8 @@ export function FocusedTurnNode({ data }: NodeProps) {
           )}
           <IconButton
             onClick={onMaximize}
-            aria-label="全屏查看协作图"
-            title="全屏查看协作图"
+            aria-label="放大查看"
+            title="放大查看"
           >
             <Maximize2 size={15} />
           </IconButton>
@@ -180,19 +209,27 @@ export function FocusedTurnNode({ data }: NodeProps) {
               </ExecutionScopeContext.Provider>
             </ReactFlowProvider>
           </div>
-          {(endpoint || revisionsOpen) && (
+          {(endpoint || revisionsOpen || debateOpen) && (
             <div
               className="flex flex-col border-t border-border"
-              style={{ height: revisionsOpen ? REVISION_DRAWER_H : DRAWER_H }}
+              style={{
+                height:
+                  revisionsOpen || debateOpen ? REVISION_DRAWER_H : DRAWER_H,
+              }}
             >
               <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1">
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                  {revisionsOpen ? "版本对比" : endpoint?.title}
+                  {revisionsOpen
+                    ? "版本对比"
+                    : debateOpen
+                      ? "交锋叙事"
+                      : endpoint?.title}
                 </span>
                 <IconButton
                   onClick={() => {
                     setEndpoint(null);
                     setRevisionsOpen(false);
+                    setDebateOpen(false);
                   }}
                   aria-label="收起"
                   title="收起"
@@ -207,6 +244,8 @@ export function FocusedTurnNode({ data }: NodeProps) {
                     messageId={messageId}
                     bare
                   />
+                ) : debateOpen && execution ? (
+                  <DebateBody execution={execution} messageId={messageId} />
                 ) : (
                   <Markdown content={endpointContent} />
                 )}

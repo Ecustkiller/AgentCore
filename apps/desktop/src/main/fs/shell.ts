@@ -1,5 +1,5 @@
-import { clipboard, shell } from "electron";
 import type { FsResult } from "@shared/ipc-contract";
+import { clipboard, shell } from "electron";
 import { locate, realInside } from "./pathGuard";
 import { ensureReady } from "./roots";
 
@@ -10,7 +10,10 @@ import { ensureReady } from "./roots";
 // 从不下发 renderer，沿用本服务的安全不变量。仅本地源会调到这里（云端无本机路径）。
 
 /** 在系统文件管理器中定位该路径（`shell.showItemInFolder`，无成功信号，靠 realpath 校验兜存在性）。 */
-export async function reveal(rootId: string, relPath: string): Promise<FsResult> {
+export async function reveal(
+  rootId: string,
+  relPath: string,
+): Promise<FsResult> {
   await ensureReady();
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;
@@ -36,7 +39,10 @@ export async function openWithDefaultApp(
 }
 
 /** 把该路径的绝对路径写入系统剪贴板（写入在主进程完成，绝对路径不进 renderer）。 */
-export async function copyPath(rootId: string, relPath: string): Promise<FsResult> {
+export async function copyPath(
+  rootId: string,
+  relPath: string,
+): Promise<FsResult> {
   await ensureReady();
   const loc = locate(rootId, relPath);
   if ("error" in loc) return loc.error;

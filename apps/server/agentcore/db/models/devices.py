@@ -20,7 +20,7 @@ from ._helpers import _new_uuid
 
 
 class PushDeviceRow(Base):
-    """A mobile device's push token, per user (原生推送设备注册, 手机端落地设计 P2).
+    """A mobile device's push token, per user (原生推送设备注册, 认证与会话 §十).
 
     A Capacitor client registers its FCM token here so the backend can notify the user
     when an agent needs them (a durable plan_review / ask_user pause) while the app is

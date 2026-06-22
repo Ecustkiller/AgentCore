@@ -50,6 +50,52 @@ jobs:
           TEST_DATABASE_URL: postgresql+asyncpg://agentcore:agentcore@localhost:5432/agentcore
         run: uv run pytest --tb=short
 
+  contracts:
+    name: Contracts + conformance (gen + drift gate)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install backend dependencies
+        working-directory: apps/server
+        run: uv sync --all-extras
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install contract-rest-types deps
+        run: pnpm install --frozen-lockfile --filter @agentcore/contract-rest-types...
+
+      - name: Regenerate committed contract artifacts
+        run: node scripts/gen-types.mjs
+
+      # Conformance fixtures are generated from the Python vectors (single source:
+      # agentcore.conformance.vectors). Regenerate them here so the drift gate below
+      # fails if a committed fixture is stale vs the vectors/oracle — keeping the
+      # 前端预览 (#/preview) and `pnpm conformance` honest with zero manual re-export.
+      - name: Regenerate committed conformance fixtures
+        working-directory: apps/server
+        run: uv run python -m agentcore.conformance.export
+
+      - name: Fail on uncommitted drift
+        run: git diff --exit-code
+
   frontend:
     name: Frontend (lint + test)
     runs-on: ubuntu-latest
@@ -83,6 +129,24 @@ jobs:
 
       - name: Test
         run: pnpm --filter agentcore-desktop test -- --run
+
+      # Render smoke gate: replay every committed conformance vector through the
+      # real components in a headless browser (#/preview) and fail if any AI state
+      # crashes on render. Catches component changes that silently break a state —
+      # zero backend/LLM, same vectors as `pnpm conformance`. See scripts/shoot.mjs.
+      - name: Install Chromium for preview shots
+        run: pnpm --filter agentcore-desktop exec playwright install --with-deps chromium
+
+      - name: Preview render smoke gate
+        run: pnpm --filter agentcore-desktop shoot
+
+      - name: Upload preview shots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-shots
+          path: apps/desktop/out/preview/
+          if-no-files-found: ignore
 
   mobile:
     name: Mobile (lint + typecheck + conformance)

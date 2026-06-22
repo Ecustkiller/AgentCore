@@ -64,8 +64,11 @@ class _ScriptedProvider:
 
 
 class _StubTool:
-    def __init__(self, name: str = "search") -> None:
+    def __init__(
+        self, name: str = "search", *, category: ToolCategory = ToolCategory.SEARCH
+    ) -> None:
         self._name = name
+        self._category = category
         self.calls = 0
 
     @property
@@ -74,7 +77,7 @@ class _StubTool:
             name=self._name,
             description="stub",
             parameters={"type": "object", "properties": {}},
-            category=ToolCategory.SEARCH,
+            category=self._category,
         )
 
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
@@ -205,12 +208,16 @@ async def test_single_ordered_log_interleaves_display_and_execution_facts():
 
 
 async def test_loop_records_note_fact_on_nudge():
-    # Three identical tool calls trip convergence governance → a fact-anchored NUDGE
+    # Three identical tool calls trip the stuck-loop detector → a fact-anchored NUDGE
     # injected into the window; the 4th round answers. The injected nudge is part of
-    # the real LLM window, so it is recorded as a note(reason="nudge") fact.
-    same = _tool_chunk("search", '{"q": "x"}')
+    # the real LLM window, so it is recorded as a note(reason="nudge") fact. A
+    # non-investigation tool (EXECUTION, not a read) keeps the over-investigation ladder
+    # dormant so this isolates the stuck-nudge → fact plumbing.
+    same = _tool_chunk("compute", '{"q": "x"}')
     provider = _ScriptedProvider([[same], [same], [same], [_content_chunk("final")]])
-    facts, content, messages = await _run(provider, _StubTool())
+    facts, content, messages = await _run(
+        provider, _StubTool(name="compute", category=ToolCategory.EXECUTION)
+    )
 
     assert content == "final"
     notes = [f for f in facts if f["kind"] == FactKind.NOTE]

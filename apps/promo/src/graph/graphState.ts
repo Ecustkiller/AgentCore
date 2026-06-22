@@ -34,8 +34,11 @@ const SCHED: Record<string, Sched> = {
   research_user: { enter: 18, run: 120, done: 180 },
   research_comp: { enter: 24, run: 120, done: 180 },
   research_tech: { enter: 30, run: 120, done: 180 },
-  plan_radical: { enter: 54, run: 195, done: 285 },
-  plan_stable: { enter: 60, run: 195, done: 285 },
+  moderator: { enter: 48, run: 195, done: 285 },
+  view_growth: { enter: 54, run: 195, done: 285 },
+  view_steady: { enter: 60, run: 195, done: 285 },
+  view_user: { enter: 66, run: 195, done: 285 },
+  view_cost: { enter: 72, run: 195, done: 285 },
   strategy: { enter: 84, run: 300, done: 345 },
   spec_product: { enter: 102, run: 360, done: 390 },
   spec_tech: { enter: 108, run: 360, done: 390 },
@@ -47,10 +50,14 @@ const STREAM: Record<string, string> = {
   research_user: "已锁定 3 类核心用户，高频痛点集中在协作断点与上下文丢失……",
   research_comp: "竞品 A 偏协作、B 偏自动化，均未打通真正的多 Agent 团队……",
   research_tech: "Agent 编排正从单体走向团队化，DAG 调度与共享工作区成主线……",
-  plan_radical:
+  moderator:
+    "本轮焦点：押注差异化 vs 控风险稳健，请各方就成本与时机正面回应……",
+  view_growth:
     "主张直接押注 Agent 团队协作这一差异点，抢占竞品尚未覆盖的空白……",
-  plan_stable: "反对一次性押注，主张先验证关键风险、按里程碑稳健迭代落地……",
-  strategy: "综合正反方：先验证关键风险，再分阶段放大投入，锁定团队协作主线……",
+  view_steady: "反对一次性押注，主张先验证关键风险、按里程碑稳健迭代落地……",
+  view_user: "强调先把协作断点这一最痛场景的核心闭环体验打磨透，再谈扩张……",
+  view_cost: "提醒算力与维护成本、落地复杂度，要求每一步都留有可回退的安全边界……",
+  strategy: "综合各方圆桌论点：先验证关键风险，再分阶段放大投入，锁定团队协作主线……",
   spec_product: "拆出 6 个里程碑，首版聚焦团队协作主链路……",
   spec_tech: "定下 DAG 调度 + 共享工作区 + MCP/A2A 的技术骨架……",
 };
@@ -59,15 +66,15 @@ const DURATION_MS: Record<string, number> = {
   research_user: 5200,
   research_comp: 6100,
   research_tech: 4800,
-  plan_radical: 7200,
-  plan_stable: 6800,
+  moderator: 8400,
+  view_growth: 7200,
+  view_steady: 6800,
+  view_user: 6400,
+  view_cost: 5900,
   strategy: 5600,
   spec_product: 4200,
   spec_tech: 5400,
 };
-
-/** Pull the debate pair apart vertically so the 对射 connector has room. */
-export const DEBATE_NUDGE = 36;
 
 export interface CaptainOverride {
   status: string;
@@ -77,10 +84,7 @@ export interface CaptainOverride {
 }
 
 export function nodePosition(id: string): { x: number; y: number } {
-  const p = DEMO_LAYOUT.positions[id] ?? { x: 0, y: 0 };
-  if (id === "plan_radical") return { x: p.x, y: p.y - DEBATE_NUDGE };
-  if (id === "plan_stable") return { x: p.x, y: p.y + DEBATE_NUDGE };
-  return p;
+  return DEMO_LAYOUT.positions[id] ?? { x: 0, y: 0 };
 }
 
 function enterOf(id: string): number {
@@ -106,8 +110,12 @@ function edgeFlow(targetId: string, frame: number): number {
 }
 
 export interface DebateState {
-  cx: number;
+  /* 对射 axis as a generic segment p1(x1,y1) → p2(x2,y2): vertical for leftright
+   * layouts (x1===x2, debaters stacked in a column), horizontal for top-down ones
+   * (y1===y2, debaters in a row). p1 is the 正营 end (warm in the cinematic gradient). */
+  x1: number;
   y1: number;
+  x2: number;
   y2: number;
   active: boolean;
 }
@@ -180,12 +188,14 @@ export function buildGraphState(
     } as Edge;
   });
 
-  const pro = nodePosition("plan_radical");
-  const con = nodePosition("plan_stable");
+  const top = nodePosition("view_growth");
+  const bot = nodePosition("view_cost");
+  const cx = top.x + 105;
   const debate: DebateState = {
-    cx: pro.x + 105,
-    y1: pro.y + 66,
-    y2: con.y + 66,
+    x1: cx,
+    y1: top.y + 66,
+    x2: cx,
+    y2: bot.y + 66,
     active: frame >= 186 && frame < 292,
   };
 

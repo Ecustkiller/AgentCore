@@ -1,8 +1,4 @@
-import {
-  Centered,
-  EmptyHint,
-  InlineError,
-} from "@/components/files/parts";
+import { Centered, EmptyHint, InlineError } from "@/components/files/parts";
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatBytes } from "@/lib/format";

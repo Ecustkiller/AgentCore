@@ -1,4 +1,4 @@
-// Native share / save for the mobile client (手机端落地设计 · 文件增强).
+// Native share / save for the mobile client (前端技术与架构 §七 · 文件增强).
 //
 // Best-effort: on a device that supports the Web Share API with files (iOS Safari,
 // Android Chrome, the Capacitor webview), this hands the bytes to the OS share sheet

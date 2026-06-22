@@ -1,4 +1,5 @@
-import { Button } from "@/components/ui";
+import { Button, CatalogIconShell } from "@/components/ui";
+import { catalogCategoryColorVar } from "@/lib/catalogColors";
 import {
   type Capabilities,
   type CapabilitySkill,
@@ -118,6 +119,7 @@ function ToolParams({ parameters }: { parameters: Record<string, unknown> }) {
 function ToolCard({ tool }: { tool: CapabilityTool }) {
   const [open, setOpen] = useState(false);
   const Icon = CATEGORY_META[tool.category]?.icon ?? Wrench;
+  const colorVar = catalogCategoryColorVar(tool.category);
   return (
     <div className="flex flex-col rounded-xl border border-border bg-card p-4">
       <Button
@@ -126,7 +128,9 @@ function ToolCard({ tool }: { tool: CapabilityTool }) {
         className="h-auto w-full justify-between gap-2 p-0 text-left font-normal"
       >
         <div className="flex min-w-0 items-center gap-2">
-          <Icon size={16} className="shrink-0 text-muted-foreground" />
+          <CatalogIconShell colorVar={colorVar} className="size-8 rounded-lg">
+            <Icon size={14} />
+          </CatalogIconShell>
           <span className="truncate font-medium text-foreground text-sm">
             {tool.name}
           </span>
@@ -168,6 +172,7 @@ function ToolCard({ tool }: { tool: CapabilityTool }) {
 /** One Skill tile: catalog summary, click-to-expand the full guidance body verbatim. */
 function SkillCard({ skill }: { skill: CapabilitySkill }) {
   const [open, setOpen] = useState(false);
+  const skillColor = catalogCategoryColorVar("skill");
   return (
     <div className="flex flex-col rounded-xl border border-border bg-card p-4">
       <Button
@@ -175,7 +180,12 @@ function SkillCard({ skill }: { skill: CapabilitySkill }) {
         onClick={() => setOpen((v) => !v)}
         className="h-auto w-full items-start gap-2 p-0 text-left font-normal"
       >
-        <BookOpen size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+        <CatalogIconShell
+          colorVar={skillColor}
+          className="mt-0.5 size-8 rounded-lg"
+        >
+          <BookOpen size={14} />
+        </CatalogIconShell>
         <div className="min-w-0 flex-1">
           <span className="block font-mono text-foreground text-sm">
             {skill.name}
@@ -317,18 +327,29 @@ export function CapabilityCatalog() {
           </span>
         </p>
         <div className="space-y-6">
-          {grouped.map(({ category, items }) => (
-            <div key={category}>
-              <h3 className="mb-2 text-muted-foreground text-xs">
-                {CATEGORY_META[category].label} · {items.length}
-              </h3>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {items.map((tool) => (
-                  <ToolCard key={tool.name} tool={tool} />
-                ))}
+          {grouped.map(({ category, items }) => {
+            const meta = CATEGORY_META[category];
+            const colorVar = catalogCategoryColorVar(category);
+            const CatIcon = meta.icon;
+            return (
+              <div key={category}>
+                <h3 className="mb-2 flex items-center gap-1.5 text-muted-foreground text-xs">
+                  <CatalogIconShell
+                    colorVar={colorVar}
+                    className="size-6 rounded-lg"
+                  >
+                    <CatIcon size={12} />
+                  </CatalogIconShell>
+                  {meta.label} · {items.length}
+                </h3>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {items.map((tool) => (
+                    <ToolCard key={tool.name} tool={tool} />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 

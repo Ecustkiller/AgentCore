@@ -1,23 +1,25 @@
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { GraphLayout } from "@/stores/graph";
-import { Maximize2 } from "lucide-react";
 import { LAYOUT_OPTIONS } from "./constants";
 
 interface GraphToolbarProps {
   layoutKind: GraphLayout;
   onLayoutKindChange: (kind: GraphLayout) => void;
-  onFitView: () => void;
 }
 
+/**
+ * 放大态 layout selector (top-right). Zoom + fit moved to the shared
+ * {@link import("./CanvasZoomControls")} cluster (bottom-left, unified with the 总览态),
+ * so this toolbar now selects the ELK layout only.
+ */
 export function GraphToolbar({
   layoutKind,
   onLayoutKindChange,
-  onFitView,
 }: GraphToolbarProps) {
   return (
     <div
-      className="absolute right-3 top-3 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-card/95 p-1 shadow-sm backdrop-blur"
+      className="absolute right-3 top-3 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-card/90 p-1 shadow-sm backdrop-blur"
       onContextMenu={(e) => e.stopPropagation()}
     >
       {LAYOUT_OPTIONS.map((opt) => (
@@ -36,12 +38,6 @@ export function GraphToolbar({
           </IconButton>
         </SimpleTooltip>
       ))}
-      <div className="mx-0.5 h-5 w-px bg-border" />
-      <SimpleTooltip label="适应画布 (F)">
-        <IconButton onClick={onFitView} aria-label="适应画布">
-          <Maximize2 size={14} />
-        </IconButton>
-      </SimpleTooltip>
     </div>
   );
 }

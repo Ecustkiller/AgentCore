@@ -2429,7 +2429,7 @@
         "type": "object"
       },
       "InferenceTokenResponse": {
-        "description": "A freshly minted inference token + its lifetime (the desktop re-mints on\nexpiry when (re)initializing the sidecar).",
+        "description": "A freshly minted inference token + its lifetime.",
         "properties": {
           "expires_in_sec": {
             "title": "Expires In Sec",
@@ -2836,20 +2836,6 @@
           "total"
         ],
         "title": "MessageListResponse",
-        "type": "object"
-      },
-      "MessagePromptResponse": {
-        "description": "The verbatim system prompt ONE assistant turn ran with (本回合提示词, 提示词透明).\n\nSurfaces the ``turn_started`` head fact captured in the turn journal (§18.3) — the\nexact CEO system prompt for that turn, dynamic bits (date / 能力目录 / attachments)\nand all. Read-only, owner-scoped; absent for user messages or legacy turns (404).",
-        "properties": {
-          "system_prompt": {
-            "title": "System Prompt",
-            "type": "string"
-          }
-        },
-        "required": [
-          "system_prompt"
-        ],
-        "title": "MessagePromptResponse",
         "type": "object"
       },
       "MoveConversationRequest": {
@@ -8760,90 +8746,6 @@
         ]
       }
     },
-    "/v1/conversations/{conversation_id}/messages/{message_id}/prompt": {
-      "get": {
-        "description": "The verbatim system prompt the CEO ran for ONE assistant turn (查看本回合提示词).\n\n提示词透明 L3 (对所有人开放): reads the ``turn_started`` head fact from the turn\njournal (§18.3) — the exact prompt that turn was given, dynamic bits and all — so a\nuser can see precisely what steered the reply. Owner-scoped + conversation-scoped\n(``load_owned``) so a foreign ``message_id`` can't leak another tenant's prompt. 404\nfor a user message or a legacy turn that journaled no head fact.",
-        "operationId": "get_message_prompt_v1_conversations__conversation_id__messages__message_id__prompt_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "conversation_id",
-            "required": true,
-            "schema": {
-              "title": "Conversation Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "message_id",
-            "required": true,
-            "schema": {
-              "title": "Message Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessagePromptResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Message Prompt",
-        "tags": [
-          "conversations"
-        ]
-      }
-    },
     "/v1/conversations/{conversation_id}/messages/{message_id}/regenerate": {
       "post": {
         "description": "Re-run a turn from an existing user message via SSE.\n\nServes both \"regenerate\" (no body content — reuse the stored user text) and\n\"edit & resend\" (``content`` set — edit the user message first). The target\n``message_id`` must be a user message; the superseded assistant reply and any\nlater turns are dropped before re-running. Like ``send_message``, the pipeline\nruns as a detached task tracked in the ``TurnRunRegistry`` and the SSE only\nattaches (执行与请求解耦 C1 · slice 1a): a disconnect lets it finish + persist,\nan explicit 停止 goes through ``POST .../stop``. A re-run is a fresh turn, so it\npasses the same gates (rate limit → ownership → BYOK/quota billing gate) as\n``send_message``.",
@@ -11661,9 +11563,84 @@
         ]
       }
     },
+    "/v1/folders/{folder_id}/permanent": {
+      "delete": {
+        "description": "彻底删除项目：立即清除文件夹、其下全部对话及云端工作区文件。\n\nDistinct from ``DELETE /{folder_id}`` (soft-delete container with retention).\nLocal-bound projects: server metadata + cloud copies only — files on the\nuser's machine are not deleted.",
+        "operationId": "delete_folder_permanent_v1_folders__folder_id__permanent_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "title": "Folder Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Folder Permanent",
+        "tags": [
+          "folders"
+        ]
+      }
+    },
     "/v1/inference/token": {
       "post": {
-        "description": "Exchange the caller's cookie session for a scoped inference token (Slice 4a).\n\nCookie-authenticated like the rest of the API; returns a token the desktop\npasses to its local sidecar so the engine's LLM calls reach ``/v1/inference``\nas this user (the platform key stays server-side).",
+        "description": "Exchange the caller's cookie session for a scoped inference token.",
         "operationId": "mint_inference_token_v1_inference_token_post",
         "parameters": [
           {
@@ -11729,7 +11706,6 @@
     },
     "/v1/inference/v1/chat/completions": {
       "post": {
-        "description": "OpenAI-shaped LLM proxy for the on-machine sidecar (Slice 4a).\n\nGate (spend) → resolve credentials server-side → forward to DeepSeek → record\nreal usage. A spend block maps to HTTP 402 — the provider's only non-retryable\n\"can't spend\" status — so the turn fails cleanly instead of the provider\nretrying a 429 three times. Upstream status codes pass through verbatim so the\nsidecar's provider keeps its 401/402/429/5xx handling.",
         "operationId": "inference_chat_completions_v1_inference_v1_chat_completions_post",
         "parameters": [
           {

@@ -1,6 +1,6 @@
 """Protocol conformance — the backend-authoritative ProjectedTurn oracle + golden export.
 
-The single source for the cross-platform protocol巡检 (手机端落地设计 §六): the backend
+The single source for the cross-platform protocol巡检 (前端技术与架构 §十二): the backend
 projects each event vector into the normalized :data:`ProjectedTurn` (the neutral judge),
 and :mod:`export` writes the (vector, golden) pairs to ``packages/protocol-conformance/
 fixtures`` so each frontend's ``fold`` can be asserted ``== golden`` via ``pnpm conformance``.

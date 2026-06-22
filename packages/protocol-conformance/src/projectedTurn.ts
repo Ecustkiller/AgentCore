@@ -1,5 +1,5 @@
 // ProjectedTurn — the platform-neutral, serializable normalized turn state that is
-// the conformance JUDGE (手机端落地设计 §六; protocol-conformance.mdc). Each end
+// the conformance JUDGE (前端技术与架构 §十二; protocol-conformance.mdc). Each end
 // implements `fold(events[]) → ProjectedTurn` and must match the backend-projected
 // golden for every vector. Internal store shapes may differ (desktop's Zustand
 // `Execution` vs mobile's reducer) — only this snapshot is asserted equal.

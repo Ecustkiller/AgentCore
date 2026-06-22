@@ -224,7 +224,10 @@ export function projectExecution(
         // if a node is both. A stray run_id (not on this graph) is ignored.
         for (const rev of f.revisions) {
           const run = runById(rev.runId);
-          if (run && !(run.revised === "bind" && rev.revisionKind === "steer")) {
+          if (
+            run &&
+            !(run.revised === "bind" && rev.revisionKind === "steer")
+          ) {
             run.revised = rev.revisionKind;
           }
         }
@@ -405,8 +408,12 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
         ? "已停止 · 未运行下游"
         : "已放行 · 继续";
     case "plan_revised": {
-      const bound = frame.revisions.filter((r) => r.revisionKind === "bind").length;
-      const steered = frame.revisions.filter((r) => r.revisionKind === "steer").length;
+      const bound = frame.revisions.filter(
+        (r) => r.revisionKind === "bind",
+      ).length;
+      const steered = frame.revisions.filter(
+        (r) => r.revisionKind === "steer",
+      ).length;
       const parts: string[] = [];
       if (bound) parts.push(`定稿 ${bound}`);
       if (steered) parts.push(`操舵 ${steered}`);

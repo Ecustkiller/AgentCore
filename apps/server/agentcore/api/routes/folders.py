@@ -15,6 +15,7 @@ from agentcore.api.schemas import (
     UpdateFolderRequest,
 )
 from agentcore.core.errors import NotFoundError
+from agentcore.folders.permanent_delete import permanent_delete_folder
 from agentcore.db.repositories import FolderRepository
 
 router = APIRouter(prefix="/folders", tags=["folders"])
@@ -72,6 +73,25 @@ async def delete_folder(
     repo: FolderRepository = Depends(get_folder_repo),
 ):
     deleted = await repo.soft_delete(folder_id, user_id=user.user_id)
+    if not deleted:
+        raise NotFoundError("文件夹不存在")
+    return StatusResponse()
+
+
+@router.delete("/{folder_id}/permanent", response_model=StatusResponse)
+async def delete_folder_permanent(
+    folder_id: str,
+    user: AuthUser,
+):
+    """彻底删除项目：立即清除文件夹、其下全部对话及云端工作区文件。
+
+    Distinct from ``DELETE /{folder_id}`` (soft-delete container with retention).
+    Local-bound projects: server metadata + cloud copies only — files on the
+    user's machine are not deleted.
+    """
+    deleted = await permanent_delete_folder(
+        folder_id=folder_id, user_id=user.user_id
+    )
     if not deleted:
         raise NotFoundError("文件夹不存在")
     return StatusResponse()

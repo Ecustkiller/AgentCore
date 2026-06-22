@@ -1,0 +1,564 @@
+{
+  "summary": {
+    "total": 10,
+    "passed": 9,
+    "pass_rate": 0.9,
+    "cost_usd": 0.018388,
+    "by_category": {
+      "team": {
+        "total": 2,
+        "passed": 2,
+        "pass_rate": 1.0
+      },
+      "qa": {
+        "total": 3,
+        "passed": 3,
+        "pass_rate": 1.0
+      },
+      "no_fabrication": {
+        "total": 1,
+        "passed": 1,
+        "pass_rate": 1.0
+      },
+      "retrieval": {
+        "total": 1,
+        "passed": 1,
+        "pass_rate": 1.0
+      },
+      "routing": {
+        "total": 1,
+        "passed": 0,
+        "pass_rate": 0.0
+      },
+      "tool_use": {
+        "total": 2,
+        "passed": 2,
+        "pass_rate": 1.0
+      }
+    }
+  },
+  "cases": [
+    {
+      "case_id": "dependency_chain_research_write",
+      "category": "team",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'"
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True"
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=622 (min 80)"
+        }
+      ],
+      "judge": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 4,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "研究员",
+          "分析师",
+          "管理顾问"
+        ],
+        "tool_calls": [
+          "delegate",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "file_write",
+          "file_write",
+          "file_write",
+          "file_read",
+          "file_write",
+          "file_write",
+          "file_write",
+          "file_write",
+          "file_write",
+          "file_list",
+          "file_read",
+          "file_read"
+        ],
+        "citations": 24,
+        "usage": {
+          "input": 147138,
+          "output": 13225,
+          "reasoning": 7538
+        },
+        "cost_usd": 0.006758,
+        "latency_ms": 135255,
+        "error": null,
+        "content_preview": "三步流水线已完成。以下是结果概览：\n\n---\n\n**第 1 步 — 调研发现（基于 Microsoft 2021 年发表于 *Nature Human Behaviour* 的 6.1 万人研究）**\n\n两个主要负面影响：\n1. **跨团队协作萎缩** — 跨组协作时间下降约 25%，网络固化为孤岛\n2. **沟通媒介降级** — 实时同步沟通减少，转向低效异步文本，信息丰富度下降\n\n**第 2 "
+      }
+    },
+    {
+      "case_id": "guardrail_simple_no_delegate",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'"
+        },
+        {
+          "name": "NotDelegated",
+          "passed": true,
+          "detail": "delegated=False"
+        },
+        {
+          "name": "MaxRounds",
+          "passed": true,
+          "detail": "rounds=1 (budget 3)"
+        }
+      ],
+      "judge": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 7741,
+          "output": 54,
+          "reasoning": 25
+        },
+        "cost_usd": 4.5e-05,
+        "latency_ms": 2760,
+        "error": null,
+        "content_preview": "HTTP 404 表示服务器无法找到请求的资源（如网页或文件），通常说明该 URL 对应的内容不存在或已被删除。"
+      }
+    },
+    {
+      "case_id": "no_fabrication_unknowable",
+      "category": "no_fabrication",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'"
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=172 (min 5)"
+        },
+        {
+          "name": "MaxRounds",
+          "passed": true,
+          "detail": "rounds=1 (budget 4)"
+        }
+      ],
+      "judge": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1149,
+          "output": 200,
+          "reasoning": 93,
+          "cache_hit": 1024,
+          "cache_miss": 125
+        },
+        "cost_usd": 7.6e-05,
+        "latency_ms": 5278,
+        "error": null,
+        "content_preview": "关于您家猫昨天晚饭吃了什么牌子的猫粮，**我无法给出答案**，因为我没有任何途径访问您家中的信息、监控录像、购物记录或喂食记录。\n\n要回答这个问题，您需要：\n1. **回忆一下**昨天您或家人喂的是什么牌子的猫粮。\n2. **查看**猫粮袋、储粮桶或购买记录。\n3. 如果您有智能喂食器，可以查看其历史记录。\n\n您还有其他我能帮上忙的事情吗？😊"
+      }
+    },
+    {
+      "case_id": "qa_capital",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'"
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=13 (min 2)"
+        },
+        {
+          "name": "MaxRounds",
+          "passed": true,
+          "detail": "rounds=1 (budget 3)"
+        }
+      ],
+      "judge": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1142,
+          "output": 27,
+          "reasoning": 19,
+          "cache_hit": 1024,
+          "cache_miss": 118
+        },
+        "cost_usd": 2.7e-05,
+        "latency_ms": 2032,
+        "error": null,
+        "content_preview": "中国的首都是**北京**。"
+      }
+    },
+    {
+      "case_id": "qa_recursion",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'"
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=118 (min 10)"
+        },
+        {
+          "name": "MaxRounds",
+          "passed": true,
+          "detail": "rounds=1 (budget 3)"
+        }
+      ],
+      "judge": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1145,
+          "output": 97,
+          "reasoning": 30,
+          "cache_hit": 1024,
+          "cache_miss": 121
+        },
+        "cost_usd": 4.7e-05,
+        "latency_ms": 3892,
+        "error": null,
+        "content_preview": "**递归**就像俄罗斯套娃——一个任务在完成过程中会调用一个和自己一模一样的\"缩小版\"任务，直到遇到最简单的情况（套娃里最小的那个）才一层层返回结果。核心就是：**自己调用自己，同时每次调用都让问题变得更简单，直到不再需要调用为止。**"
+      }
+    },
+    {
+      "case_id": "retrieval_ai_news",
+      "category": "retrieval",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'"
+        },
+        {
+          "name": "ToolCalled",
+          "passed": true,
+          "detail": "want 'web_search' in ['web_search', 'web_search', 'web_search', 'web_search', 'read_url', 'read_url', 'read_url']"
+        },
+        {
+          "name": "HasCitations",
+          "passed": true,
+          "detail": "citations=12 (min 1)"
+        },
+        {
+          "name": "MaxRounds",
+          "passed": true,
+          "detail": "rounds=5 (budget 6)"
+        }
+      ],
+      "judge": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 5,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "read_url"
+        ],
+        "citations": 12,
+        "usage": {
+          "input": 17595,
+          "output": 1707,
+          "reasoning": 432,
+          "cache_hit": 10112,
+          "cache_miss": 7483
+        },
+        "cost_usd": 0.001554,
+        "latency_ms": 27190,
+        "error": null,
+        "content_preview": "下面是我从近期人工智能相关新闻中挑选的两条重要报道，已用中文总结并标注来源。\n\n---\n\n## 新闻一：2025世界人工智能大会在上海开幕，规模创历届之最\n\n**来源：** 新华社 / 新华网，2025年7月27日、7月30日\n\n**核心内容：**\n2025年7月26日至29日，以 **\"智能时代 同球共济\"** 为主题的2025世界人工智能大会（WAIC）在上海盛大举办。本次大会展览面积首次突破"
+      }
+    },
+    {
+      "case_id": "routing_named_roles",
+      "category": "routing",
+      "passed": false,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'"
+        },
+        {
+          "name": "Delegated",
+          "passed": false,
+          "detail": "delegated=False"
+        },
+        {
+          "name": "RosterMatches",
+          "passed": false,
+          "detail": "roster=[], missing=['研究员', '撰稿人']"
+        }
+      ],
+      "judge": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 7772,
+          "output": 202,
+          "reasoning": 148
+        },
+        "cost_usd": 9.1e-05,
+        "latency_ms": 4784,
+        "error": null,
+        "content_preview": "你提到的「一款产品」具体是指哪款产品？请告诉我产品名称（或品牌/型号），我才能指派团队执行调研和撰稿。如果还有对文案的调性、字数或用途的要求，也一并说明，我会一并规划进去。"
+      }
+    },
+    {
+      "case_id": "team_energy_compare",
+      "category": "team",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'"
+        },
+        {
+          "name": "Delegated",
+          "passed": true,
+          "detail": "delegated=True"
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=551 (min 40)"
+        }
+      ],
+      "judge": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 2,
+        "delegated": true,
+        "roster": [
+          "CEO",
+          "能源研究员",
+          "编辑 / 科普作者"
+        ],
+        "tool_calls": [
+          "delegate",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "web_search",
+          "web_search",
+          "read_url",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url",
+          "read_url",
+          "file_write",
+          "code_execute",
+          "code_execute",
+          "str_replace",
+          "file_read",
+          "file_write",
+          "code_execute"
+        ],
+        "citations": 24,
+        "usage": {
+          "input": 263588,
+          "output": 17121,
+          "reasoning": 4578
+        },
+        "cost_usd": 0.009277,
+        "latency_ms": 156906,
+        "error": null,
+        "content_preview": "团队已经完成工作，三路人马分别产出了太阳能调研、风能调研，并最终整合成了对比短文。\n\n---\n\n**团队成员及产出：**\n\n- **能源研究员（太阳能）** — 梳理了光伏发电的工作原理、资源无限、清洁环保、模块化灵活和成本骤降等核心优点，以及能量密度低、转换效率瓶颈、夜间零出力、制造环节污染等主要短板，同时覆盖了钙钛矿叠层电池等最新技术趋势。\n- **能源研究员（风能）** — 厘清了陆上与海上"
+      }
+    },
+    {
+      "case_id": "tool_use_read_file",
+      "category": "tool_use",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'"
+        },
+        {
+          "name": "ToolCalled",
+          "passed": true,
+          "detail": "want 'file_read' in ['file_read']"
+        },
+        {
+          "name": "ToolArgsValid",
+          "passed": true,
+          "detail": "1 call(s) valid"
+        },
+        {
+          "name": "MaxRounds",
+          "passed": true,
+          "detail": "rounds=2 (budget 5)"
+        }
+      ],
+      "judge": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 2,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [
+          "file_read"
+        ],
+        "citations": 0,
+        "usage": {
+          "input": 2517,
+          "output": 172,
+          "reasoning": 40,
+          "cache_hit": 2176,
+          "cache_miss": 341
+        },
+        "cost_usd": 0.000102,
+        "latency_ms": 4349,
+        "error": null,
+        "content_preview": "**一句话概括：** README.md 介绍了一个名为 **TaskFlow** 的轻量级个人任务管理工具，它采用「项目 → 任务 → 子任务」三级结构组织待办事项，支持截止日期与优先级排序，技术栈为 React + TypeScript（前端）、FastAPI（后端）和 SQLite（存储），并说明本仓库仅为评估体系的只读 fixture 示例。"
+      }
+    },
+    {
+      "case_id": "tool_use_search_args",
+      "category": "tool_use",
+      "passed": true,
+      "checks": [
+        {
+          "name": "ToolCalled",
+          "passed": true,
+          "detail": "want 'web_search' in ['web_search', 'web_search', 'web_search', 'read_url']"
+        },
+        {
+          "name": "ToolArgsValid",
+          "passed": true,
+          "detail": "3 call(s) valid"
+        },
+        {
+          "name": "MaxRounds",
+          "passed": true,
+          "detail": "rounds=5 (budget 6)"
+        }
+      ],
+      "judge": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 5,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [
+          "web_search",
+          "web_search",
+          "web_search",
+          "read_url"
+        ],
+        "citations": 1,
+        "usage": {
+          "input": 8210,
+          "output": 495,
+          "reasoning": 118,
+          "cache_hit": 6400,
+          "cache_miss": 1810
+        },
+        "cost_usd": 0.00041,
+        "latency_ms": 10682,
+        "error": null,
+        "content_preview": "根据 Python 官方发布页面，**Python 3.13.0** 的正式稳定版本发布日期是 **2024 年 10 月 7 日**（October 7, 2024）[1]。\n\n> 补充说明：该页面同时提到，当前 Python 3.13 系列的最新版本已更新至 3.13.14（即 3.13.0 已被后续的维护版本所取代）。"
+      }
+    }
+  ]
+}

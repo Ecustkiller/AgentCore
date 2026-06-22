@@ -1,14 +1,11 @@
 import { FileTree, type FileTreeHandle } from "@/components/files/FileTree";
 import { IconButton } from "@/components/files/parts";
-import { Button } from "@/components/ui";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DeleteProjectDialog,
+  archiveConversationsBeforeDelete,
+} from "@/components/folders/DeleteProjectDialog";
+import { PermanentDeleteProjectDialog } from "@/components/folders/PermanentDeleteProjectDialog";
+import { Button } from "@/components/ui";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -16,11 +13,16 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  useArchiveConversation,
+  useConversations,
+} from "@/hooks/useConversations";
+import { usePermanentDeleteFolder } from "@/hooks/useFolders";
 import type { FileSource } from "@/lib/fileSource";
-import { useConversations } from "@/hooks/useConversations";
-import { notifyActionError } from "@/lib/toast";
+import { notifyActionError, notifyError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { WorkspaceInfo } from "@/services/workspaces";
+import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import {
   ChevronDown,
@@ -37,11 +39,9 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { folderIdOf } from "./storage";
-
-/** Matches server retention default (双模式工作区 §七). */
-const PROJECT_FILE_RETENTION_DAYS = 30;
 
 /**
  * One workspace = a **flat, collapsible section**: a header (chevron + name +
@@ -81,10 +81,21 @@ export function WorkspaceSection({
   const folderId = folderIdOf(ws.wsId);
   const isLocal = ws.location === "local";
   const localUnavailable = isLocal && !source;
-  const liveConvCount = useConversations().filter(
-    (c) => c.folderId === folderId,
-  ).length;
+  const navigate = useNavigate();
+  const archiveMutation = useArchiveConversation();
+  const currentId = useConversationStore((s) => s.currentConversationId);
+  const dropConversationRuntime = useConversationStore(
+    (s) => s.dropConversationRuntime,
+  );
+  const conversations = useConversations();
+  const folderConvs = useMemo(
+    () => conversations.filter((c) => c.folderId === folderId),
+    [conversations, folderId],
+  );
+  const liveConvCount = folderConvs.length;
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [permanentDeleteOpen, setPermanentDeleteOpen] = useState(false);
+  const permanentDeleteMutation = usePermanentDeleteFolder();
 
   const rootRef = useRef<HTMLDivElement>(null);
   const treeRef = useRef<FileTreeHandle>(null);
@@ -147,10 +158,38 @@ export function WorkspaceSection({
     onRename(folderId, name);
   };
 
-  const confirmDeleteProject = () => {
+  const confirmDeleteProject = async ({
+    archiveConversations,
+  }: {
+    archiveConversations: boolean;
+  }) => {
     if (!folderId) return;
+    if (archiveConversations && folderConvs.length > 0) {
+      const ok = await archiveConversationsBeforeDelete(folderConvs, {
+        archive: (id) => archiveMutation.mutateAsync(id),
+        dropRuntime: dropConversationRuntime,
+        currentId,
+        onLeaveActive: () => navigate("/"),
+      });
+      if (!ok) {
+        notifyError("归档失败，项目未删除");
+        return;
+      }
+    }
     onDelete(folderId);
     setDeleteOpen(false);
+  };
+
+  const confirmPermanentDelete = () => {
+    if (!folderId) return;
+    for (const { id } of folderConvs) {
+      dropConversationRuntime(id);
+      if (id === currentId) navigate("/");
+    }
+    permanentDeleteMutation.mutate(folderId, {
+      onSuccess: () => setPermanentDeleteOpen(false),
+      onError: (err) => notifyError(err, "彻底删除失败"),
+    });
   };
 
   // 在系统文件管理器中定位整个工作区根（仅本地源——云端无本机路径，方法不存在则不挂入口）。
@@ -207,7 +246,7 @@ export function WorkspaceSection({
         variant="ghost"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="h-auto min-w-0 flex-1 justify-start gap-1.5 rounded-none py-1.5 pl-2 pr-0 text-left text-sm font-medium"
+        className="h-auto min-h-9 min-w-0 flex-1 justify-start gap-1.5 overflow-hidden rounded-none py-1.5 pl-2 pr-0 text-left text-sm font-medium"
       >
         {expanded ? (
           <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
@@ -328,49 +367,30 @@ export function WorkspaceSection({
             <Trash2 size={14} className="shrink-0" />
             <span className="flex-1 truncate">删除项目…</span>
           </ContextMenuItem>
+          <ContextMenuItem
+            variant="danger"
+            onSelect={() => setPermanentDeleteOpen(true)}
+          >
+            <Trash2 size={14} className="shrink-0" />
+            <span className="flex-1 truncate">彻底删除项目…</span>
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>删除项目「{ws.name}」？</DialogTitle>
-            <DialogDescription asChild>
-              <div className="space-y-2 text-sm text-muted-foreground">
-                {liveConvCount > 0 ? (
-                  <p>
-                    · {liveConvCount} 条对话将移入「未分组」（对话记录不会删除）
-                  </p>
-                ) : (
-                  <p>· 此项目下暂无活跃对话</p>
-                )}
-                <p>
-                  · 项目文件将保留 {PROJECT_FILE_RETENTION_DAYS}{" "}
-                  天，之后由系统自动清理
-                </p>
-                <p className="text-xs">
-                  若只想整理聊天列表，请使用「归档对话」而非删除项目。
-                </p>
-              </div>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="neutral"
-              className="h-9 px-4"
-              onClick={() => setDeleteOpen(false)}
-            >
-              取消
-            </Button>
-            <Button
-              variant="danger"
-              className="h-9 px-4"
-              onClick={confirmDeleteProject}
-            >
-              删除项目
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DeleteProjectDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        name={ws.name}
+        liveConvCount={liveConvCount}
+        onConfirm={confirmDeleteProject}
+      />
+      <PermanentDeleteProjectDialog
+        open={permanentDeleteOpen}
+        onOpenChange={setPermanentDeleteOpen}
+        name={ws.name}
+        liveConvCount={liveConvCount}
+        isLocal={isLocal}
+        onConfirm={confirmPermanentDelete}
+      />
       {expanded && tree}
     </div>
   );

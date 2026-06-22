@@ -1,10 +1,20 @@
+---
+status: reference
+code: ""
+related:
+  - .cursor/rules/llm.mdc
+  - docs/03-AI核心/执行引擎架构设计.md
+skip_if:
+  - 只改 AgentCore 内部行为（读 llm.mdc / 03-AI）
+---
+
 # DeepSeek V4 API 开发参考
 
 > **用途**：供 AI Agent 开发时查阅的技术参考，包含模型参数、API 调用方式、注意事项。
 > **数据来源**：DeepSeek 官方 API 文档（api-docs.deepseek.com），截至 2026-06-14。
 > **官方文档**：https://api-docs.deepseek.com
 
-→ AgentCore 角色映射见 [/docs/03-AI核心/执行引擎架构设计.md §十六](/docs/03-AI核心/执行引擎架构设计.md) 与 [/docs/01-产品/术语表.md](/docs/01-产品/术语表.md)
+→ AgentCore 角色映射见 [/docs/03-AI核心/执行引擎架构设计.md §六](/docs/03-AI核心/执行引擎架构设计.md) 与 [/docs/01-产品/术语表.md](/docs/01-产品/术语表.md)
 
 ---
 

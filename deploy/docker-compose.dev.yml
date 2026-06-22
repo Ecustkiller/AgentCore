@@ -41,6 +41,12 @@ services:
       - "18888:8080"
     environment:
       SEARXNG_BASE_URL: "http://localhost:18888"
+      # Dev overrides the engine set: settings.yml is the *production* (Aliyun Shenzhen)
+      # config — CN scraper engines only, since international engines are GFW-blocked
+      # there. This dev host is the inverse (international engines reachable & fast; the
+      # CN scrapers serve CAPTCHA / 360search returns nothing → web_search would be empty).
+      # settings.dev.yml is the international-first union; prod keeps using settings.yml.
+      SEARXNG_SETTINGS_PATH: "/etc/searxng/settings.dev.yml"
       # This single dev instance serves a parallel Agent team (several researchers,
       # each fanning web_search to 4 CN engines). The image defaults to 1 granian
       # worker (× GRANIAN_BLOCKING_THREADS=4 ≈ 4 concurrent), which the team's burst

@@ -1,4 +1,4 @@
-// Desktop ↔ backend protocol 巡检 (手机端落地设计 §六; protocol-conformance.mdc).
+// Desktop ↔ backend protocol 巡检 (前端技术与架构 §十二; protocol-conformance.mdc).
 //
 // Pins desktop's fold (conformanceFold.ts — reusing the REAL projectExecution) to the
 // SAME backend-exported golden the mobile fold is checked against. If desktop's team-

@@ -11,17 +11,17 @@ import {
 } from "@/stores/conversation";
 import {
   type Execution,
-  ExecutionScopeContext,
+  type ExecutionRuntime,
   projectExecution,
   useExecutionStore,
 } from "@/stores/execution";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
+import { useUIStore } from "@/stores/ui";
 import {
   Background,
-  Controls,
   type Edge,
-  MiniMap,
   type Node,
+  Panel,
   ReactFlow,
   type ReactFlowInstance,
 } from "@xyflow/react";
@@ -33,6 +33,9 @@ import {
   countPendingDecisions,
   isTurnRecoverable,
 } from "./CanvasDecisionPanel";
+import { CanvasTurnRail, type TurnRailItem } from "./CanvasTurnRail";
+import { CanvasZoomControls } from "./CanvasZoomControls";
+import { CanvasZoomedTurn } from "./CanvasZoomedTurn";
 import {
   FOCUS_NODE_HEIGHT,
   FOCUS_NODE_WIDTH,
@@ -40,8 +43,8 @@ import {
   FocusedTurnNode,
 } from "./FocusedTurnNode";
 import { type SimpleTurnData, SimpleTurnNode } from "./SimpleTurnNode";
-import { TeamGraphFullscreen } from "./TeamGraphFullscreen";
 import { type TurnSummaryData, TurnSummaryNode } from "./TurnSummaryNode";
+import { prefersReducedMotion } from "./constants";
 
 /**
  * 对话级画布（前端UX设计.md §6.1 · 持久累积 + LOD）. The opt-in second
@@ -50,9 +53,9 @@ import { type TurnSummaryData, TurnSummaryNode } from "./TurnSummaryNode";
  * 已毕业，无实验开关——入口恒显示、对话页默认聊天，前端UX设计.md §六）。
  *
  * 乙-1 单张持久画布: ONE pannable surface where every turn accumulates as a node, top
- * → bottom (视觉累积), with a minimap + camera (ReactFlow Controls). Identity
- * continuity (「同一拨人」) rides on `agentIdentity` — same role ⇒ same avatar across
- * turns — WITHOUT backend worker实体化 (= 乙-2, 否, 见设计 §八).
+ * → bottom (视觉累积), with a tokenized zoom/fit cluster (no minimap — a vertical spine's
+ * minimap is low-value clutter). Identity continuity (「同一拨人」) rides on `agentIdentity`
+ * — same role ⇒ same avatar across turns — WITHOUT backend worker实体化 (= 乙-2, 否, 见设计 §八).
  *
  * LOD「只有聚焦回合画完整 DAG」(§七 节点 ≤50 / ≥60fps): exactly ONE team turn is
  * focused (default latest, auto-follows new turns, click a summary to switch). The
@@ -88,6 +91,12 @@ interface TurnItem {
   prompt: string;
   answer: string;
   running: boolean;
+  /** 待你拍板: unanswered boss decisions on this turn (ask_user / plan_review / 工作者上报);
+   * 0 for simple turns. Drives the folded summary node's warning chip (图上指挥扫视). */
+  pendingDecisions: number;
+  /** 待救火: this turn has recoverable terminal trouble (failed / cancelled / 部分失败);
+   * false for simple turns. Drives the folded summary node's destructive chip. */
+  recoverable: boolean;
 }
 
 /** Distinct member roles in first-seen order — drives a team node's identity avatars. */
@@ -101,6 +110,32 @@ function dedupeRoles(exec: Execution): string[] {
     out.push(r);
   }
   return out;
+}
+
+/**
+ * Per-slot projection cache (守 前端UX设计.md §八 ≤50 节点 / ≥60fps). The execution
+ * store's `patchExec` replaces ONLY the mutated message's {@link ExecutionRuntime}
+ * object on every streamed frame, leaving every settled turn's `rt` reference intact
+ * — so keying by `rt` identity means a finished turn folds exactly once and the live
+ * turn is the only slot re-projected per frame, and a scrub / status change (a fresh
+ * `rt`) self-invalidates. Without this the overview re-folded EVERY past team turn
+ * (each O(frames × runs)) on every token → O(turns × frames × runs) per frame, which
+ * degrades a long conversation's frame rate. WeakMap so dropped slots are collectable.
+ */
+const projectionCache = new WeakMap<ExecutionRuntime, Execution>();
+function projectSlot(rt: ExecutionRuntime | undefined): Execution | null {
+  if (!rt?.plan) return null;
+  const cached = projectionCache.get(rt);
+  if (cached) return cached;
+  const exec = projectExecution(
+    rt.plan,
+    rt.frames.slice(0, rt.playhead ?? rt.frames.length),
+    rt.status,
+    rt.debate,
+    rt.debateRounds,
+  );
+  projectionCache.set(rt, exec);
+  return exec;
 }
 
 export function ConversationCanvas() {
@@ -138,16 +173,7 @@ export function ConversationCanvas() {
       }
       if (m.role !== "assistant") continue;
       if (m.executionId) {
-        const rt = byId[m.id];
-        const exec = rt?.plan
-          ? projectExecution(
-              rt.plan,
-              rt.frames.slice(0, rt.playhead ?? rt.frames.length),
-              rt.status,
-              rt.debate,
-              rt.debateRounds,
-            )
-          : null;
+        const exec = projectSlot(byId[m.id]);
         out.push({
           id: m.id,
           kind: "team",
@@ -155,6 +181,11 @@ export function ConversationCanvas() {
           prompt: lastUser,
           answer: m.content,
           running: exec?.status === "running" || m.isStreaming,
+          // 图上指挥扫视 (§6.2): surface 待你拍板 / 待救火 on the FOLDED summary node so a
+          // long spine shows which turns need the boss without focusing each one. Same
+          // predicates the 指挥台 + focused node use, so the scent never disagrees.
+          pendingDecisions: countPendingDecisions(m, exec),
+          recoverable: isTurnRecoverable(exec),
         });
       } else {
         out.push({
@@ -164,6 +195,8 @@ export function ConversationCanvas() {
           prompt: lastUser,
           answer: m.content,
           running: m.isStreaming,
+          pendingDecisions: 0,
+          recoverable: false,
         });
       }
     }
@@ -175,6 +208,19 @@ export function ConversationCanvas() {
       if (turns[i].kind === "team") return turns[i].id;
     }
     return null;
+  }, [turns]);
+
+  // New-turn 轻入场 (§六): track which turns have been seen, so only a GENUINELY new
+  // turn animates in — not the whole spine on canvas open, and not a node remounting on
+  // a focus switch. Recorded after render; the nodes memo reads it on the render an id
+  // first appears (before this effect runs), so `enter` is true that once, then false.
+  // Applied to simple turns (a new team turn auto-focuses and animates via its inner DAG
+  // cascade, and the auto-focus would otherwise consume the flag a frame early).
+  const seenTurnsRef = useRef<Set<string>>(new Set());
+  const firstSpineRef = useRef(true);
+  useEffect(() => {
+    for (const t of turns) seenTurnsRef.current.add(t.id);
+    firstSpineRef.current = false;
   }, [turns]);
 
   // Exactly one focused team turn. Default + auto-follow the latest; a click on a
@@ -193,8 +239,66 @@ export function ConversationCanvas() {
     return latestTeamId;
   }, [focusedTurn, turns, latestTeamId]);
 
-  // The team turn whose full DAG is open in the on-demand overlay (全屏 deep work).
-  const [overlayTurn, setOverlayTurn] = useState<string | null>(null);
+  // The team turn zoomed to fill the canvas (放大态, 前端UX设计.md §六 · Route A): its
+  // full DAG takes over the surface IN PLACE (no portal overlay). null = 总览态; the
+  // overview stays mounted underneath so 返回 / Esc restores it exactly.
+  //
+  // 总览↔放大 camera transition (相机过渡): the focused turn is parked at the viewport
+  // center (see the camera effect below), so the 放大态 dives in from center — it scales
+  // up + fades in while the overview pushes back a touch, reading as a camera flying into
+  // that turn. `zoomShown` drives the CSS; on exit it recedes and unmounts on transitionend
+  // (reduced motion skips the animation and swaps instantly).
+  const reduceMotion = prefersReducedMotion();
+  const [zoomedTurn, setZoomedTurn] = useState<string | null>(null);
+  const [zoomAutoplay, setZoomAutoplay] = useState(false);
+  const [zoomShown, setZoomShown] = useState(false);
+  const revealRaf = useRef(0);
+  const openZoom = useCallback(
+    (turnId: string, replay: boolean) => {
+      setZoomedTurn(turnId);
+      setZoomAutoplay(replay);
+      setFocusedTurn(turnId);
+      if (reduceMotion) setZoomShown(true);
+    },
+    [reduceMotion],
+  );
+  // Reveal one frame after mount so the entry transition runs from the hidden state.
+  useEffect(() => {
+    if (!zoomedTurn || reduceMotion) return;
+    revealRaf.current = requestAnimationFrame(() => setZoomShown(true));
+    return () => cancelAnimationFrame(revealRaf.current);
+  }, [zoomedTurn, reduceMotion]);
+  const exitZoom = useCallback(() => {
+    // Kill a still-pending entry reveal so closing in the same frame can't re-show it.
+    cancelAnimationFrame(revealRaf.current);
+    setZoomShown(false);
+    // No transitionend fires under reduced motion, so unmount straight away.
+    if (reduceMotion) {
+      setZoomedTurn(null);
+      setZoomAutoplay(false);
+    }
+  }, [reduceMotion]);
+
+  // Consume a「在画布打开 / 回放」request from the chat-side inline graph (UI store
+  // bridge): zoom straight into that turn (+ autoplay for 回放), align the focus so
+  // the 指挥台 reflects it, then clear the request (用完即清, no stale re-trigger).
+  const pendingCanvasFocus = useUIStore((s) => s.pendingCanvasFocus);
+  const clearCanvasFocus = useUIStore((s) => s.clearCanvasFocus);
+  useEffect(() => {
+    if (!pendingCanvasFocus) return;
+    openZoom(pendingCanvasFocus.turnId, pendingCanvasFocus.autoplay);
+    clearCanvasFocus();
+  }, [pendingCanvasFocus, clearCanvasFocus, openZoom]);
+
+  // Bridge 放大态 to the page so it can hide the conversation-level floating toggles
+  // (聊天/画布、侧面板) that would otherwise overlap — and occlude — 放大态's own top
+  // chrome (返回 / 图工具栏). Cleared on exit AND unmount (切回聊天 / 离开对话) so the
+  // toggles can never get stranded hidden.
+  const setCanvasZoomed = useUIStore((s) => s.setCanvasZoomed);
+  useEffect(() => {
+    setCanvasZoomed(zoomedTurn != null);
+    return () => setCanvasZoomed(false);
+  }, [zoomedTurn, setCanvasZoomed]);
 
   // 图上指挥 (§6.2): pending boss decisions + 救火 + 后台云端任务 surface in a right-
   // docked 指挥台. Three scopes: the focused turn's (ask_user / plan_review / 工作者上报 /
@@ -270,7 +374,7 @@ export function ConversationCanvas() {
       if (focused) {
         const data: FocusedTurnData = {
           messageId: t.id,
-          onMaximize: () => setOverlayTurn(t.id),
+          onMaximize: () => openZoom(t.id, false),
         };
         out.push({
           id: t.id,
@@ -288,6 +392,8 @@ export function ConversationCanvas() {
           agentCount: exec?.agents.length ?? 0,
           completed: exec?.progress.completed ?? 0,
           total: exec?.progress.total ?? 0,
+          pendingDecisions: t.pendingDecisions,
+          recoverable: t.recoverable,
         };
         out.push({
           id: t.id,
@@ -301,6 +407,7 @@ export function ConversationCanvas() {
           prompt: t.prompt,
           answer: t.answer,
           running: t.running,
+          enter: !firstSpineRef.current && !seenTurnsRef.current.has(t.id),
         };
         out.push({
           id: t.id,
@@ -313,7 +420,7 @@ export function ConversationCanvas() {
       y += height + GAP_Y;
     }
     return out;
-  }, [turns, effectiveFocus]);
+  }, [turns, effectiveFocus, openZoom]);
 
   // The accumulation spine: a thin connector between consecutive turns so the
   // canvas reads as one continuous record rather than scattered cards.
@@ -330,36 +437,122 @@ export function ConversationCanvas() {
     [turns],
   );
 
+  // 回合轨道 (§六): a lightweight status index of every turn for long spines. Maps the
+  // turn spine to the rail's minimal shape (decoupled from TurnItem internals).
+  const railItems = useMemo<TurnRailItem[]>(
+    () =>
+      turns.map((t) => ({
+        id: t.id,
+        kind: t.kind,
+        status: t.exec?.status ?? null,
+        running: t.running,
+        pendingDecisions: t.pendingDecisions,
+        recoverable: t.recoverable,
+        label:
+          t.exec?.taskSummary ||
+          t.prompt ||
+          (t.kind === "team" ? "团队回合" : "直接回答"),
+      })),
+    [turns],
+  );
+
+  // Rail click: a team turn focuses (expands in place; the camera effect frames it);
+  // a simple turn can't focus, so center the camera on its card instead. Both bring
+  // the turn into view on a long spine.
+  const onRailSelect = useCallback((id: string, kind: "team" | "simple") => {
+    if (kind === "team") {
+      setFocusedTurn(id);
+    } else {
+      rfRef.current?.fitView({
+        nodes: [{ id }],
+        padding: 0.3,
+        maxZoom: 1,
+        duration: 300,
+      });
+    }
+  }, []);
+
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     // Click a collapsed team summary → focus it (expands in place). The focused
     // node, the spine, and simple cards are inert here.
     if (node.type === "teamTurn") setFocusedTurn(node.id);
   }, []);
 
-  // Camera: fit on first paint, then keep the focused turn centered — covers both a
-  // manual focus switch and a newly-arrived turn (which auto-follows into focus).
+  // Double-click a team turn → jump straight to 放大态, skipping the old two-step
+  // (点聚焦 → 点 ⤢). On a collapsed summary the first click focuses it and the
+  // dblclick (which fires on the persistent node wrapper) then zooms; on the already-
+  // focused node it mirrors its ⤢ button. zoomOnDoubleClick is off so this never also
+  // fires ReactFlow's pane zoom underneath.
+  const onNodeDoubleClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      if (node.type === "teamTurn" || node.type === "focusedTurn") {
+        openZoom(node.id, false);
+      }
+    },
+    [openZoom],
+  );
+
+  // Camera: fit on first paint, then keep the focused turn framed by FITTING the node
+  // (not a fixed zoom) — covers a manual focus switch and a newly-arrived turn (which
+  // auto-follows into focus). Fit-to-node replaces the old constant 0.75: the 760px-wide
+  // focus node overflowed horizontally on narrow windows / with the side panel open, so
+  // fit zooms out just enough, capped at 1 so it never over-magnifies a single node.
   const rfRef = useRef<ReactFlowInstance | null>(null);
+  const canvasBoxRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const rf = rfRef.current;
     if (!rf || !effectiveFocus) return;
-    const n = nodes.find((x) => x.id === effectiveFocus);
-    if (n) {
-      rf.setCenter(0, n.position.y + FOCUS_NODE_HEIGHT / 2, {
-        zoom: 0.75,
-        duration: 400,
-      });
-    }
+    if (!nodes.some((x) => x.id === effectiveFocus)) return;
+    rf.fitView({
+      nodes: [{ id: effectiveFocus }],
+      padding: 0.2,
+      maxZoom: 1,
+      duration: 400,
+    });
   }, [effectiveFocus, nodes]);
 
-  const miniMapColor = useCallback((n: Node) => {
-    if (n.type === "teamTurn") {
-      const s = (n.data as TurnSummaryData).status;
-      if (s === "running") return "var(--primary)";
-      if (s === "completed") return "var(--success)";
-      if (s === "failed") return "var(--destructive)";
-    }
-    if (n.type === "focusedTurn") return "var(--primary)";
-    return "var(--muted-foreground)";
+  // Re-frame the focused turn when the canvas WIDTH changes — the 指挥台 docking /
+  // undocking on the right (§6.2), the side panel opening, or the window resizing
+  // shrinks this surface, and the camera effect above only fires on focus / node
+  // changes, so without this the focused node slides off-center (or behind the
+  // panel). Mirrors the 放大态 GraphView's resize refit: debounced, with the first
+  // (mount) observation skipped since onInit already framed it. Reads focus from a
+  // ref so the observer is installed once (no teardown per streamed frame).
+  const effectiveFocusRef = useRef<string | null>(effectiveFocus);
+  effectiveFocusRef.current = effectiveFocus;
+  useEffect(() => {
+    const el = canvasBoxRef.current;
+    if (!el) return;
+    let lastWidth = Math.round(el.clientWidth);
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0]?.contentRect.width ?? 0);
+      if (!settled) {
+        settled = true;
+        lastWidth = w;
+        return;
+      }
+      if (w <= 0 || w === lastWidth) return;
+      lastWidth = w;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const rf = rfRef.current;
+        const focus = effectiveFocusRef.current;
+        if (!rf || !focus || !rf.getNode(focus)) return;
+        rf.fitView({
+          nodes: [{ id: focus }],
+          padding: 0.2,
+          maxZoom: 1,
+          duration: 300,
+        });
+      }, 160);
+    });
+    ro.observe(el);
+    return () => {
+      clearTimeout(timer);
+      ro.disconnect();
+    };
   }, []);
 
   // Command-bar dispatch hint, cleared when generation settles.
@@ -370,7 +563,7 @@ export function ConversationCanvas() {
 
   return (
     <div className="flex min-w-0 flex-1">
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex min-w-0 flex-1 flex-col">
         {/* Slim header: labels the view + reserves the top band so the page's floating
             view / side-panel toggles (left-3 / right-3, top-2) clear the canvas. */}
         <div className="flex h-11 shrink-0 items-center border-b border-border pl-40 pr-12">
@@ -383,13 +576,19 @@ export function ConversationCanvas() {
             </span>
           )}
         </div>
-        <div className="relative min-h-0 flex-1">
+        <div
+          ref={canvasBoxRef}
+          className={`relative min-h-0 flex-1 origin-center transition-transform duration-200 ease-out motion-reduce:transition-none ${
+            zoomedTurn && zoomShown ? "scale-[1.03]" : "scale-100"
+          }`}
+        >
           {turns.length > 0 ? (
             <ReactFlow
               nodes={nodes}
               edges={edges}
               nodeTypes={turnNodeTypes}
               onNodeClick={onNodeClick}
+              onNodeDoubleClick={onNodeDoubleClick}
               onInit={(inst) => {
                 rfRef.current = inst;
                 inst.fitView({ padding: 0.2, maxZoom: 1 });
@@ -397,18 +596,27 @@ export function ConversationCanvas() {
               nodesDraggable={false}
               nodesConnectable={false}
               elementsSelectable={false}
+              zoomOnDoubleClick={false}
               minZoom={0.2}
               maxZoom={1.5}
               proOptions={{ hideAttribution: true }}
             >
               <Background />
-              <MiniMap
-                pannable
-                zoomable
-                nodeColor={miniMapColor}
-                className="!bg-card"
-              />
-              <Controls showInteractive={false} />
+              {/* 缩放/适应控件：替换 ReactFlow 默认 Controls（其浅底硬编码样式不走设计 token）。
+                  MiniMap 已去掉——竖直单链的小地图信息量低、只添堵。 */}
+              <Panel position="bottom-left">
+                <CanvasZoomControls
+                  onZoomIn={() => rfRef.current?.zoomIn({ duration: 200 })}
+                  onZoomOut={() => rfRef.current?.zoomOut({ duration: 200 })}
+                  onFit={() =>
+                    rfRef.current?.fitView({
+                      padding: 0.2,
+                      maxZoom: 1,
+                      duration: 300,
+                    })
+                  }
+                />
+              </Panel>
             </ReactFlow>
           ) : (
             <div className="flex h-full items-center justify-center p-6">
@@ -424,12 +632,47 @@ export function ConversationCanvas() {
               </div>
             </div>
           )}
+          {/* 回合轨道 (§六): right-edge status index for long spines (self-hides when
+              short). Chrome, so it sits OUTSIDE ReactFlow — it never pans / zooms. */}
+          <CanvasTurnRail
+            items={railItems}
+            focusedId={effectiveFocus}
+            onSelect={onRailSelect}
+          />
         </div>
         <CanvasCommandBar
           onDispatch={() => setDispatched(true)}
           waiting={dispatched && generating}
           allowBackground
         />
+        {/* 放大态 (Route A): the focused turn's full DAG covers the overview in place
+            (no portal). Overview stays mounted underneath so 返回 / Esc restores it
+            exactly. The 相机过渡 dives in from center (scale + fade); on exit it recedes
+            and unmounts once the leave fade ends (child / entry transitionends ignored). */}
+        {zoomedTurn && (
+          <div
+            className={`absolute inset-0 z-20 origin-center transition duration-200 ease-out motion-reduce:transition-none ${
+              zoomShown ? "scale-100 opacity-100" : "scale-[0.92] opacity-0"
+            }`}
+            onTransitionEnd={(e) => {
+              if (
+                e.target === e.currentTarget &&
+                e.propertyName === "opacity" &&
+                !zoomShown
+              ) {
+                setZoomedTurn(null);
+                setZoomAutoplay(false);
+              }
+            }}
+          >
+            <CanvasZoomedTurn
+              key={zoomedTurn}
+              turnId={zoomedTurn}
+              autoplay={zoomAutoplay}
+              onClose={exitZoom}
+            />
+          </div>
+        )}
       </div>
       {/* 图上指挥指挥台 (§6.2): pending boss decisions + 救火 (turn-level + conversation-
           level), docked right. `message` may be undefined (approval / error-only turn). */}
@@ -442,13 +685,6 @@ export function ConversationCanvas() {
           pending={pendingTotal}
           onClose={() => setPanelDismissed(true)}
         />
-      )}
-      {/* 全屏 deep work: drill the focused turn into the on-demand overlay (full
-          detail panel + answer + command bar), scoped to its message. */}
-      {overlayTurn && (
-        <ExecutionScopeContext.Provider value={overlayTurn}>
-          <TeamGraphFullscreen onClose={() => setOverlayTurn(null)} />
-        </ExecutionScopeContext.Provider>
       )}
     </div>
   );

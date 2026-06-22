@@ -228,12 +228,17 @@ _CONTEXT_BLOCK_BODY_CAP = DEP_CONTEXT_BUDGET
 def _context_block_payloads(blocks: list[ContextBlock]) -> list[dict[str, Any]]:
     """Serialize ContextBlocks to the ``run_context`` wire shape, capping each body to
     :data:`_CONTEXT_BLOCK_BODY_CAP` (head+tail) so the journal stays bounded. ``chars`` is
-    the ORIGINAL injected size; ``truncated`` records the budget cap OR this display cap."""
+    the ORIGINAL injected size; ``truncated`` records the budget cap OR this display cap.
+
+    The captain ``system`` block is EXEMPT from the cap: it carries the bounded,
+    internally-built CEO system prompt that the desktop「收到的上下文」dialog shows verbatim
+    (having folded in the old「提示词」button), so it must stay full-fidelity — it is not the
+    unbounded user/dep body 决策④'s cap guards against."""
     payloads: list[dict[str, Any]] = []
     for b in blocks:
         body = b.body
         truncated = b.truncated
-        if len(body) > _CONTEXT_BLOCK_BODY_CAP:
+        if b.channel != "system" and len(body) > _CONTEXT_BLOCK_BODY_CAP:
             body = truncate_head_tail(body, _CONTEXT_BLOCK_BODY_CAP)
             truncated = True
         payloads.append(

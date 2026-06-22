@@ -1,4 +1,4 @@
-# AgentCore 工作区（手机端落地设计 P0 · 地基）
+# AgentCore 工作区（项目结构 §三 · packages + 跨端应用）
 #
 # 作用域刻意最小：只纳入「新代码」——共享规范/类型/token 包 + 手机端 app。
 # 现有 apps（desktop/admin/website 用 pnpm，promo 用 npm）暂不纳入，

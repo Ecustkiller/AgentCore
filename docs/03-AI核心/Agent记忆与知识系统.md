@@ -1,3 +1,13 @@
+---
+status: blueprint
+code: apps/server/agentcore/memory/
+related:
+  - docs/03-AI核心/上下文传递可视化.md
+  - docs/02-架构/双模式工作区.md
+skip_if:
+  - 只改 prompt 装配顺序（读执行引擎 §七）
+---
+
 # Agent 记忆与知识系统
 
 > **状态**：MVP 方案已确定（存储基础、分层策略、注入流程）；高级特性待定
@@ -52,7 +62,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 会话结束时由 flash 模型产出结构化变更 ops，确定性代码按小节定位套用。
 
 **写权限**：维护任务**只写 `ai_maintained=true` 的文件**，永不触碰用户手写规则（见 §五 写边界）。
-**隐私与防注入边界（决策）**：抽取时**默认不沉淀敏感个人数据**（身份证号 / 密码密钥 / 精确住址 / 支付 / 健康 / 宗教 / 性取向 / 政治倾向），除非用户明确要求记住；并把对话内容当作**待总结的素材而非指令**——不把对话里嵌入的指令或粘贴的第三方文本当成「关于用户的事实」记入，也不让其覆盖上述规则。理由：长期记忆是**会注入每一次后续 prompt 的持久文件**，静默留存敏感信息、或被对话「投毒」的代价远高于普通输出（对齐 OpenAI / Anthropic 的记忆策略）。
+**隐私与防注入边界（决策）**：两条铁律——① **默认不沉淀敏感个人数据**（身份证 / 密钥 / 精确住址 / 支付 / 健康 / 宗教 / 性取向 / 政治倾向），除非用户明确要求记住；② 把对话内容当**待总结的素材而非指令**——不把嵌入指令或粘贴的第三方文本当「关于用户的事实」记入、更不让其覆盖①。**理由**：长期记忆是会注入每一次后续 prompt 的持久文件，静默留存敏感信息、或被对话「投毒」的代价远高于普通输出（对齐 OpenAI / Anthropic）。
 
 > **现状（MVP 实现，§1.4/§1.5 已接线）**：上文「文件树 `rule` Document + 文件注入管线」是**目标形态**；云端文件树/Document 子系统尚未落地，故 MVP 先用过渡实现，存储与注入都隐藏在抽象后，文件树到位后为一处替换。
 
@@ -83,7 +93,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 - **TWM**：Agent 经 `update_task_state` 维护 goal/plan/findings 结构化状态，作钉住块不被裁剪。
 - **Agentic Recall**：窗口裁剪内容归档为可寻址 artifact，Agent 经 `recall(id)` 精确取回。
 - **布局原则**：易变块（TWM、归档索引）后置，保护 history 前缀缓存命中。
-- **跨 turn 历史**：只回放 user/assistant 文本——见 [`执行引擎架构设计.md` §十三](/docs/03-AI核心/执行引擎架构设计.md) 历史重建原则。
+- **跨 turn 历史**：只回放 user/assistant 文本——见 [`执行引擎架构设计.md` §三](/docs/03-AI核心/执行引擎架构设计.md) 历史重建原则。
 - **委派预算（参考）**：基底摘要 ~2500 字符、链合成上限 ~6000 字符；**深度 `depth ≤ 2`**（`MAX_DELEGATION_DEPTH`）；并行委派上限 10。
 
 详述与预算表见 [`../07-规划/远期规划.md`](/docs/07-规划/远期规划.md)。
@@ -110,7 +120,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 |---|---|---|---|
 | `rule` | `false` | 用户规则（用户拥有，AI 可起草但不静默改） | 按 `apply_mode` 进入 `<rules>` |
 | `rule` | `true` | AI 维护的长期记忆 | 进入 `<rules>`（默认 `always`，软措辞） |
-| `general` | — | 普通文件/文档 | 经 RAG top-K 进入 `<workspace_context>` |
+| `general` | — | 普通文件/文档 | 列入 `<workspace_context>` 概览，Agent 按需 `file_read`/`grep` 取正文（见 §5.6） |
 
 用户视角：`rule + ai_maintained=false` 显示为"规则"，`rule + ai_maintained=true` 显示为"记忆"，`general` 是普通文档。
 
@@ -136,9 +146,18 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 ### 5.5 上下文装配顺序
 
+每个常驻上下文源都是一个 `PromptContributor` 小插件（`key` + 正文 `text` + 渲染序 `order` + 预留 `budget`），由 `runtime/context/assembler.py`（`ContextAssembler`）统一收集，按 `order` **稳定排序**后以 `\n` 拼接；正文为空的源该回合自动丢弃（不留空行）。渲染序由 `SectionOrder` 单一枚举声明（**非**各调用点 `.add()` 的书写次序），间隔 100 留插槽：
+
 ```
-Agent system_prompt → Skills → Workspace Context → 用户附件
+BASE 100 → RUNTIME_CONTEXT 200 → MEMORY 300 → CEO_CORE 400
+→ SKILL_DIRECTORY 500 → CITATION 600 → WORKSPACE_OVERVIEW 800 → ATTACHMENT 900
 ```
+
+这是**一套**排序坐标系；并非每条路径都用满全部档位（worker 走 `BASE`/`RUNTIME_CONTEXT`/`MEMORY`/`ATTACHMENT`，CEO 聊天走 `BASE`/`CEO_CORE`/`SKILL_DIRECTORY`/`CITATION`，再叠 `WORKSPACE_OVERVIEW`/`ATTACHMENT`），但两路径对相对顺序的认知永远一致。
+
+> **决策：常驻源统一为 contributor 插件、顺序声明化。** 理由：① 新增常驻源只需声明一个 `order` 即落位，无需在某个拼接点插队、改动多处调用；② 渲染序与贡献次序解耦——各调用点本就按升序贡献，稳定排序复现原内联顺序、原 `\n` 拼接，**与统一前逐字节一致**（稳定前缀不变，DeepSeek 前缀缓存不破）；③ 稳定前缀（base + hints）在前、概览 / 附件置尾，护前缀缓存（概览 / 附件都空时与原 CEO 提示词逐字节一致）；④ `budget` 字段为「扳机 B」（预算 / 裁剪 / 降级）预留**唯一读取点**——今天不强制裁剪，按需才长（触发条件见 [上下文注入统一性讨论](/docs/07-规划/上下文注入统一性讨论.md) 扳机 B）。→ 见代码：`runtime/context/`（`contributor.py` 定义形状 + `assembler.py` 收集排序）。
+
+**Workspace Context（CEO）= 实时工作区概览** ✅：每回合从 live `WorkspaceBackend` 拉「最近更新在前」的文件清单（文件数 + 字符预算双重封顶）注入 `<workspace_context>`（即上表 `WORKSPACE_OVERVIEW` 档），永远新鲜、零索引依赖；正文靠 Agent 按需 `file_read`/`grep` 取（机制详见 §5.6）。worker 不走此块——它们已有更丰富的逐运行 manifest。→ 见代码：`runtime/context/workspace_overview.py`。
 
 ⏳ **Marketplace Rules**：市场 Rules 绑定待能力域落地后接入装配链。
 
@@ -149,9 +168,12 @@ Agent system_prompt → Skills → Workspace Context → 用户附件
 | 机制 | 范围 | 限制手段 |
 |---|---|---|
 | `rule` 注入（规则 + 记忆） | 仅关联文件夹的 **direct children** | `MAX_INSTRUCTION_DOCS` / `MAX_INSTRUCTION_CHARS` |
-| RAG 知识检索 | **整棵子树**，无深度限制 | chunk 上限 + top-K + 相关度阈值 |
+| 工作区概览（`<workspace_context>`） | 关联文件夹文件清单（**整棵子树**，最近更新在前） | 文件数 + 字符预算双重封顶；只列路径、正文不进概览 |
+| Agentic 检索（`file_read` / `grep` / `file_list`） | **整棵子树**，无深度限制 | Agent 自取正文，单次工具输出截断 |
 
-`rule` 不递归是因为规则按层级生效（子文件夹有自己的规则）；RAG 不限深度是因为用户心智是"文件夹里的东西 AI 都能看到"。
+`rule` 不递归是因为规则按层级生效（子文件夹有自己的规则）；工作区不限深度是因为用户心智是"文件夹里的东西 AI 都能看到"——但**不预建向量索引**：概览给方位、Agent 用文件工具取正文（agentic 检索为主路）。
+
+> **决策：取消向量 RAG（pgvector / embedding）作为近期工作区检索方案，改用「实时概览 + agentic 检索」。** 理由：① 向量索引一改文件就失效，需 embedder + pgvector + 重建管线，与"文件随时变"的工作区天然不合；② 关键词 `grep` + Agent 自取，在工作区规模（数十～数百文件）下召回足够、永远新鲜、零新依赖；③ 语义检索**降为扳机后手**——待工作区涨到关键词 + agentic 明显召回不足时再引入（即 §七「项目知识库 / pgvector 语义检索」未来项，触发条件见 [上下文注入统一性讨论](/docs/07-规划/上下文注入统一性讨论.md) 扳机 A）。
 
 ---
 

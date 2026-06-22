@@ -5,6 +5,3 @@ dist-ssr
 .env
 .env.*
 !.env.example
-
-# Generated from ../server/openapi.json by `pnpm gen:api` (single source = backend).
-src/types/api.generated.ts

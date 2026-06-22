@@ -1,5 +1,5 @@
-import { SimpleTooltip } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useChatScroll } from "@/lib/useChatScroll";
 import {
   loadLatestWindow,

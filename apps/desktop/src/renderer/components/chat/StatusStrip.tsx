@@ -21,7 +21,6 @@ import {
   useExecutionScope,
   useExecutionStore,
 } from "@/stores/execution";
-import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import {
   AlertTriangle,
@@ -102,8 +101,6 @@ function StripControls({
   const isRunning = execution.status === "running";
   const canReplay =
     execution.status === "completed" || execution.status === "cancelled";
-  const setConversationView = useUIStore((s) => s.setConversationView);
-  const conversationId = useConversationStore((s) => s.currentConversationId);
 
   return (
     <>
@@ -126,22 +123,15 @@ function StripControls({
         title={expanded ? "收起协作图" : "展开协作图"}
         onClick={onToggle}
       />
-      {conversationId ? (
-        <Button
-          variant="ghost"
-          className="ml-0.5 shrink-0 bg-primary/10 text-primary hover:bg-primary/20"
-          icon={<Maximize2 size={13} />}
-          onClick={() => setConversationView(conversationId, "canvas")}
-        >
-          在画布打开
-        </Button>
-      ) : (
-        <StripIconButton
-          icon={<Maximize2 size={15} />}
-          title="全屏查看协作图"
-          onClick={onMaximize}
-        />
-      )}
+      {/* 单一入口：通向画布的放大态（Route A，再无独立全屏）。回放走同一去处 + 自动播放。 */}
+      <Button
+        variant="ghost"
+        className="ml-0.5 shrink-0 bg-primary/10 text-primary hover:bg-primary/20"
+        icon={<Maximize2 size={13} />}
+        onClick={onMaximize}
+      >
+        在画布打开
+      </Button>
     </>
   );
 }

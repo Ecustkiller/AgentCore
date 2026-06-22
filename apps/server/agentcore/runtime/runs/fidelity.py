@@ -7,8 +7,9 @@ wherever it is re-shown:
   prompt (上下文传递, 通道③).
 - ``delegate._format_for_ceo`` — every worker's product → the CEO's synthesis input
   (CEO 综述输入瘦身). Without this a wide fan-out of long products would balloon the
-  CEO's overview pass and, worse, blunt-truncate (``ToolResult`` head-chop) the tail —
-  silently dropping late workers AND the method's own closing instructions.
+  CEO's overview pass and hit the ``ToolResult`` truncation net, whose middle-elision of
+  a multi-worker aggregate would drop whole workers — better to size + shape it here than
+  lean on that last-resort net.
 
 The POLICY (file-producer → pointer; ``summarize`` deps → digest; else pass_through
 prose water-filled across a shared budget, head+tail trimmed on overflow) lives at
@@ -18,6 +19,7 @@ each call site; this module is just the MECHANISM. All char budgets live in
 
 from __future__ import annotations
 
+from agentcore.core.text import truncate_head_tail as _truncate_head_tail
 from agentcore.runtime.runs.constants import (
     DEP_POINTER_MAX_FILES,
     DEP_POINTER_SUMMARY_CHARS,
@@ -72,18 +74,7 @@ def allocate(sizes: list[int], budget: int) -> list[int]:
 
 
 def truncate_head_tail(content: str, limit: int) -> str:
-    """Trim ``content`` to ``limit`` chars keeping BOTH ends with an elision marker
-    between, so trailing details (金额 / 法条编号) survive — a head-only cut would
-    silently drop them. Returns ``content`` unchanged when it already fits, ""
-    when ``limit <= 0``."""
-    if limit <= 0:
-        return ""
-    if len(content) <= limit:
-        return content
-    marker = "\n\n……（中间省略，已保留首尾）……\n\n"
-    keep = limit - len(marker)
-    if keep <= 0:
-        return content[:limit].rstrip() + "…"
-    head = keep * 3 // 5  # bias to the head (framing) while still keeping a real tail
-    tail = keep - head
-    return content[:head].rstrip() + marker + content[len(content) - tail :].lstrip()
+    """Trim ``content`` to ``limit`` keeping BOTH ends (so trailing 金额 / 法条编号
+    survive). Thin binding of the leaf primitive ``core.text.truncate_head_tail`` with
+    this package's default marker, so the runs callers keep one import surface."""
+    return _truncate_head_tail(content, limit)

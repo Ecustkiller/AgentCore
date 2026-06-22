@@ -1,5 +1,5 @@
 # AgentCore 桌面端打包配置（P2-1；docs/05-平台与运维/部署与运维.md §7.6、
-# docs/04-前端/前端技术与架构.md §7.6、docs/07-规划/Mac桌面端部署设计.md）。
+# docs/04-前端/前端技术与架构.md §7.6）。
 # 出 Windows(NSIS) / macOS(DMG+zip, arm64) / Linux(AppImage)；
 # MVP 不签名（内测；正式发布前再申请代码签名 / Mac 公证）。Win 优先。
 #

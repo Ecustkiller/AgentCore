@@ -1,17 +1,17 @@
 import { FileDetail } from "@/components/files/FileDetail";
-import { EmptyHint, IconButton, InlineError } from "@/components/files/parts";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
-import { IconButton as UiIconButton } from "@/components/ui";
+import { WorkspaceSection } from "@/components/files/fileWorkbench/WorkspaceSection";
 import {
+  type Tab,
   clampRail,
   loadExpandedWs,
   loadRailWidth,
   saveExpandedWs,
   saveRailWidth,
-  type Tab,
   tabKey,
 } from "@/components/files/fileWorkbench/storage";
-import { WorkspaceSection } from "@/components/files/fileWorkbench/WorkspaceSection";
+import { EmptyHint, IconButton, InlineError } from "@/components/files/parts";
+import { IconButton as UiIconButton } from "@/components/ui";
 import type { FileSource } from "@/lib/fileSource";
 import { cn } from "@/lib/utils";
 import { resolveWorkspaceSource } from "@/services/sources/workspaceSource";

@@ -1,4 +1,4 @@
-// @agentcore/protocol-conformance — 协议一致性巡检规范（手机端落地设计 §六）。
+// @agentcore/protocol-conformance — 协议一致性巡检规范（前端技术与架构 §十二）。
 //
 // 承载：ProjectedTurn schema（裁判态）+ harness（向量加载 / 深度 diff / runner）。
 // golden 向量是后端导出的 JSON（fixtures/*.json，单一源 = runtime/conformance），本包

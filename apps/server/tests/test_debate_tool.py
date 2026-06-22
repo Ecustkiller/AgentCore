@@ -12,6 +12,14 @@ from pathlib import Path
 
 from agentcore.llm.protocol import LLMChunk, LLMResponse, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.debate import (
+    DebateConfig,
+    DebateForm,
+    DebateSide,
+    JudgeVerdict,
+    RoundResult,
+    SideTurn,
+)
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
@@ -179,11 +187,15 @@ async def test_ledger_three_tier_parenting():
     debater_rows = [r for r in ledger if r.parent_run_id == mod_run_id]
     assert len(debater_rows) == 2  # 2 辩手 × 1 轮
     assert len(ledger) == 3  # 1 主持人 + 2 辩手 → captain→主持人→辩手三层
+    # 首轮 run_id 用语义后缀 `_r1_{key}`（与后续轮 `_r{n}_{key}` 同构、对齐 conformance 向量），
+    # 而非旧的位置序号 `_r1_1`。
+    assert {r.run_id for r in debater_rows} == {f"{mod_run_id}_r1_pro", f"{mod_run_id}_r1_con"}
 
 
-async def test_thorough_enforces_min_rounds_and_cross_round_memory():
-    # converge_at=1：裁判每轮都判收敛，但 thorough min=3 应防过早收敛 → 跑满 3 轮。
-    llm = _DebateLLM(converge_at=1)
+async def test_multi_round_cross_round_memory():
+    # 无最小轮门槛了：轮数由裁判逐轮自判。converge_at=3 → 裁判前两轮判未收敛、第 3 轮收敛 →
+    # 跑满 3 轮（thorough 默认 max=5，收敛早于上限发生），借此验证后续轮 continue_run 续写。
+    llm = _DebateLLM(converge_at=3)
     tool = _tool(llm)
     result = await tool.execute(
         {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
@@ -241,6 +253,35 @@ async def test_red_team_form_injects_subject_and_attacker_roles():
     joined = "\n".join(m.content for req in llm.stream_requests for m in req.messages)
     assert "红队" in joined
     assert "被审" in joined or "方案方" in joined
+
+
+def test_round_feedback_demands_new_args_and_no_self_restate():
+    """后续轮 feedback：注入【对方】上轮论点 + 明令「只补新论点、勿重述自己上轮」——降冗余轮相似度。
+
+    辩手在自己 transcript 上续写（已带自己上轮全文），故只喂对方论点、不喂自己上轮；与 _frame 的
+    焦点正交约束一上一下夹击「修订 v2 内容相似」。
+    """
+    tool = _tool(_DebateLLM())
+    config = DebateConfig(
+        motion="该不该做 X",
+        form=DebateForm.DEBATE,
+        sides=[DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")],
+    )
+    last = RoundResult(
+        1,
+        "第一轮焦点",
+        [
+            SideTurn("pro", "正方", "r1_pro", "正方上轮论点内容"),
+            SideTurn("con", "反方", "r1_con", "反方上轮论点内容"),
+        ],
+        JudgeVerdict(real_clash=True, new_arguments=True, converged=False),
+    )
+    fb = tool._round_feedback(config, config.sides[0], 2, "第二轮焦点", last)
+
+    assert "第 2 轮" in fb and "第二轮焦点" in fb
+    assert "反方上轮论点内容" in fb  # 注入【对方】上轮论点
+    assert "正方上轮论点内容" not in fb  # 不注入【自己】上轮（自己 transcript 已有）
+    assert "只补" in fb and "不要重述你上一轮" in fb
 
 
 # --- 本地执行门（双模式工作区 P2d）：辩手仅在 local backend 继承 CEO 的 gate -----

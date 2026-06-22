@@ -25,7 +25,10 @@ export function toReason(e: unknown): string {
 }
 
 /** 词法校验：解析相对路径并确认仍在根内（不触盘）。返回绝对路径或 null。 */
-export function resolveLexical(root: StoredRoot, relPath: string): string | null {
+export function resolveLexical(
+  root: StoredRoot,
+  relPath: string,
+): string | null {
   const abs = resolve(root.absPath, relPath);
   const rel = relative(root.absPath, abs);
   if (rel === "") return abs; // 根目录自身

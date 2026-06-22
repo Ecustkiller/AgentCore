@@ -139,11 +139,7 @@ export function LoginPage() {
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
-          <Button
-            type="submit"
-            className="h-10 w-full"
-            disabled={!canSubmit}
-          >
+          <Button type="submit" className="h-10 w-full" disabled={!canSubmit}>
             {busy ? "请稍候…" : mode === "login" ? "登录" : "注册并登录"}
           </Button>
 

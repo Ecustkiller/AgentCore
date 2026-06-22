@@ -357,11 +357,26 @@ class ReadUrlTool:
         except Exception as e:
             reason = describe_net_error(e)
             logger.warning("tool.read_url_error", url=url, error=reason, error_repr=repr(e))
+            # Anti-crawl / access-denied (401/403/429/451): a retry or a different URL
+            # won't help. Steer the model back to the web_search snippet it already has
+            # instead of re-reading / re-searching — this closes the 403→re-search storm
+            # seen in the team evals (the failure text is what the model reads, so the
+            # guidance must ride the runtime error, not only the tool description).
+            hint = ""
+            if (
+                isinstance(e, httpx.HTTPStatusError)
+                and e.response.status_code in (401, 403, 429, 451)
+            ):
+                hint = (
+                    "。该站点反爬 / 拒绝访问，换 URL 或重试都读不到——"
+                    "改用你已有的 web_search 摘要继续作答，不要对该来源反复重读、"
+                    "也不要为此再补一轮搜索"
+                )
             return ToolResult(
                 tool_call_id="",
                 success=False,
                 output="",
-                error=f"网页读取失败：{reason}",
+                error=f"网页读取失败：{reason}{hint}",
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 

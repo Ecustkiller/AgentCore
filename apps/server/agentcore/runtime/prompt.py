@@ -6,6 +6,7 @@ Full version will support skills, rules, workspace context, etc.
 
 import time
 
+from agentcore.runtime.context import ContextAssembler, SectionOrder
 from agentcore.runtime.skills import SkillRegistry, render_skill_directory
 
 # Shared base prompt for the CEO chat agent and every delegated worker. The
@@ -49,9 +50,15 @@ _DEFAULT_SYSTEM_PROMPT = """\
 </output_style>
 
 <tool_use>
-要发起多个互相独立、互不依赖的工具调用时（如同时检索多个不同问题、并行读取多个\
-文件），在同一轮里一次性全部发起——它们会被并发执行，远快于一轮只发一个、串行干等。\
+要发起多个互相独立、互不依赖的工具调用时（如并行读取几个已知文件、就同一事实查证\
+几个来源），在同一轮里一次性全部发起——它们会被并发执行，远快于一轮只发一个、串行干等。\
 只有当后一步的参数必须依赖前一步的返回结果时，才拆成多轮顺序调用。
+
+但检索 / 调研要收敛、不要撒网：先用一两个聚焦查询搜一轮、看清返回的摘要，再决定是否补搜，\
+而不是一上来就并行抛出一堆还没看过结果的猜测性查询。web_search 的摘要多数情况下已够作答与\
+引用；只有确需正文细节时，才用 read_url 精读 1-2 个最相关来源。某来源读不到（反爬 / 失败）\
+就用已有摘要继续推进，别换别的网址反复重读、也别为此再补一轮搜索。一个聚焦问题通常一两轮\
+调研就够——调研是手段不是目的，信息够用就转入产出，别把有限子任务做成开放式资料搜罗。
 </tool_use>
 
 <tool_safety>
@@ -196,23 +203,24 @@ def assemble_system_prompt(
     when present it is injected as a soft-priority <rules> block. This base prompt
     is shared by the CEO chat agent and the delegated workers (runs/executor.py),
     so memory reaches every agent.
+
+    Sections are stitched by :class:`ContextAssembler` (上下文注入统一): base →
+    runtime context → memory <rules> → attachment context, joined with "\n". Empty
+    optional sections (memory, attachments) are skipped, so the output is
+    byte-identical to the prior inline ``"\n".join(parts)`` assembly — load-bearing
+    for DeepSeek prefix-cache stability (see ``_RUNTIME_CONTEXT_TEMPLATE`` / pipeline.run).
     """
-    parts = [_DEFAULT_SYSTEM_PROMPT]
-
-    parts.append(
-        _RUNTIME_CONTEXT_TEMPLATE.format(
-            date=time.strftime("%Y-%m-%d %Z", time.localtime())
-        )
+    runtime_context = _RUNTIME_CONTEXT_TEMPLATE.format(
+        date=time.strftime("%Y-%m-%d %Z", time.localtime())
     )
-
-    rules = _format_memory_rules(memory_markdown)
-    if rules:
-        parts.append(rules)
-
-    if extra_context:
-        parts.append(extra_context)
-
-    return "\n".join(parts)
+    return (
+        ContextAssembler()
+        .add("base", _DEFAULT_SYSTEM_PROMPT, SectionOrder.BASE)
+        .add("runtime_context", runtime_context, SectionOrder.RUNTIME_CONTEXT)
+        .add("memory_rules", _format_memory_rules(memory_markdown), SectionOrder.MEMORY)
+        .add("attachment_context", extra_context, SectionOrder.ATTACHMENT)
+        .render()
+    )
 
 
 def compose_ceo_chat_prompt(
@@ -233,10 +241,17 @@ def compose_ceo_chat_prompt(
     Single source shared by the live turn (``runtime.pipeline``) and the static
     capability catalog (``api`` 能力图鉴), so what the user sees as「AI 工作准则」never
     drifts from what the CEO is actually given. Byte-identical to the prior inline
-    pipeline assembly.
+    pipeline assembly (the empty-skill-directory case is dropped by ``add``).
     """
-    prompt = f"{base_prompt}\n{_CEO_CORE_HINT}"
-    skill_directory = render_skill_directory(skill_registry, ceo_tool_names)
-    if skill_directory:
-        prompt = f"{prompt}\n{skill_directory}"
-    return f"{prompt}\n{CHAT_CITATION_HINT}"
+    return (
+        ContextAssembler()
+        .add("ceo_base", base_prompt, SectionOrder.BASE)
+        .add("ceo_core", _CEO_CORE_HINT, SectionOrder.CEO_CORE)
+        .add(
+            "skill_directory",
+            render_skill_directory(skill_registry, ceo_tool_names),
+            SectionOrder.SKILL_DIRECTORY,
+        )
+        .add("citation", CHAT_CITATION_HINT, SectionOrder.CITATION)
+        .render()
+    )

@@ -1,4 +1,4 @@
-/* Rich Markdown extras (手机端落地设计 P1 · 富渲染): syntax highlight + KaTeX + mermaid +
+/* Rich Markdown extras (前端技术与架构 §七 · 富渲染): syntax highlight + KaTeX + mermaid +
    citation chips. Layered over the .md base in styles.css. Co-located so this batch
    never touches the shared stylesheet. Light theme only (手机端暂不做暗色).
 

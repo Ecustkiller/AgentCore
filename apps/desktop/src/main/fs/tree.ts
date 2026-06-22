@@ -1,12 +1,17 @@
 import { promises as fs } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
-import type { FsCreateKind, FsEntry, FsFileRef, FsResult } from "@shared/ipc-contract";
-import { locate, realInside, toReason } from "./pathGuard";
+import type {
+  FsCreateKind,
+  FsEntry,
+  FsFileRef,
+  FsResult,
+} from "@shared/ipc-contract";
 import {
   LIST_FILES_CAP,
   LIST_FILES_MAX_DEPTH,
   LIST_FILES_SKIP_DIRS,
 } from "./constants";
+import { locate, realInside, toReason } from "./pathGuard";
 import { ensureReady } from "./roots";
 import { resolveWritable } from "./workspace/write";
 
@@ -126,7 +131,9 @@ export async function listDir(
   }
 }
 
-export async function listFiles(rootId: string): Promise<FsResult<FsFileRef[]>> {
+export async function listFiles(
+  rootId: string,
+): Promise<FsResult<FsFileRef[]>> {
   await ensureReady();
   const loc = locate(rootId, "");
   if ("error" in loc) return loc.error;
@@ -307,7 +314,10 @@ export async function create(
   }
 }
 
-export async function remove(rootId: string, relPath: string): Promise<FsResult> {
+export async function remove(
+  rootId: string,
+  relPath: string,
+): Promise<FsResult> {
   await ensureReady();
   if (!relPath) return { ok: false, reason: "不能删除根目录" };
   const loc = locate(rootId, relPath);

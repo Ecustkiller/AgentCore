@@ -1,5 +1,5 @@
 // Desktop's fold → ProjectedTurn snapshot adapter for the cross-platform protocol
-// 巡检 (手机端落地设计 §六; protocol-conformance.mdc). The conformance test asserts
+// 巡检 (前端技术与架构 §十二; protocol-conformance.mdc). The conformance test asserts
 // this == the backend-exported golden, the SAME golden the mobile fold is pinned to —
 // so desktop and mobile can't diverge on the protocol without the gate going red.
 //
@@ -7,27 +7,28 @@
 // (`projectExecution` + `planFromRunPlan` + `frameFromEvent` from stores/execution.ts)
 // — the complex, drift-prone surface is the actual production code, not a copy. The
 // process timeline (思考·正文·工具, single-agent AND multi-agent — 统一团队时间线) now ALSO
-// reuses the same pure helpers production renders through (`@/lib/processTimeline`,
-// shared with stores/conversation.ts), so that lane is production-sourced too — no rule
-// to drift. Only the thin turn-level scalars (content / reasoning strings / citations /
-// pending gate / cost) are assembled here to build the ProjectedTurn the golden judges.
+// reuses production-sourced helpers (`@/lib/foldMessageLane` + `processTimeline`,
+// shared with stores/conversation.ts) so live / reload / golden stay aligned.
 //
 // ProjectedTurn (+ its sub-shapes) is imported from the shared
 // @agentcore/protocol-conformance package now that desktop has joined the workspace —
 // one judge type for both ends; the committed golden JSON is the real contract checked.
 
 import {
-  appendContentStep,
-  appendReasoningStep,
-  appendToolStep,
-  dropTrailingContentSteps,
-  resolveToolStep,
-} from "@/lib/processTimeline";
+  type MessageLaneState,
+  foldCitations,
+  foldContentDelta,
+  foldContentReset,
+  foldReasoningDelta,
+  foldToolUseEnd,
+  foldToolUseStart,
+} from "@/lib/foldMessageLane";
 import {
   type ExecutionPlan,
   type ExecutionStatus,
   type RunFrame,
   frameFromEvent,
+  mergePlanInto,
   planFromRunPlan,
   projectExecution,
   upsertDebateRound,
@@ -55,7 +56,6 @@ import type {
 import type {
   CostBreakdown,
   PendingInteraction,
-  ProcessStep,
   ProjectedAgent,
   ProjectedCitation,
   ProjectedRun,
@@ -74,28 +74,14 @@ const FINISH_TO_STATUS: Record<string, TurnStatus> = {
   cancelled: "cancelled",
 };
 
-/** Append unseen agents/runs from a later same-turn delegate batch (mirrors the
- * non-exported `mergePlanInto` in stores/execution.ts). */
-function mergePlan(cur: ExecutionPlan, next: ExecutionPlan): ExecutionPlan {
-  const agents = [...cur.agents];
-  for (const a of next.agents)
-    if (!agents.some((x) => x.id === a.id)) agents.push(a);
-  const runs = [...cur.runs];
-  for (const s of next.runs) if (!runs.some((x) => x.id === s.id)) runs.push(s);
-  return {
-    ...cur,
-    agents,
-    runs,
-    taskSummary: next.taskSummary || cur.taskSummary,
-  };
-}
-
 /** Desktop's fold → ProjectedTurn (the conformance snapshot). */
 export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
-  let content = "";
-  let reasoning = "";
-  let process: ProcessStep[] = [];
-  let citations: ProjectedCitation[] = [];
+  let messageLane: MessageLaneState = {
+    content: "",
+    reasoning: "",
+    process: [],
+    citations: [],
+  };
   let status: TurnStatus = "running";
   let finishReason: string | null = null;
   let cost: CostBreakdown | null = null;
@@ -115,49 +101,50 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
 
   for (const ev of events) {
     switch (ev.type) {
-      case "content_delta": {
-        const d = (ev.payload as ContentDeltaPayload).delta || "";
-        content += d;
-        if (d) process = appendContentStep(process, d);
+      case "content_delta":
+        messageLane = foldContentDelta(
+          messageLane,
+          (ev.payload as ContentDeltaPayload).delta,
+        );
         break;
-      }
-      // 交付前核验回炉（finish_guard）：done 轮草稿未过轻层核验，引擎丢弃这一版、发
-      // content_reset、回炉重写。content_reset 进 _history（重连回放会重发），故 fold 必须
-      // 镜像生产端（stores/conversation.ts resetStreamingContent）与后端
-      // （EventSink._accumulate_process）：清正文标量 + 弹掉 process 尾部连续 content 步，
-      // 让重写版从干净态重新累积——否则巡检 fold 会把「违规版+修正版」拼在一起、与生产漂移。
-      case "content_reset": {
-        content = "";
-        process = dropTrailingContentSteps(process);
+      case "content_reset":
+        messageLane = foldContentReset(messageLane);
         break;
-      }
-      case "reasoning_delta": {
-        const d = (ev.payload as ReasoningDeltaPayload).delta || "";
-        reasoning += d;
-        if (d) process = appendReasoningStep(process, d);
+      case "reasoning_delta":
+        messageLane = foldReasoningDelta(
+          messageLane,
+          (ev.payload as ReasoningDeltaPayload).delta,
+        );
         break;
-      }
-      case "tool_use_start": {
-        const p = ev.payload as ToolUseStartPayload;
-        process = appendToolStep(process, p);
-        const frame = frameFromEvent(ev);
-        if (frame) frames.push(frame);
+      case "tool_use_start":
+        messageLane = foldToolUseStart(
+          messageLane,
+          ev.payload as ToolUseStartPayload,
+        );
+        {
+          const frame = frameFromEvent(ev);
+          if (frame) frames.push(frame);
+        }
         break;
-      }
-      case "tool_use_end": {
-        const p = ev.payload as ToolUseEndPayload;
-        const resolved = resolveToolStep(process, p);
-        if (resolved) process = resolved;
-        const frame = frameFromEvent(ev);
-        if (frame) frames.push(frame);
+      case "tool_use_end":
+        messageLane = foldToolUseEnd(
+          messageLane,
+          ev.payload as ToolUseEndPayload,
+        );
+        {
+          const frame = frameFromEvent(ev);
+          if (frame) frames.push(frame);
+        }
         break;
-      }
       case "citations":
-        citations = (ev.payload as CitationsPayload).citations ?? [];
+        messageLane = foldCitations(
+          messageLane,
+          (ev.payload as CitationsPayload).citations ?? [],
+        );
         break;
       case "run_plan": {
         const next = planFromRunPlan(ev.payload as RunPlanPayload);
-        plan = plan && plan.id === next.id ? mergePlan(plan, next) : next;
+        plan = plan && plan.id === next.id ? mergePlanInto(plan, next) : next;
         break;
       }
       case "run_started": {
@@ -217,6 +204,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
           summary: "",
           verdict: null,
           sides: [],
+          clashes: [],
         });
         break;
       }
@@ -228,6 +216,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
           summary: p.summary,
           verdict: p.verdict,
           sides: p.sides,
+          clashes: p.clashes,
         });
         break;
       }
@@ -370,13 +359,11 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   return {
     status,
     finishReason,
-    content,
-    reasoning,
+    content: messageLane.content,
+    reasoning: messageLane.reasoning,
     captainContext,
-    // The CEO's inline timeline — for single-agent AND multi-agent turns (统一团队
-    // 时间线); the team graph slots at the `delegate` step on a delegating turn.
-    process,
-    citations,
+    process: messageLane.process,
+    citations: messageLane.citations as ProjectedCitation[],
     agents,
     runs,
     progress: execution ? execution.progress : { completed: 0, total: 0 },

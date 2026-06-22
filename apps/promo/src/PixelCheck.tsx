@@ -9,7 +9,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
-import { DEMO_DEBATE_EDGE, DEMO_LAYOUT_EDGES, DEMO_NODES } from "./data/demo";
+import { DEMO_DEBATE_EDGES, DEMO_LAYOUT_EDGES, DEMO_NODES } from "./data/demo";
 import { DEMO_LAYOUT } from "./data/layout";
 
 /**
@@ -47,7 +47,7 @@ const flowNodes: Node[] = DEMO_NODES.map((n, i) => ({
   data: { ...n.data, handleDirection: "horizontal", enterIndex: i },
 }));
 
-const flowEdges: Edge[] = [...DEMO_LAYOUT_EDGES, DEMO_DEBATE_EDGE].map((e) => ({
+const flowEdges: Edge[] = [...DEMO_LAYOUT_EDGES, ...DEMO_DEBATE_EDGES].map((e) => ({
   id: e.id,
   source: e.source,
   target: e.target,

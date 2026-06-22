@@ -1,4 +1,5 @@
 import { traceSSEEvent } from "@/services/sseTrace";
+import { traceTurnFirstSSE } from "@/services/turnTrace";
 import type { SSEEvent } from "@/types/events";
 import { handleExecutionEvent } from "./handlers/execution";
 import { handleInteractionEvent } from "./handlers/interaction";
@@ -26,6 +27,7 @@ const HANDLERS = [
 export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
   // Dev-only 时序探针（默认关；DevTools 执行 __sseTrace() 开）：记每个事件的到达顺序，
   // 回合末把到达序与气泡 process[] 并排对账。no-op when disabled / in prod.
+  traceTurnFirstSSE(ctx.conversationId, event.type);
   traceSSEEvent(event, ctx.conversationId);
 
   for (const handler of HANDLERS) {

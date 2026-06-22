@@ -1,13 +1,16 @@
-import type { WorkspaceOpResult } from "@shared/ipc-contract";
 import { promises as fs } from "node:fs";
+import type { WorkspaceOpResult } from "@shared/ipc-contract";
 import { GREP_MAX_LINE, WORKSPACE_READ_MAX } from "../constants";
-import { toReason } from "../pathGuard";
 
 export function opOk(value: unknown): WorkspaceOpResult {
   return { ok: true, value };
 }
 
-export function opErr(kind: string, detail = "", count?: number): WorkspaceOpResult {
+export function opErr(
+  kind: string,
+  detail = "",
+  count?: number,
+): WorkspaceOpResult {
   return {
     ok: false,
     error: count === undefined ? { kind, detail } : { kind, detail, count },

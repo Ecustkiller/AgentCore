@@ -3,7 +3,7 @@ import {
   resolveInteraction,
 } from "@/api/interaction";
 // The interactive pause card — the actionable surface for a turn blocked on the user
-// (手机端落地设计 P1 · 交互式暂停放行). The conformance-checked fold computes
+// (前端技术与架构 §七 · 交互式暂停放行). The conformance-checked fold computes
 // `pendingInteraction`; this turns it into buttons that POST the decision to the live
 // stream (api/interaction.ts), which resumes the SAME SSE. Rendered above the composer so
 // it stays visible while the turn is blocked.

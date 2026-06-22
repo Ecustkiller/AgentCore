@@ -101,7 +101,7 @@ class Settings(BaseSettings):
     # in the env var; read as a list via the `cors_origins` property. The packaged
     # desktop renderer is served from app://agentcore (前端技术与架构.md §7.2), so
     # that fixed origin ships in the default alongside the dev Vite/preview ports.
-    # The mobile client (手机端落地设计 P0) adds its own origins: the mobile-web dev
+    # The mobile client (前端技术与架构 §七) adds its own origins: the mobile-web dev
     # server (5175) and the Capacitor shells whose webview origin is non-standard —
     # capacitor://localhost (iOS) + http(s)://localhost (Android). They authenticate by
     # bearer token (not cookies), but the browser still requires a CORS allow-listing.
@@ -191,17 +191,17 @@ class Settings(BaseSettings):
     engine_reflection_start_round: int = 3
     engine_reflection_interval: int = 3
 
-    # Manager-CEO breadth nudge (档2.5 纯粹管理者 CEO): a delegation-capable run (the CEO
-    # captain / a can_delegate worker) that keeps doing read-only investigation ITSELF —
-    # cumulative info-gathering calls crossing ``threshold`` while it has not delegated —
-    # gets ONE steer to fan the breadth out to a parallel research team instead of reading
-    # everything solo (which serializes the work and bloats the CEO context within the
-    # turn). One-shot per run; gated on ``min_round`` so a legitimate pre-delegation scout
-    # batch in the opening round doesn't trip it. ``threshold = 0`` disables it; runs that
-    # cannot delegate (leaf workers) never fire it regardless. Tunable — calibrate from the
-    # delegation rate now made observable at chat.turn_complete (delegated = workers > 0).
-    engine_delegation_nudge_threshold: int = 4
-    engine_delegation_nudge_min_round: int = 1
+    # Over-investigation safety net (收敛治理, 保险丝): a pure runaway backstop, NOT a routine
+    # convergence brake. A 3-sample A/B falsified the soft-nudge ladder — the nudge was
+    # ignored AND net-negative (cost ↑, no call reduction), because the storm is per-round
+    # batch WIDTH, not round count, and the steer fought the model after the fact. So
+    # convergence discipline now lives upstream (the system-prompt <tool_use> doctrine,
+    # applied from round 0) + the read_url anti-crawl failure guidance (closes the
+    # 403→re-search loop); this knob only force-finalizes a TRUE runaway that keeps
+    # investigating past a HIGH bar (e.g. the 17-round pathology), keyed on investigation
+    # *rounds* (a parallel batch counts once). Set high so it never fires on normal broad
+    # research (which legitimately runs ~4-7 investigation rounds). 0 disables it.
+    engine_convergence_finalize_rounds: int = 12
 
     # 交付前核验·轻层回炉 (finish_guard): when the CEO declares done (a no-tool round with
     # content), react_loop first runs a pure-code light check over the product's observable
@@ -458,7 +458,7 @@ class Settings(BaseSettings):
     # a transport error (a dropped desktop still fails cleanly, never hangs).
     workspace_handoff_timeout_seconds: float = 300.0
 
-    # --- 原生推送 (FCM, 手机端落地设计 P2) ---
+    # --- 原生推送 (FCM, 认证与会话 §十) ---
     # Default OFF: with this false, build_push_sender() returns NullPushSender and
     # notify_user() short-circuits before any DB hit, so a turn carries zero push
     # overhead until an operator wires Firebase. Enable + point at a Firebase

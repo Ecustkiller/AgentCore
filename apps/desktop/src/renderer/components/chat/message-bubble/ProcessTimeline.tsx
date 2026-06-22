@@ -1,10 +1,10 @@
 import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
+import { Markdown } from "@/components/chat/Markdown";
 import {
   ComposingToolLine,
   ToolLine,
   ToolLineGroup,
 } from "@/components/chat/ToolLine";
-import { Markdown } from "@/components/chat/Markdown";
 import { groupToolRuns, isOrchestrationTool } from "@/lib/processTimeline";
 import type { ExecutionJournal } from "@/stores/execution";
 import type { Citation, ProcessStep } from "@/types/events";

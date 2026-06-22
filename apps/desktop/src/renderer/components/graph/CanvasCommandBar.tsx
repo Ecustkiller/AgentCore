@@ -12,14 +12,14 @@ import { useEffect, useRef, useState } from "react";
 
 /**
  * Persistent bottom command bar for the team canvas (画布常驻命令栏，前端UX设计.md
- * §6.1 · §6.2). Dispatches a foreground turn via {@link sendQuickTurn}; the host (the
- * on-demand full-screen overlay {@link import("./TeamGraphFullscreen")} or the 对话级
- * 画布 {@link import("./ConversationCanvas")}) follows the new round in place.
+ * §6.1 · §6.2). Dispatches a foreground turn via {@link sendQuickTurn}; the host — the
+ * 对话级画布 overview {@link import("./ConversationCanvas")} or its 放大态
+ * {@link import("./CanvasZoomedTurn")} — follows the new round in place.
  *
  * 后台云端 toggle (`allowBackground`): a local-mode conversation can hand a task to a
  * cloud team instead — non-blocking, so it spawns no foreground round but a 后台云端
  * 任务 ({@link dispatchBackgroundTask}). Offered ONLY where that card is afterward
- * visible (the 对话级画布's 指挥台 feed), NOT the single-turn fullscreen overlay.
+ * visible (the overview's 指挥台 feed), NOT the single-turn 放大态.
  * Mirrors chat's MessageInput toggle (same gate + dispatch, single data source).
  *
  * Text-only — attachments stay in the main composer. Rendered only in canvas mode (the
@@ -115,7 +115,8 @@ export function CanvasCommandBar({
               }`}
             >
               <Cloud size={18} />
-            </IconButton>          </SimpleTooltip>
+            </IconButton>
+          </SimpleTooltip>
         )}
         <textarea
           ref={ref}
@@ -134,9 +135,7 @@ export function CanvasCommandBar({
           }}
           rows={1}
           placeholder={
-            bg
-              ? "描述要交给云端团队后台完成的任务…"
-              : "向 CEO 下达下一步指令…"
+            bg ? "描述要交给云端团队后台完成的任务…" : "向 CEO 下达下一步指令…"
           }
           className="max-h-32 min-h-[2.5rem] flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
@@ -158,7 +157,8 @@ export function CanvasCommandBar({
             className="size-10 shrink-0 rounded-xl"
           >
             {bg ? <CloudUpload size={18} /> : <ArrowUp size={18} />}
-          </IconButton>        </SimpleTooltip>
+          </IconButton>
+        </SimpleTooltip>
       </div>
     </div>
   );

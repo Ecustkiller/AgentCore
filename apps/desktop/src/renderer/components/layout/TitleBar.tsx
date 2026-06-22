@@ -1,5 +1,5 @@
-import { Button, IconButton } from "@/components/ui";
 import { WindowControls } from "@/components/layout/WindowControls";
+import { Button, IconButton } from "@/components/ui";
 import { isMac, macTitleBarInsetClass } from "@/lib/platform";
 import { chord } from "@/lib/shortcuts";
 import { useSidebarStore } from "@/stores/sidebar";

@@ -2,6 +2,7 @@ import type { GroupedConversations } from "@/hooks/useConversations";
 import {
   getConversations,
   patchConversationCache,
+  removeConversationFromCache,
   useGroupedConversations,
 } from "@/hooks/useConversations";
 import {
@@ -15,6 +16,7 @@ import {
   type FolderMeta,
   createFolder,
   deleteFolder,
+  permanentDeleteFolder,
   updateFolder,
 } from "@/services/folders";
 import { useMutation } from "@tanstack/react-query";
@@ -138,6 +140,23 @@ export function useDeleteFolder() {
       }
       removeFolderFromCache(id);
       removeWorkspaceForFolder(id);
+    },
+  });
+}
+
+/** 彻底删除项目 — hard-delete folder, all member chats, and cloud workspace. */
+export function usePermanentDeleteFolder() {
+  return useMutation({
+    mutationFn: (id: string) => permanentDeleteFolder(id),
+    onSuccess: (_data, id) => {
+      for (const c of getConversations()) {
+        if (c.folderId === id) removeConversationFromCache(c.id);
+      }
+      removeFolderFromCache(id);
+      removeWorkspaceForFolder(id);
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.archived,
+      });
     },
   });
 }

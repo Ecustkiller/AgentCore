@@ -1,5 +1,6 @@
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { Loader2, MessageSquare } from "lucide-react";
+import { useState } from "react";
 
 /**
  * 简单回合竖排退化卡（前端UX设计.md §6.1）: a single-agent turn
@@ -16,15 +17,26 @@ export interface SimpleTurnData {
   prompt: string;
   answer: string;
   running: boolean;
+  /** 轻入场 (前端UX设计.md §六): true only when this is a genuinely new turn (set by the
+   * host on the render it first appears). Captured once at mount so the streaming answer's
+   * re-renders never restart or cut the entrance short. */
+  enter?: boolean;
   [key: string]: unknown;
 }
 
 export function SimpleTurnNode({ data }: NodeProps) {
   const d = data as SimpleTurnData;
+  // Capture at mount: a remount (focus switch) / initial open passes enter=false, a new
+  // turn passes true; later prop flips (the answer streaming) must not retrigger it.
+  const [entered] = useState(d.enter ?? false);
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-border" />
-      <div className="w-[320px] rounded-xl border border-border bg-muted/30 px-3.5 py-3 shadow-sm">
+      <div
+        className={`w-[320px] rounded-xl border border-border bg-muted/30 px-3.5 py-3 shadow-sm ${
+          entered ? "animate-task-card-enter" : ""
+        }`}
+      >
         <div className="flex items-center gap-2">
           <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
             {d.running ? (

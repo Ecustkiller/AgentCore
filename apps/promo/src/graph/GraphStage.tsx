@@ -40,6 +40,9 @@ interface Props {
   padX?: number;
   padY?: number;
   showBackground?: boolean;
+  /** Promo stills: render the 对射 axis as a glowing, warm→cool gradient firing
+   * line (cinematic). The film leaves this off for the plain product connector. */
+  cinematic?: boolean;
 }
 
 export function GraphStage({
@@ -54,6 +57,7 @@ export function GraphStage({
   padX = 140,
   padY = 180,
   showBackground = true,
+  cinematic = false,
 }: Props) {
   const W = graphW;
   const H = graphH;
@@ -77,7 +81,15 @@ export function GraphStage({
         }}
       >
         <TooltipProvider>
-          {debate && <DebateConnector debate={debate} frame={frame} />}
+          {debate && (
+            <DebateConnector
+              debate={debate}
+              frame={frame}
+              cinematic={cinematic}
+              w={W}
+              h={H}
+            />
+          )}
           <ReactFlowProvider>
             <ReactFlow
               nodes={nodes}
@@ -109,56 +121,106 @@ export function GraphStage({
  * The 辩论对射 connector: a dotted line between the debate pair with particles
  * fired both ways. Drawn in graph coords (shared with ReactFlow), behind the
  * opaque cards so particles read as emerging from one card into the other.
+ *
+ * `cinematic` (promo stills) makes it the image's centerpiece: a blurred glow
+ * underlay, a thicker brighter axis stroked with a warm→cool gradient (正营 top ↔
+ * 反营 bottom — the two camps reading at a glance), and denser particles tinted to
+ * their camp. The film keeps the plain single-color product connector.
  */
 function DebateConnector({
   debate,
   frame,
+  cinematic = false,
+  w,
+  h,
 }: {
   debate: DebateState;
   frame: number;
+  cinematic?: boolean;
+  /* SVG viewport = the rendered graph's bbox (NOT the demo's): the axis lives in
+   * graph coords, so a smaller hardcoded viewport would clip it out in any bbox
+   * larger than the demo (e.g. the bigteam panorama). */
+  w: number;
+  h: number;
 }) {
   if (!debate.active) return null;
-  const { cx, y1, y2 } = debate;
-  const span = y2 - y1;
+  const { x1, y1, x2, y2 } = debate;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
 
   // Two streams crossing in opposite directions (对射), looping every ~36 frames.
   const period = 36;
   const phase = (frame % period) / period;
-  const down = [phase, (phase + 0.5) % 1];
-  const up = [(1 - phase) % 1, (1 - phase + 0.5) % 1];
+  const perDir = cinematic ? 3 : 2;
+  const stream = (base: number) =>
+    Array.from({ length: perDir }, (_, i) => (base + i / perDir) % 1);
   const dots = [
-    ...down.map((f) => ({ f, key: `d${f}` })),
-    ...up.map((f) => ({ f, key: `u${f}` })),
+    ...stream(phase).map((f) => ({ f, key: `d${f}` })),
+    ...stream(1 - phase).map((f) => ({ f, key: `u${f}` })),
   ];
+
+  // Warm (正营/p1) → cool (反营/p2) so the two camps read instantly.
+  const gradId = "debate-axis-grad";
+  const axisStroke = cinematic ? `url(#${gradId})` : "var(--primary)";
 
   return (
     <svg
-      width={DEMO_LAYOUT.width}
-      height={DEMO_LAYOUT.height}
+      width={w}
+      height={h}
       style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}
       role="presentation"
     >
+      {cinematic && (
+        <defs>
+          <linearGradient
+            id={gradId}
+            x1={x1}
+            y1={y1}
+            x2={x2}
+            y2={y2}
+            gradientUnits="userSpaceOnUse"
+          >
+            <stop offset="0%" stopColor="var(--warning)" />
+            <stop offset="50%" stopColor="var(--primary)" />
+            <stop offset="100%" stopColor="var(--primary)" />
+          </linearGradient>
+        </defs>
+      )}
+      {cinematic && (
+        <line
+          x1={x1}
+          y1={y1}
+          x2={x2}
+          y2={y2}
+          stroke={axisStroke}
+          strokeWidth={11}
+          strokeLinecap="round"
+          opacity={0.22}
+          style={{ filter: "blur(4px)" }}
+        />
+      )}
       <line
-        x1={cx}
+        x1={x1}
         y1={y1}
-        x2={cx}
+        x2={x2}
         y2={y2}
-        stroke="var(--primary)"
-        strokeWidth={2}
+        stroke={axisStroke}
+        strokeWidth={cinematic ? 2.5 : 2}
         strokeDasharray="2 4"
-        opacity={0.55}
+        opacity={cinematic ? 0.85 : 0.55}
       />
       {dots.map((d) => {
-        const y = y1 + d.f * span;
         const edge = Math.min(d.f, 1 - d.f);
         const opacity = Math.min(1, edge / 0.12);
+        const fill =
+          cinematic && d.f < 0.5 ? "var(--warning)" : "var(--primary)";
         return (
           <circle
             key={d.key}
-            cx={cx}
-            cy={y}
-            r={3}
-            fill="var(--primary)"
+            cx={x1 + d.f * dx}
+            cy={y1 + d.f * dy}
+            r={cinematic ? 4 : 3}
+            fill={fill}
             opacity={opacity}
           />
         );

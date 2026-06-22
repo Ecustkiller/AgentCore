@@ -35,7 +35,10 @@ export function sniffBinary(buf: Buffer): boolean {
 }
 
 /** 解码：BOM → utf-8-bom；合法 UTF-8 → utf-8；否则按中文场景回退 GBK（仅可读）。 */
-export function decodeText(buf: Buffer): { encoding: FsEncoding; text: string } {
+export function decodeText(buf: Buffer): {
+  encoding: FsEncoding;
+  text: string;
+} {
   if (
     buf.length >= 3 &&
     buf[0] === 0xef &&
@@ -58,7 +61,11 @@ export function decodeText(buf: Buffer): { encoding: FsEncoding; text: string } 
 }
 
 /** 编码：先规一化为 `\n`，再按 eol 还原；utf-8-bom 补 BOM。GBK 不在此处（已被拒写）。 */
-export function encodeText(content: string, encoding: FsEncoding, eol: FsEol): Buffer {
+export function encodeText(
+  content: string,
+  encoding: FsEncoding,
+  eol: FsEol,
+): Buffer {
   const normalized = content.replace(/\r\n/g, "\n");
   const withEol =
     eol === "crlf" ? normalized.replace(/\n/g, "\r\n") : normalized;

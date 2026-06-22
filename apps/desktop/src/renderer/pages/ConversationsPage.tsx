@@ -109,6 +109,7 @@ export function ConversationsPage() {
   }, [location.key]);
 
   // Switching the left filter clears any in-progress bulk selection.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `selected` is the intentional re-run key (filter change), not read inside the effect body.
   useEffect(() => {
     setSelectedIds(new Set());
     setConfirmBulkDelete(false);
@@ -395,28 +396,28 @@ export function ConversationsPage() {
                 hub (`/files`); this cross-links there with the project's root pre-
                 focused (端态 I — no `/folders/:id` overview page). */}
             {isFolderFilter && (
-                <SurfaceRowButton
-                  variant="default"
-                  onClick={() =>
-                    navigate("/files", {
-                      state: { focusWsId: `folder:${selected}` },
-                    })
-                  }
-                  className="mt-3 w-full shrink-0 justify-start gap-2 border border-border bg-muted/30 px-3 py-2 text-foreground hover:border-foreground/30 hover:bg-accent/60"
-                >
-                  <FolderOpen
-                    size={16}
-                    className="shrink-0 text-muted-foreground"
-                  />
-                  <span className="min-w-0 flex-1 truncate">
-                    浏览「{activeName}」的文件
-                  </span>
-                  <ArrowRight
-                    size={15}
-                    className="shrink-0 text-muted-foreground"
-                  />
-                </SurfaceRowButton>
-              )}
+              <SurfaceRowButton
+                variant="default"
+                onClick={() =>
+                  navigate("/files", {
+                    state: { focusWsId: `folder:${selected}` },
+                  })
+                }
+                className="mt-3 w-full shrink-0 justify-start gap-2 border border-border bg-muted/30 px-3 py-2 text-foreground hover:border-foreground/30 hover:bg-accent/60"
+              >
+                <FolderOpen
+                  size={16}
+                  className="shrink-0 text-muted-foreground"
+                />
+                <span className="min-w-0 flex-1 truncate">
+                  浏览「{activeName}」的文件
+                </span>
+                <ArrowRight
+                  size={15}
+                  className="shrink-0 text-muted-foreground"
+                />
+              </SurfaceRowButton>
+            )}
 
             {isFolderFilter && (
               <p className="mt-2 shrink-0 text-xs text-muted-foreground">

@@ -1,4 +1,4 @@
-// Bearer-token API client for the mobile web/Capacitor shell (手机端落地设计 P0/M3).
+// Bearer-token API client for the mobile web/Capacitor shell (前端技术与架构 §七).
 //
 // Unlike desktop (httpOnly cookies over the app:// origin), the mobile origin
 // (capacitor:// / a new web origin) can't rely on SameSite cookies, so the client

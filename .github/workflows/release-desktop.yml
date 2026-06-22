@@ -1,6 +1,6 @@
 name: Release Desktop
 
-# 桌面端安装包发布（部署与运维.md §7.6 双仓发布；Mac 见 07-规划/Mac桌面端部署设计.md）。
+# 桌面端安装包发布（docs/05-平台与运维/部署与运维.md §7.6 双仓发布）。
 #
 # 触发方式：
 #   · push tag desktop-v<ver>  → 预建 draft → 并行 Win + macOS(arm64)

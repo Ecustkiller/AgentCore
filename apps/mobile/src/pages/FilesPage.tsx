@@ -6,7 +6,7 @@ import {
   uploadWorkspaceFile,
 } from "@/api/workspace";
 import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
-// The cloud workspace file browser for ONE conversation (手机端落地设计 P1 · 云端文件浏览).
+// The cloud workspace file browser for ONE conversation (前端技术与架构 §七 · 云端文件浏览).
 //
 // Reachable from the chat header (/c/:id/files) — a full-screen, conversation-scoped shortcut
 // (no bottom tab bar). The 文件 tab's cross-workspace browser (/files/:wsId) is the sibling

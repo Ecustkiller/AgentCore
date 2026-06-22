@@ -1,5 +1,5 @@
 import CollaborationNetwork from "@/components/CollaborationNetwork";
-import FlowDiagram from "@/components/FlowDiagram";
+import HeroFlow from "@/components/HeroFlow";
 import Reveal from "@/components/Reveal";
 import { DOWNLOAD_PAGE_PATH, MOBILE_WEB_URL } from "@/lib/download";
 
@@ -191,13 +191,13 @@ export default function Home() {
                 "linear-gradient(90deg, color-mix(in oklab, var(--background), transparent 6%) 0%, color-mix(in oklab, var(--background), transparent 42%) 46%, transparent 78%)",
             }}
           />
-          <div className="container-x flex min-h-[88vh] flex-col justify-center py-24">
-            <div className="float-in max-w-3xl">
+          <div className="container-x grid min-h-[88vh] items-center gap-12 py-24 lg:grid-cols-[1.05fr_0.95fr]">
+            <div className="float-in max-w-2xl">
               <p className="eyebrow">
                 <Dot />
                 协作智能平台 · Collaborative Intelligence Platform
               </p>
-              <h1 className="mt-6 text-5xl font-bold leading-[1.08] tracking-tight sm:text-6xl md:text-7xl">
+              <h1 className="mt-6 text-5xl font-bold leading-[1.08] tracking-tight sm:text-6xl xl:text-7xl">
                 <span className="text-gradient">协作，</span>
                 <br />
                 是更高级的智能
@@ -256,12 +256,124 @@ export default function Home() {
                 </a>
               </p>
             </div>
+
+            {/* 右侧：一次协作的竖向流程图（用图展示；文字版讲解见下方「一次协作的全过程」步骤区 #how） */}
+            <div
+              className="float-in w-full lg:justify-self-end"
+              style={{ animationDelay: "120ms" }}
+            >
+              <div className="surface mx-auto w-full max-w-[440px] p-5 backdrop-blur-md sm:p-6">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <p className="eyebrow">
+                    <Dot />
+                    一次协作 · 概览
+                  </p>
+                  <a
+                    href="#how"
+                    className="shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    看协作步骤 →
+                  </a>
+                </div>
+                <HeroFlow />
+                <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border/60 pt-3 text-xs text-muted-foreground">
+                  <span className="inline-flex shrink-0 items-center gap-1.5">
+                    <svg
+                      width="22"
+                      height="8"
+                      viewBox="0 0 22 8"
+                      aria-hidden="true"
+                    >
+                      <line
+                        x1="1"
+                        y1="4"
+                        x2="15"
+                        y2="4"
+                        stroke="var(--primary)"
+                        strokeOpacity={0.7}
+                        strokeWidth={1.6}
+                      />
+                      <polygon
+                        points="15,1 21,4 15,7"
+                        fill="var(--primary)"
+                        fillOpacity={0.7}
+                      />
+                    </svg>
+                    任务流向
+                  </span>
+                  <span className="inline-flex shrink-0 items-center gap-1.5">
+                    <svg
+                      width="22"
+                      height="8"
+                      viewBox="0 0 22 8"
+                      aria-hidden="true"
+                    >
+                      <line
+                        x1="4"
+                        y1="4"
+                        x2="18"
+                        y2="4"
+                        stroke="var(--brand-2)"
+                        strokeOpacity={0.6}
+                        strokeWidth={1.6}
+                        strokeDasharray="4 3"
+                      />
+                      <circle
+                        cx="2"
+                        cy="4"
+                        r="1.8"
+                        fill="var(--brand-2)"
+                        fillOpacity={0.75}
+                      />
+                      <circle
+                        cx="20"
+                        cy="4"
+                        r="1.8"
+                        fill="var(--brand-2)"
+                        fillOpacity={0.75}
+                      />
+                    </svg>
+                    协作通信
+                  </span>
+                  <span className="min-w-0">波次 ①并行 ②依赖 ③辩论</span>
+                </div>
+              </div>
+            </div>
           </div>
+
           {/* 首屏底部渐隐，平滑过渡到下一区块。 */}
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-b from-transparent to-background"
           />
+        </section>
+
+        {/* ── 如何协作（步骤）：原 #how 区精简为文字步骤，完整协作图已上移至 Hero 右侧 ── */}
+        <section id="how" className="border-t border-border/60 py-20">
+          <div className="container-x">
+            <Reveal>
+              <p className="eyebrow">
+                <Dot />
+                一次协作的全过程
+              </p>
+              <h2 className="mt-3 text-3xl font-bold leading-snug sm:text-4xl">
+                从一句话，到一支团队的产出
+              </h2>
+            </Reveal>
+            <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              {STEPS.map((s, i) => (
+                <Reveal key={s.no} delay={i * 90}>
+                  <div className="surface surface-hover h-full p-6">
+                    <span className="font-mono text-sm text-primary">{s.no}</span>
+                    <h3 className="mt-2 text-lg font-semibold">{s.title}</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                      {s.body}
+                    </p>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
         </section>
 
         {/* ── 痛点转场 ── */}
@@ -342,111 +454,6 @@ export default function Home() {
                 ))}
               </div>
             </Reveal>
-          </div>
-        </section>
-
-        {/* ── 如何协作 ── */}
-        <section id="how" className="border-t border-border/60 py-24">
-          <div className="container-x">
-            <Reveal>
-              <p className="eyebrow">
-                <Dot />
-                一次协作的全过程
-              </p>
-              <h2 className="mt-4 max-w-2xl text-3xl font-bold leading-snug sm:text-4xl">
-                从一句话，到一支团队的产出
-              </h2>
-            </Reveal>
-
-            <Reveal delay={100}>
-              <div className="surface mt-12 p-6 sm:p-10">
-                <FlowDiagram />
-                <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-border/60 pt-5 text-sm leading-relaxed text-muted-foreground">
-                  <span className="inline-flex shrink-0 items-center gap-2">
-                    <svg
-                      width="30"
-                      height="10"
-                      viewBox="0 0 30 10"
-                      aria-hidden="true"
-                      className="shrink-0"
-                    >
-                      <line
-                        x1="1"
-                        y1="5"
-                        x2="22"
-                        y2="5"
-                        stroke="var(--primary)"
-                        strokeOpacity={0.7}
-                        strokeWidth={1.6}
-                      />
-                      <polygon
-                        points="22,1 29,5 22,9"
-                        fill="var(--primary)"
-                        fillOpacity={0.7}
-                      />
-                    </svg>
-                    任务流向
-                  </span>
-                  <span className="inline-flex shrink-0 items-center gap-2">
-                    <svg
-                      width="30"
-                      height="10"
-                      viewBox="0 0 30 10"
-                      aria-hidden="true"
-                      className="shrink-0"
-                    >
-                      <line
-                        x1="5"
-                        y1="5"
-                        x2="25"
-                        y2="5"
-                        stroke="var(--brand-2)"
-                        strokeOpacity={0.6}
-                        strokeWidth={1.6}
-                        strokeDasharray="4 4"
-                      />
-                      <circle
-                        cx="3"
-                        cy="5"
-                        r="2.2"
-                        fill="var(--brand-2)"
-                        fillOpacity={0.75}
-                      />
-                      <circle
-                        cx="27"
-                        cy="5"
-                        r="2.2"
-                        fill="var(--brand-2)"
-                        fillOpacity={0.75}
-                      />
-                    </svg>
-                    协作通信
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className="hidden h-3.5 w-px shrink-0 bg-border sm:inline-block"
-                  />
-                  <span className="min-w-0">
-                    <span className="font-medium text-foreground">波次调度</span>
-                    ：并行的任务编入同一波次，有依赖的排入下一波——调度器按依赖自动把任务切成一波波推进。
-                  </span>
-                </div>
-              </div>
-            </Reveal>
-
-            <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-              {STEPS.map((s, i) => (
-                <Reveal key={s.no} delay={i * 90}>
-                  <div className="surface h-full p-6">
-                    <span className="font-mono text-sm text-primary">{s.no}</span>
-                    <h3 className="mt-2 text-lg font-semibold">{s.title}</h3>
-                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                      {s.body}
-                    </p>
-                  </div>
-                </Reveal>
-              ))}
-            </div>
           </div>
         </section>
 

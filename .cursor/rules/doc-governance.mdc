@@ -1,6 +1,9 @@
 ---
-description: 文档治理——docs/ 与 rules/ 定位、内容策略、同步规则、命名篇幅
-alwaysApply: true
+description: 文档治理——docs/ 与 rules/ 定位、内容策略、同步规则、命名篇幅。写/改 docs/ 或 .cursor/rules/ 前阅读。
+globs:
+  - "docs/**"
+  - ".cursor/rules/**"
+alwaysApply: false
 ---
 
 # 文档治理

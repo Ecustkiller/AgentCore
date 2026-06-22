@@ -1,5 +1,9 @@
 export { Badge, type BadgeProps, type BadgeTone } from "./badge";
 export {
+  CatalogIconShell,
+  type CatalogIconShellProps,
+} from "./catalog-icon-shell";
+export {
   Button,
   type ButtonProps,
   type ButtonSize,

@@ -21,7 +21,11 @@ declare global {
   interface Window {
     fsApi: FsApi;
     sidecarApi: SidecarApi;
-    updaterApi: UpdaterApi;
+    /** Electron preload 注入；纯浏览器 / 单测环境可能缺失。 */
+    updaterApi?: UpdaterApi;
     windowApi: WindowApi;
+    /** 仅由纯浏览器预览入口（main.web.tsx → browserStubs）设置，标记「离线、无后端」运行，
+     *  使 AuthGate 跳过认证 bootstrap。Electron 构建里始终缺失。 */
+    __WEB_PREVIEW__?: boolean;
   }
 }
