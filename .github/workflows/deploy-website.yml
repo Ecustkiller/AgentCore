@@ -1,7 +1,8 @@
 name: Deploy Website
 
-# 官网（apps/website）静态站自动部署到 Cloudflare Pages。
-# 构建时 scripts/fetch-release.mjs 从 GitHub Releases 拉 Latest 版本写 download.generated.ts。
+# 官网（apps/website）静态站 + Pages Functions 部署到 Cloudflare Pages。
+# /download 运行时经 functions/api/desktop-release 拉 GitHub Latest（5min 缓存）；
+# 构建时 fetch-release.mjs 仍写 download.generated.ts 作首屏/离线回退。
 # 触发：master 上 website 改动 / desktop-v* 桌面发布完成后 / 手动 dispatch。
 
 on:

@@ -1,6 +1,6 @@
+import DownloadPageHero from "@/components/DownloadPageHero";
 import DownloadPanel from "@/components/DownloadPanel";
 import {
-  DESKTOP_VERSION,
   DOWNLOAD_PAGE_PATH,
   MOBILE_WEB_URL,
   MAC_INSTALL_STEPS,
@@ -10,7 +10,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: `下载 AgentCore ${DESKTOP_VERSION} — 协作智能平台`,
+  title: "下载 AgentCore 桌面客户端 — 协作智能平台",
   description:
     "下载 AgentCore 桌面客户端 for Windows 与 macOS（Apple Silicon）。Multi-Agent 协作工作台，自动更新。",
 };
@@ -60,15 +60,7 @@ export default function DownloadPage() {
       </header>
 
       <main className="container-x py-16 sm:py-24">
-        <div className="mx-auto max-w-4xl text-center">
-          <p className="eyebrow">Desktop · v{DESKTOP_VERSION}</p>
-          <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-5xl">
-            下载 AgentCore 桌面客户端
-          </h1>
-          <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-muted-foreground">
-            Windows 与 macOS（Apple Silicon）Multi-Agent 协作工作台。
-          </p>
-        </div>
+        <DownloadPageHero />
 
         <div className="mx-auto mt-12 max-w-4xl">
           <DownloadPanel />
