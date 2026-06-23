@@ -6,6 +6,7 @@ before any request), and search parsing is tested via the pure ``_parse_results`
 """
 
 import asyncio
+import json
 import time
 from pathlib import Path
 
@@ -401,6 +402,61 @@ async def test_searxng_backend_caps_concurrent_requests(monkeypatch):
     _net._states.pop(host, None)
 
 
+# --- search_backend: token-bucket rate limiter (B3 CAPTCHA defence) ---
+
+
+async def test_token_bucket_allows_burst_then_paces():
+    # Starts full (capacity tokens) so a burst passes instantly; once drained the next
+    # token can't arrive faster than the refill rate — that paces the sustained rate that
+    # CAPTCHA keys on. Lower-bound timing only (robust on slow CI).
+    bucket = search_backend_mod._TokenBucket(rate_per_sec=20.0, capacity=2.0)
+    await bucket.acquire()
+    await bucket.acquire()  # burst of 2 drained
+    start = time.monotonic()
+    await bucket.acquire()  # must wait ~1/20s for the next token
+    assert (time.monotonic() - start) >= 0.03
+
+
+async def test_token_bucket_refills_over_elapsed_time():
+    # Refill is proportional to elapsed time: simulate time passing by backdating the
+    # update clock, then a drained bucket serves again without a real wait.
+    bucket = search_backend_mod._TokenBucket(rate_per_sec=10.0, capacity=1.0)
+    await bucket.acquire()  # drained
+    bucket._updated -= 1.0  # pretend 1s elapsed → ~10 tokens refilled (capped at capacity)
+    await asyncio.wait_for(bucket.acquire(), timeout=0.5)  # served from refill, no long wait
+
+
+async def test_searxng_backend_acquires_rate_token_per_search(monkeypatch):
+    # Regression guard: every outbound search must pass the rate-limit bucket (so the
+    # CAPTCHA-defence pacing can't be silently dropped from the request path).
+    host = "localhost"
+    _net._states.pop(host, None)
+    req = httpx.Request("GET", "http://localhost:18888/search")
+    payload = {"results": [{"url": "https://e.com/a", "title": "A", "content": "x"}]}
+
+    class _OkClient:
+        async def get(self, *args, **kwargs):
+            return httpx.Response(200, json=payload, request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _OkClient())
+
+    backend = SearXNGBackend("http://localhost:18888")
+    acquired = {"n": 0}
+    bucket = backend._get_bucket()
+    real_acquire = bucket.acquire
+
+    async def _counting_acquire():
+        acquired["n"] += 1
+        await real_acquire()
+
+    monkeypatch.setattr(bucket, "acquire", _counting_acquire)
+
+    await backend.search("q")
+    await backend.search("q")
+    assert acquired["n"] == 2
+    _net._states.pop(host, None)
+
+
 async def test_searxng_backend_retries_transient_5xx_then_succeeds(monkeypatch):
     host = "localhost"
     _net._states.pop(host, None)
@@ -522,6 +578,39 @@ async def test_probe_search_backend_reports_unreachable(monkeypatch):
     ok, detail = result
     assert ok is False
     assert "ConnectError" in detail
+
+
+async def test_probe_search_results_reports_ok(monkeypatch):
+    # The real-search canary (D5): a query that returns ≥1 result confirms the engine
+    # pool actually works, not just that /healthz is 200.
+    class _Backend:
+        async def search(self, query, max_results=5):
+            return [SearchResult("t", "https://a.com", "s")]
+
+    monkeypatch.setattr(search_backend_mod, "_backend", _Backend())
+    assert await search_backend_mod.probe_search_results() == (True, 1)
+
+
+async def test_probe_search_results_flags_empty(monkeypatch):
+    # The production failure mode: SearXNG healthz-200 but every engine CAPTCHA-suspended
+    # → real search returns empty. The canary must surface this (ok=False), unlike the
+    # reachability probe which would still report healthy.
+    class _Backend:
+        async def search(self, query, max_results=5):
+            return []
+
+    monkeypatch.setattr(search_backend_mod, "_backend", _Backend())
+    assert await search_backend_mod.probe_search_results() == (False, 0)
+
+
+async def test_probe_search_results_never_raises(monkeypatch):
+    # Best-effort like the reachability probe: a failing search must never break startup.
+    class _Backend:
+        async def search(self, query, max_results=5):
+            raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(search_backend_mod, "_backend", _Backend())
+    assert await search_backend_mod.probe_search_results() is None
 
 
 async def test_web_search_fast_fails_when_circuit_open(monkeypatch):
@@ -767,6 +856,44 @@ def test_search_cache_expires_after_ttl():
     assert cache.get("q", min_results=1) is None
 
 
+def test_search_cache_negative_marks_and_serves_recently_empty():
+    # A1 防重搜风暴: a query that just came back empty is remembered (negatively) so an
+    # immediate re-issue is served empty without a network hit. Normalised like the
+    # positive key, so trivially-different spellings collapse to one marker.
+    cache = ConversationSearchCache()
+    assert cache.is_recently_empty("q") is False
+    cache.note_empty("  Q ")  # normalises to the same key as "q"
+    assert cache.is_recently_empty("q") is True
+    assert cache.is_recently_empty("other") is False
+
+
+def test_search_cache_negative_marker_expires():
+    cache = ConversationSearchCache(empty_ttl_seconds=100.0)
+    cache.note_empty("q")
+    assert cache.is_recently_empty("q") is True
+    cache._empty["q"] = time.time() - 1000  # backdate past the (short) empty TTL
+    assert cache.is_recently_empty("q") is False  # expired → a genuine retry is allowed
+
+
+def test_search_cache_positive_result_clears_negative_marker():
+    # A real result supersedes a stale "recently empty" marker (engines recovered).
+    cache = ConversationSearchCache()
+    cache.note_empty("q")
+    assert cache.is_recently_empty("q") is True
+    cache.put(_sentry("q", [_sresult("https://a.com")]))
+    assert cache.is_recently_empty("q") is False
+    assert cache.get("q", min_results=1) is not None
+
+
+def test_search_cache_negative_lru_caps_entries():
+    # The negative cache is bounded like the positive one (oldest marker evicted).
+    cache = ConversationSearchCache(max_entries=2)
+    for i in range(3):
+        cache.note_empty(f"q{i}")
+    assert cache.is_recently_empty("q0") is False  # oldest empty marker evicted
+    assert cache.is_recently_empty("q2") is True
+
+
 def test_search_cache_lru_evicts_over_count():
     cache = ConversationSearchCache(max_entries=2)
     for i in range(3):
@@ -849,21 +976,55 @@ async def test_web_search_skips_cache_without_conversation(monkeypatch):
     assert calls["n"] == 2
 
 
-async def test_web_search_empty_results_not_cached(monkeypatch):
-    monkeypatch.setattr(search_cache_mod, "_registry", SearchCacheRegistry())
+async def test_web_search_empty_result_negatively_cached(monkeypatch):
+    # CAPTCHA / transient empty (HTTP 200 + results:[]) → negatively cached briefly so a
+    # degraded worker re-issuing the SAME empty query doesn't restorm SearXNG (案例1 重搜
+    # 风暴). The marker expires fast, so once the transient cause likely cleared the query
+    # genuinely re-searches.
+    reg = SearchCacheRegistry()
+    monkeypatch.setattr(search_cache_mod, "_registry", reg)
     calls = {"n": 0}
 
     class _Backend:
         async def search(self, query, max_results=5):
             calls["n"] += 1
-            return []  # empty → not cached, left to re-search
+            return []
 
     monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
     ctx = _ctx(conversation_id="conv-empty")
     tool = WebSearchTool()
-    await tool.execute({"query": "q"}, ctx)
+
+    r1 = await tool.execute({"query": "q"}, ctx)
+    r2 = await tool.execute({"query": "q"}, ctx)  # within window → served empty, no re-search
+    assert r1.success and r2.success
+    assert calls["n"] == 1  # second suppressed by the negative cache
+    assert r2.metadata.get("cached") is True
+    assert r2.metadata.get("result_count") == 0
+
+    # once the negative marker ages past its TTL, the same query genuinely re-searches
+    reg.get_or_create("conv-empty")._empty["q"] = time.time() - 10_000
     await tool.execute({"query": "q"}, ctx)
     assert calls["n"] == 2
+
+
+async def test_web_search_empty_result_is_honest(monkeypatch):
+    # D5: an empty set is success (HTTP 200, no transport failure) but must carry an
+    # explicit note + ``empty`` flag so the model doesn't read silence as "this doesn't
+    # exist" — a CAPTCHA-suspended engine returns HTTP 200 + zero results all the same.
+    class _Backend:
+        async def search(self, query, max_results=5):
+            return []
+
+    monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
+    result = await WebSearchTool().execute({"query": "q"}, _ctx())
+
+    assert result.success is True
+    assert result.metadata.get("empty") is True
+    assert result.metadata.get("result_count") == 0
+    payload = json.loads(result.output)
+    assert payload["results"] == []
+    assert payload.get("note")  # an actionable, non-empty hint for the model
+    assert result.citations is None  # nothing to cite
 
 
 async def test_web_search_cache_refetches_when_more_results_needed(monkeypatch):

@@ -84,6 +84,12 @@ class WebSearchTool:
             if hit is not None:
                 logger.info("tool.web_search_cache_hit", query=query, result_count=len(hit.results))
                 return self._success_result(query, hit.results, start, cached=True)
+            # 负缓存（案例1 防重搜风暴）：同一查询刚返回空（常见于引擎 CAPTCHA 后 HTTP 200 +
+            # 空结果），短时内直接回空、不再打网，避免降级 worker 对同一空查询反复重搜把共享
+            # SearXNG 再次打爆。空结果会自然过期，CAPTCHA 大概率解除后才真正重搜。
+            if cache.is_recently_empty(query):
+                logger.info("tool.web_search_negative_cache_hit", query=query)
+                return self._success_result(query, [], start, cached=True)
 
         try:
             backend = get_search_backend()
@@ -99,18 +105,33 @@ class WebSearchTool:
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
-        # Cache only successful, non-empty result sets — an empty result is left to
-        # re-search (it may have been a transient miss), mirroring read_url's
-        # "only cache successful fetches" rule.
-        if cache is not None and results:
-            cache.put(
-                SearchCacheEntry(
-                    query=query,
-                    results=results,
-                    max_results=max_results,
-                    stored_at=time.time(),
+        if not results:
+            # Observability (D5): a LIVE search returned zero results — the passive signal
+            # for "search may be degraded" (a CAPTCHA-suspended engine returns HTTP 200 +
+            # empty, indistinguishable from a genuine no-hit at the transport layer).
+            # Logged at warning so ops can alert on the empty-search RATE in logs/dev.jsonl
+            # WITHOUT an active probe that would itself add the CAPTCHA-triggering load this
+            # whole change fights. A suppressed repeat logs negative_cache_hit (info) above,
+            # so this fires once per genuinely-live empty, not per retry.
+            logger.warning("tool.web_search_empty", query=query)
+
+        # Cache the outcome: a non-empty set positively (served for the TTL), an EMPTY
+        # set negatively (案例1 防重搜风暴) — a query that just came back empty is
+        # suppressed briefly so degraded workers re-issuing it don't restorm the shared
+        # SearXNG. The negative marker expires fast so a genuine retry happens once the
+        # transient cause (engine CAPTCHA) likely cleared.
+        if cache is not None:
+            if results:
+                cache.put(
+                    SearchCacheEntry(
+                        query=query,
+                        results=results,
+                        max_results=max_results,
+                        stored_at=time.time(),
+                    )
                 )
-            )
+            else:
+                cache.note_empty(query)
         return self._success_result(query, results, start, cached=False)
 
     def _success_result(
@@ -123,7 +144,19 @@ class WebSearchTool:
     ) -> ToolResult:
         """Build the (identical-shape) success ToolResult for a live or cached hit."""
         items = [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
-        output = json.dumps({"query": query, "results": items}, ensure_ascii=False)
+        payload: dict[str, Any] = {"query": query, "results": items}
+        if not items:
+            # Honesty (D5): an empty set is a *success* (HTTP 200, no transport failure),
+            # but the model must NOT read silence as "this doesn't exist" — a
+            # CAPTCHA-suspended engine returns HTTP 200 + zero results just the same. Give
+            # an explicit, actionable note so the model rephrases / tries another source
+            # instead of fabricating an answer or asserting the information is absent.
+            payload["note"] = (
+                "本次搜索未返回任何结果。可能是查询过于具体/生僻，或搜索引擎暂时受限"
+                "（如被限流）。建议换用更通用的关键词重试，或改用其他信息来源；"
+                "不要据此断定该信息不存在。"
+            )
+        output = json.dumps(payload, ensure_ascii=False)
         citations = [
             {"url": r.url, "title": r.title, "snippet": r.snippet, "site": site_of(r.url)}
             for r in results
@@ -142,6 +175,8 @@ class WebSearchTool:
         metadata: dict[str, Any] = {"result_count": len(items)}
         if cached:
             metadata["cached"] = True
+        if not items:
+            metadata["empty"] = True
         return ToolResult(
             tool_call_id="",
             success=True,

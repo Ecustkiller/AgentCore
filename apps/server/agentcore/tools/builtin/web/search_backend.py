@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlparse
@@ -47,6 +48,21 @@ DEFAULT_MAX_RESULTS = 5
 # the cooldown. The semaphore makes the burst queue into manageable waves instead of
 # self-DOSing; tune up if SearXNG is scaled out.
 _SEARCH_CONCURRENCY = 6
+
+# Pace the *rate* of outbound searches over time — distinct from _SEARCH_CONCURRENCY,
+# which caps how many run AT ONCE. The CN scraper engines (baidu/sogou) raise CAPTCHA
+# based on the request RATE from one datacenter IP over a window, NOT instantaneous
+# concurrency: a parallel team sustaining dozens of searches/min gets the IP flagged as
+# a crawler → engines "suspended" → HTTP 200 with empty results (实测案例复盘 案例1: a
+# 07:30 run fired 114 web_searches and went search-blind). A token bucket smooths that
+# sustained rate while a lone search still fires instantly from a full bucket. The
+# burst capacity is kept ≥ _SEARCH_CONCURRENCY so a single wave is never throttled below
+# the concurrency ceiling (the burst test relies on this). Per-process like the
+# semaphore/breaker (N API workers ⇒ N×rate); tune down if CAPTCHA persists, up if a
+# scaled-out SearXNG / commercial API removes the per-IP limit.
+_SEARCH_RATE_PER_SEC = 3.0  # steady-state refill: ~3 searches/sec
+_SEARCH_RATE_BURST = 8.0  # bucket capacity: a fresh team's first wave passes immediately
+_SEARCH_RATE_JITTER_S = 0.2  # extra randomised wait so paced requests don't fire in lockstep
 
 # Transient gateway/server errors (notably SearXNG 502 when an upstream engine
 # hiccups) frequently clear on a quick retry, so a 5xx is retried a couple of times
@@ -100,6 +116,42 @@ def _searxng_host(base_url: str) -> str:
     return (urlparse(base_url).hostname or "localhost").lower()
 
 
+class _TokenBucket:
+    """Async token bucket: refills at ``rate`` tokens/sec up to ``capacity``.
+
+    :meth:`acquire` waits until a whole token is available, then consumes one. Used to
+    pace the *rate* of outbound searches (see ``_SEARCH_RATE_*``) so a parallel-team
+    burst doesn't sustain a crawler-like request rate that gets the host IP CAPTCHA-
+    flagged. Single-event-loop posture (like the breaker): a short lock guards the
+    token accounting; the lock is released while waiting out a shortfall so refill stays
+    accurate and waiters don't serialise behind a sleep.
+    """
+
+    def __init__(self, rate_per_sec: float, capacity: float) -> None:
+        self._rate = rate_per_sec
+        self._capacity = capacity
+        self._tokens = capacity  # start full: a cold first search isn't penalised
+        self._updated = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                self._tokens = min(
+                    self._capacity, self._tokens + (now - self._updated) * self._rate
+                )
+                self._updated = now
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return
+                deficit = 1.0 - self._tokens
+            # Lock released: wait out the shortfall (+ jitter to desync paced waves), then
+            # re-check. Racing waiters that wake together re-loop and re-wait — correct,
+            # since only one can take the refilled token under the lock.
+            await asyncio.sleep(deficit / self._rate + random.uniform(0, _SEARCH_RATE_JITTER_S))
+
+
 class SearXNGBackend:
     """Search via a self-hosted SearXNG instance (JSON API).
 
@@ -114,6 +166,7 @@ class SearXNGBackend:
         self.base_url = (base_url or settings.searxng_url).rstrip("/")
         self._client: httpx.AsyncClient | None = None
         self._sem: asyncio.Semaphore | None = None
+        self._bucket: _TokenBucket | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
         """Lazily build the shared client, bound to the running event loop.
@@ -144,12 +197,24 @@ class SearXNGBackend:
             self._sem = asyncio.Semaphore(_SEARCH_CONCURRENCY)
         return self._sem
 
+    def _get_bucket(self) -> _TokenBucket:
+        """Lazily build the rate-limit token bucket, bound to the running event loop.
+
+        Lazy for the same reason as the semaphore: its ``asyncio.Lock`` binds to the
+        loop on first use, so building it here (right before ``acquire``) keeps it on the
+        server's loop rather than import time.
+        """
+        if self._bucket is None:
+            self._bucket = _TokenBucket(_SEARCH_RATE_PER_SEC, _SEARCH_RATE_BURST)
+        return self._bucket
+
     async def aclose(self) -> None:
         """Close the persistent client and drop it (idempotent; re-lazies on next use)."""
         if self._client is not None:
             await self._client.aclose()
             self._client = None
         self._sem = None  # re-lazied (rebinds to a fresh loop) on next use
+        self._bucket = None  # re-lazied (rebinds to a fresh loop) on next use
 
     async def search(
         self, query: str, max_results: int = DEFAULT_MAX_RESULTS
@@ -167,6 +232,13 @@ class SearXNGBackend:
                 f"已临时熔断约 {int(remaining)}s，暂不重试；"
                 f"若刚启动请稍候，或检查 {host} 是否过载/可达"
             )
+
+        # Pace the outbound RATE before taking a concurrency slot (CAPTCHA defence, see
+        # _SEARCH_RATE_*): acquired AFTER the breaker check (a fast-fail mustn't wait for
+        # a token) and OUTSIDE the semaphore (waiting for a token mustn't hold a slot).
+        # Retries inside the loop are already paced by their own backoff, so they don't
+        # re-acquire a token here.
+        await self._get_bucket().acquire()
 
         params = {"q": query, "format": "json", "safesearch": "0"}
         client = self._get_client()
@@ -403,3 +475,52 @@ async def probe_search_backend() -> tuple[bool, str] | None:
             "docker compose -f deploy/docker-compose.dev.yml up -d searxng",
         )
     return ok, detail
+
+
+# A fixed, innocuous canary for the boot real-search probe: common enough that any
+# working engine returns hits, so an EMPTY result means the engine pool is degraded
+# (every engine CAPTCHA-suspended / blocked), not that the query was too narrow.
+_SEARCH_CANARY_QUERY = "新闻"
+
+
+async def probe_search_results() -> tuple[bool, int] | None:
+    """Best-effort real-search canary, logged ✓/✗ for a startup line.
+
+    Stronger than :func:`probe_search_backend` (which only checks ``/healthz``
+    reachability): runs ONE real query and reports whether the engine pool actually
+    returns results. The production failure mode — SearXNG healthz-200 but every CN
+    engine CAPTCHA-suspended, so ``web_search`` silently returns empty — is invisible to
+    the reachability probe yet caught here. **One-shot at boot only**, never periodic: a
+    frequent active search would itself add the per-IP request volume that triggers the
+    very CAPTCHA this defends against. **Never raises** (best-effort, like the
+    reachability probe). Returns ``(ok, result_count)`` or ``None`` when no search ran.
+    """
+    backend = get_search_backend()
+    try:
+        results = await backend.search(_SEARCH_CANARY_QUERY, max_results=1)
+    except Exception as exc:  # noqa: BLE001 - best-effort; any failure == can't confirm
+        logger.warning("searxng.canary_failed", reason=describe_net_error(exc))
+        return None
+    ok = len(results) > 0
+    if ok:
+        logger.info("searxng.canary_ok", result_count=len(results))
+    else:
+        logger.warning(
+            "searxng.canary_empty",
+            hint="SearXNG 可达但实搜返回 0 条：上游引擎可能全部被限流/CAPTCHA，"
+            "web_search 将静默返回空。检查 deploy/searxng 引擎状态或重启 agentcore-searxng",
+        )
+    return ok, len(results)
+
+
+async def probe_search_at_startup() -> None:
+    """Boot-time search self-check: reachability, then (only if reachable) a real canary.
+
+    Fire-and-forget from the app lifespan. Gating the canary on a reachable ``/healthz``
+    keeps a real query off the network when SearXNG is simply down (the reachability
+    line already says so) and avoids a pointless breaker hit during a cold boot. Never
+    raises — both legs are best-effort.
+    """
+    reach = await probe_search_backend()
+    if reach is not None and reach[0]:
+        await probe_search_results()
