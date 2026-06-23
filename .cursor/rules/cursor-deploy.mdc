@@ -48,7 +48,7 @@ Windows 验收用 **`curl.exe`**（PowerShell 的 `curl` 是 `Invoke-WebRequest`
 
 | 坑 | 对策 |
 |---|---|
-| 在本地 Windows `docker build apps/server` | **禁止**——Dockerfile 用清华 PyPI，境外 IP 常 403 |
+| 在本地 Windows `docker build apps/server` | 须加 `--build-arg PYPI_INDEX=https://pypi.org/simple/`（默认清华对境外 403） |
 | 生产机无 buildx | 脚本会自动 `apt install docker-buildx-plugin` |
 | `uv sync` 极慢（10–30min+） | 正常，勿杀；`node deploy/scripts/check-remote-build.mjs` 看 `docker buildx` 是否仍在跑 |
 | 仅重跑上线、镜像已在 ACR | SSH 执行 `bash deploy/scripts/finish-server.sh <short-sha>` |
