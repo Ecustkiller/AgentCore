@@ -10,12 +10,15 @@
 # ---- builder：按 uv.lock 解析依赖到 /app/.venv ----
 FROM python:3.12-slim AS builder
 
-# 复用官方 uv 二进制（快、可复现）。
-COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /bin/
+# uv 经 pip + Aliyun PyPI 镜像安装：原 `ghcr.io/astral-sh/uv` 二进制镜像在大陆云
+# IP 上拉取超时（ghcr.io blob 不可达），且默认 PyPI 的 wheel CDN
+# (files.pythonhosted.org) 在大陆也极慢——故统一走 Aliyun 镜像，稳定可复现。
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ 'uv~=0.5.0'
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_PYTHON_DOWNLOADS=0
+    UV_PYTHON_DOWNLOADS=0 \
+    UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
 
 WORKDIR /app
 
