@@ -17,9 +17,12 @@ name: Build Backend Image
 #   ACR_USERNAME   ACR 登录用户名
 #   ACR_PASSWORD   ACR 登录密码（凭据）
 
+# ⚠️ 已弃用 push 自动触发（2026-06）— 改由 Cursor Agent 在生产机构建推 ACR：
+#   node deploy/scripts/remote-build-deploy.mjs <short-sha>
+# 见 docs/05-平台与运维/部署与运维.md §三、.cursor/rules/cursor-deploy.mdc
+# 仅保留 workflow_dispatch 作紧急备用（需 Actions 配额可用）。
+
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
 
 concurrency:

@@ -23,10 +23,11 @@ name: Deploy Backend
 #   $AGENTCORE_HOME/repo 已 clone；$AGENTCORE_HOME/.env 含 ACR 凭据（拉 VPC 端点）+
 #   IMAGE_REGISTRY；deploy/config/production.env 已填值。
 
+# ⚠️ 已弃用 push prod-* 自动触发（2026-06）— 日常由 remote-build-deploy.mjs 一次完成
+# 构建+推 ACR+finish-server.sh。本 workflow 仅 workflow_dispatch 紧急备用。
+# 见 .cursor/rules/cursor-deploy.mdc
+
 on:
-  push:
-    tags:
-      - "prod-*"
   workflow_dispatch:
     inputs:
       ref:
