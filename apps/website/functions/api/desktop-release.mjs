@@ -1,6 +1,6 @@
 import { fetchLatestReleaseArtifacts } from "../_lib/releaseArtifacts.mjs";
 
-const FALLBACK_VERSION = "0.3.2";
+const FALLBACK_VERSION = "0.3.3";
 const CACHE_SECONDS = 300;
 
 /** Cloudflare Pages Function — runtime latest desktop release for /download. */
