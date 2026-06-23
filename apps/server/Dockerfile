@@ -10,17 +10,18 @@
 # ---- builder：按 uv.lock 解析依赖到 /app/.venv ----
 FROM python:3.12-slim AS builder
 
-# uv 经 pip + Aliyun PyPI 镜像安装：原 `ghcr.io/astral-sh/uv` 二进制镜像在大陆云
-# IP 上拉取超时（ghcr.io blob 不可达），且默认 PyPI 的 wheel CDN
-# (files.pythonhosted.org) 在大陆也极慢——故统一走 Aliyun 镜像，稳定可复现。
-# 不钉版本（取最新）：uv 0.5.x 在本机并发解包 wheel 时会死锁（全线程 futex_wait
-# 卡死，非网络问题）；--frozen 从锁文件复现，uv 版本只影响安装器机制不影响结果。
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ uv
+# uv 经 pip + 清华 PyPI 镜像安装：
+# - 原 `ghcr.io/astral-sh/uv` 二进制镜像在大陆云 IP 拉取超时（ghcr.io blob 不可达）；
+# - 默认 PyPI 的 wheel CDN(files.pythonhosted.org) 在大陆极慢；
+# - 阿里云公网镜像对大 wheel(botocore 15MB) 单线程 19s、并发下会 trickle 到卡死，
+#   清华镜像同文件 ~2.8s 且稳定（实测于本生产机；故弃 aliyun 改 tuna）。
+# 不钉 uv 版本（取最新）：--frozen 从锁文件复现，uv 版本只影响安装器机制不影响结果。
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple/ uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=0 \
-    UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
+    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple/
 
 WORKDIR /app
 
