@@ -18,9 +18,12 @@ import re
 
 from agentcore.runtime.prompt import (
     _CEO_CORE_HINT,
+    _CEO_VISUALIZATION_HINT,
     CHAT_CITATION_HINT,
     assemble_system_prompt,
+    compose_ceo_chat_prompt,
 )
+from agentcore.runtime.skills import build_system_skill_registry
 
 
 def test_output_style_block_present_in_base():
@@ -107,6 +110,37 @@ def test_style_precedes_ceo_only_core_when_composed():
     base = assemble_system_prompt()
     assert "<output_style>" in base
     assert "<output_style>" not in _CEO_CORE_HINT
+
+
+def test_charting_detail_moved_out_of_worker_base():
+    # 按角色 right-size: the DETAILED charting HOW (chart-type selection + mermaid /
+    # markmap / vega-lite syntax) is CEO-only now — it must NOT ride the shared base,
+    # or every delegated worker would carry ~500 tokens that mainly serve the
+    # user-facing voice. Pin its absence so a refactor can't quietly re-inflate the
+    # worker prompt by folding the detail back into the shared base.
+    base = assemble_system_prompt()
+    for token in ("mermaid", "markmap", "vega-lite"):
+        assert token not in base, f"charting detail '{token}' leaked into the worker base"
+    # The one-line affordance survives, so a doc-writing worker still knows charts render.
+    assert "图表" in base
+
+
+def test_visualization_block_rides_only_the_composed_ceo_prompt():
+    # The moved charting HOW lives in the CEO-only <visualization> block and reaches
+    # the model ONLY through compose_ceo_chat_prompt (the CEO path) — never the bare
+    # base (the worker path). Pins the split end-to-end.
+    assert "<visualization>" in _CEO_VISUALIZATION_HINT
+    assert "mermaid" in _CEO_VISUALIZATION_HINT
+
+    base = assemble_system_prompt()
+    ceo = compose_ceo_chat_prompt(
+        base,
+        skill_registry=build_system_skill_registry(),
+        ceo_tool_names={"delegate", "consult_skill"},
+    )
+    assert "<visualization>" in ceo  # CEO carries the detailed charting HOW…
+    assert "mermaid" in ceo
+    assert "<visualization>" not in base  # …workers (base only) do not.
 
 
 def test_core_states_coordinator_tool_boundary():

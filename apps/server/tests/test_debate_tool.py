@@ -24,6 +24,7 @@ from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.tools.builtin.debate import DebateTool
+from agentcore.tools.builtin.debate.prompt import round_feedback
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -261,7 +262,6 @@ def test_round_feedback_demands_new_args_and_no_self_restate():
     辩手在自己 transcript 上续写（已带自己上轮全文），故只喂对方论点、不喂自己上轮；与 _frame 的
     焦点正交约束一上一下夹击「修订 v2 内容相似」。
     """
-    tool = _tool(_DebateLLM())
     config = DebateConfig(
         motion="该不该做 X",
         form=DebateForm.DEBATE,
@@ -276,7 +276,7 @@ def test_round_feedback_demands_new_args_and_no_self_restate():
         ],
         JudgeVerdict(real_clash=True, new_arguments=True, converged=False),
     )
-    fb = tool._round_feedback(config, config.sides[0], 2, "第二轮焦点", last)
+    fb = round_feedback(config, config.sides[0], 2, "第二轮焦点", last)
 
     assert "第 2 轮" in fb and "第二轮焦点" in fb
     assert "反方上轮论点内容" in fb  # 注入【对方】上轮论点

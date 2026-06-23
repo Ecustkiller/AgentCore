@@ -270,3 +270,24 @@ class CostEventRepository:
         )
         rows = (await self._session.execute(stmt)).all()
         return {row.message_id: int(row.c_total) for row in rows}
+
+    async def aggregate_cost_by_conversations(
+        self, conversation_ids: Sequence[str]
+    ) -> dict[str, int]:
+        """All-time spend per conversation, keyed by ``conversation_id`` (admin roster).
+
+        One GROUP BY over the given ids so the 对话 page enriches each row without
+        an N+1. Ids with no ledger rows are absent (callers default to 0).
+        """
+        if not conversation_ids:
+            return {}
+        stmt = (
+            select(
+                CostEvent.conversation_id.label("conversation_id"),
+                _sum_int(CostEvent.cost_total_nano).label("c_total"),
+            )
+            .where(CostEvent.conversation_id.in_(conversation_ids))
+            .group_by(CostEvent.conversation_id)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {row.conversation_id: int(row.c_total) for row in rows}

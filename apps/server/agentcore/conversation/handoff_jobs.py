@@ -51,7 +51,6 @@ async def persist_job_turn(*, user_id: str, conversation_id: str, result: dict) 
                 message_id=result.get("message_id"),
                 conversation_id=conversation_id,
                 trace_id=None,
-                runs=result.get("runs") or None,
                 entries=result.get("journal_entries"),
             )
         if cost_runs:

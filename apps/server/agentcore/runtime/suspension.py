@@ -179,11 +179,7 @@ class TurnSuspension:
 
     @staticmethod
     def _base_kwargs(data: dict[str, Any]) -> dict[str, Any]:
-        """The shared constructor kwargs from a stored frame dict (tolerates missing keys).
-
-        Tolerates the pre-``kind`` field name ``delegate_tool_call_id`` for
-        ``tool_call_id`` so an older plan_review frame still loads (开发期无兼容层，
-        but the rename is free to honor)."""
+        """The shared constructor kwargs from a stored frame dict (tolerates missing keys)."""
         data = dict(data or {})
         return {
             "message_id": data.get("message_id", ""),
@@ -191,7 +187,7 @@ class TurnSuspension:
             "user_id": data.get("user_id", ""),
             "captain_run_id": data.get("captain_run_id", ""),
             "checkpoint_id": data.get("checkpoint_id", ""),
-            "tool_call_id": (data.get("tool_call_id") or data.get("delegate_tool_call_id") or ""),
+            "tool_call_id": data.get("tool_call_id") or "",
             "base_system_prompt": data.get("base_system_prompt", "") or "",
             "user_message": data.get("user_message", "") or "",
             # NOTE: ``transcript`` / ``history`` / ``journal`` / ``journal_entries`` are NOT

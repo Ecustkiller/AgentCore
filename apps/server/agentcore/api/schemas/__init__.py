@@ -8,12 +8,18 @@ types, see scripts/dump_openapi.py) is byte-identical to the pre-split build.
 """
 
 from .admin import (
+    AdminAuditLogLine,
+    AdminAuditLogListResponse,
     AdminConversationLine,
+    AdminConversationListItem,
+    AdminConversationListResponse,
     AdminConversationReplay,
     AdminObservabilitySummary,
     AdminOverview,
     AdminResetPasswordResponse,
     AdminSystemStatus,
+    AdminTurnListItem,
+    AdminTurnListResponse,
     AdminUpdateUserRequest,
     AdminUsageSummary,
     AdminUserCostLine,
@@ -29,6 +35,7 @@ from .admin import (
     TurnMetricLine,
 )
 from .auth import (
+    BatchCreateInviteRequest,
     ChangePasswordRequest,
     CreateInviteRequest,
     DeleteAccountRequest,
@@ -124,7 +131,7 @@ from .model_modes import (
     UpdateModelModeRequest,
 )
 from .search import SearchItem, SearchResponse, SearchSection
-from .sharing import ShareListResponse, ShareSummary
+from .sharing import CreateShareRequest, ShareListResponse, ShareSummary
 from .tools import (
     CapabilitiesResponse,
     CapabilityGuidelines,
@@ -178,6 +185,7 @@ __all__ = [
     "TokenRefreshRequest",
     "TokenRevokeRequest",
     "CreateInviteRequest",
+    "BatchCreateInviteRequest",
     "InviteResponse",
     "InviteListResponse",
     # admin
@@ -194,7 +202,13 @@ __all__ = [
     "TurnMetricLine",
     "AdminObservabilitySummary",
     "AdminOverview",
+    "AdminAuditLogLine",
+    "AdminAuditLogListResponse",
     "AdminConversationLine",
+    "AdminConversationListItem",
+    "AdminConversationListResponse",
+    "AdminTurnListItem",
+    "AdminTurnListResponse",
     "AdminUserDetail",
     "ReplaySpan",
     "ReplayMessage",
@@ -271,6 +285,7 @@ __all__ = [
     "SearchResponse",
     # sharing
     "ShareSummary",
+    "CreateShareRequest",
     "ShareListResponse",
     # devices
     "DeviceRegistration",

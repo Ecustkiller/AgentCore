@@ -30,6 +30,9 @@ from agentcore.conversation.service import record_local_turn
 
 pytestmark = pytest.mark.anyio
 
+_TRACE = "0123456789abcdef0123456789abcdef"
+_USER_MSG_ID = "user-bubble-test"
+
 
 class _FakeSession:
     async def rollback(self) -> None:
@@ -136,10 +139,12 @@ async def test_record_local_turn_persists_messages_and_journal(monkeypatch):
         assistant_reasoning="思考…",
         citations=[{"url": "https://x"}],
         runs={"events": [], "finish_reason": "end_turn"},
+        user_message_id=_USER_MSG_ID,
         message_id="m1",
         input_tokens=10,
         output_tokens=4,
         rounds=2,
+        trace_id=_TRACE,
     )
 
     # User + assistant rows persisted under the conversation.
@@ -166,7 +171,9 @@ async def test_record_local_turn_empty_reply_skips_assistant_and_journal(monkeyp
         user_id="u1",
         user_message="hi",
         assistant_content="",  # tool-only / errored local turn
+        user_message_id=_USER_MSG_ID,
         message_id="m2",
+        trace_id=_TRACE,
     )
 
     # The user turn still lands; the empty assistant reply does not, so no journal either.
@@ -192,9 +199,11 @@ async def test_record_local_turn_records_no_cost_ledger(monkeypatch):
         user_message="hi",
         assistant_content="ok",
         runs={"events": [], "finish_reason": "end_turn"},
+        user_message_id=_USER_MSG_ID,
         message_id="m3",
         input_tokens=99,
         output_tokens=42,
+        trace_id=_TRACE,
     )
 
     assert ("msg", "assistant", "c1") in events
@@ -216,6 +225,7 @@ async def test_record_local_turn_pins_user_row_to_client_id(monkeypatch):
         assistant_content="ok",
         user_message_id="u-bubble-1",
         message_id="m9",
+        trace_id=_TRACE,
     )
 
     # The user row was pinned to the client id; the assistant row keeps the pipeline id.
@@ -235,32 +245,13 @@ async def test_record_local_turn_reuses_client_trace_id(monkeypatch):
         user_id="u1",
         user_message="hi",
         assistant_content="ok",
+        user_message_id=_USER_MSG_ID,
         message_id="m1",
         trace_id="0123456789abcdef0123456789abcdef",
     )
 
     # The assistant row carries the client's trace_id verbatim (not a server-minted one).
     assert ("trace", "assistant", "0123456789abcdef0123456789abcdef") in events
-
-
-async def test_record_local_turn_mints_trace_id_when_absent(monkeypatch):
-    """Back-compat: an old desktop that omits ``trace_id`` still gets a valid 32-hex id
-    minted server-side (the reply just isn't pre-joined to its proxy reasoning logs)."""
-    import re
-
-    events: list = []
-    _patch_persistence(monkeypatch, events, existing_title="已有标题")
-
-    await record_local_turn(
-        conversation_id="c1",
-        user_id="u1",
-        user_message="hi",
-        assistant_content="ok",
-        message_id="m1",
-    )
-
-    trace = next(e[2] for e in events if e[0] == "trace" and e[1] == "assistant")
-    assert trace and re.fullmatch(r"[0-9a-f]{32}", trace)  # freshly minted, well-formed
 
 
 async def test_record_local_turn_retry_is_idempotent_noop(monkeypatch):
@@ -282,6 +273,7 @@ async def test_record_local_turn_retry_is_idempotent_noop(monkeypatch):
         assistant_content="ok",
         user_message_id="u-bubble-1",
         message_id="m9",
+        trace_id=_TRACE,
     )
 
     # Nothing re-created: no message inserts, no 落账, no journal, no title mint.

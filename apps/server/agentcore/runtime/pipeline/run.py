@@ -36,7 +36,7 @@ from agentcore.runtime.facts import (
     record_turn_fact,
 )
 from agentcore.runtime.interaction import default_interaction_registry
-from agentcore.runtime.pipeline.finalize import _build_runs_payload, _durable_journal_entries
+from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
 from agentcore.runtime.pipeline.prepare import _assemble_ceo_toolset, _build_attachment_context
 from agentcore.runtime.prompt import (
     assemble_system_prompt,
@@ -147,7 +147,7 @@ async def run_chat_pipeline(
         worker_base_prompt = (
             f"{system_prompt}\n{attachment_context}" if attachment_context else system_prompt
         )
-        worker_tools = build_worker_registry()
+        worker_tools = build_worker_registry(backend=backend)
         # System skills (提示词瘦身 P2): the advanced-mechanism guidance the CEO pulls
         # on demand via consult_skill. Built once per turn; backs the tool AND the
         # always-on 能力目录 rendered into the CEO prompt below.
@@ -437,10 +437,7 @@ async def run_chat_pipeline(
             )
         )
 
-        # Turn replay payload: the multi-agent team-graph journal OR the
-        # single-agent 思考+工具 process timeline (or None for a plain turn).
-        # Mirrors how citations are carried back on the result.
-        runs = _build_runs_payload(sink, finish)
+        journal_entries = _journal_entries_for_turn(fact_log, sink=sink, finish=finish)
 
         return {
             "message_id": message_id,
@@ -454,16 +451,8 @@ async def run_chat_pipeline(
             "rounds": rounds,
             "finish_reason": finish,
             "citations": citations,
-            "runs": runs,
             "cost_runs": cost_runs,
-            # 执行级事件溯源 (§18.3): the durable journal source — the turn's single
-            # ordered fact log (engine execution facts interleaved with the forwarded
-            # display facts) + the process / turn_end tail. The persistence tail stores
-            # this verbatim and projects it back (gated) for display. Gated to the SAME
-            # turns that persisted before (``runs`` non-None): a plain chat turn keeps
-            # writing no journal (storage + None-gate parity); when it surfaced a graph
-            # or a single-agent process, the journal is now lossless.
-            "journal_entries": _durable_journal_entries(fact_log, runs),
+            "journal_entries": journal_entries,
         }
 
     except Exception as e:

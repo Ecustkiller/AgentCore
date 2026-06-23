@@ -47,6 +47,23 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
 }
 
+let csrfToken: string | null = null;
+
+function captureCsrf(response: Response): void {
+  const token = response.headers.get("X-CSRF-Token");
+  if (token) csrfToken = token;
+}
+
+export function clearCsrfToken(): void {
+  csrfToken = null;
+}
+
+function csrfHeaders(method: string): Record<string, string> {
+  if (!csrfToken) return {};
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return {};
+  return { "X-CSRF-Token": csrfToken };
+}
+
 // The credential/session endpoints whose 401 is *expected* (bad password, no
 // session yet) — they must NOT trigger the refresh-replay-then-logout flow.
 // `/v1/auth/invites` lives under the same prefix but is a protected admin
@@ -60,6 +77,7 @@ async function tryRefresh(): Promise<boolean> {
       method: "POST",
       credentials: "include",
     });
+    captureCsrf(res);
     return res.ok;
   } catch {
     return false;
@@ -71,16 +89,23 @@ async function request<T>(
   options: RequestInit = {},
   retry = false,
 ): Promise<T> {
+  const method = (options.method ?? "GET").toUpperCase();
   let response: Response;
   try {
     response = await fetch(`${BASE_URL}${path}`, {
       credentials: "include",
-      headers: { "Content-Type": "application/json", ...options.headers },
+      headers: {
+        "Content-Type": "application/json",
+        ...csrfHeaders(method),
+        ...options.headers,
+      },
       ...options,
     });
   } catch (cause) {
     throw new NetworkError(cause);
   }
+
+  captureCsrf(response);
 
   if (response.ok) {
     // 204/empty bodies: don't choke on an absent JSON payload.

@@ -12,6 +12,7 @@ Two routers:
   renders a 404 page without leaking whether the id ever existed.
 """
 
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -23,7 +24,7 @@ from agentcore.api.dependencies import (
     get_conversation_share_repo,
     get_message_repo,
 )
-from agentcore.api.schemas import ShareListResponse, ShareSummary, StatusResponse
+from agentcore.api.schemas import CreateShareRequest, ShareListResponse, ShareSummary, StatusResponse
 from agentcore.conversation.sharing import build_share_snapshot, render_share_html
 from agentcore.core.errors import NotFoundError
 from agentcore.db.models import ConversationShare
@@ -45,7 +46,19 @@ def _share_summary(share: ConversationShare) -> ShareSummary:
         url=f"/shared/{share.id}",
         title=share.title,
         created_at=share.created_at,
+        expires_at=share.expires_at,
     )
+
+
+def _expires_at_from_request(body: CreateShareRequest | None) -> datetime | None:
+    """Map create-body TTL to an absolute expiry (``None`` = never)."""
+    if body is None:
+        days = 30
+    else:
+        days = body.expires_in_days
+    if days is None:
+        return None
+    return datetime.now(UTC) + timedelta(days=days)
 
 
 async def _require_owned(conversation_id: str, user_id: str, repo: ConversationRepository) -> None:
@@ -57,6 +70,7 @@ async def _require_owned(conversation_id: str, user_id: str, repo: ConversationR
 async def create_share(
     conversation_id: str,
     user: AuthUser,
+    body: CreateShareRequest | None = None,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     msg_repo: MessageRepository = Depends(get_message_repo),
     share_repo: ConversationShareRepository = Depends(get_conversation_share_repo),
@@ -78,6 +92,7 @@ async def create_share(
         user_id=user.user_id,
         title=(conv.title or "").strip(),
         snapshot=snapshot,
+        expires_at=_expires_at_from_request(body),
     )
     return _share_summary(share)
 

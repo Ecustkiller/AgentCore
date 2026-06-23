@@ -1,0 +1,38 @@
+"""Application configuration loaded from environment variables."""
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from agentcore.config.approval import ApprovalSettings
+from agentcore.config.auth import AuthSettings
+from agentcore.config.checkpoint import CheckpointSettings
+from agentcore.config.database import DatabaseSettings
+from agentcore.config.engine import EngineSettings
+from agentcore.config.llm import LlmSettings
+from agentcore.config.paths import ENV_FILE
+from agentcore.config.persistence import PersistenceSettings
+from agentcore.config.quota import QuotaSettings
+from agentcore.config.search import SearchSettings
+from agentcore.config.server import ServerSettings
+from agentcore.config.workspace import WorkspaceSettings
+
+
+class Settings(
+    DatabaseSettings,
+    LlmSettings,
+    SearchSettings,
+    AuthSettings,
+    ApprovalSettings,
+    CheckpointSettings,
+    EngineSettings,
+    PersistenceSettings,
+    QuotaSettings,
+    ServerSettings,
+    WorkspaceSettings,
+    BaseSettings,
+):
+    """Flat settings object — fields grouped by domain mixin, env-loaded as one unit."""
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8")
+
+
+settings = Settings()

@@ -396,6 +396,7 @@ async def test_token_revoke_kills_refresh(client, make_invite):
 
 async def test_invite_endpoints_require_auth(client):
     assert (await client.post("/v1/auth/invites", json={})).status_code == 401
+    assert (await client.post("/v1/auth/invites/batch", json={"count": 2})).status_code == 401
     assert (await client.get("/v1/auth/invites")).status_code == 401
 
 
@@ -421,10 +422,54 @@ async def test_admin_issues_invite_and_new_user_registers_with_it(client, make_a
     assert r.status_code == 201, r.text
 
 
+async def test_admin_batch_issues_invites(client, make_admin):
+    username, password = await make_admin()
+    await _login_admin(client, username, password)
+
+    r = await client.post("/v1/auth/invites/batch", json={"count": 3})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["total"] == 3
+    assert len(body["data"]) == 3
+    codes = {item["code"] for item in body["data"]}
+    assert len(codes) == 3
+    assert all(item["status"] == "active" for item in body["data"])
+
+    assert (await client.get("/v1/auth/invites")).json()["total"] == 3
+
+
+async def test_batch_invite_rejects_invalid_count(client, make_admin):
+    username, password = await make_admin()
+    await _login_admin(client, username, password)
+    assert (await client.post("/v1/auth/invites/batch", json={"count": 0})).status_code == 422
+    assert (await client.post("/v1/auth/invites/batch", json={"count": 101})).status_code == 422
+
+
+async def test_list_invites_paginated_and_filtered(client, make_admin):
+    username, password = await make_admin()
+    await _login_admin(client, username, password)
+
+    await client.post("/v1/auth/invites/batch", json={"count": 5})
+
+    page1 = (await client.get("/v1/auth/invites", params={"page": 1, "page_size": 2})).json()
+    assert page1["total"] == 5
+    assert page1["page"] == 1
+    assert page1["page_size"] == 2
+    assert len(page1["data"]) == 2
+
+    page3 = (await client.get("/v1/auth/invites", params={"page": 3, "page_size": 2})).json()
+    assert len(page3["data"]) == 1
+
+    active = (await client.get("/v1/auth/invites", params={"status": "active"})).json()
+    assert active["total"] == 5
+    assert all(row["status"] == "active" for row in active["data"])
+
+
 async def test_non_admin_cannot_access_invites(client, make_invite):
     code = await make_invite("INV-USER")
     await _register_and_login(client, code, "regular")
     assert (await client.post("/v1/auth/invites", json={})).status_code == 403
+    assert (await client.post("/v1/auth/invites/batch", json={"count": 2})).status_code == 403
     assert (await client.get("/v1/auth/invites")).status_code == 403
 
 

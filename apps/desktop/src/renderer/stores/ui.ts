@@ -105,9 +105,6 @@ function persistTheme(v: Theme): void {
 //   - "unset"（无 key）→ 跟随 `SIDECAR_DEFAULT_ENABLED`（用户没表态，由产品默认决定）；
 //   - "on" / "off" → 用户显式选择，恒被尊重，不受默认值变化影响。
 // 有效开关 = `resolveSidecarEnabled(偏好)`，消费方（sidecarRouting）只读那个 boolean。
-//
-// 兼容旧布尔存储（"true"/"false"）：只有用户操作过开关才会写入，故 "true"→on、"false"→off 无
-// 歧义；下次写入自动规范化为 "on"/"off"。
 type SidecarPreference = "unset" | "on" | "off";
 
 /** 本地引擎默认是否开启（用户未表态时）。已毕业到**默认开**：绑定本机本地文件夹的对话默认走
@@ -118,8 +115,8 @@ const SIDECAR_DEFAULT_ENABLED = true;
 function loadSidecarPreference(): SidecarPreference {
   try {
     const v = localStorage.getItem(SIDECAR_KEY);
-    if (v === "on" || v === "true") return "on";
-    if (v === "off" || v === "false") return "off";
+    if (v === "on") return "on";
+    if (v === "off") return "off";
     return "unset";
   } catch {
     return "unset";

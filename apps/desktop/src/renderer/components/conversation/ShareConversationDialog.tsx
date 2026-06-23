@@ -13,6 +13,7 @@ import { copyText } from "@/lib/clipboard";
 import { formatMessageTime } from "@/lib/format";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import {
+  type CreateShareOptions,
   type Share,
   createShare,
   listShares,
@@ -22,6 +23,16 @@ import {
 import { useShareStore } from "@/stores/share";
 import { Check, Copy, Link2, Loader2, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+
+type ShareExpiryChoice =
+  | NonNullable<CreateShareOptions["expires_in_days"]>
+  | "never";
+
+const EXPIRY_OPTIONS: { value: ShareExpiryChoice; label: string }[] = [
+  { value: 7, label: "7 天" },
+  { value: 30, label: "30 天" },
+  { value: "never", label: "永久" },
+];
 
 /**
  * The「分享对话」dialog (mounted once at the app shell, driven by {@link useShareStore}).
@@ -53,6 +64,7 @@ export function ShareConversationDialog() {
 function ShareDialogBody({ conversationId }: { conversationId: string }) {
   const [shares, setShares] = useState<Share[] | null>(null);
   const [creating, setCreating] = useState(false);
+  const [expiry, setExpiry] = useState<ShareExpiryChoice>(30);
   const title = getConversations().find((c) => c.id === conversationId)?.title;
 
   const reload = useCallback(async () => {
@@ -71,7 +83,10 @@ function ShareDialogBody({ conversationId }: { conversationId: string }) {
   const handleCreate = async () => {
     setCreating(true);
     try {
-      const share = await createShare(conversationId);
+      const options: CreateShareOptions = {
+        expires_in_days: expiry === "never" ? null : expiry,
+      };
+      const share = await createShare(conversationId, options);
       setShares((prev) => [share, ...(prev ?? [])]);
       const copied = await copyText(shareLink(share));
       notifySuccess(copied ? "已创建链接并复制到剪贴板" : "已创建分享链接");
@@ -110,6 +125,24 @@ function ShareDialogBody({ conversationId }: { conversationId: string }) {
         </DialogDescription>
       </DialogHeader>
 
+      <div className="px-5 pb-2">
+        <p className="mb-2 text-xs text-muted-foreground">链接有效期</p>
+        <div className="flex flex-wrap gap-2">
+          {EXPIRY_OPTIONS.map((opt) => (
+            <Button
+              key={String(opt.value)}
+              type="button"
+              variant={expiry === opt.value ? "primary" : "neutral"}
+              className="h-8 px-3 text-xs"
+              disabled={creating}
+              onClick={() => setExpiry(opt.value)}
+            >
+              {opt.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+
       <div className="max-h-[40vh] overflow-y-auto px-5">
         {shares === null ? (
           <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
@@ -134,6 +167,9 @@ function ShareDialogBody({ conversationId }: { conversationId: string }) {
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {formatMessageTime(share.created_at)} 创建
+                    {share.expires_at
+                      ? ` · ${formatMessageTime(share.expires_at)} 过期`
+                      : " · 永不过期"}
                   </div>
                 </div>
                 <SimpleTooltip label="复制链接">

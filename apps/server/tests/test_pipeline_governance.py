@@ -178,10 +178,10 @@ async def test_unproductive_early_stop_reaches_message_end_and_persisted_runs(
     assert result["finish_reason"] == FinishReason.UNPRODUCTIVE
     # 1) the SSE message_end the client reads
     assert _message_end(events).payload["finish_reason"] == FinishReason.UNPRODUCTIVE
-    # 2) the persisted runs payload (runs.finish_reason — journal 唯一事实源, stored as
-    #    the string value that _persist_turn_result forwards to persist_turn_journal)
-    assert result["runs"] is not None
-    assert result["runs"]["finish_reason"] == FinishReason.UNPRODUCTIVE.value
+    # 2) the persisted journal (journal_entries → turn_end.finish_reason)
+    entries = result["journal_entries"]
+    assert entries is not None
+    assert entries[-1]["payload"]["finish_reason"] == FinishReason.UNPRODUCTIVE.value
 
 
 async def test_circuit_breaker_run_that_recovers_finishes_end_turn(
@@ -206,5 +206,6 @@ async def test_circuit_breaker_run_that_recovers_finishes_end_turn(
     assert "最终答复" in result["content"]
     assert result["finish_reason"] == FinishReason.END_TURN
     assert _message_end(events).payload["finish_reason"] == FinishReason.END_TURN
-    assert result["runs"] is not None
-    assert result["runs"]["finish_reason"] == FinishReason.END_TURN.value
+    entries = result["journal_entries"]
+    assert entries is not None
+    assert entries[-1]["payload"]["finish_reason"] == FinishReason.END_TURN.value

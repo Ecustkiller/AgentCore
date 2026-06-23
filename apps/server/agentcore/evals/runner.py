@@ -43,6 +43,7 @@ _CASE_FIELDS = frozenset(
         "checks",
         "rubric",
         "samples",
+        "prompt_profile",
     }
 )
 

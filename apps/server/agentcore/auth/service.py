@@ -175,19 +175,47 @@ class AuthService:
 
     async def create_invite(self, *, created_by: str, expires_in_days: int | None = None) -> Invite:
         """Mint a single-use invite code (D6). ``expires_in_days`` is optional."""
+        invites = await self.create_invites_batch(
+            created_by=created_by,
+            count=1,
+            expires_in_days=expires_in_days,
+        )
+        return invites[0]
+
+    async def create_invites_batch(
+        self,
+        *,
+        created_by: str,
+        count: int,
+        expires_in_days: int | None = None,
+    ) -> Sequence[Invite]:
+        """Mint multiple single-use invite codes in one transaction."""
         expires_at = (
             datetime.now(UTC) + timedelta(days=expires_in_days)
             if expires_in_days is not None
             else None
         )
-        return await self._invites.create(
-            code=generate_invite_code(),
+        codes = [generate_invite_code() for _ in range(count)]
+        return await self._invites.create_many(
+            codes=codes,
             created_by=created_by,
             expires_at=expires_at,
         )
 
-    async def list_invites(self, *, limit: int = 100) -> Sequence[Invite]:
-        return await self._invites.list_recent(limit=limit)
+    async def list_invites(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 100,
+        status: str | None = None,
+    ) -> tuple[Sequence[Invite], int]:
+        offset = (page - 1) * page_size
+        return await self._invites.list_page(
+            offset=offset,
+            limit=page_size,
+            status=status,
+            now=datetime.now(UTC),
+        )
 
     async def revoke_invite(self, *, invite_id: str) -> Invite:
         """Retire an unused invite so it can no longer register an account (邀请码撤销).

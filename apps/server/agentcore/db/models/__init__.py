@@ -14,6 +14,7 @@ was a module-level name on the original module.
 """
 
 from ._helpers import _new_uuid
+from .admin_audit import AdminAuditLog
 from .auth import Credentials, Invite, RefreshToken, UserLlmKey
 from .billing import CostEvent
 from .chat import Chat, ChatMember, ChatMessage
@@ -30,6 +31,7 @@ from .runs import (
 from .users import User, UserBlock, UserDirectorySettings
 
 __all__ = [
+    "AdminAuditLog",
     "Chat",
     "ChatMember",
     "ChatMessage",

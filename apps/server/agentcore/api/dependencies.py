@@ -12,6 +12,7 @@ from agentcore.core.errors import AuthenticationError, AuthorizationError
 from agentcore.db.base import get_session
 from agentcore.db.models import User
 from agentcore.db.repositories import (
+    AdminAuditRepository,
     ChatRepository,
     ConversationRepository,
     ConversationShareRepository,
@@ -70,6 +71,10 @@ def get_user_repo(session: AsyncSession = Depends(get_db)) -> UserRepository:
 def get_admin_service(session: AsyncSession = Depends(get_db)) -> AdminService:
     """Build the admin account-management service (用户管理) on the request session."""
     return AdminService(users=UserRepository(session))
+
+
+def get_admin_audit_repo(session: AsyncSession = Depends(get_db)) -> AdminAuditRepository:
+    return AdminAuditRepository(session)
 
 
 def get_conversation_repo(session: AsyncSession = Depends(get_db)) -> ConversationRepository:

@@ -92,6 +92,10 @@ export interface RunDetailTab {
  * ride this kind rather than RunDetailBody. Scoped by the turn (`messageId`) so it
  * lights that graph's endpoint node; `contentMessageId` is the bubble rendered.
  */
+/** Which endpoint a content tab stands for — drives its tab-strip icon (提问 vs
+ * 最终回答), mirroring the graph endpoint nodes (用户输入 / CEO 汇聚点). */
+export type EndpointKind = "prompt" | "answer";
+
 export interface ContentDetailTab {
   /** Discriminator: a chat bubble rendered as Markdown (no run). */
   kind: "content";
@@ -103,6 +107,8 @@ export interface ContentDetailTab {
   messageId: string;
   /** The chat message whose content is rendered (the prompt / the final answer). */
   contentMessageId: string;
+  /** The endpoint this bubble stands for — the user's prompt / the CEO's answer. */
+  endpoint: EndpointKind;
 }
 
 /** A side-panel detail tab: a worker run, or an endpoint chat bubble. */
@@ -157,7 +163,14 @@ interface SidePanelState {
     messageId: string,
     contentMessageId: string,
     title: string,
+    endpoint: EndpointKind,
   ) => void;
+  /**
+   * Drop every content tab (endpoint bubbles), keeping run tabs. The canvas calls
+   * this when leaving its reading context (放大态 exit / canvas→chat) so a surfaced
+   * 提问 / 最终回答 never lingers beside the chat bubble that already shows it.
+   */
+  closeContentTabs: () => void;
   /** Reveal the panel on the 工作区 home tab (the chat toggle / Ctrl+J). */
   showWorkspace: () => void;
   /** Reveal the 工作区 home tab AND request a file preview (产出文件 card click). */
@@ -225,13 +238,28 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
     });
   },
 
-  showContentDetail: (messageId, contentMessageId, title) => {
+  showContentDetail: (messageId, contentMessageId, title, endpoint) => {
     get().openTab({
       kind: "content",
       id: contentDetailTabId(messageId, contentMessageId),
       title,
       messageId,
       contentMessageId,
+      endpoint,
+    });
+  },
+
+  closeContentTabs: () => {
+    set((s) => {
+      const tabs = s.tabs.filter((t) => t.kind !== "content");
+      if (tabs.length === s.tabs.length) return s;
+      // If the dropped tab was active, fall back to a surviving detail tab (e.g. a
+      // run drilled in the canvas, kept per §十) else the 工作区 home.
+      const activeStillThere = tabs.some((t) => t.id === s.activeTabId);
+      const activeTabId = activeStillThere
+        ? s.activeTabId
+        : (tabs[tabs.length - 1]?.id ?? WORKSPACE_TAB_ID);
+      return { tabs, activeTabId };
     });
   },
 

@@ -18,6 +18,7 @@
     "android:open": "cap open android"
   },
   "dependencies": {
+    "@agentcore/contract-rest-types": "workspace:*",
     "@agentcore/contract-types": "workspace:*",
     "@agentcore/design-tokens": "workspace:*",
     "@agentcore/protocol-conformance": "workspace:*",

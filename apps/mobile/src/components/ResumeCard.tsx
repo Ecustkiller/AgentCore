@@ -47,9 +47,9 @@ export function ResumeCard({
       {!isPlanReview && paused.context && (
         <div className="pause-context">{paused.context}</div>
       )}
-      {isPlanReview && paused.steps.length > 0 && (
+      {isPlanReview && (paused.steps?.length ?? 0) > 0 && (
         <div className="pause-steps">
-          {paused.steps.map((s, i) => {
+          {(paused.steps ?? []).map((s, i) => {
             const role = str(s, "role") ?? str(s, "task");
             const summary = str(s, "output_summary");
             return (

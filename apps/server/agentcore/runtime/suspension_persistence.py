@@ -26,7 +26,7 @@ from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepository
 from agentcore.push import PushNotification, notify_user
-from agentcore.runtime.journal import entries_from_runs, runs_from_entries
+from agentcore.runtime.journal import runs_from_entries
 from agentcore.runtime.suspension import (
     SuspensionKind,
     TurnSuspension,
@@ -112,15 +112,9 @@ async def _save_pause_journal(suspension: TurnSuspension, trace_id: str | None) 
     Persists the §18.3 fact-log stream (:attr:`TurnSuspension.journal_entries` — the
     suspending face's ``current_fact_log`` snapshot: execution facts interleaved with
     forwarded display facts) so the paused journal is ``window_from_journal``-rebuildable
-    for the Phase 2 resume cutover. Falls back to flattening the display-only ``journal``
-    when no fact log was captured (a degraded / un-wired pause), preserving the old
-    behaviour for that path.
+    for resume.
     """
-    entries = (
-        list(suspension.journal_entries)
-        if suspension.journal_entries
-        else entries_from_runs({"events": suspension.journal})
-    )
+    entries = list(suspension.journal_entries)
     if not entries:
         return
     try:

@@ -1,4 +1,4 @@
-"""Pipeline finalize helpers: runs payload and durable journal entries."""
+"""Pipeline finalize helpers: journal entries and display replay projection."""
 
 from typing import Any
 
@@ -11,30 +11,33 @@ from agentcore.runtime.facts import (
     TurnFactLog,
 )
 from agentcore.runtime.journal import (
-    entries_from_runs,
+    journal_entries_from_display_runs,
 )
 
 logger = get_logger(__name__)
 
 
-def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict | None:
-    """Assemble the assistant message's ``runs`` payload from the turn's sink.
+def _should_persist_journal(sink: EventSink) -> bool:
+    """True when this turn has replayable display surface (team graph / process / context)."""
+    return not (
+        sink.execution_journal() is None
+        and sink.process_timeline() is None
+        and sink.captain_context() is None
+    )
 
-    Carries two replay artifacts on one field: the multi-agent ``events`` journal
-    (team graph) and the single-agent ``process`` timeline (inline 思考+工具面板).
-    A turn is one OR the other — the journal is None unless it delegated/checkpointed,
-    the process is None unless it was a tool-using single-agent turn — but the
-    shared shape keeps one persistence + load path. Returns None when there is
-    nothing to replay (a plain chat turn with neither)."""
+
+def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict[str, Any] | None:
+    """Assemble the client-facing ``runs`` replay payload from the turn's sink.
+
+    Used only to project ``journal_entries`` back into the wire shape the desktop /
+    sidecar forwards on local-turn write-back (:func:`runs_from_entries`). The pipeline
+    result itself carries ``journal_entries`` only — not this dict.
+    """
+    if not _should_persist_journal(sink):
+        return None
     journal = sink.execution_journal()
     process = sink.process_timeline()
-    # 上下文传递可视化 通道①: the CEO captain's received context is TURN-LEVEL (the chat
-    # bubble, present even in a pure-chat turn). Carrying it makes a pure-chat turn's
-    # payload non-None, so it persists a journal (otherwise None-gated) and replays the
-    # captain context on reload — the worker-side context already rides ``events``.
     captain_context = sink.captain_context()
-    if journal is None and process is None and captain_context is None:
-        return None
     payload: dict[str, Any] = {
         "events": journal or [],
         "finish_reason": finish.value,
@@ -46,26 +49,25 @@ def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict | None:
     return payload
 
 
-def _durable_journal_entries(
-    fact_log: TurnFactLog, runs: dict[str, Any] | None
+def _journal_entries_for_turn(
+    fact_log: TurnFactLog | None,
+    *,
+    sink: EventSink,
+    finish: FinishReason,
 ) -> list[dict[str, Any]] | None:
-    """The §18.3 fact log composed into the turn's durable journal entries (or None).
+    """Compose durable journal entries for a completed turn (or None when gated off).
 
-    The fact log is the single ordered stream (execution facts interleaved with the
-    forwarded display facts); the durable journal adds the display-only tail the log
-    does not carry — the single-agent ``process`` timeline (a post-hoc display
-    aggregate) + the closing ``turn_end`` — both read off the already-built ``runs``
-    so the two stay consistent. ``runs.events`` is NOT re-appended: those display
-    events already ride the fact log (ungated), and the read-side projection
-    (:func:`~agentcore.runtime.journal.runs_from_entries`) re-gates them.
-
-    Gated to ``runs`` non-None — the SAME turns that persisted a journal before — so a
-    plain chat turn still writes nothing (storage + None-gate parity); resume / salvage
-    / local-relay paths carry no fact log and fall back to the legacy ``runs`` flatten.
+    Fresh turns pass the engine ``fact_log`` (execution facts + forwarded display facts)
+    plus the display-only tail (process + ``turn_end``) read off the sink. Resume /
+    other paths without a fact log flatten the sink's display replay via
+    :func:`journal_entries_from_display_runs`.
     """
+    runs = _build_runs_payload(sink, finish)
     if runs is None:
         return None
-    tail = entries_from_runs(
-        {"process": runs.get("process"), "finish_reason": runs.get("finish_reason")}
-    )
-    return fact_log.entries() + tail
+    if fact_log is not None:
+        tail = journal_entries_from_display_runs(
+            {"process": runs.get("process"), "finish_reason": runs.get("finish_reason")}
+        )
+        return fact_log.entries() + (tail or [])
+    return journal_entries_from_display_runs(runs)

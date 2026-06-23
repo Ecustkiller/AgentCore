@@ -10,11 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
 from agentcore.db.models import (
+    Conversation,
     HandoffJob,
     PausedTurnRow,
     RunSessionRow,
     TurnJournalRow,
     TurnMetricsRow,
+    User,
 )
 
 
@@ -558,6 +560,82 @@ class TurnMetricsRepository:
             .limit(limit)
         )
         return result.scalars().all()
+
+    async def aggregate_stats_by_conversations(
+        self, conversation_ids: Sequence[str]
+    ) -> dict[str, dict[str, int]]:
+        """Turn + error counts per conversation (admin roster enrichment).
+
+        One GROUP BY over the given ids. Ids with no telemetry are absent
+        (callers default turns/errors to 0).
+        """
+        if not conversation_ids:
+            return {}
+        err = func.sum(case((TurnMetricsRow.status == "error", 1), else_=0))
+        stmt = (
+            select(
+                TurnMetricsRow.conversation_id.label("conversation_id"),
+                func.count().label("turns"),
+                err.label("errors"),
+            )
+            .where(TurnMetricsRow.conversation_id.in_(conversation_ids))
+            .group_by(TurnMetricsRow.conversation_id)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return {
+            row.conversation_id: {"turns": int(row.turns), "errors": int(row.errors)}
+            for row in rows
+        }
+
+    async def list_platform(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        user_id: str | None = None,
+        conversation_id: str | None = None,
+        status: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        include_deleted_conversations: bool = True,
+    ) -> tuple[Sequence[tuple[TurnMetricsRow, Conversation, User | None]], int]:
+        """Paginated cross-user turn feed for the admin 对话 page (newest-first).
+
+        Joins conversation + owner for list context. Hidden handoff-host
+        conversations are always excluded; ``include_deleted_conversations``
+        controls soft-deleted chats.
+        """
+        base = (
+            select(TurnMetricsRow, Conversation, User)
+            .join(Conversation, Conversation.id == TurnMetricsRow.conversation_id)
+            .outerjoin(User, User.user_id == TurnMetricsRow.user_id)
+            .where(Conversation.mode != "handoff")
+        )
+        if not include_deleted_conversations:
+            base = base.where(Conversation.deleted_at.is_(None))
+        if user_id is not None:
+            base = base.where(TurnMetricsRow.user_id == user_id)
+        if conversation_id is not None:
+            base = base.where(TurnMetricsRow.conversation_id == conversation_id)
+        if status is not None:
+            base = base.where(TurnMetricsRow.status == status)
+        if since is not None:
+            base = base.where(TurnMetricsRow.created_at >= since)
+        if until is not None:
+            base = base.where(TurnMetricsRow.created_at <= until)
+
+        count_result = await self._session.execute(
+            select(func.count()).select_from(base.subquery())
+        )
+        total = count_result.scalar_one()
+
+        offset = (page - 1) * page_size
+        result = await self._session.execute(
+            base.order_by(TurnMetricsRow.created_at.desc())
+            .limit(page_size)
+            .offset(offset)
+        )
+        return result.all(), total
 
     async def count_distinct_users_for_window(self, *, since: datetime) -> int:
         """Distinct accounts that completed ≥1 turn since a cutoff (活跃用户).

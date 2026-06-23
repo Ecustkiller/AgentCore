@@ -64,6 +64,28 @@ export function notifyUnauthorized(): void {
   onUnauthorized?.();
 }
 
+let csrfToken: string | null = null;
+
+function captureCsrf(response: Response): void {
+  const token = response.headers.get("X-CSRF-Token");
+  if (token) csrfToken = token;
+}
+
+export function clearCsrfToken(): void {
+  csrfToken = null;
+}
+
+/** Attach to raw ``fetch`` calls that bypass ``api.*`` (SSE, uploads, …). */
+export function getCsrfHeaders(method = "POST"): Record<string, string> {
+  return csrfHeaders(method);
+}
+
+function csrfHeaders(method: string): Record<string, string> {
+  if (!csrfToken) return {};
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return {};
+  return { "X-CSRF-Token": csrfToken };
+}
+
 // Invoked when a request looks like a backend outage (transport failure or 5xx)
 // so the app can confirm via /readyz and switch to a retry screen mid-session,
 // the same way it does on startup. Registered by the auth gate.
@@ -101,6 +123,7 @@ export function tryRefresh(): Promise<boolean> {
         method: "POST",
         credentials: "include",
       });
+      captureCsrf(res);
       return res.ok;
     } catch {
       return false;
@@ -118,12 +141,14 @@ async function request<T>(
   retry = false,
 ): Promise<T> {
   const url = `${BASE_URL}${path}`;
+  const method = (options.method ?? "GET").toUpperCase();
   let response: Response;
   try {
     response = await fetch(url, {
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
+        ...csrfHeaders(method),
         ...options.headers,
       },
       ...options,
@@ -134,6 +159,8 @@ async function request<T>(
     if (!isAuthPath(path)) onServiceUnavailable?.();
     throw new NetworkError(cause);
   }
+
+  captureCsrf(response);
 
   if (response.ok) {
     return response.json();

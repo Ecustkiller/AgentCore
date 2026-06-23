@@ -186,3 +186,57 @@ async def test_public_view_escapes_xss(client, new_client, make_invite, session_
         assert page.status_code == 200
         assert "<script" not in page.text
         assert "&lt;script&gt;" in page.text
+
+
+async def test_share_defaults_to_30_day_expiry(client, make_invite, session_factory):
+    from sqlalchemy import select
+
+    from agentcore.db.models import ConversationShare
+
+    code = await make_invite("INV-SHR-TTL")
+    await _register_and_login(client, code, "ttl-default")
+    conv_id = await _new_conversation(client, "ttl-default")
+    share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
+    assert share["expires_at"] is not None
+
+    async with session_factory() as session:
+        row = (
+            await session.execute(select(ConversationShare).where(ConversationShare.id == share["id"]))
+        ).scalar_one()
+        delta = row.expires_at - datetime.now(UTC)
+        assert timedelta(days=29) < delta < timedelta(days=31)
+
+
+async def test_share_never_expires_when_requested(client, make_invite):
+    code = await make_invite("INV-SHR-NEVER")
+    await _register_and_login(client, code, "ttl-never")
+    conv_id = await _new_conversation(client, "ttl-never")
+    share = (
+        await client.post(
+            f"/v1/conversations/{conv_id}/shares",
+            json={"expires_in_days": None},
+        )
+    ).json()
+    assert share["expires_at"] is None
+
+
+async def test_expired_share_returns_404(client, new_client, make_invite, session_factory):
+    from sqlalchemy import update
+
+    from agentcore.db.models import ConversationShare
+
+    code = await make_invite("INV-SHR-EXP")
+    await _register_and_login(client, code, "ttl-expired")
+    conv_id = await _new_conversation(client, "ttl-expired")
+    share = (await client.post(f"/v1/conversations/{conv_id}/shares")).json()
+
+    async with session_factory() as session:
+        await session.execute(
+            update(ConversationShare)
+            .where(ConversationShare.id == share["id"])
+            .values(expires_at=datetime.now(UTC) - timedelta(minutes=1))
+        )
+        await session.commit()
+
+    async with new_client() as anon:
+        assert (await anon.get(share["url"])).status_code == 404

@@ -14,6 +14,7 @@ assert it ``==`` the live transcript.
 from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.journal import (
     entries_from_runs,
+    journal_entries_from_display_runs,
     runs_from_entries,
     window_from_journal,
 )
@@ -72,6 +73,8 @@ def test_single_agent_process_round_trips_with_events_empty():
 def test_empty_and_none_payloads():
     assert entries_from_runs(None) == []
     assert entries_from_runs({}) == []
+    assert journal_entries_from_display_runs(None) is None
+    assert journal_entries_from_display_runs({}) is None
     # Nothing replayable projects back to None (matches the old「runs is NULL」shape).
     assert runs_from_entries(None) is None
     assert runs_from_entries([]) is None
@@ -158,13 +161,21 @@ def test_process_absent_key_not_emitted_on_projection():
     assert projected == runs
 
 
-# --- Execution-sourced journals (§18.3 fact log) re-gate on projection ---------
+# --- Execution-sourced journals (§18.3 fact log) --------------------------------
 #
-# A fact-log journal stores the FULL UNGATED stream (the captain's own run/tool events
-# ride it, plus the execution facts). runs_from_entries must re-apply the display gate
-# for these — discriminated by the presence of execution facts — so the bubble matches
-# what the old gated ``_build_runs_payload`` produced, while legacy journals (above)
-# stay pure inverses.
+# Fact-log journals store the full ungated stream plus execution facts. The surface
+# gate + none-gate in ``runs_from_entries`` apply uniformly (idempotent on journals
+# that were already gated at write).
+
+
+def test_cancelled_salvage_with_exec_facts_still_round_trips():
+    # A salvaged cancelled turn may carry execution facts (e.g. after pipeline cutover)
+    # with an empty gated graph — the abnormal finish_reason must still project.
+    entries = [
+        {"kind": "turn_started", "payload": {"user_message": "go"}, "ts": None},
+        {"kind": "turn_end", "payload": {"finish_reason": "cancelled"}, "ts": None},
+    ]
+    assert runs_from_entries(entries) == {"events": [], "finish_reason": "cancelled"}
 
 
 def test_execution_sourced_plain_chat_turn_projects_to_none():
@@ -532,7 +543,7 @@ def test_window_folds_head_assistant_tool_drops_final_answer():
 
 
 def test_window_none_without_turn_started():
-    # A legacy / display-only journal (no execution facts) has no head anchor → the
+    # A display-only journal (no execution facts) has no head anchor → the
     # captain window is not reconstructable (Phase 1), so the projection returns None.
     entries = [
         _fact("run_plan", {"execution_id": "e1"}, ts="t0"),

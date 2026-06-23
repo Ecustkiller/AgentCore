@@ -1,5 +1,4 @@
 import { CostTrendBars, TurnTrendBars } from "@/components/charts";
-import { ConversationReplay } from "@/components/ConversationReplay";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -19,6 +18,7 @@ import {
 import { errorMessage } from "@/services/api";
 import { Info, RefreshCw } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 
 /** The two lenses 分析 fuses: 成本 (money) and 健康 (reliability). */
 export type AnalyticsSegment = "cost" | "health";
@@ -34,38 +34,32 @@ function fmtPct(rate: number): string {
  * drill-in), so they live behind one segmented control instead of two tabs. Only
  * the active lens fetches, so switching is a fresh load, not a double request.
  */
-export function AnalyticsPage({
-  segment,
-  onSegmentChange,
-}: {
-  segment: AnalyticsSegment;
-  onSegmentChange: (s: AnalyticsSegment) => void;
-}) {
-  // Drill-in: a conversation_id opens the shared 会话复盘 timeline (replacing the
-  // page). Set from a clicked 近期错误 row or the manual id box.
-  const [replayId, setReplayId] = useState<string | null>(null);
+export function AnalyticsPage() {
+  const { segment: segmentParam } = useParams<{ segment: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [idInput, setIdInput] = useState("");
-  // reloadKey bumps to force the active panel to refetch; the per-lens loading
-  // flags drive the shared refresh spinner.
   const [reloadKey, setReloadKey] = useState(0);
   const [costLoading, setCostLoading] = useState(false);
   const [healthLoading, setHealthLoading] = useState(false);
 
-  if (replayId) {
-    return (
-      <ConversationReplay
-        conversationId={replayId}
-        backLabel="返回分析"
-        onBack={() => setReplayId(null)}
-      />
-    );
+  if (segmentParam !== "cost" && segmentParam !== "health") {
+    return <Navigate to="/analytics/cost" replace />;
   }
 
-  const openReplay = (e: FormEvent) => {
+  const segment: AnalyticsSegment = segmentParam;
+
+  const openReplay = (conversationId: string) => {
+    navigate(`/replay/${conversationId}`, { state: { from: location.pathname } });
+  };
+
+  const submitReplay = (e: FormEvent) => {
     e.preventDefault();
     const id = idInput.trim();
-    if (id) setReplayId(id);
+    if (id) openReplay(id);
   };
+
+  const setSegment = (s: AnalyticsSegment) => navigate(`/analytics/${s}`);
 
   const activeLoading = segment === "cost" ? costLoading : healthLoading;
   const subtitle =
@@ -81,8 +75,8 @@ export function AnalyticsPage({
           <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
-          <SegmentToggle value={segment} onChange={onSegmentChange} />
-          <form onSubmit={openReplay} className="flex items-center gap-2">
+          <SegmentToggle value={segment} onChange={setSegment} />
+          <form onSubmit={submitReplay} className="flex items-center gap-2">
             <Input
               value={idInput}
               onChange={(e) => setIdInput(e.target.value)}
@@ -116,7 +110,7 @@ export function AnalyticsPage({
         <HealthPanel
           reloadKey={reloadKey}
           onLoadingChange={setHealthLoading}
-          onOpenReplay={setReplayId}
+          onOpenReplay={openReplay}
         />
       )}
     </div>

@@ -99,6 +99,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Audit Logs
+         * @description 操作审计： privileged actions taken through the admin console, newest first.
+         *
+         *     Filters: ``action`` exact match (e.g. ``user.update``), ``actor_id`` pin one
+         *     operator. Append-only — each row is who did what to which resource and when.
+         */
+        get: operations["list_audit_logs_v1_admin_audit_logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Conversations
+         * @description 平台对话名册 (对话页 · 会话段): cross-user paginated conversation index.
+         *
+         *     Each row carries owner identity, housekeeping flags, message/turn/error rollups,
+         *     and all-time spend. Filters AND-combine; soft-deleted conversations are included
+         *     by default (``include_deleted=false`` hides them). Drill into 会话复盘 by ``id``.
+         */
+        get: operations["list_conversations_v1_admin_conversations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/conversations/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Conversation Turns
+         * @description 平台回合流水 (对话页 · 回合段): cross-user paginated turn feed.
+         *
+         *     Finer-grained than the session roster — each row is one ``turn_metrics`` record
+         *     with conversation title + owner identity for triage. Newest-first; filters
+         *     AND-combine. Drill into 会话复盘 by ``conversation_id``.
+         */
+        get: operations["list_conversation_turns_v1_admin_conversations_turns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/observability/conversations/{conversation_id}": {
         parameters: {
             query?: never;
@@ -382,6 +453,26 @@ export interface paths {
         put?: never;
         /** Create Invite */
         post: operations["create_invite_v1_auth_invites_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/invites/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Invites Batch
+         * @description Mint multiple single-use invite codes (admin batch issuance).
+         */
+        post: operations["create_invites_batch_v1_auth_invites_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2554,6 +2645,44 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AdminAuditLogLine
+         * @description One privileged operator action, newest-first in the audit feed.
+         */
+        AdminAuditLogLine: {
+            /** Action */
+            action: string;
+            /** Actor Id */
+            actor_id: string;
+            /** Actor Username */
+            actor_username: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            } | null;
+            /** Id */
+            id: string;
+            /** Target Id */
+            target_id: string | null;
+            /** Target Type */
+            target_type: string;
+        };
+        /** AdminAuditLogListResponse */
+        AdminAuditLogListResponse: {
+            /** Data */
+            data: components["schemas"]["AdminAuditLogLine"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
+        };
+        /**
          * AdminConversationLine
          * @description One of a user's conversations in the 用户详情 roster (compact row).
          *
@@ -2578,6 +2707,67 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * AdminConversationListItem
+         * @description One row in the platform-wide 对话 roster (``GET /v1/admin/conversations``).
+         *
+         *     Cross-user conversation index for ops: owner identity, housekeeping flags,
+         *     message/turn/error rollups, and all-time spend (nano-USD). Soft-deleted
+         *     conversations and tombstone owners are surfaced when requested — the client
+         *     folds ``cny_per_usd`` for ¥. Drill into 会话复盘 by ``id``.
+         */
+        AdminConversationListItem: {
+            /** Archived */
+            archived: boolean;
+            /** Cost Total */
+            cost_total: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Display Name */
+            display_name: string | null;
+            /** Errors */
+            errors: number;
+            /** Id */
+            id: string;
+            /** Messages */
+            messages: number;
+            /** Title */
+            title: string | null;
+            /** Turns */
+            turns: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** User Deleted At */
+            user_deleted_at?: string | null;
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username: string | null;
+        };
+        /**
+         * AdminConversationListResponse
+         * @description Paginated platform conversation roster (admin-only).
+         */
+        AdminConversationListResponse: {
+            /** Cny Per Usd */
+            cny_per_usd: number;
+            /** Data */
+            data: components["schemas"]["AdminConversationListItem"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
         };
         /**
          * AdminConversationReplay
@@ -2699,6 +2889,72 @@ export interface components {
             users_total: number;
             /** Version */
             version: string;
+        };
+        /**
+         * AdminTurnListItem
+         * @description One turn in the platform-wide 回合 feed — TurnMetricLine + list context.
+         *
+         *     Carries the owning conversation title and account display identity so an
+         *     operator can triage without opening 复盘 first.
+         */
+        AdminTurnListItem: {
+            /** Agent Id */
+            agent_id: string | null;
+            /** Conversation Deleted At */
+            conversation_deleted_at?: string | null;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Conversation Title */
+            conversation_title?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Delegated */
+            delegated: boolean;
+            /** Display Name */
+            display_name?: string | null;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Error */
+            error: string | null;
+            /** Finish Reason */
+            finish_reason: string | null;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Kind */
+            kind: string;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Rounds */
+            rounds: number;
+            /** Status */
+            status: string;
+            /** Trace Id */
+            trace_id: string | null;
+            /** Turn Id */
+            turn_id: string;
+            /** User Id */
+            user_id: string;
+            /** Username */
+            username?: string | null;
+            /** Workers */
+            workers: number;
+        };
+        /**
+         * AdminTurnListResponse
+         * @description Paginated platform turn feed (admin-only).
+         */
+        AdminTurnListResponse: {
+            /** Data */
+            data: components["schemas"]["AdminTurnListItem"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
         };
         /**
          * AdminUpdateUserRequest
@@ -2948,6 +3204,13 @@ export interface components {
          * @enum {string}
          */
         ApprovalDecision: "approve" | "approve_always" | "approve_always_files" | "deny";
+        /** BatchCreateInviteRequest */
+        BatchCreateInviteRequest: {
+            /** Count */
+            count: number;
+            /** Expires In Days */
+            expires_in_days?: number | null;
+        };
         /**
          * BindLocalWorkspaceRequest
          * @description Bind a conversation's workspace to a desktop FS root (switch to local mode).
@@ -3363,6 +3626,21 @@ export interface components {
             expires_in_days?: number | null;
         };
         /**
+         * CreateShareRequest
+         * @description Optional expiry when minting a public share link.
+         *
+         *     ``expires_in_days=None`` means the link never auto-expires (explicit opt-in).
+         *     Omitted / default ``30`` matches the platform security default.
+         */
+        CreateShareRequest: {
+            /**
+             * Expires In Days
+             * @description 链接有效天数；null 表示永不过期
+             * @default 30
+             */
+            expires_in_days: (7 | 30) | null;
+        };
+        /**
          * CreateSnapshotRequest
          * @description Take a manual snapshot of a conversation's workspace.
          *
@@ -3661,6 +3939,10 @@ export interface components {
         InviteListResponse: {
             /** Data */
             data: components["schemas"]["InviteResponse"][];
+            /** Page */
+            page?: number | null;
+            /** Page Size */
+            page_size?: number | null;
             /** Total */
             total: number;
         };
@@ -3943,11 +4225,11 @@ export interface components {
             rounds: number;
             runs?: components["schemas"]["RunsPayload"] | null;
             /** Trace Id */
-            trace_id?: string | null;
+            trace_id: string;
             /** User Message */
             user_message: string;
             /** User Message Id */
-            user_message_id?: string | null;
+            user_message_id: string;
         };
         /**
          * RecordTurnResponse
@@ -4422,6 +4704,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Expires At */
+            expires_at?: string | null;
             /** Id */
             id: string;
             /** Title */
@@ -4679,8 +4963,12 @@ export interface components {
             error: string | null;
             /** Finish Reason */
             finish_reason: string | null;
+            /** Input Tokens */
+            input_tokens: number;
             /** Kind */
             kind: string;
+            /** Output Tokens */
+            output_tokens: number;
             /** Rounds */
             rounds: number;
             /** Status */
@@ -5124,6 +5412,130 @@ export interface operations {
             };
         };
     };
+    list_audit_logs_v1_admin_audit_logs_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                action?: string | null;
+                actor_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminAuditLogListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_conversations_v1_admin_conversations_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                q?: string | null;
+                user_id?: string | null;
+                has_errors?: boolean | null;
+                include_deleted?: boolean;
+                since?: string | null;
+                until?: string | null;
+                sort?: "updated_at" | "created_at" | "cost";
+                order?: "asc" | "desc";
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminConversationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_conversation_turns_v1_admin_conversations_turns_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                user_id?: string | null;
+                conversation_id?: string | null;
+                status?: ("ok" | "error") | null;
+                since?: string | null;
+                until?: string | null;
+                include_deleted_conversations?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTurnListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     observability_conversation_v1_admin_observability_conversations__conversation_id__get: {
         parameters: {
             query?: never;
@@ -5516,7 +5928,11 @@ export interface operations {
     };
     list_invites_v1_auth_invites_get: {
         parameters: {
-            query?: never;
+            query?: {
+                page?: number;
+                page_size?: number;
+                status?: ("active" | "used" | "expired" | "revoked") | null;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -5571,6 +5987,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InviteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_invites_batch_v1_auth_invites_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchCreateInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5659,6 +6112,7 @@ export interface operations {
             path?: never;
             cookie?: {
                 refresh_token?: string | null;
+                access_token?: string | null;
             };
         };
         requestBody?: never;
@@ -6818,7 +7272,11 @@ export interface operations {
                 access_token?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CreateShareRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {

@@ -1103,3 +1103,102 @@ async def test_admin_overview_empty_is_zero(client, make_admin):
     assert b["cost_today"]["total"] == 0
     assert b["recent_errors"] == []
     assert [p["turns"] for p in b["recent_daily_turns"]] == [0] * 7
+
+
+# --- 对话名册 (platform conversation roster + turn feed) ---
+
+
+async def test_admin_conversations_requires_auth(client):
+    assert (await client.get("/v1/admin/conversations")).status_code == 401
+    assert (await client.get("/v1/admin/conversations/turns")).status_code == 401
+
+
+async def test_non_admin_cannot_access_conversations(client, make_invite):
+    code = await make_invite("INV-CONV")
+    await _register_and_login(client, code, "regular_conv")
+    assert (await client.get("/v1/admin/conversations")).status_code == 403
+    assert (await client.get("/v1/admin/conversations/turns")).status_code == 403
+
+
+async def test_admin_list_conversations_roster(client, make_admin, session_factory):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    bob = await _seed_user(session_factory, "bob")
+
+    ok_id, _ = await _seed_conversation_with_turn(
+        session_factory, user_id=alice, status="ok", cost_nano=3000
+    )
+    err_id, _ = await _seed_conversation_with_turn(
+        session_factory, user_id=bob, status="error", error="boom", cost_nano=1000
+    )
+
+    r = await client.get("/v1/admin/conversations")
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["total"] == 2
+    assert len(b["data"]) == 2
+    by_id = {row["id"]: row for row in b["data"]}
+    assert by_id[ok_id]["username"] == "alice"
+    assert by_id[ok_id]["turns"] == 1
+    assert by_id[ok_id]["errors"] == 0
+    assert by_id[ok_id]["messages"] == 2
+    assert by_id[ok_id]["cost_total"] == 3000
+    assert by_id[err_id]["errors"] == 1
+    assert by_id[err_id]["cost_total"] == 1000
+    assert b["cny_per_usd"] == settings.cny_per_usd
+
+
+async def test_admin_list_conversations_filters_has_errors(client, make_admin, session_factory):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    ok_id, _ = await _seed_conversation_with_turn(session_factory, user_id=alice, status="ok")
+    err_id, _ = await _seed_conversation_with_turn(
+        session_factory, user_id=alice, status="error", error="boom"
+    )
+
+    r = await client.get("/v1/admin/conversations", params={"has_errors": "true"})
+    assert r.status_code == 200, r.text
+    ids = {row["id"] for row in r.json()["data"]}
+    assert err_id in ids
+    assert ok_id not in ids
+
+
+async def test_admin_list_conversations_sort_by_cost(client, make_admin, session_factory):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    cheap_id, _ = await _seed_conversation_with_turn(
+        session_factory, user_id=alice, status="ok", cost_nano=1000
+    )
+    expensive_id, _ = await _seed_conversation_with_turn(
+        session_factory, user_id=alice, status="ok", cost_nano=9000
+    )
+
+    r = await client.get(
+        "/v1/admin/conversations",
+        params={"sort": "cost", "order": "desc", "user_id": alice},
+    )
+    assert r.status_code == 200, r.text
+    ids = [row["id"] for row in r.json()["data"]]
+    assert ids.index(expensive_id) < ids.index(cheap_id)
+
+
+async def test_admin_list_conversation_turns_feed(client, make_admin, session_factory):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    conv_id, _ = await _seed_conversation_with_turn(
+        session_factory, user_id=alice, status="error", error="boom"
+    )
+
+    r = await client.get("/v1/admin/conversations/turns", params={"status": "error"})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert b["total"] >= 1
+    row = next(x for x in b["data"] if x["conversation_id"] == conv_id)
+    assert row["conversation_title"] == "复盘会话"
+    assert row["username"] == "alice"
+    assert row["status"] == "error"
+    assert row["error"] == "boom"

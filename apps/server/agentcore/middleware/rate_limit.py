@@ -100,15 +100,57 @@ class SlidingWindowRateLimiter:
 
 
 # Module-level singletons sized from settings; exposed so tests can reset state.
-auth_rate_limiter = FixedWindowRateLimiter(
-    max_requests=settings.auth_rate_limit_max,
-    window_seconds=settings.auth_rate_limit_window_seconds,
-)
-# Per-user message-send limiter, consulted in the conversation routes via
-# agentcore.conversation.rate_limit.enforce_user_message_rate_limit.
-message_rate_limiter = SlidingWindowRateLimiter(
+def _build_auth_rate_limiter():
+    if settings.rate_limit_backend == "redis":
+        try:
+            from agentcore.middleware.redis_rate_limit import RedisFixedWindowRateLimiter, redis_client
+
+            return RedisFixedWindowRateLimiter(
+                client=redis_client(),
+                prefix="rl:auth",
+                max_requests=settings.auth_rate_limit_max,
+                window_seconds=settings.auth_rate_limit_window_seconds,
+            )
+        except Exception:
+            pass
+    return FixedWindowRateLimiter(
+        max_requests=settings.auth_rate_limit_max,
+        window_seconds=settings.auth_rate_limit_window_seconds,
+    )
+
+
+def _build_sliding_rate_limiter(*, prefix: str, max_requests: int, window_seconds: float):
+    if settings.rate_limit_backend == "redis":
+        try:
+            from agentcore.middleware.redis_rate_limit import (
+                RedisSlidingWindowRateLimiter,
+                redis_client,
+            )
+
+            return RedisSlidingWindowRateLimiter(
+                client=redis_client(),
+                prefix=prefix,
+                max_requests=max_requests,
+                window_seconds=window_seconds,
+            )
+        except Exception:
+            pass
+    return SlidingWindowRateLimiter(
+        max_requests=max_requests,
+        window_seconds=window_seconds,
+    )
+
+
+auth_rate_limiter = _build_auth_rate_limiter()
+message_rate_limiter = _build_sliding_rate_limiter(
+    prefix="rl:msg",
     max_requests=settings.user_message_rate_limit_max,
     window_seconds=settings.user_message_rate_limit_window_seconds,
+)
+inference_token_mint_limiter = _build_sliding_rate_limiter(
+    prefix="rl:inf",
+    max_requests=settings.inference_token_mint_max,
+    window_seconds=settings.inference_token_mint_window_seconds,
 )
 
 
@@ -116,6 +158,7 @@ def reset_rate_limit_state() -> None:
     """Clear all counters (test isolation between cases)."""
     auth_rate_limiter.reset()
     message_rate_limiter.reset()
+    inference_token_mint_limiter.reset()
 
 
 def _client_key(request: Request) -> str:

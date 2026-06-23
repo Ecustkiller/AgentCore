@@ -28,6 +28,7 @@ from importlib.metadata import version as _package_version
 
 from fastapi import APIRouter, Response, status
 
+from agentcore.cache.redis_health import redis_ready
 from agentcore.config import settings
 from agentcore.db.base import database_ready
 
@@ -44,9 +45,17 @@ async def liveness() -> dict[str, str]:
 async def readiness(response: Response) -> dict[str, object]:
     """Readiness probe: 200 when every hard dependency is reachable, else 503."""
     db_ok = await database_ready()
-    if not db_ok:
+    redis_ok = await redis_ready()
+    ready = db_ok and redis_ok
+    if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return {"status": "ready" if db_ok else "not_ready", "database": db_ok}
+    body: dict[str, object] = {
+        "status": "ready" if ready else "not_ready",
+        "database": db_ok,
+    }
+    if settings.rate_limit_backend == "redis":
+        body["redis"] = redis_ok
+    return body
 
 
 def app_version() -> str:

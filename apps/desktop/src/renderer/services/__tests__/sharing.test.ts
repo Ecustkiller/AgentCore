@@ -19,11 +19,11 @@ const share = (over: Partial<Share> = {}): Share => ({
   ...over,
 });
 
-const okJson = (body: unknown) => ({
-  ok: true,
-  status: 200,
-  json: async () => body,
-});
+const okJson = (body: unknown) =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {

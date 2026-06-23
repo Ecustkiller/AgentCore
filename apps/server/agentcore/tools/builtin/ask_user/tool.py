@@ -1,47 +1,4 @@
-"""ask_user — the CEO pauses the turn to ask the user (the one asking primitive).
-
-CEO-only: wired in ``runtime.pipeline`` next to ``delegate`` and deliberately NOT in
-``build_builtin_registry`` (a delegated worker never talks to the user). This is the
-single「向用户发问」primitive — it absorbed the former 引导式开场 (``kickoff``): whether
-the CEO is **opening** a producible-but-underspecified request (做网站 / 文档…) or
-hitting a **mid-execution** high-cost fork (A vs B / an irreversible step), it asks the
-SAME way and through the SAME mechanism.
-
-Two modes, one primitive — the model picks via ``blocking``. DEFAULT (``blocking`` true):
-suspend + resume — the card surfaces, the turn suspends on the interaction registry's
-Future, and the user's answer flows back into the CEO's ReAct loop as this tool's result.
-挂起+恢复 is the general case (it preserves any in-flight context — delegate results, read
-files) and subsumes the opening 引导 at negligible cost, so the runtime — not the model —
-owns「该结束还是该挂起」. NON-BLOCKING (``blocking`` false, Cursor 式): for a low-stakes
-fork the CEO already has a sensible default for, it surfaces the question, returns a
-``CONTINUE`` immediately (no suspend, no durable frame, no extra round) and keeps working
-on its stated default; the user's answer, if any, rides an ordinary next-turn message.
-Requires a stated fallback (an ``assumptions`` entry or a question ``default``) — without
-one「非阻塞」would silently guess, so it degrades to an error steering the CEO to block.
-The model decides WHETHER to ask (restraint) and, when it does, whether the fork is worth
-freezing the turn (block) or can ride a default (non-block). 对比与决策见
-docs/03-AI核心/Agent协作模式.md（向用户发问 / 阻塞与非阻塞）.
-
-The card's content is one adaptive shape (rich when opening, compact mid-task):
-``message`` (the framing / opening line — always shown), optional ``context``
-background, optional ``assumptions`` (起步计划 — low-impact decisions the CEO made for
-the user, read-only chips), optional ``questions`` (the askable items, each pre-fillable
-with a ``default`` so a 想省事 user one-clicks through), and optional ``style_options``
-(visual products only). A mid-task A/B is just ``message`` + a one-item ``questions``.
-
-A submit answer is ``ToolEffect.CONTINUE`` (the CEO resumes with the user's picks); a
-stop is ``ToolEffect.INTERACT`` — a terminal effect that ends the turn gracefully in-band
-(its closing note rides as ``ToolResult.final_text``). The question + answer are
-journaled (``events._JOURNAL_EVENT_TYPES``) so a reload replays the exchange inline.
-
-结构化挂起 2b (turn 级落盘 + ``POST .../resume``): like the ``delegate`` checkpoint hook,
-the suspend is backed by a durable frame — an :class:`AskUserSuspension` is saved to
-``paused_turns`` BEFORE the wait and dropped after a live in-process resolve / timeout. A
-disconnect / restart during the wait leaves the frame so ``POST .../resume`` can map the
-user's answer back to this tool's result and continue the CEO loop. The answer→result
-mapping is the module-level :func:`ask_user_tool_result` so the live path and resume
-share one source of truth.
-"""
+"""AskUserTool: CEO asking primitive (blocking suspend + non-blocking surface)."""
 
 from __future__ import annotations
 
@@ -50,10 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect, new_id
-from agentcore.runtime.checkpoints import (
-    CheckpointDecision,
-    CheckpointResponse,
-)
+from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import (
     EventSink,
     checkpoint_required,
@@ -63,19 +17,19 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
+from agentcore.tools.builtin.ask_user.result import ask_user_tool_result
+from agentcore.tools.builtin.ask_user.schema import (
+    normalize_assumptions,
+    normalize_questions,
+    normalize_style_options,
+)
+from agentcore.tools.builtin.ask_user.suspend import drop_suspension, persist_suspension
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
 if TYPE_CHECKING:
     from agentcore.runtime.suspension import SuspensionDeleter, SuspensionSaver
 
 logger = get_logger(__name__)
-
-# Caps so a runaway prompt can't bloat the card / event. The free-form note on the
-# card always lets the user steer beyond these.
-_MAX_QUESTIONS = 5  # 开场重点问题最多 5 个（对齐 Cursor 2.1 的 3–5）
-_MAX_OPTIONS = 6  # 每个 choice 问题的选项上限
-_MAX_ASSUMPTIONS = 10
-_MAX_STYLES = 6
 
 
 @dataclass
@@ -244,9 +198,9 @@ class AskUserTool:
                 error="ask_user 需要非空的 message 参数（向用户说明你在问什么）。",
             )
         ctx_text = str(arguments.get("context") or "")
-        assumptions = _normalize_assumptions(arguments.get("assumptions"))
-        questions = _normalize_questions(arguments.get("questions"))
-        style_options = _normalize_style_options(arguments.get("style_options"))
+        assumptions = normalize_assumptions(arguments.get("assumptions"))
+        questions = normalize_questions(arguments.get("questions"))
+        style_options = normalize_style_options(arguments.get("style_options"))
 
         # 非阻塞发问 (Cursor 式): surface + proceed, never freeze the turn. Branch BEFORE
         # any suspend / durable-frame machinery — it shares none of it.
@@ -269,15 +223,16 @@ class AskUserTool:
         # (disconnect) / crash during the wait propagates past the drop below, leaving
         # the frame for ``POST .../resume``; the in-memory resolve still settles a
         # live turn even if the save failed.
-        await self._persist_suspension(
-            checkpoint_id,
-            context,
-            message,
-            ctx_text,
-            assumptions,
-            questions,
-            style_options,
-            required,
+        await persist_suspension(
+            self,
+            checkpoint_id=checkpoint_id,
+            context=context,
+            message=message,
+            ctx_text=ctx_text,
+            assumptions=assumptions,
+            questions=questions,
+            style_options=style_options,
+            required_event=required,
         )
         try:
             response = await self.registry.suspend(
@@ -299,7 +254,7 @@ class AskUserTool:
             response = CheckpointResponse(decision=CheckpointDecision.TIMEOUT)
         # Reached only on a live resolve / timeout — a cancel raises CancelledError,
         # which propagates PAST this and leaves the frame for /resume.
-        await self._drop_suspension()
+        await drop_suspension(self)
 
         # Keep only picks that were actually on some question's menu — a resolve can't
         # inject arbitrary strings into the CEO's context (the desktop composes its
@@ -380,217 +335,3 @@ class AskUserTool:
                 "届时再据此调整。"
             ),
         )
-
-    def _can_persist_suspension(self) -> bool:
-        """Whether this ask_user pause should be durably persisted (结构化挂起 2b).
-
-        The turn's ``message_id`` + the persist closure must be wired (the live CEO
-        path) — a standalone / un-wired construction (tests) keeps 2a in-memory only."""
-        return bool(self.message_id and self.suspension_saver is not None and self.conversation_id)
-
-    async def _persist_suspension(
-        self,
-        checkpoint_id,
-        context,
-        message,
-        ctx_text,
-        assumptions,
-        questions,
-        style_options,
-        required_event,
-    ) -> None:
-        """Capture + persist the durable suspension frame for this ask_user pause (2b).
-
-        Reads the CEO transcript off the ``captain_transcript`` contextvar (published
-        by the captain executor) — without it a faithful resume is impossible, so
-        capture is skipped (the live resolve still works). Folds the about-to-emit
-        ``checkpoint_required`` into the frame's journal so a resume replays the
-        prompt+resolution as a pair. Best-effort: the saver swallows its own errors.
-        """
-        if not self._can_persist_suspension():
-            return
-        from agentcore.core.log_context import get_log_value
-        from agentcore.runtime.suspension import (
-            AskUserSuspension,
-            captain_transcript,
-            find_tool_call_id,
-            turn_history,
-        )
-
-        transcript = captain_transcript.get()
-        if not transcript:
-            logger.info("suspension.no_transcript", checkpoint_id=checkpoint_id)
-            return
-        from agentcore.runtime.facts import snapshot_fact_log
-
-        journal = list(self.sink.execution_journal() or [])
-        journal.append(
-            {
-                "type": required_event.type.value,
-                "payload": required_event.payload,
-                "timestamp": required_event.timestamp,
-            }
-        )
-        # The §18.3 fact-log stream at this same instant — the persist source (the
-        # display ``journal`` above is the degraded fallback). The suspending card is
-        # emitted only AFTER this save, so fold it in so the persisted stream carries it.
-        journal_entries = snapshot_fact_log(
-            trailing=[
-                {
-                    "kind": required_event.type.value,
-                    "payload": required_event.payload,
-                    "ts": required_event.timestamp,
-                }
-            ]
-        )
-        frame = AskUserSuspension(
-            message_id=self.message_id or "",
-            conversation_id=self.conversation_id,
-            user_id=context.user_id,
-            captain_run_id=self.captain_run_id or "",
-            checkpoint_id=checkpoint_id,
-            tool_call_id=find_tool_call_id(transcript, "ask_user"),
-            base_system_prompt=self.base_system_prompt,
-            user_message=self.user_message,
-            transcript=list(transcript),
-            history=list(turn_history.get() or []),
-            question=message,
-            context=ctx_text,
-            assumptions=assumptions,
-            questions=questions,
-            style_options=style_options,
-            journal=journal,
-            journal_entries=journal_entries,
-            trace_id=get_log_value("trace_id"),
-        )
-        await self.suspension_saver(frame)  # type: ignore[misc]
-
-    async def _drop_suspension(self) -> None:
-        """Delete the durable frame after a live in-process resolve / timeout (2b)."""
-        if self._can_persist_suspension() and self.suspension_deleter is not None:
-            await self.suspension_deleter(self.message_id or "")
-
-
-def ask_user_tool_result(response: CheckpointResponse) -> ToolResult:
-    """Map the user's ask_user answer to the tool result the CEO loop consumes.
-
-    The single source of truth for both the live tool (``AskUserTool.execute``) and
-    a durable resume (``runtime/pipeline.resume_chat_pipeline``): submit feeds back as
-    a ``CONTINUE`` result (the CEO resumes); stop returns an ``INTERACT`` (terminal)
-    result whose closing note rides as ``final_text`` so the engine — or the resume —
-    ends the turn gracefully with that text; a timeout hands control back to the CEO to
-    wrap up on its own. Pure (no SSE side-effect): the caller streams the stop's
-    ``final_text`` via ``content_delta`` (it is persist-only, the engine never re-emits
-    it).
-
-    答复正文 (α 答复模型): the desktop composes the user's per-question picks + style +
-    free-form note into ONE readable ``note`` string (the picks live in the UI, so the
-    answer is composed where the data is — no structured wire payload the only-reader CEO
-    would just flatten back to prose anyway). ``selected`` stays for any non-desktop /
-    legacy single-option client.
-    """
-    decision = response.decision
-    picks = "、".join(response.selected)
-    note = response.note.strip()
-    if decision is CheckpointDecision.CONTINUE:
-        if note and picks:
-            output = f"用户选择：{picks}；并补充：\n{note}\n请据此继续。"
-        elif note:
-            # The desktop's composed answer (per-question picks + style + note) rides here.
-            output = f"用户答复：\n{note}\n请据此继续。"
-        elif picks:
-            output = f"用户选择：{picks}。请按此继续。"
-        else:
-            output = "用户确认：按你提出的方向继续。"
-        return ToolResult(tool_call_id="", success=True, output=output)
-    # ADJUST stays mapped for any non-desktop client + old journaled turns (the desktop
-    # card merged 调整 into 提交 / CONTINUE).
-    if decision is CheckpointDecision.ADJUST:
-        if picks and note:
-            output = f"用户选择：{picks}；并调整：\n{note}\n请据此调整后再继续。"
-        elif note:
-            output = f"用户调整指令：\n{note}\n请据此调整后再继续。"
-        elif picks:
-            output = f"用户选择：{picks}。\n请据此继续。"
-        else:
-            output = "用户未填写具体调整说明，请据上下文稳妥推进。"
-        return ToolResult(tool_call_id="", success=True, output=output)
-    if decision is CheckpointDecision.STOP:
-        closing = note or "好的，已按你的要求停止本回合。"
-        return ToolResult(
-            tool_call_id="",
-            success=True,
-            output="用户选择停止本回合。",
-            effect=ToolEffect.INTERACT,
-            final_text=closing,
-        )
-    # TIMEOUT — never silently picked a branch; let the CEO decide how to close.
-    return ToolResult(
-        tool_call_id="",
-        success=True,
-        output="用户未在时限内回应。请基于目前已掌握的信息，自行决定如何稳妥收尾。",
-    )
-
-
-def _normalize_assumptions(raw: Any) -> list[dict[str, Any]]:
-    """Cap + id the 起步计划 chips, dropping malformed / empty-label entries."""
-    items = raw if isinstance(raw, list) else []
-    out: list[dict[str, Any]] = []
-    for i, it in enumerate(items[:_MAX_ASSUMPTIONS]):
-        if not isinstance(it, dict):
-            continue
-        label = str(it.get("label") or "").strip()
-        if not label:
-            continue
-        out.append({"id": f"a{i}", "label": label, "value": str(it.get("value") or "").strip()})
-    return out
-
-
-def _normalize_questions(raw: Any) -> list[dict[str, Any]]:
-    """Cap (≤5) + id the questions, normalizing kind/options/multiple/default.
-
-    ``default`` is optional here (unlike the old kickoff): an opening question should
-    pre-fill one, but a mid-task fork usually wants the user to actively choose, so it
-    is left empty when the CEO omits it.
-    """
-    items = raw if isinstance(raw, list) else []
-    out: list[dict[str, Any]] = []
-    for i, it in enumerate(items[:_MAX_QUESTIONS]):
-        if not isinstance(it, dict):
-            continue
-        prompt = str(it.get("prompt") or "").strip()
-        if not prompt:
-            continue
-        kind = "text" if str(it.get("kind") or "").strip() == "text" else "choice"
-        if kind == "choice":
-            options = [str(o).strip() for o in (it.get("options") or []) if str(o).strip()][
-                :_MAX_OPTIONS
-            ]
-            multiple = bool(it.get("multiple") or False)
-        else:
-            options = []
-            multiple = False
-        out.append(
-            {
-                "id": f"q{i}",
-                "prompt": prompt,
-                "kind": kind,
-                "options": options,
-                "multiple": multiple,
-                "default": str(it.get("default") or "").strip(),
-            }
-        )
-    return out
-
-
-def _normalize_style_options(raw: Any) -> list[dict[str, Any]]:
-    """Cap + id the 风格预设, accepting either ``{label}`` dicts or bare strings."""
-    items = raw if isinstance(raw, list) else []
-    out: list[dict[str, Any]] = []
-    for i, it in enumerate(items[:_MAX_STYLES]):
-        raw_label = it.get("label") if isinstance(it, dict) else it
-        label = str(raw_label or "").strip()
-        if not label:
-            continue
-        out.append({"id": f"s{i}", "label": label})
-    return out

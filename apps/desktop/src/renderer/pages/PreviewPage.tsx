@@ -1,17 +1,28 @@
 import { ChatView } from "@/components/chat/ChatView";
 import { Button } from "@/components/ui";
-import { PREVIEW_FIXTURES, type PreviewFixture } from "@/preview/fixtures";
+import { PREVIEW_FIXTURES } from "@/preview/fixtures";
+import { deleteRecording, useRecordings } from "@/preview/recordings";
 import {
   replayFixtureNow,
   replayFixturePrefix,
   replayFixtureStreamed,
 } from "@/preview/replay";
 import { useConversationStore } from "@/stores/conversation";
-import { FlaskConical, Play, Radio } from "lucide-react";
-import { useEffect, useRef } from "react";
+import type { SSEEvent } from "@/types/events";
+import { FlaskConical, Play, Radio, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 
-const convIdFor = (fx: PreviewFixture) => `preview-${fx.name}`;
+/** A preview entry: a local recording (captured from a real turn) or a committed
+ *  conformance vector. Both replay through the identical path. */
+interface Scenario {
+  name: string;
+  description: string;
+  events: SSEEvent[];
+  kind: "recording" | "fixture";
+}
+
+const convIdFor = (name: string) => `preview-${name}`;
 
 /**
  * Hidden dev route (`#/preview`) for eyeballing every AI state offline. Each entry
@@ -27,11 +38,31 @@ export function PreviewPage() {
   // harness (scripts/shoot.mjs) can deep-link each scenario deterministically and
   // humans can bookmark one. Fall back to the first fixture so the pane is never
   // empty.
+  // Local recordings (captured from real turns) sit above the committed
+  // conformance vectors; both replay through the same path. Recordings react to
+  // saves/deletes so a just-captured turn shows up here without a reload.
+  const recordings = useRecordings();
+  const scenarios = useMemo<Scenario[]>(
+    () => [
+      ...recordings.map((r) => ({
+        name: r.name,
+        description: r.description,
+        events: r.events,
+        kind: "recording" as const,
+      })),
+      ...PREVIEW_FIXTURES.map((f) => ({
+        name: f.name,
+        description: f.description,
+        events: f.events,
+        kind: "fixture" as const,
+      })),
+    ],
+    [recordings],
+  );
+
   const requested = searchParams.get("s");
   const current =
-    PREVIEW_FIXTURES.find((f) => f.name === requested) ??
-    PREVIEW_FIXTURES[0] ??
-    null;
+    scenarios.find((s) => s.name === requested) ?? scenarios[0] ?? null;
   const selected = current?.name ?? null;
 
   // Mid-stream frame index (`#/preview?s=…&k=<n>`): replay only the first n events
@@ -43,6 +74,11 @@ export function PreviewPage() {
   const frame =
     Number.isFinite(parsedFrame) && parsedFrame > 0 ? parsedFrame : null;
 
+  // Total replayable events in the current scenario → the scrubber's right end
+  // (terminal state). The slider spans 1…total; landing on total drops `k` so the
+  // URL collapses back to the canonical terminal form the harness screenshots.
+  const total = current?.events.length ?? 0;
+
   const stopStreamed = () => {
     cancelRef.current?.();
     cancelRef.current = null;
@@ -52,17 +88,44 @@ export function PreviewPage() {
     setSearchParams({ s: name }, { replace: true });
   };
 
+  const removeRecording = (name: string) => {
+    deleteRecording(name);
+    // If we just deleted the open one, drop `?s=` so selection falls back to the
+    // first remaining scenario instead of pointing at a gone entry.
+    if (selected === name) setSearchParams({}, { replace: true });
+  };
+
+  // Drag the scrubber → rewrite `?k=`. At/over the right end we drop `k` entirely
+  // (terminal). The URL stays the single source of truth: the effect below re-replays
+  // the prefix and data-preview-frame updates, so the screenshot harness and a human
+  // scrubbing land on the exact same frame.
+  const setFrame = (value: number) => {
+    if (!selected) return;
+    if (value >= total) {
+      setSearchParams({ s: selected }, { replace: true });
+    } else {
+      setSearchParams(
+        { s: selected, k: String(Math.max(1, value)) },
+        { replace: true },
+      );
+    }
+  };
+
   const replayNow = () => {
     if (!current) return;
     stopStreamed();
-    replayFixtureNow(convIdFor(current), current.events, current.description);
+    replayFixtureNow(
+      convIdFor(current.name),
+      current.events,
+      current.description,
+    );
   };
 
   const playStreamed = () => {
     if (!current) return;
     stopStreamed();
     cancelRef.current = replayFixtureStreamed(
-      convIdFor(current),
+      convIdFor(current.name),
       current.events,
       current.description,
     );
@@ -75,19 +138,20 @@ export function PreviewPage() {
   useEffect(() => {
     cancelRef.current?.();
     cancelRef.current = null;
-    const fx = PREVIEW_FIXTURES.find((f) => f.name === selected);
-    if (fx) {
+    const sc = scenarios.find((s) => s.name === selected);
+    if (sc) {
+      const cid = convIdFor(sc.name);
       if (frame !== null) {
-        replayFixturePrefix(convIdFor(fx), fx.events, frame, fx.description);
+        replayFixturePrefix(cid, sc.events, frame, sc.description);
       } else {
-        replayFixtureNow(convIdFor(fx), fx.events, fx.description);
+        replayFixtureNow(cid, sc.events, sc.description);
       }
     }
     return () => {
       cancelRef.current?.();
       cancelRef.current = null;
     };
-  }, [selected, frame]);
+  }, [selected, frame, scenarios]);
 
   // Drop the synthetic slice when leaving so it never lingers as the active
   // conversation.
@@ -111,39 +175,83 @@ export function PreviewPage() {
               前端预览
             </h1>
             <p className="text-xs text-muted-foreground">
-              {PREVIEW_FIXTURES.length} 个 AI 场景 · 离线回放
+              {scenarios.length} 个场景 · 离线回放
             </p>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          {PREVIEW_FIXTURES.length === 0 ? (
+          {scenarios.length === 0 ? (
             <p className="px-2 py-4 text-xs text-muted-foreground">
-              未找到 fixture。请确认 packages/protocol-conformance/fixtures
-              存在。
+              未找到场景。请确认 packages/protocol-conformance/fixtures
+              存在，或用标题栏「录制」按钮录一个回合。
             </p>
           ) : (
-            <ul className="space-y-0.5">
-              {PREVIEW_FIXTURES.map((fx) => (
-                <li key={fx.name}>
-                  <button
-                    type="button"
-                    onClick={() => select(fx.name)}
-                    className={`w-full rounded-lg px-3 py-2 text-left ${
-                      selected === fx.name
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                    }`}
-                  >
-                    <span className="block truncate text-sm font-medium">
-                      {fx.name}
-                    </span>
-                    <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                      {fx.description}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              {recordings.length > 0 && (
+                <div className="mb-2">
+                  <p className="px-3 py-1 text-xs font-medium text-muted-foreground">
+                    录制（本地）
+                  </p>
+                  <ul className="space-y-0.5">
+                    {recordings.map((r) => (
+                      <li key={r.name} className="relative">
+                        <button
+                          type="button"
+                          onClick={() => select(r.name)}
+                          className={`w-full rounded-lg px-3 py-2 pr-9 text-left ${
+                            selected === r.name
+                              ? "bg-accent text-foreground"
+                              : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                          }`}
+                        >
+                          <span className="block truncate text-sm font-medium">
+                            {r.name}
+                          </span>
+                          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                            {r.description}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeRecording(r.name)}
+                          aria-label={`删除录制 ${r.name}`}
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {recordings.length > 0 && (
+                <p className="px-3 py-1 text-xs font-medium text-muted-foreground">
+                  内置场景
+                </p>
+              )}
+              <ul className="space-y-0.5">
+                {PREVIEW_FIXTURES.map((fx) => (
+                  <li key={fx.name}>
+                    <button
+                      type="button"
+                      onClick={() => select(fx.name)}
+                      className={`w-full rounded-lg px-3 py-2 text-left ${
+                        selected === fx.name
+                          ? "bg-accent text-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      }`}
+                    >
+                      <span className="block truncate text-sm font-medium">
+                        {fx.name}
+                      </span>
+                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                        {fx.description}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </div>
       </aside>
@@ -179,6 +287,37 @@ export function PreviewPage() {
             </div>
           )}
         </div>
+        {current && total > 1 && (
+          <div className="flex items-center gap-3 border-b border-border px-4 py-1.5">
+            <span className="shrink-0 text-xs font-medium text-muted-foreground">
+              帧
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={total}
+              step={1}
+              value={frame ?? total}
+              onChange={(e) => setFrame(Number(e.target.value))}
+              className="h-1 flex-1 cursor-pointer accent-primary"
+              aria-label="流式中间帧 scrubber"
+            />
+            <span className="w-32 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+              {frame !== null
+                ? `第 ${frame} / ${total} 事件`
+                : `终态 · ${total} 事件`}
+            </span>
+            {frame !== null && (
+              <button
+                type="button"
+                onClick={() => setFrame(total)}
+                className="shrink-0 text-xs font-medium text-primary hover:underline"
+              >
+                回终态
+              </button>
+            )}
+          </div>
+        )}
         <div className="relative flex min-h-0 flex-1 flex-col">
           <ChatView />
         </div>

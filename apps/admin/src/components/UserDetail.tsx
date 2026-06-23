@@ -1,5 +1,4 @@
 import { CostTrendBars } from "@/components/charts";
-import { ConversationReplay } from "@/components/ConversationReplay";
 import { ResetPasswordDialog } from "@/components/ResetPasswordDialog";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -22,8 +21,9 @@ import {
   type RoleCostLine,
   fetchUserDetail,
 } from "@/services/adminUsers";
-import { ArrowLeft, KeyRound, MessageSquare, RefreshCw } from "lucide-react";
+import { ArrowLeft, ExternalLink, KeyRound, MessageSquare, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
 function quotaSummary(u: AdminUserDetail["user"]): string {
   if (u.is_unlimited) return "无限额";
@@ -40,14 +40,16 @@ export function UserDetail({
   userId: string;
   onBack: () => void;
 }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState<AdminUserDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Drill-in: a conversation_id opens the shared 会话复盘 timeline (replacing the
-  // detail). Set from a clicked conversation row or recent-activity row.
-  const [replayId, setReplayId] = useState<string | null>(null);
-  // Reset-password modal toggle (acts on this account).
   const [resetting, setResetting] = useState(false);
+
+  const openReplay = (conversationId: string) => {
+    navigate(`/replay/${conversationId}`, { state: { from: location.pathname } });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,16 +66,6 @@ export function UserDetail({
   useEffect(() => {
     void load();
   }, [load]);
-
-  if (replayId) {
-    return (
-      <ConversationReplay
-        conversationId={replayId}
-        backLabel="返回用户详情"
-        onBack={() => setReplayId(null)}
-      />
-    );
-  }
 
   const user = data?.user;
   const byok = data?.billing_mode === "byok";
@@ -214,10 +206,15 @@ export function UserDetail({
 
           <ConversationsTable
             rows={data.conversations}
-            onOpen={setReplayId}
+            userId={user.id}
+            onOpen={openReplay}
           />
 
-          <RecentTurnsTable rows={data.recent_turns} onOpen={setReplayId} />
+          <RecentTurnsTable
+            rows={data.recent_turns}
+            userId={user.id}
+            onOpen={openReplay}
+          />
 
           {resetting && (
             <ResetPasswordDialog
@@ -263,18 +260,34 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function ConversationsTable({
   rows,
+  userId,
   onOpen,
 }: {
   rows: AdminConversationLine[];
+  userId: string;
   onOpen: (conversationId: string) => void;
 }) {
+  const navigate = useNavigate();
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="border-border border-b px-5 py-3.5">
-        <h2 className="text-base font-semibold text-foreground">最近会话</h2>
-        <p className="mt-0.5 text-muted-foreground text-xs">
-          按最近活动排序 · 点击行进入会话复盘
-        </p>
+      <div className="flex items-center justify-between gap-3 border-border border-b px-5 py-3.5">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">最近会话</h2>
+          <p className="mt-0.5 text-muted-foreground text-xs">
+            按最近活动排序 · 点击行进入会话复盘
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() =>
+            navigate(`/conversations/conversations?user_id=${encodeURIComponent(userId)}`)
+          }
+        >
+          <ExternalLink size={14} />
+          查看全部
+        </Button>
       </div>
       <table className="w-full text-sm">
         <thead>
@@ -318,18 +331,36 @@ function ConversationsTable({
 
 function RecentTurnsTable({
   rows,
+  userId,
   onOpen,
 }: {
   rows: TurnMetricLine[];
+  userId: string;
   onOpen: (conversationId: string) => void;
 }) {
+  const navigate = useNavigate();
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="border-border border-b px-5 py-3.5">
-        <h2 className="text-base font-semibold text-foreground">最近活动</h2>
-        <p className="mt-0.5 text-muted-foreground text-xs">
-          最近的回合（newest-first）· 点击行进入会话复盘
-        </p>
+      <div className="flex items-center justify-between gap-3 border-border border-b px-5 py-3.5">
+        <div>
+          <h2 className="text-base font-semibold text-foreground">最近活动</h2>
+          <p className="mt-0.5 text-muted-foreground text-xs">
+            最近的回合（newest-first）· 点击行进入会话复盘
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() =>
+            navigate(
+              `/conversations/turns?user_id=${encodeURIComponent(userId)}`,
+            )
+          }
+        >
+          <ExternalLink size={14} />
+          查看全部
+        </Button>
       </div>
       <table className="w-full text-sm">
         <thead>

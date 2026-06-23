@@ -1,0 +1,141 @@
+/** Fit-to-width viewport, resize observers, and zoom helpers for GraphView. */
+
+import { fitWidthBox } from "@/lib/elk-layout";
+import type { ReactFlowInstance } from "@xyflow/react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { prefersReducedMotion } from "./constants";
+
+interface UseGraphViewportOptions {
+  embedded: boolean;
+  bbox: { width: number; height: number } | null;
+  layoutReady: boolean;
+  onMeasure?: (m: { height: number; overflowing: boolean }) => void;
+}
+
+export function useGraphViewport({
+  embedded,
+  bbox,
+  layoutReady,
+  onMeasure,
+}: UseGraphViewportOptions) {
+  const rfRef = useRef<ReactFlowInstance | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [colWidth, setColWidth] = useState(0);
+  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const viewportSettledRef = useRef(false);
+
+  useEffect(() => {
+    if (!layoutReady) {
+      viewportSettledRef.current = false;
+    }
+  }, [layoutReady]);
+
+  const onInit = useCallback((inst: ReactFlowInstance) => {
+    rfRef.current = inst;
+    setRfInstance(inst);
+  }, []);
+
+  const fitView = useCallback(() => {
+    rfRef.current?.fitView({ padding: 0.2, duration: 300 });
+  }, []);
+
+  const centerNode = useCallback((id: string) => {
+    const node = rfRef.current?.getNode(id);
+    if (!node) return;
+    const w = node.measured?.width ?? 210;
+    const h = node.measured?.height ?? 64;
+    rfRef.current?.setCenter(node.position.x + w / 2, node.position.y + h / 2, {
+      zoom: 1.2,
+      duration: 300,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!embedded) return;
+    const el = containerRef.current;
+    if (!el) return;
+    setColWidth(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setColWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [embedded]);
+
+  useEffect(() => {
+    if (!embedded || !rfInstance || !bbox || colWidth <= 0 || !layoutReady) {
+      return;
+    }
+    const fit = fitWidthBox(bbox.width, bbox.height, colWidth);
+    const x = Math.max(0, (colWidth - fit.renderedWidth) / 2);
+    const y =
+      fit.renderedHeight <= fit.height
+        ? (fit.height - fit.renderedHeight) / 2
+        : 0;
+    const animate = viewportSettledRef.current && !prefersReducedMotion();
+    rfInstance.setViewport(
+      { x, y, zoom: fit.zoom },
+      animate ? { duration: 200 } : undefined,
+    );
+    viewportSettledRef.current = true;
+    setOverflowing(fit.overflowing);
+    onMeasure?.({ height: fit.height, overflowing: fit.overflowing });
+  }, [embedded, rfInstance, bbox, colWidth, layoutReady, onMeasure]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "f" && e.key !== "F") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      fitView();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fitView]);
+
+  useEffect(() => {
+    if (embedded) return;
+    const el = containerRef.current;
+    if (!el) return;
+    let lastWidth = Math.round(el.clientWidth);
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0]?.contentRect.width ?? 0);
+      if (!settled) {
+        settled = true;
+        lastWidth = w;
+        return;
+      }
+      if (w <= 0 || w === lastWidth) return;
+      lastWidth = w;
+      clearTimeout(timer);
+      timer = setTimeout(() => fitView(), 160);
+    });
+    ro.observe(el);
+    return () => {
+      clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, [embedded, fitView]);
+
+  return {
+    containerRef,
+    rfRef,
+    overflowing,
+    fitView,
+    centerNode,
+    onInit,
+  };
+}

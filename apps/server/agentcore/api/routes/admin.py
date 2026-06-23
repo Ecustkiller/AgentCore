@@ -15,18 +15,22 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.admin import AdminService
+from agentcore.admin.audit import record_admin_audit
 from agentcore.api.account_cleanup import cleanup_account_resources
 from agentcore.api.cost_view import cost_breakdown, usage_breakdown
 from agentcore.api.dependencies import (
     AdminUser,
+    get_admin_audit_repo,
     get_admin_service,
     get_asset_storage,
     get_auth_service,
     get_conversation_repo,
     get_conversation_share_repo,
     get_cost_event_repo,
+    get_db,
     get_message_repo,
     get_turn_journal_repo,
     get_turn_metrics_repo,
@@ -35,12 +39,18 @@ from agentcore.api.dependencies import (
 )
 from agentcore.api.routes.system import app_version
 from agentcore.api.schemas import (
+    AdminAuditLogLine,
+    AdminAuditLogListResponse,
     AdminConversationLine,
+    AdminConversationListItem,
+    AdminConversationListResponse,
     AdminConversationReplay,
     AdminObservabilitySummary,
     AdminOverview,
     AdminResetPasswordResponse,
     AdminSystemStatus,
+    AdminTurnListItem,
+    AdminTurnListResponse,
     AdminUpdateUserRequest,
     AdminUsageSummary,
     AdminUserCostLine,
@@ -65,6 +75,7 @@ from agentcore.core.errors import NotFoundError
 from agentcore.db.base import database_ready
 from agentcore.db.models import User
 from agentcore.db.repositories import (
+    AdminAuditRepository,
     ConversationRepository,
     ConversationShareRepository,
     CostEventRepository,
@@ -96,6 +107,9 @@ _ERROR_FEED = 20
 # 会话复盘 message cap: one conversation's thread is bounded for the timeline payload
 # (a conversation rarely exceeds this; deeper history is a paginated concern later).
 _REPLAY_MAX_MESSAGES = 500
+# 对话页 roster caps — paginated, not a dashboard glance.
+_CONVERSATION_PAGE_SIZE_DEFAULT = 20
+_TURN_PAGE_SIZE_DEFAULT = 20
 # 复盘 span preview cap: a tool call's args/result are truncated to a triage-sized
 # snippet (the full text lives in turn_journal / the client replay, not this ops view).
 _SPAN_PREVIEW = 200
@@ -305,6 +319,7 @@ async def update_user(
     body: AdminUpdateUserRequest,
     admin: AdminUser,
     service: AdminService = Depends(get_admin_service),
+    db: AsyncSession = Depends(get_db),
 ) -> AdminUserResponse:
     """Partially update an account's role / status / quota.
 
@@ -332,6 +347,22 @@ async def update_user(
         status=body.status if "status" in fields else None,
         quota=quota or None,
     )
+    audit_detail: dict[str, object] = {}
+    if "role" in fields and body.role is not None:
+        audit_detail["role"] = body.role
+    if "status" in fields and body.status is not None:
+        audit_detail["status"] = body.status
+    if quota:
+        audit_detail["quota"] = quota
+    if audit_detail:
+        await record_admin_audit(
+            db,
+            actor_id=admin.user_id,
+            action="user.update",
+            target_type="user",
+            target_id=user_id,
+            detail=audit_detail,
+        )
     return _admin_user_response(updated)
 
 
@@ -340,6 +371,7 @@ async def reset_user_password(
     user_id: str,
     admin: AdminUser,
     auth_service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
 ) -> AdminResetPasswordResponse:
     """Reset an account's password to a fresh one-off (重置密码), returned once for the
     admin to hand over. Revokes the user's sessions (forces re-login on every device)
@@ -347,6 +379,13 @@ async def reset_user_password(
     in ``AuthService`` (password/session domain); this route is the admin-gated entry.
     """
     temp_password = await auth_service.admin_reset_password(user_id=user_id)
+    await record_admin_audit(
+        db,
+        actor_id=admin.user_id,
+        action="user.reset_password",
+        target_type="user",
+        target_id=user_id,
+    )
     return AdminResetPasswordResponse(temporary_password=temp_password)
 
 
@@ -359,6 +398,7 @@ async def delete_user(
     shares: ConversationShareRepository = Depends(get_conversation_share_repo),
     llm_keys: UserLlmKeyRepository = Depends(get_user_llm_key_repo),
     assets: AssetStorage = Depends(get_asset_storage),
+    db: AsyncSession = Depends(get_db),
 ) -> AdminUserResponse:
     """注销 (soft-delete + anonymize) an account, admin-initiated (用户管理 强操作).
 
@@ -382,6 +422,13 @@ async def delete_user(
         shares=shares,
         llm_keys=llm_keys,
         assets=assets,
+    )
+    await record_admin_audit(
+        db,
+        actor_id=admin.user_id,
+        action="user.delete",
+        target_type="user",
+        target_id=user_id,
     )
     return _admin_user_response(updated)
 
@@ -561,6 +608,174 @@ async def system_status(
     )
 
 
+@router.get("/audit-logs", response_model=AdminAuditLogListResponse)
+async def list_audit_logs(
+    admin: AdminUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    action: str | None = Query(None, max_length=64),
+    actor_id: str | None = Query(None),
+    audit_repo: AdminAuditRepository = Depends(get_admin_audit_repo),
+) -> AdminAuditLogListResponse:
+    """操作审计： privileged actions taken through the admin console, newest first.
+
+    Filters: ``action`` exact match (e.g. ``user.update``), ``actor_id`` pin one
+    operator. Append-only — each row is who did what to which resource and when.
+    """
+    rows, total = await audit_repo.list_page(
+        page=page,
+        page_size=page_size,
+        action=action,
+        actor_id=actor_id,
+    )
+    return AdminAuditLogListResponse(
+        data=[
+            AdminAuditLogLine(
+                id=log.id,
+                actor_id=log.actor_id,
+                actor_username=username,
+                action=log.action,
+                target_type=log.target_type,
+                target_id=log.target_id,
+                detail=log.detail,
+                created_at=log.created_at,
+            )
+            for log, username in rows
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/conversations", response_model=AdminConversationListResponse)
+async def list_conversations(
+    admin: AdminUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(_CONVERSATION_PAGE_SIZE_DEFAULT, ge=1, le=100),
+    q: str | None = Query(None, max_length=100),
+    user_id: str | None = Query(None),
+    has_errors: bool | None = Query(None),
+    include_deleted: bool = Query(True),
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    sort: Literal["updated_at", "created_at", "cost"] = Query("updated_at"),
+    order: Literal["asc", "desc"] = Query("desc"),
+    conversations: ConversationRepository = Depends(get_conversation_repo),
+    messages_repo: MessageRepository = Depends(get_message_repo),
+    metrics_repo: TurnMetricsRepository = Depends(get_turn_metrics_repo),
+    cost_repo: CostEventRepository = Depends(get_cost_event_repo),
+) -> AdminConversationListResponse:
+    """平台对话名册 (对话页 · 会话段): cross-user paginated conversation index.
+
+    Each row carries owner identity, housekeeping flags, message/turn/error rollups,
+    and all-time spend. Filters AND-combine; soft-deleted conversations are included
+    by default (``include_deleted=false`` hides them). Drill into 会话复盘 by ``id``.
+    """
+    rows, total = await conversations.list_admin(
+        page=page,
+        page_size=page_size,
+        query=q,
+        user_id=user_id,
+        has_errors=has_errors,
+        include_deleted=include_deleted,
+        since=since,
+        until=until,
+        sort=sort,
+        order=order,
+    )
+    conv_ids = [conv.id for conv, _ in rows]
+    msg_counts = await messages_repo.counts_for_conversations(conv_ids)
+    turn_stats = await metrics_repo.aggregate_stats_by_conversations(conv_ids)
+    costs = await cost_repo.aggregate_cost_by_conversations(conv_ids)
+
+    data: list[AdminConversationListItem] = []
+    for conv, owner in rows:
+        stats = turn_stats.get(conv.id, {"turns": 0, "errors": 0})
+        title = conv.title or None
+        if title == "":
+            title = None
+        data.append(
+            AdminConversationListItem(
+                id=conv.id,
+                title=title,
+                user_id=conv.user_id,
+                username=owner.username if owner else None,
+                display_name=owner.display_name if owner else None,
+                user_deleted_at=owner.deleted_at if owner else None,
+                created_at=conv.created_at,
+                updated_at=conv.updated_at,
+                deleted_at=conv.deleted_at,
+                archived=conv.archived,
+                messages=msg_counts.get(conv.id, 0),
+                turns=stats["turns"],
+                errors=stats["errors"],
+                cost_total=costs.get(conv.id, 0),
+            )
+        )
+
+    return AdminConversationListResponse(
+        data=data,
+        total=total,
+        page=page,
+        page_size=page_size,
+        cny_per_usd=settings.cny_per_usd,
+    )
+
+
+@router.get("/conversations/turns", response_model=AdminTurnListResponse)
+async def list_conversation_turns(
+    admin: AdminUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(_TURN_PAGE_SIZE_DEFAULT, ge=1, le=100),
+    user_id: str | None = Query(None),
+    conversation_id: str | None = Query(None),
+    status: Literal["ok", "error"] | None = Query(None),
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    include_deleted_conversations: bool = Query(True),
+    metrics_repo: TurnMetricsRepository = Depends(get_turn_metrics_repo),
+) -> AdminTurnListResponse:
+    """平台回合流水 (对话页 · 回合段): cross-user paginated turn feed.
+
+    Finer-grained than the session roster — each row is one ``turn_metrics`` record
+    with conversation title + owner identity for triage. Newest-first; filters
+    AND-combine. Drill into 会话复盘 by ``conversation_id``.
+    """
+    rows, total = await metrics_repo.list_platform(
+        page=page,
+        page_size=page_size,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        status=status,
+        include_deleted_conversations=include_deleted_conversations,
+        since=since,
+        until=until,
+    )
+    data: list[AdminTurnListItem] = []
+    for tm, conv, owner in rows:
+        title = conv.title or None
+        if title == "":
+            title = None
+        base = TurnMetricLine.model_validate(tm)
+        data.append(
+            AdminTurnListItem(
+                **base.model_dump(),
+                conversation_title=title,
+                username=owner.username if owner else None,
+                display_name=owner.display_name if owner else None,
+                conversation_deleted_at=conv.deleted_at,
+            )
+        )
+
+    return AdminTurnListResponse(
+        data=data,
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
 @router.get("/observability/summary", response_model=AdminObservabilitySummary)
 async def observability_summary(
     admin: AdminUser,
@@ -615,6 +830,7 @@ async def observability_summary(
 async def observability_conversation(
     conversation_id: str,
     admin: AdminUser,
+    db: AsyncSession = Depends(get_db),
     conversations: ConversationRepository = Depends(get_conversation_repo),
     messages_repo: MessageRepository = Depends(get_message_repo),
     metrics_repo: TurnMetricsRepository = Depends(get_turn_metrics_repo),
@@ -685,6 +901,19 @@ async def observability_conversation(
             )
         )
     timeline.sort(key=lambda r: r.created_at)
+
+    await record_admin_audit(
+        db,
+        actor_id=admin.user_id,
+        action="conversation.replay",
+        target_type="conversation",
+        target_id=conversation_id,
+        detail={
+            "owner_user_id": conv.user_id,
+            "turns": len(metrics),
+            "messages": len(timeline),
+        },
+    )
 
     return AdminConversationReplay(
         conversation=ReplayConversation(

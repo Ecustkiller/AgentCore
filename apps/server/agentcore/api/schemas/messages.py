@@ -417,18 +417,16 @@ class RecordTurnRequest(BaseModel):
     # The client-minted id of the user bubble (a clean UUID). Pinning the persisted
     # user row to it makes the whole write-back idempotent: the desktop retries this
     # POST on a flaky response, and a retry after a write we DID commit must not
-    # duplicate the user/assistant rows (双模式工作区 §一.1 回写可靠性). Optional for
-    # back-compat; the desktop always sends it.
-    user_message_id: str | None = Field(None, max_length=64)
+    # duplicate the user/assistant rows (双模式工作区 §一.1 回写可靠性).
+    user_message_id: str = Field(..., min_length=1, max_length=64)
     message_id: str | None = Field(None, max_length=64)
     input_tokens: int = Field(0, ge=0)
     output_tokens: int = Field(0, ge=0)
     rounds: int = Field(0, ge=0)
     # The local turn's trace_id (32-hex), stamped by the desktop on every cloud
     # inference-proxy LLM call this turn made. Reusing it for the persisted reply joins
-    # the reasoning logs + the bubble under ONE trace (打通气泡↔日志). Optional for
-    # back-compat; the server mints a fresh id when an old desktop omits it.
-    trace_id: str | None = Field(None, max_length=32)
+    # the reasoning logs + the bubble under ONE trace (打通气泡↔日志).
+    trace_id: str = Field(..., min_length=32, max_length=32)
 
 
 class RecordTurnResponse(BaseModel):

@@ -15,6 +15,7 @@ because the global-search tests import it directly.
 """
 
 from ._base import _UNSET, _ilike_pattern
+from .admin_audit import AdminAuditRepository
 from .auth import (
     CredentialsRepository,
     InviteRepository,
@@ -45,6 +46,7 @@ from .users import (
 __all__ = [
     "_UNSET",
     "_ilike_pattern",
+    "AdminAuditRepository",
     "ChatRepository",
     "ConversationRepository",
     "ConversationShareRepository",

@@ -38,6 +38,14 @@ from agentcore.db.repositories import (
 from agentcore.main import app
 from agentcore.security import hash_password
 
+# Cookie-session integration tests predate CSRF; keep them green unless marked @pytest.mark.csrf.
+@pytest.fixture(autouse=True)
+def _disable_csrf_unless_marked(monkeypatch, request):
+    if request.node.get_closest_marker("csrf") or "test_csrf" in request.module.__name__:
+        return
+    monkeypatch.setattr(settings, "csrf_enabled", False)
+
+
 # Per-process schema so concurrent test runs never DROP/CREATE the *same* schema
 # out from under each other. A shared name lets a second pytest process (parallel
 # agent / pytest-xdist worker) wipe the first run's rows mid-test ("用户名或密码错误")

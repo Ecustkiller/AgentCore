@@ -5,7 +5,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { NODE_HEIGHT, computeLayout, fitWidthBox } from "@/lib/elk-layout";
+import { NODE_HEIGHT } from "@/lib/elk-layout";
 import { estimateTokens, formatCost, headText, tailText } from "@/lib/format";
 import { useActiveMessages, useConversationStore } from "@/stores/conversation";
 import {
@@ -14,38 +14,26 @@ import {
   useExecutionScope,
   useProjectedExecution,
 } from "@/stores/execution";
-import { type GraphEdge, useGraphStore } from "@/stores/graph";
-import { useSidePanelStore } from "@/stores/sidePanel";
+import { useGraphStore } from "@/stores/graph";
+import { type EndpointKind, useSidePanelStore } from "@/stores/sidePanel";
 import { useUsageStore } from "@/stores/usage";
-import {
-  Background,
-  type Edge,
-  type Node,
-  type NodeChange,
-  ReactFlow,
-  type ReactFlowInstance,
-} from "@xyflow/react";
+import { Background, type Edge, type Node, ReactFlow } from "@xyflow/react";
 import { Crosshair, Maximize2, ScanSearch } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { CanvasZoomControls } from "./CanvasZoomControls";
 import { GraphToolbar } from "./GraphToolbar";
 import { Timeline } from "./Timeline";
 import { WaveLanes } from "./WaveLanes";
-import {
-  INPUT_ID,
-  edgeTypes,
-  isEndpointId,
-  nodeTypes,
-  prefersReducedMotion,
-} from "./constants";
+import { INPUT_ID, edgeTypes, isEndpointId, nodeTypes } from "./constants";
 import {
   type WaveBand,
-  buildGraphStructure,
   computeWaves,
   deriveArtifacts,
   deriveCaptainStatus,
   resolveHandoff,
 } from "./helpers";
+import { useGraphLayout } from "./useGraphLayout";
+import { useGraphViewport } from "./useGraphViewport";
 
 interface GraphViewProps {
   /**
@@ -68,13 +56,17 @@ interface GraphViewProps {
   /**
    * Endpoint drill-in hand-off: when set, clicking the 用户输入 / CEO 汇聚点
    * endpoint reports the chat message to surface (the prompt / the final answer)
-   * + a title, so the host (canvas focused node / 放大态) opens it in the shared
-   * right-docked SidePanel as a content tab — like a worker drill, WITHOUT leaving
-   * the canvas. The endpoint node then lights from that active content tab (same
-   * one-source highlight as workers). The in-chat embedded graph leaves it unset
-   * and keeps the jump-to-chat focus (that bubble is already in the column).
+   * + a title + which endpoint it is, so the host (canvas focused node / 放大态)
+   * opens it in the shared right-docked SidePanel as a content tab — like a worker
+   * drill, WITHOUT leaving the canvas. The endpoint node then lights from that
+   * active content tab (same one-source highlight as workers). The in-chat embedded
+   * graph leaves it unset and keeps the jump-to-chat focus (bubble already in column).
    */
-  onEndpointSelect?: (contentMessageId: string, title: string) => void;
+  onEndpointSelect?: (
+    contentMessageId: string,
+    title: string,
+    endpoint: EndpointKind,
+  ) => void;
   /** Embedded only: report the canvas height the graph wants (fit-to-width of
    * the laid-out bbox, clamped) so the wrapper can size its box to each graph's
    * real footprint. `overflowing` is true when the graph is taller than the
@@ -104,55 +96,12 @@ export function GraphView({
   const messageId = useExecutionScope();
   const execution = useProjectedExecution();
   const hasFrames = useActiveExecField((rt) => rt.frames.length > 0);
-  // Latest projected runs — incl. synthesized「修订 vN」revisions (乙 热修 P4), which
-  // are NOT in the plan — for the structure-gated layout effect to read without
-  // re-running on every streamed token. `structuralKey` below changes when a
-  // revision node appears, so the effect re-runs and reads the fresh list here.
-  const projectedRunsRef = useRef(execution?.runs);
-  projectedRunsRef.current = execution?.runs;
-  // Layout is per-graph view state (see stores/graph.ts): each inline graph owns
-  // its own ELK positions, so multiple message graphs never clobber one another.
-  const [positions, setPositions] = useState<
-    Record<string, { x: number; y: number }>
-  >({});
-  const [edges, setEdges] = useState<GraphEdge[]>([]);
-  // The laid-out graph's natural bbox (方案 D): drives the embedded canvas's
-  // fit-to-width zoom + height. Null until the first layout commits.
-  const [bbox, setBbox] = useState<{ width: number; height: number } | null>(
-    null,
-  );
-  const setLayout = useCallback(
-    (
-      nextPositions: Record<string, { x: number; y: number }>,
-      nextEdges: GraphEdge[],
-    ) => {
-      setPositions(nextPositions);
-      setEdges(nextEdges);
-    },
-    [],
-  );
-  // 方案 D（真居中）：每个节点按真实测量高度回中到 ELK 给它的固定槽位，使连线锚点（位于
-  // 各自真实高度 50% 处）落在同一条槽位中线上 → 1→1 直连边笔直、接真·垂直正中。只读测量
-  // 高度、不重跑布局：槽位不变 → 零级联；节点流式长高时是绕固定锚点对称扩张，邻居不动。
-  const [nodeHeights, setNodeHeights] = useState<Record<string, number>>({});
-  const onNodesChange = useCallback((changes: NodeChange[]) => {
-    setNodeHeights((prev) => {
-      let next = prev;
-      for (const c of changes) {
-        if (c.type === "dimensions" && c.dimensions) {
-          const h = c.dimensions.height;
-          if (h > 0 && prev[c.id] !== h) {
-            if (next === prev) next = { ...prev };
-            next[c.id] = h;
-          }
-        }
-      }
-      return next;
-    });
-  }, []);
-  // Only the algorithm choice is global (a shared, persisted user preference).
   const layoutKind = useGraphStore((s) => s.layoutKind);
   const setLayoutKind = useGraphStore((s) => s.setLayoutKind);
+  const { positions, edges, bbox, layoutReady, nodeHeights, onNodesChange } =
+    useGraphLayout(execution, layoutKind);
+  const { containerRef, rfRef, overflowing, fitView, centerNode, onInit } =
+    useGraphViewport({ embedded, bbox, layoutReady, onMeasure });
   // Left-right flow re-anchors node handles to the horizontal axis.
   const handleDirection =
     layoutKind === "leftright" ? "horizontal" : "vertical";
@@ -236,118 +185,7 @@ export function GraphView({
     () => execution?.runs.find((r) => r.kind === "captain") ?? null,
     [execution],
   );
-  const [layoutReady, setLayoutReady] = useState(false);
-  const rfRef = useRef<ReactFlowInstance | null>(null);
-  // Embedded fit-to-width plumbing (方案 D): the canvas element (whose width is
-  // the message column) is measured live, and the React Flow instance is held in
-  // state so the viewport effect re-runs once the canvas is ready. `overflowing`
-  // toggles the bottom fade when the graph is taller than the clamp ceiling.
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [colWidth, setColWidth] = useState(0);
-  const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
-  const [overflowing, setOverflowing] = useState(false);
-  // First fit snaps (from React Flow's default viewport); later fits — when the
-  // team grows mid-stream and the graph relays out — animate so the canvas eases
-  // to its new framing instead of jumping. Per-message instance, so a fresh turn
-  // / re-expand snaps again.
-  const viewportSettledRef = useRef(false);
-  // Right-click menu target. `null` is the pane (empty-canvas) menu; a string is
-  // the right-clicked node. Radix ContextMenu owns the open state + cursor
-  // positioning; React Flow's handlers below only record *which* surface was
-  // right-clicked so the content can vary.
   const [menuNodeId, setMenuNodeId] = useState<string | null>(null);
-
-  // Layout depends only on graph *shape* (run ids + dependencies), so it is
-  // recomputed when the plan changes — not on every streamed token.
-  const structuralKey = useMemo(
-    () =>
-      execution
-        ? execution.runs
-            .map(
-              (s) => `${s.id}:${s.dependsOn.join(",")}:${s.parentRunId ?? ""}`,
-            )
-            .join("|")
-        : "",
-    [execution],
-  );
-
-  useEffect(() => {
-    if (!structuralKey) {
-      setLayout({}, []);
-      setBbox(null);
-      setLayoutReady(false);
-      // A cleared graph's next fit should snap, not animate from a stale frame.
-      viewportSettledRef.current = false;
-      return;
-    }
-    const runs = projectedRunsRef.current ?? [];
-    const debate = runs.some((r) => r.stance != null);
-    const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
-    const { nodeIds, rawEdges } = buildGraphStructure(runs, INPUT_ID);
-
-    let cancelled = false;
-    computeLayout(nodeIds, rawEdges, layoutKind, debate, {
-      source: INPUT_ID,
-      sink: captainId ?? undefined,
-    }).then((result) => {
-      if (cancelled) return;
-      setLayout(result.positions, rawEdges);
-      setBbox({ width: result.width, height: result.height });
-      setLayoutReady(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-    // `structuralKey` already changes with the scoped message (run ids are
-    // unique), so it covers a message switch — no need to also depend on
-    // `messageId` (which is constant per graph instance anyway).
-  }, [structuralKey, layoutKind, setLayout]);
-
-  // Measure the canvas width live (方案 D): it is the message column, which the
-  // right detail panel / window resize can change, so the fit-to-width zoom must
-  // track it rather than assume a fixed column. Embedded only — the full-screen
-  // overlay keeps React Flow's own fitView.
-  useEffect(() => {
-    if (!embedded) return;
-    const el = containerRef.current;
-    if (!el) return;
-    setColWidth(el.clientWidth);
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0;
-      if (w > 0) setColWidth(w);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [embedded]);
-
-  // Fit-to-width viewport (方案 D): zoom only shrinks when the graph is wider
-  // than the column (never upscales), so node size is consistent across messages;
-  // the box height then follows the graph's real footprint at that zoom, clamped.
-  // When the graph is shorter than its box it is centered; when it overflows the
-  // ceiling it is top-aligned and a fade hints there is more (→ 全屏).
-  useEffect(() => {
-    if (!embedded || !rfInstance || !bbox || colWidth <= 0 || !layoutReady) {
-      return;
-    }
-    const fit = fitWidthBox(bbox.width, bbox.height, colWidth);
-    const x = Math.max(0, (colWidth - fit.renderedWidth) / 2);
-    const y =
-      fit.renderedHeight <= fit.height
-        ? (fit.height - fit.renderedHeight) / 2
-        : 0;
-    // Animate every fit except the first (which would fly in from the default
-    // viewport). 200ms matches the box's height transition, so frame + box ease
-    // together as the team grows — unless the user asked to reduce motion, then
-    // every fit snaps.
-    const animate = viewportSettledRef.current && !prefersReducedMotion();
-    rfInstance.setViewport(
-      { x, y, zoom: fit.zoom },
-      animate ? { duration: 200 } : undefined,
-    );
-    viewportSettledRef.current = true;
-    setOverflowing(fit.overflowing);
-    onMeasure?.({ height: fit.height, overflowing: fit.overflowing });
-  }, [embedded, rfInstance, bbox, colWidth, layoutReady, onMeasure]);
 
   // The single-node drill-in: hand off to the embedded panel, or toggle in-graph
   // focus. Shared by mouse clicks and keyboard (Enter/Space) activation.
@@ -364,7 +202,7 @@ export function GraphView({
         // Full-screen: surface the prompt in the in-place panel (no exit);
         // embedded: jump to the prompt bubble already in the column.
         if (onEndpointSelect) {
-          onEndpointSelect(taskMessage.id, "提问");
+          onEndpointSelect(taskMessage.id, "提问", "prompt");
           return;
         }
         focusMessage(taskMessage.id);
@@ -377,7 +215,7 @@ export function GraphView({
       if (captainRun && id === captainRun.id) {
         if (!finalAnswer) return;
         if (onEndpointSelect) {
-          onEndpointSelect(finalAnswer.id, "最终回答");
+          onEndpointSelect(finalAnswer.id, "最终回答", "answer");
           return;
         }
         focusMessage(finalAnswer.id);
@@ -431,74 +269,6 @@ export function GraphView({
     },
     [],
   );
-
-  const fitView = useCallback(() => {
-    rfRef.current?.fitView({ padding: 0.2, duration: 300 });
-  }, []);
-
-  const centerNode = useCallback((id: string) => {
-    const node = rfRef.current?.getNode(id);
-    if (!node) return;
-    const w = node.measured?.width ?? 210;
-    const h = node.measured?.height ?? 64;
-    rfRef.current?.setCenter(node.position.x + w / 2, node.position.y + h / 2, {
-      zoom: 1.2,
-      duration: 300,
-    });
-  }, []);
-
-  // `F` fits the whole graph to the viewport (ignored while typing in a field).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "f" && e.key !== "F") return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target as HTMLElement | null;
-      if (
-        t &&
-        (t.tagName === "INPUT" ||
-          t.tagName === "TEXTAREA" ||
-          t.isContentEditable)
-      ) {
-        return;
-      }
-      e.preventDefault();
-      fitView();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [fitView]);
-
-  // Non-embedded (canvas 放大态) only: when the graph's width changes — the shared
-  // right-docked run-detail panel opening / closing / being resized beside it, or
-  // the window resizing — refit so the DAG re-centers into the width it actually
-  // has instead of sliding behind the panel. Debounced so a resize-drag settles
-  // before the fit; the first (mount) observation is skipped because `fitView`
-  // already framed it. Embedded mode keeps its own width effect.
-  useEffect(() => {
-    if (embedded) return;
-    const el = containerRef.current;
-    if (!el) return;
-    let lastWidth = Math.round(el.clientWidth);
-    let settled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const ro = new ResizeObserver((entries) => {
-      const w = Math.round(entries[0]?.contentRect.width ?? 0);
-      if (!settled) {
-        settled = true;
-        lastWidth = w;
-        return;
-      }
-      if (w <= 0 || w === lastWidth) return;
-      lastWidth = w;
-      clearTimeout(timer);
-      timer = setTimeout(() => fitView(), 160);
-    });
-    ro.observe(el);
-    return () => {
-      clearTimeout(timer);
-      ro.disconnect();
-    };
-  }, [embedded, fitView]);
 
   const captainStatus = useMemo<RunStatus | null>(
     () =>
@@ -759,10 +529,7 @@ export function GraphView({
                 edges={flowEdges}
                 nodeTypes={nodeTypes}
                 edgeTypes={edgeTypes}
-                onInit={(inst) => {
-                  rfRef.current = inst;
-                  setRfInstance(inst);
-                }}
+                onInit={onInit}
                 onNodesChange={onNodesChange}
                 onNodeClick={onNodeClick}
                 onNodeContextMenu={onNodeContextMenu}

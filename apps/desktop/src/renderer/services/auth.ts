@@ -3,6 +3,7 @@ import {
   BASE_URL,
   NetworkError,
   api,
+  clearCsrfToken,
   tryRefresh,
 } from "@/services/api";
 import { clearSidecarInference } from "@/services/inferenceToken";
@@ -72,6 +73,7 @@ export async function register(input: RegisterInput): Promise<AuthUser> {
 
 export async function logout(): Promise<void> {
   await api.post("/v1/auth/logout");
+  clearCsrfToken();
   clearSidecarInference(); // session ended → next login re-mints
 }
 

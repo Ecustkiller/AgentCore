@@ -5,7 +5,13 @@ import {
   type HandoffFileChange,
   sha256HexFromBase64,
 } from "@/lib/handoff-review";
-import { BASE_URL, api, notifyUnauthorized, tryRefresh } from "@/services/api";
+import {
+  BASE_URL,
+  api,
+  getCsrfHeaders,
+  notifyUnauthorized,
+  tryRefresh,
+} from "@/services/api";
 import { performWorkspaceOp } from "@/services/workspaceOps";
 import type { components } from "@/types/api.generated";
 import type {
@@ -134,6 +140,7 @@ async function consumeWorkspaceStream<T>(
       credentials: "include",
       headers: {
         Accept: "text/event-stream",
+        ...getCsrfHeaders("POST"),
         ...(hasBody ? { "Content-Type": "application/json" } : {}),
       },
       body: hasBody ? JSON.stringify(opts.body) : undefined,

@@ -1,5 +1,5 @@
 ---
-description: 改桌面前端组件/样式/布局后想自检渲染效果、或想离线查看某个 AI 态（辩论/派单/升级/审批/计划复核/工具/引用…）时读——#/preview 离线回放 conformance 向量、pnpm dev:web 纯浏览器跑渲染层、pnpm shoot 无头截图自检、CI 渲染冒烟门禁。别再靠跑真实 AI 看前端效果。
+description: 改桌面前端组件/样式/布局后想自检渲染效果、或想离线查看某个 AI 态（辩论/派单/升级/审批/计划复核/工具/引用…）时读——#/preview 离线回放 conformance 向量、帧滑块逐帧看流式中间态、标题栏「录制」按钮把真实回合录进预览补盲区、pnpm dev:web 纯浏览器跑渲染层、pnpm shoot 无头截图自检、CI 渲染冒烟门禁。别再靠跑真实 AI 看前端效果。
 alwaysApply: false
 ---
 
@@ -11,14 +11,15 @@ alwaysApply: false
 
 | 谁 | 怎么进 |
 |---|---|
-| 人·应用内 | 命令面板（`Ctrl/Cmd+K`）搜「前端预览」→ `#/preview`；深链单场景 `#/preview?s=<场景名>` |
+| 人·应用内 | 命令面板（`Ctrl/Cmd+K`）搜「前端预览」→ `#/preview`；深链单场景 `#/preview?s=<场景名>`；工具栏帧滑块拖动看流式中间态（深链 `?k=<n>`） |
 | 人·纯浏览器 | `pnpm -C apps/desktop dev:web` → 开 `http://localhost:5199/index.web.html#/preview` |
-| AI·截图自检 | `pnpm -C apps/desktop shoot [场景名过滤]` → 逐场景出图到 `out/preview/<name>.png`，**读图核对** |
+| 人·录制补盲 | 标题栏「录制」(DEV) → 跑一次真实回合 → **回合结束自动存**为「录制（本地）」出现在 `#/preview`（localStorage、可删、不入仓；手动「停止」可提前存） |
+| AI·截图自检 | `pnpm -C apps/desktop shoot [场景名过滤]` → 逐场景出图到 `out/preview/<name>.png`，`SHOOT_FRAMES=N` 连中间帧，**读图核对** |
 
 ## 纪律
 
 - 改桌面组件/样式/布局 → `pnpm shoot` → 读 `out/preview/*.png` 自检，形成「改→截→看→迭代」紧回路。
 - **CI frontend job 跑 `pnpm shoot` 作渲染冒烟门禁**：任一场景渲染崩（未捕获报错 / `#/preview` 挂不上）即 CI 红。推送前先自检，省得吃红。
-- 盲区：只回放**已录**向量；后端新增事件类型 → 先 `cd apps/server && uv run python -m agentcore.conformance.export` 重导 fixture，新场景才会在预览出现。
+- 盲区与补法：内置场景只回放**已录**向量。全新 AI 态想立刻看 → 标题栏「录制」(DEV) 跑一次真实回合，**回合结束自动存**为「录制（本地）」进 `#/preview`（scratch、不入仓）。要长期入库 → `cd apps/server && uv run python -m agentcore.conformance.export` 重导为正式 fixture。
 
 完整机制 / 浏览器打桩 / AuthGate 离线旁路 / 被否决方案（Storybook、手写 mock 态）→ [`前端技术与架构.md §12.3`](/docs/04-前端/前端技术与架构.md)。

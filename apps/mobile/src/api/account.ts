@@ -1,11 +1,12 @@
 import type { User } from "@/api/auth";
 // Self-service account management for the mobile client (设置·账户设置).
 //
-// Profile / password / avatar / 注销 over the same endpoints the desktop uses
-// (auth.ts + users.py). Returns the refreshed User so callers can re-render. The
-// avatar is fetched as a blob → object URL (a bearer token can't ride an <img src>,
-// unlike the desktop's cookie auth), so display works under Authorization headers.
+// Profile / password / avatar / 注销 over the same endpoints the desktop uses.
+// REST DTOs track OpenAPI via @agentcore/contract-rest-types.
 import { apiFetch } from "@/api/client";
+import type { components } from "@/types/api.generated";
+
+type Schemas = components["schemas"];
 
 /** Mirror of the server's avatar_upload_max_bytes so an oversized pick fails fast. */
 export const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
@@ -15,12 +16,10 @@ async function readUser(res: Response, fallback: string): Promise<User> {
   return (await res.json()) as User;
 }
 
-/** Edit display name and/or email (PATCH semantics: omitted keys stay, `email:""`
- *  clears it). Returns the refreshed user. 422 if the email is taken. */
-export async function updateProfile(update: {
-  display_name?: string;
-  email?: string | null;
-}): Promise<User> {
+/** Edit display name and/or email (PATCH semantics). Returns the refreshed user. */
+export async function updateProfile(
+  update: Schemas["UpdateProfileRequest"],
+): Promise<User> {
   const res = await apiFetch("/v1/auth/me", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -34,19 +33,19 @@ export async function changePassword(
   currentPassword: string,
   newPassword: string,
 ): Promise<void> {
+  const body = {
+    current_password: currentPassword,
+    new_password: newPassword,
+  } satisfies Schemas["ChangePasswordRequest"];
   const res = await apiFetch("/v1/auth/change-password", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      current_password: currentPassword,
-      new_password: newPassword,
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await errorMessage(res, "修改失败"));
 }
 
-/** Upload a new avatar: the backend reads the RAW image bytes (no multipart) and
- *  re-encodes to a square WebP, so we send the File directly with its mime type. */
+/** Upload a new avatar (raw image bytes; server re-encodes to WebP). */
 export async function uploadAvatar(file: File): Promise<User> {
   const res = await apiFetch("/v1/users/me/avatar", {
     method: "POST",
@@ -56,7 +55,7 @@ export async function uploadAvatar(file: File): Promise<User> {
   return readUser(res, "上传失败");
 }
 
-/** Remove the avatar and fall back to the initial. Returns the refreshed user. */
+/** Remove the avatar and fall back to the initial. */
 export async function deleteAvatar(): Promise<User> {
   return readUser(
     await apiFetch("/v1/users/me/avatar", { method: "DELETE" }),
@@ -64,20 +63,17 @@ export async function deleteAvatar(): Promise<User> {
   );
 }
 
-/** Self-service 注销: soft-delete + anonymize behind a password re-confirm. The caller
- *  must drop to login afterwards (the session is revoked server-side). */
+/** Self-service 注销: soft-delete behind a password re-confirm. */
 export async function deleteAccount(password: string): Promise<void> {
   const res = await apiFetch("/v1/auth/me", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ password } satisfies Schemas["DeleteAccountRequest"]),
   });
   if (!res.ok) throw new Error(await errorMessage(res, "注销失败"));
 }
 
-/** Fetch an avatar (relative path from `user.avatar_url`) as an object URL — the only
- *  way to show it under bearer auth. Returns null on failure (UI falls back to the
- *  initial). The caller must `URL.revokeObjectURL` it on unmount / change. */
+/** Fetch an avatar as an object URL under bearer auth. */
 export async function fetchAvatarObjectUrl(
   avatarUrl: string,
 ): Promise<string | null> {

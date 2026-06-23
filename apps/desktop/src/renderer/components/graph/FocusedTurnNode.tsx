@@ -8,7 +8,7 @@ import {
   isDebate,
   useMessageExecution,
 } from "@/stores/execution";
-import { useSidePanelStore } from "@/stores/sidePanel";
+import { type EndpointKind, useSidePanelStore } from "@/stores/sidePanel";
 import {
   Handle,
   type NodeProps,
@@ -110,8 +110,8 @@ export function FocusedTurnNode({ data }: NodeProps) {
   // Endpoint drill (提问 / 最终回答): open the bubble in the shared right panel as a
   // content tab — closes any comparison drawer so detail reads in one place.
   const onEndpointSelect = useCallback(
-    (contentMessageId: string, title: string) => {
-      showContentDetail(messageId, contentMessageId, title);
+    (contentMessageId: string, title: string, endpoint: EndpointKind) => {
+      showContentDetail(messageId, contentMessageId, title, endpoint);
       setRevisionsOpen(false);
       setDebateOpen(false);
     },

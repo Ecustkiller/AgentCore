@@ -3,14 +3,14 @@
 from sqlalchemy.exc import IntegrityError
 
 from agentcore.conversation.common import generate_title
-from agentcore.core.log_context import log_context, new_trace_id
+from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import ConversationRepository, MessageRepository
 from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.memory.consolidation import schedule_consolidation
-from agentcore.runtime.journal import persist_turn_journal
+from agentcore.runtime.journal import journal_entries_from_display_runs, persist_turn_journal
 
 logger = get_logger(__name__)
 
@@ -43,33 +43,31 @@ async def record_local_turn(
     assistant_reasoning: str | None = None,
     citations: list[dict] | None = None,
     runs: dict | None = None,
-    user_message_id: str | None = None,
+    user_message_id: str,
     message_id: str | None = None,
     input_tokens: int = 0,
     output_tokens: int = 0,
     rounds: int = 0,
-    trace_id: str | None = None,
+    trace_id: str,
     llm_credentials: LLMCredentials | None = None,
 ) -> dict:
     """Persist a turn that ran on the user's machine via the sidecar."""
-    trace_id = trace_id or new_trace_id()
     with log_context(trace_id=trace_id, conversation_id=conversation_id, user_id=user_id):
-        if user_message_id:
-            async with async_session_factory() as session:
-                already = await MessageRepository(session).get_by_id(
-                    user_message_id, conversation_id=conversation_id
-                )
-            if already is not None:
-                logger.info(
-                    "chat.local_turn_idempotent_hit",
-                    conversation_id=conversation_id,
-                    message_id=message_id,
-                )
-                return await _recorded_turn_response(
-                    conversation_id=conversation_id,
-                    user_message_id=user_message_id,
-                    message_id=message_id,
-                )
+        async with async_session_factory() as session:
+            already = await MessageRepository(session).get_by_id(
+                user_message_id, conversation_id=conversation_id
+            )
+        if already is not None:
+            logger.info(
+                "chat.local_turn_idempotent_hit",
+                conversation_id=conversation_id,
+                message_id=message_id,
+            )
+            return await _recorded_turn_response(
+                conversation_id=conversation_id,
+                user_message_id=user_message_id,
+                message_id=message_id,
+            )
 
         try:
             async with async_session_factory() as session:
@@ -114,7 +112,7 @@ async def record_local_turn(
                     message_id=assistant_msg.id,
                     conversation_id=conversation_id,
                     trace_id=trace_id,
-                    runs=runs,
+                    entries=journal_entries_from_display_runs(runs),
                 )
 
         async with async_session_factory() as session:
