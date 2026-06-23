@@ -43,7 +43,7 @@ from agentcore.runtime.suspension_retention import paused_turn_retention_loop
 from agentcore.security import KeyEncryptor
 from agentcore.tools.builtin.web.search_backend import (
     aclose_search_backend,
-    probe_search_backend,
+    probe_search_at_startup,
 )
 from agentcore.workspace.retention import retention_loop
 
@@ -125,10 +125,12 @@ async def lifespan(app: FastAPI):
         consolidation_task = asyncio.create_task(consolidation_loop())
 
     # Dev-experience: log SearXNG ✓/✗ at boot so a not-started search dependency is
-    # visible immediately instead of only surfacing mid-run as a breaker message.
+    # visible immediately instead of only surfacing mid-run as a breaker message. The
+    # probe also runs a one-shot real-search canary when reachable, so a healthz-200-but-
+    # every-engine-CAPTCHA SearXNG (the production failure mode) is visible at boot too.
     # Fire-and-forget — bounded by the probe's own short timeout and never blocks or
     # fails startup (web_search just degrades while SearXNG is down).
-    searxng_probe_task = asyncio.create_task(probe_search_backend())
+    searxng_probe_task = asyncio.create_task(probe_search_at_startup())
 
     # Recoverable-worker roster TTL sweep (留人 跨进程落盘 P3): prune run_sessions
     # rows idle past the 7-day window so the durable roster stays bounded.

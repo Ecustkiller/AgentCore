@@ -51,6 +51,15 @@ SEARCH_CACHE_MAX_BYTES = 2 * 1024 * 1024  # 2 MiB
 SEARCH_CACHE_MAX_CONVERSATIONS = 256
 # An idle conversation's whole cache is reaped after this long untouched.
 SEARCH_CACHE_CONVERSATION_TTL_SECONDS = 30 * 60.0
+# A query that just came back EMPTY is remembered (negatively) this long, so a degraded
+# worker re-issuing the SAME empty query within the window is served the empty result
+# from memory instead of re-hitting SearXNG. Kept MUCH shorter than the positive TTL: an
+# empty is usually transient (engine CAPTCHA / hiccup) and a genuine retry once it likely
+# cleared is wanted — we only suppress the immediate retry STORM (实测案例复盘 案例1: a
+# degraded worker fired 13–16 searches, each empty re-hit deepening the CAPTCHA ban that
+# blanks the WHOLE team). Negative-cached only within a conversation (workers share the
+# conversation_id), same single-worker in-process posture as the positive cache.
+SEARCH_EMPTY_TTL_SECONDS = 45.0
 
 
 def _query_key(query: str) -> str:
@@ -94,11 +103,17 @@ class ConversationSearchCache:
         max_entries: int = SEARCH_CACHE_MAX_ENTRIES,
         max_bytes: int = SEARCH_CACHE_MAX_BYTES,
         ttl_seconds: float = SEARCH_CACHE_TTL_SECONDS,
+        empty_ttl_seconds: float = SEARCH_EMPTY_TTL_SECONDS,
     ) -> None:
         self._entries: OrderedDict[str, SearchCacheEntry] = OrderedDict()
+        # Negative cache: normalised query → time the empty result was recorded. Bounded
+        # the same way (LRU by count + TTL); keyed/normalised exactly like the positive
+        # cache so the same query collapses across both.
+        self._empty: OrderedDict[str, float] = OrderedDict()
         self._max_entries = max_entries
         self._max_bytes = max_bytes
         self._ttl = ttl_seconds
+        self._empty_ttl = empty_ttl_seconds
         self.last_access: float = time.time()
 
     def get(self, query: str, *, min_results: int) -> SearchCacheEntry | None:
@@ -129,9 +144,37 @@ class ConversationSearchCache:
         the TTL + count + byte caps."""
         self.last_access = time.time()
         key = _query_key(entry.query)
+        self._empty.pop(key, None)  # a real result supersedes any stale "recently empty" marker
         self._entries[key] = entry
         self._entries.move_to_end(key)
         self._prune()
+
+    def is_recently_empty(self, query: str) -> bool:
+        """Whether ``query`` returned empty within the negative-cache window.
+
+        True means "serve empty without hitting the network" — it suppresses an
+        immediate re-search of a query that just came back empty (engine CAPTCHA /
+        hiccup), which is what turns a degraded worker's retries into a storm against
+        the shared SearXNG. An expired marker is pruned and misses (a genuine retry).
+        """
+        self.last_access = time.time()
+        key = _query_key(query)
+        stored = self._empty.get(key)
+        if stored is None:
+            return False
+        if (time.time() - stored) > self._empty_ttl:
+            del self._empty[key]
+            return False
+        self._empty.move_to_end(key)
+        return True
+
+    def note_empty(self, query: str) -> None:
+        """Record that ``query`` just returned empty (negative cache), bounded LRU + TTL."""
+        self.last_access = time.time()
+        key = _query_key(query)
+        self._empty[key] = time.time()
+        self._empty.move_to_end(key)
+        self._prune_empty()
 
     def is_idle(self, ttl_seconds: float) -> bool:
         """Whether this cache has not been touched within ``ttl_seconds`` (the
@@ -147,6 +190,14 @@ class ConversationSearchCache:
             self._entries.popitem(last=False)
         while self._total_bytes() > self._max_bytes and len(self._entries) > 1:
             self._entries.popitem(last=False)
+
+    def _prune_empty(self) -> None:
+        now = time.time()
+        expired = [k for k, t in self._empty.items() if (now - t) > self._empty_ttl]
+        for k in expired:
+            del self._empty[k]
+        while len(self._empty) > self._max_entries:
+            self._empty.popitem(last=False)
 
     def _total_bytes(self) -> int:
         return sum(_entry_bytes(e.results) for e in self._entries.values())
@@ -176,6 +227,7 @@ class SearchCacheRegistry:
         cache_max_entries: int = SEARCH_CACHE_MAX_ENTRIES,
         cache_max_bytes: int = SEARCH_CACHE_MAX_BYTES,
         cache_ttl_seconds: float = SEARCH_CACHE_TTL_SECONDS,
+        cache_empty_ttl_seconds: float = SEARCH_EMPTY_TTL_SECONDS,
     ) -> None:
         self._caches: OrderedDict[str, ConversationSearchCache] = OrderedDict()
         self._max_conversations = max_conversations
@@ -183,6 +235,7 @@ class SearchCacheRegistry:
         self._cache_max_entries = cache_max_entries
         self._cache_max_bytes = cache_max_bytes
         self._cache_ttl = cache_ttl_seconds
+        self._cache_empty_ttl = cache_empty_ttl_seconds
 
     def get_or_create(self, conversation_id: str) -> ConversationSearchCache:
         """The conversation's cache, creating it on first use. Reaps idle
@@ -194,6 +247,7 @@ class SearchCacheRegistry:
                 max_entries=self._cache_max_entries,
                 max_bytes=self._cache_max_bytes,
                 ttl_seconds=self._cache_ttl,
+                empty_ttl_seconds=self._cache_empty_ttl,
             )
             self._caches[conversation_id] = cache
         self._caches.move_to_end(conversation_id)
