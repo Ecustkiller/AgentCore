@@ -27,7 +27,17 @@ Cloudflare Pages、admin SSH、后端 GHA 不可用时的兜底构建均走本�
 | 5 | 管理后台 | `pnpm -C apps/admin deploy:production` |
 | 6 | 验收 | 见下表 |
 
-桌面端另轨：`desktop-v*` tag → `release-desktop.yml`；发版后更新官网 `FALLBACK_VERSION` 再跑步 3。
+桌面端另轨：`desktop-v*` tag → `release-desktop.yml`；发版后更新官网 `FALLBACK_VERSION` 再跑步 3。跨轨道何时必须协同 → [`部署与运维.md` §7.4](/docs/05-平台与运维/部署与运维.md)（协议变更：后端+web 同日，桌面 7 日内 patch）。
+
+## 跨轨道发布（摘要）
+
+| 变更 | 后端 | mobile/admin | 桌面 |
+|------|------|--------------|------|
+| 纯后端 | 随时 `prod-*` | 不必 | 不必 |
+| 协议/fold 变更 | 同日 deploy | 同日 deploy | **7 日内** `desktop-v*` |
+| 纯 UI | 不必 | 随改动 deploy | 独立发版 |
+
+门禁：`pnpm conformance` 全绿。详见 docs §7.4。
 
 ## 验收
 
