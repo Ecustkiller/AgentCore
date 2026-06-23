@@ -14,6 +14,7 @@
     "check-ui-tokens": "node ../../scripts/check-ui-tokens.mjs --src apps/mobile/src",
     "conformance": "tsx src/protocol/conformance.run.ts",
     "shot": "node scripts/shot.cjs",
+    "deploy:pages": "node scripts/deploy-pages.mjs",
     "cap:sync": "pnpm build && cap sync",
     "android:open": "cap open android"
   },

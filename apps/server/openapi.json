@@ -5483,6 +5483,11 @@
             "title": "Id",
             "type": "string"
           },
+          "password_must_change": {
+            "default": false,
+            "title": "Password Must Change",
+            "type": "boolean"
+          },
           "role": {
             "title": "Role",
             "type": "string"

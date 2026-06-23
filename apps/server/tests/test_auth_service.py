@@ -79,6 +79,7 @@ class FakeCredentials:
             password_hash=password_hash,
             failed_attempts=0,
             locked_until=None,
+            password_must_change=False,
         )
         self._by_user[user_id] = cred
         return cred
@@ -96,11 +97,13 @@ class FakeCredentials:
         cred.failed_attempts = 0
         cred.locked_until = None
 
-    async def set_password(self, user_id, password_hash):
+    async def set_password(self, user_id, password_hash, *, must_change=None):
         cred = self._by_user[user_id]
         cred.password_hash = password_hash
         cred.failed_attempts = 0
         cred.locked_until = None
+        if must_change is not None:
+            cred.password_must_change = must_change
 
 
 class FakeRefreshTokens:
@@ -463,13 +466,15 @@ async def test_revoke_invite_twice_rejected():
 
 
 async def test_admin_reset_password_rotates_secret_and_revokes_sessions():
-    svc, _u, _c, tokens, invites = _make()
+    svc, _u, creds, tokens, invites = _make()
     await invites.create(code="C1")
     user = await svc.register(username="nora", password=_PW, invite_code="C1")
     _, pair = await svc.login(username="nora", password=_PW)
 
     temp = await svc.admin_reset_password(user_id=user.user_id)
     assert len(temp) >= 8 and temp != _PW
+    cred = await creds.get_by_user_id(user.user_id)
+    assert cred.password_must_change is True
 
     # old password no longer works; the freshly minted one does
     with pytest.raises(AuthenticationError):
@@ -504,6 +509,55 @@ async def test_admin_reset_password_unknown_user_raises_not_found():
         await svc.admin_reset_password(user_id="ghost")
 
 
+# --- admin set password (设置密码) ---
+
+
+async def test_admin_set_password_rotates_secret_and_revokes_sessions():
+    svc, _u, creds, tokens, invites = _make()
+    await invites.create(code="C2")
+    user = await svc.register(username="setme", password=_PW, invite_code="C2")
+    _, pair = await svc.login(username="setme", password=_PW)
+
+    custom = "custompass99"
+    await svc.admin_set_password(user_id=user.user_id, new_password=custom)
+    cred = await creds.get_by_user_id(user.user_id)
+    assert cred.password_must_change is True
+
+    with pytest.raises(AuthenticationError):
+        await svc.login(username="setme", password=_PW)
+    relogged, _ = await svc.login(username="setme", password=custom)
+    assert relogged.user_id == user.user_id
+
+    with pytest.raises(AuthenticationError):
+        await svc.refresh(refresh_token=pair.refresh_token)
+
+
+async def test_admin_set_password_force_change_false():
+    svc, _u, creds, _tokens, invites = _make()
+    await invites.create(code="C3")
+    user = await svc.register(username="perm", password=_PW, invite_code="C3")
+
+    await svc.admin_set_password(
+        user_id=user.user_id, new_password="permanent1", force_change=False
+    )
+    cred = await creds.get_by_user_id(user.user_id)
+    assert cred.password_must_change is False
+
+
+async def test_admin_set_password_weak_raises():
+    svc, _u, _creds, _tokens, invites = _make()
+    await invites.create(code="C4")
+    user = await svc.register(username="weak", password=_PW, invite_code="C4")
+    with pytest.raises(ValidationError):
+        await svc.admin_set_password(user_id=user.user_id, new_password="short")
+
+
+async def test_admin_set_password_unknown_user_raises_not_found():
+    svc, *_ = _make()
+    with pytest.raises(NotFoundError):
+        await svc.admin_set_password(user_id="ghost", new_password="longenough")
+
+
 # --- change password (self-service 修改密码) ---
 
 
@@ -528,6 +582,19 @@ async def test_change_password_rotates_secret_and_keeps_current_session():
     assert rotated.refresh_token
     with pytest.raises(AuthenticationError):
         await svc.refresh(refresh_token=old_pair.refresh_token)
+
+
+async def test_change_password_clears_must_change_flag():
+    svc, _u, creds, _t, invites = _make()
+    await invites.create(code="C1")
+    user = await svc.register(username="sam", password=_PW, invite_code="C1")
+    temp = await svc.admin_reset_password(user_id=user.user_id)
+    assert (await creds.get_by_user_id(user.user_id)).password_must_change is True
+
+    await svc.change_password(
+        user_id=user.user_id, current_password=temp, new_password="brand-new-pw"
+    )
+    assert (await creds.get_by_user_id(user.user_id)).password_must_change is False
 
 
 async def test_change_password_wrong_current_raises():

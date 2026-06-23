@@ -1,9 +1,11 @@
 import { AdminShell } from "@/components/AdminShell";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { AccountPage } from "@/pages/AccountPage";
 import { AnalyticsPage } from "@/pages/AnalyticsPage";
 import { AuditPage } from "@/pages/AuditPage";
 import { ConversationsPage } from "@/pages/ConversationsPage";
+import { ForcePasswordChangePage } from "@/pages/ForcePasswordChangePage";
 import { InvitesPage } from "@/pages/InvitesPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { OverviewPage } from "@/pages/OverviewPage";
@@ -38,6 +40,9 @@ async function bootstrap(): Promise<void> {
 
 export function App() {
   const status = useAuthStore((s) => s.status);
+  const passwordMustChange = useAuthStore(
+    (s) => s.user?.passwordMustChange ?? false,
+  );
 
   useEffect(() => {
     setUnauthorizedHandler(() => useAuthStore.getState().setUnauthenticated());
@@ -89,6 +94,10 @@ export function App() {
     );
   }
 
+  if (passwordMustChange) {
+    return <ForcePasswordChangePage />;
+  }
+
   return (
     <BrowserRouter>
       <Routes>
@@ -105,6 +114,7 @@ export function App() {
           <Route path="replay/:conversationId" element={<ReplayPage />} />
           <Route path="audit" element={<AuditPage />} />
           <Route path="system" element={<SystemPage />} />
+          <Route path="account" element={<AccountPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

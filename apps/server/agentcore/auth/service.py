@@ -253,10 +253,35 @@ class AuthService:
             raise NotFoundError("用户凭据不存在")
 
         temp_password = generate_temp_password()
-        await self._credentials.set_password(user_id, hash_password(temp_password))
+        await self._credentials.set_password(
+            user_id, hash_password(temp_password), must_change=True
+        )
         # Force re-login everywhere: the old sessions must not outlive the reset.
         await self._refresh_tokens.revoke_all_for_user(user_id)
         return temp_password
+
+    async def admin_set_password(
+        self, *, user_id: str, new_password: str, force_change: bool = True
+    ) -> None:
+        """Set an account's password to an admin-chosen value (设置密码).
+
+        Revokes the user's refresh tokens (forces re-login on every device) and
+        clears any brute-force lockout. The plaintext is never stored — only its
+        hash. Raises ``NotFoundError`` for an unknown account, ``ValidationError``
+        if the password is too short.
+        """
+        user = await self._users.get_by_id(user_id)
+        if user is None:
+            raise NotFoundError("用户不存在")
+        creds = await self._credentials.get_by_user_id(user_id)
+        if creds is None:  # pragma: no cover - an account always has credentials
+            raise NotFoundError("用户凭据不存在")
+        if len(new_password) < _MIN_PASSWORD_LENGTH:
+            raise ValidationError(f"密码至少需要 {_MIN_PASSWORD_LENGTH} 个字符")
+        await self._credentials.set_password(
+            user_id, hash_password(new_password), must_change=force_change
+        )
+        await self._refresh_tokens.revoke_all_for_user(user_id)
 
     async def admin_delete_account(self, *, actor_id: str, user_id: str) -> tuple[User, str | None]:
         """Admin-initiated 注销 (account deletion): soft-delete + anonymize the target
@@ -284,6 +309,11 @@ class AuthService:
         await self._refresh_tokens.revoke_all_for_user(user_id)
         return (updated or user), avatar_key
 
+    async def password_must_change(self, *, user_id: str) -> bool:
+        """Whether the account must set a new password before normal use."""
+        creds = await self._credentials.get_by_user_id(user_id)
+        return bool(creds and creds.password_must_change)
+
     # --- self-service account ops (账户设置: 改密码 / 改资料 / 注销) ---
 
     async def change_password(
@@ -304,7 +334,9 @@ class AuthService:
             raise ValidationError(f"密码至少需要 {_MIN_PASSWORD_LENGTH} 个字符")
         if verify_password(new_password, creds.password_hash):
             raise ValidationError("新密码不能与当前密码相同")
-        await self._credentials.set_password(user_id, hash_password(new_password))
+        await self._credentials.set_password(
+            user_id, hash_password(new_password), must_change=False
+        )
         await self._refresh_tokens.revoke_all_for_user(user_id)
         return await self._issue_tokens(user_id, family=new_id(), now=datetime.now(UTC))
 

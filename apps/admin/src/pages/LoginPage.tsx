@@ -75,6 +75,9 @@ export function LoginPage() {
             {submitting ? "登录中…" : "登录"}
           </Button>
         </form>
+        <p className="mt-4 text-center text-xs text-muted-foreground">
+          忘记密码？请联系其他平台管理员在用户管理中重置，或联系运维。
+        </p>
       </div>
     </div>
   );

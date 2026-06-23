@@ -104,12 +104,13 @@ export function AdminShell() {
             <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-medium uppercase">
               {(displayName ?? "?").charAt(0)}
             </div>
-            <span
-              className="min-w-0 flex-1 truncate text-base text-muted-foreground"
+            <NavLink
+              to="/account"
+              className="min-w-0 flex-1 truncate text-base text-muted-foreground transition-colors hover:text-foreground"
               title={displayName}
             >
               {displayName}
-            </span>
+            </NavLink>
           </div>
           <Button
             variant="ghost"

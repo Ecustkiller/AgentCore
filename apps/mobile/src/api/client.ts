@@ -12,6 +12,8 @@
 // adapter via setTokenPersistence() at startup — so this file never imports Capacitor and
 // the swap to OS Keychain/Keystore is one adapter + one boot call, not a rewrite.
 
+import { clientHeaders } from "@/lib/clientBuildInfo";
+
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 const ACCESS_KEY = "agentcore.mobile.access";
@@ -154,7 +156,7 @@ export async function apiFetch(
   const run = () =>
     fetch(apiUrl(path), {
       ...init,
-      headers: { ...(init.headers ?? {}), ...authHeader() },
+      headers: { ...clientHeaders(), ...(init.headers ?? {}), ...authHeader() },
     });
   let res = await run();
   if (res.status === 401 && (await refreshTokens())) {

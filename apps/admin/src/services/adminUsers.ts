@@ -19,6 +19,8 @@ export type AdminConversationLine =
 export type RoleCostLine = components["schemas"]["RoleCostLine"];
 export type AdminResetPasswordResponse =
   components["schemas"]["AdminResetPasswordResponse"];
+export type AdminSetPasswordRequest =
+  components["schemas"]["AdminSetPasswordRequest"];
 
 export interface ListUsersParams {
   page: number;
@@ -85,6 +87,17 @@ export async function resetUserPassword(
   return api.post<AdminResetPasswordResponse>(
     `/v1/admin/users/${userId}/reset-password`,
   );
+}
+
+/**
+ * Set an account's password to an operator-chosen value and revoke every active
+ * session. The plaintext is never returned — the caller already knows it.
+ */
+export async function setUserPassword(
+  userId: string,
+  body: AdminSetPasswordRequest,
+): Promise<void> {
+  await api.post(`/v1/admin/users/${userId}/set-password`, body);
 }
 
 /**

@@ -334,6 +334,8 @@ async def test_admin_resets_user_password(client, new_client, make_admin):
                 json={"username": "forgetful", "password": temp},
             )
         ).status_code == 200
+        me = (await fresh.get("/v1/auth/me")).json()
+        assert me["password_must_change"] is True
 
 
 async def test_reset_password_unknown_user_404(client, make_admin):
@@ -348,6 +350,106 @@ async def test_reset_password_requires_admin(client, make_invite):
     me = (await client.get("/v1/auth/me")).json()["id"]
     # even targeting self, the role gate refuses a non-admin before the service runs
     assert (await client.post(f"/v1/admin/users/{me}/reset-password")).status_code == 403
+
+
+# --- set password (设置密码) ---
+
+_CUSTOM_PW = "custompass99"
+
+
+async def test_admin_sets_user_password(client, new_client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    code = (await client.post("/v1/auth/invites", json={})).json()["code"]
+
+    async with new_client() as target:
+        await _register_and_login(target, code, "settarget")
+        uid = (await target.get("/v1/auth/me")).json()["id"]
+
+        r = await client.post(
+            f"/v1/admin/users/{uid}/set-password",
+            json={"new_password": _CUSTOM_PW},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "ok"
+
+        assert (await target.post("/v1/auth/refresh")).status_code == 401
+
+    async with new_client() as fresh:
+        assert (
+            await fresh.post("/v1/auth/login", json={"username": "settarget", "password": _PW})
+        ).status_code == 401
+        assert (
+            await fresh.post(
+                "/v1/auth/login",
+                json={"username": "settarget", "password": _CUSTOM_PW},
+            )
+        ).status_code == 200
+        me = (await fresh.get("/v1/auth/me")).json()
+        assert me["password_must_change"] is True
+
+
+async def test_set_password_force_change_false(client, new_client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    code = (await client.post("/v1/auth/invites", json={})).json()["code"]
+
+    async with new_client() as target:
+        await _register_and_login(target, code, "permuser")
+        uid = (await target.get("/v1/auth/me")).json()["id"]
+
+        r = await client.post(
+            f"/v1/admin/users/{uid}/set-password",
+            json={"new_password": _CUSTOM_PW, "force_change": False},
+        )
+        assert r.status_code == 200, r.text
+
+    async with new_client() as fresh:
+        assert (
+            await fresh.post(
+                "/v1/auth/login",
+                json={"username": "permuser", "password": _CUSTOM_PW},
+            )
+        ).status_code == 200
+        me = (await fresh.get("/v1/auth/me")).json()
+        assert me["password_must_change"] is False
+
+
+async def test_set_password_weak_rejected(client, make_admin, make_invite):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    code = await make_invite("INV-SP")
+    await _register_and_login(client, code, "weaktarget")
+    uid = (await client.get("/v1/auth/me")).json()["id"]
+    assert (
+        await client.post(
+            f"/v1/admin/users/{uid}/set-password",
+            json={"new_password": "short"},
+        )
+    ).status_code == 422
+
+
+async def test_set_password_unknown_user_404(client, make_admin):
+    username, password = await make_admin()
+    await _login(client, username, password)
+    assert (
+        await client.post(
+            f"/v1/admin/users/{uuid4()}/set-password",
+            json={"new_password": _CUSTOM_PW},
+        )
+    ).status_code == 404
+
+
+async def test_set_password_requires_admin(client, make_invite):
+    code = await make_invite("INV-SP2")
+    await _register_and_login(client, code, "plainuser2")
+    me = (await client.get("/v1/auth/me")).json()["id"]
+    assert (
+        await client.post(
+            f"/v1/admin/users/{me}/set-password",
+            json={"new_password": _CUSTOM_PW},
+        )
+    ).status_code == 403
 
 
 # --- 注销账号 (admin-initiated deletion, 用户管理 强操作) ---
