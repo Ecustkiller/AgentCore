@@ -4,8 +4,11 @@
 （两条运行路径都已存在），再用 :class:`~agentcore.evals.types.PairwiseJudge` 成对裁判主臂
 vs 基准臂，最后在「质量·成本·延迟」三轴上聚合，按 archetype 分段。
 
-P0（本阶段）只做 ``single`` vs ``team`` 配对 + 成对裁判 + 三轴报告，全程可用假 provider /
-假裁判跑通自测；``matched_single``（等算力单体 best-of-N）+ 预算对齐留给 P1。
+``single`` vs ``team`` 配对 + 成对裁判 + 三轴报告，全程可用假 provider / 假裁判跑通自测。
+``matched_single``（等算力单体 best-of-N、按 team 的**思考-token 中位数**预算对齐）已落地——见
+:func:`_run_matched_single_arm`：把「团队更好」从「砸了更多算力」纠正为「**同等算力下**更好」，
+这是「多 Agent 是否真有价值」的关键判据。预算主单位 = 思考-token（钱/延迟并列报但不对齐），
+是产品负责人已拍板的协议（远期规划 §2.4）。
 """
 
 from __future__ import annotations
@@ -36,12 +39,17 @@ logger = get_logger(__name__)
 
 _DEFAULT_CASES_DIR = Path(__file__).parent / "cases"
 
-# 臂 → 运行路径。matched_single（P1，best-of-N 单体）仍走 single 路径，预算对齐由 P1 叠加。
+# 臂 → 运行路径。matched_single（等算力单体）也走 single 路径，但由本模块的 best-of-N +
+# 预算对齐编排（见 _run_matched_single_arm），故同样映射到 "single"。
 _ARM_TO_PATH: dict[str, str] = {
     "single": "single",
     "team": "team",
     "matched_single": "single",
 }
+
+# matched_single best-of-N 的安全上限：当单次 single 远比 team 便宜时，best-of-N 不会无限
+# 采样烧额度（预算够即停，至多采样这么多次）。
+_MATCHED_SINGLE_CAP = 6
 
 _COMPARISON_FIELDS = frozenset(
     {
@@ -120,6 +128,125 @@ def _error_verdict(
     return PairwiseVerdict(winner="tie", rationale="两臂均出错")
 
 
+# --- matched_single：等算力单体（best-of-N + 预算对齐 team）-------------------
+
+
+async def _best_of_n_single(
+    cc: ComparisonCase, harness: Harness, budget_thinking: float
+) -> list[TurnOutcome]:
+    """按**思考-token 预算**反复跑「单体」一臂，累计思考-token 够到 ``budget_thinking`` 即停
+    （至少 1 次、至多上限次）。
+
+    预算主单位 = 思考-token（产品负责人已拍板：钱/延迟并列报但**不**对齐，见远期规划 §2.4）。
+    顺序跑只为按实测累计思考-token 定 N（best-of-N 的 N 不预知）；返回每次尝试的 TurnOutcome。
+    预算 ≤0（team 全 sample 无思考-token / 出错）→ 只跑 1 次，退化等价 single 臂。
+    """
+    ac = _arm_case(cc, "matched_single")
+    attempts: list[TurnOutcome] = []
+    cumulative = 0.0
+    while len(attempts) < _MATCHED_SINGLE_CAP:
+        outcome = await harness.run_case(ac)
+        attempts.append(outcome)
+        cumulative += float(outcome.usage.get("reasoning", 0))
+        if cumulative >= budget_thinking:  # 预算够即停（overshoot ≤ 一次单体，刻意偏强基准）
+            break
+    return attempts
+
+
+async def _select_champion(
+    attempts: list[TurnOutcome],
+    cc: ComparisonCase,
+    *,
+    judge: PairwiseJudge | None,
+    layer: int,
+) -> TurnOutcome:
+    """best-of-N 选优：用成对裁判跑「擂台赛」选出最强一次尝试。
+
+    有裁判（``layer>=2`` 且 ``cc.rubric``）才比质量——给单体它的**最好一击**，令对照基准尽可
+    能强、team 的胜出更难被「单体没发挥好」解释（保守，宁可低估 team 优势）。无裁判 / 无
+    rubric / 仅一条成功尝试时取第一条成功尝试（不凭空臆造质量排序）。
+    """
+    live = [a for a in attempts if not a.error]
+    if not live:
+        return attempts[0]  # 全失败：返回第一条（携带 error，交回上层按错判负）
+    if len(live) == 1 or judge is None or layer < 2 or not cc.rubric:
+        return live[0]
+    champ = live[0]
+    for challenger in live[1:]:
+        verdict = await judge.compare(
+            rubric=cc.rubric,
+            user_message=cc.user_message,
+            subject_arm="challenger",
+            subject_content=challenger.content,
+            baseline_arm="champion",
+            baseline_content=champ.content,
+        )
+        if verdict.winner == "challenger":
+            champ = challenger
+    return champ
+
+
+def _fold_matched_single(attempts: list[TurnOutcome], champion: TurnOutcome) -> TurnOutcome:
+    """把 best-of-N 的多次尝试折叠成一个 matched_single 结果（喂现有成对裁判 / 三轴度量）。
+
+    **质量取 champion**（选出的最强一次），**算力按全部尝试累加**（``usage`` 逐键求和含思考-
+    token、``cost_usd`` 求和）——等算力的账 = N 次单体之和；**对齐轴是思考-token**（见
+    :func:`_run_matched_single_arm`），钱/延迟并列入报但不作为对齐目标。**延迟取 max**：
+    best-of-N 可并行采样、墙钟≈最慢一次（此处顺序跑仅为按预算定 N）。只要有一次成功就不算
+    error。
+    """
+    usage: dict[str, int] = {}
+    cost = 0.0
+    for a in attempts:
+        for k, v in a.usage.items():
+            usage[k] = usage.get(k, 0) + int(v)
+        cost += a.cost_usd
+    live = [a for a in attempts if not a.error]
+    return TurnOutcome(
+        content=champion.content,
+        finish_reason=champion.finish_reason,
+        rounds=champion.rounds,
+        tool_calls=list(champion.tool_calls),
+        citations=list(champion.citations),
+        delegated=False,
+        roster=[],
+        usage=usage,
+        cost_usd=cost,
+        latency_ms=max((a.latency_ms for a in attempts), default=0),
+        error=None if live else (attempts[0].error if attempts else "matched_single 无任何尝试"),
+    )
+
+
+async def _run_matched_single_arm(
+    cc: ComparisonCase,
+    harness: Harness,
+    team: ArmResult | None,
+    *,
+    judge: PairwiseJudge | None,
+    layer: int,
+) -> ArmResult:
+    """跑 matched_single 臂：把单体 best-of-N 到 team 的**思考-token 中位数预算 T_B**。
+
+    协议（产品负责人已拍板，见远期规划 §2.4）：预算主单位 = 思考-token；测量后对齐——先跑
+    team、取思考-token 中位数 T_B、调 best-of-N 的 N 逼近 T_B。实际对齐度由报告的
+    ``thinking_token_ratio``（team/matched）体现，落在 [0.8, 1.25] 即视为等算力（该带在取倒数
+    下自封闭）。每 sample：按 T_B best-of-N → 选优 champion → 折叠成可与 team 逐对裁判的
+    TurnOutcome；``checks`` 跑在折叠结果上（其 content / finish_reason 即 champion 的）。
+    无 team → 预算 0、退化等价 single。
+    """
+    res = ArmResult(arm="matched_single")
+    ac = _arm_case(cc, "matched_single")
+    team_thinking = [float(o.usage.get("reasoning", 0)) for o in team.outcomes] if team else []
+    budget = statistics.median(team_thinking) if team_thinking else 0.0
+    for _ in range(max(1, cc.samples)):
+        attempts = await _best_of_n_single(cc, harness, budget)
+        champion = await _select_champion(attempts, cc, judge=judge, layer=layer)
+        folded = _fold_matched_single(attempts, champion)
+        res.outcomes.append(folded)
+        res.checks.append(apply_checks(ac, folded))
+    return res
+
+
 async def run_comparison_case(
     cc: ComparisonCase,
     harness: Harness,
@@ -127,9 +254,16 @@ async def run_comparison_case(
     judge: PairwiseJudge | None = None,
     layer: int = 1,
 ) -> ComparisonCaseReport:
-    """跑一道对比用例：各臂采样 ``samples`` 次 → （layer≥2 且有裁判）主臂逐对 vs 基准臂。"""
+    """跑一道对比用例：各臂采样 ``samples`` 次 → （layer≥2 且有裁判）主臂逐对 vs 基准臂。
+
+    ``matched_single`` 臂特殊：先跑完 team 拿到思考-token 中位数预算，再据此 best-of-N 单体
+    （见 :func:`_run_matched_single_arm`），故它总在 team 之后跑。
+    """
     arms: dict[str, ArmResult] = {}
+    # 先跑非 matched_single 臂（matched_single 的等算力预算取自 team 实测 compute，须后跑）。
     for arm in cc.arms:
+        if arm == "matched_single":
+            continue
         ac = _arm_case(cc, arm)
         res = ArmResult(arm=arm)
         for _ in range(max(1, cc.samples)):
@@ -137,6 +271,10 @@ async def run_comparison_case(
             res.outcomes.append(outcome)
             res.checks.append(apply_checks(ac, outcome))
         arms[arm] = res
+    if "matched_single" in cc.arms:
+        arms["matched_single"] = await _run_matched_single_arm(
+            cc, harness, arms.get("team"), judge=judge, layer=layer
+        )
 
     pairwise: dict[str, list[PairwiseVerdict]] = {}
     base = arms.get(cc.baseline_arm)

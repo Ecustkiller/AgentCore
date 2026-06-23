@@ -157,7 +157,12 @@
     "content": "",
     "reasoning": "",
     "captainContext": [],
-    "process": [],
+    "process": [
+      {
+        "kind": "team",
+        "execution_id": "exec1"
+      }
+    ],
     "citations": [],
     "agents": [
       {

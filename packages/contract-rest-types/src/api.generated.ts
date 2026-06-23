@@ -419,6 +419,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/users/{user_id}/set-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set User Password
+         * @description Set an account's password to an admin-chosen value (设置密码).
+         *
+         *     Revokes the user's sessions (forces re-login on every device) and clears any
+         *     lockout. The plaintext is never returned — the operator already knows it.
+         *     ``force_change`` (default true) requires the user to pick a new password on
+         *     next login. 404 for an unknown account.
+         */
+        post: operations["set_user_password_v1_admin_users__user_id__set_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/change-password": {
         parameters: {
             query?: never;
@@ -2859,6 +2884,23 @@ export interface components {
         AdminResetPasswordResponse: {
             /** Temporary Password */
             temporary_password: string;
+        };
+        /**
+         * AdminSetPasswordRequest
+         * @description Admin-specified new password (设置密码) for a target account.
+         *
+         *     Plaintext is never stored or echoed back — only its hash. Revokes the user's
+         *     sessions on success (same as reset). ``force_change`` defaults true so the user
+         *     must set their own password on next login unless the operator opts out.
+         */
+        AdminSetPasswordRequest: {
+            /**
+             * Force Change
+             * @default true
+             */
+            force_change: boolean;
+            /** New Password */
+            new_password: string;
         };
         /**
          * AdminSystemStatus
@@ -5881,6 +5923,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminResetPasswordResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_user_password_v1_admin_users__user_id__set_password_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */

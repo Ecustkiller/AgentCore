@@ -54,7 +54,9 @@ def test_registry_registers_the_system_skills():
         "team_orchestration_advanced",
         "debate_and_review",
         "revising_a_product",
-        "asking_the_user",
+        "ask_user_kickoff",
+        "ask_user_midtask",
+        "delegate_checkpoint",
     }
 
 
@@ -76,20 +78,25 @@ def test_registry_rejects_duplicate_name():
 
 
 def test_available_hides_gated_skills_without_required_tools():
-    # asking_the_user needs the ask_user tool. On the autonomous (no live user) path
-    # it is not wired, so the skill drops out of the catalog.
+    # The ask_user_* skills (and delegate_checkpoint, which pauses for user review)
+    # need the ask_user tool. On the autonomous (no live user) path it is not wired,
+    # so those skills drop out of the catalog.
     reg = build_system_skill_registry()
     available = {s.name for s in reg.available(_NO_LIVE_USER)}
     assert "team_orchestration_advanced" in available
     assert "debate_and_review" in available
     assert "revising_a_product" in available
-    assert "asking_the_user" not in available
+    assert "ask_user_kickoff" not in available
+    assert "ask_user_midtask" not in available
+    assert "delegate_checkpoint" not in available
 
 
 def test_available_shows_gated_skills_when_tools_wired():
     reg = build_system_skill_registry()
     available = {s.name for s in reg.available(_FULL_TOOLS)}
-    assert "asking_the_user" in available
+    assert "ask_user_kickoff" in available
+    assert "ask_user_midtask" in available
+    assert "delegate_checkpoint" in available
 
 
 # --- directory rendering -----------------------------------------------------
@@ -108,7 +115,9 @@ def test_directory_lists_only_available_skills_with_names_and_summaries():
 def test_directory_omits_gated_skills_on_autonomous_path():
     reg = build_system_skill_registry()
     out = render_skill_directory(reg, _NO_LIVE_USER)
-    assert "asking_the_user" not in out
+    assert "ask_user_kickoff" not in out
+    assert "ask_user_midtask" not in out
+    assert "delegate_checkpoint" not in out
     # The non-gated advanced skills are still offered.
     assert "team_orchestration_advanced" in out
 
@@ -211,21 +220,39 @@ def test_revise_skill_teaches_recall_and_delegate_fallback():
     assert "delegate" in body
 
 
-def test_asking_the_user_skill_teaches_opening_and_mid_task_and_requires_tool():
-    # The merged 开场引导 + 途中拍板 skill (formerly two: kickoff + checkpoints),
-    # now both riding the one ask_user tool it gates on.
-    skill = build_system_skill_registry().get("asking_the_user")
+def test_ask_user_kickoff_skill_teaches_impact_tiered_proposal_card():
+    # 开场提案卡 split out of the formerly-merged asking_the_user skill: impact-tiered
+    # card content, gated on the ask_user tool (live-user only). The checkpoint detail
+    # must NOT ride here — it moved to its own delegate_checkpoint skill.
+    skill = build_system_skill_registry().get("ask_user_kickoff")
     assert skill.requires_tools == ("ask_user",)
     body = skill.body
-    # opening: impact-tiered proposal card content.
     assert "assumptions" in body
     assert "questions" in body
     assert "style_options" in body
     assert "影响" in body  # 影响力分档
-    # mid-task: the ask_user fork + debate closing handed to the user.
-    assert "ask_user" in body
-    assert "采纳正方" in body
-    # proceed-and-annotate (the non-interrupt branch).
-    assert "假设" in body and "若不符请指正" in body
-    # plan-time wave-boundary pause.
+    assert "开工提案卡" in body
+    assert "checkpoint_after" not in body
+
+
+def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
+    # 途中拍板 split: the mid-task fork + 何时不打断 (proceed-and-annotate) + the
+    # non-blocking ask + debate closing handed to the user. Gated on ask_user; the
+    # checkpoint mechanism is now its own skill, not part of midtask.
+    skill = build_system_skill_registry().get("ask_user_midtask")
+    assert skill.requires_tools == ("ask_user",)
+    body = skill.body
+    assert "采纳正方" in body  # debate closing handed to the user
+    assert "假设" in body and "若不符请指正" in body  # proceed-and-annotate
+    assert "blocking=false" in body  # the non-blocking ask
+    assert "checkpoint_after" not in body
+
+
+def test_delegate_checkpoint_skill_teaches_wave_boundary_pause():
+    # 委派波间挂起 split out: the checkpoint_after wave-boundary pause. Gated on
+    # ask_user (the live-user proxy) since it pauses for user review.
+    skill = build_system_skill_registry().get("delegate_checkpoint")
+    assert skill.requires_tools == ("ask_user",)
+    body = skill.body
     assert "checkpoint_after" in body
+    assert "depends_on" in body  # only meaningful inside a multi-step DAG

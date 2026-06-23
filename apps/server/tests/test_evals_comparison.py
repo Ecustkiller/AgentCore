@@ -59,6 +59,34 @@ class _CmpHarness:
         )
 
 
+class _BoNHarness:
+    """single 臂逐次返回不同内容（第 2 条含 [GOOD]）、team 固定更贵——验证 best-of-N 选优。"""
+
+    def __init__(self) -> None:
+        self._singles = iter([f"单体{c}{' [GOOD]' if c == 'B' else ''}" for c in "ABCDEF"])
+
+    async def run_case(self, case) -> TurnOutcome:  # noqa: ANN001
+        if case.path == "team":
+            return TurnOutcome(
+                content="团队答案",
+                finish_reason="end_turn",
+                rounds=2,
+                delegated=True,
+                roster=["研究员"],
+                usage={"input": 200, "output": 100, "reasoning": 80},
+                cost_usd=0.024,
+                latency_ms=700,
+            )
+        return TurnOutcome(
+            content=next(self._singles),
+            finish_reason="end_turn",
+            rounds=1,
+            usage={"input": 80, "output": 40, "reasoning": 30},
+            cost_usd=0.010,
+            latency_ms=1000,
+        )
+
+
 class _FixedJudgeProvider:
     """永远判给固定位置（X 或 Y）—— 模拟有位置偏见的裁判。"""
 
@@ -131,6 +159,47 @@ def test_run_comparison_case_aggregates_layer1():
     assert rep.arms["single"].passk is True  # FinishReason 全过
     assert rep.arms["team"].passk is True  # Delegated 全过
     assert rep.subject_arms == ["team"]
+
+
+# --- matched_single（等算力单体：best-of-N + 预算对齐 team）-------------------
+
+
+def test_matched_single_iso_compute_arm_folds_and_budget_bounds():
+    cc = _cmp_case(
+        arms=["matched_single", "team"],
+        baseline_arm="matched_single",
+        checks={"matched_single": [{"name": "FinishReason"}], "team": [{"name": "Delegated"}]},
+        samples=2,
+    )
+    rep = asyncio.run(run_comparison_case(cc, _CmpHarness(), judge=_TeamWinsJudge(), layer=2))
+
+    ms = rep.arms["matched_single"]
+    assert len(ms.outcomes) == 2
+    o = ms.outcomes[0]
+    # 预算 = team 思考-token 中位数 T_B=80；single 每次 30 → 累计 30/60/90≥80 → best-of-3
+    assert abs(o.cost_usd - 0.030) < 1e-9  # 算力 = Σ尝试（钱并列报，0.010×3）
+    assert o.usage["reasoning"] == 90  # 30 × 3（对齐轴：思考-token）
+    assert o.usage["input"] == 240  # 80 × 3
+    assert o.latency_ms == 1000  # max（best-of-N 可并行）
+    assert o.delegated is False
+    assert rep.subject_arms == ["team"]  # baseline=matched_single → 只检验 team
+    comp = case_metrics(rep)["comparisons"]["team"]
+    assert comp["cost_ratio"] == round(0.024 / 0.030, 4)  # ≈0.8：team compute ≈ 等算力单体
+
+
+def test_matched_single_best_of_n_selects_champion():
+    cc = _cmp_case(
+        arms=["matched_single", "team"],
+        baseline_arm="matched_single",
+        checks={"matched_single": [{"name": "FinishReason"}], "team": [{"name": "Delegated"}]},
+        samples=1,
+    )
+    judge = LLMPairwiseJudge(_MarkerJudgeProvider(), "m")  # 含 [GOOD] 的一方胜
+    rep = asyncio.run(run_comparison_case(cc, _BoNHarness(), judge=judge, layer=2))
+
+    champ = rep.arms["matched_single"].outcomes[0]
+    assert "[GOOD]" in champ.content  # 擂台赛从 3 次尝试里选出含标记的最强一次
+    assert abs(champ.cost_usd - 0.030) < 1e-9  # 仍按全部 3 次尝试累计算力
 
 
 # --- 成对裁判 ----------------------------------------------------------------
@@ -280,6 +349,31 @@ def test_lint_comparison_bad_arm():
 def test_lint_comparison_baseline_not_in_arms():
     errs = lint_comparison_case(_raw(arms=["single", "team"], baseline_arm="matched_single"))
     assert any("baseline_arm" in e for e in errs)
+
+
+def test_lint_comparison_matched_single_requires_team():
+    errs = lint_comparison_case(
+        _raw(
+            arms=["single", "matched_single"],
+            baseline_arm="single",
+            checks={"matched_single": [{"name": "FinishReason"}]},
+        )
+    )
+    assert any("matched_single" in e and "team" in e for e in errs)
+
+
+def test_lint_comparison_matched_single_with_team_ok():
+    errs = lint_comparison_case(
+        _raw(
+            arms=["matched_single", "team"],
+            baseline_arm="matched_single",
+            checks={
+                "matched_single": [{"name": "FinishReason"}],
+                "team": [{"name": "Delegated"}],
+            },
+        )
+    )
+    assert errs == []
 
 
 def test_lint_comparison_unregistered_check():

@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from agentcore.core.logging import get_logger
-from agentcore.evals.checks import build_check
+from agentcore.evals.checks import DIAGNOSTIC_CHECKS, build_check
 from agentcore.evals.harness import EvalHarness
 from agentcore.evals.seed_lint import lint_suite
 from agentcore.evals.types import (
@@ -80,7 +80,11 @@ def load_cases(cases_dir: Path | str | None = None, suite: str = "core") -> list
 
 
 def apply_checks(case: EvalCase, outcome: TurnOutcome) -> list[CheckOutcome]:
-    """对一次运行结果跑该用例声明的全部确定性 Check（判定零 LLM）。"""
+    """对一次运行结果跑该用例声明的全部确定性 Check（判定零 LLM）。
+
+    诊断 Check（``DIAGNOSTIC_CHECKS``，轨迹形状）落标 ``gating=False``：仍跑仍报告，但不计入
+    pass/fail（评测体系重设计 §三）。
+    """
     results: list[CheckOutcome] = []
     for spec in case.checks:
         try:
@@ -88,7 +92,10 @@ def apply_checks(case: EvalCase, outcome: TurnOutcome) -> list[CheckOutcome]:
         except KeyError as e:  # 已被 lint 拦住；此处兜底，绝不让单个坏 check 炸整套
             results.append(CheckOutcome(str(spec.get("name", "?")), False, f"未注册 check: {e}"))
             continue
-        results.append(check.run(case, outcome))
+        result = check.run(case, outcome)
+        if result.name in DIAGNOSTIC_CHECKS:
+            result.gating = False
+        results.append(result)
     return results
 
 

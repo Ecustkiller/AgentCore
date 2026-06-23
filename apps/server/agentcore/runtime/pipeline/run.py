@@ -245,7 +245,7 @@ async def run_chat_pipeline(
         # 瘦身 P2) + inline citation guidance. The directory lists only the skills whose
         # required tools are actually wired this turn (derived from the assembled CEO
         # toolset), so it never advertises a capability the CEO does not hold (e.g.
-        # asking_the_user appears only on the live-user path, when ask_user is wired)
+        # the ask_user_* skills appear only on the live-user path, when ask_user is wired)
         # — the same invariant the old per-hint gating enforced. The advanced「怎么做」
         # detail no longer rides every turn; the CEO pulls it via consult_skill.
         ceo_tool_names = {schema.name for schema in chat_tools.list_all()}

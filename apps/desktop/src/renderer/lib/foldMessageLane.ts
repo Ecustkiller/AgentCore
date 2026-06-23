@@ -9,8 +9,12 @@ import type {
   ToolUseStartPayload,
 } from "@/types/events";
 import {
+  appendAskStep,
+  appendCheckpointStep,
   appendContentStep,
+  appendPlanReviewStep,
   appendReasoningStep,
+  appendTeamStep,
   appendToolStep,
   dropTrailingContentSteps,
   resolveToolStep,
@@ -93,4 +97,41 @@ export function foldCitations(
   citations: Citation[],
 ): MessageLaneState {
   return { ...state, citations };
+}
+
+/** Fold a `run_plan` into the timeline as a `team` marker (协作图时间线落点) — the FIRST
+ * plan of an execution fixes the collaboration graph's slot; later same-id batches no-op. */
+export function foldTeamMarker(
+  state: MessageLaneState,
+  executionId: string,
+): MessageLaneState {
+  const process = appendTeamStep(state.process, executionId);
+  return process === state.process ? state : { ...state, process };
+}
+
+/** Fold a `checkpoint_required` into the timeline as a positional `checkpoint` marker. */
+export function foldCheckpointMarker(
+  state: MessageLaneState,
+  checkpointId: string,
+): MessageLaneState {
+  const process = appendCheckpointStep(state.process, checkpointId);
+  return process === state.process ? state : { ...state, process };
+}
+
+/** Fold a `question_posted` into the timeline as a positional `ask` marker. */
+export function foldAskMarker(
+  state: MessageLaneState,
+  askId: string,
+): MessageLaneState {
+  const process = appendAskStep(state.process, askId);
+  return process === state.process ? state : { ...state, process };
+}
+
+/** Fold a `plan_review_required` into the timeline as a positional `plan_review` marker. */
+export function foldPlanReviewMarker(
+  state: MessageLaneState,
+  checkpointId: string,
+): MessageLaneState {
+  const process = appendPlanReviewStep(state.process, checkpointId);
+  return process === state.process ? state : { ...state, process };
 }

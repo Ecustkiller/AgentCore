@@ -20,6 +20,7 @@ from agentcore.runtime.events import (
     SSEEvent,
     approval_required,
     approval_resolved,
+    checkpoint_required,
     citations_event,
     content_delta,
     content_reset,
@@ -35,6 +36,7 @@ from agentcore.runtime.events import (
     plan_review_required,
     plan_review_resolved,
     plan_revised,
+    question_posted,
     reasoning_delta,
     run_completed,
     run_context,
@@ -250,6 +252,42 @@ def _plan_review_resolved_continue() -> list[SSEEvent]:
             cost=_COST,
         ),
         message_end(FinishReason.END_TURN, input_tokens=3000, output_tokens=400, cost=_COST),
+    ]
+
+
+def _single_agent_checkpoint() -> list[SSEEvent]:
+    """单聊·检查点 (ask_user blocking=true)：CEO 想清楚后向用户拍板、暂停回合。检查点在时间线
+    **原位**落一个 `checkpoint` 标记（卡片正文另路 fold，按 checkpoint_id 取回），回合停在
+    checkpoint_required（无 message_end）→ pendingInteraction=checkpoint、status=paused。
+    验「检查点不再压到气泡底部、而是回到它真实发生的时序位」。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        reasoning_delta("这个需求有歧义，先问清楚。"),
+        content_delta("开始前我确认一下方向："),
+        checkpoint_required(
+            checkpoint_id="cp1",
+            conversation_id=_CONV,
+            question="先做 A 还是 B？",
+            context="两条路线各有取舍。",
+        ),
+    ]
+
+
+def _single_agent_non_blocking_ask() -> list[SSEEvent]:
+    """单聊·非阻塞发问 (ask_user blocking=false)：CEO 抛出一个已有默认值的问题但**继续干**，不
+    挂起、不结算。时间线**原位**落一个 `ask` 标记（卡片正文另路 fold，按 ask_id 取回），回合
+    照常 end_turn 收尾。验「非阻塞发问插在它真实发生的正文之间，而非堆到底部」。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我先按常见默认推进。"),
+        question_posted(
+            ask_id="ask1",
+            conversation_id=_CONV,
+            question="需要同时导出 PDF 吗？",
+            context="默认仅 Markdown。",
+        ),
+        content_delta(" 已完成初稿。"),
+        message_end(FinishReason.END_TURN, input_tokens=1000, output_tokens=200, cost=_COST),
     ]
 
 
@@ -1534,6 +1572,14 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "approval_resolved_continue": ("审批：通过后继续到 end_turn", _approval_resolved_continue),
     "plan_review_paused": ("结构化挂起：plan_review_required 暂停", _plan_review_paused),
     "plan_review_resolved_continue": ("结构化挂起：放行后跑完下游", _plan_review_resolved_continue),
+    "single_agent_checkpoint": (
+        "单聊：检查点 ask_user(blocking) 在时间线原位落 checkpoint 标记 + 暂停",
+        _single_agent_checkpoint,
+    ),
+    "single_agent_non_blocking_ask": (
+        "单聊：非阻塞发问 question_posted 在时间线原位落 ask 标记、回合照常收尾",
+        _single_agent_non_blocking_ask,
+    ),
     "single_agent_citations": ("单聊：思考→工具→正文 + citations 来源卡", _single_agent_citations),
     "single_agent_content_reset": (
         "单聊：交付前核验回炉 (finish_guard) content_reset 丢弃违规版正文、重写修正版",

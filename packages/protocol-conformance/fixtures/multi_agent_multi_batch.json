@@ -202,7 +202,15 @@
     "process": [
       {
         "kind": "content",
-        "text": "先调研。 再撰写。"
+        "text": "先调研。"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec1"
+      },
+      {
+        "kind": "content",
+        "text": " 再撰写。"
       }
     ],
     "citations": [],

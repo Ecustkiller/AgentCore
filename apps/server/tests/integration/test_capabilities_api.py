@@ -54,7 +54,7 @@ async def test_capabilities_lists_system_skills_with_body(client, make_invite):
     body = (await client.get("/v1/capabilities")).json()
     skills = {s["name"]: s for s in body["skills"]}
     assert "team_orchestration_advanced" in skills
-    assert "asking_the_user" in skills
+    assert "ask_user_kickoff" in skills
     for skill in skills.values():
         assert skill["summary"]
         assert skill["body"]  # the full guidance, not just the catalog one-liner

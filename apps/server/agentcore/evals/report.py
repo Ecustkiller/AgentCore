@@ -30,7 +30,10 @@ def _case_to_dict(c: CaseReport) -> dict:
         "case_id": c.case_id,
         "category": c.category,
         "passed": c.passed,
-        "checks": [{"name": ck.name, "passed": ck.passed, "detail": ck.detail} for ck in c.checks],
+        "checks": [
+            {"name": ck.name, "passed": ck.passed, "detail": ck.detail, "gating": ck.gating}
+            for ck in c.checks
+        ],
         "judge": (
             None
             if c.judge is None
@@ -78,8 +81,10 @@ def format_report(report: EvalReport) -> str:
         status = "PASS" if c.passed else "FAIL"
         lines.append(f"[{status}] {c.case_id}  ({c.category})")
         for ck in c.checks:
-            mark = "[+]" if ck.passed else "[-]"
-            lines.append(f"    {mark} {ck.name}: {ck.detail}")
+            # 诊断 Check（gating=False）不计入判定：用 [~] 标记区别于门禁 [+]/[-]，避免误读为失败。
+            mark = "[~]" if not ck.gating else ("[+]" if ck.passed else "[-]")
+            suffix = " (诊断)" if not ck.gating else ""
+            lines.append(f"    {mark} {ck.name}{suffix}: {ck.detail}")
         if c.judge is not None:
             mark = "[+]" if c.judge.passed else "[-]"
             lines.append(f"    {mark} Judge {c.judge.score}: {c.judge.rationale[:80]}")
@@ -97,3 +102,20 @@ def format_report(report: EvalReport) -> str:
     lines.append(f"总计: {report.passed}/{report.total} 通过 ({pct:.0f}%)   成本 ${total_cost:.4f}")
     lines.append("=" * 64)
     return "\n".join(lines)
+
+
+def baseline_regression(report: EvalReport, baseline: dict, tolerance: float) -> tuple[bool, str]:
+    """对比当前报告与 baseline 的**总通过率**；跌破 ``baseline - tolerance`` 判回归（评测体系
+    重设计 §七：L1 跌破 baseline 超阈 → 红）。
+
+    返回 ``(是否回归, 人读说明)``。``tolerance`` 吸收真模型非确定性（思考模型不吃 temperature，
+    单次跑天然抖动）——只有显著掉档才算回归，避免噪声把门弄红。baseline 缺 ``pass_rate`` 视为 0。
+    """
+    base_rate = float(baseline.get("summary", {}).get("pass_rate", 0.0))
+    cur = report.pass_rate
+    regressed = cur < base_rate - tolerance
+    detail = (
+        f"pass_rate {cur:.4f} vs baseline {base_rate:.4f}"
+        f"（容差 {tolerance:.2f}）→ {'回归' if regressed else 'OK'}"
+    )
+    return regressed, detail

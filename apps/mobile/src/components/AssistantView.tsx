@@ -3,13 +3,14 @@ import { Markdown } from "@/components/Markdown";
 import { TeamView } from "@/components/TeamView";
 // Rich assistant rendering shared by live turns and history replay (前端技术与架构 §七 ·
 // 富渲染 + 多 Agent 团队视图). One {@link AssistantContent} consumes the same fields whether
-// they come from the live fold (ProjectedTurn) or a persisted message (MessageDetail):
+// they come from the live fold (ProjectedTurn) or a persisted message (MessageDetail).
 //
-//   - single-agent turn → a `process` timeline (正文 / 思考 / 工具, interleaved); for
-//                          history it is restored from MessageDetail.runs.process
-//   - multi-agent turn  → `process` is empty (activity lives in the `team` graph); render
-//                          the team view + the captain's `content` + `reasoning`. For
-//                          history the team is re-folded from MessageDetail.runs.events.
+// 统一团队时间线: every turn renders its `process` timeline (正文 / 思考 / 工具, interleaved);
+// for history it is restored from MessageDetail.runs.process. A multi-agent turn additionally
+// carries a `team` positional marker in that timeline — the collaboration graph slots inline
+// at the marker (协作图时间线落点), re-folded from MessageDetail.runs.events for history.
+// The checkpoint·ask·plan_review markers are anchors for desktop's inline cards; mobile owns
+// those interactions via its PauseCard, so they no-op in the timeline.
 //
 // Citations render as a source list under the message either way.
 import type {
@@ -57,18 +58,26 @@ export function AssistantContent({
    *  轮焦点 / 小结 / 裁判；收场后让位给 {@link DebateView} 的全量双产物。 */
   debateRounds?: DebateNarrativeRound[];
 }) {
+  const hasTeam = !!team && team.runs.length > 0;
   return (
     <>
-      {team && team.runs.length > 0 ? <TeamView {...team} /> : null}
       {debate ? (
         <DebateView debate={debate} />
       ) : debateRounds && debateRounds.length > 0 ? (
         <LiveDebateNarrative rounds={debateRounds} />
       ) : null}
       {process && process.length > 0 ? (
-        <ProcessTimeline steps={process} citations={citations} />
+        // 统一团队时间线: the team graph rides its inline `team` marker (协作图时间线落点);
+        // the checkpoint·ask·plan_review markers are anchors for desktop cards — mobile owns
+        // those via its PauseCard, so they no-op inline here.
+        <ProcessTimeline
+          steps={process}
+          citations={citations}
+          team={hasTeam ? team : undefined}
+        />
       ) : (
         <>
+          {hasTeam ? <TeamView {...team} /> : null}
           {reasoning ? <Reasoning text={reasoning} /> : null}
           {content ? (
             <Markdown content={content} citations={citations} />
@@ -194,8 +203,7 @@ function baseName(detail: string): string {
 }
 
 type TimelineNode =
-  | { kind: "reasoning"; text: string }
-  | { kind: "content"; text: string }
+  | Exclude<ProcessStep, { kind: "tool" }>
   | { kind: "tool"; step: ToolStepData }
   | { kind: "tool-group"; tools: ToolStepData[] };
 
@@ -254,19 +262,38 @@ function toolGroupSummary(tools: ToolStepData[]): string {
 function ProcessTimeline({
   steps,
   citations,
+  team,
 }: {
   steps: ProcessStep[];
   citations?: Citation[];
+  team?: TeamProjection;
 }) {
+  const nodes = groupToolRuns(steps);
+  // Legacy turns whose persisted process predates the `team` marker still carry a team
+  // (re-folded from events) — render it once at the top so the graph never vanishes.
+  const hasTeamMarker = steps.some((s) => s.kind === "team");
   return (
     <div className="timeline">
-      {groupToolRuns(steps).map((node, i) => {
+      {team && !hasTeamMarker ? <TeamView {...team} /> : null}
+      {nodes.map((node, i) => {
         if (node.kind === "content")
           // biome-ignore lint/suspicious/noArrayIndexKey: timeline is an append-only stream; segments never reorder, so the index is stable identity
           return <Markdown key={i} content={node.text} citations={citations} />;
         if (node.kind === "reasoning")
           // biome-ignore lint/suspicious/noArrayIndexKey: timeline is an append-only stream; segments never reorder, so the index is stable identity
           return <Reasoning key={i} text={node.text} />;
+        if (node.kind === "team")
+          return team ? (
+            <TeamView key={`team-${node.execution_id}`} {...team} />
+          ) : null;
+        // checkpoint·ask·plan_review markers anchor desktop cards; mobile owns these via
+        // its PauseCard surface, so they render nothing inline.
+        if (
+          node.kind === "checkpoint" ||
+          node.kind === "ask" ||
+          node.kind === "plan_review"
+        )
+          return null;
         if (node.kind === "tool-group")
           return <ToolGroup key={node.tools[0].id} tools={node.tools} />;
         return <ToolStep key={node.step.id} step={node.step} />;

@@ -43,7 +43,13 @@ from agentcore.runtime.runs.scheduler import (
     OnBoundary,
     RunExecutor,
 )
-from agentcore.runtime.runs.types import BatchMetrics, RunPhase, RunSpec, RunState
+from agentcore.runtime.runs.types import (
+    BatchMetrics,
+    NodeTiming,
+    RunPhase,
+    RunSpec,
+    RunState,
+)
 
 # The most nodes this scheduler runs at once. Ready nodes beyond this stay pending
 # and ride a freed slot. Kept in step with MAX_PARALLEL_DELEGATIONS (the tree-wide
@@ -152,6 +158,10 @@ class WaveScheduler:
         peak_running = 0
         dispatched_count = 0
         slot_starved = 0
+        # 多任务并行图 (并行时间线): each dispatched node's occupancy window as ms offsets from
+        # wall_start — the same per-node dispatch/finish marks that feed busy_ms, kept (not
+        # discarded) so the host can render real temporal parallelism. Dispatched nodes only.
+        timeline: list[NodeTiming] = []
         # 受监督波循环埋点 (BatchMetrics §7.2): decision-boundary YIELDs fired this run, by
         # reason —晚绑定触发数 / 计划漂移返工触发数 / checkpoint. Counts fires (on_boundary
         # invocations), so a marked plan driven without a hook tallies zero.
@@ -220,7 +230,16 @@ class WaveScheduler:
                     completed[run_id] = state
                     started = started_at.pop(run_id, None)
                     if started is not None:  # node occupancy: dispatch → finish
-                        busy_ms += int((time.monotonic() - started) * 1000)
+                        finished = time.monotonic()
+                        busy_ms += int((finished - started) * 1000)
+                        timeline.append(
+                            NodeTiming(
+                                run_id=run_id,
+                                start_ms=int((started - wall_start) * 1000),
+                                end_ms=int((finished - wall_start) * 1000),
+                                outcome=state.phase.value,
+                            )
+                        )
                     if on_progress is not None:
                         on_progress(completed)
                     if state.phase is RunPhase.FAILED:
@@ -329,6 +348,7 @@ class WaveScheduler:
                     checkpoint_boundaries=checkpoint_boundaries,
                     escalations=escalations,
                     scope_escalations=scope_escalations,
+                    timeline=timeline,
                 )
             )
         return completed

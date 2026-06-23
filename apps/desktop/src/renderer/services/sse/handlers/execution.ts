@@ -46,6 +46,10 @@ export function handleExecutionEvent(
         payload.plan_type === "multi_agent" ||
         payload.plan_type === "debate"
       ) {
+        // Flush any rAF-buffered content FIRST so it lands as content step(s) BEFORE the
+        // `team` marker — the collaboration graph slots after the CEO's intro line, not
+        // above it (协作图时间线落点; matches the conformance golden's [content, team] order).
+        flushPendingContent(conversationId);
         useConversationStore
           .getState()
           .setLastAssistantExecutionId(payload.execution_id, conversationId);
@@ -76,6 +80,9 @@ export function handleExecutionEvent(
     case "run_completed":
     case "run_failed":
     case "run_progress":
+    // 调度埋点量化 (深层诊断指标): the WaveScheduler snapshot folds onto Execution.batches via
+    // the same frame path (journaled → replays on reload); shown only in 诊断模式 (run detail).
+    case "batch_metrics":
     // 「计划已调整」轻痕迹 (设计 §7.2): a NON-interrupting trace — the CEO re-bound / re-steered
     // paused nodes via replan. Folds onto the runs' `revised` via the same frame path (no
     // conversation-store gate); journaled, so it replays on reload.

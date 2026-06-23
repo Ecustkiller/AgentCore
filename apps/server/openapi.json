@@ -471,6 +471,26 @@
         "title": "AdminResetPasswordResponse",
         "type": "object"
       },
+      "AdminSetPasswordRequest": {
+        "description": "Admin-specified new password (设置密码) for a target account.\n\nPlaintext is never stored or echoed back — only its hash. Revokes the user's\nsessions on success (same as reset). ``force_change`` defaults true so the user\nmust set their own password on next login unless the operator opts out.",
+        "properties": {
+          "force_change": {
+            "default": true,
+            "title": "Force Change",
+            "type": "boolean"
+          },
+          "new_password": {
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_password"
+        ],
+        "title": "AdminSetPasswordRequest",
+        "type": "object"
+      },
       "AdminSystemStatus": {
         "description": "Read-only platform status for the admin console (``GET /v1/admin/system``).\n\nA deployment sanity-check at a glance (管理员后台 P2): the billing mode + global\nquota defaults + FX rate (all deploy-time ``config``, not editable here),\ndatabase reachability, build provenance, and account tallies. Everything is\nread-only — config changes go through env + redeploy, not the console.",
         "properties": {
@@ -7359,6 +7379,91 @@
           }
         },
         "summary": "Reset User Password",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/users/{user_id}/set-password": {
+      "post": {
+        "description": "Set an account's password to an admin-chosen value (设置密码).\n\nRevokes the user's sessions (forces re-login on every device) and clears any\nlockout. The plaintext is never returned — the operator already knows it.\n``force_change`` (default true) requires the user to pick a new password on\nnext login. 404 for an unknown account.",
+        "operationId": "set_user_password_v1_admin_users__user_id__set_password_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminSetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set User Password",
         "tags": [
           "admin"
         ]

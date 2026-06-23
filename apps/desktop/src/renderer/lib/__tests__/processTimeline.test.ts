@@ -9,6 +9,10 @@ import { describe, expect, it } from "vitest";
 
 const reasoning = (text: string): ProcessStep => ({ kind: "reasoning", text });
 const content = (text: string): ProcessStep => ({ kind: "content", text });
+const team = (execution_id: string): ProcessStep => ({
+  kind: "team",
+  execution_id,
+});
 const tool = (
   id: string,
   tool_name = "file_read",
@@ -113,27 +117,28 @@ describe("groupToolRuns", () => {
     expect(process).toEqual(snapshot);
   });
 
-  it("keeps an orchestration step (delegate) as its own un-grouped boundary node", () => {
-    // The team graph slots at the delegate step, so it must stay a lone `tool` node.
-    const nodes = groupToolRuns([tool("a"), tool("d", "delegate"), tool("b")]);
-    expect(nodes.map((n) => n.kind)).toEqual(["tool", "tool", "tool"]);
+  it("keeps a `team` marker as its own boundary node (graph slots at its position)", () => {
+    // 统一团队时间线: an orchestration call no longer emits a tool step — a `team` marker
+    // stands in its place, and the collaboration graph renders AT this node's position.
+    const nodes = groupToolRuns([tool("a"), team("exec1"), tool("b")]);
+    expect(nodes.map((n) => n.kind)).toEqual(["tool", "team", "tool"]);
     const mid = nodes[1];
-    if (mid.kind !== "tool") throw new Error("expected tool");
-    expect(mid.step.tool_name).toBe("delegate");
+    if (mid.kind !== "team") throw new Error("expected team");
+    expect(mid.execution_id).toBe("exec1");
   });
 
-  it("breaks tool runs around a delegate (does not absorb it into a group)", () => {
+  it("breaks tool runs around a `team` marker (does not absorb it into a group)", () => {
     const nodes = groupToolRuns([
       tool("a"),
       tool("b"),
-      tool("d", "delegate"),
+      team("exec1"),
       tool("c"),
       tool("e"),
     ]);
-    // a+b group · delegate lone boundary · c+e group
+    // a+b group · team lone boundary · c+e group
     expect(nodes.map((n) => n.kind)).toEqual([
       "tool-group",
-      "tool",
+      "team",
       "tool-group",
     ]);
   });

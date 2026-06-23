@@ -184,7 +184,16 @@
     "content": "",
     "reasoning": "",
     "captainContext": [],
-    "process": [],
+    "process": [
+      {
+        "kind": "team",
+        "execution_id": "exec1"
+      },
+      {
+        "kind": "plan_review",
+        "checkpoint_id": "cp1"
+      }
+    ],
     "citations": [],
     "agents": [
       {

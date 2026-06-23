@@ -130,6 +130,13 @@ def lint_comparison_case(raw: dict[str, Any]) -> list[str]:
     if arms and baseline not in arms:
         errors.append(f"[{cid}] baseline_arm={baseline!r} 不在 arms={arms}")
 
+    # matched_single（等算力单体）的 best-of-N 预算取自 team 的实测 compute，故声明它必须同
+    # 时声明 team；通常还应把 baseline_arm 设为 matched_single 才能得到「team vs 等算力单体」。
+    if arms and "matched_single" in arms and "team" not in arms:
+        errors.append(
+            f"[{cid}] arms 含 matched_single 须同时含 team（等算力预算取自 team 实测 compute）"
+        )
+
     toolset = raw.get("toolset", "ceo")
     if toolset not in _TOOLSETS:
         errors.append(f"[{cid}] toolset={toolset!r} 非法（须属 {sorted(_TOOLSETS)}）")

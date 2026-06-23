@@ -2,6 +2,7 @@ import type { DebateNarrativeRound, DebateResultPayload } from "@/types/events";
 import type { RunFrame } from "./frames";
 import {
   type AgentState,
+  type BatchMetricsSnapshot,
   type Execution,
   type ExecutionPlan,
   type ExecutionStatus,
@@ -79,6 +80,10 @@ export function projectExecution(
   // plan_review_resolved carries only the checkpoint id, so remember which step
   // run ids each pause gated on (from its _required frame) to apply the decision.
   const checkpointSteps = new Map<string, string[]>();
+
+  // 调度埋点量化 (深层诊断指标): WaveScheduler snapshots fold here in fire order, one per
+  // delegate segment (a checkpoint / scope yield + resume appends another).
+  const batches: BatchMetricsSnapshot[] = [];
 
   for (const f of frames) {
     switch (f.kind) {
@@ -252,6 +257,12 @@ export function projectExecution(
         // counters would reset). The frame is kept only as a timeline marker.
         break;
       }
+      case "batch_metrics": {
+        // 调度埋点量化 (深层诊断指标): accrue the scheduler snapshot for 诊断模式 (run
+        // detail's 调度 block). Append per segment so a multi-batch / resumed turn keeps each.
+        batches.push(f.metrics);
+        break;
+      }
       case "run_escalation": {
         // 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append it
         // to its run so the node shows a ⚠️ badge and the card raises a live notice the
@@ -360,6 +371,7 @@ export function projectExecution(
       completed: runs.filter((s) => s.status === "completed").length,
       total: runs.length,
     },
+    batches,
     debate,
     debateRounds,
   };
@@ -389,6 +401,8 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       return `${role(frame.agentId)} 失败`;
     case "run_progress":
       return `进度 ${frame.completed}/${frame.total}`;
+    case "batch_metrics":
+      return `调度快照 · ${frame.metrics.nodes} 节点 · 峰值并发 ${frame.metrics.peakRunning}`;
     case "run_escalation":
       return `${role(frame.agentId)} 上报问题`;
     case "escalation_required":

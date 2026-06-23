@@ -16,6 +16,13 @@ from agentcore.runtime.events.journal_config import (
 from agentcore.runtime.events.types import EventType, SSEEvent
 from agentcore.runtime.facts import Fact, record_turn_fact
 
+# Orchestration tools hand the turn to a sub-team and open a team execution. Their
+# captain-level call is NOT rendered as a tool step — the `team` marker (emitted at
+# run_plan) stands in its place as the collaboration graph's timeline slot. Mirrors
+# the frontend `ORCHESTRATION_TOOLS` (lib/processTimeline.ts); keep the two in lockstep.
+# Shared with the conformance oracle (projection.py) so live + golden agree.
+ORCHESTRATION_TOOLS = frozenset({"delegate", "debate"})
+
 
 class EventSink:
     """Async queue bridging execution (producer) and SSE (consumer)."""
@@ -106,10 +113,23 @@ class EventSink:
             self._detached = False
         return snapshot
 
+    def _has_marker(self, kind: str, key: str, value: str) -> bool:
+        """Whether a positional marker step (team / checkpoint / ask / plan_review) for
+        ``value`` is already in the timeline — keeps a replayed / multi-batch event from
+        dropping a duplicate anchor."""
+        return any(s.get("kind") == kind and s.get(key) == value for s in self._process)
+
     def _accumulate_process(self, event: SSEEvent) -> None:
         t = event.type
         if t == EventType.RUN_PLAN:
             self._has_run_plan = True
+            # 协作图时间线落点 (统一团队时间线): the FIRST run_plan of an execution drops a
+            # zero-width `team` marker at its chronological spot, so the inline graph renders
+            # there rather than at the bottom. Later batches (same execution_id) merge into the
+            # same graph — one marker per execution.
+            execution_id = event.payload.get("execution_id") or ""
+            if execution_id and not self._has_marker("team", "execution_id", execution_id):
+                self._process.append({"kind": "team", "execution_id": execution_id})
         elif t == EventType.REASONING_DELTA:
             delta = event.payload.get("delta") or ""
             if not delta:
@@ -130,10 +150,13 @@ class EventSink:
             while self._process and self._process[-1].get("kind") == "content":
                 self._process.pop()
         elif t == EventType.TOOL_USE_START:
-            self._has_tool = True
             payload = event.payload
-            if payload.get("run_id"):
+            # Skip a delegated worker's call (run-scoped — belongs to its run node, not the
+            # captain timeline) and an orchestration call (delegate/debate — the `team` marker
+            # stands in its place). Neither becomes a captain tool step.
+            if payload.get("run_id") or payload.get("tool_name") in ORCHESTRATION_TOOLS:
                 return
+            self._has_tool = True
             self._process.append(
                 {
                     "kind": "tool",
@@ -146,7 +169,7 @@ class EventSink:
             )
         elif t == EventType.TOOL_USE_END:
             payload = event.payload
-            if payload.get("run_id"):
+            if payload.get("run_id") or payload.get("tool_name") in ORCHESTRATION_TOOLS:
                 return
             call_id = payload.get("tool_call_id", "")
             result = payload.get("result")
@@ -160,6 +183,23 @@ class EventSink:
                     if display is not None:
                         step["display"] = display
                     break
+        elif t == EventType.CHECKPOINT_REQUIRED:
+            # 检查点时间线落点: a blocking ask_user pauses the CEO HERE — drop a positional
+            # marker so the card replays at its real spot, not stamped at the bottom. The card
+            # body is folded separately (client checkpointsFromEvents), keyed by this id.
+            cid = event.payload.get("checkpoint_id") or ""
+            if cid and not self._has_marker("checkpoint", "checkpoint_id", cid):
+                self._process.append({"kind": "checkpoint", "checkpoint_id": cid})
+        elif t == EventType.QUESTION_POSTED:
+            # 非阻塞发问时间线落点: the CEO surfaced a question and kept working — marker only.
+            aid = event.payload.get("ask_id") or ""
+            if aid and not self._has_marker("ask", "ask_id", aid):
+                self._process.append({"kind": "ask", "ask_id": aid})
+        elif t == EventType.PLAN_REVIEW_REQUIRED:
+            # 计划复核时间线落点: a plan-review gate pauses the turn HERE.
+            cid = event.payload.get("checkpoint_id") or ""
+            if cid and not self._has_marker("plan_review", "checkpoint_id", cid):
+                self._process.append({"kind": "plan_review", "checkpoint_id": cid})
 
     def seed_journal(self, events: list[dict[str, Any]]) -> None:
         self._journal.extend(events)
@@ -169,9 +209,13 @@ class EventSink:
         return self._journal if has_surface else None
 
     def process_timeline(self) -> list[dict[str, Any]] | None:
-        if not self._has_tool:
-            return None
-        return self._process or None
+        # Persist the timeline whenever it carries STRUCTURE beyond the CEO's own text —
+        # a tool, the team graph, or an interaction marker (checkpoint / ask / plan_review).
+        # A pure reasoning/content turn needs none (the content scalar IS the answer, and
+        # reasoning rides its own column), matching the fold's "tool-less single-agent turn
+        # → no process" so live / reload / golden stay aligned.
+        structural = any(s.get("kind") not in ("reasoning", "content") for s in self._process)
+        return self._process if structural else None
 
     def captain_context(self) -> list[dict[str, Any]] | None:
         from agentcore.runtime.runs.types import RunKind

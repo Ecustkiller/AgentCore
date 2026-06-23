@@ -279,6 +279,93 @@ describe("projectExecution (fold)", () => {
     });
   });
 
+  it("folds batch_metrics frames onto execution.batches (深层诊断指标)", () => {
+    const snap = {
+      nodes: 3,
+      width: 4,
+      peakRunning: 2,
+      wallMs: 1000,
+      busyMs: 1500,
+      slotStarved: 1,
+      completed: 3,
+      failed: 0,
+      skipped: 0,
+      bindBoundaries: 0,
+      scopeBoundaries: 1,
+      checkpointBoundaries: 0,
+      escalations: 2,
+      scopeEscalations: 1,
+      timeline: [{ runId: "run-1", startMs: 0, endMs: 800, outcome: "completed" }],
+    };
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      { t: 2, kind: "batch_metrics", metrics: snap },
+    ];
+    // Empty before the frame, accrued after — and a second segment appends (a
+    // checkpoint / scope yield + resume emits another snapshot).
+    expect(projectExecution(plan, [], "running").batches).toEqual([]);
+    const exec = projectExecution(plan, frames, "running");
+    expect(exec.batches).toEqual([snap]);
+    const two = projectExecution(
+      plan,
+      [...frames, { t: 3, kind: "batch_metrics", metrics: { ...snap, nodes: 1 } }],
+      "running",
+    );
+    expect(two.batches.map((b) => b.nodes)).toEqual([3, 1]);
+  });
+
+  it("frameFromEvent maps batch_metrics (snake→camel snapshot)", () => {
+    const frame = frameFromEvent({
+      type: "batch_metrics",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      payload: {
+        execution_id: "exec-1",
+        nodes: 5,
+        width: 3,
+        peak_running: 3,
+        wall_ms: 2000,
+        busy_ms: 4200,
+        slot_starved: 2,
+        completed: 4,
+        failed: 1,
+        skipped: 0,
+        bind_boundaries: 1,
+        scope_boundaries: 0,
+        checkpoint_boundaries: 1,
+        escalations: 0,
+        scope_escalations: 0,
+        timeline: [
+          { run_id: "w1", start_ms: 0, end_ms: 1800, outcome: "completed" },
+          { run_id: "w2", start_ms: 5, end_ms: 2000, outcome: "failed" },
+        ],
+      },
+    });
+    expect(frame).toEqual({
+      t: Date.parse("2026-01-01T00:00:00.000Z"),
+      kind: "batch_metrics",
+      metrics: {
+        nodes: 5,
+        width: 3,
+        peakRunning: 3,
+        wallMs: 2000,
+        busyMs: 4200,
+        slotStarved: 2,
+        completed: 4,
+        failed: 1,
+        skipped: 0,
+        bindBoundaries: 1,
+        scopeBoundaries: 0,
+        checkpointBoundaries: 1,
+        escalations: 0,
+        scopeEscalations: 0,
+        timeline: [
+          { runId: "w1", startMs: 0, endMs: 1800, outcome: "completed" },
+          { runId: "w2", startMs: 5, endMs: 2000, outcome: "failed" },
+        ],
+      },
+    });
+  });
+
   it("attaches tool calls to the running run's agent", () => {
     const frames: RunFrame[] = [
       started("agent-2", "run-2"),

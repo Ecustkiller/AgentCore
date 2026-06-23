@@ -11,6 +11,7 @@ import type {
   QuestionPostedPayload,
   SSEEvent,
 } from "@/types/events";
+import { flushPendingContent } from "../contentBuffer";
 import { execMessageId } from "../helpers";
 import type { DispatchContext } from "../types";
 
@@ -32,6 +33,9 @@ export function handleInteractionEvent(
       return true;
     }
     case "checkpoint_required": {
+      // Flush buffered content first so the checkpoint marker anchors AFTER the CEO's
+      // preceding line (统一团队时间线; matches the conformance golden's step order).
+      flushPendingContent(conversationId);
       useConversationStore
         .getState()
         .addCheckpoint(
@@ -54,6 +58,7 @@ export function handleInteractionEvent(
       return true;
     }
     case "question_posted": {
+      flushPendingContent(conversationId);
       useConversationStore
         .getState()
         .addNonBlockingAsk(
@@ -63,6 +68,7 @@ export function handleInteractionEvent(
       return true;
     }
     case "plan_review_required": {
+      flushPendingContent(conversationId);
       useConversationStore
         .getState()
         .addPlanReview(

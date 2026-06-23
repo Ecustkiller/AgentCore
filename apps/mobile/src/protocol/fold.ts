@@ -28,6 +28,7 @@ import type {
   PlanReviewRequiredPayload,
   PlanReviewResolvedPayload,
   PlanRevisedPayload,
+  QuestionPostedPayload,
   ReasoningDeltaPayload,
   RunCompletedPayload,
   RunContextPayload,
@@ -63,6 +64,43 @@ const FINISH_TO_STATUS: Record<string, TurnStatus> = {
 
 function assertNever(x: never): never {
   throw new Error(`fold: unhandled SSE event type: ${JSON.stringify(x)}`);
+}
+
+// Orchestration tools (delegate/debate) never emit a `tool` step: they are stood in for
+// by a `team` marker dropped at their run_plan (统一团队时间线). Mirrors the backend
+// sink/oracle ORCHESTRATION_TOOLS — conformance pins this set equal.
+const ORCHESTRATION_TOOLS = new Set(["delegate", "debate"]);
+
+/** Drop a `team` marker fixing the collaboration graph's chronological slot in the CEO
+ * timeline. Deduped by execution_id (a debate's two run_plans share one id ⇒ one slot). */
+function pushTeamMarker(process: ProcessStep[], executionId: string): void {
+  if (!executionId) return;
+  if (process.some((s) => s.kind === "team" && s.execution_id === executionId))
+    return;
+  process.push({ kind: "team", execution_id: executionId });
+}
+
+/** Drop a `checkpoint` marker (blocking ask_user) at its chronological slot. */
+function pushCheckpointMarker(process: ProcessStep[], id: string): void {
+  if (!id) return;
+  if (process.some((s) => s.kind === "checkpoint" && s.checkpoint_id === id))
+    return;
+  process.push({ kind: "checkpoint", checkpoint_id: id });
+}
+
+/** Drop an `ask` marker (non-blocking question) at its chronological slot. */
+function pushAskMarker(process: ProcessStep[], id: string): void {
+  if (!id) return;
+  if (process.some((s) => s.kind === "ask" && s.ask_id === id)) return;
+  process.push({ kind: "ask", ask_id: id });
+}
+
+/** Drop a `plan_review` marker (plan-review gate) at its chronological slot. */
+function pushPlanReviewMarker(process: ProcessStep[], id: string): void {
+  if (!id) return;
+  if (process.some((s) => s.kind === "plan_review" && s.checkpoint_id === id))
+    return;
+  process.push({ kind: "plan_review", checkpoint_id: id });
 }
 
 /** Fold one 逐轮叙事 update (`debate_round_started` → focus only, verdict null;
@@ -193,8 +231,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         const p = ev.payload as ToolUseStartPayload;
         // A delegated worker's call (run-scoped) belongs to its run node, not the
         // captain's inline timeline — keep it out of `process` (统一团队时间线 = the
-        // CEO's OWN steps); still clear the run's live toolProgress below.
-        if (!p.run_id) {
+        // CEO's OWN steps); still clear the run's live toolProgress below. An
+        // orchestration tool (delegate/debate) is likewise skipped: its `team` marker
+        // (dropped at run_plan) stands in for it.
+        if (!p.run_id && !ORCHESTRATION_TOOLS.has(p.tool_name)) {
           process.push({
             kind: "tool",
             id: p.tool_call_id,
@@ -213,7 +253,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "tool_use_end": {
         const p = ev.payload as ToolUseEndPayload;
-        if (!p.run_id) {
+        if (!p.run_id && !ORCHESTRATION_TOOLS.has(p.tool_name)) {
           for (let i = process.length - 1; i >= 0; i--) {
             const step = process[i];
             if (step.kind === "tool" && step.id === p.tool_call_id) {
@@ -232,6 +272,9 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "run_plan": {
         const p = ev.payload as RunPlanPayload;
+        // 协作图时间线落点: the first plan of an execution drops a `team` marker fixing the
+        // collaboration graph's slot in the CEO timeline (later same-id batches no-op).
+        pushTeamMarker(process, p.execution_id);
         if (planId === null || planId === p.execution_id) {
           planId = p.execution_id;
           for (const a of p.agents)
@@ -492,6 +535,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "checkpoint_required": {
         const p = ev.payload as CheckpointRequiredPayload;
+        pushCheckpointMarker(process, p.checkpoint_id);
         pending = {
           kind: "checkpoint",
           checkpointId: p.checkpoint_id,
@@ -514,6 +558,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       }
       case "plan_review_required": {
         const p = ev.payload as PlanReviewRequiredPayload;
+        pushPlanReviewMarker(process, p.checkpoint_id);
         const runIds = (p.steps ?? []).map((s) => s.run_id);
         checkpointSteps.set(p.checkpoint_id, runIds);
         for (const rid of runIds) {
@@ -544,6 +589,13 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
+      case "question_posted": {
+        // 非阻塞提问 (ask_user blocking=false): drop an `ask` marker at its chronological
+        // slot; the turn does NOT pause (no `pending`). Mirrors the backend oracle.
+        const p = ev.payload as QuestionPostedPayload;
+        pushAskMarker(process, p.ask_id);
+        break;
+      }
       case "error":
         status = "failed";
         break;
@@ -560,7 +612,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "turn_saved":
       case "title_generated":
       case "tool_progress":
-      case "question_posted":
+      // 调度埋点量化 (深层诊断指标): a desktop-only 诊断模式 surface (run detail's 调度 block) —
+      // mobile has no diagnostic panel, so it folds to nothing here and stays out of the
+      // conformance ProjectedTurn (desktop folds it onto Execution.batches instead).
+      case "batch_metrics":
       case "workspace_op_required":
       case "workspace_promoted":
       case "handoff_snapshot_done":

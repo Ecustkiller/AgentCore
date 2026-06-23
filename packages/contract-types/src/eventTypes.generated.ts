@@ -4,6 +4,7 @@
 export type SSEEventType =
   | "approval_required"
   | "approval_resolved"
+  | "batch_metrics"
   | "checkpoint_required"
   | "checkpoint_resolved"
   | "citations"

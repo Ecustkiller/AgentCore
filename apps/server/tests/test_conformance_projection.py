@@ -60,11 +60,11 @@ def test_single_agent_error(projected):
 def test_multi_agent_delegate_tree(projected):
     p = projected["multi_agent_delegate"]
     assert p["status"] == "completed"
-    # 统一团队时间线: the captain's OWN inline timeline rides `process` (content + the
-    # `delegate` step that marks where the team graph slots in). The only tool step is the
-    # captain's delegate — worker outputs ride `runs`/`agents`, not this lane.
-    assert [s["kind"] for s in p["process"]] == ["content", "tool", "content"]
-    assert [s["tool_name"] for s in p["process"] if s["kind"] == "tool"] == ["delegate"]
+    # 统一团队时间线: the captain's OWN inline timeline rides `process` (content + a `team`
+    # marker fixing where the collaboration graph slots in — the orchestration call itself
+    # makes NO tool step). Worker outputs ride `runs`/`agents`, not this lane.
+    assert [s["kind"] for s in p["process"]] == ["content", "team", "content"]
+    assert [s["execution_id"] for s in p["process"] if s["kind"] == "team"] == ["exec1"]
     assert p["content"] == "我来安排团队。 团队已完成。"
     assert len(p["runs"]) == 2
     assert all(r["status"] == "completed" for r in p["runs"])
@@ -140,10 +140,13 @@ def test_multi_agent_worker_tool(projected):
     assert p["status"] == "running"
     assert p["finishReason"] is None
     # 统一团队时间线 (worker-tool 归属修): a delegated worker's tool_use carries run_id, so the
-    # process folds keep it OUT of the captain bubble — `process` is only the CEO's own intro
-    # content. The worker's tool rides the team graph (toolProgress, asserted below), never
-    # the CEO timeline.
-    assert p["process"] == [{"kind": "content", "text": "我来分工。"}]
+    # process folds keep it OUT of the captain bubble — `process` is the CEO's own intro
+    # content plus the `team` marker (dropped at run_plan) fixing the graph's slot. The
+    # worker's tool rides the team graph (toolProgress, asserted below), never the CEO timeline.
+    assert p["process"] == [
+        {"kind": "content", "text": "我来分工。"},
+        {"kind": "team", "execution_id": "exec1"},
+    ]
     w1 = next(a for a in p["agents"] if a["id"] == "w1")
     w2 = next(a for a in p["agents"] if a["id"] == "w2")
     assert w1["status"] == "completed"
