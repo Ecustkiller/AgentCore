@@ -69,6 +69,7 @@ jobs:
           build-args: |
             GIT_SHA=${{ steps.img.outputs.sha }}
             BUILT_AT=${{ steps.img.outputs.built_at }}
+            PYPI_INDEX=https://pypi.org/simple/
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

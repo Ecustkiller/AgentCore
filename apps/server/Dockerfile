@@ -2,28 +2,24 @@
 # 多阶段：builder 用 uv 按 uv.lock 复现依赖到 venv；runtime 只带 venv + 源码，
 # 非 root 运行。GIT_SHA / BUILT_AT 构建期注入并经 GET /version 暴露。
 #
-# 本地构建：
-#   docker build -t agentcore-api \
-#     --build-arg GIT_SHA="$(git rev-parse --short HEAD)" \
-#     --build-arg BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)" apps/server
+# 构建示例：
+#   生产机（默认清华镜像）：
+#     docker buildx build -t agentcore-api --build-arg GIT_SHA=... --build-arg BUILT_AT=... apps/server
+#   GHA / 境外 / 本地 Windows：
+#     docker buildx build ... --build-arg PYPI_INDEX=https://pypi.org/simple/ apps/server
 
 # ---- builder：按 uv.lock 解析依赖到 /app/.venv ----
 FROM python:3.12-slim AS builder
 
-# uv 经 pip + 清华 PyPI 镜像安装：
-# - 原 `ghcr.io/astral-sh/uv` 二进制镜像在大陆云 IP 拉取超时（ghcr.io blob 不可达）；
-# - 默认 PyPI 的 wheel CDN(files.pythonhosted.org) 在大陆极慢；
-# - 阿里云公网镜像对大 wheel(botocore 15MB) 单线程 19s、并发下会 trickle 到卡死，
-# 清华镜像同文件 ~2.8s 且稳定（实测于本生产机；故弃 aliyun 改 tuna）。
-# ⚠️ 镜像面向【生产机构建】：境外 / 本地 Docker Desktop 拉此镜像可能 403，勿在本地 build 推 ACR；
-#    GHA 不可用时用 deploy/scripts/remote-build-deploy.mjs 在生产机 build（见 cursor-deploy.mdc）。
-# 不钉 uv 版本（取最新）：--frozen 从锁文件复现，uv 版本只影响安装器机制不影响结果。
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple/ uv
+# PYPI_INDEX：生产机默认清华（大陆快）；GHA/境外传 https://pypi.org/simple/（清华对境外 IP 常 403）。
+# 原 ghcr.io/astral-sh/uv 二进制在大陆云拉取超时，故统一 pip 装 uv。
+ARG PYPI_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple/
+RUN pip install --no-cache-dir -i "${PYPI_INDEX}" uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=0 \
-    UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple/
+    UV_DEFAULT_INDEX=${PYPI_INDEX}
 
 WORKDIR /app
 
