@@ -2,16 +2,16 @@ name: Release Desktop
 
 # 桌面端安装包发布（docs/05-平台与运维/部署与运维.md §7.6 双仓发布）。
 #
-# 触发方式：
-#   · push tag desktop-v<ver>  → 预建 draft → 并行 Win + macOS(arm64)
-#   · workflow_dispatch        → 可选只构建 win / mac / all（补发单平台）
+# 触发方式（2026-06 后）：
+#   · 日常：Cursor 本地 build + 上传 AgentCore-releases（cursor-deploy.mdc）
+#   · workflow_dispatch：紧急备用（需 Actions 配额）
 #
 # 跨仓发布需 PAT：secrets.RELEASE_GH_TOKEN（对 Lawofall/AgentCore-releases 有写权）。
 
+# ⚠️ 已弃用 push desktop-v* 自动触发（2026-06）— 改由 Cursor Agent 本地构建 + 上传
+# 公开发布仓（见 cursor-deploy.mdc §桌面发版）。仅 workflow_dispatch 紧急备用。
+
 on:
-  push:
-    tags:
-      - "desktop-v*"
   workflow_dispatch:
     inputs:
       platform:

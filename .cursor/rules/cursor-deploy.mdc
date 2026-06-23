@@ -1,70 +1,88 @@
 ---
-description: 全端部署（后端+官网+手机+管理后台）——用户说「部署/上线」时读；凭据存 deploy/.env.deploy.local 不入仓。
+description: 全端部署（后端+官网+手机+管理后台+桌面）——用户说「部署/上线/发版」时读；凭据存 deploy/.env.deploy.local 不入仓。
 globs:
   - "apps/website/**"
   - "apps/mobile/**"
   - "apps/admin/**"
+  - "apps/desktop/**"
   - "apps/server/**"
   - "deploy/**"
+  - ".github/workflows/*"
 alwaysApply: false
 ---
 
 # Cursor 代部署
 
-Cloudflare Pages、admin SSH、后端 GHA 不可用时的兜底构建均走本地脚本 → [`部署与运维.md` §二/§7.8](/docs/05-平台与运维/部署与运维.md)。
+**2026-06 决策**：所有**部署/发版**不走 GitHub Actions push 触发（私有仓 Actions 配额/账单不可靠）。GHA workflow 仅 `workflow_dispatch` 紧急备用。→ [`部署与运维.md` §三](/docs/05-平台与运维/部署与运维.md)
 
-凭据：`deploy/.env.deploy.local`（从 `deploy/.env.deploy.local.example` 复制）。**禁止**在 chat 索要/回显 token 或 SSH 私钥。
+凭据：`deploy/.env.deploy.local`。**禁止**在 chat 索要/回显 token / SSH 私钥 / `RELEASE_GH_TOKEN`。
 
 ## 全端发布顺序
 
-| 步 | 动作 | 命令 / 触发 |
-|---|------|-------------|
-| 1 | 提交推送 `master` | `git push origin master` |
-| 2a | 后端镜像（GHA 正常） | `build-backend.yml` 自动推 ACR → `git tag prod-vN && git push origin prod-vN` → `deploy-backend.yml` |
-| 2b | 后端镜像（GHA 账单/配额失败） | `node deploy/scripts/remote-build-deploy.mjs <short-sha>`（**在生产机 build**，见下） |
+| 步 | 动作 | 命令 |
+|---|------|------|
+| 1 | 推送 `master` | `git push origin master` |
+| 2 | 后端（构建+部署一体） | `pnpm deploy:backend <short-sha>` |
 | 3 | 官网 | `pnpm -C apps/website deploy:pages` |
-| 4 | 手机网页 | `pnpm -C apps/mobile deploy:pages` |
+| 4 | 手机 | `pnpm -C apps/mobile deploy:pages` |
 | 5 | 管理后台 | `pnpm -C apps/admin deploy:production` |
 | 6 | 验收 | 见下表 |
+| 7 | 打发布点 tag（**不触发 GHA**） | `git tag prod-vN && git push origin prod-vN` |
 
-桌面端另轨：`desktop-v*` tag → `release-desktop.yml`；发版后更新官网 `FALLBACK_VERSION` 再跑步 3。跨轨道何时必须协同 → [`部署与运维.md` §7.4](/docs/05-平台与运维/部署与运维.md)（协议变更：后端+web 同日，桌面 7 日内 patch）。
+协议变更类另需桌面发版 → 见 §桌面发版。
+
+## 验收
+
+| 目标 | 检查 |
+|------|------|
+| API | `curl.exe https://app.fashitianxia.xyz/api/version` → `git_sha` |
+| 官网 / 手机 / admin | HTTP 200（见 §二 URL） |
+
+Windows 用 **`curl.exe`**（PowerShell `curl` = `Invoke-WebRequest`）。
+
+## 后端（生产机构建）
+
+```bash
+pnpm deploy:backend <short-sha>      # = remote-build-deploy.mjs
+pnpm deploy:backend:status           # 查 buildx 是否仍在跑
+```
+
+SSH 到生产机 → `git checkout` → `docker buildx build`（默认清华 PyPI）→ 推 ACR(VPC) → `finish-server.sh`。
+
+| 坑 | 对策 |
+|---|---|
+| 本地 Windows `docker build` | 加 `--build-arg PYPI_INDEX=https://pypi.org/simple/`；日常仍应在生产机构建 |
+| `uv sync` 15–30min+ | 首次无缓存正常，勿杀 |
+| 仅重部署、镜像已在 ACR | SSH：`bash deploy/scripts/finish-server.sh <sha>` |
+
+**禁止**依赖 `build-backend.yml` / `deploy-backend.yml` 的 push 触发。
+
+## 桌面发版
+
+```bash
+pnpm bump-version desktop patch
+git commit && git push && git tag desktop-vX.Y.Z && git push origin desktop-vX.Y.Z
+# tag 不再触发 GHA — 本地构建：
+pnpm -C apps/desktop build:win          # Windows（本机）
+pnpm -C apps/desktop build:mac            # macOS arm64（须 Apple Silicon Mac）
+# 上传至 Lawofall/AgentCore-releases draft vX.Y.Z（需 RELEASE_GH_TOKEN 环境变量）
+# draft 含 7 资产 → Publish → 更新 website FALLBACK_VERSION → deploy:pages
+```
+
+**禁止**依赖 `release-desktop.yml` 的 push 触发。
 
 ## 跨轨道发布（摘要）
 
 | 变更 | 后端 | mobile/admin | 桌面 |
 |------|------|--------------|------|
-| 纯后端 | 随时 `prod-*` | 不必 | 不必 |
-| 协议/fold 变更 | 同日 deploy | 同日 deploy | **7 日内** `desktop-v*` |
-| 纯 UI | 不必 | 随改动 deploy | 独立发版 |
+| 纯后端 | 随时 deploy | 不必 | 不必 |
+| 协议/fold | 同日 deploy | 同日 | 7 日内 patch |
+| 纯 UI | 不必 | 随改动 | 独立 |
 
 门禁：`pnpm conformance` 全绿。详见 docs §7.4。
 
-## 验收
-
-| 目标 | URL / 检查 |
-|------|------------|
-| API | `curl.exe https://app.fashitianxia.xyz/api/version` → `git_sha` 为目标短 SHA |
-| 官网 | `https://fashitianxia.xyz/download/` |
-| 手机 | `https://m.fashitianxia.xyz/` → HTTP 200 |
-| 管理后台 | `https://office.fashitianxia.xyz/` → HTTP 200 |
-
-Windows 验收用 **`curl.exe`**（PowerShell 的 `curl` 是 `Invoke-WebRequest` 别名）。
-
-## 后端兜底构建（必读）
-
-**症状**：`build-backend.yml` 数秒内失败，注解含 *payments have failed* / *spending limit*。
-
-**对策**：`node deploy/scripts/remote-build-deploy.mjs <short-sha>`（需 `DEPLOY_SSH_*`）。脚本 SSH 到生产机 → `git checkout` → `docker buildx build` → 推 ACR(VPC) → `finish-server.sh`。
-
-| 坑 | 对策 |
-|---|---|
-| 在本地 Windows `docker build apps/server` | 须加 `--build-arg PYPI_INDEX=https://pypi.org/simple/`（默认清华对境外 403） |
-| 生产机无 buildx | 脚本会自动 `apt install docker-buildx-plugin` |
-| `uv sync` 极慢（10–30min+） | 正常，勿杀；`node deploy/scripts/check-remote-build.mjs` 看 `docker buildx` 是否仍在跑 |
-| 仅重跑上线、镜像已在 ACR | SSH 执行 `bash deploy/scripts/finish-server.sh <short-sha>` |
-
 ## 纪律
 
-- 不重新启用 `deploy-website.yml` / `deploy-mobile-web.yml` / `deploy-admin.yml` 的 push 触发
-- `prod-*` tag 在**后端真正上线后**再打（漂移检测用）
-- admin / 后端 SSH 共用 `DEPLOY_SSH_HOST` / `DEPLOY_SSH_USER` / `DEPLOY_SSH_KEY_PATH`
+- 不重新启用任何 deploy/release workflow 的 **push / tag / schedule 自动部署**
+- `prod-*` / `desktop-v*` tag 仅作发布点标记与漂移检测
+- CI（`ci.yml`）仍走 GHA push/PR；账单挂时发布前本地跑 conformance + pytest
