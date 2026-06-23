@@ -13,7 +13,9 @@ FROM python:3.12-slim AS builder
 # uv 经 pip + Aliyun PyPI 镜像安装：原 `ghcr.io/astral-sh/uv` 二进制镜像在大陆云
 # IP 上拉取超时（ghcr.io blob 不可达），且默认 PyPI 的 wheel CDN
 # (files.pythonhosted.org) 在大陆也极慢——故统一走 Aliyun 镜像，稳定可复现。
-RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ 'uv~=0.5.0'
+# 不钉版本（取最新）：uv 0.5.x 在本机并发解包 wheel 时会死锁（全线程 futex_wait
+# 卡死，非网络问题）；--frozen 从锁文件复现，uv 版本只影响安装器机制不影响结果。
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
