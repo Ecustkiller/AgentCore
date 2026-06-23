@@ -10,6 +10,7 @@ name: Deploy Backend
 #
 # master 是 WIP 主干、HEAD≠可上线点（§7.2）：部署只认 prod-* 发布点，不随 master 自动上线。
 # 镜像由 build-backend.yml 在 push master 时已构建推 ACR，故 prod-* tag 指向的 SHA 必有镜像。
+# GHA 账单失败时改走 deploy/scripts/remote-build-deploy.mjs（见 cursor-deploy.mdc）。
 # 回退：对旧 prod-* tag（或旧 SHA）重跑本流（手动 dispatch 填 ref）——deploy-server.sh
 # 自动识别为回退、跳过正向迁移（库需对齐时从 backups/ 手动恢复，§7.7）。
 #

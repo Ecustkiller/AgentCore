@@ -14,7 +14,9 @@ FROM python:3.12-slim AS builder
 # - 原 `ghcr.io/astral-sh/uv` 二进制镜像在大陆云 IP 拉取超时（ghcr.io blob 不可达）；
 # - 默认 PyPI 的 wheel CDN(files.pythonhosted.org) 在大陆极慢；
 # - 阿里云公网镜像对大 wheel(botocore 15MB) 单线程 19s、并发下会 trickle 到卡死，
-#   清华镜像同文件 ~2.8s 且稳定（实测于本生产机；故弃 aliyun 改 tuna）。
+# 清华镜像同文件 ~2.8s 且稳定（实测于本生产机；故弃 aliyun 改 tuna）。
+# ⚠️ 镜像面向【生产机构建】：境外 / 本地 Docker Desktop 拉此镜像可能 403，勿在本地 build 推 ACR；
+#    GHA 不可用时用 deploy/scripts/remote-build-deploy.mjs 在生产机 build（见 cursor-deploy.mdc）。
 # 不钉 uv 版本（取最新）：--frozen 从锁文件复现，uv 版本只影响安装器机制不影响结果。
 RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple/ uv
 

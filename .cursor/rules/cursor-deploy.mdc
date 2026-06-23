@@ -1,32 +1,60 @@
 ---
-description: 部署官网/手机网页/管理后台——用户说「部署」时读；凭据存 deploy/.env.deploy.local 不入仓。
+description: 全端部署（后端+官网+手机+管理后台）——用户说「部署/上线」时读；凭据存 deploy/.env.deploy.local 不入仓。
 globs:
   - "apps/website/**"
   - "apps/mobile/**"
   - "apps/admin/**"
+  - "apps/server/**"
   - "deploy/**"
 alwaysApply: false
 ---
 
 # Cursor 代部署
 
-Cloudflare Pages 与 admin SSH 部署不走 GitHub Actions 自动触发 → [`部署与运维.md` §二](/docs/05-平台与运维/部署与运维.md)。
+Cloudflare Pages、admin SSH、后端 GHA 不可用时的兜底构建均走本地脚本 → [`部署与运维.md` §二/§7.8](/docs/05-平台与运维/部署与运维.md)。
 
-凭据：`deploy/.env.deploy.local`（从 `deploy/.env.deploy.local.example` 复制；也回退读 `apps/website/.env.deploy.local` 的 CF token）。**禁止**在 chat 索要/回显 token 或 SSH 私钥。
+凭据：`deploy/.env.deploy.local`（从 `deploy/.env.deploy.local.example` 复制）。**禁止**在 chat 索要/回显 token 或 SSH 私钥。
 
-| 目标 | 命令 | 验收 |
-|------|------|------|
-| 官网 | `pnpm -C apps/website deploy:pages` | `https://fashitianxia.xyz/download/` 版本号 |
-| 手机网页 | `pnpm -C apps/mobile deploy:pages` | `https://m.fashitianxia.xyz/` 可打开 |
-| 管理后台 | `pnpm -C apps/admin deploy:production` | `https://office.fashitianxia.xyz/` 可打开 |
+## 全端发布顺序
 
-## 何时部署
+| 步 | 动作 | 命令 / 触发 |
+|---|------|-------------|
+| 1 | 提交推送 `master` | `git push origin master` |
+| 2a | 后端镜像（GHA 正常） | `build-backend.yml` 自动推 ACR → `git tag prod-vN && git push origin prod-vN` → `deploy-backend.yml` |
+| 2b | 后端镜像（GHA 账单/配额失败） | `node deploy/scripts/remote-build-deploy.mjs <short-sha>`（**在生产机 build**，见下） |
+| 3 | 官网 | `pnpm -C apps/website deploy:pages` |
+| 4 | 手机网页 | `pnpm -C apps/mobile deploy:pages` |
+| 5 | 管理后台 | `pnpm -C apps/admin deploy:production` |
+| 6 | 验收 | 见下表 |
 
-- 用户说「部署官网 / 手机版 / 管理后台」
-- 对应 `apps/*` 改动且用户确认上线
-- 桌面发版后刷新下载页（更新 `FALLBACK_VERSION` → 官网 deploy:pages）
+桌面端另轨：`desktop-v*` tag → `release-desktop.yml`；发版后更新官网 `FALLBACK_VERSION` 再跑步 3。
+
+## 验收
+
+| 目标 | URL / 检查 |
+|------|------------|
+| API | `curl.exe https://app.fashitianxia.xyz/api/version` → `git_sha` 为目标短 SHA |
+| 官网 | `https://fashitianxia.xyz/download/` |
+| 手机 | `https://m.fashitianxia.xyz/` → HTTP 200 |
+| 管理后台 | `https://office.fashitianxia.xyz/` → HTTP 200 |
+
+Windows 验收用 **`curl.exe`**（PowerShell 的 `curl` 是 `Invoke-WebRequest` 别名）。
+
+## 后端兜底构建（必读）
+
+**症状**：`build-backend.yml` 数秒内失败，注解含 *payments have failed* / *spending limit*。
+
+**对策**：`node deploy/scripts/remote-build-deploy.mjs <short-sha>`（需 `DEPLOY_SSH_*`）。脚本 SSH 到生产机 → `git checkout` → `docker buildx build` → 推 ACR(VPC) → `finish-server.sh`。
+
+| 坑 | 对策 |
+|---|---|
+| 在本地 Windows `docker build apps/server` | **禁止**——Dockerfile 用清华 PyPI，境外 IP 常 403 |
+| 生产机无 buildx | 脚本会自动 `apt install docker-buildx-plugin` |
+| `uv sync` 极慢（10–30min+） | 正常，勿杀；`node deploy/scripts/check-remote-build.mjs` 看 `docker buildx` 是否仍在跑 |
+| 仅重跑上线、镜像已在 ACR | SSH 执行 `bash deploy/scripts/finish-server.sh <short-sha>` |
 
 ## 纪律
 
-- admin 需 `DEPLOY_SSH_HOST` / `DEPLOY_SSH_USER` / `DEPLOY_SSH_KEY_PATH`
 - 不重新启用 `deploy-website.yml` / `deploy-mobile-web.yml` / `deploy-admin.yml` 的 push 触发
+- `prod-*` tag 在**后端真正上线后**再打（漂移检测用）
+- admin / 后端 SSH 共用 `DEPLOY_SSH_HOST` / `DEPLOY_SSH_USER` / `DEPLOY_SSH_KEY_PATH`
