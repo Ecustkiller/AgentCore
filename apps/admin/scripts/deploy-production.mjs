@@ -14,7 +14,6 @@ import {
   sshScript,
 } from "../../../deploy/scripts/load-deploy-env.mjs";
 
-const ADMIN_DIR = join(REPO_ROOT, "apps/admin");
 const API_URL = "https://app.fashitianxia.xyz/api";
 const TARBALL = join(REPO_ROOT, "admin-dist.tgz");
 const NGINX_CONF = join(REPO_ROOT, "deploy/nginx/office-admin.conf");
@@ -22,14 +21,17 @@ const REMOTE_SCRIPT = join(REPO_ROOT, "deploy/scripts/admin-remote-install.sh");
 
 loadDeployEnv();
 
-run("pnpm install (admin)", "pnpm", ["install", "--no-frozen-lockfile", "--ignore-workspace"], {
-  cwd: ADMIN_DIR,
-  env: process.env,
-});
+const buildEnv = { ...process.env, VITE_API_URL: API_URL };
 
-run("pnpm build (admin)", "pnpm", ["build"], {
-  cwd: ADMIN_DIR,
-  env: { ...process.env, VITE_API_URL: API_URL },
+run(
+  "pnpm install (admin workspace)",
+  "pnpm",
+  ["install", "--frozen-lockfile", "--filter", "agentcore-admin..."],
+  { env: buildEnv },
+);
+
+run("pnpm build (admin)", "pnpm", ["--filter", "agentcore-admin", "build"], {
+  env: buildEnv,
 });
 
 run("tar admin dist", "tar", ["-czf", TARBALL, "-C", "apps/admin", "dist"]);
