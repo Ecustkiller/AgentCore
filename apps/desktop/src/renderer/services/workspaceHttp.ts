@@ -1,4 +1,9 @@
-import { ApiError, NetworkError, tryRefresh } from "@/services/api";
+import {
+  ApiError,
+  NetworkError,
+  getCsrfHeaders,
+  tryRefresh,
+} from "@/services/api";
 
 /**
  * Neutral HTTP primitives + wire types shared by every workspace/file REST client
@@ -26,11 +31,17 @@ export async function authedFetch(
   url: string,
   init: RequestInit = {},
 ): Promise<Response> {
+  const method = (init.method ?? "GET").toUpperCase();
+  const withCsrf = {
+    credentials: "include" as const,
+    ...init,
+    headers: { ...getCsrfHeaders(method), ...init.headers },
+  };
   let res: Response;
   try {
-    res = await fetch(url, { credentials: "include", ...init });
+    res = await fetch(url, withCsrf);
     if (res.status === 401 && (await tryRefresh())) {
-      res = await fetch(url, { credentials: "include", ...init });
+      res = await fetch(url, withCsrf);
     }
   } catch (cause) {
     throw new NetworkError(cause);

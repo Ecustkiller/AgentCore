@@ -1,91 +1,19 @@
-"""Turn Journal — persist a turn's execution fact stream and project it back.
-
-The §18.3 Turn Journal is the唯一事实源 for a turn's execution: an append-only,
-per-turn ordered stream of facts (run/tool/interaction events for a multi-agent
-turn; reasoning/tool 步 for a single-agent turn; a closing ``turn_end``). It lives
-in the ``turn_journal`` table (keyed by ``turn_id`` == the assistant ``message_id``)
-and REPLACES the old ``messages.runs`` JSON blob.
-
-「一切皆投影」(§18.3): nothing else stores the replay payload. The assistant
-message's ``MessageDetail.runs`` is rebuilt from the journal on read via
-:func:`runs_from_entries`; the write side flattens the in-memory sink payload to
-journal entries via :func:`entries_from_runs`. The two are exact inverses, so a
-turn round-trips through the journal unchanged.
-
-This module owns the (pure) projection transforms + a best-effort persist helper.
-Storage is the :class:`~agentcore.db.repositories.TurnJournalRepository` (the
-§18.6 ``Journal`` port's Postgres implementation); a future Sidecar swaps it for a
-local one without touching the engine.
-"""
+"""Journal projection (read path: ordered facts → runs payload / LLM window / resume seed)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from agentcore.config import settings
-from agentcore.core.logging import get_logger
-from agentcore.runtime.events import _JOURNAL_SURFACE_TYPES, EventType
+from agentcore.runtime.events import FinishReason, _JOURNAL_SURFACE_TYPES, EventType
 from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind
 from agentcore.runtime.runs.types import RunKind
 
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+from .entries import KIND_TURN_END, _PROCESS_PREFIX
 
+if TYPE_CHECKING:
     from agentcore.llm.protocol import LLMMessage
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunState
-
-logger = get_logger(__name__)
-
-# Journal kind for the per-turn outcome fact (finish_reason). The run/tool/
-# interaction facts keep their SSE event type as their kind; single-agent process
-# steps are prefixed so the two lanes are distinguishable in the table.
-KIND_TURN_END = "turn_end"
-_PROCESS_PREFIX = "process_"
-
-
-def entries_from_runs(runs: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Flatten an in-memory ``runs`` replay payload into ordered journal entries.
-
-    ``runs`` is the sink-built ``{events, finish_reason, process?}`` payload (see
-    ``runtime/pipeline._build_runs_payload``). Each entry is ``{kind, payload, ts}``
-    in emission order: the team-graph ``events`` first (each keeping its SSE event
-    type as ``kind`` + original ``timestamp`` as ``ts``), then any single-agent
-    ``process`` steps (kind-prefixed), then a closing ``turn_end`` carrying the
-    finish reason. Returns ``[]`` for an empty / absent payload.
-    """
-    if not runs:
-        return []
-    entries: list[dict[str, Any]] = []
-    for ev in runs.get("events") or []:
-        entries.append(
-            {
-                "kind": ev.get("type") or "",
-                "payload": ev.get("payload") or {},
-                "ts": ev.get("timestamp"),
-            }
-        )
-    for step in runs.get("process") or []:
-        entries.append(
-            {
-                "kind": f"{_PROCESS_PREFIX}{step.get('kind') or 'step'}",
-                "payload": step,
-                "ts": None,
-            }
-        )
-    # turn_end (the per-turn outcome fact): finish_reason + an optional error. A 报错回合
-    # carries its error here so the inline error card replays on reload (Tier 2 a) — the
-    # live error rides a transport-only ``error`` SSE event (never journaled), so this
-    # outcome fact is its only durable home. Emitted when EITHER is present.
-    finish_reason = runs.get("finish_reason")
-    run_error = runs.get("error")
-    if finish_reason is not None or run_error is not None:
-        payload: dict[str, Any] = {"finish_reason": finish_reason}
-        if run_error is not None:
-            payload["error"] = run_error
-        entries.append({"kind": KIND_TURN_END, "payload": payload, "ts": None})
-    return entries
-
 
 # A run node's terminal display event: the deltas-退场 synthesis splices the run's full
 # output/thinking right before it. Both COMPLETED and FAILED qualify — a failed worker
@@ -153,39 +81,23 @@ def _splice_synthetic_deltas(
 def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """Project ordered journal entries back into a ``runs`` replay payload (DISPLAY).
 
-    Inverse of :func:`entries_from_runs` for the team-graph ``events`` / single-agent
-    ``process`` / ``turn_end`` lanes: events rebuild the ``{type, payload, timestamp}``
-    shape the client folds, process steps restore verbatim, ``turn_end`` supplies
-    ``finish_reason``. Returns ``None`` when nothing is replayable, matching the
-    old「``messages.runs`` is NULL」contract so the client renders a plain bubble.
+    Inverse of :func:`entries.entries_from_runs` for the team-graph ``events`` /
+    single-agent ``process`` / ``turn_end`` lanes: events rebuild the
+    ``{type, payload, timestamp}`` shape the client folds, process steps restore
+    verbatim, ``turn_end`` supplies ``finish_reason``. Returns ``None`` when nothing
+    is replayable, matching the old「``messages.runs`` is NULL」contract so the client
+    renders a plain bubble.
 
-    Two journal lineages flow through here and must project IDENTICALLY (so a turn's
-    bubble is the same whoever wrote its journal):
+    Execution facts (``EXECUTION_ONLY_KINDS`` / ``message_final``) are skipped from
+    ``events`` — they carry engine-rebuild state, not client-foldable display. The
+    surface gate (parity with ``EventSink.execution_journal``) always runs: pre-gated
+    display-only journals (salvage / incomplete / local-relay) pass through unchanged;
+    execution-sourced journals drop captain-only noise. Plain chat turns (no graph,
+    process, context, or abnormal outcome) project to ``None``.
 
-    - **Legacy / seeded / resume-frame journals** (no §18.3 execution facts): the
-      events were ALREADY display-gated at write (``_build_runs_payload`` stored the
-      team graph only when surfaced, ``[]`` otherwise; a salvaged turn stored
-      ``{events:[], finish}`` on purpose). So these project as a PURE inverse —
-      untouched — preserving the round-trip contract + the cancelled-salvage bubble +
-      ``suspension_persistence`` resume hydration.
-    - **Execution-sourced journals** (carry execution facts — the fact log is the
-      single source, 执行级事件溯源 §18.3): these stored the FULL UNGATED stream
-      (the captain's own ``run_*`` / ``tool_use_*`` ride it too). Re-apply the display
-      gate so a non-surfaced turn does not suddenly render the captain's run events as
-      a team graph: drop ``events`` unless a surface type is present (parity with
-      ``EventSink.execution_journal``), and project to ``None`` when nothing is left to
-      show (a plain chat turn — its facts persist for window rebuild but display as a
-      plain bubble). The discriminator is the presence of execution facts, NOT the
-      content, so the two clauses never fire on a legacy/salvage journal.
-
-    deltas 退场: an execution-sourced journal no longer carries per-token
-    ``run_output_delta`` / ``run_reasoning_delta`` (they are transport-only liveliness
-    now). Each agent run's full output + thinking is its ``message_final`` fact, from
-    which :func:`_splice_synthetic_deltas` reconstructs ONE equivalent delta block per
-    run, spliced just before the run's terminal event — so the client fold replays the
-    same 输出 / 思考 with zero change. (A legacy journal that still carries real deltas
-    has no ``message_final`` facts, so the synthesis is a no-op and it round-trips
-    untouched.)
+    deltas 退场: per-token worker deltas are no longer journaled; each agent run's full
+    output lives in its ``message_final`` fact, from which :func:`_splice_synthetic_deltas`
+    reconstructs one equivalent delta block per run before the terminal event.
     """
     if not entries:
         return None
@@ -195,7 +107,6 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
     # The 报错回合 outcome (code + message) carried on turn_end, projected back so the
     # bubble rebuilds its inline error card on reload (Tier 2 a). None for a clean turn.
     turn_error: dict[str, Any] | None = None
-    has_exec_facts = False
     # 上下文传递可视化 通道①: the CEO captain's received context is TURN-LEVEL (the chat
     # bubble above the graph), so it is lifted out of the node events into captain_context
     # — present even on a pure-chat turn (no surface), where the events gate to []. Keyed
@@ -220,7 +131,6 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
             # text is replayed as a synthetic delta block (spliced below). Collect
             # it keyed by run_id; the captain's own message_final is collected too but
             # is never synthesized (its run_id is not an agent run — see the splice).
-            has_exec_facts = True
             run_id = payload.get("run_id")
             if run_id:
                 final_outputs[run_id] = {
@@ -229,12 +139,8 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
                 }
             continue
         elif kind in EXECUTION_ONLY_KINDS:
-            # Execution-level facts (§18.3: turn_started / round_boundary / llm_call /
-            # note / tool_call / plan_snapshot) carry engine-rebuild state, not client-
-            # foldable display events — skip them so they never leak into runs.events
-            # (the client fold would choke on an unknown event type). Their presence
-            # marks this as an execution-sourced journal → re-gate the display below.
-            has_exec_facts = True
+            # Execution-level facts carry engine-rebuild state, not client-foldable
+            # display events — skip them so they never leak into runs.events.
             continue
         elif kind.startswith(_PROCESS_PREFIX):
             process.append(payload)
@@ -267,20 +173,21 @@ def runs_from_entries(entries: list[dict[str, Any]] | None) -> dict[str, Any] | 
             events.append({"type": kind, "payload": payload, "timestamp": entry.get("ts")})
     if final_outputs:
         events = _splice_synthetic_deltas(events, final_outputs, agent_run_ids)
-    if has_exec_facts:
-        # Surface gate (parity with EventSink.execution_journal): the captain's own
-        # run events are execution detail, not a replayable team graph — show events
-        # only when the turn surfaced (delegated / checkpointed).
-        if not any(e["type"] in _JOURNAL_SURFACE_TYPES for e in events):
-            events = []
-        # None-gate: an execution-sourced turn with no graph + no process is a plain
-        # chat turn → render a plain bubble (the facts still persist for rebuild). A
-        # captain_context keeps it non-None: a pure-chat turn still has「收到的上下文」to
-        # replay on the CEO bubble (上下文传递可视化 通道①), even with no graph/process.
-        # A turn_error keeps it non-None too: a 报错回合 (e.g. the captain failed after
-        # workers ran) must still replay its error card on reload (Tier 2 a).
-        if not events and not process and not captain_context and not turn_error:
-            return None
+    # Surface gate (parity with EventSink.execution_journal): idempotent on journals
+    # that were already gated at write (salvage / incomplete / local-relay).
+    if not any(e["type"] in _JOURNAL_SURFACE_TYPES for e in events):
+        events = []
+    # None-gate: a plain chat turn (clean end_turn, no graph/process/context/error)
+    # → render a plain bubble. Abnormal finishes (cancelled / error / …) and salvage
+    # payloads with only ``turn_end`` still project non-None.
+    if (
+        not events
+        and not process
+        and not captain_context
+        and not turn_error
+        and (finish_reason is None or finish_reason == FinishReason.END_TURN.value)
+    ):
+        return None
     runs: dict[str, Any] = {"events": events, "finish_reason": finish_reason}
     if process:
         runs["process"] = process
@@ -331,7 +238,7 @@ def window_from_journal(
     ``run_id`` scopes a multi-agent turn to one run; ``None`` infers the captain (the
     run of the first ``role="captain"`` round_boundary — the resume target, whose head
     is ``turn_started``). Returns ``None`` when there is no ``turn_started`` to anchor
-    the head (a legacy / display-only journal): only the captain window is reconstructed,
+    the head (a display-only journal): only the captain window is reconstructed,
     whose head is a fact; a worker's task-prompt head is not yet journaled.
     """
     if not entries:
@@ -465,7 +372,7 @@ def completed_from_journal(
 
     Last write per ``run_id`` wins (a retried / revised run supersedes). The captain's own
     ``message_final`` (content/reasoning, no ``phase``) is NOT a seed and is skipped, as is
-    a legacy / display journal with no run-final facts (→ ``{}``).
+    a display-only journal with no run-final facts (→ ``{}``).
     """
     if not entries:
         return {}
@@ -496,7 +403,7 @@ def plan_from_journal(entries: list[dict[str, Any]] | None) -> RunPlan | None:
     the EXACT plan (its already-minted run_ids matching the ``completed_from_journal`` seed)
     and re-drives the unfinished tail, no旁路 frame.
 
-    Returns ``None`` when no ``plan_snapshot`` fact is present (a legacy / display journal,
+    Returns ``None`` when no ``plan_snapshot`` fact is present (a display-only journal,
     or a non-delegate turn) — the caller falls back to the in-memory carrier.
     """
     if not entries:
@@ -508,62 +415,3 @@ def plan_from_journal(entries: list[dict[str, Any]] | None) -> RunPlan | None:
         if (entry.get("kind") or "") == FactKind.PLAN_SNAPSHOT.value:
             latest = entry.get("payload") or {}
     return plan_from_json(latest) if latest is not None else None
-
-
-async def persist_turn_journal(
-    session: AsyncSession,
-    *,
-    message_id: str | None,
-    conversation_id: str,
-    trace_id: str | None,
-    runs: dict[str, Any] | None,
-    entries: list[dict[str, Any]] | None = None,
-) -> None:
-    """Record a turn's replay payload to the journal (唯一事实源), best-effort.
-
-    Called from the message-persistence tail right after the assistant row is
-    written, on the SAME session, keyed by the assistant ``message_id``. Replaces
-    the turn's rows wholesale (so a resume reusing the id re-persists cleanly). A
-    failure must NEVER break the turn (文档铁律, same posture as the cost ledger): it
-    rolls back only this write and logs — the reply is already committed and the
-    worst case is a turn that won't replay its graph.
-
-    ``entries`` is the pre-composed §18.3 fact-log stream (the single ordered log:
-    the engine's execution facts interleaved with the forwarded display facts, plus
-    the process timeline + ``turn_end`` tail). When given it is stored verbatim — the
-    fact log is now the source. ``runs`` is the legacy display payload, flattened via
-    :func:`entries_from_runs` when no fact log is supplied (the manual salvage / local
-    relay / resume call sites that do not run the fact-recording pipeline).
-    """
-    entries = entries if entries is not None else entries_from_runs(runs)
-    if not message_id or not entries:
-        return
-    from agentcore.db.repositories import TurnJournalRepository
-
-    try:
-        await TurnJournalRepository(session).record(
-            turn_id=message_id,
-            conversation_id=conversation_id,
-            trace_id=trace_id,
-            entries=entries,
-        )
-    except Exception as e:  # noqa: BLE001 — journal persistence must never break the turn
-        await session.rollback()
-        logger.warning(
-            "journal.persist_failed",
-            message_id=message_id,
-            error=str(e),
-        )
-
-    # D2 观测：把同一份耐久 entries 投影成执行 span 树并导出（off the user path、
-    # best-effort）。这里是所有回合路径（首轮 / 重答 / handoff / resume / salvage）写
-    # 耐久 journal 的唯一汇点，故 span 树天然覆盖全路径。导出自身吞异常、绝不影响回合。
-    if settings.observability_span_export_enabled:
-        from agentcore.runtime.spans import export_turn_spans
-
-        export_turn_spans(
-            entries,
-            trace_id=trace_id,
-            conversation_id=conversation_id,
-            turn_id=message_id,
-        )

@@ -3,6 +3,7 @@
 from typing import Any
 
 from agentcore.runtime.checkpoints import CheckpointDecision
+from agentcore.runtime.journal import runs_from_entries
 
 
 def parse_decision(raw: Any) -> CheckpointDecision:
@@ -30,6 +31,8 @@ def trim_result(turn_id: str, result: dict[str, Any]) -> dict[str, Any]:
     """
     finish = result.get("finish_reason")
     finish_str = finish.value if hasattr(finish, "value") else (str(finish) if finish else "error")
+    journal_entries = result.get("journal_entries")
+    runs = runs_from_entries(journal_entries) if journal_entries else None
     return {
         "turnId": turn_id,
         "messageId": result.get("message_id"),
@@ -47,6 +50,6 @@ def trim_result(turn_id: str, result: dict[str, Any]) -> dict[str, Any]:
         # relays them verbatim). Spend is metered at the cloud inference proxy (Slice 4a),
         # not relayed from here.
         "citations": result.get("citations") or [],
-        "runs": result.get("runs"),
+        "runs": runs,
         "error": result.get("error"),
     }

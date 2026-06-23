@@ -1,3 +1,4 @@
+import { PreviewRecorderButton } from "@/components/layout/PreviewRecorderButton";
 import { WindowControls } from "@/components/layout/WindowControls";
 import { Button, IconButton } from "@/components/ui";
 import { isMac, macTitleBarInsetClass } from "@/lib/platform";
@@ -43,6 +44,8 @@ export function TitleBar() {
 
       {/* Search trigger + window controls (Win/Linux; macOS uses traffic lights) */}
       <div className="flex items-center [-webkit-app-region:no-drag]">
+        {/* Dev-only: record a real turn into the offline preview (#/preview). */}
+        {import.meta.env.DEV && <PreviewRecorderButton />}
         <Button
           variant="neutral"
           onClick={openSearch}

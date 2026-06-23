@@ -170,25 +170,52 @@ describe("showRunDetail", () => {
 
 describe("showContentDetail", () => {
   it("pins an endpoint bubble as a content tab, reveals + activates it", () => {
-    panel().showContentDetail(MID, "answer-msg", "最终回答");
+    panel().showContentDetail(MID, "answer-msg", "最终回答", "answer");
     const id = contentDetailTabId(MID, "answer-msg");
     expect(panel().open).toBe(true);
     expect(panel().activeTabId).toBe(id);
     const tab = panel().tabs[0];
     expect(tab.kind).toBe("content");
     expect(tab.title).toBe("最终回答");
-    // The content tab carries the bubble to render, not a runId.
+    // The content tab carries the bubble to render + which endpoint it is (drives
+    // the tab icon), not a runId.
     if (tab.kind === "content") {
       expect(tab.contentMessageId).toBe("answer-msg");
+      expect(tab.endpoint).toBe("answer");
     }
   });
 
   it("coexists with run tabs and dedups by its own id", () => {
     panel().showRunDetail(MID, "run-1", "研究员");
-    panel().showContentDetail(MID, "answer-msg", "最终回答");
-    panel().showContentDetail(MID, "answer-msg", "最终回答");
+    panel().showContentDetail(MID, "answer-msg", "最终回答", "answer");
+    panel().showContentDetail(MID, "answer-msg", "最终回答", "answer");
     // One run tab + one content tab; the re-open dedups rather than appends.
     expect(panel().tabs).toHaveLength(2);
     expect(panel().tabs.map((t) => t.kind)).toEqual(["run", "content"]);
+  });
+});
+
+describe("closeContentTabs", () => {
+  it("drops content tabs but keeps run tabs, re-activating a survivor", () => {
+    panel().showRunDetail(MID, "run-1", "研究员");
+    panel().showContentDetail(MID, "answer-msg", "最终回答", "answer");
+    // The content tab is active; closing content tabs falls back to the run tab.
+    panel().closeContentTabs();
+    expect(panel().tabs.map((t) => t.kind)).toEqual(["run"]);
+    expect(panel().activeTabId).toBe(tabId("run-1"));
+  });
+
+  it("falls back to the 工作区 home when no detail tab survives", () => {
+    panel().showContentDetail(MID, "answer-msg", "最终回答", "answer");
+    panel().closeContentTabs();
+    expect(panel().tabs).toHaveLength(0);
+    expect(panel().activeTabId).toBe(WORKSPACE_TAB_ID);
+  });
+
+  it("is a no-op when there are no content tabs", () => {
+    panel().showRunDetail(MID, "run-1", "研究员");
+    panel().closeContentTabs();
+    expect(panel().tabs.map((t) => t.id)).toEqual([tabId("run-1")]);
+    expect(panel().activeTabId).toBe(tabId("run-1"));
   });
 });

@@ -4,11 +4,33 @@ invites."""
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
 from agentcore.db.models import Credentials, Invite, RefreshToken, UserLlmKey
+
+
+def _invite_status_clause(status: str, *, now: datetime):
+    """SQL filter mirroring ``_invite_status`` in api/routes/auth.py."""
+    if status == "used":
+        return Invite.used_at.isnot(None)
+    if status == "revoked":
+        return and_(Invite.used_at.is_(None), Invite.revoked_at.isnot(None))
+    if status == "expired":
+        return and_(
+            Invite.used_at.is_(None),
+            Invite.revoked_at.is_(None),
+            Invite.expires_at.isnot(None),
+            Invite.expires_at <= now,
+        )
+    if status == "active":
+        return and_(
+            Invite.used_at.is_(None),
+            Invite.revoked_at.is_(None),
+            or_(Invite.expires_at.is_(None), Invite.expires_at > now),
+        )
+    raise ValueError(f"unknown invite status filter: {status}")
 
 
 class CredentialsRepository:
@@ -182,6 +204,28 @@ class InviteRepository:
         await self._session.refresh(invite)
         return invite
 
+    async def create_many(
+        self,
+        *,
+        codes: list[str],
+        created_by: str | None = None,
+        expires_at: datetime | None = None,
+    ) -> Sequence[Invite]:
+        invites = [
+            Invite(
+                id=new_id(),
+                code=code,
+                created_by=created_by,
+                expires_at=expires_at,
+            )
+            for code in codes
+        ]
+        self._session.add_all(invites)
+        await self._session.commit()
+        for invite in invites:
+            await self._session.refresh(invite)
+        return invites
+
     async def get_by_code(self, code: str) -> Invite | None:
         result = await self._session.execute(select(Invite).where(Invite.code == code))
         return result.scalar_one_or_none()
@@ -195,6 +239,31 @@ class InviteRepository:
             select(Invite).order_by(Invite.created_at.desc()).limit(limit)
         )
         return result.scalars().all()
+
+    async def list_page(
+        self,
+        *,
+        offset: int,
+        limit: int,
+        status: str | None = None,
+        now: datetime | None = None,
+    ) -> tuple[Sequence[Invite], int]:
+        now = now or datetime.now(UTC)
+        filters = [_invite_status_clause(status, now=now)] if status is not None else []
+
+        total_result = await self._session.execute(
+            select(func.count()).select_from(Invite).where(*filters)
+        )
+        total = total_result.scalar_one()
+
+        result = await self._session.execute(
+            select(Invite)
+            .where(*filters)
+            .order_by(Invite.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return result.scalars().all(), total
 
     async def mark_used(self, invite_id: str, *, used_by: str) -> None:
         await self._session.execute(

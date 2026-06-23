@@ -84,6 +84,14 @@ def test_result_stop_defaults_closing_when_no_note():
     assert res.final_text  # a non-empty default closing, so the bubble is never blank
 
 
+def test_result_adjust_treated_as_continue():
+    res = ask_user_tool_result(
+        CheckpointResponse(decision=CheckpointDecision.ADJUST, note="走稳一点", selected=["A"])
+    )
+    assert res.effect is ToolEffect.CONTINUE
+    assert "走稳一点" in res.output
+
+
 def test_result_timeout_hands_back_to_ceo():
     res = ask_user_tool_result(CheckpointResponse(decision=CheckpointDecision.TIMEOUT))
     # not terminal — the CEO decides how to wrap up on the next round.

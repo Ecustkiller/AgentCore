@@ -8,37 +8,58 @@ import {
   LayoutDashboard,
   LogOut,
   type LucideIcon,
+  MessageSquare,
+  ScrollText,
   Server,
   ShieldCheck,
   Ticket,
   Users,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
 /**
- * The console's sections (管理员后台.md): 概览 (landing hub) / 用户 (P0) / 邀请码
- * (P0) / 分析 (P1, 成本 + 健康 merged) / 系统 (P2).
+ * The console's sections: 概览 / 用户 / 邀请码 / 分析 / 系统 / 审计.
+ * URL-routed via react-router for bookmarkable deep links.
  */
-export type AdminTab = "overview" | "users" | "invites" | "analytics" | "system";
+export type AdminTab =
+  | "overview"
+  | "users"
+  | "invites"
+  | "conversations"
+  | "analytics"
+  | "system"
+  | "audit";
 
-const NAV: { id: AdminTab; label: string; icon: LucideIcon }[] = [
-  { id: "overview", label: "概览", icon: LayoutDashboard },
-  { id: "users", label: "用户", icon: Users },
-  { id: "invites", label: "邀请码", icon: Ticket },
-  { id: "analytics", label: "分析", icon: BarChart3 },
-  { id: "system", label: "系统", icon: Server },
-];
+const NAV: { id: AdminTab; label: string; icon: LucideIcon; path: string }[] =
+  [
+    { id: "overview", label: "概览", icon: LayoutDashboard, path: "/overview" },
+    { id: "users", label: "用户", icon: Users, path: "/users" },
+    { id: "invites", label: "邀请码", icon: Ticket, path: "/invites" },
+    { id: "conversations", label: "对话", icon: MessageSquare, path: "/conversations/conversations" },
+    { id: "analytics", label: "分析", icon: BarChart3, path: "/analytics/cost" },
+    { id: "audit", label: "审计", icon: ScrollText, path: "/audit" },
+    { id: "system", label: "系统", icon: Server, path: "/system" },
+  ];
 
-export function AdminShell({
-  active,
-  onNavigate,
-  children,
-}: {
-  active: AdminTab;
-  onNavigate: (tab: AdminTab) => void;
-  children: ReactNode;
-}) {
+function navClassName({ isActive }: { isActive: boolean }) {
+  return cn(
+    "flex h-10 w-full items-center gap-3 rounded-lg px-3 text-base outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+    isActive
+      ? "bg-accent font-medium text-accent-foreground"
+      : "text-muted-foreground hover:bg-accent hover:text-foreground",
+  );
+}
+
+function navItemActive(id: AdminTab, pathname: string): boolean {
+  if (id === "users") return pathname.startsWith("/users");
+  if (id === "analytics") return pathname.startsWith("/analytics");
+  if (id === "conversations") return pathname.startsWith("/conversations");
+  return pathname === NAV.find((n) => n.id === id)?.path;
+}
+
+export function AdminShell() {
+  const location = useLocation();
   const user = useAuthStore((s) => s.user);
   const setUnauthenticated = useAuthStore((s) => s.setUnauthenticated);
 
@@ -64,23 +85,17 @@ export function AdminShell({
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3">
           {NAV.map((item) => {
             const Icon = item.icon;
-            const isActive = item.id === active;
+            const isActive = navItemActive(item.id, location.pathname);
             return (
-              <button
+              <NavLink
                 key={item.id}
-                type="button"
+                to={item.path}
                 aria-current={isActive ? "page" : undefined}
-                onClick={() => onNavigate(item.id)}
-                className={cn(
-                  "flex h-10 w-full items-center gap-3 rounded-lg px-3 text-base outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-                  isActive
-                    ? "bg-accent font-medium text-accent-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
+                className={navClassName({ isActive })}
               >
                 <Icon size={18} className="shrink-0" />
                 {item.label}
-              </button>
+              </NavLink>
             );
           })}
         </nav>
@@ -107,7 +122,9 @@ export function AdminShell({
           </Button>
         </div>
       </aside>
-      <main className="flex-1 overflow-y-auto">{children}</main>
+      <main className="flex-1 overflow-y-auto">
+        <Outlet />
+      </main>
     </div>
   );
 }

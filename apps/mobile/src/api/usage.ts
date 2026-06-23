@@ -4,15 +4,13 @@
 // (api/routes 工资单). The LIVE turn already carries its cost in the SSE message_end
 // (the fold's ProjectedTurn.cost), so this endpoint is only for RELOADED history — a
 // persisted MessageDetail does not carry cost. Supplementary: callers swallow failures
-// (cost must never break the chat). Types are a hand-written subset of the backend
-// TurnCost schema (schemas.py), matching the skeleton convention in conversations.ts.
+// (cost must never break the chat). REST DTOs track OpenAPI via contract-rest-types.
 import { apiFetch } from "@/api/client";
+import type { components } from "@/types/api.generated";
 
-interface TurnCost {
-  message_id: string;
-  // Integer nano-USD (1 USD = 1e9); `cny_total` is a server-computed display value.
-  cost: { total: number; currency: string; cny_total: number };
-}
+type Schemas = components["schemas"];
+
+type TurnCost = Schemas["TurnCost"];
 
 /**
  * A turn's persisted cost total in integer nano-USD (0 when unmetered / unknown / not
@@ -30,54 +28,15 @@ export async function getMessageCostTotal(messageId: string): Promise<number> {
   }
 }
 
-// --- Account dashboard (设置·用量) — hand-written subset of UsageSummary (schemas.py). ---
+// --- Account dashboard (设置·用量) ---
 
-/** Token counts; integer nano-USD cost + server-computed ¥ (`cny_total`, no re-pricing). */
-export interface CostBreakdown {
-  total: number;
-  currency: string;
-  cny_total: number;
-}
-export interface UsageBreakdown {
-  input: number;
-  output: number;
-  reasoning: number;
-  cache_hit: number;
-  cache_miss: number;
-}
-export interface UsageWindow {
-  usage: UsageBreakdown;
-  cost: CostBreakdown;
-  requests: number;
-}
-/** Free-tier limits; 0 = unlimited. Money is USD nano internally. */
-export interface QuotaStatus {
-  daily_tokens: number;
-  monthly_cost_nano: number;
-  daily_requests: number;
-}
-/** One role's monthly spend — the team payroll grouped by role (本月各角色花销). */
-export interface RoleCostLine {
-  role: string;
-  cost_total: number;
-  turns: number;
-}
-/** One UTC day's total spend — a point in the 7-day trend. */
-export interface DailyCost {
-  date: string;
-  cost_total: number;
-}
-export interface UsageSummary {
-  today: UsageWindow;
-  month: UsageWindow;
-  month_by_role: RoleCostLine[];
-  recent_daily_cost: DailyCost[];
-  quota: QuotaStatus;
-  // Single server-owned FX rate so the client formats ¥ without hard-coding it.
-  cny_per_usd: number;
-  // Present under BYOK so the dashboard reframes 额度 as 自带 Key 不限额.
-  billing_mode?: string;
-}
+export type CostBreakdown = Schemas["CostBreakdown"];
+export type UsageBreakdown = Schemas["UsageBreakdown"];
+export type UsageWindow = Schemas["UsageWindow"];
+export type QuotaStatus = Schemas["QuotaStatus"];
+export type RoleCostLine = Schemas["RoleCostLine"];
+export type DailyCost = Schemas["DailyCost"];
+export type UsageSummary = Schemas["UsageSummary"];
 
 /** Account dashboard: today's tokens/cost, the month's cost, quota + FX rate. */
 export async function getUsageSummary(): Promise<UsageSummary> {

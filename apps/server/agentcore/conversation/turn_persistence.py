@@ -18,7 +18,7 @@ from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.memory.consolidation import schedule_consolidation
 from agentcore.runtime.events import EventSink, FinishReason, title_generated
-from agentcore.runtime.journal import entries_from_runs, persist_turn_journal
+from agentcore.runtime.journal import journal_entries_from_display_runs, persist_turn_journal
 from agentcore.workspace.protocol import WorkspaceBackend
 from agentcore.workspace.snapshots import create_snapshot
 
@@ -65,7 +65,6 @@ async def persist_turn_result(
     assistant_reply = result.get("content") or ""
     assistant_reasoning = result.get("reasoning_content") or None
     assistant_citations = result.get("citations") or None
-    assistant_runs = result.get("runs") or None
     journal_entries = result.get("journal_entries")
     cost_runs = result.get("cost_runs") or []
 
@@ -84,10 +83,13 @@ async def persist_turn_result(
         finish_value is not None and finish_value != FinishReason.END_TURN.value
     )
     synth_entries = (
-        entries_from_runs({"finish_reason": finish_value, "error": run_error})
+        journal_entries_from_display_runs(
+            {"finish_reason": finish_value, "error": run_error}
+        )
         if journal_entries is None and abnormal
         else None
     )
+    durable_entries = journal_entries if journal_entries is not None else synth_entries
 
     async with async_session_factory() as session:
         msg_repo = MessageRepository(session)
@@ -116,8 +118,7 @@ async def persist_turn_result(
                 message_id=result.get("message_id"),
                 conversation_id=conversation_id,
                 trace_id=trace_id,
-                runs=assistant_runs,
-                entries=journal_entries if journal_entries is not None else synth_entries,
+                entries=durable_entries,
             )
 
         if cost_runs:
@@ -247,10 +248,12 @@ async def persist_incomplete_turn(
                 message_id=msg.id,
                 conversation_id=conversation_id,
                 trace_id=trace_id,
-                runs={
-                    "events": journal,
-                    "finish_reason": FinishReason.CANCELLED.value,
-                },
+                entries=journal_entries_from_display_runs(
+                    {
+                        "events": journal,
+                        "finish_reason": FinishReason.CANCELLED.value,
+                    }
+                ),
             )
         logger.info(
             "chat.incomplete_persisted",

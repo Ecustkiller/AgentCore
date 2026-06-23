@@ -147,3 +147,26 @@ def test_every_tool_exposes_catalog_fields():
         assert isinstance(schema.category, ToolCategory)
         assert isinstance(schema.approval, ToolApproval)
         assert isinstance(schema.parameters, dict)
+
+
+def test_worker_registry_omits_code_execute_on_cloud_server():
+    from pathlib import Path
+
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+    from agentcore.workspace.server import ServerWorkspace
+
+    backend = ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox(), location="server")
+    names = {s.name for s in build_worker_registry(backend=backend).list_all()}
+    assert "code_execute" not in names
+    assert "escalate" in names
+
+
+def test_worker_registry_keeps_code_execute_on_local_server_workspace():
+    from pathlib import Path
+
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+    from agentcore.workspace.server import ServerWorkspace
+
+    backend = ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox(), location="local")
+    names = {s.name for s in build_worker_registry(backend=backend).list_all()}
+    assert "code_execute" in names

@@ -1,15 +1,13 @@
-import type { AdminTab } from "@/components/AdminShell";
-import { ConversationReplay } from "@/components/ConversationReplay";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { cn, fmtCny, fmtInt, fmtMs, fmtTime } from "@/lib/utils";
-import type { AnalyticsSegment } from "@/pages/AnalyticsPage";
 import type { TurnMetricLine } from "@/services/adminObservability";
 import { type AdminOverview, fetchOverview } from "@/services/adminOverview";
 import { errorMessage } from "@/services/api";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 
 /** A 0..1 fraction as a 1-decimal percentage (e.g. 0.042 → "4.2%"). */
 function fmtPct(rate: number): string {
@@ -25,16 +23,16 @@ const ERROR_PREVIEW_LIMIT = 5;
  * into the single page that owns the detail (分析 / 用户 / 系统). It deliberately
  * does not re-render the full charts/tables those pages own.
  */
-export function OverviewPage({
-  onNavigate,
-}: {
-  onNavigate: (tab: AdminTab, segment?: AnalyticsSegment) => void;
-}) {
+export function OverviewPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [data, setData] = useState<AdminOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Drill-in: an error row opens the shared 会话复盘 timeline (replacing the page).
-  const [replayId, setReplayId] = useState<string | null>(null);
+
+  const openReplay = (conversationId: string) => {
+    navigate(`/replay/${conversationId}`, { state: { from: location.pathname } });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,16 +49,6 @@ export function OverviewPage({
   useEffect(() => {
     void load();
   }, [load]);
-
-  if (replayId) {
-    return (
-      <ConversationReplay
-        conversationId={replayId}
-        backLabel="返回概览"
-        onBack={() => setReplayId(null)}
-      />
-    );
-  }
 
   const today = data?.today;
   const errTone =
@@ -114,7 +102,7 @@ export function OverviewPage({
               label="今日活跃用户"
               value={fmtInt(data.active_users_today)}
               sub={`共 ${fmtInt(data.users_active)} 活跃账号`}
-              onClick={() => onNavigate("users")}
+              onClick={() => navigate("/users")}
             />
             <MetricCard
               label="今日回合"
@@ -124,24 +112,24 @@ export function OverviewPage({
                   错误 {fmtInt(today.errors)} · {fmtPct(today.error_rate)}
                 </Badge>
               }
-              onClick={() => onNavigate("analytics", "health")}
+              onClick={() => navigate("/analytics/health")}
             />
             <MetricCard
               label="今日成本"
               value={fmtCny(data.cost_today.cny_total)}
-              onClick={() => onNavigate("analytics", "cost")}
+              onClick={() => navigate("/analytics/cost")}
             />
             <MetricCard
               label="P95 延迟"
               value={fmtMs(today.p95_duration_ms)}
               sub={`平均 ${today.avg_rounds.toFixed(1)} 轮 · 委派 ${fmtPct(today.delegated_rate)}`}
-              onClick={() => onNavigate("analytics", "health")}
+              onClick={() => navigate("/analytics/health")}
             />
           </div>
 
           <button
             type="button"
-            onClick={() => onNavigate("system")}
+            onClick={() => navigate("/system")}
             className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-border bg-card px-5 py-4 text-left text-sm outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
           >
             <div className="flex items-center gap-2">
@@ -162,8 +150,8 @@ export function OverviewPage({
 
           <ErrorsPreview
             rows={data.recent_errors}
-            onOpen={setReplayId}
-            onViewAll={() => onNavigate("analytics", "health")}
+            onOpen={openReplay}
+            onViewAll={() => navigate("/analytics/health")}
           />
         </div>
       )}

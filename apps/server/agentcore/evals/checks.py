@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentcore.evals.style_lint import style_violations
 from agentcore.evals.types import CheckOutcome, EvalCase, TurnOutcome
 
 
@@ -156,6 +157,25 @@ class MaxToolCallsCheck:
 
 
 @dataclass
+class StyleCleanCheck:
+    """回复无 anti-slop 风格违规（方向④确定性护栏）。
+
+    跑 ``style_lint.style_violations`` 检测套话开场 / 客套收尾 / 未授权 emoji（纯文本、零
+    LLM，详见 ``style_lint.py``）。``args.allow`` 可豁免规则——典型是用户自己用了 emoji 时
+    放行 ``"emoji"``，与 ``<output_style>`` 的 emoji soft carve-out 对齐。
+    """
+
+    allow: list[str] = field(default_factory=list)
+    name: str = "StyleClean"
+
+    def run(self, case: EvalCase, outcome: TurnOutcome) -> CheckOutcome:
+        violations = [v for v in style_violations(outcome.content) if v.rule not in self.allow]
+        ok = not violations
+        detail = "clean" if ok else "; ".join(f"{v.rule}:{v.snippet}" for v in violations)
+        return CheckOutcome(self.name, ok, detail)
+
+
+@dataclass
 class NoFabricationMarkerCheck:
     """回复不含编造痕迹（确定性子集：禁用短语命中即判失败）。
 
@@ -189,6 +209,7 @@ _REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
     "NoFabricationMarker": lambda a: NoFabricationMarkerCheck(
         forbidden=list(a.get("forbidden", []))
     ),
+    "StyleClean": lambda a: StyleCleanCheck(allow=list(a.get("allow", []))),
 }
 
 CHECK_NAMES: frozenset[str] = frozenset(_REGISTRY)

@@ -1,13 +1,19 @@
 import { StreamError } from "@/lib/errors";
-import { notifyUnauthorized, tryRefresh } from "@/services/api";
 import type { PlanReviewUserDecision } from "@/services/planReview";
+import {
+  BASE_URL,
+  getCsrfHeaders,
+  notifyUnauthorized,
+  tryRefresh,
+} from "@/services/api";
+import {
+  dispatchSSEEvent,
+  flushPendingContent,
+} from "@/services/sse/dispatch";
 import { traceTurnMilestone } from "@/services/turnTrace";
 import { useApprovalStore } from "@/stores/approvals";
 import { getRuntime } from "@/stores/conversation";
 import type { SSEEvent } from "@/types/events";
-import { dispatchSSEEvent, flushPendingContent } from "./sse/dispatch";
-
-const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 /** Max wait for response headers (connect + server accept). Distinct from {@link pumpSSE}'s
  *  idle timeout, which only applies once the body is streaming. */
@@ -196,6 +202,7 @@ async function runMessageStream(
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
+        ...getCsrfHeaders("POST"),
       },
       body,
       signal,

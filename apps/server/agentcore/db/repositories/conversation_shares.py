@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
@@ -29,6 +29,7 @@ class ConversationShareRepository:
         user_id: str,
         title: str,
         snapshot: list[dict],
+        expires_at: datetime | None = None,
     ) -> ConversationShare:
         share = ConversationShare(
             id=new_id(),
@@ -36,6 +37,7 @@ class ConversationShareRepository:
             user_id=user_id,
             title=title,
             snapshot=snapshot,
+            expires_at=expires_at,
         )
         self._session.add(share)
         await self._session.commit()
@@ -53,6 +55,10 @@ class ConversationShareRepository:
             select(ConversationShare).where(
                 ConversationShare.id == token,
                 ConversationShare.revoked_at.is_(None),
+                or_(
+                    ConversationShare.expires_at.is_(None),
+                    ConversationShare.expires_at > datetime.now(UTC),
+                ),
             )
         )
         return result.scalar_one_or_none()
@@ -69,6 +75,10 @@ class ConversationShareRepository:
                 ConversationShare.conversation_id == conversation_id,
                 ConversationShare.user_id == user_id,
                 ConversationShare.revoked_at.is_(None),
+                or_(
+                    ConversationShare.expires_at.is_(None),
+                    ConversationShare.expires_at > datetime.now(UTC),
+                ),
             )
             .order_by(ConversationShare.created_at.desc())
         )

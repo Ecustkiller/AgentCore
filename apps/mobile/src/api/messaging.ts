@@ -3,91 +3,31 @@
 // The 消息 page is human↔human, a domain separate from the 对话 page's AI conversations,
 // so this is its own service with its own types. messages.py is REST-only (no SSE), so the
 // mobile client POLLS (the locked decision): the chat list and the open thread each refresh
-// on an interval. Types are a hand-written subset of the backend schemas (schemas.py),
-// matching the skeleton convention across the mobile api/ layer. Wire fields stay snake_case.
+// on an interval. REST DTOs track OpenAPI via @agentcore/contract-rest-types.
 import { apiFetch } from "@/api/client";
+import type { components } from "@/types/api.generated";
 
-export type ChatType = "dm" | "group" | "official";
-export type ChatMemberState = "accepted" | "pending";
-export type ChatSenderType = "user" | "official" | "agent";
-export type MessageContentType = "text" | "image" | "file" | "system_card";
-export type SendContentType = "text" | "image" | "file";
+type Schemas = components["schemas"];
 
-/** Persisted attachment display metadata. `workspace_path` is the download path; for an
- *  image, `thumb_path` is a generated WebP thumbnail's path (cheaper inline previews). */
-export interface StoredAttachment {
-  name: string;
-  path: string;
-  truncated?: boolean;
-  kind?: "file" | "dir";
-  workspace_path?: string | null;
-  size_bytes?: number | null;
-  thumb_path?: string | null;
-}
+export type ChatType = Schemas["ChatSummary"]["type"];
+export type ChatMemberState = Schemas["ChatSummary"]["state"];
+export type ChatSenderType = Schemas["ChatMessageDetail"]["sender_type"];
+export type MessageContentType = Schemas["ChatMessageDetail"]["content_type"];
+export type SendContentType = Schemas["SendChatMessageRequest"]["content_type"];
 
-/** A human shown on a chat (the peer of a dm; a member of a group). */
-export interface ChatParticipant {
-  id: string;
-  username: string;
-  display_name: string;
-  is_admin?: boolean;
-  muted_by_admin?: boolean;
-}
+export type StoredAttachment = Schemas["StoredAttachment"];
+export type ChatParticipant = Schemas["ChatParticipant"];
+export type ChatSummary = Schemas["ChatSummary"];
+export type ChatMessageDetail = Schemas["ChatMessageDetail"];
+export type UserSearchResult = Schemas["UserSearchResult"];
+export type BlockedUser = Schemas["BlockedUser"];
+export type ChatFileUploadResponse = Schemas["ChatFileUploadResponse"];
 
-/** One row in the IM chat list, plus this user's per-chat state. */
-export interface ChatSummary {
-  id: string;
-  type: ChatType;
-  title?: string | null;
-  avatar_url?: string | null;
-  peer?: ChatParticipant | null;
-  last_message_at?: string | null;
-  last_message_preview?: string | null;
-  unread?: number;
-  pinned?: boolean;
-  muted?: boolean;
-  state?: ChatMemberState;
-}
-
-/** One message in a chat thread. */
-export interface ChatMessageDetail {
-  id: string;
-  chat_id: string;
-  sender_user_id: string | null;
-  sender_type: ChatSenderType;
-  content: string | null;
-  content_type: MessageContentType;
-  attachments?: StoredAttachment[];
-  payload?: Record<string, unknown> | null;
-  reply_to_message_id?: string | null;
-  created_at: string;
-}
-
-/** A discoverable user surfaced by people-search (任意搜人, exact match). */
-export interface UserSearchResult {
-  id: string;
-  username: string;
-  display_name: string;
-}
-
-/** A user this account has blocked. */
-export interface BlockedUser {
-  id: string;
-  username: string;
-  display_name: string;
-}
-
-/** Result of a chat attachment upload (Stage 4 富消息). */
-export interface ChatFileUploadResponse {
-  path: string;
-  size_bytes: number;
-  thumb_path: string | null;
-}
-
-interface ListResponse<T> {
-  data: T[];
-  total: number;
-}
+type ChatListResponse = Schemas["ChatListResponse"];
+type ChatMembersResponse = Schemas["ChatMembersResponse"];
+type UserSearchResponse = Schemas["UserSearchResponse"];
+type ChatMessageListResponse = Schemas["ChatMessageListResponse"];
+type BlockListResponse = Schemas["BlockListResponse"];
 
 async function getJson<T>(path: string, fallback: string): Promise<T> {
   const res = await apiFetch(path);
@@ -115,7 +55,7 @@ export async function searchUsers(
   query: string,
   limit = 20,
 ): Promise<UserSearchResult[]> {
-  const res = await getJson<ListResponse<UserSearchResult>>(
+  const res = await getJson<UserSearchResponse>(
     `/v1/messages/users/search?q=${encodeURIComponent(query)}&limit=${limit}`,
     "搜索失败",
   );
@@ -126,7 +66,7 @@ export async function searchUsers(
 
 /** This user's chat list (recent first), with unread counts and dm peers. */
 export async function listChats(): Promise<ChatSummary[]> {
-  const res = await getJson<ListResponse<ChatSummary>>(
+  const res = await getJson<ChatListResponse>(
     "/v1/messages/chats",
     "加载会话失败",
   );
@@ -144,7 +84,7 @@ export async function startDm(userId: string): Promise<ChatSummary> {
 
 /** A chat's members (group roster: resolves sender names for group bubbles). */
 export async function listMembers(chatId: string): Promise<ChatParticipant[]> {
-  const res = await getJson<ListResponse<ChatParticipant>>(
+  const res = await getJson<ChatMembersResponse>(
     `/v1/messages/chats/${chatId}/members`,
     "加载成员失败",
   );
@@ -171,12 +111,7 @@ export async function listMessages(
   page = 1,
   pageSize = 50,
 ): Promise<MessagePage> {
-  const res = await getJson<{
-    data: ChatMessageDetail[];
-    total: number;
-    page: number;
-    page_size: number;
-  }>(
+  const res = await getJson<ChatMessageListResponse>(
     `/v1/messages/chats/${chatId}/messages?page=${page}&page_size=${pageSize}`,
     "加载消息失败",
   );
@@ -260,7 +195,7 @@ export async function fetchChatAttachmentBlob(
 // --- Blocking (任意搜人 护栏) ---
 
 export async function listBlocks(): Promise<BlockedUser[]> {
-  const res = await getJson<ListResponse<BlockedUser>>(
+  const res = await getJson<BlockListResponse>(
     "/v1/messages/blocks",
     "加载失败",
   );

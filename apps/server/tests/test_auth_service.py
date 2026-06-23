@@ -154,6 +154,12 @@ class FakeInvites:
         self.records[inv.id] = inv
         return inv
 
+    async def create_many(self, *, codes, created_by=None, expires_at=None):
+        return [
+            await self.create(code=code, created_by=created_by, expires_at=expires_at)
+            for code in codes
+        ]
+
     async def get_by_code(self, code):
         return next((i for i in self.records.values() if i.code == code), None)
 
@@ -162,6 +168,25 @@ class FakeInvites:
 
     async def list_recent(self, *, limit=100):
         return list(self.records.values())[:limit]
+
+    async def list_page(self, *, offset, limit, status=None, now=None):
+        now = now or datetime.now(UTC)
+        rows = list(self.records.values())
+
+        def _status(row) -> str:
+            if row.used_at is not None:
+                return "used"
+            if row.revoked_at is not None:
+                return "revoked"
+            if row.expires_at is not None and row.expires_at <= now:
+                return "expired"
+            return "active"
+
+        if status is not None:
+            rows = [r for r in rows if _status(r) == status]
+        rows.sort(key=lambda r: getattr(r, "created_at", ""), reverse=True)
+        total = len(rows)
+        return rows[offset : offset + limit], total
 
     async def mark_used(self, invite_id, *, used_by):
         self.records[invite_id].used_by = used_by
@@ -381,11 +406,22 @@ async def test_create_invite_with_expiry_sets_future_expiry():
     assert invite.expires_at is not None and invite.expires_at > before
 
 
+async def test_create_invites_batch_mints_unique_codes():
+    svc, _u, _c, _t, _i = _make()
+    invites = await svc.create_invites_batch(created_by="admin-1", count=5)
+    assert len(invites) == 5
+    codes = {i.code for i in invites}
+    assert len(codes) == 5
+    assert all(i.created_by == "admin-1" for i in invites)
+
+
 async def test_list_invites_returns_all_minted():
     svc, _u, _c, _t, _i = _make()
     await svc.create_invite(created_by="admin-1")
     await svc.create_invite(created_by="admin-1")
-    assert len(await svc.list_invites()) == 2
+    invites, total = await svc.list_invites()
+    assert total == 2
+    assert len(invites) == 2
 
 
 # --- invite revocation (邀请码撤销) ---

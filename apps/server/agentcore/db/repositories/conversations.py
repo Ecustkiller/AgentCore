@@ -7,9 +7,9 @@ from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
-from agentcore.db.models import Conversation, CostEvent, Message
+from agentcore.db.models import Conversation, CostEvent, Message, TurnMetricsRow, User
 
-from ._base import _ilike_pattern
+from ._base import _ilike_pattern, _sum_int
 from ._journal_cascade import delete_journal_for_conversation
 
 
@@ -123,6 +123,88 @@ class ConversationRepository:
             .offset(offset)
         )
         return result.scalars().all(), total
+
+    async def list_admin(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        query: str | None = None,
+        user_id: str | None = None,
+        has_errors: bool | None = None,
+        include_deleted: bool = True,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        sort: str = "updated_at",
+        order: str = "desc",
+    ) -> tuple[Sequence[tuple[Conversation, User | None]], int]:
+        """Cross-user conversation roster for the admin 对话 page.
+
+        Excludes hidden handoff-host conversations (same as the user sidebar).
+        ``include_deleted`` controls soft-deleted conversations; owner identity
+        is always joined (tombstone accounts carry ``User.deleted_at``). Filters
+        AND-combine: ``query`` ILIKEs title, ``user_id`` scopes to one account,
+        ``has_errors`` keeps only conversations with ≥1 errored turn,
+        ``since``/``until`` bound ``updated_at`` (inclusive).
+        """
+        cost_subq = (
+            select(
+                CostEvent.conversation_id.label("conversation_id"),
+                _sum_int(CostEvent.cost_total_nano).label("cost_total"),
+            )
+            .group_by(CostEvent.conversation_id)
+            .subquery()
+        )
+        base = (
+            select(Conversation, User)
+            .outerjoin(User, User.user_id == Conversation.user_id)
+            .outerjoin(cost_subq, cost_subq.c.conversation_id == Conversation.id)
+            .where(Conversation.mode != "handoff")
+        )
+        if not include_deleted:
+            base = base.where(Conversation.deleted_at.is_(None))
+        if user_id is not None:
+            base = base.where(Conversation.user_id == user_id)
+        if query:
+            base = base.where(Conversation.title.ilike(_ilike_pattern(query)))
+        if since is not None:
+            base = base.where(Conversation.updated_at >= since)
+        if until is not None:
+            base = base.where(Conversation.updated_at <= until)
+        if has_errors is True:
+            error_ids = (
+                select(TurnMetricsRow.conversation_id)
+                .where(TurnMetricsRow.status == "error")
+                .distinct()
+                .scalar_subquery()
+            )
+            base = base.where(Conversation.id.in_(error_ids))
+        elif has_errors is False:
+            error_ids = (
+                select(TurnMetricsRow.conversation_id)
+                .where(TurnMetricsRow.status == "error")
+                .distinct()
+                .scalar_subquery()
+            )
+            base = base.where(Conversation.id.not_in(error_ids))
+
+        count_result = await self._session.execute(
+            select(func.count()).select_from(base.subquery())
+        )
+        total = count_result.scalar_one()
+
+        if sort == "cost":
+            sort_col = func.coalesce(cost_subq.c.cost_total, 0)
+        elif sort == "created_at":
+            sort_col = Conversation.created_at
+        else:
+            sort_col = Conversation.updated_at
+        order_by = sort_col.asc() if order == "asc" else sort_col.desc()
+        offset = (page - 1) * page_size
+        result = await self._session.execute(
+            base.order_by(order_by).limit(page_size).offset(offset)
+        )
+        return result.all(), total
 
     async def search(self, user_id: str, query: str, *, limit: int) -> Sequence[Conversation]:
         """Owner-scoped title substring search (全局搜索 Tier 1).

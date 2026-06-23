@@ -15,11 +15,11 @@ import type { FsRoot } from "@shared/ipc-contract";
 
 const URL = `${BASE_URL}/v1/conversations/c1/workspace/binding`;
 
-const jsonResponse = (body: unknown) => ({
-  ok: true,
-  status: 200,
-  json: async () => body,
-});
+const jsonResponse = (body: unknown) =>
+  new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 
 const callInit = (m: ReturnType<typeof vi.fn>, call = 0): RequestInit =>
   m.mock.calls[call][1] as RequestInit;

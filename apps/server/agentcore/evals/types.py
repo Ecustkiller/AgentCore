@@ -42,6 +42,9 @@ class EvalCase:
     checks: list[dict[str, Any]] = field(default_factory=list)
     rubric: str | None = None
     samples: int = 1
+    # 方向① 变体注入：命名的 prompt 变体（见 evals/prompt_profiles.py）。None=基线（恒等，
+    # 与生产逐字节一致）；非 None 时 harness 在本例运行期 use_profile 注入该变体，A/B 提示词。
+    prompt_profile: str | None = None
 
 
 @dataclass

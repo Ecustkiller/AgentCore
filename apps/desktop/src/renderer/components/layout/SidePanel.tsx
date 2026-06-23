@@ -10,7 +10,7 @@ import {
   WORKSPACE_TAB_ID,
   useSidePanelStore,
 } from "@/stores/sidePanel";
-import { FolderOpen, X } from "lucide-react";
+import { FolderOpen, Sparkles, UserRound, X } from "lucide-react";
 import {
   type PointerEvent as ReactPointerEvent,
   useEffect,
@@ -172,7 +172,9 @@ function WorkspaceTab({
 }
 
 /** A closable detail tab chip (a run's agent role, or an endpoint's 提问 /
- * 最终回答, + a close affordance). Shared by both detail-tab kinds. */
+ * 最终回答, + a close affordance). Shared by both detail-tab kinds; a content tab
+ * carries an icon (matching its graph endpoint node) so it reads apart from the
+ * icon-less run tabs at a glance. */
 export function RunTabChip({
   tab,
   active,
@@ -184,6 +186,15 @@ export function RunTabChip({
   onSelect: () => void;
   onClose: () => void;
 }) {
+  // Content tabs mirror the graph bookends: 你的任务 (UserRound) / CEO 汇总 (Sparkles).
+  const icon =
+    tab.kind === "content" ? (
+      tab.endpoint === "prompt" ? (
+        <UserRound size={14} className="shrink-0" />
+      ) : (
+        <Sparkles size={14} className="shrink-0" />
+      )
+    ) : null;
   return (
     <div
       className={`group/tab flex shrink-0 items-center rounded-lg ${
@@ -195,7 +206,8 @@ export function RunTabChip({
       <Button
         variant="ghost"
         onClick={onSelect}
-        className="h-auto max-w-[120px] truncate rounded-none py-1 pl-2.5 pr-1 text-sm font-normal"
+        icon={icon ?? undefined}
+        className="h-auto max-w-[140px] truncate rounded-none py-1 pl-2.5 pr-1 text-sm font-normal"
       >
         {tab.title}
       </Button>

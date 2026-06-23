@@ -1,4 +1,4 @@
-import { api } from "@/services/api";
+import { api, clearCsrfToken } from "@/services/api";
 import type { AuthUser } from "@/stores/auth";
 import type { components } from "@/types/api.generated";
 
@@ -30,4 +30,5 @@ export async function login(
 
 export async function logout(): Promise<void> {
   await api.post("/v1/auth/logout");
+  clearCsrfToken();
 }

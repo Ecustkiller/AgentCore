@@ -5,7 +5,7 @@ and 会话复盘. All admin-gated (管理员后台.md); reuses the per-user usag
 """
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -164,6 +164,29 @@ class AdminSystemStatus(BaseModel):
     admins: int
 
 
+# --- Admin: 操作审计 (audit trail) ---
+
+
+class AdminAuditLogLine(BaseModel):
+    """One privileged operator action, newest-first in the audit feed."""
+
+    id: str
+    actor_id: str
+    actor_username: str
+    action: str
+    target_type: str
+    target_id: str | None
+    detail: dict[str, Any] | None
+    created_at: datetime
+
+
+class AdminAuditLogListResponse(BaseModel):
+    data: list[AdminAuditLogLine]
+    total: int
+    page: int
+    page_size: int
+
+
 # --- Admin: 运营观测看板 (观测, P1) ---
 # The operator-facing health view, sourced from turn_metrics (the per-turn
 # telemetry DB sink) rather than the dev log firehose (logs/dev.jsonl). Admin-gated
@@ -222,6 +245,8 @@ class TurnMetricLine(BaseModel):
     duration_ms: int
     delegated: bool
     workers: int
+    input_tokens: int
+    output_tokens: int
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -298,6 +323,64 @@ class AdminConversationLine(BaseModel):
     updated_at: datetime
     # Total messages in the conversation (user + assistant).
     messages: int
+
+
+class AdminConversationListItem(BaseModel):
+    """One row in the platform-wide 对话 roster (``GET /v1/admin/conversations``).
+
+    Cross-user conversation index for ops: owner identity, housekeeping flags,
+    message/turn/error rollups, and all-time spend (nano-USD). Soft-deleted
+    conversations and tombstone owners are surfaced when requested — the client
+    folds ``cny_per_usd`` for ¥. Drill into 会话复盘 by ``id``.
+    """
+
+    id: str
+    title: str | None
+    user_id: str
+    username: str | None
+    display_name: str | None
+    # Set when the owning account was soft-deleted (注销).
+    user_deleted_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None
+    archived: bool
+    messages: int
+    turns: int
+    errors: int
+    cost_total: int
+
+
+class AdminConversationListResponse(BaseModel):
+    """Paginated platform conversation roster (admin-only)."""
+
+    data: list[AdminConversationListItem]
+    total: int
+    page: int
+    page_size: int
+    cny_per_usd: float
+
+
+class AdminTurnListItem(TurnMetricLine):
+    """One turn in the platform-wide 回合 feed — TurnMetricLine + list context.
+
+    Carries the owning conversation title and account display identity so an
+    operator can triage without opening 复盘 first.
+    """
+
+    conversation_title: str | None = None
+    username: str | None = None
+    display_name: str | None = None
+    conversation_deleted_at: datetime | None = None
+
+
+class AdminTurnListResponse(BaseModel):
+    """Paginated platform turn feed (admin-only)."""
+
+    data: list[AdminTurnListItem]
+    total: int
+    page: int
+    page_size: int
 
 
 class AdminUserDetail(BaseModel):

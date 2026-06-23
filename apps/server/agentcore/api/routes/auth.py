@@ -9,10 +9,12 @@ instead (认证与会话.md §十; resolution in api/dependencies.py).
 """
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Cookie, Depends, Response
+from fastapi import APIRouter, Cookie, Depends, Query, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentcore.admin.audit import record_admin_audit
 from agentcore.api.account_cleanup import cleanup_account_resources
 from agentcore.api.dependencies import (
     ACCESS_TOKEN_COOKIE,
@@ -22,10 +24,14 @@ from agentcore.api.dependencies import (
     get_auth_service,
     get_conversation_repo,
     get_conversation_share_repo,
+    get_db,
     get_messaging_service,
     get_user_llm_key_repo,
 )
+from agentcore.middleware.csrf import clear_csrf_token, issue_csrf_token
+from agentcore.security import decode_access_token
 from agentcore.api.schemas import (
+    BatchCreateInviteRequest,
     ChangePasswordRequest,
     CreateInviteRequest,
     DeleteAccountRequest,
@@ -107,7 +113,7 @@ def _invite_response(invite: Invite, now: datetime) -> InviteResponse:
     )
 
 
-def _set_auth_cookies(response: Response, tokens: TokenPair) -> None:
+def _set_auth_cookies(response: Response, tokens: TokenPair, *, user_id: str) -> None:
     response.set_cookie(
         key=ACCESS_TOKEN_COOKIE,
         value=tokens.access_token,
@@ -126,11 +132,14 @@ def _set_auth_cookies(response: Response, tokens: TokenPair) -> None:
         samesite=settings.cookie_samesite,
         path=_refresh_cookie_path(),
     )
+    if settings.csrf_enabled:
+        issue_csrf_token(response, user_id)
 
 
-def _clear_auth_cookies(response: Response) -> None:
+def _clear_auth_cookies(response: Response, *, user_id: str | None = None) -> None:
     response.delete_cookie(ACCESS_TOKEN_COOKIE, path="/")
     response.delete_cookie(REFRESH_TOKEN_COOKIE, path=_refresh_cookie_path())
+    clear_csrf_token(response, user_id)
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
@@ -163,7 +172,7 @@ async def login(
     service: AuthService = Depends(get_auth_service),
 ):
     user, tokens = await service.login(username=body.username, password=body.password)
-    _set_auth_cookies(response, tokens)
+    _set_auth_cookies(response, tokens, user_id=user.user_id)
     return _user_response(user)
 
 
@@ -181,7 +190,8 @@ async def refresh(
         # Token invalid/expired/reused: clear cookies so the client logs in again.
         _clear_auth_cookies(response)
         raise
-    _set_auth_cookies(response, tokens)
+    user_id = decode_access_token(tokens.access_token)
+    _set_auth_cookies(response, tokens, user_id=user_id)
     return StatusResponse()
 
 
@@ -189,11 +199,18 @@ async def refresh(
 async def logout(
     response: Response,
     refresh_token: RefreshCookie = None,
+    access_token: Annotated[str | None, Cookie(alias=ACCESS_TOKEN_COOKIE)] = None,
     service: AuthService = Depends(get_auth_service),
 ):
+    user_id: str | None = None
+    if access_token:
+        try:
+            user_id = decode_access_token(access_token)
+        except AuthenticationError:
+            user_id = None
     if refresh_token:
         await service.logout(refresh_token=refresh_token)
-    _clear_auth_cookies(response)
+    _clear_auth_cookies(response, user_id=user_id)
     return StatusResponse()
 
 
@@ -280,7 +297,7 @@ async def change_password(
         current_password=body.current_password,
         new_password=body.new_password,
     )
-    _set_auth_cookies(response, tokens)
+    _set_auth_cookies(response, tokens, user_id=user.user_id)
     return StatusResponse()
 
 
@@ -311,7 +328,7 @@ async def delete_account(
         llm_keys=llm_keys,
         assets=assets,
     )
-    _clear_auth_cookies(response)
+    _clear_auth_cookies(response, user_id=user.user_id)
     return StatusResponse()
 
 
@@ -320,24 +337,69 @@ async def create_invite(
     admin: AdminUser,
     body: CreateInviteRequest | None = None,
     service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
 ):
     invite = await service.create_invite(
         created_by=admin.user_id,
         expires_in_days=body.expires_in_days if body else None,
     )
+    await record_admin_audit(
+        db,
+        actor_id=admin.user_id,
+        action="invite.create",
+        target_type="invite",
+        target_id=invite.id,
+        detail={"expires_in_days": body.expires_in_days if body else None},
+    )
     return _invite_response(invite, datetime.now(UTC))
+
+
+@router.post("/invites/batch", response_model=InviteListResponse, status_code=201)
+async def create_invites_batch(
+    admin: AdminUser,
+    body: BatchCreateInviteRequest,
+    service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mint multiple single-use invite codes (admin batch issuance)."""
+    invites = await service.create_invites_batch(
+        created_by=admin.user_id,
+        count=body.count,
+        expires_in_days=body.expires_in_days,
+    )
+    await record_admin_audit(
+        db,
+        actor_id=admin.user_id,
+        action="invite.batch_create",
+        target_type="invite",
+        detail={"count": body.count, "expires_in_days": body.expires_in_days},
+    )
+    now = datetime.now(UTC)
+    return InviteListResponse(
+        data=[_invite_response(i, now) for i in invites],
+        total=len(invites),
+    )
 
 
 @router.get("/invites", response_model=InviteListResponse)
 async def list_invites(
     admin: AdminUser,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=100),
+    status: Literal["active", "used", "expired", "revoked"] | None = Query(None),
     service: AuthService = Depends(get_auth_service),
 ):
     now = datetime.now(UTC)
-    invites = await service.list_invites()
+    invites, total = await service.list_invites(
+        page=page,
+        page_size=page_size,
+        status=status,
+    )
     return InviteListResponse(
         data=[_invite_response(i, now) for i in invites],
-        total=len(invites),
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -346,8 +408,16 @@ async def revoke_invite(
     invite_id: str,
     admin: AdminUser,
     service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """Retire an unused invite (邀请码撤销). 404 unknown id; 422 if already used/revoked.
     Returns the now-revoked invite so the client can update the row in place."""
     invite = await service.revoke_invite(invite_id=invite_id)
+    await record_admin_audit(
+        db,
+        actor_id=admin.user_id,
+        action="invite.revoke",
+        target_type="invite",
+        target_id=invite_id,
+    )
     return _invite_response(invite, datetime.now(UTC))

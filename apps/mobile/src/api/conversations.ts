@@ -3,10 +3,9 @@ import { apiFetch } from "@/api/client";
 //
 // Bearer-authenticated reads/writes over the same cloud endpoints the desktop uses
 // (api/routes/conversations.py). Pure data fetch — the chat transport (SSE) lives in
-// stream.ts. The response types are a hand-written subset of the backend schemas
-// (schemas.py) covering only the fields this skeleton renders; the desktop generates the
-// full set from OpenAPI (mobile has no gen pipeline yet — matches the existing skeleton
-// convention in stream.ts/client.ts of typing responses inline).
+// stream.ts. REST DTOs track the backend OpenAPI spec via @agentcore/contract-rest-types;
+// `runs.events` stays typed as SSEEvent[] (opaque JSON in OpenAPI — API 开发规范).
+import type { components } from "@/types/api.generated";
 import type {
   Citation,
   ContextBlockWire,
@@ -14,15 +13,10 @@ import type {
   SSEEvent,
 } from "@agentcore/contract-types";
 
-export interface ConversationSummary {
-  id: string;
-  title: string | null;
-  updated_at: string;
-  created_at: string;
-  message_count: number;
-  pinned: boolean;
-  archived: boolean;
-}
+type Schemas = components["schemas"];
+
+/** A conversation row from the list/detail endpoints (server-shaped). */
+export type ConversationSummary = Schemas["ConversationSummary"];
 
 /** An assistant message's persisted replay payload (schemas.py RunsPayload).
  *  `events` is a MULTI-agent turn's ordered run/tool SSE journal (empty `[]` for a
@@ -43,10 +37,10 @@ export interface RunsPayload {
 /** A user message's attachment as persisted (composer 附件). The agent-chat send ships the
  *  file text inline; the server durably stores it, so a reloaded turn carries only display
  *  metadata (name + truncation), not the content — enough to show context chips. */
-export interface AttachmentMeta {
-  name: string;
-  truncated?: boolean;
-}
+export type AttachmentMeta = Pick<
+  Schemas["StoredAttachment"],
+  "name" | "truncated"
+>;
 
 export interface MessageDetail {
   id: string;
@@ -68,7 +62,7 @@ export async function listConversations(
     `/v1/conversations?page=1&page_size=50&archived=${archived}`,
   );
   if (!res.ok) throw new Error(`加载会话列表失败 (${res.status})`);
-  const data = (await res.json()) as { data: ConversationSummary[] };
+  const data = (await res.json()) as Schemas["ConversationListResponse"];
   return data.data;
 }
 
@@ -126,6 +120,32 @@ export interface MessageWindow {
   hasMoreBefore: boolean;
 }
 
+function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
+  const runs = row.runs;
+  return {
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    reasoning_content: row.reasoning_content ?? null,
+    citations: (row.citations ?? []) as Citation[],
+    runs: runs
+      ? {
+          events: (runs.events ?? []) as unknown as SSEEvent[],
+          finish_reason: runs.finish_reason ?? null,
+          process: (runs.process ?? null) as ProcessStep[] | null,
+          captain_context: (runs.captain_context ?? null) as
+            | ContextBlockWire[]
+            | null,
+        }
+      : null,
+    attachments: row.attachments?.map((a) => ({
+      name: a.name,
+      truncated: a.truncated,
+    })),
+    created_at: row.created_at,
+  };
+}
+
 /** The latest window of a conversation's messages (chronological, oldest-first), or —
  *  with `before` (an ISO cursor) — the page strictly older than it (scroll-up). The
  *  endpoint windows at ≤200; we load 100 at a time and use `has_more_before` to know
@@ -139,9 +159,9 @@ export async function getMessages(
     `/v1/conversations/${conversationId}/messages?limit=100${cursor}`,
   );
   if (!res.ok) throw new Error(`加载消息失败 (${res.status})`);
-  const data = (await res.json()) as {
-    data: MessageDetail[];
-    has_more_before: boolean;
+  const data = (await res.json()) as Schemas["MessageListResponse"];
+  return {
+    messages: data.data.map(toMessageDetail),
+    hasMoreBefore: data.has_more_before,
   };
-  return { messages: data.data, hasMoreBefore: data.has_more_before };
 }

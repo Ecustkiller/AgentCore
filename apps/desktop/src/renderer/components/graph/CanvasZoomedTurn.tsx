@@ -6,7 +6,7 @@ import {
   isDebate,
   useMessageExecution,
 } from "@/stores/execution";
-import { useSidePanelStore } from "@/stores/sidePanel";
+import { type EndpointKind, useSidePanelStore } from "@/stores/sidePanel";
 import { ArrowLeft, MessagesSquare, Network } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CanvasCommandBar } from "./CanvasCommandBar";
@@ -91,8 +91,8 @@ export function CanvasZoomedTurn({
   // Endpoint drill (提问 / 最终回答): open the bubble in the same right-docked panel
   // as a content tab — detail always opens to the right, lighting its endpoint node.
   const onEndpointSelect = useCallback(
-    (contentMessageId: string, title: string) =>
-      showContentDetail(scopeId, contentMessageId, title),
+    (contentMessageId: string, title: string, endpoint: EndpointKind) =>
+      showContentDetail(scopeId, contentMessageId, title, endpoint),
     [scopeId, showContentDetail],
   );
 
@@ -107,7 +107,7 @@ export function CanvasZoomedTurn({
       sp.open &&
       sp.tabs.some((t) => t.id === sp.activeTabId && t.messageId === scopeId);
     if (onRunTab) return;
-    showContentDetail(scopeId, finalAnswerId, "最终回答");
+    showContentDetail(scopeId, finalAnswerId, "最终回答", "answer");
   }, [finalAnswerId, scopeId, showContentDetail]);
 
   // After the command bar dispatches, follow the new round — switch scope when its
@@ -134,6 +134,11 @@ export function CanvasZoomedTurn({
       onClose();
     }
   }, [following, messages, generating, scopeId, onClose]);
+
+  // Leaving 放大态 drops any endpoint content tab it surfaced (提问 / 最终回答) so it
+  // doesn't linger beside the chat bubble on the way back to chat; a drilled run tab
+  // is kept (§十「退出放大态后右坞仍展示同一 run」).
+  useEffect(() => () => useSidePanelStore.getState().closeContentTabs(), []);
 
   // Progressive Esc: close the side panel (a drilled run or surfaced endpoint from
   // THIS turn) first, and only once it is gone does Esc leave the zoomed view.

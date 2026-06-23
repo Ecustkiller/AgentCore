@@ -138,6 +138,11 @@ def generate_refresh_token() -> tuple[str, str]:
     return raw, hash_refresh_token(raw)
 
 
+def generate_csrf_token() -> str:
+    """Return a high-entropy CSRF synchronizer token (cookie-session clients)."""
+    return secrets.token_urlsafe(32)
+
+
 # --- Invite codes (shareable, single-use registration tokens) ---
 
 

@@ -23,6 +23,7 @@ from pathlib import Path
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
+from agentcore.evals.prompt_profiles import resolve_prompt_profile
 from agentcore.evals.types import EvalCase, EvalConfigError, TurnOutcome
 from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.config import ModelProfile
@@ -34,6 +35,7 @@ from agentcore.runtime.costing import aggregate_cost
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType, FinishReason, SSEEvent
 from agentcore.runtime.pipeline import run_chat_pipeline
+from agentcore.runtime.prompt_profile import use_profile
 from agentcore.tools.builtin import build_builtin_registry, build_ceo_tool_registry
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -210,21 +212,26 @@ class EvalHarness:
         sink = RecordingSink()
         backend = ServerWorkspace(root=self._fixture_root(case), sandbox=SubprocessSandbox())
         profiles = resolve_profile_set(case.mode, custom_modes={}, ceiling=_EVAL_CEILING)
+        # 方向①：在本例运行期激活声明的 prompt 变体（None=基线/恒等）。装配函数（深在
+        # run_chat_pipeline 内）经 contextvar 就地咨询，故无需改 pipeline / engine 签名；退出
+        # use_profile 必复位，变体不泄漏到本例之外。
+        prompt_profile = resolve_prompt_profile(case.prompt_profile)
         t0 = time.monotonic()
-        try:
-            if case.path == "single":
-                return await self._run_single(case, backend, profiles, sink, t0)
-            return await self._run_team(case, backend, profiles, sink, t0)
-        except Exception as e:  # react_loop/pipeline 失败 → error 态（不让一例炸掉整套）
-            logger.error("evals.run_case_failed", case=case.id, error=str(e), exc_info=True)
-            return TurnOutcome(
-                content="",
-                finish_reason="error",
-                rounds=0,
-                tool_calls=list(sink.tool_calls),
-                latency_ms=_ms(t0),
-                error=str(e),
-            )
+        with use_profile(prompt_profile):
+            try:
+                if case.path == "single":
+                    return await self._run_single(case, backend, profiles, sink, t0)
+                return await self._run_team(case, backend, profiles, sink, t0)
+            except Exception as e:  # react_loop/pipeline 失败 → error 态（不让一例炸掉整套）
+                logger.error("evals.run_case_failed", case=case.id, error=str(e), exc_info=True)
+                return TurnOutcome(
+                    content="",
+                    finish_reason="error",
+                    rounds=0,
+                    tool_calls=list(sink.tool_calls),
+                    latency_ms=_ms(t0),
+                    error=str(e),
+                )
 
     async def _run_single(self, case, backend, profiles, sink, t0) -> TurnOutcome:
         provider = self._provider or build_provider(_eval_credentials())

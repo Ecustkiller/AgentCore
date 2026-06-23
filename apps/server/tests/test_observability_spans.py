@@ -244,8 +244,8 @@ def test_cancelled_finish_marks_root_error():
     assert root.attributes["agentcore.finish_reason"] == "cancelled"
 
 
-def test_legacy_display_only_journal_still_builds_run_spans():
-    # A legacy / salvage journal (entries_from_runs output: run_* + tool_use_* events,
+def test_display_only_journal_still_builds_run_spans():
+    # A display-only / salvage journal (entries_from_runs output: run_* + tool_use_* events,
     # NO execution facts). The span tree still forms from the run events; it simply
     # lacks the per-round aggregates the execution facts would add.
     entries = [

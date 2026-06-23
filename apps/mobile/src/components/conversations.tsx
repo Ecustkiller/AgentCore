@@ -47,7 +47,9 @@ export function SearchResults({
               className="conv"
               onClick={() =>
                 onOpen(
-                  section.type === "message" ? item.conversation_id : item.id,
+                  section.type === "message"
+                    ? (item.conversation_id ?? null)
+                    : item.id,
                 )
               }
             >
@@ -56,8 +58,8 @@ export function SearchResults({
                 <span className="conv-snippet">
                   <Highlight
                     text={item.snippet}
-                    start={item.match_start}
-                    end={item.match_end}
+                    start={item.match_start ?? null}
+                    end={item.match_end ?? null}
                   />
                 </span>
               )}

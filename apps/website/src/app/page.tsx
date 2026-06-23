@@ -66,27 +66,22 @@ const ROLES = [
 const COMPARE = [
   {
     dim: "底层架构",
-    others: "单 Agent + 子任务派发",
+    others: "一个助手承担主流程，子任务多为自我派发",
     ours: "Multi-Agent 原生，委派是一等公民",
   },
   {
     dim: "协作方式",
-    others: "父任务下发，缺真正协商",
+    others: "子任务派发为主，少见编排级协商与互审",
     ours: "串行 / 并行 / 辩论 / 互审，统一 DAG 编排",
   },
   {
     dim: "过程可见",
-    others: "黑箱，只交付结果",
+    others: "多只见最终结果，难以看清中间决策",
     ours: "全程可观测：决策 / 工具 / 耗时实时可见",
   },
   {
-    dim: "你的角色",
-    others: "提示者 / 指令者",
-    ours: "领导者：下达目标、审阅、决策",
-  },
-  {
     dim: "扩展生态",
-    others: "单一 Agent 商店",
+    others: "以对话或单个 Agent 配置为主",
     ours: "工具 / 技能 / 规则 / Agent / 团队 五类资产",
   },
 ];
@@ -508,7 +503,7 @@ export default function Home() {
             <Reveal>
               <p className="eyebrow">
                 <Dot />
-                对标 Cursor / Codex / Claude
+                单 Agent 助手 vs 协作平台
               </p>
               <h2 className="mt-4 max-w-2xl text-3xl font-bold leading-snug sm:text-4xl">
                 不止更聪明，而是会协作
@@ -523,7 +518,7 @@ export default function Home() {
                         维度
                       </th>
                       <th className="p-5 text-sm font-semibold text-muted-foreground">
-                        其它 AI 产品
+                        单 Agent 助手
                       </th>
                       <th className="p-5 text-sm font-semibold text-primary">
                         AgentCore

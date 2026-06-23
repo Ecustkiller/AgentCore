@@ -5,7 +5,9 @@
 # 避免用根 lockfile 重解析正在运行的 desktop 与并行 agent 的安装。
 #   - apps/mobile：M3 已加入（全新手机端实现）
 #   - apps/desktop：M1 已加入（接入 @agentcore/contract-types + protocol-conformance）
+#   - apps/admin：接入 @agentcore/contract-rest-types（与 desktop 共享 OpenAPI 单一源）
 packages:
   - "packages/*"
   - "apps/mobile"
   - "apps/desktop"
+  - "apps/admin"

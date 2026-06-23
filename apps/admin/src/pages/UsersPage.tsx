@@ -29,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 20;
@@ -79,6 +80,8 @@ function SortHeader({
 }
 
 export function UsersPage() {
+  const { userId: detailId } = useParams<{ userId?: string }>();
+  const navigate = useNavigate();
   const selfId = useAuthStore((s) => s.user?.id);
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -101,8 +104,6 @@ export function UsersPage() {
   const [editing, setEditing] = useState<AdminUser | null>(null);
   // The account the operator is about to 注销 (null = no dialog open).
   const [deleting, setDeleting] = useState<AdminUser | null>(null);
-  // Drill-in: a user id opens the 用户详情 view (replacing the roster).
-  const [detailId, setDetailId] = useState<string | null>(null);
 
   // Debounce the search box; a new query always restarts at page 1.
   useEffect(() => {
@@ -200,7 +201,7 @@ export function UsersPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   if (detailId) {
-    return <UserDetail userId={detailId} onBack={() => setDetailId(null)} />;
+    return <UserDetail userId={detailId} onBack={() => navigate("/users")} />;
   }
 
   return (
@@ -333,7 +334,7 @@ export function UsersPage() {
                     ) : (
                       <button
                         type="button"
-                        onClick={() => setDetailId(u.id)}
+                        onClick={() => navigate(`/users/${u.id}`)}
                         title="查看用户详情"
                         className="rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >

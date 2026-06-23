@@ -76,7 +76,21 @@ export function SystemPage() {
       )}
 
       {!loading && !error && data && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <>
+          {data.admins <= 1 && data.users_total <= 2 && (
+            <div className="mb-5 rounded-xl border border-warning/30 bg-warning/10 px-5 py-4 text-sm">
+              <p className="font-medium text-foreground">首次部署引导</p>
+              <p className="mt-1 text-muted-foreground">
+                邀请码注册需要先有管理员账号。全新环境请在服务器上运行{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
+                  uv run python scripts/create_admin.py &lt;username&gt;
+                </code>{" "}
+                （在 <code className="font-mono text-xs">apps/server</code>{" "}
+                目录），再用此控制台签发邀请码。
+              </p>
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           <Card title="计费模式">
             <Badge tone="primary">
               {data.billing_mode === "byok" ? "BYOK · 自带 Key" : "平台付费"}
@@ -145,6 +159,7 @@ export function SystemPage() {
             <Row label="管理员">{fmtInt(data.admins)}</Row>
           </Card>
         </div>
+        </>
       )}
     </div>
   );

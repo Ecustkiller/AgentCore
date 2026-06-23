@@ -23,6 +23,7 @@ from agentcore.runtime.suspension import PlanReviewSuspension, suspension_from_j
 
 
 def _frame(message_id: str, conversation_id: str, user_id: str) -> PlanReviewSuspension:
+    journal = [{"type": "run_plan", "payload": {}, "timestamp": "t"}]
     return PlanReviewSuspension(
         message_id=message_id,
         conversation_id=conversation_id,
@@ -52,7 +53,8 @@ def _frame(message_id: str, conversation_id: str, user_id: str) -> PlanReviewSus
             ]
         ),
         completed={"del_a_1": RunState(phase=RunPhase.COMPLETED, content="S1OUT")},
-        journal=[{"type": "run_plan", "payload": {}, "timestamp": "t"}],
+        journal=journal,
+        journal_entries=[{"kind": "run_plan", "payload": {}, "ts": "t"}],
         steps=[{"run_id": "del_a_1", "role": "研究员", "summary": "…"}],
         pending=[{"run_id": "del_a_2", "role": "写手"}],
         trace_id="trace1",

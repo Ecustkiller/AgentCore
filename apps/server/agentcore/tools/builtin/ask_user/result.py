@@ -1,0 +1,58 @@
+"""Map ask_user checkpoint responses to tool results (live + resume shared)."""
+
+from __future__ import annotations
+
+from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
+from agentcore.tools.protocol import ToolEffect, ToolResult
+
+
+def ask_user_tool_result(response: CheckpointResponse) -> ToolResult:
+    """Map the user's ask_user answer to the tool result the CEO loop consumes.
+
+    The single source of truth for both the live tool (``AskUserTool.execute``) and
+    a durable resume (``runtime/pipeline.resume_chat_pipeline``): submit feeds back as
+    a ``CONTINUE`` result (the CEO resumes); stop returns an ``INTERACT`` (terminal)
+    result whose closing note rides as ``final_text`` so the engine — or the resume —
+    ends the turn gracefully with that text; a timeout hands control back to the CEO to
+    wrap up on its own. Pure (no SSE side-effect): the caller streams the stop's
+    ``final_text`` via ``content_delta`` (it is persist-only, the engine never re-emits
+    it).
+
+    答复正文 (α 答复模型): the desktop composes the user's per-question picks + style +
+    free-form note into ONE readable ``note`` string (the picks live in the UI, so the
+    answer is composed where the data is — no structured wire payload the only-reader CEO
+    would just flatten back to prose anyway).
+    """
+    decision = response.decision
+    if decision is CheckpointDecision.ADJUST:
+        # ask_user cards no longer expose a separate「调整」action — any legacy client
+        # that still sends ADJUST is treated as CONTINUE (the note carries the steer).
+        decision = CheckpointDecision.CONTINUE
+    picks = "、".join(response.selected)
+    note = response.note.strip()
+    if decision is CheckpointDecision.CONTINUE:
+        if note and picks:
+            output = f"用户选择：{picks}；并补充：\n{note}\n请据此继续。"
+        elif note:
+            # The desktop's composed answer (per-question picks + style + note) rides here.
+            output = f"用户答复：\n{note}\n请据此继续。"
+        elif picks:
+            output = f"用户选择：{picks}。请按此继续。"
+        else:
+            output = "用户确认：按你提出的方向继续。"
+        return ToolResult(tool_call_id="", success=True, output=output)
+    if decision is CheckpointDecision.STOP:
+        closing = note or "好的，已按你的要求停止本回合。"
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output="用户选择停止本回合。",
+            effect=ToolEffect.INTERACT,
+            final_text=closing,
+        )
+    # TIMEOUT — never silently picked a branch; let the CEO decide how to close.
+    return ToolResult(
+        tool_call_id="",
+        success=True,
+        output="用户未在时限内回应。请基于目前已掌握的信息，自行决定如何稳妥收尾。",
+    )

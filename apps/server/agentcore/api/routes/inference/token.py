@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from agentcore.api.dependencies import AuthUser, get_user_repo
 from agentcore.config import settings
+from agentcore.conversation.inference_rate_limit import enforce_inference_token_mint_rate_limit
 from agentcore.core.errors import AuthenticationError
 from agentcore.db.models import User
 from agentcore.db.repositories import UserRepository
@@ -27,6 +28,7 @@ class InferenceTokenResponse(BaseModel):
 @router.post("/inference/token", response_model=InferenceTokenResponse)
 async def mint_inference_token(user: AuthUser) -> InferenceTokenResponse:
     """Exchange the caller's cookie session for a scoped inference token."""
+    await enforce_inference_token_mint_rate_limit(user.user_id)
     return InferenceTokenResponse(
         token=create_inference_token(user.user_id),
         expires_in_sec=settings.inference_token_expire_minutes * 60,

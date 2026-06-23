@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentcore.evals.checks import CHECK_NAMES
+from agentcore.evals.prompt_profiles import PROFILE_NAMES
 
 _CATEGORIES = {"qa", "retrieval", "team", "tool_use", "no_fabrication", "routing"}
 _PATHS = {"single", "team"}
@@ -50,12 +51,34 @@ def lint_case(raw: dict[str, Any]) -> list[str]:
     if not checks and not raw.get("rubric"):
         errors.append(f"[{cid}] 既无 checks 也无 rubric——该用例不会判定任何东西")
 
+    # 路由用例（方向③）：路由准确率聚合器（routing.py）靠声明的 check 当**单一标签源**——
+    # Delegated=期望委派、NotDelegated=期望自答，故每条 routing 用例须**恰好声明其一**（标签
+    # 唯一），且须走 path="team"（single 路径恒不委派，NotDelegated 会平凡通过、Delegated 不
+    # 可能成立，度量失真）。非 routing 类别不受此约束。
+    if category == "routing" and isinstance(checks, list):
+        names = {s.get("name") for s in checks if isinstance(s, dict)}
+        label = names & {"Delegated", "NotDelegated"}
+        if len(label) != 1:
+            errors.append(
+                f"[{cid}] category=routing 须恰好声明 Delegated / NotDelegated 之一"
+                f"（路由准确率的标签源），当前={sorted(label)}"
+            )
+        if path != "team":
+            errors.append(f"[{cid}] category=routing 须 path='team'（single 恒不委派、度量失真）")
+
     try:
         samples = int(raw.get("samples", 1))
         if samples < 1:
             errors.append(f"[{cid}] samples={samples} 须 ≥1")
     except (TypeError, ValueError):
         errors.append(f"[{cid}] samples 须为整数")
+
+    # 方向① 变体注入：声明的 prompt_profile 必须是已注册的变体名（写错立刻挂）。
+    profile = raw.get("prompt_profile")
+    if profile is not None and profile not in PROFILE_NAMES:
+        errors.append(
+            f"[{cid}] prompt_profile={profile!r} 未注册（须属 {sorted(PROFILE_NAMES)}）"
+        )
 
     return errors
 

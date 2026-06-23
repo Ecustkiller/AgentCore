@@ -33,6 +33,7 @@ async def test_readyz_returns_200_when_database_reachable(monkeypatch):
         return True
 
     monkeypatch.setattr(system, "database_ready", _ready)
+    monkeypatch.setattr(system, "redis_ready", _ready)
     async with _client() as c:
         r = await c.get("/readyz")
 
@@ -44,12 +45,47 @@ async def test_readyz_returns_503_when_database_down(monkeypatch):
     async def _down() -> bool:
         return False
 
+    async def _redis_ok() -> bool:
+        return True
+
     monkeypatch.setattr(system, "database_ready", _down)
+    monkeypatch.setattr(system, "redis_ready", _redis_ok)
     async with _client() as c:
         r = await c.get("/readyz")
 
     assert r.status_code == 503
     assert r.json() == {"status": "not_ready", "database": False}
+
+
+async def test_readyz_includes_redis_when_redis_backend(monkeypatch):
+    async def _ready() -> bool:
+        return True
+
+    monkeypatch.setattr(system.settings, "rate_limit_backend", "redis")
+    monkeypatch.setattr(system, "database_ready", _ready)
+    monkeypatch.setattr(system, "redis_ready", _ready)
+    async with _client() as c:
+        r = await c.get("/readyz")
+
+    assert r.status_code == 200
+    assert r.json() == {"status": "ready", "database": True, "redis": True}
+
+
+async def test_readyz_returns_503_when_redis_required_but_down(monkeypatch):
+    async def _db_ok() -> bool:
+        return True
+
+    async def _redis_down() -> bool:
+        return False
+
+    monkeypatch.setattr(system.settings, "rate_limit_backend", "redis")
+    monkeypatch.setattr(system, "database_ready", _db_ok)
+    monkeypatch.setattr(system, "redis_ready", _redis_down)
+    async with _client() as c:
+        r = await c.get("/readyz")
+
+    assert r.status_code == 503
+    assert r.json() == {"status": "not_ready", "database": True, "redis": False}
 
 
 async def test_version_exposes_build_provenance(monkeypatch):

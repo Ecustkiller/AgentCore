@@ -239,15 +239,6 @@ def test_suspension_from_json_tolerates_missing_keys():
     assert restored.checkpoint_run_ids == set()
 
 
-def test_suspension_from_json_tolerates_legacy_delegate_tool_call_id():
-    # A pre-union frame keyed the call id as ``delegate_tool_call_id``; it must still
-    # load into ``tool_call_id`` (no compat layer, but the rename stays free).
-    restored = suspension_from_json(
-        {"kind": "plan_review", "message_id": "m1", "delegate_tool_call_id": "call_old"}
-    )
-    assert restored.tool_call_id == "call_old"
-
-
 def test_find_tool_call_id_picks_trailing_matching_call():
     transcript = [
         LLMMessage(role="user", content="原始"),

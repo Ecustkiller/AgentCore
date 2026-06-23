@@ -118,6 +118,11 @@ class CreateInviteRequest(BaseModel):
     expires_in_days: int | None = Field(None, ge=1, le=365)
 
 
+class BatchCreateInviteRequest(BaseModel):
+    count: int = Field(..., ge=1, le=100)
+    expires_in_days: int | None = Field(None, ge=1, le=365)
+
+
 class InviteResponse(BaseModel):
     id: str
     code: str
@@ -135,3 +140,5 @@ class InviteResponse(BaseModel):
 class InviteListResponse(BaseModel):
     data: list[InviteResponse]
     total: int
+    page: int | None = None
+    page_size: int | None = None

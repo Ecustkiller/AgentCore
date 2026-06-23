@@ -1,5 +1,6 @@
 """Built-in tool implementations."""
 
+from agentcore.config import settings
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.builtin.code_execute import CodeExecuteTool
 from agentcore.tools.builtin.escalate import EscalateTool
@@ -15,9 +16,24 @@ from agentcore.tools.builtin.grep import GrepTool
 from agentcore.tools.builtin.web.read_url import ReadUrlTool
 from agentcore.tools.builtin.web.search import WebSearchTool
 from agentcore.tools.registry import ToolRegistry
+from agentcore.workspace.protocol import WorkspaceBackend
 
 
-def build_builtin_registry() -> ToolRegistry:
+def code_execute_enabled_for(backend: WorkspaceBackend | None) -> bool:
+    """Whether ``code_execute`` may appear in a runtime worker toolset.
+
+    Local / sidecar execution stays on; cloud ``location=server`` defaults off unless
+    ``CODE_EXECUTE_CLOUD_ENABLED`` is set (subprocess in the API container is not a
+    real isolation boundary — 安全权限与治理 §5).
+    """
+    if backend is None:
+        return True
+    if backend.location == "local":
+        return True
+    return settings.code_execute_cloud_enabled
+
+
+def build_builtin_registry(*, include_code_execute: bool = True) -> ToolRegistry:
     """Register the platform's built-in tools (single source of truth).
 
     Both the chat pipeline (worker toolset) and the read-only ``GET /tools``
@@ -35,11 +51,12 @@ def build_builtin_registry() -> ToolRegistry:
     registry.register(FileDeleteTool())
     registry.register(FileMoveTool())
     registry.register(GrepTool())
-    registry.register(CodeExecuteTool())
+    if include_code_execute:
+        registry.register(CodeExecuteTool())
     return registry
 
 
-def build_worker_registry() -> ToolRegistry:
+def build_worker_registry(*, backend: WorkspaceBackend | None = None) -> ToolRegistry:
     """The delegated worker's toolset: the platform built-ins PLUS the worker-only
     ``escalate`` upward channel.
 
@@ -51,7 +68,9 @@ def build_worker_registry() -> ToolRegistry:
     ``escalate`` too (a sub-worker escalates to its captain worker, which can re-escalate
     to the CEO).
     """
-    registry = build_builtin_registry()
+    registry = build_builtin_registry(
+        include_code_execute=code_execute_enabled_for(backend),
+    )
     registry.register(EscalateTool())
     return registry
 

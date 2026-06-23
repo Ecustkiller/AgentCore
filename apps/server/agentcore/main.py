@@ -36,6 +36,7 @@ from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import setup_logging
 from agentcore.db.migration_check import check_migrations
 from agentcore.memory.consolidation import consolidation_loop, shutdown_scheduler
+from agentcore.middleware.csrf import CsrfMiddleware
 from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
 from agentcore.runtime.session_retention import session_retention_loop
 from agentcore.runtime.suspension_retention import paused_turn_retention_loop
@@ -182,6 +183,7 @@ app = FastAPI(
 
 # Middleware runs outermost-last-added: register the rate limiter first so CORS
 # wraps it and even a 429 response carries the CORS headers the browser needs.
+app.add_middleware(CsrfMiddleware)
 app.add_middleware(AuthRateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -192,7 +194,7 @@ app.add_middleware(
     # Downloads (导出对话 / workspace zips) carry the filename in Content-Disposition;
     # browsers hide non-simple response headers cross-origin unless explicitly exposed,
     # so the renderer can read the server's sanitized UTF-8 filename instead of guessing.
-    expose_headers=["Content-Disposition"],
+    expose_headers=["Content-Disposition", "X-CSRF-Token"],
 )
 
 

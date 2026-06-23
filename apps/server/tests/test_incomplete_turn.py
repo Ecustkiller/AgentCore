@@ -177,8 +177,10 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
     assert created["trace_id"] == "trace"
     # The cancelled turn's finished team work is recorded to the journal.
     assert journaled["message_id"] == "m1"
-    assert journaled["runs"]["events"] == journal
-    assert journaled["runs"]["finish_reason"] == FinishReason.CANCELLED.value
+    display_entries = [e for e in journaled["entries"] if e["kind"] != "turn_end"]
+    assert [e["kind"] for e in display_entries] == ["run_plan", "run_completed"]
+    turn_end = next(e for e in journaled["entries"] if e["kind"] == "turn_end")
+    assert turn_end["payload"]["finish_reason"] == FinishReason.CANCELLED.value
 
 
 async def test_persist_incomplete_swallows_db_errors(monkeypatch):

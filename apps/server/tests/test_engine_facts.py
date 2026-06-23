@@ -26,7 +26,7 @@ from agentcore.runtime.facts import (
     current_fact_log,
 )
 from agentcore.runtime.journal import runs_from_entries, window_from_journal
-from agentcore.runtime.pipeline import _durable_journal_entries
+from agentcore.runtime.pipeline import _journal_entries_for_turn
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -226,22 +226,27 @@ async def test_loop_records_note_fact_on_nudge():
     assert len(injected) == 1
 
 
-def test_durable_journal_entries_gates_on_runs_none():
-    # Persistence cutover: a plain chat turn (runs=None — nothing surfaced, no process)
-    # writes NO journal, so storage + the None-gate match the pre-cutover behavior even
-    # though the fact log accumulated.
+def test_journal_entries_for_turn_gates_on_plain_sink():
+    # Persistence cutover: a plain chat turn (nothing surfaced, no process) writes NO
+    # journal, so storage + the None-gate match the pre-cutover behavior even though
+    # the fact log accumulated.
+    from agentcore.runtime.events import FinishReason
+
     log = TurnFactLog()
     log.record_fact(
         TurnStartedFact(system_prompt="s", user_message="hi", model_profile="m").to_fact()
     )
     log.record_fact(RoundBoundaryFact(round_idx=0, run_id="cap", role="captain").to_fact())
-    assert _durable_journal_entries(log, None) is None
+    sink = EventSink()
+    assert _journal_entries_for_turn(log, sink=sink, finish=FinishReason.END_TURN) is None
 
 
-def test_durable_journal_entries_composes_log_plus_tail_and_projects_gated():
+def test_journal_entries_for_turn_composes_log_plus_tail_and_projects_gated():
     # A surfaced turn: durable = the fact log (execution + forwarded display facts) +
-    # the process/turn_end tail read off ``runs``. runs.events is NOT re-appended (it
+    # the process/turn_end tail read off the sink. runs.events is NOT re-appended (it
     # already rides the log); the read-side projection re-gates to the team graph.
+    from agentcore.runtime.events import FinishReason
+
     log = TurnFactLog()
     log.record_fact(
         TurnStartedFact(system_prompt="s", user_message="go", model_profile="m").to_fact()
@@ -254,11 +259,9 @@ def test_durable_journal_entries_composes_log_plus_tail_and_projects_gated():
     log.record_fact(Fact(kind="run_completed", payload={"run_id": "w1"}, ts="t1"))
     log.record_fact(MessageFinalFact(run_id="cap", content="done").to_fact())
 
-    runs = {
-        "events": [{"type": "run_plan", "payload": {"execution_id": "e1"}, "timestamp": "t0"}],
-        "finish_reason": "end_turn",
-    }
-    durable = _durable_journal_entries(log, runs)
+    sink = EventSink()
+    sink.seed_journal([{"type": "run_plan", "payload": {"execution_id": "e1"}, "timestamp": "t0"}])
+    durable = _journal_entries_for_turn(log, sink=sink, finish=FinishReason.END_TURN)
 
     # Tail = just turn_end (no process); the log's own entries come first verbatim.
     assert durable[-1] == {"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None}

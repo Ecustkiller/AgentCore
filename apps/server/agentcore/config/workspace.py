@@ -1,0 +1,34 @@
+"""Workspace storage, snapshots, retention, and local-op timeouts."""
+
+from pydantic import BaseModel
+
+
+class WorkspaceSettings(BaseModel):
+    data_dir: str = "./data"
+
+    storage_backend: str = "auto"
+    s3_endpoint_url: str = ""
+    s3_region: str = "cn-shenzhen"
+    s3_bucket: str = "agentcore-workspaces"
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    s3_addressing_style: str = "path"
+
+    workspace_snapshot_enabled: bool = True
+    workspace_auto_snapshot_max: int = 10
+
+    workspace_retention_enabled: bool = True
+    workspace_retention_days: int = 30
+    workspace_retention_sweep_interval_seconds: int = 6 * 3600
+    workspace_retention_batch_limit: int = 100
+
+    workspace_upload_max_bytes: int = 25 * 1024 * 1024
+    avatar_upload_max_bytes: int = 5 * 1024 * 1024
+    workspace_clone_timeout_seconds: int = 120
+    workspace_op_timeout_seconds: float = 60.0
+    workspace_execute_timeout_slack_seconds: float = 30.0
+    workspace_handoff_timeout_seconds: float = 300.0
+
+    # Cloud (server-location) workers: code_execute runs in the API container subprocess
+    # — not a real isolation boundary. Default off; local/sidecar keeps code_execute.
+    code_execute_cloud_enabled: bool = False

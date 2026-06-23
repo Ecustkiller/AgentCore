@@ -2,19 +2,14 @@
 //
 // The user supplies their own DeepSeek API key (backend config.billing_mode "byok");
 // without one, turns can't run — so this page is load-bearing on mobile, not just a
-// convenience. The server stores only AES-256-GCM ciphertext and ever echoes just the
-// last 4 chars. Types are a hand-written subset of the backend LlmKeyStatusResponse
-// (schemas.py), matching the skeleton convention in conversations.ts / usage.ts.
+// convenience. REST DTOs track OpenAPI via @agentcore/contract-rest-types.
 import { apiFetch } from "@/api/client";
+import type { components } from "@/types/api.generated";
 
-/** Settings view of the key — never the plaintext. `status` is one of
- *  unconfigured | unchecked | active | error; `message` carries a test failure. */
-export interface LlmKeyStatus {
-  configured: boolean;
-  status: "unconfigured" | "unchecked" | "active" | "error";
-  masked_key: string | null;
-  message: string | null;
-}
+type Schemas = components["schemas"];
+
+/** Settings view of the key — never the plaintext. */
+export type LlmKeyStatus = Schemas["LlmKeyStatusResponse"];
 
 async function readStatus(
   res: Response,

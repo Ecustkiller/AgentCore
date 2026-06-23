@@ -205,6 +205,10 @@ class ConversationShare(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
+    # Optional auto-expiry (security default: 30d at create). NULL = never expires.
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # Set when the owner revokes the link (or a cascade does); a revoked share 404s
     # on the public page. Soft (not a row delete) so revocation is observable and the
     # link can never silently reactivate.
