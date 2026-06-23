@@ -2,11 +2,21 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { cn, fmtCompact, fmtInt, nanoUsdToUsd } from "@/lib/utils";
+import {
+  clientGitSha,
+  clientVersion,
+  formatGitSha,
+} from "@/lib/clientBuildInfo";
 import { errorMessage } from "@/services/api";
 import {
   type AdminSystemStatus,
   fetchSystemStatus,
 } from "@/services/adminSystem";
+import {
+  fetchReleaseDrift,
+  type ReleaseDriftSnapshot,
+  versionsMatch,
+} from "@/services/releaseDrift";
 import { RefreshCw } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 
@@ -20,6 +30,7 @@ function quotaLimit(value: string): ReactNode {
 
 export function SystemPage() {
   const [data, setData] = useState<AdminSystemStatus | null>(null);
+  const [drift, setDrift] = useState<ReleaseDriftSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +38,12 @@ export function SystemPage() {
     setLoading(true);
     setError(null);
     try {
-      setData(await fetchSystemStatus());
+      const [system, releaseDrift] = await Promise.all([
+        fetchSystemStatus(),
+        fetchReleaseDrift(),
+      ]);
+      setData(system);
+      setDrift(releaseDrift);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -121,10 +137,59 @@ export function SystemPage() {
           </Card>
 
           <Card title="版本">
-            <Row label="版本">{orUnknown(data.version)}</Row>
-            <Row label="Git">{orUnknown(data.git_sha).slice(0, 12)}</Row>
-            <Row label="构建时间">{orUnknown(data.built_at)}</Row>
+            <Row label="控制台版本">{clientVersion()}</Row>
+            <Row label="控制台构建">{formatGitSha(clientGitSha())}</Row>
+            <Row label="API 版本">{orUnknown(data.version)}</Row>
+            <Row label="API 构建">{orUnknown(data.git_sha).slice(0, 12)}</Row>
+            <Row label="API 构建时间">{orUnknown(data.built_at)}</Row>
           </Card>
+
+          {drift && (
+            <Card title="发布漂移">
+              <Row label="Desktop 最新">
+                {drift.desktopGithubVersion ?? "—"}
+                {drift.desktopGithubTag ? (
+                  <span className="ml-2 text-muted-foreground text-xs">
+                    ({drift.desktopGithubTag})
+                  </span>
+                ) : null}
+              </Row>
+              <Row label="下载页展示">
+                {drift.websiteDownloadVersion ?? "—"}
+              </Row>
+              <Row label="GitHub ↔ 下载页">
+                <DriftBadge
+                  ok={versionsMatch(
+                    drift.desktopGithubVersion,
+                    drift.websiteDownloadVersion,
+                  )}
+                  okLabel="一致"
+                  warnLabel="不一致"
+                  unknownLabel="未知"
+                />
+              </Row>
+              <Row label="控制台 ↔ API SHA">
+                <DriftBadge
+                  ok={
+                    data.git_sha && clientGitSha() !== "unknown"
+                      ? data.git_sha.startsWith(clientGitSha()) ||
+                        clientGitSha().startsWith(data.git_sha.slice(0, 7))
+                      : null
+                  }
+                  okLabel="同部署"
+                  warnLabel="异轨"
+                  unknownLabel="未知"
+                />
+              </Row>
+              {drift.errors.length > 0 && (
+                <p className="mt-3 text-destructive text-xs">{drift.errors.join(" · ")}</p>
+              )}
+              <p className="mt-3 text-muted-foreground text-xs">
+                Desktop 来自 GitHub Latest；下载页来自官网 runtime API。API 与 Web
+                客户端独立部署，SHA 不同属预期。
+              </p>
+            </Card>
+          )}
 
           <Card title="全局配额默认值">
             <Row label="日 token">
@@ -181,4 +246,21 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
       <span className="font-medium text-foreground tabular-nums">{children}</span>
     </div>
   );
+}
+
+function DriftBadge({
+  ok,
+  okLabel,
+  warnLabel,
+  unknownLabel,
+}: {
+  ok: boolean | null;
+  okLabel: string;
+  warnLabel: string;
+  unknownLabel: string;
+}) {
+  if (ok === null) {
+    return <Badge tone="neutral">{unknownLabel}</Badge>;
+  }
+  return <Badge tone={ok ? "success" : "warning"}>{ok ? okLabel : warnLabel}</Badge>;
 }

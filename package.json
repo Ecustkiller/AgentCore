@@ -8,7 +8,8 @@
   },
   "scripts": {
     "conformance": "pnpm -r run conformance && pnpm -C apps/desktop run conformance",
-    "gen:types": "node scripts/gen-types.mjs"
+    "gen:types": "node scripts/gen-types.mjs",
+    "bump-version": "node scripts/bump-version.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

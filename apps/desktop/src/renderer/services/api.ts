@@ -1,3 +1,5 @@
+import { clientHeaders } from "@/lib/clientBuildInfo";
+
 export const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 export class ApiError extends Error {
@@ -148,6 +150,7 @@ async function request<T>(
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
+        ...clientHeaders(),
         ...csrfHeaders(method),
         ...options.headers,
       },

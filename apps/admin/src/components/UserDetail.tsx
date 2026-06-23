@@ -1,5 +1,6 @@
 import { CostTrendBars } from "@/components/charts";
 import { ResetPasswordDialog } from "@/components/ResetPasswordDialog";
+import { SetPasswordDialog } from "@/components/SetPasswordDialog";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
@@ -46,6 +47,7 @@ export function UserDetail({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [settingPassword, setSettingPassword] = useState(false);
 
   const openReplay = (conversationId: string) => {
     navigate(`/replay/${conversationId}`, { state: { from: location.pathname } });
@@ -125,14 +127,24 @@ export function UserDetail({
                   {user.status === "active" ? "活跃" : "已停用"}
                 </Badge>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setResetting(true)}
-              >
-                <KeyRound size={14} />
-                重置密码
-              </Button>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSettingPassword(true)}
+                >
+                  <KeyRound size={14} />
+                  设置密码
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setResetting(true)}
+                >
+                  <KeyRound size={14} />
+                  重置密码
+                </Button>
+              </div>
             </div>
             <p className="mt-1 text-muted-foreground text-sm">
               @{user.username}
@@ -221,6 +233,14 @@ export function UserDetail({
               userId={user.id}
               username={user.username}
               onClose={() => setResetting(false)}
+            />
+          )}
+
+          {settingPassword && (
+            <SetPasswordDialog
+              userId={user.id}
+              username={user.username}
+              onClose={() => setSettingPassword(false)}
             />
           )}
         </div>

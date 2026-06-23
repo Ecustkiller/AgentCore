@@ -1,20 +1,9 @@
 name: Deploy Admin Console
 
-# 管理后台 apps/admin → 生产机 /opt/agentcore/admin/dist + Nginx（office.fashitianxia.xyz）。
-# 经 Cloudflare Tunnel 暴露（见 deploy/nginx/office-admin.conf，本机 :8090）。
-# API：VITE_API_URL=https://app.fashitianxia.xyz/api；CORS 须含 https://office.fashitianxia.xyz。
-#
-# 触发：master 上 admin 改动 / deploy 资产 / openapi 契约，或手动 dispatch。
-# 需 secrets：DEPLOY_SSH_*；首次上线后须 create_admin.py 创建管理员。
+# ⚠️ 已弃用自动触发 — 改由 Cursor Agent 本地 `pnpm -C apps/admin deploy:production` 部署。
+# 见 docs/05-平台与运维/部署与运维.md §二、.cursor/rules/cursor-deploy.mdc
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - "apps/admin/**"
-      - "apps/server/openapi.json"
-      - "deploy/nginx/office-admin.conf"
-      - ".github/workflows/deploy-admin.yml"
   workflow_dispatch:
 
 concurrency:

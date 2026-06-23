@@ -1,0 +1,32 @@
+---
+description: 部署官网/手机网页/管理后台——用户说「部署」时读；凭据存 deploy/.env.deploy.local 不入仓。
+globs:
+  - "apps/website/**"
+  - "apps/mobile/**"
+  - "apps/admin/**"
+  - "deploy/**"
+alwaysApply: false
+---
+
+# Cursor 代部署
+
+Cloudflare Pages 与 admin SSH 部署不走 GitHub Actions 自动触发 → [`部署与运维.md` §二](/docs/05-平台与运维/部署与运维.md)。
+
+凭据：`deploy/.env.deploy.local`（从 `deploy/.env.deploy.local.example` 复制；也回退读 `apps/website/.env.deploy.local` 的 CF token）。**禁止**在 chat 索要/回显 token 或 SSH 私钥。
+
+| 目标 | 命令 | 验收 |
+|------|------|------|
+| 官网 | `pnpm -C apps/website deploy:pages` | `https://fashitianxia.xyz/download/` 版本号 |
+| 手机网页 | `pnpm -C apps/mobile deploy:pages` | `https://m.fashitianxia.xyz/` 可打开 |
+| 管理后台 | `pnpm -C apps/admin deploy:production` | `https://office.fashitianxia.xyz/` 可打开 |
+
+## 何时部署
+
+- 用户说「部署官网 / 手机版 / 管理后台」
+- 对应 `apps/*` 改动且用户确认上线
+- 桌面发版后刷新下载页（更新 `FALLBACK_VERSION` → 官网 deploy:pages）
+
+## 纪律
+
+- admin 需 `DEPLOY_SSH_HOST` / `DEPLOY_SSH_USER` / `DEPLOY_SSH_KEY_PATH`
+- 不重新启用 `deploy-website.yml` / `deploy-mobile-web.yml` / `deploy-admin.yml` 的 push 触发

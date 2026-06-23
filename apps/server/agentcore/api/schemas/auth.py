@@ -67,9 +67,12 @@ class UserResponse(BaseModel):
     # its API base. The ``?v=`` is a content hash, so the cached <img> refreshes on
     # change. → see api/routes/users.py for the (public) serving endpoint.
     avatar_url: str | None = None
+    # True when an admin reset handed a one-off temp password — the client should
+    # force a self-service password change before normal use.
+    password_must_change: bool = False
 
     @classmethod
-    def from_user(cls, user: "User") -> "UserResponse":
+    def from_user(cls, user: "User", *, password_must_change: bool = False) -> "UserResponse":
         """Build the API view of a user row (the single source for this mapping)."""
         return cls(
             id=user.user_id,
@@ -80,6 +83,7 @@ class UserResponse(BaseModel):
             created_at=user.created_at,
             default_model_mode=user.default_model_mode,
             avatar_url=_avatar_url(user.user_id, user.avatar_key),
+            password_must_change=password_must_change,
         )
 
 

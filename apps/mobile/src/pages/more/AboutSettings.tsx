@@ -1,4 +1,9 @@
 import { type VersionInfo, fetchVersion } from "@/api/system";
+import {
+  clientGitSha,
+  clientVersion,
+  formatGitSha,
+} from "@/lib/clientBuildInfo";
 // 关于 (/more/about) — version + build provenance. The desktop's 软件更新 section is
 // dropped (mobile updates ship through the App Store / Play, not an in-app updater).
 import { useEffect, useState } from "react";
@@ -44,16 +49,20 @@ export function AboutSettings() {
           <p className="error hint">{error}</p>
         ) : info ? (
           <>
-            <Row label="版本" value={info.version} />
+            <Row label="客户端版本" value={clientVersion()} />
             <Row
-              label="构建版本"
-              value={
-                info.gitSha === "unknown" ? "未标记（本地开发）" : info.gitSha
-              }
+              label="客户端构建"
+              value={formatGitSha(clientGitSha())}
+              mono={clientGitSha() !== "unknown"}
+            />
+            <Row label="API 版本" value={info.version} />
+            <Row
+              label="API 构建"
+              value={formatGitSha(info.gitSha)}
               mono={info.gitSha !== "unknown"}
             />
             <Row
-              label="构建时间"
+              label="API 构建时间"
               value={info.builtAt === "unknown" ? "—" : info.builtAt}
             />
           </>

@@ -5102,6 +5102,11 @@ export interface components {
             email: string | null;
             /** Id */
             id: string;
+            /**
+             * Password Must Change
+             * @default false
+             */
+            password_must_change: boolean;
             /** Role */
             role: string;
             /** Username */

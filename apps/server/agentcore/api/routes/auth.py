@@ -24,6 +24,7 @@ from agentcore.api.dependencies import (
     get_auth_service,
     get_conversation_repo,
     get_conversation_share_repo,
+    get_credentials_repo,
     get_db,
     get_messaging_service,
     get_user_llm_key_repo,
@@ -54,6 +55,7 @@ from agentcore.db.models import Invite, User
 from agentcore.db.repositories import (
     ConversationRepository,
     ConversationShareRepository,
+    CredentialsRepository,
     UserLlmKeyRepository,
 )
 from agentcore.messaging import MessagingService
@@ -84,8 +86,15 @@ def _refresh_cookie_path() -> str:
 RefreshCookie = Annotated[str | None, Cookie(alias=REFRESH_TOKEN_COOKIE)]
 
 
-def _user_response(user: User) -> UserResponse:
-    return UserResponse.from_user(user)
+def _user_response(user: User, *, password_must_change: bool = False) -> UserResponse:
+    return UserResponse.from_user(user, password_must_change=password_must_change)
+
+
+async def _user_response_for(
+    user: User, creds_repo: CredentialsRepository
+) -> UserResponse:
+    creds = await creds_repo.get_by_user_id(user.user_id)
+    return _user_response(user, password_must_change=bool(creds and creds.password_must_change))
 
 
 def _invite_status(invite: Invite, now: datetime) -> str:
@@ -170,10 +179,11 @@ async def login(
     body: LoginRequest,
     response: Response,
     service: AuthService = Depends(get_auth_service),
+    creds_repo: CredentialsRepository = Depends(get_credentials_repo),
 ):
     user, tokens = await service.login(username=body.username, password=body.password)
     _set_auth_cookies(response, tokens, user_id=user.user_id)
-    return _user_response(user)
+    return await _user_response_for(user, creds_repo)
 
 
 @router.post("/refresh", response_model=StatusResponse)
@@ -221,12 +231,19 @@ async def logout(
 # sends `Authorization: Bearer <access>` on every call (resolved in api/dependencies.py).
 
 
-def _token_response(tokens: TokenPair, *, user: User | None = None) -> TokenResponse:
+def _token_response(
+    tokens: TokenPair,
+    *,
+    user: User | None = None,
+    password_must_change: bool = False,
+) -> TokenResponse:
     return TokenResponse(
         access_token=tokens.access_token,
         refresh_token=tokens.refresh_token,
         expires_in=settings.jwt_access_token_expire_minutes * 60,
-        user=_user_response(user) if user is not None else None,
+        user=_user_response(user, password_must_change=password_must_change)
+        if user is not None
+        else None,
     )
 
 
@@ -238,7 +255,8 @@ async def token_login(
     """Bearer-token login: same credential check as cookie ``/login`` but returns the
     access + refresh tokens in the JSON body (plus the user — identity in one call)."""
     user, tokens = await service.login(username=body.username, password=body.password)
-    return _token_response(tokens, user=user)
+    must_change = await service.password_must_change(user_id=user.user_id)
+    return _token_response(tokens, user=user, password_must_change=must_change)
 
 
 @router.post("/token/refresh", response_model=TokenResponse)
@@ -264,8 +282,11 @@ async def token_revoke(
 
 
 @router.get("/me", response_model=UserResponse)
-async def me(user: AuthUser):
-    return _user_response(user)
+async def me(
+    user: AuthUser,
+    creds_repo: CredentialsRepository = Depends(get_credentials_repo),
+):
+    return await _user_response_for(user, creds_repo)
 
 
 @router.patch("/me", response_model=UserResponse)
@@ -288,6 +309,7 @@ async def change_password(
     user: AuthUser,
     response: Response,
     service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """Change the signed-in user's password (修改密码). All other devices are logged out
     (their refresh families are revoked); this session is handed fresh cookies so the
@@ -298,6 +320,13 @@ async def change_password(
         new_password=body.new_password,
     )
     _set_auth_cookies(response, tokens, user_id=user.user_id)
+    if user.role == "admin":
+        await record_admin_audit(
+            db,
+            actor_id=user.user_id,
+            action="account.change_password",
+            target_type="account",
+        )
     return StatusResponse()
 
 

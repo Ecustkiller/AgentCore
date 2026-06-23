@@ -100,6 +100,18 @@ class AdminResetPasswordResponse(BaseModel):
     temporary_password: str
 
 
+class AdminSetPasswordRequest(BaseModel):
+    """Admin-specified new password (设置密码) for a target account.
+
+    Plaintext is never stored or echoed back — only its hash. Revokes the user's
+    sessions on success (same as reset). ``force_change`` defaults true so the user
+    must set their own password on next login unless the operator opts out.
+    """
+
+    new_password: str = Field(..., min_length=8)
+    force_change: bool = True
+
+
 # --- Admin: 全站用量看板 (P1) + 系统状态 (P2) ---
 # The cross-user counterparts of the per-user usage schemas above, plus a
 # read-only deployment-status snapshot. Both endpoints are admin-gated

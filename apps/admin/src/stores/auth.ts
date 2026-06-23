@@ -6,6 +6,7 @@ export interface AuthUser {
   displayName: string;
   email: string | null;
   role: string;
+  passwordMustChange: boolean;
 }
 
 /**

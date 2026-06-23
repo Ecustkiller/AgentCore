@@ -2,6 +2,9 @@ import { resolve } from "path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import { searchForWorkspaceRoot } from "vite";
+import { viteClientBuildDefine } from "../../scripts/client-build-info.mjs";
+
+const clientBuildDefine = viteClientBuildDefine(new URL("./package.json", import.meta.url));
 
 export default defineConfig({
   main: {
@@ -21,6 +24,7 @@ export default defineConfig({
     },
   },
   renderer: {
+    define: clientBuildDefine,
     resolve: {
       alias: {
         "@": resolve("src/renderer"),

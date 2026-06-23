@@ -1,22 +1,9 @@
 name: Deploy Mobile Web
 
-# 手机端网页版（apps/mobile）静态 SPA → Cloudflare Pages。
-# 生产：https://m.fashitianxia.xyz（自定义域名在 CF Pages 项目 agentcore-mobile 绑定）。
-# API：VITE_API_URL 指向 https://app.fashitianxia.xyz/api（Nginx /api 反代前缀）。
-#
-# 触发：master 上 mobile / 共享包改动，或手动 dispatch。
-# 需 secrets：CLOUDFLARE_API_TOKEN（Pages 部署 + 绑域；若含 Zone.DNS:Edit 则自动写 m CNAME）。
-# 自定义域 m.fashitianxia.xyz：Pages 绑定 + 显式 DNS CNAME（须压过 *.fashitianxia.xyz Tunnel 兜底）。
+# ⚠️ 已弃用自动触发 — 改由 Cursor Agent 本地 `pnpm -C apps/mobile deploy:pages` 部署。
+# 见 docs/05-平台与运维/部署与运维.md §二、.cursor/rules/cursor-deploy.mdc
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - "apps/mobile/**"
-      - "packages/design-tokens/**"
-      - "packages/contract-types/**"
-      - "pnpm-lock.yaml"
-      - ".github/workflows/deploy-mobile-web.yml"
   workflow_dispatch:
 
 concurrency:

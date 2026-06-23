@@ -165,6 +165,12 @@ def get_auth_service(session: AsyncSession = Depends(get_db)) -> AuthService:
     )
 
 
+def get_credentials_repo(
+    session: AsyncSession = Depends(get_db),
+) -> CredentialsRepository:
+    return CredentialsRepository(session)
+
+
 async def get_current_user(
     access_token: Annotated[str | None, Cookie(alias=ACCESS_TOKEN_COOKIE)] = None,
     authorization: Annotated[str | None, Header()] = None,

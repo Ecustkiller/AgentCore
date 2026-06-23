@@ -1,5 +1,10 @@
 import { Button } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
+import {
+  clientGitSha,
+  clientVersion,
+  formatGitSha,
+} from "@/lib/clientBuildInfo";
 import { type VersionInfo, fetchVersion } from "@/services/system";
 import { useUIStore } from "@/stores/ui";
 import { useUpdatesStore } from "@/stores/updates";
@@ -161,16 +166,20 @@ export function AboutSettings() {
           <p className="text-destructive">{error}</p>
         ) : info ? (
           <>
-            <Row label="版本" value={info.version} />
+            <Row label="客户端版本" value={clientVersion()} />
             <Row
-              label="构建版本"
-              value={
-                info.gitSha === "unknown" ? "未标记（本地开发）" : info.gitSha
-              }
+              label="客户端构建"
+              value={formatGitSha(clientGitSha())}
+              mono={clientGitSha() !== "unknown"}
+            />
+            <Row label="API 版本" value={info.version} />
+            <Row
+              label="API 构建"
+              value={formatGitSha(info.gitSha)}
               mono={info.gitSha !== "unknown"}
             />
             <Row
-              label="构建时间"
+              label="API 构建时间"
               value={info.builtAt === "unknown" ? "—" : info.builtAt}
             />
           </>

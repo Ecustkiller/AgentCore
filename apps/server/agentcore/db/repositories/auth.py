@@ -68,14 +68,25 @@ class CredentialsRepository:
         )
         await self._session.commit()
 
-    async def set_password(self, user_id: str, password_hash: str) -> None:
+    async def set_password(
+        self,
+        user_id: str,
+        password_hash: str,
+        *,
+        must_change: bool | None = None,
+    ) -> None:
         """Replace the stored hash and clear any lockout. An admin reset both rotates
         the secret and unlocks the account (a forgotten password may have tripped the
-        brute-force lock)."""
+        brute-force lock). ``must_change`` optionally sets ``password_must_change``."""
+        values: dict = {
+            "password_hash": password_hash,
+            "failed_attempts": 0,
+            "locked_until": None,
+        }
+        if must_change is not None:
+            values["password_must_change"] = must_change
         await self._session.execute(
-            update(Credentials)
-            .where(Credentials.user_id == user_id)
-            .values(password_hash=password_hash, failed_attempts=0, locked_until=None)
+            update(Credentials).where(Credentials.user_id == user_id).values(**values)
         )
         await self._session.commit()
 

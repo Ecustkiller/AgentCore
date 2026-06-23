@@ -1,19 +1,10 @@
 name: Deploy Website
 
-# 官网（apps/website）静态站 + Pages Functions 部署到 Cloudflare Pages。
-# /download 运行时经 functions/api/desktop-release 拉 GitHub Latest（5min 缓存）；
-# 构建时 fetch-release.mjs 仍写 download.generated.ts 作首屏/离线回退。
-# 触发：master 上 website 改动 / desktop-v* 桌面发布完成后 / 手动 dispatch。
+# ⚠️ 已弃用自动触发 — 官网改由 Cursor Agent 本地 `pnpm -C apps/website deploy:pages` 部署。
+# 见 docs/05-平台与运维/部署与运维.md §二、.cursor/rules/cursor-deploy.mdc
+# 仅保留 workflow_dispatch 作紧急备用（需 Actions 配额可用）。
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - "apps/website/**"
-      - ".github/workflows/deploy-website.yml"
-  workflow_run:
-    workflows: ["Release Desktop"]
-    types: [completed]
   workflow_dispatch:
 
 concurrency:
@@ -23,8 +14,6 @@ concurrency:
 jobs:
   deploy:
     name: Build & deploy to Cloudflare Pages
-    # workflow_run：仅在 Release Desktop 成功后才刷新下载页（避免 release 失败仍更新官网）。
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
 
     steps:

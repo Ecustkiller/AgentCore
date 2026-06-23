@@ -19,6 +19,8 @@ const ACTION_FILTERS: { value: string; label: string }[] = [
   { value: "", label: "全部操作" },
   { value: "user.update", label: "修改用户" },
   { value: "user.reset_password", label: "重置密码" },
+  { value: "user.set_password", label: "设置密码" },
+  { value: "account.change_password", label: "修改密码" },
   { value: "user.delete", label: "注销账号" },
   { value: "invite.create", label: "生成邀请码" },
   { value: "invite.batch_create", label: "批量生成" },

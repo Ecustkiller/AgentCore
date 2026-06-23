@@ -48,6 +48,7 @@ from agentcore.api.schemas import (
     AdminObservabilitySummary,
     AdminOverview,
     AdminResetPasswordResponse,
+    AdminSetPasswordRequest,
     AdminSystemStatus,
     AdminTurnListItem,
     AdminTurnListResponse,
@@ -66,6 +67,7 @@ from agentcore.api.schemas import (
     ReplaySpan,
     RoleCostLine,
     TurnHealthWindow,
+    StatusResponse,
     TurnMetricLine,
     UsageWindow,
 )
@@ -387,6 +389,37 @@ async def reset_user_password(
         target_id=user_id,
     )
     return AdminResetPasswordResponse(temporary_password=temp_password)
+
+
+@router.post("/users/{user_id}/set-password", response_model=StatusResponse)
+async def set_user_password(
+    user_id: str,
+    body: AdminSetPasswordRequest,
+    admin: AdminUser,
+    auth_service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
+) -> StatusResponse:
+    """Set an account's password to an admin-chosen value (设置密码).
+
+    Revokes the user's sessions (forces re-login on every device) and clears any
+    lockout. The plaintext is never returned — the operator already knows it.
+    ``force_change`` (default true) requires the user to pick a new password on
+    next login. 404 for an unknown account.
+    """
+    await auth_service.admin_set_password(
+        user_id=user_id,
+        new_password=body.new_password,
+        force_change=body.force_change,
+    )
+    await record_admin_audit(
+        db,
+        actor_id=admin.user_id,
+        action="user.set_password",
+        target_type="user",
+        target_id=user_id,
+        detail={"force_change": body.force_change},
+    )
+    return StatusResponse(status="ok")
 
 
 @router.delete("/users/{user_id}", response_model=AdminUserResponse)
