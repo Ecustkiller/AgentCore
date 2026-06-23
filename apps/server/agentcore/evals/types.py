@@ -72,11 +72,18 @@ class TurnOutcome:
 
 @dataclass
 class CheckOutcome:
-    """一个确定性 Check 的判定结果。"""
+    """一个确定性 Check 的判定结果。
+
+    ``gating`` 区分两类 Check（评测体系重设计 §三）：``True`` = L0 契约/安全**不变量**，进
+    pass/fail 判定；``False`` = **诊断**（轨迹形状，如派没派/roster），仍记录与报告，但**不**计
+    入判定——任务是否成功看 L1 rubric 裁判，不看编排机制。归类见 ``checks.DIAGNOSTIC_CHECKS``，
+    由 ``runner.apply_checks`` 落标。
+    """
 
     name: str
     passed: bool
     detail: str = ""
+    gating: bool = True
 
 
 @dataclass
@@ -100,11 +107,16 @@ class CaseReport:
 
     @property
     def checks_passed(self) -> bool:
-        return all(c.passed for c in self.checks)
+        """仅 **gating（L0 不变量）** Check 全过即可；诊断 Check 记录但不计入判定。"""
+        return all(c.passed for c in self.checks if c.gating)
 
     @property
     def passed(self) -> bool:
-        """判定口径（§五 5.3）：规则断言全过 且（无裁判 or 裁判通过）且未报错。"""
+        """判定口径（评测体系重设计 §三）：L0 不变量全过 且（无裁判 or 裁判通过）且未报错。
+
+        诊断 Check（轨迹形状）不参与判定——任务是否成功由 L1 rubric 裁判与 L0 安全/契约不变量
+        共同决定，不由「派没派 / roster 对不对」决定。
+        """
         judge_ok = self.judge is None or self.judge.passed
         return self.checks_passed and judge_ok and self.outcome.error is None
 

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import TYPE_CHECKING
 
 from agentcore.core.logging import get_logger
+from agentcore.runtime.events import batch_metrics as batch_metrics_event
 from agentcore.runtime.events import run_progress
 from agentcore.tools.builtin.delegate.accumulate import (
     accumulate_usage,
@@ -119,6 +121,12 @@ async def drive(
             checkpoint=m.checkpoint_boundaries,
             escalations=m.escalations,
             scope_ratio=round(m.scope_escalations / m.escalations, 2) if m.escalations else 0.0,
+        )
+        # 深层诊断指标 (前端UX设计.md §十): surface the scheduler snapshot to the client so
+        # 诊断模式 shows it in run detail (journaled → replays on reload). Whole-batch verbatim
+        # — the host already logged it; this just also hands it to the UI fold.
+        tool._sink.emit(
+            batch_metrics_event(execution_id=execution_id, metrics=dataclasses.asdict(m))
         )
 
     if tool._pending_boundary is not None:

@@ -69,10 +69,23 @@ export interface ToolUseEndPayload {
   run_id?: string;
 }
 
-/** One step in a single-agent turn's 思考·正文·工具 inline timeline (前端UX设计.md
- * §一B). A `reasoning` step coalesces consecutive thinking deltas, a `content` step
+/** One step in a turn's 思考·正文·工具·协作 inline timeline (统一团队时间线,
+ * 前端UX设计.md §一B). The first three kinds are the CEO bubble's own narrative:
+ * a `reasoning` step coalesces consecutive thinking deltas, a `content` step
  * coalesces consecutive reply-text deltas, and a `tool` step records one call
- * resolved by its matching `tool_use_end`. */
+ * resolved by its matching `tool_use_end`.
+ *
+ * The remaining kinds are POSITIONAL MARKERS — zero-width anchors that fix WHERE a
+ * non-text turn element renders in chronological order, instead of being stamped at
+ * the bottom of the bubble. Each carries only the id needed to look its full payload
+ * up from the turn's side channels (the team execution / the checkpoint·ask·plan_review
+ * folds), so the timeline stays the single ordered source of truth for position:
+ * - `team`: the multi-agent collaboration graph slot (emitted at the turn's first
+ *   `run_plan`; an orchestration tool — delegate/debate — therefore creates NO tool
+ *   step, this marker stands in its place).
+ * - `checkpoint`: a blocking `ask_user` checkpoint card (`checkpoint_required`).
+ * - `ask`: a non-blocking question card (`question_posted`).
+ * - `plan_review`: a plan-review gate card (`plan_review_required`). */
 export type ProcessStep =
   | { kind: "reasoning"; text: string }
   | { kind: "content"; text: string }
@@ -84,7 +97,11 @@ export type ProcessStep =
       result: string | null;
       status: "running" | "success" | "error";
       display?: ToolDisplay | null;
-    };
+    }
+  | { kind: "team"; execution_id: string }
+  | { kind: "checkpoint"; checkpoint_id: string }
+  | { kind: "ask"; ask_id: string }
+  | { kind: "plan_review"; checkpoint_id: string };
 
 /** The user's settlement of a paused GRANTABLE tool call; mirrors the backend
  * `ApprovalDecision`. */
@@ -413,6 +430,47 @@ export interface RunProgressPayload {
   total: number;
 }
 
+/** 调度埋点量化 (深层诊断指标, 前端UX设计.md §十): one WaveScheduler run's observability
+ * snapshot, surfaced for the client's 诊断模式 (`diagnosticMode`). A delegate turn emits one
+ * per scheduler segment (a checkpoint / scope yield + resume emits another), so the desktop
+ * fold accrues a list on `Execution.batches`; the run-detail 诊断信息 reads it. Journaled (it
+ * rides a delegate turn alongside `run_plan`), so it replays on reload. `busy_ms / wall_ms ≈`
+ * 平均并发; `slot_starved > 0` ⇒ the `width` cap throttled ready nodes. The boundary tallies
+ * count 受监督波循环 yields fired THIS segment (bind 晚绑定 / scope 漂移返工 / checkpoint 复核);
+ * the escalate tallies are raw (`scope_escalations ⊆ escalations`). Desktop-only diagnostic
+ * surface — the mobile fold no-ops it (no 诊断 panel), so it is NOT in the conformance
+ * ProjectedTurn. */
+/** 多任务并行图 (并行时间线): one dispatched node's occupancy window — ms offsets from the
+ * scheduler's wall start (same t0 as `wall_ms`). `outcome` is the terminal RunPhase value
+ * (`completed`/`failed`). Only dispatched nodes appear (cascade-skipped omitted). */
+export interface NodeTimingPayload {
+  run_id: string;
+  start_ms: number;
+  end_ms: number;
+  outcome: string;
+}
+
+export interface BatchMetricsPayload {
+  execution_id: string;
+  nodes: number;
+  width: number;
+  peak_running: number;
+  wall_ms: number;
+  busy_ms: number;
+  slot_starved: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  bind_boundaries: number;
+  scope_boundaries: number;
+  checkpoint_boundaries: number;
+  escalations: number;
+  scope_escalations: number;
+  /** 多任务并行图 (并行时间线): per-node occupancy windows (offsets from wall start), so the
+   * desktop can render real temporal parallelism. Dispatched nodes only; host sorts by start. */
+  timeline: NodeTimingPayload[];
+}
+
 // ── 辩论编排产物（debate 工具/主持人收场，前端辩论视图渲染用）─────────────────
 // 一场辩论收场时 emit 的【完整结构化产物】，与 run_plan(plan_type="debate") 的图节点
 // 互补：图承载逐辩手执行（发言全文随辩手 run 走 run_output_delta），本事件承载主持人的
@@ -646,6 +704,7 @@ export type SSEPayloadMap = {
   run_completed: RunCompletedPayload;
   run_failed: RunFailedPayload;
   run_progress: RunProgressPayload;
+  batch_metrics: BatchMetricsPayload;
   run_escalation: RunEscalationPayload;
   escalation_required: EscalationRequiredPayload;
   escalation_resolved: EscalationResolvedPayload;

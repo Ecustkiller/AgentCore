@@ -179,8 +179,9 @@ export interface RunCheckpoint {
 /** 升级实时可见 / 阻塞式求决策: one escalation a worker raised mid-run via `escalate` (its
  * only upward channel to the CEO). `question` is the self-contained ask; `assumption` is what
  * the worker proceeds on; `blocking` flags that a wrong guess would void its product. Folded
- * onto its {@link RunNode} so the node shows a ⚠️ badge and the card raises a turn-level notice
- * the moment it fires — not after the CEO synthesizes.
+ * onto its {@link RunNode} so the node shows a ⚠️ badge and `EscalationCards` surfaces it on the
+ * turn the moment it fires — a non-blocking `raised` as a passive notice, a `pending` as an
+ * interactive 待你拍板 card — not after the CEO synthesizes.
  *
  * `status` is the lifecycle: `raised` = a non-blocking `run_escalation` banner (the worker kept
  * working); `pending` = a blocking `escalation_required` parked on the user (the card is live);
@@ -267,6 +268,45 @@ export interface RunNode {
   escalations: RunEscalation[];
 }
 
+/** 多任务并行图 (并行时间线): one dispatched node's occupancy window, folded (snake→camel) from a
+ * `batch_metrics` frame's `timeline`. `startMs`/`endMs` are offsets from the scheduler wall start
+ * (same t0 as {@link BatchMetricsSnapshot.wallMs}) — the 并行时间线 lays nodes on it so overlap =
+ * real concurrency, a gap before a bar = the `width` cap serialized it, the longest bar = the
+ * critical path. `runId` ties back to a {@link RunNode} for role/label/color. `outcome` is the
+ * terminal status (`completed`/`failed`). Dispatched nodes only (cascade-skipped omitted). */
+export interface NodeTiming {
+  runId: string;
+  startMs: number;
+  endMs: number;
+  outcome: string;
+}
+
+/** 调度埋点量化 (深层诊断指标, 前端UX设计.md §十): one WaveScheduler segment's observability
+ * snapshot, folded from a `batch_metrics` frame. `busyMs / wallMs ≈` 平均并发; `slotStarved > 0`
+ * ⇒ the `width` 并发上限 throttled ready nodes. The boundary tallies count 受监督波循环 yields
+ * fired this segment (bind 晚绑定 / scope 漂移返工 / checkpoint 用户复核); the escalate tallies
+ * are raw (`scopeEscalations ⊆ escalations`). `timeline` carries each dispatched node's occupancy
+ * window (多任务并行图, §十一). A delegate turn accrues one per scheduler segment (a checkpoint /
+ * scope yield + resume appends another). The aggregates show only in 诊断模式 (run detail); the
+ * `timeline` drives the all-users 并行时间线 (canvas 放大态). */
+export interface BatchMetricsSnapshot {
+  nodes: number;
+  width: number;
+  peakRunning: number;
+  wallMs: number;
+  busyMs: number;
+  slotStarved: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  bindBoundaries: number;
+  scopeBoundaries: number;
+  checkpointBoundaries: number;
+  escalations: number;
+  scopeEscalations: number;
+  timeline: NodeTiming[];
+}
+
 export interface Execution {
   id: string;
   planType: "single_agent" | "multi_agent" | "debate";
@@ -275,6 +315,11 @@ export interface Execution {
   agents: AgentState[];
   runs: RunNode[];
   progress: { completed: number; total: number };
+  /** 调度埋点量化 (深层诊断指标, §十): the turn's WaveScheduler snapshots, one per delegate
+   * segment, folded from `batch_metrics` frames. Empty for a single-agent turn or before the
+   * scheduler reports. Surfaced ONLY in 诊断模式 (run detail's 调度 block) — a desktop-local
+   * diagnostic, kept out of the conformance ProjectedTurn. */
+  batches: BatchMetricsSnapshot[];
   /** 辩论收场产物（`debate_result`）：决策简报 + 交锋叙事线，verbatim 承载；null = 非
    * 辩论回合。与 {@link runs} 互补——辩手发言全文在对应辩手节点，本字段是主持人的逐轮
    * 裁判/小结 + 决策简报（{@link DebateView} 据此渲染）。 */

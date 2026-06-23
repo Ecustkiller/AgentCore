@@ -16,10 +16,14 @@
 
 import {
   type MessageLaneState,
+  foldAskMarker,
+  foldCheckpointMarker,
   foldCitations,
   foldContentDelta,
   foldContentReset,
+  foldPlanReviewMarker,
   foldReasoningDelta,
+  foldTeamMarker,
   foldToolUseEnd,
   foldToolUseStart,
 } from "@/lib/foldMessageLane";
@@ -45,6 +49,7 @@ import type {
   DebateRoundStartedPayload,
   MessageEndPayload,
   PlanReviewRequiredPayload,
+  QuestionPostedPayload,
   ReasoningDeltaPayload,
   RunContextPayload,
   RunPlanPayload,
@@ -145,6 +150,9 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "run_plan": {
         const next = planFromRunPlan(ev.payload as RunPlanPayload);
         plan = plan && plan.id === next.id ? mergePlanInto(plan, next) : next;
+        // 协作图时间线落点: the first plan of an execution drops a `team` marker fixing
+        // the graph's slot in the CEO timeline (later same-id batches no-op).
+        messageLane = foldTeamMarker(messageLane, next.id);
         break;
       }
       case "run_started": {
@@ -228,6 +236,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         const frame = frameFromEvent(ev);
         if (frame) frames.push(frame);
         const p = ev.payload as PlanReviewRequiredPayload;
+        messageLane = foldPlanReviewMarker(messageLane, p.checkpoint_id);
         pending = {
           kind: "plan_review",
           checkpointId: p.checkpoint_id,
@@ -268,6 +277,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       }
       case "checkpoint_required": {
         const p = ev.payload as CheckpointRequiredPayload;
+        messageLane = foldCheckpointMarker(messageLane, p.checkpoint_id);
         pending = {
           kind: "checkpoint",
           checkpointId: p.checkpoint_id,
@@ -285,6 +295,11 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         }
         break;
       }
+      case "question_posted": {
+        const p = ev.payload as QuestionPostedPayload;
+        messageLane = foldAskMarker(messageLane, p.ask_id);
+        break;
+      }
       case "error":
         status = "failed";
         break;
@@ -297,7 +312,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       }
       default:
         // message_start / turn_saved / title_generated / tool_progress /
-        // question_posted / workspace_op_required / workspace_promoted / handoff_* —
+        // workspace_op_required / workspace_promoted / handoff_* —
         // not part of the normalized judge state.
         break;
     }

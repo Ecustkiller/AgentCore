@@ -118,6 +118,46 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const checkpoints = message.checkpoints ?? [];
   const nonBlockingAsks = message.nonBlockingAsks ?? [];
   const planReviews = message.planReviews ?? [];
+  // 统一团队时间线: cards whose positional marker rides the inline timeline render there;
+  // only un-anchored ones (no-process turns, or legacy rows whose process predates the
+  // markers) still fall back to the bottom stack — never double-render.
+  const procSteps = message.process ?? [];
+  const markedCheckpoints = useMemo(
+    () =>
+      new Set(
+        procSteps.flatMap((s) =>
+          s.kind === "checkpoint" ? [s.checkpoint_id] : [],
+        ),
+      ),
+    [procSteps],
+  );
+  const markedAsks = useMemo(
+    () =>
+      new Set(procSteps.flatMap((s) => (s.kind === "ask" ? [s.ask_id] : []))),
+    [procSteps],
+  );
+  const markedReviews = useMemo(
+    () =>
+      new Set(
+        procSteps.flatMap((s) =>
+          s.kind === "plan_review" ? [s.checkpoint_id] : [],
+        ),
+      ),
+    [procSteps],
+  );
+  // Escalations ride the team execution's inline slot (next to the graph, in
+  // ProcessTimeline) whenever the turn carries a `team` marker; only un-anchored
+  // legacy turns (graph re-folded at the bottom / no-process) fall back to the
+  // bottom stack here — never double-render.
+  const hasTeamMarker = useMemo(
+    () => procSteps.some((s) => s.kind === "team"),
+    [procSteps],
+  );
+  const bottomCheckpoints = checkpoints.filter(
+    (c) => !markedCheckpoints.has(c.id),
+  );
+  const bottomAsks = nonBlockingAsks.filter((a) => !markedAsks.has(a.id));
+  const bottomReviews = planReviews.filter((p) => !markedReviews.has(p.id));
   const singleAgentArtifacts = useMemo(
     () =>
       message.executionId === null
@@ -189,6 +229,10 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
       executionId={message.executionId}
       messageId={message.id}
       journal={message.runs}
+      conversationId={conversationId}
+      checkpoints={checkpoints}
+      nonBlockingAsks={nonBlockingAsks}
+      planReviews={planReviews}
     />
   ) : (
     <>
@@ -278,7 +322,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           referenced={referenced}
         />
       )}
-      {checkpoints.map((cp) => (
+      {bottomCheckpoints.map((cp) => (
         <CheckpointCard
           key={cp.id}
           checkpoint={cp}
@@ -286,10 +330,10 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           interactive={message.isStreaming}
         />
       ))}
-      {nonBlockingAsks.map((ask) => (
+      {bottomAsks.map((ask) => (
         <NonBlockingAskCard key={ask.id} ask={ask} />
       ))}
-      {planReviews.map((pr) => (
+      {bottomReviews.map((pr) => (
         <PlanReviewCard
           key={pr.id}
           review={pr}
@@ -297,7 +341,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           interactive={message.isStreaming}
         />
       ))}
-      {message.executionId && (
+      {message.executionId && !hasTeamMarker && (
         <EscalationCards
           messageId={message.id}
           conversationId={conversationId}

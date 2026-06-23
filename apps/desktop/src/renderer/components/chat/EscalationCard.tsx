@@ -10,7 +10,14 @@ import {
   decideEscalation,
 } from "@/services/escalation";
 import { type RunEscalation, useMessageExecution } from "@/stores/execution";
-import { ArrowRight, Check, Clock, HelpCircle, Loader2 } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  Clock,
+  HelpCircle,
+  Loader2,
+  Megaphone,
+} from "lucide-react";
 import { useState } from "react";
 
 export function EscalationCard({
@@ -24,6 +31,12 @@ export function EscalationCard({
   conversationId: string | null;
   interactive: boolean;
 }) {
+  // 非阻塞上报 (run_escalation): the worker flagged a decision but kept working on its
+  // assumption — a turn-level NOTICE, never a 待拍板 card (no resolve target). Handled
+  // first so it never falls through to the pending path (which POSTs to a null id).
+  if (escalation.status === "raised") {
+    return <RaisedEscalation escalation={escalation} role={role} />;
+  }
   if (escalation.status === "resolved" || escalation.status === "timeout") {
     return <ResolvedEscalation escalation={escalation} role={role} />;
   }
@@ -151,6 +164,39 @@ function DormantEscalation({
   );
 }
 
+/** 非阻塞上报「边干边提醒」(run_escalation, status=raised): the worker surfaced a
+ * decision/blocker but did NOT suspend — it proceeded on its assumption. A passive,
+ * non-interactive notice (neutral tone, no buttons) so 升级实时可见 holds even when the
+ * 协作图 is collapsed, while staying visibly distinct from a 待你拍板 decision card. */
+function RaisedEscalation({
+  escalation,
+  role,
+}: {
+  escalation: RunEscalation;
+  role: string;
+}) {
+  return (
+    <DecisionCard tone="neutral" className="bg-card/60">
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 shrink-0 text-muted-foreground">
+          <Megaphone size={14} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-muted-foreground">
+            {role} · 边干边上报（无需你拍板）
+          </p>
+          <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
+            {escalation.question}
+          </p>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            已按假设继续：{escalation.assumption}
+          </p>
+        </div>
+      </div>
+    </DecisionCard>
+  );
+}
+
 function ResolvedEscalation({
   escalation,
   role,
@@ -202,14 +248,15 @@ export function EscalationCards({
   if (!execution) return null;
 
   const roleById = new Map(execution.agents.map((a) => [a.id, a.role]));
+  // Every escalation renders, incl. non-blocking `raised` notices (升级实时可见) — each
+  // EscalationCard picks its own variant by status; the pending count below stays
+  // pending-only so a notice never inflates the 待你拍板 badge.
   const items = execution.runs.flatMap((run) =>
-    run.escalations
-      .filter((e) => e.status !== "raised")
-      .map((e, i) => ({
-        esc: e,
-        role: roleById.get(run.agentId) ?? run.agentId,
-        key: e.id ?? `${run.id}-${i}`,
-      })),
+    run.escalations.map((e, i) => ({
+      esc: e,
+      role: roleById.get(run.agentId) ?? run.agentId,
+      key: e.id ?? `${run.id}-${i}`,
+    })),
   );
   if (items.length === 0) return null;
 

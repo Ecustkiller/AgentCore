@@ -1,9 +1,13 @@
 import type { ErrorAction } from "@/lib/errors";
 import {
+  foldAskMarker,
+  foldCheckpointMarker,
   foldCitations,
   foldContentDelta,
   foldContentReset,
+  foldPlanReviewMarker,
   foldReasoningDelta,
+  foldTeamMarker,
   foldToolUseEnd,
   foldToolUseStart,
   messageLaneFromMessage,
@@ -399,8 +403,13 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const msg = messages[idx];
         const existing = msg.checkpoints ?? [];
         if (existing.some((c) => c.id === payload.checkpoint_id)) return null;
+        const lane = foldCheckpointMarker(
+          messageLaneFromMessage(msg),
+          payload.checkpoint_id,
+        );
         messages[idx] = {
           ...msg,
+          process: lane.process,
           checkpoints: [
             ...existing,
             {
@@ -434,8 +443,10 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const msg = messages[idx];
         const existing = msg.nonBlockingAsks ?? [];
         if (existing.some((a) => a.id === payload.ask_id)) return null;
+        const lane = foldAskMarker(messageLaneFromMessage(msg), payload.ask_id);
         messages[idx] = {
           ...msg,
+          process: lane.process,
           nonBlockingAsks: [
             ...existing,
             {
@@ -495,8 +506,13 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const msg = messages[idx];
         const existing = msg.planReviews ?? [];
         if (existing.some((c) => c.id === payload.checkpoint_id)) return null;
+        const lane = foldPlanReviewMarker(
+          messageLaneFromMessage(msg),
+          payload.checkpoint_id,
+        );
         messages[idx] = {
           ...msg,
+          process: lane.process,
           planReviews: [
             ...existing,
             {
@@ -603,8 +619,22 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const messages = [...rt.messages];
         for (let i = messages.length - 1; i >= 0; i--) {
           if (messages[i].role === "assistant") {
-            if (messages[i].executionId === executionId) return null;
-            messages[i] = { ...messages[i], executionId };
+            const msg = messages[i];
+            // 协作图时间线落点: stamp the executionId AND drop a `team` marker fixing the
+            // collaboration graph's slot in the CEO timeline (dedup by execution_id, so a
+            // debate's two run_plans / a repeat batch only anchor once).
+            const lane = foldTeamMarker(
+              messageLaneFromMessage(msg),
+              executionId,
+            );
+            const idChanged = msg.executionId !== executionId;
+            const procChanged = lane.process !== msg.process;
+            if (!idChanged && !procChanged) return null;
+            messages[i] = {
+              ...msg,
+              ...(idChanged ? { executionId } : {}),
+              ...(procChanged ? { process: lane.process } : {}),
+            };
             return { messages };
           }
         }

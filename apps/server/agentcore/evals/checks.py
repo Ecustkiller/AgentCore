@@ -214,6 +214,12 @@ _REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
 
 CHECK_NAMES: frozenset[str] = frozenset(_REGISTRY)
 
+# 诊断 Check（轨迹形状）：仍注册、仍跑、仍报告，但**不计入** pass/fail（评测体系重设计 §三/§六）。
+# 「派没派 / roster 对不对」是编排手段，不是任务结果——把它当 golden 标签会变成回归测试作者的
+# 编排理论（「实现冒充需求」）。过度编排改由「个体贡献=0 + L0 成本预算」度量，期望角色改由 L1
+# milestone 覆盖度量。``runner.apply_checks`` 据此集合把对应 CheckOutcome 标为 gating=False。
+DIAGNOSTIC_CHECKS: frozenset[str] = frozenset({"Delegated", "NotDelegated", "RosterMatches"})
+
 
 def build_check(spec: dict[str, Any]) -> Any:
     """从 ``{"name", "args"}`` 规格构造一个 Check 实例（名未注册则 KeyError）。"""

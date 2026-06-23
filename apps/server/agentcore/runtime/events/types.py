@@ -43,6 +43,7 @@ class EventType(StrEnum):
     RUN_FAILED = "run_failed"
     RUN_PROGRESS = "run_progress"
     RUN_TOOL_PROGRESS = "run_tool_progress"
+    BATCH_METRICS = "batch_metrics"
     RUN_ESCALATION = "run_escalation"
     ESCALATION_REQUIRED = "escalation_required"
     ESCALATION_RESOLVED = "escalation_resolved"

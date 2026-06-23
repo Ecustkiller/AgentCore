@@ -619,6 +619,58 @@ async def test_metrics_excludes_seeded_nodes():
     assert m.completed == 1
 
 
+# --- 多任务并行图 (并行时间线 · per-node timing windows) ---
+
+
+async def test_metrics_timeline_records_overlapping_windows():
+    # 真并发：three independent slow nodes under a wide cap all overlap, so their timeline
+    # windows mutually overlap (latest start < earliest end) — the gantt's「重叠＝真并行」.
+    plan = RunPlan()
+    for x in ("a", "b", "c"):
+        plan.add(_spec(x))
+    sink: list[BatchMetrics] = []
+    await WaveScheduler(max_parallel=8).run(plan, _slow_ok, metrics_sink=sink)
+    tl = sink[0].timeline
+    assert {n.run_id for n in tl} == {"a", "b", "c"}
+    assert all(n.outcome == "completed" for n in tl)
+    assert all(0 <= n.start_ms <= n.end_ms for n in tl)
+    assert max(n.start_ms for n in tl) < min(n.end_ms for n in tl)
+
+
+async def test_metrics_timeline_serialized_under_width_one():
+    # 串行化：width 1 forces the three nodes sequential, so their windows do NOT overlap —
+    # each starts at/after the previous one ends (the gantt's gap that exposes the cap).
+    plan = RunPlan()
+    for x in ("a", "b", "c"):
+        plan.add(_spec(x))
+    sink: list[BatchMetrics] = []
+    await WaveScheduler(max_parallel=1).run(plan, _slow_ok, metrics_sink=sink)
+    tl = sorted(sink[0].timeline, key=lambda n: n.start_ms)
+    assert len(tl) == 3
+    for prev, nxt in zip(tl, tl[1:], strict=False):
+        assert nxt.start_ms >= prev.end_ms
+
+
+async def test_metrics_timeline_excludes_skipped_and_marks_failure():
+    # Only DISPATCHED nodes get a window: a fails (skip cascade), so b never ran and carries
+    # no bar — but a's window stays, stamped with its failed outcome.
+    plan = RunPlan()
+    plan.add(_spec("a", on_failure="skip"))
+    plan.add(_spec("b", ("a",)))
+
+    async def ex(spec: RunSpec, _completed) -> RunState:
+        if spec.run_id == "a":
+            return RunState(phase=RunPhase.FAILED, error="boom")
+        return RunState(phase=RunPhase.COMPLETED, content="b")
+
+    sink: list[BatchMetrics] = []
+    await WaveScheduler().run(plan, ex, metrics_sink=sink)
+    m = sink[0]
+    assert m.skipped == 1  # b cascade-skipped
+    assert [n.run_id for n in m.timeline] == ["a"]
+    assert m.timeline[0].outcome == "failed"
+
+
 # --- 受监督波循环埋点 (boundary + escalation tallies) ---
 
 

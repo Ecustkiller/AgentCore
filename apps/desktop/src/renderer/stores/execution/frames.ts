@@ -1,4 +1,5 @@
 import type {
+  BatchMetricsPayload,
   CheckpointDecision,
   ContextBlockWire,
   EscalationRequiredPayload,
@@ -22,6 +23,7 @@ import type {
   ToolUseEndPayload,
   ToolUseStartPayload,
 } from "@/types/events";
+import type { BatchMetricsSnapshot } from "./types";
 
 /**
  * One recorded run-level fact. The frame stream is append-only and is the
@@ -83,6 +85,13 @@ export type RunFrame =
       error: string;
     }
   | { t: number; kind: "run_progress"; completed: number; total: number }
+  | {
+      // 调度埋点量化 (深层诊断指标): a WaveScheduler segment's snapshot, folded onto
+      // Execution.batches for 诊断模式 (run detail). Carries no run_id — it is execution-level.
+      t: number;
+      kind: "batch_metrics";
+      metrics: BatchMetricsSnapshot;
+    }
   | {
       t: number;
       kind: "run_escalation";
@@ -243,6 +252,35 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         kind: "run_progress",
         completed: p.completed,
         total: p.total,
+      };
+    }
+    case "batch_metrics": {
+      const p = event.payload as BatchMetricsPayload;
+      return {
+        t,
+        kind: "batch_metrics",
+        metrics: {
+          nodes: p.nodes,
+          width: p.width,
+          peakRunning: p.peak_running,
+          wallMs: p.wall_ms,
+          busyMs: p.busy_ms,
+          slotStarved: p.slot_starved,
+          completed: p.completed,
+          failed: p.failed,
+          skipped: p.skipped,
+          bindBoundaries: p.bind_boundaries,
+          scopeBoundaries: p.scope_boundaries,
+          checkpointBoundaries: p.checkpoint_boundaries,
+          escalations: p.escalations,
+          scopeEscalations: p.scope_escalations,
+          timeline: (p.timeline ?? []).map((n) => ({
+            runId: n.run_id,
+            startMs: n.start_ms,
+            endMs: n.end_ms,
+            outcome: n.outcome,
+          })),
+        },
       };
     }
     case "run_escalation": {

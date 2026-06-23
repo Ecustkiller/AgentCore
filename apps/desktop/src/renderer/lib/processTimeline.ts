@@ -74,15 +74,19 @@ export function dropTrailingContentSteps(
 
 /** Append a started tool call as a `running` step to the timeline.
  *
- * A DELEGATED WORKER's call (`payload.run_id` set) is skipped: workers share the
- * turn's top-level tool_use stream, but their calls belong to their run node, not
- * the captain bubble's inline timeline (统一团队时间线 = the CEO's OWN steps). Returns
- * the same reference when skipped so callers can no-op. */
+ * Skipped (returns the same reference so callers can no-op) for:
+ * - a DELEGATED WORKER's call (`payload.run_id` set): workers share the turn's top-level
+ *   tool_use stream, but their calls belong to their run node, not the captain bubble's
+ *   inline timeline (统一团队时间线 = the CEO's OWN steps);
+ * - an ORCHESTRATION call (delegate/debate): the `team` marker (dropped at `run_plan`)
+ *   stands in its place as the collaboration graph's slot, so it makes no tool step.
+ *   Mirrors the backend `EventSink._accumulate_process`. */
 export function appendToolStep(
   process: ProcessStep[] | undefined,
   payload: ToolUseStartPayload,
 ): ProcessStep[] {
-  if (payload.run_id) return process ?? [];
+  if (payload.run_id || isOrchestrationTool(payload.tool_name))
+    return process ?? [];
   const steps = process ? [...process] : [];
   steps.push({
     kind: "tool",
@@ -108,8 +112,9 @@ export function resolveToolStep(
   process: ProcessStep[] | undefined,
   payload: ToolUseEndPayload,
 ): ProcessStep[] | undefined {
-  // A worker's call never entered the captain timeline (see appendToolStep) — no-op.
-  if (payload.run_id) return process;
+  // A worker's / orchestration call never entered the captain timeline (see
+  // appendToolStep) — no-op.
+  if (payload.run_id || isOrchestrationTool(payload.tool_name)) return process;
   if (!process) return process;
   let changed = false;
   const steps = process.map((s) => {
@@ -124,19 +129,87 @@ export function resolveToolStep(
   return changed ? steps : process;
 }
 
+/** Whether a positional marker step of `kind` keyed by `key`==`value` is already in the
+ * timeline — keeps a replayed / multi-batch event from dropping a duplicate anchor. */
+function hasMarker(
+  process: ProcessStep[] | undefined,
+  kind: ProcessStep["kind"],
+  key: string,
+  value: string,
+): boolean {
+  return !!process?.some(
+    (s) => s.kind === kind && (s as Record<string, unknown>)[key] === value,
+  );
+}
+
+/** Drop a `team` marker (collaboration graph slot) at the turn's FIRST `run_plan`
+ * (统一团队时间线): later same-execution batches merge into one graph, so only one marker
+ * per execution. Returns the same reference when already present so callers can no-op.
+ * Mirrors the backend `EventSink._accumulate_process`. */
+export function appendTeamStep(
+  process: ProcessStep[] | undefined,
+  executionId: string,
+): ProcessStep[] {
+  if (!executionId) return process ?? [];
+  if (hasMarker(process, "team", "execution_id", executionId))
+    return process ?? [];
+  return [...(process ?? []), { kind: "team", execution_id: executionId }];
+}
+
+/** Drop a `checkpoint` marker (blocking ask_user) at its chronological spot; the card
+ * body folds separately, keyed by `checkpointId`. No-op (same ref) if already present. */
+export function appendCheckpointStep(
+  process: ProcessStep[] | undefined,
+  checkpointId: string,
+): ProcessStep[] {
+  if (!checkpointId) return process ?? [];
+  if (hasMarker(process, "checkpoint", "checkpoint_id", checkpointId))
+    return process ?? [];
+  return [
+    ...(process ?? []),
+    { kind: "checkpoint", checkpoint_id: checkpointId },
+  ];
+}
+
+/** Drop an `ask` marker (non-blocking question) at its chronological spot; the card body
+ * folds separately, keyed by `askId`. No-op (same ref) if already present. */
+export function appendAskStep(
+  process: ProcessStep[] | undefined,
+  askId: string,
+): ProcessStep[] {
+  if (!askId) return process ?? [];
+  if (hasMarker(process, "ask", "ask_id", askId)) return process ?? [];
+  return [...(process ?? []), { kind: "ask", ask_id: askId }];
+}
+
+/** Drop a `plan_review` marker (plan-review gate) at its chronological spot; the card
+ * body folds separately, keyed by `checkpointId`. No-op (same ref) if already present. */
+export function appendPlanReviewStep(
+  process: ProcessStep[] | undefined,
+  checkpointId: string,
+): ProcessStep[] {
+  if (!checkpointId) return process ?? [];
+  if (hasMarker(process, "plan_review", "checkpoint_id", checkpointId))
+    return process ?? [];
+  return [
+    ...(process ?? []),
+    { kind: "plan_review", checkpoint_id: checkpointId },
+  ];
+}
+
 /** A tool step (narrowed from {@link ProcessStep}). */
 export type ToolStep = Extract<ProcessStep, { kind: "tool" }>;
 
 /**
  * A render node for the inline timeline after consecutive tool steps are coalesced
- * (前端UX设计.md §一B). `reasoning` / `content` stay 1:1 with their steps (they are
- * the natural boundaries that break a run → 保序); a maximal run of ≥2 adjacent tool
+ * (前端UX设计.md §一B). `reasoning` / `content` and the positional markers (`team` /
+ * `checkpoint` / `ask` / `plan_review`) stay 1:1 with their steps — they are the
+ * natural boundaries that break a tool run → 保序; a maximal run of ≥2 adjacent tool
  * steps folds into one collapsible `tool-group`; a lone tool stays inline as `tool`
  * (阈值 ≥2 — 单个不套壳，维持现状平铺).
  */
 export type TimelineNode =
-  | { kind: "reasoning"; text: string }
-  | { kind: "content"; text: string }
+  | Exclude<ProcessStep, { kind: "tool" }>
   | { kind: "tool"; step: ToolStep }
   | { kind: "tool-group"; tools: ToolStep[] };
 
@@ -158,14 +231,12 @@ export function isOrchestrationTool(toolName: string): boolean {
 /**
  * Coalesce a process timeline's consecutive tool steps into render nodes: a run of
  * ≥2 adjacent `kind:"tool"` steps becomes one `tool-group`, a lone tool stays an
- * inline `tool`, and `reasoning`/`content` steps pass through unchanged as the
- * boundaries that break runs — so the true chronological order is fully preserved
- * (前端UX设计.md §一B). Pure & view-only: `process[]` itself is untouched, so the
- * backend / journal / conformance oracle are unaffected.
- *
- * An orchestration tool ({@link isOrchestrationTool}: delegate / debate) is ALSO a
- * boundary — a multi-agent turn renders its team graph at that step, so it stays its
- * own un-grouped `tool` node (and breaks any run around it) like reasoning/content.
+ * inline `tool`, and every non-tool step (`reasoning`/`content` AND the positional
+ * markers `team`/`checkpoint`/`ask`/`plan_review`) passes through unchanged as a
+ * boundary that breaks runs — so the true chronological order is fully preserved
+ * (前端UX设计.md §一B): the team graph and the interaction cards render at their own
+ * marker's slot, not stamped at the bottom. Pure & view-only: `process[]` itself is
+ * untouched, so the backend / journal / conformance oracle are unaffected.
  *
  * The trailing content step (the final answer) is a `content` node, never a tool —
  * the answer can never be hidden inside a collapsed group.
@@ -184,14 +255,7 @@ export function groupToolRuns(process: ProcessStep[]): TimelineNode[] {
   };
   for (const step of process) {
     if (step.kind === "tool") {
-      if (isOrchestrationTool(step.tool_name)) {
-        // Team boundary: flush the current run and emit this delegate/debate step
-        // as its own node so the inline team graph can replace it.
-        flush();
-        nodes.push({ kind: "tool", step });
-      } else {
-        run.push(step);
-      }
+      run.push(step);
     } else {
       flush();
       nodes.push(step);

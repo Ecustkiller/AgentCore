@@ -16,6 +16,34 @@ export function useExecutionScope(): string | null {
   return useContext(ExecutionScopeContext);
 }
 
+/**
+ * One projected {@link Execution} per runtime snapshot, shared across every consumer
+ * of the same turn. The store swaps a message's {@link ExecutionRuntime} for a NEW
+ * object on every mutation (`patchExec` spreads), so the object identity IS a content
+ * key: while a snapshot is unchanged all consumers (InlineTeamGraph / EscalationCards /
+ * MultiAgentFileArtifacts / GraphView…) read the SAME fold — one `projectExecution` per
+ * turn-frame instead of one per consumer per frame — and a superseded snapshot is GC'd
+ * along with its cache entry. The playhead rides on `rt`, so scrubbing yields a new `rt`
+ * and re-folds. Sharing one object also stabilizes referential equality downstream.
+ */
+const projectionCache = new WeakMap<ExecutionRuntime, Execution>();
+
+function projectRuntime(rt: ExecutionRuntime): Execution | null {
+  if (!rt.plan) return null;
+  const cached = projectionCache.get(rt);
+  if (cached) return cached;
+  const upto = rt.playhead ?? rt.frames.length;
+  const exec = projectExecution(
+    rt.plan,
+    rt.frames.slice(0, upto),
+    rt.status,
+    rt.debate,
+    rt.debateRounds,
+  );
+  projectionCache.set(rt, exec);
+  return exec;
+}
+
 /** Project a specific message's execution at its current playhead — live tail
  * or replay. Used where the message id is explicit (the inline graph + panel). */
 export function useMessageExecution(
@@ -24,17 +52,7 @@ export function useMessageExecution(
   const rt = useExecutionStore((s) =>
     messageId ? s.byId[messageId] : undefined,
   );
-  return useMemo(() => {
-    if (!rt?.plan) return null;
-    const upto = rt.playhead ?? rt.frames.length;
-    return projectExecution(
-      rt.plan,
-      rt.frames.slice(0, upto),
-      rt.status,
-      rt.debate,
-      rt.debateRounds,
-    );
-  }, [rt]);
+  return useMemo(() => (rt ? projectRuntime(rt) : null), [rt]);
 }
 
 /**

@@ -397,6 +397,10 @@
       {
         "kind": "content",
         "text": "我来组织一场多方圆桌。"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec1"
       }
     ],
     "citations": [],

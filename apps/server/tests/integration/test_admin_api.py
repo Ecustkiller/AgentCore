@@ -415,12 +415,15 @@ async def test_set_password_force_change_false(client, new_client, make_admin):
         assert me["password_must_change"] is False
 
 
-async def test_set_password_weak_rejected(client, make_admin, make_invite):
+async def test_set_password_weak_rejected(client, new_client, make_admin):
     username, password = await make_admin()
     await _login(client, username, password)
-    code = await make_invite("INV-SP")
-    await _register_and_login(client, code, "weaktarget")
-    uid = (await client.get("/v1/auth/me")).json()["id"]
+    code = (await client.post("/v1/auth/invites", json={})).json()["code"]
+
+    async with new_client() as target:
+        await _register_and_login(target, code, "weaktarget")
+        uid = (await target.get("/v1/auth/me")).json()["id"]
+
     assert (
         await client.post(
             f"/v1/admin/users/{uid}/set-password",

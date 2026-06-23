@@ -200,7 +200,15 @@
     "process": [
       {
         "kind": "content",
-        "text": "我来安排团队。 团队已完成（有 1 条待你拍板的升级）。"
+        "text": "我来安排团队。"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec1"
+      },
+      {
+        "kind": "content",
+        "text": " 团队已完成（有 1 条待你拍板的升级）。"
       }
     ],
     "citations": [],

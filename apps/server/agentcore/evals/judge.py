@@ -1,23 +1,135 @@
-"""LLM 裁判（对比评估 §六 / 评估体系 P1）.
+"""LLM 裁判（评测体系重设计 §五：L1 结果评分主轴 + 多 Agent 诊断成对裁判）.
 
 本文件容纳两类裁判，共用一个 :class:`~agentcore.llm.protocol.LLMProvider`：
 
-- :class:`LLMPairwiseJudge`（已落地，本文件）：**成对偏好**裁判，判「主臂 vs 基准臂」
-  哪个更好——盲评（隐去谁是团队）+ 位置对调（A/B 顺序换一遍各判一次，仅当两序一致才
-  计胜，抵消位置偏见）+ 坏 JSON 容错。现状见 ``docs/02-架构/后端架构.md`` §五。
-- ``LLMJudge``（绝对分裁判，⏳ P1）：按 rubric 给 1–5 分，见
-  ``docs/07-规划/远期规划.md`` §2.4 支一；落地后并入本文件。
+- :class:`LLMJudge`（绝对分裁判，**L1 结果评分主轴**）：按 rubric 给 1–5 分、pass = 均分 ≥
+  阈值。CoT（先理由后分）+ 反长度偏差系统提示提升与人对齐；``samples>1`` 多采样取均分压裁判
+  方差（思考模型不吃 temperature，靠重采样降噪）。这是新评测体系判「任务是否成功」的主轴。
+- :class:`LLMPairwiseJudge`（成对偏好裁判，多 Agent 对比**诊断**用）：判「主臂 vs 基准臂」哪个
+  更好——盲评 + 位置对调（A/B 换序各判一次，仅当两序一致才计胜，抵消位置偏见）+ 坏 JSON 容错。
 
-判定本身仍走 ``provider.complete``；单测注入返回固定 JSON 的假 provider，零成本验证
-解析 / 位置对调合议 / 容错（见 tests/test_evals_comparison.py），真模型留给 nightly。
+判定本身仍走 ``provider.complete``；单测注入返回固定 JSON 的假 provider，零成本验证解析 /
+位置对调合议 / 容错（见 tests/test_evals_comparison.py），真模型留给 nightly。裁判可信工程
+（gold-set + Cohen's kappa 校准、平衡置换消 rubric 选项位置偏差）见重设计 §五（P0 后续）。
 """
 
 from __future__ import annotations
 
 import json
 
-from agentcore.evals.types import PairwiseVerdict
+from agentcore.evals.types import EvalCase, JudgeVerdict, PairwiseVerdict, TurnOutcome
 from agentcore.llm.protocol import LLMMessage, LLMProvider, LLMRequest
+
+# --- L1 结果评分主轴：绝对分裁判 ---------------------------------------------
+
+_ABSOLUTE_SYSTEM_PROMPT = (
+    "你是严格的质量评审。给定一个任务、评分准则（rubric）和一份答案，按准则给 1–5 分。\n"
+    "评分锚点：1=完全没满足/跑题或编造；2=大体没满足；3=部分满足、有明显缺漏；"
+    "4=基本满足准则；5=完全满足且无明显问题。\n"
+    "重要原则：简洁正确优于冗长堆砌——绝不因答案更长、更详细、语气更自信就给高分；"
+    "惩罚注水、冗余、重复；只看是否真正满足准则。\n"
+    "先写一句简短理由，再给分。只输出 JSON，不要其他文字：\n"
+    '{"score": <1-5 整数>, "rationale": "简短理由"}'
+)
+
+
+def _parse_score(content: str) -> tuple[float, str]:
+    """从裁判输出抽 ``(score∈[0,5], rationale)``；非法 JSON 容错为 0 分（判负）。"""
+    try:
+        start = content.index("{")
+        end = content.rindex("}")
+        data = json.loads(content[start : end + 1])
+    except (ValueError, json.JSONDecodeError):
+        return 0.0, f"裁判输出无法解析为 JSON: {content[:120]!r}"
+    try:
+        score = float(data.get("score", 0))
+    except (TypeError, ValueError):
+        score = 0.0
+    score = max(0.0, min(5.0, score))
+    return score, str(data.get("rationale", ""))
+
+
+class LLMJudge:
+    """绝对分裁判（实现 :class:`~agentcore.evals.types.Judge` 协议）—— L1 结果评分主轴。
+
+    按 ``case.rubric`` 给被评答案 1–5 分，``passed = 均分 ≥ pass_threshold``（pass 阈值留在代码
+    里、可审计可调，不让模型自报 pass）。``samples>1`` 时多采样取均分压裁判方差（思考模型不吃
+    temperature，靠重采样降噪）。``provider`` 注入便于单测（脚本化假 provider 返回固定 JSON）。
+    """
+
+    def __init__(
+        self,
+        provider: LLMProvider,
+        model: str,
+        *,
+        pass_threshold: float = 4.0,
+        samples: int = 1,
+        scenario: str = "eval.judge.absolute",
+    ) -> None:
+        self._provider = provider
+        self._model = model
+        self._pass_threshold = pass_threshold
+        self._samples = max(1, samples)
+        self._scenario = scenario
+
+    async def _one(self, rubric: str, user_message: str, answer: str) -> tuple[float, str]:
+        user = (
+            f"【评分准则】\n{rubric}\n\n"
+            f"【任务】\n{user_message}\n\n"
+            f"【答案】\n{answer}\n\n"
+            "请只输出 JSON。"
+        )
+        request = LLMRequest(
+            messages=[
+                LLMMessage(role="system", content=_ABSOLUTE_SYSTEM_PROMPT),
+                LLMMessage(role="user", content=user),
+            ],
+            model=self._model,
+            temperature=0.0,
+            stream=False,
+            thinking=True,
+            scenario=self._scenario,
+        )
+        response = await self._provider.complete(request)
+        return _parse_score(response.content or "")
+
+    async def score(self, case: EvalCase, outcome: TurnOutcome) -> JudgeVerdict:
+        scores: list[float] = []
+        rationales: list[str] = []
+        for _ in range(self._samples):
+            s, r = await self._one(case.rubric or "", case.user_message, outcome.content or "")
+            scores.append(s)
+            rationales.append(r)
+        avg = sum(scores) / len(scores) if scores else 0.0
+        passed = avg >= self._pass_threshold
+        if len(rationales) == 1:
+            rationale = rationales[0]
+        else:
+            rationale = f"均分 {avg:.1f}/5（{len(scores)} 采样）：" + " || ".join(rationales)
+        return JudgeVerdict(score=round(avg, 2), passed=passed, rationale=rationale)
+
+
+def build_default_judge(mode: str = "quality") -> LLMJudge:
+    """构造接真实 DeepSeek 的绝对分裁判：默认固定 Pro 档（Pro 评 Flash，压同家族自偏好）。
+
+    裁判模型优先读 ``EVAL_JUDGE_MODEL``，否则回落 ``mode`` 档（默认 quality → Pro）的 chat 档
+    模型；凭据复用 harness 的 eval 专用 key 解析。仅 CLI/nightly 真跑调用——单测注入假 provider。
+    与 :func:`~agentcore.evals.comparison.build_default_pairwise_judge` 同构（共用 eval ceiling /
+    凭据解析），故同样在函数内惰性 import 重依赖，保持本模块对 runtime/factory 零顶层耦合。
+    """
+    import os
+
+    from agentcore.evals.harness import _EVAL_CEILING, _eval_credentials
+    from agentcore.llm.factory import build_provider
+    from agentcore.llm.modes import resolve_profile_set
+
+    provider = build_provider(_eval_credentials())
+    model = os.environ.get("EVAL_JUDGE_MODEL", "").strip()
+    if not model:
+        profiles = resolve_profile_set(mode, custom_modes={}, ceiling=_EVAL_CEILING)
+        model = profiles.get("chat").model
+    return LLMJudge(provider, model)
+
 
 _SYSTEM_PROMPT = (
     "你是严格的成对评审。给定一个任务和两份答案（答案X、答案Y），依据评分准则判断哪份更好。\n"

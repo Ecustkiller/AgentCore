@@ -333,6 +333,10 @@
       {
         "kind": "content",
         "text": "我发起一场正反辩论来定夺。"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec1"
       }
     ],
     "citations": [],

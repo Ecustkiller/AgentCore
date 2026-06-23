@@ -38,6 +38,7 @@ from agentcore.runtime.events.journal_config import (
     _JOURNAL_SURFACE_TYPES,
 )
 from agentcore.runtime.events.run import (
+    batch_metrics,
     debate_result,
     debate_round,
     debate_round_started,
@@ -107,6 +108,7 @@ __all__ = [
     "run_completed",
     "run_failed",
     "run_progress",
+    "batch_metrics",
     "debate_result",
     "debate_round_started",
     "debate_round",

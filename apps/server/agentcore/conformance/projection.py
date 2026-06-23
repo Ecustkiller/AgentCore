@@ -10,11 +10,14 @@ the oracle never invents behavior the product doesn't already have:
 - the multi-agent team graph (agents / runs / progress) mirrors desktop
   ``projectExecution`` (run_plan skeleton → run_* frames fold in; progress derived
   from run states; revisions synthesized from their run_started frame);
-- the 思考·正文·工具 ``process`` timeline mirrors ``EventSink._accumulate_process``
-  (reasoning/content deltas coalesce; one step per tool call resolved by its
-  tool_use_end), carried for single-agent AND multi-agent turns (统一团队时间线 — the
-  CEO's own steps, with the ``delegate`` step marking the team-graph slot), parity
-  with ``process_timeline()`` (which only goes None for a tool-less turn);
+- the 思考·正文·工具·协作 ``process`` timeline mirrors ``EventSink._accumulate_process``
+  (reasoning/content deltas coalesce; one step per captain tool call resolved by its
+  tool_use_end; zero-width positional markers — ``team`` at run_plan, ``checkpoint`` /
+  ``ask`` / ``plan_review`` at their *_required — fix where the graph / interaction
+  cards render in chronological order; orchestration tool steps are dropped, the
+  ``team`` marker stands in), carried for single-agent AND multi-agent turns (统一团队
+  时间线 — the CEO's own steps), parity with ``process_timeline()`` (which only goes
+  None for a turn with no structural step);
 - ``content`` / ``reasoning`` accumulate the captain bubble's deltas (present even in
   a multi-agent turn — the CEO speaks above the graph);
 - ``status`` / ``pendingInteraction`` fold the gate state machine (a *_required pauses,
@@ -29,6 +32,8 @@ Output keys are the camelCase ProjectedTurn shape (see
 from __future__ import annotations
 
 from typing import Any
+
+from agentcore.runtime.events.sink import ORCHESTRATION_TOOLS
 
 # message_end.finish_reason → terminal TurnStatus (parity with desktop statusFromFinish,
 # extended with the non-error completed reasons the chat turn can carry).
@@ -122,6 +127,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     def run_by_id(rid: str) -> dict[str, Any] | None:
         return next((r for r in runs if r["id"] == rid), None)
 
+    def has_marker(kind: str, key: str, value: str) -> bool:
+        """Whether a positional marker (team / checkpoint / ask / plan_review) for
+        ``value`` is already in the timeline (multi-batch / replay dedup)."""
+        return any(s.get("kind") == kind and s.get(key) == value for s in process)
+
     def upsert_round(entry: dict[str, Any]) -> None:
         """Fold one 逐轮叙事 update by ``round_no`` (a later debate_round overwrites the
         focus-only round_started entry — it carries focus too), kept ascending. Mirrors
@@ -166,9 +176,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         elif etype == "tool_use_start":
             # A delegated worker's call (run-scoped) belongs to its run node, not the
-            # captain's inline timeline — keep it out of `process` (统一团队时间线 = the
-            # CEO's OWN steps); still clear the run's live toolProgress below.
-            if not p.get("run_id"):
+            # captain's inline timeline; an orchestration call (delegate/debate) is
+            # represented by the `team` marker (dropped at run_plan), not a tool step.
+            # Either way it creates no captain step (统一团队时间线 = the CEO's OWN steps);
+            # still clear the run's live toolProgress below.
+            if not p.get("run_id") and p.get("tool_name") not in ORCHESTRATION_TOOLS:
                 step: dict[str, Any] = {
                     "kind": "tool",
                     "id": p.get("tool_call_id", ""),
@@ -188,7 +200,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     ag["toolProgress"] = None
 
         elif etype == "tool_use_end":
-            if p.get("run_id"):
+            if p.get("run_id") or p.get("tool_name") in ORCHESTRATION_TOOLS:
                 continue
             call_id = p.get("tool_call_id", "")
             result = p.get("result")
@@ -206,6 +218,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         elif etype == "run_plan":
             ip = p.get("execution_id")
+            # 协作图时间线落点 (统一团队时间线): the first run_plan of an execution drops a
+            # zero-width `team` marker at its chronological spot (later same-id batches merge
+            # into one graph → one marker). Mirrors EventSink._accumulate_process.
+            if ip and not has_marker("team", "execution_id", ip):
+                process.append({"kind": "team", "execution_id": ip})
             if plan_id is None or plan_id == ip:
                 plan_id = ip
                 for a in p.get("agents") or []:
@@ -455,9 +472,14 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 status = "running"
 
         elif etype == "checkpoint_required":
+            cid = p.get("checkpoint_id", "")
+            # 检查点时间线落点: positional marker so the card replays at its real spot
+            # (card body folds separately, keyed by id). Mirrors EventSink.
+            if cid and not has_marker("checkpoint", "checkpoint_id", cid):
+                process.append({"kind": "checkpoint", "checkpoint_id": cid})
             pending = {
                 "kind": "checkpoint",
-                "checkpointId": p.get("checkpoint_id", ""),
+                "checkpointId": cid,
                 "question": p.get("question", ""),
                 "context": p.get("context", ""),
             }
@@ -474,6 +496,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         elif etype == "plan_review_required":
             cid = p.get("checkpoint_id", "")
+            # 计划复核时间线落点: positional marker (card body folds separately).
+            if cid and not has_marker("plan_review", "checkpoint_id", cid):
+                process.append({"kind": "plan_review", "checkpoint_id": cid})
             run_ids = [s.get("run_id", "") for s in (p.get("steps") or [])]
             checkpoint_steps[cid] = run_ids
             for rid in run_ids:
@@ -500,6 +525,13 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 pending = None
                 status = "running"
 
+        elif etype == "question_posted":
+            # 非阻塞发问时间线落点: the CEO surfaced a question and kept working (no gate, no
+            # pending) — positional marker only, card body folds separately by ask_id.
+            aid = p.get("ask_id", "")
+            if aid and not has_marker("ask", "ask_id", aid):
+                process.append({"kind": "ask", "ask_id": aid})
+
         elif etype == "error":
             status = "failed"
 
@@ -510,9 +542,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         else:
             # message_start / turn_saved / title_generated / tool_progress /
-            # question_posted (non-gating) / workspace_op_required / handoff_* —
-            # not part of the normalized turn judge state (no-op). Mirrored by the
-            # frontend folds' assertNever switch so the set stays in lockstep.
+            # workspace_op_required / handoff_* — not part of the normalized turn judge
+            # state (no-op). Mirrored by the frontend folds' assertNever switch so the
+            # set stays in lockstep.
             pass
 
     # A cancelled turn never received terminal frames for in-flight nodes; freeze them
@@ -534,9 +566,12 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         # captain emitted run_context for (pure chat included), [] otherwise.
         "captainContext": captain_context,
         # The CEO's inline timeline — carried for single-agent AND multi-agent turns
-        # (统一团队时间线): a delegating turn's `delegate` step marks where the team graph
-        # slots in at render, worker activity rides `runs`/`agents`. Tool-less turns
-        # build no process (no interleaving to preserve), matching process_timeline().
+        # (统一团队时间线): besides reasoning/content/tool steps it carries zero-width
+        # POSITIONAL MARKERS — `team` (the collaboration graph slot, dropped at run_plan),
+        # `checkpoint` / `ask` / `plan_review` (interaction cards) — fixing where each
+        # non-text element renders in chronological order, worker activity rides
+        # `runs`/`agents`. A pure reasoning/content turn builds no structural step (the
+        # live persist gate then stores no process, matching the fold).
         "process": process,
         "citations": citations,
         "agents": agents,

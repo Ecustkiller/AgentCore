@@ -170,6 +170,10 @@
       {
         "kind": "content",
         "text": "我来分工。"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec1"
       }
     ],
     "citations": [],

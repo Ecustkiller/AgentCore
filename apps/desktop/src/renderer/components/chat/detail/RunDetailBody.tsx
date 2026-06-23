@@ -12,6 +12,7 @@ import { formatCompact, formatCost, formatUsd } from "@/lib/format";
 import { activeRuntime, useConversationStore } from "@/stores/conversation";
 import {
   type AgentState,
+  type BatchMetricsSnapshot,
   MODEL_TIER_META,
   type RunEscalation,
   type RunNode,
@@ -327,6 +328,7 @@ export function RunDetailBody({
           run={run}
           executionId={execution.id}
           traceId={traceId}
+          batches={execution.batches}
         />
       )}
     </div>
@@ -783,10 +785,12 @@ function DiagnosticSection({
   run,
   executionId,
   traceId,
+  batches,
 }: {
   run: RunNode;
   executionId: string;
   traceId: string | null;
+  batches: BatchMetricsSnapshot[];
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -826,10 +830,69 @@ function DiagnosticSection({
           {run.model && <DiagRow label="模型" value={run.model} />}
           <DiagRow label="执行 ID" value={executionId} />
           <DiagRow label="Trace ID" value={traceId ?? "—"} />
+          {batches.length > 0 && <SchedulingDiag batches={batches} />}
         </div>
       )}
     </section>
   );
+}
+
+/** 调度埋点量化 (深层诊断指标, §十): the turn's WaveScheduler snapshot(s), rendered inside
+ * 诊断信息. Execution-level (not run-scoped) — it answers「这回合的并发真的发生了吗 / width 卡没卡
+ * / 自我纠偏触发了几次」. Most turns carry one batch; a checkpoint/scope yield + resume adds more.
+ * Exported for the render test (the panel is dev-gated, so the shoot harness never reaches it). */
+export function SchedulingDiag({ batches }: { batches: BatchMetricsSnapshot[] }) {
+  return (
+    <div className="mt-1 border-t border-border/60 pt-2">
+      <p className="mb-1 text-xs font-medium text-muted-foreground">
+        调度{batches.length > 1 ? ` · ${batches.length} 批` : ""}
+      </p>
+      {batches.map((b, i) => (
+        <div
+          key={i}
+          className="mb-2 space-y-1 last:mb-0"
+        >
+          {batches.length > 1 && (
+            <p className="text-[11px] text-muted-foreground">批次 {i + 1}</p>
+          )}
+          <DiagRow
+            label="节点 / 并发"
+            value={`${b.nodes} · 上限 ${b.width} · 峰值 ${b.peakRunning}`}
+          />
+          <DiagRow
+            label="平均并发 / 用时"
+            value={`${b.wallMs > 0 ? (b.busyMs / b.wallMs).toFixed(2) : "—"} · ${b.wallMs}ms`}
+          />
+          <DiagRow label="结果" value={schedOutcome(b)} />
+          {b.slotStarved > 0 && (
+            <DiagRow label="槽位等待" value={`${b.slotStarved} 次`} />
+          )}
+          {(b.bindBoundaries > 0 ||
+            b.scopeBoundaries > 0 ||
+            b.checkpointBoundaries > 0) && (
+            <DiagRow
+              label="自我纠偏"
+              value={`绑定 ${b.bindBoundaries} · 操舵 ${b.scopeBoundaries} · 复核 ${b.checkpointBoundaries}`}
+            />
+          )}
+          {b.escalations > 0 && (
+            <DiagRow
+              label="队员上报"
+              value={`${b.escalations}（scope ${b.scopeEscalations}）`}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** 调度结果一行：完成数恒显，失败 / 跳过仅在 >0 时追加（无则不喧宾夺主）。 */
+function schedOutcome(b: BatchMetricsSnapshot): string {
+  const parts = [`完成 ${b.completed}`];
+  if (b.failed > 0) parts.push(`失败 ${b.failed}`);
+  if (b.skipped > 0) parts.push(`跳过 ${b.skipped}`);
+  return parts.join(" · ");
 }
 
 /** One diagnostic id row — left label, right mono value that wraps (`break-all`)

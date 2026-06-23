@@ -339,6 +339,26 @@ class RunState:
 
 
 @dataclass(frozen=True)
+class NodeTiming:
+    """One node's occupancy window within a WaveScheduler run (多任务并行图 / 并行时间线).
+
+    ``start_ms`` / ``end_ms`` are offsets from the scheduler's wall start — the SAME t0
+    :attr:`BatchMetrics.wall_ms` measures — so the host can lay every node on one timeline
+    and SEE the temporal truth the dependency DAG can't: real concurrency (overlapping
+    bars), the critical path (the longest pole), and where the ``width`` cap serialized
+    ready work (gaps before a bar that a free slot would have filled). ``outcome`` is the
+    node's terminal :class:`RunPhase` value. Only **dispatched** nodes appear here —
+    cascade-skipped nodes never ran, so they carry no window (their count still rides
+    :attr:`BatchMetrics.skipped`).
+    """
+
+    run_id: str
+    start_ms: int
+    end_ms: int
+    outcome: str
+
+
+@dataclass(frozen=True)
 class BatchMetrics:
     """Observability snapshot of one :class:`~agentcore.runtime.runs.wave.WaveScheduler`
     run (调度埋点量化).
@@ -378,3 +398,7 @@ class BatchMetrics:
     # ── escalate 信号埋点 (raw → host derives scope 占比) ──
     escalations: int = 0  # total escalations harvested across THIS run's nodes
     scope_escalations: int = 0  # of which carried kind=scope (deviation signal)
+    # ── 多任务并行图 (并行时间线): per-node occupancy windows (offsets from wall start) ──
+    # so the host can render real temporal parallelism. Dispatched nodes only (skipped
+    # omitted); ordered by completion (the host sorts by start for display).
+    timeline: list[NodeTiming] = field(default_factory=list)

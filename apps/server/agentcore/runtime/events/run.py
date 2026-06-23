@@ -164,6 +164,22 @@ def run_progress(completed: int, total: int) -> SSEEvent:
     )
 
 
+def batch_metrics(*, execution_id: str, metrics: dict[str, Any]) -> SSEEvent:
+    """One WaveScheduler run's observability snapshot (调度埋点量化), surfaced for the
+    client's 诊断模式 (前端UX设计.md §十「深层诊断指标」). ``metrics`` is the verbatim
+    ``dataclasses.asdict`` of a :class:`~agentcore.runtime.runs.types.BatchMetrics`
+    (nodes / width / peak_running / wall_ms / busy_ms / slot_starved / outcome counts /
+    受监督波循环 boundary + escalate tallies) — carried snake_case as a wire-shaped leaf,
+    folded onto the desktop ``Execution.batches`` and shown in run detail's 诊断信息. A
+    delegate turn emits one per scheduler segment (a checkpoint/scope yield + resume emits
+    another), so the fold accrues a list. Journaled (it rides a delegate turn alongside
+    ``run_plan``), so it replays on reload; the mobile fold no-ops it (no diagnostic surface)."""
+    return SSEEvent(
+        type=EventType.BATCH_METRICS,
+        payload={"execution_id": execution_id, **metrics},
+    )
+
+
 def debate_result(
     *,
     execution_id: str,

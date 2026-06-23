@@ -49,7 +49,7 @@ async def get_capabilities(_user: AuthUser) -> CapabilitiesResponse:
     ]
 
     # The CEO prompt template: composed with the catalog's CEO tool names so the 能力目录
-    # reflects the full repertoire (e.g. asking_the_user shows because ask_user is a CEO
+    # reflects the full repertoire (e.g. ask_user_kickoff shows because ask_user is a CEO
     # tool). No per-user memory / per-turn attachments — this is the static blueprint.
     ceo_tool_names = {
         entry.schema.name for entry in catalog if AVAILABLE_TO_CEO in entry.available_to

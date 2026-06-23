@@ -1,4 +1,8 @@
 import { DebateBody } from "@/components/chat/DebateCompare";
+import {
+  ParallelTimeline,
+  hasParallelTimeline,
+} from "@/components/chat/ParallelTimeline";
 import { Button } from "@/components/ui";
 import { useActiveGenerating, useActiveMessages } from "@/stores/conversation";
 import {
@@ -7,10 +11,20 @@ import {
   useMessageExecution,
 } from "@/stores/execution";
 import { type EndpointKind, useSidePanelStore } from "@/stores/sidePanel";
-import { ArrowLeft, MessagesSquare, Network } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Clock, MessagesSquare, Network } from "lucide-react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { CanvasCommandBar } from "./CanvasCommandBar";
 import { GraphView } from "./GraphView";
+
+/** 放大态可切换的视图：协作图 (依赖结构) / 交锋叙事 (辩论主角) / 并行时间线 (时间真相)。 */
+type TurnView = "graph" | "clash" | "timeline";
 
 /**
  * The canvas's 放大态 (前端UX设计.md §六 · Route A): one turn's full collaboration
@@ -51,18 +65,41 @@ export function CanvasZoomedTurn({
   const showContentDetail = useSidePanelStore((s) => s.showContentDetail);
   const messages = useActiveMessages();
 
-  // 辩论回合：放大态在「交锋叙事 ↔ 协作图」间切换 (前端UX设计.md §四/§六)。交锋页是主角
-  // (决策简报 + 叙事线)、图作次级——辩论的 DAG 是固定低信息形状。默认落交锋；回放本回合则落
-  // 图让时间线在图上播放。切回合 (跟随新指令) 时按新回合性质复位 (deps 含 scopeId)。
+  // 放大态视图切换 (前端UX设计.md §四/§六/§十一)：交锋叙事 (辩论主角，决策简报 + 叙事线) /
+  // 协作图 (依赖结构) / 并行时间线 (时间真相，多任务并行图)。辩论默认落交锋、其余默认落图；回放
+  // 本回合则落图让时间线在图上播放。并行时间线恒为可选透镜 (从不作默认)。切回合 (跟随新指令)
+  // 时按新回合性质复位 (deps 含 scopeId)。
   const debate = !!execution && isDebate(execution);
-  const [debateTab, setDebateTab] = useState<"clash" | "graph">(
+  const parallel = !!execution && hasParallelTimeline(execution);
+  const [view, setView] = useState<TurnView>(
     debate && !(autoplay && scopeId === turnId) ? "clash" : "graph",
   );
   useEffect(() => {
     const replayThisTurn = autoplay && scopeId === turnId;
-    setDebateTab(debate && !replayThisTurn ? "clash" : "graph");
+    setView(debate && !replayThisTurn ? "clash" : "graph");
   }, [debate, scopeId, autoplay, turnId]);
-  const showClash = debate && debateTab === "clash";
+  const showClash = debate && view === "clash";
+  const showTimeline = parallel && view === "timeline";
+
+  // The 放大态 view switcher's available tabs (≥2 ⇒ it renders): 交锋 only for a debate,
+  // 时间线 only when there's parallel-execution data, 协作图 always.
+  const viewTabs = useMemo(() => {
+    const tabs: { id: TurnView; label: string; icon: ReactNode }[] = [];
+    if (debate)
+      tabs.push({
+        id: "clash",
+        label: "交锋叙事",
+        icon: <MessagesSquare size={14} />,
+      });
+    tabs.push({ id: "graph", label: "协作图", icon: <Network size={14} /> });
+    if (parallel)
+      tabs.push({
+        id: "timeline",
+        label: "并行时间线",
+        icon: <Clock size={14} />,
+      });
+    return tabs;
+  }, [debate, parallel]);
 
   // This turn's final answer bubble (mirrors GraphView's `finalAnswer`): the
   // assistant message stamped with this execution id once the CEO starts writing.
@@ -175,35 +212,25 @@ export function CanvasZoomedTurn({
               {taskSummary}
             </span>
           )}
-          {/* 辩论回合的「交锋叙事 ↔ 协作图」切换：交锋是主角、默认页，图作次级。 */}
-          {debate && (
+          {/* 放大态视图切换 (交锋叙事 / 协作图 / 并行时间线)：≥2 个可用视图才出现。 */}
+          {viewTabs.length >= 2 && (
             <div className="ml-auto flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-card p-0.5">
-              <Button
-                variant="ghost"
-                onClick={() => setDebateTab("clash")}
-                aria-pressed={debateTab === "clash"}
-                icon={<MessagesSquare size={14} />}
-                className={
-                  debateTab === "clash"
-                    ? "bg-accent text-foreground hover:bg-accent"
-                    : undefined
-                }
-              >
-                交锋叙事
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => setDebateTab("graph")}
-                aria-pressed={debateTab === "graph"}
-                icon={<Network size={14} />}
-                className={
-                  debateTab === "graph"
-                    ? "bg-accent text-foreground hover:bg-accent"
-                    : undefined
-                }
-              >
-                协作图
-              </Button>
+              {viewTabs.map((v) => (
+                <Button
+                  key={v.id}
+                  variant="ghost"
+                  onClick={() => setView(v.id)}
+                  aria-pressed={view === v.id}
+                  icon={v.icon}
+                  className={
+                    view === v.id
+                      ? "bg-accent text-foreground hover:bg-accent"
+                      : undefined
+                  }
+                >
+                  {v.label}
+                </Button>
+              ))}
             </div>
           )}
         </div>
@@ -214,6 +241,11 @@ export function CanvasZoomedTurn({
             // (与图节点 / 端点钻取同一 SidePanel)。
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <DebateBody execution={execution} messageId={scopeId} />
+            </div>
+          ) : showTimeline && execution ? (
+            // 并行时间线页 (多任务并行图)：把队员执行铺在真实时间轴上，看真并发 / 串行化 / 关键路径。
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <ParallelTimeline execution={execution} />
             </div>
           ) : (
             <div className="min-h-0 flex-1">

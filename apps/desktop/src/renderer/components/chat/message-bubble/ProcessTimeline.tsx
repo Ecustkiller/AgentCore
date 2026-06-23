@@ -1,14 +1,23 @@
+import { CheckpointCard } from "@/components/chat/CheckpointCard";
+import { EscalationCards } from "@/components/chat/EscalationCard";
 import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
+import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
+import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import {
   ComposingToolLine,
   ToolLine,
   ToolLineGroup,
 } from "@/components/chat/ToolLine";
-import { groupToolRuns, isOrchestrationTool } from "@/lib/processTimeline";
+import { groupToolRuns } from "@/lib/processTimeline";
+import type {
+  CheckpointDisplay,
+  NonBlockingAskDisplay,
+  PlanReviewDisplay,
+} from "@/stores/conversation";
 import type { ExecutionJournal } from "@/stores/execution";
 import type { Citation, ProcessStep } from "@/types/events";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ThinkingDots, ThinkingHeader } from "./Thinking";
 
 function InlineReasoning({
@@ -68,7 +77,10 @@ function ProcessRow({
       />
     );
   }
-  return <ToolLine step={step} />;
+  // Positional markers (team/checkpoint/ask/plan_review) are resolved in the timeline
+  // map, never routed here — only a `tool` step reaches this tail.
+  if (step.kind === "tool") return <ToolLine step={step} />;
+  return null;
 }
 
 export function ProcessTimeline({
@@ -81,6 +93,10 @@ export function ProcessTimeline({
   executionId,
   messageId,
   journal,
+  conversationId,
+  checkpoints,
+  nonBlockingAsks,
+  planReviews,
 }: {
   process: ProcessStep[];
   isStreaming: boolean;
@@ -91,6 +107,10 @@ export function ProcessTimeline({
   executionId?: string | null;
   messageId?: string;
   journal?: ExecutionJournal;
+  conversationId: string | null;
+  checkpoints: CheckpointDisplay[];
+  nonBlockingAsks: NonBlockingAskDisplay[];
+  planReviews: PlanReviewDisplay[];
 }) {
   const last = process[process.length - 1];
   const hasContentStep = process.some((s) => s.kind === "content");
@@ -101,26 +121,63 @@ export function ProcessTimeline({
     last.status !== "running";
 
   const nodes = groupToolRuns(process);
-  const teamNodeIdx =
-    executionId && messageId
-      ? nodes.findIndex(
-          (n) => n.kind === "tool" && isOrchestrationTool(n.step.tool_name),
-        )
-      : -1;
+  // The team graph normally rides its inline `team` marker; only legacy turns whose
+  // persisted process predates the marker fall back to a bottom-stamped graph.
+  const hasTeamMarker = process.some((s) => s.kind === "team");
 
   return (
     <div className="space-y-2">
       {nodes.map((node, i) => {
         const live = isStreaming && i === nodes.length - 1;
-        if (i === teamNodeIdx && executionId && messageId) {
-          return (
-            <InlineTeamGraph
-              key={executionId}
-              messageId={messageId}
-              executionId={executionId}
-              journal={journal}
+        // Positional markers (统一团队时间线): resolve each marker to its card / graph at
+        // its chronological slot, looking the payload up from the turn's side channels.
+        if (node.kind === "team") {
+          // 统一团队时间线: the collaboration graph rides this slot — and the team's
+          // escalations (worker→CEO→你 求决策) ride right with it. They are
+          // execution-scoped moments that belong WITH the team, not stamped at the
+          // bubble bottom AFTER the final answer; the bottom stack keeps them only for
+          // un-anchored legacy turns (no `team` marker). EscalationCards self-hides
+          // when the turn raised none.
+          return messageId ? (
+            <Fragment key={`team-${node.execution_id}`}>
+              <InlineTeamGraph
+                messageId={messageId}
+                executionId={node.execution_id}
+                journal={journal}
+              />
+              <EscalationCards
+                messageId={messageId}
+                conversationId={conversationId}
+                interactive={isStreaming}
+              />
+            </Fragment>
+          ) : null;
+        }
+        if (node.kind === "checkpoint") {
+          const cp = checkpoints.find((c) => c.id === node.checkpoint_id);
+          return cp ? (
+            <CheckpointCard
+              key={cp.id}
+              checkpoint={cp}
+              conversationId={conversationId}
+              interactive={isStreaming}
             />
-          );
+          ) : null;
+        }
+        if (node.kind === "ask") {
+          const ask = nonBlockingAsks.find((a) => a.id === node.ask_id);
+          return ask ? <NonBlockingAskCard key={ask.id} ask={ask} /> : null;
+        }
+        if (node.kind === "plan_review") {
+          const pr = planReviews.find((p) => p.id === node.checkpoint_id);
+          return pr ? (
+            <PlanReviewCard
+              key={pr.id}
+              review={pr}
+              conversationId={conversationId}
+              interactive={isStreaming}
+            />
+          ) : null;
         }
         if (node.kind === "tool-group") {
           return (
@@ -144,7 +201,7 @@ export function ProcessTimeline({
           />
         );
       })}
-      {executionId && messageId && teamNodeIdx === -1 && (
+      {executionId && messageId && !hasTeamMarker && (
         <InlineTeamGraph
           messageId={messageId}
           executionId={executionId}
