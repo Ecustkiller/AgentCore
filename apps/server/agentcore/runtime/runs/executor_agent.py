@@ -12,10 +12,9 @@ from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.llm.config import apply_overrides
-from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.protocol import LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import (
     EventSink,
@@ -75,7 +74,7 @@ logger = get_logger(__name__)
 def build_agent_executor(
     *,
     plan: RunPlan,
-    llm: DeepSeekProvider,
+    llm: LLMProvider,
     tools: ToolRegistry,
     sink: EventSink,
     base_tool_context: ToolContext,
@@ -176,7 +175,9 @@ def build_agent_executor(
         if bridge is None:
             return None
 
-        async def _request(question: str, assumption: str) -> EscalationOutcome:
+        async def _request(
+            question: str, assumption: str, questions: list[dict[str, Any]]
+        ) -> EscalationOutcome:
             # Cap: count this conversation's already-parked blocking escalates. The check
             # and the suspend's create() run with no await between them (single loop), so
             # the count can't race (设计 §4.7). Over cap ⇒ degrade (proceed on assumption).
@@ -200,6 +201,7 @@ def build_agent_executor(
                         "agent_id": agent_id,
                         "question": question,
                         "assumption": assumption,
+                        "questions": questions,
                     },
                     timeout=escalation_timeout,
                     on_suspended=lambda: sink.emit(
@@ -209,6 +211,7 @@ def build_agent_executor(
                             escalation_id=escalation_id,
                             question=question,
                             assumption=assumption,
+                            questions=questions,
                         )
                     ),
                 )
@@ -272,6 +275,11 @@ def build_agent_executor(
                 thinking=spec.thinking,
                 reasoning_effort=spec.reasoning_effort,
             )
+            # 真·多模型辩手：显式 model 覆写只换 profile 的模型名（保留该档的温度/预算等），
+            # 再经 llm（回合级 ProviderRouter）按 ``provider/model`` 前缀路由到对应厂商。空
+            # （所有普通 worker）= 用 tier 解析出的模型，行为逐字不变。
+            if spec.model:
+                profile = replace(profile, model=spec.model)
             priced_model = profile.model
             tool_ctx = replace(
                 base_tool_context,

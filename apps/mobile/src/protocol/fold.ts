@@ -616,6 +616,11 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       // mobile has no diagnostic panel, so it folds to nothing here and stays out of the
       // conformance ProjectedTurn (desktop folds it onto Execution.batches instead).
       case "batch_metrics":
+      // 交互式逐轮辩论的「续辩/收场」决策事件：桌面端 live-only（驱动决策卡），收场叙事
+      // 已由 debate_round / debate_result 承载，故 conformance ProjectedTurn 从不携带它们
+      // （与桌面 oracle 一致）。手机端无逐轮决策 UI → 折为 no-op，仅在此登记以保穷尽。
+      case "debate_round_decision_required":
+      case "debate_round_decision_resolved":
       case "workspace_op_required":
       case "workspace_promoted":
       case "handoff_snapshot_done":

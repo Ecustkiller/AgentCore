@@ -43,6 +43,20 @@ def _case_to_dict(c: CaseReport) -> dict:
                 "rationale": c.judge.rationale,
             }
         ),
+        "milestone": (
+            None
+            if c.milestone is None
+            else {
+                "coverage": c.milestone.coverage,
+                "passed": c.milestone.passed,
+                "threshold": c.milestone.threshold,
+                "items": [
+                    {"id": it.id, "covered": it.covered, "weight": it.weight, "desc": it.desc}
+                    for it in c.milestone.items
+                ],
+                "rationale": c.milestone.rationale,
+            }
+        ),
         "outcome": {
             "finish_reason": o.finish_reason,
             "rounds": o.rounds,
@@ -88,6 +102,12 @@ def format_report(report: EvalReport) -> str:
         if c.judge is not None:
             mark = "[+]" if c.judge.passed else "[-]"
             lines.append(f"    {mark} Judge {c.judge.score}: {c.judge.rationale[:80]}")
+        if c.milestone is not None:
+            mk = "[+]" if c.milestone.passed else "[-]"
+            cov = c.milestone.coverage * 100
+            thr = c.milestone.threshold * 100
+            miss = [it.id for it in c.milestone.items if not it.covered]
+            lines.append(f"    {mk} Milestone 覆盖 {cov:.0f}% (阈 {thr:.0f}%) 缺={miss}")
         if c.outcome.error:
             lines.append(f"    !!! error: {c.outcome.error}")
     lines.append("-" * 64)

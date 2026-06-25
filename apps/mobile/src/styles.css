@@ -1106,10 +1106,27 @@ button.link {
   border-radius: 8px;
 }
 
+.debate-point-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .debate-point-name {
   font-size: 12px;
   font-weight: 500;
   color: var(--accent);
+}
+
+/* 真·多模型辩论：该方背后的模型（豆包 / DeepSeek …）—— 中性元数据 pill，与状态/身份色不竞争。 */
+.debate-point-model {
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--border);
+  border-radius: 999px;
 }
 
 .debate-point-text {

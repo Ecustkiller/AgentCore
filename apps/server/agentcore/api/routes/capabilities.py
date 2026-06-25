@@ -18,6 +18,7 @@ from agentcore.api.schemas import (
     CapabilitySkill,
     CapabilityTool,
 )
+from agentcore.config import settings
 from agentcore.runtime.prompt import assemble_system_prompt, compose_ceo_chat_prompt
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.catalog import AVAILABLE_TO_CEO, build_capability_catalog
@@ -42,7 +43,9 @@ async def get_capabilities(_user: AuthUser) -> CapabilitiesResponse:
         for entry in catalog
     ]
 
-    skill_registry = build_system_skill_registry()
+    # Honor legal_vertical_enabled so the catalog matches the CEO's runtime repertoire
+    # (the pipeline wires the same include_legal) — else the 能力图鉴 silently drifts.
+    skill_registry = build_system_skill_registry(include_legal=settings.legal_vertical_enabled)
     skills = [
         CapabilitySkill(name=skill.name, summary=skill.summary, body=skill.body)
         for skill in skill_registry.list_all()

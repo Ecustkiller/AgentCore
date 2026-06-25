@@ -10,6 +10,7 @@ from structlog.testing import capture_logs
 
 from agentcore.llm.config import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
 from agentcore.llm.pricing import (
+    DOUBAO_SEED_TURBO,
     NANO_PER_USD,
     cache_savings,
     calculate_cost,
@@ -72,6 +73,25 @@ def test_pro_prices():
 def test_unknown_model_falls_back_to_flash():
     usage = _usage(output_tokens=1_000_000)
     assert calculate_cost("totally-unknown", usage) == calculate_cost(DEEPSEEK_V4_FLASH, usage)
+
+
+def test_doubao_priced_at_vendor_rate_not_flash():
+    # 豆包 must price at its own (Volcengine 0–32K) rate, NOT degrade to Flash — the
+    # whole point of adding it to the table. The distortion that motivated this is on
+    # output: ¥8/1M ≈ $1.1111 vs Flash's $0.28 (~4× under-count before).
+    usage = _usage(input_tokens=1_000_000, cache_miss_tokens=1_000_000, output_tokens=1_000_000)
+    cost = calculate_cost(DOUBAO_SEED_TURBO, usage)
+    assert cost.input == 111_100_000  # ¥0.8/1M ÷ 7.2 ≈ $0.1111
+    assert cost.cached == 0
+    assert cost.output == 1_111_100_000  # ¥8/1M ÷ 7.2 ≈ $1.1111
+    assert cost != calculate_cost(DEEPSEEK_V4_FLASH, usage)
+
+
+def test_doubao_does_not_log_pricing_fallback():
+    # Now that 豆包 is in the table, a real run must not emit cost.pricing_fallback.
+    with capture_logs() as logs:
+        calculate_cost(DOUBAO_SEED_TURBO, _usage(input_tokens=26163, output_tokens=1499))
+    assert _fallback_logs(logs) == []
 
 
 # --- cache-split reconciliation: the input bill always matches the prompt ---

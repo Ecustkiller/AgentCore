@@ -49,7 +49,12 @@ class EscalationChannel:
     """
 
     armed: bool
-    request: Callable[[str, str], Awaitable[EscalationOutcome]]
+    # ``request(question, assumption, questions)``: ``questions`` is the optional
+    # structured-fork list (同 ask_user 的 questions, already normalized —
+    # id/prompt/kind/options/multiple/default), empty for a plain free-text ask. It
+    # rides the journaled ``escalation_required`` so the card renders the SAME
+    # choice/text UI as ask_user (用户一键拍板而非读散文手敲).
+    request: Callable[[str, str, list[dict[str, Any]]], Awaitable[EscalationOutcome]]
 
 
 @dataclass(frozen=True)

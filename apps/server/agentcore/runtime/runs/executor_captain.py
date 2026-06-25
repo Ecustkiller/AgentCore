@@ -8,9 +8,8 @@ from dataclasses import asdict, replace
 
 from agentcore.core.logging import get_logger
 from agentcore.llm.config import ModelProfile
-from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import (
@@ -39,7 +38,7 @@ logger = get_logger(__name__)
 
 def build_captain_executor(
     *,
-    llm: DeepSeekProvider,
+    llm: LLMProvider,
     tools: ToolRegistry,
     sink: EventSink,
     base_tool_context: ToolContext,
@@ -98,7 +97,7 @@ def build_captain_executor(
 
 def build_captain_resumer(
     *,
-    llm: DeepSeekProvider,
+    llm: LLMProvider,
     tools: ToolRegistry,
     sink: EventSink,
     base_tool_context: ToolContext,
@@ -142,7 +141,7 @@ async def _drive_captain_loop(
     spec: RunSpec,
     messages: list[LLMMessage],
     received_blocks: list[ContextBlock] | None = None,
-    llm: DeepSeekProvider,
+    llm: LLMProvider,
     tools: ToolRegistry,
     sink: EventSink,
     tool_ctx: ToolContext,

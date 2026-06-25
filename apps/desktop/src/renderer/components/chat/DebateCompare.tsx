@@ -3,13 +3,12 @@ import {
   countPillMuted,
   statusAccentText,
   statusPillInline,
-  surfaceMutedPanel,
   textLinkPrimary,
 } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { Execution } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
-import { Gavel, Scale, Swords, Target, Users } from "lucide-react";
+import { Gavel, Scale, Swords, Users } from "lucide-react";
 import { useRef } from "react";
 import { BriefCard, RoundtableSpectrum } from "./debate/Brief";
 import { RoundList } from "./debate/Narrative";
@@ -72,9 +71,11 @@ function stopLabel(reason: string | null): string {
 }
 
 /**
- * 产物面主体：形态行 (图标 + 形态名 + 进行中/收场原因 pill) + 辩题头 + 决策简报 (收场淡入)
- * + 交锋叙事线。`narrative_first` 调简报与叙事顺序；本实例若**亲眼看着** live→收场 (曾渲染过
- * 进行中) 则简报恒追加在叙事下方，不把正读的轮顶下去 (设计 §4.3)。
+ * 产物面主体：极简元信息条 (形态图标 + 进行中/收场原因 pill + 主持人裁决链) + 决策简报 (收场淡入)
+ * + 交锋叙事线。**辩题与形态名已在画布顶栏常驻**，故 body 不再重复 (旧版形态行 + 辩题面板把同一句
+ * 辩题写 2~3 遍，用户反馈的「乱」首因)——只留头栏没有的：收场状态 + 主持人裁决过程钻取。
+ * `narrative_first` 调简报与叙事顺序；本实例若**亲眼看着** live→收场 (曾渲染过进行中) 则简报恒追加
+ * 在叙事下方，不把正读的轮顶下去 (设计 §4.3)。
  */
 function DebateBodyInner({
   model,
@@ -85,15 +86,12 @@ function DebateBodyInner({
   execution: Execution;
   messageId: string;
 }) {
-  const { label: formLabel, Icon } = FORM_META[model.form] ?? FORM_META.debate;
-
   const wasLive = useRef(!model.settled);
   if (!model.settled) wasLive.current = true;
   const narrativeFirst =
     model.settled && wasLive.current ? true : model.narrativeFirst;
 
-  // 辩题已在下方 DebateTopicHeader 展示 (进行中 motion = 首轮焦点占位)；把它传给叙事线，
-  // 让与辩题同文的轮焦点显示为「本轮交锋」，不再辩题/第 1 轮上下重复。
+  // 辩题已在画布顶栏常驻；传给叙事线让与辩题同文的轮焦点显示为「本轮交锋」，避免辩题/第 1 轮重复。
   const topicMotion = model.motion ?? model.rounds[0]?.focus ?? "";
   const narrative = (
     <RoundList
@@ -122,22 +120,7 @@ function DebateBodyInner({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Icon size={15} className={`shrink-0 ${statusAccentText.primary}`} />
-        <span className="flex-1 text-sm font-medium text-foreground">
-          {formLabel}
-        </span>
-        {model.settled ? (
-          <SimpleTooltip label="辩论收场原因">
-            <span className={countPillMuted}>
-              {stopLabel(model.stopReason)}
-            </span>
-          </SimpleTooltip>
-        ) : (
-          <span className={statusPillInline.primary}>进行中</span>
-        )}
-      </div>
-      <DebateTopicHeader
+      <DebateMetaStrip
         model={model}
         execution={execution}
         messageId={messageId}
@@ -159,11 +142,11 @@ function DebateBodyInner({
 }
 
 /**
- * 辩题 + 主持人 (the debate's framing)。`motion` 收场才权威；进行中用**首轮焦点**占位 (用户
- * 拍板)，收场再换成真辩题——同一容器内文本替换，不重挂。主持人裁决链仅收场可钻取
- * (`moderatorRunId` 收场才有)。两者都无 → 进行中尚无焦点，整块略去。
+ * 极简元信息条 —— 只承载画布顶栏**没有**的：收场原因 / 进行中 状态 + 主持人裁决过程钻取。形态名与
+ * 辩题不再在此重复 (顶栏常驻，见 {@link DebateBodyInner})。主持人裁决链仅收场可钻取 (`moderatorRunId`
+ * 收场才有)；进行中只剩形态图标 + 「进行中」pill。
  */
-function DebateTopicHeader({
+function DebateMetaStrip({
   model,
   execution,
   messageId,
@@ -173,33 +156,26 @@ function DebateTopicHeader({
   messageId: string;
 }) {
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
-  const motion = model.motion ?? model.rounds[0]?.focus ?? "";
+  const { Icon } = FORM_META[model.form] ?? FORM_META.debate;
   const moderatorRun = model.moderatorRunId
     ? execution.runs.find((r) => r.id === model.moderatorRunId)
     : undefined;
-  if (!motion && !moderatorRun) return null;
-
   return (
-    <div className={`${surfaceMutedPanel} p-3`}>
-      {motion && (
-        <div className="flex items-start gap-2">
-          <Target
-            size={14}
-            className={`mt-0.5 shrink-0 ${statusAccentText.primary}`}
-          />
-          <div className="min-w-0 flex-1">
-            <span className="text-xs text-muted-foreground">辩题</span>
-            <p className="mt-0.5 text-sm font-medium text-foreground">
-              {motion}
-            </p>
-          </div>
-        </div>
+    <div className="flex items-center gap-2">
+      <Icon size={14} className={`shrink-0 ${statusAccentText.primary}`} />
+      {model.settled ? (
+        <SimpleTooltip label="辩论收场原因">
+          <span className={countPillMuted}>{stopLabel(model.stopReason)}</span>
+        </SimpleTooltip>
+      ) : (
+        <span className={statusPillInline.primary}>进行中</span>
       )}
+      <span className="min-w-0 flex-1" />
       {moderatorRun && (
         <Button
           variant="ghost"
           onClick={() => showRunDetail(messageId, moderatorRun.id, "主持人")}
-          className={`mt-2 h-auto px-0 py-0 ${textLinkPrimary} hover:bg-transparent`}
+          className={`h-auto px-0 py-0 ${textLinkPrimary} hover:bg-transparent`}
           icon={<Gavel size={12} />}
         >
           主持人裁决过程

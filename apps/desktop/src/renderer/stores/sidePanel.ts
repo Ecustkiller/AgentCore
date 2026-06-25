@@ -171,6 +171,12 @@ interface SidePanelState {
    * 提问 / 最终回答 never lingers beside the chat bubble that already shows it.
    */
   closeContentTabs: () => void;
+  /**
+   * Reveal the panel WITHOUT touching the active tab — used by the 指挥台 region's
+   * auto-surface (前端UX设计.md §6.2) so a newly-arrived decision opens the dock while
+   * a run-detail tab the user is reading stays put (the region hangs above it).
+   */
+  openPanel: () => void;
   /** Reveal the panel on the 工作区 home tab (the chat toggle / Ctrl+J). */
   showWorkspace: () => void;
   /** Reveal the 工作区 home tab AND request a file preview (产出文件 card click). */
@@ -261,6 +267,11 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
         : (tabs[tabs.length - 1]?.id ?? WORKSPACE_TAB_ID);
       return { tabs, activeTabId };
     });
+  },
+
+  openPanel: () => {
+    persist(OPEN_KEY, "true");
+    set({ open: true });
   },
 
   showWorkspace: () => {

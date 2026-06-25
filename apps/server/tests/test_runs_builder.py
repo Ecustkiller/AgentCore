@@ -42,6 +42,27 @@ def test_counter_start_offsets_ids():
     assert plan.nodes[0].run_id == "t_6"
 
 
+def test_inline_model_override_passthrough():
+    """显式 model 覆写透传到 RunSpec.model（真·多模型辩手）：set→透传、缺省→空、非字符串→空。
+
+    ``provider/model`` 前缀（如 doubao/...）须原样落到 RunSpec.model，执行器据此覆写
+    profile.model 并经路由器分发；普通 worker 不带 model → 空 = 按 tier 解析默认模型。
+    """
+    plan, errs = build_run_plan(
+        [
+            {"role": "A", "task": "a", "model": "doubao/doubao-seed-2-1-turbo-260628"},
+            {"role": "B", "task": "b"},
+            {"role": "C", "task": "c", "model": 123},
+        ],
+        id_prefix="t",
+    )
+    assert errs == []
+    a, b, c = plan.nodes
+    assert a.model == "doubao/doubao-seed-2-1-turbo-260628"
+    assert b.model == ""
+    assert c.model == ""
+
+
 def test_dag_fanout_siblings_get_sibling_summary():
     # The fix: parallel researchers that fan out from the same point (here both have
     # no deps → same dep set) now see each other — they used to get nothing and ran

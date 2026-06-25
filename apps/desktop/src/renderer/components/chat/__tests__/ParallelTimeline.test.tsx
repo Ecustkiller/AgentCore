@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Render test for 并行时间线 (多任务并行图, 前端UX设计.md §十一).
+ * Render test for 并行时间线 (多任务并行图, 前端UX设计.md §6.5).
  *
  * The view lives in the canvas 放大态 (a ReactFlow-heavy surface the shoot harness doesn't
  * drive into), so this asserts the gantt DOM directly: a bar per dispatched node with its
@@ -16,7 +16,9 @@ import { ParallelTimeline, hasParallelTimeline } from "../ParallelTimeline";
 
 afterEach(cleanup);
 
-const metrics = (over: Partial<BatchMetricsSnapshot>): BatchMetricsSnapshot => ({
+const metrics = (
+  over: Partial<BatchMetricsSnapshot>,
+): BatchMetricsSnapshot => ({
   nodes: 2,
   width: 8,
   peakRunning: 2,
@@ -104,10 +106,14 @@ describe("ParallelTimeline (并行时间线)", () => {
     const { container } = render(
       ParallelTimelineEl([
         metrics({
-          timeline: [{ runId: "w1", startMs: 0, endMs: 500, outcome: "completed" }],
+          timeline: [
+            { runId: "w1", startMs: 0, endMs: 500, outcome: "completed" },
+          ],
         }),
         metrics({
-          timeline: [{ runId: "w2", startMs: 0, endMs: 700, outcome: "completed" }],
+          timeline: [
+            { runId: "w2", startMs: 0, endMs: 700, outcome: "completed" },
+          ],
         }),
       ]),
     );
@@ -116,7 +122,9 @@ describe("ParallelTimeline (并行时间线)", () => {
   });
 
   it("renders nothing when no batch carries timing", () => {
-    const { container } = render(ParallelTimelineEl([metrics({ timeline: [] })]));
+    const { container } = render(
+      ParallelTimelineEl([metrics({ timeline: [] })]),
+    );
     expect(container.textContent).toBe("");
   });
 });
@@ -138,8 +146,16 @@ describe("hasParallelTimeline (gate)", () => {
     expect(
       hasParallelTimeline(
         exec([
-          metrics({ timeline: [{ runId: "w1", startMs: 0, endMs: 1, outcome: "completed" }] }),
-          metrics({ timeline: [{ runId: "w2", startMs: 0, endMs: 1, outcome: "completed" }] }),
+          metrics({
+            timeline: [
+              { runId: "w1", startMs: 0, endMs: 1, outcome: "completed" },
+            ],
+          }),
+          metrics({
+            timeline: [
+              { runId: "w2", startMs: 0, endMs: 1, outcome: "completed" },
+            ],
+          }),
         ]),
       ),
     ).toBe(true);
@@ -148,7 +164,13 @@ describe("hasParallelTimeline (gate)", () => {
   it("is false for a single-node or empty timeline (nothing parallel to show)", () => {
     expect(
       hasParallelTimeline(
-        exec([metrics({ timeline: [{ runId: "w1", startMs: 0, endMs: 1, outcome: "completed" }] })]),
+        exec([
+          metrics({
+            timeline: [
+              { runId: "w1", startMs: 0, endMs: 1, outcome: "completed" },
+            ],
+          }),
+        ]),
       ),
     ).toBe(false);
     expect(hasParallelTimeline(exec([]))).toBe(false);

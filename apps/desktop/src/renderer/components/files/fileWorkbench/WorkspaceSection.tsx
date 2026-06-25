@@ -4,7 +4,6 @@ import {
   DeleteProjectDialog,
   archiveConversationsBeforeDelete,
 } from "@/components/folders/DeleteProjectDialog";
-import { PermanentDeleteProjectDialog } from "@/components/folders/PermanentDeleteProjectDialog";
 import { Button } from "@/components/ui";
 import {
   ContextMenu,
@@ -25,6 +24,7 @@ import type { WorkspaceInfo } from "@/services/workspaces";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import {
+  Brain,
   ChevronDown,
   ChevronRight,
   Cloud,
@@ -66,6 +66,9 @@ export function WorkspaceSection({
   onDelete,
   onViewConversations,
   flashing,
+  hasProjectMemory,
+  projectMemoryActive,
+  onOpenProjectMemory,
 }: {
   ws: WorkspaceInfo;
   source: FileSource | null;
@@ -77,6 +80,11 @@ export function WorkspaceSection({
   onDelete: (folderId: string) => void;
   onViewConversations: (folderId: string) => void;
   flashing: boolean;
+  /** This (cloud) project has its own AI 记忆 layer → show a「本项目记忆」row atop the
+   * expanded body. The memory leaf opens in the shared detail pane (记忆作用域与画像分层 P2). */
+  hasProjectMemory?: boolean;
+  projectMemoryActive?: boolean;
+  onOpenProjectMemory?: () => void;
 }) {
   const folderId = folderIdOf(ws.wsId);
   const isLocal = ws.location === "local";
@@ -94,7 +102,6 @@ export function WorkspaceSection({
   );
   const liveConvCount = folderConvs.length;
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [permanentDeleteOpen, setPermanentDeleteOpen] = useState(false);
   const permanentDeleteMutation = usePermanentDeleteFolder();
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -158,13 +165,9 @@ export function WorkspaceSection({
     onRename(folderId, name);
   };
 
-  const confirmDeleteProject = async ({
-    archiveConversations,
-  }: {
-    archiveConversations: boolean;
-  }) => {
+  const confirmDeleteProject = async () => {
     if (!folderId) return;
-    if (archiveConversations && folderConvs.length > 0) {
+    if (folderConvs.length > 0) {
       const ok = await archiveConversationsBeforeDelete(folderConvs, {
         archive: (id) => archiveMutation.mutateAsync(id),
         dropRuntime: dropConversationRuntime,
@@ -187,7 +190,7 @@ export function WorkspaceSection({
       if (id === currentId) navigate("/");
     }
     permanentDeleteMutation.mutate(folderId, {
-      onSuccess: () => setPermanentDeleteOpen(false),
+      onSuccess: () => setDeleteOpen(false),
       onError: (err) => notifyError(err, "彻底删除失败"),
     });
   };
@@ -367,13 +370,6 @@ export function WorkspaceSection({
             <Trash2 size={14} className="shrink-0" />
             <span className="flex-1 truncate">删除项目…</span>
           </ContextMenuItem>
-          <ContextMenuItem
-            variant="danger"
-            onSelect={() => setPermanentDeleteOpen(true)}
-          >
-            <Trash2 size={14} className="shrink-0" />
-            <span className="flex-1 truncate">彻底删除项目…</span>
-          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
       <DeleteProjectDialog
@@ -381,17 +377,31 @@ export function WorkspaceSection({
         onOpenChange={setDeleteOpen}
         name={ws.name}
         liveConvCount={liveConvCount}
-        onConfirm={confirmDeleteProject}
-      />
-      <PermanentDeleteProjectDialog
-        open={permanentDeleteOpen}
-        onOpenChange={setPermanentDeleteOpen}
-        name={ws.name}
-        liveConvCount={liveConvCount}
         isLocal={isLocal}
-        onConfirm={confirmPermanentDelete}
+        onConfirm={confirmDeleteProject}
+        onPermanentConfirm={confirmPermanentDelete}
       />
-      {expanded && tree}
+      {expanded && (
+        <>
+          {hasProjectMemory && onOpenProjectMemory && (
+            <button
+              type="button"
+              onClick={onOpenProjectMemory}
+              title="本项目专属的 AI 记忆（画像）"
+              className={cn(
+                "flex h-7 w-full items-center gap-1.5 rounded-lg pl-7 pr-2 text-left text-sm transition-colors",
+                projectMemoryActive
+                  ? "bg-accent text-foreground"
+                  : "text-foreground hover:bg-accent/60",
+              )}
+            >
+              <Brain size={14} className="shrink-0 text-primary" />
+              <span className="min-w-0 flex-1 truncate">本项目记忆</span>
+            </button>
+          )}
+          {tree}
+        </>
+      )}
     </div>
   );
 }

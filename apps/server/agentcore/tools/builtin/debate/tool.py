@@ -7,11 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory, new_id
-from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet, default_profile_set
+from agentcore.llm.protocol import LLMProvider
 from agentcore.runtime.debate import (
     DebateConfig,
     Moderator,
+    RoundBoundary,
+    RoundDecision,
     RoundPolicy,
     RoundResult,
 )
@@ -19,9 +21,12 @@ from agentcore.runtime.events import (
     EventSink,
     debate_result,
     debate_round,
+    debate_round_decision_required,
+    debate_round_decision_resolved,
     debate_round_started,
     run_started,
 )
+from agentcore.runtime.interaction import InteractionKind
 from agentcore.tools.builtin.debate.events import account_moderator, moderator_plan_event
 from agentcore.tools.builtin.debate.rounds import make_round_runner
 from agentcore.tools.builtin.debate.schema import (
@@ -38,6 +43,7 @@ from agentcore.tools.registry import ToolRegistry
 if TYPE_CHECKING:
     from agentcore.runtime.approvals import ApprovalGate
     from agentcore.runtime.costing import RunCost
+    from agentcore.runtime.interaction import InteractionRegistry
     from agentcore.runtime.runs.session import RunSession
 
 logger = get_logger(__name__)
@@ -54,7 +60,7 @@ class DebateTool:
     def __init__(
         self,
         *,
-        llm: DeepSeekProvider,
+        llm: LLMProvider,
         sink: EventSink,
         system_prompt: str,
         user_message: str,
@@ -65,6 +71,10 @@ class DebateTool:
         captain_run_id: str | None = None,
         approval_gate: ApprovalGate | None = None,
         depth: int = 0,
+        registry: InteractionRegistry | None = None,
+        conversation_id: str = "",
+        round_decision_timeout: float = 0.0,
+        interactive_armed: bool = False,
     ) -> None:
         self._llm = llm
         self._sink = sink
@@ -77,6 +87,13 @@ class DebateTool:
         self._captain_run_id = captain_run_id
         self._approval_gate = approval_gate
         self._depth = depth
+        # 交互式逐轮（opt-in）的挂起桥接：``registry`` 是统一交互桥（与 ask_user/escalate 同一个）；
+        # ``interactive_armed`` 是「有活跃用户」闸（同 ask_user 的 checkpoint 闸）——无活跃用户
+        # （自治 / handoff）即便 debate(interactive=true) 也回落到主持人自判收敛，不挂起。
+        self._registry = registry
+        self._conversation_id = conversation_id
+        self._round_decision_timeout = round_decision_timeout
+        self._interactive_armed = interactive_armed
         # 每个 side 的可续写 session（跨轮带记忆）：首轮执行后留人，后续轮 continue_run 取用。
         self._debater_sessions: dict[str, RunSession] = {}
         from agentcore.runtime.costing import WorkerResultAccumulator
@@ -164,6 +181,80 @@ class DebateTool:
                 )
             )
 
+        # 交互式逐轮（opt-in）：仅当 CEO 显式 interactive=true、本回合有活跃用户（armed）、交互桥
+        # 已接入且超时为正时挂起请示用户；否则 on_round_boundary=None ⇒ 主持人按裁判自判收敛（与
+        # 非交互辩论逐字同辙，零行为变化）。挂起复用与 ask_user/escalate 同一条交互桥。
+        interactive = (
+            bool(arguments.get("interactive"))
+            and self._interactive_armed
+            and self._registry is not None
+            and self._round_decision_timeout > 0
+        )
+
+        async def _round_boundary(
+            *, round_no: int, result: RoundResult, converged: bool, max_rounds: int
+        ) -> RoundBoundary | None:
+            assert self._registry is not None  # gated by `interactive`
+            decision_id = f"debate_round_{new_id()}"
+            rationale = result.verdict.rationale
+            payload = {
+                "execution_id": execution_id,
+                "moderator_run_id": moderator_run_id,
+                "decision_id": decision_id,
+                "round_no": round_no,
+                "focus": result.focus,
+                "summary": result.summary,
+                "converged": converged,
+                "rationale": rationale,
+            }
+            try:
+                outcome = await self._registry.suspend(
+                    decision_id,
+                    self._conversation_id,
+                    kind=InteractionKind.DEBATE_ROUND,
+                    payload=payload,
+                    timeout=self._round_decision_timeout,
+                    on_suspended=lambda: self._sink.emit(
+                        debate_round_decision_required(
+                            execution_id=execution_id,
+                            moderator_run_id=moderator_run_id,
+                            decision_id=decision_id,
+                            round_no=round_no,
+                            focus=result.focus,
+                            summary=result.summary,
+                            converged=converged,
+                            rationale=rationale,
+                        )
+                    ),
+                )
+            except TimeoutError:
+                # 用户未应答 ⇒ 交回裁判自动收敛（返回 None）；emit resolved=timeout 让前端收卡。
+                logger.info("debate.round_decision.timeout", decision_id=decision_id, r=round_no)
+                self._sink.emit(
+                    debate_round_decision_resolved(
+                        execution_id=execution_id,
+                        moderator_run_id=moderator_run_id,
+                        decision_id=decision_id,
+                        decision="timeout",
+                    )
+                )
+                return None
+            decision = str(outcome.get("decision") or "").strip()
+            focus = str(outcome.get("focus") or "").strip()
+            self._sink.emit(
+                debate_round_decision_resolved(
+                    execution_id=execution_id,
+                    moderator_run_id=moderator_run_id,
+                    decision_id=decision_id,
+                    decision=decision or "continue",
+                    focus=focus,
+                )
+            )
+            if decision == "conclude":
+                return RoundBoundary(decision=RoundDecision.CONCLUDE)
+            # continue（含未知值兜底）：续辩；focus 非空=用户「加角度」覆写下一轮议题。
+            return RoundBoundary(decision=RoundDecision.CONTINUE, focus=focus)
+
         started_at = time.monotonic()
         try:
             result = await moderator.run(
@@ -171,6 +262,7 @@ class DebateTool:
                 run_round=runner,
                 on_round_start=_emit_round_start,
                 on_round=_emit_round,
+                on_round_boundary=_round_boundary if interactive else None,
             )
         except Exception as exc:  # noqa: BLE001 — 辩论崩溃降级为工具失败，让 CEO 回落
             logger.exception("debate.failed", motion=motion[:80])

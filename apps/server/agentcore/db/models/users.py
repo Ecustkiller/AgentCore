@@ -63,6 +63,15 @@ class User(Base):
     # a custom ModelMode id. NULL = inherit the operator default
     # (settings.default_model_mode → economy). A conversation may override it.
     default_model_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Long-term AI memory master switch (Agent记忆与知识系统 §一). When False the
+    # user's `ai_maintained` memory is neither injected into prompts nor grown by the
+    # offline consolidation pass — the privacy off-ramp ("AI 记忆" 设置页总开关). The
+    # markdown body still lives in the MemoryStore so re-enabling restores it; only
+    # messages sent while OFF are skipped (consolidation advances its watermark past
+    # them). Defaults True (memory on, matching the product default).
+    memory_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=text("true")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

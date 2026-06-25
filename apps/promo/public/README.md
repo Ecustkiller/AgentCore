@@ -2,7 +2,7 @@
 
 Remotion 的 `staticFile()` 从本目录（`public/`）解析资源。
 
-## 加 BGM（用户后续自加，见设计文档 §七）
+## 加 BGM（用户后续自加，见 ../README.md「内容 / 品牌决策」）
 
 1. 把背景音乐放到这里，命名为 **`bgm.mp3`**（或自定名）。
 2. 打开 `src/Video.tsx`，把顶部的 `BGM_FILE` 由 `null` 改为 `"bgm.mp3"`。

@@ -3,6 +3,7 @@
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.llm.modes import ProfileSet
+from agentcore.memory import default_memory_store
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import (
     EventSink,
@@ -23,6 +24,7 @@ from agentcore.tools.builtin import (
     build_ceo_tool_registry,
 )
 from agentcore.tools.builtin.ask_user import AskUserTool
+from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
 from agentcore.tools.builtin.consult_skill import ConsultSkillTool
 from agentcore.tools.builtin.debate import DebateTool
 from agentcore.tools.builtin.delegate import DelegateTool
@@ -56,9 +58,12 @@ def _assemble_ceo_toolset(
     suspension_deleter: SuspensionDeleter | None,
     backend_location: str,
     skill_registry: SkillRegistry,
+    memory_enabled: bool = True,
+    folder_id: str | None = None,
 ) -> tuple[DelegateTool, ReviseTool, DebateTool, ToolRegistry]:
     """Wire the CEO coordinator's toolset (delegate + revise + read/retrieval +
-    consult_skill + an optional ask_user), shared by a fresh turn and a 2b resume.
+    consult_skill + an optional consult_memory + an optional ask_user), shared by a
+    fresh turn and a 2b resume.
 
     The CEO is a COORDINATOR: it holds only the read/retrieval built-ins plus the
     orchestration primitives, never the mutation tools (those live with workers via
@@ -91,6 +96,8 @@ def _assemble_ceo_toolset(
         message_id=message_id,
         suspension_saver=suspension_saver,
         suspension_deleter=suspension_deleter,
+        folder_id=folder_id,
+        memory_enabled=memory_enabled,
     )
     chat_tools = build_ceo_tool_registry()
     chat_tools.register(delegate_tool)
@@ -127,12 +134,27 @@ def _assemble_ceo_toolset(
         profile_set=profiles,
         captain_run_id=captain_run_id,
         approval_gate=approval_gate,
+        # 交互式逐轮（opt-in）的挂起桥接：同 ask_user/escalate 共用统一交互桥 + checkpoint 超时；
+        # ``checkpoint_enabled`` 即「有活跃用户」闸（自治 / handoff 回合不武装 → 回落自判收敛）。
+        registry=default_interaction_registry(),
+        conversation_id=conversation_id,
+        round_decision_timeout=settings.checkpoint_timeout_seconds,
+        interactive_armed=checkpoint_enabled,
     )
     chat_tools.register(debate_tool)
     # consult_skill (提示词瘦身 P2): always wired (not live-user gated) so the CEO can
     # pull any advanced-mechanism guidance on demand; the always-on 能力目录 in the
     # prompt lists the skills whose required tools are actually wired this turn.
     chat_tools.register(ConsultSkillTool(registry=skill_registry))
+    # consult_memory (记忆文件夹化 §六): CEO-only on-demand recall of a 记忆主题笔记. Gated by
+    # the long-term-memory master switch — off ⇒ not wired, AND the prompt's 记忆主题目录 is
+    # not rendered (compose_ceo_chat_prompt keys the directory on this tool being present),
+    # so a user who turned memory off surfaces zero memory — the same privacy off-ramp as
+    # the core-memory injection (always-injected 画像 already gated in pipeline/run.py).
+    if memory_enabled:
+        # ``folder_id`` lets consult_memory resolve a topic name across BOTH scopes — the
+        # current project's 主题 first, then global (记忆作用域与画像分层 §5.2).
+        chat_tools.register(ConsultMemoryTool(store=default_memory_store(), project_id=folder_id))
     if checkpoint_enabled:
         # 结构化挂起 2b: arm the ask_user pause with the SAME durable closures as the
         # delegate plan_review — message_id keys the frame, the turn-level constants
@@ -152,6 +174,8 @@ def _assemble_ceo_toolset(
                 message_id=message_id,
                 suspension_saver=suspension_saver,
                 suspension_deleter=suspension_deleter,
+                folder_id=folder_id,
+                memory_enabled=memory_enabled,
             )
         )
     return delegate_tool, revise_tool, debate_tool, chat_tools

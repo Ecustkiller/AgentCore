@@ -17,6 +17,51 @@ _TOOLSETS = {"ceo", "worker"}
 _REQUIRED = ("id", "category", "user_message")
 
 
+def _lint_milestones(cid: str, raw: dict[str, Any]) -> list[str]:
+    """校验 milestone 子目标清单（后端架构.md §五）：结构 + id 唯一 + 权重正 + 阈值合法。
+
+    milestone 非必填；声明了才校验。每条须为 ``{"id", "desc", "weight"?}``，``id`` 用例内唯一、
+    ``desc`` 非空、``weight``（缺省 1）须为正数；``milestone_threshold``（缺省 0.8）须在 (0, 1]。
+    """
+    errors: list[str] = []
+    milestones = raw.get("milestones")
+    if milestones is None:
+        return errors
+    if not isinstance(milestones, list):
+        return [f"[{cid}] milestones 须为列表"]
+
+    seen: set[str] = set()
+    for i, m in enumerate(milestones):
+        if not isinstance(m, dict):
+            errors.append(f"[{cid}] milestones[{i}] 须为对象")
+            continue
+        mid = m.get("id")
+        if not mid:
+            errors.append(f"[{cid}] milestones[{i}] 缺 id")
+        elif mid in seen:
+            errors.append(f"[{cid}] milestones id 重复: {mid!r}")
+        else:
+            seen.add(mid)
+        if not m.get("desc"):
+            errors.append(f"[{cid}] milestones[{mid or i}] 缺 desc（子目标描述）")
+        if "weight" in m:
+            try:
+                if float(m["weight"]) <= 0:
+                    errors.append(f"[{cid}] milestones[{mid or i}] weight 须为正数")
+            except (TypeError, ValueError):
+                errors.append(f"[{cid}] milestones[{mid or i}] weight 须为数值")
+
+    if "milestone_threshold" in raw:
+        try:
+            t = float(raw["milestone_threshold"])
+            if not 0.0 < t <= 1.0:
+                errors.append(f"[{cid}] milestone_threshold={t} 须在 (0, 1]")
+        except (TypeError, ValueError):
+            errors.append(f"[{cid}] milestone_threshold 须为数值")
+
+    return errors
+
+
 def lint_case(raw: dict[str, Any]) -> list[str]:
     """返回一条用例的所有结构错误（空列表 = 合法）。"""
     errors: list[str] = []
@@ -48,8 +93,10 @@ def lint_case(raw: dict[str, Any]) -> list[str]:
             elif spec["name"] not in CHECK_NAMES:
                 errors.append(f"[{cid}] checks[{i}].name={spec['name']!r} 未注册")
 
-    if not checks and not raw.get("rubric"):
-        errors.append(f"[{cid}] 既无 checks 也无 rubric——该用例不会判定任何东西")
+    errors.extend(_lint_milestones(cid, raw))
+
+    if not checks and not raw.get("rubric") and not raw.get("milestones"):
+        errors.append(f"[{cid}] 既无 checks 也无 rubric / milestones——该用例不会判定任何东西")
 
     # 路由用例（方向③）：路由准确率聚合器（routing.py）靠声明的 check 当**单一标签源**——
     # Delegated=期望委派、NotDelegated=期望自答，故每条 routing 用例须**恰好声明其一**（标签
@@ -76,9 +123,7 @@ def lint_case(raw: dict[str, Any]) -> list[str]:
     # 方向① 变体注入：声明的 prompt_profile 必须是已注册的变体名（写错立刻挂）。
     profile = raw.get("prompt_profile")
     if profile is not None and profile not in PROFILE_NAMES:
-        errors.append(
-            f"[{cid}] prompt_profile={profile!r} 未注册（须属 {sorted(PROFILE_NAMES)}）"
-        )
+        errors.append(f"[{cid}] prompt_profile={profile!r} 未注册（须属 {sorted(PROFILE_NAMES)}）")
 
     return errors
 

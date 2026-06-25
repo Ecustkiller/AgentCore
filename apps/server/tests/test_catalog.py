@@ -17,7 +17,7 @@ from agentcore.tools.catalog import (
 )
 
 # What the CEO holds beyond the read-only built-ins (mirrors pipeline._assemble_ceo_toolset).
-_CEO_ORCHESTRATION = {"delegate", "revise", "consult_skill", "ask_user"}
+_CEO_ORCHESTRATION = {"delegate", "revise", "consult_skill", "consult_memory", "ask_user"}
 # Mutation built-ins the coordinator must NOT hold (they belong to workers).
 _WORKER_ONLY_BUILTINS = {
     "file_write",

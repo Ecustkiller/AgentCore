@@ -1,4 +1,4 @@
-"""L1 绝对分裁判 + 诊断 Check 不计入判定 + baseline 回归门 单测（评测体系重设计 §三/§五/§七）.
+"""L1 绝对分裁判 + 诊断 Check 不计入判定 + baseline 回归门 单测（后端架构.md §五）.
 
 零真实 LLM：注入返回固定 JSON 的假 provider 验证 :class:`LLMJudge` 解析/阈值/多采样/容错；
 用合成 ``TurnOutcome`` 验证诊断 Check 落 ``gating=False`` 不影响 ``CaseReport.passed``；纯函数

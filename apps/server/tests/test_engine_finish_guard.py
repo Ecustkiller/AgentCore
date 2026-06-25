@@ -4,9 +4,13 @@ Drives the done-round verification guard with a scripted provider (no network): 
 CEO self-report done whose content carries an out-of-range citation marker is NOT
 accepted — the loop discards that draft (emits ``content_reset`` to clear the streamed
 bubble), injects a fact-anchored steer, and reworks; a clean rewrite then finishes.
-Past the rework cap the product ships as-is. The worker path (annotate_citations=False)
-skips the marker check, since worker text is un-numbered (its local [n] is re-ordered
+Past the rework cap the product ships as-is. The citation check is CEO-only
+(annotate_citations=False skips it: worker text is un-numbered, its local [n] re-ordered
 when folded into the turn card).
+
+The **structural** checks (unclosed / empty-bodied code fence) are the 统一底线: they
+fire on BOTH paths. On the CEO path the reset is ``content_reset``; a worker passes
+``on_reset`` so its rework clears the run card via ``run_output_reset`` instead.
 """
 
 from pathlib import Path
@@ -54,6 +58,7 @@ async def _run(
     *,
     citation_sink: list[dict] | None = None,
     annotate_citations: bool = True,
+    on_reset=None,
     max_rounds: int = 10,
 ):
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
@@ -68,6 +73,7 @@ async def _run(
         profile=profile,
         citation_sink=citation_sink,
         annotate_citations=annotate_citations,
+        on_reset=on_reset,
     )
     return result, messages, sink
 
@@ -129,3 +135,42 @@ async def test_worker_path_skips_citation_guard():
     assert content == "worker 产出 [1]。"
     assert rounds == 1
     assert _resets(sink) == []
+
+
+async def test_ceo_structural_defect_reworks():
+    # 统一底线·CEO 路径：未闭合代码块 → 回炉 + content_reset；次轮干净 → 结束。
+    provider = _ScriptedProvider(
+        [
+            [_content_chunk("见下：\n```python\nprint(1)")],
+            [_content_chunk("修正：\n```python\nprint(1)\n```\n完成。")],
+        ]
+    )
+    (content, _r, _u, rounds), messages, sink = await _run(provider, citation_sink=[])
+    assert rounds == 2
+    assert content.endswith("完成。")
+    steers = [m for m in messages if m.role == "user" and m.content and "核验未通过" in m.content]
+    assert len(steers) == 1
+    assert "没有闭合" in steers[0].content
+    assert len(_resets(sink)) == 1
+
+
+async def test_worker_structural_defect_reworks_via_on_reset():
+    # 统一底线·worker 路径：结构缺陷照样回炉，但重置走 on_reset（run_output_reset），
+    # 而非 content_reset；引用查仍跳过。
+    resets: list[bool] = []
+    provider = _ScriptedProvider(
+        [
+            [_content_chunk("草稿：\n```json\n```")],  # 声明 json 却空体
+            [_content_chunk("修正后的产出，无代码块。")],
+        ]
+    )
+    (content, _r, _u, rounds), messages, sink = await _run(
+        provider,
+        citation_sink=[],
+        annotate_citations=False,
+        on_reset=lambda: resets.append(True),
+    )
+    assert rounds == 2
+    assert content == "修正后的产出，无代码块。"
+    assert len(resets) == 1  # worker 的重置回调被触发
+    assert _resets(sink) == []  # 没有走 CEO 的 content_reset

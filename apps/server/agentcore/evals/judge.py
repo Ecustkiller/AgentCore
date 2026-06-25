@@ -1,4 +1,4 @@
-"""LLM 裁判（评测体系重设计 §五：L1 结果评分主轴 + 多 Agent 诊断成对裁判）.
+"""LLM 裁判（后端架构.md §五：L1 结果评分主轴 + 多 Agent 诊断成对裁判）.
 
 本文件容纳两类裁判，共用一个 :class:`~agentcore.llm.protocol.LLMProvider`：
 
@@ -10,14 +10,22 @@
 
 判定本身仍走 ``provider.complete``；单测注入返回固定 JSON 的假 provider，零成本验证解析 /
 位置对调合议 / 容错（见 tests/test_evals_comparison.py），真模型留给 nightly。裁判可信工程
-（gold-set + Cohen's kappa 校准、平衡置换消 rubric 选项位置偏差）见重设计 §五（P0 后续）。
+（gold-set + Cohen's kappa 校准、kappa>门 才准上 baseline 门）已落在 ``calibration.py``
+（重设计 §五）；本裁判须先过那里的校准门，其 pass_rate 才可信地用于 baseline 回归门。
 """
 
 from __future__ import annotations
 
 import json
 
-from agentcore.evals.types import EvalCase, JudgeVerdict, PairwiseVerdict, TurnOutcome
+from agentcore.evals.types import (
+    EvalCase,
+    JudgeVerdict,
+    MilestoneItemResult,
+    MilestoneVerdict,
+    PairwiseVerdict,
+    TurnOutcome,
+)
 from agentcore.llm.protocol import LLMMessage, LLMProvider, LLMRequest
 
 # --- L1 结果评分主轴：绝对分裁判 ---------------------------------------------
@@ -109,13 +117,12 @@ class LLMJudge:
         return JudgeVerdict(score=round(avg, 2), passed=passed, rationale=rationale)
 
 
-def build_default_judge(mode: str = "quality") -> LLMJudge:
-    """构造接真实 DeepSeek 的绝对分裁判：默认固定 Pro 档（Pro 评 Flash，压同家族自偏好）。
+def _eval_provider_and_model(mode: str) -> tuple[LLMProvider, str]:
+    """构造接真实 DeepSeek 的裁判 (provider, model)：默认 Pro 档（Pro 评 Flash，压同家族自偏好）。
 
-    裁判模型优先读 ``EVAL_JUDGE_MODEL``，否则回落 ``mode`` 档（默认 quality → Pro）的 chat 档
-    模型；凭据复用 harness 的 eval 专用 key 解析。仅 CLI/nightly 真跑调用——单测注入假 provider。
-    与 :func:`~agentcore.evals.comparison.build_default_pairwise_judge` 同构（共用 eval ceiling /
-    凭据解析），故同样在函数内惰性 import 重依赖，保持本模块对 runtime/factory 零顶层耦合。
+    裁判模型优先读 ``EVAL_JUDGE_MODEL``，否则回落 ``mode`` 档（默认 quality → Pro）的 chat 档；
+    凭据复用 harness 的 eval 专用 key。绝对分裁判与 milestone 裁判共用本解析，避免「同一根因改两
+    处」。函数内惰性 import 重依赖，保持本模块对 runtime/factory 零顶层耦合。
     """
     import os
 
@@ -128,7 +135,128 @@ def build_default_judge(mode: str = "quality") -> LLMJudge:
     if not model:
         profiles = resolve_profile_set(mode, custom_modes={}, ceiling=_EVAL_CEILING)
         model = profiles.get("chat").model
+    return provider, model
+
+
+def build_default_judge(mode: str = "quality") -> LLMJudge:
+    """构造接真实 DeepSeek 的绝对分裁判（Pro 评 Flash）。仅 CLI/nightly 真跑调用——单测注入假
+    provider。模型/凭据解析见 :func:`_eval_provider_and_model`。"""
+    provider, model = _eval_provider_and_model(mode)
     return LLMJudge(provider, model)
+
+
+# --- L1 结果评分主轴：milestone 覆盖裁判 -------------------------------------
+
+_MILESTONE_SYSTEM_PROMPT = (
+    "你是严格的交付物评审。给定一个任务、一组『子目标(milestone)』和一份答案，逐条判断答案是否"
+    "**确实覆盖**了每个子目标——只看交付内容，不看过程、不看谁写的、不看走了什么流程。\n"
+    "判定原则：真正满足才算覆盖；含糊带过、跑题、编造均不算覆盖；简洁正确优于冗长堆砌，绝不因"
+    "答案更长更详细就判覆盖。\n"
+    "对给定的每个 id 都要给出 true/false。只输出 JSON，不要其他文字：\n"
+    '{"items": [{"id": "<子目标id>", "covered": true}], "rationale": "简短整体理由"}'
+)
+
+
+def _parse_milestones(content: str, valid_ids: set[str]) -> tuple[dict[str, bool], str]:
+    """从裁判输出抽 ``({id: covered}, rationale)``；非法 JSON → 空 dict（逐项保守按未覆盖计）。
+
+    只采纳 ``valid_ids`` 内的 id（裁判幻觉出的多余 id 直接忽略），漏判的 id 由调用方按未覆盖兜底。
+    """
+    try:
+        start = content.index("{")
+        end = content.rindex("}")
+        data = json.loads(content[start : end + 1])
+    except (ValueError, json.JSONDecodeError):
+        return {}, f"裁判输出无法解析为 JSON: {content[:120]!r}"
+    covered: dict[str, bool] = {}
+    for item in data.get("items", []) or []:
+        if isinstance(item, dict) and str(item.get("id")) in valid_ids:
+            covered[str(item["id"])] = bool(item.get("covered", False))
+    return covered, str(data.get("rationale", ""))
+
+
+class LLMMilestoneJudge:
+    """milestone 覆盖裁判（实现 :class:`~agentcore.evals.types.MilestoneJudge` 协议）.
+
+    一次调用让裁判对 ``case.milestones`` 逐条判 covered 布尔；覆盖率 = **加权命中比**，
+    ``passed = 覆盖率 >= case.milestone_threshold``。漏判 / 解析失败的子目标**保守按未覆盖**计
+    （绝不无据放过——这是结果断言，宁可判负也不放水）。``provider`` 注入便于单测。
+    """
+
+    def __init__(
+        self,
+        provider: LLMProvider,
+        model: str,
+        *,
+        scenario: str = "eval.judge.milestone",
+    ) -> None:
+        self._provider = provider
+        self._model = model
+        self._scenario = scenario
+
+    async def score_milestones(self, case: EvalCase, outcome: TurnOutcome) -> MilestoneVerdict:
+        milestones = case.milestones or []
+        threshold = case.milestone_threshold
+        if not milestones:
+            return MilestoneVerdict(1.0, True, threshold, [], "无 milestone（平凡通过）")
+
+        listing = "\n".join(
+            f"- [{m['id']}] {m.get('desc', '')}（权重 {m.get('weight', 1)}）" for m in milestones
+        )
+        user = (
+            f"【任务】\n{case.user_message}\n\n"
+            f"【子目标清单】\n{listing}\n\n"
+            f"【答案】\n{outcome.content or ''}\n\n"
+            "请逐条判定每个子目标是否被覆盖，只输出 JSON。"
+        )
+        request = LLMRequest(
+            messages=[
+                LLMMessage(role="system", content=_MILESTONE_SYSTEM_PROMPT),
+                LLMMessage(role="user", content=user),
+            ],
+            model=self._model,
+            temperature=0.0,
+            stream=False,
+            thinking=True,
+            scenario=self._scenario,
+        )
+        response = await self._provider.complete(request)
+        valid_ids = {str(m["id"]) for m in milestones}
+        covered_map, rationale = _parse_milestones(response.content or "", valid_ids)
+
+        items: list[MilestoneItemResult] = []
+        total_w = 0.0
+        hit_w = 0.0
+        for m in milestones:
+            mid = str(m["id"])
+            try:
+                weight = float(m.get("weight", 1) or 1)
+            except (TypeError, ValueError):
+                weight = 1.0
+            covered = covered_map.get(mid, False)
+            total_w += weight
+            if covered:
+                hit_w += weight
+            items.append(
+                MilestoneItemResult(
+                    id=mid, desc=str(m.get("desc", "")), weight=weight, covered=covered
+                )
+            )
+        coverage = hit_w / total_w if total_w else 0.0
+        return MilestoneVerdict(
+            coverage=round(coverage, 4),
+            passed=coverage >= threshold,
+            threshold=threshold,
+            items=items,
+            rationale=rationale,
+        )
+
+
+def build_default_milestone_judge(mode: str = "quality") -> LLMMilestoneJudge:
+    """构造接真实 DeepSeek 的 milestone 覆盖裁判（Pro 评 Flash）。模型/凭据解析见
+    :func:`_eval_provider_and_model`（与绝对分裁判同源）。仅 CLI/nightly 真跑调用。"""
+    provider, model = _eval_provider_and_model(mode)
+    return LLMMilestoneJudge(provider, model)
 
 
 _SYSTEM_PROMPT = (

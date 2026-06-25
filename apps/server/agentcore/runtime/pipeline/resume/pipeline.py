@@ -83,7 +83,9 @@ async def resume_chat_pipeline(
     message_id = suspension.message_id
     conversation_id = suspension.conversation_id
     captain_run_id = suspension.captain_run_id or new_id()
-    llm = pipeline_pkg.build_provider(llm_credentials)
+    # 真·多模型辩手：同 run.py，回合 llm = DeepSeek 默认外包一层 ProviderRouter（resume 也可能
+    # 续跑含多模型辩手的辩论）。无前缀照走默认、零行为变化；路由器生命周期由下方 llm.close() 释放。
+    llm = pipeline_pkg.build_router_around(pipeline_pkg.build_provider(llm_credentials))
     # Republish history so a re-pause DURING the settle (a downstream checkpoint while
     # resume_plan runs) captures it into the fresh frame — symmetric with the live turn
     # (Phase 2 ⑤). Reset in finally.
@@ -91,9 +93,10 @@ async def resume_chat_pipeline(
     try:
         worker_tools = build_worker_registry(backend=backend)
         # Same system-skill registry as a fresh turn so the resumed CEO loop can
-        # still consult_skill (提示词瘦身 P2). The CEO prompt itself is replayed from
-        # the stored transcript (already slim + 能力目录), so no directory re-render.
-        skill_registry = build_system_skill_registry()
+        # still consult_skill (提示词瘦身 P2), including the legal vertical skill when
+        # enabled. The CEO prompt itself is replayed from the stored transcript
+        # (already slim + 能力目录), so no directory re-render.
+        skill_registry = build_system_skill_registry(include_legal=settings.legal_vertical_enabled)
         base_tool_context = ToolContext(
             execution_id=new_id(),
             run_id=new_id(),
@@ -136,6 +139,8 @@ async def resume_chat_pipeline(
             suspension_deleter=suspension_deleter,
             backend_location=backend.location,
             skill_registry=skill_registry,
+            folder_id=suspension.folder_id,
+            memory_enabled=suspension.memory_enabled,
         )
 
         sink.emit(message_start(message_id, conversation_id=conversation_id))

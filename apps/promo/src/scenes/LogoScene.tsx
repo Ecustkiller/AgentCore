@@ -3,7 +3,7 @@ import { entranceStyle } from "../motion/primitives";
 
 /*
  * 27–30s end card (scene-local 0–90 @30fps): brand lockup, no CTA
- * (宣传视频落地设计.md §七). A small collaboration-network glyph, the AgentCore
+ * (apps/promo/README.md). A small collaboration-network glyph, the AgentCore
  * wordmark, then the slogan「协作，是更高级的智能」— each easing up in sequence
  * over a soft primary glow.
  */

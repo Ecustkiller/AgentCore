@@ -36,7 +36,7 @@ from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType, FinishReason, SSEEvent
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.runtime.prompt_profile import use_profile
-from agentcore.tools.builtin import build_builtin_registry, build_ceo_tool_registry
+from agentcore.tools.builtin import build_ceo_tool_registry, build_worker_registry
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -235,7 +235,14 @@ class EvalHarness:
 
     async def _run_single(self, case, backend, profiles, sink, t0) -> TurnOutcome:
         provider = self._provider or build_provider(_eval_credentials())
-        tools = build_ceo_tool_registry() if case.toolset == "ceo" else build_builtin_registry()
+        # toolset="worker" gets the REAL delegated-worker registry (builtins + the
+        # worker-only ``escalate`` upward channel), so a worker-path eval exercises
+        # escalate exactly as production does; "ceo" gets the coordinator read-only subset.
+        tools = (
+            build_ceo_tool_registry()
+            if case.toolset == "ceo"
+            else build_worker_registry(backend=backend)
+        )
         profile = profiles.get("chat")
         citations: list[dict] = []
         ctx = ToolContext(

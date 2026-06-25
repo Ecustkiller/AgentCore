@@ -107,6 +107,48 @@ class EscalateTool:
                             "你仍照常把当前能做的做完、不必阻塞。normal=普通待决问题（默认）。"
                         ),
                     },
+                    "questions": {
+                        "type": "array",
+                        "description": (
+                            "可选，仅 blocking=true 时有意义：把这个【只有用户能定】"
+                            "的岔路拆成结构化选项，让用户一键拍板、不必读你的散文再手敲。"
+                            "岔路是干净的 A/B 或多选时强烈建议给（结构同 ask_user 的 "
+                            "questions，最多 5 个）；纯开放问题（无明确候选）则省略，"
+                            "用户直接文本作答。"
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "prompt": {
+                                    "type": "string",
+                                    "description": "问题本身，简洁清楚。",
+                                },
+                                "kind": {
+                                    "type": "string",
+                                    "enum": ["choice", "text"],
+                                    "description": (
+                                        "choice=从 options 里选；text=让用户填一句。默认 choice。"
+                                    ),
+                                },
+                                "options": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "kind=choice 时的候选项（最多 6 个）。",
+                                },
+                                "multiple": {
+                                    "type": "boolean",
+                                    "description": "可选：options 是否允许多选，默认 false。",
+                                },
+                                "default": {
+                                    "type": "string",
+                                    "description": (
+                                        "可选：你的暂定倾向（choice 时应是 options 中一项）。"
+                                    ),
+                                },
+                            },
+                            "required": ["prompt"],
+                        },
+                    },
                 },
                 "required": ["question"],
             },
@@ -156,9 +198,15 @@ class EscalateTool:
         # its outcome. A ``degraded`` outcome (concurrency cap full) or an unarmed turn (no
         # channel) falls through to the non-blocking path below — so blocking is a strict
         # superset of non-blocking, never a regression (设计 §4.4).
+        # 结构化升级（复用 ask_user 的问题规整）：把岔路拆成 choice/text 选项随挂起卡下发，
+        # 让用户一键拍板。仅阻塞挂起路径用到（非阻塞无卡可答）。Local import 避免经 ask_user
+        # 包 __init__ 触发 runtime 依赖环。
+        from agentcore.tools.builtin.ask_user.schema import normalize_questions
+
         channel = context.escalation
         if blocking and channel is not None and channel.armed:
-            outcome = await channel.request(question, assumption)
+            questions = normalize_questions(arguments.get("questions"))
+            outcome = await channel.request(question, assumption, questions)
             if outcome.status != "degraded":
                 return escalate_tool_result(outcome.status, outcome.answer, assumption)
         # 非阻塞 (default) / degraded / unarmed: surface the escalation live (best-effort,

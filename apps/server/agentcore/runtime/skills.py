@@ -151,8 +151,10 @@ _DEBATE_AND_REVIEW = """\
 - `roundtable` 多方圆桌：3+ 视角多边碰撞，探讨争议、铺满观点光谱。sides≥3。
 
 你只需定【命题与参与方】：`motion` 放命题（用户原话或你提炼的争议命题）；`sides` 每方给 `key`\
-（唯一英文短词，如 pro/con/red1，用于跨轮定位）、`name`（展示名，如「正方」「经济学视角」）、\
-`stance`（喂给该方辩手的立场 / 视角定位）。轮数与收敛【你和用户都不设】——主持人据交锋质量自调。\
+（唯一英文短词，如 pro/con/red1，用于跨轮定位）、`name`（展示名：用简短的【立场 / 视角】名，\
+各方【对称同风格】——甜党 / 咸党、正方 / 反方、经济学视角 / 工程视角；别一方用立场名、另一方用\
+模型名「原生DeepSeek」，模型走单独的 `model` 字段 + 界面徽章；仅「比谁更聪明」类辩论才两方都用\
+模型名）、`stance`（喂给该方辩手的立场 / 视角定位）。轮数与收敛【你和用户都不设】——主持人据交锋质量自调。\
 `thorough=false`（单轮快速对碰，对**含圆桌在内的所有形态**生效）用于【用户只想轻量看看】：明说\
 「快速对碰一下」，或意图明显轻量（如「测试下这个功能」「简单一点就好」「随便聊聊 / 看个大概」）\
 ——这类不该被强制跑满多轮、产出冗余的「修订 v2」；其余默认 `thorough=true`（圆桌多轮、正反/红队辩透）。
@@ -309,16 +311,27 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
 )
 
 
-def build_system_skill_registry() -> SkillRegistry:
+def build_system_skill_registry(*, include_legal: bool = False) -> SkillRegistry:
     """Register the platform's built-in (system) skills — the single source of truth.
 
     Mirrors ``build_builtin_registry`` for tools: code-defined, always available to
     the CEO via ``consult_skill``. Future market skills register into the SAME
     registry shape (单一机制、多类来源).
+
+    ``include_legal`` opts the legal vertical's domain skills into the SAME registry
+    (法律垂直 v0 stopgap, gated on ``settings.legal_vertical_enabled`` at the call site).
+    Default off so generic deployments keep exactly the platform system skills — the
+    legal pack is layered, not baked into the core set. Deferred import keeps the
+    module graph free of a core→domain edge when the vertical is disabled.
     """
     registry = SkillRegistry()
     for skill in _SYSTEM_SKILLS:
         registry.register(skill)
+    if include_legal:
+        from agentcore.runtime.legal_skills import LEGAL_SKILLS
+
+        for skill in LEGAL_SKILLS:
+            registry.register(skill)
     return registry
 
 

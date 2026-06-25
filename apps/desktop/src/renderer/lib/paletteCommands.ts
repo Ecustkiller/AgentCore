@@ -27,13 +27,14 @@ import {
   Palette,
   PanelLeft,
   Plus,
+  ScrollText,
   Settings,
   Share2,
-  Sparkles,
   Sun,
   UserCog,
   Users,
   Workflow,
+  Wrench,
 } from "lucide-react";
 import type { NavigateFunction } from "react-router-dom";
 
@@ -207,12 +208,30 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: go("/toolbox"),
     },
     {
-      id: "nav-ai-tools",
-      title: "AI 工具",
+      id: "nav-tools",
+      title: "工具",
       category: "前往",
-      icon: Sparkles,
-      keywords: ["ai tools", "toolbox"],
-      run: go("/toolbox/ai-tools"),
+      icon: Wrench,
+      keywords: ["tools", "toolbox", "gongju", "nengli"],
+      run: go("/toolbox/tools"),
+    },
+    {
+      // 技能已并入「AI 提示词」页（按需注入的工具进阶用法 / 薄技能）——保留 skills/jineng 关键词，搜「技能」仍落到这里。
+      id: "nav-guidelines",
+      title: "AI 提示词",
+      category: "前往",
+      icon: ScrollText,
+      keywords: [
+        "guidelines",
+        "prompt",
+        "skills",
+        "consult",
+        "zhunze",
+        "tishici",
+        "jineng",
+        "nengli",
+      ],
+      run: go("/toolbox/guidelines"),
     },
     {
       id: "nav-manual",

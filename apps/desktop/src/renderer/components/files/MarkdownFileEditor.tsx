@@ -63,11 +63,16 @@ export function MarkdownFileEditor({
   path,
   name,
   onClose,
+  embedded,
 }: {
   source: FileSource;
   path: string;
   name: string;
   onClose: () => void;
+  /** Hosted inside a larger shell (e.g. the 全局+本项目 split) that owns the single 返回
+   * control and tab chrome — so suppress this editor's own back button. Everything else
+   * (脏标 / 保存 / AI 改写 / 编辑·预览) stays, since each pane edits its own file. */
+  embedded?: boolean;
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -357,11 +362,13 @@ export function MarkdownFileEditor({
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-1 pr-1.5">
-        <SimpleTooltip label="返回文件列表">
-          <IconButton onClick={onClose} aria-label="返回文件列表">
-            <ChevronLeft size={16} />
-          </IconButton>
-        </SimpleTooltip>
+        {!embedded && (
+          <SimpleTooltip label="返回文件列表">
+            <IconButton onClick={onClose} aria-label="返回文件列表">
+              <ChevronLeft size={16} />
+            </IconButton>
+          </SimpleTooltip>
+        )}
         <FileText size={13} className="shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
           {dirty && <span className="text-primary">● </span>}

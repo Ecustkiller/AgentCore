@@ -235,7 +235,13 @@ def tool_ckpt(
 
 
 def tool_durable(
-    provider: Provider, sink: EventSink, registry: InteractionRegistry, saver, deleter
+    provider: Provider,
+    sink: EventSink,
+    registry: InteractionRegistry,
+    saver,
+    deleter,
+    folder_id: str | None = None,
+    memory_enabled: bool = True,
 ):
     return DelegateTool(
         llm=provider,
@@ -253,6 +259,8 @@ def tool_durable(
         suspension_saver=saver,
         suspension_deleter=deleter,
         captain_run_id="CEO",
+        folder_id=folder_id,
+        memory_enabled=memory_enabled,
     )
 
 

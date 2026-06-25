@@ -1,3 +1,4 @@
+import { notifyInfo } from "@/lib/toast";
 import { BASE_URL, notifyUnauthorized, tryRefresh } from "@/services/api";
 import type { ChatMessageDetail } from "@/services/messaging";
 import { applyConversationPromotion } from "@/services/workspacePromotion";
@@ -79,6 +80,10 @@ function handleFrame(frame: string): void {
         localRootId: e.local_root_id,
         localSubpath: e.local_subpath,
       });
+    } else if (event.type === "memory_updated") {
+      // The offline consolidation pass refreshed the user's long-term memory (off the
+      // turn path) — a heads-up toast so an open「AI 记忆」editor knows to reload.
+      notifyInfo("AI 刚刚更新了你的记忆");
     }
     // "ready" and any other event types: no-op here.
   } catch {

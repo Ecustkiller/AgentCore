@@ -49,6 +49,10 @@ export interface DebateSideModel {
   stance: Stance | null;
   /** 身份色 `var(--agent-N)` (按 name hash，live↔收场恒定)；内联使用，遵 color-tokens。 */
   colorVar: string;
+  /** 该方辩手的模型覆写 (真·多模型辩论，`provider/model` 或空)：收场由 roster (`debate.sides`)
+   *  按 sideKey 映射补回，进行中 roster 未到 → 空 (不显模型徽章)。{@link modelVendorLabel} 映射成
+   *  友好厂商名供发言格标「豆包 / DeepSeek」。 */
+  model: string;
   run: RunNode | null;
 }
 
@@ -113,6 +117,11 @@ function settledModel(
   execution: Execution,
   debate: DebateResultPayload,
 ): DebateModel {
+  // roster (debate.sides) 是模型覆写的权威源：按语义 key 映射，让每轮发言格按 sideKey 补回模型
+  // (真·多模型辩论的「谁是哪个模型」)。进行中无 roster → 该路不经此、模型留空。
+  const modelBySideKey = new Map(
+    debate.sides.map((s) => [s.key, s.model ?? ""]),
+  );
   const rounds: DebateRoundModel[] = debate.rounds.map((round) => ({
     roundNo: round.round_no,
     focus: round.focus,
@@ -131,6 +140,7 @@ function settledModel(
         name: side.name,
         stance: run?.stance ?? null,
         colorVar: agentColorVar(side.name),
+        model: modelBySideKey.get(side.key) ?? "",
         run,
       };
     }),
@@ -232,6 +242,8 @@ function twoSide(run: RunNode, stance: Stance): DebateSideModel {
     name,
     stance,
     colorVar: agentColorVar(name),
+    // 进行中无 roster（模型覆写权威源），故留空；收场由 settledModel 按 sideKey 补回。
+    model: "",
     run,
   };
 }
@@ -281,6 +293,8 @@ function multiSide(
     name: role,
     stance: null,
     colorVar: agentColorVar(role),
+    // 进行中无 roster；收场由 settledModel 按 sideKey 补回模型。
+    model: "",
     run,
   };
 }
@@ -326,4 +340,41 @@ export function roundSignal(round: DebateRoundModel): DebateSignal {
   if (round.verdict?.converged) return "converged";
   if (round.verdict?.real_clash) return "clash";
   return "quiet";
+}
+
+/**
+ * 该方是否需要单独显示模型徽章 —— 当一方的**身份名已经包含厂商名**时（后端 roster 取名回退成
+ * 模型名，如「原生DeepSeek」并排「DeepSeek」徽章 = 噪音），抑制徽章避免重复；身份名是语义立场
+ * （「甜党」「支持方」）时才显，让「谁是哪个模型」这一维真正有信息量、不冗余（用户反馈的「乱」之一）。
+ */
+export function shouldShowModelBadge(
+  name: string,
+  model: string | null | undefined,
+): boolean {
+  const label = modelVendorLabel(model);
+  if (!label) return false;
+  return !name.toLowerCase().includes(label.toLowerCase());
+}
+
+/** 厂商前缀 / 模型名 → 友好厂商名（真·多模型辩论的「谁是哪个模型」展示）。`provider/model` 前缀
+ *  优先（doubao/kimi/zhipu）；无前缀按模型名识别（DeepSeek 是默认 provider、无前缀）。空 → null
+ *  （不显徽章）。兜底返回前缀或原串，未知模型也给出可读名。映射随接入新厂商在此一处扩展。 */
+export function modelVendorLabel(
+  model: string | null | undefined,
+): string | null {
+  const m = (model ?? "").trim();
+  if (!m) return null;
+  const byPrefix: Record<string, string> = {
+    doubao: "豆包",
+    kimi: "Kimi",
+    zhipu: "智谱",
+    deepseek: "DeepSeek",
+  };
+  const prefix = m.includes("/") ? m.slice(0, m.indexOf("/")) : "";
+  if (prefix) return byPrefix[prefix] ?? prefix;
+  if (/^deepseek/i.test(m)) return "DeepSeek";
+  if (/^doubao/i.test(m)) return "豆包";
+  if (/^glm/i.test(m)) return "智谱";
+  if (/^kimi/i.test(m)) return "Kimi";
+  return m;
 }

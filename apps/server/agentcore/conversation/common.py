@@ -96,3 +96,13 @@ async def resolve_profile_set(
     return resolve_mode_profile_set(
         mode_ref, custom_modes=custom_modes, ceiling=settings.selectable_models
     )
+
+
+async def resolve_memory_enabled(session: AsyncSession, user_id: str) -> bool:
+    """This turn's long-term-memory master switch (Agent记忆与知识系统 §一).
+
+    Defaults to True for an unknown user (memory on, the product default), so a
+    missing row never silently suppresses injection.
+    """
+    user = await UserRepository(session).get_by_id(user_id)
+    return user.memory_enabled if user else True

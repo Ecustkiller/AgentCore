@@ -39,6 +39,7 @@ function projectRuntime(rt: ExecutionRuntime): Execution | null {
     rt.status,
     rt.debate,
     rt.debateRounds,
+    rt.debateDecisions,
   );
   projectionCache.set(rt, exec);
   return exec;

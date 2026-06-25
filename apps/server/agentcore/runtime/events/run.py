@@ -81,6 +81,19 @@ def run_output_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
     )
 
 
+def run_output_reset(run_id: str, agent_id: str) -> SSEEvent:
+    """交付前核验回炉时清掉这个 worker 卡片已流式累积的草稿正文。
+
+    ``content_reset`` 的 worker 对偶：done 轮正文已逐 token 经 ``run_output_delta`` emit 到
+    run 节点，无法「收回」，故 finish_guard 命中回炉时发本事件——前端清该 agent 的
+    ``outputChunks``，重写版重新流式，呈现为「违规版 → 修正版」一次干净替换而非追加。
+    transport-only、不进 journal（重载时 worker 产出由 ``message_final`` fact 重建）。"""
+    return SSEEvent(
+        type=EventType.RUN_OUTPUT_RESET,
+        payload={"run_id": run_id, "agent_id": agent_id},
+    )
+
+
 def run_reasoning_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
     return SSEEvent(
         type=EventType.RUN_REASONING_DELTA,

@@ -65,28 +65,34 @@ const ROLES = [
 
 const COMPARE = [
   {
-    dim: "底层架构",
-    others: "一个助手承担主流程，子任务多为自我派发",
-    ours: "Multi-Agent 原生，委派是一等公民",
+    dim: "怎么干活",
+    others: "一个助手把所有事串着做，前后全靠它一个人",
+    ours: "一支团队各干各的，能同时推进、按依赖关系交接",
   },
   {
-    dim: "协作方式",
-    others: "子任务派发为主，少见编排级协商与互审",
-    ours: "串行 / 并行 / 辩论 / 互审，统一 DAG 编排",
+    dim: "有人把关吗",
+    others: "自己出结果，没人复查，结论未经论证",
+    ours: "Agent 之间互审辩论，有「质检」环节",
   },
   {
-    dim: "过程可见",
-    others: "多只见最终结果，难以看清中间决策",
-    ours: "全程可观测：决策 / 工具 / 耗时实时可见",
+    dim: "你看得见吗",
+    others: "只见最终结果，中间决策是黑箱",
+    ours: "谁在做什么、为什么这样决策，实时可见",
   },
   {
-    dim: "扩展生态",
-    others: "以对话或单个 Agent 配置为主",
-    ours: "工具 / 技能 / 规则 / Agent / 团队 五类资产",
+    dim: "能扩展吗",
+    others: "配一个 Agent 的提示词和工具",
+    ours: "工具 / 技能 / 规则 / Agent / 团队，五类资产可沉淀复用",
   },
 ];
 
-const ASSETS = ["工具 Tool", "技能 Skill", "规则 Rule", "Agent", "团队 Team"];
+const ECOSYSTEM = [
+  { name: "工具 Tool", desc: "接入你的数据库、API、文件系统" },
+  { name: "技能 Skill", desc: "沉淀你的分析流程、写作规范" },
+  { name: "规则 Rule", desc: "团队行为的红线与偏好" },
+  { name: "Agent", desc: "配好角色的专精队员" },
+  { name: "团队 Team", desc: "一键复用整支团队配置" },
+];
 
 function BrandMark() {
   return (
@@ -236,7 +242,7 @@ export default function Home() {
                   手机网页版
                 </a>
                 <a href="#how" className="btn btn-ghost">
-                  看团队如何协作
+                  看他们怎么干活
                 </a>
               </div>
               <p className="mt-3 text-sm text-muted-foreground">
@@ -261,13 +267,13 @@ export default function Home() {
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <p className="eyebrow">
                     <Dot />
-                    一次协作 · 概览
+                    一次任务 · 概览
                   </p>
                   <a
                     href="#how"
                     className="shrink-0 text-sm text-muted-foreground transition-colors hover:text-foreground"
                   >
-                    看协作步骤 →
+                    看完整流程 →
                   </a>
                 </div>
                 <HeroFlow />
@@ -349,7 +355,7 @@ export default function Home() {
             <Reveal>
               <p className="eyebrow">
                 <Dot />
-                一次协作的全过程
+                一次任务的全过程
               </p>
               <h2 className="mt-3 text-3xl font-bold leading-snug sm:text-4xl">
                 从一句话，到一支团队的产出
@@ -384,8 +390,12 @@ export default function Home() {
                 <br className="hidden sm:block" />
                 也只是一个人在战斗
               </h2>
-              <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-                现在的 AI 产品，本质都是「单 Agent + 子任务派发」——一个全能助理把任务拆给自己做。
+              <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground">
+                你让 AI 做一份竞品分析——它搜资料、写大纲、填内容，全是同一个"人"。
+                没有人帮它查漏，没有人跟它争论，没有人审它的结论。
+                它自己出题、自己答、自己打分。
+              </p>
+              <p className="mt-4 max-w-xl text-lg leading-relaxed text-muted-foreground">
                 可现实里的复杂工作，从来不是靠一个人更努力，而是靠一支会分工、会协商、会互相把关的团队。
               </p>
             </Reveal>
@@ -493,6 +503,9 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+              <p className="mt-5 text-base leading-relaxed text-muted-foreground">
+                用 ChatGPT 你得学会"怎么问"。用 AgentCore，你只需要知道<span className="font-medium text-foreground">"要什么"</span>。
+              </p>
             </Reveal>
           </div>
         </section>
@@ -506,7 +519,7 @@ export default function Home() {
                 单 Agent 助手 vs 协作平台
               </p>
               <h2 className="mt-4 max-w-2xl text-3xl font-bold leading-snug sm:text-4xl">
-                不止更聪明，而是会协作
+                架构不同，结果就不同
               </h2>
             </Reveal>
             <Reveal delay={100}>
@@ -515,7 +528,7 @@ export default function Home() {
                   <thead>
                     <tr className="border-b border-border">
                       <th className="p-5 text-sm font-semibold text-muted-foreground">
-                        维度
+                        &nbsp;
                       </th>
                       <th className="p-5 text-sm font-semibold text-muted-foreground">
                         单 Agent 助手
@@ -554,24 +567,25 @@ export default function Home() {
               <div className="flex flex-wrap items-center gap-3">
                 <p className="eyebrow">
                   <Dot />
-                  协作生态
+                  扩展生态
                 </p>
                 <span className="pill border-[color-mix(in_oklab,var(--warning),transparent_60%)] text-warning">
                   即将开放
                 </span>
               </div>
               <h2 className="mt-4 max-w-2xl text-3xl font-bold leading-snug sm:text-4xl">
-                不止一个 Agent，而是一个协作生态
+                不止一个 Agent，而是一整套生态
               </h2>
               <p className="mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground">
-                未来，AgentCore 将开放五类可共享的协作资产。把你打磨好的工作流和团队，沉淀、复用、分享。
+                把你打磨好的工作流和团队，沉淀成五类可复用的资产——自己用，或分享给别人。
               </p>
             </Reveal>
             <div className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-              {ASSETS.map((a, i) => (
-                <Reveal key={a} delay={i * 70}>
-                  <div className="surface surface-hover flex h-24 items-center justify-center p-4 text-center text-base font-semibold">
-                    {a}
+              {ECOSYSTEM.map((a, i) => (
+                <Reveal key={a.name} delay={i * 70}>
+                  <div className="surface surface-hover flex h-full min-h-[7rem] flex-col items-center justify-center gap-2 p-5 text-center">
+                    <span className="text-base font-semibold">{a.name}</span>
+                    <span className="text-xs leading-snug text-muted-foreground">{a.desc}</span>
                   </div>
                 </Reveal>
               ))}
@@ -589,6 +603,11 @@ export default function Home() {
               <p className="mx-auto mt-6 max-w-xl text-lg text-muted-foreground">
                 AgentCore —— 让 AI 像团队一样工作。
               </p>
+              <div className="mx-auto mt-6 flex flex-wrap items-center justify-center gap-2.5">
+                <span className="pill">MCP 工具协议</span>
+                <span className="pill">可私有部署</span>
+                <span className="pill">桌面 + 手机</span>
+              </div>
               <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
                 <a href={DOWNLOAD_PAGE_PATH} className="btn btn-primary">
                   <DownloadIcon />
@@ -603,7 +622,7 @@ export default function Home() {
                   手机网页版
                 </a>
                 <a href="#how" className="btn btn-ghost">
-                  看团队如何协作
+                  看他们怎么干活
                 </a>
               </div>
             </Reveal>
@@ -649,7 +668,7 @@ export default function Home() {
                 </li>
                 <li>
                   <a href="#how" className="hover:text-foreground">
-                    如何协作
+                    团队流程
                   </a>
                 </li>
                 <li>
@@ -664,12 +683,12 @@ export default function Home() {
               <ul className="mt-3 space-y-2 text-muted-foreground">
                 <li>
                   <a href="#top" className="hover:text-foreground">
-                    协作智能
+                    核心理念
                   </a>
                 </li>
                 <li>
                   <a href="#ecosystem" className="hover:text-foreground">
-                    协作生态
+                    扩展生态
                   </a>
                 </li>
               </ul>

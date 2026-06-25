@@ -84,6 +84,54 @@ async def test_durable_pause_persists_frame_then_drops_on_live_resolve():
     assert "S1OUT" in result.output and "S2OUT" in result.output
 
 
+async def test_durable_pause_captures_resume_scope():
+    # The turn's project scope AND the memory master switch ride the durable frame so a
+    # fresh-process resume re-wires consult_memory exactly as this turn did: same project
+    # (project 主题 first, then global) and memory-off stays off — 记忆作用域与画像分层 §5.2 /
+    # resume folder_id + memory_enabled 缺口.
+    from agentcore.runtime.suspension import captain_transcript
+
+    registry = InteractionRegistry()
+    saved: list = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(mid):
+        pass
+
+    t = tool_durable(
+        Provider(["S1OUT", "S2OUT"]),
+        EventSink(),
+        registry,
+        _save,
+        _drop,
+        folder_id="proj_42",
+        memory_enabled=False,
+    )
+    transcript = [
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(id="call_del", function=ToolCallFunction(name="delegate", arguments="{}")),
+            ],
+        ),
+    ]
+    token = captain_transcript.set(transcript)
+    try:
+        exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG}, ctx()))
+        await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
+        await exec_task
+    finally:
+        captain_transcript.reset(token)
+
+    assert saved
+    assert saved[0].folder_id == "proj_42"
+    assert saved[0].memory_enabled is False
+
+
 async def test_durable_capture_skipped_without_transcript():
     registry = InteractionRegistry()
     saved: list = []

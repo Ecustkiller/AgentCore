@@ -2359,6 +2359,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/users/me/memory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get My Memory
+         * @description Load the signed-in user's long-term memory + whether memory is enabled.
+         */
+        get: operations["get_my_memory_v1_users_me_memory_get"];
+        /**
+         * Put My Memory
+         * @description Write the user's long-term memory back (full-document edit, CAS-guarded).
+         *
+         *     Holds the per-user memory lock so the read-compare-write is atomic against the offline
+         *     consolidation pass. A ``baseline`` that no longer matches the current (merged) version
+         *     returns ``ok=False, conflict=True`` with the live version (never a blind overwrite); the
+         *     client then reloads or forces the write with ``baseline=None``. The edited document is
+         *     split back into 偏好.md + 画像.md; the returned version is that of the re-merged result so
+         *     it matches what the next GET serves (split→save→merge normalizes the markdown).
+         */
+        put: operations["put_my_memory_v1_users_me_memory_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/memory/enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set My Memory Enabled
+         * @description Toggle the long-term memory master switch (off = stop injecting AND growing).
+         */
+        put: operations["set_my_memory_enabled_v1_users_me_memory_enabled_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/memory/files/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get My Memory File
+         * @description Load ONE memory leaf — 偏好/画像 (global) or a project's 画像 (with ``folder_id``).
+         */
+        get: operations["get_my_memory_file_v1_users_me_memory_files__kind__get"];
+        /**
+         * Put My Memory File
+         * @description Write ONE memory leaf back (CAS-guarded; an empty body drops the file).
+         *
+         *     Holds the per-user memory lock so the read-compare-write is atomic against the offline
+         *     consolidation pass. A ``baseline`` that no longer matches the leaf's current version
+         *     returns ``ok=False, conflict=True`` (never a blind overwrite). Clearing a leaf (empty
+         *     content) deletes the underlying file so it stops being injected.
+         */
+        put: operations["put_my_memory_file_v1_users_me_memory_files__kind__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/memory/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Memory Projects
+         * @description List folder_ids that have project-scoped memory (so the「文件」rail can surface them).
+         *
+         *     Declared before ``/files/{kind}`` so the static segment wins the route match.
+         */
+        get: operations["list_my_memory_projects_v1_users_me_memory_projects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/{user_id}/avatar": {
         parameters: {
             query?: never;
@@ -4044,6 +4146,72 @@ export interface components {
             /** Last Read Message Id */
             last_read_message_id: string;
         };
+        /** MemoryEnabledRequest */
+        MemoryEnabledRequest: {
+            /**
+             * Enabled
+             * @description Long-term memory master switch
+             */
+            enabled: boolean;
+        };
+        /**
+         * MemoryFileResponse
+         * @description One memory leaf's body + its CAS tag (a single editor leaf's load payload).
+         */
+        MemoryFileResponse: {
+            /** Content */
+            content: string;
+            /** Version */
+            version: string;
+        };
+        /**
+         * MemoryKind
+         * @description Which always-injected core leaf an editor surface addresses (记忆作用域与画像分层 §四).
+         *
+         *     ``preferences`` → 偏好.md (沟通/工作习惯, GLOBAL-only); ``profile`` → 画像.md
+         *     (技术栈/关于用户的事实, global or — with a ``folder_id`` — a project layer).
+         * @enum {string}
+         */
+        MemoryKind: "preferences" | "profile";
+        /**
+         * MemoryProjectsResponse
+         * @description folder_ids whose PROJECT memory layer is non-empty (the rail shows a node each).
+         */
+        MemoryProjectsResponse: {
+            /** Folders */
+            folders: string[];
+        };
+        /**
+         * MemoryResponse
+         * @description The user's memory document + the master switch (the editor's load payload).
+         */
+        MemoryResponse: {
+            /** Content */
+            content: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Version */
+            version: string;
+        };
+        /** MemoryWriteRequest */
+        MemoryWriteRequest: {
+            /** Baseline */
+            baseline?: string | null;
+            /** Content */
+            content: string;
+        };
+        /** MemoryWriteResult */
+        MemoryWriteResult: {
+            /**
+             * Conflict
+             * @default false
+             */
+            conflict: boolean;
+            /** Ok */
+            ok: boolean;
+            /** Version */
+            version: string;
+        };
         /**
          * MessageAttachment
          * @description A piece of context the user referenced (@-mention or paperclip).
@@ -4465,6 +4633,37 @@ export interface components {
             ok: boolean;
             /** Value */
             value?: unknown | null;
+        };
+        /**
+         * ResolveDebateRoundInteraction
+         * @description Settle an interactive debate round boundary (``debate_round`` interaction, 逐轮交互).
+         *
+         *     Raised when a ``debate(interactive=true)`` Moderator paused at a round boundary so the user
+         *     can steer depth instead of letting the judge auto-converge. ``decision`` is ``continue``
+         *     (debate another round — ``focus``, if given, overrides the next round's framing = 「加角度」,
+         *     steering the debate onto the dimension the user cares about) or ``conclude`` (stop now and
+         *     emit the brief, even if the judge had not converged). A late resolve (the round already
+         *     timed out → judge auto-convergence took over) falls through the route as 404, so the desktop
+         *     renders it as「已关闭」rather than an error. In-process only (not durably persisted): a
+         *     disconnect / restart drops the live debate, so there is no ``resume`` counterpart.
+         */
+        ResolveDebateRoundInteraction: {
+            /**
+             * Decision
+             * @default continue
+             * @enum {string}
+             */
+            decision: "continue" | "conclude";
+            /**
+             * Focus
+             * @default
+             */
+            focus: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "debate_round";
         };
         /**
          * ResolveEscalationInteraction
@@ -7017,7 +7216,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveCheckpointInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolvePlanReviewInteraction"] | components["schemas"]["ResolveEscalationInteraction"];
+                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveCheckpointInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolvePlanReviewInteraction"] | components["schemas"]["ResolveEscalationInteraction"] | components["schemas"]["ResolveDebateRoundInteraction"];
             };
         };
         responses: {
@@ -9661,6 +9860,224 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmKeyStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_memory_v1_users_me_memory_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_my_memory_v1_users_me_memory_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryWriteResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_my_memory_enabled_v1_users_me_memory_enabled_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryEnabledRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_memory_file_v1_users_me_memory_files__kind__get: {
+        parameters: {
+            query?: {
+                folder_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                kind: components["schemas"]["MemoryKind"];
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryFileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_my_memory_file_v1_users_me_memory_files__kind__put: {
+        parameters: {
+            query?: {
+                folder_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                kind: components["schemas"]["MemoryKind"];
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryWriteResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_memory_projects_v1_users_me_memory_projects_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryProjectsResponse"];
                 };
             };
             /** @description Validation Error */

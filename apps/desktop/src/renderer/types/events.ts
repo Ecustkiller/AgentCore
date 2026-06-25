@@ -39,3 +39,11 @@ export interface SkillConsultDisplay {
   skill_name: string;
   summary: string;
 }
+
+/** `consult_memory` rich result (记忆文件夹化 §六 · 渐进披露 可视化): which 记忆主题笔记
+ * the CEO pulled — its `topic` name. The full note body rides the `result` text (shown
+ * verbatim under this header), so the user sees exactly which memory the model reached
+ * for and what it read. */
+export interface MemoryConsultDisplay {
+  topic: string;
+}

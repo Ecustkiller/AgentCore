@@ -13,8 +13,8 @@ orchestrator (planning, not content) and duplicated the long-term rule file.
 This module owns: long-term-memory ops extraction (`LLMMemoryExtractor`) +
 deterministic application (`MarkdownMemoryApplier`), per-turn maintenance
 orchestration (`maintain_user_memory`), the memory file store (`MemoryStore`;
-MVP `FileMemoryStore` backs one markdown file per user on disk until the cloud
-file tree lands), and the conversation title generator.
+MVP `FileMemoryStore` backs a per-user folder of markdown files on disk until the
+cloud file tree lands), and the conversation title generator.
 """
 
 from agentcore.memory.conversation_title import (
@@ -24,14 +24,27 @@ from agentcore.memory.conversation_title import (
     TitleGenerator,
     TitleInput,
 )
+from agentcore.memory.injection import load_injected_memory, load_memory_topics
 from agentcore.memory.maintenance import maintain_user_memory
 from agentcore.memory.store import (
+    ALWAYS_MEMORY_FILES,
+    CORE_MEMORY_FILE,
+    PREFERENCES_MEMORY_FILE,
+    TOPIC_DIR,
     FileMemoryStore,
+    MemoryFileMeta,
+    MemoryScope,
     MemoryStore,
     default_memory_store,
+    is_topic_path,
+    memory_version,
+    topic_path,
+    topic_slug,
 )
 from agentcore.memory.user_memory import (
     MEMORY_SECTIONS,
+    PREFERENCES_SECTIONS,
+    PROFILE_SECTIONS,
     LLMMemoryExtractor,
     MarkdownMemoryApplier,
     MemoryAction,
@@ -39,7 +52,10 @@ from agentcore.memory.user_memory import (
     MemoryExtractInput,
     MemoryExtractor,
     MemoryOp,
+    core_file_for_section,
+    merge_global_core,
     parse_memory_ops,
+    split_global_core,
 )
 
 __all__ = [
@@ -49,6 +65,9 @@ __all__ = [
     "LLMTitleGenerator",
     "TITLE_MAX_CHARS",
     "MEMORY_SECTIONS",
+    "PREFERENCES_SECTIONS",
+    "PROFILE_SECTIONS",
+    "core_file_for_section",
     "MemoryAction",
     "MemoryOp",
     "MemoryExtractInput",
@@ -57,8 +76,22 @@ __all__ = [
     "MarkdownMemoryApplier",
     "LLMMemoryExtractor",
     "parse_memory_ops",
+    "merge_global_core",
+    "split_global_core",
     "MemoryStore",
+    "MemoryScope",
+    "MemoryFileMeta",
     "FileMemoryStore",
+    "CORE_MEMORY_FILE",
+    "PREFERENCES_MEMORY_FILE",
+    "ALWAYS_MEMORY_FILES",
+    "TOPIC_DIR",
+    "topic_path",
+    "topic_slug",
+    "is_topic_path",
     "default_memory_store",
+    "memory_version",
     "maintain_user_memory",
+    "load_injected_memory",
+    "load_memory_topics",
 ]

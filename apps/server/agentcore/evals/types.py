@@ -27,8 +27,8 @@ class EvalCase:
     """一个黄金用例。从 ``cases/*.json`` 加载（loader 解析为本类型）。
 
     ``checks`` 是声明式断言 ``[{"name": str, "args": {...}}]``，由 ``checks.build_check``
-    解析；期望委派角色等参数统一进 ``args``（如 ``RosterMatches`` 的 ``args.expected``）。
-    ``rubric`` 非空时走 LLM 裁判（P1）；``samples`` >1 为重跑取通过率（治非确定性）。
+    解析。``rubric`` 非空走绝对分 LLM 裁判；``milestones`` 非空走 milestone 覆盖裁判（结果维，
+    取代 ``RosterMatches`` 等轨迹断言，§六）——两者皆计入判定。``samples`` >1 为重跑取通过率。
     """
 
     id: str
@@ -41,6 +41,11 @@ class EvalCase:
     history: list[dict[str, Any]] = field(default_factory=list)
     checks: list[dict[str, Any]] = field(default_factory=list)
     rubric: str | None = None
+    # 结果维 milestone 覆盖（后端架构.md §五）：把任务的子目标写成可逐条判定的清单
+    # ``[{"id", "desc", "weight"}]``，由 LLM milestone 裁判判**交付物**覆盖了哪些（不管谁干的、
+    # 走没走某轨迹）。取代轨迹断言 ``RosterMatches``。``milestone_threshold`` 为加权覆盖率阈值。
+    milestones: list[dict[str, Any]] = field(default_factory=list)
+    milestone_threshold: float = 0.8
     samples: int = 1
     # 方向① 变体注入：命名的 prompt 变体（见 evals/prompt_profiles.py）。None=基线（恒等，
     # 与生产逐字节一致）；非 None 时 harness 在本例运行期 use_profile 注入该变体，A/B 提示词。
@@ -74,7 +79,7 @@ class TurnOutcome:
 class CheckOutcome:
     """一个确定性 Check 的判定结果。
 
-    ``gating`` 区分两类 Check（评测体系重设计 §三）：``True`` = L0 契约/安全**不变量**，进
+    ``gating`` 区分两类 Check（后端架构.md §五）：``True`` = L0 契约/安全**不变量**，进
     pass/fail 判定；``False`` = **诊断**（轨迹形状，如派没派/roster），仍记录与报告，但**不**计
     入判定——任务是否成功看 L1 rubric 裁判，不看编排机制。归类见 ``checks.DIAGNOSTIC_CHECKS``，
     由 ``runner.apply_checks`` 落标。
@@ -96,14 +101,41 @@ class JudgeVerdict:
 
 
 @dataclass
+class MilestoneItemResult:
+    """单条 milestone 子目标的判定（裁判判它在交付物里有没有被覆盖）。"""
+
+    id: str
+    desc: str
+    weight: float
+    covered: bool
+
+
+@dataclass
+class MilestoneVerdict:
+    """milestone 覆盖裁判结果（后端架构.md §五：结果维断言，非轨迹）。
+
+    ``coverage`` = **加权命中比** ``Σweight(covered)/Σweight``，
+    ``passed = coverage >= threshold``。逐项 ``items`` 留痕，便于看清「哪个子目标没覆盖」，
+    比单一 1–5 分更可诊断。
+    """
+
+    coverage: float
+    passed: bool
+    threshold: float
+    items: list[MilestoneItemResult] = field(default_factory=list)
+    rationale: str = ""
+
+
+@dataclass
 class CaseReport:
-    """一次用例运行的完整报告（确定性 Check + 可选裁判 + 归一化 outcome）。"""
+    """一次用例运行的完整报告（确定性 Check + 可选裁判 + 可选 milestone + 归一化 outcome）。"""
 
     case_id: str
     category: str
     outcome: TurnOutcome
     checks: list[CheckOutcome] = field(default_factory=list)
     judge: JudgeVerdict | None = None
+    milestone: MilestoneVerdict | None = None
 
     @property
     def checks_passed(self) -> bool:
@@ -112,13 +144,15 @@ class CaseReport:
 
     @property
     def passed(self) -> bool:
-        """判定口径（评测体系重设计 §三）：L0 不变量全过 且（无裁判 or 裁判通过）且未报错。
+        """判定口径（后端架构.md §五）：L0 不变量全过 且（无 rubric 裁判 or 通过）且
+        （无 milestone or 覆盖达阈）且未报错。
 
-        诊断 Check（轨迹形状）不参与判定——任务是否成功由 L1 rubric 裁判与 L0 安全/契约不变量
-        共同决定，不由「派没派 / roster 对不对」决定。
+        诊断 Check（轨迹形状）不参与判定——任务是否成功由 L0 安全/契约不变量 + L1 rubric 裁判 +
+        milestone 交付物覆盖共同决定，不由「派没派 / roster 对不对」决定。
         """
         judge_ok = self.judge is None or self.judge.passed
-        return self.checks_passed and judge_ok and self.outcome.error is None
+        milestone_ok = self.milestone is None or self.milestone.passed
+        return self.checks_passed and judge_ok and milestone_ok and self.outcome.error is None
 
 
 @dataclass
@@ -153,6 +187,12 @@ class Judge(Protocol):
     """LLM 裁判：按 rubric 给语义分（P1，用 ``LLMProvider.complete``）。"""
 
     async def score(self, case: EvalCase, outcome: TurnOutcome) -> JudgeVerdict: ...
+
+
+class MilestoneJudge(Protocol):
+    """milestone 覆盖裁判：一次结构化打分，判交付物覆盖了哪些子目标（结果维，非轨迹）。"""
+
+    async def score_milestones(self, case: EvalCase, outcome: TurnOutcome) -> MilestoneVerdict: ...
 
 
 class Harness(Protocol):

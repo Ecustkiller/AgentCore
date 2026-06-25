@@ -161,6 +161,15 @@ class RunSpec:
     # worker into least-privilege (the named, allow-list-intersected tools).
     tools: list[str] | None = None
     model_preference: str = "strong"
+    # Explicit per-node model override (真·多模型辩手). Empty = resolve the model from
+    # ``model_preference`` via the turn's ProfileSet (the default for ALL ordinary
+    # workers — unchanged). When set, the executor replaces only the resolved
+    # profile's ``model`` with this value and dispatches through the turn's
+    # ProviderRouter, so a ``provider/model`` prefix (e.g. ``doubao/doubao-seed-2-1-
+    # turbo-260628``) routes that node to a specific vendor while keeping the tier's
+    # other params (temperature / budget). Pricing falls back to flash for an unknown
+    # model name (a known, logged fallback) until a per-model price is registered.
+    model: str = ""
     thinking: bool | None = None
     reasoning_effort: str | None = None
     expected_output: str = ""

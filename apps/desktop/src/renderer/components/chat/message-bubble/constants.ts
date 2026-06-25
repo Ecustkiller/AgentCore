@@ -2,6 +2,7 @@ import type { ProcessStep } from "@/types/events";
 import {
   ArrowUp,
   BookOpen,
+  Brain,
   Code2,
   FileText,
   Folder,
@@ -32,6 +33,7 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
   delegate: { Icon: Users, label: "委派任务" },
   ask_user: { Icon: HelpCircle, label: "向你确认" },
   consult_skill: { Icon: BookOpen, label: "查阅能力" },
+  consult_memory: { Icon: Brain, label: "查阅记忆" },
   revise: { Icon: PenLine, label: "修订产物" },
   escalate: { Icon: ArrowUp, label: "上报问题" },
 };

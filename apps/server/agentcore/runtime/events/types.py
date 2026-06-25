@@ -38,6 +38,7 @@ class EventType(StrEnum):
     RUN_STARTED = "run_started"
     RUN_CONTEXT = "run_context"
     RUN_OUTPUT_DELTA = "run_output_delta"
+    RUN_OUTPUT_RESET = "run_output_reset"
     RUN_REASONING_DELTA = "run_reasoning_delta"
     RUN_COMPLETED = "run_completed"
     RUN_FAILED = "run_failed"
@@ -50,6 +51,8 @@ class EventType(StrEnum):
     DEBATE_RESULT = "debate_result"
     DEBATE_ROUND_STARTED = "debate_round_started"
     DEBATE_ROUND = "debate_round"
+    DEBATE_ROUND_DECISION_REQUIRED = "debate_round_decision_required"
+    DEBATE_ROUND_DECISION_RESOLVED = "debate_round_decision_resolved"
 
 
 class FinishReason(StrEnum):

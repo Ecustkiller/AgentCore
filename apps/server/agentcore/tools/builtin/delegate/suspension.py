@@ -75,6 +75,8 @@ async def persist_suspension(
         tool_call_id=find_tool_call_id(transcript, "delegate"),
         base_system_prompt=tool._system_prompt,
         user_message=tool._user_message,
+        folder_id=tool._folder_id,
+        memory_enabled=tool._memory_enabled,
         transcript=list(transcript),
         history=list(turn_history.get() or []),
         plan=plan,

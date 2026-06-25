@@ -62,6 +62,7 @@ function projectSlot(rt: ExecutionRuntime | undefined): Execution | null {
     rt.status,
     rt.debate,
     rt.debateRounds,
+    rt.debateDecisions,
   );
   projectionCache.set(rt, exec);
   return exec;

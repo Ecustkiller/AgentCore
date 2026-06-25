@@ -86,6 +86,8 @@ async def persist_suspension(
         tool_call_id=find_tool_call_id(transcript, "ask_user"),
         base_system_prompt=tool.base_system_prompt,
         user_message=tool.user_message,
+        folder_id=tool.folder_id,
+        memory_enabled=tool.memory_enabled,
         transcript=list(transcript),
         history=list(turn_history.get() or []),
         question=message,

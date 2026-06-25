@@ -65,6 +65,20 @@ def test_tool_args_valid():
     ).passed
 
 
+def test_tool_arg_non_empty():
+    spec = {"name": "ToolArgNonEmpty", "args": {"tool": "escalate", "arg": "questions"}}
+    # escalate 真带了结构化 questions（非空数组）→ 过
+    full = '{"question": "选 A 还是 B", "questions": [{"prompt": "选哪个"}]}'
+    assert _run(spec, _outcome(tool_calls=[("escalate", full)])).passed
+    # 键缺失（只发了自由文本升级）→ 不过
+    assert not _run(spec, _outcome(tool_calls=[("escalate", '{"question": "q"}')])).passed
+    # 空数组 = 没真结构化 → 不过
+    empty = '{"question": "q", "questions": []}'
+    assert not _run(spec, _outcome(tool_calls=[("escalate", empty)])).passed
+    # 根本没调用该工具 → 不过
+    assert not _run(spec, _outcome(tool_calls=[])).passed
+
+
 def test_has_citations():
     oc = _outcome(citations=[{"url": "a"}, {"url": "b"}])
     assert _run({"name": "HasCitations", "args": {"min": 2}}, oc).passed
@@ -117,6 +131,7 @@ def test_registry_contains_all_documented_checks():
         "NonEmpty",
         "ToolCalled",
         "ToolArgsValid",
+        "ToolArgNonEmpty",
         "HasCitations",
         "Delegated",
         "RosterMatches",

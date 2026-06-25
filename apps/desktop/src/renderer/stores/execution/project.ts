@@ -3,6 +3,7 @@ import type { RunFrame } from "./frames";
 import {
   type AgentState,
   type BatchMetricsSnapshot,
+  type DebateRoundDecision,
   type Execution,
   type ExecutionPlan,
   type ExecutionStatus,
@@ -22,6 +23,7 @@ export function projectExecution(
   status: ExecutionStatus,
   debate: DebateResultPayload | null = null,
   debateRounds: DebateNarrativeRound[] = [],
+  debateDecisions: DebateRoundDecision[] = [],
 ): Execution {
   const agents: AgentState[] = plan.agents.map((a) => ({
     id: a.id,
@@ -278,6 +280,8 @@ export function projectExecution(
             blocking: f.blocking,
             status: "raised",
             answer: null,
+            // 非阻塞 banner 无应答卡，故无结构化选项。
+            questions: [],
           });
         break;
       }
@@ -296,6 +300,8 @@ export function projectExecution(
             blocking: true,
             status: "pending",
             answer: null,
+            // 结构化升级: choice/text 选项随挂起卡渲染（同 ask_user）；free-text 升级为 []。
+            questions: f.questions ?? [],
           });
         break;
       }
@@ -374,6 +380,7 @@ export function projectExecution(
     batches,
     debate,
     debateRounds,
+    debateDecisions,
   };
 }
 

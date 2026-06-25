@@ -1,5 +1,9 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { RunDetailBody } from "@/components/chat/detail/RunDetailBody";
+import {
+  CommandRegion,
+  useCommandRegion,
+} from "@/components/graph/CanvasDecisionPanel";
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
@@ -35,6 +39,11 @@ export function SidePanel() {
   const closeTab = useSidePanelStore((s) => s.closeTab);
   const byId = useExecutionStore((s) => s.byId);
   const messages = useActiveMessages();
+  // 图上指挥 (前端UX设计.md §6.2): the 指挥台 region pinned to the top of this one dock.
+  // Called before the `open` early-return below so its auto-surface effect can reveal
+  // the panel even while it's closed (a brand-new decision opens it). Inert in chat
+  // mode (the bridge store's `active` is false there).
+  const command = useCommandRegion();
 
   // A detail tab survives only while it belongs to the live conversation: a run
   // tab while its message's execution slot still holds the run (§9.3); a content
@@ -113,35 +122,41 @@ export function SidePanel() {
         </SimpleTooltip>
       </div>
 
-      <div className="relative min-h-0 flex-1">
-        {wsMounted && (
-          <div
-            className={`absolute inset-0 ${workspaceActive ? "" : "hidden"}`}
-          >
-            <WorkspaceMode />
-          </div>
-        )}
-        {activeTab?.kind === "run" && (
-          <div className="absolute inset-0 overflow-y-auto">
-            <RunDetailBody
-              key={activeTab.id}
-              messageId={activeTab.messageId}
-              runId={activeTab.runId}
-            />
-          </div>
-        )}
-        {activeTab?.kind === "content" && (
-          // An endpoint bubble (提问 / 最终回答) surfaced from the canvas — the
-          // deliverable read as plain Markdown, no run-detail chrome.
-          <div className="absolute inset-0 overflow-y-auto p-4">
-            <Markdown
-              content={
-                messages.find((m) => m.id === activeTab.contentMessageId)
-                  ?.content ?? ""
-              }
-            />
-          </div>
-        )}
+      {/* Content area (前端UX设计.md §6.2 · §十): the 指挥台 region pinned on top when
+          it has something actionable (capped + self-scrolling, so the tab body keeps
+          usable height), then the active tab's body below. */}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {command.show && <CommandRegion {...command} />}
+        <div className="relative min-h-0 flex-1">
+          {wsMounted && (
+            <div
+              className={`absolute inset-0 ${workspaceActive ? "" : "hidden"}`}
+            >
+              <WorkspaceMode />
+            </div>
+          )}
+          {activeTab?.kind === "run" && (
+            <div className="absolute inset-0 overflow-y-auto">
+              <RunDetailBody
+                key={activeTab.id}
+                messageId={activeTab.messageId}
+                runId={activeTab.runId}
+              />
+            </div>
+          )}
+          {activeTab?.kind === "content" && (
+            // An endpoint bubble (提问 / 最终回答) surfaced from the canvas — the
+            // deliverable read as plain Markdown, no run-detail chrome.
+            <div className="absolute inset-0 overflow-y-auto p-4">
+              <Markdown
+                content={
+                  messages.find((m) => m.id === activeTab.contentMessageId)
+                    ?.content ?? ""
+                }
+              />
+            </div>
+          )}
+        </div>
       </div>
     </aside>
   );

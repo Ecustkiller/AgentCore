@@ -1,8 +1,12 @@
 import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
-import type { BatchMetricsSnapshot, Execution, NodeTiming } from "@/stores/execution";
+import type {
+  BatchMetricsSnapshot,
+  Execution,
+  NodeTiming,
+} from "@/stores/execution";
 
 /**
- * 多任务并行图 · 并行时间线 (前端UX设计.md §十一) — the one view that shows the *temporal*
+ * 多任务并行图 · 并行时间线 (前端UX设计.md §6.5) — the one view that shows the *temporal*
  * truth the collaboration DAG can't. The graph draws **dependency** structure; this lays
  * every worker run on a real time axis (offsets from the scheduler's wall start), so the
  * user SEES: overlapping bars = nodes that truly ran at the same time, a gap before a bar =
@@ -25,14 +29,19 @@ export function ParallelTimeline({ execution }: { execution: Execution }) {
       <header className="flex flex-col gap-1">
         <h2 className="text-sm font-semibold text-foreground">并行时间线</h2>
         <p className="text-xs text-muted-foreground">
-          每条是一个队员的执行区间，横轴为真实时间。<span className="text-foreground">重叠</span>
-          ＝真并行，<span className="text-foreground">空档</span>＝并发上限让它排队，
+          每条是一个队员的执行区间，横轴为真实时间。
+          <span className="text-foreground">重叠</span>
+          ＝真并行，<span className="text-foreground">空档</span>
+          ＝并发上限让它排队，
           <span className="text-foreground">最长条</span>＝关键路径。
         </p>
       </header>
       {batches.map((batch, i) => (
+        // Keyed by the segment's first dispatched run — unique across segments (a node
+        // runs in exactly one scheduler segment; a resume seeds prior nodes as completed
+        // and omits them here) and stable, so no array-index key. `i` is the display 批次 N.
         <BatchTrack
-          key={i}
+          key={batch.timeline[0].runId}
           batch={batch}
           label={batches.length > 1 ? `批次 ${i + 1}` : null}
           execution={execution}
@@ -63,11 +72,7 @@ function BatchTrack({
 }) {
   // The axis spans the segment's wall time; fall back to the latest finish so a bar never
   // overflows if wallMs is rounded short, and guard the divisor against a zero-length run.
-  const span = Math.max(
-    batch.wallMs,
-    ...batch.timeline.map((n) => n.endMs),
-    1,
-  );
+  const span = Math.max(batch.wallMs, ...batch.timeline.map((n) => n.endMs), 1);
   const rows = [...batch.timeline].sort((a, b) => a.startMs - b.startMs);
 
   return (
@@ -79,7 +84,10 @@ function BatchTrack({
         <span className="text-xs text-muted-foreground">
           并发峰值 {batch.peakRunning} · 总时长 {fmtMs(batch.wallMs)}
           {batch.slotStarved > 0 && (
-            <span className="text-foreground"> · 上限 {batch.width} 串行化</span>
+            <span className="text-foreground">
+              {" "}
+              · 上限 {batch.width} 串行化
+            </span>
           )}
         </span>
       </div>
@@ -121,7 +129,10 @@ function TimelineRow({
   task: string | null;
 }) {
   const leftPct = (node.startMs / span) * 100;
-  const widthPct = Math.max(((node.endMs - node.startMs) / span) * 100, MIN_BAR_PCT);
+  const widthPct = Math.max(
+    ((node.endMs - node.startMs) / span) * 100,
+    MIN_BAR_PCT,
+  );
   const failed = node.outcome === "failed";
   const color = agentColorVar(role);
   const dur = fmtMs(node.endMs - node.startMs);

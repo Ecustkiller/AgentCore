@@ -1,6 +1,7 @@
 import { SectionLabel, SurfaceNavLink } from "@/components/ui";
 import { useAuthStore } from "@/stores/auth";
 import {
+  Brain,
   Gauge,
   Info,
   KeyRound,
@@ -32,6 +33,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "模型",
     items: [{ icon: KeyRound, label: "模型配置", path: "/more/model" }],
+  },
+  {
+    label: "AI",
+    items: [{ icon: Brain, label: "AI 记忆", path: "/more/memory" }],
   },
   {
     label: "账户",

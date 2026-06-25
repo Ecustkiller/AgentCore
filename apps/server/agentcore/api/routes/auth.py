@@ -284,8 +284,16 @@ async def token_revoke(
 @router.get("/me", response_model=UserResponse)
 async def me(
     user: AuthUser,
+    response: Response,
     creds_repo: CredentialsRepository = Depends(get_credentials_repo),
 ):
+    # Re-establish the CSRF token for a session resumed via the access cookie: app
+    # cold-start calls /me (not login/refresh), so without this the client holds a
+    # valid session but no CSRF token and its first mutating request 403s. The token
+    # is stateless (security.sign_csrf_token) — cheap to re-mint, and any valid
+    # signature for this user verifies, so minting one here is safe and idempotent.
+    if settings.csrf_enabled:
+        issue_csrf_token(response, user.user_id)
     return await _user_response_for(user, creds_repo)
 
 

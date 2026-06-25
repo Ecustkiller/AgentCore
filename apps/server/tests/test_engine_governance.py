@@ -21,7 +21,7 @@ from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.config import ModelProfile
 from agentcore.llm.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
 from agentcore.runtime.engine import react_loop, resolve_tool_timeout
-from agentcore.runtime.events import EventSink, FinishReason
+from agentcore.runtime.events import EventSink, EventType, FinishReason, SSEEvent
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -616,6 +616,149 @@ async def test_empty_response_degrades_without_fallback_model():
 
     assert provider.models == ["primary", "primary"]  # no escalation
     assert finish_override == [FinishReason.DEGRADED]
+
+
+# --- Phase 2: engine-level fallback ladder on a hard LLM failure ---------------
+
+
+class _RecordingSink(EventSink):
+    """EventSink that also keeps every emitted event, so a test can assert whether
+    the engine surfaced an SSE ``error`` (it must NOT when a fallback retry recovers)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.emitted: list[SSEEvent] = []
+
+    def emit(self, event: SSEEvent) -> None:
+        self.emitted.append(event)
+        super().emit(event)
+
+
+class _FailingProvider:
+    """Records each request's model and raises on the rounds in ``fail_on`` (simulating
+    an LLM call whose provider-level retries are already exhausted); otherwise streams
+    the scripted chunks for that round."""
+
+    def __init__(self, rounds: list[list[LLMChunk]], *, fail_on: set[int]) -> None:
+        self._rounds = rounds
+        self._fail_on = fail_on
+        self.calls = 0
+        self.models: list[str] = []
+
+    async def stream(self, request):  # noqa: ANN001 - duck-typed for the loop
+        idx = self.calls
+        self.models.append(request.model)
+        self.calls += 1
+        if idx in self._fail_on:
+            raise RuntimeError("provider boom")
+        chunks = self._rounds[idx] if idx < len(self._rounds) else []
+        for chunk in chunks:
+            yield chunk
+
+
+def _errors(sink: _RecordingSink) -> list[SSEEvent]:
+    return [e for e in sink.emitted if e.type == EventType.ERROR]
+
+
+async def _run_with_sink(provider, profile, sink):  # noqa: ANN001
+    finish_override: list[FinishReason] = []
+    content, _r, _u, rounds = await react_loop(
+        messages=[LLMMessage(role="user", content="go")],
+        llm=provider,
+        tools=_registry(_StubTool()),
+        sink=sink,
+        tool_context=_context(),
+        profile=profile,
+        finish_override_sink=finish_override,
+    )
+    return content, rounds, finish_override
+
+
+async def test_llm_failure_falls_back_to_model_and_recovers():
+    # Round 0's LLM call hard-fails → the engine escalates to the fallback model and
+    # round 1 answers. The turn finishes clean: no error is shown (the failure was
+    # absorbed by the retry) and no degraded/error finish is stamped.
+    provider = _FailingProvider([[], [_content_chunk("recovered")]], fail_on={0})
+    profile = ModelProfile(
+        model="primary",
+        fallback_model="fallback-pro",
+        thinking=False,
+        reasoning_effort=None,
+        max_rounds=20,
+    )
+    sink = _RecordingSink()
+    content, _rounds, finish_override = await _run_with_sink(provider, profile, sink)
+
+    assert content == "recovered"
+    assert provider.models == ["primary", "fallback-pro"]  # escalated on the failure
+    assert finish_override == []  # recovered → clean finish
+    assert _errors(sink) == []  # the absorbed failure was never surfaced
+
+
+async def test_llm_failure_after_fallback_finishes_error():
+    # Round 0 fails on the primary → fallback; round 1 fails on the fallback too → the
+    # ladder is exhausted with no content → ERROR (surfaced now, stamped on the turn).
+    provider = _FailingProvider([], fail_on={0, 1})
+    profile = ModelProfile(
+        model="primary",
+        fallback_model="fallback-pro",
+        thinking=False,
+        reasoning_effort=None,
+        max_rounds=20,
+    )
+    sink = _RecordingSink()
+    content, rounds, finish_override = await _run_with_sink(provider, profile, sink)
+
+    assert content == ""
+    assert rounds == 2
+    assert provider.models == ["primary", "fallback-pro"]
+    assert finish_override == [FinishReason.ERROR]
+    assert len(_errors(sink)) == 1  # surfaced exactly once, at the end of the ladder
+
+
+async def test_llm_failure_with_partial_content_degrades():
+    # Round 0 streams partial content + a tool call (loop continues); round 1 hard-fails
+    # with no fallback configured → the turn keeps the partial answer and finishes
+    # DEGRADED (don't discard a partial answer as a blank error).
+    provider = _FailingProvider(
+        [[_content_chunk("partial"), _tool_chunk("search", "{}")], []],
+        fail_on={1},
+    )
+    profile = ModelProfile(
+        model="primary",
+        fallback_model=None,
+        thinking=False,
+        reasoning_effort=None,
+        max_rounds=20,
+    )
+    sink = _RecordingSink()
+    content, rounds, finish_override = await _run_with_sink(provider, profile, sink)
+
+    assert content == "partial"
+    assert rounds == 2
+    assert finish_override == [FinishReason.DEGRADED]
+    assert len(_errors(sink)) == 1
+
+
+async def test_llm_failure_without_fallback_errors_immediately():
+    # No fallback model: a first-round hard failure has nowhere to escalate, so it ends
+    # the turn on ERROR after a single attempt (no spurious model switch).
+    provider = _FailingProvider([], fail_on={0})
+    profile = ModelProfile(
+        model="primary",
+        fallback_model=None,
+        thinking=False,
+        reasoning_effort=None,
+        max_rounds=20,
+    )
+    sink = _RecordingSink()
+    content, rounds, finish_override = await _run_with_sink(provider, profile, sink)
+
+    assert content == ""
+    assert rounds == 1
+    assert provider.models == ["primary"]  # no escalation attempted
+    assert finish_override == [FinishReason.ERROR]
+    assert len(_errors(sink)) == 1
 
 
 # --- B2: tool failure circuit breaker + no-output early stop --------------------

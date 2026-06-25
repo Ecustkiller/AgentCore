@@ -133,11 +133,13 @@ def test_directory_empty_when_nothing_available():
 # --- consult_skill tool ------------------------------------------------------
 
 
-def test_consult_skill_schema_is_ceo_only_skill_category():
+def test_consult_skill_schema_is_ceo_orchestration_primitive():
+    # consult_skill is a CEO orchestration primitive (not a「技能」-category tool):
+    # 技能 are Prompt injection shown in the「AI 提示词」catalog, never a tool group.
     tool = ConsultSkillTool(registry=build_system_skill_registry())
     schema = tool.schema
     assert schema.name == "consult_skill"
-    assert schema.category is ToolCategory.SKILL
+    assert schema.category is ToolCategory.ORCHESTRATION
 
 
 async def test_consult_skill_returns_body_on_hit():

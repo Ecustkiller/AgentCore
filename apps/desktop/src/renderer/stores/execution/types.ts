@@ -1,4 +1,5 @@
 import type {
+  AskQuestion,
   CheckpointDecision,
   ContextBlockWire,
   CostBreakdown,
@@ -201,6 +202,35 @@ export interface RunEscalation {
   blocking: boolean;
   status: "raised" | "pending" | "resolved" | "timeout";
   answer: string | null;
+  /** 结构化升级: the worker's optional structured forks (同 ask_user 的 questions) the
+   * `EscalationCard` renders as choice/text so the user one-taps a decision. Folded from a
+   * BLOCKING `escalation_required`; `[]` for a free-text ask or a non-blocking `raised` banner.
+   * Desktop-local — like {@link RunEscalation.id} it is NOT in the conformance ProjectedTurn
+   * (conformanceFold maps only the 5 golden fields), so it never widens the cross-end contract. */
+  questions: AskQuestion[];
+}
+
+/** 交互式逐轮辩论决策卡 (opt-in, 辩论编排设计.md §逐轮交互): one round boundary the user is (was)
+ * asked to steer — 继续辩 / 加角度 / 够了出结论 — instead of the judge auto-converging. Folded
+ * desktop-live-only from `debate_round_decision_required` (→ `pending`) + its `debate_round_decision_
+ * resolved` (→ `continued`/`concluded`/`timeout`), keyed by `id` (the decision_id the card POSTs to,
+ * `POST …/interactions/{id}` kind=`debate_round`). `focus`/`summary` are this round's context;
+ * `converged`/`rationale` are the judge's read (the card highlights it as the default); `decisionFocus`
+ * is the 加角度 the user injected for the next round (`continued` only).
+ *
+ * Transport-only & ephemeral: STRIPPED from the conformance ProjectedTurn (like {@link
+ * RunEscalation.id}) — the events aren't journaled, so on reload this is `[]` and the concluded
+ * exchange lives in {@link Execution.debate}. Non-interactive debates carry none. */
+export interface DebateRoundDecision {
+  id: string;
+  moderatorRunId: string;
+  roundNo: number;
+  focus: string;
+  summary: string;
+  converged: boolean;
+  rationale: string;
+  status: "pending" | "continued" | "concluded" | "timeout";
+  decisionFocus: string;
 }
 
 export interface RunNode {
@@ -286,7 +316,7 @@ export interface NodeTiming {
  * ⇒ the `width` 并发上限 throttled ready nodes. The boundary tallies count 受监督波循环 yields
  * fired this segment (bind 晚绑定 / scope 漂移返工 / checkpoint 用户复核); the escalate tallies
  * are raw (`scopeEscalations ⊆ escalations`). `timeline` carries each dispatched node's occupancy
- * window (多任务并行图, §十一). A delegate turn accrues one per scheduler segment (a checkpoint /
+ * window (多任务并行图, §6.5). A delegate turn accrues one per scheduler segment (a checkpoint /
  * scope yield + resume appends another). The aggregates show only in 诊断模式 (run detail); the
  * `timeline` drives the all-users 并行时间线 (canvas 放大态). */
 export interface BatchMetricsSnapshot {
@@ -328,6 +358,10 @@ export interface Execution {
    * 出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。Transport-only 事件，重载
    * （journal 无逐轮事件）恒为 `[]`——届时全量叙事线已在 {@link debate}。非辩论恒 `[]`。 */
   debateRounds: DebateNarrativeRound[];
+  /** 交互式逐轮辩论决策卡（opt-in, §逐轮交互）：`debate_round_decision_*` 折叠累积。Desktop-
+   * local & transport-only —— STRIPPED from the conformance ProjectedTurn、重载恒 `[]`（事件不进
+   * journal）。仅 `debate(interactive=true)` 且有活跃用户的辩论非空；其余恒 `[]`。 */
+  debateDecisions: DebateRoundDecision[];
 }
 
 /**

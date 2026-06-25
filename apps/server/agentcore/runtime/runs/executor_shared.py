@@ -5,14 +5,14 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from agentcore.llm.config import ModelProfile
-from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import (
     EventSink,
     run_output_delta,
+    run_output_reset,
     run_reasoning_delta,
     run_tool_progress,
 )
@@ -76,7 +76,7 @@ def _is_hard_failure(content: str, contract: RunContract | None) -> bool:
 async def _react_and_capture(
     messages: list[LLMMessage],
     *,
-    llm: DeepSeekProvider,
+    llm: LLMProvider,
     tools: ToolRegistry,
     sink: EventSink,
     tool_ctx: ToolContext,
@@ -119,6 +119,7 @@ async def _react_and_capture(
         on_tool_progress=lambda tool, chars: sink.emit(
             run_tool_progress(run_id, agent_id, tool, chars)
         ),
+        on_reset=lambda: sink.emit(run_output_reset(run_id, agent_id)),
         raise_on_error=True,
         citation_sink=citation_sink,
         annotate_citations=False,

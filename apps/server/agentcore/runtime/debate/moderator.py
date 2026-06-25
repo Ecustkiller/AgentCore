@@ -28,12 +28,15 @@ from agentcore.runtime.debate.types import (
     STOP_CONVERGED,
     STOP_MAX_ROUNDS,
     STOP_REASONS,
+    STOP_USER_CONCLUDED,
     DebateBrief,
     DebateClash,
     DebateConfig,
     DebateForm,
     DebateResult,
     JudgeVerdict,
+    RoundBoundary,
+    RoundDecision,
     RoundResult,
     RoundRunner,
     SideTurn,
@@ -51,6 +54,11 @@ RoundHook = Callable[[RoundResult], Awaitable[None]]
 # 本轮焦点既定、辩手发言【前】的回调（DebateTool 据此 emit debate_round_started，让焦点先于
 # 发言亮出）；入参 (round_no, focus)。测试可省。
 RoundStartHook = Callable[[int, str], Awaitable[None]]
+# 交互式逐轮边界回调（opt-in，辩论编排设计.md §逐轮交互）：每轮判完 + 小结后，把「继续辩 / 加角
+# 度 / 够了出结论」的决定权交给用户。入参 (round_no, result, converged, max_rounds)；返回
+# :class:`RoundBoundary` 驱动循环，或 ``None`` 表示「交回裁判自动收敛」（DebateTool 在超时 / 无活
+# 跃用户时返 None）。未接此钩子（默认 / 测试 / 非交互辩论）时循环逐字按裁判自判收敛，行为不变。
+RoundBoundaryHook = Callable[..., Awaitable["RoundBoundary | None"]]
 
 
 def _clip(text: str, limit: int = _TURN_CLIP) -> str:
@@ -122,6 +130,48 @@ def _form_guidance(form: DebateForm) -> str:
     )
 
 
+def _frame_form_hint(form: DebateForm) -> str:
+    """各形态「该把本轮焦点定成什么」的差异指引（喂给 :meth:`Moderator._frame`）。
+
+    与 :func:`_form_guidance`（裁判向：判收敛）正交——这条是议题向：定一个贴合形态、能逼出
+    好交锋的焦点。圆桌尤其受益（要的是铺光谱的维度轴，而非二元对立）。"""
+    if form is DebateForm.RED_TEAM:
+        return (
+            "形态=红队挑刺：把焦点对准【被审方案的一个具体风险面】（某失败场景 / 边界条件 / "
+            "隐含假设的漏洞），让红队能集中火力施压、方案方能正面回应修补。"
+        )
+    if form is DebateForm.ROUNDTABLE:
+        return (
+            "形态=多方圆桌：把焦点定成一个能【摊开观点光谱】的维度轴——各方在此维度上自然分化、"
+            "各有独特定位，而非逼出二元对立。好的圆桌焦点让每个视角都有独到的话可说。"
+        )
+    return (
+        "形态=正反辩论：把焦点落在【真正分胜负的 crux】上——双方最根本的那个分歧点，"
+        "而非双方其实都同意的外围枝节。"
+    )
+
+
+def _brief_form_hint(form: DebateForm) -> str:
+    """各形态「简报该产出什么」的差异指引（喂给 :meth:`Moderator._brief`）。
+
+    呼应 :attr:`DebateResult.narrative_first`：决策类（正反/红队）简报先行、为决策负责；
+    探讨类（圆桌）过程先行、简报是观点地图小结。"""
+    if form is DebateForm.RED_TEAM:
+        return (
+            "这是【红队挑刺】：简报应是【风险清单 + 加固建议】——把挖出的风险按严重度梳理、"
+            "标明哪些方案方已修补、哪些仍是 open 风险需用户决断。"
+        )
+    if form is DebateForm.ROUNDTABLE:
+        return (
+            "这是【多方圆桌】：简报应是【观点地图小结】——铺出观点光谱全貌、各视角的独特定位与"
+            "其成立前提，而非强行裁谁对谁错；末尾点出值得用户进一步思考的开放问题。"
+        )
+    return (
+        "这是【正反辩论】：简报要为用户的【决策】负责到底——给出带置信度与反转条件的倾向判断 + "
+        "具体建议，而非把正反并排甩给用户让他自己选。"
+    )
+
+
 def _sides_block(config: DebateConfig) -> str:
     lines = []
     for s in config.sides:
@@ -176,18 +226,29 @@ class Moderator:
         run_round: RoundRunner,
         on_round_start: RoundStartHook | None = None,
         on_round: RoundHook | None = None,
+        on_round_boundary: RoundBoundaryHook | None = None,
     ) -> DebateResult:
         """驱动整场辩论到收敛 / 上限，返回双产物（决策简报 + 交锋叙事线）。
 
-        收敛【完全由裁判逐轮自判】（``verdict.converged`` 即收场）——无最小轮门槛强制多轮。
+        收敛【默认完全由裁判逐轮自判】（``verdict.converged`` 即收场）——无最小轮门槛强制多轮。
         「别过早收敛」的智慧在裁判标准里（:meth:`_judge`：第 1 轮开场默认继续、除非命题空泛），
         不再靠外部计数。``policy.max_rounds`` 是纯安全上限（裁判持续不收敛时的断路器兜底）。每轮
         成功产出后触发 ``on_round``（emit 事件 / 老板检查点）。
+
+        交互式逐轮（opt-in，辩论编排设计.md §逐轮交互）：当注入 ``on_round_boundary`` 时，每轮
+        判完 + 小结后把决定权交给用户而非直接采信裁判——``CONTINUE`` 再辩一轮（可带「加角度」焦点
+        覆写）、``CONCLUDE`` 立即出结论（即便裁判判收敛也以用户为准；反之用户也可在裁判判收敛时续
+        辩）。钩子返回 ``None``（超时 / 无活跃用户）则回退到裁判自动收敛。未接钩子时循环逐字不变
+        （与 ``checkpoint`` marker 无 hook 即惰性同辙），故非交互辩论零行为变化。``max_rounds`` 始
+        终是硬上限：用户连续 ``CONTINUE`` 也不会越过它。
         """
         rounds: list[RoundResult] = []
         stop_reason = STOP_MAX_ROUNDS  # 循环跑满未 break ⇒ 触上限兜底
+        # 交互式「加角度」：用户在上一轮边界给的下一轮焦点覆写（空=主持人自动定焦点）。
+        focus_override = ""
         for round_no in range(1, config.policy.max_rounds + 1):
-            focus = await self._frame(config, rounds)
+            focus = focus_override or await self._frame(config, rounds)
+            focus_override = ""
             # 焦点既定、发言之前先报本轮开场（前端据此亮出焦点头，再流式各方发言）。
             if on_round_start is not None:
                 await on_round_start(round_no, focus)
@@ -217,11 +278,29 @@ class Moderator:
                 break
 
             verdict = await self._judge(config, focus, turns, rounds)
-            summary = await self._summarize(config, focus, turns, verdict)
+            # rounds 此刻是【已完成的历史轮】（本轮 rr 尚未 append）——喂给 _summarize 作上一轮锚点。
+            summary = await self._summarize(config, focus, turns, verdict, rounds)
             rr = RoundResult(round_no, focus, turns, verdict, summary)
             rounds.append(rr)
             if on_round is not None:
                 await on_round(rr)
+
+            # 交互式逐轮边界（opt-in）：把「继续辩 / 加角度 / 够了出结论」交给用户；钩子返回 None
+            # （超时 / 无活跃用户）则回退裁判自动收敛。用户选择凌驾裁判——CONCLUDE 即便裁判未收敛
+            # 也收场，CONTINUE 即便裁判已收敛也续辩（focus 非空则覆写下一轮议题=「加角度」）。
+            if on_round_boundary is not None:
+                boundary = await on_round_boundary(
+                    round_no=round_no,
+                    result=rr,
+                    converged=verdict.converged,
+                    max_rounds=config.policy.max_rounds,
+                )
+                if boundary is not None:
+                    if boundary.decision is RoundDecision.CONCLUDE:
+                        stop_reason = STOP_USER_CONCLUDED
+                        break
+                    focus_override = boundary.focus  # CONTINUE：续辩（可带「加角度」焦点）
+                    continue
 
             if verdict.converged:
                 stop_reason = (
@@ -237,8 +316,9 @@ class Moderator:
         if not history:
             user = (
                 f"辩论命题：{config.motion}\n\n参与方：\n{_sides_block(config)}\n\n"
-                f"{_form_guidance(config.form)}\n\n"
-                "请把命题拆成【第一轮】各方应集中交锋的一个最核心争议焦点。"
+                f"{_frame_form_hint(config.form)}\n\n"
+                "请把命题拆成【第一轮】各方应集中交锋的一个最核心争议焦点——挑命题里【最承重】的"
+                "那个争议点开场（分量最大、最能带出后续交锋的），别开在边角枝节上。"
                 "焦点必须是【一句短语、不超过 30 字】、像一个小标题，聚焦【单一】具体可辩的争议点——"
                 '不要复述命题、不要泛泛、不要用分号堆叠多个点。只输出 JSON：{"focus": "..."}'
             )
@@ -252,6 +332,7 @@ class Moderator:
                 f"上一轮小结：{_clip(last.summary, _SUMMARY_CLIP)}\n"
                 f"裁判判定：真交锋={last.verdict.real_clash}、新论点={last.verdict.new_arguments}、"
                 f"建议焦点={last.verdict.next_focus}\n\n"
+                f"{_frame_form_hint(config.form)}\n"
                 "请据上轮【仍未决的分歧】设【本轮】应聚焦的争议点：必须【正交于上方已覆盖焦点】——"
                 "换一个尚未谈透的维度或更深一层，而非换个说法重谈同一点。"
                 "焦点必须是【一句短语、不超过 30 字】、像一个小标题，聚焦单一争议点。"
@@ -276,6 +357,9 @@ class Moderator:
     ) -> JudgeVerdict:
         round_no = len(history) + 1
         max_rounds = config.policy.max_rounds
+        # clash 上限随参与方数放宽：2 方正反 4 条够，3+ 方圆桌要容得下跨对的交锋边（A驳B、C驳A），
+        # 否则多方场景的交锋图被腰斩。仍设硬顶（_as_clashes 去重 + 截断），保叙事线轻量。
+        clash_limit = max(4, len(config.sides) + 2)
         # 「别过早收敛」从机械楼层搬进裁判标准：第 1 轮开场各方往往尚未接火（real_clash=false
         # 是常态），默认继续以逼出下一轮交锋，仅当命题空泛到开场即无新论点才收；快速单轮模式
         # （max=1）本就一次对碰即收；多轮模式按 thorough 调收敛松紧。
@@ -298,15 +382,19 @@ class Moderator:
             "请做【辩论领域内】的交锋质量与收敛判定（不是判谁写得好），只输出 JSON：\n"
             '{"real_clash": true/false, "new_arguments": true/false, "converged": true/false, '
             '"stop_reason": "converged|focus_clarified|red_team_exhausted", '
-            '"next_focus": "若未收敛，下一轮应聚焦的点", "rationale": "一句话理由", '
+            '"next_focus": "若未收敛，下一轮应聚焦的点", '
+            '"rationale": "一句话点出本轮的实质推进：谁让步 / 谁补强 / 谁被驳倒", '
             '"clashes": [{"from": "<side_key>", "to": "<被反驳方 side_key>", '
-            '"point": "这条反驳的要点（一句话）"}]}\n'
+            '"point": "这条反驳的命门（一句话、锋利具体、抓住要害）"}]}\n'
             "- real_clash：各方是否真针锋相对回应了彼此（而非各说各话）。\n"
             "- new_arguments：本轮是否还在产生【新】论点（开始重复=false）。\n"
             "- converged：是否可以收场（无新论点 / 焦点已澄清为价值之争 / 红队风险已挖尽）。\n"
-            "- clashes：本轮谁【针对性反驳】了谁、驳的要点（只列真正针锋相对的边，"
-            "各说各话别列）。最多 4 条；from/to 用发言标题里的 [side_key]，from≠to；"
-            "本轮无真交锋则给 []。"
+            "- rationale：别写空话套话，点出本轮交锋的【实质推进】（哪一方在哪个点上让步 / 补强 / "
+            "被驳倒），让人一句话读懂本轮的胜负手。\n"
+            f"- clashes：本轮谁【针对性反驳】了谁、驳的命门（只列真正针锋相对的边，各说各话别列；"
+            f"要点一句话抓住要害、别复述原话）。**覆盖本轮主要交锋别遗漏**；多方时鼓励列出跨对的"
+            f"边（如 A 驳 B、C 驳 A）。最多 {clash_limit} 条；from/to 用发言标题里的 [side_key]，"
+            f"from≠to；本轮无真交锋则给 []。"
         )
         data = await self._complete_json(_JUDGE_SYSTEM, user, "judge")
         if not data:
@@ -325,7 +413,9 @@ class Moderator:
             stop_reason=_as_str(data.get("stop_reason")),
             next_focus=_as_str(data.get("next_focus")),
             rationale=_as_str(data.get("rationale")),
-            clashes=_as_clashes(data.get("clashes"), {s.key for s in config.sides}),
+            clashes=_as_clashes(
+                data.get("clashes"), {s.key for s in config.sides}, limit=clash_limit
+            ),
         )
 
     # ── 第4步：写本轮小结 ────────────────────────────────────────────────
@@ -335,11 +425,22 @@ class Moderator:
         focus: str,
         turns: Sequence[SideTurn],
         verdict: JudgeVerdict,
+        history: list[RoundResult],
     ) -> str:
+        # 喂上一轮小结 → 本轮小结写成连贯的【认知推进线】（带 delta），而非孤立摘要。
+        prev = _clip(history[-1].summary, _SUMMARY_CLIP) if history else ""
+        prev_block = f"上一轮小结：{prev}\n\n" if prev else ""
+        form_touch = (
+            "（多方圆桌：侧重点出本轮【新增 / 凸显了哪个视角】、观点光谱往哪铺。）"
+            if config.form is DebateForm.ROUNDTABLE
+            else "（点出相比上一轮，本轮交锋【推进 / 澄清了什么】，与上轮串成一条推进线。）"
+        )
         user = (
-            f"辩论命题：{config.motion}\n本轮焦点：{focus}\n\n本轮各方发言：\n{_turns_block(turns)}\n\n"
+            f"辩论命题：{config.motion}\n本轮焦点：{focus}\n\n{prev_block}"
+            f"本轮各方发言：\n{_turns_block(turns)}\n\n"
             "请写一句【本轮小结】（≤80 字）：本轮交锋推进了什么、达成了什么共识、仍存什么分歧。"
-            '面向速读者，串起认知推进线。只输出 JSON：{"summary": "..."}'
+            f"{form_touch}面向速读者、串起认知推进线。"
+            '只输出 JSON：{"summary": "..."}'
         )
         data = await self._complete_json(_SUMMARY_SYSTEM, user, "summary")
         summary = _as_str(data.get("summary"))
@@ -357,13 +458,31 @@ class Moderator:
         )
         last_turns = _turns_block(rounds[-1].ok_turns, clip=_TURN_CLIP)
         sides_keys = ", ".join(s.key for s in config.sides)
+        is_red_team = config.form is DebateForm.RED_TEAM
+        # 红队专用：让简报给每条风险（红队成员，不含被审方案方）评严重度，驱动前端「风险看板」
+        # 分级 + 总览计数。其余形态不要这个字段（风险严重度对正反/圆桌无意义）。
+        severity_field = (
+            f'  "risk_severities": {{"<红队成员 side_key∈[{sides_keys}]>": "high|medium|low"}},\n'
+            if is_red_team
+            else ""
+        )
+        severity_note = (
+            "（红队：在 risk_severities 里给每个红队成员的风险按【影响后果 × 发生可能性】评"
+            "high/medium/low，让用户先看高危；被审方案方不评级。）"
+            if is_red_team
+            else ""
+        )
         user = (
             f"辩论命题：{config.motion}\n参与方：\n{_sides_block(config)}\n\n"
             f"各轮推进：\n{timeline}\n\n最后一轮各方发言：\n{last_turns}\n\n"
-            "请产出【决策简报】，为用户的决策负责到底（不要只把正反并排甩给他）。只输出 JSON：\n"
+            f"{_brief_form_hint(config.form)}\n"
+            "请据此产出简报，为用户负责到底（不要只把各方观点并排甩给他）：各方最强论点要"
+            "【去水压成单句、只留命门】、leaning / confidence 要写清【反转条件】（在什么前提下"
+            f"倾向会翻）。{severity_note}只输出 JSON：\n"
             "{\n"
             '  "crux": "双方真正的争议焦点在哪",\n'
             f'  "strongest_points": {{"<side_key∈[{sides_keys}]>": "该方去水后的最强论点"}},\n'
+            f"{severity_field}"
             '  "factual_disputes": ["关键【事实】分歧（可据证据帮判的）"],\n'
             '  "value_disputes": ["【价值/偏好】分歧（AI 判不了、必须交用户定的）"],\n'
             '  "leaning": "你的倾向性判断（基于事实哪方更站得住）",\n'
@@ -383,6 +502,10 @@ class Moderator:
         return DebateBrief(
             crux=_as_str(data.get("crux")) or config.motion,
             strongest_points=_as_str_dict(data.get("strongest_points")),
+            # 严重度仅红队形态有意义：非红队即便 LLM 误填也丢弃，保证载荷干净。
+            risk_severities=(
+                _as_severity_dict(data.get("risk_severities")) if is_red_team else {}
+            ),
             factual_disputes=_as_str_list(data.get("factual_disputes")),
             value_disputes=_as_str_list(data.get("value_disputes")),
             leaning=_as_str(data.get("leaning")),
@@ -449,6 +572,45 @@ def _as_str_dict(value: Any) -> dict[str, str]:
                 if key and point:
                     out[key] = point
         return out
+    return {}
+
+
+_SEVERITY_VALUES = {"high", "medium", "low"}
+_SEVERITY_ALIASES = {
+    "高": "high",
+    "中": "medium",
+    "低": "low",
+    "critical": "high",
+    "severe": "high",
+    "major": "high",
+    "moderate": "medium",
+    "minor": "low",
+}
+
+
+def _as_severity_dict(value: Any) -> dict[str, str]:
+    """把 risk_severities 规整为 {side_key: high|medium|low}（容忍中文/同义词/list 变体）。
+
+    只收 high/medium/low 三档，非法档位丢弃——前端风险看板只认这三档分级。
+    """
+
+    def _norm(raw: Any) -> str:
+        token = _as_str(raw).strip().lower()
+        token = _SEVERITY_ALIASES.get(token, token)
+        return token if token in _SEVERITY_VALUES else ""
+
+    if isinstance(value, dict):
+        out = {str(k): _norm(v) for k, v in value.items()}
+        return {k: v for k, v in out.items() if v}
+    if isinstance(value, list):
+        result: dict[str, str] = {}
+        for item in value:
+            if isinstance(item, dict):
+                key = _as_str(item.get("key") or item.get("side") or item.get("side_key"))
+                sev = _norm(item.get("severity") or item.get("level") or item.get("value"))
+                if key and sev:
+                    result[key] = sev
+        return result
     return {}
 
 

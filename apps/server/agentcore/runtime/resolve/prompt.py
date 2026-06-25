@@ -5,7 +5,9 @@ Full version will support skills, rules, workspace context, etc.
 """
 
 import time
+from collections.abc import Sequence
 
+from agentcore.memory.user_memory import strip_memory_chrome
 from agentcore.runtime.context import ContextAssembler, SectionOrder
 from agentcore.runtime.resolve.profile import (
     FRAGMENT_BASE,
@@ -211,10 +213,19 @@ _MEMORY_RULES_TEMPLATE = """
 
 
 def _format_memory_rules(memory_markdown: str | None) -> str | None:
-    """Wrap the user's memory markdown into a <rules> block, or None if empty."""
+    """Wrap the user's memory into a <rules> block, or None if empty.
+
+    Injects only the substantive body: the file's human chrome (the title + the
+    "可随时编辑/删除" note) is stripped (``strip_memory_chrome``) because the wrapper
+    below already frames what this is to the model, and the note is addressed to the
+    user — verbatim it's just mid-prompt noise.
+    """
     if not memory_markdown or not memory_markdown.strip():
         return None
-    return _MEMORY_RULES_TEMPLATE.format(memory=memory_markdown.strip())
+    body = strip_memory_chrome(memory_markdown)
+    if not body:
+        return None
+    return _MEMORY_RULES_TEMPLATE.format(memory=body)
 
 
 def assemble_system_prompt(
@@ -252,22 +263,49 @@ def assemble_system_prompt(
     )
 
 
+def render_memory_topic_directory(topic_names: Sequence[str]) -> str:
+    """Render the CEO-only ``<记忆主题目录>`` block listing the consultable topic notes.
+
+    The user's memory is a folder (记忆文件夹化 §六): a small always-injected CORE note
+    (画像) plus on-demand TOPIC notes (主题/<slug>.md). Only the topic NAMES ride the
+    prompt — enough for the model to decide WHEN to pull a note's full body via
+    ``consult_memory(name)`` — so deep, occasional knowledge stays out of the常驻 prefix.
+    Returns "" when the user has no topic notes so the caller appends nothing (and the
+    directory↔tool invariant: the caller renders this only when ``consult_memory`` is
+    wired this turn).
+    """
+    if not topic_names:
+        return ""
+    lines = [
+        "<记忆主题目录>",
+        "下列是该用户的「记忆主题笔记」，其全文未常驻；当某主题与当前任务相关时，"
+        "先用 `consult_memory(name)` 把该主题全文拉回来再据此执行（用户画像等核心记忆已常驻、"
+        "无需查阅）：",
+    ]
+    lines.extend(f"- {name}" for name in topic_names)
+    lines.append("</记忆主题目录>")
+    return "\n".join(lines)
+
+
 def compose_ceo_chat_prompt(
     base_prompt: str,
     *,
     skill_registry: SkillRegistry,
     ceo_tool_names: set[str],
+    memory_topics: Sequence[str] = (),
 ) -> str:
     """Compose the CEO chat agent's system prompt from the clean base.
 
     Layers the entry coordinator's hint stack onto the shared base: the SLIM CEO core
     routing hint + the always-on 能力目录 (only the skills whose required tools are in
     ``ceo_tool_names`` — the same live-tool gate the runtime applies, e.g. the
-    ``ask_user_*`` skills show only when ``ask_user`` is wired) + inline citation
-    guidance + the CEO-only ``<visualization>`` block (按角色 right-size: the detailed
-    charting HOW rides only the user-facing voice, not every worker — workers keep the
-    base's one-line affordance). The per-turn attachment block is appended by the caller
-    AFTER this so the stable hint stack stays prefix-cache friendly (缓存友好).
+    ``ask_user_*`` skills show only when ``ask_user`` is wired) + the CEO-only 记忆主题目录
+    (``memory_topics``, listing the user's on-demand TOPIC notes — rendered only when
+    ``consult_memory`` is wired this turn, the same live-tool gate as the skill directory)
+    + inline citation guidance + the CEO-only ``<visualization>`` block (按角色 right-size:
+    the detailed charting HOW rides only the user-facing voice, not every worker — workers
+    keep the base's one-line affordance). The per-turn attachment block is appended by the
+    caller AFTER this so the stable hint stack stays prefix-cache friendly (缓存友好).
 
     Single source shared by the live turn (``runtime.pipeline``) and the static
     capability catalog (``api`` 能力图鉴), so what the user sees as「AI 工作准则」never
@@ -282,6 +320,17 @@ def compose_ceo_chat_prompt(
             "skill_directory",
             render_skill_directory(skill_registry, ceo_tool_names),
             SectionOrder.SKILL_DIRECTORY,
+        )
+        .add(
+            "memory_topics",
+            # Directory↔tool invariant: advertise the consultable topics only when the
+            # consult_memory tool is actually wired this turn (memory master switch on),
+            # mirroring the skill directory's live-tool gate. An empty block is dropped
+            # by ``add``.
+            render_memory_topic_directory(memory_topics)
+            if "consult_memory" in ceo_tool_names
+            else "",
+            SectionOrder.MEMORY_TOPICS,
         )
         .add("citation", resolve(FRAGMENT_CITATION, CHAT_CITATION_HINT), SectionOrder.CITATION)
         .add(

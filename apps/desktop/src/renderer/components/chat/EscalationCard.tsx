@@ -1,9 +1,5 @@
-import {
-  Button,
-  DecisionCard,
-  DecisionCardIcon,
-  Textarea,
-} from "@/components/ui";
+import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
+import { interactiveCheckpointTone } from "@/components/ui/tone-presets";
 import { notifyError } from "@/lib/toast";
 import {
   type EscalationUserDecision,
@@ -19,6 +15,12 @@ import {
   Megaphone,
 } from "lucide-react";
 import { useState } from "react";
+import {
+  AskNoteField,
+  AskQuestionFields,
+  type AskUserContent,
+  useAskAnswer,
+} from "./ask/AskUserFields";
 
 export function EscalationCard({
   escalation,
@@ -61,11 +63,27 @@ function PendingEscalation({
   role: string;
   conversationId: string | null;
 }) {
-  const [answer, setAnswer] = useState("");
+  // 结构化升级: reuse the ask_user 问答内核 (choice/text + 答复模型 α composition). A worker
+  // fork is always a 待你拍板 (no 起步计划 / 风格), so the content carries only the structured
+  // `questions`; the free note doubles as the answer box for a plain free-text escalate.
+  const content: AskUserContent = {
+    question: escalation.question,
+    context: "",
+    assumptions: [],
+    questions: escalation.questions,
+    styleOptions: [],
+  };
+  const ans = useAskAnswer(content);
+  const tone = interactiveCheckpointTone.warning;
   const [submitting, setSubmitting] = useState<
     EscalationUserDecision["kind"] | null
   >(null);
   const busy = submitting !== null;
+  const hasStructured = escalation.questions.length > 0;
+  // composeAnswer flattens picks + note into one readable string (a worker reads it like the
+  // CEO does); for a free-text escalate it is just the note. 提交 needs a non-empty answer.
+  const composed = ans.compose(false);
+  const canSubmit = composed.trim().length > 0;
 
   const send = (decision: EscalationUserDecision) => {
     if (busy || !conversationId || !escalation.id) return;
@@ -90,22 +108,34 @@ function PendingEscalation({
           <p className="mt-2 rounded-lg bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
             未答则按此继续：{escalation.assumption}
           </p>
-          <Textarea
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            disabled={busy}
-            rows={2}
-            placeholder="输入你的决定（留空则点「按假设继续」）"
-            className="mt-2 w-full border-border bg-card/70 focus:border-warning/60"
-          />
+          <div className="mt-2 space-y-3">
+            {hasStructured && (
+              <AskQuestionFields
+                content={content}
+                answer={ans}
+                tone={tone}
+                disabled={busy}
+              />
+            )}
+            <AskNoteField
+              answer={ans}
+              tone={tone}
+              disabled={busy}
+              placeholder={
+                hasStructured
+                  ? "可选 · 补充说明"
+                  : "输入你的决定（留空则点「按假设继续」）"
+              }
+            />
+          </div>
         </div>
       </div>
 
       <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-6">
         <Button
           variant="primary"
-          disabled={busy || !answer.trim()}
-          onClick={() => send({ kind: "answer", answer: answer.trim() })}
+          disabled={busy || !canSubmit}
+          onClick={() => send({ kind: "answer", answer: composed })}
           icon={
             submitting === "answer" ? (
               <Loader2 size={13} className="animate-spin" />

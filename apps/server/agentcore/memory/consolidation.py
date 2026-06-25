@@ -28,6 +28,7 @@ posture; multi-process scaling moves it behind the same seam.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
@@ -36,13 +37,14 @@ from agentcore.conversation.history import load_recent_history
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.errors import is_schema_error
-from agentcore.db.repositories import ConversationRepository, MessageRepository
+from agentcore.db.repositories import ConversationRepository, MessageRepository, UserRepository
 from agentcore.llm.byok import resolve_user_llm_credentials
 from agentcore.llm.factory import build_provider
 from agentcore.memory.locks import user_memory_lock
 from agentcore.memory.maintenance import maintain_user_memory
 from agentcore.memory.store import MemoryStore, default_memory_store
 from agentcore.memory.user_memory import LLMMemoryExtractor
+from agentcore.messaging.hub import default_chat_hub
 
 logger = get_logger(__name__)
 
@@ -68,9 +70,23 @@ async def consolidate_conversation(
                 conv = await ConversationRepository(session).get_by_id(conversation_id)
                 if conv is None or latest is None:
                     return False
+                # Master switch off (Agent记忆与知识系统 §一): don't grow memory. Advance
+                # the watermark past these messages so re-enabling later won't
+                # retroactively consolidate what was said while memory was off (privacy)
+                # and the sweeper stops re-checking this conversation.
+                user = await UserRepository(session).get_by_id(user_id)
+                if user is not None and not user.memory_enabled:
+                    await ConversationRepository(session).set_memory_synced_at(
+                        conversation_id, latest
+                    )
+                    return False
                 synced = conv.memory_synced_at
                 if synced is not None and latest <= synced:
                     return False  # nothing new since the last pass
+                # The conversation's project (folder_id) → memory scope: facts true only in
+                # this project route to its layer, not global (记忆作用域与画像分层 §三). Captured
+                # here while the row is loaded; None for a bare/global chat.
+                folder_id = conv.folder_id
                 window = await load_recent_history(
                     session,
                     conversation_id,
@@ -98,12 +114,22 @@ async def consolidate_conversation(
                         store=store,
                         today=datetime.now(UTC).date().isoformat(),
                         section_cap=settings.memory_section_bullet_cap,
+                        max_topic_files=settings.memory_max_topic_files,
+                        project_id=folder_id,
                     )
                 finally:
                     await provider.close()
 
             async with async_session_factory() as session:
                 await ConversationRepository(session).set_memory_synced_at(conversation_id, latest)
+            # Nudge any live client (the「AI 记忆」editor / a toast) that the file moved
+            # under it, so a viewer reloads instead of saving onto a stale baseline. The
+            # offline pass is off the request path, so this rides the per-user firehose
+            # (messaging hub) rather than the turn SSE. Best-effort — a hub hiccup must
+            # not flip the consolidation's result.
+            if changed:
+                with contextlib.suppress(Exception):
+                    await default_chat_hub().publish([user_id], {"type": "memory_updated"})
             logger.info(
                 "memory.consolidated",
                 conversation_id=conversation_id,

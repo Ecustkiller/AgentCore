@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from agentcore.tools.builtin import build_ceo_tool_registry, build_worker_registry
 from agentcore.tools.builtin.ask_user import AskUserTool
+from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
 from agentcore.tools.builtin.consult_skill import ConsultSkillTool
 from agentcore.tools.builtin.delegate import DelegateTool
 from agentcore.tools.builtin.replan import ReplanTool
@@ -45,14 +46,15 @@ class CatalogTool:
 # (verified across delegate / revise / consult_skill / ask_user) — so the catalog reads
 # it off an uninitialised instance (:func:`_static_schema`). This keeps the tool class
 # the single source of each schema WITHOUT fabricating a turn's worth of runtime objects
-# just to read metadata. Both ``consult_skill`` (always wired) and ``ask_user`` (wired
-# only on the live-user / checkpoint path) are advertised so the catalog shows the CEO's
-# full repertoire.
+# just to read metadata. ``consult_skill`` (always wired), ``consult_memory`` (wired only
+# when the memory master switch is on) and ``ask_user`` (wired only on the live-user /
+# checkpoint path) are all advertised so the catalog shows the CEO's full repertoire.
 _CEO_ORCHESTRATION_TOOLS: tuple[type, ...] = (
     DelegateTool,
     ReplanTool,
     ReviseTool,
     ConsultSkillTool,
+    ConsultMemoryTool,
     AskUserTool,
 )
 

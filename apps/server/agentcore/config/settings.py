@@ -7,6 +7,7 @@ from agentcore.config.auth import AuthSettings
 from agentcore.config.checkpoint import CheckpointSettings
 from agentcore.config.database import DatabaseSettings
 from agentcore.config.engine import EngineSettings
+from agentcore.config.features import FeatureSettings
 from agentcore.config.llm import LlmSettings
 from agentcore.config.paths import ENV_FILE
 from agentcore.config.persistence import PersistenceSettings
@@ -24,6 +25,7 @@ class Settings(
     ApprovalSettings,
     CheckpointSettings,
     EngineSettings,
+    FeatureSettings,
     PersistenceSettings,
     QuotaSettings,
     ServerSettings,

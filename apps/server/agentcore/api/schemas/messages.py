@@ -177,6 +177,24 @@ class ResolveEscalationInteraction(BaseModel):
     use_assumption: bool = False
 
 
+class ResolveDebateRoundInteraction(BaseModel):
+    """Settle an interactive debate round boundary (``debate_round`` interaction, 逐轮交互).
+
+    Raised when a ``debate(interactive=true)`` Moderator paused at a round boundary so the user
+    can steer depth instead of letting the judge auto-converge. ``decision`` is ``continue``
+    (debate another round — ``focus``, if given, overrides the next round's framing = 「加角度」,
+    steering the debate onto the dimension the user cares about) or ``conclude`` (stop now and
+    emit the brief, even if the judge had not converged). A late resolve (the round already
+    timed out → judge auto-convergence took over) falls through the route as 404, so the desktop
+    renders it as「已关闭」rather than an error. In-process only (not durably persisted): a
+    disconnect / restart drops the live debate, so there is no ``resume`` counterpart.
+    """
+
+    kind: Literal["debate_round"] = "debate_round"
+    decision: Literal["continue", "conclude"] = "continue"
+    focus: str = Field("", max_length=2000)
+
+
 # Discriminated union body for the unified resolve endpoint.
 ResolveInteractionRequest = (
     ResolveApprovalInteraction
@@ -184,6 +202,7 @@ ResolveInteractionRequest = (
     | ResolveClientToolInteraction
     | ResolvePlanReviewInteraction
     | ResolveEscalationInteraction
+    | ResolveDebateRoundInteraction
 )
 
 
@@ -222,6 +241,10 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
         # 阻塞式求决策: the escalate channel awaits {answer} | {use_assumption}; 按假设继续
         # is an early timeout (the worker falls back to its assumption).
         return {"answer": body.answer, "use_assumption": body.use_assumption}
+    if isinstance(body, ResolveDebateRoundInteraction):
+        # 逐轮交互: the Moderator's round-boundary hook awaits {decision, focus}; conclude stops
+        # now, continue (+ optional focus = 加角度) debates another round.
+        return {"decision": body.decision, "focus": body.focus}
     raise ValueError(f"unknown interaction kind: {getattr(body, 'kind', None)!r}")
 
 

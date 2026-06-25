@@ -12,7 +12,11 @@ from agentcore.core.types import new_id
 from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.protocol import TokenUsage
-from agentcore.memory import default_memory_store
+from agentcore.memory import (
+    default_memory_store,
+    load_injected_memory,
+    load_memory_topics,
+)
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.citations import merge_citations, out_of_range_markers
 from agentcore.runtime.context import (
@@ -79,8 +83,10 @@ async def run_chat_pipeline(
     sink: EventSink,
     user_id: str,
     backend: WorkspaceBackend,
+    folder_id: str | None = None,
     attachments: list[dict] | None = None,
     approvals_enabled: bool = True,
+    memory_enabled: bool = True,
     profile_set: ProfileSet | None = None,
     llm_credentials: LLMCredentials | None = None,
     session_saver: SessionSaver | None = None,
@@ -98,6 +104,13 @@ async def run_chat_pipeline(
     job (双模式工作区 P2e / e2): that run has no live client to answer prompts and
     operates on an isolated server sandbox, so — like cloud-mode workers — it needs
     no gate; leaving it on would deadlock every file/exec tool on a timeout-deny.
+
+    ``memory_enabled`` is the user's long-term-memory master switch (resolved by the
+    caller): False injects no memory <rules> this turn (Agent记忆与知识系统 §一).
+
+    ``folder_id`` is the conversation's project (None for a bare/global chat): it selects
+    the memory SCOPE so a project conversation also gets that project's memory layer
+    injected (global + project), and ``consult_memory`` searches both (记忆作用域与画像分层 §三).
 
     ``profile_set`` carries the turn's resolved 质量档 (经济/高质量/custom): which
     model each scenario (chat/agent.strong/...) runs this turn, resolved by the
@@ -132,7 +145,25 @@ async def run_chat_pipeline(
 
     try:
         # --- Phase 1: Prepare ---
-        memory_markdown = await default_memory_store().load(user_id)
+        # Long-term memory injection is gated by the user's master switch (Agent记忆
+        # 与知识系统 §一): when off we inject nothing (an empty body drops the <rules>
+        # memory section entirely), so a user who turned memory off sees zero influence
+        # from it this turn — the privacy off-ramp's inject half (the grow half is
+        # gated in memory/consolidation.py).
+        # 记忆作用域 (§5.2): the always-injected core spans global 偏好.md + 画像.md and — when
+        # the conversation is in a project — that project's 画像.md, concatenated global-first
+        # (stable prefix) into one <rules> body. Master switch off ⇒ "".
+        memory_store = default_memory_store()
+        memory_markdown = await load_injected_memory(
+            memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
+        )
+        # 记忆主题目录 (记忆文件夹化 §六 / 作用域 §5.2): the on-demand TOPIC notes (主题/<slug>.md)
+        # are never injected wholesale — only their NAMES (merged across global + project)
+        # ride the CEO prompt, and the CEO pulls a note's full body via consult_memory when
+        # relevant. Same master-switch gate: off ⇒ [] ⇒ no directory rendered, no tool wired.
+        memory_topics = await load_memory_topics(
+            memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
+        )
         # Clean, stable base (base + date + memory): NO attachments, NO CEO hints.
         # This is the cacheable prefix shared by the CEO and reused verbatim by
         # workers. The (per-turn, variable) attachment block is appended LAST below —
@@ -150,9 +181,14 @@ async def run_chat_pipeline(
         worker_tools = build_worker_registry(backend=backend)
         # System skills (提示词瘦身 P2): the advanced-mechanism guidance the CEO pulls
         # on demand via consult_skill. Built once per turn; backs the tool AND the
-        # always-on 能力目录 rendered into the CEO prompt below.
-        skill_registry = build_system_skill_registry()
-        llm = pipeline_pkg.build_provider(llm_credentials)
+        # always-on 能力目录 rendered into the CEO prompt below. Legal vertical v0 layers
+        # its domain skill in only when enabled (法律垂直「答辩状作战室」, off by default).
+        skill_registry = build_system_skill_registry(include_legal=settings.legal_vertical_enabled)
+        # 真·多模型辩手：回合 llm = DeepSeek 默认（``build_provider``，保留可测试打桩的 seam）
+        # 外包一层 ProviderRouter。无前缀模型（CEO / 委派 / 主持人）照走默认，仅辩论辩手 side
+        # 带 ``provider/model`` 前缀的调用路由到对应厂商。无厂商 key 时只是空包一层，零行为变化。
+        # 路由器接管默认 + 厂商 client 的生命周期，由下方 finally 的 ``await llm.close()`` 释放。
+        llm = pipeline_pkg.build_router_around(pipeline_pkg.build_provider(llm_credentials))
 
         # The workspace backend is resolved per conversation by the caller
         # (folder space vs. its own conversation space) and injected here. The
@@ -239,6 +275,8 @@ async def run_chat_pipeline(
             suspension_deleter=suspension_deleter,
             backend_location=backend.location,
             skill_registry=skill_registry,
+            memory_enabled=memory_enabled,
+            folder_id=folder_id,
         )
 
         # The entry chat agent gets the SLIM CEO core + the always-on 能力目录 (提示词
@@ -253,6 +291,7 @@ async def run_chat_pipeline(
             system_prompt,
             skill_registry=skill_registry,
             ceo_tool_names=ceo_tool_names,
+            memory_topics=memory_topics,
         )
         # Real-time workspace overview (工作区上下文): a compact, newest-first listing of
         # the files already on disk in this conversation's workspace, so the CEO can

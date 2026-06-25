@@ -1,6 +1,7 @@
 import type { DebateResultPayload, SSEEvent } from "@/types/events";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  type DebateRoundDecision,
   type ExecutionJournal,
   type ExecutionPlan,
   type RunFrame,
@@ -9,6 +10,7 @@ import {
   debateSides,
   elapsedMs,
   execRuntime,
+  foldDebateDecision,
   frameFromEvent,
   hasRevisions,
   isDebate,
@@ -457,6 +459,7 @@ describe("projectExecution (fold)", () => {
         blocking: true,
         status: "raised",
         answer: null,
+        questions: [],
       },
     ]);
     // A run that never escalated carries an empty list (drives "no badge").
@@ -515,6 +518,7 @@ describe("projectExecution (fold)", () => {
         blocking: true,
         status: "pending",
         answer: null,
+        questions: [],
       },
     ]);
     frames.push({
@@ -536,7 +540,48 @@ describe("projectExecution (fold)", () => {
       blocking: true,
       status: "resolved",
       answer: "用 Postgres。",
+      questions: [],
     });
+  });
+
+  // 结构化升级: a blocking escalate carrying structured `questions` (同 ask_user) folds them onto
+  // the run's escalation so the EscalationCard renders the choice/text UI (not just a free-text box).
+  it("folds a blocking escalate's structured questions onto the run", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "escalation_required",
+        escalationId: "esc-1",
+        runId: "run-1",
+        agentId: "agent-1",
+        question: "选型需要你拍板",
+        assumption: "暂用 Postgres",
+        questions: [
+          {
+            id: "q0",
+            prompt: "用哪个数据库？",
+            kind: "choice",
+            options: ["Postgres", "MySQL"],
+            multiple: false,
+            default: "Postgres",
+          },
+        ],
+      },
+    ];
+    const esc = projectExecution(plan, frames, "running").runs.find(
+      (s) => s.id === "run-1",
+    )?.escalations[0];
+    expect(esc?.questions).toEqual([
+      {
+        id: "q0",
+        prompt: "用哪个数据库？",
+        kind: "choice",
+        options: ["Postgres", "MySQL"],
+        multiple: false,
+        default: "Postgres",
+      },
+    ]);
   });
 
   it("folds a blocking escalate timeout: status timeout, answer stays null", () => {
@@ -643,6 +688,7 @@ describe("projectExecution (fold)", () => {
         blocking: true,
         status: "resolved",
         answer: "答1",
+        questions: [],
       },
       {
         id: "esc-2",
@@ -651,6 +697,7 @@ describe("projectExecution (fold)", () => {
         blocking: true,
         status: "timeout",
         answer: null,
+        questions: [],
       },
     ]);
   });
@@ -1622,5 +1669,138 @@ describe("定向唤回 版本链 (乙 热修 P4)", () => {
     // full stream → the revision is present.
     const after = projectExecution(plan, frames, "completed");
     expect(hasRevisions(after)).toBe(true);
+  });
+});
+
+// 交互式逐轮辩论决策 (opt-in, 辩论编排设计.md §逐轮交互): the Moderator suspends at a round
+// boundary; `debate_round_decision_required` appends a `pending` card and its `_resolved` twin
+// settles it. Desktop-live & transport-only (not journaled) — folded by foldDebateDecision, NOT
+// projected from frames, and STRIPPED from the conformance ProjectedTurn.
+describe("交互式逐轮辩论决策 (foldDebateDecision, §逐轮交互)", () => {
+  const required = (
+    id: string,
+    roundNo: number,
+    converged: boolean,
+  ): Parameters<typeof foldDebateDecision>[1] => ({
+    kind: "required",
+    id,
+    moderatorRunId: "mod-1",
+    roundNo,
+    focus: `第 ${roundNo} 轮焦点`,
+    summary: `第 ${roundNo} 轮小结`,
+    converged,
+    rationale: "裁判判读",
+  });
+
+  it("required appends a pending card carrying the judge's read (decisionFocus empty)", () => {
+    const out = foldDebateDecision([], required("d-1", 1, false));
+    expect(out).toEqual<DebateRoundDecision[]>([
+      {
+        id: "d-1",
+        moderatorRunId: "mod-1",
+        roundNo: 1,
+        focus: "第 1 轮焦点",
+        summary: "第 1 轮小结",
+        converged: false,
+        rationale: "裁判判读",
+        status: "pending",
+        decisionFocus: "",
+      },
+    ]);
+  });
+
+  it("resolved continue settles to continued and keeps 加角度 as decisionFocus", () => {
+    const pending = foldDebateDecision([], required("d-1", 1, false));
+    const out = foldDebateDecision(pending, {
+      kind: "resolved",
+      id: "d-1",
+      decision: "continue",
+      focus: "聚焦成本",
+    });
+    expect(out[0]).toMatchObject({
+      status: "continued",
+      decisionFocus: "聚焦成本",
+    });
+  });
+
+  it("resolved conclude settles to concluded with no decisionFocus", () => {
+    const pending = foldDebateDecision([], required("d-1", 1, true));
+    const out = foldDebateDecision(pending, {
+      kind: "resolved",
+      id: "d-1",
+      decision: "conclude",
+      focus: "",
+    });
+    expect(out[0]).toMatchObject({ status: "concluded", decisionFocus: "" });
+  });
+
+  it("resolved timeout settles to timeout (裁判自动收敛接管, decisionFocus dropped)", () => {
+    const pending = foldDebateDecision([], required("d-1", 1, true));
+    const out = foldDebateDecision(pending, {
+      kind: "resolved",
+      id: "d-1",
+      // A timeout never carries a user 加角度, even if the wire echoed one.
+      decision: "timeout",
+      focus: "ignored",
+    });
+    expect(out[0]).toMatchObject({ status: "timeout", decisionFocus: "" });
+  });
+
+  it("a resolve for an unknown id is a safe no-op (stale / already gone)", () => {
+    const pending = foldDebateDecision([], required("d-1", 1, false));
+    const out = foldDebateDecision(pending, {
+      kind: "resolved",
+      id: "ghost",
+      decision: "conclude",
+      focus: "",
+    });
+    expect(out).toBe(pending);
+  });
+
+  it("keeps multiple rounds' cards in fire order, settling each by id", () => {
+    let list = foldDebateDecision([], required("d-1", 1, false));
+    list = foldDebateDecision(list, {
+      kind: "resolved",
+      id: "d-1",
+      decision: "continue",
+      focus: "",
+    });
+    list = foldDebateDecision(list, required("d-2", 2, true));
+    expect(list.map((d) => d.id)).toEqual(["d-1", "d-2"]);
+    expect(list.map((d) => d.status)).toEqual(["continued", "pending"]);
+  });
+
+  it("a re-fired required for the same id replaces the card (defensive)", () => {
+    const first = foldDebateDecision([], required("d-1", 1, false));
+    const again = foldDebateDecision(first, required("d-1", 1, true));
+    expect(again).toHaveLength(1);
+    expect(again[0].converged).toBe(true);
+  });
+
+  it("projectExecution carries debateDecisions verbatim, defaulting to []", () => {
+    expect(projectExecution(plan, [], "running").debateDecisions).toEqual([]);
+    const decisions = foldDebateDecision([], required("d-1", 1, false));
+    const exec = projectExecution(plan, [], "running", null, [], decisions);
+    expect(exec.debateDecisions).toBe(decisions);
+  });
+
+  it("recordDebateDecision folds onto the slot (live path: required → resolved)", () => {
+    store().startExecution(plan, MID);
+    store().recordDebateDecision(required("d-1", 1, false), MID);
+    expect(rt().debateDecisions).toHaveLength(1);
+    expect(rt().debateDecisions[0].status).toBe("pending");
+    store().recordDebateDecision(
+      { kind: "resolved", id: "d-1", decision: "continue", focus: "聚焦成本" },
+      MID,
+    );
+    expect(rt().debateDecisions[0]).toMatchObject({
+      status: "continued",
+      decisionFocus: "聚焦成本",
+    });
+  });
+
+  it("recordDebateDecision is a no-op without an active plan", () => {
+    store().recordDebateDecision(required("d-1", 1, false), MID);
+    expect(rt().debateDecisions).toEqual([]);
   });
 });
