@@ -19,7 +19,10 @@
 // Env knobs: SHOOT_FRAMES (default 0 = terminal only; N = N evenly-spaced in-progress
 // frames per scenario via #/preview?s=…&k=<count>, file `<name>.f<k>.png`),
 // SHOOT_SETTLE_MS (default 800), SHOOT_WIDTH (1440), SHOOT_HEIGHT (900),
-// SHOOT_SCALE (2), SHOOT_THEME ("light" | "dark", default light).
+// SHOOT_SCALE (2), SHOOT_THEME ("light" | "dark", default light),
+// SHOOT_VIEW ("chat" default | "canvas" → appends &view=canvas to shoot the canvas
+// layout + 指挥台 region instead of the chat surface; canvas async layout (elk) wants
+// a longer SHOOT_SETTLE_MS, e.g. 1500).
 
 import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -41,6 +44,7 @@ const VIEWPORT = {
 const SCALE = Number(process.env.SHOOT_SCALE ?? 2);
 const THEME = process.env.SHOOT_THEME === "dark" ? "dark" : "light";
 const FRAMES = Math.max(0, Number(process.env.SHOOT_FRAMES ?? 0) | 0);
+const VIEW = process.env.SHOOT_VIEW === "canvas" ? "canvas" : "chat";
 const filter = (process.argv[2] ?? "").toLowerCase();
 
 /** Up to `frames` evenly-spaced event counts in (0, total) for mid-stream frames. */
@@ -154,10 +158,11 @@ async function main() {
       // don't reload), so every shot starts from a clean app boot.
       const url = new URL("index.web.html", base);
       url.searchParams.set("shoot", String(i));
+      const viewSuffix = VIEW === "canvas" ? "&view=canvas" : "";
       url.hash =
         shot.k === null
-          ? `/preview?s=${encodeURIComponent(shot.name)}`
-          : `/preview?s=${encodeURIComponent(shot.name)}&k=${shot.k}`;
+          ? `/preview?s=${encodeURIComponent(shot.name)}${viewSuffix}`
+          : `/preview?s=${encodeURIComponent(shot.name)}&k=${shot.k}${viewSuffix}`;
       await page.goto(url.href, { waitUntil: "load", timeout: 30_000 });
       const frameSel = shot.k === null ? "full" : String(shot.k);
       await page.waitForSelector(

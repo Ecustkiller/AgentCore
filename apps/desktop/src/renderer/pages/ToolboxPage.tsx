@@ -20,6 +20,7 @@ import {
   Palette,
   Plug,
   Presentation,
+  ScrollText,
   Table2,
   Workflow,
   Wrench,
@@ -36,24 +37,15 @@ interface ToolboxEntry {
   to?: string;
 }
 
-const FEATURED: ToolboxEntry[] = [
-  {
-    id: "ai-tools",
-    title: "AI 能力",
-    description: "工具、技能与 AI 工作准则一览，全部公开可查",
-    icon: Wrench,
-    color: "ai-tools",
-    to: "/toolbox/ai-tools",
-  },
-  {
-    id: "manual",
-    title: "产品手册",
-    description: "从上手到玩转，到看懂团队怎么运转",
-    icon: BookOpen,
-    color: "manual",
-    to: "/toolbox/manual",
-  },
-];
+// 产品手册保留为顶部 hero（了解平台）：onboarding 旗舰入口，单独成块。
+const MANUAL: ToolboxEntry = {
+  id: "manual",
+  title: "产品手册",
+  description: "从上手到玩转，到看懂团队怎么运转",
+  icon: BookOpen,
+  color: "manual",
+  to: "/toolbox/manual",
+};
 
 const CREATION_TOOLS: ToolboxEntry[] = [
   {
@@ -79,10 +71,11 @@ const CREATION_TOOLS: ToolboxEntry[] = [
   },
   {
     id: "canvas",
-    title: "画布",
-    description: "自由排布的创作白板",
+    title: "白板",
+    description: "自由排布、人与 AI 同板协作",
     icon: Palette,
     color: "canvas",
+    to: "/whiteboard",
   },
   {
     id: "slides",
@@ -114,7 +107,27 @@ const CREATION_TOOLS: ToolboxEntry[] = [
   },
 ];
 
-const MORE_CAPABILITIES: ToolboxEntry[] = [
+// 「能力」组：AI 自身的能力（工具 + AI 提示词，均已可用、点开见对应能力图鉴）+
+// 平台集成（连接器 / 工作流，即将开放）。能力图鉴只分两类——工具（确定性代码）与
+// AI 提示词（含准则与按需注入的工具进阶用法 / 薄技能）；这批薄技能本质是 Prompt 注入、不是
+// 独立能力，并入「AI 提示词」页。
+const CAPABILITIES: ToolboxEntry[] = [
+  {
+    id: "tools",
+    title: "工具",
+    description: "Agent 可调用的动作工具，含可用性与调用参数",
+    icon: Wrench,
+    color: "tools",
+    to: "/toolbox/tools",
+  },
+  {
+    id: "guidelines",
+    title: "AI 提示词",
+    description: "AI 遵循的提示词：全员准则 + CEO 完整提示词 + 工具进阶用法（薄技能）",
+    icon: ScrollText,
+    color: "guidelines",
+    to: "/toolbox/guidelines",
+  },
   {
     id: "connectors",
     title: "集成 · 连接器",
@@ -254,10 +267,23 @@ export function ToolboxPage() {
         </p>
       </header>
 
+      {/* 了解平台：产品手册（onboarding hero） */}
       <section className="mt-8">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {FEATURED.map((entry) => (
-            <ToolboxFeaturedCard key={entry.id} entry={entry} />
+        <ToolboxFeaturedCard entry={MANUAL} />
+      </section>
+
+      <section className="mt-10">
+        <ToolboxSectionHeader
+          label="能力"
+          meta={`${CAPABILITIES.filter((e) => e.to).length} 项可用`}
+        />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          {CAPABILITIES.map((entry) => (
+            <ToolboxTileCard
+              key={entry.id}
+              entry={entry}
+              comingSoon={!entry.to}
+            />
           ))}
         </div>
       </section>
@@ -269,16 +295,11 @@ export function ToolboxPage() {
         />
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           {CREATION_TOOLS.map((entry) => (
-            <ToolboxTileCard key={entry.id} entry={entry} comingSoon />
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-10">
-        <ToolboxSectionHeader label="更多能力" />
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {MORE_CAPABILITIES.map((entry) => (
-            <ToolboxTileCard key={entry.id} entry={entry} comingSoon />
+            <ToolboxTileCard
+              key={entry.id}
+              entry={entry}
+              comingSoon={!entry.to}
+            />
           ))}
         </div>
       </section>

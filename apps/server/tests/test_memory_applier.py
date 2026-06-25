@@ -1,9 +1,13 @@
 """Tests for the deterministic memory ops applier (MarkdownMemoryApplier)."""
 
+from agentcore.memory.store import CORE_MEMORY_FILE, PREFERENCES_MEMORY_FILE
 from agentcore.memory.user_memory import (
     MarkdownMemoryApplier,
     MemoryAction,
     MemoryOp,
+    merge_global_core,
+    split_global_core,
+    strip_memory_chrome,
 )
 
 SAMPLE = """\
@@ -84,6 +88,24 @@ def test_preamble_preserved():
     assert "本文件由 AI 自动维护" in out
 
 
+def test_strip_memory_chrome_drops_title_and_note():
+    # The injection projection must shed the human chrome (H1 title + "可随时编辑/删除"
+    # note) — verbatim it's mid-prompt noise — while keeping the substantive sections.
+    body = strip_memory_chrome(SAMPLE)
+    assert "用户记忆" not in body
+    assert "本文件由 AI 自动维护" not in body
+    assert body.startswith("## 沟通偏好")
+    assert "- 用简体中文回复" in body
+    assert "## 技术栈与工具" in body
+
+
+def test_strip_memory_chrome_passes_through_freeform():
+    # No leading H1 chrome → nothing stripped (respect a freeform user edit).
+    freeform = "## 沟通偏好\n- 用简体中文回复"
+    assert strip_memory_chrome(freeform) == freeform
+    assert strip_memory_chrome("") == ""
+
+
 def test_multiple_ops_applied_in_order():
     out = apply(
         SAMPLE,
@@ -143,6 +165,26 @@ def test_add_unrelated_bullet_is_not_merged():
     assert "- 前端 React" in out
 
 
+# --- topic notes (free-form: section optional → default bucket) ---
+
+
+def test_topic_op_without_section_lands_in_default_bucket():
+    # A topic note op may omit the section; the applier files it under the default
+    # bucket so the same section/bullet machinery serves core and topic notes.
+    out = apply("", MemoryOp(MemoryAction.ADD, content="部署用 docker compose", file="主题/部署.md"))
+    assert "## 要点" in out
+    assert "- 部署用 docker compose" in out
+
+
+def test_topic_op_with_free_section_is_kept():
+    out = apply(
+        "",
+        MemoryOp(MemoryAction.ADD, section="踩坑", content="忘了跑迁移", file="主题/部署.md"),
+    )
+    assert "## 踩坑" in out
+    assert "- 忘了跑迁移" in out
+
+
 # --- section_cap (deterministic backstop that bounds section growth) ---
 
 
@@ -179,3 +221,50 @@ def test_non_positive_section_cap_means_no_cap():
     assert "先给结论，再给细节" in out
     assert "第三条" in out
     assert "第四条" in out
+
+
+# --- global core combine/split (editor surface + organic 偏好/画像 migration) ---
+
+
+def test_split_routes_sections_to_preferences_and_profile():
+    combined = "## 沟通偏好\n- 用中文\n\n## 技术栈与工具\n- 用 Python\n"
+    files = split_global_core(combined)
+    assert "用中文" in files[PREFERENCES_MEMORY_FILE]
+    assert "用中文" not in files[CORE_MEMORY_FILE]
+    assert "用 Python" in files[CORE_MEMORY_FILE]
+    assert "用 Python" not in files[PREFERENCES_MEMORY_FILE]
+
+
+def test_split_routes_unknown_section_to_profile():
+    # A freeform user-typed section is never lost — it lands in 画像.md.
+    files = split_global_core("## 我的怪癖\n- 喜欢深色\n")
+    assert "我的怪癖" in files[CORE_MEMORY_FILE]
+    assert files[PREFERENCES_MEMORY_FILE] == ""
+
+
+def test_merge_then_split_round_trips_sections():
+    merged = merge_global_core("## 沟通偏好\n- 用中文\n", "## 技术栈与工具\n- 用 Python\n")
+    assert "用中文" in merged and "用 Python" in merged
+    files = split_global_core(merged)
+    assert "用中文" in files[PREFERENCES_MEMORY_FILE]
+    assert "用 Python" in files[CORE_MEMORY_FILE]
+
+
+def test_merge_of_two_empty_files_is_empty():
+    # A brand-new user sees an empty editor, not a stray preamble.
+    assert merge_global_core("", "") == ""
+
+
+def test_split_of_empty_clears_both_files():
+    files = split_global_core("")
+    assert files[PREFERENCES_MEMORY_FILE] == ""
+    assert files[CORE_MEMORY_FILE] == ""
+
+
+def test_split_migrates_legacy_profile_with_preference_sections():
+    # An old 画像.md still carrying preference sections splits on save (organic migration).
+    legacy = "## 沟通偏好\n- 用中文\n\n## 关于用户的事实\n- 在做 AgentCore\n"
+    files = split_global_core(legacy)
+    assert "用中文" in files[PREFERENCES_MEMORY_FILE]
+    assert "在做 AgentCore" in files[CORE_MEMORY_FILE]
+    assert "用中文" not in files[CORE_MEMORY_FILE]

@@ -1,9 +1,11 @@
 import { FileDetail } from "@/components/files/FileDetail";
+import { MemoryProfileSplitEditor } from "@/components/files/MemoryProfileSplitEditor";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
 import { WorkspaceSection } from "@/components/files/fileWorkbench/WorkspaceSection";
 import {
   type Tab,
   clampRail,
+  folderIdOf,
   loadExpandedWs,
   loadRailWidth,
   saveExpandedWs,
@@ -14,18 +16,69 @@ import { EmptyHint, IconButton, InlineError } from "@/components/files/parts";
 import { IconButton as UiIconButton } from "@/components/ui";
 import type { FileSource } from "@/lib/fileSource";
 import { cn } from "@/lib/utils";
+import { listMemoryProjects } from "@/services/memory";
+import {
+  GLOBAL_PREFERENCES_PATH,
+  GLOBAL_PROFILE_PATH,
+  createMemorySource,
+  memoryProjectProfilePath,
+  parseProjectProfilePath,
+} from "@/services/sources/memorySource";
 import { resolveWorkspaceSource } from "@/services/sources/workspaceSource";
 import type { WorkspaceInfo } from "@/services/workspaces";
+import { useQuery } from "@tanstack/react-query";
 import {
+  Brain,
   FileText,
   FolderOpen,
   FolderPlus,
   HardDrive,
   Loader2,
   Search,
+  SlidersHorizontal,
+  UserRound,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+/** Synthetic workspace id every memory leaf's tab lives under — they belong to no real
+ * workspace (private per-user data), so they're resolved to {@link createMemorySource}
+ * directly (path-aware: one source serves all leaves) and exempted from the "workspace
+ * gone → close its tabs" cleanup. */
+const MEMORY_WS = "__memory__";
+
+/** One memory leaf row in the rail (偏好 / 画像 / 本项目记忆) — a slim button that opens
+ * the leaf in the detail pane like any file. */
+function MemoryLeafButton({
+  icon,
+  label,
+  active,
+  indented,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  active: boolean;
+  indented?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex h-7 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-sm transition-colors",
+        indented ? "pl-7" : "pl-4",
+        active
+          ? "bg-accent text-foreground"
+          : "text-foreground hover:bg-accent/60",
+      )}
+    >
+      {icon}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
+  );
+}
 
 /**
  * The cross-project 文件 hub's **split** file UI (VSCode 式左树右详情) — the merged
@@ -66,6 +119,7 @@ export function FileWorkbench({
   onRename,
   onDelete,
   onViewConversations,
+  showMemory,
   focusWsId,
   focusKey,
 }: {
@@ -79,6 +133,9 @@ export function FileWorkbench({
   onRename: (folderId: string, name: string) => void;
   onDelete: (folderId: string) => void;
   onViewConversations: (folderId: string) => void;
+  /** Show the pinned「AI 记忆」entry atop the rail (opens the memory doc in the detail
+   * pane like any file). Off for hosts that shouldn't surface it (e.g. side panels). */
+  showMemory?: boolean;
   /** When navigated here with a target workspace (`/conversations`「浏览文件」),
    * auto-expand + highlight + scroll to that section（段默认折叠，故主动展开那一个）。
    * `focusKey` (= navigation key) makes re-focusing the same project on a later jump
@@ -150,9 +207,12 @@ export function FileWorkbench({
     });
   };
 
-  // 工作区被删/消失 → 关掉它名下的标签页，并修正激活项。
+  // 工作区被删/消失 → 关掉它名下的标签页，并修正激活项。记忆 tab（合成 ws）不属任何工作区，
+  // 故豁免，否则它会被立刻清掉。
   useEffect(() => {
-    const live = tabs.filter((t) => workspaces.some((w) => w.wsId === t.wsId));
+    const live = tabs.filter(
+      (t) => t.wsId === MEMORY_WS || workspaces.some((w) => w.wsId === t.wsId),
+    );
     if (live.length === tabs.length) return;
     setTabs(live);
     if (activeKey && !live.some((t) => tabKey(t.wsId, t.path) === activeKey)) {
@@ -182,6 +242,23 @@ export function FileWorkbench({
       m.set(w.wsId, resolveWorkspaceSource(w, fsAvailable));
     return m;
   }, [workspaces, fsAvailable]);
+
+  // 记忆叶子的路径感知单一源（所有记忆叶子共用一例，按 tab path 解析作用域；与工作区源同构，
+  // 故复用 FileDetail/编辑器）。
+  const memorySource = useMemo(() => createMemorySource(), []);
+
+  // 哪些云项目有「本项目记忆」（决定在其工作区段下挂记忆节点）。仅在展示记忆时拉取；记忆是 AI
+  // 维护的、变更不频繁，故 30s staleTime 足够（清空项目记忆后该节点在下次刷新时消失）。
+  const memoryProjects = useQuery({
+    queryKey: ["memory-projects"],
+    queryFn: listMemoryProjects,
+    enabled: !!showMemory,
+    staleTime: 30_000,
+  });
+  const memoryProjectIds = useMemo(
+    () => new Set(memoryProjects.data ?? []),
+    [memoryProjects.data],
+  );
 
   // 过滤只按工作区名（大小写不敏感子串）——本次只做工作区级筛选，不下探文件名。
   const visibleWorkspaces = useMemo(() => {
@@ -252,6 +329,43 @@ export function FileWorkbench({
           </div>
         </div>
 
+        {/* Pinned「AI 记忆」entry — private per-user data, not a workspace, so it sits above
+            the workspace list. The always-injected GLOBAL core is split into 偏好 + 画像
+            (记忆作用域与画像分层 §四); each opens in the detail pane like any file (合成 ws +
+            path-aware memorySource). Per-project 画像 hangs under its own workspace section
+            below. The enable/disable switch lives in 设置 → AI 记忆. */}
+        {showMemory && (
+          <div className="shrink-0 border-b border-border py-1">
+            <div className="flex h-7 items-center gap-2 px-4 text-xs font-medium text-muted-foreground">
+              <Brain size={14} className="shrink-0 text-primary" />
+              <span className="min-w-0 flex-1 truncate">AI 记忆 · 全局</span>
+            </div>
+            <MemoryLeafButton
+              indented
+              icon={
+                <SlidersHorizontal
+                  size={14}
+                  className="shrink-0 text-muted-foreground"
+                />
+              }
+              label="偏好"
+              active={activeKey === tabKey(MEMORY_WS, GLOBAL_PREFERENCES_PATH)}
+              onClick={() =>
+                openFile(MEMORY_WS, GLOBAL_PREFERENCES_PATH, "偏好.md")
+              }
+            />
+            <MemoryLeafButton
+              indented
+              icon={
+                <UserRound size={14} className="shrink-0 text-muted-foreground" />
+              }
+              label="画像"
+              active={activeKey === tabKey(MEMORY_WS, GLOBAL_PROFILE_PATH)}
+              onClick={() => openFile(MEMORY_WS, GLOBAL_PROFILE_PATH, "画像.md")}
+            />
+          </div>
+        )}
+
         {isLoading ? (
           <div className="flex flex-1 items-center justify-center">
             <Loader2
@@ -310,23 +424,47 @@ export function FileWorkbench({
                   没有名称匹配「{filter.trim()}」的工作区
                 </p>
               ) : (
-                visibleWorkspaces.map((ws) => (
-                  <WorkspaceSection
-                    key={ws.wsId}
-                    ws={ws}
-                    source={sourceByWs.get(ws.wsId) ?? null}
-                    activePath={
-                      activeTab?.wsId === ws.wsId ? activeTab.path : null
-                    }
-                    expanded={expandedWs.has(ws.wsId)}
-                    onToggle={() => toggleWs(ws.wsId)}
-                    onOpenFile={(path, name) => openFile(ws.wsId, path, name)}
-                    onRename={onRename}
-                    onDelete={onDelete}
-                    onViewConversations={onViewConversations}
-                    flashing={ws.wsId === flashWsId}
-                  />
-                ))
+                visibleWorkspaces.map((ws) => {
+                  const folderId = folderIdOf(ws.wsId);
+                  const hasProjectMemory =
+                    !!showMemory && !!folderId && memoryProjectIds.has(folderId);
+                  const projectMemoryPath = folderId
+                    ? memoryProjectProfilePath(folderId)
+                    : null;
+                  return (
+                    <WorkspaceSection
+                      key={ws.wsId}
+                      ws={ws}
+                      source={sourceByWs.get(ws.wsId) ?? null}
+                      activePath={
+                        activeTab?.wsId === ws.wsId ? activeTab.path : null
+                      }
+                      expanded={expandedWs.has(ws.wsId)}
+                      onToggle={() => toggleWs(ws.wsId)}
+                      onOpenFile={(path, name) => openFile(ws.wsId, path, name)}
+                      onRename={onRename}
+                      onDelete={onDelete}
+                      onViewConversations={onViewConversations}
+                      flashing={ws.wsId === flashWsId}
+                      hasProjectMemory={hasProjectMemory}
+                      projectMemoryActive={
+                        !!projectMemoryPath &&
+                        activeTab?.wsId === MEMORY_WS &&
+                        activeTab.path === projectMemoryPath
+                      }
+                      onOpenProjectMemory={
+                        projectMemoryPath
+                          ? () =>
+                              openFile(
+                                MEMORY_WS,
+                                projectMemoryPath,
+                                `${ws.name}·画像.md`,
+                              )
+                          : undefined
+                      }
+                    />
+                  );
+                })
               )}
             </div>
           </>
@@ -377,7 +515,18 @@ export function FileWorkbench({
             <div className="relative min-h-0 flex-1">
               {tabs.map((t) => {
                 const key = tabKey(t.wsId, t.path);
-                const src = sourceByWs.get(t.wsId) ?? null;
+                const src =
+                  t.wsId === MEMORY_WS
+                    ? memorySource
+                    : (sourceByWs.get(t.wsId) ?? null);
+                // A project's 画像 leaf opens the two-pane 全局+本项目 editor instead of a
+                // lone file; resolve its live workspace name for the 归属 label (fall back
+                // to stripping the tab name if the workspace is gone).
+                const projFolderId =
+                  t.wsId === MEMORY_WS ? parseProjectProfilePath(t.path) : null;
+                const projWs = projFolderId
+                  ? workspaces.find((w) => folderIdOf(w.wsId) === projFolderId)
+                  : null;
                 return (
                   <div
                     key={key}
@@ -387,12 +536,23 @@ export function FileWorkbench({
                     )}
                   >
                     {src ? (
-                      <FileDetail
-                        source={src}
-                        path={t.path}
-                        name={t.name}
-                        onClose={() => closeTab(key)}
-                      />
+                      projFolderId ? (
+                        <MemoryProfileSplitEditor
+                          source={src}
+                          folderId={projFolderId}
+                          projectName={
+                            projWs?.name ?? t.name.replace(/·画像\.md$/, "")
+                          }
+                          onClose={() => closeTab(key)}
+                        />
+                      ) : (
+                        <FileDetail
+                          source={src}
+                          path={t.path}
+                          name={t.name}
+                          onClose={() => closeTab(key)}
+                        />
+                      )
                     ) : (
                       <EmptyHint
                         inline

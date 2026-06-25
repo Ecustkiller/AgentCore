@@ -18,6 +18,9 @@ class PersistenceSettings(BaseModel):
     memory_consolidation_sweep_interval_seconds: int = 300
     memory_consolidation_sweep_batch_limit: int = 100
     memory_section_bullet_cap: int = 20
+    # Max on-demand topic notes (主题/<slug>.md) per user; new ones beyond this are
+    # dropped by the consolidation pass (anti-bloat backstop, 记忆文件夹化 §七).
+    memory_max_topic_files: int = 24
 
     compaction_enabled: bool = True
     compaction_trigger_input_tokens: int = 64_000

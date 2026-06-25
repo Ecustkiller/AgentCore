@@ -15,6 +15,7 @@ from agentcore.runtime.debate import (
     STOP_CONVERGED,
     STOP_FOCUS_CLARIFIED,
     STOP_MAX_ROUNDS,
+    STOP_USER_CONCLUDED,
     DebateBrief,
     DebateConfig,
     DebateForm,
@@ -22,6 +23,8 @@ from agentcore.runtime.debate import (
     DebateSide,
     JudgeVerdict,
     Moderator,
+    RoundBoundary,
+    RoundDecision,
     RoundPolicy,
     RoundResult,
     SideTurn,
@@ -437,3 +440,108 @@ def test_round_to_event_payload_matches_result_round_unit():
     assert [s["run_id"] for s in payload["sides"]] == ["pro_r1", "con_r1"]
     # 收场全量 payload 的逐轮单元由同一方法产出 → 必逐字相等（单一源，防漂移）。
     assert result.to_event_payload()["rounds"][0] == payload
+
+
+# --- 交互式逐轮边界钩子（opt-in，辩论编排设计.md §逐轮交互） -----------------------
+
+
+def _run_interactive(llm, runner, config, boundary):  # noqa: ANN001
+    return asyncio.run(
+        Moderator(provider=llm, model="m").run(
+            config, run_round=runner, on_round_boundary=boundary
+        )
+    )
+
+
+def test_round_boundary_conclude_overrides_judge_keep_going():
+    """用户在第 1 轮边界选「够了出结论」→ 即便裁判判未收敛也立即收场，归因 user_concluded。"""
+    seen: list = []
+
+    async def boundary(*, round_no, result, converged, max_rounds):  # noqa: ANN001
+        seen.append((round_no, converged, max_rounds))
+        return RoundBoundary(decision=RoundDecision.CONCLUDE)
+
+    llm = _ScriptedLLM(judge_results=[_KEEP_GOING])  # 裁判想继续
+    runner = _RecordingRunner()
+    result = _run_interactive(llm, runner, _config(policy=RoundPolicy(max_rounds=5)), boundary)
+
+    assert len(result.rounds) == 1
+    assert len(runner.calls) == 1
+    assert result.stop_reason == STOP_USER_CONCLUDED
+    # 钩子入参携本轮裁判判读（converged=False）与硬上限，供卡片渲染默认建议。
+    assert seen == [(1, False, 5)]
+
+
+def test_round_boundary_continue_overrides_convergence_with_focus():
+    """裁判第 1 轮即判收敛，但用户选「加角度（带焦点）继续」→ 续辩；下一轮焦点用用户的覆写
+    （跳过主持人自动定焦点），第 2 轮再选「够了」收场。"""
+    decisions = [
+        RoundBoundary(decision=RoundDecision.CONTINUE, focus="用户加的角度"),
+        RoundBoundary(decision=RoundDecision.CONCLUDE),
+    ]
+    calls: list = []
+
+    async def boundary(*, round_no, result, converged, max_rounds):  # noqa: ANN001
+        calls.append((round_no, converged))
+        return decisions[round_no - 1]
+
+    llm = _ScriptedLLM(judge_results=[_CONVERGE])  # 裁判每轮都判收敛
+    runner = _RecordingRunner()
+    result = _run_interactive(llm, runner, _config(policy=RoundPolicy(max_rounds=5)), boundary)
+
+    # 用户的 CONTINUE 凌驾裁判的收敛 → 真的辩了第 2 轮；第 2 轮的 CONCLUDE 收场。
+    assert len(result.rounds) == 2
+    assert result.stop_reason == STOP_USER_CONCLUDED
+    assert [c[0] for c in calls] == [1, 2]
+    assert calls[0][1] is True  # 裁判第 1 轮就判收敛，但被用户覆盖
+    # 「加角度」：第 2 轮 run_round 收到的焦点是用户覆写值（非主持人 _frame 自动定的「焦点N」）。
+    assert runner.calls[1]["focus"] == "用户加的角度"
+    assert llm.frame_calls == 1  # 第 2 轮跳过 _frame（焦点被覆写），故只定过 1 次焦点
+
+
+def test_round_boundary_continue_without_focus_uses_auto_frame():
+    """CONTINUE 但不带焦点 → 下一轮回落主持人自动定焦点（_frame 照常被调）。"""
+    decisions = [
+        RoundBoundary(decision=RoundDecision.CONTINUE),  # 不加角度
+        RoundBoundary(decision=RoundDecision.CONCLUDE),
+    ]
+
+    async def boundary(*, round_no, result, converged, max_rounds):  # noqa: ANN001
+        return decisions[round_no - 1]
+
+    llm = _ScriptedLLM(judge_results=[_CONVERGE])
+    runner = _RecordingRunner()
+    result = _run_interactive(llm, runner, _config(policy=RoundPolicy(max_rounds=5)), boundary)
+
+    assert len(result.rounds) == 2
+    # 两轮都走主持人自动定焦点（_frame 各调一次），焦点为「焦点1」「焦点2」。
+    assert llm.frame_calls == 2
+    assert [c["focus"] for c in runner.calls] == ["焦点1", "焦点2"]
+
+
+def test_round_boundary_none_falls_back_to_judge_convergence():
+    """钩子返回 None（超时 / 无活跃用户）→ 回退裁判自动收敛：裁判判收敛即收场（与非交互同辙）。"""
+
+    async def boundary(*, round_no, result, converged, max_rounds):  # noqa: ANN001
+        return None
+
+    llm = _ScriptedLLM(judge_results=[_CONVERGE])
+    runner = _RecordingRunner()
+    result = _run_interactive(llm, runner, _config(policy=RoundPolicy(max_rounds=5)), boundary)
+
+    assert len(result.rounds) == 1
+    assert result.stop_reason == STOP_CONVERGED
+
+
+def test_round_boundary_continue_respects_max_rounds_safety_cap():
+    """用户连续 CONTINUE 也不越过 max_rounds 硬上限：到顶兜底停，归因 max_rounds（非 user_concluded）。"""
+
+    async def boundary(*, round_no, result, converged, max_rounds):  # noqa: ANN001
+        return RoundBoundary(decision=RoundDecision.CONTINUE)  # 永远想继续
+
+    llm = _ScriptedLLM(judge_results=[_CONVERGE])  # 裁判判收敛也被用户压住
+    runner = _RecordingRunner()
+    result = _run_interactive(llm, runner, _config(policy=RoundPolicy(max_rounds=3)), boundary)
+
+    assert len(result.rounds) == 3
+    assert result.stop_reason == STOP_MAX_ROUNDS

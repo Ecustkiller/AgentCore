@@ -24,7 +24,8 @@ from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.tools.builtin.debate import DebateTool
-from agentcore.tools.builtin.debate.prompt import round_feedback
+from agentcore.tools.builtin.debate.prompt import debater_task, round_feedback
+from agentcore.tools.builtin.debate.schema import parse_sides
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -301,6 +302,59 @@ def _gate() -> ApprovalGate:
         registry=InteractionRegistry(),
         timeout_seconds=1.0,
     )
+
+
+def test_side_model_parsed_and_injected_into_debater_task():
+    """真·多模型辩手契约：sides[].model 经 parse_sides → DebateSide.model → debater_task 的
+    task payload['model']（→ RunSpec.model → 执行器覆写 profile.model → 路由器按 provider/model
+    前缀分发到对应厂商）。留空的一方不带 model 键（回落 tier 默认模型，行为不变）。"""
+    sides, err = parse_sides(
+        [
+            {
+                "key": "a",
+                "name": "豆包",
+                "stance": "我最聪明",
+                "model": "doubao/doubao-seed-2-1-turbo-260628",
+            },
+            {"key": "b", "name": "DeepSeek", "stance": "我才最聪明"},
+        ]
+    )
+    assert err == ""
+    assert sides[0].model == "doubao/doubao-seed-2-1-turbo-260628"
+    assert sides[1].model == ""
+    cfg = DebateConfig(motion="谁更聪明", form=DebateForm.DEBATE, sides=sides)
+    t_a = debater_task(cfg, sides[0], 0, round_no=1, focus="智商")
+    t_b = debater_task(cfg, sides[1], 1, round_no=1, focus="智商")
+    assert t_a["model"] == "doubao/doubao-seed-2-1-turbo-260628"
+    assert "model" not in t_b
+
+
+def test_quick_mode_injects_concise_hint_thorough_does_not():
+    """快速对碰（thorough=False）给首轮辩手注入「少检索、收窄到 1 个论点」的轻量约束；认真辩透
+    （thorough=True）不注入，保留深挖取证。根治观测到的「为 trivial 命题刷十余次 web_search、
+    跑近十轮」——辩手自停在轮数上限内，故有效杠杆是提示词而非轮数上限。"""
+    from agentcore.runtime.debate import RoundPolicy
+    from agentcore.tools.builtin.debate.schema import QUICK_DEBATER_HINT
+
+    sides, _ = parse_sides(
+        [
+            {"key": "pro", "name": "正方", "stance": "甜"},
+            {"key": "con", "name": "反方", "stance": "咸"},
+        ]
+    )
+    quick_cfg = DebateConfig(
+        motion="甜豆腐脑 vs 咸豆腐脑",
+        form=DebateForm.DEBATE,
+        sides=sides,
+        policy=RoundPolicy.quick(),
+    )
+    thorough_cfg = DebateConfig(  # default policy → thorough
+        motion="甜豆腐脑 vs 咸豆腐脑", form=DebateForm.DEBATE, sides=sides
+    )
+    quick_task = debater_task(quick_cfg, sides[0], 0, round_no=1, focus="正统")["task"]
+    thorough_task = debater_task(thorough_cfg, sides[0], 0, round_no=1, focus="正统")["task"]
+    assert QUICK_DEBATER_HINT in quick_task
+    assert QUICK_DEBATER_HINT not in thorough_task
 
 
 async def test_workers_gated_in_local_mode(monkeypatch):

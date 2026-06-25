@@ -10,6 +10,11 @@ import {
   APPSHELL_W,
   AppShellStill,
 } from "./scenes/AppShellStill";
+import {
+  MOBILE_H,
+  MOBILE_W,
+  MobileChatStill,
+} from "./scenes/MobileChatStill";
 import { LogoScene } from "./scenes/LogoScene";
 import {
   CLOSEUP_H,
@@ -121,6 +126,13 @@ export const RemotionRoot: React.FC = () => {
           />
         );
       })()}
+
+      <Still
+        id="Still-mobile"
+        component={MobileChatStill}
+        width={MOBILE_W}
+        height={MOBILE_H}
+      />
 
       {/* Product-manual collaboration diagrams as standalone promo stills, each
           sized to its baked ELK bbox (+ margin). Render: `pnpm stills` → 2x PNGs. */}

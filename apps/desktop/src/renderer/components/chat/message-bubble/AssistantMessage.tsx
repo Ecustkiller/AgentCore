@@ -5,11 +5,9 @@ import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
 import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
-import { ReceivedContextDialog } from "@/components/chat/ReceivedContext";
 import { type CitationFlash, SourceCards } from "@/components/chat/SourceCards";
 import { Button } from "@/components/ui";
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
-import { SimpleTooltip } from "@/components/ui/tooltip";
 import { referencedCitationNumbers } from "@/lib/citations";
 import { errorActionForCode } from "@/lib/errors";
 import {
@@ -17,7 +15,7 @@ import {
   fileArtifactsFromProcess,
   mergeArtifacts,
 } from "@/lib/fileArtifacts";
-import { formatCompact, formatCost } from "@/lib/format";
+import { formatCost } from "@/lib/format";
 import { runRegenerate } from "@/services/turns";
 import {
   getActiveRuntime,
@@ -25,29 +23,20 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { useMessageExecution } from "@/stores/execution";
-import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
 import type { ProcessStep } from "@/types/events";
 import {
   AlertTriangle,
-  Check,
-  Copy,
-  Fingerprint,
   FolderUp,
   KeyRound,
   RefreshCw,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  DeleteMessageAction,
-  MessageAction,
-  MessageTime,
-} from "./MessageActions";
+import { AssistantMessageFooter } from "./AssistantMessageFooter";
 import { ComposingToolLine, ProcessTimeline } from "./ProcessTimeline";
 import { ThinkingDots, ThinkingPanel } from "./Thinking";
 import type { MessageBubbleProps } from "./types";
-import { useCopyAction } from "./useCopyAction";
 
 function MultiAgentFileArtifacts({
   messageId,
@@ -95,10 +84,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const cachedTotal = useUsageStore(
     (s) => s.messageCosts[message.id]?.cost.total ?? null,
   );
-  const { copied, onCopy } = useCopyAction(() => message.content);
-  const { copied: traceCopied, onCopy: onCopyTrace } = useCopyAction(
-    () => message.traceId ?? "",
-  );
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const navigate = useNavigate();
   const errorAction = message.error
@@ -106,8 +91,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     : null;
   const hasReasoning =
     !!message.reasoning && message.reasoning.trim().length > 0;
-  const usageDetail = useUIStore((s) => s.usageDetail);
-  const diagnosticMode = useUIStore((s) => s.diagnosticMode);
   const captainContext = message.captainContext ?? [];
   const hasProcess = (message.process?.length ?? 0) > 0;
   const citations = useMemo(() => message.citations ?? [], [message.citations]);
@@ -172,20 +155,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const costText =
     message.executionId === null && turnTotal != null && turnTotal > 0
       ? formatCost(turnTotal, cnyPerUsd)
-      : null;
-  const usage = message.usage;
-  const usageText = usage
-    ? usageDetail
-      ? `↑${formatCompact(usage.input)}（缓存 ${formatCompact(
-          usage.cache_hit,
-        )}） ↓${formatCompact(usage.output)}（思考 ${formatCompact(
-          usage.reasoning,
-        )}）`
-      : `↑${formatCompact(usage.input)} ↓${formatCompact(usage.output)}`
-    : null;
-  const roundsText =
-    message.rounds != null && message.rounds > 1
-      ? `${message.rounds} 轮`
       : null;
 
   const onPeekCost = () => {
@@ -349,49 +318,13 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         />
       )}
       {!message.isStreaming && !isGenerating && message.content.length > 0 && (
-        <div className="mt-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <MessageAction
-            icon={copied ? <Check size={13} /> : <Copy size={13} />}
-            label={copied ? "已复制" : "复制"}
-            onClick={onCopy}
-          />
-          <MessageAction
-            icon={<RefreshCw size={13} />}
-            label="重新生成"
-            onClick={handleRegenerate}
-          />
-          <DeleteMessageAction messageId={message.id} />
-          <ReceivedContextDialog blocks={captainContext} />
-          {(import.meta.env.DEV || diagnosticMode) && message.traceId && (
-            <MessageAction
-              icon={
-                traceCopied ? <Check size={13} /> : <Fingerprint size={13} />
-              }
-              label={traceCopied ? "已复制 trace id" : "复制 trace id"}
-              onClick={onCopyTrace}
-            />
-          )}
-          {usageText && (
-            <SimpleTooltip label="本回合 token 用量（输入 ↑ / 输出 ↓）">
-              <span className="ml-1 text-xs tabular-nums text-muted-foreground/70">
-                {usageText}
-              </span>
-            </SimpleTooltip>
-          )}
-          {roundsText && (
-            <SimpleTooltip label="本回合 ReAct 思考→行动轮次">
-              <span className="text-xs tabular-nums text-muted-foreground/70">
-                {roundsText}
-              </span>
-            </SimpleTooltip>
-          )}
-          {costText && (
-            <span className="ml-1 text-xs text-muted-foreground/70">
-              {costText}
-            </span>
-          )}
-          <MessageTime iso={message.createdAt} />
-        </div>
+        <AssistantMessageFooter
+          message={message}
+          captainContext={captainContext}
+          costText={costText}
+          finishReason={finishReason}
+          onRegenerate={handleRegenerate}
+        />
       )}
     </div>
   );

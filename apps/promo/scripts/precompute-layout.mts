@@ -9,7 +9,7 @@
  * Run:  npx tsx scripts/precompute-layout.mts   (cwd = apps/promo)
  *
  * Baking coordinates to a constant keeps render-time fully synchronous and
- * deterministic (the demo shape is fixed), per 宣传视频落地设计.md §三.4.
+ * deterministic (the demo shape is fixed), per apps/promo/README.md.
  */
 import { writeFile } from "node:fs/promises";
 import path from "node:path";

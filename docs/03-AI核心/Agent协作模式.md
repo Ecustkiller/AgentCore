@@ -81,6 +81,8 @@ worker 唯一的向上通道。`blocking=false`（默认）= 上报后按 `assum
 
 **阻塞式求决策（`blocking=true`）✅**：worker 撞上「只有用户能定、猜错就作废」的岔路时，经 `ToolContext.escalation` 端口挂起等用户；超时回落非阻塞行为（按 `assumption` 续跑）。**采纳 worker→用户**（复用 `InteractionRegistry` + `ESCALATION` kind），**否决 worker→CEO 波内重入**——CEO 调 `delegate` 后 ReAct 停在工具调用上，波内无活着的 CEO。
 
+**结构化提问 ✅**：岔路若是干净的 A/B 或多选，worker 可附**结构化 `questions`**（结构同 `ask_user`：choice/text + `options`/`default`，随 `escalation_required` 下发），挂起卡复用 `ask_user` 的问答内核渲染，用户一键拍板而非读散文手敲；纯开放问题则省略、回退自由文本。关键约束：**前端把选项选择拍平成纯文本答复**回填，故后端 resolve 契约（`{answer, use_assumption}`）与挂起恢复路径**保持不变**；`questions` 为 desktop-local（不进 conformance golden），手机端忽略至其应答卡落地。
+
 | 约束 | 取值 |
 |---|---|
 | 武装门 | 与 `ask_user` 同闸（`checkpoint_enabled` + live client）；无 live user 时自动退化非阻塞 |
@@ -88,7 +90,7 @@ worker 唯一的向上通道。`blocking=false`（默认）= 上报后按 `assum
 | 同回合并发阻塞上限 | 3（超出退化非阻塞） |
 | 回合状态 | 阻塞升级**不**翻 `paused`（兄弟继续跑）；`escalation_required`/`escalation_resolved` 单一发射者 = awaiter |
 
-`kind=scope`（非阻塞）在波边界被 CEO 消费，用于计划漂移纠偏——见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard`、图节点「待你拍板」角标；⏳ 手机交互层（fold 已有、应答卡未落地）。
+`kind=scope`（非阻塞）在波边界被 CEO 消费，用于计划漂移纠偏——见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard`（结构化升级与 `ask_user` 共用问答内核 `AskUserFields`）、图节点「待你拍板」角标；⏳ 手机交互层（fold 已有、应答卡未落地）。
 
 → 见代码：`tools/builtin/escalate.py`、`runtime/interaction.py`（`ESCALATION`）、`runtime/runs/executor_agent.py`（`_escalation_channel`）
 

@@ -1,0 +1,884 @@
+{
+  "name": "multi_agent_red_team",
+  "description": "多 Agent：红队审查收场（form=red_team）风险看板 + 加固建议 + 方案方回应双产物",
+  "events": [
+    {
+      "type": "message_start",
+      "payload": {
+        "message_id": "m1",
+        "conversation_id": "conv_demo"
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "我发起一场红队审查来压测这个方案。"
+      },
+      "timestamp": "2026-01-01T00:00:00.001Z"
+    },
+    {
+      "type": "run_plan",
+      "payload": {
+        "execution_id": "exec1",
+        "plan_type": "debate",
+        "task_summary": "红队审查：压测「自建鉴权服务」方案",
+        "agents": [
+          {
+            "id": "redteam_mod1",
+            "role": "主持人",
+            "model_preference": "strong",
+            "thinking": true,
+            "reasoning_effort": "high"
+          }
+        ],
+        "runs": [
+          {
+            "id": "redteam_mod1",
+            "agent_id": "redteam_mod1",
+            "task": "主持红队审查：压测「自建鉴权服务」方案",
+            "depends_on": [],
+            "parent_run_id": "captain1"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "redteam_mod1",
+        "agent_id": "redteam_mod1",
+        "parent_run_id": "captain1",
+        "kind": "agent",
+        "revision": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "run_plan",
+      "payload": {
+        "execution_id": "exec1",
+        "plan_type": "debate",
+        "task_summary": "",
+        "agents": [
+          {
+            "id": "d_subject",
+            "role": "方案方",
+            "model_preference": "strong",
+            "thinking": true,
+            "reasoning_effort": "high"
+          },
+          {
+            "id": "d_red1",
+            "role": "安全红队",
+            "model_preference": "strong",
+            "thinking": true,
+            "reasoning_effort": "high"
+          },
+          {
+            "id": "d_red2",
+            "role": "合规红队",
+            "model_preference": "strong",
+            "thinking": true,
+            "reasoning_effort": "high"
+          },
+          {
+            "id": "d_red3",
+            "role": "运维红队",
+            "model_preference": "fast",
+            "thinking": false,
+            "reasoning_effort": "low"
+          }
+        ],
+        "runs": [
+          {
+            "id": "redteam_mod1_r1_subject",
+            "agent_id": "d_subject",
+            "task": "为「自建鉴权服务」方案抗辩并修补",
+            "depends_on": [],
+            "parent_run_id": "redteam_mod1",
+            "group": "debate:red_team",
+            "round": 1
+          },
+          {
+            "id": "redteam_mod1_r1_red1",
+            "agent_id": "d_red1",
+            "task": "挖「自建鉴权服务」方案的安全风险",
+            "depends_on": [],
+            "parent_run_id": "redteam_mod1",
+            "group": "debate:red_team",
+            "round": 1
+          },
+          {
+            "id": "redteam_mod1_r1_red2",
+            "agent_id": "d_red2",
+            "task": "审「自建鉴权服务」方案的合规缺口",
+            "depends_on": [],
+            "parent_run_id": "redteam_mod1",
+            "group": "debate:red_team",
+            "round": 1
+          },
+          {
+            "id": "redteam_mod1_r1_red3",
+            "agent_id": "d_red3",
+            "task": "查「自建鉴权服务」方案的运维隐患",
+            "depends_on": [],
+            "parent_run_id": "redteam_mod1",
+            "group": "debate:red_team",
+            "round": 1
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "redteam_mod1_r1_subject",
+        "agent_id": "d_subject",
+        "parent_run_id": "redteam_mod1",
+        "kind": "agent",
+        "revision": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.005Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "redteam_mod1_r1_subject",
+        "agent_id": "d_subject",
+        "delta": "方案方：自建鉴权可控、省授权成本。"
+      },
+      "timestamp": "2026-01-01T00:00:00.006Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "redteam_mod1_r1_subject",
+        "agent_id": "d_subject",
+        "output_summary": "方案方抗辩完成",
+        "duration_ms": 820,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.007Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "redteam_mod1_r1_red1",
+        "agent_id": "d_red1",
+        "parent_run_id": "redteam_mod1",
+        "kind": "agent",
+        "revision": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.008Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "redteam_mod1_r1_red1",
+        "agent_id": "d_red1",
+        "delta": "安全红队：刷新令牌缺轮换，泄漏即长期可用。"
+      },
+      "timestamp": "2026-01-01T00:00:00.009Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "redteam_mod1_r1_red1",
+        "agent_id": "d_red1",
+        "output_summary": "安全红队挖掘完成",
+        "duration_ms": 860,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.010Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "redteam_mod1_r1_red2",
+        "agent_id": "d_red2",
+        "parent_run_id": "redteam_mod1",
+        "kind": "agent",
+        "revision": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.011Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "redteam_mod1_r1_red2",
+        "agent_id": "d_red2",
+        "delta": "合规红队：缺审计日志留存，过不了等保合规。"
+      },
+      "timestamp": "2026-01-01T00:00:00.012Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "redteam_mod1_r1_red2",
+        "agent_id": "d_red2",
+        "output_summary": "合规红队挖掘完成",
+        "duration_ms": 780,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.013Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "redteam_mod1_r1_red3",
+        "agent_id": "d_red3",
+        "parent_run_id": "redteam_mod1",
+        "kind": "agent",
+        "revision": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.014Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "redteam_mod1_r1_red3",
+        "agent_id": "d_red3",
+        "delta": "运维红队：密钥轮换全靠人肉，长期负担偏高。"
+      },
+      "timestamp": "2026-01-01T00:00:00.015Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "redteam_mod1_r1_red3",
+        "agent_id": "d_red3",
+        "output_summary": "运维红队挖掘完成",
+        "duration_ms": 540,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.016Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "redteam_mod1",
+        "agent_id": "redteam_mod1",
+        "output_summary": "自建鉴权的攻击面是否可控",
+        "duration_ms": 2100,
+        "role": "主持人",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.017Z"
+    },
+    {
+      "type": "debate_result",
+      "payload": {
+        "execution_id": "exec1",
+        "moderator_run_id": "redteam_mod1",
+        "form": "red_team",
+        "motion": "压测「自建鉴权服务」方案的稳健性",
+        "stop_reason": "red_team_exhausted",
+        "narrative_first": false,
+        "sides": [
+          {
+            "key": "subject",
+            "name": "方案方",
+            "stance": "自建鉴权可控且省授权成本",
+            "is_subject": true,
+            "model": ""
+          },
+          {
+            "key": "red1",
+            "name": "安全红队",
+            "stance": "自建鉴权的攻击面与凭证安全",
+            "is_subject": false,
+            "model": ""
+          },
+          {
+            "key": "red2",
+            "name": "合规红队",
+            "stance": "自建鉴权的合规与审计缺口",
+            "is_subject": false,
+            "model": ""
+          },
+          {
+            "key": "red3",
+            "name": "运维红队",
+            "stance": "自建鉴权的长期运维负担",
+            "is_subject": false,
+            "model": ""
+          }
+        ],
+        "rounds": [
+          {
+            "round_no": 1,
+            "focus": "凭证存储与会话固定的攻击面",
+            "summary": "红队指出自建鉴权易踩 token 泄漏与会话固定，方案方承认需补固化与轮换。",
+            "verdict": {
+              "real_clash": true,
+              "new_arguments": true,
+              "converged": false,
+              "stop_reason": "",
+              "rationale": "红队挖出有效风险，方案方部分采纳，仍有未覆盖项。"
+            },
+            "sides": [
+              {
+                "key": "subject",
+                "name": "方案方",
+                "run_id": "redteam_mod1_r1_subject",
+                "ok": true
+              },
+              {
+                "key": "red1",
+                "name": "安全红队",
+                "run_id": "redteam_mod1_r1_red1",
+                "ok": true
+              },
+              {
+                "key": "red2",
+                "name": "合规红队",
+                "run_id": "redteam_mod1_r1_red2",
+                "ok": true
+              },
+              {
+                "key": "red3",
+                "name": "运维红队",
+                "run_id": "redteam_mod1_r1_red3",
+                "ok": true
+              }
+            ],
+            "clashes": [
+              {
+                "from_key": "red1",
+                "to_key": "subject",
+                "point": "未做 token 轮换与设备绑定，刷新令牌一旦泄漏即长期可用。"
+              },
+              {
+                "from_key": "red2",
+                "to_key": "subject",
+                "point": "缺审计日志留存与访问追溯，过不了等保与合规审查。"
+              }
+            ]
+          }
+        ],
+        "brief": {
+          "crux": "自建鉴权的攻击面是否可控、加固成本是否低于外采",
+          "strongest_points": {
+            "red1": "刷新令牌缺轮换与设备绑定，泄漏即长期可用，是最尖锐风险。",
+            "red2": "无审计日志留存与访问追溯，过不了等保三级与合规审查。",
+            "red3": "密钥轮换 / 应急吊销全靠人肉，长期运维负担与误操作风险偏高。",
+            "subject": "可引入短时访问令牌 + 轮换刷新令牌，把风险降到与外采相当。"
+          },
+          "risk_severities": {
+            "red1": "high",
+            "red2": "medium",
+            "red3": "low"
+          },
+          "factual_disputes": [
+            "自建 vs 外采的真实合规改造工作量缺乏一致口径"
+          ],
+          "value_disputes": [
+            "把鉴权握在自己手里的掌控感 vs 外采省心"
+          ],
+          "leaning": "有条件通过：先补 3 项加固再上线",
+          "confidence": "medium",
+          "recommendation": "上线前必须：① 刷新令牌轮换 + 设备绑定 ② 登录限速与异常告警 ③ 第三方渗透测试。",
+          "open_questions": [
+            "密钥轮换的运维归属谁？"
+          ]
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.018Z"
+    },
+    {
+      "type": "message_end",
+      "payload": {
+        "finish_reason": "end_turn",
+        "usage": {
+          "input_tokens": 3200,
+          "output_tokens": 560,
+          "reasoning_tokens": 0,
+          "cache_hit_tokens": 0,
+          "cache_miss_tokens": 0
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "rounds": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.019Z"
+    }
+  ],
+  "projected": {
+    "status": "completed",
+    "finishReason": "end_turn",
+    "content": "我发起一场红队审查来压测这个方案。",
+    "reasoning": "",
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "我发起一场红队审查来压测这个方案。"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec1"
+      }
+    ],
+    "citations": [],
+    "agents": [
+      {
+        "id": "redteam_mod1",
+        "role": "主持人",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "d_subject",
+        "role": "方案方",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "方案方：自建鉴权可控、省授权成本。",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "d_red1",
+        "role": "安全红队",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "安全红队：刷新令牌缺轮换，泄漏即长期可用。",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "d_red2",
+        "role": "合规红队",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "合规红队：缺审计日志留存，过不了等保合规。",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "d_red3",
+        "role": "运维红队",
+        "modelPreference": "fast",
+        "thinking": false,
+        "reasoningEffort": "low",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "运维红队：密钥轮换全靠人肉，长期负担偏高。",
+        "reasoning": "",
+        "toolProgress": null
+      }
+    ],
+    "runs": [
+      {
+        "id": "redteam_mod1",
+        "agentId": "redteam_mod1",
+        "task": "主持红队审查：压测「自建鉴权服务」方案",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "自建鉴权的攻击面是否可控",
+        "durationMs": 2100,
+        "error": null,
+        "parentRunId": "captain1",
+        "kind": "agent",
+        "role": "主持人",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": null,
+        "group": null,
+        "round": 0,
+        "revisionOf": null,
+        "revision": 0,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      },
+      {
+        "id": "redteam_mod1_r1_subject",
+        "agentId": "d_subject",
+        "task": "为「自建鉴权服务」方案抗辩并修补",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "方案方抗辩完成",
+        "durationMs": 820,
+        "error": null,
+        "parentRunId": "redteam_mod1",
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": null,
+        "group": "debate:red_team",
+        "round": 1,
+        "revisionOf": null,
+        "revision": 0,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      },
+      {
+        "id": "redteam_mod1_r1_red1",
+        "agentId": "d_red1",
+        "task": "挖「自建鉴权服务」方案的安全风险",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "安全红队挖掘完成",
+        "durationMs": 860,
+        "error": null,
+        "parentRunId": "redteam_mod1",
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": null,
+        "group": "debate:red_team",
+        "round": 1,
+        "revisionOf": null,
+        "revision": 0,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      },
+      {
+        "id": "redteam_mod1_r1_red2",
+        "agentId": "d_red2",
+        "task": "审「自建鉴权服务」方案的合规缺口",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "合规红队挖掘完成",
+        "durationMs": 780,
+        "error": null,
+        "parentRunId": "redteam_mod1",
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": null,
+        "group": "debate:red_team",
+        "round": 1,
+        "revisionOf": null,
+        "revision": 0,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      },
+      {
+        "id": "redteam_mod1_r1_red3",
+        "agentId": "d_red3",
+        "task": "查「自建鉴权服务」方案的运维隐患",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "运维红队挖掘完成",
+        "durationMs": 540,
+        "error": null,
+        "parentRunId": "redteam_mod1",
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": null,
+        "group": "debate:red_team",
+        "round": 1,
+        "revisionOf": null,
+        "revision": 0,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      }
+    ],
+    "progress": {
+      "completed": 5,
+      "total": 5
+    },
+    "pendingInteraction": null,
+    "cost": {
+      "input": 240000,
+      "cached": 64000,
+      "output": 120000,
+      "total": 360000,
+      "currency": "USD"
+    },
+    "debate": {
+      "execution_id": "exec1",
+      "moderator_run_id": "redteam_mod1",
+      "form": "red_team",
+      "motion": "压测「自建鉴权服务」方案的稳健性",
+      "stop_reason": "red_team_exhausted",
+      "narrative_first": false,
+      "sides": [
+        {
+          "key": "subject",
+          "name": "方案方",
+          "stance": "自建鉴权可控且省授权成本",
+          "is_subject": true,
+          "model": ""
+        },
+        {
+          "key": "red1",
+          "name": "安全红队",
+          "stance": "自建鉴权的攻击面与凭证安全",
+          "is_subject": false,
+          "model": ""
+        },
+        {
+          "key": "red2",
+          "name": "合规红队",
+          "stance": "自建鉴权的合规与审计缺口",
+          "is_subject": false,
+          "model": ""
+        },
+        {
+          "key": "red3",
+          "name": "运维红队",
+          "stance": "自建鉴权的长期运维负担",
+          "is_subject": false,
+          "model": ""
+        }
+      ],
+      "rounds": [
+        {
+          "round_no": 1,
+          "focus": "凭证存储与会话固定的攻击面",
+          "summary": "红队指出自建鉴权易踩 token 泄漏与会话固定，方案方承认需补固化与轮换。",
+          "verdict": {
+            "real_clash": true,
+            "new_arguments": true,
+            "converged": false,
+            "stop_reason": "",
+            "rationale": "红队挖出有效风险，方案方部分采纳，仍有未覆盖项。"
+          },
+          "sides": [
+            {
+              "key": "subject",
+              "name": "方案方",
+              "run_id": "redteam_mod1_r1_subject",
+              "ok": true
+            },
+            {
+              "key": "red1",
+              "name": "安全红队",
+              "run_id": "redteam_mod1_r1_red1",
+              "ok": true
+            },
+            {
+              "key": "red2",
+              "name": "合规红队",
+              "run_id": "redteam_mod1_r1_red2",
+              "ok": true
+            },
+            {
+              "key": "red3",
+              "name": "运维红队",
+              "run_id": "redteam_mod1_r1_red3",
+              "ok": true
+            }
+          ],
+          "clashes": [
+            {
+              "from_key": "red1",
+              "to_key": "subject",
+              "point": "未做 token 轮换与设备绑定，刷新令牌一旦泄漏即长期可用。"
+            },
+            {
+              "from_key": "red2",
+              "to_key": "subject",
+              "point": "缺审计日志留存与访问追溯，过不了等保与合规审查。"
+            }
+          ]
+        }
+      ],
+      "brief": {
+        "crux": "自建鉴权的攻击面是否可控、加固成本是否低于外采",
+        "strongest_points": {
+          "red1": "刷新令牌缺轮换与设备绑定，泄漏即长期可用，是最尖锐风险。",
+          "red2": "无审计日志留存与访问追溯，过不了等保三级与合规审查。",
+          "red3": "密钥轮换 / 应急吊销全靠人肉，长期运维负担与误操作风险偏高。",
+          "subject": "可引入短时访问令牌 + 轮换刷新令牌，把风险降到与外采相当。"
+        },
+        "risk_severities": {
+          "red1": "high",
+          "red2": "medium",
+          "red3": "low"
+        },
+        "factual_disputes": [
+          "自建 vs 外采的真实合规改造工作量缺乏一致口径"
+        ],
+        "value_disputes": [
+          "把鉴权握在自己手里的掌控感 vs 外采省心"
+        ],
+        "leaning": "有条件通过：先补 3 项加固再上线",
+        "confidence": "medium",
+        "recommendation": "上线前必须：① 刷新令牌轮换 + 设备绑定 ② 登录限速与异常告警 ③ 第三方渗透测试。",
+        "open_questions": [
+          "密钥轮换的运维归属谁？"
+        ]
+      }
+    },
+    "debateRounds": []
+  }
+}

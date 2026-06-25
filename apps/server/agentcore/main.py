@@ -20,6 +20,7 @@ from agentcore.api.routes import (
     folders,
     inference,
     llm_key,
+    memory,
     messages,
     realtime,
     search,
@@ -229,6 +230,7 @@ app.include_router(files.router, prefix="/v1")
 app.include_router(folders.router, prefix="/v1")
 app.include_router(inference.router, prefix="/v1")
 app.include_router(llm_key.router, prefix="/v1")
+app.include_router(memory.router, prefix="/v1")
 app.include_router(messages.router, prefix="/v1")
 app.include_router(realtime.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")

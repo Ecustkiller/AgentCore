@@ -136,7 +136,12 @@ def escalation_required(
     escalation_id: str,
     question: str,
     assumption: str,
+    questions: list[dict[str, Any]] | None = None,
 ) -> SSEEvent:
+    """``question`` is the worker's headline ask; ``questions`` is the optional
+    structured-fork list (同 ask_user 的 questions) the card renders as choice/text so
+    the user one-taps a decision instead of free-typing. Journaled, so the structured
+    prompt replays inline on reload."""
     return SSEEvent(
         type=EventType.ESCALATION_REQUIRED,
         payload={
@@ -145,6 +150,7 @@ def escalation_required(
             "agent_id": agent_id,
             "question": question,
             "assumption": assumption,
+            "questions": questions or [],
         },
     )
 
@@ -165,5 +171,61 @@ def escalation_resolved(
             "agent_id": agent_id,
             "status": status,
             "answer": answer,
+        },
+    )
+
+
+def debate_round_decision_required(
+    *,
+    execution_id: str,
+    moderator_run_id: str,
+    decision_id: str,
+    round_no: int,
+    focus: str,
+    summary: str,
+    converged: bool,
+    rationale: str = "",
+) -> SSEEvent:
+    """交互式逐轮辩论：主持人在一轮边界挂起等用户「继续辩 / 加角度 / 够了出结论」。
+
+    ``decision_id`` 是 resolve 端点的交互 id（前端 POST 用户的选择回它）；``converged`` /
+    ``rationale`` 是裁判对本轮的判读（卡片把它作为默认建议高亮）。Transport-only liveliness：
+    NOT journaled——耐久记录是最终 ``debate_result``（用户的选择体现在实际发生的轮次 /
+    stop_reason），重载据其重建，故本卡不进 journal / conformance（与 ``debate_round`` 同辙）。
+    """
+    return SSEEvent(
+        type=EventType.DEBATE_ROUND_DECISION_REQUIRED,
+        payload={
+            "execution_id": execution_id,
+            "moderator_run_id": moderator_run_id,
+            "decision_id": decision_id,
+            "round_no": round_no,
+            "focus": focus,
+            "summary": summary,
+            "converged": converged,
+            "rationale": rationale,
+        },
+    )
+
+
+def debate_round_decision_resolved(
+    *,
+    execution_id: str,
+    moderator_run_id: str,
+    decision_id: str,
+    decision: str,
+    focus: str = "",
+) -> SSEEvent:
+    """交互式逐轮辩论：上条决策的结算。``decision`` ∈ ``continue`` / ``conclude`` / ``timeout``
+    （超时或无活跃用户回落裁判自动收敛）；``focus`` 是用户「加角度」给的下一轮议题（仅 continue
+    且非空时有值）。Transport-only（同 required，不进 journal）。"""
+    return SSEEvent(
+        type=EventType.DEBATE_ROUND_DECISION_RESOLVED,
+        payload={
+            "execution_id": execution_id,
+            "moderator_run_id": moderator_run_id,
+            "decision_id": decision_id,
+            "decision": decision,
+            "focus": focus,
         },
     )

@@ -78,6 +78,36 @@ def _single_agent_tool() -> list[SSEEvent]:
     ]
 
 
+def _single_agent_consult_memory() -> list[SSEEvent]:
+    """单聊：CEO 翻开一条记忆主题笔记 (记忆文件夹化 §六 · consult_memory 渐进披露 可视化)。系统
+    提示词的「记忆主题目录」只列主题名；CEO 判断「部署流程」与当前任务相关 → 调
+    ``consult_memory(name=部署流程)`` 把该主题笔记**全文**拉回（``tool_use_end`` 携 ``display.topic``
+    + ``result`` 正文），据此作答。consult_memory 是 CEO 召回原语、**不在** ORCHESTRATION_TOOLS
+    丢弃集（那只含 delegate/debate），故它照常落一个 ``tool`` 步——三端 process fold + oracle 据
+    ``display.topic`` 渲染成「查阅记忆：<主题>」卡片 + 可展开全文（镜像 consult_skill 的查阅卡）。"""
+    note = (
+        "## 部署流程\n"
+        "- 前端：pnpm dev 起桌面壳\n"
+        "- 服务端：uv run python -m agentcore\n"
+        "- 数据库：本地 Postgres，迁移 alembic upgrade head\n"
+    )
+    return [
+        message_start("m1", conversation_id=_CONV),
+        reasoning_delta("这事和部署有关，先翻一下记忆里的部署流程。"),
+        tool_use_start("tc1", "consult_memory", {"name": "部署流程"}),
+        tool_use_end(
+            "tc1",
+            "consult_memory",
+            success=True,
+            output=note,
+            display={"topic": "部署流程"},
+        ),
+        content_delta("按你记录的部署流程，"),
+        content_delta("先 pnpm dev 起壳，再 uv run 起服务端即可。"),
+        message_end(FinishReason.END_TURN, input_tokens=1400, output_tokens=180, cost=_COST),
+    ]
+
+
 def _single_agent_error() -> list[SSEEvent]:
     return [
         message_start("m1", conversation_id=_CONV),
@@ -477,8 +507,22 @@ def _multi_agent_debate() -> list[SSEEvent]:
         "stop_reason": "converged",
         "narrative_first": False,
         "sides": [
-            {"key": "pro", "name": "支持方", "stance": "支持采用方案 A", "is_subject": False},
-            {"key": "con", "name": "反对方", "stance": "反对采用方案 A", "is_subject": False},
+            # 真·多模型辩论：各方携显式 model（pro=豆包前缀路由 / con=无前缀默认 DeepSeek），
+            # 锚定「正方=豆包 vs 反方=DeepSeek」展示链的跨端对齐（model 随 sides verbatim 折入）。
+            {
+                "key": "pro",
+                "name": "支持方",
+                "stance": "支持采用方案 A",
+                "is_subject": False,
+                "model": "doubao/doubao-seed-2-1-turbo-260628",
+            },
+            {
+                "key": "con",
+                "name": "反对方",
+                "stance": "反对采用方案 A",
+                "is_subject": False,
+                "model": "deepseek-v4-pro",
+            },
         ],
         "rounds": [
             {
@@ -754,6 +798,881 @@ def _multi_agent_roundtable_rounds() -> list[SSEEvent]:
         run_started(r2b, "rt_b2", parent_run_id=r1b, revision=2),
         run_output_delta(r2b, "rt_b2", "监管视角续：可观测性应立法强制。"),
         message_end(FinishReason.CANCELLED, input_tokens=4000, output_tokens=700, cost=_COST),
+    ]
+
+
+def _multi_agent_red_team() -> list[SSEEvent]:
+    """多 Agent：红队审查【收场】(red_team settled)。被审【方案方】(is_subject=true) 承受红队的
+    单向攻击并回应修补，主持人逐轮挖风险、判是否挖尽，收场 debate_result(form="red_team") 承载
+    【风险看板 + 交锋叙事线】双产物：红队成员的 strongest_points = 最尖锐风险、方案方的 = 其抗辩，
+    recommendation = 加固建议。三名红队成员（安全 / 合规 / 运维）携 brief.risk_severities
+    = high/medium/low，验【风险看板】按严重度分级 + 总览计数（高危 1 · 中危 1 · 低危 1）+ 由危到轻
+    排序；其余红队简报骨架（加固建议 / 方案方回应 / 还需厘清）与正反辩论同一套主次（结论先行 +
+    价值之争提为「需你拍板」+ 事实分歧/待解降级），逐轮走风险看板研判。"""
+    cap, mod = "captain1", "redteam_mod1"
+    subj_run = f"{mod}_r1_subject"
+    red1_run = f"{mod}_r1_red1"
+    red2_run = f"{mod}_r1_red2"
+    red3_run = f"{mod}_r1_red3"
+    mod_agents = [
+        {
+            "id": mod,
+            "role": "主持人",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    mod_runs = [
+        {
+            "id": mod,
+            "agent_id": mod,
+            "task": "主持红队审查：压测「自建鉴权服务」方案",
+            "depends_on": [],
+            "parent_run_id": cap,
+        },
+    ]
+    debater_agents = [
+        {
+            "id": "d_subject",
+            "role": "方案方",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "d_red1",
+            "role": "安全红队",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "d_red2",
+            "role": "合规红队",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "d_red3",
+            "role": "运维红队",
+            "model_preference": "fast",
+            "thinking": False,
+            "reasoning_effort": "low",
+        },
+    ]
+    debater_runs = [
+        {
+            "id": subj_run,
+            "agent_id": "d_subject",
+            "task": "为「自建鉴权服务」方案抗辩并修补",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:red_team",
+            "round": 1,
+        },
+        {
+            "id": red1_run,
+            "agent_id": "d_red1",
+            "task": "挖「自建鉴权服务」方案的安全风险",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:red_team",
+            "round": 1,
+        },
+        {
+            "id": red2_run,
+            "agent_id": "d_red2",
+            "task": "审「自建鉴权服务」方案的合规缺口",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:red_team",
+            "round": 1,
+        },
+        {
+            "id": red3_run,
+            "agent_id": "d_red3",
+            "task": "查「自建鉴权服务」方案的运维隐患",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:red_team",
+            "round": 1,
+        },
+    ]
+    debate_payload = {
+        "form": "red_team",
+        "motion": "压测「自建鉴权服务」方案的稳健性",
+        "stop_reason": "red_team_exhausted",
+        "narrative_first": False,
+        # 红队=被审方案方(is_subject) + ≥1 红队；语义名对称同风格（方案方 / 安全红队），不混入模型名。
+        "sides": [
+            {
+                "key": "subject",
+                "name": "方案方",
+                "stance": "自建鉴权可控且省授权成本",
+                "is_subject": True,
+                "model": "",
+            },
+            {
+                "key": "red1",
+                "name": "安全红队",
+                "stance": "自建鉴权的攻击面与凭证安全",
+                "is_subject": False,
+                "model": "",
+            },
+            {
+                "key": "red2",
+                "name": "合规红队",
+                "stance": "自建鉴权的合规与审计缺口",
+                "is_subject": False,
+                "model": "",
+            },
+            {
+                "key": "red3",
+                "name": "运维红队",
+                "stance": "自建鉴权的长期运维负担",
+                "is_subject": False,
+                "model": "",
+            },
+        ],
+        "rounds": [
+            {
+                "round_no": 1,
+                "focus": "凭证存储与会话固定的攻击面",
+                "summary": "红队指出自建鉴权易踩 token 泄漏与会话固定，方案方承认需补固化与轮换。",
+                "verdict": {
+                    "real_clash": True,
+                    "new_arguments": True,
+                    "converged": False,
+                    "stop_reason": "",
+                    "rationale": "红队挖出有效风险，方案方部分采纳，仍有未覆盖项。",
+                },
+                "sides": [
+                    {"key": "subject", "name": "方案方", "run_id": subj_run, "ok": True},
+                    {"key": "red1", "name": "安全红队", "run_id": red1_run, "ok": True},
+                    {"key": "red2", "name": "合规红队", "run_id": red2_run, "ok": True},
+                    {"key": "red3", "name": "运维红队", "run_id": red3_run, "ok": True},
+                ],
+                "clashes": [
+                    {
+                        "from_key": "red1",
+                        "to_key": "subject",
+                        "point": "未做 token 轮换与设备绑定，刷新令牌一旦泄漏即长期可用。",
+                    },
+                    {
+                        "from_key": "red2",
+                        "to_key": "subject",
+                        "point": "缺审计日志留存与访问追溯，过不了等保与合规审查。",
+                    },
+                ],
+            },
+        ],
+        "brief": {
+            "crux": "自建鉴权的攻击面是否可控、加固成本是否低于外采",
+            "strongest_points": {
+                "red1": "刷新令牌缺轮换与设备绑定，泄漏即长期可用，是最尖锐风险。",
+                "red2": "无审计日志留存与访问追溯，过不了等保三级与合规审查。",
+                "red3": "密钥轮换 / 应急吊销全靠人肉，长期运维负担与误操作风险偏高。",
+                "subject": "可引入短时访问令牌 + 轮换刷新令牌，把风险降到与外采相当。",
+            },
+            # 红队风险严重度（驱动前端风险看板分级 + 总览计数）：安全=高危、合规=中危、运维=低危；
+            # 被审方案方(subject)不评级。
+            "risk_severities": {
+                "red1": "high",
+                "red2": "medium",
+                "red3": "low",
+            },
+            "factual_disputes": ["自建 vs 外采的真实合规改造工作量缺乏一致口径"],
+            "value_disputes": ["把鉴权握在自己手里的掌控感 vs 外采省心"],
+            "leaning": "有条件通过：先补 3 项加固再上线",
+            "confidence": "medium",
+            "recommendation": "上线前必须：① 刷新令牌轮换 + 设备绑定 ② 登录限速与异常告警 ③ 第三方渗透测试。",
+            "open_questions": ["密钥轮换的运维归属谁？"],
+        },
+    }
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我发起一场红队审查来压测这个方案。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary="红队审查：压测「自建鉴权服务」方案",
+            agents=mod_agents,
+            runs=mod_runs,
+        ),
+        run_started(mod, mod, parent_run_id=cap),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary="",
+            agents=debater_agents,
+            runs=debater_runs,
+        ),
+        run_started(subj_run, "d_subject", parent_run_id=mod),
+        run_output_delta(subj_run, "d_subject", "方案方：自建鉴权可控、省授权成本。"),
+        run_completed(
+            subj_run,
+            "d_subject",
+            output_summary="方案方抗辩完成",
+            duration_ms=820,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(red1_run, "d_red1", parent_run_id=mod),
+        run_output_delta(red1_run, "d_red1", "安全红队：刷新令牌缺轮换，泄漏即长期可用。"),
+        run_completed(
+            red1_run,
+            "d_red1",
+            output_summary="安全红队挖掘完成",
+            duration_ms=860,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(red2_run, "d_red2", parent_run_id=mod),
+        run_output_delta(red2_run, "d_red2", "合规红队：缺审计日志留存，过不了等保合规。"),
+        run_completed(
+            red2_run,
+            "d_red2",
+            output_summary="合规红队挖掘完成",
+            duration_ms=780,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(red3_run, "d_red3", parent_run_id=mod),
+        run_output_delta(red3_run, "d_red3", "运维红队：密钥轮换全靠人肉，长期负担偏高。"),
+        run_completed(
+            red3_run,
+            "d_red3",
+            output_summary="运维红队挖掘完成",
+            duration_ms=540,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_completed(
+            mod,
+            mod,
+            output_summary="自建鉴权的攻击面是否可控",
+            duration_ms=2100,
+            role="主持人",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        debate_result(execution_id="exec1", moderator_run_id=mod, payload=debate_payload),
+        message_end(FinishReason.END_TURN, input_tokens=3200, output_tokens=560, cost=_COST),
+    ]
+
+
+def _multi_agent_legal_war_room() -> list[SSEEvent]:
+    """多 Agent：法律「答辩状作战室」端到端（hero · 法律垂直场景设计.md §6.3 M3 补盲 fixture）。
+    复用现有事件类型**组合**出法律 hero 的玻璃箱全流程——给它一个常驻离线预览场景 + CI 渲染冒烟门，
+    **不新增事件类型 → fold 不碰**（守协议边界）。流程与 M2 实测形态一致：① CEO
+    `consult_skill(legal_answer_brief)` 翻作战室打法；② `delegate` 起草律师出 `答辩状初稿.md`
+    （worker 内 `file_write`）；③ `debate(form=red_team)` 让**原告红队**单向压测我方答辩
+    （`defense` is_subject vs 程序 / 实体红队），收场 `debate_result` 承「风险看板 + 加固建议 +
+    我方回应」双产物，挖出 3 个攻击点（送达举证 / 质量异议具体性 / 沉默推定）；④ `delegate` 核验
+    律师 `web_search` + 落 `法条核验报告.md`（带**出处** + `[待核验]`）；⑤ 终稿前 `checkpoint`
+    人审闸门**暂停**（status=paused、pendingInteraction=checkpoint），把攻防 / 核验结论摊给律师
+    拍板再收口。核验出处 v0 走核验报告 + worker 工具日志（非 citations 来源卡，来源卡接入属后续
+    打磨），故本向量如实**不发** citations_event、亦不 message_end（停在人审闸门）。"""
+    cap = "captain1"
+    mod = "warroom_mod1"
+    r_draft, w_draft = "r_draft", "w_draft"
+    r_verify, w_verify = "r_verify", "w_verify"
+    subj_run = f"{mod}_r1_defense"
+    redp_run = f"{mod}_r1_redproc"
+    reds_run = f"{mod}_r1_redsubst"
+
+    skill_guidance = (
+        "## 答辩状作战室\n"
+        "1. 解析对方起诉状 + 我方事实 → 逐项答辩（程序抗辩 + 实体抗辩 + 质证 + 法律依据）。\n"
+        "2. delegate 起草，debate(red_team, is_subject=我方答辩) 让原告红队单向压测，再逐点加固。\n"
+        "3. delegate 核验逐条法条 / 时效，未核验不得引用、标 [待核验]；终稿标法域 + 免责 + 人审闸门。\n"
+    )
+    draft_md = (
+        "# 民事答辩状（初稿）\n"
+        "## 程序抗辩\n- 对原告送达与举证提出异议。\n"
+        "## 实体抗辩\n- 质量异议函已发，违约责任不成立。\n"
+        "## 法律依据\n- 《民法典》合同编相关条款（待核验）。\n"
+    )
+    verify_md = (
+        "# 法条核验报告\n"
+        "| 引用 | 现行有效性 | 出处 | 结论 |\n"
+        "|---|---|---|---|\n"
+        "| 违约金超损失 30% 可调减 | 现行有效 | 《民法典合同编通则若干问题的解释》第 65 条 | ✅ 已核验 |\n"
+        "| 质量异议合理期限 | 现行有效 | 《民法典》第 621 条 | ✅ 已核验 |\n"
+        "| 送达推定到达规则 | 待确认条款 | web 摘要不足 | ⚠️ [待核验]（转人工 / 库核） |\n"
+    )
+
+    draft_agents = [
+        {
+            "id": w_draft,
+            "role": "起草律师",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    draft_runs = [{"id": r_draft, "agent_id": w_draft, "task": "起草答辩状初稿", "depends_on": []}]
+    verify_agents = [
+        {
+            "id": w_verify,
+            "role": "核验律师",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    verify_runs = [
+        {"id": r_verify, "agent_id": w_verify, "task": "逐条核验法条与时效", "depends_on": []}
+    ]
+    mod_agents = [
+        {
+            "id": mod,
+            "role": "主持人",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    mod_runs = [
+        {
+            "id": mod,
+            "agent_id": mod,
+            "task": "主持红队审查：原告视角压测我方答辩",
+            "depends_on": [],
+            "parent_run_id": cap,
+        },
+    ]
+    debater_agents = [
+        {
+            "id": "d_defense",
+            "role": "我方答辩",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "d_red_proc",
+            "role": "程序红队",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "d_red_subst",
+            "role": "实体红队",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    debater_runs = [
+        {
+            "id": subj_run,
+            "agent_id": "d_defense",
+            "task": "为我方答辩抗辩并加固",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:red_team",
+            "round": 1,
+        },
+        {
+            "id": redp_run,
+            "agent_id": "d_red_proc",
+            "task": "以原告视角挖程序 / 送达漏洞",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:red_team",
+            "round": 1,
+        },
+        {
+            "id": reds_run,
+            "agent_id": "d_red_subst",
+            "task": "以原告视角挖实体抗辩漏洞",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:red_team",
+            "round": 1,
+        },
+    ]
+    debate_payload = {
+        "form": "red_team",
+        "motion": "以原告视角压测我方《民事答辩状》的稳健性",
+        "stop_reason": "red_team_exhausted",
+        "narrative_first": False,
+        "sides": [
+            {
+                "key": "defense",
+                "name": "我方答辩",
+                "stance": "逐项抗辩成立、无需担责",
+                "is_subject": True,
+                "model": "",
+            },
+            {
+                "key": "red_proc",
+                "name": "程序红队（原告）",
+                "stance": "程序与送达举证存在硬伤",
+                "is_subject": False,
+                "model": "",
+            },
+            {
+                "key": "red_subst",
+                "name": "实体红队（原告）",
+                "stance": "实体抗辩不成立",
+                "is_subject": False,
+                "model": "",
+            },
+        ],
+        "rounds": [
+            {
+                "round_no": 1,
+                "focus": "送达举证 / 质量异议具体性 / 沉默推定 三点攻防",
+                "summary": "原告红队挖出送达签收链缺失、异议函笼统、对部分诉请沉默三点；我方补证据并逐点否认加固。",
+                "verdict": {
+                    "real_clash": True,
+                    "new_arguments": True,
+                    "converged": True,
+                    "stop_reason": "red_team_exhausted",
+                    "rationale": "三点攻击已被逐点回应 / 加固，无新增有效攻击。",
+                },
+                "sides": [
+                    {"key": "defense", "name": "我方答辩", "run_id": subj_run, "ok": True},
+                    {"key": "red_proc", "name": "程序红队（原告）", "run_id": redp_run, "ok": True},
+                    {"key": "red_subst", "name": "实体红队（原告）", "run_id": reds_run, "ok": True},
+                ],
+                "clashes": [
+                    {
+                        "from_key": "red_proc",
+                        "to_key": "defense",
+                        "point": "到达举证缺签收链，送达争议规则对我方不利。",
+                    },
+                    {
+                        "from_key": "red_subst",
+                        "to_key": "defense",
+                        "point": "质量异议函笼统、未指向批次 / 标准；对部分诉请沉默易被推定认可。",
+                    },
+                ],
+            },
+        ],
+        "brief": {
+            "crux": "我方答辩能否扛住原告对『送达举证 + 质量异议具体性 + 沉默推定』三点的攻击",
+            "strongest_points": {
+                "red_proc": "到达举证缺签收链，按送达争议规则我方不利，是最尖锐风险。",
+                "red_subst": "质量异议函表述笼统、未指向具体批次 / 标准，难达异议成立要件；对原告主张沉默处易被推定认可。",
+                "defense": "已补送达回执 + 异议函逐条对应批次，并就沉默项明确否认。",
+            },
+            "risk_severities": {
+                "red_proc": "high",
+                "red_subst": "medium",
+            },
+            "factual_disputes": ["质量异议函是否在合理期限内送达原告口径不一"],
+            "value_disputes": ["以程序抗辩拖延 vs 实体一次性了结的策略取舍"],
+            "leaning": "有条件成立：补强送达证据 + 异议函具体化 + 逐项否认后可扛住",
+            "confidence": "medium",
+            "recommendation": "终稿前必须：① 补送达签收链证据 ② 异议函按批次 / 标准逐条具体化 ③ 对原告每项主张明确否认，杜绝沉默推定。",
+            "open_questions": ["违约金调减的请求权基础按哪条主张？"],
+        },
+    }
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我先翻一下「答辩状作战室」的打法。"),
+        tool_use_start("cs1", "consult_skill", {"name": "legal_answer_brief"}),
+        tool_use_end(
+            "cs1",
+            "consult_skill",
+            success=True,
+            output=skill_guidance,
+            display={
+                "skill_name": "legal_answer_brief",
+                "summary": "答辩状要素结构 + 对方律师作战室编排 + 反幻觉硬约束",
+            },
+        ),
+        content_delta("按作战室打法组队：先起草，再让原告红队压一遍，核验法条，最后请你拍板。"),
+        # ① delegate 起草律师 → 答辩状初稿.md（worker 内 file_write）
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "起草律师"}]}),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="起草答辩状初稿",
+            agents=draft_agents,
+            runs=draft_runs,
+        ),
+        run_started(r_draft, w_draft),
+        run_tool_progress(r_draft, w_draft, "file_write", len(draft_md)),
+        tool_use_start(
+            "fw1", "file_write", {"path": "答辩状初稿.md", "content": draft_md}, run_id=r_draft
+        ),
+        tool_use_end("fw1", "file_write", success=True, output="已写入", run_id=r_draft),
+        run_output_delta(r_draft, w_draft, "答辩状初稿就绪：程序抗辩 + 实体抗辩 + 质证 + 法律依据。"),
+        run_completed(
+            r_draft,
+            w_draft,
+            output_summary="起草完成：答辩状初稿.md",
+            duration_ms=1600,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="起草完成：答辩状初稿.md"),
+        # ② debate(red_team)：原告红队单向压测我方答辩（hero）
+        content_delta("现在让原告红队来压测我方答辩。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary="红队审查：原告视角压测我方《民事答辩状》",
+            agents=mod_agents,
+            runs=mod_runs,
+        ),
+        run_started(mod, mod, parent_run_id=cap),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary="",
+            agents=debater_agents,
+            runs=debater_runs,
+        ),
+        run_started(subj_run, "d_defense", parent_run_id=mod),
+        run_output_delta(
+            subj_run, "d_defense", "我方：已补送达回执、异议函逐条对应批次，并就沉默项明确否认。"
+        ),
+        run_completed(
+            subj_run,
+            "d_defense",
+            output_summary="我方抗辩 + 加固完成",
+            duration_ms=900,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(redp_run, "d_red_proc", parent_run_id=mod),
+        run_output_delta(redp_run, "d_red_proc", "程序红队：到达举证缺签收链，送达争议对我方不利。"),
+        run_completed(
+            redp_run,
+            "d_red_proc",
+            output_summary="程序红队挖掘完成",
+            duration_ms=840,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(reds_run, "d_red_subst", parent_run_id=mod),
+        run_output_delta(
+            reds_run, "d_red_subst", "实体红队：质量异议函笼统、对部分诉请沉默易被推定认可。"
+        ),
+        run_completed(
+            reds_run,
+            "d_red_subst",
+            output_summary="实体红队挖掘完成",
+            duration_ms=860,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_completed(
+            mod,
+            mod,
+            output_summary="原告红队三点攻击已被逐点回应",
+            duration_ms=2200,
+            role="主持人",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        debate_result(execution_id="exec1", moderator_run_id=mod, payload=debate_payload),
+        # ③ delegate 核验律师 → web_search + 法条核验报告.md（出处 + [待核验]）
+        content_delta("再逐条核验法条与时效。"),
+        tool_use_start("dc2", "delegate", {"tasks": [{"role": "核验律师"}]}),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="逐条核验法条 / 时效",
+            agents=verify_agents,
+            runs=verify_runs,
+        ),
+        run_started(r_verify, w_verify),
+        run_tool_progress(r_verify, w_verify, "web_search", 3),
+        tool_use_start(
+            "ws1",
+            "web_search",
+            {"query": "民法典合同编通则解释 违约金 调减"},
+            run_id=r_verify,
+        ),
+        tool_use_end(
+            "ws1",
+            "web_search",
+            success=True,
+            output="命中：合同编通则解释第 65 条；送达规则未取到权威原文。",
+            run_id=r_verify,
+        ),
+        run_tool_progress(r_verify, w_verify, "file_write", len(verify_md)),
+        tool_use_start(
+            "fw2", "file_write", {"path": "法条核验报告.md", "content": verify_md}, run_id=r_verify
+        ),
+        tool_use_end("fw2", "file_write", success=True, output="已写入", run_id=r_verify),
+        run_output_delta(
+            r_verify,
+            w_verify,
+            "核验完成：违约金调减引《合同编通则解释》第 65 条；送达规则标 [待核验]。",
+        ),
+        run_completed(
+            r_verify,
+            w_verify,
+            output_summary="核验完成：法条核验报告.md",
+            duration_ms=2000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end(
+            "dc2", "delegate", success=True, output="核验完成：法条核验报告.md（1 处 [待核验]）"
+        ),
+        # ④ 终稿前人审闸门 → 暂停（status=paused，结论摊给律师拍板再收口）
+        content_delta(
+            "终稿前请你过一下：红队 3 个攻击点已逐点加固，法条已核验，有 1 处待人工确认。"
+        ),
+        checkpoint_required(
+            checkpoint_id="cp1",
+            conversation_id=_CONV,
+            question="是否采纳终稿并提交？（含 1 处 [待核验] 法条）",
+            context="原告红队已挖尽收敛，核验报告与答辩状初稿见工作区；终稿将标注法域 + 免责。",
+        ),
+    ]
+
+
+def _multi_agent_roundtable_settled() -> list[SSEEvent]:
+    """多 Agent：圆桌探讨【收场】(roundtable settled)。3 视角多边碰撞后主持人收场，debate_result
+    (form="roundtable") 承载【观点光谱 + 交锋叙事线】双产物：strongest_points 按 side.key 给各视角
+    核心主张（光谱），leaning=综合观察、recommendation=建议。探讨无单一裁决/赢家。验「观点光谱」英雄
+    区（置顶 glanceable）+ 叙事后简报小结（共同焦点一行 / 需你拍板 / 还需厘清），与正反/红队同一套
+    次级信息主次（去掉旧版等权 DisputeSection，三形态一致）。圆桌辩手无 stance（多方非二元正反）。"""
+    cap, mod = "captain1", "rts_mod1"
+    ra, rb, rc = f"{mod}_r1_a", f"{mod}_r1_b", f"{mod}_r1_c"
+    mod_agents = [
+        {
+            "id": mod,
+            "role": "主持人",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    mod_runs = [
+        {
+            "id": mod,
+            "agent_id": mod,
+            "task": "主持多方圆桌：AI 该如何治理",
+            "depends_on": [],
+            "parent_run_id": cap,
+        },
+    ]
+    debater_agents = [
+        {
+            "id": "rt_a",
+            "role": "技术视角",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "rt_b",
+            "role": "监管视角",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "rt_c",
+            "role": "产业视角",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    debater_runs = [
+        {
+            "id": ra,
+            "agent_id": "rt_a",
+            "task": "从技术视角谈 AI 治理",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:roundtable",
+            "round": 1,
+        },
+        {
+            "id": rb,
+            "agent_id": "rt_b",
+            "task": "从监管视角谈 AI 治理",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:roundtable",
+            "round": 1,
+        },
+        {
+            "id": rc,
+            "agent_id": "rt_c",
+            "task": "从产业视角谈 AI 治理",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "group": "debate:roundtable",
+            "round": 1,
+        },
+    ]
+    debate_payload = {
+        "form": "roundtable",
+        "motion": "AI 该如何治理",
+        "stop_reason": "converged",
+        "narrative_first": False,
+        # 圆桌≥3 视角，语义名对称同风格（技术 / 监管 / 产业视角）；无 is_subject、无 stance。
+        "sides": [
+            {
+                "key": "a",
+                "name": "技术视角",
+                "stance": "风险源于能力外溢，治理应内建可观测与熔断",
+                "is_subject": False,
+                "model": "",
+            },
+            {
+                "key": "b",
+                "name": "监管视角",
+                "stance": "缺的是问责主体，须以立法明确责任归属",
+                "is_subject": False,
+                "model": "",
+            },
+            {
+                "key": "c",
+                "name": "产业视角",
+                "stance": "一刀切立法抬高合规成本，应分级分场景落地",
+                "is_subject": False,
+                "model": "",
+            },
+        ],
+        "rounds": [
+            {
+                "round_no": 1,
+                "focus": "AI 治理的主轴：先管能力还是先管问责",
+                "summary": "技术方归因能力外溢，监管方强调问责缺位，产业方提醒落地成本，三方收敛到分级治理。",
+                "verdict": {
+                    "real_clash": True,
+                    "new_arguments": False,
+                    "converged": True,
+                    "stop_reason": "三方视角已充分铺开并就分级治理形成交集。",
+                    "rationale": "光谱铺满且出现交集，继续无新增视角。",
+                },
+                "sides": [
+                    {"key": "a", "name": "技术视角", "run_id": ra, "ok": True},
+                    {"key": "b", "name": "监管视角", "run_id": rb, "ok": True},
+                    {"key": "c", "name": "产业视角", "run_id": rc, "ok": True},
+                ],
+                "clashes": [
+                    {
+                        "from_key": "b",
+                        "to_key": "a",
+                        "point": "能力外溢说回避了问责主体，技术归因不能替代责任分配。",
+                    },
+                    {
+                        "from_key": "c",
+                        "to_key": "b",
+                        "point": "强问责会抬高合规成本，产业落地承受不起一刀切立法。",
+                    },
+                ],
+            },
+        ],
+        "brief": {
+            "crux": "AI 治理的主轴：先管能力还是先管问责",
+            "strongest_points": {
+                "a": "风险源于能力外溢，治理应内建可观测与熔断。",
+                "b": "缺的是问责主体，须以立法明确责任归属。",
+                "c": "一刀切立法抬高合规成本，应分级分场景落地。",
+            },
+            "factual_disputes": ["现有事故里『能力外溢』与『问责缺位』各占多少缺一致数据"],
+            "value_disputes": ["创新速度优先 vs 风险兜底优先"],
+            "leaning": "三方共识：分级治理 + 可观测先行，问责随之立法",
+            "confidence": "medium",
+            "recommendation": "按能力分级，先强制高风险场景的可观测与熔断，再补问责立法。",
+            "open_questions": ["谁来认定与维护『高风险场景』清单？"],
+        },
+    }
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来组织一场多方圆桌并收场。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary="多方圆桌：AI 该如何治理",
+            agents=mod_agents,
+            runs=mod_runs,
+        ),
+        run_started(mod, mod, parent_run_id=cap),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary="",
+            agents=debater_agents,
+            runs=debater_runs,
+        ),
+        run_started(ra, "rt_a", parent_run_id=mod),
+        run_output_delta(ra, "rt_a", "技术视角：能力外溢是根因，需可观测与熔断。"),
+        run_completed(
+            ra,
+            "rt_a",
+            output_summary="技术视角发言完成",
+            duration_ms=800,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(rb, "rt_b", parent_run_id=mod),
+        run_output_delta(rb, "rt_b", "监管视角：问责缺位才是关键，须立法明确。"),
+        run_completed(
+            rb,
+            "rt_b",
+            output_summary="监管视角发言完成",
+            duration_ms=820,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(rc, "rt_c", parent_run_id=mod),
+        run_output_delta(rc, "rt_c", "产业视角：别忽视落地成本，应分级分场景。"),
+        run_completed(
+            rc,
+            "rt_c",
+            output_summary="产业视角发言完成",
+            duration_ms=810,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_completed(
+            mod,
+            mod,
+            output_summary="AI 治理的主轴：先管能力还是先管问责",
+            duration_ms=2200,
+            role="主持人",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        debate_result(execution_id="exec1", moderator_run_id=mod, payload=debate_payload),
+        message_end(FinishReason.END_TURN, input_tokens=3400, output_tokens=600, cost=_COST),
     ]
 
 
@@ -1566,6 +2485,10 @@ def _multi_agent_captain_context() -> list[SSEEvent]:
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "single_agent_text": ("单聊：思考+正文+总账，end_turn 完成", _single_agent_text),
     "single_agent_tool": ("单聊：思考→工具→正文（process 时间线）", _single_agent_tool),
+    "single_agent_consult_memory": (
+        "单聊：CEO 翻开记忆主题笔记（consult_memory → 查阅记忆卡片 + 全文）",
+        _single_agent_consult_memory,
+    ),
     "single_agent_error": ("单聊：正文中途 error 事件 → failed", _single_agent_error),
     "multi_agent_delegate": ("多 Agent：委派 2 队员，runs 树 + 进度 + 总账", _multi_agent_delegate),
     "approval_paused": ("审批：approval_required 暂停（无 message_end）", _approval_paused),
@@ -1596,6 +2519,19 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_roundtable_rounds": (
         "多 Agent：圆桌逐轮增量（debate_round_started/debate_round）+ 续写 revision + 中途取消",
         _multi_agent_roundtable_rounds,
+    ),
+    "multi_agent_red_team": (
+        "多 Agent：红队审查收场（form=red_team）风险看板 + 加固建议 + 方案方回应双产物",
+        _multi_agent_red_team,
+    ),
+    "multi_agent_legal_war_room": (
+        "法律「答辩状作战室」端到端 hero：consult_skill→delegate 起草→debate(red_team) 原告红队压测"
+        "→delegate 核验(法条核验报告 + [待核验])→人审闸门 checkpoint 暂停",
+        _multi_agent_legal_war_room,
+    ),
+    "multi_agent_roundtable_settled": (
+        "多 Agent：圆桌探讨收场（form=roundtable）观点光谱英雄区 + 叙事后简报小结双产物",
+        _multi_agent_roundtable_settled,
     ),
     "multi_agent_revision": ("多 Agent：定向唤回续写（revision 合成节点）", _multi_agent_revision),
     "multi_agent_plan_revised": (

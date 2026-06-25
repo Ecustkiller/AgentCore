@@ -58,6 +58,13 @@ class AskUserTool:
     message_id: str | None = None
     suspension_saver: SuspensionSaver | None = None
     suspension_deleter: SuspensionDeleter | None = None
+    # The cloud project (= workspace folder) scope, carried so a durable ask_user pause
+    # captures it into the frame — the resumed toolset re-wires consult_memory to the same
+    # project (记忆作用域与画像分层 §5.2). ``None`` for 裸聊 / local. Capture-only (unused live).
+    folder_id: str | None = None
+    # The memory master switch, captured so resume re-wires consult_memory as this turn did
+    # (off ⇒ stays off). Capture-only; defaults True (always-on).
+    memory_enabled: bool = True
 
     @property
     def schema(self) -> ToolSchema:

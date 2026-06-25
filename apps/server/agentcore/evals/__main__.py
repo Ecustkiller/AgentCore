@@ -1,4 +1,4 @@
-"""评估体系 CLI（评测体系重设计 §三/§七）：一条命令跑完整套评测、出报告.
+"""评估体系 CLI（后端架构.md §五）：一条命令跑完整套评测、出报告.
 
 用法::
 
@@ -9,10 +9,12 @@
     python -m agentcore.evals --update-baseline   # 落 baseline（回归门基准）后退出
     python -m agentcore.evals --baseline eval-out/core-baseline.json  # 跑回归门（跌破即非 0）
     python -m agentcore.evals --compare        # 对比评估：团队 vs 单体（成对裁判，诊断）
+    python -m agentcore.evals --calibrate      # 裁判校准：gold-set 算判↔人 kappa（kappa<门 即非 0）
 
 真跑（非 ``--lint-only``）会调真实 DeepSeek，需 ``EVAL_DEEPSEEK_API_KEY``。L1 绝对分裁判默认
 固定 Pro 档（Pro 评 Flash，压同家族自偏好），可经 ``EVAL_JUDGE_MODEL`` 覆盖模型。
-退出码：全过/未回归=0；有用例未过或跌破 baseline=1；用例配置/加载错误=2——便于挂 CI。
+退出码：全过/未回归/裁判可信=0；用例未过、跌破 baseline 或 kappa<门=1；
+配置/加载错误=2——便于挂 CI。
 """
 
 from __future__ import annotations
@@ -24,6 +26,12 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from agentcore.evals.calibration import (
+    calibrate,
+    calibration_to_dict,
+    format_calibration_report,
+    load_gold_set,
+)
 from agentcore.evals.comparison import (
     build_default_pairwise_judge,
     comparison_report_to_dict,
@@ -31,7 +39,7 @@ from agentcore.evals.comparison import (
     load_comparison_cases,
     run_comparison_suite,
 )
-from agentcore.evals.judge import build_default_judge
+from agentcore.evals.judge import build_default_judge, build_default_milestone_judge
 from agentcore.evals.report import baseline_regression, format_report, report_to_dict
 from agentcore.evals.routing import (
     format_routing_report,
@@ -48,6 +56,9 @@ from agentcore.evals.types import EvalConfigError
 
 # baseline 默认落盘到 apps/server/eval-out/（绝对路径，与 CLI 的 cwd 无关）。
 _DEFAULT_EVAL_OUT = Path(__file__).resolve().parents[2] / "eval-out"
+
+# gold-set 默认读包内 evals/cases/gold/labels.json（人工标注数据，随用例同放）。
+_DEFAULT_GOLD_SET = Path(__file__).resolve().parent / "cases" / "gold" / "labels.json"
 
 
 def _default_baseline_path(suite: str) -> Path:
@@ -110,6 +121,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--style",
         action="store_true",
         help="输出风格违规：跑套件后对回复跑 anti-slop linter，出违规率（先可观测，方向④）",
+    )
+    p.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="裁判校准：人工 gold-set 过生产裁判，算判↔人 kappa（kappa>=门 才准上 baseline 门）",
+    )
+    p.add_argument(
+        "--gold-set",
+        default=None,
+        help="gold-set JSON 路径（缺省 evals/cases/gold/labels.json）；配 --calibrate 用",
+    )
+    p.add_argument(
+        "--kappa-gate",
+        type=float,
+        default=0.6,
+        help="kappa 门：Cohen's kappa(判↔人 pass/fail) >= 该值 才算裁判可信（默认 0.6）",
     )
     return p
 
@@ -202,7 +229,37 @@ async def _run_style(args: argparse.Namespace) -> int:
     return 0  # 风格为软门禁（信息性），不以违规率卡退出码
 
 
+async def _run_calibration(args: argparse.Namespace) -> int:
+    """裁判校准分支：gold-set 过生产裁判 → 判↔人一致度 → kappa 门判可信（重设计 §五）。
+
+    退出码：``kappa>=门``（裁判可信）=0；低于门=1（别拿这把没校准的尺子去卡 baseline 门）；
+    gold-set 结构错误经 :class:`EvalConfigError` → 2。``--lint-only`` 零 LLM 只校验 gold-set 结构。
+    """
+    path = Path(args.gold_set) if args.gold_set else _DEFAULT_GOLD_SET
+    labels = load_gold_set(path)
+
+    if args.lint_only:
+        print(f"[lint] OK — {len(labels)} 条 gold-set 标注结构合法（{path}）")
+        return 0
+
+    judge = build_default_judge(mode=args.judge_mode)
+    result = await calibrate(judge, labels, kappa_gate=args.kappa_gate)
+    print(format_calibration_report(result))
+
+    if args.out:
+        out = Path(args.out)
+        out.write_text(
+            json.dumps(calibration_to_dict(result), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\n[report] 已写出 JSON -> {out}")
+
+    return 0 if result.trustworthy else 1
+
+
 async def _run(args: argparse.Namespace) -> int:
+    if args.calibrate:
+        return await _run_calibration(args)
     if args.compare:
         return await _run_comparison(args)
     if args.routing:
@@ -218,9 +275,13 @@ async def _run(args: argparse.Namespace) -> int:
         print(f"[lint] OK — {len(cases)} 个用例结构合法（suite={args.suite}）")
         return 0
 
-    # L1 主轴：layer>=2 时构造绝对分裁判（默认 Pro 评 Flash），按 case.rubric 给 1–5 分计入判定。
+    # L1 主轴：layer>=2 时构造两类裁判（默认 Pro 评 Flash）——绝对分裁判按 case.rubric 给 1–5 分、
+    # milestone 裁判按 case.milestones 判交付物覆盖；用例声明哪个就跑哪个，均计入判定。
     judge = build_default_judge(mode=args.judge_mode) if args.layer >= 2 else None
-    report = await run_suite(cases, judge=judge, layer=args.layer)
+    milestone_judge = (
+        build_default_milestone_judge(mode=args.judge_mode) if args.layer >= 2 else None
+    )
+    report = await run_suite(cases, judge=judge, milestone_judge=milestone_judge, layer=args.layer)
     print(format_report(report))
 
     if args.out:

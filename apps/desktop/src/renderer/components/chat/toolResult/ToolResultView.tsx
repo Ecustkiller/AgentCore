@@ -1,11 +1,12 @@
 import { cleanSourceTitle } from "@/lib/citations";
 import type {
   CodeExecDisplay,
+  MemoryConsultDisplay,
   SkillConsultDisplay,
   ToolDisplay,
   WebSearchDisplay,
 } from "@/types/events";
-import { BookOpen, FileCode2, FileText, Terminal } from "lucide-react";
+import { BookOpen, Brain, FileCode2, FileText, Terminal } from "lucide-react";
 import { useMemo } from "react";
 import { Favicon } from "../Favicon";
 import { type DiffLine, lineDiff } from "./diff";
@@ -41,6 +42,10 @@ function isCodeExecDisplay(d: unknown): d is CodeExecDisplay {
 
 function isSkillConsultDisplay(d: unknown): d is SkillConsultDisplay {
   return !!d && typeof (d as { skill_name?: unknown }).skill_name === "string";
+}
+
+function isMemoryConsultDisplay(d: unknown): d is MemoryConsultDisplay {
+  return !!d && typeof (d as { topic?: unknown }).topic === "string";
 }
 
 /** Whether a tool has anything to expand — a rich display, an editable diff, or a
@@ -86,6 +91,9 @@ export function toolResultPeek(d: ToolResultData): string {
   }
   if (isSkillConsultDisplay(d.display)) {
     return clampLine(d.display.summary || "已查阅能力指引");
+  }
+  if (isMemoryConsultDisplay(d.display)) {
+    return clampLine(d.display.topic || "已查阅记忆");
   }
   if (isFileEdit(d)) {
     const path = asString(d.args.path);
@@ -211,6 +219,35 @@ function SkillConsultResult({
           {display.summary}
         </div>
       )}
+      {result.trim() && (
+        <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed text-foreground/90">
+          {result}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/** Pulled memory-topic card (记忆文件夹化 §六 · 渐进披露 可视化): the topic name as a
+ * header, with the full note body the CEO consulted shown verbatim below — so the user
+ * sees exactly which memory the AI reached for and what it read. Mirrors
+ * {@link SkillConsultResult}, the sibling on-demand consult. */
+function MemoryConsultResult({
+  display,
+  result,
+}: {
+  display: MemoryConsultDisplay;
+  result: string;
+}) {
+  return (
+    <div className="mt-1 overflow-hidden rounded-lg border border-border">
+      <div className="flex items-center gap-2 border-border/60 border-b bg-muted/40 px-2.5 py-1 text-xs">
+        <Brain size={12} className="shrink-0 text-muted-foreground" />
+        <span className="text-muted-foreground">查阅记忆：</span>
+        <span className="truncate font-mono text-foreground">
+          {display.topic}
+        </span>
+      </div>
       {result.trim() && (
         <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed text-foreground/90">
           {result}
@@ -368,6 +405,11 @@ export function ToolResultView({ data }: { data: ToolResultData }) {
   if (isSkillConsultDisplay(data.display)) {
     return (
       <SkillConsultResult display={data.display} result={data.result ?? ""} />
+    );
+  }
+  if (isMemoryConsultDisplay(data.display)) {
+    return (
+      <MemoryConsultResult display={data.display} result={data.result ?? ""} />
     );
   }
   if (isFileEdit(data)) {

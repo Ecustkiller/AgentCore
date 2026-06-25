@@ -141,6 +141,19 @@ describe("togglePanel", () => {
   });
 });
 
+describe("openPanel", () => {
+  it("reveals the panel without changing the active tab", () => {
+    // The 指挥台 auto-surface (前端UX设计.md §6.2) opens the dock on a new decision but
+    // must not yank the user off a run-detail tab they're reading (子决策 A).
+    panel().openTab(runDetail("run-1"));
+    panel().togglePanel(); // close it, keeping run-1 active
+    expect(panel().open).toBe(false);
+    panel().openPanel();
+    expect(panel().open).toBe(true);
+    expect(panel().activeTabId).toBe(tabId("run-1"));
+  });
+});
+
 describe("showWorkspace", () => {
   it("reveals the panel on the 工作区 home tab", () => {
     panel().showWorkspace();

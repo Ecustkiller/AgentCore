@@ -124,6 +124,16 @@ class TurnSuspension:
     # workers the SAME opening as the pre-pause ones.
     base_system_prompt: str
     user_message: str
+    # The cloud project (= workspace folder) scope this turn ran in, captured so the resumed
+    # CEO toolset re-wires consult_memory to the SAME project scope (project 主题 first, then
+    # global) instead of degrading to global-only — 记忆作用域与画像分层 §5.2. ``None`` for a
+    # 裸聊 / local turn with no cloud folder. Serialized into the frame (resume control state).
+    folder_id: str | None = None
+    # The long-term-memory master switch at pause: captured so a resume re-wires the toolset
+    # the SAME way the original turn did — memory OFF ⇒ consult_memory stays UNwired on resume
+    # too (privacy off-ramp parity, 记忆作用域与画像分层). Defaults True (legacy frames + the
+    # always-on default) so an absent value never silently strips memory from a resume.
+    memory_enabled: bool = True
     # The CEO window at pause is a PROJECTION of the turn journal, NOT a stored blob
     # (执行级事件溯源 Phase 2 ⑤): resume folds ``journal_entries`` + ``history`` via
     # ``window_from_journal``. Kept as an in-memory carrier (the suspending face captures it
@@ -165,6 +175,8 @@ class TurnSuspension:
             "tool_call_id": self.tool_call_id,
             "base_system_prompt": self.base_system_prompt,
             "user_message": self.user_message,
+            "folder_id": self.folder_id,
+            "memory_enabled": self.memory_enabled,
             # NOTE: ``transcript`` / ``history`` / ``journal`` / ``journal_entries`` are
             # deliberately NOT serialized into the frame (执行级事件溯源 Phase 2 ⑤): the CEO
             # window is rebuilt by ``window_from_journal`` from the turn_journal facts (§18.3)
@@ -190,6 +202,10 @@ class TurnSuspension:
             "tool_call_id": data.get("tool_call_id") or "",
             "base_system_prompt": data.get("base_system_prompt", "") or "",
             "user_message": data.get("user_message", "") or "",
+            "folder_id": data.get("folder_id"),
+            # Legacy frames (pre-field) lack the key → default True so a resume never silently
+            # strips memory that the original turn had on.
+            "memory_enabled": data.get("memory_enabled", True),
             # NOTE: ``transcript`` / ``history`` / ``journal`` / ``journal_entries`` are NOT
             # in the frame (Phase 2 ⑤) — the CEO window is rebuilt from the turn_journal facts
             # on claim (``window_from_journal``), so they default empty here. The Sidecar's

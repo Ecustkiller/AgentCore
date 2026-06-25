@@ -20,6 +20,15 @@ LENGTH_HINT = (
     "聚焦你最有力的 2–3 个论点、约 400–600 字讲透，宁深勿长——不堆砌、不面面俱到。"
 )
 
+# 「快速对碰」(thorough=False，主持人单轮即收) 的辩手附加约束。观测：即便是 trivial 命题，快速辩
+# 论的辩手仍各刷十余次 web_search、跑近十轮 ReAct（自停于内容、远未触及安全上限），墙钟与成本几乎
+# 全耗在这。轮数上限不是有效杠杆（辩手自停在上限内），真正的杠杆是【告诉辩手这是轻量交锋】——直接
+# 压「检索次数」与「论点广度」。仅快速模式注入；认真辩透（thorough=True）不加，保留深挖取证。
+QUICK_DEBATER_HINT = (
+    "【快速对碰】这是一次轻量单轮交锋：以你的常识与推理直接立论，能不检索就不检索"
+    "（至多 1 次必要取证），只把你【最有力的 1 个论点】讲透即可——不深挖、不多角度铺开。"
+)
+
 FORM_LABELS = {
     DebateForm.DEBATE: "正反辩论",
     DebateForm.RED_TEAM: "红队挑刺",
@@ -65,7 +74,14 @@ DEBATE_PARAMETERS = {
                     },
                     "name": {
                         "type": "string",
-                        "description": "展示名（正方 / 红队 / 经济学视角）。",
+                        "description": (
+                            "展示名：用简短的【立场 / 视角】名，且各方【对称、同一风格】"
+                            "（甜党 / 咸党、正方 / 反方、经济学视角 / 工程视角）。"
+                            "不要一方用立场名、另一方却用模型名（如「原生DeepSeek」）——"
+                            "模型是下方单独的 model 字段（界面另有徽章标注），"
+                            "别把模型名塞进展示名。例外：辩论本身就是「比谁更聪明」、"
+                            "各方即以模型为身份时，两方都统一用模型名。"
+                        ),
                     },
                     "stance": {
                         "type": "string",
@@ -77,6 +93,15 @@ DEBATE_PARAMETERS = {
                             "仅红队形态：标记被审的【方案方】（承受单向攻击并回应修补）。"
                         ),
                     },
+                    "model": {
+                        "type": "string",
+                        "description": (
+                            "（可选）指定该方辩手使用的模型，实现【真·多模型辩论】——让各方真正由不同模型驱动"
+                            "（如对比「哪个模型更聪明」）。用 `provider/model` 前缀路由到不同厂商，"
+                            "如 `doubao/doubao-seed-2-1-turbo-260628`（火山方舟）。"
+                            "留空=用平台默认模型。仅在用户明确想让各方由不同模型出战时设置；普通辩论留空即可。"
+                        ),
+                    },
                 },
                 "required": ["key", "name", "stance"],
             },
@@ -84,8 +109,18 @@ DEBATE_PARAMETERS = {
         "thorough": {
             "type": "boolean",
             "description": (
-                "是否认真辩透（默认 true，最小 3 轮）；false=快速单轮对碰。"
-                "圆桌恒多轮（默认最小 2 轮）。"
+                "是否认真辩透（默认 true）：true=主持人逐轮自判收敛、挖尽实质分歧"
+                "（安全上限 5 轮、圆桌 4 轮，收敛永远可早于上限发生）；false=快速单轮"
+                "对碰、一次交锋即收。轮数与收敛全由主持人自调，你和用户都不设轮数。"
+            ),
+        },
+        "interactive": {
+            "type": "boolean",
+            "description": (
+                "是否逐轮请用户掌舵（默认 false=主持人自判收敛、全程自动）。true=每轮辩完暂停，"
+                "让用户在「继续辩 / 加角度（给下一轮议题）/ 够了出结论」间抉择。仅当用户明确想"
+                "亲自把控辩论深度 / 走向时才开；用户没要就别开（增加来回、打断自动流）。无活跃"
+                "用户或用户超时不应答则自动回落到主持人自判收敛。"
             ),
         },
     },
@@ -123,8 +158,17 @@ def parse_sides(raw: Any) -> tuple[list[DebateSide], str]:
         if key in seen:
             return [], f"sides 的 key 重复：`{key}`（每个参与方需唯一 key）。"
         seen.add(key)
+        # model（可选）：真·多模型辩手的显式覆写，宽松解析（仅收非空字符串），经 debater_task →
+        # RunSpec.model → 执行器 → 路由器按 provider/model 前缀分发。留空=平台默认。
+        model = str(item.get("model") or "").strip()
         sides.append(
-            DebateSide(key=key, name=name, stance=stance, is_subject=bool(item.get("is_subject")))
+            DebateSide(
+                key=key,
+                name=name,
+                stance=stance,
+                is_subject=bool(item.get("is_subject")),
+                model=model,
+            )
         )
     if len(sides) < 2:
         return [], "debate 至少需要 2 个有效参与方（每个含非空 key/name/stance）。"

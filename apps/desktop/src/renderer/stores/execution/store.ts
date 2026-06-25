@@ -4,10 +4,19 @@ import type {
   RunPlanPayload,
 } from "@/types/events";
 import { create } from "zustand";
-import { upsertDebateRound } from "./debate";
+import {
+  type DebateDecisionUpdate,
+  foldDebateDecision,
+  upsertDebateRound,
+} from "./debate";
 import { type RunFrame, frameFromEvent } from "./frames";
 import { mergePlanInto, planFromRunPlan } from "./plan";
-import type { ExecutionJournal, ExecutionPlan, ExecutionStatus } from "./types";
+import type {
+  DebateRoundDecision,
+  ExecutionJournal,
+  ExecutionPlan,
+  ExecutionStatus,
+} from "./types";
 
 /**
  * The execution state of a single assistant message's turn — plan, frame
@@ -29,6 +38,10 @@ export interface ExecutionRuntime {
    * 折叠累积于此，{@link projectExecution} 透传到 {@link Execution.debateRounds}。`[]` =
    * 非辩论/无逐轮事件（含重载，逐轮事件 transport-only 不进 journal）。 */
   debateRounds: DebateNarrativeRound[];
+  /** 交互式逐轮辩论决策卡（`debate_round_decision_*` —— 回合级单事件，非 frame）：折叠累积于
+   * 此，{@link projectExecution} 透传到 {@link Execution.debateDecisions}。`[]` = 非交互辩论 /
+   * 无决策事件（含重载，事件 transport-only 不进 journal）。 */
+  debateDecisions: DebateRoundDecision[];
 }
 
 /**
@@ -61,6 +74,14 @@ interface ExecutionState {
    * upsertDebateRound}; a no-plan slot ignores it. Drives the进行中 per-round overlay
    * before {@link recordDebateResult}'s 收场 product lands. */
   recordDebateRound: (round: DebateNarrativeRound, messageId: string) => void;
+  /** Fold one 交互式逐轮决策 update (`debate_round_decision_required` → append `pending`;
+   * `..._resolved` → settle by id) into the slot's {@link ExecutionRuntime.debateDecisions}
+   * via {@link foldDebateDecision}; a no-plan slot ignores it. Drives the round-boundary
+   * 决策卡（opt-in, §逐轮交互）. */
+  recordDebateDecision: (
+    update: DebateDecisionUpdate,
+    messageId: string,
+  ) => void;
   setStatus: (status: ExecutionStatus, messageId: string) => void;
   setPlayhead: (index: number | null, messageId: string) => void;
   goLive: (messageId: string) => void;
@@ -81,6 +102,7 @@ const EMPTY_EXEC: ExecutionRuntime = {
   status: "planning",
   debate: null,
   debateRounds: [],
+  debateDecisions: [],
 };
 
 /** Map a persisted turn's `finish_reason` to the terminal execution status the
@@ -128,6 +150,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         status: "running",
         debate: null,
         debateRounds: [],
+        debateDecisions: [],
       })),
 
     ingestPlan: (plan, messageId) => {
@@ -162,6 +185,15 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
       patchExec(messageId, (cur) =>
         cur.plan
           ? { debateRounds: upsertDebateRound(cur.debateRounds, round) }
+          : null,
+      ),
+
+    recordDebateDecision: (update, messageId) =>
+      patchExec(messageId, (cur) =>
+        cur.plan
+          ? {
+              debateDecisions: foldDebateDecision(cur.debateDecisions, update),
+            }
           : null,
       ),
 
@@ -204,6 +236,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               debate,
               // 逐轮事件 transport-only（不进 journal）：重载无之，全量叙事线在 debate 里。
               debateRounds: [],
+              // 交互式逐轮决策卡同为 transport-only：重载恒空（决策已体现在收场叙事 / 轮次）。
+              debateDecisions: [],
             },
           },
         };

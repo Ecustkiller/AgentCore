@@ -6,6 +6,8 @@ import {
 } from "@/stores/execution";
 import type {
   DebateResultPayload,
+  DebateRoundDecisionRequiredPayload,
+  DebateRoundDecisionResolvedPayload,
   DebateRoundPayload,
   DebateRoundStartedPayload,
   RunContextPayload,
@@ -154,6 +156,40 @@ export function handleExecutionEvent(
             sides: p.sides,
             clashes: p.clashes,
           },
+          mid,
+        );
+      }
+      return true;
+    }
+    // 交互式逐轮辩论 (opt-in, §逐轮交互): the Moderator paused at a round boundary for the user
+    // to steer (continue / 加角度 / conclude). Append a `pending` decision card; its resolved
+    // twin settles it. Transport-only (not journaled) — a desktop-live card, like debate_round.
+    case "debate_round_decision_required": {
+      const mid = execMessageId(conversationId);
+      if (mid) {
+        const p = event.payload as DebateRoundDecisionRequiredPayload;
+        useExecutionStore.getState().recordDebateDecision(
+          {
+            kind: "required",
+            id: p.decision_id,
+            moderatorRunId: p.moderator_run_id,
+            roundNo: p.round_no,
+            focus: p.focus,
+            summary: p.summary,
+            converged: p.converged,
+            rationale: p.rationale,
+          },
+          mid,
+        );
+      }
+      return true;
+    }
+    case "debate_round_decision_resolved": {
+      const mid = execMessageId(conversationId);
+      if (mid) {
+        const p = event.payload as DebateRoundDecisionResolvedPayload;
+        useExecutionStore.getState().recordDebateDecision(
+          { kind: "resolved", id: p.decision_id, decision: p.decision, focus: p.focus },
           mid,
         );
       }

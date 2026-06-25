@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,8 +9,7 @@ from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.llm.config import ModelProfile
-from agentcore.llm.deepseek import DeepSeekProvider
-from agentcore.llm.protocol import LLMMessage, TokenUsage
+from agentcore.llm.protocol import LLMMessage
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.facts import NoteFact, record_turn_fact
 from agentcore.runtime.loop_controller import (
@@ -21,7 +19,8 @@ from agentcore.runtime.loop_controller import (
 )
 from agentcore.tools.registry import ToolRegistry
 
-from .finalize import force_finalize
+from .directive import Continue, Finalize, LoopDirective, Return, SwitchModel
+from .outcome import RoundOutcome
 
 logger = get_logger(__name__)
 
@@ -120,42 +119,62 @@ def apply_circuit_breaker(
     return CircuitBreakerOutcome(message=breaker_message, refresh_tool_defs=refresh)
 
 
-@dataclass(frozen=True)
-class LoopExit:
-    """Early return from the ReAct loop."""
+def decide_llm_failure(
+    *,
+    profile: ModelProfile,
+    active_model: str | None,
+    final_content: str,
+) -> LoopDirective:
+    """Pick the directive for a round whose LLM call hard-failed (non-raising path).
 
-    content: str
-    reasoning: str
-    usage: TokenUsage
-    rounds: int
-    finish_override: FinishReason | None = None
+    The provider already exhausted its own network retries (429/5xx backoff) before
+    the exception escaped, so retrying the SAME model is pointless. Escalate to the
+    profile's fallback model once — a different model may be healthy — sharing the
+    one-switch budget with the empty-response ladder via the ``active_model`` gate.
+    When no fallback is available (unconfigured, disabled, or already in use), end the
+    turn on an honest terminal reason: ``ERROR`` when nothing was produced, ``DEGRADED``
+    when partial content already streamed (don't discard a partial answer).
+    """
+    fallback_model = profile.fallback_model
+    fallback_available = (
+        settings.engine_fallback_enabled
+        and fallback_model is not None
+        and fallback_model != (active_model or profile.model)
+    )
+    if fallback_available:
+        assert fallback_model is not None  # fallback_available ⇒ a model exists
+        logger.warning("engine.fallback_model_on_error", fallback_model=fallback_model)
+        return SwitchModel(model=fallback_model)
+
+    reason = FinishReason.DEGRADED if final_content else FinishReason.ERROR
+    logger.warning(
+        "engine.llm_failed_terminal", reason=reason.value, has_content=bool(final_content)
+    )
+    return Return(finish_reason=reason)
 
 
-async def govern_after_tools(
+def govern_after_tools(
+    outcome: RoundOutcome,
     controller: LoopController,
     *,
     messages: list[LLMMessage],
-    llm: DeepSeekProvider,
-    profile: ModelProfile,
-    emit_content: Callable[[str], None],
-    emit_reasoning: Callable[[str], None],
-    final_content: str,
-    final_reasoning: str,
-    total_usage: TokenUsage,
     round_idx: int,
     run_id: str,
     breaker_message: str | None,
-    attempts: list[Any],
-    round_tool_calls: list[Any],
-    round_content: str,
-    finish_override_sink: list[FinishReason] | None,
-) -> LoopExit | None:
-    """Run post-tool convergence governance; return LoopExit when the loop should stop."""
-    round_all_failed = bool(attempts) and all(not a.success for a in attempts)
+) -> LoopDirective:
+    """Run post-tool convergence governance and return the next directive.
+
+    Steers that keep the loop going (a stuck-loop nudge, a periodic reflection)
+    are injected here as side effects on ``messages`` and resolve to ``Continue``;
+    a hard stop resolves to ``Finalize`` (the caller forces one tool-free round).
+    ``UNPRODUCTIVE`` is stamped via the Finalize directive's ``finish_reason``.
+    Convergence and reflection are suppressed when the circuit breaker already
+    steered this round (``breaker_message is not None``) so steers don't stack.
+    """
     controller.note_round_productivity(
-        had_tool_calls=bool(round_tool_calls),
-        all_failed=round_all_failed,
-        had_content=bool(round_content),
+        had_tool_calls=outcome.has_tool_calls,
+        all_failed=outcome.all_tools_failed,
+        had_content=bool(outcome.content),
     )
 
     signal = controller.detect()
@@ -173,7 +192,7 @@ async def govern_after_tools(
         record_turn_fact(
             NoteFact(role="user", content=reflection, reason="nudge", run_id=run_id).to_fact()
         )
-        return None
+        return Continue()
 
     if signal is not None and action is Intervention.FINALIZE:
         logger.warning(
@@ -183,39 +202,13 @@ async def govern_after_tools(
             count=signal.count,
             round=round_idx,
         )
-        content, reasoning, usage, rounds = await force_finalize(
-            messages=messages,
-            llm=llm,
-            profile=profile,
-            emit_content=emit_content,
-            emit_reasoning=emit_reasoning,
-            final_content=final_content,
-            final_reasoning=final_reasoning,
-            total_usage=total_usage,
-            rounds=round_idx + 1,
-            reason=signal.reason.value,
-            run_id=run_id,
-        )
-        return LoopExit(content, reasoning, usage, rounds)
+        return Finalize(reason=signal.reason.value)
 
     if controller.unproductive_early_stop():
-        logger.warning("engine.unproductive_stop", round=round_idx, attempts=len(attempts))
-        if finish_override_sink is not None:
-            finish_override_sink.append(FinishReason.UNPRODUCTIVE)
-        content, reasoning, usage, rounds = await force_finalize(
-            messages=messages,
-            llm=llm,
-            profile=profile,
-            emit_content=emit_content,
-            emit_reasoning=emit_reasoning,
-            final_content=final_content,
-            final_reasoning=final_reasoning,
-            total_usage=total_usage,
-            rounds=round_idx + 1,
-            reason="unproductive",
-            run_id=run_id,
+        logger.warning(
+            "engine.unproductive_stop", round=round_idx, attempts=len(outcome.attempts)
         )
-        return LoopExit(content, reasoning, usage, rounds, FinishReason.UNPRODUCTIVE)
+        return Finalize(reason="unproductive", finish_reason=FinishReason.UNPRODUCTIVE)
 
     if breaker_message is None and controller.convergence_action() is Intervention.FINALIZE:
         logger.warning(
@@ -224,20 +217,7 @@ async def govern_after_tools(
             investigation_rounds=controller.investigation_rounds,
             investigation_calls=controller.investigation_calls,
         )
-        content, reasoning, usage, rounds = await force_finalize(
-            messages=messages,
-            llm=llm,
-            profile=profile,
-            emit_content=emit_content,
-            emit_reasoning=emit_reasoning,
-            final_content=final_content,
-            final_reasoning=final_reasoning,
-            total_usage=total_usage,
-            rounds=round_idx + 1,
-            reason="convergence",
-            run_id=run_id,
-        )
-        return LoopExit(content, reasoning, usage, rounds)
+        return Finalize(reason="convergence")
 
     if breaker_message is None and controller.reflection_due(round_idx):
         review = progress_review_prompt(round_idx + 1)
@@ -247,4 +227,4 @@ async def govern_after_tools(
             NoteFact(role="user", content=review, reason="reflection", run_id=run_id).to_fact()
         )
 
-    return None
+    return Continue()

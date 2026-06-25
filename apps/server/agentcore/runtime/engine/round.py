@@ -13,17 +13,14 @@ from agentcore.core.logging import get_logger
 from agentcore.llm.config import ModelProfile, build_request
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.protocol import LLMMessage, TokenUsage
-from agentcore.runtime.events import (
-    EventSink,
-    FinishReason,
-    content_reset,
-    error_event,
-)
+from agentcore.runtime.events import FinishReason
 from agentcore.runtime.facts import LlmCallFact, NoteFact, RoundBoundaryFact, record_turn_fact
 from agentcore.runtime.loop_controller import Intervention, LoopController
 from agentcore.runtime.verify import finish_guard, format_guard_steer
 
-from .segments import join_segments, tool_calls_to_dicts
+from .directive import Continue, LoopDirective, Return, Rework, SwitchModel
+from .outcome import RoundOutcome
+from .segments import tool_calls_to_dicts
 from .stream import stream_llm_round
 from .tool_clear import project_cleared_window
 
@@ -82,9 +79,16 @@ class LlmRoundOutput:
 
 @dataclass(frozen=True)
 class LlmRoundFailure:
-    """LLM call failed; caller should return accumulated state."""
+    """LLM call failed on the non-raising path.
 
-    rounds: int
+    Carries the ``(error_code, error_message)`` an SSE ``error`` event would show,
+    but does NOT emit it: the loop defers surfacing the error until the engine-level
+    fallback ladder is exhausted, so a successful fallback-model retry shows the user
+    no error. The ``raise_on_error`` (worker) path re-raises instead of returning this.
+    """
+
+    error_code: str
+    error_message: str
 
 
 async def run_llm_round(
@@ -101,7 +105,6 @@ async def run_llm_round(
     round_idx: int,
     run_id: str,
     raise_on_error: bool,
-    sink: EventSink,
 ) -> LlmRoundOutput | LlmRoundFailure:
     """Stream one LLM round; record facts and round_end log on success."""
     request_window = build_request_window(messages, investigation_tools, round_idx)
@@ -125,8 +128,7 @@ async def run_llm_round(
             fallback_code=ErrorCode.LLM_ERROR,
             fallback_message="出了点问题，请稍后重试。",
         )
-        sink.emit(error_event(code, message))
-        return LlmRoundFailure(rounds=round_idx + 1)
+        return LlmRoundFailure(error_code=code, error_message=message)
 
     record_turn_fact(
         LlmCallFact(
@@ -158,36 +160,34 @@ async def run_llm_round(
     )
 
 
-@dataclass(frozen=True)
-class NoToolRoundAction:
-    """What to do after a round with no tool calls."""
-
-    kind: str  # "finish" | "rework" | "fallback" | "degraded" | "retry"
-    active_model: str | None = None
-
-
 def decide_no_tool_round(
+    outcome: RoundOutcome,
     *,
-    round_content: str,
     final_content: str,
-    content_before_round: str,
     controller: LoopController,
     profile: ModelProfile,
     active_model: str | None,
     annotate_citations: bool,
     citation_sink: list[dict[str, Any]] | None,
     finish_guard_reworks: int,
-) -> NoToolRoundAction:
-    """Classify a no-tool-call round: finish, finish_guard rework, or empty-response ladder."""
-    if round_content:
-        reworks = (
-            finish_guard(final_content, citation_count=len(citation_sink or []))
-            if annotate_citations
-            else []
+) -> LoopDirective:
+    """Pick the directive for a round with no tool calls.
+
+    A round that produced text either finishes cleanly (``Return``) or, if
+    finish_guard rejects it and reworks remain, is reworked (``Rework``). An empty
+    round walks the convergence controller's degraded ladder: switch to the
+    fallback model (``SwitchModel``), finish degraded (``Return`` + DEGRADED), or
+    retry once more (``Continue``).
+    """
+    if outcome.content:
+        reworks = finish_guard(
+            final_content,
+            citation_count=len(citation_sink or []),
+            check_citations=annotate_citations,
         )
         if reworks and finish_guard_reworks < settings.engine_finish_guard_max_reworks:
-            return NoToolRoundAction(kind="rework")
-        return NoToolRoundAction(kind="finish")
+            return Rework()
+        return Return()
 
     fallback_model = profile.fallback_model
     fallback_available = (
@@ -197,16 +197,19 @@ def decide_no_tool_round(
     )
     action = controller.empty_response_action(fallback_available=fallback_available)
     if action is Intervention.FALLBACK:
-        return NoToolRoundAction(kind="fallback", active_model=fallback_model)
+        assert fallback_model is not None  # fallback_available ⇒ a model exists
+        logger.warning("engine.fallback_model", fallback_model=fallback_model)
+        return SwitchModel(model=fallback_model)
     if action is Intervention.FINALIZE:
-        return NoToolRoundAction(kind="degraded")
-    return NoToolRoundAction(kind="retry")
+        logger.warning("engine.degraded")
+        return Return(finish_reason=FinishReason.DEGRADED)
+    return Continue()
 
 
 def apply_finish_guard_rework(
     *,
     messages: list[LLMMessage],
-    sink: EventSink,
+    emit_reset: Callable[[], None],
     final_content: str,
     content_before_round: str,
     round_idx: int,
@@ -215,11 +218,15 @@ def apply_finish_guard_rework(
     citation_sink: list[dict[str, Any]] | None,
     finish_guard_reworks: int,
 ) -> tuple[str, int]:
-    """Discard rejected content, inject steer, return updated content and rework count."""
-    reworks = (
-        finish_guard(final_content, citation_count=len(citation_sink or []))
-        if annotate_citations
-        else []
+    """Discard rejected content, inject steer, return updated content and rework count.
+
+    ``emit_reset`` clears the producer's already-streamed draft on the right surface —
+    ``content_reset`` for the CEO bubble, ``run_output_reset`` for a worker card — so the
+    rewrite presents as a clean「违规版 → 修正版」replacement, not an append (统一底线)."""
+    reworks = finish_guard(
+        final_content,
+        citation_count=len(citation_sink or []),
+        check_citations=annotate_citations,
     )
     steer = format_guard_steer(reworks)
     logger.info(
@@ -228,7 +235,7 @@ def apply_finish_guard_rework(
         attempt=finish_guard_reworks + 1,
         issues=len(reworks),
     )
-    sink.emit(content_reset())
+    emit_reset()
     messages.append(LLMMessage(role="user", content=steer))
     record_turn_fact(
         NoteFact(

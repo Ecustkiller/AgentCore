@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui";
+import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatMessageTime } from "@/lib/format";
 import { notifyError } from "@/lib/toast";
@@ -24,7 +24,14 @@ export function MessageAction({
   );
 }
 
-export function DeleteMessageAction({ messageId }: { messageId: string }) {
+export function DeleteMessageAction({
+  messageId,
+  compact = false,
+}: {
+  messageId: string;
+  /** Icon-only toolbar style for the assistant message footer. */
+  compact?: boolean;
+}) {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const [confirming, setConfirming] = useState(false);
 
@@ -39,6 +46,31 @@ export function DeleteMessageAction({ messageId }: { messageId: string }) {
   };
 
   if (confirming) {
+    if (compact) {
+      return (
+        <span className="inline-flex items-center gap-0.5">
+          <SimpleTooltip label="确认删除">
+            <IconButton
+              size="sm"
+              tone="destructive"
+              aria-label="确认删除"
+              onClick={() => void onDelete()}
+            >
+              <Check size={14} />
+            </IconButton>
+          </SimpleTooltip>
+          <SimpleTooltip label="取消">
+            <IconButton
+              size="sm"
+              aria-label="取消"
+              onClick={() => setConfirming(false)}
+            >
+              <X size={14} />
+            </IconButton>
+          </SimpleTooltip>
+        </span>
+      );
+    }
     return (
       <span className="inline-flex items-center gap-0.5">
         <Button
@@ -58,6 +90,20 @@ export function DeleteMessageAction({ messageId }: { messageId: string }) {
           取消
         </Button>
       </span>
+    );
+  }
+
+  if (compact) {
+    return (
+      <SimpleTooltip label="删除">
+        <IconButton
+          size="sm"
+          aria-label="删除"
+          onClick={() => setConfirming(true)}
+        >
+          <Trash2 size={14} />
+        </IconButton>
+      </SimpleTooltip>
     );
   }
 

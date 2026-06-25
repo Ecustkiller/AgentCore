@@ -22,6 +22,7 @@ from agentcore.evals.types import (
     EvalReport,
     Harness,
     Judge,
+    MilestoneJudge,
     TurnOutcome,
 )
 
@@ -42,6 +43,8 @@ _CASE_FIELDS = frozenset(
         "history",
         "checks",
         "rubric",
+        "milestones",
+        "milestone_threshold",
         "samples",
         "prompt_profile",
     }
@@ -83,7 +86,7 @@ def apply_checks(case: EvalCase, outcome: TurnOutcome) -> list[CheckOutcome]:
     """对一次运行结果跑该用例声明的全部确定性 Check（判定零 LLM）。
 
     诊断 Check（``DIAGNOSTIC_CHECKS``，轨迹形状）落标 ``gating=False``：仍跑仍报告，但不计入
-    pass/fail（评测体系重设计 §三）。
+    pass/fail（后端架构.md §五）。
     """
     results: list[CheckOutcome] = []
     for spec in case.checks:
@@ -104,16 +107,25 @@ async def run_case_report(
     harness: Harness,
     *,
     judge: Judge | None = None,
+    milestone_judge: MilestoneJudge | None = None,
     layer: int = 1,
 ) -> list[CaseReport]:
-    """跑一个用例 ``samples`` 次，每次产一条 :class:`CaseReport`（确定性 Check + 可选裁判）。"""
+    """跑一个用例 ``samples`` 次，每次产一条 :class:`CaseReport`（确定性 Check + 可选裁判）。
+
+    ``layer>=2`` 时按用例声明接两类 L1 裁判：有 ``rubric`` 走绝对分 ``judge``、有 ``milestones``
+    走覆盖 ``milestone_judge``（结果维，取代轨迹断言）。两者皆为判定信号，缺则跳过。
+    """
     reports: list[CaseReport] = []
     for _ in range(max(1, case.samples)):
         outcome = await harness.run_case(case)
         checks = apply_checks(case, outcome)
         verdict = None
-        if layer >= 2 and judge is not None and case.rubric and outcome.error is None:
-            verdict = await judge.score(case, outcome)
+        milestone = None
+        if layer >= 2 and outcome.error is None:
+            if judge is not None and case.rubric:
+                verdict = await judge.score(case, outcome)
+            if milestone_judge is not None and case.milestones:
+                milestone = await milestone_judge.score_milestones(case, outcome)
         reports.append(
             CaseReport(
                 case_id=case.id,
@@ -121,6 +133,7 @@ async def run_case_report(
                 outcome=outcome,
                 checks=checks,
                 judge=verdict,
+                milestone=milestone,
             )
         )
     return reports
@@ -131,6 +144,7 @@ async def run_suite(
     harness: Harness | None = None,
     *,
     judge: Judge | None = None,
+    milestone_judge: MilestoneJudge | None = None,
     layer: int = 1,
 ) -> EvalReport:
     """跑整套用例，聚合成 :class:`EvalReport`（一个用例 samples>1 时贡献多条）。"""
@@ -144,5 +158,13 @@ async def run_suite(
             path=case.path,
             samples=case.samples,
         )
-        all_reports.extend(await run_case_report(case, runner_harness, judge=judge, layer=layer))
+        all_reports.extend(
+            await run_case_report(
+                case,
+                runner_harness,
+                judge=judge,
+                milestone_judge=milestone_judge,
+                layer=layer,
+            )
+        )
     return EvalReport(cases=all_reports)

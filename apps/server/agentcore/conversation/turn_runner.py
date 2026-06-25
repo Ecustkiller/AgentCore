@@ -51,6 +51,7 @@ async def run_and_persist(
     generate_title: bool,
     llm_credentials: LLMCredentials | None,
     profile_set: ProfileSet | None = None,
+    memory_enabled: bool = True,
 ) -> None:
     """Run the pipeline, persist the assistant reply, then title + memory."""
     session_saver, session_loader = session_callbacks(conversation_id)
@@ -82,8 +83,10 @@ async def run_and_persist(
                 sink=sink,
                 user_id=user_id,
                 backend=backend,
+                folder_id=folder_id,
                 attachments=attachments,
                 llm_credentials=llm_credentials,
+                memory_enabled=memory_enabled,
                 profile_set=profile_set,
                 session_saver=session_saver,
                 session_loader=session_loader,

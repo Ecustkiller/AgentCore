@@ -12,7 +12,6 @@ import {
   ChevronDown,
   ChevronRight,
   CornerDownRight,
-  Layers,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -121,22 +120,19 @@ export function ReceivedContextSection({
  * (its content == the `system` block). Renders nothing when the turn carried no context
  * (legacy turns with empty `captainContext`).
  */
+/** Controlled dialog — trigger lives in {@link AssistantMessageFooter}「更多」菜单。 */
 export function ReceivedContextDialog({
   blocks,
-}: { blocks: ContextBlockWire[] }) {
-  const [open, setOpen] = useState(false);
+  open,
+  onOpenChange,
+}: {
+  blocks: ContextBlockWire[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   if (blocks.length === 0) return null;
   return (
-    <>
-      <Button
-        variant="neutral"
-        className="px-1.5"
-        icon={<Layers size={13} />}
-        onClick={() => setOpen(true)}
-      >
-        收到的上下文 · {blocks.length} 段
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col">
           <DialogHeader>
             <DialogTitle>收到的上下文</DialogTitle>
@@ -155,8 +151,7 @@ export function ReceivedContextDialog({
             ))}
           </div>
         </DialogContent>
-      </Dialog>
-    </>
+    </Dialog>
   );
 }
 

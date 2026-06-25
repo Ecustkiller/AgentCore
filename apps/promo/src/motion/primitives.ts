@@ -1,7 +1,7 @@
 import { Easing, interpolate } from "remotion";
 
 /*
- * Frame-driven motion primitives (宣传视频落地设计.md §三.5). The product animates
+ * Frame-driven motion primitives (apps/promo/README.md). The product animates
  * node entrance / running pulse / terminal flash / streaming on the CSS wall
  * clock, which a frame-accurate render cannot sync to (styles.css neutralizes
  * them). These pure helpers re-derive the same motions from the current frame so

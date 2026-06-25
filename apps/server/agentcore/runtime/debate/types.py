@@ -48,12 +48,19 @@ class DebateSide:
     ``key`` 是机器标识（用于 run_id / 前端分桶 / 跨轮续写定位），``name`` 是展示名
     （正方 / 红队A / 经济学视角），``stance`` 是喂给辩手的立场定位（拼进它的角色补充）。
     ``is_subject`` 标记红队形态里那个「被审方案方」（单向攻击的承受方），其余形态恒 False。
+
+    ``model`` 是该方辩手的【显式模型覆写】（真·多模型辩手）：空=用平台默认（DeepSeek）；
+    形如 ``doubao/doubao-seed-2-1-turbo-260628`` 的 ``provider/model`` 则经回合级
+    ProviderRouter 路由到对应厂商——这让一场辩论的各方真正由不同模型驱动（如「豆包 vs
+    DeepSeek 谁更聪明」），而非同一模型扮演多角。透传链：side.model → debater_task →
+    RunSpec.model → 执行器覆写 profile.model → 路由器按前缀分发。
     """
 
     key: str
     name: str
     stance: str
     is_subject: bool = False
+    model: str = ""
 
 
 @dataclass(frozen=True)
@@ -146,6 +153,32 @@ class DebateClash:
     point: str
 
 
+class RoundDecision(StrEnum):
+    """用户在一轮辩论边界的抉择（交互式逐轮，opt-in；辩论编排设计.md §逐轮交互）。
+
+    辩论默认由裁判逐轮自判收敛；当 ``debate(interactive=true)`` 且有活跃用户时，主持人每轮判完
+    后把决定权交给用户：``CONTINUE`` 再辩一轮（``RoundBoundary.focus`` 留空=主持人自动定下一轮
+    焦点，非空=用户「加的角度」覆写焦点），``CONCLUDE`` 直接出结论（即便裁判未判收敛）。无第三态
+    —— v1 不做「加辩方 / 换辩手」。超时 / 无活跃用户回落裁判自动收敛（见 Moderator.run）。
+    """
+
+    CONTINUE = "continue"
+    CONCLUDE = "conclude"
+
+
+@dataclass(frozen=True)
+class RoundBoundary:
+    """一轮边界的处置 —— :class:`RoundDecision` + 可选的下一轮焦点覆写（「加角度」）。
+
+    ``focus`` 仅在 ``decision is CONTINUE`` 且非空时生效：作为下一轮的议题覆写主持人自动定焦点
+    （用户把辩论引向自己在意的维度）；``CONCLUDE`` 时忽略。主持人收到 ``None``（未接钩子 / 超时
+    / 无活跃用户）则回退到裁判的自动收敛判定。
+    """
+
+    decision: RoundDecision
+    focus: str = ""
+
+
 @dataclass
 class JudgeVerdict:
     """收敛裁判结果（辩论编排设计.md §二 第3步 + §五）。
@@ -172,6 +205,7 @@ STOP_FOCUS_CLARIFIED = "focus_clarified"  # 分歧已归结为价值/偏好之�
 STOP_RED_TEAM_EXHAUSTED = "red_team_exhausted"  # 无新风险可挖（红队专用）
 STOP_MAX_ROUNDS = "max_rounds"  # 达轮数硬上限（兜底，由循环而非裁判判定）
 STOP_ALL_FAILED = "all_failed"  # 某轮全员发言失败，主持人提前终止
+STOP_USER_CONCLUDED = "user_concluded"  # 交互式逐轮：用户在轮边界选择「够了，出结论」
 STOP_REASONS = frozenset(
     {
         STOP_CONVERGED,
@@ -179,6 +213,7 @@ STOP_REASONS = frozenset(
         STOP_RED_TEAM_EXHAUSTED,
         STOP_MAX_ROUNDS,
         STOP_ALL_FAILED,
+        STOP_USER_CONCLUDED,
     }
 )
 
@@ -248,6 +283,9 @@ class DebateBrief:
 
     crux: str  # 争议焦点：双方真正分歧在哪
     strongest_points: dict[str, str] = field(default_factory=dict)  # side_key → 去水最强论点
+    # 红队专用：红队成员 side_key → 该风险严重度（high/medium/low），驱动前端「风险看板」按严重度
+    # 分级 + 总览计数。非红队形态恒空；被审方案方（is_subject）不评级。
+    risk_severities: dict[str, str] = field(default_factory=dict)
     factual_disputes: list[str] = field(default_factory=list)  # 关键事实分歧（AI 可帮判）
     value_disputes: list[str] = field(default_factory=list)  # 价值/偏好分歧（交用户）
     leaning: str = ""  # 主持人倾向性判断
@@ -320,6 +358,9 @@ class DebateResult:
                     "name": s.name,
                     "stance": s.stance,
                     "is_subject": s.is_subject,
+                    # 真·多模型辩论：该方辩手的模型覆写（`provider/model` 或空=平台默认），让前端
+                    # 标注「正方=豆包 / 反方=DeepSeek」——「谁更聪明」对战的核心可读性。
+                    "model": s.model,
                 }
                 for s in self.config.sides
             ],
@@ -327,6 +368,9 @@ class DebateResult:
             "brief": {
                 "crux": self.brief.crux,
                 "strongest_points": dict(self.brief.strongest_points),
+                # 红队风险严重度（side_key → high/medium/low）：前端风险看板按它分级 + 计数；
+                # 其余形态恒空 dict，载荷形状统一。
+                "risk_severities": dict(self.brief.risk_severities),
                 "factual_disputes": list(self.brief.factual_disputes),
                 "value_disputes": list(self.brief.value_disputes),
                 "leaning": self.brief.leaning,
@@ -369,6 +413,11 @@ def _form_label(form: DebateForm) -> str:
     }.get(form, str(form))
 
 
+def _severity_label(sev: str) -> str:
+    """红队风险严重度枚举 → 中文（与前端风险看板同口径）；未知值原样回显。"""
+    return {"high": "高", "medium": "中", "low": "低"}.get(sev, sev)
+
+
 def _stop_label(reason: str) -> str:
     return {
         STOP_CONVERGED: "已收敛",
@@ -376,6 +425,7 @@ def _stop_label(reason: str) -> str:
         STOP_RED_TEAM_EXHAUSTED: "风险已挖尽",
         STOP_MAX_ROUNDS: "达轮数上限",
         STOP_ALL_FAILED: "辩手发言失败提前终止",
+        STOP_USER_CONCLUDED: "用户选择出结论",
     }.get(reason, reason or "已结束")
 
 
@@ -386,7 +436,9 @@ def _render_brief(brief: DebateBrief, config: DebateConfig) -> str:
     for side in config.sides:
         point = brief.strongest_points.get(side.key)
         if point:
-            lines.append(f"- **{side.name}最强论点**：{point}")
+            sev = brief.risk_severities.get(side.key)
+            sev_tag = f"（风险严重度：{_severity_label(sev)}）" if sev else ""
+            lines.append(f"- **{side.name}最强论点**{sev_tag}：{point}")
     if brief.factual_disputes:
         lines.append("- **关键事实分歧（可据证据帮判）**：")
         lines.extend(f"  - {d}" for d in brief.factual_disputes)

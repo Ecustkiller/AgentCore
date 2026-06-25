@@ -65,7 +65,7 @@ export function CanvasZoomedTurn({
   const showContentDetail = useSidePanelStore((s) => s.showContentDetail);
   const messages = useActiveMessages();
 
-  // 放大态视图切换 (前端UX设计.md §四/§六/§十一)：交锋叙事 (辩论主角，决策简报 + 叙事线) /
+  // 放大态视图切换 (前端UX设计.md §四/§六/§6.5)：交锋叙事 (辩论主角，决策简报 + 叙事线) /
   // 协作图 (依赖结构) / 并行时间线 (时间真相，多任务并行图)。辩论默认落交锋、其余默认落图；回放
   // 本回合则落图让时间线在图上播放。并行时间线恒为可选透镜 (从不作默认)。切回合 (跟随新指令)
   // 时按新回合性质复位 (deps 含 scopeId)。

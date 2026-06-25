@@ -62,7 +62,11 @@ class ConsultSkillTool:
                 },
                 "required": ["name"],
             },
-            category=ToolCategory.SKILL,
+            # A CEO orchestration primitive (sits beside delegate / replan / revise in
+            # _CEO_ORCHESTRATION_TOOLS), NOT a「技能」-category tool: 技能 are Prompt
+            # injection, surfaced in the「AI 提示词」catalog, not as a tool group. Keeping
+            # this orchestration also drops the spurious「技能」group from the tools page.
+            category=ToolCategory.ORCHESTRATION,
             approval=ToolApproval.NEVER,
         )
 

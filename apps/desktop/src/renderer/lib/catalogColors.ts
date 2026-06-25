@@ -13,12 +13,16 @@ export type ArtifactKind =
   | "form"
   | "connectors"
   | "workflow"
-  | "ai-tools"
+  | "tools"
+  | "guidelines"
   | "manual";
 
-/** CSS `var(...)` for a creation-tool or featured toolbox entry. */
+/** CSS `var(...)` for a creation-tool or featured toolbox entry. The 能力 entries
+ * (工具 / AI 提示词) borrow the catalog family so the launcher tile and the catalog
+ * page read as the same color identity. */
 export function artifactColorVar(kind: ArtifactKind): string {
-  if (kind === "ai-tools") return "var(--primary)";
+  if (kind === "tools") return "var(--primary)";
+  if (kind === "guidelines") return "var(--catalog-orchestration)";
   return `var(--artifact-${kind})`;
 }
 

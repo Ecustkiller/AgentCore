@@ -8,10 +8,9 @@ from dataclasses import asdict, replace
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.llm.config import apply_overrides
-from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import TokenUsage
+from agentcore.llm.protocol import LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink, run_completed, run_failed, run_started
 from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
@@ -36,7 +35,7 @@ async def continue_run(
     session: RunSession,
     feedback: str,
     revision_run_id: str,
-    llm: DeepSeekProvider,
+    llm: LLMProvider,
     tools: ToolRegistry,
     sink: EventSink,
     base_tool_context: ToolContext,
@@ -72,7 +71,7 @@ async def _continue_run_scoped(
     session: RunSession,
     feedback: str,
     revision_run_id: str,
-    llm: DeepSeekProvider,
+    llm: LLMProvider,
     tools: ToolRegistry,
     sink: EventSink,
     base_tool_context: ToolContext,
@@ -118,6 +117,10 @@ async def _continue_run_scoped(
             thinking=spec.thinking,
             reasoning_effort=spec.reasoning_effort,
         )
+        # 真·多模型辩手：续写沿用首轮 spec 的显式 model 覆写（session.spec 已带），故同一辩手
+        # 跨轮恒走同一厂商模型。空 = 按 tier 解析（普通续写，行为不变）。见 _execute_node 同款。
+        if spec.model:
+            profile = replace(profile, model=spec.model)
         priced_model = profile.model
         tool_ctx = replace(
             base_tool_context,

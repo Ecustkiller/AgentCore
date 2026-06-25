@@ -5,10 +5,13 @@
   "path": "team",
   "mode": "economy",
   "samples": 1,
+  "_note": "后端架构.md §五：从轨迹断言（RosterMatches 角色名对不对）改为结果断言（交付物该有的内容齐没齐）。Delegated 保留为诊断（非门禁，只记『有没有派单』），是否成功看 milestone 覆盖。",
   "checks": [
     { "name": "FinishReason" },
-    { "name": "Delegated" },
-    { "name": "RosterMatches", "args": { "expected": ["研究员", "撰稿人"] } }
+    { "name": "Delegated" }
   ],
-  "rubric": "是否正确按要求委派出『研究员』与『撰稿人』两个角色并完成各自分工。"
+  "milestones": [
+    { "id": "research", "desc": "给出对该产品市场口碑的实质调研内容（有具体观点/信息，而非一句空话）", "weight": 1 },
+    { "id": "copy", "desc": "把调研结论写成一段可直接使用的成文文案", "weight": 1 }
+  ]
 }

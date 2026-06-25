@@ -2,8 +2,9 @@
 
 Mirrors the check_contract / out_of_range_markers test posture: finish_guard is a
 pure function over ``(content, citation_count)`` returning concrete rework items, and
-format_guard_steer renders them into one injected ``[系统提示]``. First cut covers only
-the fabricated-citation check.
+format_guard_steer renders them into one injected ``[系统提示]``. Coverage spans the
+two light-layer checks: fabricated citations and structural completeness (unclosed /
+empty-bodied code fences).
 """
 
 from agentcore.runtime.verify import finish_guard, format_guard_steer
@@ -48,6 +49,45 @@ def test_code_fence_markers_ignored():
 def test_empty_content_passes():
     assert finish_guard("", citation_count=0) == []
     assert finish_guard("   ", citation_count=0) == []
+
+
+def test_closed_nonempty_fence_passes():
+    content = "见下例：\n```python\nprint('hi')\n```\n收工。"
+    assert finish_guard(content, citation_count=0) == []
+
+
+def test_unclosed_fence_flagged():
+    reworks = finish_guard("步骤如下：\n```python\nprint(1)", citation_count=0)
+    assert len(reworks) == 1
+    assert "没有闭合" in reworks[0]
+
+
+def test_empty_fence_with_language_flagged():
+    reworks = finish_guard("示例：\n```python\n```\n", citation_count=0)
+    assert len(reworks) == 1
+    assert "python" in reworks[0]
+    assert "空" in reworks[0]
+
+
+def test_bare_empty_fence_not_flagged():
+    # 无语言标注的空围栏可能是有意排版，保守起见不判（守住近零误报）。
+    assert finish_guard("```\n```\n", citation_count=0) == []
+
+
+def test_indented_empty_fence_flagged():
+    # 列表内缩进的围栏（lstrip 后仍是 ```）照样检出。
+    reworks = finish_guard("- 代码：\n  ```json\n  ```\n", citation_count=0)
+    assert len(reworks) == 1
+    assert "json" in reworks[0]
+
+
+def test_citation_and_structure_combine():
+    # 造引用 + 空代码块 = 两条独立修正项。
+    content = "见 [5]。\n```python\n```\n"
+    reworks = finish_guard(content, citation_count=2)
+    assert len(reworks) == 2
+    assert any("编造引用" in r for r in reworks)
+    assert any("空" in r for r in reworks)
 
 
 def test_format_steer_renders_problems():

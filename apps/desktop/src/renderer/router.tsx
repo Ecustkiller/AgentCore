@@ -8,14 +8,17 @@ import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { PreviewPage } from "@/pages/PreviewPage";
 import { ToolboxPage } from "@/pages/ToolboxPage";
+import { WhiteboardPage } from "@/pages/WhiteboardPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
 import { AppearanceSettings } from "@/pages/more/AppearanceSettings";
 import { MembersSettings } from "@/pages/more/MembersSettings";
+import { MemorySettings } from "@/pages/more/MemorySettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
 import { ShortcutsSettings } from "@/pages/more/ShortcutsSettings";
 import { UsageSettings } from "@/pages/more/UsageSettings";
-import { AiToolsPage } from "@/pages/toolbox/AiToolsPage";
+import { GuidelinesPage } from "@/pages/toolbox/GuidelinesPage";
+import { ToolsPage } from "@/pages/toolbox/ToolsPage";
 import {
   ManualCollaboration,
   ManualIntro,
@@ -40,10 +43,12 @@ export const router = createHashRouter([
       },
       { path: "conversations", element: <ConversationsPage /> },
       { path: "files", element: <FilesPage /> },
+      { path: "whiteboard", element: <WhiteboardPage /> },
       { path: "messages", element: <MessagesPage /> },
       { path: "messages/:chatId", element: <MessagesPage /> },
       { path: "toolbox", element: <ToolboxPage /> },
-      { path: "toolbox/ai-tools", element: <AiToolsPage /> },
+      { path: "toolbox/tools", element: <ToolsPage /> },
+      { path: "toolbox/guidelines", element: <GuidelinesPage /> },
       {
         path: "toolbox/manual",
         element: <ManualShell />,
@@ -67,6 +72,7 @@ export const router = createHashRouter([
           // Opening 设置 lands on the first page (模型配置); there is no overview.
           { index: true, element: <Navigate to="/more/model" replace /> },
           { path: "model", element: <ModelSettings /> },
+          { path: "memory", element: <MemorySettings /> },
           { path: "account", element: <AccountSettings /> },
           { path: "usage", element: <UsageSettings /> },
           { path: "appearance", element: <AppearanceSettings /> },

@@ -325,6 +325,13 @@ export interface RunOutputDeltaPayload {
   delta: string;
 }
 
+// 交付前核验回炉时清掉这个 worker 卡片已流式累积的草稿正文（content_reset 的 worker 对偶）。
+// transport-only、不进 journal；fold 收到即清该 agent 的 outputChunks，重写版重新流式。
+export interface RunOutputResetPayload {
+  run_id: string;
+  agent_id: string;
+}
+
 export interface RunReasoningDeltaPayload {
   run_id: string;
   agent_id: string;
@@ -360,16 +367,22 @@ export interface RunEscalationPayload {
  * its `delegate` mid-wave, so the worker asks the user DIRECTLY. This surfaces the interactive
  * decision card (`EscalationCard`), keyed by `escalation_id` for the resolve endpoint. `question`
  * is the worker's self-contained ask; `assumption` is the fallback it proceeds on if no answer
- * arrives (the timeout degrade). Run-scoped so the card attaches to this worker's node. UNLIKE
- * the (transport-only) non-blocking `run_escalation` banner, this is JOURNALED — the prompt + its
- * resolution replay inline on reload, and the turn never flips to `paused` (siblings keep
- * running). 设计: docs/07-规划/阻塞式求决策设计.md §4.2/§4.5. */
+ * arrives (the timeout degrade). `questions` is the optional structured-fork list (同 ask_user 的
+ * questions — choice/text/multiple/default) the card renders so the user one-taps a decision
+ * instead of free-typing; empty for a plain free-text ask. Run-scoped so the card attaches to this
+ * worker's node. UNLIKE the (transport-only) non-blocking `run_escalation` banner, this is JOURNALED
+ * — the prompt (incl. its structured questions) + resolution replay inline on reload, and the turn
+ * never flips to `paused` (siblings keep running). 设计: docs/07-规划/阻塞式求决策设计.md §4.2/§4.5. */
 export interface EscalationRequiredPayload {
   escalation_id: string;
   run_id: string;
   agent_id: string;
   question: string;
   assumption: string;
+  /** Structured forks (同 ask_user 的 questions). Optional: absent on old journaled events
+   * (fold with `?? []`) and empty for a free-text ask. Desktop renders these via the shared
+   * ask_user question UI; mobile ignores them until its escalation answer card lands. */
+  questions?: AskQuestion[];
 }
 
 /** 阻塞式求决策 settlement (设计 §4.4): a blocking escalate resolved and the worker resumes.
@@ -486,6 +499,11 @@ export interface DebateSideInfo {
   name: string;
   stance: string;
   is_subject: boolean;
+  /** 该方辩手的【模型覆写】（真·多模型辩论）：`provider/model`（如 `doubao/doubao-seed-2-1-turbo
+   *  -260628`）经 ProviderRouter 路由到对应厂商，无前缀=默认 DeepSeek，空=平台默认。前端据此标
+   *  「正方=豆包 / 反方=DeepSeek」徽章——「谁更聪明」对战的核心可读性。**新增字段**：早于本特性
+   *  journaled 的 debate_result 事件可能缺省，重载时按空处理（不显徽章）。 */
+  model?: string;
 }
 
 /** 叙事线某一轮里某一方的执行指针：`run_id` 关联执行图的辩手节点（取发言全文 L3）。 */
@@ -543,6 +561,9 @@ export interface DebateNarrativeRound {
 export interface DebateBriefInfo {
   crux: string;
   strongest_points: Record<string, string>;
+  /** 红队专用：红队成员 `key` → 风险严重度 `high|medium|low`，驱动「风险看板」按严重度分级 +
+   * 总览计数。非红队形态恒为空对象；被审方案方（`is_subject`）不评级。可缺省（旧产物兼容）。 */
+  risk_severities?: Record<string, string>;
   factual_disputes: string[];
   value_disputes: string[];
   leaning: string;
@@ -581,6 +602,34 @@ export interface DebateRoundStartedPayload {
 export interface DebateRoundPayload extends DebateRoundInfo {
   execution_id: string;
   moderator_run_id: string;
+}
+
+/** 交互式逐轮辩论（opt-in, 辩论编排设计.md §逐轮交互）：主持人在一轮边界挂起，把「继续辩 /
+ * 加角度 / 够了出结论」的决定权交给用户（而非直接采信裁判自判收敛）。`decision_id` 是 resolve
+ * 目标（POST …/interactions/{id}, kind=`debate_round`）；`converged`/`rationale` 是裁判对本轮
+ * 的判读（决策卡据此高亮默认建议）。Transport-only liveliness：NOT journaled——耐久记录是收场
+ * `debate_result`（用户的选择体现在实际发生的轮次 / stop_reason），故重载无此卡、只见收场叙事。 */
+export interface DebateRoundDecisionRequiredPayload {
+  execution_id: string;
+  moderator_run_id: string;
+  decision_id: string;
+  round_no: number;
+  focus: string;
+  summary: string;
+  converged: boolean;
+  rationale: string;
+}
+
+/** 交互式逐轮辩论结算：用户在轮边界的抉择（或超时回落）。`decision`：`continue`（再辩一轮）/
+ * `conclude`（立即出结论）/ `timeout`（未应答 / 无活跃用户 → 裁判自动收敛接管）。`focus` 是用户
+ * 为下一轮注入的「加角度」议题（仅 `continue` 且非空时有值）。Transport-only（`_required` 的孪生，
+ * 同样不进 journal）。 */
+export interface DebateRoundDecisionResolvedPayload {
+  execution_id: string;
+  moderator_run_id: string;
+  decision_id: string;
+  decision: "continue" | "conclude" | "timeout";
+  focus: string;
 }
 
 export interface MessageEndPayload {
@@ -699,6 +748,7 @@ export type SSEPayloadMap = {
   run_started: RunStartedPayload;
   run_context: RunContextPayload;
   run_output_delta: RunOutputDeltaPayload;
+  run_output_reset: RunOutputResetPayload;
   run_reasoning_delta: RunReasoningDeltaPayload;
   run_tool_progress: RunToolProgressPayload;
   run_completed: RunCompletedPayload;
@@ -711,6 +761,8 @@ export type SSEPayloadMap = {
   debate_result: DebateResultPayload;
   debate_round_started: DebateRoundStartedPayload;
   debate_round: DebateRoundPayload;
+  debate_round_decision_required: DebateRoundDecisionRequiredPayload;
+  debate_round_decision_resolved: DebateRoundDecisionResolvedPayload;
   message_end: MessageEndPayload;
   error: ErrorPayload;
   title_generated: TitleGeneratedPayload;

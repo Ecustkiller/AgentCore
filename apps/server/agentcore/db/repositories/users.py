@@ -209,6 +209,18 @@ class UserRepository:
         )
         await self._session.commit()
 
+    async def set_memory_enabled(self, user_id: str, enabled: bool) -> None:
+        """Flip the long-term AI memory master switch (Agent记忆与知识系统 §一).
+
+        Gates both injection (``pipeline/run.py``) and the offline consolidation
+        pass (``memory/consolidation.py``); the memory body itself is untouched, so
+        re-enabling restores it.
+        """
+        await self._session.execute(
+            update(User).where(User.user_id == user_id).values(memory_enabled=enabled)
+        )
+        await self._session.commit()
+
     async def set_quota(
         self,
         user_id: str,

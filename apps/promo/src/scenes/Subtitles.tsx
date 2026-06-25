@@ -1,7 +1,7 @@
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 
 /*
- * The brand-narrative subtitle track (宣传视频落地设计.md §五). Verbatim copy from
+ * The brand-narrative subtitle track (apps/promo/README.md). Verbatim copy from
  * the storyboard — the film argues "协作，是更高级的智能" while the picture demos
  * the product. Driven by the global frame; each cue cross-fades at its edges.
  */

@@ -104,8 +104,12 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
     monkeypatch.setattr(pipeline, "build_provider", lambda *a, **k: provider)
 
     class _FakeStore:
-        async def load(self, _user_id: str) -> str:
+        async def load(self, _user_id: str, _path: str) -> str:
             return ""
+
+        async def list(self, _user_id: str) -> list:
+            # No topic notes ⇒ no 记忆主题目录 / consult_memory on this single-agent path.
+            return []
 
     monkeypatch.setattr("agentcore.runtime.pipeline.run.default_memory_store", lambda: _FakeStore())
 

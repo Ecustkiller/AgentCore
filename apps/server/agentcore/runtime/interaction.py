@@ -45,6 +45,12 @@ class InteractionKind(StrEnum):
     # Unlike the halting gates above, this does NOT pause the turn — siblings keep running
     # and a timeout degrades to the worker's stated assumption (设计: 07-规划/阻塞式求决策设计).
     ESCALATION = "escalation"
+    # 交互式逐轮辩论 (debate interactive=true): the Moderator paused at a round boundary so the
+    # user can steer depth — 继续辩 / 加角度（带焦点）/ 够了出结论 → result: ``{decision, focus}``.
+    # In-process only (like ESCALATION, never durably persisted — see suspension.py): the
+    # debate's in-memory state lives in the awaiting coroutine. A timeout / unarmed turn falls
+    # back to the judge's auto-convergence. (设计: docs/03-AI核心/辩论编排设计.md §逐轮交互)
+    DEBATE_ROUND = "debate_round"
 
 
 @dataclass

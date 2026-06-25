@@ -91,6 +91,7 @@ export function FilesPage() {
       onViewConversations={(folderId) =>
         navigate("/conversations", { state: { focusFolderId: folderId } })
       }
+      showMemory
       focusWsId={focusWsId}
       focusKey={location.key}
     />

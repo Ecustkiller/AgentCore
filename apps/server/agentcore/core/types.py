@@ -48,9 +48,11 @@ class ToolCategory(StrEnum):
     # Category is declarative metadata for classification/tooling; the engine no
     # longer branches on tool category (it acts on the ToolResult, not the name).
     INTERACTION = "interaction"
-    # On-demand capability retrieval (the CEO ``consult_skill`` tool, 提示词瘦身 P2):
-    # pulls a system Skill's full guidance into the loop. Declarative metadata only —
-    # like every other category, the engine does not branch on it.
+    # Currently UNUSED: ``consult_skill`` was recategorised to ORCHESTRATION (it is a CEO
+    # orchestration primitive, and 技能 are Prompt injection shown in the「AI 提示词」
+    # catalog — not a tool group). Kept as declarative metadata so the contract type is
+    # stable; removable via ``pnpm gen:types`` once we're sure no future skill-category
+    # tool wants it. Like every category, the engine never branches on it.
     SKILL = "skill"
 
 

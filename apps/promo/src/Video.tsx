@@ -16,7 +16,7 @@ import { ScenarioMain } from "./scenes/ScenarioScene";
 import { Subtitles } from "./scenes/Subtitles";
 
 /*
- * Master 30s timeline (宣传视频落地设计.md §五). The desktop shell is the 全程基线 —
+ * Master 30s timeline (apps/promo/README.md). The desktop shell is the 全程基线 —
  * mounted once, behind every app scene — while the main area swaps content by
  * phase, each phase a <Sequence> so its useCurrentFrame is scene-local (entrance
  * / pulse / streaming all reset to 0 at the phase start):

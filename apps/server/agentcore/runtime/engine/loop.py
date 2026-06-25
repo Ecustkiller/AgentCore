@@ -1,6 +1,7 @@
 """ReAct main loop: turn control, LLM rounds, tool execution, governance."""
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from agentcore.core.logging import get_logger
@@ -12,19 +13,24 @@ from agentcore.runtime.events import (
     EventSink,
     FinishReason,
     content_delta,
+    content_reset,
+    error_event,
     reasoning_delta,
 )
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
+from .directive import Continue, Finalize, LoopDirective, Return, Rework, SwitchModel
 from .finalize import force_finalize
 from .governance import (
     apply_circuit_breaker,
     classify_investigation_tools,
     create_loop_controller,
+    decide_llm_failure,
     govern_after_tools,
     resolve_openai_tool_defs,
 )
+from .outcome import RoundOutcome
 from .round import (
     LlmRoundFailure,
     apply_finish_guard_rework,
@@ -50,6 +56,7 @@ async def react_loop(
     on_content: Callable[[str], None] | None = None,
     on_reasoning: Callable[[str], None] | None = None,
     on_tool_progress: Callable[[str, int], None] | None = None,
+    on_reset: Callable[[], None] | None = None,
     raise_on_error: bool = False,
     citation_sink: list[dict[str, Any]] | None = None,
     annotate_citations: bool = True,
@@ -76,6 +83,10 @@ async def react_loop(
     ``on_tool_progress`` to surface a worker's tool-call ARGUMENT streaming
     (``(tool_name, cumulative_chars)``, throttled) — the only live signal during a
     long file write, which is neither content nor reasoning.
+    ``on_reset`` mirrors that redirection for the finish_guard rework reset: the
+    default clears the CEO bubble (``content_reset``); a worker passes ``on_reset``
+    to clear its run card (``run_output_reset``) instead — so the rewrite replaces
+    the discarded draft cleanly on whichever surface streamed it (统一底线).
     ``allowed_tool_names`` filters which tools the model may call (``None`` = all,
     ``[]`` = none). Tool execution events always go to the sink. When
     ``citation_sink`` is provided, web sources consulted by research tools are
@@ -126,6 +137,7 @@ async def react_loop(
 
     emit_content = on_content or (lambda delta: sink.emit(content_delta(delta)))
     emit_reasoning = on_reasoning or (lambda delta: sink.emit(reasoning_delta(delta)))
+    emit_reset = on_reset or (lambda: sink.emit(content_reset()))
 
     total_usage = TokenUsage()
     final_content = ""
@@ -154,45 +166,147 @@ async def react_loop(
             round_idx=round_idx,
             run_id=run_id,
             raise_on_error=raise_on_error,
-            sink=sink,
         )
+
         if isinstance(round_result, LlmRoundFailure):
-            return final_content, final_reasoning, total_usage, round_result.rounds
-
-        round_content = round_result.content
-        round_reasoning = round_result.reasoning
-        round_tool_calls = round_result.tool_calls
-        usage = round_result.usage
-
-        if usage:
-            total_usage = total_usage + usage
-        if usage_sink is not None:
-            usage_sink[:] = [total_usage]
-
-        if round_content:
-            final_content = join_segments(final_content, round_content)
-        if round_reasoning:
-            final_reasoning += round_reasoning
-
-        round_empty = not round_content and not round_tool_calls
-        controller.note_empty_round(round_empty)
-
-        if not round_tool_calls:
-            action = decide_no_tool_round(
-                round_content=round_content,
-                final_content=final_content,
-                content_before_round=content_before_round,
-                controller=controller,
-                profile=profile,
-                active_model=active_model,
-                annotate_citations=annotate_citations,
-                citation_sink=citation_sink,
-                finish_guard_reworks=finish_guard_reworks,
+            # Hard LLM failure (non-raising path): the provider already exhausted its
+            # network retries. Walk the engine-level fallback ladder — escalate to the
+            # fallback model once, else end on ERROR/DEGRADED (error surfaced below, in
+            # the Return arm, so a recovered fallback retry shows the user nothing).
+            outcome = RoundOutcome(
+                content="",
+                reasoning="",
+                usage=None,
+                llm_failed=True,
+                error_code=round_result.error_code,
+                error_message=round_result.error_message,
             )
-            if action.kind == "rework":
+            directive: LoopDirective = decide_llm_failure(
+                profile=profile, active_model=active_model, final_content=final_content
+            )
+        else:
+            usage = round_result.usage
+            if usage:
+                total_usage = total_usage + usage
+            if usage_sink is not None:
+                usage_sink[:] = [total_usage]
+
+            if round_result.content:
+                final_content = join_segments(final_content, round_result.content)
+            if round_result.reasoning:
+                final_reasoning += round_result.reasoning
+
+            outcome = RoundOutcome(
+                content=round_result.content,
+                reasoning=round_result.reasoning,
+                usage=usage,
+                tool_calls=round_result.tool_calls,
+            )
+            controller.note_empty_round(outcome.is_empty)
+
+            if not outcome.has_tool_calls:
+                directive = decide_no_tool_round(
+                    outcome,
+                    final_content=final_content,
+                    controller=controller,
+                    profile=profile,
+                    active_model=active_model,
+                    annotate_citations=annotate_citations,
+                    citation_sink=citation_sink,
+                    finish_guard_reworks=finish_guard_reworks,
+                )
+            else:
+                messages.append(
+                    LLMMessage(
+                        role="assistant",
+                        content=outcome.content or None,
+                        tool_calls=outcome.tool_calls,
+                        reasoning_content=outcome.reasoning or None,
+                    )
+                )
+                tool_results, terminal, attempts = await execute_tools(
+                    outcome.tool_calls,
+                    tools,
+                    tool_context,
+                    sink,
+                    approval_gate=approval_gate,
+                    citation_sink=citation_sink,
+                    annotate_citations=annotate_citations,
+                    run_id=run_id,
+                )
+                messages.extend(tool_results)
+                outcome = replace(
+                    outcome,
+                    tool_results=tool_results,
+                    attempts=attempts,
+                    terminal_handoff=(terminal.final_text or "")
+                    if terminal is not None
+                    else None,
+                )
+
+                if terminal is not None:
+                    usage_meta = terminal.metadata or {}
+                    total_usage = total_usage + TokenUsage(
+                        input_tokens=usage_meta.get("input_tokens", 0),
+                        output_tokens=usage_meta.get("output_tokens", 0),
+                        reasoning_tokens=usage_meta.get("reasoning_tokens", 0),
+                        cache_hit_tokens=usage_meta.get("cache_hit_tokens", 0),
+                        cache_miss_tokens=usage_meta.get("cache_miss_tokens", 0),
+                    )
+                    directive = Return(extra_content=outcome.terminal_handoff or "")
+                else:
+                    controller.record(outcome.attempts)
+                    breaker = apply_circuit_breaker(
+                        controller,
+                        messages=messages,
+                        run_id=run_id,
+                        round_idx=round_idx,
+                        disabled_tools=disabled_tools,
+                    )
+                    if breaker.refresh_tool_defs:
+                        tool_defs = _resolve_tool_defs()
+                    directive = govern_after_tools(
+                        outcome,
+                        controller,
+                        messages=messages,
+                        round_idx=round_idx,
+                        run_id=run_id,
+                        breaker_message=breaker.message,
+                    )
+
+        match directive:
+            case Return(finish_reason=fr, extra_content=extra):
+                if outcome.llm_failed:
+                    sink.emit(
+                        error_event(outcome.error_code or "", outcome.error_message or "")
+                    )
+                if fr is not None and finish_override_sink is not None:
+                    finish_override_sink.append(fr)
+                content = join_segments(final_content, extra) if extra else final_content
+                return content, final_reasoning, total_usage, round_idx + 1
+            case Finalize(reason=reason, finish_reason=fr):
+                if fr is not None and finish_override_sink is not None:
+                    finish_override_sink.append(fr)
+                return await force_finalize(
+                    messages=messages,
+                    llm=llm,
+                    profile=profile,
+                    emit_content=emit_content,
+                    emit_reasoning=emit_reasoning,
+                    final_content=final_content,
+                    final_reasoning=final_reasoning,
+                    total_usage=total_usage,
+                    rounds=round_idx + 1,
+                    reason=reason,
+                    run_id=run_id,
+                )
+            case SwitchModel(model=model):
+                active_model = model
+                continue
+            case Rework():
                 final_content, finish_guard_reworks = apply_finish_guard_rework(
                     messages=messages,
-                    sink=sink,
+                    emit_reset=emit_reset,
                     final_content=final_content,
                     content_before_round=content_before_round,
                     round_idx=round_idx,
@@ -202,91 +316,8 @@ async def react_loop(
                     finish_guard_reworks=finish_guard_reworks,
                 )
                 continue
-            if action.kind == "finish":
-                return final_content, final_reasoning, total_usage, round_idx + 1
-            if action.kind == "fallback":
-                active_model = action.active_model
-                logger.warning(
-                    "engine.fallback_model", round=round_idx, fallback_model=active_model
-                )
+            case Continue():
                 continue
-            if action.kind == "degraded":
-                logger.warning("engine.degraded", round=round_idx)
-                if finish_override_sink is not None:
-                    finish_override_sink.append(FinishReason.DEGRADED)
-                return final_content, final_reasoning, total_usage, round_idx + 1
-            continue
-
-        assistant_msg = LLMMessage(
-            role="assistant",
-            content=round_content or None,
-            tool_calls=round_tool_calls,
-            reasoning_content=round_reasoning or None,
-        )
-        messages.append(assistant_msg)
-
-        tool_results, terminal, attempts = await execute_tools(
-            round_tool_calls,
-            tools,
-            tool_context,
-            sink,
-            approval_gate=approval_gate,
-            citation_sink=citation_sink,
-            annotate_citations=annotate_citations,
-            run_id=run_id,
-        )
-        messages.extend(tool_results)
-
-        if terminal is not None:
-            usage_meta = terminal.metadata or {}
-            total_usage = total_usage + TokenUsage(
-                input_tokens=usage_meta.get("input_tokens", 0),
-                output_tokens=usage_meta.get("output_tokens", 0),
-                reasoning_tokens=usage_meta.get("reasoning_tokens", 0),
-                cache_hit_tokens=usage_meta.get("cache_hit_tokens", 0),
-                cache_miss_tokens=usage_meta.get("cache_miss_tokens", 0),
-            )
-            handoff_content = terminal.final_text or ""
-            combined = join_segments(final_content, handoff_content)
-            return combined, final_reasoning, total_usage, round_idx + 1
-
-        controller.record(attempts)
-
-        breaker = apply_circuit_breaker(
-            controller,
-            messages=messages,
-            run_id=run_id,
-            round_idx=round_idx,
-            disabled_tools=disabled_tools,
-        )
-        if breaker.refresh_tool_defs:
-            tool_defs = _resolve_tool_defs()
-
-        exit_result = await govern_after_tools(
-            controller,
-            messages=messages,
-            llm=llm,
-            profile=profile,
-            emit_content=emit_content,
-            emit_reasoning=emit_reasoning,
-            final_content=final_content,
-            final_reasoning=final_reasoning,
-            total_usage=total_usage,
-            round_idx=round_idx,
-            run_id=run_id,
-            breaker_message=breaker.message,
-            attempts=attempts,
-            round_tool_calls=round_tool_calls,
-            round_content=round_content,
-            finish_override_sink=finish_override_sink,
-        )
-        if exit_result is not None:
-            return (
-                exit_result.content,
-                exit_result.reasoning,
-                exit_result.usage,
-                exit_result.rounds,
-            )
 
     logger.warning("engine.max_rounds_exhausted", rounds=profile.max_rounds)
     return await force_finalize(

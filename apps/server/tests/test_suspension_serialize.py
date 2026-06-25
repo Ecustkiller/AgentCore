@@ -109,6 +109,8 @@ def test_turn_suspension_full_frame_round_trips():
         tool_call_id="call_del_1",
         base_system_prompt="base sys",
         user_message="原始请求",
+        folder_id="F1",
+        memory_enabled=False,
         transcript=transcript,
         plan=plan,
         completed={"del_abc_1": _completed_state()},
@@ -131,6 +133,12 @@ def test_turn_suspension_full_frame_round_trips():
     assert restored.tool_call_id == "call_del_1"
     assert restored.base_system_prompt == "base sys"
     assert restored.user_message == "原始请求"
+    # The project scope survives the frame so resume re-wires consult_memory to it.
+    assert restored.folder_id == "F1"
+    assert frame.to_json()["folder_id"] == "F1"
+    # The memory master switch survives too: a memory-off turn resumes memory-off.
+    assert restored.memory_enabled is False
+    assert frame.to_json()["memory_enabled"] is False
     assert restored.trace_id == "trace123"
     # transcript / history are NOT serialized into the frame (Phase 2 ⑤) — the CEO window
     # is rebuilt from turn_journal on claim; resume echoes the call via the serialized
@@ -184,6 +192,7 @@ def test_ask_user_suspension_round_trips():
         tool_call_id="call_ask_1",
         base_system_prompt="base sys",
         user_message="帮我选",
+        folder_id="F2",
         transcript=transcript,
         question="按这个计划开做？",
         context="两者代价不同",
@@ -209,6 +218,7 @@ def test_ask_user_suspension_round_trips():
     assert restored.kind is SuspensionKind.ASK_USER
     assert restored.message_id == "m2"
     assert restored.tool_call_id == "call_ask_1"
+    assert restored.folder_id == "F2"
     assert restored.question == "按这个计划开做？"
     assert restored.context == "两者代价不同"
     assert restored.assumptions == [{"id": "a0", "label": "部署", "value": "纯静态"}]
@@ -233,6 +243,8 @@ def test_suspension_from_json_tolerates_missing_keys():
     restored = suspension_from_json({"message_id": "m1"})
     assert isinstance(restored, PlanReviewSuspension)
     assert restored.message_id == "m1"
+    assert restored.folder_id is None  # absent → global-only resume (safe default)
+    assert restored.memory_enabled is True  # absent → memory on (legacy/always-on default)
     assert restored.transcript == []
     assert restored.plan.nodes == []
     assert restored.completed == {}

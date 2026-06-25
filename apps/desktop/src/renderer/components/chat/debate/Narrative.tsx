@@ -20,7 +20,6 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  ClipboardList,
   MessagesSquare,
   ShieldAlert,
   ShieldCheck,
@@ -29,6 +28,7 @@ import {
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { ConvergenceBand } from "./ConvergenceBand";
+import { SideIdentity } from "./SideChip";
 import {
   type DebateClashView,
   type DebateForm,
@@ -43,8 +43,9 @@ import {
  * 时间轴节点 (轴点颜色按 {@link roundSignal} 读出交锋/收敛态)，串成「认知推进线」(辩论编排设计.md
  * §4.2)。顶部挂一条 {@link ConvergenceBand} 做 glanceable 概览 (概览 ↔ 时间线 = 两级、非重复)。
  *
- * 展开策略全程连续：**只展开最后一轮 (活动/在飞那轮)、其余折到 L1**——既让进行中盯住当前轮的
- * 流式发言，又让收场不再把你正读的轮「唰」地收起；用户可手动展开任意轮 (一旦交互即固定)。
+ * 展开策略：**默认全折到 L1，只展开在飞那轮 (流式中)**——进行中盯住当前轮的流式发言，收场后每轮
+ * 折到焦点行、首屏不再爆 L3 全文 (用户反馈的「乱」之一)，过程按需逐层深读；用户可手动展开任意轮
+ * (一旦交互即固定)。
  */
 export function RoundList({
   rounds,
@@ -120,8 +121,9 @@ export function RoundList({
  *  - **L2**：裁判徽章 + 裁判理由 + L3 开关。
  *  - **L3**：各方发言对置 (2 方左右对开 / 多方自适应双列)。
  *
- * 展开默认 = `isLast`。用户点击落到本地 override、**一旦交互即固定**，不随新轮自动折叠。轮号作
- * React key → live→收场 同号轮复用同一实例，展开态与已展开的发言**无缝延续**、不重挂。
+ * 展开默认 = `round.inFlight` (仅在飞轮自动展开，收场全折)。用户点击落到本地 override、**一旦交互
+ * 即固定**，不随新轮自动折叠。轮号作 React key → live→收场 同号轮复用同一实例，展开态与已展开的
+ * 发言**无缝延续**、不重挂。
  */
 /** 一条被点选的交锋边：选中的 clash 下标 + 触发序号 (重复点同一条也能再次滚动定位)。 */
 interface PickedClash {
@@ -173,8 +175,11 @@ function RoundCell({
   const [speechOverride, setSpeechOverride] = useState<boolean | null>(null);
   const [picked, setPicked] = useState<PickedClash | null>(null);
 
-  const open = openOverride ?? isLast;
-  const showSpeeches = open && (speechOverride ?? isLast);
+  // 默认全收起到 L1，只让**在飞那轮**（流式中）自动展开——根治旧「默认展开最后一轮、首屏直接铺
+  // L3 全文发言、信息量爆炸」（用户反馈）。收场后每轮折到焦点行，过程按需逐层深读；用户一旦手动
+  // 展开即落本地 override 固定，不随新轮自动折叠。
+  const open = openOverride ?? round.inFlight;
+  const showSpeeches = open && (speechOverride ?? round.inFlight);
 
   // 点一条交锋边 → 把它当成「引用连线」：展开本轮发言 (L3) 并高亮 + 滚动定位涉及的两方发言格，
   // 让「反方在驳正方哪点」从一句话变成可直达发言的导航 (辩论编排设计.md §4.2 L3)。
@@ -391,9 +396,10 @@ function RoundDiscussion({
 }
 
 /**
- * 正反辩论·逐轮记分卡：把一轮读成「对阵 + 三维研判 (交锋 / 论据 / 收敛)」的记分行，再挂裁判理由
- * 与交锋点。三维取自主持人裁判的真实字段 (real_clash / new_arguments / converged)，**不编造比分**
- * ——它们是轮级判定、非按方计分。
+ * 正反辩论·逐轮记分（瘦身版）：把一轮的三维裁判（交锋 / 论据 / 收敛）压成**一行 inline pill**，再挂
+ * 裁判理由与交锋点。三维取自主持人裁判真实字段 (real_clash / new_arguments / converged)，**不编造
+ * 比分**。旧版是「带双方名标题行 + 3 列大网格」的独立卡、套在已嵌套的轮卡里 = 盒中盒（用户反馈
+ * 的「重」），现降为一行信号——双方名已在下方发言格承载，不在记分处重复。
  */
 function RoundScorecard({
   round,
@@ -404,47 +410,20 @@ function RoundScorecard({
   return (
     <>
       {v && (
-        <div className="mt-1.5 rounded-lg border border-border bg-card p-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-            <h5 className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-              <ClipboardList size={12} />
-              本轮记分
-            </h5>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {round.sides.map((s, i) => (
-                <span key={s.key} className="inline-flex items-center gap-1.5">
-                  {i > 0 && (
-                    <Swords size={11} className="text-muted-foreground" />
-                  )}
-                  <span
-                    className="text-xs font-medium"
-                    style={{ color: s.colorVar }}
-                  >
-                    {s.name}
-                  </span>
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="mt-2 grid grid-cols-3 gap-2">
-            <ScoreMetric
-              label="交锋"
-              pill={verdictTogglePill(v.real_clash)}
-              text={v.real_clash ? "正面交锋" : "各说各话"}
-            />
-            <ScoreMetric
-              label="论据"
-              pill={verdictTogglePill(v.new_arguments)}
-              text={v.new_arguments ? "有新论据" : "无新论据"}
-            />
-            <ScoreMetric
-              label="收敛"
-              pill={
-                v.converged ? statusPillInline.success : statusPillInline.muted
-              }
-              text={v.converged ? "已收敛" : "未收敛"}
-            />
-          </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <span className={verdictTogglePill(v.real_clash)}>
+            {v.real_clash ? "有交锋" : "各说各话"}
+          </span>
+          <span className={verdictTogglePill(v.new_arguments)}>
+            {v.new_arguments ? "有新论据" : "无新论据"}
+          </span>
+          <span
+            className={
+              v.converged ? statusPillInline.success : statusPillInline.muted
+            }
+          >
+            {v.converged ? "已收敛" : "未收敛"}
+          </span>
         </div>
       )}
       {v?.rationale && (
@@ -460,24 +439,6 @@ function RoundScorecard({
         />
       )}
     </>
-  );
-}
-
-/** 记分卡的一维：维度名 + 结果 pill (交锋 / 论据 走 verdictTogglePill，收敛走 success/muted)。 */
-function ScoreMetric({
-  label,
-  pill,
-  text,
-}: {
-  label: string;
-  pill: string;
-  text: string;
-}) {
-  return (
-    <div className="flex flex-col items-start gap-1">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className={pill}>{text}</span>
-    </div>
   );
 }
 
@@ -612,7 +573,7 @@ function clashRole(
 
 /**
  * 一方的发言格：身份色标签栏头 (立场/视角名，点击钻取完整产出) + 渲染后的发言 markdown。
- * **身份 ≠ 状态**——身份走 {@link SideIdentityPill} 的 `colorVar`，运行状态仍走
+ * **身份 ≠ 状态**——身份走 {@link SideIdentity} 的 `colorVar`，运行状态仍走
  * {@link StatusDot}；live↔收场同一身份恒同色、同结构，可顺色追踪一方的论点链。
  */
 function NarrativeSideCell({
@@ -646,7 +607,11 @@ function NarrativeSideCell({
   const header = (
     <span className="flex w-full items-center gap-1.5 text-left">
       {run && <StatusDot status={run.status} />}
-      <SideIdentityPill name={side.name} colorVar={side.colorVar} />
+      <SideIdentity
+        name={side.name}
+        colorVar={side.colorVar}
+        model={side.model}
+      />
       <span className="min-w-0 flex-1" />
       {run && (
         <ChevronRight
@@ -695,28 +660,6 @@ function NarrativeSideCell({
         )}
       </div>
     </div>
-  );
-}
-
-/** 立场/视角名身份徽章：按身份色 `var(--agent-N)` 着色 (14% 底，内联 var，遵 color-tokens
- * 身份色板约定——不进 Tailwind 类、不与状态色竞争)。live 栏头与收场发言格共用。 */
-function SideIdentityPill({
-  name,
-  colorVar,
-}: {
-  name: string;
-  colorVar: string;
-}) {
-  return (
-    <span
-      className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium"
-      style={{
-        color: colorVar,
-        backgroundColor: `color-mix(in oklch, ${colorVar} 14%, transparent)`,
-      }}
-    >
-      {name}
-    </span>
   );
 }
 
@@ -799,7 +742,7 @@ function ClashList({
   );
 }
 
-/** 交锋边里的一方名：按身份色着色的纯文字 (比 {@link SideIdentityPill} 更轻，密集列表里不抢
+/** 交锋边里的一方名：按身份色着色的纯文字 (比 {@link SideNamePill} 更轻，密集列表里不抢
  * 视觉)，与发言格同 `colorVar` → 顺色对上是哪一方。 */
 function ClashName({ name, colorVar }: { name: string; colorVar: string }) {
   return (

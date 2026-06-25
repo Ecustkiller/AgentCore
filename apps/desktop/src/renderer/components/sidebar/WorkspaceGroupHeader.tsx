@@ -2,7 +2,6 @@ import {
   DeleteProjectDialog,
   archiveConversationsBeforeDelete,
 } from "@/components/folders/DeleteProjectDialog";
-import { PermanentDeleteProjectDialog } from "@/components/folders/PermanentDeleteProjectDialog";
 import { IconButton, SurfaceRow } from "@/components/ui";
 import {
   ContextMenu,
@@ -61,7 +60,6 @@ export function WorkspaceGroupHeader({
 }: Props) {
   const [moreOpen, setMoreOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [permanentDeleteOpen, setPermanentDeleteOpen] = useState(false);
   const navigate = useNavigate();
   const archiveMutation = useArchiveConversation();
   const deleteFolderMutation = useDeleteFolder();
@@ -104,12 +102,8 @@ export function WorkspaceGroupHeader({
     });
   };
 
-  const confirmDeleteProject = async ({
-    archiveConversations,
-  }: {
-    archiveConversations: boolean;
-  }) => {
-    if (archiveConversations && convs.length > 0) {
+  const confirmDeleteProject = async () => {
+    if (convs.length > 0) {
       const ok = await archiveConversationsBeforeDelete(convs, {
         archive: (id) => archiveMutation.mutateAsync(id),
         dropRuntime: dropConversationRuntime,
@@ -133,7 +127,7 @@ export function WorkspaceGroupHeader({
       if (id === currentId) navigate("/");
     }
     permanentDeleteMutation.mutate(folder.id, {
-      onSuccess: () => setPermanentDeleteOpen(false),
+      onSuccess: () => setDeleteOpen(false),
       onError: (err) => notifyError(err, "彻底删除失败"),
     });
   };
@@ -168,13 +162,6 @@ export function WorkspaceGroupHeader({
         <Trash2 size={14} className="shrink-0" />
         <span className="flex-1 truncate">删除项目…</span>
       </ContextMenuItem>
-      <ContextMenuItem
-        variant="danger"
-        onSelect={() => setPermanentDeleteOpen(true)}
-      >
-        <Trash2 size={14} className="shrink-0" />
-        <span className="flex-1 truncate">彻底删除项目…</span>
-      </ContextMenuItem>
     </>
   );
 
@@ -204,13 +191,6 @@ export function WorkspaceGroupHeader({
       <DropdownMenuItem variant="danger" onSelect={() => setDeleteOpen(true)}>
         <Trash2 size={14} className="shrink-0" />
         <span className="flex-1 truncate">删除项目…</span>
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        variant="danger"
-        onSelect={() => setPermanentDeleteOpen(true)}
-      >
-        <Trash2 size={14} className="shrink-0" />
-        <span className="flex-1 truncate">彻底删除项目…</span>
       </DropdownMenuItem>
     </>
   );
@@ -298,15 +278,9 @@ export function WorkspaceGroupHeader({
         onOpenChange={setDeleteOpen}
         name={folder.name}
         liveConvCount={liveConvCount}
-        onConfirm={(opts) => void confirmDeleteProject(opts)}
-      />
-      <PermanentDeleteProjectDialog
-        open={permanentDeleteOpen}
-        onOpenChange={setPermanentDeleteOpen}
-        name={folder.name}
-        liveConvCount={liveConvCount}
         isLocal={!!folder.localRootId}
-        onConfirm={confirmPermanentDelete}
+        onConfirm={() => void confirmDeleteProject()}
+        onPermanentConfirm={confirmPermanentDelete}
       />
     </>
   );

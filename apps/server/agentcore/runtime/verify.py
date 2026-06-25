@@ -9,10 +9,21 @@
 落点同时盖住两条路）。本模块只产出结论与注入文案，保持纯函数、可独立单测，处置（回炉 /
 放行 / 计数）在 react_loop 里。
 
-第一刀只做一条轻层校验：**造引用拦截**——正文角标 ``[n]`` 指向不存在的来源卡（编号 < 1
-或 > 来源数）。这是真实运行里出过的事故（CEO 直答用了 [25][27] 而实际仅 24 源，直接违反
-基座提示词「绝不编造引用」却不自知），纯机械可判、近零成本。后续轻层（残留 TODO / JSON
-可解析）与重层（要跑 / 要重算 / 换眼睛找漏 / 回源对照）在此扩展。
+轻层现覆盖两类**纯机械、近零误报**的校验：
+
+1. **造引用拦截**——正文角标 ``[n]`` 指向不存在的来源卡（编号 < 1 或 > 来源数）。真实事故是
+   CEO 直答用了 [25][27] 而实际仅 24 源，违反基座提示词「绝不编造引用」却不自知。
+2. **结构完整性**——代码围栏未闭合（``` 开了没收尾、后文整片被当代码渲染）、或声明了语言却
+   空体（标了 ``python`` 却没有任何内容，等于「答应给代码却没给」）。都是「交付不完整」的
+   机械信号，最终交付里几乎不会有意为之，故误报率近零。
+
+刻意**不**纳入「残留 TODO / 填空占位」之类：法律垂直会正当地在合同模板留空待填、worker 也会
+如实写「该资料待客户提供」，机械判会误伤——轻层的立身之本是近零误报，宁缺毋滥。后续轻层（如
+受限的 JSON 可解析）与重层（要跑 / 要重算 / 换眼睛找漏 / 回源对照）在此扩展。
+
+**统一底线**：结构完整性两查对 CEO 与 worker 同样成立，二者收尾都过这道关（worker 回炉经
+``run_output_reset`` 干净重写其卡片）；造引用查仅 CEO 路径开（见 ``finish_guard`` 的
+``check_citations``）。
 
 → 见设计: docs/03-AI核心/执行引擎架构设计.md（ReAct 循环 · 交付前核验）
 """
@@ -22,26 +33,73 @@ from __future__ import annotations
 from agentcore.runtime.citations import out_of_range_markers
 
 
-def finish_guard(content: str, *, citation_count: int) -> list[str]:
+def finish_guard(content: str, *, citation_count: int, check_citations: bool = True) -> list[str]:
     """模型宣布 done 时的轻层守卫：返回「待修正项」列表，空列表 = 放行交付。
 
     每条都是一句锚定具体事实的修正指令（镜像 ``loop_controller`` 的注入风格——锚到可观测
     的实事而非空泛的「再想想」），由 react_loop 经 :func:`format_guard_steer` 拼成系统
     提示注入、回炉一轮。纯函数、不经 LLM、不靠 CEO 自觉，可独立单测。
 
-    第一刀只查造引用：:func:`~agentcore.runtime.citations.out_of_range_markers` 抓出
-    正文里指向不存在来源卡的角标 ``[n]``（编号 < 1 或 > ``citation_count``）。这正是基座
-    提示词「绝不编造引用」的机械兜底。``citation_count`` 是本回合实际收集到的来源卡数；
-    为 0 时正文里出现任何 ``[n]`` 都视为编造（与客户端「越界角标降级为纯文本」同义）。
+    这是**所有 react_loop 收尾共过的统一底线**——CEO captain 与 worker 都在 done 点过此关。
+    现查两类，二者的适用面不同：
+
+    1. **造引用**（仅 ``check_citations``）：:func:`~agentcore.runtime.citations.out_of_range_markers`
+       抓正文里指向不存在来源卡的角标 ``[n]``（编号 < 1 或 > ``citation_count``）。``citation_count``
+       是本回合实际收集到的来源卡数；为 0 时正文里任何 ``[n]`` 都视为编造（与客户端「越界角标
+       降级为纯文本」同义）。仅 CEO 路径开（``check_citations=annotate_citations``）：worker 文本
+       未编号、其本地 ``[n]`` 汇入回合卡时会重排，角标校验语义不适用，故 worker 关此查。
+    2. **结构完整性**（始终查）：:func:`_code_fence_reworks` 抓代码围栏未闭合 / 声明语言却空体。
+       与角标无关、对 CEO 与 worker 同样成立，故是真正的统一底线。
     """
     reworks: list[str] = []
-    stray = out_of_range_markers(content, citation_count)
-    if stray:
-        marks = "、".join(f"[{n}]" for n in stray)
+    if check_citations:
+        stray = out_of_range_markers(content, citation_count)
+        if stray:
+            marks = "、".join(f"[{n}]" for n in stray)
+            reworks.append(
+                f"正文用了 {marks} 这些来源角标，但本回合实际只有 {citation_count} 条来源——"
+                "它们指向不存在的来源卡，属于编造引用（违反「绝不编造引用」）。请删除这些角标、"
+                "改成真实存在的来源编号，或为该论断补上可检索到的来源；没有依据就直接去掉这处引用。"
+            )
+    reworks.extend(_code_fence_reworks(content))
+    return reworks
+
+
+def _code_fence_reworks(content: str) -> list[str]:
+    """结构完整性轻检：扫 Markdown 代码围栏，抓两类纯机械、近零误报的缺陷。
+
+    - **未闭合**：``` 开了块却没收尾——会让后文整片被当代码渲染（最终交付里几乎不会有意为之）。
+    - **声明语言却空体**：``` 标了语言（如 ``python``）却没有任何内容，等于「答应给代码却没给」。
+
+    单遍扫行、把每个行首 ``` 当作开/合切换（标准 Markdown 同字符围栏不嵌套），开块时记下语言、
+    累计块内非空内容；合块时若「有语言且零内容」记一条空体项，扫完仍在块内记一条未闭合项。
+    措辞锚到具体缺陷并点明下一步，与造引用项同风格。
+    """
+    reworks: list[str] = []
+    in_fence = False
+    fence_lang = ""
+    body_chars = 0
+    for line in content.splitlines():
+        if line.lstrip().startswith("```"):
+            if in_fence:
+                if fence_lang and body_chars == 0:
+                    reworks.append(
+                        f"正文里标注为「{fence_lang}」的代码块是空的——声明了代码却没有任何内容。"
+                        "请补全该代码块的内容，或删除这个空代码块。"
+                    )
+                in_fence = False
+                fence_lang = ""
+                body_chars = 0
+            else:
+                in_fence = True
+                fence_lang = line.lstrip().lstrip("`").strip()
+                body_chars = 0
+        elif in_fence and line.strip():
+            body_chars += len(line.strip())
+    if in_fence:
         reworks.append(
-            f"正文用了 {marks} 这些来源角标，但本回合实际只有 {citation_count} 条来源——"
-            "它们指向不存在的来源卡，属于编造引用（违反「绝不编造引用」）。请删除这些角标、"
-            "改成真实存在的来源编号，或为该论断补上可检索到的来源；没有依据就直接去掉这处引用。"
+            "正文里有一个用 ``` 开启的代码块没有闭合（缺少结尾的 ```）——会导致后面的内容"
+            "全部被当作代码渲染。请补上结尾的 ```，或删除多余的起始标记。"
         )
     return reworks
 

@@ -65,6 +65,8 @@ class DelegateTool:
         message_id: str | None = None,
         suspension_saver: SuspensionSaver | None = None,
         suspension_deleter: SuspensionDeleter | None = None,
+        folder_id: str | None = None,
+        memory_enabled: bool = True,
         depth: int = 0,
     ) -> None:
         self._llm = llm
@@ -88,6 +90,13 @@ class DelegateTool:
         self._message_id = message_id
         self._suspension_saver = suspension_saver
         self._suspension_deleter = suspension_deleter
+        # Turn-level project scope, carried purely so a durable plan_review pause captures it
+        # into the frame — the resumed toolset re-wires consult_memory to the same project
+        # (记忆作用域与画像分层 §5.2). Not used by the delegate drive itself.
+        self._folder_id = folder_id
+        # Same capture-only role: the memory master switch rides the frame so resume re-wires
+        # consult_memory exactly as this turn did (off ⇒ stays off).
+        self._memory_enabled = memory_enabled
         self._children: list[DelegateTool] = []
         self._calls = 0
         from agentcore.runtime.costing import WorkerResultAccumulator

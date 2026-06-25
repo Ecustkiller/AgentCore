@@ -1,9 +1,4 @@
-import {
-  Button,
-  DecisionCard,
-  DecisionCardFooter,
-  Textarea,
-} from "@/components/ui";
+import { Button, DecisionCard, DecisionCardFooter } from "@/components/ui";
 import {
   interactiveCheckpointTone,
   resolvedCheckpointTone,
@@ -14,23 +9,23 @@ import {
   decideCheckpoint,
 } from "@/services/checkpoint";
 import type { CheckpointDisplay } from "@/stores/conversation";
-import type {
-  AskAssumption,
-  AskQuestion,
-  AskStyleOption,
-} from "@/types/events";
 import {
   Check,
-  ChevronRight,
   CircleHelp,
   Clock,
   Loader2,
   OctagonX,
   Pencil,
   Rocket,
-  SlidersHorizontal,
 } from "lucide-react";
 import { useState } from "react";
+import {
+  AskNoteField,
+  AskQuestionFields,
+  type AskUserContent,
+  isOpeningFlavored,
+  useAskAnswer,
+} from "./ask/AskUserFields";
 
 /**
  * Inline ask_user card — the CEO paused the turn to ask the user. This is the ONE
@@ -75,27 +70,6 @@ export function CheckpointCard({
   );
 }
 
-/** The minimal ask_user content both the live card and the durable resume card
- * render. A {@link CheckpointDisplay} (live/replay) and a paused-turn frame both
- * satisfy it, so the one {@link AskUserCard} body serves both surfaces. */
-export interface AskUserContent {
-  question: string;
-  context: string;
-  assumptions: AskAssumption[];
-  questions: AskQuestion[];
-  styleOptions: AskStyleOption[];
-}
-
-/** Whether the card leans「开场引导」(ready-to-go, primary) vs「途中拍板」(careful
- * fork, warning): an opening carries 起步计划 / 风格, or pre-fills every question
- * with a default; a mid-task fork carries a bare question with no defaults. */
-function isOpeningFlavored(c: AskUserContent): boolean {
-  if (c.assumptions.length > 0 || c.styleOptions.length > 0) return true;
-  return (
-    c.questions.length > 0 && c.questions.every((q) => q.default.length > 0)
-  );
-}
-
 /** Per-tone class sets — from shared tone-presets (Tailwind literal strings). */
 const TONE = interactiveCheckpointTone;
 
@@ -126,67 +100,11 @@ export function AskUserCard({
 }) {
   const opening = isOpeningFlavored(content);
   const tone = opening ? TONE.primary : TONE.warning;
-
-  // Per-question answer: choice → option(s), text → [typed value]. Seed from each
-  // question's default so a 想省事 user can one-click submit an opening as-is.
-  const [answers, setAnswers] = useState<Record<string, string[]>>(() => {
-    const init: Record<string, string[]> = {};
-    for (const q of content.questions)
-      init[q.id] = q.default ? [q.default] : [];
-    return init;
-  });
-  // Per-question「其他」escape hatch (Cursor 式): when a choice question's options
-  // don't fit, the user reveals an inline custom field for THAT question instead of
-  // dumping into the single global note. `otherOn` is the revealed/selected flag,
-  // `otherText` the typed value — folded into that question's answer on submit.
-  const [otherOn, setOtherOn] = useState<Record<string, boolean>>({});
-  const [otherText, setOtherText] = useState<Record<string, string>>({});
-  const [styleId, setStyleId] = useState<string | null>(
-    content.styleOptions[0]?.id ?? null,
-  );
-  const [note, setNote] = useState("");
+  const ans = useAskAnswer(content);
   const [submitting, setSubmitting] = useState<CheckpointUserDecision | null>(
     null,
   );
   const busy = submitting !== null;
-
-  const toggleChoice = (q: AskQuestion, opt: string) => {
-    if (busy) return;
-    setAnswers((cur) => {
-      const picked = cur[q.id] ?? [];
-      if (q.multiple) {
-        return {
-          ...cur,
-          [q.id]: picked.includes(opt)
-            ? picked.filter((o) => o !== opt)
-            : [...picked, opt],
-        };
-      }
-      return { ...cur, [q.id]: picked.includes(opt) ? [] : [opt] };
-    });
-    // Single-select: picking a listed option deselects「其他」(mutually exclusive).
-    if (!q.multiple)
-      setOtherOn((cur) => (cur[q.id] ? { ...cur, [q.id]: false } : cur));
-  };
-
-  const setText = (q: AskQuestion, value: string) => {
-    if (busy) return;
-    setAnswers((cur) => ({ ...cur, [q.id]: value ? [value] : [] }));
-  };
-
-  // Toggle a choice question's「其他」field. Single-select: engaging it clears the
-  // listed picks (mutually exclusive); multi-select: it coexists with checked options.
-  const toggleOther = (q: AskQuestion) => {
-    if (busy) return;
-    const turningOn = !otherOn[q.id];
-    setOtherOn((cur) => ({ ...cur, [q.id]: turningOn }));
-    if (turningOn && !q.multiple) setAnswers((cur) => ({ ...cur, [q.id]: [] }));
-  };
-
-  const setOtherValue = (q: AskQuestion, value: string) => {
-    if (busy) return;
-    setOtherText((cur) => ({ ...cur, [q.id]: value }));
-  };
 
   const send = (decision: CheckpointUserDecision) => {
     if (busy) return;
@@ -194,17 +112,7 @@ export function AskUserCard({
     // 停止 carries only an optional closing remark; 提交 composes the picks +
     // style + note into one readable answer (selected stays empty — α 答复模型).
     const composed =
-      decision === "stop"
-        ? note.trim()
-        : composeAnswer(
-            content,
-            answers,
-            otherOn,
-            otherText,
-            styleId,
-            note,
-            opening,
-          );
+      decision === "stop" ? ans.note.trim() : ans.compose(opening);
     // The caller resolves / resumes; on a hard failure (live decide) re-enable so
     // the user can retry (resume unmounts the card, so the reset is a harmless no-op).
     Promise.resolve(onSubmit(decision, composed)).catch((err) => {
@@ -214,15 +122,6 @@ export function AskUserCard({
       setSubmitting(null);
     });
   };
-
-  // How many decisions already carry a value — surfaced on the opening CTA so a
-  // 想省事 user sees the card is ready to ship as-is.
-  const presetCount =
-    content.questions.filter(
-      (q) =>
-        (answers[q.id] ?? []).length > 0 ||
-        (otherOn[q.id] && (otherText[q.id] ?? "").trim().length > 0),
-    ).length + (styleId ? 1 : 0);
 
   return (
     <DecisionCard
@@ -255,95 +154,22 @@ export function AskUserCard({
           </div>
         </div>
 
-        {/* 起步计划：可折叠的只读信息块（默认展开；收起后 summary 仍预览各项名）。 */}
-        {content.assumptions.length > 0 && (
-          <details
-            open
-            className="group rounded-lg border-l-2 border-primary/30 bg-muted/40"
-          >
-            <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 [&::-webkit-details-marker]:hidden">
-              <ChevronRight
-                size={13}
-                className="shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
-              />
-              <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                起步计划
-              </span>
-              <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70 group-open:hidden">
-                {content.assumptions.map((a) => a.label).join(" · ")}
-              </span>
-            </summary>
-            <div className="space-y-1 px-3 pb-2 pl-8">
-              {content.assumptions.map((a) => (
-                <div key={a.id} className="flex gap-2 text-xs">
-                  <span className="w-16 shrink-0 text-muted-foreground">
-                    {a.label}
-                  </span>
-                  <span className="min-w-0 flex-1 whitespace-pre-wrap text-foreground">
-                    {a.value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </details>
-        )}
-
-        {content.questions.map((q, i) => (
-          <QuestionField
-            key={q.id}
-            index={i + 1}
-            numbered={content.questions.length > 1}
-            question={q}
-            answer={answers[q.id] ?? []}
-            otherOn={otherOn[q.id] ?? false}
-            otherText={otherText[q.id] ?? ""}
-            disabled={busy}
-            tone={tone}
-            onToggleChoice={(opt) => toggleChoice(q, opt)}
-            onSetText={(v) => setText(q, v)}
-            onToggleOther={() => toggleOther(q)}
-            onSetOther={(v) => setOtherValue(q, v)}
-          />
-        ))}
-
-        {content.styleOptions.length > 0 && (
-          <div>
-            <p className="flex items-center gap-1 text-xs font-medium text-foreground">
-              <SlidersHorizontal size={13} className="text-muted-foreground" />
-              风格基调
-            </p>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {content.styleOptions.map((s) => {
-                const active = s.id === styleId;
-                return (
-                  <Button
-                    key={s.id}
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() => !busy && setStyleId(active ? null : s.id)}
-                    className={`h-auto rounded-lg border px-2.5 py-1 font-normal disabled:opacity-40 ${
-                      active ? tone.optActive : tone.optIdle
-                    }`}
-                  >
-                    {s.label}
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <Textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
+        <AskQuestionFields
+          content={content}
+          answer={ans}
+          tone={tone}
           disabled={busy}
-          rows={2}
+        />
+
+        <AskNoteField
+          answer={ans}
+          tone={tone}
+          disabled={busy}
           placeholder={
             opening
               ? "可选 · 补充或修改任何一处，留空就按上面开做"
               : "可选 · 补充说明或调整方向"
           }
-          className={`w-full border-border bg-card placeholder:text-muted-foreground/70 ${tone.focus}`}
         />
       </div>
 
@@ -383,162 +209,13 @@ export function AskUserCard({
         </Button>
         {opening && (
           <span className="min-w-0 text-xs text-muted-foreground">
-            {presetCount > 0
-              ? `已为你预选 ${presetCount} 项，也可在下方对话框回复`
+            {ans.presetCount > 0
+              ? `已为你预选 ${ans.presetCount} 项，也可在下方对话框回复`
               : "也可直接在下方对话框回复"}
           </span>
         )}
       </DecisionCardFooter>
     </DecisionCard>
-  );
-}
-
-/** One askable item: a choice (radio / checkbox) or free-form text fill. `numbered`
- * shows a leading step badge (only when there is more than one question, so a lone
- * mid-task fork stays clean). */
-function QuestionField({
-  index,
-  numbered,
-  question,
-  answer,
-  otherOn,
-  otherText,
-  disabled,
-  tone,
-  onToggleChoice,
-  onSetText,
-  onToggleOther,
-  onSetOther,
-}: {
-  index: number;
-  numbered: boolean;
-  question: AskQuestion;
-  answer: string[];
-  otherOn: boolean;
-  otherText: string;
-  disabled: boolean;
-  tone: (typeof TONE)[keyof typeof TONE];
-  onToggleChoice: (opt: string) => void;
-  onSetText: (value: string) => void;
-  onToggleOther: () => void;
-  onSetOther: (value: string) => void;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="flex items-center gap-2">
-        {numbered && (
-          <span
-            className={`flex size-5 shrink-0 items-center justify-center rounded-full text-xs font-medium ${tone.badge}`}
-          >
-            {index}
-          </span>
-        )}
-        <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm text-foreground">
-          {question.prompt}
-        </p>
-        {question.kind === "choice" && question.multiple && (
-          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-            可多选
-          </span>
-        )}
-      </div>
-      <div className={`mt-1.5 ${numbered ? "pl-7" : ""}`}>
-        {question.kind === "text" ? (
-          <input
-            type="text"
-            value={answer[0] ?? ""}
-            onChange={(e) => onSetText(e.target.value)}
-            disabled={disabled}
-            placeholder={question.default || undefined}
-            className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${tone.focus}`}
-          />
-        ) : (
-          <div className="space-y-1">
-            {question.options.map((opt) => {
-              const active = answer.includes(opt);
-              const isDefault = !!question.default && opt === question.default;
-              return (
-                <Button
-                  key={opt}
-                  variant="ghost"
-                  disabled={disabled}
-                  onClick={() => onToggleChoice(opt)}
-                  className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1.5 text-left font-normal disabled:opacity-40 ${
-                    active ? tone.optActive : tone.optIdle
-                  }`}
-                >
-                  <span className="flex w-full items-start gap-2">
-                    <span
-                      className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border-2 ${
-                        question.multiple ? "rounded-lg" : "rounded-full"
-                      } ${active ? tone.markActive : "border-border"}`}
-                    >
-                      {active &&
-                        (question.multiple ? (
-                          <Check size={11} strokeWidth={3} />
-                        ) : (
-                          <span className={`size-2 rounded-full ${tone.dot}`} />
-                        ))}
-                    </span>
-                    <span className="min-w-0 flex-1 whitespace-pre-wrap">
-                      {opt}
-                    </span>
-                    {isDefault && (
-                      <span
-                        className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-xs ${
-                          active ? tone.badge : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        默认
-                      </span>
-                    )}
-                  </span>
-                </Button>
-              );
-            })}
-            {/* 「其他」逃生口：选项不合适时就地为这一题填自定义答案，而非塞进全局补充框。 */}
-            <Button
-              variant="ghost"
-              disabled={disabled}
-              onClick={onToggleOther}
-              className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1.5 text-left font-normal disabled:opacity-40 ${
-                otherOn ? tone.optActive : tone.optIdle
-              }`}
-            >
-              <span className="flex w-full items-start gap-2">
-                <span
-                  className={`mt-0.5 flex size-4 shrink-0 items-center justify-center border-2 ${
-                    question.multiple ? "rounded-lg" : "rounded-full"
-                  } ${otherOn ? tone.markActive : "border-border"}`}
-                >
-                  {otherOn &&
-                    (question.multiple ? (
-                      <Check size={11} strokeWidth={3} />
-                    ) : (
-                      <span className={`size-2 rounded-full ${tone.dot}`} />
-                    ))}
-                </span>
-                <span className="min-w-0 flex-1 whitespace-pre-wrap">
-                  其他…
-                </span>
-              </span>
-            </Button>
-            {otherOn && (
-              <input
-                type="text"
-                value={otherText}
-                onChange={(e) => onSetOther(e.target.value)}
-                disabled={disabled}
-                // biome-ignore lint/a11y/noAutofocus: 用户点开「其他」才渲染此框，聚焦到刚展开的字段是预期 UX（非页面加载时强夺焦点）。
-                autoFocus
-                placeholder="填写你的答案"
-                className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${tone.focus}`}
-              />
-            )}
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -667,38 +344,4 @@ function ResolvedCheckpoint({ checkpoint }: { checkpoint: CheckpointDisplay }) {
       </div>
     </div>
   );
-}
-
-/** Compose the user's picks + style + free note into ONE readable answer the CEO
- * can act on (答复模型 α): each answered question, the chosen style, and any note.
- * Plain text — the only reader is the CEO (an LLM), so there is no structured wire
- * payload it would just flatten back to prose. A pure free-text ask (no structured
- * items) sends the raw note. */
-function composeAnswer(
-  content: AskUserContent,
-  answers: Record<string, string[]>,
-  otherOn: Record<string, boolean>,
-  otherText: Record<string, string>,
-  styleId: string | null,
-  note: string,
-  opening: boolean,
-): string {
-  const trimmed = note.trim();
-  if (content.questions.length === 0 && content.styleOptions.length === 0) {
-    return trimmed;
-  }
-  const lines: string[] = [];
-  for (const q of content.questions) {
-    const picked = (answers[q.id] ?? []).map((s) => s.trim()).filter(Boolean);
-    // 「其他」自定义值并入这一题的答案（多选时与已勾选项并列，单选时即为答案）。
-    const custom = otherOn[q.id] ? (otherText[q.id] ?? "").trim() : "";
-    const values = custom ? [...picked, custom] : picked;
-    if (values.length) lines.push(`· ${q.prompt}：${values.join("、")}`);
-    else if (q.default) lines.push(`· ${q.prompt}：（按你的默认）`);
-  }
-  const style = content.styleOptions.find((s) => s.id === styleId);
-  if (style) lines.push(`· 风格：${style.label}`);
-  if (trimmed) lines.push(`· 补充：${trimmed}`);
-  if (lines.length === 0) return trimmed;
-  return [opening ? "就按这个方案开做：" : "我的答复：", ...lines].join("\n");
 }

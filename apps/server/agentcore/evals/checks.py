@@ -77,6 +77,33 @@ class ToolArgsValidCheck:
 
 
 @dataclass
+class ToolArgNonEmptyCheck:
+    """指定工具的某次调用，入参 ``arg`` 存在且**非空**（非空 list/str/dict 等真值）。
+
+    比 ``ToolArgsValid.required``（仅查键是否存在）更强：断言「模型不仅填了这个参数、还真
+    带了内容」。典型用途是验证 escalate 的结构化 ``questions``——worker 真把【只有用户能定】
+    的岔路拆成了选项（而非把键留空 / 给空数组）。任一匹配调用满足即通过。
+    """
+
+    tool: str = ""
+    arg: str = ""
+    name: str = "ToolArgNonEmpty"
+
+    def run(self, case: EvalCase, outcome: TurnOutcome) -> CheckOutcome:
+        matched = [(n, a) for (n, a) in outcome.tool_calls if n == self.tool]
+        if not matched:
+            return CheckOutcome(self.name, False, f"no call to {self.tool!r}")
+        for n, raw in matched:
+            try:
+                args = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                continue
+            if args.get(self.arg):  # truthy ⇒ present & non-empty (空 list/str/dict 为假)
+                return CheckOutcome(self.name, True, f"{n}.{self.arg} non-empty")
+        return CheckOutcome(self.name, False, f"{self.tool}.{self.arg} empty/missing in all calls")
+
+
+@dataclass
 class HasCitationsCheck:
     """引用数达阈值（检索类用例）。"""
 
@@ -200,6 +227,9 @@ _REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
     "ToolArgsValid": lambda a: ToolArgsValidCheck(
         tool=a.get("tool"), required=list(a.get("required", []))
     ),
+    "ToolArgNonEmpty": lambda a: ToolArgNonEmptyCheck(
+        tool=a.get("tool", ""), arg=a.get("arg", "")
+    ),
     "HasCitations": lambda a: HasCitationsCheck(min_count=int(a.get("min", 1))),
     "Delegated": lambda a: DelegatedCheck(),
     "NotDelegated": lambda a: NotDelegatedCheck(),
@@ -214,7 +244,7 @@ _REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
 
 CHECK_NAMES: frozenset[str] = frozenset(_REGISTRY)
 
-# 诊断 Check（轨迹形状）：仍注册、仍跑、仍报告，但**不计入** pass/fail（评测体系重设计 §三/§六）。
+# 诊断 Check（轨迹形状）：仍注册、仍跑、仍报告，但**不计入** pass/fail（后端架构.md §五）。
 # 「派没派 / roster 对不对」是编排手段，不是任务结果——把它当 golden 标签会变成回归测试作者的
 # 编排理论（「实现冒充需求」）。过度编排改由「个体贡献=0 + L0 成本预算」度量，期望角色改由 L1
 # milestone 覆盖度量。``runner.apply_checks`` 据此集合把对应 CheckOutcome 标为 gating=False。

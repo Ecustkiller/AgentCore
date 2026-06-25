@@ -16,7 +16,7 @@ import type { ReactNode } from "react";
 import { DEMO_TASK } from "../data/demo";
 
 /*
- * The desktop shell, re-stated (宣传视频落地设计.md §三.3): a static, pixel-faithful
+ * The desktop shell, re-stated (apps/promo/README.md): a static, pixel-faithful
  * copy of AppShell + TitleBar + Sidebar markup with the store/IPC/router wiring
  * stripped out. It's the 全程基线 — present behind every "app" scene — so the
  * chrome reads as one continuous running app while only the main area changes.

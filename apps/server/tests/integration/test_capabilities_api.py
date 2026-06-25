@@ -34,7 +34,7 @@ async def test_capabilities_returns_full_catalog(client, make_invite):
 
     tools = {t["name"]: t for t in body["tools"]}
     # The complete repertoire — CEO orchestration the old /v1/tools never served…
-    for name in ("delegate", "revise", "consult_skill", "ask_user"):
+    for name in ("delegate", "revise", "consult_skill", "consult_memory", "ask_user"):
         assert name in tools
         assert tools[name]["available_to"] == ["ceo"]
     # …worker-only mutation + escalate…

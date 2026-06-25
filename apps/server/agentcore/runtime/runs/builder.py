@@ -299,6 +299,7 @@ def _inline_spec(
     thinking_raw = item.get("thinking")
     effort_raw = item.get("reasoning_effort")
     pref = item.get("model_preference", "strong")
+    model_raw = item.get("model")
     stance_raw = item.get("stance")
     group_raw = item.get("group")
     round_raw = item.get("round")
@@ -313,6 +314,9 @@ def _inline_spec(
         system_prompt_supplement=item.get("system_prompt_supplement") or None,
         tools=_tools(item.get("tools"), valid_tools),
         model_preference=pref if pref in _VALID_TIERS else "strong",
+        # Explicit model override (真·多模型辩手)：宽松解析（仅收非空字符串，否则空=按 tier
+        # 解析），由执行器覆写 profile.model 并经路由器分发。普通 worker 不带此字段 → 空。
+        model=model_raw.strip() if isinstance(model_raw, str) else "",
         thinking=thinking_raw if isinstance(thinking_raw, bool) else None,
         reasoning_effort=effort_raw if effort_raw in _VALID_EFFORTS else None,
         expected_output=item.get("expected_output", "") or "",

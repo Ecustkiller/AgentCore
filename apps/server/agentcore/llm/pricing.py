@@ -1,8 +1,10 @@
 """Single source of truth for turning token usage into money (不变量 #2).
 
 Every place that needs a cost calls :func:`calculate_cost` — there is no other
-price table and no per-site arithmetic. Prices are USD per 1M tokens, taken from
-``docs/06-参考/DeepSeek-V4-API参考.md`` §三 (authoritative).
+price table and no per-site arithmetic. Prices are USD per 1M tokens: DeepSeek from
+``docs/06-参考/DeepSeek-V4-API参考.md`` §三 (authoritative); third-party vendors
+(豆包/方舟) from the vendor's published CNY rate converted at ``CNY_PER_USD`` (see the
+table comments). Per-input-length tiers + FX-from-config are the Phase 2 定价表 item.
 
 Money is never a float. Costs are computed in :class:`~decimal.Decimal` and
 returned as integer **nano-USD** (1 USD = 1e9 nano) — the canonical unit stored
@@ -25,9 +27,16 @@ logger = get_logger(__name__)
 # 1 USD expressed in nano-USD. The ledger and API speak integer nano-USD.
 NANO_PER_USD = 1_000_000_000
 
-# USD per 1M tokens (source: docs/06-参考/DeepSeek-V4-API参考.md §三, authoritative).
-# cache_hit is ~50× cheaper than cache_miss — splitting input by hit/miss is what
-# keeps the bill honest on multi-turn chats (DeepSeek prefix caching).
+# 豆包 (Volcengine 方舟) routed model id — keyed WITH the ``doubao/`` prefix because
+# that is the exact string that reaches calculate_cost: the ProviderRouter only strips
+# the prefix when *calling* the vendor, so cost accounting still sees the original id.
+# TODO(Phase 2 定价表): match by vendor prefix so a new dated version (…-2606xx) keeps
+# its price instead of silently degrading to Flash.
+DOUBAO_SEED_TURBO = "doubao/doubao-seed-2-1-turbo-260628"
+
+# USD per 1M tokens. DeepSeek: docs/06-参考/DeepSeek-V4-API参考.md §三 (authoritative);
+# cache_hit is ~50× cheaper than cache_miss — splitting input by hit/miss is what keeps
+# the bill honest on multi-turn chats (DeepSeek prefix caching).
 _PRICING: dict[str, dict[str, Decimal]] = {
     DEEPSEEK_V4_FLASH: {
         "cache_hit": Decimal("0.0028"),
@@ -38,6 +47,18 @@ _PRICING: dict[str, dict[str, Decimal]] = {
         "cache_hit": Decimal("0.003625"),
         "cache_miss": Decimal("0.435"),
         "output": Decimal("0.87"),
+    },
+    # 豆包 doubao-seed-2.1-turbo via 火山方舟. Volcengine 豆包1.6 统一定价 (深度思考/非思考同价),
+    # tiered by INPUT length; this is the 0–32K tier (input ¥0.8/1M, output ¥8/1M) — the
+    # common case (debate prompts sit well under 32K). USD = CNY ÷ 7.2 (settings.cny_per_usd):
+    # ¥0.8→$0.1111, ¥8→$1.1111. No usable cache tier here: the generic OpenAI-compatible
+    # provider doesn't surface a prompt cache split, so input is always billed as a miss
+    # (cache_hit mirrors cache_miss and is never exercised). Source: Volcengine 豆包大模型 1.6
+    # 定价 (2025 FORCE). TODO(Phase 2 定价表): per-input-length tiers + FX from config.
+    DOUBAO_SEED_TURBO: {
+        "cache_hit": Decimal("0.1111"),
+        "cache_miss": Decimal("0.1111"),
+        "output": Decimal("1.1111"),
     },
 }
 

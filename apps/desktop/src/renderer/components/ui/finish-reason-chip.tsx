@@ -7,7 +7,7 @@ import {
   TrendingDown,
 } from "lucide-react";
 
-const META: Record<
+export const FINISH_REASON_META: Record<
   string,
   { label: string; Icon: LucideIcon; tone: "muted" | "warning" }
 > = {
@@ -41,7 +41,7 @@ export function FinishReasonChip({
   reason: string | undefined;
   className?: string;
 }) {
-  const meta = reason ? META[reason] : undefined;
+  const meta = reason ? FINISH_REASON_META[reason] : undefined;
   if (!meta) return null;
   const { label, Icon, tone } = meta;
   return (

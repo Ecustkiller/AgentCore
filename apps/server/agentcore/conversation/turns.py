@@ -3,7 +3,11 @@
 import asyncio
 import time
 
-from agentcore.conversation.common import resolve_local_binding, resolve_profile_set
+from agentcore.conversation.common import (
+    resolve_local_binding,
+    resolve_memory_enabled,
+    resolve_profile_set,
+)
 from agentcore.conversation.history import load_chat_context
 from agentcore.conversation.turn_backend import build_turn_backend
 from agentcore.conversation.turn_persistence import persist_turn_result, salvage_incomplete_turn
@@ -53,6 +57,7 @@ async def stream_chat(
             local_container_root_id = conv.local_container_root_id
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
+            memory_enabled = await resolve_memory_enabled(session, user_id)
 
         backend = build_turn_backend(
             user_id=user_id,
@@ -95,6 +100,7 @@ async def stream_chat(
                 generate_title=True,
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
+                memory_enabled=memory_enabled,
             )
 
     except Exception as e:
@@ -148,6 +154,7 @@ async def regenerate_chat(
             history = await load_chat_context(session, conversation_id, max_messages=40)
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
+            memory_enabled = await resolve_memory_enabled(session, user_id)
 
         backend = build_turn_backend(
             user_id=user_id,
@@ -179,6 +186,7 @@ async def regenerate_chat(
                 generate_title=False,
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
+                memory_enabled=memory_enabled,
             )
 
     except Exception as e:

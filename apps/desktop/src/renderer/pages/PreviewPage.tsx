@@ -1,4 +1,6 @@
 import { ChatView } from "@/components/chat/ChatView";
+import { ConversationCanvas } from "@/components/graph/ConversationCanvas";
+import { SidePanel } from "@/components/layout/SidePanel";
 import { Button } from "@/components/ui";
 import { PREVIEW_FIXTURES } from "@/preview/fixtures";
 import { deleteRecording, useRecordings } from "@/preview/recordings";
@@ -9,7 +11,14 @@ import {
 } from "@/preview/replay";
 import { useConversationStore } from "@/stores/conversation";
 import type { SSEEvent } from "@/types/events";
-import { FlaskConical, Play, Radio, Trash2 } from "lucide-react";
+import {
+  FlaskConical,
+  MessageSquare,
+  Network,
+  Play,
+  Radio,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -79,13 +88,33 @@ export function PreviewPage() {
   // URL collapses back to the canonical terminal form the harness screenshots.
   const total = current?.events.length ?? 0;
 
+  // Render surface (`#/preview?s=…&view=canvas`): chat (default) replays into
+  // `ChatView`; canvas mounts the real canvas layout (`ConversationCanvas` +
+  // `SidePanel`) so the canvas-only chrome — the team graph and the 指挥台
+  // `CommandRegion` pinned atop the side panel (前端UX设计.md §6.2) — is eyeball-able
+  // and shoot-gated too, not just the chat surface. URL-driven so the harness can
+  // deep-link it and a human can bookmark it.
+  const view = searchParams.get("view") === "canvas" ? "canvas" : "chat";
+  // Preserve the current view across selection / scrubbing so flipping a scenario
+  // or dragging the frame slider doesn't kick canvas back to chat.
+  const withView = (params: Record<string, string>) =>
+    view === "canvas" ? { ...params, view } : params;
+
   const stopStreamed = () => {
     cancelRef.current?.();
     cancelRef.current = null;
   };
 
   const select = (name: string) => {
-    setSearchParams({ s: name }, { replace: true });
+    setSearchParams(withView({ s: name }), { replace: true });
+  };
+
+  const setView = (next: "chat" | "canvas") => {
+    const params: Record<string, string> = {};
+    if (selected) params.s = selected;
+    if (frame !== null) params.k = String(frame);
+    if (next === "canvas") params.view = next;
+    setSearchParams(params, { replace: true });
   };
 
   const removeRecording = (name: string) => {
@@ -102,10 +131,10 @@ export function PreviewPage() {
   const setFrame = (value: number) => {
     if (!selected) return;
     if (value >= total) {
-      setSearchParams({ s: selected }, { replace: true });
+      setSearchParams(withView({ s: selected }), { replace: true });
     } else {
       setSearchParams(
-        { s: selected, k: String(Math.max(1, value)) },
+        withView({ s: selected, k: String(Math.max(1, value)) }),
         { replace: true },
       );
     }
@@ -270,6 +299,37 @@ export function PreviewPage() {
           </div>
           {current && (
             <div className="flex shrink-0 items-center gap-1.5">
+              {/* 聊天 ⇄ 画布: flip the render surface for the SAME replayed slice, so a
+                  canvas-only state (team graph + 指挥台 region) can be eyeballed offline
+                  without spinning up a real multi-agent run. */}
+              <div className="mr-1 flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+                <Button
+                  variant="ghost"
+                  onClick={() => setView("chat")}
+                  aria-pressed={view === "chat"}
+                  icon={<MessageSquare size={14} />}
+                  className={
+                    view === "chat"
+                      ? "bg-accent text-foreground hover:bg-accent"
+                      : undefined
+                  }
+                >
+                  聊天
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => setView("canvas")}
+                  aria-pressed={view === "canvas"}
+                  icon={<Network size={14} />}
+                  className={
+                    view === "canvas"
+                      ? "bg-accent text-foreground hover:bg-accent"
+                      : undefined
+                  }
+                >
+                  画布
+                </Button>
+              </div>
               <Button
                 variant="neutral"
                 onClick={replayNow}
@@ -318,9 +378,20 @@ export function PreviewPage() {
             )}
           </div>
         )}
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          <ChatView />
-        </div>
+        {view === "canvas" ? (
+          // Mirror ConversationPage's canvas layout: the canvas takes the main
+          // column and the unified SidePanel docks on the right (where the 指挥台
+          // CommandRegion auto-surfaces atop the tabs). Same flat row, so the region
+          // caps + self-scrolls exactly as it does in the app.
+          <div className="relative flex min-h-0 flex-1">
+            <ConversationCanvas />
+            <SidePanel />
+          </div>
+        ) : (
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <ChatView />
+          </div>
+        )}
       </div>
     </div>
   );

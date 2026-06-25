@@ -69,6 +69,18 @@ describe("toolResultPeek", () => {
     ).toBe("已写入 a.ts");
   });
 
+  it("names the topic for a consult_memory", () => {
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "consult_memory",
+          display: { topic: "部署流程" },
+          result: "## 笔记\n- x",
+        }),
+      ),
+    ).toBe("部署流程");
+  });
+
   it("falls back to the first non-empty result line", () => {
     expect(
       toolResultPeek(data({ toolName: "grep", result: "match line\nmore" })),

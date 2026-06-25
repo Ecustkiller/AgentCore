@@ -1,4 +1,5 @@
 import type {
+  AskQuestion,
   BatchMetricsPayload,
   CheckpointDecision,
   ContextBlockWire,
@@ -111,6 +112,9 @@ export type RunFrame =
       agentId: string;
       question: string;
       assumption: string;
+      // 结构化升级: optional structured forks (同 ask_user 的 questions) the card renders. The
+      // builder always sets it (`?? []`); optional so hand-built fixtures may omit it.
+      questions?: AskQuestion[];
     }
   | {
       // 阻塞式求决策 settlement: the blocking escalate resolved (answer) or timed out.
@@ -305,6 +309,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         agentId: p.agent_id,
         question: p.question,
         assumption: p.assumption,
+        questions: p.questions ?? [],
       };
     }
     case "escalation_resolved": {
