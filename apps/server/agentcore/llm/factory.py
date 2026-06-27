@@ -11,7 +11,7 @@ fallback, kept behind the billing-mode switch (empty in the BYOK beta).
 """
 
 from agentcore.config import settings
-from agentcore.llm.byok import LLMCredentials
+from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.protocol import LLMProvider

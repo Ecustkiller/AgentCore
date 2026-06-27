@@ -160,7 +160,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: preview-shots
-          path: apps/desktop/out/preview/
+          path: apps/desktop/shoot-out/
           if-no-files-found: ignore
 
   mobile:

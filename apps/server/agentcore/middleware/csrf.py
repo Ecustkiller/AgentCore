@@ -17,7 +17,8 @@ from starlette.responses import JSONResponse, Response
 from agentcore.api.dependencies import ACCESS_TOKEN_COOKIE
 from agentcore.config import settings
 from agentcore.core.errors import AuthenticationError
-from agentcore.security import decode_access_token, sign_csrf_token, verify_csrf_token
+from agentcore.security.csrf import sign_csrf_token, verify_csrf_token
+from agentcore.security.tokens import decode_access_token
 
 CSRF_HEADER = "X-CSRF-Token"
 CSRF_COOKIE = "csrf_token"

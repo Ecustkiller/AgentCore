@@ -4,7 +4,7 @@
 // which stubs the four Electron globals), then drives a headless Chromium to each
 // committed conformance scenario and writes a PNG per scenario. This is the tight
 // loop the AI uses to self-check UI changes: edit a component → `pnpm shoot` →
-// read the PNGs in out/preview/ — no Electron, no backend, no LLM, no tokens.
+// read the PNGs in shoot-out/ — no Electron, no backend, no LLM, no tokens.
 //
 // It also doubles as a CI render smoke gate: a scenario that crashes on render
 // (uncaught error, or the page never mounts #/preview) is a failure and the
@@ -34,7 +34,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const desktopDir = resolve(here, "..");
 const repoRoot = resolve(desktopDir, "..", "..");
 const fixturesDir = resolve(repoRoot, "packages/protocol-conformance/fixtures");
-const outDir = resolve(desktopDir, "out/preview");
+// Dev-only screenshot output. MUST stay outside electron-vite `out/` — electron-builder
+// packs `out/**` into the installer (see electron-builder.yml `files`).
+const SHOOT_OUT_DIR = "shoot-out";
+const outDir = resolve(desktopDir, SHOOT_OUT_DIR);
 
 const SETTLE_MS = Number(process.env.SHOOT_SETTLE_MS ?? 800);
 const VIEWPORT = {

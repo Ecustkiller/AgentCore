@@ -42,7 +42,7 @@ from agentcore.middleware.csrf import CsrfMiddleware
 from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
 from agentcore.runtime.session_retention import session_retention_loop
 from agentcore.runtime.suspension_retention import paused_turn_retention_loop
-from agentcore.security import KeyEncryptor
+from agentcore.security.keys import KeyEncryptor
 from agentcore.tools.builtin.web.search_backend import (
     aclose_search_backend,
     probe_search_at_startup,

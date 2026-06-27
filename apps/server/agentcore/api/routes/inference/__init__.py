@@ -9,7 +9,7 @@ from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import CostEventRepository
 from agentcore.llm.byok import resolve_user_llm_credentials
 from agentcore.runtime.costing import ROLE_CAPTAIN, background_run_cost
-from agentcore.security import decode_inference_token
+from agentcore.security.tokens import decode_inference_token
 
 router = APIRouter(tags=["inference"])
 router.include_router(token.router)

@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "conformance": "pnpm -r run conformance && pnpm -C apps/desktop run conformance",
+    "conformance": "pnpm -r run conformance",
     "gen:types": "node scripts/gen-types.mjs",
     "bump-version": "node scripts/bump-version.mjs",
     "deploy:backend": "node deploy/scripts/remote-build-deploy.mjs",

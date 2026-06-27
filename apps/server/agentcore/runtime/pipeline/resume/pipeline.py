@@ -12,7 +12,7 @@ from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.llm.byok import LLMCredentials
+from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.checkpoints import CheckpointDecision
