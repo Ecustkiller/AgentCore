@@ -2,6 +2,7 @@ import { captureSSEEvent } from "@/preview/recorder";
 import { traceSSEEvent } from "@/services/sseTrace";
 import { traceTurnFirstSSE } from "@/services/turnTrace";
 import type { SSEEvent } from "@/types/events";
+import { handleBoardEvent } from "./handlers/board";
 import { handleExecutionEvent } from "./handlers/execution";
 import { handleInteractionEvent } from "./handlers/interaction";
 import { handleMessageStreamEvent } from "./handlers/messageStream";
@@ -14,6 +15,7 @@ const HANDLERS = [
   handleInteractionEvent,
   handleMetaEvent,
   handleWorkspaceEvent,
+  handleBoardEvent,
   handleExecutionEvent,
 ] as const;
 

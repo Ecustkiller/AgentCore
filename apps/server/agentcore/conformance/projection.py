@@ -312,6 +312,15 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if ag:
                 ag["output"] += p.get("delta") or ""
 
+        elif etype == "run_output_reset":
+            # 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：worker done
+            # 轮草稿未过轻层核验（统一底线·结构完整性），引擎丢弃这一版、发 run_output_reset、回炉
+            # 重写。清该 agent 的 output 标量（重写版从干净态重累积），reasoning 是真实过程、保留
+            # ——否则会把「违规版+修正版」拼在一起。transport-only（不进 journal），与三端 fold 一致。
+            ag = agent_by_id(p.get("agent_id", ""))
+            if ag:
+                ag["output"] = ""
+
         elif etype == "run_reasoning_delta":
             ag = agent_by_id(p.get("agent_id", ""))
             if ag:
@@ -541,10 +550,10 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             status = _FINISH_TO_STATUS.get(finish_reason or "", "completed")
 
         else:
-            # message_start / turn_saved / title_generated / tool_progress /
-            # workspace_op_required / handoff_* — not part of the normalized turn judge
-            # state (no-op). Mirrored by the frontend folds' assertNever switch so the
-            # set stays in lockstep.
+            # message_start / turn_saved / title_generated / followups_generated /
+            # board_op_required / tool_progress / workspace_op_required / handoff_* —
+            # not part of the normalized turn judge state (no-op). Mirrored by the frontend folds'
+            # assertNever switch so the set stays in lockstep.
             pass
 
     # A cancelled turn never received terminal frames for in-flight nodes; freeze them

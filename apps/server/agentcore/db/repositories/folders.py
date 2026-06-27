@@ -7,7 +7,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
-from agentcore.db.models import Conversation, Folder
+from agentcore.db.models import Board, Conversation, Folder
 
 from ._base import _UNSET, _ilike_pattern
 
@@ -129,6 +129,13 @@ class FolderRepository:
                 Conversation.user_id == user_id,
                 Conversation.folder_id == folder_id,
             )
+            .values(folder_id=None)
+        )
+        # Boards in this folder fall back to ungrouped too (never lose a board to a
+        # deleted folder — symmetric with conversations above).
+        await self._session.execute(
+            update(Board)
+            .where(Board.user_id == user_id, Board.folder_id == folder_id)
             .values(folder_id=None)
         )
         await self._session.commit()

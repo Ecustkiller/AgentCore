@@ -1,70 +1,166 @@
-import { Excalidraw, restore, serializeAsJSON } from "@excalidraw/excalidraw";
-import "@excalidraw/excalidraw/index.css";
-import { resolveDark } from "@/lib/theme";
-import { useUIStore } from "@/stores/ui";
-import { type ComponentProps, useCallback, useMemo, useRef } from "react";
+import { PageContainer } from "@/components/layout/PageContainer";
+import { Button, Card } from "@/components/ui";
+import {
+  type BoardSummary,
+  createBoard,
+  deleteBoard,
+  listBoards,
+} from "@/services/boards";
+import { Loader2, Plus, Presentation, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-type ExcalidrawProps = ComponentProps<typeof Excalidraw>;
-type ExcalidrawAPI = Parameters<NonNullable<ExcalidrawProps["excalidrawAPI"]>>[0];
-type SceneChange = NonNullable<ExcalidrawProps["onChange"]>;
-
-// M1 占位持久化：先落 localStorage 把「刷新不丢」跑通，后续切到后端 /v1/boards
-// （实施文档 §四 数据模型 / §六 M1）。键名带版本号，便于日后场景迁移。
-const STORAGE_KEY = "agentcore:whiteboard:local:v1";
-
-function loadInitialData(): ExcalidrawProps["initialData"] {
-  // 默认开启网格（gridModeEnabled）；固定 ON 以覆盖历史场景里未持久化网格状态的情况。
-  const withGrid: ExcalidrawProps["initialData"] = {
-    appState: { gridModeEnabled: true },
-  };
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return withGrid;
-    // restore 把裸 JSON 补全成合法 scene（collaborators 等字段不靠 JSON 还原）。
-    const restored = restore(JSON.parse(raw), null, null);
-    restored.appState.gridModeEnabled = true;
-    return restored;
-  } catch {
-    return withGrid;
-  }
+// 顶部「白板」入口 = 跨文件夹板列表（AI协作白板.md §三 A / §九 M1）：列出本人全部白板、
+// 建板、开板、删板。板的 folder 归属（G3）在此为可空，未归组板也在列表里。
+function formatUpdated(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export function WhiteboardPage() {
-  const theme = useUIStore((s) => s.theme);
-  // 持有 Excalidraw 命令式 API（实施文档 §三）：M2 的 AI ops / 存盘经此读写场景。
-  const apiRef = useRef<ExcalidrawAPI | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const navigate = useNavigate();
+  const [boards, setBoards] = useState<BoardSummary[] | null>(null);
+  const [error, setError] = useState(false);
+  const [creating, setCreating] = useState(false);
+  // 二次确认删除：首点亮「确认删除」、再点才删，避免误删（不用原生 confirm）。
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
-  // initialData 仅在挂载时读取一次，故用 useMemo 读一次本地场景。
-  const initialData = useMemo(loadInitialData, []);
+  const load = useCallback(async () => {
+    setError(false);
+    try {
+      setBoards(await listBoards());
+    } catch {
+      setError(true);
+    }
+  }, []);
 
-  // onChange 触发频繁，防抖 ~1.5s 再写本地（实施文档 §四：autosave 防抖 ~1.5s）。
-  const handleChange = useCallback<SceneChange>((elements, appState, files) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      try {
-        localStorage.setItem(
-          STORAGE_KEY,
-          serializeAsJSON(elements, appState, files, "local"),
-        );
-      } catch {
-        // 配额满 / 隐私模式下写失败：M1 占位存储静默放过，后端落库为最终方案。
-      }
-    }, 1500);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleCreate = useCallback(async () => {
+    setCreating(true);
+    try {
+      const board = await createBoard();
+      navigate(`/whiteboard/${board.id}`);
+    } catch {
+      setError(true);
+      setCreating(false);
+    }
+  }, [navigate]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    try {
+      await deleteBoard(id);
+      setBoards((prev) => prev?.filter((b) => b.id !== id) ?? null);
+    } catch {
+      setError(true);
+    } finally {
+      setConfirmingId(null);
+    }
   }, []);
 
   return (
-    <div className="absolute inset-0">
-      <Excalidraw
-        excalidrawAPI={(api) => {
-          apiRef.current = api;
-        }}
-        initialData={initialData}
-        // 强制简体中文：Excalidraw 默认跟随浏览器/英文，本 app 全中文界面故固定 zh-CN。
-        langCode="zh-CN"
-        onChange={handleChange}
-        theme={resolveDark(theme) ? "dark" : "light"}
-      />
-    </div>
+    <PageContainer width="canvas">
+      <header className="flex items-center justify-between gap-3 pb-2">
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">白板</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            无限画布，人与 AI 团队同板协作
+          </p>
+        </div>
+        <Button
+          variant="primary"
+          size="md"
+          icon={<Plus size={16} />}
+          onClick={handleCreate}
+          disabled={creating}
+        >
+          新建白板
+        </Button>
+      </header>
+
+      {error ? (
+        <div className="mt-8 rounded-xl border border-border bg-card p-6 text-center">
+          <p className="text-sm text-muted-foreground">加载失败</p>
+          <Button
+            variant="neutral"
+            className="mt-3"
+            onClick={() => void load()}
+          >
+            重试
+          </Button>
+        </div>
+      ) : boards === null ? (
+        <div className="mt-16 flex justify-center">
+          <Loader2 className="animate-spin text-muted-foreground" size={24} />
+        </div>
+      ) : boards.length === 0 ? (
+        <div className="mt-16 flex flex-col items-center gap-3 text-center">
+          <Presentation className="text-muted-foreground/60" size={40} />
+          <p className="text-sm text-muted-foreground">还没有白板</p>
+          <Button
+            variant="primary"
+            icon={<Plus size={16} />}
+            onClick={handleCreate}
+            disabled={creating}
+          >
+            新建白板
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-3">
+          {boards.map((board) => (
+            <Card
+              key={board.id}
+              variant="interactive"
+              className="group relative flex cursor-pointer flex-col gap-3 p-4 shadow-sm transition-shadow hover:shadow-md"
+              onClick={() => navigate(`/whiteboard/${board.id}`)}
+            >
+              <div className="flex h-16 items-center justify-center rounded-lg bg-muted">
+                <Presentation className="text-muted-foreground/70" size={24} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="truncate text-sm font-medium text-foreground">
+                  {board.title}
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  更新于 {formatUpdated(board.updated_at)}
+                </p>
+              </div>
+              {confirmingId === board.id ? (
+                <button
+                  type="button"
+                  className="absolute right-2 top-2 rounded-lg bg-destructive px-2 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleDelete(board.id);
+                  }}
+                >
+                  确认删除
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  aria-label="删除白板"
+                  className="absolute right-2 top-2 hidden rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:block"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmingId(board.id);
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </Card>
+          ))}
+        </div>
+      )}
+    </PageContainer>
   );
 }

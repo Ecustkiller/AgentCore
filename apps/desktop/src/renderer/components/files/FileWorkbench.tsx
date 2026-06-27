@@ -357,11 +357,16 @@ export function FileWorkbench({
             <MemoryLeafButton
               indented
               icon={
-                <UserRound size={14} className="shrink-0 text-muted-foreground" />
+                <UserRound
+                  size={14}
+                  className="shrink-0 text-muted-foreground"
+                />
               }
               label="画像"
               active={activeKey === tabKey(MEMORY_WS, GLOBAL_PROFILE_PATH)}
-              onClick={() => openFile(MEMORY_WS, GLOBAL_PROFILE_PATH, "画像.md")}
+              onClick={() =>
+                openFile(MEMORY_WS, GLOBAL_PROFILE_PATH, "画像.md")
+              }
             />
           </div>
         )}
@@ -427,7 +432,9 @@ export function FileWorkbench({
                 visibleWorkspaces.map((ws) => {
                   const folderId = folderIdOf(ws.wsId);
                   const hasProjectMemory =
-                    !!showMemory && !!folderId && memoryProjectIds.has(folderId);
+                    !!showMemory &&
+                    !!folderId &&
+                    memoryProjectIds.has(folderId);
                   const projectMemoryPath = folderId
                     ? memoryProjectProfilePath(folderId)
                     : null;

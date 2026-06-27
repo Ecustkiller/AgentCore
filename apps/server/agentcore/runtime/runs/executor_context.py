@@ -19,6 +19,7 @@ from agentcore.runtime.runs.executor_identities import (
 )
 from agentcore.runtime.runs.fidelity import allocate, pointer_body, truncate_head_tail
 from agentcore.runtime.runs.plan import RunPlan
+from agentcore.runtime.runs.serialize import split_debrief
 from agentcore.runtime.runs.types import ContextBlock, RunContract, RunSpec, RunState
 from agentcore.runtime.workspace import summarize
 
@@ -336,39 +337,55 @@ def _dep_context_blocks(
 
     Order follows ``depends_on``; a dep with neither content nor files is skipped."""
     # mode ∈ {"pointer", "summarize", "pass_through"}
-    deps: list[tuple[str, str, str, list[str], str]] = []  # (dep_id, label, content, files, mode)
+    # (dep_id, label, clean_content, files, mode, author_summary)
+    deps: list[tuple[str, str, str, list[str], str, str]] = []
     for dep_id in depends_on:
         state = completed.get(dep_id)
         if not state or (not state.content and not state.files_touched):
             continue
         dep_spec = plan.by_id(dep_id)
         label = dep_spec.role if dep_spec and dep_spec.role else dep_id
+        # 完工交接简报: peel the worker's「## 交接简报」off its product so the prose body sizes
+        # on the deliverable alone, and the author's own 结论 can LEAD the block (survives trim).
+        clean, debrief = split_debrief(state.content)
+        author_summary = (debrief or {}).get("summary", "") if debrief else ""
         if state.files_touched:
             mode = "pointer"
         elif dep_spec and dep_spec.policy.result_handling == "summarize":
             mode = "summarize"
         else:
             mode = "pass_through"
-        deps.append((dep_id, label, state.content, list(state.files_touched), mode))
+        deps.append((dep_id, label, clean, list(state.files_touched), mode, author_summary))
 
     # Only PROSE pass_through deps draw on the shared budget; pointer / summarize deps
     # are already compact and sized independently.
     allowances = iter(
-        allocate([len(c) for (_, _, c, _, m) in deps if m == "pass_through"], DEP_CONTEXT_BUDGET)
+        allocate([len(c) for (_, _, c, _, m, _) in deps if m == "pass_through"], DEP_CONTEXT_BUDGET)
     )
     blocks: list[ContextBlock] = []
-    for dep_id, label, content, files, mode in deps:
+    for dep_id, label, content, files, mode, author_summary in deps:
         if mode == "pointer":
             body = pointer_body(content, files)
             # full product is on disk (递指针); body is a digest, not a budget trim.
             truncated = False
         elif mode == "summarize":
-            body = summarize(content, limit=DEP_SUMMARY_CHARS)
-            truncated = len(content) > DEP_SUMMARY_CHARS
+            # The author's own 结论 beats a mechanical head-chop (作者最知道该留什么): use it as the
+            # digest when present, else fall back to the blind summarize.
+            if author_summary:
+                body = author_summary
+                truncated = len(content) > len(author_summary)
+            else:
+                body = summarize(content, limit=DEP_SUMMARY_CHARS)
+                truncated = len(content) > DEP_SUMMARY_CHARS
         else:
             allowance = next(allowances)
             body = truncate_head_tail(content, allowance)
             truncated = len(content) > allowance
+        # Let the downstream see the upstream author's own 结论 FIRST — cheapest to read and the
+        # one line that should survive even when the body below is budget-trimmed. (summarize
+        # already IS that line, so skip the lead there to avoid repeating it.)
+        if author_summary and mode != "summarize":
+            body = f"【上游交接结论】{author_summary}\n\n{body}"
         blocks.append(
             ContextBlock(
                 channel="dependency",

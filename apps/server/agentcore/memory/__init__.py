@@ -24,6 +24,12 @@ from agentcore.memory.conversation_title import (
     TitleGenerator,
     TitleInput,
 )
+from agentcore.memory.followups import (
+    FOLLOWUPS_MAX,
+    FollowupInput,
+    FollowupsGenerator,
+    LLMFollowupsGenerator,
+)
 from agentcore.memory.injection import load_injected_memory, load_memory_topics
 from agentcore.memory.maintenance import maintain_user_memory
 from agentcore.memory.store import (
@@ -64,6 +70,10 @@ __all__ = [
     "TitleGenerator",
     "LLMTitleGenerator",
     "TITLE_MAX_CHARS",
+    "FollowupInput",
+    "FollowupsGenerator",
+    "LLMFollowupsGenerator",
+    "FOLLOWUPS_MAX",
     "MEMORY_SECTIONS",
     "PREFERENCES_SECTIONS",
     "PROFILE_SECTIONS",

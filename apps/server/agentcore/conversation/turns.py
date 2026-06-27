@@ -22,7 +22,11 @@ from agentcore.core.log_context import log_context, new_trace_id
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.db.base import async_session_factory
-from agentcore.db.repositories import ConversationRepository, MessageRepository
+from agentcore.db.repositories import (
+    BoardRepository,
+    ConversationRepository,
+    MessageRepository,
+)
 from agentcore.llm.byok import LLMCredentials
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink, FinishReason, error_event, message_end, turn_saved
@@ -58,6 +62,12 @@ async def stream_chat(
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
+            # AI 协作白板 (§六 M2): if this conversation is a board's dedicated thread, the
+            # turn is a 白板会话 — hand its board id to the pipeline so the CEO gets board_ops.
+            board = await BoardRepository(session).get_by_conversation_id(
+                conversation_id, user_id=user_id
+            )
+            board_id = board.id if board else None
 
         backend = build_turn_backend(
             user_id=user_id,
@@ -101,6 +111,7 @@ async def stream_chat(
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
                 memory_enabled=memory_enabled,
+                board_id=board_id,
             )
 
     except Exception as e:
@@ -155,6 +166,10 @@ async def regenerate_chat(
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
+            board = await BoardRepository(session).get_by_conversation_id(
+                conversation_id, user_id=user_id
+            )
+            board_id = board.id if board else None
 
         backend = build_turn_backend(
             user_id=user_id,
@@ -187,6 +202,7 @@ async def regenerate_chat(
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
                 memory_enabled=memory_enabled,
+                board_id=board_id,
             )
 
     except Exception as e:
@@ -227,6 +243,13 @@ async def resume_chat(
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             history = await load_chat_context(session, conversation_id, max_messages=40)
+            # AI 协作白板 (§六 M2): re-derive the board binding (authoritative in the DB, not
+            # carried in the frame) so a board turn paused at a checkpoint regains board_ops
+            # on resume — symmetric with the send path's lookup in ``stream_chat``.
+            board = await BoardRepository(session).get_by_conversation_id(
+                conversation_id, user_id=user_id
+            )
+            board_id = board.id if board else None
 
         backend = build_turn_backend(
             user_id=user_id,
@@ -271,6 +294,7 @@ async def resume_chat(
                         sink=sink,
                         backend=backend,
                         history=history[:-1],
+                        board_id=board_id,
                         llm_credentials=llm_credentials,
                         profile_set=profile_set,
                         session_saver=session_saver,

@@ -13,6 +13,7 @@ from agentcore.db.base import get_session
 from agentcore.db.models import User
 from agentcore.db.repositories import (
     AdminAuditRepository,
+    BoardRepository,
     ChatRepository,
     ConversationRepository,
     ConversationShareRepository,
@@ -100,6 +101,10 @@ def get_asset_storage() -> AssetStorage:
 
 def get_folder_repo(session: AsyncSession = Depends(get_db)) -> FolderRepository:
     return FolderRepository(session)
+
+
+def get_board_repo(session: AsyncSession = Depends(get_db)) -> BoardRepository:
+    return BoardRepository(session)
 
 
 def get_model_mode_repo(session: AsyncSession = Depends(get_db)) -> ModelModeRepository:

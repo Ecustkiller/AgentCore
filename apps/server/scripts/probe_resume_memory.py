@@ -7,9 +7,13 @@
 3. 直写一条【项目作用域】主题笔记 + 一条【全局】同名主题（证明 project-first）。
    consult_memory 读的是 主题/<slug>.md，无写 API（offline consolidation 才生成），故探针经
    default_memory_store() 直写到后端同一 data 目录。
-4. 发一条笼统部署请求 → CEO 走「发问门」ask_user 挂起（持久化帧）→ 读到 checkpoint_required 即断线。
-5. GET /paused 取挂起帧 message_id；POST /resume（note 明确要求先 consult_memory 查『部署流程』再答）。
-6. 读 logs/dev.jsonl 末尾，确认出现 consult_memory.hit scope=project。
+4. 发一条产出类请求 → CEO 走「发问门」ask_user 挂起（持久化帧）→ 读到 checkpoint_required 即断线。
+   发问门是判断式触发，故最多在 4 个新会话间重试，直到某轮真的挂起。
+5. GET /paused 确认帧已落库。断线后在线 run 仍阻塞在 ask_user、握着 folder 级 workspace_lock，但探针
+   直接走 durable /resume —— 服务端 resume_message 会先 stop_and_drain 掉该在线 run（释放锁、留帧）再
+   续跑，这正是「断线未重启 → fallback durable resume」的真实路径（兼回归该服务端防线）。
+6. POST /resume（note 明确要求先 consult_memory 查『部署流程』再答）。
+7. 读 logs/dev.jsonl，确认【本会话且 resume 之后】出现 consult_memory.hit scope=project。
 
 从 apps/server 跑::
 
@@ -27,6 +31,7 @@ import base64
 import json
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -128,19 +133,33 @@ async def _stream_events(
     return events, message_id
 
 
-def _seed_topics(user_id: str, folder_id: str) -> None:
+async def _seed_topics(user_id: str, folder_id: str) -> None:
     store = default_memory_store()
-
-    async def _go() -> None:
-        # SAME topic name in both scopes, different bodies → a project-first hit must
-        # return the PROJECT body, proving scope precedence end-to-end.
-        await store.save(user_id, topic_path(TOPIC), GLOBAL_BODY)
-        await store.save(user_id, topic_path(TOPIC), PROJECT_BODY, scope=folder_id)
-
-    asyncio.run(_go())
+    # SAME topic name in both scopes, different bodies → a project-first hit must
+    # return the PROJECT body, proving scope precedence end-to-end.
+    await store.save(user_id, topic_path(TOPIC), GLOBAL_BODY)
+    await store.save(user_id, topic_path(TOPIC), PROJECT_BODY, scope=folder_id)
 
 
-def _read_recent_consult_logs(since_epoch: float, tail: int = 1500) -> list[dict[str, Any]]:
+def _log_epoch(ts: str | None) -> float:
+    """Parse a structlog ISO8601 ``timestamp`` (``...Z``) to epoch seconds; 0.0 if absent."""
+    if not ts:
+        return 0.0
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def _read_consult_logs_for(
+    conversation_id: str, since_epoch: float, tail: int = 4000
+) -> list[dict[str, Any]]:
+    """``consult_memory.*`` 日志，**仅限本次探针的会话且发生在 ``since_epoch`` 之后**。
+
+    旧版只读末尾若干行、不按会话/时间过滤——会命中其它并行回合或上一次探针的陈旧 hit，
+    把判定钉死成假阳。这里用 conversation_id（每次探针新建，故唯一标识本次运行）+ resume
+    起始时刻双重过滤，确保 scope=project 的命中确实来自这次 resume，而非 send 阶段或历史。
+    """
     if not LOG_FILE.exists():
         return []
     lines = LOG_FILE.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -151,14 +170,18 @@ def _read_recent_consult_logs(since_epoch: float, tail: int = 1500) -> list[dict
         except json.JSONDecodeError:
             continue
         ev = rec.get("event", "")
-        if isinstance(ev, str) and ev.startswith("consult_memory"):
-            hits.append(rec)
+        if not (isinstance(ev, str) and ev.startswith("consult_memory")):
+            continue
+        if rec.get("conversation_id") != conversation_id:
+            continue
+        if _log_epoch(rec.get("timestamp")) < since_epoch:
+            continue
+        hits.append(rec)
     return hits
 
 
 async def run(args: argparse.Namespace) -> int:
     base = args.base_url.rstrip("/")
-    t0 = time.time()
     async with httpx.AsyncClient(timeout=None) as client:
         token = await _login(client, base, args.user, args.password)
         headers = {"Authorization": f"Bearer {token}"}
@@ -188,23 +211,49 @@ async def run(args: argparse.Namespace) -> int:
         print(f"项目 folder_id={folder_id}\n会话 conversation_id={conv_id}")
 
         # 3) 直写项目+全局同名主题
-        _seed_topics(user_id, folder_id)
+        await _seed_topics(user_id, folder_id)
         print(f"已写主题「{TOPIC}」：项目作用域(scope={folder_id}) + 全局各一份")
 
-        # 4) 笼统部署请求 → ask_user 挂起 → 断线
-        msg = "我想把我这个项目部署上线，你帮我安排一下吧。"
-        print(f"\n[send] 发送笼统请求：{msg!r}")
-        send_url = f"{base}/v1/conversations/{conv_id}/messages"
-        events, message_id = await _stream_events(
-            client, send_url, headers, {"content": msg}, stop_on=PAUSE_EVENTS, label="send"
+        # 4) 产出类请求 → ask_user 挂起 → 断线。发问门是判断式触发（非确定性，实测同一句话可能这次
+        #    挂起、下次直答）；本探针只需要可靠到达「挂起」态以验 resume，故用一句明确把关键决策权交还
+        #    用户、并请其先发问的产出类请求，最大化走发问门概率，再在最多 ATTEMPTS 个新会话间重试。
+        msg = (
+            "我想做一个网站，但风格、页面结构、要放的内容我都还没想好。"
+            "你先别急着动手，挑几个最关键的问题来问我，等我确认方向后再开始。"
         )
-        paused = any(e["type"] in PAUSE_EVENTS for e in events)
-        if not paused:
+        attempts = 4
+        paused_conv: str | None = None
+        for attempt in range(1, attempts + 1):
+            if attempt == 1:
+                attempt_conv = conv_id
+            else:
+                cr2 = await client.post(
+                    f"{base}/v1/conversations",
+                    headers=headers,
+                    json={"title": f"记忆resume探针会话#{attempt}", "folder_id": folder_id},
+                )
+                cr2.raise_for_status()
+                attempt_conv = cr2.json()["id"]
+            print(f"\n[send#{attempt}] conv={attempt_conv}\n  发送笼统请求：{msg!r}")
+            send_url = f"{base}/v1/conversations/{attempt_conv}/messages"
+            events, _ = await _stream_events(
+                client, send_url, headers, {"content": msg},
+                stop_on=PAUSE_EVENTS, label=f"send#{attempt}",
+            )
+            if any(e["type"] in PAUSE_EVENTS for e in events):
+                paused_conv = attempt_conv
+                break
             last = events[-1]["type"] if events else "(无事件)"
-            print(f"[send] 未触发 ask_user 挂起（末事件={last}）。模型这轮没走发问门，换更笼统的话再试。")
+            print(f"[send#{attempt}] 未触发挂起（末事件={last}）。")
+        if paused_conv is None:
+            print(f"[send] {attempts} 次均未走发问门挂起——CEO 这几轮都直答了，换更笼统的话再试。")
             return 2
+        conv_id = paused_conv
 
-        # 5) 确认持久化帧 → /resume（强制 consult_memory）
+        # 5) 确认持久化帧已落库。断线后在线 run 仍阻塞在 ask_user、握着 folder 级 workspace_lock——
+        #    但探针不再客户端 /stop，直接走 durable /resume：服务端 resume_message 会先
+        #    stop_and_drain 掉这个在线 run（cancel 释放锁、留帧），再用帧续跑。这正是「断线未重启 →
+        #    fallback durable resume」的真实路径，同时回归验证该服务端自洽防线。
         await asyncio.sleep(0.5)  # 给 suspension_saver 落帧一点时间
         pl = await client.get(f"{base}/v1/conversations/{conv_id}/paused", headers=headers)
         pl.raise_for_status()
@@ -216,11 +265,14 @@ async def run(args: argparse.Namespace) -> int:
         paused_mid = frame["message_id"]
         print(f"[paused] 帧 kind={frame['kind']} message_id={paused_mid} question={frame.get('question','')[:40]!r}")
 
+        # 6) durable /resume：服务端先 stop_and_drain 在线 run → claim 帧 → 全新 run → 从帧里的
+        #    folder_id+memory_enabled 重建工具集 → consult_memory 必须仍命中【项目作用域】。
         note = (
             f"请先调用 consult_memory 查阅本项目的『{TOPIC}』记忆主题，把它的全文读出来，"
             "然后严格按其中列出的步骤，给出本项目的部署方案。"
         )
         print(f"[resume] decision=adjust note={note[:50]!r}")
+        resume_started = time.time()  # 判定只认这一刻之后、本会话的 consult_memory.hit
         resume_url = f"{base}/v1/conversations/{conv_id}/messages/{paused_mid}/resume"
         r_events, _ = await _stream_events(
             client,
@@ -242,9 +294,9 @@ async def run(args: argparse.Namespace) -> int:
         )
         print(f"[resume] consult_memory 被调用={consulted}  最终答复前120字：{final[:120]!r}")
 
-    # 6) 读日志验证 scope=project
+    # 7) 读日志验证 scope=project（仅本会话、仅 resume 之后——杜绝陈旧/send 阶段命中冒充）
     await asyncio.sleep(0.4)
-    logs = _read_recent_consult_logs(t0)
+    logs = _read_consult_logs_for(conv_id, resume_started)
     print("\n── logs/dev.jsonl 里的 consult_memory 事件（本次探针）──")
     if not logs:
         print("  (未发现 consult_memory.* 日志——模型可能没真正调用该工具)")

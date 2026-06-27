@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from agentcore.api.routes import (
     admin,
     auth,
+    boards,
     capabilities,
     conversations,
     devices,
@@ -222,6 +223,7 @@ async def agentcore_error_handler(request, exc: AgentCoreError):
 app.include_router(system.router)
 app.include_router(admin.router, prefix="/v1")
 app.include_router(auth.router, prefix="/v1")
+app.include_router(boards.router, prefix="/v1")
 app.include_router(capabilities.router, prefix="/v1")
 app.include_router(conversations.router, prefix="/v1")
 app.include_router(devices.router, prefix="/v1")

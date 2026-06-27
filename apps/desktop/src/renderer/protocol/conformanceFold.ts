@@ -179,6 +179,10 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "run_output_delta":
+      // 交付前核验回炉 (finish_guard) 的 worker 对偶: run_output_reset folds via the same frame
+      // path — projectExecution clears the agent's outputChunks so the rewrite replaces the
+      // discarded draft (content_reset 之于 CEO 气泡). Mirrors the oracle + mobile fold.
+      case "run_output_reset":
       case "run_reasoning_delta":
       case "run_tool_progress":
       case "run_completed":
@@ -311,8 +315,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       default:
-        // message_start / turn_saved / title_generated / tool_progress /
-        // workspace_op_required / workspace_promoted / handoff_* —
+        // message_start / turn_saved / title_generated / followups_generated /
+        // board_op_required / tool_progress / workspace_op_required / workspace_promoted / handoff_* —
         // not part of the normalized judge state.
         break;
     }

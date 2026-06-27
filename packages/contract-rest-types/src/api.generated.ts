@@ -688,6 +688,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/boards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Boards */
+        get: operations["list_boards_v1_boards_get"];
+        put?: never;
+        /** Create Board */
+        post: operations["create_board_v1_boards_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/boards/{board_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Board */
+        get: operations["get_board_v1_boards__board_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Board */
+        delete: operations["delete_board_v1_boards__board_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Board */
+        patch: operations["update_board_v1_boards__board_id__patch"];
+        trace?: never;
+    };
+    "/v1/boards/{board_id}/conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ensure Board Conversation
+         * @description Get (or lazily mint) the board's dedicated AI conversation (AI协作白板.md §三 A / M2).
+         *
+         *     Idempotent: returns the existing ``conversation_id`` if the board already has one;
+         *     otherwise creates a chat conversation (titled + filed like the board) and binds it.
+         *     Both repos share one session so the create + link commit together. The canvas calls
+         *     this before its first AI turn, then runs the turn on the returned conversation.
+         */
+        post: operations["ensure_board_conversation_v1_boards__board_id__conversation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/boards/{board_id}/scene": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Write Board Scene
+         * @description CAS-write the scene (autosave). A stale ``baseline`` returns ``conflict=True``
+         *     with the live board (never a blind overwrite); the client reconciles or forces the
+         *     write with ``baseline=null``.
+         */
+        put: operations["write_board_scene_v1_boards__board_id__scene_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/capabilities": {
         parameters: {
             query?: never;
@@ -3390,6 +3474,89 @@ export interface components {
             username: string;
         };
         /**
+         * BoardConversationResponse
+         * @description The board's dedicated AI conversation id (existing or just-created).
+         */
+        BoardConversationResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+        };
+        /**
+         * BoardDetail
+         * @description A board plus its full scene (the canvas load payload).
+         */
+        BoardDetail: {
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Id */
+            id: string;
+            /** Scene */
+            scene: {
+                [key: string]: unknown;
+            };
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
+        /** BoardSceneWriteRequest */
+        BoardSceneWriteRequest: {
+            /** Baseline */
+            baseline?: number | null;
+            /** Scene */
+            scene: {
+                [key: string]: unknown;
+            };
+        };
+        /** BoardSummary */
+        BoardSummary: {
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
+        /** BoardWriteResult */
+        BoardWriteResult: {
+            board?: components["schemas"]["BoardDetail"] | null;
+            /**
+             * Conflict
+             * @default false
+             */
+            conflict: boolean;
+            /** Ok */
+            ok: boolean;
+            /** Version */
+            version: number;
+        };
+        /**
          * CapabilitiesResponse
          * @description The complete capability picture for the 能力图鉴 page (single fetch).
          */
@@ -3735,6 +3902,13 @@ export interface components {
             output: number;
             /** Total */
             total: number;
+        };
+        /** CreateBoardRequest */
+        CreateBoardRequest: {
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Title */
+            title?: string | null;
         };
         /** CreateConversationRequest */
         CreateConversationRequest: {
@@ -5223,6 +5397,19 @@ export interface components {
             /** Workers */
             workers: number;
         };
+        /**
+         * UpdateBoardRequest
+         * @description Rename / move a board (scene is written via the dedicated scene endpoint).
+         *
+         *     Both fields optional — the route reads ``model_fields_set`` so an omitted field is
+         *     left untouched while an explicit ``folder_id: null`` moves the board to ungrouped.
+         */
+        UpdateBoardRequest: {
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Title */
+            title?: string | null;
+        };
         /** UpdateConversationRequest */
         UpdateConversationRequest: {
             /** Archived */
@@ -6679,6 +6866,259 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_boards_v1_boards_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoardSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_board_v1_boards_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBoardRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoardSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_board_v1_boards__board_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                board_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoardDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_board_v1_boards__board_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                board_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_board_v1_boards__board_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                board_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateBoardRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoardSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ensure_board_conversation_v1_boards__board_id__conversation_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                board_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoardConversationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_board_scene_v1_boards__board_id__scene_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                board_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BoardSceneWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoardWriteResult"];
                 };
             };
             /** @description Validation Error */

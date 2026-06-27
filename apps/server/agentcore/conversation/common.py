@@ -9,7 +9,14 @@ from agentcore.db.repositories import FolderRepository, ModelModeRepository, Use
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet
 from agentcore.llm.modes import resolve_profile_set as resolve_mode_profile_set
-from agentcore.memory import TITLE_MAX_CHARS, ChatMessage, LLMTitleGenerator, TitleInput
+from agentcore.memory import (
+    TITLE_MAX_CHARS,
+    ChatMessage,
+    FollowupInput,
+    LLMFollowupsGenerator,
+    LLMTitleGenerator,
+    TitleInput,
+)
 from agentcore.workspace.locate import LocalBinding
 from agentcore.workspace.locate import resolve_local_binding as locate_local_binding
 
@@ -80,6 +87,36 @@ async def generate_title(
     except Exception as e:
         logger.warning("chat.title_failed", conversation_id=conversation_id, error=str(e))
         return fallback
+
+
+async def generate_followups(
+    *,
+    provider: DeepSeekProvider,
+    conversation_id: str,
+    user_message: str,
+    assistant_reply: str,
+) -> list[str]:
+    """Best-effort turn-level「下一步」suggestions; returns ``[]`` on any failure.
+
+    Pure garnish (CEO→user quick-reply chips), so every failure mode — empty input,
+    empty model output, timeout, network/parse error — collapses to「no chips」and is
+    swallowed here; it never blocks or fails the turn it garnishes.
+    """
+    if not assistant_reply.strip():
+        return []
+
+    messages: list[ChatMessage] = []
+    if user_message.strip():
+        messages.append({"role": "user", "content": user_message})
+    messages.append({"role": "assistant", "content": assistant_reply})
+
+    try:
+        return await LLMFollowupsGenerator(provider).generate(
+            FollowupInput(conversation_id=conversation_id, messages=messages)
+        )
+    except Exception as e:
+        logger.warning("chat.followups_failed", conversation_id=conversation_id, error=str(e))
+        return []
 
 
 async def resolve_profile_set(

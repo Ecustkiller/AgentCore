@@ -8,11 +8,13 @@ The EventSink decouples execution from delivery (backpressure-safe).
 
 from __future__ import annotations
 
+from agentcore.runtime.events.board import board_op_required
 from agentcore.runtime.events.chat import (
     citations_event,
     content_delta,
     content_reset,
     error_event,
+    followups_generated,
     message_end,
     message_start,
     reasoning_delta,
@@ -91,12 +93,14 @@ __all__ = [
     "plan_review_resolved",
     "workspace_op_required",
     "workspace_promoted",
+    "board_op_required",
     "handoff_snapshot_done",
     "handoff_job_started",
     "handoff_apply_done",
     "message_end",
     "error_event",
     "title_generated",
+    "followups_generated",
     "turn_saved",
     "run_plan",
     "plan_revised",

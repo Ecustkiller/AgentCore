@@ -13,14 +13,7 @@ import {
   type DebateRoundDecision,
   useMessageExecution,
 } from "@/stores/execution";
-import {
-  ArrowRight,
-  Check,
-  Clock,
-  Gavel,
-  Loader2,
-  Plus,
-} from "lucide-react";
+import { ArrowRight, Check, Clock, Gavel, Loader2, Plus } from "lucide-react";
 import { useState } from "react";
 
 /**

@@ -124,6 +124,43 @@ def test_format_for_ceo_short_prose_passes_through_whole():
     assert "中间省略" not in out
 
 
+def test_format_for_ceo_surfaces_next_steps_advisory_and_leads_with_summary():
+    # 完工交接简报: the per-worker synthesis body LEADS with the author's 结论, the「## 交接简报」
+    # section is peeled off, and each worker's 建议下一步 is gathered into one advisory section.
+    t = tool(Provider([]))
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="调研", role="研究员")])
+    content = "一段研究综述正文。\n\n## 交接简报\n结论：结论是甲\n建议下一步：补做竞品对比"
+    results = {"w1": RunState(phase=RunPhase.COMPLETED, content=content)}
+    out = t._format_for_ceo(plan, results)
+    assert "队员建议的下一步" in out
+    assert "补做竞品对比" in out
+    assert "交接结论：结论是甲" in out  # per-worker body leads with the author summary
+    assert "## 交接简报" not in out  # the raw section is peeled off the synthesis input
+
+
+def test_format_for_ceo_no_next_steps_section_when_none():
+    t = tool(Provider([]))
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="调研", role="研究员")])
+    results = {"w1": RunState(phase=RunPhase.COMPLETED, content="只有正文，没有交接简报小节。")}
+    out = t._format_for_ceo(plan, results)
+    # The advisory SECTION (its unique intro) is absent; the closing instruction's conditional
+    # mention of 『队员建议的下一步』 may still appear and is fine.
+    assert "顺带提的后续方向" not in out
+
+
+def test_direct_result_strips_debrief_and_footers_next_steps():
+    # finalize=true (single worker → user): the answer is the clean deliverable; a 建议下一步
+    # is re-attached as a readable footer (no CEO synthesis pass to relay it otherwise).
+    from agentcore.tools.builtin.delegate.ceo_format import direct_result
+
+    t = tool(Provider([]))
+    content = "最终交付正文。\n\n## 交接简报\n结论：完成\n建议下一步：可考虑加单测"
+    res = direct_result(t, content)
+    assert res.final_text.startswith("最终交付正文。")
+    assert "## 交接简报" not in res.final_text  # handoff section stripped from the answer
+    assert "**建议下一步**：可考虑加单测" in res.final_text  # but next-step relayed as a footer
+
+
 def test_format_for_ceo_emits_uncapped_synthesis_metric():
     t = tool(Provider([]))
     nodes = [RunSpec(run_id=f"w{i}", task="分析", role=f"分析{i}") for i in range(8)]

@@ -661,6 +661,16 @@ export interface TitleGeneratedPayload {
   title: string;
 }
 
+/** CEO→用户「下一步推荐」(下一步推荐): 2-4 quick-reply suggestions for the just-finished
+ * turn, phrased as the user's next message. Generated post-turn by a World B narrow task
+ * and emitted after `message_end`; the client attaches them to the latest assistant message
+ * as one-click chips (filled into the composer on click). Transport-only — not journaled,
+ * not persisted, so like `title_generated` it is a no-op in the conformance ProjectedTurn. */
+export interface FollowupsGeneratedPayload {
+  conversation_id: string;
+  followups: string[];
+}
+
 export interface TurnSavedPayload {
   user_message_id: string;
 }
@@ -682,6 +692,40 @@ export interface WorkspaceOpRequiredPayload {
   root_id: string;
   op: string;
   args: Record<string, unknown>;
+}
+
+/** One structured whiteboard op the AI emits (AI协作白板.md §六 M2). The closed verb
+ * set is shared with the server tool + the desktop applier: `add_node` (a shape with a
+ * caller-chosen `ref` handle so later ops can wire to it), `connect` (an arrow `from`→`to`
+ * by ref/id), `move` / `set_text` / `delete` (target an existing `id` or a same-batch
+ * `ref`), `group` (`members` by ref/id). Fields beyond `op` are op-specific. */
+export interface BoardOp {
+  op: "add_node" | "connect" | "move" | "set_text" | "delete" | "group";
+  ref?: string;
+  id?: string;
+  kind?: "sticky" | "rectangle" | "ellipse" | "diamond" | "text";
+  text?: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  color?: string;
+  from?: string;
+  to?: string;
+  label?: string;
+  members?: string[];
+}
+
+/** Transport-only client-tool request: apply a batch of board ops to the user's open
+ * Excalidraw canvas (`board_id`) and POST the result to the interaction-resolve endpoint
+ * (settling the server's `BoardChannel`). The board counterpart of
+ * `workspace_op_required`; NOT journaled (a request/response exchange, not turn content). */
+export interface BoardOpRequiredPayload {
+  request_id: string;
+  conversation_id: string;
+  board_id: string;
+  ops: BoardOp[];
+  summary: string;
 }
 
 /** A folderless 裸聊 was lazily promoted into a real folder on its first file write
@@ -766,10 +810,12 @@ export type SSEPayloadMap = {
   message_end: MessageEndPayload;
   error: ErrorPayload;
   title_generated: TitleGeneratedPayload;
+  followups_generated: FollowupsGeneratedPayload;
   turn_saved: TurnSavedPayload;
   citations: CitationsPayload;
   workspace_op_required: WorkspaceOpRequiredPayload;
   workspace_promoted: WorkspacePromotedPayload;
+  board_op_required: BoardOpRequiredPayload;
   handoff_snapshot_done: HandoffSnapshotDonePayload;
   handoff_job_started: HandoffJobStartedPayload;
   handoff_apply_done: HandoffApplyDonePayload;

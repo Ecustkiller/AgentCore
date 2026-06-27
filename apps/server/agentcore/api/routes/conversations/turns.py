@@ -144,6 +144,14 @@ async def resume_message(
     if suspension is None:
         raise NotFoundError("挂起的回合不存在或已处理")
 
+    # The durable frame is now ours (claim succeeded ⇒ this really is a paused turn). If the
+    # turn's original in-process run is still alive — a disconnect did NOT end it (执行与请求
+    # 解耦), so it is parked on its ask_user / plan_review interaction holding the folder
+    # workspace_lock until checkpoint_timeout — tear it down BEFORE the resume run takes that
+    # same lock. Otherwise they deadlock, and the old run would later double-continue the turn
+    # when its checkpoint times out. Cancel leaves the (already-claimed) frame alone.
+    await turn_runs.stop_and_drain(conversation_id)
+
     sink = EventSink()
     task = asyncio.create_task(
         resume_chat(

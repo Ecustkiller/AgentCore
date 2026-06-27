@@ -2,6 +2,7 @@
 
 from agentcore.config import settings
 from agentcore.conversation.background import spawn_background
+from agentcore.conversation.common import generate_followups as mint_followups
 from agentcore.conversation.common import generate_title as mint_title
 from agentcore.conversation.common import log_cost_recorded
 from agentcore.conversation.compaction import schedule_compaction
@@ -17,7 +18,12 @@ from agentcore.db.repositories import (
 from agentcore.llm.byok import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.memory.consolidation import schedule_consolidation
-from agentcore.runtime.events import EventSink, FinishReason, title_generated
+from agentcore.runtime.events import (
+    EventSink,
+    FinishReason,
+    followups_generated,
+    title_generated,
+)
 from agentcore.runtime.journal import journal_entries_from_display_runs, persist_turn_journal
 from agentcore.workspace.protocol import WorkspaceBackend
 from agentcore.workspace.snapshots import create_snapshot
@@ -173,22 +179,40 @@ async def persist_turn_result(
         conv = await conv_repo.get_by_id(conversation_id)
         needs_title = bool(generate_title and conv and not conv.title)
 
-    if needs_title:
+    # 下一步推荐 (CEO→用户): quick-reply chips for the just-finished turn. Only for a
+    # cleanly-ended turn that actually produced a reply — an errored / paused / empty
+    # turn has no「what next」to offer (and would distract from its real prompt).
+    wants_followups = bool(assistant_reply.strip()) and not abnormal
+
+    # Both are post-turn World B「内部窄任务」on the same fast model — build one provider
+    # and run them in sequence so a title-less follow-up turn still gets one client.
+    if needs_title or wants_followups:
         provider = build_provider(llm_credentials)
         try:
-            title = await mint_title(
-                provider=provider,
-                conversation_id=conversation_id,
-                user_message=user_message,
-                assistant_reply=assistant_reply,
-            )
+            if needs_title:
+                title = await mint_title(
+                    provider=provider,
+                    conversation_id=conversation_id,
+                    user_message=user_message,
+                    assistant_reply=assistant_reply,
+                )
+                if title:
+                    async with async_session_factory() as session:
+                        await ConversationRepository(session).update_title(
+                            conversation_id, title
+                        )
+                    sink.emit(title_generated(title, conversation_id=conversation_id))
+            if wants_followups:
+                followups = await mint_followups(
+                    provider=provider,
+                    conversation_id=conversation_id,
+                    user_message=user_message,
+                    assistant_reply=assistant_reply,
+                )
+                if followups:
+                    sink.emit(followups_generated(followups, conversation_id=conversation_id))
         finally:
             await provider.close()
-        if title:
-            async with async_session_factory() as session:
-                conv_repo = ConversationRepository(session)
-                await conv_repo.update_title(conversation_id, title)
-            sink.emit(title_generated(title, conversation_id=conversation_id))
 
     schedule_consolidation(conversation_id)
     schedule_compaction(conversation_id, result.get("input_tokens", 0))

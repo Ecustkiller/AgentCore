@@ -111,6 +111,31 @@ class TurnRunRegistry:
         logger.info("turn_run.stop", conversation_id=conversation_id, run_id=run.run_id)
         return True
 
+    async def stop_and_drain(self, conversation_id: str, *, timeout: float = 10.0) -> bool:
+        """Cancel the conversation's live run AND await its unwind — durable-resume preflight.
+
+        Durable ``POST .../resume`` takes a paused turn over from its persisted frame. A
+        disconnect does NOT end the in-process run (执行与请求解耦), so it can still be sitting
+        blocked on its ``ask_user`` / ``plan_review`` interaction, holding the folder
+        ``workspace_lock`` until ``checkpoint_timeout`` (default 600s). Spawning the resume
+        run on top of that would (1) deadlock on that lock and (2) — once the old run times
+        out — continue the SAME turn a second time. So tear it down first: ``cancel`` raises
+        ``CancelledError`` through the suspend point, which leaves the durable frame intact
+        and releases the lock; we then await the unwind (bounded, so a wedged task can't hang
+        the request) before the resume run takes the lock. ``stop`` is the fire-and-forget
+        sibling (user 「停止」); this one waits because the caller needs the lock freed next.
+        Returns ``True`` if a live run was found and drained.
+        """
+        run = self._runs.get(conversation_id)
+        if run is None or run.task.done():
+            return False
+        run.task.cancel()
+        logger.info("turn_run.stop", conversation_id=conversation_id, run_id=run.run_id)
+        # ``asyncio.wait`` never re-raises the task's (CancelledError) result; a timeout just
+        # means it is still unwinding, in which case the resume run briefly blocks on the lock.
+        await asyncio.wait({run.task}, timeout=timeout)
+        return True
+
 
 # Module-level singleton (single-worker posture, as approvals / interaction).
 turn_runs = TurnRunRegistry()

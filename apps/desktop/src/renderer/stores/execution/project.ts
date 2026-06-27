@@ -25,59 +25,73 @@ export function projectExecution(
   debateRounds: DebateNarrativeRound[] = [],
   debateDecisions: DebateRoundDecision[] = [],
 ): Execution {
-  const agents: AgentState[] = plan.agents.map((a) => ({
-    id: a.id,
-    role: a.role,
-    modelPreference: a.modelPreference,
-    thinking: a.thinking ?? true,
-    reasoningEffort: a.reasoningEffort ?? "high",
-    status: "idle",
-    currentRunId: null,
-    outputChunks: [],
-    reasoningChunks: [],
-    toolCalls: [],
-    toolProgress: null,
-  }));
-  const runs: RunNode[] = plan.runs.map((s) => ({
-    id: s.id,
-    agentId: s.agentId,
-    task: s.task,
-    status: "pending",
-    dependsOn: s.dependsOn,
-    outputSummary: null,
-    durationMs: null,
-    error: null,
-    // Plan-declared parent so the 子任务 tree + graph grouping work before the
-    // run_started frame folds in (the frame re-confirms it). 阶段1 flat workers
-    // resolve to a CEO-captain id with no node, treated as "no parent here".
-    parentRunId: s.parentRunId ?? null,
-    // Plan-declared kind so the captain 汇聚点 is identifiable before its
-    // run_started frame folds in (the frame re-confirms it).
-    kind: s.kind ?? "agent",
-    role: null,
-    model: null,
-    usage: null,
-    cost: null,
-    // 辩论/审查 display tags ride straight from the plan (no run frame mutates
-    // them — they are declared once and immutable).
-    stance: s.stance ?? null,
-    group: s.group ?? null,
-    round: s.round ?? 0,
-    // Plan runs are never revisions; a revision is synthesized from its frame.
-    revisionOf: null,
-    revision: 0,
-    // No「计划已调整」trace until a plan_revised frame folds in (设计 §7.2).
-    revised: null,
-    // No checkpoint until a plan_review frame folds in (结构化挂起 2a).
-    checkpoint: null,
-    // No received context until the run_context frame folds in (上下文传递可视化).
-    receivedContext: [],
-    // No escalations until a run_escalation frame folds in (升级实时可见).
-    escalations: [],
-  }));
+  const agents: AgentState[] = [];
+  const runs: RunNode[] = [];
 
   const agentById = (id: string) => agents.find((a) => a.id === id);
   const runById = (id: string) => runs.find((s) => s.id === id);
+
+  const agentFromPlan = (id: string): AgentState | null => {
+    const spec = plan.agents.find((a) => a.id === id);
+    if (!spec) return null;
+    return {
+      id: spec.id,
+      role: spec.role,
+      modelPreference: spec.modelPreference,
+      thinking: spec.thinking ?? true,
+      reasoningEffort: spec.reasoningEffort ?? "high",
+      status: "idle",
+      currentRunId: null,
+      outputChunks: [],
+      reasoningChunks: [],
+      toolCalls: [],
+      toolProgress: null,
+    };
+  };
+
+  const runFromPlan = (id: string): RunNode | null => {
+    const spec = plan.runs.find((s) => s.id === id);
+    if (!spec) return null;
+    return {
+      id: spec.id,
+      agentId: spec.agentId,
+      task: spec.task,
+      status: "pending",
+      dependsOn: spec.dependsOn,
+      outputSummary: null,
+      durationMs: null,
+      error: null,
+      parentRunId: spec.parentRunId ?? null,
+      kind: spec.kind ?? "agent",
+      role: null,
+      model: null,
+      usage: null,
+      cost: null,
+      stance: spec.stance ?? null,
+      group: spec.group ?? null,
+      round: spec.round ?? 0,
+      revisionOf: null,
+      revision: 0,
+      revised: null,
+      checkpoint: null,
+      receivedContext: [],
+      escalations: [],
+    };
+  };
+
+  const ensureAgent = (id: string) => {
+    if (!agentById(id)) {
+      const a = agentFromPlan(id);
+      if (a) agents.push(a);
+    }
+  };
+
+  const ensureRun = (id: string) => {
+    if (!runById(id)) {
+      const r = runFromPlan(id);
+      if (r) runs.push(r);
+    }
+  };
 
   // plan_review_resolved carries only the checkpoint id, so remember which step
   // run ids each pause gated on (from its _required frame) to apply the decision.
@@ -142,6 +156,9 @@ export function projectExecution(
             runs.push(run);
           }
         }
+        if (!run) ensureRun(f.runId);
+        ensureAgent(f.agentId);
+        run = runById(f.runId);
         if (run) {
           run.status = "running";
           // Capture the 阶段2 declaration slots onto the node so a later graph
@@ -169,6 +186,15 @@ export function projectExecution(
       case "run_output_delta": {
         const agent = agentById(f.agentId);
         if (agent) agent.outputChunks.push(f.delta);
+        break;
+      }
+      case "run_output_reset": {
+        // 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：worker done
+        // 轮草稿未过轻层核验（统一底线·结构完整性），引擎丢弃这一版、发 run_output_reset、回炉
+        // 重写。清这个 agent 已累积的产出（重写版从干净态重累积），reasoning 是真实过程、保留
+        // ——镜像后端 oracle 与 mobile fold（conformance pins them equal）。
+        const agent = agentById(f.agentId);
+        if (agent) agent.outputChunks = [];
         break;
       }
       case "run_reasoning_delta": {
@@ -210,6 +236,7 @@ export function projectExecution(
         // them pending so the node shows a「待放行」badge.
         checkpointSteps.set(f.checkpointId, f.runIds);
         for (const id of f.runIds) {
+          ensureRun(id);
           const run = runById(id);
           if (run) run.checkpoint = { status: "pending", decision: null };
         }
@@ -230,6 +257,7 @@ export function projectExecution(
         // trace (bind=据上游证据定稿待绑定步骤; steer=偏离后操舵未跑步骤). bind wins over steer
         // if a node is both. A stray run_id (not on this graph) is ignored.
         for (const rev of f.revisions) {
+          ensureRun(rev.runId);
           const run = runById(rev.runId);
           if (
             run &&
@@ -356,6 +384,22 @@ export function projectExecution(
     }
   }
 
+  // Plan-declared nodes not yet touched by frames stay visible as pending/idle
+  // (replay playhead before their run_started) — appended after started nodes so
+  // multi-batch delegate order matches the oracle (revision before later batch).
+  for (const spec of plan.runs) {
+    if (!runById(spec.id)) {
+      const r = runFromPlan(spec.id);
+      if (r) runs.push(r);
+    }
+  }
+  for (const spec of plan.agents) {
+    if (!agentById(spec.id)) {
+      const a = agentFromPlan(spec.id);
+      if (a) agents.push(a);
+    }
+  }
+
   // A stopped turn never receives terminal run frames for its in-flight nodes;
   // freeze them as cancelled so the card leaves its live state (no spinners /
   // progress bar) instead of looking like it is still running.
@@ -398,6 +442,8 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       return `${task(frame.runId)} · 收到上下文`;
     case "run_output_delta":
       return `${role(frame.agentId)} 输出中…`;
+    case "run_output_reset":
+      return `${role(frame.agentId)} 重写产出…`;
     case "run_reasoning_delta":
       return `${role(frame.agentId)} 思考中…`;
     case "run_tool_progress":

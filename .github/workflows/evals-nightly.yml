@@ -74,6 +74,7 @@ jobs:
       - name: Lint eval cases (hard gate, zero LLM)
         run: |
           uv run python -m agentcore.evals --suite "$SUITE" --lint-only
+          uv run python -m agentcore.evals --suite probe --lint-only
           uv run python -m agentcore.evals --routing --lint-only
           uv run python -m agentcore.evals --compare --lint-only
 
@@ -113,6 +114,20 @@ jobs:
         continue-on-error: true
         run: uv run python -m agentcore.evals --compare --out eval-reports/comparison.json
 
+      # ---- 软门禁·挖坑探针（交付前核验「重层」立项的证据绊线，见 docs/07-规划/远期规划.md §2.5）：
+      # 跑「便宜层 finish_guard 够不着」的两类——①算术/单一答案（确定性地面真值 ContentMatches）、
+      # ②代码必须真跑（生成→沙箱跑隐藏边界用例）。开发期实测两类均近满分（缺口不在此），故为观测性
+      # 软门禁；哪天通过率抬头，即「机械轻层不够、该上重层」的触发信号。
+      - name: Probe · arithmetic ground-truth (soft)
+        if: steps.key.outputs.present == 'true'
+        continue-on-error: true
+        run: uv run python -m agentcore.evals --suite probe --layer 1 --out eval-reports/probe.json
+
+      - name: Probe · code-must-run (soft)
+        if: steps.key.outputs.present == 'true'
+        continue-on-error: true
+        run: uv run python scripts/probe_code_execution.py --out eval-reports/probe_code.json
+
       # 把关键指标写进 GitHub 作业摘要（best-effort；jq 在 ubuntu-latest 自带）。
       - name: Write job summary
         if: steps.key.outputs.present == 'true'
@@ -131,6 +146,14 @@ jobs:
             if [ -f eval-reports/style.json ]; then
               echo "### 输出风格"
               jq -r '"干净率 \(((.clean_rate//0)*100)|floor)%（计入 \(.total) 条）"' eval-reports/style.json
+            fi
+            if [ -f eval-reports/probe.json ]; then
+              echo "### 挖坑探针·算术/单一答案"
+              jq -r '.summary | "通过 \(.passed)/\(.total)（\((.pass_rate*100)|floor)%）  成本 $\(.cost_usd)"' eval-reports/probe.json
+            fi
+            if [ -f eval-reports/probe_code.json ]; then
+              echo "### 挖坑探针·代码必须真跑"
+              jq -r '.summary | "通过 \(.passed)/\(.total)（\((.pass_rate*100)|floor)%）"' eval-reports/probe_code.json
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

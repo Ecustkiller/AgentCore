@@ -123,7 +123,8 @@ const CAPABILITIES: ToolboxEntry[] = [
   {
     id: "guidelines",
     title: "AI 提示词",
-    description: "AI 遵循的提示词：全员准则 + CEO 完整提示词 + 工具进阶用法（薄技能）",
+    description:
+      "AI 遵循的提示词：全员准则 + CEO 完整提示词 + 工具进阶用法（薄技能）",
     icon: ScrollText,
     color: "guidelines",
     to: "/toolbox/guidelines",

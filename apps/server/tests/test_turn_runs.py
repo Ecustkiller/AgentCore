@@ -75,6 +75,72 @@ async def test_stop_unknown_conversation_is_false():
     assert reg.stop("missing") is False
 
 
+async def test_stop_and_drain_waits_for_unwind_before_returning():
+    # Durable-resume preflight: unlike fire-and-forget ``stop``, ``stop_and_drain`` must not
+    # return until the live run has actually unwound — the caller is about to take the same
+    # ``workspace_lock`` the cancelled (suspended) run was holding. ``released`` stands in for
+    # that lock being freed as the run's ``async with workspace_lock`` exits on CancelledError.
+    reg = TurnRunRegistry()
+    released = asyncio.Event()
+
+    async def _parked_until_cancelled() -> None:
+        try:
+            await asyncio.Event().wait()  # parked on an interaction, like a suspended turn
+        except asyncio.CancelledError:
+            released.set()
+            raise
+
+    task = asyncio.create_task(_parked_until_cancelled())
+    reg.register(conversation_id="c1", task=task, sink=EventSink())
+    await asyncio.sleep(0)  # let the task actually start + park inside its try/except
+
+    assert await reg.stop_and_drain("c1") is True
+    # Genuinely drained (not merely signalled) by the time we return — this is the whole
+    # point of the method, so the resume run never races the old run for the lock.
+    assert task.done()
+    assert released.is_set()
+
+    await asyncio.sleep(0)  # let the done-callback clear the slot
+    assert reg.get("c1") is None
+    assert await reg.stop_and_drain("c1") is False  # idempotent
+
+
+async def test_stop_and_drain_unknown_conversation_is_false():
+    reg = TurnRunRegistry()
+    assert await reg.stop_and_drain("missing") is False
+
+
+async def test_stop_and_drain_frees_workspace_lock_for_resumer():
+    # The exact deadlock this fixes: a suspended in-process run sits on its interaction holding
+    # the folder ``workspace_lock``; durable ``/resume`` then takes that SAME lock. Without
+    # draining first the resumer blocks until checkpoint_timeout (600s). ``stop_and_drain`` must
+    # free it so the resume run acquires the lock immediately.
+    from agentcore.workspace.locks import workspace_lock
+
+    reg = TurnRunRegistry()
+    key = "u1:f1:c1"
+    holding = asyncio.Event()
+
+    async def _suspended_run() -> None:
+        async with workspace_lock(key):
+            holding.set()
+            await asyncio.Event().wait()  # parked on its interaction, still holding the lock
+
+    task = asyncio.create_task(_suspended_run())
+    reg.register(conversation_id="c1", task=task, sink=EventSink())
+    await asyncio.wait_for(holding.wait(), timeout=1.0)  # the run now holds the lock
+
+    await reg.stop_and_drain("c1")
+
+    async def _resumer_takes_lock() -> bool:
+        async with workspace_lock(key):
+            return True
+
+    # Drained ⇒ the lock is free, so the resumer acquires it within a tight bound; a regression
+    # (drain that does not wait for the unwind, or no drain at all) would hang until the timeout.
+    assert await asyncio.wait_for(_resumer_takes_lock(), timeout=1.0) is True
+
+
 async def test_finished_run_is_discarded():
     reg = TurnRunRegistry()
 
