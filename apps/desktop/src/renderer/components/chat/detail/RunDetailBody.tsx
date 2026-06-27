@@ -855,7 +855,7 @@ export function SchedulingDiag({
           className="mb-2 space-y-1 last:mb-0"
         >
           {batches.length > 1 && (
-            <p className="text-[11px] text-muted-foreground">批次 {i + 1}</p>
+            <p className="text-xs text-muted-foreground">批次 {i + 1}</p>
           )}
           <DiagRow
             label="节点 / 并发"

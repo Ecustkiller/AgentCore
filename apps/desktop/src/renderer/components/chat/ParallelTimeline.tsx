@@ -140,7 +140,7 @@ function TimelineRow({
   return (
     <div className="flex items-center gap-2" style={{ height: ROW_HEIGHT }}>
       <div
-        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
         style={{ backgroundColor: color }}
         aria-hidden
       >
@@ -154,7 +154,7 @@ function TimelineRow({
       </span>
       <div className="relative h-5 flex-1">
         <div
-          className={`absolute top-0 bottom-0 flex items-center justify-end rounded-md px-1.5 ${
+          className={`absolute top-0 bottom-0 flex items-center justify-end rounded-lg px-1.5 ${
             failed ? "ring-1 ring-destructive" : ""
           }`}
           style={{
@@ -167,7 +167,7 @@ function TimelineRow({
             failed ? " · 失败" : ""
           }`}
         >
-          <span className="truncate text-[10px] font-medium text-white/95">
+          <span className="truncate text-xs font-medium text-white/95">
             {dur}
           </span>
         </div>
