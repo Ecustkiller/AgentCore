@@ -13,7 +13,7 @@ from agentcore.conversation.inference_rate_limit import enforce_inference_token_
 from agentcore.core.errors import AuthenticationError
 from agentcore.db.models import User
 from agentcore.db.repositories import UserRepository
-from agentcore.security import create_inference_token, decode_inference_token
+from agentcore.security.tokens import create_inference_token, decode_inference_token
 
 router = APIRouter()
 

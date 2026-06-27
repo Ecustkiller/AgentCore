@@ -8,9 +8,9 @@ from typing import Annotated, Any
 
 from pydantic import Field, TypeAdapter, ValidationError
 
-from agentcore.api.schemas import ResolveInteractionRequest, interaction_result_from_body
+from agentcore.api.schemas.messages import ResolveInteractionRequest, interaction_result_from_body
 from agentcore.core.logging import get_logger
-from agentcore.llm.byok import LLMCredentials
+from agentcore.llm.credentials import LLMCredentials
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.sidecar import protocol
 from agentcore.sidecar.paused_store import LocalPausedTurnStore

@@ -112,8 +112,11 @@ export function projectExecution(
         // like a planned worker. Guarded on the original existing, so a stray
         // revision frame (parent not on this graph) is ignored, not mis-drawn.
         if (!run && f.revision > 0 && f.parentRunId) {
+          // Parent is plan-declared and may not be materialized yet (lazy fold).
+          ensureRun(f.parentRunId);
           const original = runById(f.parentRunId);
           if (original) {
+            ensureAgent(original.agentId);
             const originAgent = agentById(original.agentId);
             agents.push({
               id: f.agentId,
@@ -256,8 +259,10 @@ export function projectExecution(
         // paused plan via replan. Tag each affected node so it paints a non-interrupting
         // trace (bind=据上游证据定稿待绑定步骤; steer=偏离后操舵未跑步骤). bind wins over steer
         // if a node is both. A stray run_id (not on this graph) is ignored.
+        // Oracle declares every run in the run_plan before plan_revised fires — materialize
+        // the full plan slice so late-bound nodes exist to tag (r2/r3 while still pending).
+        for (const spec of plan.runs) ensureRun(spec.id);
         for (const rev of f.revisions) {
-          ensureRun(rev.runId);
           const run = runById(rev.runId);
           if (
             run &&

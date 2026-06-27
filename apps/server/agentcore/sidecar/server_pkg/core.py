@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.byok import (
+from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
     INFERENCE_TRACE_HEADER,
     LLMCredentials,

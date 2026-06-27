@@ -16,40 +16,26 @@ never leak as plaintext or crash a turn.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.db.repositories import UserLlmKeyRepository
-from agentcore.security import KeyEncryptor
+from agentcore.llm.credentials import (
+    INFERENCE_CONVERSATION_HEADER,
+    INFERENCE_TRACE_HEADER,
+    LLMCredentials,
+)
+from agentcore.security.keys import KeyEncryptor
 
 logger = get_logger(__name__)
 
-# HTTP header a sidecar stamps on its cloud-proxy LLM calls so the /v1/inference
-# proxy can attribute spend to the conversation (双模式工作区 §一.1 / Slice 4a).
-# Shared so the stamper (sidecar/server.py) and the reader (api/routes/inference.py)
-# can never drift on the spelling.
-INFERENCE_CONVERSATION_HEADER = "X-AgentCore-Conversation"
-# HTTP header carrying the local turn's trace_id on every cloud-proxy LLM call, so the
-# proxy binds it into its logs and the later write-back (record_local_turn) reuses the
-# SAME id — stitching a sidecar turn's reasoning (proxy spend) + persisted reply into
-# ONE greppable trace (打通气泡↔日志). Same stamper/reader sharing as the conversation
-# header above; the desktop mints the id per turn (core/log_context.new_trace_id shape).
-INFERENCE_TRACE_HEADER = "X-AgentCore-Trace"
-
-
-@dataclass(frozen=True)
-class LLMCredentials:
-    """A resolved BYOK key plus the server-fixed endpoint for one turn."""
-
-    api_key: str
-    base_url: str
-    # Optional per-turn HTTP headers the provider sends upstream. The sidecar uses
-    # this to stamp the conversation id on its cloud-proxy LLM calls (Slice 4a) so
-    # the proxy can attribute spend; ordinary cloud turns leave it ``None``.
-    extra_headers: dict[str, str] | None = None
+__all__ = [
+    "INFERENCE_CONVERSATION_HEADER",
+    "INFERENCE_TRACE_HEADER",
+    "LLMCredentials",
+    "resolve_user_llm_credentials",
+]
 
 
 def _encryptor() -> KeyEncryptor | None:

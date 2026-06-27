@@ -26,24 +26,15 @@ dependencies = [
 
 [project.optional-dependencies]
 # 内置 Python 打包（方案 B）瘦身用的 sidecar 运行时**子集**。来源 = ``agentcore.sidecar.server``
-# 的**静态 import 闭包**：引擎 + ``api.schemas`` 在 import 期会传递性拉入 DB/auth 层（故
-# sqlalchemy/asyncpg/jose/pwdlib/passlib/cryptography 必须保留，否则连 import 都过不去）。
-# 而 HTTP 栈（fastapi/uvicorn/starlette/sse-starlette）、迁移（alembic）、缓存（redis）、
-# 对象存储（boto3——仅 storage/s3.py 内惰性 import）、缩略图（pillow——仅 messaging）均
-# **不在 sidecar 回合路径上**，故剔除（boto3 体积最大）。``scripts/bundle-sidecar.mjs`` 以
-# ``--no-deps`` 装 agentcore 包本体 + 本组依赖，故基础 ``dependencies``（完整 server）对
-# server/Docker/dev 安装保持不变。**改基础 deps 的共享子集时需同步本组。**
+# 的**静态 import 闭包**：引擎 + 旁路凭证类型（``llm/credentials.py``，无 DB/security）。
+# HTTP 栈、DB（sqlalchemy/asyncpg）、迁移、缓存、对象存储、JWT/密码学（jose/cryptography/
+# pwdlib/passlib）均不在 sidecar 回合路径上，故剔除。``scripts/bundle-sidecar.mjs`` 以
+# ``--no-deps`` 装 agentcore 包本体 + 本组依赖。**改闭包时需同步本组并跑 bundle:sidecar 冒烟。**
 sidecar = [
     "pydantic>=2.10",
     "pydantic-settings>=2.7",
-    "sqlalchemy[asyncio]>=2.0",
-    "asyncpg>=0.30",
     "httpx>=0.28",
     "structlog>=24.4",
-    "python-jose[cryptography]>=3.3",
-    "passlib[bcrypt]>=1.7",
-    "pwdlib[argon2]>=0.3.0",
-    "cryptography>=49.0.0",
 ]
 dev = [
     "pytest>=8.3",

@@ -25,7 +25,7 @@ from agentcore.db.repositories import UserLlmKeyRepository
 from agentcore.llm.byok import resolve_user_llm_credentials
 from agentcore.llm.config import DEEPSEEK_V4_FLASH
 from agentcore.llm.factory import build_provider
-from agentcore.security import KeyEncryptor
+from agentcore.security.keys import KeyEncryptor
 
 logger = get_logger(__name__)
 

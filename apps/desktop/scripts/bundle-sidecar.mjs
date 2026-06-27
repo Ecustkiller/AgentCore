@@ -7,8 +7,8 @@
  *   1) 一份**独立 CPython 发行版**（python-build-standalone，uv 同源、设计上可重定位）；
  *   2) 一份用 `uv pip install --target` 装好的旁路 site-packages——只装 sidecar **运行时
  *      子集**（pyproject 的 `[project.optional-dependencies].sidecar`）+ `--no-deps` 的
- *      agentcore 包本体，而非整个 server。剔掉 fastapi/uvicorn/alembic/redis/sse-starlette/
- *      boto3/pillow 等不在回合路径上的重依赖，安装包显著瘦身（boto3 体积最大）。
+ *      agentcore 包本体，而非整个 server。剔掉 fastapi/uvicorn/alembic/redis/sqlalchemy/
+ *      boto3/jose/cryptography 等不在 sidecar 回合路径上的重依赖。
  * 运行期主进程 `resolveSpawnConfig`（`src/main/sidecar-service.ts`）在 `app.isPackaged` 时指向
  * `<resources>/sidecar/python` 的解释器，并以 `PYTHONPATH=<resources>/sidecar/site-packages`
  * 注入引擎包——用 `--target` 旁路目录而非 venv，绕开「venv 记录的 base python 绝对路径在用户机

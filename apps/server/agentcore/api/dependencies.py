@@ -35,7 +35,7 @@ from agentcore.db.repositories import (
 )
 from agentcore.messaging import MessagingService
 from agentcore.messaging.hub import HubChatEventPublisher, default_chat_hub
-from agentcore.security import decode_access_token
+from agentcore.security.tokens import decode_access_token
 from agentcore.storage.assets import AssetStorage, build_asset_storage
 
 # Cookie name carrying the access JWT (set by the auth routes).

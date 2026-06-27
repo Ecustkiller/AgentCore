@@ -19,11 +19,17 @@ directories:
   output: release/${version}
   buildResources: build
 
-# out/ 是 electron-vite 自包含产物（main/preload/renderer 全打进，依赖已 bundle），
-# 故只需打包 out/ + package.json，不随包附带 node_modules，安装包更精简。
+# out/ 是 electron-vite 自包含产物（renderer 已 bundle；main/preload 仅保留少量运行时
+# 外部依赖）。renderer 专用包放在 package.json devDependencies，electron-builder 不会
+# 把它们打进 node_modules。shoot 截图在 shoot-out/（须在 out/ 外）；下列排除为
+# 历史/防御性规则，防止旧路径或手误产物再次进包。
 files:
   - out/**
   - package.json
+  - "!out/preview/**"
+  - "!out/preview-debate/**"
+  - "!out/cmdregion/**"
+  - "!out/route-shots/**"
 
 # 内置 Python 运行时（远期规划 §一.1「内置 Python 打包」方案 B）：由 scripts/bundle-sidecar.mjs
 # 预构建到 resources/sidecar/（独立 CPython + --target site-packages），随包拷入应用

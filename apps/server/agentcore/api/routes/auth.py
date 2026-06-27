@@ -30,7 +30,7 @@ from agentcore.api.dependencies import (
     get_user_llm_key_repo,
 )
 from agentcore.middleware.csrf import clear_csrf_token, issue_csrf_token
-from agentcore.security import decode_access_token
+from agentcore.security.tokens import decode_access_token
 from agentcore.api.schemas import (
     BatchCreateInviteRequest,
     ChangePasswordRequest,
