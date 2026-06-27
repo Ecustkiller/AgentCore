@@ -244,7 +244,7 @@ export function PreviewPage() {
                           type="button"
                           onClick={() => removeRecording(r.name)}
                           aria-label={`删除录制 ${r.name}`}
-                          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
                         >
                           <Trash2 size={14} />
                         </button>
