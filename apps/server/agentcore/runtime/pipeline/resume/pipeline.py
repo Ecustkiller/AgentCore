@@ -6,6 +6,7 @@ import contextlib
 from dataclasses import asdict
 
 import agentcore.runtime.pipeline as pipeline_pkg
+from agentcore.board.channel import BoardChannel
 from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
@@ -26,7 +27,10 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.pipeline.resume.finish import finish_resume_turn, finish_terminal_resume
-from agentcore.runtime.pipeline.resume.settle import append_resumed_tool_results, settle_resumed_suspension
+from agentcore.runtime.pipeline.resume.settle import (
+    append_resumed_tool_results,
+    settle_resumed_suspension,
+)
 from agentcore.runtime.pipeline.resume.window import pre_pause_content, resumed_captain_window
 from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset
 from agentcore.runtime.runs import RunKind, RunPhase, RunSpec, build_captain_resumer
@@ -40,6 +44,7 @@ from agentcore.runtime.suspension import (
     turn_history,
 )
 from agentcore.tools.builtin import build_worker_registry, file_mutation_tool_names
+from agentcore.tools.builtin.board_ops import BoardOpsTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.workspace.protocol import WorkspaceBackend
 
@@ -55,6 +60,7 @@ async def resume_chat_pipeline(
     sink: EventSink,
     backend: WorkspaceBackend,
     history: list[dict] | None = None,
+    board_id: str | None = None,
     llm_credentials: LLMCredentials | None = None,
     profile_set: ProfileSet | None = None,
     session_saver: SessionSaver | None = None,
@@ -78,6 +84,13 @@ async def resume_chat_pipeline(
     reuse it. A downstream checkpoint can pause again — the same hooks re-persist a fresh
     frame, so resume is fully re-entrant. ``selected`` carries the user's option picks
     (ask_user only). Returns the same result shape as :func:`run_chat_pipeline`.
+
+    ``board_id`` marks the resumed turn as a 白板会话 (AI协作白板.md §六 M2): re-derived by
+    the caller from the conversation's board binding (authoritative in the DB, not stored in
+    the frame), so a board turn that paused at a checkpoint regains the ``board_ops`` tool +
+    its :class:`BoardChannel` on resume and can keep drawing on the user's canvas. ``None``
+    for every ordinary chat — then ``board_ops`` is neither wired nor reachable, exactly as
+    on the fresh-turn path.
     """
     profiles = profile_set or default_profile_set()
     message_id = suspension.message_id
@@ -97,6 +110,23 @@ async def resume_chat_pipeline(
         # enabled. The CEO prompt itself is replayed from the stored transcript
         # (already slim + 能力目录), so no directory re-render.
         skill_registry = build_system_skill_registry(include_legal=settings.legal_vertical_enabled)
+        # AI 协作白板 (§六 M2): a board-bound turn that paused at a checkpoint regains its
+        # BoardChannel on resume, so the continued CEO loop can still reach the user's open
+        # canvas via ``board_ops``. Rebuilt fresh (channels aren't serializable) from the
+        # caller's re-derived ``board_id`` + this resume's sink, bound on the SAME shared
+        # interaction bridge the ops-resolve endpoint settles. ``None`` ⇒ ordinary chat,
+        # tool unwired below — symmetric with the fresh-turn path (run.py).
+        board_channel = (
+            BoardChannel(
+                sink=sink,
+                conversation_id=conversation_id,
+                board_id=board_id,
+                registry=default_interaction_registry(),
+                timeout_seconds=settings.board_op_timeout_seconds,
+            )
+            if board_id
+            else None
+        )
         base_tool_context = ToolContext(
             execution_id=new_id(),
             run_id=new_id(),
@@ -104,6 +134,7 @@ async def resume_chat_pipeline(
             backend=backend,
             user_id=suspension.user_id,
             conversation_id=conversation_id,
+            board_channel=board_channel,
         )
         approval_gate = (
             ApprovalGate(
@@ -142,6 +173,14 @@ async def resume_chat_pipeline(
             folder_id=suspension.folder_id,
             memory_enabled=suspension.memory_enabled,
         )
+
+        # AI 协作白板 (§六 M2): re-give the resumed CEO the ``board_ops`` tool so it can keep
+        # drawing after the checkpoint. Registered into the assembled toolset BEFORE the loop
+        # runs, so it joins this resume's LLM function catalog (the replayed system prompt is
+        # the stored slim one — the catalog, not the prompt, is what makes the tool callable).
+        # Only in a 白板会话 — every other resume never sees it.
+        if board_channel is not None:
+            chat_tools.register(BoardOpsTool())
 
         sink.emit(message_start(message_id, conversation_id=conversation_id))
         # Continue the pre-pause exchange: seed the journal so the persisted turn

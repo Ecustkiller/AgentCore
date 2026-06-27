@@ -12,7 +12,7 @@ import { useNavigate } from "react-router-dom";
 export function useConversationBulkSelect(
   list: Conversation[],
   selectedFilter: string,
-  isArchivedView: boolean,
+  _isArchivedView: boolean,
 ) {
   const navigate = useNavigate();
   const [selectMode, setSelectMode] = useState(false);

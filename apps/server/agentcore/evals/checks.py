@@ -8,6 +8,7 @@ Check 读 :class:`TurnOutcome`，返回 :class:`CheckOutcome`。
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -219,6 +220,46 @@ class NoFabricationMarkerCheck:
         return CheckOutcome(self.name, not hit, f"forbidden hits={hit}")
 
 
+@dataclass
+class ContentMatchesCheck:
+    """回复正文匹配/不匹配给定正则——**确定性的「答案对不对」校验**。
+
+    评估套件原本只有结构 / 轨迹类 Check（收口、工具、引用数、roster、轮数），**没有**「交付
+    物语义上对不对」这一维：一份答案错了、却结构完整（过得了轻层 ``finish_guard`` 的代码围栏
+    闭合 + 角标越界两查），现有 Check 一律放行。本 Check 用一个**已知正确答案**的正则在正文上
+    ``re.search``——``negate=False`` 要求命中（正确答案出现即过）、``negate=True`` 要求**不**命
+    中（探测某个错误答案没出现）。``flags`` 取 ``"i"``（忽略大小写）/``"s"``（``.`` 跨行）/
+    ``"m"``（多行），可组合（如 ``"is"``）。
+
+    主用途是「挖坑」探针（远期规划.md §2.5 重层立项证据）：给一道有唯一可判答案的任务（第 N
+    个素数 / 复利终值 / 大数乘法 / 日期推算），用本 Check 当确定性地面真值，量化「回合过了轻层
+    却答错」的缺陷率——那正是机械轻层够不着、需重层（要跑 / 要重算 / 回源对照）才拦得住的那一类。
+    """
+
+    pattern: str = ""
+    negate: bool = False
+    flags: str = ""
+    name: str = "ContentMatches"
+
+    _FLAG_BITS = {"i": re.IGNORECASE, "s": re.DOTALL, "m": re.MULTILINE}
+
+    def _flag_value(self) -> int:
+        bits = 0
+        for ch in self.flags:
+            bits |= self._FLAG_BITS.get(ch, 0)
+        return bits
+
+    def run(self, case: EvalCase, outcome: TurnOutcome) -> CheckOutcome:
+        text = outcome.content or ""
+        try:
+            hit = re.search(self.pattern, text, self._flag_value()) is not None
+        except re.error as e:
+            return CheckOutcome(self.name, False, f"bad regex {self.pattern!r}: {e}")
+        ok = (not hit) if self.negate else hit
+        verb = "must-not-match" if self.negate else "must-match"
+        return CheckOutcome(self.name, ok, f"{verb} {self.pattern!r} -> {'hit' if hit else 'miss'}")
+
+
 # 注册表：check 名 → 从 args 构造实例。新增 Check 在此登记，seed_lint 据键集校验。
 _REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
     "FinishReason": lambda a: FinishReasonCheck(expected=a.get("expected", "end_turn")),
@@ -240,6 +281,11 @@ _REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
         forbidden=list(a.get("forbidden", []))
     ),
     "StyleClean": lambda a: StyleCleanCheck(allow=list(a.get("allow", []))),
+    "ContentMatches": lambda a: ContentMatchesCheck(
+        pattern=a.get("pattern", ""),
+        negate=bool(a.get("negate", False)),
+        flags=a.get("flags", ""),
+    ),
 }
 
 CHECK_NAMES: frozenset[str] = frozenset(_REGISTRY)

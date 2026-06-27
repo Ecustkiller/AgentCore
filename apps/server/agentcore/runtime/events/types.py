@@ -19,6 +19,10 @@ class EventType(StrEnum):
     MESSAGE_END = "message_end"
     ERROR = "error"
     TITLE_GENERATED = "title_generated"
+    # CEO→用户「下一步推荐」(下一步推荐): 2-4 个可点选的快捷追问，回合收尾后由一次 World B
+    # 窄任务生成、附到刚完成的助手消息下。与 title_generated 同属「回合后元信息」——不进
+    # 判定态（ProjectedTurn），三端 fold 一律 no-op；transport-only，不落库、不进 journal。
+    FOLLOWUPS_GENERATED = "followups_generated"
     TURN_SAVED = "turn_saved"
     CITATIONS = "citations"
     APPROVAL_REQUIRED = "approval_required"
@@ -31,6 +35,11 @@ class EventType(StrEnum):
     PLAN_REVISED = "plan_revised"
     WORKSPACE_OP_REQUIRED = "workspace_op_required"
     WORKSPACE_PROMOTED = "workspace_promoted"
+    # AI 协作白板 (AI协作白板.md §六 M2): a transport-only client-tool request — the
+    # server asks the bound desktop to apply structured board ops to the open Excalidraw
+    # canvas and report back. Like WORKSPACE_OP_REQUIRED it is NOT journaled (it is a
+    # request/response exchange, not turn content), so it stays out of the journal sets.
+    BOARD_OP_REQUIRED = "board_op_required"
     HANDOFF_SNAPSHOT_DONE = "handoff_snapshot_done"
     HANDOFF_JOB_STARTED = "handoff_job_started"
     HANDOFF_APPLY_DONE = "handoff_apply_done"

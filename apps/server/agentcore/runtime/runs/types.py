@@ -324,6 +324,15 @@ class RunState:
     # 阶段的冗余 file_list 轮). Best-effort: a file a worker wrote indirectly (e.g. via
     # a code_execute script) is not captured — only direct file-tool calls are.
     files_touched: list[str] = field(default_factory=list)
+    # 完工交接简报 (worker → 下游/CEO): a structured wrap-up the worker appends to its output
+    # (一句话结论 / 关键要点 / 采用的假设 / 建议下一步), harvested once from the content at run
+    # finish (mirrors ``files_touched`` / ``escalations``). Lets a downstream dep block LEAD
+    # with the author's own 结论 — most likely to survive budget-trim, cheapest to read — and
+    # the CEO aggregate surface 建议下一步 to relay to the user, instead of every reader
+    # re-deriving the gist from raw prose. ``None`` when the worker emitted none (or it was
+    # unparseable; harvest degrades gracefully). Keys: summary / key_points / assumptions /
+    # next_steps (each present only when non-empty). Best-effort signal, never load-bearing.
+    debrief: dict[str, Any] | None = None
     usage: dict[str, int] = field(default_factory=dict)
     cost: dict[str, int] = field(default_factory=dict)
     # The run's full message transcript (system + task + every assistant/tool turn

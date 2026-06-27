@@ -58,6 +58,7 @@ from agentcore.runtime.runs.executor_shared import (
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.serialize import (
+    debrief_from_content,
     escalations_from_transcript,
     files_touched_from_transcript,
     run_final_fact,
@@ -440,6 +441,11 @@ def build_agent_executor(
                 if settled is not None:
                     esc["status"] = settled["status"]
                     esc["answer"] = settled["answer"]
+            # 完工交接简报: harvest the worker's「## 交接简报」wrap-up once (best-effort; None
+            # when absent) so downstream dep injection / CEO synthesis read the author's own
+            # 结论 + 建议下一步 instead of re-deriving them from prose. Carried on BOTH terminal
+            # states (a worker that failed its contract can still have produced a useful brief).
+            debrief = debrief_from_content(content)
             if not verdict.ok and _is_hard_failure(content, contract):
                 reason = "；".join(verdict.failures)
                 logger.info("contract.failed", run_id=spec.run_id, failures=verdict.failures)
@@ -450,6 +456,7 @@ def build_agent_executor(
                     reasoning=reasoning,
                     error=reason,
                     escalations=escalations,
+                    debrief=debrief,
                     citations=worker_citations,
                     model=profile.model,
                     duration_ms=duration_ms,
@@ -482,6 +489,7 @@ def build_agent_executor(
                 reasoning=reasoning,
                 warnings=[] if verdict.ok else list(verdict.failures),
                 escalations=escalations,
+                debrief=debrief,
                 citations=worker_citations,
                 model=profile.model,
                 duration_ms=duration_ms,

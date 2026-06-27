@@ -8,6 +8,7 @@ import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { PreviewPage } from "@/pages/PreviewPage";
 import { ToolboxPage } from "@/pages/ToolboxPage";
+import { WhiteboardCanvasPage } from "@/pages/WhiteboardCanvasPage";
 import { WhiteboardPage } from "@/pages/WhiteboardPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
@@ -44,6 +45,7 @@ export const router = createHashRouter([
       { path: "conversations", element: <ConversationsPage /> },
       { path: "files", element: <FilesPage /> },
       { path: "whiteboard", element: <WhiteboardPage /> },
+      { path: "whiteboard/:boardId", element: <WhiteboardCanvasPage /> },
       { path: "messages", element: <MessagesPage /> },
       { path: "messages/:chatId", element: <MessagesPage /> },
       { path: "toolbox", element: <ToolboxPage /> },

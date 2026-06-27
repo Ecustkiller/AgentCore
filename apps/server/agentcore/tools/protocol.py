@@ -14,6 +14,7 @@ from agentcore.core.text import truncate_head_tail
 from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect
 
 if TYPE_CHECKING:
+    from agentcore.board.channel import BoardChannel
     from agentcore.workspace.protocol import WorkspaceBackend
     from agentcore.workspace.write_claims import WriteCoordinator
 
@@ -115,6 +116,13 @@ class ToolContext:
     # the assumption fallback); this channel owns the mechanism (cap / suspend / events /
     # RunState recording) so the tool stays off the event vocabulary (引擎纯化).
     escalation: EscalationChannel | None = None
+    # AI 协作白板 (AI协作白板.md §六 M2): the per-run channel that lets ``board_ops`` apply
+    # structured ops to the user's open Excalidraw canvas via the bound desktop. Set per
+    # run by the assembler ONLY when the conversation is bound to a board (a 白板会话);
+    # ``None`` for every ordinary chat / worker / test — then ``board_ops`` returns a clean
+    # "not on a board" error instead of touching anything. The channel owns the mechanism
+    # (suspend / emit / await the desktop); the tool owns only the op→result mapping (引擎纯化).
+    board_channel: BoardChannel | None = None
 
 
 @dataclass

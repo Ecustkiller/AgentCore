@@ -23,6 +23,7 @@ from .auth import (
     UserLlmKeyRepository,
 )
 from .billing import CostEventRepository
+from .boards import BoardRepository
 from .chat import ChatRepository
 from .conversation_shares import ConversationShareRepository
 from .conversations import ConversationRepository
@@ -47,6 +48,7 @@ __all__ = [
     "_UNSET",
     "_ilike_pattern",
     "AdminAuditRepository",
+    "BoardRepository",
     "ChatRepository",
     "ConversationRepository",
     "ConversationShareRepository",

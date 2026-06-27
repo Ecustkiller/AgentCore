@@ -297,7 +297,9 @@ describe("projectExecution (fold)", () => {
       checkpointBoundaries: 0,
       escalations: 2,
       scopeEscalations: 1,
-      timeline: [{ runId: "run-1", startMs: 0, endMs: 800, outcome: "completed" }],
+      timeline: [
+        { runId: "run-1", startMs: 0, endMs: 800, outcome: "completed" },
+      ],
     };
     const frames: RunFrame[] = [
       started("agent-1", "run-1"),
@@ -310,7 +312,10 @@ describe("projectExecution (fold)", () => {
     expect(exec.batches).toEqual([snap]);
     const two = projectExecution(
       plan,
-      [...frames, { t: 3, kind: "batch_metrics", metrics: { ...snap, nodes: 1 } }],
+      [
+        ...frames,
+        { t: 3, kind: "batch_metrics", metrics: { ...snap, nodes: 1 } },
+      ],
       "running",
     );
     expect(two.batches.map((b) => b.nodes)).toEqual([3, 1]);

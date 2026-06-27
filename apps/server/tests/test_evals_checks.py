@@ -125,6 +125,32 @@ def test_no_fabrication_marker():
     assert _run({"name": "NoFabricationMarker"}, hit).passed
 
 
+def test_content_matches():
+    # 命中（正确答案出现）→ 过；未命中 → 不过
+    assert _run({"name": "ContentMatches", "args": {"pattern": "541"}}, _outcome(content="第 100 个素数是 541。")).passed
+    assert not _run({"name": "ContentMatches", "args": {"pattern": "541"}}, _outcome(content="答案是 540。")).passed
+
+    # negate：要求某个错误答案**不**出现（探测「没答成简单利息 11200」）
+    neg = {"name": "ContentMatches", "args": {"pattern": "11200", "negate": True}}
+    assert _run(neg, _outcome(content="本息合计 11268.25 元")).passed
+    assert not _run(neg, _outcome(content="本息合计 11200 元")).passed
+
+    # flags=i 忽略大小写
+    assert _run(
+        {"name": "ContentMatches", "args": {"pattern": "saturday", "flags": "i"}},
+        _outcome(content="It is Saturday."),
+    ).passed
+
+    # 数字 pattern 容忍真实分隔符（无 / 逗号 / LaTeX \,）—— 探针 ground-truth 的健壮性
+    digit = {"name": "ContentMatches", "args": {"pattern": "15\\D{0,3}592\\D{0,3}984"}}
+    for c in ["15592984", "15,592,984", r"15\,592\,984"]:
+        assert _run(digit, _outcome(content=c)).passed, c
+
+    # 坏正则不抛异常、判不过并在 detail 标注
+    bad = _run({"name": "ContentMatches", "args": {"pattern": "("}}, _outcome(content="x"))
+    assert not bad.passed and "bad regex" in bad.detail
+
+
 def test_registry_contains_all_documented_checks():
     expected = {
         "FinishReason",
@@ -137,5 +163,6 @@ def test_registry_contains_all_documented_checks():
         "RosterMatches",
         "MaxRounds",
         "NoFabricationMarker",
+        "ContentMatches",
     }
     assert expected <= CHECK_NAMES

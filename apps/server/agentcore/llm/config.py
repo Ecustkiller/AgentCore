@@ -162,6 +162,20 @@ PROFILES: dict[str, ModelProfile] = {
         max_tokens=64,
         max_rounds=1,
     ),
+    # CEO→用户「下一步推荐」(下一步推荐): predict the just-finished turn's 2-4 next steps as
+    # quick-reply chips. Fast + non-thinking + one-shot (World B narrow task, like title);
+    # temperature a touch higher than title for some spread across the suggestions. 256
+    # tokens fits up to 4 short CJK lines without mid-list cutoff (title's 64 is sized for a
+    # single ~16-char line — too tight here). Sibling of title; kept separate per the growth
+    # invariant (their tuning — count/length vs title length — evolves apart).
+    "followups": ModelProfile(
+        model=DEEPSEEK_V4_FLASH,
+        thinking=False,
+        reasoning_effort=None,
+        temperature=0.5,
+        max_tokens=256,
+        max_rounds=1,
+    ),
 }
 
 # Universal safe fallback for an unknown profile name or invalid tier: the chat

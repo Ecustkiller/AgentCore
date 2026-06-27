@@ -50,6 +50,15 @@ from .auth import (
     UpdateProfileRequest,
     UserResponse,
 )
+from .boards import (
+    BoardConversationResponse,
+    BoardDetail,
+    BoardSceneWriteRequest,
+    BoardSummary,
+    BoardWriteResult,
+    CreateBoardRequest,
+    UpdateBoardRequest,
+)
 from .common import StatusResponse
 from .conversations import (
     ConversationListResponse,
@@ -228,6 +237,14 @@ __all__ = [
     "FolderSummary",
     "FolderGroup",
     "GroupedConversationsResponse",
+    # boards (AI 协作白板)
+    "CreateBoardRequest",
+    "UpdateBoardRequest",
+    "BoardSummary",
+    "BoardDetail",
+    "BoardSceneWriteRequest",
+    "BoardWriteResult",
+    "BoardConversationResponse",
     # model modes
     "ModelModeSummary",
     "CreateModelModeRequest",

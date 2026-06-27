@@ -128,7 +128,9 @@ export function DeleteProjectDialog({
           <DialogTitle>删除项目「{name}」？</DialogTitle>
           <DialogDescription asChild>
             <div className="space-y-1 text-sm text-muted-foreground">
-              {liveConvCount > 0 && <p>其下 {liveConvCount} 条对话将一并归档。</p>}
+              {liveConvCount > 0 && (
+                <p>其下 {liveConvCount} 条对话将一并归档。</p>
+              )}
               <p>
                 云端文件约 {PROJECT_FILE_RETENTION_DAYS} 天后由系统自动清理。
               </p>

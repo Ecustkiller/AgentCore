@@ -2,7 +2,7 @@ from agentcore.llm.protocol import LLMChunk, ToolCallDelta
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import _dep_context_blocks, build_agent_executor
-from agentcore.runtime.runs.types import RunPhase, RunSpec
+from agentcore.runtime.runs.types import RunPhase, RunPolicy, RunSpec
 from agentcore.runtime.runs.wave import WaveScheduler
 from agentcore.tools.registry import ToolRegistry
 from tests.runs_executor.conftest import (
@@ -61,6 +61,35 @@ def test_dep_block_prose_dep_unchanged_full_text():
     assert block.body == "纯文字结论无文件"
     assert block.fidelity == "pass_through"  # no files → prose pass_through
     assert block.truncated is False  # short prose fits the budget whole
+
+
+def test_dep_block_leads_with_author_debrief_summary():
+    # 完工交接简报: a pass_through dep's block LEADS with the upstream author's own 结论 (so the
+    # downstream sees the gist first / it survives any later trim), and the「## 交接简报」section
+    # is peeled off the body — its 建议下一步 is for the CEO, not downstream deliverable prose.
+    plan = _plan(RunSpec(run_id="u", agent_id="u", role="研究员", task="调研"))
+    content = "详细调研正文……\n\n## 交接简报\n- 结论：方案A明显更优\n- 建议下一步：做A的POC"
+    block = _dep_context_blocks(plan, ["u"], {"u": _state(content)})[0]
+    assert block.body.startswith("【上游交接结论】方案A明显更优")
+    assert "详细调研正文" in block.body  # the deliverable body still follows the lead
+    assert "## 交接简报" not in block.body  # section peeled off, not double-shipped
+    assert "建议下一步" not in block.body  # next_steps is CEO-facing, not downstream prose
+
+
+def test_dep_summarize_uses_author_summary_over_blind_head_chop():
+    # summarize fidelity: the author's own 结论 beats a mechanical head-chop of noisy prose.
+    spec = RunSpec(
+        run_id="u",
+        agent_id="u",
+        role="研究员",
+        task="调研",
+        policy=RunPolicy(result_handling="summarize"),
+    )
+    content = ("无关开头" + ("噪" * 2000)) + "\n\n## 交接简报\n结论：真正重要的一句结论"
+    block = _dep_context_blocks(_plan(spec), ["u"], {"u": _state(content)})[0]
+    assert block.fidelity == "summarize"
+    assert block.body == "真正重要的一句结论"  # author 结论, not 噪噪噪… head-chop
+    assert block.truncated is True  # the full product is longer than the digest
 
 
 async def test_dag_file_writing_upstream_passes_pointer_downstream():

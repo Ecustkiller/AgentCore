@@ -92,6 +92,10 @@ export interface ConversationState {
     citations: Citation[],
     conversationId?: string | null,
   ) => void;
+  attachFollowupsToLastMessage: (
+    followups: string[],
+    conversationId?: string | null,
+  ) => void;
   attachCostToLastMessage: (
     cost: CostBreakdown,
     conversationId?: string | null,
@@ -349,6 +353,16 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         if (!last || last.role !== "assistant") return null;
         const lane = foldCitations(messageLaneFromMessage(last), citations);
         messages[messages.length - 1] = { ...last, citations: lane.citations };
+        return { messages };
+      }),
+
+    attachFollowupsToLastMessage: (followups, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        if (followups.length === 0) return null;
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") return null;
+        messages[messages.length - 1] = { ...last, followups };
         return { messages };
       }),
 

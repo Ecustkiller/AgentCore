@@ -52,11 +52,11 @@ def build_fixtures() -> list[dict[str, Any]]:
 
 
 def main() -> None:
+    fixtures = build_fixtures()
     _FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
     # Drop stale fixtures so a removed/renamed vector never leaves an orphan golden.
     for stale in _FIXTURES_DIR.glob("*.json"):
         stale.unlink()
-    fixtures = build_fixtures()
     for fx in fixtures:
         path = _FIXTURES_DIR / f"{fx['name']}.json"
         path.write_text(

@@ -2,6 +2,7 @@ import { patchConversationCache } from "@/hooks/useConversations";
 import { useConversationStore } from "@/stores/conversation";
 import type {
   CitationsPayload,
+  FollowupsGeneratedPayload,
   SSEEvent,
   TitleGeneratedPayload,
   TurnSavedPayload,
@@ -19,6 +20,13 @@ export function handleMetaEvent(
       patchConversationCache(conversationId, {
         title: (event.payload as TitleGeneratedPayload).title,
       });
+      return true;
+    }
+    case "followups_generated": {
+      const payload = event.payload as FollowupsGeneratedPayload;
+      useConversationStore
+        .getState()
+        .attachFollowupsToLastMessage(payload.followups, conversationId);
       return true;
     }
     case "turn_saved": {

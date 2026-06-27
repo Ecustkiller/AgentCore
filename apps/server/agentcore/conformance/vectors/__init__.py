@@ -1,0 +1,28 @@
+"""Curated conformance vectors — representative SSE event sequences (前端技术与架构 §十二).
+
+Built with the REAL event builders (:mod:`agentcore.runtime.events`). Split by scenario
+under this package (``single_agent`` / ``gates`` / ``multi_agent`` / ``debate`` / ``legal``
+/ ``board``); aggregated here as ``VECTORS``. Export via ``python -m agentcore.conformance.export``.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+from agentcore.runtime.events import SSEEvent
+
+from .board import VECTORS as _BOARD
+from .debate import VECTORS as _DEBATE
+from .gates import VECTORS as _GATES
+from .legal import VECTORS as _LEGAL
+from .multi_agent import VECTORS as _MULTI_AGENT
+from .single_agent import VECTORS as _SINGLE_AGENT
+
+VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
+    **_SINGLE_AGENT,
+    **_GATES,
+    **_MULTI_AGENT,
+    **_DEBATE,
+    **_LEGAL,
+    **_BOARD,
+}

@@ -1,6 +1,7 @@
 import { CheckpointCard } from "@/components/chat/CheckpointCard";
 import { EscalationCards } from "@/components/chat/EscalationCard";
 import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
+import { FollowupChips } from "@/components/chat/FollowupChips";
 import { InlineTeamGraph } from "@/components/chat/InlineTeamGraph";
 import { Markdown } from "@/components/chat/Markdown";
 import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
@@ -25,12 +26,7 @@ import {
 import { useMessageExecution } from "@/stores/execution";
 import { useUsageStore } from "@/stores/usage";
 import type { ProcessStep } from "@/types/events";
-import {
-  AlertTriangle,
-  FolderUp,
-  KeyRound,
-  RefreshCw,
-} from "lucide-react";
+import { AlertTriangle, FolderUp, KeyRound, RefreshCw } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
@@ -85,6 +81,13 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     (s) => s.messageCosts[message.id]?.cost.total ?? null,
   );
   const conversationId = useConversationStore((s) => s.currentConversationId);
+  // 下一步推荐 chips ride the live tail only: render them on the latest message of the
+  // active conversation, so a follow-up turn (or scrolling back) retires stale chips.
+  const isLastMessage = useConversationStore((s) => {
+    const id = s.currentConversationId;
+    const msgs = id ? s.byId[id]?.messages : undefined;
+    return !!msgs && msgs.length > 0 && msgs[msgs.length - 1].id === message.id;
+  });
   const navigate = useNavigate();
   const errorAction = message.error
     ? errorActionForCode(message.error.code)
@@ -326,6 +329,12 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           onRegenerate={handleRegenerate}
         />
       )}
+      {!message.isStreaming &&
+        !isGenerating &&
+        isLastMessage &&
+        (message.followups?.length ?? 0) > 0 && (
+          <FollowupChips followups={message.followups ?? []} />
+        )}
     </div>
   );
 }

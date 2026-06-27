@@ -4,6 +4,7 @@ import contextlib
 from dataclasses import asdict
 
 import agentcore.runtime.pipeline as pipeline_pkg
+from agentcore.board.channel import BoardChannel
 from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
@@ -69,6 +70,7 @@ from agentcore.tools.builtin import (
     build_worker_registry,
     file_mutation_tool_names,
 )
+from agentcore.tools.builtin.board_ops import BoardOpsTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.workspace.protocol import WorkspaceBackend
 
@@ -84,6 +86,7 @@ async def run_chat_pipeline(
     user_id: str,
     backend: WorkspaceBackend,
     folder_id: str | None = None,
+    board_id: str | None = None,
     attachments: list[dict] | None = None,
     approvals_enabled: bool = True,
     memory_enabled: bool = True,
@@ -111,6 +114,11 @@ async def run_chat_pipeline(
     ``folder_id`` is the conversation's project (None for a bare/global chat): it selects
     the memory SCOPE so a project conversation also gets that project's memory layer
     injected (global + project), and ``consult_memory`` searches both (记忆作用域与画像分层 §三).
+
+    ``board_id`` marks this turn as a 白板会话 (AI协作白板.md §六 M2): when set, the CEO
+    gains the ``board_ops`` tool + a :class:`BoardChannel` bound to that board, so it can
+    apply structured ops to the user's open Excalidraw canvas. ``None`` for every ordinary
+    chat — then ``board_ops`` is neither wired nor reachable.
 
     ``profile_set`` carries the turn's resolved 质量档 (经济/高质量/custom): which
     model each scenario (chat/agent.strong/...) runs this turn, resolved by the
@@ -190,6 +198,22 @@ async def run_chat_pipeline(
         # 路由器接管默认 + 厂商 client 的生命周期，由下方 finally 的 ``await llm.close()`` 释放。
         llm = pipeline_pkg.build_router_around(pipeline_pkg.build_provider(llm_credentials))
 
+        # AI 协作白板 (§六 M2): a board-bound turn gets a BoardChannel so ``board_ops`` can
+        # reach the user's open canvas via the desktop. Bound to this board + conversation
+        # on the shared interaction bridge (same registry the resolve endpoint settles).
+        # ``None`` for an ordinary chat — then the tool below is never wired either.
+        board_channel = (
+            BoardChannel(
+                sink=sink,
+                conversation_id=conversation_id,
+                board_id=board_id,
+                registry=default_interaction_registry(),
+                timeout_seconds=settings.board_op_timeout_seconds,
+            )
+            if board_id
+            else None
+        )
+
         # The workspace backend is resolved per conversation by the caller
         # (folder space vs. its own conversation space) and injected here. The
         # engine and tools never see a Path — they only touch ``context.backend``.
@@ -200,6 +224,7 @@ async def run_chat_pipeline(
             backend=backend,
             user_id=user_id,
             conversation_id=conversation_id,
+            board_channel=board_channel,
         )
 
         # --- Phase 2: Assemble the CEO chat agent's toolset (coordinator) ---
@@ -278,6 +303,13 @@ async def run_chat_pipeline(
             memory_enabled=memory_enabled,
             folder_id=folder_id,
         )
+
+        # AI 协作白板 (§六 M2): in a 白板会话, hand the CEO the ``board_ops`` tool so it can
+        # draw on the user's open canvas. Registered AFTER the coordinator toolset is
+        # assembled and BEFORE ``ceo_tool_names`` is read, so it joins the LLM's function
+        # catalog this turn. Only here (board-bound runs) — every other chat never sees it.
+        if board_channel is not None:
+            chat_tools.register(BoardOpsTool())
 
         # The entry chat agent gets the SLIM CEO core + the always-on 能力目录 (提示词
         # 瘦身 P2) + inline citation guidance. The directory lists only the skills whose

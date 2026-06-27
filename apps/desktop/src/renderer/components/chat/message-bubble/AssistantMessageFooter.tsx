@@ -13,10 +13,10 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { copyText } from "@/lib/clipboard";
 import { formatCompact } from "@/lib/format";
 import { notifySuccess } from "@/lib/toast";
+import type { UsageBreakdown } from "@/services/usage";
 import type { Message } from "@/stores/conversation";
 import { useConversationStore } from "@/stores/conversation";
 import { useUIStore } from "@/stores/ui";
-import type { UsageBreakdown } from "@/services/usage";
 import type { ContextBlockWire } from "@/types/events";
 import {
   Check,
@@ -28,10 +28,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import {
-  DeleteMessageAction,
-  MessageTime,
-} from "./MessageActions";
+import { DeleteMessageAction, MessageTime } from "./MessageActions";
 import { useCopyAction } from "./useCopyAction";
 
 function cacheRatePercent(usage: UsageBreakdown): number | null {
@@ -234,9 +231,10 @@ function MessageMoreMenu({
               <DropdownMenuSeparator />
               {showTrace && message.traceId && (
                 <DropdownMenuItem
-                  onSelect={() =>
-                    void copyDiagnostic("trace id", message.traceId!)
-                  }
+                  onSelect={() => {
+                    const traceId = message.traceId;
+                    if (traceId) void copyDiagnostic("trace id", traceId);
+                  }}
                 >
                   <Fingerprint
                     size={14}
@@ -255,9 +253,11 @@ function MessageMoreMenu({
               )}
               {showDiagnosticIds && message.executionId && (
                 <DropdownMenuItem
-                  onSelect={() =>
-                    void copyDiagnostic("execution id", message.executionId!)
-                  }
+                  onSelect={() => {
+                    const executionId = message.executionId;
+                    if (executionId)
+                      void copyDiagnostic("execution id", executionId);
+                  }}
                 >
                   <Copy size={14} className="shrink-0 text-muted-foreground" />
                   复制 execution id
@@ -302,11 +302,7 @@ export function AssistantMessageFooter({
           </IconButton>
         </SimpleTooltip>
         <SimpleTooltip label="重新生成">
-          <IconButton
-            size="sm"
-            aria-label="重新生成"
-            onClick={onRegenerate}
-          >
+          <IconButton size="sm" aria-label="重新生成" onClick={onRegenerate}>
             <RefreshCw size={14} />
           </IconButton>
         </SimpleTooltip>

@@ -841,7 +841,9 @@ function DiagnosticSection({
  * 诊断信息. Execution-level (not run-scoped) — it answers「这回合的并发真的发生了吗 / width 卡没卡
  * / 自我纠偏触发了几次」. Most turns carry one batch; a checkpoint/scope yield + resume adds more.
  * Exported for the render test (the panel is dev-gated, so the shoot harness never reaches it). */
-export function SchedulingDiag({ batches }: { batches: BatchMetricsSnapshot[] }) {
+export function SchedulingDiag({
+  batches,
+}: { batches: BatchMetricsSnapshot[] }) {
   return (
     <div className="mt-1 border-t border-border/60 pt-2">
       <p className="mb-1 text-xs font-medium text-muted-foreground">
@@ -849,7 +851,7 @@ export function SchedulingDiag({ batches }: { batches: BatchMetricsSnapshot[] })
       </p>
       {batches.map((b, i) => (
         <div
-          key={i}
+          key={`${b.wallMs}-${b.nodes}-${b.peakRunning}-${b.width}`}
           className="mb-2 space-y-1 last:mb-0"
         >
           {batches.length > 1 && (

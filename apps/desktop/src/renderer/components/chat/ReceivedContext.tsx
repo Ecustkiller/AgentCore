@@ -8,11 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { formatCompact } from "@/lib/format";
 import type { ContextBlockWire } from "@/types/events";
-import {
-  ChevronDown,
-  ChevronRight,
-  CornerDownRight,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, CornerDownRight } from "lucide-react";
 import { useState } from "react";
 
 /** Context channel → 中文 label + one-line hint (上下文传递可视化). The single source both
@@ -133,24 +129,24 @@ export function ReceivedContextDialog({
   if (blocks.length === 0) return null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col">
-          <DialogHeader>
-            <DialogTitle>收到的上下文</DialogTitle>
-            <DialogDescription>
-              本回合 AI 实际读到的上下文，与喂给模型的逐字一致（系统提示 /
-              对话历史 / 原始请求 …）。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-5 pb-5">
-            {blocks.map((b, i) => (
-              <ContextBlockCard
-                key={`${b.channel}-${i}`}
-                block={b}
-                defaultOpen={false}
-              />
-            ))}
-          </div>
-        </DialogContent>
+      <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col">
+        <DialogHeader>
+          <DialogTitle>收到的上下文</DialogTitle>
+          <DialogDescription>
+            本回合 AI 实际读到的上下文，与喂给模型的逐字一致（系统提示 /
+            对话历史 / 原始请求 …）。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-5 pb-5">
+          {blocks.map((b, i) => (
+            <ContextBlockCard
+              key={`${b.channel}-${i}`}
+              block={b}
+              defaultOpen={false}
+            />
+          ))}
+        </div>
+      </DialogContent>
     </Dialog>
   );
 }

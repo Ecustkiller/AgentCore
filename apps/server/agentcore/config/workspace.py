@@ -28,6 +28,10 @@ class WorkspaceSettings(BaseModel):
     workspace_op_timeout_seconds: float = 60.0
     workspace_execute_timeout_slack_seconds: float = 30.0
     workspace_handoff_timeout_seconds: float = 300.0
+    # AI 协作白板 (AI协作白板.md §六 M2): how long the BoardChannel waits for the bound
+    # desktop to apply an op batch before failing the call (so a closed canvas / dropped
+    # client never hangs the turn). Same class as the workspace-op deadline above.
+    board_op_timeout_seconds: float = 60.0
 
     # Cloud (server-location) workers: code_execute runs in the API container subprocess
     # — not a real isolation boundary. Default off; local/sidecar keeps code_execute.

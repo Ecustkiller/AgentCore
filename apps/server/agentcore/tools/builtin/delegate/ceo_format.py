@@ -20,14 +20,24 @@ logger = get_logger(__name__)
 
 def direct_result(tool: DelegateTool, content: str) -> ToolResult:
     """提案2a：把单个成功 worker 的产出直接作为本回合最终答复（HANDOFF 终态）。"""
-    tool._sink.emit(content_delta(content))
+    from agentcore.runtime.runs.serialize import split_debrief
+
+    # 完工交接简报: a worker's「## 交接简报」is a handoff for the team, not part of the
+    # user-facing answer — strip it on the finalize path. If it suggested a 建议下一步,
+    # re-attach it as a clean footer (there is no CEO synthesis pass here to relay it).
+    clean, debrief = split_debrief(content)
+    text = clean or content
+    next_steps = (debrief or {}).get("next_steps", "") if debrief else ""
+    if next_steps:
+        text = f"{text}\n\n---\n**建议下一步**：{next_steps}"
+    tool._sink.emit(content_delta(text))
     return ToolResult(
         tool_call_id="",
         success=True,
-        output=content,
+        output=text,
         output_limit=DELEGATE_OUTPUT_LIMIT,
         effect=ToolEffect.HANDOFF,
-        final_text=content,
+        final_text=text,
     )
 
 
@@ -80,7 +90,16 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
     """Each worker's product folded back to the CEO — SINGLE SOURCE for synthesis + run_context."""
     from agentcore.runtime.runs.constants import CEO_SYNTHESIS_BUDGET, DEP_POINTER_SUMMARY_CHARS
     from agentcore.runtime.runs.fidelity import allocate, truncate_head_tail
+    from agentcore.runtime.runs.serialize import split_debrief
     from agentcore.runtime.workspace import summarize
+
+    # 完工交接简报: peel each worker's「## 交接简报」off its product ONCE — the prose body sizes on
+    # the deliverable alone, the author's own 结论 LEADS the body, and 建议下一步 is surfaced
+    # separately (format_for_ceo) for the CEO to relay to the user.
+    cleaned: dict[str, tuple[str, dict[str, Any] | None]] = {}
+    for node in plan.nodes:
+        st = results.get(node.run_id)
+        cleaned[node.run_id] = split_debrief(st.content) if st and st.content else ("", None)
 
     def _mode(node) -> str:
         st = results.get(node.run_id)
@@ -94,7 +113,7 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
     allowances = iter(
         allocate(
             [
-                len(results[node.run_id].content)
+                len(cleaned[node.run_id][0])
                 for node in plan.nodes
                 if modes[node.run_id] == "pass_through"
             ],
@@ -107,20 +126,26 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
         status = state.phase.value if state else "unknown"
         label = node.role or node.run_id
         mode = modes[node.run_id]
+        clean, debrief = cleaned[node.run_id]
+        author_summary = (debrief or {}).get("summary", "") if debrief else ""
+        next_steps = (debrief or {}).get("next_steps", "") if debrief else ""
         fidelity = ""
         truncated = False
         if mode == "pointer":
-            body = summarize(state.content, limit=DEP_POINTER_SUMMARY_CHARS)
+            body = summarize(clean, limit=DEP_POINTER_SUMMARY_CHARS)
             fidelity, truncated = "pointer", True
         elif mode == "pass_through":
             allowance = next(allowances)
-            body = truncate_head_tail(state.content, allowance)
+            body = truncate_head_tail(clean, allowance)
             fidelity = "pass_through"
-            truncated = len(state.content) > allowance
+            truncated = len(clean) > allowance
         elif state and state.error:
             body = f"（失败：{state.error}）"
         else:
             body = "（无输出）"
+        # Lead the CEO's per-worker view with the author's own 结论 (cheapest, trim-proof).
+        if author_summary and mode in ("pointer", "pass_through"):
+            body = f"交接结论：{author_summary}\n\n{body}"
         if state and state.warnings:
             warns = "；".join(state.warnings)
             body += f"\n\n> 质检提醒（未完全达标，请判断是否需要返工）：{warns}"
@@ -142,6 +167,7 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
                 "fidelity": fidelity,
                 "truncated": truncated,
                 "files": files,
+                "next_steps": next_steps,
             }
         )
     return products
@@ -156,6 +182,17 @@ def format_for_ceo(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
 
     products = worker_products(tool, plan, results)
     emit_captain_readback(tool, products)
+    # 完工交接简报: surface each worker's 建议下一步 (proactive, non-blocking — distinct from the
+    # escalation block's 待决问题) as ONE advisory section so the CEO can relay the worthwhile
+    # ones to the user. Empty when nobody suggested anything.
+    suggestions = [(wp["role"], wp["next_steps"]) for wp in products if wp.get("next_steps")]
+    if suggestions:
+        lines.append(
+            "\n### 队员建议的下一步（供参考，由你与用户定夺，非必须执行）\n"
+            "以下是各队员完工时顺带提的后续方向（非阻塞、不是待决问题）。择其有价值者，在你给"
+            "用户的概览里自然带出『团队建议接下来可以…』即可；无价值的忽略，不要逐条复述。\n"
+            + "\n".join(f"- {role}：{ns}" for role, ns in suggestions)
+        )
     for wp in products:
         lines.append(
             f"\n### {wp['role']}（{wp['status']}） · run_id: `{wp['run_id']}`\n{wp['body']}"
@@ -176,6 +213,7 @@ def format_for_ceo(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
         "步骤或 Agent。如仍需补充工作，可再次调用 delegate；若用户希望对其中某个产物"
         "做小改 / 增补、且仍由原角色来改，可用 revise（传该产物上面的 run_id + 修改"
         "意见）唤回原作者在原稿基础上续写，而不必从零重派。"
+        "若上方有『队员建议的下一步』，择其有价值者在概览末尾以一句『建议下一步』自然带给用户。"
     )
     output = "\n".join(lines)
     raw_chars = sum(len(s.content) for s in results.values() if s and s.content)

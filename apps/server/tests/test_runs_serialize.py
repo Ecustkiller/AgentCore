@@ -67,6 +67,23 @@ def test_state_json_round_trips_files_touched():
     assert restored.files_touched == ["a.html", "b.css"]
 
 
+def test_state_json_round_trips_debrief():
+    # 完工交接简报: a seed/resume must carry the worker's harvested debrief so downstream
+    # injection / CEO synthesis on a resumed turn read the same author 结论 / 建议下一步.
+    state = RunState(
+        phase=RunPhase.COMPLETED,
+        content="x",
+        debrief={"summary": "做完了甲", "next_steps": "接着做乙"},
+    )
+    restored = state_from_json(state_to_json(state))
+    assert restored.debrief == {"summary": "做完了甲", "next_steps": "接着做乙"}
+
+
+def test_state_json_debrief_defaults_none():
+    restored = state_from_json(state_to_json(RunState(phase=RunPhase.COMPLETED, content="x")))
+    assert restored.debrief is None
+
+
 def test_escalations_from_transcript_collects_in_call_order():
     transcript = [
         LLMMessage(role="user", content="做事"),

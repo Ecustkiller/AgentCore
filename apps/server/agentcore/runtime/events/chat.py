@@ -145,6 +145,18 @@ def title_generated(title: str, *, conversation_id: str) -> SSEEvent:
     )
 
 
+def followups_generated(followups: list[str], *, conversation_id: str) -> SSEEvent:
+    """CEO→用户「下一步推荐」(下一步推荐): quick-reply chips for the just-finished turn.
+
+    Attached client-side to the latest assistant message. Emitted only when there is
+    at least one suggestion (a no-op event carries no UX), after ``message_end``.
+    """
+    return SSEEvent(
+        type=EventType.FOLLOWUPS_GENERATED,
+        payload={"conversation_id": conversation_id, "followups": followups},
+    )
+
+
 def turn_saved(*, user_message_id: str) -> SSEEvent:
     return SSEEvent(
         type=EventType.TURN_SAVED,

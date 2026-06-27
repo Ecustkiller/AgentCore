@@ -1,14 +1,15 @@
-"""Tests for the legal vertical v0 domain Skill (法律垂直「答辩状作战室」).
+"""Tests for the legal vertical v0 domain Skills.
 
-Guards three things:
-1. Opt-in gating — ``legal_answer_brief`` is ABSENT from the default registry and
-   PRESENT only with ``include_legal=True`` (so generic deployments never see legal
-   content; the platform system-skill set in test_skills.py stays exactly the 6).
+Two domain skills share the same registry + gating: ``legal_answer_brief`` (「答辩状
+作战室」) and ``legal_case_analysis`` (「原告 / 被告 / 法官」三方视角案情研判). The same
+three guards apply to each:
+1. Opt-in gating — ABSENT from the default registry and PRESENT only with
+   ``include_legal=True`` (so generic deployments never see legal content; the
+   platform system-skill set in test_skills.py stays exactly the 6).
 2. consult_skill resolves it (CEO can pull the full guidance) when registered, and
    the 能力目录 lists it when its required tools are wired.
-3. The body still teaches its mechanism — the war-room orchestration (delegate +
-   debate red_team with is_subject) and the anti-hallucination floor — so it can't
-   silently rot into a generic "write a brief" prompt.
+3. The body still teaches its mechanism — the orchestration (delegate + debate) and
+   the anti-hallucination floor — so it can't silently rot into a generic prompt.
 """
 
 from pathlib import Path
@@ -104,3 +105,64 @@ def test_body_enforces_anti_hallucination_floor():
     assert "中国大陆法" in body
     assert "免责" in body
     assert "checkpoint_after" in body or "人审" in body
+
+
+# --- legal_case_analysis：三方视角案情研判（接案评估 / 诉讼策略） -------------------
+
+
+def test_case_analysis_absent_by_default():
+    # 与 legal_answer_brief 同：默认不污染通用部署。
+    assert build_system_skill_registry().get("legal_case_analysis") is None
+
+
+def test_case_analysis_present_when_opted_in():
+    reg = build_system_skill_registry(include_legal=True)
+    skill = reg.get("legal_case_analysis")
+    assert skill is not None
+    # 原被告对抗靠 debate、法官研判 + 核验靠 delegate（两者恒在 CEO 路径）。
+    assert skill.requires_tools == ("delegate", "debate")
+
+
+def test_directory_lists_case_analysis_when_enabled_and_tools_wired():
+    reg = build_system_skill_registry(include_legal=True)
+    out = render_skill_directory(reg, _FULL_TOOLS)
+    assert "- legal_case_analysis：" in out
+
+
+async def test_consult_resolves_case_analysis_when_enabled():
+    reg = build_system_skill_registry(include_legal=True)
+    tool = ConsultSkillTool(registry=reg)
+    result = await tool.execute({"name": "legal_case_analysis"}, _ctx())
+    assert result.success
+    assert result.output == reg.get("legal_case_analysis").body
+
+
+def _case_body() -> str:
+    return build_system_skill_registry(include_legal=True).get("legal_case_analysis").body
+
+
+def test_case_analysis_body_teaches_three_perspective_orchestration():
+    # 三方 = 原告/被告（debate form=debate）+ 法官（delegate 中立研判 worker）。
+    body = _case_body()
+    assert "原告" in body and "被告" in body and "法官" in body
+    assert "delegate" in body
+    assert "debate" in body and 'form="debate"' in body
+    assert "plaintiff" in body and "defendant" in body  # 对称两方
+    assert "法官研判" in body and "举证责任" in body  # 中立裁判位的法律大脑
+
+
+def test_case_analysis_body_teaches_two_scenarios():
+    # v0 一支 skill 覆盖两个场景、产物分别给（A 分流）。
+    body = _case_body()
+    assert "接案评估" in body and "诉讼策略" in body
+    assert "ask_user" in body  # A 分流：拿不准反问
+
+
+def test_case_analysis_body_enforces_anti_hallucination_floor():
+    # 同答辩状底线，额外：胜负研判定性为倾向性研判（非判决结果预测）。
+    body = _case_body()
+    assert "核验" in body and "不得" in body
+    assert "中国大陆法" in body
+    assert "免责" in body
+    assert "checkpoint_after" in body or "人审" in body
+    assert "倾向性研判" in body and "非判决结果预测" in body

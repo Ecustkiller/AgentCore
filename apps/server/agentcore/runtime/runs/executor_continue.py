@@ -20,7 +20,7 @@ from agentcore.runtime.runs.executor_shared import (
     _react_and_capture,
     _revision_message,
 )
-from agentcore.runtime.runs.serialize import files_touched_from_transcript
+from agentcore.runtime.runs.serialize import debrief_from_content, files_touched_from_transcript
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.runtime.workspace import summarize
@@ -188,6 +188,7 @@ async def _continue_run_scoped(
             duration_ms=duration_ms,
             rounds=round_rounds,
             files_touched=files_touched_from_transcript(messages),
+            debrief=debrief_from_content(content),
             usage=usage,
             cost=cost,
             transcript=messages,

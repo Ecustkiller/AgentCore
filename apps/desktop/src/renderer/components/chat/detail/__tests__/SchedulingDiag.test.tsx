@@ -80,7 +80,9 @@ describe("SchedulingDiag (调度诊断块)", () => {
 
   it("numbers each segment when a turn has multiple batches", () => {
     render(
-      <SchedulingDiag batches={[base, { ...base, nodes: 1, peakRunning: 1 }]} />,
+      <SchedulingDiag
+        batches={[base, { ...base, nodes: 1, peakRunning: 1 }]}
+      />,
     );
     expect(screen.getByText("调度 · 2 批")).toBeTruthy();
     expect(screen.getByText("批次 1")).toBeTruthy();

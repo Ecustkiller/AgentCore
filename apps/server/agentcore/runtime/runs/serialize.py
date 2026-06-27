@@ -169,6 +169,127 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
     return out
 
 
+# 完工交接简报 (worker → 下游/CEO): the worker ends its output with a「## 交接简报」section
+# (结论 / 关键要点 / 关键假设 / 建议下一步) — a structured wrap-up for its READERS, not more
+# deliverable prose. Harvested here so a downstream dep block can LEAD with the author's own
+# 结论 (most likely to survive budget-trim, cheapest to read) and the CEO aggregate can surface
+# 建议下一步 to relay to the user — instead of every reader re-deriving the gist from raw prose.
+# Same discipline as the sibling transcript harvesters: best-effort, pure, unit-testable; a
+# missing / unparseable section degrades to ``(content, None)`` so every caller behaves EXACTLY
+# as before — byte-identical for output that carries no section (load-bearing for conformance
+# stability: existing vectors carry no debrief, so the read sites are unchanged for them).
+_DEBRIEF_SENTINEL = "交接简报"
+
+# The field labels the worker is prompted to use, mapped to the parsed dict keys. Order here is
+# the canonical order; matching is tolerant of leading -/* bullets and **bold** around a label.
+_DEBRIEF_LABELS: tuple[tuple[str, str], ...] = (
+    ("结论", "summary"),
+    ("关键要点", "key_points"),
+    ("关键假设", "assumptions"),
+    ("建议下一步", "next_steps"),
+)
+
+
+def _debrief_strip_markup(line: str) -> str:
+    """Drop leading list bullets / surrounding bold so a label or value line matches cleanly."""
+    s = line.strip()
+    while s[:1] in ("-", "*", "•", "·", "—"):
+        s = s[1:].strip()
+    if s.startswith("**") and s.endswith("**") and len(s) > 4:
+        s = s[2:-2].strip()
+    return s
+
+
+def _debrief_heading_index(lines: list[str]) -> int | None:
+    """Index of the LAST line that reads as the「交接简报」heading (markdown ``#`` or **bold**),
+    or None. Last-wins so an incidental earlier mention in the body isn't mistaken for it."""
+    for i in range(len(lines) - 1, -1, -1):
+        s = lines[i].strip()
+        if not s:
+            continue
+        is_heading = s.startswith("#") or (s.startswith("**") and s.endswith("**"))
+        if is_heading and _DEBRIEF_SENTINEL in s:
+            return i
+    return None
+
+
+def _debrief_match_label(line: str) -> tuple[str, str] | None:
+    """If ``line`` opens a known debrief field, return (dict_key, value-on-this-line)."""
+    s = _debrief_strip_markup(line)
+    for label, key in _DEBRIEF_LABELS:
+        if s.startswith(label):
+            rest = s[len(label) :].lstrip()
+            if rest[:1] in ("：", ":"):
+                return key, rest[1:].strip()
+            if not rest:  # 「结论」alone on its line → its value follows on the next lines
+                return key, ""
+    return None
+
+
+def _parse_debrief_fields(section_lines: list[str]) -> dict[str, Any] | None:
+    """Parse a debrief section's body lines into the debrief dict, or None if nothing parsed.
+
+    Walks line by line: a label line opens a field; following non-label lines append to the
+    open field (so a value may span lines or be a bullet list). ``key_points`` keeps a list;
+    the prose fields are joined into one string."""
+    collected: dict[str, list[str]] = {}
+    current: str | None = None
+    for raw in section_lines:
+        matched = _debrief_match_label(raw)
+        if matched is not None:
+            key, value = matched
+            current = key
+            collected.setdefault(key, [])
+            if value:
+                collected[key].append(value)
+            continue
+        if current is None:
+            continue
+        text = _debrief_strip_markup(raw)
+        if text:
+            collected[current].append(text)
+    out: dict[str, Any] = {}
+    summary = " ".join(collected.get("summary", [])).strip()
+    if summary:
+        out["summary"] = summary
+    key_points = [p for p in collected.get("key_points", []) if p]
+    if key_points:
+        out["key_points"] = key_points
+    assumptions = " ".join(collected.get("assumptions", [])).strip()
+    if assumptions:
+        out["assumptions"] = assumptions
+    next_steps = " ".join(collected.get("next_steps", [])).strip()
+    if next_steps:
+        out["next_steps"] = next_steps
+    return out or None
+
+
+def split_debrief(content: str) -> tuple[str, dict[str, Any] | None]:
+    """Split a worker's final output into ``(deliverable_body, debrief | None)``.
+
+    The deliverable body is everything BEFORE the「## 交接简报」section; the debrief is the
+    parsed section ({summary, key_points, assumptions, next_steps} — each present only when
+    non-empty). Best-effort: returns ``(content, None)`` when there is no parseable section,
+    so every reader behaves exactly as it did before debriefs existed."""
+    if not content or _DEBRIEF_SENTINEL not in content:
+        return content, None
+    lines = content.splitlines()
+    idx = _debrief_heading_index(lines)
+    if idx is None:
+        return content, None
+    debrief = _parse_debrief_fields(lines[idx + 1 :])
+    if debrief is None:
+        return content, None
+    body = "\n".join(lines[:idx]).rstrip()
+    return body, debrief
+
+
+def debrief_from_content(content: str) -> dict[str, Any] | None:
+    """The debrief a worker appended to its output, or None. Thin wrapper over
+    :func:`split_debrief` for the harvest choke point, which keeps the full content."""
+    return split_debrief(content)[1]
+
+
 def transcript_to_json(transcript: list[LLMMessage]) -> list[dict[str, Any]]:
     return [message_to_dict(m) for m in transcript]
 
@@ -229,6 +350,7 @@ def state_to_json(state: RunState) -> dict[str, Any]:
         "duration_ms": state.duration_ms,
         "rounds": state.rounds,
         "files_touched": list(state.files_touched),
+        "debrief": dict(state.debrief) if state.debrief else None,
         "usage": dict(state.usage),
         "cost": dict(state.cost),
     }
@@ -251,6 +373,7 @@ def state_from_json(data: dict[str, Any]) -> RunState:
         duration_ms=int(data.get("duration_ms", 0) or 0),
         rounds=int(data.get("rounds", 0) or 0),
         files_touched=list(data.get("files_touched") or []),
+        debrief=data.get("debrief") if isinstance(data.get("debrief"), dict) else None,
         usage=dict(data.get("usage") or {}),
         cost=dict(data.get("cost") or {}),
     )

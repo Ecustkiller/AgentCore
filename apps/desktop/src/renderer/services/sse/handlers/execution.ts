@@ -77,6 +77,10 @@ export function handleExecutionEvent(
       return true;
     }
     case "run_output_delta":
+    // 交付前核验回炉 (finish_guard) 的 worker 对偶: run_output_reset 清这个 worker 已流式累积
+    // 的草稿产出（content_reset 之于 CEO 气泡），重写版从干净态重累积。Folds via the same frame
+    // path (projectExecution clears the agent's outputChunks); transport-only, not journaled.
+    case "run_output_reset":
     case "run_reasoning_delta":
     case "run_tool_progress":
     case "run_completed":
@@ -189,7 +193,12 @@ export function handleExecutionEvent(
       if (mid) {
         const p = event.payload as DebateRoundDecisionResolvedPayload;
         useExecutionStore.getState().recordDebateDecision(
-          { kind: "resolved", id: p.decision_id, decision: p.decision, focus: p.focus },
+          {
+            kind: "resolved",
+            id: p.decision_id,
+            decision: p.decision,
+            focus: p.focus,
+          },
           mid,
         );
       }

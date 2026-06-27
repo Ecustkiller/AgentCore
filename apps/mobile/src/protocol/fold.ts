@@ -35,6 +35,7 @@ import type {
   RunEscalationPayload,
   RunFailedPayload,
   RunOutputDeltaPayload,
+  RunOutputResetPayload,
   RunPlanPayload,
   RunReasoningDeltaPayload,
   RunStartedPayload,
@@ -363,6 +364,16 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         if (ag) ag.output += p.delta || "";
         break;
       }
+      // 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：worker done 轮
+      // 草稿未过轻层核验（统一底线·结构完整性），引擎丢弃这一版、发 run_output_reset、回炉重写。
+      // 只清该 agent 的 output（重写版从干净态重累积），reasoning 是真实过程、保留——镜像后端
+      // oracle 与 desktop fold（conformance pins them equal）。transport-only（不进 journal）。
+      case "run_output_reset": {
+        const p = ev.payload as RunOutputResetPayload;
+        const ag = agentById(p.agent_id);
+        if (ag) ag.output = "";
+        break;
+      }
       case "run_reasoning_delta": {
         const p = ev.payload as RunReasoningDeltaPayload;
         const ag = agentById(p.agent_id);
@@ -611,6 +622,13 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "message_start":
       case "turn_saved":
       case "title_generated":
+      // CEO→用户「下一步推荐」: post-turn quick-reply chips. A desktop-only live affordance
+      // (filled into the composer on click); mobile has no chip UI yet, and it is not part of
+      // the normalized turn judge state regardless → fold to nothing here.
+      case "followups_generated":
+      // AI 协作白板 client-tool request: a transport-only request/response exchange (settle the
+      // bound desktop's board), never turn content → no-op (mobile has no board surface).
+      case "board_op_required":
       case "tool_progress":
       // 调度埋点量化 (深层诊断指标): a desktop-only 诊断模式 surface (run detail's 调度 block) —
       // mobile has no diagnostic panel, so it folds to nothing here and stays out of the

@@ -90,6 +90,11 @@ export interface Message {
   nonBlockingAsks?: NonBlockingAskDisplay[];
   planReviews?: PlanReviewDisplay[];
   error?: { code: string; message: string };
+  /** CEO→用户「下一步推荐」(下一步推荐): post-turn quick-reply suggestions, shown as
+   * one-click chips under the latest assistant turn (fill the composer on click).
+   * Live-only — never persisted (transport-only `followups_generated`); on reload the
+   * turn is history and its「what next」is stale, so chips simply don't reappear. */
+  followups?: string[];
   traceId?: string;
   /** P2 工作区升级提示 (前端UX设计.md §九): set when THIS turn's first file write
    * promoted a bare chat into a folder-backed workspace (`workspace_promoted`).

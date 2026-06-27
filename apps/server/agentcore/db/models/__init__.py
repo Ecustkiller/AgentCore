@@ -17,6 +17,7 @@ from ._helpers import _new_uuid
 from .admin_audit import AdminAuditLog
 from .auth import Credentials, Invite, RefreshToken, UserLlmKey
 from .billing import CostEvent
+from .boards import Board
 from .chat import Chat, ChatMember, ChatMessage
 from .conversations import Conversation, ConversationShare, Folder, Message
 from .devices import PushDeviceRow
@@ -32,6 +33,7 @@ from .users import User, UserBlock, UserDirectorySettings
 
 __all__ = [
     "AdminAuditLog",
+    "Board",
     "Chat",
     "ChatMember",
     "ChatMessage",

@@ -15,6 +15,7 @@ import type {
   RunFailedPayload,
   RunKind,
   RunOutputDeltaPayload,
+  RunOutputResetPayload,
   RunProgressPayload,
   RunReasoningDeltaPayload,
   RunStartedPayload,
@@ -55,6 +56,9 @@ export type RunFrame =
       blocks: ContextBlockWire[];
     }
   | { t: number; kind: "run_output_delta"; agentId: string; delta: string }
+  // 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：清这个 worker
+  // 已累积的草稿产出，重写版从干净态重累积（reasoning 保留）。
+  | { t: number; kind: "run_output_reset"; agentId: string }
   | { t: number; kind: "run_reasoning_delta"; agentId: string; delta: string }
   | {
       t: number;
@@ -203,6 +207,14 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         kind: "run_output_delta",
         agentId: p.agent_id,
         delta: p.delta,
+      };
+    }
+    case "run_output_reset": {
+      const p = event.payload as RunOutputResetPayload;
+      return {
+        t,
+        kind: "run_output_reset",
+        agentId: p.agent_id,
       };
     }
     case "run_reasoning_delta": {
