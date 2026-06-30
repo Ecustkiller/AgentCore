@@ -66,8 +66,10 @@ class ApprovalGate:
 
     Two grant scopes: ``APPROVE_ALWAYS`` whitelists the ONE tool of the card;
     ``APPROVE_ALWAYS_FILES`` whitelists the whole file-mutation class
-    (``file_op_tools``) so a multi-file / mixed-op task is unblocked with one click,
-    while ``code_execute`` stays separately gated.
+    (``file_op_tools``) so a multi-file / mixed-op task is unblocked with one click.
+    ``code_execute`` (and any other ``per_call_tools``) is exempt from BOTH: a turn-wide
+    grant is refused for it, so it is confirmed per call and a later injected-content-
+    driven execution cannot ride an earlier "allow for the turn" (PI-004).
     """
 
     sink: EventSink
@@ -80,6 +82,13 @@ class ApprovalGate:
     # tools.builtin.file_mutation_tool_names — so it is a single source of truth;
     # empty when not wired (the class grant then degrades to granting nothing).
     file_op_tools: frozenset[str] = frozenset()
+    # GRANTABLE tools that must be confirmed PER CALL — a turn-wide「本轮内都允许」
+    # (APPROVE_ALWAYS) grant is REFUSED for them, so the highest-risk side effect
+    # (code_execute) re-prompts every call and a later injected-content-driven call
+    # cannot ride an earlier grant (PI-004). Injected from the builtin registry
+    # (GRANTABLE ∩ EXECUTION) — see tools.builtin.per_call_tool_names — so it is a
+    # single source of truth; empty when not wired (then nothing is exempt).
+    per_call_tools: frozenset[str] = frozenset()
     _granted: set[str] = field(default_factory=set)
 
     async def authorize(
@@ -89,9 +98,11 @@ class ApprovalGate:
 
         ``APPROVE_ALWAYS`` also whitelists ``tool_name`` for the rest of the turn;
         ``APPROVE_ALWAYS_FILES`` whitelists the whole ``file_op_tools`` class. Both
-        then sweep the matching calls already suspended on this gate.
-        A timeout is treated as ``DENY`` — a request is never silently allowed.
-        An already-granted tool returns ``APPROVE`` immediately (no prompt).
+        then sweep the matching calls already suspended on this gate. A tool in
+        ``per_call_tools`` (code_execute) is exempt: an ``APPROVE_ALWAYS`` on it is
+        downgraded to a one-shot ``APPROVE`` (never whitelisted), so it re-prompts each
+        call (PI-004). A timeout is treated as ``DENY`` — a request is never silently
+        allowed. An already-granted tool returns ``APPROVE`` immediately (no prompt).
         """
         if tool_name in self._granted:
             return ApprovalDecision.APPROVE
@@ -124,8 +135,19 @@ class ApprovalGate:
             decision = ApprovalDecision.DENY
 
         if decision is ApprovalDecision.APPROVE_ALWAYS:
-            self._granted.add(tool_name)
-            self._sweep_pending_tools(frozenset({tool_name}))
+            if tool_name in self.per_call_tools:
+                # A turn-wide grant is refused for a per-call tool (code_execute): the
+                # user's click authorizes THIS call, but the tool is NOT whitelisted, so
+                # the next call — possibly driven by injected content later in the turn —
+                # prompts again (PI-004). Downgrade to a one-shot APPROVE; the client also
+                # hides the「本轮内都允许」button for these tools, so this is defense in depth.
+                logger.info(
+                    "approval.turn_grant_refused", tool=tool_name, approval_id=approval_id
+                )
+                decision = ApprovalDecision.APPROVE
+            else:
+                self._granted.add(tool_name)
+                self._sweep_pending_tools(frozenset({tool_name}))
         elif decision is ApprovalDecision.APPROVE_ALWAYS_FILES:
             # Grant the whole file-mutation class for the turn, and sweep every
             # already-suspended file-op call — so one click clears writes, edits,

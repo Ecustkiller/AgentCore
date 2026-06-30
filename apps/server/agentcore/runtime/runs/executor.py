@@ -1,7 +1,7 @@
 """Host-side AGENT run executor: run one RunSpec node via the shared ReAct loop.
 
 Thin facade — implementation split across executor_*.py modules.
-→ 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
+→ 见设计: docs/03-AI核心/执行引擎架构设计.md §八（Run 模型）
 """
 
 from __future__ import annotations

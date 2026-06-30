@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
+import { hasAutoUpdater } from "@/lib/capabilities";
 import {
   clientGitSha,
   clientVersion,
@@ -186,7 +187,8 @@ export function AboutSettings() {
         ) : null}
       </div>
 
-      <UpdateSection />
+      {/* 自动更新仅桌面外壳；web 客户端随刷新拿到新版，故 web 不挂「软件更新」。 */}
+      {hasAutoUpdater() && <UpdateSection />}
       <DiagnosticModeSection />
     </div>
   );

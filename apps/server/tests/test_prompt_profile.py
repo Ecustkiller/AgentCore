@@ -73,12 +73,12 @@ def test_use_profile_resets_on_exception() -> None:
 
 
 def test_overridable_keys_are_the_four_static_fragments() -> None:
-    assert OVERRIDABLE_KEYS == {
+    assert {
         FRAGMENT_BASE,
         FRAGMENT_CEO_CORE,
         FRAGMENT_CITATION,
         FRAGMENT_CEO_VISUALIZATION,
-    }
+    } == OVERRIDABLE_KEYS
 
 
 # --- 逐字节守恒（前缀缓存安全的命脉） ---

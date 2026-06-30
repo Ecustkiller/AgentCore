@@ -72,7 +72,7 @@ async def load_chat_context(
     never the newest — see ``MessageRepository.list_recent_after``). The summary rides
     as the FIRST item (assistant block) right after the system prompt, keeping the
     stable system prefix cached and re-caching only summary+tail when a re-compaction
-    changes the summary (执行引擎架构设计 §十三 长对话压缩).
+    changes the summary (执行引擎架构设计 §三 长对话压缩).
 
     NB: long-term memory consolidation deliberately still reads raw recent messages via
     :func:`load_recent_history` — it reconciles ACTUAL turns into the memory file and

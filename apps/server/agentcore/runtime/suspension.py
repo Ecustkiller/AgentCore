@@ -29,7 +29,7 @@ result must echo (so the rebuilt transcript stays a valid tool-call/result pair)
 the ``base_system_prompt`` + ``user_message`` (to re-wire the CEO toolset), and the
 ``checkpoint_id`` (so resume re-emits the resolution).
 
-The journal-so-far is NOT in the frame: it is the §18.3 ``turn_journal`` (唯一事实源),
+The journal-so-far is NOT in the frame: it is the §8.3 ``turn_journal`` (唯一事实源),
 written at pause and re-hydrated onto :attr:`TurnSuspension.journal` when the resume
 claims the frame (see ``runtime/suspension_persistence.py``). The frame thus carries
 only the resume *control* state, not a second copy of the replay stream.
@@ -126,12 +126,12 @@ class TurnSuspension:
     user_message: str
     # The cloud project (= workspace folder) scope this turn ran in, captured so the resumed
     # CEO toolset re-wires consult_memory to the SAME project scope (project 主题 first, then
-    # global) instead of degrading to global-only — 记忆作用域与画像分层 §5.2. ``None`` for a
+    # global) instead of degrading to global-only — Agent记忆与知识系统 §二. ``None`` for a
     # 裸聊 / local turn with no cloud folder. Serialized into the frame (resume control state).
     folder_id: str | None = None
     # The long-term-memory master switch at pause: captured so a resume re-wires the toolset
     # the SAME way the original turn did — memory OFF ⇒ consult_memory stays UNwired on resume
-    # too (privacy off-ramp parity, 记忆作用域与画像分层). Defaults True (legacy frames + the
+    # too (privacy off-ramp parity, Agent记忆与知识系统 §二). Defaults True (legacy frames + the
     # always-on default) so an absent value never silently strips memory from a resume.
     memory_enabled: bool = True
     # The CEO window at pause is a PROJECTION of the turn journal, NOT a stored blob
@@ -148,10 +148,10 @@ class TurnSuspension:
     history: list[dict[str, Any]] = field(default_factory=list)
     # The team-graph journal up to and including the pause's ``*_required`` event. A
     # transient in-memory carrier ONLY: it is persisted to the ``turn_journal`` table
-    # (唯一事实源, §18.3) — NOT into ``paused_turns.frame`` — and re-hydrated here when
+    # (唯一事实源, §8.3) — NOT into ``paused_turns.frame`` — and re-hydrated here when
     # the resume claims the frame, so the resumed turn replays the whole graph.
     journal: list[dict[str, Any]] = field(default_factory=list)
-    # The same pause point as the §18.3 fact-log stream: the turn's single ordered log
+    # The same pause point as the §8.3 fact-log stream: the turn's single ordered log
     # (execution facts — turn_started / round_boundary / llm_call — interleaved with the
     # forwarded display facts) up to and including the suspending ``*_required`` event.
     # Like :attr:`journal` a transient carrier ONLY (NOT serialized into the frame): the
@@ -179,7 +179,7 @@ class TurnSuspension:
             "memory_enabled": self.memory_enabled,
             # NOTE: ``transcript`` / ``history`` / ``journal`` / ``journal_entries`` are
             # deliberately NOT serialized into the frame (执行级事件溯源 Phase 2 ⑤): the CEO
-            # window is rebuilt by ``window_from_journal`` from the turn_journal facts (§18.3)
+            # window is rebuilt by ``window_from_journal`` from the turn_journal facts (§8.3)
             # + reloaded history, so the frame holds only resume CONTROL metadata. See the
             # module docstring + ``runtime/journal.py``.
             "trace_id": self.trace_id,

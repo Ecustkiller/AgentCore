@@ -30,7 +30,7 @@ async def persist_turn_journal(
     rolls back only this write and logs — the reply is already committed and the
     worst case is a turn that won't replay its graph.
 
-    ``entries`` is the §18.3 fact-log stream (execution facts interleaved with
+    ``entries`` is the §8.3 fact-log stream (execution facts interleaved with
     forwarded display facts, plus process / ``turn_end`` tail). Callers that only
     hold a display ``runs`` payload must flatten via
     :func:`entries.journal_entries_from_display_runs` before calling.

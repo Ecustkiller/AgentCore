@@ -5,8 +5,11 @@ See ``vectors/__init__.py`` for the aggregated ``VECTORS`` registry.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from agentcore.runtime.events import (
     FinishReason,
+    SSEEvent,
     content_delta,
     debate_result,
     debate_round,
@@ -21,7 +24,6 @@ from agentcore.runtime.events import (
 
 from ._common import _CONV, _COST, _USAGE
 
-from collections.abc import Callable
 
 def _multi_agent_debate() -> list[SSEEvent]:
     """多 Agent：辩论（debate 工具 / 主持人驱动）。两段 run_plan(plan_type="debate")——先声明
@@ -201,6 +203,246 @@ def _multi_agent_debate() -> list[SSEEvent]:
         ),
         debate_result(execution_id="exec1", moderator_run_id=mod, payload=debate_payload),
         message_end(FinishReason.END_TURN, input_tokens=3000, output_tokens=500, cost=_COST),
+    ]
+
+def _multi_agent_debate_followup() -> list[SSEEvent]:
+    """多 Agent：正反辩论【收场】带【用户追问】（交互式逐轮 / 追问，Phase 2）。第 1 轮后用户向
+    支持方【追问】「灰度期数据口径不一致谁来兜底」并选续辩，第 2 轮辩手（continue revision）正面
+    回应 → 收场 ``debate_result`` 的 ``rounds[1]`` 携 verbatim ``user_interjections``=
+    ``[{ask, target_key:"pro", answered:true}]``——这是【唯一耐久】的用户追问痕迹（决策事件
+    transport-only 不入 journal），三端 verbatim 折入 ``ProjectedTurn.debate``，重载复盘可见。
+    验「追问随轮留痕」契约全链路（types → events.ts → 三端 verbatim fold）。"""
+    cap, mod = "captain1", "debate_fu_mod1"
+    pro_r1, con_r1 = f"{mod}_r1_pro", f"{mod}_r1_con"
+    pro_r2, con_r2 = f"{mod}_r2_pro", f"{mod}_r2_con"
+    mod_agents = [
+        {
+            "id": mod,
+            "role": "主持人",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    mod_runs = [
+        {
+            "id": mod,
+            "agent_id": mod,
+            "task": "主持正反辩论（可追问）：是否采用方案 A",
+            "depends_on": [],
+            "parent_run_id": cap,
+        },
+    ]
+    debater_agents = [
+        {
+            "id": "d_pro",
+            "role": "支持方",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "d_con",
+            "role": "反对方",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    debater_runs = [
+        {
+            "id": pro_r1,
+            "agent_id": "d_pro",
+            "task": "论证支持采用方案 A",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "stance": "pro",
+            "group": "debate:debate",
+            "round": 1,
+        },
+        {
+            "id": con_r1,
+            "agent_id": "d_con",
+            "task": "论证反对采用方案 A",
+            "depends_on": [],
+            "parent_run_id": mod,
+            "stance": "con",
+            "group": "debate:debate",
+            "round": 1,
+        },
+    ]
+    round1_payload = {
+        "round_no": 1,
+        "focus": "方案 A 的收益与风险敞口",
+        "summary": "支持方强调收益可量化，反对方指出缺乏风险兜底，焦点收敛到风险可控性。",
+        "verdict": {
+            "real_clash": True,
+            "new_arguments": True,
+            "converged": False,
+            "stop_reason": "",
+            "rationale": "核心交锋已起，但风险兜底尚未谈透，值得再探一轮。",
+        },
+        "sides": [
+            {"key": "pro", "name": "支持方", "run_id": pro_r1, "ok": True},
+            {"key": "con", "name": "反对方", "run_id": con_r1, "ok": True},
+        ],
+        "clashes": [
+            {
+                "from_key": "con",
+                "to_key": "pro",
+                "point": "收益可量化但未对冲风险敞口，量化口径回避了尾部风险。",
+            },
+        ],
+        # 第 1 轮无前序边界 ⇒ 无用户追问（载荷形状统一，恒带空列表）。
+        "user_interjections": [],
+    }
+    round2_payload = {
+        "round_no": 2,
+        "focus": "灰度期数据口径不一致时的兜底机制",
+        "summary": "支持方正面回应追问：灰度期以反对方数据口径为准并设熔断；分歧收敛到回滚阈值。",
+        "verdict": {
+            "real_clash": True,
+            "new_arguments": False,
+            "converged": True,
+            "stop_reason": "双方就兜底机制达成共识，仅剩阈值需用户拍板。",
+            "rationale": "支持方接住了用户追问、给出兜底，争点收敛到回滚阈值这一价值取舍。",
+        },
+        "sides": [
+            {"key": "pro", "name": "支持方", "run_id": pro_r2, "ok": True},
+            {"key": "con", "name": "反对方", "run_id": con_r2, "ok": True},
+        ],
+        "clashes": [
+            {
+                "from_key": "con",
+                "to_key": "pro",
+                "point": "以反对方口径为准虽稳妥，但熔断阈值过松仍可能放大尾部风险。",
+            },
+        ],
+        # 用户在第 1 轮边界向【支持方】追问、本轮承接回应（verbatim 复盘单元）。
+        "user_interjections": [
+            {
+                "ask": "灰度期如果出现数据口径不一致，谁来兜底、按谁的口径？",
+                "target_key": "pro",
+                "answered": True,
+            },
+        ],
+    }
+    debate_payload = {
+        "form": "debate",
+        "motion": "是否采用方案 A",
+        "stop_reason": "converged",
+        "narrative_first": False,
+        "sides": [
+            {
+                "key": "pro",
+                "name": "支持方",
+                "stance": "支持采用方案 A",
+                "is_subject": False,
+                "model": "doubao/doubao-seed-2-1-turbo-260628",
+            },
+            {
+                "key": "con",
+                "name": "反对方",
+                "stance": "反对采用方案 A",
+                "is_subject": False,
+                "model": "deepseek-v4-pro",
+            },
+        ],
+        "rounds": [round1_payload, round2_payload],
+        "brief": {
+            "crux": "方案 A 的风险是否可控、灰度兜底是否到位",
+            "strongest_points": {
+                "pro": "收益显著且可量化，已就追问给出灰度兜底（以保守口径为准 + 熔断）",
+                "con": "风险敞口缺乏兜底，熔断阈值仍可能过松",
+            },
+            "factual_disputes": ["历史故障率的数据口径不一致"],
+            "value_disputes": ["增长优先 vs 稳健优先"],
+            "leaning": "倾向有条件采用",
+            "confidence": "medium",
+            "recommendation": "采纳支持方的灰度兜底方案，回滚阈值需你拍板。",
+            # 用户追问已被回应、但仅剩的阈值取舍上交用户拍板（追问不石沉大海）。
+            "open_questions": ["灰度的回滚阈值如何设定（你的追问已促成兜底，阈值仍需你定）？"],
+        },
+    }
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我发起一场可追问的正反辩论来定夺。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary="正反辩论（可追问）：是否采用方案 A",
+            agents=mod_agents,
+            runs=mod_runs,
+        ),
+        run_started(mod, mod, parent_run_id=cap),
+        run_plan(
+            execution_id="exec1",
+            plan_type="debate",
+            task_summary="",
+            agents=debater_agents,
+            runs=debater_runs,
+        ),
+        run_started(pro_r1, "d_pro", parent_run_id=mod),
+        run_output_delta(pro_r1, "d_pro", "支持理由：收益可量化。"),
+        run_completed(
+            pro_r1,
+            "d_pro",
+            output_summary="支持方陈述完成",
+            duration_ms=800,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(con_r1, "d_con", parent_run_id=mod),
+        run_output_delta(con_r1, "d_con", "反对理由：风险无兜底。"),
+        run_completed(
+            con_r1,
+            "d_con",
+            output_summary="反对方陈述完成",
+            duration_ms=850,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        # 第 2 轮：辩手 continue revision（parent=首轮 run，revision=2）回应用户追问。
+        run_started(pro_r2, pro_r2, parent_run_id=pro_r1, revision=2),
+        run_output_delta(pro_r2, pro_r2, "回应追问：灰度以保守口径为准并设熔断。"),
+        run_completed(
+            pro_r2,
+            pro_r2,
+            output_summary="支持方回应追问完成",
+            duration_ms=820,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(con_r2, con_r2, parent_run_id=con_r1, revision=2),
+        run_output_delta(con_r2, con_r2, "仍存疑：熔断阈值过松。"),
+        run_completed(
+            con_r2,
+            con_r2,
+            output_summary="反对方续论完成",
+            duration_ms=830,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_completed(
+            mod,
+            mod,
+            output_summary="灰度兜底已达成，仅剩回滚阈值待你拍板",
+            duration_ms=2400,
+            role="主持人",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        debate_result(execution_id="exec1", moderator_run_id=mod, payload=debate_payload),
+        message_end(FinishReason.END_TURN, input_tokens=3600, output_tokens=620, cost=_COST),
     ]
 
 def _multi_agent_roundtable_rounds() -> list[SSEEvent]:
@@ -880,6 +1122,7 @@ def _multi_agent_roundtable_settled() -> list[SSEEvent]:
 
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_debate": ("多 Agent：辩论（debate 工具）主持人→辩手 + 决策简报/叙事线双产物", _multi_agent_debate),
+    "multi_agent_debate_followup": ("多 Agent：辩论收场带用户追问（user_interjections verbatim 复盘）", _multi_agent_debate_followup),
     "multi_agent_roundtable_rounds": ("多 Agent：圆桌逐轮增量（debate_round_started/debate_round）+ 续写 revision + 中途取消", _multi_agent_roundtable_rounds),
     "multi_agent_red_team": ("多 Agent：红队审查收场（form=red_team）风险看板 + 加固建议 + 方案方回应双产物", _multi_agent_red_team),
     "multi_agent_roundtable_settled": ("多 Agent：圆桌探讨收场（form=roundtable）观点光谱英雄区 + 叙事后简报小结双产物", _multi_agent_roundtable_settled),

@@ -22,6 +22,7 @@ from agentcore.tools.builtin.ask_user.schema import (
     normalize_assumptions,
     normalize_questions,
     normalize_style_options,
+    option_label,
 )
 from agentcore.tools.builtin.ask_user.suspend import drop_suspension, persist_suspension
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -45,7 +46,8 @@ class AskUserTool:
     disconnect / restart is recoverable via ``POST .../resume``. The frame needs the
     turn-level constants (``captain_run_id`` / ``base_system_prompt`` /
     ``user_message``) to re-wire the CEO toolset on resume. Left ``None`` / empty
-    (standalone / tests) ⇒ 2a in-memory only (the live resolve still works).
+    (standalone / tests) ⇒ no durable frame, so the pause degrades to the backend-only
+    timed wait (窄兜底) that auto-continues on timeout.
     """
 
     sink: EventSink
@@ -60,7 +62,7 @@ class AskUserTool:
     suspension_deleter: SuspensionDeleter | None = None
     # The cloud project (= workspace folder) scope, carried so a durable ask_user pause
     # captures it into the frame — the resumed toolset re-wires consult_memory to the same
-    # project (记忆作用域与画像分层 §5.2). ``None`` for 裸聊 / local. Capture-only (unused live).
+    # project (Agent记忆与知识系统 §二). ``None`` for 裸聊 / local. Capture-only (unused live).
     folder_id: str | None = None
     # The memory master switch, captured so resume re-wires consult_memory as this turn did
     # (off ⇒ stays off). Capture-only; defaults True (always-on).
@@ -123,7 +125,9 @@ class AskUserTool:
                             "可选：真正要用户拍板的问题（最多 5 个）。途中岔路通常就一个；"
                             "开场可摊开数个高杠杆决策（含影响大的技术选择，如是否响应式 / "
                             "双语 / 带后台）。开场的问题应尽量预填 default，让想省事的用户一键"
-                            "全默认通过；途中的关键岔路通常不填 default（就是要 ta 选）。"
+                            "全默认通过；途中的关键岔路通常不填 default（就是要 ta 选）。choice "
+                            "选项可给每项配一行 detail（权衡/代价），并把你最建议的一项标 "
+                            "recommended，帮用户看懂取舍、快速拍板。"
                         ),
                         "items": {
                             "type": "object",
@@ -141,8 +145,34 @@ class AskUserTool:
                                 },
                                 "options": {
                                     "type": "array",
-                                    "items": {"type": "string"},
                                     "description": "kind=choice 时的候选项（最多 6 个）。",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "label": {
+                                                "type": "string",
+                                                "description": (
+                                                    "选项文字（即用户选它时回传的答案）。"
+                                                ),
+                                            },
+                                            "detail": {
+                                                "type": "string",
+                                                "description": (
+                                                    "可选：这个选项的一行权衡 / 代价，展示在"
+                                                    "选项下方，帮用户看懂「为什么选它」。"
+                                                ),
+                                            },
+                                            "recommended": {
+                                                "type": "boolean",
+                                                "description": (
+                                                    "可选：标记你建议的那一项（至多一个）。"
+                                                    "仅「推荐」高亮、不会替用户预选；"
+                                                    "要预选请用 default。"
+                                                ),
+                                            },
+                                        },
+                                        "required": ["label"],
+                                    },
                                 },
                                 "multiple": {
                                     "type": "boolean",
@@ -155,7 +185,7 @@ class AskUserTool:
                                     "type": "string",
                                     "description": (
                                         "可选：你的默认答案（开场强烈建议填）。choice 时应是 "
-                                        "options 中的一项，text 时是预填文本。"
+                                        "options 中某一项的 label，text 时是预填文本。"
                                     ),
                                 },
                             },
@@ -231,7 +261,7 @@ class AskUserTool:
         # (disconnect) / crash during the wait propagates past the drop below, leaving
         # the frame for ``POST .../resume``; the in-memory resolve still settles a
         # live turn even if the save failed.
-        await persist_suspension(
+        saved = await persist_suspension(
             self,
             checkpoint_id=checkpoint_id,
             context=context,
@@ -242,6 +272,23 @@ class AskUserTool:
             style_options=style_options,
             required_event=required,
         )
+        # 挂起即收口 (②): once the durable frame is saved, END the turn in place instead of
+        # parking on the in-memory interaction Future. We emit the card here (the wait path
+        # emits it via ``on_suspended``) and return a SUSPEND effect — the engine maps it to
+        # FinishReason.PAUSED and leaves THIS call pending (no tool result), so the resumed
+        # window ends exactly at the assistant and EVERY resolution (even in-session) flows
+        # through the one cold ``POST .../resume`` path, collapsing the live/durable dual-state
+        # at its source. Gated on ``saved`` (§六-1 窄兜底): a turn we could not persist can't be
+        # finalized (resume would have no frame to reclaim), so it falls through to the
+        # backend-only timed wait below.
+        if saved:
+            self.sink.emit(required)
+            logger.info("checkpoint.finalized", checkpoint_id=checkpoint_id)
+            return ToolResult(tool_call_id="", success=True, output="", effect=ToolEffect.SUSPEND)
+        # 窄兜底（薄网，挂起即收口 ② Phase 3）: no durable frame, so hold the turn on a BACKEND-ONLY
+        # bounded wait — the card is surfaced, but no client can settle an ask_user anymore (its
+        # resolve schema is gone from the unified endpoint), so this can only end by timeout →
+        # auto-continue (不丢回合). A disconnect cancels it and the engine salvages the turn.
         try:
             response = await self.registry.suspend(
                 checkpoint_id,
@@ -260,14 +307,16 @@ class AskUserTool:
         except TimeoutError:
             logger.info("checkpoint.timeout", checkpoint_id=checkpoint_id)
             response = CheckpointResponse(decision=CheckpointDecision.TIMEOUT)
-        # Reached only on a live resolve / timeout — a cancel raises CancelledError,
-        # which propagates PAST this and leaves the frame for /resume.
+        # Reached only on the timeout auto-continue — no client resolve path remains for an
+        # ask_user (its schema is gone from the unified endpoint). A cancel raises
+        # CancelledError, which propagates PAST this; with no saved frame the engine salvages
+        # the turn as usual.
         await drop_suspension(self)
 
         # Keep only picks that were actually on some question's menu — a resolve can't
         # inject arbitrary strings into the CEO's context (the desktop composes its
         # answer into ``note`` and sends no picks, so this is a guard for other clients).
-        allowed = {o for q in questions for o in q.get("options", [])}
+        allowed = {option_label(o) for q in questions for o in q.get("options", [])}
         response.selected = [s for s in response.selected if s in allowed]
 
         self.sink.emit(

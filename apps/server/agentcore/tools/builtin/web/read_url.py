@@ -1,20 +1,18 @@
 """Built-in tool: read_url (fetch a web page and extract its main text)."""
 
-import asyncio
 import contextlib
-import ipaddress
 import json
 import re
-import socket
 import time
-from enum import Enum
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 
+from agentcore.config import settings
 from agentcore.core.logging import get_logger
+from agentcore.core.net import classify_url as _classify_url
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.builtin.web._net import (
     EgressError,
@@ -25,6 +23,7 @@ from agentcore.tools.builtin.web._net import (
     site_of,
     web_timeout,
 )
+from agentcore.tools.builtin.web.source_domains import default_source_domain_registry
 from agentcore.tools.builtin.web.url_cache import (
     UrlCacheEntry,
     default_url_cache_registry,
@@ -37,83 +36,27 @@ _DEFAULT_MAX_CHARS = 8000
 _MAX_CHARS_CAP = 30000
 _MAX_REDIRECTS = 5
 _SNIPPET_MAX = 200  # citation preview length — a sentence or two, not the whole lead
-_BLOCKED_HOSTNAMES = {"localhost", "0.0.0.0", "metadata.google.internal"}
+# Query-string length (chars) above which a read of a NOVEL domain is treated as a
+# possible exfil beacon (PI-002): a fabricated ``?d=<secret>`` rides the query, while
+# legitimate article URLs rarely carry a 64+ char opaque query. The query-length AND
+# novel-domain conjunction keeps the common search→deep-read and plain-URL reads quiet.
+_SUSPICIOUS_QUERY_LEN = 64
 
 
-class _URLBlock(Enum):
-    """URL 被拒原因；value 为面向模型的诚实错误信息。
-
-    把「DNS 解析失败/网络不可达」与「真·SSRF 拦截」区分开 —— 旧实现把两者都
-    报成「私有/内网」，既误导模型反复重试，也掩盖了环境层面的网络问题。
-    """
-
-    BAD_SCHEME = "[ERROR] 仅支持 http/https 链接"
-    BLOCKED_HOST = "[ERROR] 该主机名禁止访问（本地/内网保留域名）"
-    DNS_FAIL = (
-        "[ERROR] 无法解析该域名（DNS 解析失败或网络不可达）。"
-        "请确认链接拼写正确且可公网访问；若反复出现，可能是当前环境出网受限。"
-    )
-    PRIVATE_IP = "[ERROR] 链接解析到私有/保留地址，已按 SSRF 防护拦截"
-
-
-def _ip_is_safe(ip: str) -> bool:
-    """True only for globally-routable addresses (blocks private/metadata)."""
+def _query_len(url: str) -> int:
+    """Length of the URL's query component (exfil-bandwidth proxy); 0 if unparseable."""
     try:
-        addr = ipaddress.ip_address(ip)
+        return len(urlparse(url).query or "")
     except ValueError:
-        return False
-    return not (
-        addr.is_private
-        or addr.is_loopback
-        or addr.is_link_local  # 含云元数据 169.254.169.254
-        or addr.is_reserved
-        or addr.is_multicast
-        or addr.is_unspecified
-    )
-
-
-async def _classify_url(url: str) -> _URLBlock | None:
-    """SSRF 检查并区分拒绝原因；返回 None 表示可安全请求。
-
-    域名经 DNS 解析后，只要任一解析地址落在私网/回环/链路本地/保留段即拒绝
-    （封堵「域名指向内网/169.254.169.254」这类绕过）。
-    """
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return _URLBlock.BAD_SCHEME
-        hostname = (parsed.hostname or "").strip().rstrip(".").lower()
-        if not hostname:
-            return _URLBlock.BAD_SCHEME
-        if hostname in _BLOCKED_HOSTNAMES:
-            return _URLBlock.BLOCKED_HOST
-        if hostname.endswith(".local") or hostname.endswith(".internal"):
-            return _URLBlock.BLOCKED_HOST
-
-        try:
-            ipaddress.ip_address(hostname)
-            return None if _ip_is_safe(hostname) else _URLBlock.PRIVATE_IP
-        except ValueError:
-            pass  # 不是字面 IP，下面走 DNS 解析
-
-        try:
-            infos = await asyncio.get_running_loop().getaddrinfo(
-                hostname, None, proto=socket.IPPROTO_TCP
-            )
-        except OSError:
-            return _URLBlock.DNS_FAIL
-        addrs = {info[4][0] for info in infos}
-        if not addrs:
-            return _URLBlock.DNS_FAIL
-        if not all(_ip_is_safe(a) for a in addrs):
-            return _URLBlock.PRIVATE_IP
-        return None
-    except Exception:
-        return _URLBlock.DNS_FAIL
+        return 0
 
 
 async def _is_safe_url(url: str) -> bool:
-    """Bool 包装：用于重定向逐跳重校验（_safe_request）。"""
+    """Bool 包装：重定向逐跳重校验（``_safe_request``）。
+
+    引用本模块级 ``_classify_url``（从 :mod:`agentcore.core.net` 导入的别名），
+    以便 ``test_web_tools`` 对 ``read_url._classify_url`` 的 monkeypatch 仍生效。
+    """
     return await _classify_url(url) is None
 
 
@@ -251,6 +194,50 @@ def _make_snippet(description: str, text: str) -> str:
 class ReadUrlTool:
     """Fetch a web page and return its extracted main text."""
 
+    @staticmethod
+    def _guard_novel_domain_exfil(url: str, conversation_id: str) -> str | None:
+        """Observe (and, under the opt-in flag, refuse) the novel-domain exfil pattern.
+
+        Indirect prompt injection can drive read_url to ``https://attacker/?d=<secret>``
+        — the SSRF guard blocks only INTERNAL targets, so a public exfil URL passes. The
+        deterministic tell: a legitimate deep-read targets a domain ``web_search``
+        surfaced this conversation, while an exfil URL is a model-fabricated NOVEL domain
+        carrying a long opaque query (the secret). When both hold, log it (always, for
+        observability) and refuse it when ``read_url_block_novel_query`` is on.
+
+        Returns an honest model-facing error string to BLOCK, else ``None`` (allow).
+        Skipped for unscoped calls (no per-conversation source set to compare against)
+        and for short / absent query strings (no meaningful exfil bandwidth) — so the
+        common search→deep-read and plain-URL reads are untouched. Path-based exfil to a
+        novel domain with no query is a known residual gap (closing it needs novel-domain
+        approval, a heavier UX trade-off — 项目审计-提示注入专项 §五 PI-002).
+        """
+        if not conversation_id:
+            return None
+        query_len = _query_len(url)
+        if query_len < _SUSPICIOUS_QUERY_LEN:
+            return None
+        domain = site_of(url)
+        if not domain:
+            return None
+        if default_source_domain_registry().has_domain(conversation_id, domain):
+            return None
+        logger.warning(
+            "tool.read_url_novel_domain",
+            url=url[:200],
+            site=domain,
+            query_len=query_len,
+            conversation_id=conversation_id,
+            blocked=settings.read_url_block_novel_query,
+        )
+        if settings.read_url_block_novel_query:
+            return (
+                "[ERROR] 该链接指向本会话检索结果之外的新域名且携带较长查询参数，"
+                "已按出网外泄防护拦截。如确需读取该来源，请先用 web_search 找到它，"
+                "或请用户直接提供链接。"
+            )
+        return None
+
     @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
@@ -344,6 +331,19 @@ class ReadUrlTool:
                         }
                     ],
                 )
+
+        # PI-002 出网外泄观测：only reached on a cache MISS (a real outbound fetch is about
+        # to happen). A model-fabricated novel domain carrying a long opaque query is the
+        # indirect-injection exfil tell — always logged, refused only under the opt-in flag.
+        exfil_block = self._guard_novel_domain_exfil(url, context.conversation_id)
+        if exfil_block is not None:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=exfil_block,
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
 
         headers = {
             "User-Agent": "Mozilla/5.0 (compatible; AgentCore/1.0; +https://agentcore.dev)",

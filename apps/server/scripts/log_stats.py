@@ -21,6 +21,174 @@ def _avg(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
+# ── 协作质量 (学·度量 闸门, docs/07-规划/远期规划.md §2.4) ──
+# Per-turn collaboration-quality signals, grouped by trace_id (= one user interaction,
+# logging.mdc) and labeled by MAST group (Multi-Agent System Failure Taxonomy: 规格 /
+# 错位 / 验证 / 终止). All four metrics are derived from events the runtime ALREADY logs
+# — this is a pure read over logs/dev.jsonl, no runtime change. 单一事实源 note: the same
+# four are also persisted per-turn in the turn_metrics table for the prod/operator面.
+_EARLY_FINISH_FLAGS = {"length", "max_rounds", "degraded", "unproductive"}
+
+
+def _new_trace() -> dict:
+    return {
+        "turn": False,  # saw a chat.turn_complete / chat.resume_complete for this trace
+        "delegated": False,
+        "finish_reason": None,
+        "contract_retry": 0,
+        "contract_failed": 0,
+        "revise": 0,
+        "revise_failed": 0,
+        "delegate_batches": 0,
+        "yields": 0,  # delegate.yielded boundaries (first plan needed mid-course replan)
+        "scope_yields": 0,
+        "escalations": 0,
+        "scope_boundaries": 0,
+        "scope_ratio_sum": 0.0,
+        "scope_ratio_n": 0,
+        "loop_nudge": 0,
+        "loop_finalize": 0,
+        "max_rounds": 0,
+    }
+
+
+def _accumulate_trace(rec: dict, event: str, obj: dict) -> None:
+    """Fold one log line into its trace's collaboration-quality tally."""
+    if event in ("chat.turn_complete", "chat.resume_complete"):
+        rec["turn"] = True
+        rec["delegated"] = rec["delegated"] or bool(obj.get("delegated"))
+        rec["finish_reason"] = obj.get("finish_reason") or rec["finish_reason"]
+    elif event == "contract.retry":
+        rec["contract_retry"] += 1
+    elif event == "contract.failed":
+        rec["contract_failed"] += 1
+    elif event == "revise.started":
+        rec["revise"] += 1
+    elif event == "run.revise_failed":
+        rec["revise_failed"] += 1
+    elif event == "delegate.started":
+        rec["delegated"] = True
+        rec["delegate_batches"] += 1
+    elif event == "delegate.completed":
+        rec["escalations"] += int(obj.get("escalations", 0) or 0)
+        rec["scope_boundaries"] += int(obj.get("scope", 0) or 0)
+        if obj.get("escalations"):
+            rec["scope_ratio_sum"] += float(obj.get("scope_ratio", 0.0) or 0.0)
+            rec["scope_ratio_n"] += 1
+    elif event == "delegate.yielded":
+        rec["yields"] += 1
+        if obj.get("reason") == "scope":
+            rec["scope_yields"] += 1
+    elif event == "engine.loop_nudge":
+        rec["loop_nudge"] += 1
+    elif event == "engine.loop_finalize":
+        rec["loop_finalize"] += 1
+    elif event == "engine.max_rounds_exhausted":
+        rec["max_rounds"] += 1
+
+
+# engine convergence events → the per-trace tally field they fold into (_accumulate_trace).
+_GOVERNANCE_EVENTS = {
+    "engine.loop_nudge": "loop_nudge",
+    "engine.loop_finalize": "loop_finalize",
+    "engine.max_rounds_exhausted": "max_rounds",
+}
+
+
+def _print_convergence_governance(events: Counter[str], traces: dict[str, dict]) -> None:
+    """Convergence signals (engine governance.py / loop.py): loops nudged / force-finalized
+    / round-budget exhausted — spikes mean the AI is spinning.
+
+    Each raw total is split in-turn vs orphan. An ``orphan`` event either carries no
+    trace_id or belongs to a trace that never logged a chat.turn_complete — an eval / test
+    run (these bind a trace but emit no turn), or a turn truncated out of this rolling log
+    window. The turn-grouped 空转率 below counts only in-turn events, so this split is what
+    reconciles it with the raw totals (previously a silent gap).
+    """
+    present = {e: events.get(e, 0) for e in _GOVERNANCE_EVENTS if events.get(e)}
+    if not present:
+        return
+    completed = [t for t in traces.values() if t["turn"]]
+    print("\n── Convergence Governance ──")
+    for e, c in sorted(present.items(), key=lambda x: -x[1]):
+        in_turn = sum(t[_GOVERNANCE_EVENTS[e]] for t in completed)
+        orphan = c - in_turn
+        note = f"  ({in_turn} in turns, {orphan} orphan)" if orphan else ""
+        print(f"  {c:>4}x  {e}{note}")
+
+
+def _print_collaboration_quality(traces: dict[str, dict]) -> None:
+    """The 协作质量方向盘: four turn-level metrics + MAST group labels."""
+    turns = [t for t in traces.values() if t["turn"]]
+    if not turns:
+        return
+    n = len(turns)
+    delegated = [t for t in turns if t["delegated"]]
+    nd = len(delegated)
+
+    print("\n── Collaboration Quality (协作质量 · MAST) ──")
+    print(f"  Turns {n}  (delegated {nd})")
+
+    # [验证] 返工率 — turns where someone built on a wrong assumption (MAST verification).
+    rework = [
+        t
+        for t in turns
+        if t["contract_retry"] or t["contract_failed"] or t["revise"] or t["revise_failed"]
+    ]
+    cr = sum(t["contract_retry"] for t in turns)
+    cf = sum(t["contract_failed"] for t in turns)
+    rv = sum(t["revise"] for t in turns)
+    print(
+        f"  [验证] 返工率       {len(rework) / n * 100:5.1f}%  "
+        f"({len(rework)}/{n} turns; contract-retry {cr}, revise {rv}, contract-failed {cf})"
+    )
+
+    # [规格] 首计划存活率 + [错位] 漂移率 — both only meaningful over delegated turns.
+    if nd:
+        survived = [t for t in delegated if t["yields"] == 0]
+        replanned = nd - len(survived)
+        print(
+            f"  [规格] 首计划存活率 {len(survived) / nd * 100:5.1f}%  "
+            f"({len(survived)}/{nd} delegated turns ran first plan clean; "
+            f"{replanned} needed mid-course replan)"
+        )
+        drift = [t for t in delegated if t["scope_yields"] or t["scope_boundaries"]]
+        ratios = [
+            t["scope_ratio_sum"] / t["scope_ratio_n"] for t in delegated if t["scope_ratio_n"]
+        ]
+        ratio_note = f"; avg scope_ratio {_avg(ratios):.2f}" if ratios else ""
+        print(
+            f"  [错位] 漂移率       {len(drift) / nd * 100:5.1f}%  "
+            f"({len(drift)}/{nd} delegated turns w/ scope signal{ratio_note})"
+        )
+    else:
+        print("  [规格] 首计划存活率    —    (no delegated turns)")
+        print("  [错位] 漂移率         —    (no delegated turns)")
+
+    # [终止] 空转·早收 — spinning / not-recognizing-done / early-stop (MAST termination).
+    idle = [
+        t
+        for t in turns
+        if t["loop_nudge"]
+        or t["loop_finalize"]
+        or t["max_rounds"]
+        or (t["finish_reason"] or "").lower() in _EARLY_FINISH_FLAGS
+    ]
+    ln = sum(t["loop_nudge"] for t in turns)
+    lf = sum(t["loop_finalize"] for t in turns)
+    mr = sum(t["max_rounds"] for t in turns)
+    flags = Counter(
+        (t["finish_reason"] or "?")
+        for t in turns
+        if (t["finish_reason"] or "").lower() in _EARLY_FINISH_FLAGS
+    )
+    flag_note = f"; finish-flags {dict(flags)}" if flags else ""
+    print(
+        f"  [终止] 空转·早收     {len(idle) / n * 100:5.1f}%  "
+        f"({len(idle)}/{n} turns; loop_nudge {ln}, loop_finalize {lf}, max_rounds {mr}{flag_note})"
+    )
+
+
 def main() -> None:
     if not LOG_FILE.exists():
         print(f"Log file not found: {LOG_FILE}")
@@ -34,6 +202,7 @@ def main() -> None:
     round_ends: list[dict] = []
     llm_calls: list[dict] = []
     cost_records: list[dict] = []
+    traces: dict[str, dict] = {}
     total = 0
     bad_lines = 0
 
@@ -50,6 +219,9 @@ def main() -> None:
             total += 1
             event = obj.get("event", "")
             events[event] += 1
+            tid = obj.get("trace_id")
+            if tid:
+                _accumulate_trace(traces.setdefault(tid, _new_trace()), event, obj)
             if obj.get("level") == "error":
                 errors.append(obj)
             if event == "chat.turn_complete":
@@ -203,17 +375,8 @@ def main() -> None:
         if model_mix:
             print(f"  Models     {'  '.join(f'{m}×{n}' for m, n in model_mix.most_common())}")
 
-    # Convergence governance signals (engine.py): loops nudged / force-finalized /
-    # round-budget exhausted — spikes here mean the AI is spinning.
-    governance = {
-        e: events.get(e, 0)
-        for e in ("engine.loop_nudge", "engine.loop_finalize", "engine.max_rounds_exhausted")
-        if events.get(e)
-    }
-    if governance:
-        print("\n── Convergence Governance ──")
-        for e, c in sorted(governance.items(), key=lambda x: -x[1]):
-            print(f"  {c:>4}x  {e}")
+    _print_convergence_governance(events, traces)
+    _print_collaboration_quality(traces)
 
     print()
 

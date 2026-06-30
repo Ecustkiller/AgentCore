@@ -1,6 +1,8 @@
 import { DebateView, LiveDebateNarrative } from "@/components/DebateView";
 import { Markdown } from "@/components/Markdown";
+import { NonBlockingAskCard } from "@/components/NonBlockingAskCard";
 import { TeamView } from "@/components/TeamView";
+import type { NonBlockingAsk } from "@/protocol/fold";
 // Rich assistant rendering shared by live turns and history replay (前端技术与架构 §七 ·
 // 富渲染 + 多 Agent 团队视图). One {@link AssistantContent} consumes the same fields whether
 // they come from the live fold (ProjectedTurn) or a persisted message (MessageDetail).
@@ -23,6 +25,7 @@ import type {
 import type {
   ProjectedAgent,
   ProjectedRun,
+  ProjectedTeamNote,
 } from "@agentcore/protocol-conformance";
 import { useState } from "react";
 
@@ -32,6 +35,18 @@ export interface TeamProjection {
   agents: ProjectedAgent[];
   runs: ProjectedRun[];
   progress: { completed: number; total: number };
+  /** 团队便签墙 (§2.2 通): notes workers broadcast to their concurrent siblings this turn
+   *  (`team_note_posted`), in post order — rendered by {@link TeamView}. Optional so the promo
+   *  still (which builds team from a truncated vector) and legacy callers keep compiling. */
+  teamNotes?: ProjectedTeamNote[];
+  /** 阻塞式求决策 (②): forwarded straight to {@link TeamView} via the `{...team}` spread so a
+   *  worker's pending escalation can render as an actionable answer card. All optional — a
+   *  read-only / history team simply omits them. */
+  conversationId?: string | null;
+  /** runId → pending `escalation_id` (transport-only sibling extractPendingEscalations). */
+  pendingEscalations?: Map<string, string>;
+  /** Live turn → the pending escalation is answerable over the open stream. */
+  escalationsInteractive?: boolean;
 }
 
 export function AssistantContent({
@@ -43,6 +58,8 @@ export function AssistantContent({
   team,
   debate,
   debateRounds,
+  asks,
+  onFill,
 }: {
   process?: ProcessStep[];
   content: string;
@@ -57,6 +74,13 @@ export function AssistantContent({
   /** 辩论进行中的逐轮叙事 (fold 的 `debateRounds`)：`debate` 收场产物未到时实时叠出主持人逐
    *  轮焦点 / 小结 / 裁判；收场后让位给 {@link DebateView} 的全量双产物。 */
   debateRounds?: DebateNarrativeRound[];
+  /** 非阻塞提问 (ask_user blocking=false): transport-only card content keyed by ask_id,
+   *  read off raw events via {@link extractAsks} (NOT the ProjectedTurn). The timeline's
+   *  `ask` marker resolves to its card here; empty/absent → the marker no-ops. */
+  asks?: NonBlockingAsk[];
+  /** Tap an ask/chip → fill the composer (回填输入框, review before send). Absent → chips
+   *  render but no-op (e.g. a read-only context with no composer). */
+  onFill?: (text: string) => void;
 }) {
   const hasTeam = !!team && team.runs.length > 0;
   return (
@@ -74,6 +98,8 @@ export function AssistantContent({
           steps={process}
           citations={citations}
           team={hasTeam ? team : undefined}
+          asks={asks}
+          onFill={onFill}
         />
       ) : (
         <>
@@ -263,10 +289,14 @@ function ProcessTimeline({
   steps,
   citations,
   team,
+  asks,
+  onFill,
 }: {
   steps: ProcessStep[];
   citations?: Citation[];
   team?: TeamProjection;
+  asks?: NonBlockingAsk[];
+  onFill?: (text: string) => void;
 }) {
   const nodes = groupToolRuns(steps);
   // Legacy turns whose persisted process predates the `team` marker still carry a team
@@ -286,13 +316,19 @@ function ProcessTimeline({
           return team ? (
             <TeamView key={`team-${node.execution_id}`} {...team} />
           ) : null;
-        // checkpoint·ask·plan_review markers anchor desktop cards; mobile owns these via
-        // its PauseCard surface, so they render nothing inline.
-        if (
-          node.kind === "checkpoint" ||
-          node.kind === "ask" ||
-          node.kind === "plan_review"
-        )
+        // 非阻塞提问卡 (ask_user blocking=false): resolve the `ask` marker to its card at
+        // its chronological slot, content looked up by ask_id from the transport-only
+        // `asks` side channel (extractAsks). No content (single-agent history / no onFill)
+        // → the marker no-ops, exactly like desktop.
+        if (node.kind === "ask") {
+          const ask = asks?.find((a) => a.id === node.ask_id);
+          return ask && onFill ? (
+            <NonBlockingAskCard key={ask.id} ask={ask} onFill={onFill} />
+          ) : null;
+        }
+        // checkpoint·plan_review markers anchor desktop cards; mobile owns these blocking
+        // interactions via its PauseCard surface, so they render nothing inline.
+        if (node.kind === "checkpoint" || node.kind === "plan_review")
           return null;
         if (node.kind === "tool-group")
           return <ToolGroup key={node.tools[0].id} tools={node.tools} />;

@@ -3,12 +3,12 @@
 Events flow from the engine → asyncio.Queue → SSE StreamingResponse → client.
 The EventSink decouples execution from delivery (backpressure-safe).
 
-→ 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（事件流）
+→ 见设计: docs/03-AI核心/执行引擎架构设计.md §二（SSE 事件协议）
 """
 
 from __future__ import annotations
 
-from agentcore.runtime.events.board import board_op_required
+from agentcore.runtime.events.board import board_op_required, board_read_required
 from agentcore.runtime.events.chat import (
     citations_event,
     content_delta,
@@ -58,6 +58,7 @@ from agentcore.runtime.events.run import (
     run_reasoning_delta,
     run_started,
     run_tool_progress,
+    team_note_posted,
 )
 from agentcore.runtime.events.sink import EventSink
 from agentcore.runtime.events.types import EventType, FinishReason, SSEEvent
@@ -94,6 +95,7 @@ __all__ = [
     "workspace_op_required",
     "workspace_promoted",
     "board_op_required",
+    "board_read_required",
     "handoff_snapshot_done",
     "handoff_job_started",
     "handoff_apply_done",
@@ -113,6 +115,7 @@ __all__ = [
     "escalation_raised",
     "escalation_required",
     "escalation_resolved",
+    "team_note_posted",
     "run_completed",
     "run_failed",
     "run_progress",

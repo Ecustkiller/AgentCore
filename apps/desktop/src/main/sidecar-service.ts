@@ -34,6 +34,7 @@ import {
 } from "@shared/sidecar-contract";
 import { BrowserWindow, type WebContents, app, ipcMain } from "electron";
 import { getStoredRoot } from "./fs-service";
+import { assertShape } from "./ipc-validate";
 
 // 本地回合的审批门（双模式工作区 / 远期规划 §一）。开启后，sidecar 引擎对 worker 的「碰真实
 // 机器」工具（file_write / code_execute 等 GRANTABLE）挂起审批，与云端 local 模式同语义——
@@ -480,6 +481,8 @@ export class SidecarManager {
         traceId: req.traceId,
         userMessage: req.userMessage,
         history: req.history ?? [],
+        // 续辩种子（结构化补轮·B）：原样透传给引擎（None=普通回合）。引擎宽容解析，故无需主进程校验。
+        ...(req.debateSeed ? { debateSeed: req.debateSeed } : {}),
         // Re-send the current cloud-proxy token every turn: the sidecar is long-lived
         // but the token rotates (12h TTL), so the engine adopts the fresh one per turn
         // (initialize-time creds would otherwise 401 after expiry).
@@ -619,9 +622,19 @@ export class SidecarManager {
 export function registerSidecarIpc(): void {
   const manager = new SidecarManager();
 
+  // IPC-004（第五轮 IPC 权限面审计）：每个句柄进入业务前在边界结构校验寻址 / 标识类 string
+  // 字段（rootId / turnId / …）+ 可选 subpath。畸形入参（仅来自被攻破的 renderer）抛
+  // `IpcInvalidArgsError` → invoke reject，与本组句柄「拉不起 / 引擎异常即 reject 让 renderer
+  // 降级」的契约一致。数据载荷（history / inference / result / debateSeed）仍由下游 / 引擎宽容消费。
   ipcMain.handle(
     SIDECAR_CHANNELS.startTurn,
     async (e, req: SidecarStartTurnRequest): Promise<SidecarTurnResult> => {
+      assertShape(
+        SIDECAR_CHANNELS.startTurn,
+        req,
+        ["rootId", "conversationId", "turnId", "traceId", "userMessage"],
+        ["subpath"],
+      );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");
       const workspaceRoot = await resolveWorkspaceRoot(
@@ -632,17 +645,42 @@ export function registerSidecarIpc(): void {
     },
   );
 
-  ipcMain.handle(SIDECAR_CHANNELS.cancel, (_e, req: SidecarCancelRequest) =>
-    manager.cancel(req),
-  );
+  ipcMain.handle(SIDECAR_CHANNELS.cancel, (_e, req: SidecarCancelRequest) => {
+    assertShape(
+      SIDECAR_CHANNELS.cancel,
+      req,
+      ["rootId", "turnId"],
+      ["subpath"],
+    );
+    return manager.cancel(req);
+  });
 
-  ipcMain.handle(SIDECAR_CHANNELS.respond, (_e, req: SidecarRespondRequest) =>
-    manager.respond(req),
-  );
+  ipcMain.handle(SIDECAR_CHANNELS.respond, (_e, req: SidecarRespondRequest) => {
+    assertShape(
+      SIDECAR_CHANNELS.respond,
+      req,
+      ["rootId", "requestId", "conversationId"],
+      ["subpath"],
+    );
+    return manager.respond(req);
+  });
 
   ipcMain.handle(
     SIDECAR_CHANNELS.resume,
     async (e, req: SidecarResumeRequest): Promise<SidecarTurnResult> => {
+      assertShape(
+        SIDECAR_CHANNELS.resume,
+        req,
+        [
+          "rootId",
+          "conversationId",
+          "messageId",
+          "traceId",
+          "decision",
+          "note",
+        ],
+        ["subpath"],
+      );
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");
       const workspaceRoot = await resolveWorkspaceRoot(
@@ -655,13 +693,19 @@ export function registerSidecarIpc(): void {
 
   ipcMain.handle(
     SIDECAR_CHANNELS.listPaused,
-    (_e, req: SidecarListPausedRequest): Promise<SidecarPausedTurn[]> =>
-      manager.listPaused(req),
+    (_e, req: SidecarListPausedRequest): Promise<SidecarPausedTurn[]> => {
+      assertShape(SIDECAR_CHANNELS.listPaused, req, [
+        "rootId",
+        "conversationId",
+      ]);
+      return manager.listPaused(req);
+    },
   );
 
   ipcMain.handle(
     SIDECAR_CHANNELS.probe,
     async (_e, req: SidecarProbeRequest): Promise<void> => {
+      assertShape(SIDECAR_CHANNELS.probe, req, ["rootId"], ["subpath"]);
       const root = await getStoredRoot(req.rootId);
       if (!root) throw new Error("本地目录未授权或已移除");
       const workspaceRoot = await resolveWorkspaceRoot(

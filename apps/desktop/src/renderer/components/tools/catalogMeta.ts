@@ -43,11 +43,11 @@ export const APPROVAL_LABEL: Record<ToolApproval, string> = {
   always: "始终审批",
 };
 
-// Governance colors map to the project's status tokens: neutral (auto), warning
-// (asks the user), destructive (always gated). No hardcoded palette.
+// Governance colors map to the project's status tokens: neutral (auto / asks the
+// user — 极简中性下分类态不再用琥珀), destructive (always gated). No hardcoded palette.
 export const APPROVAL_BADGE: Record<ToolApproval, string> = {
   never: "bg-muted text-muted-foreground",
-  grantable: "bg-warning/10 text-warning",
+  grantable: "bg-muted text-muted-foreground",
   always: "bg-destructive/10 text-destructive",
 };
 

@@ -5,6 +5,7 @@ import {
   useUpdateFolder,
 } from "@/hooks/useFolders";
 import { useWorkspaces } from "@/hooks/useWorkspaces";
+import { hasLocalFiles } from "@/lib/capabilities";
 import { notifyError } from "@/lib/toast";
 import { useFoldersStore } from "@/stores/folders";
 import { useMemo } from "react";
@@ -39,6 +40,15 @@ export function FilesPage() {
   // 导航唯一，传给 workbench 作为「本次聚焦」的触发键（同一项目可重复聚焦）。
   const focusWsId =
     (location.state as { focusWsId?: string } | null)?.focusWsId ?? null;
+
+  // 从对话页「记忆已更新」卡片深链跳来时携带的目标记忆叶子（合成路径 + 标签）：workbench 在该
+  // 次导航（focusKey=location.key）打开对应记忆 tab。记忆更新对话内可见 §1.6。
+  const openMemoryLeaf =
+    (
+      location.state as {
+        openMemoryLeaf?: { path: string; name: string };
+      } | null
+    )?.openMemoryLeaf ?? null;
 
   const fsApi = typeof window !== "undefined" ? window.fsApi : undefined;
 
@@ -81,7 +91,7 @@ export function FilesPage() {
       isLoading={query.isLoading}
       isError={query.isError}
       onRetry={() => void query.refetch()}
-      fsAvailable={!!fsApi}
+      fsAvailable={hasLocalFiles()}
       onNewFolder={() => void handleNewFolder()}
       onAddLocal={() => void handleAddLocal()}
       onRename={(folderId, name) =>
@@ -93,6 +103,7 @@ export function FilesPage() {
       }
       showMemory
       focusWsId={focusWsId}
+      openMemoryLeaf={openMemoryLeaf}
       focusKey={location.key}
     />
   );

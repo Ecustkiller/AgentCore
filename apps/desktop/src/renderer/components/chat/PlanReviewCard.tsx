@@ -1,55 +1,24 @@
-import {
-  Badge,
-  Button,
-  DecisionCard,
-  DecisionCardIcon,
-  Textarea,
-} from "@/components/ui";
-import { notifyError } from "@/lib/toast";
-import {
-  type PlanReviewUserDecision,
-  decidePlanReview,
-} from "@/services/planReview";
+import { DecisionCard, DecisionCardIcon } from "@/components/ui";
 import type { PlanReviewDisplay } from "@/stores/conversation";
-import {
-  ArrowRight,
-  Check,
-  Clock,
-  GitBranch,
-  Loader2,
-  OctagonX,
-  Pencil,
-} from "lucide-react";
-import { useState } from "react";
+import { Check, Clock, GitBranch, OctagonX, Pencil } from "lucide-react";
 
 /**
- * Inline plan_review card — the WaveScheduler paused after a `checkpoint_after`
- * step completed and before its dependents run (结构化挂起). Rendered under the
- * assistant bubble that raised it (会话流内，alongside any ask_user checkpoints), so
- * it both gates the live turn and replays inline on reload.
+ * Inline plan_review card — the WaveScheduler paused after a `checkpoint_after` step
+ * completed and before its dependents run (结构化挂起). Rendered under the assistant
+ * bubble that raised it (会话流内，alongside any ask_user checkpoints), replaying inline on
+ * reload.
  *
- * `interactive` is true only for the live, suspended turn (the owning message is
- * still streaming). A pending review on a finished/reloaded turn renders as a
- * passive record; a resolved one always renders its settled state. Choices: 继续
- * (run the gated downstream as-is) / 调整 (inject the note as a steer onto the
- * downstream, then run) / 停止 (end the run here).
+ * 挂起即收口 (②, Phase 3): plan_review never parks live inline anymore — the scheduler
+ * finalizes the turn at the boundary (`SUSPEND → PAUSED`), so the actionable surface is the
+ * durable resume card (ResumePrompt). Inline, this renders only as a passive record: a
+ * pending review on a finished/reloaded turn is a dormant record; a resolved one shows its
+ * settled state (继续 ran the gated downstream / 调整 steered it / 停止 ended the run).
  */
-export function PlanReviewCard({
-  review,
-  conversationId,
-  interactive,
-}: {
-  review: PlanReviewDisplay;
-  conversationId: string | null;
-  interactive: boolean;
-}) {
+export function PlanReviewCard({ review }: { review: PlanReviewDisplay }) {
   if (review.status === "resolved") {
     return <ResolvedPlanReview review={review} />;
   }
-  if (!interactive) {
-    return <DormantPlanReview review={review} />;
-  }
-  return <PendingPlanReview review={review} conversationId={conversationId} />;
+  return <DormantPlanReview review={review} />;
 }
 
 /** The just-completed step(s) under review: each worker's role + a capped excerpt
@@ -71,115 +40,6 @@ function ReviewedSteps({ review }: { review: PlanReviewDisplay }) {
         </div>
       ))}
     </div>
-  );
-}
-
-/** A compact preview of the downstream nodes gated behind this pause. */
-function PendingPreview({ review }: { review: PlanReviewDisplay }) {
-  if (review.pending.length === 0) return null;
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      <ArrowRight size={13} className="shrink-0 text-muted-foreground" />
-      <span className="text-xs text-muted-foreground">继续后将运行</span>
-      {review.pending.map((n) => (
-        <Badge key={n.run_id} tone="muted">
-          {n.role}
-        </Badge>
-      ))}
-    </div>
-  );
-}
-
-/** The live, actionable card: reviewed step(s) + gated downstream + an optional
- * note, settled by 继续 / 调整 / 停止. */
-function PendingPlanReview({
-  review,
-  conversationId,
-}: {
-  review: PlanReviewDisplay;
-  conversationId: string | null;
-}) {
-  const [note, setNote] = useState("");
-  const [submitting, setSubmitting] = useState<PlanReviewUserDecision | null>(
-    null,
-  );
-  const busy = submitting !== null;
-
-  const send = (decision: PlanReviewUserDecision) => {
-    if (busy || !conversationId) return;
-    setSubmitting(decision);
-    decidePlanReview(conversationId, review.id, decision, note.trim()).catch(
-      (err) => {
-        notifyError(err, "提交失败");
-        setSubmitting(null);
-      },
-    );
-  };
-
-  const spinnerOr = (
-    decision: PlanReviewUserDecision,
-    icon: React.ReactNode,
-  ) =>
-    submitting === decision ? (
-      <Loader2 size={13} className="animate-spin" />
-    ) : (
-      icon
-    );
-
-  return (
-    <DecisionCard tone="warning" animate>
-      <div className="flex items-start gap-2">
-        <DecisionCardIcon tone="warning">
-          <GitBranch size={16} />
-        </DecisionCardIcon>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-warning">
-            执行已暂停 · 待你放行下一步
-          </p>
-          <p className="mt-0.5 text-sm text-foreground">
-            这一步已完成，请过目：
-          </p>
-          <ReviewedSteps review={review} />
-          <PendingPreview review={review} />
-
-          <Textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            disabled={busy}
-            rows={2}
-            placeholder="可选 · 备注（调整时作为对下游的指示；停止时作为收尾备注）"
-            className="mt-2 w-full border-border bg-card/70 focus:border-warning/60"
-          />
-        </div>
-      </div>
-
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-6">
-        <Button
-          variant="primary"
-          icon={spinnerOr("continue", <Check size={13} />)}
-          disabled={busy}
-          onClick={() => send("continue")}
-        >
-          继续
-        </Button>
-        <Button
-          variant="neutral"
-          icon={spinnerOr("adjust", <Pencil size={13} />)}
-          disabled={busy || !note.trim()}
-          onClick={() => send("adjust")}
-        >
-          调整
-        </Button>
-        <Button
-          variant="danger"
-          icon={spinnerOr("stop", <OctagonX size={13} />)}
-          disabled={busy}
-          onClick={() => send("stop")}
-        >
-          停止
-        </Button>
-      </div>
-    </DecisionCard>
   );
 }
 

@@ -21,6 +21,7 @@ import type {
   RunStartedPayload,
   RunToolProgressPayload,
   SSEEvent,
+  TeamNotePostedPayload,
   ToolDisplay,
   ToolUseEndPayload,
   ToolUseStartPayload,
@@ -163,6 +164,25 @@ export type RunFrame =
       t: number;
       kind: "plan_revised";
       revisions: { runId: string; revisionKind: PlanRevisionKind }[];
+    }
+  | {
+      // 团队便签墙 (§2.2 通): a worker broadcast a one-line decision / heads-up to its
+      // CONCURRENT siblings via post_note. Turn-level (NOT run-scoped onto a node) — folds
+      // onto Execution.teamNotes. Journaled, so it replays on reload like any frame.
+      // `noteKind` (not `kind`) because `kind` is this union's discriminant; it carries the
+      // wire note kind (decision / heads_up / claim). 便签会过期 → supersession (§2.2): an amendment
+      // carries `supersedes` (the noteId it 改写/作废s) + `supersedeMode` (update / void).
+      t: number;
+      kind: "team_note_posted";
+      noteId: string;
+      runId: string;
+      agentId: string;
+      role: string;
+      noteKind: string;
+      text: string;
+      ts: number | null;
+      supersedes: string | null;
+      supersedeMode: "update" | "void" | null;
     };
 
 /** Wall-clock time of a wire event (ms), used to label timeline frames. The
@@ -383,6 +403,22 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
           runId: r.run_id,
           revisionKind: r.kind,
         })),
+      };
+    }
+    case "team_note_posted": {
+      const p = event.payload as TeamNotePostedPayload;
+      return {
+        t,
+        kind: "team_note_posted",
+        noteId: p.note_id,
+        runId: p.run_id,
+        agentId: p.agent_id,
+        role: p.role,
+        noteKind: p.kind,
+        text: p.text,
+        ts: p.ts,
+        supersedes: p.supersedes ?? null,
+        supersedeMode: p.supersede_mode ?? null,
       };
     }
     default:

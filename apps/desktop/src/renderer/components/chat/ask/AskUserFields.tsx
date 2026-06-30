@@ -27,9 +27,9 @@ export interface AskUserContent {
   styleOptions: AskStyleOption[];
 }
 
-/** Whether the card leans「开场引导」(ready-to-go, primary) vs「途中拍板」(careful
- * fork, warning): an opening carries 起步计划 / 风格, or pre-fills every question
- * with a default; a mid-task fork carries a bare question with no defaults. */
+/** Whether the card leans「开场引导」(ready-to-go) vs「途中拍板」(careful fork):
+ * an opening carries 起步计划 / 风格, or pre-fills every question with a default;
+ * a mid-task fork carries a bare question with no defaults. (Both render 品牌蓝.) */
 export function isOpeningFlavored(c: AskUserContent): boolean {
   if (c.assumptions.length > 0 || c.styleOptions.length > 0) return true;
   return (
@@ -314,14 +314,15 @@ function QuestionField({
         ) : (
           <div className="space-y-1">
             {question.options.map((opt) => {
-              const active = answer.includes(opt);
-              const isDefault = !!question.default && opt === question.default;
+              const active = answer.includes(opt.label);
+              const isDefault =
+                !!question.default && opt.label === question.default;
               return (
                 <Button
-                  key={opt}
+                  key={opt.label}
                   variant="ghost"
                   disabled={disabled}
-                  onClick={() => onToggleChoice(opt)}
+                  onClick={() => onToggleChoice(opt.label)}
                   className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1.5 text-left font-normal disabled:opacity-40 ${
                     active ? tone.optActive : tone.optIdle
                   }`}
@@ -339,18 +340,37 @@ function QuestionField({
                           <span className={`size-2 rounded-full ${tone.dot}`} />
                         ))}
                     </span>
-                    <span className="min-w-0 flex-1 whitespace-pre-wrap">
-                      {opt}
-                    </span>
-                    {isDefault && (
-                      <span
-                        className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-xs ${
-                          active ? tone.badge : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        默认
+                    {/* label + 权衡说明(detail) + 推荐/默认徽标。detail 作次级行帮用户看懂取舍。 */}
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-start gap-1.5">
+                        <span className="min-w-0 flex-1 whitespace-pre-wrap">
+                          {opt.label}
+                        </span>
+                        {opt.recommended && (
+                          <span
+                            className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-xs ${tone.badge}`}
+                          >
+                            推荐
+                          </span>
+                        )}
+                        {isDefault && (
+                          <span
+                            className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-xs ${
+                              active
+                                ? tone.badge
+                                : "bg-muted text-muted-foreground"
+                            }`}
+                          >
+                            默认
+                          </span>
+                        )}
                       </span>
-                    )}
+                      {opt.detail && (
+                        <span className="mt-0.5 block whitespace-pre-wrap text-xs text-muted-foreground">
+                          {opt.detail}
+                        </span>
+                      )}
+                    </span>
                   </span>
                 </Button>
               );

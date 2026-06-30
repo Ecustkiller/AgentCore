@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>概念 6 · 比赛回放 — 交锋叙事重设计</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <style>
+      .c6 { max-width: 920px; margin: 0 auto; padding: 24px 24px 60px; }
+      .c6 .eyebrow { font-size: 12px; font-weight: 600; color: var(--muted-foreground); }
+      .c6 h1.page { margin: 6px 0 18px; font-size: 21px; font-weight: 750; }
+
+      /* scoreboard / eval bar */
+      .score { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+      .score .end { font-size: 13px; font-weight: 650; display: flex; align-items: center; gap: 7px; flex: none; }
+      .score .end .pct { font-variant-numeric: tabular-nums; font-size: 15px; }
+      .score .end.l { color: var(--agent-sweet); }
+      .score .end.r { color: var(--agent-salty); flex-direction: row-reverse; }
+      .evalbar { flex: 1; display: flex; height: 30px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+      .evalbar .seg { transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
+      .evalbar .seg.l { background: color-mix(in oklch, var(--agent-sweet) 40%, transparent); }
+      .evalbar .seg.r { background: color-mix(in oklch, var(--agent-salty) 40%, transparent); }
+      .lead-note { font-size: 12.5px; color: var(--muted-foreground); text-align: center; margin-bottom: 18px; }
+
+      /* transport */
+      .transport { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+      .transport .pp { flex: none; width: 42px; height: 42px; border-radius: 999px; border: 0; background: var(--primary); color: var(--primary-foreground); display: grid; place-items: center; cursor: pointer; box-shadow: var(--shadow-sm); }
+      .transport .scrub { flex: 1; accent-color: var(--primary); cursor: pointer; }
+      .transport .now { flex: none; font-size: 13px; font-weight: 650; white-space: nowrap; min-width: 86px; text-align: right; }
+      .ticks { display: flex; justify-content: space-between; margin: 4px 4px 22px; }
+      .ticks .tick { font-size: 11.5px; color: var(--muted-foreground); cursor: pointer; }
+      .ticks .tick.on { color: var(--primary); font-weight: 700; }
+
+      /* stage */
+      .stage { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px 22px; background: var(--card); min-height: 230px; box-shadow: var(--shadow-sm); }
+      .stage .st-top { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; flex-wrap: wrap; }
+      .stage .focus { font-size: 16px; font-weight: 720; }
+      .stage .sub { font-size: 12.5px; color: var(--muted-foreground); margin-bottom: 16px; }
+      .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+      .duo .sp { font-size: 13px; line-height: 1.7; }
+      .duo .sp .nm { display: flex; align-items: center; gap: 7px; font-weight: 650; color: var(--side); font-size: 12.5px; margin-bottom: 6px; }
+      .duo .sp .body { border-left: 3px solid var(--side); padding-left: 12px; color: var(--foreground); }
+      .clashes { margin-top: 16px; border-top: 1px dashed var(--border); padding-top: 12px; }
+      .clashes .ch-lbl { font-size: 11.5px; font-weight: 600; color: var(--muted-foreground); display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+      .clashes .ch { font-size: 12.5px; line-height: 1.6; margin-bottom: 6px; }
+      .clashes .ch b { color: var(--side); }
+      .final .why { font-size: 14px; line-height: 1.75; }
+      .final .need { margin-top: 14px; padding: 12px 14px; border-radius: var(--radius-sm); background: color-mix(in oklch, var(--warning) 9%, var(--card)); border: 1px solid color-mix(in oklch, var(--warning) 40%, var(--border)); }
+      .final .need .nt { font-size: 13px; font-weight: 650; color: var(--warning-foreground); display: flex; gap: 6px; align-items: center; }
+      .final .need ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
+      @media (max-width: 640px) { .duo { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="chrome">
+        <a class="back" href="index.html">‹ 返回</a>
+        <span class="title" id="title"></span>
+        <div class="tabs">
+          <button aria-pressed="true">⚖ 交锋叙事</button>
+          <button aria-pressed="false">⛬ 协作图</button>
+        </div>
+      </div>
+      <div id="root"></div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="icons.js"></script>
+    <script>
+      const D = window.DEBATE;
+      document.getElementById("title").textContent = D.motion;
+      const sideBy = (k) => D.sides.find((s) => s.key === k);
+      const sweet = sideBy("sweet"), salty = sideBy("salty");
+
+      const roundMo = [56, 65]; // momentum (salty share) after each round
+      const steps = [];
+      steps.push({
+        k: "开场", mo: 50, sub: "双方就位，亮出立场",
+        render: () =>
+          h(
+            "div",
+            { class: "final" },
+            h("div", { class: "st-top" }, h("span", { class: "focus" }, "辩题：" + D.motion)),
+            h("div", { class: "sub" }, D.form + " · 比赛即将开始，态势 50 : 50"),
+            h(
+              "div",
+              { class: "duo" },
+              ...D.sides.map((s) =>
+                h(
+                  "div",
+                  { class: "sp", style: `--side: var(${s.colorVar})` },
+                  h("div", { class: "nm" }, h("span", { class: "id-dot", style: `--side: var(${s.colorVar})` }), s.name + " · " + s.stance),
+                  h("div", { class: "body" }, s.point),
+                ),
+              ),
+            ),
+          ),
+      });
+      D.rounds.forEach((r, i) => {
+        steps.push({
+          k: "第 " + r.no + " 轮", mo: roundMo[i] ?? 50, sub: r.focus,
+          render: () => {
+            const stage = h("div", {});
+            stage.append(
+              h(
+                "div",
+                { class: "st-top" },
+                h("span", { class: "pill pill-muted" }, "第 " + r.no + " 轮"),
+                h("span", { class: "focus" }, r.focus),
+                r.verdict.real_clash ? h("span", { class: "pill pill-primary" }, "有交锋") : h("span", { class: "pill pill-muted" }, "各说各话"),
+                r.verdict.converged ? h("span", { class: "pill pill-success" }, "收敛") : null,
+              ),
+              h("div", { class: "sub" }, r.summary),
+              h(
+                "div",
+                { class: "duo" },
+                ...D.sides.map((s) =>
+                  h(
+                    "div",
+                    { class: "sp", style: `--side: var(${s.colorVar})` },
+                    h("div", { class: "nm" }, h("span", { class: "id-dot", style: `--side: var(${s.colorVar})` }), s.name),
+                    h("div", { class: "body" }, r.speeches[s.key]),
+                  ),
+                ),
+              ),
+            );
+            if (r.clashes.length) {
+              const cl = h("div", { class: "clashes" }, h("div", { class: "ch-lbl" }, svg("swords", 13), "本轮交锋点"));
+              r.clashes.forEach((c) => {
+                const src = sideBy(c.from);
+                cl.append(h("div", { class: "ch", style: `--side: var(${src.colorVar})` }, h("b", {}, src.name), " → ", c.point));
+              });
+              stage.append(cl);
+            }
+            return stage;
+          },
+        });
+      });
+      steps.push({
+        k: "收场", mo: 65, sub: "已澄清为价值之争",
+        render: () =>
+          h(
+            "div",
+            { class: "final", style: `--side: var(${sideBy(D.brief.leaningSide).colorVar})` },
+            h("div", { class: "st-top" }, h("span", { class: "pill pill-success" }, svg("check", 12), "终场"), h("span", { class: "focus", style: "color:var(--side)" }, D.brief.leaningTitle)),
+            h("div", { class: "sub" }, "终场态势 " + (100 - 65) + " : " + 65 + "（咸略占上风）· 置信 " + D.brief.confidencePct + "%"),
+            h("p", { class: "why" }, D.brief.leaning),
+            h(
+              "div",
+              { class: "need" },
+              h("div", { class: "nt" }, svg("user", 14), "但这几条得你拍板，结论才算数"),
+              h("ul", {}, ...D.brief.valueDisputes.map((t) => h("li", {}, t))),
+            ),
+          ),
+      });
+
+      let cur = 0, timer = null;
+      const c6 = h("div", { class: "c6" });
+
+      const segL = h("div", { class: "seg l" });
+      const segR = h("div", { class: "seg r" });
+      const pctL = h("span", { class: "pct" });
+      const pctR = h("span", { class: "pct" });
+      const leadNote = h("div", { class: "lead-note" });
+      const stageEl = h("div", { class: "stage" });
+      const nowEl = h("span", { class: "now" });
+      const scrub = h("input", { type: "range", class: "scrub", min: "0", max: String(steps.length - 1), step: "1", value: "0" });
+      const ppBtn = h("button", { class: "pp" }, svg("play", 18));
+      const ticksEl = h("div", { class: "ticks" });
+
+      function setStep(i, fromScrub) {
+        cur = Math.max(0, Math.min(steps.length - 1, i));
+        const s = steps[cur];
+        segR.style.width = s.mo + "%";
+        segL.style.width = 100 - s.mo + "%";
+        pctL.textContent = 100 - s.mo + "%";
+        pctR.textContent = s.mo + "%";
+        leadNote.textContent =
+          s.mo === 50 ? "态势均衡 · 谁也没占上风" : (s.mo > 50 ? salty.name + "（咸）暂时占上风" : sweet.name + "（甜）暂时占上风") + " · " + s.k;
+        nowEl.textContent = s.k;
+        stageEl.replaceChildren(s.render());
+        if (!fromScrub) scrub.value = String(cur);
+        [...ticksEl.children].forEach((t, idx) => t.classList.toggle("on", idx === cur));
+      }
+
+      function stop() { if (timer) { clearInterval(timer); timer = null; } ppBtn.replaceChildren(svg("play", 18)); }
+      function play() {
+        if (timer) { stop(); return; }
+        if (cur >= steps.length - 1) setStep(0);
+        ppBtn.replaceChildren(svg("pause", 18));
+        timer = setInterval(() => { if (cur >= steps.length - 1) { stop(); return; } setStep(cur + 1); }, 1500);
+      }
+      ppBtn.addEventListener("click", play);
+      scrub.addEventListener("input", () => { stop(); setStep(Number(scrub.value), true); });
+
+      steps.forEach((s, idx) => {
+        const t = h("span", { class: "tick" }, s.k);
+        t.addEventListener("click", () => { stop(); setStep(idx); });
+        ticksEl.append(t);
+      });
+
+      c6.append(
+        h("div", { class: "eyebrow" }, "比赛回放 · 把交锋当一场可回放的比赛"),
+        h("h1", { class: "page" }, "拖时间轴，看态势怎么一轮轮变的"),
+        h(
+          "div",
+          { class: "score" },
+          h("span", { class: "end l" }, h("span", { class: "id-dot", style: `--side: var(${sweet.colorVar})` }), sweet.stance, pctL),
+          h("div", { class: "evalbar" }, segL, segR),
+          h("span", { class: "end r" }, h("span", { class: "id-dot", style: `--side: var(${salty.colorVar})` }), salty.stance, pctR),
+        ),
+        leadNote,
+        h("div", { class: "transport" }, ppBtn, scrub, nowEl),
+        ticksEl,
+        stageEl,
+      );
+
+      document.getElementById("root").append(c6);
+      setStep(0);
+    </script>
+  </body>
+</html>

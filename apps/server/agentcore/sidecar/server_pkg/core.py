@@ -36,7 +36,7 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         self._root: Path | None = None
         self._creds: LLMCredentials | None = None
         self._approvals_enabled = True
-        # The local durable-pause store (§18.6 paused-turn port, local impl), set from
+        # The local durable-pause store (§8.6 paused-turn port, local impl), set from
         # ``initialize``'s ``dataDir``. ``None`` ⇒ no data dir ⇒ pauses stay in-memory.
         self._paused_store: LocalPausedTurnStore | None = None
         # turn_id → running task, so ``cancel`` can reach an in-flight turn. A resume

@@ -21,12 +21,13 @@ logger = get_logger(__name__)
 @dataclass
 class SupervisedRun:
     """A delegate plan paused at a decision boundary, awaiting the CEO's ``replan`` (受监督
-    的波循环). Holds exactly what :meth:`DelegateTool.replan` needs to finalise / re-steer
+    的波循环).     Holds exactly what :meth:`DelegateTool.replan` needs to finalise / re-steer
     and resume the SAME DAG from where it yielded: the (mutable) plan, the completed-so-far
     seeds, the turn's execution id, the original ``finalize`` flag, the ``reason`` it
-    yielded for (``BIND`` = late-bind a placeholder, ``SCOPE`` = re-steer the tail after a
-    队员 deviation — gates ``replan``'s required-field check), and the run_ids that triggered
-    the yield (the late-bound node for BIND, the deviating node for SCOPE).
+    yielded for (``BIND`` = late-bind a placeholder, ``SCOPE`` = the reactive arm: re-steer the
+    tail after a 队员 deviation OR replan(add) a producer for a worker卡在缺输入·依赖缺口, §2.4
+    — gates ``replan``'s required-field check), and the run_ids that triggered the yield (the
+    late-bound node for BIND, the deviating / dep-blocked node for SCOPE).
     """
 
     plan: RunPlan
@@ -221,20 +222,39 @@ def format_bind_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) -> 
         "\n---\n请调用 `replan` 定稿上述步骤："
         "`binds=[{run_id, role, task, …}]`（定稿后该步即可运行）；可选 "
         "`steers=[{run_id, note}]` 操舵其它未跑步骤；确无需继续则 `replan(stop=true)`。\n"
+        "定稿前先对一下上游这几块的【拼图边】（语义边界对账）：彼此对同一共享点"
+        "（接口 / 字段 / 数据格式）的假设是否一致、有没有缺口或重复——据此把待定稿步骤定准；"
+        "若某已完成步骤与上游对不上，用 `revise` 唤回它对齐，别让下游接着错下去。\n"
         f"当前已完成 {done} 步；待跑：{('、'.join(f'`{p}`' for p in pending)) or '（无）'}。"
     )
     return "\n".join(lines)
 
 
 def format_scope_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) -> str:
-    """SCOPE-arm brief (偏离信号)."""
+    """Reactive-arm brief — 职责偏离 (kind=scope) AND/OR 依赖缺口·卡在缺输入 (kind=dep, §2.4).
+
+    Both kinds ride the SAME reactive boundary (``BoundaryReason.SCOPE``); this brief tells the
+    captain which is which so it picks the right ``replan`` lever — ``steers`` to re-aim an
+    un-run step for a scope deviation, ``add`` to append a producer / wire a dependency edge for
+    a worker卡在缺输入."""
     from agentcore.runtime.runs import RunPhase
 
+    # Does any surfaced node carry a dep (依赖缺口) signal? Tailor the header / closing guidance
+    # so a pure-scope yield reads exactly as before, while a dep yield steers toward replan(add).
+    has_dep = any(
+        e.get("kind") == "dep"
+        for n in nodes
+        for e in (results.get(n.run_id).escalations if results.get(n.run_id) else [])
+    )
+    headline = (
+        "队员报告职责偏离 / 卡在缺输入" if has_dep else "队员报告职责偏离"
+    )
     lines = [
-        "## 计划已让出（队员报告职责偏离，请校准未跑步骤）",
-        "下列【已完成】步骤报告了「职责/范围偏离」(escalate kind=scope)：它们在执行中发现"
-        "真正要做的与初始计划不符。请阅读它们的产出与偏离说明，判断是否需要操舵【尚未运行】"
-        "的下游步骤，再用 `replan` 续跑同一计划。",
+        f"## 计划已让出（{headline}，请校准未跑步骤）",
+        "下列【已完成】步骤报告了「职责/范围偏离」(escalate kind=scope) 或「卡在缺输入·依赖缺口」"
+        "(escalate kind=dep)：前者发现真正要做的与初始计划不符，后者缺一个还不存在的输入 / 依赖"
+        "（没人产出过、计划也没安排）才能做好。请阅读它们的产出与信号说明，再用 `replan` 续跑同一"
+        "计划——偏离用 `steers` 操舵未跑步骤，缺输入用 `add` 追加一个产出它的步骤 / 接一条依赖边。",
     ]
     for node in nodes:
         state = results.get(node.run_id)
@@ -243,24 +263,30 @@ def format_scope_boundary(plan: RunPlan, results: dict, nodes: list[RunSpec]) ->
             summary = summary[:PLAN_REVIEW_SUMMARY_CHARS] + "…"
         esc_lines: list[str] = []
         for e in state.escalations if state else []:
-            if e.get("kind") != "scope":
+            kind = e.get("kind")
+            if kind not in ("scope", "dep"):
                 continue
             question = str(e.get("question") or "").strip()
             assumption = str(e.get("assumption") or "").strip()
-            esc_lines.append(f"  - 偏离：{question or '（未写明）'}")
+            tag = "缺输入" if kind == "dep" else "偏离"
+            esc_lines.append(f"  - {tag}：{question or '（未写明）'}")
             if assumption:
                 esc_lines.append(f"    暂定假设：{assumption}")
         lines.append(
-            f"\n### 偏离 · run_id: `{node.run_id}`（{node.role or node.run_id}）\n"
+            f"\n### 队员信号 · run_id: `{node.run_id}`（{node.role or node.run_id}）\n"
             f"产出：{summary or '（无产出）'}\n"
-            "偏离说明：\n" + ("\n".join(esc_lines) or "  - （未写明）")
+            "信号说明：\n" + ("\n".join(esc_lines) or "  - （未写明）")
         )
     pending = [n.run_id for n in plan.nodes if n.run_id not in results]
     done = sum(1 for s in results.values() if s and s.phase is RunPhase.COMPLETED)
     lines.append(
         "\n---\n请调用 `replan` 校准未跑步骤：`steers=[{run_id, note}]` 操舵尚未运行的下游"
-        "（运行前注入指令）；若某步是『待定稿』可一并 `binds=[…]` 定稿；确认无需改动可直接 "
-        "`replan()` 续跑；确无需继续则 `replan(stop=true)`。\n"
+        "（运行前注入指令）；有队员【卡在缺输入】时用 `add=[{role, task, depends_on}]` 追加一个"
+        "产出它的步骤 / 接一条依赖边；若某步是『待定稿』可一并 `binds=[…]` 定稿；确认无需改动可"
+        "直接 `replan()` 续跑；确无需继续则 `replan(stop=true)`。\n"
+        "校准前主动对一遍【拼图边】（语义边界对账）：这次信号很可能波及兄弟步骤——别只盯举手这块，"
+        "查其它已完成步骤与它在共享点（接口 / 字段 / 数据格式）上是否还对得上，有冲突 / 缺口 / 重复"
+        "就一并用 `steers` 操舵未跑步骤、或用 `revise` 唤回已跑步骤对齐。\n"
         f"当前已完成 {done} 步；待跑：{('、'.join(f'`{p}`' for p in pending)) or '（无）'}。"
     )
     return "\n".join(lines)

@@ -1,6 +1,6 @@
-"""Execution-level Turn Journal facts (§18.3) — the schema + the engine's write port.
+"""Execution-level Turn Journal facts (§8.3) — the schema + the engine's write port.
 
-The §18.3 Turn Journal is a turn's 唯一事实源: an append-only, per-turn ordered
+The §8.3 Turn Journal is a turn's 唯一事实源: an append-only, per-turn ordered
 stream of facts from which everything replayable / resumable is a projection. The
 conceptual model is nine fact kinds::
 
@@ -18,7 +18,7 @@ the gap with the旁路 ``paused_turns.frame``.
 
 This module owns the **seven execution-level facts** that close that gap (the new
 kinds), making the journal lossless so the window / frame become projections of it
-(执行级事件溯源；as-built 见执行引擎 §18.3):
+(执行级事件溯源；as-built 见执行引擎 §8.3):
 
 - :class:`TurnStartedFact` — the turn's head: the *verbatim* system prompt, the user
   message, the model profile. Anchors the window fold (the system prompt is dynamic —
@@ -59,7 +59,7 @@ stays in :mod:`agentcore.runtime.journal` (``KIND_TURN_END``). The display proje
 (:data:`EXECUTION_ONLY_KINDS`) so adding them never disturbs replay.
 
 Pure schema + an in-memory recorder here: stdlib only, no DB, no engine import. The
-durable side is the §18.6 ``Journal`` port (``db.repositories.TurnJournalRepository``);
+durable side is the §8.6 ``Journal`` port (``db.repositories.TurnJournalRepository``);
 a turn's :class:`TurnFactLog` is flattened to journal entries and persisted there at
 turn end (and re-projected on read), exactly like the display journal today.
 """
@@ -73,7 +73,7 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 
 
 class FactKind(StrEnum):
-    """The seven execution-level fact kinds this module produces (§18.3).
+    """The seven execution-level fact kinds this module produces (§8.3).
 
     These are NEW kinds (no rename of the existing display entries, which keep their
     SSE event-type kind — zero migration). The umbrella ``run_event`` / ``interaction``
@@ -110,7 +110,7 @@ class Fact:
     ``ts`` is optional (the table's ``seq`` is the authoritative order; an execution
     fact mirrors the existing process facts in leaving it ``None`` unless a caller
     stamps a time for debugging / time-travel). :meth:`entry` yields the plain dict
-    the §18.6 ``Journal`` port persists, identical in shape to the display entries.
+    the §8.6 ``Journal`` port persists, identical in shape to the display entries.
     """
 
     kind: str
@@ -217,7 +217,7 @@ class ToolCallFact:
     """One completed tool call's FULL model-facing result — the window's tool message.
 
     The window fold reads tool results from this fact, NOT the forwarded display
-    ``tool_use_end`` (执行级事件溯源 §18.3 投影边界①): on the CEO chat path the engine
+    ``tool_use_end`` (执行级事件溯源 §8.3 投影边界①): on the CEO chat path the engine
     folds citation numbers into the tool message AFTER emitting ``tool_use_end``, so the
     event's ``result`` is the pre-annotation text while the model actually saw the
     annotated one. Recorded after that annotation, so ``result`` is byte-for-byte what
@@ -259,7 +259,7 @@ class NoteFact:
     instruction into the loop's ``messages``; these are not model output nor a tool
     result, so without a fact the window fold would miss them. ``reason`` tags the
     source (``nudge`` / ``finalize`` / …) for time-travel readability. ``run_id`` scopes
-    the note to its run (执行级事件溯源 §18.3 投影边界②): a captain note injected while a
+    the note to its run (执行级事件溯源 §8.3 投影边界②): a captain note injected while a
     delegated worker is the active run must still fold into the CAPTAIN window, so the
     fold attributes by this id rather than by "the most-recent round_boundary".
     """
@@ -312,11 +312,11 @@ class MessageFinalFact:
 
 @runtime_checkable
 class FactRecorder(Protocol):
-    """The engine-facing write side of the §18.3 Journal (执行级落地 §4).
+    """The engine-facing write side of the §8.3 Journal (执行级落地 §4).
 
     The engine records execution facts as they happen through this port instead of
     deriving them from the SSE sink. Phase 1 impl is the in-memory :class:`TurnFactLog`
-    (flushed to the durable §18.6 ``Journal`` at turn end); a Sidecar could supply a
+    (flushed to the durable §8.6 ``Journal`` at turn end); a Sidecar could supply a
     write-through one without touching the engine.
     """
 
@@ -377,7 +377,7 @@ def snapshot_fact_log(
     """Snapshot the ambient fact log's entries at a pause (+ optional trailing entries).
 
     The suspending faces (``ask_user`` / ``delegate``) persist the journal-AT-PAUSE to
-    the §18.3 turn_journal so a resume can rebuild the window from it. That journal is
+    the §8.3 turn_journal so a resume can rebuild the window from it. That journal is
     exactly this ambient single ordered log — EXCEPT the suspending display event
     (``checkpoint_required`` / ``plan_review_required``) is emitted only AFTER the frame
     is saved (in the registry's ``on_suspended``), so it is not yet in the log; the face

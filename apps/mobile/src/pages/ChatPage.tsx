@@ -1,5 +1,6 @@
 import { getTokens } from "@/api/client";
 import {
+  type MemoryUpdate,
   type MessageDetail,
   createConversation,
   getMessages,
@@ -7,19 +8,36 @@ import {
 import { attachStream, resumeStream, streamMessage } from "@/api/stream";
 import {
   type PausedTurnSummary,
-  listPausedTurns,
+  type TurnRecovery,
+  getRecovery,
   stopConversation,
 } from "@/api/turn";
 import { getMessageCostTotal } from "@/api/usage";
 import { AssistantContent } from "@/components/AssistantView";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
+import { FileArtifactsCard } from "@/components/FileArtifactsCard";
+import { MemoryUpdateCard } from "@/components/MemoryUpdateCard";
 import { PauseCard } from "@/components/PauseCard";
 import { ResumeCard } from "@/components/ResumeCard";
 import { type MessageAttachment, readTextAttachment } from "@/lib/attachments";
-import { fold } from "@/protocol/fold";
-import type { CheckpointDecision, SSEEvent } from "@agentcore/contract-types";
+import {
+  fileArtifactsFromEvents,
+  fileArtifactsFromProcess,
+  mergeArtifacts,
+} from "@/lib/fileArtifacts";
+import {
+  extractAsks,
+  extractFollowups,
+  extractPendingEscalations,
+  fold,
+} from "@/protocol/fold";
+import type {
+  CheckpointDecision,
+  MessageEndPayload,
+  SSEEvent,
+} from "@agentcore/contract-types";
 import type { ProjectedTurn } from "@agentcore/protocol-conformance";
-import { Folder, Menu, SquarePen } from "lucide-react";
+import { Folder, Menu, Sparkles, SquarePen } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -139,7 +157,9 @@ function useLazyMessageCost(messageId: string): {
 
 /** One-line status derived from the projected turn — proves the fold drives the UI
  * (进度 / 工具 are read off ProjectedTurn, not re-parsed from events). A `paused` turn
- * returns null: the interactive PauseCard above the composer owns that surface. */
+ * returns null: its actionable surface owns the view instead — an `approval` pause shows the
+ * PauseCard above the composer, while 挂起即收口 (②, Phase 3) a checkpoint / plan_review pause
+ * finalizes the turn and shows the durable ResumeCard below it. */
 function summarize(p: ProjectedTurn): string | null {
   if (p.status === "paused") return null;
   if (p.runs.length > 0) {
@@ -153,12 +173,43 @@ function summarize(p: ProjectedTurn): string | null {
   return null;
 }
 
-function AssistantBubble({ turn, live }: { turn: Turn; live: boolean }) {
+function AssistantBubble({
+  turn,
+  live,
+  conversationId,
+  onFill,
+}: {
+  turn: Turn;
+  live: boolean;
+  conversationId: string | null;
+  onFill: (text: string) => void;
+}) {
   const p = useMemo(() => fold(turn.events), [turn.events]);
+  // 本回合产出文件：实时回合从原始事件配对取（captain + worker 工具一网打尽）。
+  const artifacts = useMemo(
+    () => fileArtifactsFromEvents(turn.events),
+    [turn.events],
+  );
+  // 非阻塞提问卡内容：随时间线 `ask` 标记原位呈现（旁路读原始事件，不入 ProjectedTurn）。
+  const asks = useMemo(() => extractAsks(turn.events), [turn.events]);
+  // 阻塞式求决策「待你拍板」: runId→pending escalation_id (旁路读原始事件)，喂给团队视图把待答
+  // 的 worker 升级渲染成可交互答复卡；仅实时回合 (live) 可答。
+  const pendingEscalations = useMemo(
+    () => extractPendingEscalations(turn.events),
+    [turn.events],
+  );
   const meta = summarize(p);
   const isMulti = p.runs.length > 0;
   const team = isMulti
-    ? { agents: p.agents, runs: p.runs, progress: p.progress }
+    ? {
+        agents: p.agents,
+        runs: p.runs,
+        progress: p.progress,
+        teamNotes: p.teamNotes,
+        conversationId,
+        pendingEscalations,
+        escalationsInteractive: live,
+      }
     : undefined;
   const empty =
     !isMulti && p.process.length === 0 && !p.content && !p.reasoning;
@@ -178,8 +229,14 @@ function AssistantBubble({ turn, live }: { turn: Turn; live: boolean }) {
           team={team}
           debate={p.debate}
           debateRounds={p.debateRounds}
+          asks={asks}
+          onFill={onFill}
         />
       )}
+      <FileArtifactsCard
+        artifacts={artifacts}
+        conversationId={conversationId}
+      />
       {/* The team view carries its own progress header; the one-line meta is the
           single-agent fallback. */}
       {!isMulti && meta && <div className="meta">{meta}</div>}
@@ -193,7 +250,15 @@ function AssistantBubble({ turn, live }: { turn: Turn; live: boolean }) {
 // single-agent tool turn restores its process timeline (runs.process), and the captain's
 // reply / 思考 / 引用 come off the authoritative top-level fields. A row with nothing to
 // show (a bare tool-only turn) renders nothing.
-function HistoryAssistant({ m }: { m: MessageDetail }) {
+function HistoryAssistant({
+  m,
+  conversationId,
+  onFill,
+}: {
+  m: MessageDetail;
+  conversationId: string | null;
+  onFill: (text: string) => void;
+}) {
   const { team, debate } = useMemo(() => {
     const events = m.runs?.events;
     if (!events || events.length === 0)
@@ -201,11 +266,27 @@ function HistoryAssistant({ m }: { m: MessageDetail }) {
     const p = fold(events);
     const team =
       p.runs.length > 0
-        ? { agents: p.agents, runs: p.runs, progress: p.progress }
+        ? {
+            agents: p.agents,
+            runs: p.runs,
+            progress: p.progress,
+            teamNotes: p.teamNotes,
+          }
         : undefined;
     return { team, debate: p.debate };
   }, [m.runs]);
   const process = m.runs?.process ?? undefined;
+  // 本回合产出文件：单聊读 runs.process，多 Agent 读 runs.events 日志；合并去重（另一支为空）。
+  const artifacts = useMemo(
+    () =>
+      mergeArtifacts(
+        fileArtifactsFromProcess(m.runs?.process ?? undefined),
+        fileArtifactsFromEvents(m.runs?.events ?? []),
+      ),
+    [m.runs],
+  );
+  // 非阻塞提问卡内容：仅多 Agent 历史持久化 runs.events（单聊为空 → 无卡，与桌面一致）。
+  const asks = useMemo(() => extractAsks(m.runs?.events ?? []), [m.runs]);
   // A persisted message carries no cost; lazy-fetch it from the ledger when seen.
   const { ref, total } = useLazyMessageCost(m.id);
   const cost = formatCost(total);
@@ -215,7 +296,8 @@ function HistoryAssistant({ m }: { m: MessageDetail }) {
     (!process || process.length === 0) &&
     !m.content &&
     !m.reasoning_content &&
-    m.citations.length === 0
+    m.citations.length === 0 &&
+    artifacts.length === 0
   ) {
     return null;
   }
@@ -229,6 +311,12 @@ function HistoryAssistant({ m }: { m: MessageDetail }) {
         captainContext={m.runs?.captain_context ?? undefined}
         team={team}
         debate={debate}
+        asks={asks}
+        onFill={onFill}
+      />
+      <FileArtifactsCard
+        artifacts={artifacts}
+        conversationId={conversationId}
       />
       {cost && <div className="cost">{cost}</div>}
     </div>
@@ -250,6 +338,8 @@ export function ChatPage() {
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
+  // The composer text input — focused after tapping a 下一步 chip so the user can edit/send.
+  const composerInputRef = useRef<HTMLInputElement>(null);
   // Turns that paused at a checkpoint then lost their stream (durable resume frames),
   // surfaced as ResumeCards on reopen (结构化挂起 2b).
   const [paused, setPaused] = useState<PausedTurnSummary[]>([]);
@@ -257,6 +347,9 @@ export function ChatPage() {
   // re-entrancy while a page is in flight (历史上翻分页).
   const [hasMoreBefore, setHasMoreBefore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // 「记忆已更新」卡 (③ §1.6): the latest window's offline-consolidation results, pinned at the
+  // thread tail. Only the newest window carries them, so scroll-up (loadOlder) leaves them be.
+  const [memoryUpdates, setMemoryUpdates] = useState<MemoryUpdate[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Set just before an older page is prepended: the viewport's distance-from-bottom to
   // restore afterwards, so the content under the user's eyes doesn't jump (scroll anchor).
@@ -266,7 +359,7 @@ export function ChatPage() {
 
   // Append an event to the live (last) turn — lazily opening a userText-less turn when
   // none exists yet (a reattach on reopen, whose user bubble is already in history).
-  const appendEvent = (event: SSEEvent) =>
+  const appendEvent = (event: SSEEvent) => {
     setTurns((t) => {
       if (t.length === 0) {
         return [{ id: crypto.randomUUID(), userText: null, events: [event] }];
@@ -276,6 +369,20 @@ export function ChatPage() {
       next[next.length - 1] = { ...last, events: [...last.events, event] };
       return next;
     });
+    // 挂起即收口 (②): a live stream can END at a durable checkpoint — message_end carries
+    // finish_reason=paused. The turn finalized (its in-process resolve Future was never
+    // parked), so the live PauseCard no longer applies; re-read the recovery snapshot so
+    // its durable ResumeCard surfaces once the stream settles (the single cold resume
+    // path), exactly as a reopen would. One chokepoint for every stream
+    // (send/resume/reconnect/attach), mirroring the desktop's message_end handler.
+    if (
+      conversationId &&
+      event.type === "message_end" &&
+      (event.payload as MessageEndPayload).finish_reason === "paused"
+    ) {
+      void refreshPaused(conversationId);
+    }
+  };
 
   // Load the persisted transcript for the conversation in the URL — this is what makes a
   // refresh keep the conversation (刷新不丢): the id rides the route, the history is the
@@ -291,6 +398,7 @@ export function ChatPage() {
       setSending(false);
       setPaused([]);
       setHasMoreBefore(false);
+      setMemoryUpdates([]);
       return;
     }
     setHistory(null);
@@ -299,19 +407,27 @@ export function ChatPage() {
     setSending(false);
     setPaused([]);
     setHasMoreBefore(false);
+    setMemoryUpdates([]);
     let cancelled = false;
-    // Best-effort: a turn that paused at a checkpoint then lost its stream surfaces as a
-    // resume card. Never blocks opening the conversation (it stays recoverable on reopen).
-    listPausedTurns(conversationId)
-      .then((p) => {
-        if (!cancelled) setPaused(p);
-      })
-      .catch(() => {});
+    // 统一恢复态快照（recovery 统一, 对称 §18.2）：一次属主校验读，既给出「待恢复」卡要用的挂起帧
+    // （结构化挂起 2b），又给出「是否还有 detached live run 可续看」(slice 1b)。尽力而为，永不阻塞
+    // 打开会话（失败 = 空快照，回合下次重开仍可恢复）。保留为 promise，让下方 attach 决策对齐同一
+    // 份快照（与桌面端一致）。
+    const recoveryLoaded = getRecovery(conversationId).catch(
+      (): TurnRecovery => ({ liveRunning: false, paused: [] }),
+    );
+    void recoveryLoaded.then((r) => {
+      if (!cancelled) setPaused(r.paused);
+    });
     getMessages(conversationId)
-      .then(({ messages, hasMoreBefore: more }) => {
+      .then(async ({ messages, hasMoreBefore: more, memoryUpdates }) => {
         if (cancelled) return;
         setHistory(messages);
         setHasMoreBefore(more);
+        // 「记忆已更新」卡 (③ §1.6): only the latest window carries them — pin at the thread
+        // tail. A (re)open/refresh loads them; scroll-up (loadOlder) never overwrites them,
+        // matching desktop (mobile has no live firehose, so they surface on load, not push).
+        setMemoryUpdates(memoryUpdates);
         // A draft's first message, handed off across the / → /c/:id remount: POST + stream
         // it now (the conversation exists but has no run yet, so attach would no-op).
         if (pendingFirstSend && pendingFirstSend.id === conversationId) {
@@ -322,7 +438,16 @@ export function ChatPage() {
         }
         const last = messages[messages.length - 1];
         if (last && last.role === "user") {
-          void attachOnOpen(conversationId);
+          // 单一快照决定唯一可操作面：仅当有 detached live run 且无挂起帧时才 attach 续看。挂起即
+          // 收口 (②)：到达 checkpoint 的回合已 FINALIZE（run 结束、落帧），是纯 durable——「待恢复」
+          // 卡为唯一面，不再 attach（唯一的 live∩durable 重叠是 §六-1 薄网，帧没存住、paused 本就为
+          // 空，进不到这支）。liveRunning 与 attach 端点同源活性判据 → 一次读即定面，liveRunning/
+          // paused 不会互相矛盾（源头消除竞态，而非排序绕过）。
+          const recovery = await recoveryLoaded;
+          if (cancelled) return;
+          if (recovery.liveRunning && recovery.paused.length === 0) {
+            void attachOnOpen(conversationId);
+          }
         }
       })
       .catch((e) => {
@@ -395,7 +520,23 @@ export function ChatPage() {
     () => (liveTurn ? fold(liveTurn.events) : null),
     [liveTurn],
   );
-  const pending = sending ? (liveProjection?.pendingInteraction ?? null) : null;
+  // 挂起即收口 (②, Phase 3): only an approval still resolves live in-stream — a checkpoint
+  // (ask_user) / plan_review now finalizes the turn (message_end finish_reason=paused) and is
+  // continued via the durable ResumeCard below, never an in-stream PauseCard. So the live
+  // pause surface is narrowed to approvals; a finalized checkpoint folds to the ResumeCard.
+  const livePending = sending
+    ? (liveProjection?.pendingInteraction ?? null)
+    : null;
+  const pending = livePending?.kind === "approval" ? livePending : null;
+
+  // 下一步推荐 chips: the just-finished turn's followups, surfaced above the composer (tapping
+  // fills the input — review/edit before send, mirroring desktop). Transport-only, read off the
+  // raw events (not the fold/ProjectedTurn): only a turn streamed this session carries them, and
+  // they retire the instant the next turn starts (`sending`) — a reload never re-shows stale ones.
+  const followups = useMemo(
+    () => (sending || !liveTurn ? [] : extractFollowups(liveTurn.events)),
+    [sending, liveTurn],
+  );
 
   // Stage picked files as text attachments (composer 附件). Each is read on the spot (the
   // pick is the grant); images / binaries are refused with a reason and skipped. The input
@@ -418,6 +559,13 @@ export function ChatPage() {
 
   function removeAttachment(name: string) {
     setAttachments((prev) => prev.filter((a) => a.name !== name));
+  }
+
+  // Tap a 下一步 chip → fill the composer (don't auto-send: let the user edit first, like
+  // desktop). Appends after a space when text is already typed, so a chip never clobbers it.
+  function fillFollowup(text: string) {
+    setInput((prev) => (prev.trim() ? `${prev} ${text}` : text));
+    composerInputRef.current?.focus();
   }
 
   // 直接对话: a draft (no conversationId) lazily creates a conversation on first send, then
@@ -585,6 +733,19 @@ export function ChatPage() {
     }
   }
 
+  // 挂起即收口 (②): re-read the conversation's recovery snapshot — used when a live stream
+  // ends at a checkpoint (appendEvent sees message_end finish_reason=paused) so the just-
+  // finalized turn's durable ResumeCard surfaces (it renders once `sending` flips false).
+  // Cheap + idempotent; best-effort — a recovery hiccup must never disrupt the settled turn.
+  async function refreshPaused(cid: string) {
+    try {
+      const r = await getRecovery(cid);
+      setPaused(r.paused);
+    } catch {
+      /* best-effort: never break the just-finished turn on a recovery refresh */
+    }
+  }
+
   // Continue a durably-paused turn (结构化挂起 2b). The user's decision is POSTed to the
   // resume endpoint, which claims the persisted frame (atomic — a stale double-tap 404s)
   // and drives the rest of the turn on a fresh SSE; we stream it into a userText-less turn
@@ -686,7 +847,15 @@ export function ChatPage() {
           </button>
         )}
         {history?.map((m) => {
-          if (m.role !== "user") return <HistoryAssistant key={m.id} m={m} />;
+          if (m.role !== "user")
+            return (
+              <HistoryAssistant
+                key={m.id}
+                m={m}
+                conversationId={conversationId ?? null}
+                onFill={fillFollowup}
+              />
+            );
           const atts = m.attachments ?? [];
           if (!m.content && atts.length === 0) return null;
           return (
@@ -707,21 +876,22 @@ export function ChatPage() {
             <AssistantBubble
               turn={turn}
               live={sending && i === turns.length - 1}
+              conversationId={conversationId ?? null}
+              onFill={fillFollowup}
             />
           </div>
         ))}
+        {/* 「记忆已更新」卡 (③ §1.6): offline-consolidation results pinned at the thread tail
+            — it post-dates every turn (consolidation folds a window of finished turns). The
+            card filters empty updates itself, so the common (none) case renders nothing. */}
+        <MemoryUpdateCard updates={memoryUpdates} />
       </div>
 
       {pending && conversationId && (
         <PauseCard
-          key={
-            pending.kind === "approval"
-              ? pending.approvalId
-              : pending.checkpointId
-          }
+          key={pending.approvalId}
           pending={pending}
           conversationId={conversationId}
-          runs={liveProjection?.runs ?? []}
         />
       )}
 
@@ -756,6 +926,27 @@ export function ChatPage() {
       {attachError && (
         <div className="error bar">
           <span>{attachError}</span>
+        </div>
+      )}
+
+      {followups.length > 0 && (
+        <div className="followups">
+          <div className="followups-label">
+            <Sparkles size={12} />
+            <span>下一步</span>
+          </div>
+          <div className="followups-row">
+            {followups.map((text) => (
+              <button
+                key={text}
+                type="button"
+                className="followup-chip"
+                onClick={() => fillFollowup(text)}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -797,6 +988,7 @@ export function ChatPage() {
           ＋
         </button>
         <input
+          ref={composerInputRef}
           placeholder={history === null ? "加载中…" : "说点什么…"}
           value={input}
           disabled={history === null || sending}

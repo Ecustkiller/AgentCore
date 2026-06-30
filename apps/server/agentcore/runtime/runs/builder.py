@@ -13,7 +13,7 @@ Run-id minting preserves two schemes: a no-deps batch numbers nodes
 DAG namespaces each declared id ``{prefix}_{raw}`` and rewrites every
 ``depends_on`` ref the same way, so intra-DAG edges survive.
 
-→ 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
+→ 见设计: docs/03-AI核心/执行引擎架构设计.md §八（Run 模型）
 """
 
 from __future__ import annotations

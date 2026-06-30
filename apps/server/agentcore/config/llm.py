@@ -17,6 +17,15 @@ class LlmSettings(BaseModel):
     doubao_api_key: str = ""  # 豆包 / 火山方舟（前缀 doubao；model 传接入点 ID 或模型 ID）
     doubao_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
 
+    # --- AI 协作白板 读图 (AI协作白板.md §九.4) ---
+    # 视觉 provider（Qwen-VL via DashScope OpenAI 兼容端点）。**空 key = 不启用**——`board_read`
+    # 返回干净「读图能力未配置」错误；填 key 即「插上即用」，无需改任何代码。base_url 须含版本
+    # 前缀（同各家 OpenAI 兼容文档）。内测期由运维/本机在 .env 配置（非 BYOK 逐用户）。
+    vision_api_key: str = ""
+    vision_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    vision_model: str = "qwen-vl-max"
+    vision_timeout_seconds: float = 60.0
+
     # --- 计费模式 (BYOK 内测) ---
     billing_mode: str = "byok"
 

@@ -155,14 +155,7 @@ export function ProcessTimeline({
         }
         if (node.kind === "checkpoint") {
           const cp = checkpoints.find((c) => c.id === node.checkpoint_id);
-          return cp ? (
-            <CheckpointCard
-              key={cp.id}
-              checkpoint={cp}
-              conversationId={conversationId}
-              interactive={isStreaming}
-            />
-          ) : null;
+          return cp ? <CheckpointCard key={cp.id} checkpoint={cp} /> : null;
         }
         if (node.kind === "ask") {
           const ask = nonBlockingAsks.find((a) => a.id === node.ask_id);
@@ -170,14 +163,7 @@ export function ProcessTimeline({
         }
         if (node.kind === "plan_review") {
           const pr = planReviews.find((p) => p.id === node.checkpoint_id);
-          return pr ? (
-            <PlanReviewCard
-              key={pr.id}
-              review={pr}
-              conversationId={conversationId}
-              interactive={isStreaming}
-            />
-          ) : null;
+          return pr ? <PlanReviewCard key={pr.id} review={pr} /> : null;
         }
         if (node.kind === "tool-group") {
           return (

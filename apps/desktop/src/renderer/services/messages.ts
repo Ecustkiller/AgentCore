@@ -1,5 +1,6 @@
 import { api } from "@/services/api";
 import {
+  type MemoryUpdate,
   type Message,
   checkpointsFromEvents,
   nonBlockingAsksFromEvents,
@@ -85,6 +86,27 @@ export interface MessageWindow {
   total: number;
   hasMoreBefore: boolean;
   hasMoreAfter: boolean;
+  /** 记忆更新对话内可见 (§1.6): the conversation-tail「记忆已更新」cards. Backend returns
+   * these ONLY for the latest window (the cards sit after the last message); empty on
+   * scroll-up / around pages. */
+  memoryUpdates: MemoryUpdate[];
+}
+
+/** Map a persisted `memory_updates` row (REST `MemoryUpdateView`) to the client's
+ * domain {@link MemoryUpdate} for the conversation-tail card. */
+export function toMemoryUpdate(m: Schemas["MemoryUpdateView"]): MemoryUpdate {
+  return {
+    id: m.id,
+    createdAt: m.created_at,
+    items: (m.items ?? []).map((it) => ({
+      action: it.action,
+      file: it.file,
+      section: it.section,
+      scope: it.scope,
+      content: it.content,
+      target: it.target,
+    })),
+  };
 }
 
 /** The execution (plan) id of a reloaded multi-agent turn — the first
@@ -215,11 +237,13 @@ export async function fetchMessageWindow(
   const res = await api.get<BackendMessageListResponse>(
     `/v1/conversations/${conversationId}/messages${qs ? `?${qs}` : ""}`,
   );
+  const rows = res.data as unknown as BackendMessage[];
   return {
-    messages: res.data.map((m) => toMessage(m as unknown as BackendMessage)),
+    messages: rows.map((m) => toMessage(m)),
     total: res.total,
     hasMoreBefore: res.has_more_before,
     hasMoreAfter: res.has_more_after,
+    memoryUpdates: (res.memory_updates ?? []).map(toMemoryUpdate),
   };
 }
 
@@ -293,13 +317,14 @@ export async function loadNewerMessages(conversationId: string): Promise<void> {
  */
 export async function loadLatestWindow(conversationId: string): Promise<void> {
   const win = await fetchMessageWindow(conversationId);
-  useConversationStore
-    .getState()
-    .setMessageWindow(
-      win.messages,
-      { hasMoreBefore: win.hasMoreBefore, hasMoreAfter: win.hasMoreAfter },
-      conversationId,
-    );
+  const store = useConversationStore.getState();
+  store.setMessageWindow(
+    win.messages,
+    { hasMoreBefore: win.hasMoreBefore, hasMoreAfter: win.hasMoreAfter },
+    conversationId,
+  );
+  // Latest window owns the tail cards; replace them (older/around pages return none).
+  store.setMemoryUpdates(win.memoryUpdates, conversationId);
 }
 
 /**
@@ -332,6 +357,10 @@ export async function jumpToMessage(
       { hasMoreBefore: win.hasMoreBefore, hasMoreAfter: win.hasMoreAfter },
       conversationId,
     );
+    // The tail cards belong only to the live tail; an around-window has none, so this
+    // clears any cards left from the latest view (they'd otherwise float after the
+    // historical window). They return on the next latest-window load.
+    after.setMemoryUpdates(win.memoryUpdates, conversationId);
     // Focus on the next frame so the bubbles have rendered before we scroll.
     requestAnimationFrame(() =>
       useConversationStore.getState().focusMessage(messageId),

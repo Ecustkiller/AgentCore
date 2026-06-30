@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 
 
 def record_round_start(*, round_idx: int, run_id: str, role: str) -> None:
-    """Mark a ReAct round boundary for journal fold (§18.3)."""
+    """Mark a ReAct round boundary for journal fold (§8.3)."""
     record_turn_fact(RoundBoundaryFact(round_idx=round_idx, run_id=run_id, role=role).to_fact())
 
 

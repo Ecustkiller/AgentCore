@@ -1,116 +1,52 @@
-"""Shared networking resilience for direct-egress web tools.
+"""Per-host egress circuit breaker for direct-egress web tools.
+
+The stateless networking primitives (timeouts, :func:`describe_net_error`,
+:func:`site_of`, the SSRF guard) moved to :mod:`agentcore.core.net` so HTTP
+routes (e.g. the favicon proxy) can reuse them without importing ``tools``.
+This module keeps only the *stateful* part — a best-effort, in-process per-host
+breaker — and re-exports the core primitives so existing
+``from ...web._net import ...`` call sites keep working unchanged.
 
 ``read_url`` reaches the open internet directly via httpx (unlike ``web_search``,
 which is proxied through a self-hosted SearXNG). In restricted-egress
 environments a blocked host wastes the full timeout on *every* retry across
-ReAct rounds, and httpx's ``ConnectTimeout`` stringifies to ``""`` — so the
-failure is both slow and invisible in logs.
-
-This module is the shared remedy, wired in at the common choke point
-(``read_url._safe_request``):
-
-- :func:`describe_net_error` — turn opaque httpx errors into an honest,
-  model-facing reason (so logs show the real cause, not ``error: ""``).
-- a per-host **circuit breaker** (:func:`circuit_remaining` / :func:`note_failure`
-  / :func:`note_success`) — after repeated transport failures a host is
-  short-circuited for a cooldown, so the agent fast-fails instead of stalling.
-- :func:`web_timeout` — a shared ``httpx.Timeout`` with a short connect deadline
-  (blocked hosts fail fast) and a longer read window (slow sites still succeed).
+ReAct rounds; the breaker short-circuits a host after repeated transport
+failures so the agent fast-fails (raising :class:`EgressError`) instead of
+stalling, then auto-recovers after a cooldown.
 """
 
 from __future__ import annotations
 
-import ssl
 import time
 from dataclasses import dataclass
-from urllib.parse import urlparse
 
-import httpx
+from agentcore.core.net import (
+    SEARCH_TIMEOUT,
+    WEB_CONNECT_TIMEOUT,
+    WEB_READ_TIMEOUT,
+    EgressError,
+    describe_net_error,
+    site_of,
+    web_timeout,
+)
 
-# Overall search read budget. Kept ≥ SearXNG's own max_request_timeout (15s, see
-# deploy/searxng/settings.yml): a search fans out to several China engines and can
-# legitimately take >10s under load, so a tighter client deadline would abandon
-# results SearXNG would still return. Connect still uses the short
-# WEB_CONNECT_TIMEOUT, so a genuinely down host fast-fails into the breaker.
-SEARCH_TIMEOUT = 16.0
-WEB_CONNECT_TIMEOUT = 5.0  # connect deadline: blocked hosts fail fast
-WEB_READ_TIMEOUT = 15.0  # read window for slow-but-reachable sites
+__all__ = [
+    "SEARCH_TIMEOUT",
+    "WEB_CONNECT_TIMEOUT",
+    "WEB_READ_TIMEOUT",
+    "WEB_HOST_FAIL_THRESHOLD",
+    "WEB_HOST_CIRCUIT_COOLDOWN",
+    "EgressError",
+    "circuit_remaining",
+    "describe_net_error",
+    "note_failure",
+    "note_success",
+    "site_of",
+    "web_timeout",
+]
+
 WEB_HOST_FAIL_THRESHOLD = 3  # consecutive transport failures before tripping
 WEB_HOST_CIRCUIT_COOLDOWN = 120.0  # how long a tripped host stays short-circuited
-
-
-class EgressError(Exception):
-    """Raised when the per-host breaker short-circuits an outbound request.
-
-    Its ``str()`` is the honest, model-facing reason, so callers can surface it
-    directly without re-wrapping.
-    """
-
-
-def web_timeout(read: float = WEB_READ_TIMEOUT) -> httpx.Timeout:
-    """Timeout with a short connect deadline and a configurable read window."""
-    return httpx.Timeout(read, connect=WEB_CONNECT_TIMEOUT)
-
-
-def site_of(url: str) -> str:
-    """Display hostname for a URL: lowercased, sans a leading ``www.``.
-
-    Used to label source/citation cards. Returns ``""`` when the URL has no
-    parseable host (the card then falls back to the title/url).
-    """
-    try:
-        host = (urlparse(url).hostname or "").lower()
-    except ValueError:
-        return ""
-    return host[4:] if host.startswith("www.") else host
-
-
-def _is_ssl_error(e: BaseException) -> bool:
-    """True when an exception (or its cause chain) is a TLS/cert-verification failure.
-
-    httpx wraps the handshake's ``ssl.SSLError`` in an ``httpx.ConnectError`` whose own
-    ``str()`` is often empty, so the generic「无法建立连接」branch would mislabel a broken
-    cert chain as「出网受限」— a real, high-frequency case for China gov/court sites (see
-    实测案例复盘.md 案例 1). Walk the ``__cause__``/``__context__`` chain for an
-    ``ssl.SSLError`` (with a string fallback for the verify-failed marker).
-    """
-    seen: set[int] = set()
-    cur: BaseException | None = e
-    while cur is not None and id(cur) not in seen:
-        seen.add(id(cur))
-        if isinstance(cur, ssl.SSLError):
-            return True
-        cur = cur.__cause__ or cur.__context__
-    return "CERTIFICATE_VERIFY_FAILED" in str(e)
-
-
-def describe_net_error(e: BaseException) -> str:
-    """Readable reason for a failed outbound request.
-
-    httpx timeout/connect errors frequently stringify to ``""``; surface the
-    failure type plus a plain-language hint so both the log and the model see a
-    real cause instead of an empty string.
-    """
-    if isinstance(e, EgressError):
-        return str(e)
-    if _is_ssl_error(e):
-        return (
-            "SSL 证书校验失败（站点证书链不被信任，常见于国内部分政务/法院站点）；"
-            "改用 web_search 摘要或换其它来源，勿对同一站点反复重试"
-        )
-    if isinstance(e, httpx.ConnectTimeout):
-        return "连接超时（无法连上该站点，可能出网受限或站点不可达）"
-    if isinstance(e, httpx.ReadTimeout):
-        return "读取超时（站点响应过慢）"
-    if isinstance(e, (httpx.ConnectError, httpx.NetworkError)):
-        detail = str(e).strip()
-        return "无法建立连接（出网受限或站点不可达）" + (f": {detail}" if detail else "")
-    if isinstance(e, httpx.TimeoutException):
-        return "请求超时"
-    if isinstance(e, httpx.HTTPStatusError):
-        return f"HTTP {e.response.status_code}"
-    detail = str(e).strip()
-    return f"{type(e).__name__}" + (f": {detail}" if detail else "")
 
 
 @dataclass

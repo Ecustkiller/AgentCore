@@ -32,6 +32,11 @@ ROLE_CAPTAIN = "captain"
 ROLE_MEMBER = "member"
 ROLE_TITLE = "title"
 ROLE_MEMORY = "memory"
+# ``vision`` tags a board_read 读图 sub-call (AI协作白板.md §九.4): an in-turn tool-layer
+# call to a SEPARATE vision model (qwen-vl ≠ the run's DeepSeek). It is NOT a Run/Agent —
+# it gets its own priced ledger row (one model = one row, 同跨档不复价) so its spend shows
+# as its own line on the team payroll + the by-role dashboard.
+ROLE_VISION = "vision"
 
 # The four money keys carried in cost_events.cost (integer nano-USD). The Cost
 # dataclass also exposes ``currency``, which rides in its own column instead.
@@ -165,6 +170,40 @@ def background_run_cost(role: str, model: str, usage: TokenUsage) -> RunCost:
     )
 
 
+def vision_run_cost(
+    model: str,
+    usage: TokenUsage,
+    *,
+    parent_run_id: str | None,
+    duration_ms: int = 0,
+) -> RunCost:
+    """A ledger row for a ``board_read`` vision sub-call (AI协作白板.md §九.4 Gap ②).
+
+    A tool-layer sub-call to a SEPARATE vision model (qwen-vl ≠ the run's DeepSeek), so it
+    cannot fold into the run's usage — that would misprice it at the run's tier. Priced
+    here exactly once via the one ``calculate_cost`` (不变量 #2) under the dedicated
+    ``vision`` role, then routed into the turn's ``cost_runs`` via ``ToolContext.cost_sink``
+    so it lands on the turn's ``message_id`` (in-turn spend, UNLIKE ``background_run_cost``'s
+    off-turn NULL). ``parent_run_id`` is the calling captain's run id, so the spend nests
+    under the captain in the turn's run tree; ``rounds`` is 1 (one vision call). A unique
+    ``vis_`` run id keeps the ledger's idempotent upsert-by-run_id honest.
+    """
+    body, total, currency = _split_cost(asdict(calculate_cost(model, usage)))
+    return RunCost(
+        run_id=f"vis_{new_id()}",
+        parent_run_id=parent_run_id,
+        agent_id=None,
+        role=ROLE_VISION,
+        model=model,
+        tokens=usage.as_dict(),
+        cost=body,
+        cost_total_nano=total,
+        currency=currency,
+        rounds=1,
+        duration_ms=duration_ms,
+    )
+
+
 def aggregate_cost(cost_runs: Sequence[dict]) -> dict[str, int | str]:
     """Sum per-run cost rows into the turn total carried on ``message_end.cost``.
 
@@ -203,6 +242,18 @@ class WorkerResultAccumulator:
         self.usage: dict[str, int] = {key: 0 for key in _USAGE_KEYS}
         self.run_ledger: list[RunCost] = []
         self.citations: list[dict[str, Any]] = []
+        # 协作质量 tally (学·度量, docs/05-平台与运维/管理员后台.md §四): per-turn orchestration
+        # signals rolled up the SAME parent/child path as usage (merge() below), so a nested
+        # lead's sub-team folds in for free. ``boundary_yields`` = 受监督边界让出次数 (首计划存活:
+        # a supervised bind/scope boundary handed control back to the captain mid-plan);
+        # ``scope_signals`` = escalate kind=scope count (漂移); ``escalations`` = total
+        # worker→captain escalations. The revise count (返工 的另一半) is read off the revise
+        # tool's run_ledger, not here.
+        self.collab: dict[str, int] = {
+            "boundary_yields": 0,
+            "scope_signals": 0,
+            "escalations": 0,
+        }
 
     def add_usage(self, usage: Mapping[str, int]) -> None:
         """Fold one run's (or sub-team's) short-key token usage into the total."""
@@ -247,3 +298,5 @@ class WorkerResultAccumulator:
         self.add_usage(other.usage)
         self.run_ledger.extend(other.run_ledger)
         merge_citations(self.citations, other.citations)
+        for key in self.collab:
+            self.collab[key] += other.collab.get(key, 0)

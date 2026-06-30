@@ -74,7 +74,7 @@ function PendingEscalation({
     styleOptions: [],
   };
   const ans = useAskAnswer(content);
-  const tone = interactiveCheckpointTone.warning;
+  const tone = interactiveCheckpointTone.primary;
   const [submitting, setSubmitting] = useState<
     EscalationUserDecision["kind"] | null
   >(null);
@@ -95,13 +95,13 @@ function PendingEscalation({
   };
 
   return (
-    <DecisionCard tone="warning" animate>
+    <DecisionCard tone="primary" animate>
       <div className="flex items-start gap-2">
-        <DecisionCardIcon tone="warning">
+        <DecisionCardIcon tone="primary">
           <HelpCircle size={16} />
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-warning">{role} · 请你拍板</p>
+          <p className="text-xs font-medium text-primary">{role} · 请你拍板</p>
           <p className="mt-0.5 whitespace-pre-wrap text-sm text-foreground">
             {escalation.question}
           </p>
@@ -295,7 +295,7 @@ export function EscalationCards({
   return (
     <div className="mt-2 space-y-2">
       {pendingCount > 0 && (
-        <p className="text-xs font-medium text-warning">
+        <p className="text-xs font-medium text-primary">
           团队有 {pendingCount} 项待你拍板
         </p>
       )}

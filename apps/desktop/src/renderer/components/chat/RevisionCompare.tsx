@@ -26,7 +26,7 @@ import { useState } from "react";
  * Pure projection: reads the same per-message {@link Execution} the graph does
  * (revisions are synthesized into it from their `run_started` frames), so live and
  * replayed turns render identically with no second source of truth — exactly like
- * {@link DebateBody} for debates.
+ * the 统一辩论室 ({@link import("./debate/DebateStream").DebateStream}) for debates.
  */
 export function RevisionCompare({
   execution,

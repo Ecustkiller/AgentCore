@@ -25,7 +25,8 @@ from agentcore.runtime.context import (
     SectionOrder,
     build_workspace_overview,
 )
-from agentcore.runtime.costing import aggregate_cost, captain_run_cost_from_state
+from agentcore.runtime.costing import RunCost, aggregate_cost, captain_run_cost_from_state
+from agentcore.runtime.debate import DebateSeed
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
@@ -69,9 +70,12 @@ from agentcore.runtime.suspension import (
 from agentcore.tools.builtin import (
     build_worker_registry,
     file_mutation_tool_names,
+    per_call_tool_names,
 )
 from agentcore.tools.builtin.board_ops import BoardOpsTool
+from agentcore.tools.builtin.board_read import BoardReadTool
 from agentcore.tools.protocol import ToolContext
+from agentcore.vision import build_vision_reader
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
@@ -96,6 +100,7 @@ async def run_chat_pipeline(
     session_loader: SessionLoader | None = None,
     suspension_saver: SuspensionSaver | None = None,
     suspension_deleter: SuspensionDeleter | None = None,
+    debate_seed: dict | None = None,
 ) -> dict:
     """Run the full chat pipeline for a single user message.
 
@@ -113,7 +118,7 @@ async def run_chat_pipeline(
 
     ``folder_id`` is the conversation's project (None for a bare/global chat): it selects
     the memory SCOPE so a project conversation also gets that project's memory layer
-    injected (global + project), and ``consult_memory`` searches both (记忆作用域与画像分层 §三).
+    injected (global + project), and ``consult_memory`` searches both (Agent记忆与知识系统 §二).
 
     ``board_id`` marks this turn as a 白板会话 (AI协作白板.md §六 M2): when set, the CEO
     gains the ``board_ops`` tool + a :class:`BoardChannel` bound to that board, so it can
@@ -139,7 +144,7 @@ async def run_chat_pipeline(
     # workers hang under (see DelegateTool._plan_event).
     captain_run_id = new_id()
 
-    # 执行级事件溯源 (§18.3): the turn's single ordered fact log. Bound to the ambient
+    # 执行级事件溯源 (§8.3): the turn's single ordered fact log. Bound to the ambient
     # contextvar BEFORE any sink.emit / captain run so the engine's execution facts
     # (round_boundary / llm_call / note / message_final) AND the sink's display facts
     # (run_*/tool_use_*/interaction) accumulate here in ONE order — copied into each
@@ -163,7 +168,11 @@ async def run_chat_pipeline(
         # (stable prefix) into one <rules> body. Master switch off ⇒ "".
         memory_store = default_memory_store()
         memory_markdown = await load_injected_memory(
-            memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
+            memory_store,
+            user_id,
+            folder_id=folder_id,
+            enabled=memory_enabled,
+            file_char_cap=settings.memory_injected_file_char_cap,
         )
         # 记忆主题目录 (记忆文件夹化 §六 / 作用域 §5.2): the on-demand TOPIC notes (主题/<slug>.md)
         # are never injected wholesale — only their NAMES (merged across global + project)
@@ -214,6 +223,13 @@ async def run_chat_pipeline(
             else None
         )
 
+        # AI 协作白板 §九.4 Gap ②: the turn-level vision cost sink. ``board_read`` appends a
+        # priced ``role=vision`` ledger row here per 读图 sub-call. Shared by REFERENCE across
+        # every derived run context (executor uses ``replace``, which copies the list ref), so
+        # a vision call from any run — captain or a delegated worker — lands in this one list,
+        # collected into ``cost_runs`` after the turn. Empty unless a board_read actually billed.
+        vision_cost_sink: list[RunCost] = []
+
         # The workspace backend is resolved per conversation by the caller
         # (folder space vs. its own conversation space) and injected here. The
         # engine and tools never see a Path — they only touch ``context.backend``.
@@ -225,6 +241,10 @@ async def run_chat_pipeline(
             user_id=user_id,
             conversation_id=conversation_id,
             board_channel=board_channel,
+            # §九.4: vision provider (QwenVL) — set VISION_API_KEY to enable; None ⇒
+            # board_read returns a clean「读图能力未配置」error (「插上即用」).
+            vision_reader=build_vision_reader(),
+            cost_sink=vision_cost_sink,
         )
 
         # --- Phase 2: Assemble the CEO chat agent's toolset (coordinator) ---
@@ -257,6 +277,7 @@ async def run_chat_pipeline(
                 registry=default_interaction_registry(),
                 timeout_seconds=settings.approval_timeout_seconds,
                 file_op_tools=file_mutation_tool_names(),
+                per_call_tools=per_call_tool_names(),
             )
             if (settings.approval_gate_enabled and approvals_enabled)
             else None
@@ -302,14 +323,18 @@ async def run_chat_pipeline(
             skill_registry=skill_registry,
             memory_enabled=memory_enabled,
             folder_id=folder_id,
+            # 结构化补轮·B：前端从收场卡发起续辩时直传的上一场种子（宽容解析；无实质内容→None）。
+            debate_seed=DebateSeed.from_payload(debate_seed),
         )
 
-        # AI 协作白板 (§六 M2): in a 白板会话, hand the CEO the ``board_ops`` tool so it can
-        # draw on the user's open canvas. Registered AFTER the coordinator toolset is
-        # assembled and BEFORE ``ceo_tool_names`` is read, so it joins the LLM's function
-        # catalog this turn. Only here (board-bound runs) — every other chat never sees it.
+        # AI 协作白板: in a 白板会话, hand the CEO the board tools so it can draw on
+        # (``board_ops``, §六 M2) and read (``board_read``, §九) the user's open canvas.
+        # Registered AFTER the coordinator toolset is assembled and BEFORE ``ceo_tool_names``
+        # is read, so they join the LLM's function catalog this turn. Only here (board-bound
+        # runs) — every other chat never sees them.
         if board_channel is not None:
             chat_tools.register(BoardOpsTool())
+            chat_tools.register(BoardReadTool())
 
         # The entry chat agent gets the SLIM CEO core + the always-on 能力目录 (提示词
         # 瘦身 P2) + inline citation guidance. The directory lists only the skills whose
@@ -341,6 +366,10 @@ async def run_chat_pipeline(
             .add("ceo_prompt", chat_system_prompt, SectionOrder.BASE)
             .add("workspace_context", workspace_overview, SectionOrder.WORKSPACE_OVERVIEW)
             .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
+            # COST-004 (仅观测起步): 埋本回合 CEO 系统提示的逐段 chars + 是否越软闸, 攒据用、零行为
+            # 改动。此处是「易变尾 (workspace/attachment)」与稳定前缀 (ceo_prompt) 同框的 choke
+            # point, 正是未来「仅裁易变尾」软闸的作用点 (项目审计-成本性能专项 §九)。
+            .observe(scope="ceo_turn", soft_cap=settings.prompt_budget_char_soft_cap)
             .render()
         )
 
@@ -349,7 +378,7 @@ async def run_chat_pipeline(
 
         profile = profiles.get("chat")
 
-        # 执行级事件溯源 (§18.3): the turn's HEAD fact — the verbatim CEO system prompt
+        # 执行级事件溯源 (§8.3): the turn's HEAD fact — the verbatim CEO system prompt
         # (dynamic: date / skills / attachments, so captured not re-rendered), the user
         # message, the model profile, and how many prior messages were folded in. This
         # is the window fold's anchor; recorded before the captain runs so it is the
@@ -407,11 +436,16 @@ async def run_chat_pipeline(
             # back even on error — _persist_turn_result writes cost_runs independently
             # of whether any assistant text landed. Skip when nothing metered (no
             # usage → no row), so a pre-LLM crash stays free.
-            cost_runs = (
-                [asdict(captain_run_cost_from_state(captain_run_id, captain_state))]
-                if captain_state.usage
-                else []
-            )
+            cost_runs = [
+                *(
+                    [asdict(captain_run_cost_from_state(captain_run_id, captain_state))]
+                    if captain_state.usage
+                    else []
+                ),
+                # A board_read 读图 sub-call may have billed before the captain died
+                # (§九.4 Gap ②): carry those vision rows so the spend isn't lost on error.
+                *(asdict(r) for r in vision_cost_sink),
+            ]
             return {
                 "message_id": message_id,
                 "content": "",
@@ -465,6 +499,9 @@ async def run_chat_pipeline(
             # 辩论：主持人一行 + 每个辩手每轮一行（含 continue_run 续写），各自 parented
             # 到上级（辩手→主持人、主持人→captain），与 delegate 同形折账。
             *(asdict(r) for r in debate_tool.run_ledger),
+            # AI 协作白板 读图: each board_read 视觉子调用 is its own role=vision row,
+            # parented to the calling run (§九.4 Gap ②). Empty unless a read billed.
+            *(asdict(r) for r in vision_cost_sink),
         ]
         turn_cost = aggregate_cost(cost_runs)
 
@@ -524,6 +561,13 @@ async def run_chat_pipeline(
             "citations": citations,
             "cost_runs": cost_runs,
             "journal_entries": journal_entries,
+            # 协作质量 (学·度量 §2.5): turn-level orchestration signals for turn_metrics +
+            # chat.turn_complete — boundary_yields / scope_signals / escalations off the
+            # delegate accumulator, plus the revise count (定向唤回 次数 = 返工 的另一半).
+            "collab": {
+                **delegate_tool.collab,
+                "revises": len(revise_tool.run_ledger),
+            },
         }
 
     except Exception as e:
@@ -546,6 +590,12 @@ async def run_chat_pipeline(
     finally:
         current_fact_log.reset(fact_log_token)
         turn_history.reset(history_token)
-        sink.close()
+        # Do NOT close the sink here. The pipeline is a *producer* on a sink it did not
+        # create; closing it would silently drop the post-turn tail (title_generated /
+        # followups_generated), which persist_turn_result emits AFTER this returns —
+        # emit() is a no-op once closed (sink.py). The sink's OWNER (the coordinator that
+        # created it: stream_chat / regenerate_chat / resume_chat / handoff / sidecar)
+        # closes it, so the tail reaches the client. (Title survived the old early-close
+        # via its DB write; transport-only followups vanished — the 「下一步推荐」 bug.)
         with contextlib.suppress(Exception):
             await llm.close()

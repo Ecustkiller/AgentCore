@@ -13,6 +13,15 @@ from pathlib import Path
 import httpx
 import pytest
 
+from agentcore.core.net import (
+    URLBlock as _URLBlock,
+)
+from agentcore.core.net import (
+    classify_url as _classify_url,
+)
+from agentcore.core.net import (
+    ip_is_safe as _ip_is_safe,
+)
 from agentcore.runtime.citations import annotate_tool_citations, merge_citations
 from agentcore.tools.builtin.web import _net
 from agentcore.tools.builtin.web import read_url as read_url_mod
@@ -29,12 +38,9 @@ from agentcore.tools.builtin.web._net import (
 )
 from agentcore.tools.builtin.web.read_url import (
     ReadUrlTool,
-    _classify_url,
     _extract_page,
     _extract_text,
-    _ip_is_safe,
     _make_snippet,
-    _URLBlock,
 )
 from agentcore.tools.builtin.web.search import WebSearchTool
 from agentcore.tools.builtin.web.search_backend import (

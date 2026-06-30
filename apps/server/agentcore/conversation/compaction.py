@@ -1,4 +1,4 @@
-"""Long-conversation compaction (执行引擎架构设计 §十三 长对话压缩).
+"""Long-conversation compaction (执行引擎架构设计 §三 长对话压缩).
 
 A long chat must not feed its WHOLE transcript to the LLM every turn: even under
 DeepSeek's 1M window (which never overflows) that invites context rot, and a lapsed

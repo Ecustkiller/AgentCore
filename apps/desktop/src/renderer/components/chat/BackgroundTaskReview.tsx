@@ -192,7 +192,7 @@ export function BackgroundTaskReview({
         <span className="text-primary">~{counts.modified}</span>
         <span className="text-destructive">-{counts.deleted}</span>
         {conflicts.length > 0 ? (
-          <span className="flex items-center gap-1 text-warning">
+          <span className="flex items-center gap-1 text-destructive">
             <AlertTriangle size={12} />
             {conflicts.length} 个与本地改动冲突，需你选择
           </span>
@@ -212,7 +212,7 @@ export function BackgroundTaskReview({
             return (
               <li
                 key={row.change.path}
-                className="rounded-lg border border-warning/40 bg-warning/5"
+                className="rounded-lg border border-destructive/40 bg-destructive/5"
               >
                 <div className="flex items-center gap-1.5 px-2 py-1.5">
                   <IconButton
@@ -246,7 +246,7 @@ export function BackgroundTaskReview({
                   />
                 </div>
                 {open && canPreview && (
-                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-warning/30 px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground">
+                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words border-t border-destructive/30 px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground">
                     {row.change.content}
                   </pre>
                 )}
@@ -257,7 +257,7 @@ export function BackgroundTaskReview({
       )}
 
       {forced > 0 && (
-        <p className="mt-2 flex items-center gap-1 text-xs text-warning">
+        <p className="mt-2 flex items-center gap-1 text-xs text-destructive">
           <AlertTriangle size={12} />
           将强制覆盖 {forced} 个有本地改动的文件
         </p>
@@ -337,7 +337,7 @@ function DecisionToggle({
 }) {
   const cls = active
     ? danger
-      ? "border-warning bg-warning/10 text-warning"
+      ? "border-destructive bg-destructive/10 text-destructive"
       : "border-primary bg-primary/10 text-primary"
     : "border-transparent text-muted-foreground hover:bg-accent";
   return (

@@ -40,6 +40,11 @@ class EventType(StrEnum):
     # canvas and report back. Like WORKSPACE_OP_REQUIRED it is NOT journaled (it is a
     # request/response exchange, not turn content), so it stays out of the journal sets.
     BOARD_OP_REQUIRED = "board_op_required"
+    # AI 协作白板 (AI协作白板.md §九): transport-only client-tool request — the server asks the
+    # bound desktop to rasterize a subset of board elements (手绘 / 截图) to a PNG and report it
+    # back so the vision reader can read it. Like BOARD_OP_REQUIRED it is NOT journaled (a
+    # request/response exchange, not turn content), so it stays out of the journal sets.
+    BOARD_READ_REQUIRED = "board_read_required"
     HANDOFF_SNAPSHOT_DONE = "handoff_snapshot_done"
     HANDOFF_JOB_STARTED = "handoff_job_started"
     HANDOFF_APPLY_DONE = "handoff_apply_done"
@@ -57,6 +62,11 @@ class EventType(StrEnum):
     RUN_ESCALATION = "run_escalation"
     ESCALATION_REQUIRED = "escalation_required"
     ESCALATION_RESOLVED = "escalation_resolved"
+    # 团队便签墙 (§2.2 通): a worker pinned a short note (我定了 X / 提个醒 Y) to the batch
+    # note wall for its concurrent siblings. Journaled (it rides a delegate turn alongside
+    # RUN_PLAN, a surface type), so the team-notes panel replays on reload; folded onto the
+    # ProjectedTurn so both ends render it (conformance-visible, unlike transport-only board ops).
+    TEAM_NOTE_POSTED = "team_note_posted"
     DEBATE_RESULT = "debate_result"
     DEBATE_ROUND_STARTED = "debate_round_started"
     DEBATE_ROUND = "debate_round"
@@ -71,6 +81,12 @@ class FinishReason(StrEnum):
     UNPRODUCTIVE = "unproductive"
     ERROR = "error"
     CANCELLED = "cancelled"
+    # 挂起即收口 (②): the turn ended NOT because it finished, but because it hit a durable
+    # checkpoint (ask_user blocking / plan_review) and finalized in place — its frame +
+    # journal are persisted and it awaits ``POST .../resume``. Distinct from END_TURN (the
+    # turn is NOT done) and CANCELLED (no error / no abort): the client renders the stream's
+    # close as the single resume card.
+    PAUSED = "paused"
 
 
 @dataclass

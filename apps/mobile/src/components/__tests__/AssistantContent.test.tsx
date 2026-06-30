@@ -1,0 +1,160 @@
+// @vitest-environment jsdom
+/**
+ * Render tests for the mobile assistant message renderer (前端技术与架构 §七 富渲染, AUD-012).
+ *
+ * AssistantContent is the shared shape consumer for both live folds and history replay. These
+ * pin its composition logic — which sub-view it picks per props — with the heavy leaf children
+ * (Markdown / DebateView / TeamView) stubbed, so the test targets AssistantContent's own
+ * branching (process-timeline vs team/reasoning/content, debate overlay, the inline tool step,
+ * citations, and the 收到的上下文 panel that hides the verbatim system prompt per 决策②), not
+ * those leaves. The block comment keeps the @vitest-environment directive file-leading.
+ */
+
+import { AssistantContent } from "@/components/AssistantView";
+import type {
+  Citation,
+  ContextBlockWire,
+  DebateResultPayload,
+  ProcessStep,
+} from "@agentcore/contract-types";
+import type { ProjectedRun } from "@agentcore/protocol-conformance";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/components/Markdown", () => ({
+  Markdown: ({ content }: { content: string }) => (
+    <div data-testid="md">{content}</div>
+  ),
+}));
+vi.mock("@/components/DebateView", () => ({
+  DebateView: () => <div data-testid="debate" />,
+  LiveDebateNarrative: () => <div data-testid="live-debate" />,
+}));
+vi.mock("@/components/TeamView", () => ({
+  TeamView: () => <div data-testid="team" />,
+}));
+
+afterEach(cleanup);
+
+function ctxBlock(
+  p: Partial<ContextBlockWire> & { channel: ContextBlockWire["channel"] },
+): ContextBlockWire {
+  return {
+    heading: "",
+    body: "",
+    chars: 0,
+    truncated: false,
+    source_role: "",
+    source_run_id: "",
+    fidelity: "",
+    files: [],
+    ...p,
+  };
+}
+
+function makeRun(p: Partial<ProjectedRun> & { id: string }): ProjectedRun {
+  return {
+    agentId: "a1",
+    task: "task",
+    status: "completed",
+    dependsOn: [],
+    outputSummary: null,
+    durationMs: null,
+    error: null,
+    parentRunId: null,
+    kind: "agent",
+    role: null,
+    model: null,
+    usage: null,
+    cost: null,
+    stance: null,
+    group: null,
+    round: 0,
+    revisionOf: null,
+    revision: 0,
+    revised: null,
+    checkpoint: null,
+    receivedContext: [],
+    escalations: [],
+    ...p,
+  };
+}
+
+describe("AssistantContent", () => {
+  it("renders a pure-chat turn as Markdown, with no team/debate overlay", () => {
+    render(<AssistantContent content="你好世界" />);
+    expect(screen.getByTestId("md").textContent).toBe("你好世界");
+    expect(screen.queryByTestId("team")).toBeNull();
+    expect(screen.queryByTestId("debate")).toBeNull();
+  });
+
+  it("renders citations as a numbered 来源 list", () => {
+    const citations: Citation[] = [
+      { url: "https://a.com/post", title: "A 标题", site: "a.com" },
+    ];
+    render(<AssistantContent content="" citations={citations} />);
+    expect(screen.getByText("来源")).toBeTruthy();
+    expect(screen.getByText("A 标题")).toBeTruthy();
+    expect(screen.getByText("a.com")).toBeTruthy();
+  });
+
+  it("shows 收到的上下文 but hides the verbatim system prompt (决策②)", () => {
+    render(
+      <AssistantContent
+        content=""
+        captainContext={[
+          ctxBlock({ channel: "system", body: "SECRET SYSTEM PROMPT" }),
+          ctxBlock({
+            channel: "request",
+            heading: "登录页",
+            body: "做个登录页",
+          }),
+        ]}
+      />,
+    );
+    // The system block is filtered out, so only 1 段 is counted and shown.
+    expect(screen.getByText("收到的上下文 · 1 段")).toBeTruthy();
+    expect(screen.getByText("原始请求")).toBeTruthy();
+    expect(screen.getByText("做个登录页")).toBeTruthy();
+    expect(screen.queryByText("SECRET SYSTEM PROMPT")).toBeNull();
+  });
+
+  it("overlays the debate product when present", () => {
+    render(
+      <AssistantContent content="ignored" debate={{} as DebateResultPayload} />,
+    );
+    expect(screen.getByTestId("debate")).toBeTruthy();
+  });
+
+  it("renders an inline tool step with its 中文 label, detail and status", () => {
+    const process: ProcessStep[] = [
+      {
+        kind: "tool",
+        id: "t1",
+        tool_name: "web_search",
+        arguments: { query: "openai 新闻" },
+        result: null,
+        status: "success",
+      },
+    ];
+    render(<AssistantContent content="" process={process} />);
+    expect(screen.getByText("搜索网页")).toBeTruthy();
+    expect(screen.getByText("openai 新闻")).toBeTruthy();
+    expect(screen.getByText("完成")).toBeTruthy();
+  });
+
+  it("renders the team graph for a multi-agent turn", () => {
+    render(
+      <AssistantContent
+        content=""
+        process={[]}
+        team={{
+          agents: [],
+          runs: [makeRun({ id: "r1" })],
+          progress: { completed: 1, total: 1 },
+        }}
+      />,
+    );
+    expect(screen.getByTestId("team")).toBeTruthy();
+  });
+});

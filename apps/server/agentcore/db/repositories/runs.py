@@ -4,7 +4,7 @@ turns, the turn journal (唯一事实源) and per-turn metrics (观测看板).""
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import case, delete, distinct, func, select, update
+from sqlalchemy import and_, case, delete, distinct, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -263,7 +263,7 @@ class PausedTurnRepository:
         ``updated_at`` advances on re-pause (resume → pause again), so an actively
         re-paused turn stays alive while one abandoned past the window is pruned. Also
         clears each pruned turn's ``turn_journal`` rows — the journal-so-far is stored
-        there (唯一事实源, §18.3) and would otherwise orphan, since an abandoned pause
+        there (唯一事实源, §8.3) and would otherwise orphan, since an abandoned pause
         never produces a message to project onto. Batched (one transaction) so a sweep
         never holds one huge lock; returns the number of paused turns removed.
         """
@@ -291,7 +291,7 @@ class PausedTurnRepository:
 
 
 class TurnJournalRepository:
-    """The §18.6 ``Journal`` port's Postgres impl — the唯一事实源 store (§18.3).
+    """The §8.6 ``Journal`` port's Postgres impl — the唯一事实源 store (§8.3).
 
     A turn's execution facts are stored append-only, ordered by ``seq`` within a
     ``turn_id`` (== the assistant ``message_id``). :meth:`record` replaces the turn's
@@ -421,12 +421,18 @@ class TurnMetricsRepository:
         workers: int,
         input_tokens: int,
         output_tokens: int,
+        boundary_yields: int = 0,
+        scope_signals: int = 0,
+        revises: int = 0,
+        escalations: int = 0,
     ) -> None:
         """Append one telemetry row for a completed turn (one commit).
 
         The caller (conversation service) supplies the already-computed turn
         outcome — this layer stays pure storage. A row id is minted here (Core
-        bulk paths skip the ORM default, but this is a single ORM ``add``).
+        bulk paths skip the ORM default, but this is a single ORM ``add``). The
+        协作质量 counters (boundary_yields / scope_signals / revises / escalations,
+        学·度量 §2.5) default 0 so a plain single-agent turn writes zeros.
         """
         self._session.add(
             TurnMetricsRow(
@@ -446,6 +452,10 @@ class TurnMetricsRepository:
                 workers=workers,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                boundary_yields=boundary_yields,
+                scope_signals=scope_signals,
+                revises=revises,
+                escalations=escalations,
             )
         )
         await self._session.commit()
@@ -462,6 +472,13 @@ class TurnMetricsRepository:
         """
         err = case((TurnMetricsRow.status == "error", 1), else_=0)
         dele = case((TurnMetricsRow.delegated.is_(True), 1), else_=0)
+        # 协作质量 (学·度量 §2.5): 首计划存活 = delegated turns whose first plan ran without a
+        # supervised boundary handing control back (boundary_yields == 0). The caller derives
+        # 存活率 = survived / delegated; the raw counters back 返工/漂移/escalation rates.
+        survived = case(
+            (and_(TurnMetricsRow.delegated.is_(True), TurnMetricsRow.boundary_yields == 0), 1),
+            else_=0,
+        )
         stmt = select(
             func.count().label("turns"),
             func.coalesce(func.sum(err), 0).label("errors"),
@@ -473,6 +490,11 @@ class TurnMetricsRepository:
             func.coalesce(func.avg(TurnMetricsRow.rounds), 0).label("avg_rounds"),
             func.coalesce(func.sum(TurnMetricsRow.input_tokens), 0).label("input_tokens"),
             func.coalesce(func.sum(TurnMetricsRow.output_tokens), 0).label("output_tokens"),
+            func.coalesce(func.sum(survived), 0).label("first_plan_survived"),
+            func.coalesce(func.sum(TurnMetricsRow.boundary_yields), 0).label("boundary_yields"),
+            func.coalesce(func.sum(TurnMetricsRow.scope_signals), 0).label("scope_signals"),
+            func.coalesce(func.sum(TurnMetricsRow.revises), 0).label("revises"),
+            func.coalesce(func.sum(TurnMetricsRow.escalations), 0).label("escalations"),
         ).where(TurnMetricsRow.created_at >= since)
         row = (await self._session.execute(stmt)).one()
         return {
@@ -484,6 +506,12 @@ class TurnMetricsRepository:
             "avg_rounds": float(row.avg_rounds or 0.0),
             "input_tokens": int(row.input_tokens or 0),
             "output_tokens": int(row.output_tokens or 0),
+            # 协作质量 raw aggregates (caller derives rates over delegated/turns).
+            "first_plan_survived": int(row.first_plan_survived or 0),
+            "boundary_yields": int(row.boundary_yields or 0),
+            "scope_signals": int(row.scope_signals or 0),
+            "revises": int(row.revises or 0),
+            "escalations": int(row.escalations or 0),
         }
 
     async def aggregate_daily_for_window(self, *, since: datetime) -> dict[str, dict]:

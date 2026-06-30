@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from agentcore.runtime.approvals import ApprovalGate
     from agentcore.runtime.costing import RunCost
     from agentcore.runtime.ports import ClientRequestBridge
+    from agentcore.runtime.runs.notewall import NoteWall
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.scheduler import BoundaryReason
     from agentcore.runtime.runs.types import RunSpec, RunState
@@ -92,7 +93,7 @@ class DelegateTool:
         self._suspension_deleter = suspension_deleter
         # Turn-level project scope, carried purely so a durable plan_review pause captures it
         # into the frame — the resumed toolset re-wires consult_memory to the same project
-        # (记忆作用域与画像分层 §5.2). Not used by the delegate drive itself.
+        # (Agent记忆与知识系统 §二). Not used by the delegate drive itself.
         self._folder_id = folder_id
         # Same capture-only role: the memory master switch rides the frame so resume re-wires
         # consult_memory exactly as this turn did (off ⇒ stays off).
@@ -104,6 +105,15 @@ class DelegateTool:
         self._acc = WorkerResultAccumulator()
         self._supervised: SupervisedRun | None = None
         self._pending_boundary: tuple[BoundaryReason, list[RunSpec]] | None = None
+        # 挂起即收口 (②): set by the CHECKPOINT boundary hook when it finalizes the turn at a
+        # plan_review pause (frame saved) — ``drive`` reads it after the scheduler soft-pauses
+        # and returns a SUSPEND ToolResult. False on every ordinary drive.
+        self._pending_pause: bool = False
+        # 团队便签墙 (§2.2 通 / §2.3 合·对账): the most recent batch's wall, set by ``drive`` when it
+        # builds the executor so the CEO finalize (``format_for_ceo``, both the normal-终态 and the
+        # ``replan(stop)`` finalize_stopped paths) can fold the team's outstanding 决定 / 认领 into
+        # 语义边界对账. None until a batch runs (a CEO that never delegated has no wall).
+        self._note_wall: NoteWall | None = None
 
     @property
     def usage(self) -> dict[str, int]:
@@ -118,6 +128,12 @@ class DelegateTool:
         return self._acc.citations
 
     @property
+    def collab(self) -> dict[str, int]:
+        """Turn-level 协作质量 tally (学·度量 §2.5): boundary_yields / scope_signals /
+        escalations, rolled up across this turn's batches (and nested sub-teams)."""
+        return self._acc.collab
+
+    @property
     def schema(self) -> ToolSchema:
         return ToolSchema(
             name="delegate",
@@ -130,10 +146,30 @@ class DelegateTool:
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         from agentcore.runtime.runs import build_run_plan
 
-        tasks_raw = arguments.get("tasks")
-        if not isinstance(tasks_raw, list) or not tasks_raw:
-            msg = "'tasks' 必须是非空数组：每个元素至少包含 role 和 task。"
-            return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+        # 拆·playbook 固化 (§2.1): a固化形状 instantiates the whole tasks array, then flows through
+        # the SAME pipeline below as a hand-written one (纯加法). playbook XOR tasks — expanding a
+        # playbook AND passing tasks is ambiguous, so reject rather than silently pick one.
+        playbook = arguments.get("playbook")
+        if playbook is not None:
+            from agentcore.runtime.runs.playbooks import expand_playbook
+
+            if not isinstance(playbook, str) or not playbook.strip():
+                msg = "playbook 必须是非空字符串（playbook 名）。"
+                return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+            if arguments.get("tasks"):
+                msg = "playbook 与 tasks 二选一：用 playbook 时把槽位放进 playbook_args，别同时传 tasks。"
+                return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+            tasks_raw, pb_errors = expand_playbook(playbook.strip(), arguments.get("playbook_args"))
+            if pb_errors:
+                msg = "playbook 实例化失败：" + "；".join(pb_errors)
+                logger.info("delegate.playbook_rejected", playbook=playbook, errors=pb_errors)
+                return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
+            logger.info("delegate.playbook", playbook=playbook.strip(), nodes=len(tasks_raw))
+        else:
+            tasks_raw = arguments.get("tasks")
+            if not isinstance(tasks_raw, list) or not tasks_raw:
+                msg = "'tasks' 必须是非空数组：每个元素至少包含 role 和 task。"
+                return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
 
         valid_tools = {s.name for s in self._tools.list_all()}
         self._calls += 1

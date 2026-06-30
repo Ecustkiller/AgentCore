@@ -163,6 +163,25 @@ jobs:
           path: apps/desktop/shoot-out/
           if-no-files-found: ignore
 
+      # Web client boot gate (form A: desktop renderer in a plain browser). Boots the
+      # PRODUCTION web entry (vite.webapp.config.ts → main.webapp.tsx, real cookie
+      # auth — NOT the offline #/preview) in the chromium installed above and asserts
+      # it mounts with the real auth gate active (__WEB__ && !__WEB_PREVIEW__) and
+      # zero uncaught render errors. Catches a regressed web entry / broken auth gate
+      # / web-incompatible import on every PR. No backend or LLM here: the full
+      # login→send→stream smoke (`pnpm smoke:webapp`) needs a live server + seeded
+      # dev user and bills a real turn, so it stays a local/nightly check.
+      - name: Web client boot smoke gate
+        run: pnpm --filter agentcore-desktop smoke:webapp:ci
+
+      - name: Upload web smoke shots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-smoke-shots
+          path: apps/desktop/smoke-out/
+          if-no-files-found: ignore
+
   mobile:
     name: Mobile (lint + typecheck + conformance)
     runs-on: ubuntu-latest

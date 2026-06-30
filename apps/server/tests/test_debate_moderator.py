@@ -73,8 +73,11 @@ class _ScriptedLLM:
         self.judge_calls = 0
         self.summary_calls = 0
         self.brief_calls = 0
+        # 每次 complete 的 (system, user) prompt，供断言注入内容（如用户追问进了简报 prompt）。
+        self.seen: list[tuple[str, str]] = []
 
     async def complete(self, request):  # noqa: ANN001
+        self.seen.append((request.messages[0].content, request.messages[1].content))
         step = request.scenario.rsplit(".", 1)[-1]
         if step == "frame":
             self.frame_calls += 1
@@ -105,8 +108,15 @@ class _RecordingRunner:
         self.calls = []
         self.fail_all = fail_all
 
-    async def __call__(self, *, round_no, focus, sides, history):  # noqa: ANN001
-        self.calls.append({"round_no": round_no, "focus": focus, "history_len": len(history)})
+    async def __call__(self, *, round_no, focus, sides, history, interjections=()):  # noqa: ANN001
+        self.calls.append(
+            {
+                "round_no": round_no,
+                "focus": focus,
+                "history_len": len(history),
+                "interjections": list(interjections),
+            }
+        )
         return [
             SideTurn(
                 side_key=s.key,
@@ -377,7 +387,7 @@ def test_round_hooks_order_start_before_speak_before_round():
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
-        async def __call__(self, *, round_no, focus, sides, history):  # noqa: ANN001
+        async def __call__(self, *, round_no, focus, sides, history, interjections=()):  # noqa: ANN001
             order.append(f"speak{round_no}")
             self.calls.append({"round_no": round_no, "focus": focus})
             return [
@@ -545,3 +555,100 @@ def test_round_boundary_continue_respects_max_rounds_safety_cap():
 
     assert len(result.rounds) == 3
     assert result.stop_reason == STOP_MAX_ROUNDS
+
+
+# --- 追问（user_interjections，交互式逐轮 / Phase 2） ----------------------------
+
+
+def test_followup_ask_injected_into_next_round_and_recorded_answered():
+    """用户在第 1 轮边界【追问】+ 续辩 → 追问注入【第 2 轮】run_round（辩手据此回应），并作为
+    UserInterjection 随第 2 轮 RoundResult 留痕（answered=True，结构事实：后续轮已承接）。"""
+    decisions = [
+        RoundBoundary(
+            decision=RoundDecision.CONTINUE, ask="灰度期数据口径不一致谁兜底？", ask_target="pro"
+        ),
+        RoundBoundary(decision=RoundDecision.CONCLUDE),
+    ]
+
+    async def boundary(*, round_no, result, converged, max_rounds):  # noqa: ANN001
+        return decisions[round_no - 1]
+
+    llm = _ScriptedLLM(judge_results=[_CONVERGE])
+    runner = _RecordingRunner()
+    result = _run_interactive(llm, runner, _config(policy=RoundPolicy(max_rounds=5)), boundary)
+
+    # 第 1 轮无追问，第 2 轮 run_round 收到该追问（注入辩手 prompt 的入口）。
+    assert runner.calls[0]["interjections"] == []
+    assert [i.ask for i in runner.calls[1]["interjections"]] == ["灰度期数据口径不一致谁兜底？"]
+    assert runner.calls[1]["interjections"][0].target_key == "pro"
+    # 追问随【第 2 轮】RoundResult 留痕，answered 翻 True（结构事实：本轮已承接它）。
+    assert result.rounds[0].user_interjections == []
+    assert len(result.rounds[1].user_interjections) == 1
+    inter = result.rounds[1].user_interjections[0]
+    assert inter.ask == "灰度期数据口径不一致谁兜底？"
+    assert inter.target_key == "pro"
+    assert inter.answered is True
+    # 进 debate_result.rounds[*].user_interjections（唯一耐久痕迹，verbatim 复盘）。
+    payload = result.to_event_payload()
+    assert payload["rounds"][1]["user_interjections"] == [
+        {"ask": "灰度期数据口径不一致谁兜底？", "target_key": "pro", "answered": True}
+    ]
+    assert payload["rounds"][0]["user_interjections"] == []
+
+
+def test_followup_ask_on_conclude_recorded_unanswered():
+    """用户在收场时仍带追问（无后续轮可答）→ 挂到本轮记为 answered=False（honest gap，别静默丢）。"""
+
+    async def boundary(*, round_no, result, converged, max_rounds):  # noqa: ANN001
+        return RoundBoundary(
+            decision=RoundDecision.CONCLUDE, ask="那合规边界怎么算？", ask_target=""
+        )
+
+    llm = _ScriptedLLM(judge_results=[_KEEP_GOING])
+    runner = _RecordingRunner()
+    result = _run_interactive(llm, runner, _config(policy=RoundPolicy(max_rounds=5)), boundary)
+
+    assert len(result.rounds) == 1
+    assert result.stop_reason == STOP_USER_CONCLUDED
+    inter = result.rounds[0].user_interjections[0]
+    assert inter.ask == "那合规边界怎么算？"
+    assert inter.target_key == ""
+    assert inter.answered is False  # 收场无后续轮承接
+
+
+def test_followup_ask_at_max_rounds_cap_recorded_unanswered():
+    """用户在轮数上限边界仍追问 CONTINUE，但循环已无后续轮 → 挂到最后一轮记为未应答（不丢）。"""
+
+    async def boundary(*, round_no, result, converged, max_rounds):  # noqa: ANN001
+        return RoundBoundary(decision=RoundDecision.CONTINUE, ask=f"第{round_no}轮后的追问")
+
+    llm = _ScriptedLLM(judge_results=[_CONVERGE])
+    runner = _RecordingRunner()
+    result = _run_interactive(llm, runner, _config(policy=RoundPolicy(max_rounds=2)), boundary)
+
+    assert len(result.rounds) == 2
+    assert result.stop_reason == STOP_MAX_ROUNDS
+    # 第 1 轮边界的追问被【第 2 轮】承接（attach 到 round 2, answered=True）；第 2 轮边界的追问无
+    # 后续轮 → orphan 兜底挂到末轮（round 2）记未应答。故 round 1 无痕、round 2 携两条。
+    assert result.rounds[0].user_interjections == []
+    last = result.rounds[1].user_interjections
+    assert [i.ask for i in last] == ["第1轮后的追问", "第2轮后的追问"]
+    assert [i.answered for i in last] == [True, False]
+
+
+def test_brief_prompt_carries_user_followups():
+    """收场简报 prompt 携全场用户追问（让结论交代是否已回应）；无追问则不出现该块（零行为变化）。"""
+    decisions = [
+        RoundBoundary(decision=RoundDecision.CONTINUE, ask="回滚阈值怎么定？"),
+        RoundBoundary(decision=RoundDecision.CONCLUDE),
+    ]
+
+    async def boundary(*, round_no, result, converged, max_rounds):  # noqa: ANN001
+        return decisions[round_no - 1]
+
+    llm = _ScriptedLLM(judge_results=[_CONVERGE])
+    _run_interactive(llm, _RecordingRunner(), _config(policy=RoundPolicy(max_rounds=5)), boundary)
+
+    brief_prompts = [u for (s, u) in llm.seen if "请据此产出简报" in u]
+    assert brief_prompts and "回滚阈值怎么定？" in brief_prompts[0]
+    assert "用户在本轮追问" not in brief_prompts[0]  # 简报块用「过程中用户提出的【追问】」抬头

@@ -5,8 +5,11 @@ See ``vectors/__init__.py`` for the aggregated ``VECTORS`` registry.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from agentcore.runtime.events import (
     FinishReason,
+    SSEEvent,
     citations_event,
     content_delta,
     content_reset,
@@ -16,7 +19,6 @@ from agentcore.runtime.events import (
     reasoning_delta,
     run_completed,
     run_context,
-    run_plan,
     run_started,
     tool_use_end,
     tool_use_start,
@@ -24,7 +26,6 @@ from agentcore.runtime.events import (
 
 from ._common import _CONV, _COST, _USAGE, _ctx_block
 
-from collections.abc import Callable
 
 def _single_agent_text() -> list[SSEEvent]:
     return [
@@ -49,7 +50,7 @@ def _single_agent_tool() -> list[SSEEvent]:
 
 def _single_agent_consult_memory() -> list[SSEEvent]:
     """单聊：CEO 翻开一条记忆主题笔记 (记忆文件夹化 §六 · consult_memory 渐进披露 可视化)。系统
-    提示词的「记忆主题目录」只列主题名；CEO 判断「部署流程」与当前任务相关 → 调
+    提示词的「记忆主题目录」列主题名＋一行摘要；CEO 判断「部署流程」与当前任务相关 → 调
     ``consult_memory(name=部署流程)`` 把该主题笔记**全文**拉回（``tool_use_end`` 携 ``display.topic``
     + ``result`` 正文），据此作答。consult_memory 是 CEO 召回原语、**不在** ORCHESTRATION_TOOLS
     丢弃集（那只含 delegate/debate），故它照常落一个 ``tool`` 步——三端 process fold + oracle 据

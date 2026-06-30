@@ -88,7 +88,14 @@ class CsrfMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if any(request.url.path.startswith(p) for p in _EXEMPT_PREFIXES):
             return await call_next(request)
-        if _bearer_present(request):
+        # Exempt ONLY a pure bearer client (mobile) — one with no session cookie.
+        # A request that carries the access cookie must still pass CSRF even if it
+        # also sends an Authorization header: the auth layer prefers the cookie
+        # (``access_token or bearer``), so without this clause an attacker could
+        # skip CSRF entirely by adding a bogus ``Authorization: Bearer`` header to a
+        # cross-site request while still authenticating via the ambient cookie —
+        # collapsing CSRF protection onto the CORS allowlist (SEC-003).
+        if _bearer_present(request) and not request.cookies.get(ACCESS_TOKEN_COOKIE):
             return await call_next(request)
         user_id = _csrf_user_id(request)
         if user_id is None:

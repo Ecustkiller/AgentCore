@@ -8,7 +8,7 @@ input shape and single / parallel / DAG become data, not code paths:
 - DAG               = nodes wired by ``depends_on``;
 - adaptive (阶段2)  = an empty plan a captain grows via :meth:`add`.
 
-→ 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
+→ 见设计: docs/03-AI核心/执行引擎架构设计.md §八（Run 模型）
 """
 
 from __future__ import annotations

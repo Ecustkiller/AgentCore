@@ -114,3 +114,6 @@ export const DOWNLOAD_PAGE_PATH = "/download" as const;
 
 /** 手机端 web SPA（Cloudflare Pages · deploy-mobile-web.yml） */
 export const MOBILE_WEB_URL = "https://m.fashitianxia.xyz" as const;
+
+/** 主力 web 客户端（apps/desktop 渲染层跑浏览器，同源托管在 app. 根路径；免安装、需登录）。 */
+export const WEB_APP_URL = "https://app.fashitianxia.xyz" as const;

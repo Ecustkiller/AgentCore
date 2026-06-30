@@ -46,6 +46,22 @@ export function isFileOpTool(name: string): boolean {
 }
 
 /**
+ * Tools that must be confirmed PER CALL — their card does NOT offer「本轮内都允许」
+ * (`approve_always`), mirroring the backend `per_call_tool_names()` (GRANTABLE ∩
+ * EXECUTION). `code_execute` is the highest-risk side effect, so it re-prompts every
+ * call and a later injected-content-driven execution can't ride an earlier turn-grant
+ * (PI-004). The backend gate is authoritative — it downgrades an `approve_always` on
+ * these tools to a one-shot `approve` — so hiding the button here is the honest UI half.
+ */
+export const PER_CALL_TOOLS: ReadonlySet<string> = new Set(["code_execute"]);
+
+/** Whether `name`'s card may offer the turn-wide「本轮内都允许」grant (false for
+ * per-call tools like `code_execute`, which are always confirmed individually). */
+export function supportsTurnGrant(name: string): boolean {
+  return !PER_CALL_TOOLS.has(name);
+}
+
+/**
  * Other pending cards a turn-scoped grant on `approval` should auto-approve:
  * same conversation, in the grant's scope, not the card itself, not already in
  * flight. `approve_always` scopes to the same tool; `approve_always_files` scopes

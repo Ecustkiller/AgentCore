@@ -52,7 +52,7 @@ import {
 /**
  * 运行机制内容块（产品手册「运行机制」组的 4 个内容件）。
  *
- * 由 `pages/toolbox/ProductManual.tsx` 组合渲染——本模块只提供内容件，全屏壳 / 顶栏 /
+ * 由 `pages/toolbox/manual/`（`ManualShell.tsx` 全屏壳）组合渲染——本模块只提供内容件，全屏壳 / 顶栏 /
  * 左侧目录 / Esc 退出都归手册页。原「团队运行机制」独立页（`/toolbox/mechanism`）已并入
  * 产品手册（IA 见 `docs/04-前端/前端UX设计.md §十二`）。
  *

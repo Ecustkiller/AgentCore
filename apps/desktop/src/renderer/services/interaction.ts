@@ -5,16 +5,18 @@ import type { components } from "@/types/api.generated";
 type Schemas = components["schemas"];
 
 /**
- * Unified suspend-resume bridge (§18.2): a single endpoint settles any paused
- * interaction — a tool approval, an `ask_user` checkpoint, a `plan_review` DAG
- * checkpoint (结构化挂起 2a), or a local-workspace op. The body is discriminated on
- * `kind`, so callers build their kind-specific shape.
+ * Unified suspend-resume bridge (§18.2): a single endpoint settles any client-resolvable
+ * paused interaction — a tool approval, a local-workspace op, a worker's blocking
+ * escalation, or an interactive debate round. The body is discriminated on `kind`, so
+ * callers build their kind-specific shape.
+ *
+ * 挂起即收口 (②, Phase 3): `ask_user` / `plan_review` are no longer settled here — a CEO
+ * checkpoint finalizes the turn and is continued via the cold `POST .../resume` path
+ * (services/turns.ts), so their resolve schemas are gone from the backend union.
  */
 export type ResolveInteractionBody =
   | Schemas["ResolveApprovalInteraction"]
-  | Schemas["ResolveCheckpointInteraction"]
   | Schemas["ResolveClientToolInteraction"]
-  | Schemas["ResolvePlanReviewInteraction"]
   | Schemas["ResolveEscalationInteraction"]
   | Schemas["ResolveDebateRoundInteraction"];
 

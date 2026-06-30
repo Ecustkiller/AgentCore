@@ -138,7 +138,7 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
               <span className="text-muted-foreground">{fidelityShort}</span>
             )}
             {handoff.truncated && (
-              <span className="font-medium text-warning">截断</span>
+              <span className="font-medium text-muted-foreground">截断</span>
             )}
           </div>
         </EdgeLabelRenderer>

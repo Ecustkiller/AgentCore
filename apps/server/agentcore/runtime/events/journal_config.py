@@ -31,6 +31,11 @@ _JOURNAL_EVENT_TYPES = frozenset(
         EventType.PLAN_REVISED,
         EventType.ESCALATION_REQUIRED,
         EventType.ESCALATION_RESOLVED,
+        # 团队便签墙 (§2.2 通): journaled so the team-notes panel replays on reload. Like
+        # PLAN_REVISED / BATCH_METRICS it only fires inside a delegate turn (alongside
+        # RUN_PLAN, a surface type), so it needs no _JOURNAL_SURFACE_TYPES entry to gate
+        # journal persistence.
+        EventType.TEAM_NOTE_POSTED,
     }
 )
 

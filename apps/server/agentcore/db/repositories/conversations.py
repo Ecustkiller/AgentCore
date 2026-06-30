@@ -7,7 +7,14 @@ from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
-from agentcore.db.models import Conversation, CostEvent, Message, TurnMetricsRow, User
+from agentcore.db.models import (
+    Conversation,
+    CostEvent,
+    MemoryUpdateRow,
+    Message,
+    TurnMetricsRow,
+    User,
+)
 
 from ._base import _ilike_pattern, _sum_int
 from ._journal_cascade import delete_journal_for_conversation
@@ -344,7 +351,7 @@ class ConversationRepository:
 
         App-level cascade (no DB FK, per repo convention). Used only by retention
         after the grace period — distinct from ``soft_delete`` (the user-facing
-        recoverable delete). The ``turn_journal`` replay stream (唯一事实源, §18.3)
+        recoverable delete). The ``turn_journal`` replay stream (唯一事实源, §8.3)
         is dropped here too — it would otherwise orphan (it has no own TTL sweep,
         unlike paused_turns / run_sessions).
         """
@@ -355,6 +362,10 @@ class ConversationRepository:
             delete(CostEvent).where(CostEvent.conversation_id == conversation_id)
         )
         await delete_journal_for_conversation(self._session, conversation_id)
+        # Conversation-tail 记忆已更新 records (keyed by conversation_id, no message FK).
+        await self._session.execute(
+            delete(MemoryUpdateRow).where(MemoryUpdateRow.conversation_id == conversation_id)
+        )
         await self._session.execute(delete(Conversation).where(Conversation.id == conversation_id))
         await self._session.commit()
 
@@ -380,7 +391,7 @@ class ConversationRepository:
         compacted_through: datetime,
         input_tokens: int | None,
     ) -> None:
-        """Persist the rolling compaction summary + its watermark (执行引擎 §十三 长对话压缩).
+        """Persist the rolling compaction summary + its watermark (执行引擎 §三 长对话压缩).
 
         ``summary`` is the merged rolling digest, ``compacted_through`` the created_at
         of the last message folded into it (the loader replays only messages strictly

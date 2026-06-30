@@ -16,7 +16,7 @@ from agentcore.runtime.events import (
     tool_use_start,
 )
 
-from ._common import _CONV, _COST, _USAGE
+from ._common import _CONV, _COST
 
 _BOARD_ID = "board_demo"
 _REQ_ID = "board-req-1"

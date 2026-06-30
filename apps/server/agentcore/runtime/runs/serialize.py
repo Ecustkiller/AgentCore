@@ -117,10 +117,10 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
 
     Each item is ``{question, assumption, blocking, kind, status, answer}`` parsed from
     the call's arguments (assumption defaults to "", blocking to False, kind to
-    ``"normal"``). ``kind="scope"`` (执行引擎架构设计.md §受监督的波循环) marks a
-    职责/范围 deviation the WaveScheduler consumes at a wave boundary
-    (``BoundaryReason.SCOPE``) so the CEO
-    re-steers the not-yet-run tail; ``"normal"`` is an ordinary 待决问题 resolved at
+    ``"normal"``). ``kind="scope"`` (职责/范围偏离) and ``kind="dep"`` (依赖缺口·卡在缺输入 X,
+    §2.4) are BOTH consumed by the WaveScheduler at the reactive wave boundary
+    (``BoundaryReason.SCOPE``) so the CEO re-steers / replan(add)s the not-yet-run tail
+    (执行引擎架构设计.md §受监督的波循环); ``"normal"`` is an ordinary 待决问题 resolved at
     synthesis. ``status`` defaults to ``"raised"`` (a non-blocking escalate, or a blocking
     one that degraded) with no ``answer``; the executor overrides these to ``"resolved"``
     / ``"timeout"`` for a blocking escalate that actually suspended for the user (阻塞式求
@@ -148,16 +148,17 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
             if not question:
                 continue
             kind = str(parsed.get("kind") or "normal").strip().lower()
-            if kind not in ("normal", "scope"):
+            if kind not in ("normal", "scope", "dep"):
                 kind = "normal"
             out.append(
                 {
                     "question": question,
                     "assumption": str(parsed.get("assumption") or "").strip(),
                     "blocking": bool(parsed.get("blocking")),
-                    # 执行引擎架构设计.md §受监督的波循环: "scope" → a 职责/范围 deviation
-                    # the scheduler consumes at a wave boundary (CEO re-steers the un-run tail);
-                    # → an ordinary 待决问题 resolved at synthesis.
+                    # 执行引擎架构设计.md §受监督的波循环: "scope" (职责/范围偏离) and "dep"
+                    # (依赖缺口·卡在缺输入 X, §2.4) are BOTH consumed at the reactive wave
+                    # boundary — the CEO re-steers ("scope") / replan(add)s a producer ("dep")
+                    # for the un-run tail; "normal" is an ordinary 待决问题 resolved at synthesis.
                     "kind": kind,
                     # 阻塞式求决策: lifecycle of a blocking escalate. Default for a
                     # non-blocking / degraded one; the executor folds in the user's
@@ -420,7 +421,7 @@ def run_final_fact(run_id: str, state: RunState) -> Any:
     zero drift between the (being-removed) ``paused_turns.frame`` blob and its journal
     projection. Recorded for EVERY terminal worker (COMPLETED / FAILED) at the executor's
     single run choke point, so a resume re-seeds finished nodes from facts, never the旁路
-    frame. ``message_final`` (vs a new kind) keeps the §18.3 execution-kind set stable; the
+    frame. ``message_final`` (vs a new kind) keeps the §8.3 execution-kind set stable; the
     captain's own ``message_final`` (content/reasoning, no ``phase``) is NOT a seed and is
     skipped by the projection.
     """

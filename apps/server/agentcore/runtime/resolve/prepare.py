@@ -5,6 +5,7 @@ from agentcore.core.logging import get_logger
 from agentcore.llm.modes import ProfileSet
 from agentcore.memory import default_memory_store
 from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.debate import DebateSeed
 from agentcore.runtime.events import (
     EventSink,
 )
@@ -60,6 +61,7 @@ def _assemble_ceo_toolset(
     skill_registry: SkillRegistry,
     memory_enabled: bool = True,
     folder_id: str | None = None,
+    debate_seed: DebateSeed | None = None,
 ) -> tuple[DelegateTool, ReviseTool, DebateTool, ToolRegistry]:
     """Wire the CEO coordinator's toolset (delegate + revise + read/retrieval +
     consult_skill + an optional consult_memory + an optional ask_user), shared by a
@@ -140,6 +142,8 @@ def _assemble_ceo_toolset(
         conversation_id=conversation_id,
         round_decision_timeout=settings.checkpoint_timeout_seconds,
         interactive_armed=checkpoint_enabled,
+        # 结构化补轮·B：前端从收场卡发起续辩时直传的上一场种子（None=全新辩论）。
+        prior_seed=debate_seed,
     )
     chat_tools.register(debate_tool)
     # consult_skill (提示词瘦身 P2): always wired (not live-user gated) so the CEO can
@@ -153,7 +157,7 @@ def _assemble_ceo_toolset(
     # the core-memory injection (always-injected 画像 already gated in pipeline/run.py).
     if memory_enabled:
         # ``folder_id`` lets consult_memory resolve a topic name across BOTH scopes — the
-        # current project's 主题 first, then global (记忆作用域与画像分层 §5.2).
+        # current project's 主题 first, then global (Agent记忆与知识系统 §二).
         chat_tools.register(ConsultMemoryTool(store=default_memory_store(), project_id=folder_id))
     if checkpoint_enabled:
         # 结构化挂起 2b: arm the ask_user pause with the SAME durable closures as the

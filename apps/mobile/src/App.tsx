@@ -5,6 +5,7 @@ import { TabLayout } from "@/components/TabLayout";
 import { ChatPage } from "@/pages/ChatPage";
 import { FilesPage } from "@/pages/FilesPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { MemoryPage } from "@/pages/MemoryPage";
 import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { ServiceUnavailablePage } from "@/pages/ServiceUnavailablePage";
@@ -117,6 +118,14 @@ export function App() {
             <Tabbed>
               <WorkspaceFilesPage />
             </Tabbed>
+          }
+        />
+        <Route
+          path="/memory"
+          element={
+            <RequireAuth>
+              <MemoryPage />
+            </RequireAuth>
           }
         />
         <Route

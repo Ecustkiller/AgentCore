@@ -1,0 +1,33 @@
+{
+  "summary": {
+    "passed": 4,
+    "total": 4,
+    "pass_rate": 1.0
+  },
+  "tasks": [
+    {
+      "id": "roman_to_int",
+      "passed": 1,
+      "total": 1,
+      "fails": []
+    },
+    {
+      "id": "merge_intervals",
+      "passed": 1,
+      "total": 1,
+      "fails": []
+    },
+    {
+      "id": "is_valid_brackets",
+      "passed": 1,
+      "total": 1,
+      "fails": []
+    },
+    {
+      "id": "find_first_geq",
+      "passed": 1,
+      "total": 1,
+      "fails": []
+    }
+  ]
+}

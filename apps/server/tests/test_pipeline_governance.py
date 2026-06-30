@@ -28,7 +28,7 @@ from agentcore.llm.config import ModelProfile
 from agentcore.llm.modes import ProfileSet
 from agentcore.llm.protocol import LLMChunk, ToolCallDelta
 from agentcore.runtime import pipeline
-from agentcore.runtime.events import EventSink, EventType, FinishReason
+from agentcore.runtime.events import EventSink, EventType, FinishReason, followups_generated
 from agentcore.tools.protocol import ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -104,10 +104,10 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
     monkeypatch.setattr(pipeline, "build_provider", lambda *a, **k: provider)
 
     class _FakeStore:
-        async def load(self, _user_id: str, _path: str) -> str:
+        async def load(self, _user_id: str, _path: str, scope: str | None = None) -> str:
             return ""
 
-        async def list(self, _user_id: str) -> list:
+        async def list(self, _user_id: str, scope: str | None = None) -> list:
             # No topic notes ⇒ no 记忆主题目录 / consult_memory on this single-agent path.
             return []
 
@@ -116,12 +116,18 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
     # delegate / revise / debate are unused on this single-agent path, but the pipeline
     # tail folds their usage/ledger/citations — give them empty doubles. The delegate
     # double also needs ``dispose_open_supervised`` (受监督的波循环 P5 Edge): the tail
-    # awaits it to release any dangling supervised plan before the usage fold.
+    # awaits it to release any dangling supervised plan before the usage fold, plus
+    # ``collab`` (协作质量 §2.5): the tail spreads ``delegate_tool.collab`` into the turn
+    # result, so the double mirrors the real tool's zeroed tally.
     async def _noop_dispose() -> None:
         return None
 
     fake_delegate = SimpleNamespace(
-        usage={}, run_ledger=[], citations=[], dispose_open_supervised=_noop_dispose
+        usage={},
+        run_ledger=[],
+        citations=[],
+        dispose_open_supervised=_noop_dispose,
+        collab={"boundary_yields": 0, "scope_signals": 0, "escalations": 0},
     )
     fake_revise = SimpleNamespace(usage={}, run_ledger=[], citations=[])
     fake_debate = SimpleNamespace(usage={}, run_ledger=[], citations=[])
@@ -150,14 +156,57 @@ async def _run_pipeline(monkeypatch, provider: _ScriptedProvider, registry: Tool
         approvals_enabled=False,  # no live client → skip the approval/checkpoint gate
         profile_set=ProfileSet(profiles={"chat": profile}),
     )
-    # run_chat_pipeline closes the sink in its finally, so the queue drains to the
-    # None sentinel — collect every emitted event for the message_end assertion.
+    # run_chat_pipeline no longer closes the sink (its owner does); this test is the
+    # owner, so close it to drain the queue to the None sentinel and collect every event.
+    sink.close()
     events = [e async for e in sink]
     return result, events
 
 
 def _message_end(events):
     return next(e for e in events if e.type == EventType.MESSAGE_END)
+
+
+async def test_pipeline_leaves_sink_open_for_post_turn_tail(monkeypatch):
+    """The pipeline must NOT close the sink — its owner (the coordinator) does — so the
+    post-turn tail (title_generated / followups_generated, emitted by persist_turn_result
+    AFTER the pipeline returns) still reaches the client.
+
+    Regression for the dropped 「下一步推荐」: run_chat_pipeline used to close the sink in
+    its finally, so the tail hit an already-closed sink and was silently dropped (emit is a
+    no-op once closed). Title survived via its DB write; the transport-only followups —
+    whose ONLY delivery channel is this SSE event — vanished entirely ("从没出现过").
+    """
+    registry = ToolRegistry()
+    registry.register(_StubTool(name="noop", success=True))  # unused: one clean content round
+    provider = _ScriptedProvider([[_content_chunk("答复")]])
+    _patch_pipeline(monkeypatch, provider, registry)
+
+    sink = EventSink()
+    profile = ModelProfile(model="chat-model", thinking=False, reasoning_effort=None, max_rounds=20)
+    backend = ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox())
+    await pipeline.run_chat_pipeline(
+        conversation_id="conv-1",
+        user_message="hi",
+        history=[],
+        sink=sink,
+        user_id="user-1",
+        backend=backend,
+        approvals_enabled=False,
+        profile_set=ProfileSet(profiles={"chat": profile}),
+    )
+
+    # The invariant: the pipeline returned but left the sink OPEN for the owner's tail.
+    assert sink._closed is False
+
+    # The tail emit persist_turn_result does after the pipeline still lands on the sink.
+    sink.emit(followups_generated(["帮我把结论整理成一页纪要"], conversation_id="conv-1"))
+    sink.close()  # the owner (here, the test) closes once the tail is emitted
+    types = [e.type async for e in sink]
+
+    assert EventType.FOLLOWUPS_GENERATED in types
+    # …and it arrives AFTER message_end (a genuine post-turn tail, not mid-stream).
+    assert types.index(EventType.FOLLOWUPS_GENERATED) > types.index(EventType.MESSAGE_END)
 
 
 async def test_unproductive_early_stop_reaches_message_end_and_persisted_runs(

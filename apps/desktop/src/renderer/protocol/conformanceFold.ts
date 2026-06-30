@@ -77,6 +77,11 @@ const FINISH_TO_STATUS: Record<string, TurnStatus> = {
   unproductive: "completed",
   error: "failed",
   cancelled: "cancelled",
+  // 挂起即收口 (②): a turn finalized AT a durable checkpoint ends with finish_reason=paused
+  // — a terminal message_end whose turn is NOT done. Stay paused (the *_required already set
+  // status + pendingInteraction; this only adds finishReason + cost) so the single resume
+  // card renders, not a completed bubble. Without this it'd fall to "completed" below.
+  paused: "paused",
 };
 
 /** Desktop's fold → ProjectedTurn (the conformance snapshot). */
@@ -196,7 +201,11 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       // same frame path (projectExecution appends pending / flips resolved). The turn does
       // NOT pause on these (siblings keep running), so unlike the gates they set no pending.
       case "escalation_required":
-      case "escalation_resolved": {
+      case "escalation_resolved":
+      // 团队便签墙 (§2.2 通): a worker broadcast a one-line decision / heads-up to its concurrent
+      // siblings — folds turn-level onto Execution.teamNotes via the same frame path (post order,
+      // deduped by noteId). Mirrors the backend oracle + mobile fold (conformance pins them equal).
+      case "team_note_posted": {
         const frame = frameFromEvent(ev);
         if (frame) frames.push(frame);
         break;
@@ -316,8 +325,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       }
       default:
         // message_start / turn_saved / title_generated / followups_generated /
-        // board_op_required / tool_progress / workspace_op_required / workspace_promoted / handoff_* —
-        // not part of the normalized judge state.
+        // board_op_required / board_read_required / tool_progress / workspace_op_required /
+        // workspace_promoted / handoff_* — not part of the normalized judge state.
         break;
     }
   }
@@ -390,5 +399,18 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     cost,
     debate,
     debateRounds,
+    // 团队便签墙 (§2.2 通): single source = projectExecution's frame fold (above), mapped to the
+    // golden's ProjectedTeamNote shape — the same single-source pattern as `escalations`.
+    teamNotes: (execution?.teamNotes ?? []).map((n) => ({
+      noteId: n.noteId,
+      runId: n.runId,
+      agentId: n.agentId,
+      role: n.role,
+      kind: n.kind,
+      text: n.text,
+      ts: n.ts,
+      status: n.status,
+      supersedes: n.supersedes,
+    })),
   };
 }

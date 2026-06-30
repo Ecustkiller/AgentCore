@@ -34,6 +34,13 @@ NANO_PER_USD = 1_000_000_000
 # its price instead of silently degrading to Flash.
 DOUBAO_SEED_TURBO = "doubao/doubao-seed-2-1-turbo-260628"
 
+# Qwen-VL-Max (通义千问视觉) — the default board 读图 reader via DashScope's
+# OpenAI-compatible endpoint (AI协作白板.md §九.4). Keyed by the exact ``vision_model``
+# config string that reaches calculate_cost (config/llm.py default). Other vision models
+# (GLM-4V / GPT-4o / 本地 vLLM…) are user-selectable and fall back to the default tier +
+# a logged warning until added — same posture as any unpriced model.
+QWEN_VL_MAX = "qwen-vl-max"
+
 # USD per 1M tokens. DeepSeek: docs/06-参考/DeepSeek-V4-API参考.md §三 (authoritative);
 # cache_hit is ~50× cheaper than cache_miss — splitting input by hit/miss is what keeps
 # the bill honest on multi-turn chats (DeepSeek prefix caching).
@@ -59,6 +66,18 @@ _PRICING: dict[str, dict[str, Decimal]] = {
         "cache_hit": Decimal("0.1111"),
         "cache_miss": Decimal("0.1111"),
         "output": Decimal("1.1111"),
+    },
+    # Qwen-VL-Max via DashScope international (USD-denominated, the default compatible-mode
+    # base_url): input $0.80/1M, output $3.20/1M, cache hit = 20% of input = $0.16/1M.
+    # Source: 阿里云百炼模型价格 + help.aliyun.com/zh/model-studio Context Cache (命中缓存的输入
+    # 按标准输入单价 20% 计费). The OpenAI-compatible usage block QwenVLReader parses surfaces no
+    # prompt-cache split (it reads only prompt/completion_tokens), so input is always billed as
+    # a miss today — cache_hit stays priced for when the reader learns to read
+    # ``prompt_tokens_details.cached_tokens``.
+    QWEN_VL_MAX: {
+        "cache_hit": Decimal("0.16"),
+        "cache_miss": Decimal("0.80"),
+        "output": Decimal("3.20"),
     },
 }
 

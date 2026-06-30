@@ -6,7 +6,12 @@ from pydantic import BaseModel, computed_field
 class AuthSettings(BaseModel):
     jwt_secret_key: str = "dev-secret-change-in-production"
     jwt_access_token_expire_minutes: int = 30
-    jwt_refresh_token_expire_days: int = 7
+    # Refresh tokens rotate on every use and each rotation stamps a fresh
+    # now+N-day expiry (auth/service.py _issue_tokens) with no absolute family
+    # cap — a *sliding* window: any launch within N days of the last keeps the
+    # user signed in. 30d (was 7d) tolerates a month of inactivity before a forced
+    # re-login. The refresh + CSRF cookies' max_age both track this value.
+    jwt_refresh_token_expire_days: int = 30
     inference_token_expire_minutes: int = 120  # 2h — scoped sidecar proxy token
 
     inference_token_mint_max: int = 10
@@ -28,6 +33,13 @@ class AuthSettings(BaseModel):
     user_message_rate_limit_max: int = 20
     user_message_rate_limit_window_seconds: int = 60
     trust_proxy: bool = False
+    # When trust_proxy is on, the client IP is read from X-Forwarded-For. XFF is appended
+    # left→right by each hop, so the *leftmost* entry is client-controlled and trivially
+    # spoofed to rotate the rate-limit key past per-IP throttling; the trustworthy value
+    # is the entry your own proxy appended, counted from the RIGHT. Set this to the number
+    # of trusted proxies you run in front of the app (1 = one nginx; 2 = CDN + nginx), so
+    # the limiter keys off ``parts[-trusted_proxy_hops]`` (SEC-008).
+    trusted_proxy_hops: int = 1
 
     csrf_enabled: bool = True
     # ``memory`` = process-local counters (dev / single worker). ``redis`` = shared

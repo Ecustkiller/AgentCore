@@ -6,7 +6,7 @@ from agentcore.llm.protocol import ToolCall
 
 
 def tool_calls_to_dicts(tool_calls: list[ToolCall] | None) -> list[dict[str, Any]]:
-    """Serialize a round's tool calls for the ``llm_call`` fact (§18.3).
+    """Serialize a round's tool calls for the ``llm_call`` fact (§8.3).
 
     The window fold rebuilds the assistant message from this, so it mirrors the
     OpenAI/transcript shape (``runs.serialize._tool_call_to_dict``) exactly — id +

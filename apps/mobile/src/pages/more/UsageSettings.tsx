@@ -16,6 +16,7 @@ const ROLE_LABELS: Record<string, string> = {
   arena: "辩论",
   title: "标题生成",
   memory: "记忆整理",
+  vision: "视觉读图",
 };
 
 function cny(nanoUsd: number, rate: number): string {

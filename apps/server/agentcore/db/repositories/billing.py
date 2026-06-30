@@ -152,24 +152,30 @@ class CostEventRepository:
             conditions.append(CostEvent.user_id == user_id)
         return await self._aggregate(*conditions)
 
-    async def aggregate_by_role_for_window(self, *, user_id: str, since: datetime) -> list[dict]:
-        """Per-role spend for a user since a cutoff (本月各角色花销 — 团队工资单 by role).
+    async def aggregate_by_role_for_window(
+        self, *, user_id: str | None = None, since: datetime
+    ) -> list[dict]:
+        """Per-role spend since a cutoff (本月各角色花销 — 团队工资单 by role).
 
         Groups the window by the ledger ``role`` and SUMs the scalar
         ``cost_total_nano`` (the money truth, index-friendly) plus a distinct-turn
         count per role. Only roles that actually spent (>0) are returned, ordered
         by spend desc so the dashboard leads with the biggest spender (Top 花销) —
         the multi-agent product differentiator a single-agent tool can't show.
-        Filters on ``ix_cost_events_user_created`` then groups.
+        ``user_id`` scopes to one account (hits ``ix_cost_events_user_created``);
+        ``None`` is platform-wide (admin 全站看板).
         """
         total = _sum_int(CostEvent.cost_total_nano)
+        conditions: list[ColumnElement] = [CostEvent.created_at >= since]
+        if user_id is not None:
+            conditions.append(CostEvent.user_id == user_id)
         stmt = (
             select(
                 CostEvent.role.label("role"),
                 total.label("c_total"),
                 func.count(distinct(CostEvent.message_id)).label("turns"),
             )
-            .where(CostEvent.user_id == user_id, CostEvent.created_at >= since)
+            .where(*conditions)
             .group_by(CostEvent.role)
             .having(total > 0)
             .order_by(total.desc())

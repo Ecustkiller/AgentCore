@@ -175,15 +175,21 @@ async def _drive(
                 )
 
     async def run() -> dict:
-        return await pipeline.resume_chat_pipeline(
-            suspension=_ask_frame(),
-            decision=CheckpointDecision.CONTINUE,
-            note="继续",
-            sink=sink,
-            backend=_backend(),
-            board_id=board_id,
-            profile_set=_profiles(),
-        )
+        try:
+            return await pipeline.resume_chat_pipeline(
+                suspension=_ask_frame(),
+                decision=CheckpointDecision.CONTINUE,
+                note="继续",
+                sink=sink,
+                backend=_backend(),
+                board_id=board_id,
+                profile_set=_profiles(),
+            )
+        finally:
+            # The pipeline no longer closes the sink (its owner does); this test owns it,
+            # so close it once the turn ends → the concurrent desktop drainer gets the None
+            # sentinel and the gather completes instead of blocking forever on sink.get().
+            sink.close()
 
     result, _ = await asyncio.gather(run(), desktop())
     return result, captured

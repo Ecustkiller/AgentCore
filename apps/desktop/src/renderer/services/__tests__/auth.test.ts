@@ -10,6 +10,7 @@ import {
 } from "../auth";
 
 const ME = "/v1/auth/me";
+const REFRESH = "/v1/auth/refresh";
 const READYZ = "/readyz";
 
 const backendUser = {
@@ -68,6 +69,7 @@ describe("bootstrapAuth", () => {
 
   it("returns unauthenticated on 401 when the backend is ready", async () => {
     mockFetch((url) => {
+      if (url.endsWith(REFRESH)) return json({ error: "no session" }, 401);
       if (url.endsWith(ME)) return json({ error: "no session" }, 401);
       if (url.endsWith(READYZ))
         return json({ status: "ready", database: true });
@@ -79,8 +81,33 @@ describe("bootstrapAuth", () => {
     expect(result.kind).toBe("unauthenticated");
   });
 
+  it("silently refreshes an expired access token and stays authenticated", async () => {
+    // Cold start with an expired access cookie but a still-valid refresh cookie:
+    // /auth/me 401s, the silent refresh succeeds, and the retried /auth/me works.
+    let meCalls = 0;
+    mockFetch((url) => {
+      if (url.endsWith(REFRESH)) return json({ status: "ok" });
+      if (url.endsWith(ME)) {
+        meCalls += 1;
+        return meCalls === 1
+          ? json({ error: "access token expired" }, 401)
+          : json(backendUser);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const result = await bootstrapAuth();
+
+    expect(result.kind).toBe("authenticated");
+    if (result.kind === "authenticated") {
+      expect(result.user.username).toBe("dev");
+    }
+    expect(meCalls).toBe(2); // probed, refreshed, then re-probed successfully
+  });
+
   it("returns unavailable on 401 when /readyz reports the database down", async () => {
     mockFetch((url) => {
+      if (url.endsWith(REFRESH)) return json({ error: "no session" }, 401);
       if (url.endsWith(ME)) return json({ error: "no session" }, 401);
       if (url.endsWith(READYZ))
         return json({ status: "not_ready", database: false }, 503);

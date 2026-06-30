@@ -134,11 +134,23 @@ export interface AskAssumption {
   value: string;
 }
 
+/** One selectable answer to a choice {@link AskQuestion}. The `label` is both the
+ * displayed text and the value composed back into the answer (答复模型 α — there is no
+ * separate wire value). `detail` is an optional one-line trade-off shown under the label
+ * (帮用户看懂「为什么选它」); `recommended` flags the option the asker (CEO / worker) advises
+ * — a purely advisory highlight, NOT a pre-selection (the seeded pick is still driven by
+ * the question's `default`). At most one option per question carries `recommended`. */
+export interface AskOption {
+  label: string;
+  detail?: string;
+  recommended?: boolean;
+}
+
 export interface AskQuestion {
   id: string;
   prompt: string;
   kind: "choice" | "text";
-  options: string[];
+  options: AskOption[];
   multiple: boolean;
   default: string;
 }
@@ -401,6 +413,37 @@ export interface EscalationResolvedPayload {
   answer: string;
 }
 
+/** 团队便签墙 (§2.2 通·便签墙): a delegated worker pinned a one-line note for its CONCURRENT
+ * siblings — `decision` (我定了 X：别人要依赖的接口 / 字段名 / 格式 / 命名), `heads_up`
+ * (提个醒 Y：踩到的坑 / 发现), or `claim` (我领了 Z：认领一块活 / 文件，避免和队友撞活 / 重复 —
+ * the proactive, visible counterpart of WriteCoordinator's hard file guard). Broadcast
+ * fire-and-forget (the poster keeps working, never awaits a reply — it is NOT a chat), and
+ * pushed into siblings before their next step so the parallel silos build on each other's
+ * evolving work. `note_id` is a stable key (dedup); `run_id` / `agent_id` / `role` are the
+ * author (谁贴的); `ts` is epoch seconds. Scoped to one delegate batch (`execution_id`).
+ * Journaled, so the team-notes panel replays on reload.
+ *
+ * 便签会过期 → supersession (§2.2): an AMENDMENT note also carries `supersedes` (the `note_id`
+ * it 改写/作废s) + `supersede_mode` (`update` → target superseded / `void` → target voided).
+ * Those two are the single signal every fold uses to mark the TARGET stale; a fresh post omits
+ * them. */
+export interface TeamNotePostedPayload {
+  execution_id: string;
+  note_id: string;
+  run_id: string;
+  agent_id: string;
+  role: string;
+  kind: "decision" | "heads_up" | "claim";
+  text: string;
+  ts: number;
+  /** Set only on an amendment: the `note_id` this note 改写/作废s (its target). Absent on a
+   * fresh post. */
+  supersedes?: string;
+  /** Set only on an amendment: `update` (改写 — target becomes superseded, this note carries the
+   * corrected decision) or `void` (作废 — target becomes voided, this note is a retraction). */
+  supersede_mode?: "update" | "void";
+}
+
 /** Token counts in the ledger short-key form. `cache_hit + cache_miss === input`;
  * `reasoning ⊆ output`. */
 export interface UsageBreakdown {
@@ -532,6 +575,17 @@ export interface DebateClash {
   point: string;
 }
 
+/** 用户在某轮边界注入的【追问】（交互式逐轮，opt-in）：`ask` 是要辩手正面回答的问题，`target_key`
+ * 指定方（{@link DebateSideInfo.key}，空=问全场），`answered` 是结构事实——是否真有后续轮承接它
+ * （追问即续辩，正常恒 true；轮数上限边界追问 / 紧接超时无后续轮则 false，非「答得好不好」判断）。
+ * 唯一耐久的用户追问痕迹（决策事件 transport-only 不入 journal），随 {@link DebateRoundInfo} 进
+ * `debate_result` 复盘可见。 */
+export interface DebateUserInterjection {
+  ask: string;
+  target_key: string;
+  answered: boolean;
+}
+
 /** 叙事线的一轮（L1 焦点 + 裁判 / L2 小结 / L3 交锋边）：`sides` 是本轮各方→辩手 run 的映射，
  * `clashes` 是本轮论点级谁驳谁。 */
 export interface DebateRoundInfo {
@@ -541,6 +595,9 @@ export interface DebateRoundInfo {
   verdict: DebateVerdict;
   sides: DebateRoundSide[];
   clashes: DebateClash[];
+  /** 驱动本轮的用户追问（交互式逐轮，opt-in；非交互 / 无追问为空数组）。可缺省（旧产物兼容，
+   * 与 {@link DebateBriefInfo.risk_severities} 同样的渐进式契约扩展）。 */
+  user_interjections?: DebateUserInterjection[];
 }
 
 /** 进行中实时叠加的一轮叙事态（debate_round_started / debate_round 折叠累积，进 ProjectedTurn
@@ -639,7 +696,12 @@ export interface MessageEndPayload {
     | "degraded"
     | "unproductive"
     | "error"
-    | "cancelled";
+    | "cancelled"
+    // 挂起即收口 (②): the turn ENDED at a durable checkpoint (ask_user blocking /
+    // plan_review) and finalized in place — its frame is persisted and it awaits
+    // POST .../resume. NOT done (≠ end_turn) and not aborted (≠ cancelled): the client
+    // keeps the turn paused and renders the stream's close as the single resume card.
+    | "paused";
   usage?: {
     input_tokens: number;
     output_tokens: number;
@@ -728,6 +790,18 @@ export interface BoardOpRequiredPayload {
   summary: string;
 }
 
+/** Transport-only client-tool request: rasterize a subset of board elements (`ids` — the
+ * hand-drawn / screenshot subset of a selection) to a PNG and POST it back to the
+ * interaction-resolve endpoint (settling the server's `BoardChannel.read`), so the vision
+ * reader can read it (AI协作白板.md §九). The read counterpart of `board_op_required`; NOT
+ * journaled. The resolve value carries `{ pngBase64, w, h }`. */
+export interface BoardReadRequiredPayload {
+  request_id: string;
+  conversation_id: string;
+  board_id: string;
+  ids: string[];
+}
+
 /** A folderless 裸聊 was lazily promoted into a real folder on its first file write
  * (文件夹即工作区 §懒建 / 工作区对称化 D1a). The chat now belongs to `folder_id`; the
  * live client re-groups it under that folder and surfaces the new workspace in the 文件
@@ -802,6 +876,7 @@ export type SSEPayloadMap = {
   run_escalation: RunEscalationPayload;
   escalation_required: EscalationRequiredPayload;
   escalation_resolved: EscalationResolvedPayload;
+  team_note_posted: TeamNotePostedPayload;
   debate_result: DebateResultPayload;
   debate_round_started: DebateRoundStartedPayload;
   debate_round: DebateRoundPayload;
@@ -816,6 +891,7 @@ export type SSEPayloadMap = {
   workspace_op_required: WorkspaceOpRequiredPayload;
   workspace_promoted: WorkspacePromotedPayload;
   board_op_required: BoardOpRequiredPayload;
+  board_read_required: BoardReadRequiredPayload;
   handoff_snapshot_done: HandoffSnapshotDonePayload;
   handoff_job_started: HandoffJobStartedPayload;
   handoff_apply_done: HandoffApplyDonePayload;

@@ -1,5 +1,6 @@
 import { dispatchSSEEvent, flushPendingContent } from "@/services/sse/dispatch";
 import { useConversationStore } from "@/stores/conversation";
+import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type { SSEEvent } from "@/types/events";
 
 /**
@@ -13,6 +14,11 @@ function seedSlice(conversationId: string, userPrompt?: string): void {
   const store = useConversationStore.getState();
   // Fresh slice each time so re-playing the same fixture starts clean.
   store.dropConversationRuntime(conversationId);
+  // 挂起即收口 (②): a paused fixture's message_end(paused) surfaces a resume entry into
+  // the (conversation-scoped) paused-turns sibling store; reset it alongside the runtime
+  // so a re-replay (StrictMode's dev double-invoke, or re-cutting a frame) starts clean
+  // instead of stacking a stale resume card from the prior run's assistant message.
+  usePausedTurnStore.getState().clear(conversationId);
   store.switchConversation(conversationId);
   if (userPrompt) {
     store.addMessage(

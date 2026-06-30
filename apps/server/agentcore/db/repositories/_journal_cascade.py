@@ -1,6 +1,6 @@
 """Cascade-delete helpers for ``turn_journal`` rows.
 
-The ``turn_journal`` replay stream (§18.3 唯一事实源) has no DB foreign key and no
+The ``turn_journal`` replay stream (§8.3 唯一事实源) has no DB foreign key and no
 own TTL sweep, so every hard-delete of a conversation or its messages must drop the
 matching journal rows in the *same* transaction or they orphan. Centralized here so
 all three delete paths — conversation ``hard_delete``, message ``delete_after``,

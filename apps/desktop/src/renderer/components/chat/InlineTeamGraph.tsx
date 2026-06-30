@@ -1,5 +1,6 @@
 import { RevisionCompare } from "@/components/chat/RevisionCompare";
 import { StatusStrip } from "@/components/chat/StatusStrip";
+import { TeamNotesPanel } from "@/components/chat/TeamNotesPanel";
 import { GraphView } from "@/components/graph/GraphView";
 import {
   EMBED_DEFAULT_COL_WIDTH,
@@ -115,10 +116,14 @@ export function InlineTeamGraph({
             onMeasure={onMeasure}
           />
         )}
+        {/* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their
+            concurrent siblings this turn — shown whether the graph is expanded or collapsed, so
+            it stays a compact, always-visible artifact. Renders nothing for a turn with no notes. */}
+        <TeamNotesPanel notes={execution.teamNotes} />
       </div>
-      {/* 辩论双产物 (决策简报 + 交锋叙事线) 不再内联聊天——它是「过程」，归画布放大态的
-          「交锋叙事」页 (DebateBody)，入口是上方状态条的「在画布打开」。聊天只留状态条的
-          辩论 pill 作信号 (前端UX设计.md §四/§六)。 */}
+      {/* 辩论全过程不再内联聊天——它是「过程」，归画布放大态的统一辩论室 (群聊 IM 主视图 +
+          对比擂台透镜，见 {@link import("../debate/DebateStream").DebateStream})，入口是上方状态条的
+          「在画布打开」。聊天只留状态条的辩论 pill 作信号 (前端UX设计.md §4.1)。 */}
       {hasRevisions(execution) && (
         <RevisionCompare execution={execution} messageId={messageId} />
       )}

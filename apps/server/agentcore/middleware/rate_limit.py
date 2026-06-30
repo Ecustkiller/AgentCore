@@ -103,7 +103,10 @@ class SlidingWindowRateLimiter:
 def _build_auth_rate_limiter():
     if settings.rate_limit_backend == "redis":
         try:
-            from agentcore.middleware.redis_rate_limit import RedisFixedWindowRateLimiter, redis_client
+            from agentcore.middleware.redis_rate_limit import (
+                RedisFixedWindowRateLimiter,
+                redis_client,
+            )
 
             return RedisFixedWindowRateLimiter(
                 client=redis_client(),
@@ -165,7 +168,17 @@ def _client_key(request: Request) -> str:
     if settings.trust_proxy:
         forwarded = request.headers.get("x-forwarded-for")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            # Take the Nth entry from the RIGHT — the IP appended by your own trusted
+            # proxy — not the leftmost (client-controlled, trivially spoofed to rotate
+            # the rate-limit key past per-IP throttling). N = number of trusted proxies
+            # in front of the app (SEC-008).
+            hops = settings.trusted_proxy_hops if settings.trusted_proxy_hops > 0 else 1
+            if len(parts) >= hops:
+                return parts[-hops]
+            # Chain shorter than the configured trusted-proxy count → the request didn't
+            # traverse the expected proxies, so XFF is untrustworthy; fall back to the
+            # real socket peer rather than honor a (possibly spoofed) shorter chain.
     client = request.client
     return client.host if client else "unknown"
 

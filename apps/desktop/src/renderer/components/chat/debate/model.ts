@@ -15,6 +15,7 @@ import type {
   DebateResultPayload,
   DebateRoundSide,
   DebateSideInfo,
+  DebateUserInterjection,
   DebateVerdict,
 } from "@/types/events";
 
@@ -85,6 +86,10 @@ export interface DebateRoundModel {
   sides: DebateSideModel[];
   clashes: DebateClashView[];
   inFlight: boolean;
+  /** 驱动本轮的用户【追问】(辩论编排设计.md §6.3)。收场以
+   *  权威 `debate_result.rounds[*].user_interjections` 为准；进行中恒空——live 孪生
+   *  {@link DebateNarrativeRound} 刻意不携带（守 conformance 不动），追问在收场复盘可见。 */
+  userInterjections: DebateUserInterjection[];
 }
 
 /**
@@ -129,6 +134,8 @@ function settledModel(
     verdict: round.verdict,
     inFlight: false,
     clashes: resolveClashes(round.clashes, round.sides),
+    // 收场权威：本轮承接的用户追问（verbatim 复盘）。缺省（旧产物 / 非交互）→ 空。
+    userInterjections: round.user_interjections ?? [],
     sides: round.sides.map((side): DebateSideModel => {
       const run = execution.runs.find((r) => r.id === side.run_id) ?? null;
       return {
@@ -228,6 +235,8 @@ function liveTwoSideRounds(
       inFlight: !narr?.verdict,
       clashes: resolveClashes(narr?.clashes, narr?.sides ?? []),
       sides,
+      // 进行中无 verbatim 追问（live 孪生不带）；收场由 settledModel 接管。
+      userInterjections: [],
     });
   }
   return rounds;
@@ -275,6 +284,8 @@ function liveMultiSideRounds(execution: Execution): DebateRoundModel[] {
       sides: runs.map((run) =>
         multiSide(run, execution, keyByRunId.get(run.id) ?? ""),
       ),
+      // 进行中无 verbatim 追问（live 孪生不带）；收场由 settledModel 接管。
+      userInterjections: [],
     });
   }
   return rounds;
@@ -329,6 +340,34 @@ function resolveClashes(
 /** 一条扁平旧批次轮 (无主持人逐轮叙事)：轮号 0 且无焦点。消费方据此免去逐轮外壳。 */
 export function isFlatRound(round: DebateRoundModel): boolean {
   return round.roundNo < 1 && !round.focus;
+}
+
+/** 参辩名册的一方：语义 `sideKey` + 展示名 + 身份色——站队 / 拍板按 `sideKey` 记录用户取舍。 */
+export interface DebateRosterSide {
+  sideKey: string;
+  name: string;
+  colorVar: string;
+}
+
+/**
+ * 从各轮发言**并集**出参辩名册（按语义 `sideKey` 去重、跨轮稳定；`key`=run_id 每轮不同不可用）。
+ * live↔收场同一套，故直播段即可用（彼时 `model.sides` roster 尚为空）——站队气泡投票 / 拍板按方
+ * 据此定位。空 `sideKey`（多方进行中 narr 未到的发言）跳过。
+ */
+export function debateRoster(rounds: DebateRoundModel[]): DebateRosterSide[] {
+  const seen = new Map<string, DebateRosterSide>();
+  for (const round of rounds) {
+    for (const s of round.sides) {
+      if (s.sideKey && !seen.has(s.sideKey)) {
+        seen.set(s.sideKey, {
+          sideKey: s.sideKey,
+          name: s.name,
+          colorVar: s.colorVar,
+        });
+      }
+    }
+  }
+  return [...seen.values()];
 }
 
 /**

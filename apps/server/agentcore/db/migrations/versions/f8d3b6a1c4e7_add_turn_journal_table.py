@@ -1,4 +1,4 @@
-"""add turn_journal table; drop messages.runs (§18.3 Turn Journal 唯一事实源)
+"""add turn_journal table; drop messages.runs (§8.3 Turn Journal 唯一事实源)
 
 Revision ID: f8d3b6a1c4e7
 Revises: c4f8b1d6e9a2

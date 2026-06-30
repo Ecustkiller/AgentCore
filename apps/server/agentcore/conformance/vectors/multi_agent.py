@@ -5,8 +5,11 @@ See ``vectors/__init__.py`` for the aggregated ``VECTORS`` registry.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from agentcore.runtime.events import (
     FinishReason,
+    SSEEvent,
     content_delta,
     escalation_raised,
     escalation_required,
@@ -22,13 +25,13 @@ from agentcore.runtime.events import (
     run_reasoning_delta,
     run_started,
     run_tool_progress,
+    team_note_posted,
     tool_use_end,
     tool_use_start,
 )
 
-from ._common import _CONV, _COST, _USAGE, _ESC_Q, _ESC_A, _ctx_block
+from ._common import _CONV, _COST, _ESC_A, _ESC_Q, _USAGE, _ctx_block
 
-from collections.abc import Callable
 
 def _multi_agent_delegate() -> list[SSEEvent]:
     agents = [
@@ -918,8 +921,468 @@ def _multi_agent_worker_output_reset() -> list[SSEEvent]:
     ]
 
 
+def _multi_agent_lead_subplan_bind_replan() -> list[SSEEvent]:
+    """多 Agent·嵌套 lead 在自己子计划上晚定稿续跑 (受监督子计划 B, docs/03-AI核心/编排器与CEO主Agent.md
+    §2.4)。CEO 把「整块后端」交给一个 lead（L1，顶层 worker）；L1 上手后自己扇出一支子队
+    （sa 子调研 + sb 待定稿 bind_after_deps），子队 run_plan 与 L1 **同一 execution_id** → 三端按
+    ``parent_run_id`` 合并进同一张团队图（不 reset，子节点挂在 L1 下）。sa 跑完触到 L1 子计划的波
+    边界 → L1【自己】调 replan 定稿 sb（``plan_revised`` kind=bind，execution_id 仍是这同一 id）→ 三端
+    把 ``revised=bind`` 折到子节点 sb（其余节点恒 None）；定稿后续跑 sb。这是 B 的去特例闭环在 UI 折叠
+    层的契约：**lead（非根 CEO）的自主再绑定看得见、且嵌套图按 parent_run_id 不串层**，回合照常 end_turn。"""
+    lead_agent = {
+        "id": "L1",
+        "role": "后端负责人",
+        "model_preference": "strong",
+        "thinking": True,
+        "reasoning_effort": "high",
+    }
+    sub_agents = [
+        {
+            "id": "sa",
+            "role": "子研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "sb",
+            "role": "子撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    lead_runs = [{"id": "L1", "agent_id": "L1", "task": "负责整个后端", "depends_on": []}]
+    sub_runs = [
+        {
+            "id": "sa",
+            "agent_id": "sa",
+            "task": "子调研接口现状",
+            "depends_on": [],
+            "parent_run_id": "L1",
+        },
+        {
+            "id": "sb",
+            "agent_id": "sb",
+            "task": "（依赖完成后再定稿）",
+            "depends_on": ["sa"],
+            "parent_run_id": "L1",
+        },
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来把后端整块交给一位负责人。"),
+        # ① CEO 的团队：一个 lead 顶层 worker。team 标记落在首个 run_plan。
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="构建后端（下放给负责人自行拆解）",
+            agents=[lead_agent],
+            runs=lead_runs,
+        ),
+        run_started("L1", "L1"),
+        # ② L1 上手后自己扇出子队（同 execution_id → 合并进图，子节点挂在 L1 下，不再发 team 标记）。
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="后端子团队（含晚绑定下游）",
+            agents=sub_agents,
+            runs=sub_runs,
+        ),
+        run_started("sa", "sa", parent_run_id="L1"),
+        run_output_delta("sa", "sa", "现有接口与缺口……"),
+        run_completed(
+            "sa",
+            "sa",
+            output_summary="完成子调研",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        # ③ 子计划波边界让出 → L1【自己】据 sa 产出定稿 sb（bind）。execution_id 仍是同一子图所属 id。
+        plan_revised(
+            execution_id="exec1",
+            revisions=[{"run_id": "sb", "kind": "bind"}],
+        ),
+        run_started("sb", "sb", parent_run_id="L1"),
+        run_output_delta("sb", "sb", "据子调研撰写接口方案……"),
+        run_completed(
+            "sb",
+            "sb",
+            output_summary="完成子撰写",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        # ④ L1 整合子队产出，自身节点完成。
+        run_completed(
+            "L1",
+            "L1",
+            output_summary="后端整块完成",
+            duration_ms=3000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        content_delta(" 后端已完成（负责人中途自行定稿了一个晚绑定步骤）。"),
+        message_end(FinishReason.END_TURN, input_tokens=5200, output_tokens=960, cost=_COST),
+    ]
+
+
+def _multi_agent_lead_subplan_scope_steer() -> list[SSEEvent]:
+    """多 Agent·嵌套 lead 据子队员偏离操舵子计划 (受监督子计划 B 的 SCOPE 臂, 自底向上)。CEO 把整块
+    交给 lead（L1）；L1 扇出子队（sa 子调研 + sb 子撰写，sb 依赖 sa）。sa 执行中发现真正要做的与初始
+    子计划不符，调 ``escalate kind=scope`` 报偏离 → 三端把该升级折到子节点 sa（⚠️ 实时可见、非阻塞，
+    回合不 paused）。其未跑下游 sb 触发 L1 子计划的 SCOPE 波边界 → L1【自己】调 replan 操舵 sb
+    （``plan_revised`` kind=steer）→ revised=steer 折到 sb；据偏离续跑 sb。验「lead 自底向上据证据
+    重规划在 UI 折叠层成立、嵌套图不串层」。"""
+    lead_agent = {
+        "id": "L1",
+        "role": "前端负责人",
+        "model_preference": "strong",
+        "thinking": True,
+        "reasoning_effort": "high",
+    }
+    sub_agents = [
+        {
+            "id": "sa",
+            "role": "子研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "sb",
+            "role": "子撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    lead_runs = [{"id": "L1", "agent_id": "L1", "task": "负责整个前端", "depends_on": []}]
+    sub_runs = [
+        {
+            "id": "sa",
+            "agent_id": "sa",
+            "task": "子调研真实交互需求",
+            "depends_on": [],
+            "parent_run_id": "L1",
+        },
+        {
+            "id": "sb",
+            "agent_id": "sb",
+            "task": "撰写子页面方案",
+            "depends_on": ["sa"],
+            "parent_run_id": "L1",
+        },
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来把前端整块交给一位负责人。"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="构建前端（下放给负责人自行拆解）",
+            agents=[lead_agent],
+            runs=lead_runs,
+        ),
+        run_started("L1", "L1"),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="前端子团队",
+            agents=sub_agents,
+            runs=sub_runs,
+        ),
+        run_started("sa", "sa", parent_run_id="L1"),
+        # 子队员 sa 报告职责偏离（escalate kind=scope）→ 折到 sa 节点（实时可见、非阻塞）。
+        escalation_raised(
+            "sa",
+            "sa",
+            question="真正要做的是 X 而非初始子计划的 Y，下游写法应随之调整。",
+            assumption="暂按 X 推进",
+            blocking=False,
+        ),
+        run_output_delta("sa", "sa", "已按 X 完成子调研"),
+        run_completed(
+            "sa",
+            "sa",
+            output_summary="完成子调研（含 1 条偏离）",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        # 未跑下游 sb 触 SCOPE 波边界 → L1【自己】据偏离操舵 sb（steer）。
+        plan_revised(
+            execution_id="exec1",
+            revisions=[{"run_id": "sb", "kind": "steer"}],
+        ),
+        run_started("sb", "sb", parent_run_id="L1"),
+        run_output_delta("sb", "sb", "据校准后的 X 撰写页面方案……"),
+        run_completed(
+            "sb",
+            "sb",
+            output_summary="完成子撰写（已据偏离校准）",
+            duration_ms=1200,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_completed(
+            "L1",
+            "L1",
+            output_summary="前端整块完成",
+            duration_ms=3000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        content_delta(" 前端已完成（负责人据子队员的偏离信号中途校准了下游）。"),
+        message_end(FinishReason.END_TURN, input_tokens=5200, output_tokens=960, cost=_COST),
+    ]
+
+
+def _multi_agent_team_notes() -> list[SSEEvent]:
+    """多 Agent·通·便签墙 (§2.2)：并行两队员把【给队友看的】决定 / 提醒 / 认领贴到团队便签墙。
+
+    两个 run 无依赖（同波并行）：研究员先贴一条 ``decision``（定了别人要依赖的接口），撰写员再贴
+    一条 ``heads_up``（提个醒一个坑），随后撰写员贴一条 ``claim``（我领了——认领一块活免得撞活，
+    WriteCoordinator 的台面化对偶）。三条都 journaled，折到 ProjectedTurn.teamNotes（按贴出顺序、
+    按 noteId 去重）——验三端 fold 对 team_note_posted 三类 kind 的投影一致（与图节点正交：notes 不进
+    runs/process，只进 teamNotes）。便签是顺手广播，不改回合 paused / pending 态。"""
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    # Both depend on nothing → they run in the SAME wave (真并行), which is exactly when the
+    # note wall matters (siblings can see each other's notes mid-flight).
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研接口", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写文档", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队并行推进。"),
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "研究员"}, {"role": "撰写员"}]}),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="并行调研 + 撰写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_started("r2", "w2"),
+        # 研究员 broadcasts a DECISION its teammate must align on (an interface contract).
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n1",
+            run_id="r1",
+            agent_id="w1",
+            role="研究员",
+            kind="decision",
+            text="接口定了：GET /items 返回 {items:[], next_cursor}",
+            ts=1_700_000_000.0,
+        ),
+        # 撰写员 broadcasts a HEADS-UP (a pitfall it hit) for the others.
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n2",
+            run_id="r2",
+            agent_id="w2",
+            role="撰写员",
+            kind="heads_up",
+            text="提个醒：示例里的时间一律用 ISO8601，别用本地格式",
+            ts=1_700_000_001.0,
+        ),
+        # 撰写员 CLAIMS a piece of work so a sibling doesn't duplicate it (我领了 — the proactive,
+        # visible counterpart of WriteCoordinator's hard file guard).
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n3",
+            run_id="r2",
+            agent_id="w2",
+            role="撰写员",
+            kind="claim",
+            text="示例文档这部分我来写，别人不用重复",
+            ts=1_700_000_002.0,
+        ),
+        run_output_delta("r1", "w1", "调研结论"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成调研",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_output_delta("r2", "w2", "成稿"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成撰写",
+            duration_ms=1100,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成 2 项任务。"),
+        content_delta(" 团队已完成。"),
+        message_end(FinishReason.END_TURN, input_tokens=4200, output_tokens=820, cost=_COST),
+    ]
+
+
+def _multi_agent_team_notes_amended() -> list[SSEEvent]:
+    """多 Agent·通·便签墙·改写/作废 (§2.2 便签会过期 → supersession)：队员更正自己贴过的便签。
+
+    便签会过期：研究员先贴一条 decision（字段用 password），随后【改写】它（字段改用 pwd）——旧便签 n1
+    被标 superseded、新便签 n3 携 ``supersedes=n1`` ``supersede_mode=update``；撰写员贴一条 heads_up 后
+    【作废】它——旧便签 n2 被标 voided、撤回便签 n4 携 ``supersedes=n2`` ``supersede_mode=void``。验三端
+    fold 一致：amendment 事件把【目标】便签标 superseded/voided（不是把 amendment 自己标），amendment 自己
+    active 且携 supersedes 指回来源——这样陈旧决定不会一直误导队友。"""
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "撰写员",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研接口", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "撰写文档", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队并行推进。"),
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "研究员"}, {"role": "撰写员"}]}),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="并行调研 + 撰写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_started("r2", "w2"),
+        # 研究员 broadcasts a DECISION, then realizes it changed and 改写s it (password → pwd):
+        # n1 becomes superseded, n3 carries the corrected decision + supersedes=n1.
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n1",
+            run_id="r1",
+            agent_id="w1",
+            role="研究员",
+            kind="decision",
+            text="登录字段用 password",
+            ts=1_700_000_000.0,
+        ),
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n3",
+            run_id="r1",
+            agent_id="w1",
+            role="研究员",
+            kind="decision",
+            text="登录字段改用 pwd（替代 password）",
+            ts=1_700_000_002.0,
+            supersedes="n1",
+            supersede_mode="update",
+        ),
+        # 撰写员 broadcasts a HEADS-UP, then 作废s it (no replacement): n2 becomes voided, n4 is the
+        # retraction notice + supersedes=n2 / mode=void.
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n2",
+            run_id="r2",
+            agent_id="w2",
+            role="撰写员",
+            kind="heads_up",
+            text="示例时间用本地格式",
+            ts=1_700_000_001.0,
+        ),
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n4",
+            run_id="r2",
+            agent_id="w2",
+            role="撰写员",
+            kind="heads_up",
+            text="撤回之前那条：示例时间用本地格式",
+            ts=1_700_000_003.0,
+            supersedes="n2",
+            supersede_mode="void",
+        ),
+        run_output_delta("r1", "w1", "调研结论"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成调研",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_output_delta("r2", "w2", "成稿"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成撰写",
+            duration_ms=1100,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成 2 项任务。"),
+        content_delta(" 团队已完成。"),
+        message_end(FinishReason.END_TURN, input_tokens=4300, output_tokens=860, cost=_COST),
+    ]
+
+
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_delegate": ("多 Agent：委派 2 队员，runs 树 + 进度 + 总账", _multi_agent_delegate),
+    "multi_agent_team_notes": (
+        "多 Agent·通·便签墙：并行队员贴 decision/heads_up/claim 便签，折到 teamNotes（按序去重，与图节点正交）",
+        _multi_agent_team_notes,
+    ),
+    "multi_agent_team_notes_amended": (
+        "多 Agent·通·便签墙·改写/作废：队员 改写(update)/作废(void) 自己贴过的便签，目标便签标 superseded/voided",
+        _multi_agent_team_notes_amended,
+    ),
     "multi_agent_worker_tool": ("多 Agent：worker 工具调用 + run_tool_progress 实时态", _multi_agent_worker_tool),
     "multi_agent_worker_output_reset": (
         "多 Agent：交付前核验回炉 worker 对偶 run_output_reset 丢弃违规版 worker 草稿、保留思考、重写修正版",
@@ -927,6 +1390,14 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     ),
     "multi_agent_revision": ("多 Agent：定向唤回续写（revision 合成节点）", _multi_agent_revision),
     "multi_agent_plan_revised": ("多 Agent：自主再绑定「计划已调整」轻痕迹（plan_revised 折 bind/steer 到节点 revised）", _multi_agent_plan_revised),
+    "multi_agent_lead_subplan_bind_replan": (
+        "多 Agent·嵌套 lead 在自己子计划上晚定稿续跑（受监督子计划 B：同 execution_id 合并子图 + lead 自主 replan bind 折到子节点）",
+        _multi_agent_lead_subplan_bind_replan,
+    ),
+    "multi_agent_lead_subplan_scope_steer": (
+        "多 Agent·嵌套 lead 据子队员 scope 偏离操舵子计划（受监督子计划 B 自底向上：run_escalation 折子节点 + lead 自主 replan steer 折子节点）",
+        _multi_agent_lead_subplan_scope_steer,
+    ),
     "multi_agent_multi_batch": ("多 Agent：同回合两批 delegate（合并 + 累计进度）", _multi_agent_multi_batch),
     "multi_agent_escalation": ("多 Agent：worker 升级实时可见（run_escalation 折到节点 escalations，非阻塞）", _multi_agent_escalation),
     "multi_agent_blocking_escalate": ("多 Agent：阻塞式求决策 答复路径（escalation_required→pending→resolved，回合不 paused）", _multi_agent_blocking_escalate),

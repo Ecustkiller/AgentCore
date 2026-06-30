@@ -1,4 +1,4 @@
-"""Tool Protocol, ToolBinding, and approval three-state.
+"""Tool Protocol, ToolSchema, and approval three-state.
 
 Defines the unified contract for all tools (built-in and external).
 Tools declare their schema (for LLM function calling) and implement execute().
@@ -15,6 +15,9 @@ from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect
 
 if TYPE_CHECKING:
     from agentcore.board.channel import BoardChannel
+    from agentcore.runtime.costing import RunCost
+    from agentcore.runtime.runs.notewall import NoteWall, TeamNote
+    from agentcore.vision.protocol import VisionReader
     from agentcore.workspace.protocol import WorkspaceBackend
     from agentcore.workspace.write_claims import WriteCoordinator
 
@@ -99,6 +102,22 @@ class ToolContext:
     # by an upstream it consolidates but not one a concurrent sibling did.
     write_coordinator: WriteCoordinator | None = None
     write_ancestors: frozenset[str] = frozenset()
+    # 团队便签墙 (§2.2 通): the per-batch sticky-note wall the worker-only ``post_note`` tool
+    # broadcasts onto and that the engine pushes fresh sibling notes from before each step.
+    # Set per delegated-worker node by ``build_agent_executor`` (one wall shared by the batch);
+    # ``None`` for the CEO / solo worker / tests (no concurrent siblings) — then ``post_note``
+    # returns a clean「无并行队友」result and no notes are injected. ``agent_role`` is this
+    # worker's display role, stamped onto its notes for sibling-facing attribution (谁贴的).
+    note_wall: NoteWall | None = None
+    agent_role: str = ""
+    # 团队便签墙 实时可见: a narrow callback the ``post_note`` tool fires the INSTANT a note is
+    # pinned, so the team-notes panel lights up live (the durable record rides the journaled
+    # ``team_note_posted`` event this callback emits). Set per delegated-worker node by
+    # ``build_agent_executor`` (it closes over the run's EventSink + execution_id); ``None``
+    # for the CEO / tests — the tool still records onto the wall, only the live banner is
+    # skipped. A narrow callback (not the EventSink itself) keeps tools off the event
+    # vocabulary — the executor owns event shape (引擎纯化), exactly like ``on_escalate``.
+    on_note: Callable[[TeamNote], None] | None = None
     # 升级实时可见 (escalation 实时 SSE): a run-scoped live channel for the worker-only
     # ``escalate`` tool to surface its escalation the INSTANT it is raised, called with
     # ``(question, assumption, blocking)``. Set per delegated-worker node by
@@ -123,6 +142,20 @@ class ToolContext:
     # "not on a board" error instead of touching anything. The channel owns the mechanism
     # (suspend / emit / await the desktop); the tool owns only the op→result mapping (引擎纯化).
     board_channel: BoardChannel | None = None
+    # AI 协作白板 (AI协作白板.md §九.4): the optional vision port ``board_read`` uses to turn a
+    # rasterized hand-drawn / screenshot selection into text (DeepSeek V4 无多模态, so 读图 is a
+    # separate model). Wired by ``build_vision_reader`` when ``VISION_API_KEY`` is set; ``None``
+    # without a key (and on workers / tests) ⇒ ``board_read`` returns a clean「读图能力未配置」
+    # error instead of pretending. Set here (CEO, not workers) alongside ``board_channel``.
+    vision_reader: VisionReader | None = None
+    # AI 协作白板 (AI协作白板.md §九.4 Gap ②): a turn-level sink ``board_read`` appends a priced
+    # vision sub-call ledger row (:class:`~agentcore.runtime.costing.RunCost`) to. The vision
+    # model (qwen-vl) ≠ the run's DeepSeek, so the spend can't fold into the run usage; it
+    # becomes its own ``role=vision`` row the pipeline collects into the turn's ``cost_runs``
+    # (→ cost_events on the turn's message_id). Set once on the pipeline's base context and
+    # shared by every derived run via ``replace`` (a plain list, shared by reference); only
+    # ``board_read`` writes it, only in a 白板会话. ``None`` everywhere else (tests / no board).
+    cost_sink: list[RunCost] | None = None
 
 
 @dataclass
@@ -131,7 +164,7 @@ class ToolResult:
 
     ``effect`` steers the ReAct loop and is the ONLY signal the engine acts on to
     decide whether the turn continues — never the tool's name or category (引擎纯化,
-    设计 §18.5). The default ``ToolEffect.CONTINUE`` feeds ``output`` back to the
+    设计 §8.5). The default ``ToolEffect.CONTINUE`` feeds ``output`` back to the
     model and loops; a terminal effect (``HANDOFF`` / ``INTERACT``) stops the loop
     because the tool already produced the turn's final user-facing answer, carried
     in ``final_text`` (so the model does not generate a second, duplicate reply).

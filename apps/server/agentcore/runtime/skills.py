@@ -20,6 +20,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agentcore.runtime.runs.playbooks import available_playbooks
+
+# 拆·playbook 固化 (§2.1): the固化形状 listing embedded in the team-orchestration skill, sourced
+# from the registry so the skill never drifts from the actual set / their summaries.
+_PLAYBOOK_LISTING = available_playbooks()
+
 
 @dataclass(frozen=True)
 class SystemSkill:
@@ -89,8 +95,11 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 把这些调研依赖设 `summarize` 省 token；要保金额 / 法条编号 / 代码原样时才留 `pass_through`。\
 （注意：`result_handling` 只管【上游→下游】注入，不影响回到你手里的内容——后者由 task 措辞\
 决定，见下「广度调查」。）
-- 嵌套委派：只有当某个 task 本身复杂到需自带一支小队时，才给它开 `can_delegate=true`\
-（与流水线长度无关，最多再嵌套一层，其子成员不能继续委派，非必要不开）。
+- 嵌套委派（lead 下放）：当某个区【又大又半独立、自身还有内部结构】（典型：前端 / 后端 / 数据，\
+每块自己都是多步的活）时，给它开 `can_delegate=true`、只交一个成果级目标，让这名 lead 上手后自己\
+拆自己那摊、边干边据证据调（它在自己子队上同样能 replan / 收口，和你在顶层一样）——这正治「开局\
+就得一次把整张计划猜死」。判据是【这个区够不够大、够不够自成一摊】、不是流水线长度；最多再嵌套\
+一层、其子成员不能继续委派。几个扁平的并行小活（如查三个不相干话题）别加 lead，那是纯开销。
 - 轻量直出：当只派【一个】worker、且这次委派就是整件事的最终交付时，设 `finalize=true`：\
 该 worker 成功后其产出直接作为你的回复呈现，省掉一轮收尾。只在确定看到结果后无需再做\
 别的事时才用；只要可能要据结果继续委派、或一次派了多个 worker，就别设。
@@ -129,6 +138,11 @@ worker 据定稿提纲写全文，用 `depends_on` 串起。提纲由专家据�
 与上一条 `checkpoint_after` 的分别：checkpoint_after 是【让用户把关】中途结果，bind_after_deps 是\
 【你自己据证据再定下游职责】、不打扰用户。克制使用——只在『此刻写死下游 spec 很可能跑偏』时设；\
 上游已定、下游此刻就能写清的步骤别设（徒增一次回合）。
+- 固化形状（playbook）：少数高频形状已固化成可一键实例化的确定性骨架——设 `playbook` + \
+`playbook_args` 即生成整支团队（与手写 tasks 二选一），免每次手搓。可用：""" + _PLAYBOOK_LISTING + """。\
+开工前先对一下：本次的活是不是正好是这些形状之一？是就直接套（省去手搓、还自带依赖编排与便签墙\
+对齐等最佳实践），别再一片片手搭；只有形态确实特殊时才手写 tasks。各形状的槽位见 `delegate` 的 \
+playbook_args 参数说明。
 </team_orchestration_advanced>"""
 
 _DEBATE_AND_REVIEW = """\
@@ -197,6 +211,9 @@ _ASK_USER_KICKOFF = """\
 品味，也包括影响大的技术选择】——例如要不要手机端响应式、要不要中英双语、以后要不要能自己改内容\
 （带后台）、交互动效还是纯静态。开场的每个问题都【应预填 default 默认答案】，这样即便问 5 个，想省事\
 的用户一键就全默认通过，不会变回那堵要手打的墙。
+- 给 choice 的每个选项配一行 `detail`（这一项的权衡 / 代价），展示在选项下方，让用户不必\
+读散文就看懂取舍；把你最建议的一项标 `recommended`（至多一个，仅「推荐」高亮、不替用户预选，\
+预选仍由 default 定）。开场里 recommended 常与 default 同项，detail 让用户秒懂取舍。
 - `style_options`：仅当产物是视觉类（网站 / 海报 / 幻灯…）时给出风格预设（如「深色科技 / 简约商务 / \
 活泼明亮」）让用户选基调；非视觉类省略。
 
@@ -213,7 +230,9 @@ _ASK_USER_MIDTASK = """\
 并请用户拍板：典型如方案 A/B 抉择、执行不可逆操作（大量删除 / 覆盖）前确认、任务范围明显超出最初预期\
 需用户重新授权。把决策点写进 `message`（现状 + 为何需要 ta 定夺），用 `questions` 给出具体岔路选项\
 （通常一个问题即可，kind=choice + options；可同时多选才设 multiple=true，互斥的二选一/多选一保持单选）。\
-途中的关键岔路通常【不预填 default】——就是要 ta 来选。用户「提交」会带上 ta 勾选的选项与可选补充，回到\
+途中的关键岔路通常【不预填 default】——就是要 ta 来选；但可给每个选项配一行 `detail`\
+（A/B 各自的权衡 / 代价），并把你倾向的一项标 `recommended`：不替用户预选，却让 ta 一眼\
+看到你的专业倾向、快速拍板。用户「提交」会带上 ta 勾选的选项与可选补充，回到\
 你的循环；「停止」结束本回合。同样：发问的话只写进 `message`、正文在发问前留空（避免落库铺垫与恢复后\
 的话粘连，详见 ask_user_kickoff）。
 

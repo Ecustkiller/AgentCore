@@ -2,7 +2,6 @@ import {
   graphBadgeMuted,
   graphBadgePrimary,
   graphBadgePrimaryPlain,
-  graphBadgeWarning,
   modelTierBadge,
   statusPillInline,
   statusPillSoft,
@@ -380,7 +379,7 @@ export function AgentNode({ data }: NodeProps) {
                           );
                         })()}
                       {(d.escalationPending ?? 0) > 0 ? (
-                        <span className={graphBadgeWarning}>
+                        <span className={graphBadgePrimary}>
                           <ArrowUp size={10} />
                           待你拍板
                           {(d.escalationPending ?? 0) > 1
@@ -646,7 +645,7 @@ function revisedBadge(kind: PlanRevisionKind): { label: string; hint: string } {
  * timeout folds in as 已放行 (the engine continued). */
 function checkpointBadge(c: RunCheckpoint): { label: string; cls: string } {
   if (c.status === "pending") {
-    return { label: "待放行", cls: statusPillSoft.warning };
+    return { label: "待放行", cls: statusPillSoft.primary };
   }
   if (c.decision === "stop") {
     return { label: "已停止", cls: statusPillSoft.destructive };

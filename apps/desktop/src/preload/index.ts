@@ -1,9 +1,9 @@
-import { electronAPI } from "@electron-toolkit/preload";
 import {
   FS_CHANNELS,
   type FsApi,
   type FsChangedEvent,
 } from "@shared/ipc-contract";
+import { LOG_CHANNELS, type LogApi } from "@shared/log-contract";
 import {
   SIDECAR_CHANNELS,
   type SidecarApi,
@@ -93,6 +93,10 @@ const updaterApi: UpdaterApi = {
   },
 };
 
+const logApi: LogApi = {
+  write: (entry) => ipcRenderer.send(LOG_CHANNELS.write, entry),
+};
+
 const windowApi = {
   minimize: () => ipcRenderer.send("window:minimize"),
   maximize: () => ipcRenderer.send("window:maximize"),
@@ -101,23 +105,23 @@ const windowApi = {
 
 if (process.contextIsolated) {
   try {
-    contextBridge.exposeInMainWorld("electron", electronAPI);
     contextBridge.exposeInMainWorld("fsApi", fsApi);
     contextBridge.exposeInMainWorld("sidecarApi", sidecarApi);
     contextBridge.exposeInMainWorld("updaterApi", updaterApi);
+    contextBridge.exposeInMainWorld("logApi", logApi);
     contextBridge.exposeInMainWorld("windowApi", windowApi);
   } catch (error) {
     console.error(error);
   }
 } else {
   // @ts-ignore - 非隔离环境下直接挂载
-  window.electron = electronAPI;
-  // @ts-ignore - 非隔离环境下直接挂载
   window.fsApi = fsApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.sidecarApi = sidecarApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.updaterApi = updaterApi;
+  // @ts-ignore - 非隔离环境下直接挂载
+  window.logApi = logApi;
   // @ts-ignore - 非隔离环境下直接挂载
   window.windowApi = windowApi;
 }

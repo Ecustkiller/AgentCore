@@ -1047,7 +1047,7 @@ export interface paths {
         put?: never;
         /**
          * Resolve Interaction
-         * @description Settle any paused interaction over the unified bridge (§18.2).
+         * @description Settle any paused interaction over the unified bridge (§8.2).
          *
          *     One endpoint for every suspend kind, discriminated on ``body.kind``:
          *
@@ -1233,7 +1233,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/conversations/{conversation_id}/paused": {
+    "/v1/conversations/{conversation_id}/recovery": {
         parameters: {
             query?: never;
             header?: never;
@@ -1241,17 +1241,20 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Conversation Paused Turns
-         * @description List turns awaiting resume after a durable plan_review / ask_user pause (结构化挂起 2b).
+         * Get Conversation Recovery
+         * @description One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).
          *
-         *     Called on conversation reopen: a turn that paused then lost its live SSE
-         *     (disconnect / restart) has no assistant message yet — only a persisted frame.
-         *     The client renders each as a resume card by ``kind`` (plan_review from ``steps`` /
-         *     ``pending``; ask_user from ``question`` + the optional ``assumptions`` /
-         *     ``questions`` / ``style_options``) offering continue / adjust / stop → the resume
-         *     endpoint. Oldest-first. 404 if not owned.
+         *     Folds the two former reopen probes — is a detached run still live (实时重连续看
+         *     1b)? are there durably paused turns (结构化挂起 2b)? — into a single owner-gated
+         *     read so the client picks ONE actionable surface without racing two endpoints. A turn
+         *     parked at a checkpoint is BOTH live (its run is parked holding the workspace lock)
+         *     and durably paused (its frame persisted before the ``await``); probing ``/paused``
+         *     and the ``/stream`` attach independently surfaced a duplicate 拍板 card. The client
+         *     attaches (``GET .../stream``) only when ``live_running`` and ``paused`` is empty;
+         *     otherwise a paused turn's resume card is its single surface. ``live_running`` mirrors
+         *     the attach endpoint's own liveness test (a registered run whose task is not done).
          */
-        get: operations["list_conversation_paused_turns_v1_conversations__conversation_id__paused_get"];
+        get: operations["get_conversation_recovery_v1_conversations__conversation_id__recovery_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2545,6 +2548,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/users/me/memory/topics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Memory Topics
+         * @description List on-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).
+         *
+         *     ``folder_id`` None = the GLOBAL 主题/ folder; a folder_id = that project's. Same scope
+         *     convention as ``/files/{kind}`` (no separate ``scope`` enum). Declared before
+         *     ``/topics/{slug}`` / ``/files/{kind}`` so the static segment wins the route match.
+         */
+        get: operations["list_my_memory_topics_v1_users_me_memory_topics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/memory/topics/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get My Memory Topic
+         * @description Load ONE on-demand TOPIC note's body — global (``folder_id`` None) or a project's.
+         */
+        get: operations["get_my_memory_topic_v1_users_me_memory_topics__slug__get"];
+        /**
+         * Put My Memory Topic
+         * @description Write ONE TOPIC note back (CAS-guarded; an empty body deletes — mirrors ``/files/{kind}``).
+         *
+         *     Holds the per-user memory lock so the read-compare-write is atomic against the offline
+         *     consolidation pass. A ``baseline`` that no longer matches the note's current version
+         *     returns ``ok=False, conflict=True`` (never a blind overwrite). Clearing a note (empty
+         *     content) deletes the underlying file so it leaves the 记忆主题目录 (and stops being
+         *     consult-able).
+         */
+        put: operations["put_my_memory_topic_v1_users_me_memory_topics__slug__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/{user_id}/avatar": {
         parameters: {
             query?: never;
@@ -3229,6 +3286,8 @@ export interface components {
             /** Cny Per Usd */
             cny_per_usd: number;
             month: components["schemas"]["UsageWindow"];
+            /** Month By Role */
+            month_by_role: components["schemas"]["RoleCostLine"][];
             /** Month By User */
             month_by_user: components["schemas"]["AdminUserCostLine"][];
             /** Recent Daily Cost */
@@ -3992,6 +4051,68 @@ export interface components {
             turns: number;
         };
         /**
+         * DebateSeedBriefInput
+         * @description The prior debate's brief digest carried in a 续辩 seed (no 辩手全文).
+         */
+        DebateSeedBriefInput: {
+            /**
+             * Crux
+             * @default
+             */
+            crux: string;
+            /**
+             * Leaning
+             * @default
+             */
+            leaning: string;
+            /** Open Questions */
+            open_questions?: string[];
+            /** Strongest Points */
+            strongest_points?: {
+                [key: string]: string;
+            };
+            /** Value Disputes */
+            value_disputes?: string[];
+        };
+        /**
+         * DebateSeedInput
+         * @description 结构化补轮·B（可逆叫停）：前端从收场卡发起续辩时，把上一场 ``debate_result`` 投影成的最小
+         *     种子（辩论编排设计.md §6.6）。后端据此让本回合的 debate 续上一场（主持人焦点
+         *     正交于已谈、首轮辩手读到上一场摘要）。只带过程摘要 + 简报关键项，**不带辩手全文**（全文随辩手
+         *     run 走执行事件，体量大）。
+         */
+        DebateSeedInput: {
+            brief?: components["schemas"]["DebateSeedBriefInput"];
+            /**
+             * Motion
+             * @default
+             */
+            motion: string;
+            /** Rounds */
+            rounds?: components["schemas"]["DebateSeedRoundInput"][];
+        };
+        /**
+         * DebateSeedRoundInput
+         * @description One prior-debate round's digest (结构化补轮·B seed).
+         */
+        DebateSeedRoundInput: {
+            /**
+             * Focus
+             * @default
+             */
+            focus: string;
+            /**
+             * Round No
+             * @default 0
+             */
+            round_no: number;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+        };
+        /**
          * DeleteAccountRequest
          * @description Self-service account deletion (注销账户): the password re-confirms a
          *     destructive, irreversible action before the account is soft-deleted + anonymized.
@@ -4340,7 +4461,7 @@ export interface components {
         };
         /**
          * MemoryKind
-         * @description Which always-injected core leaf an editor surface addresses (记忆作用域与画像分层 §四).
+         * @description Which always-injected core leaf an editor surface addresses (Agent记忆与知识系统 §1.4).
          *
          *     ``preferences`` → 偏好.md (沟通/工作习惯, GLOBAL-only); ``profile`` → 画像.md
          *     (技术栈/关于用户的事实, global or — with a ``folder_id`` — a project layer).
@@ -4366,6 +4487,73 @@ export interface components {
             enabled: boolean;
             /** Version */
             version: string;
+        };
+        /**
+         * MemoryTopicsResponse
+         * @description On-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).
+         *
+         *     Names only (``主题/<slug>.md`` → ``slug``), sorted; the body is pulled per-note via
+         *     ``GET …/topics/{slug}`` when the user opens one (渐进披露, mirrors ``consult_memory``).
+         */
+        MemoryTopicsResponse: {
+            /** Topics */
+            topics: string[];
+        };
+        /**
+         * MemoryUpdateItemView
+         * @description One applied memory change in a 记忆已更新 card (Agent记忆与知识系统 §1.6).
+         *
+         *     ``file`` is a friendly label (偏好 / 画像 / 主题·<slug>); ``scope`` is ``global`` or
+         *     ``project`` (the conversation's project layer); ``content`` is the bullet text for an
+         *     add/update or the matched text for a remove. ``target`` is the synthetic memory-leaf
+         *     path the card deep-links to (desktop ``memorySource`` scheme; "" = no leaf). Shape
+         *     mirrors ``memory/maintenance.py`` ``MemoryUpdateItem`` (the stored
+         *     ``memory_updates.items`` JSONB).
+         */
+        MemoryUpdateItemView: {
+            /** Action */
+            action: string;
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /** File */
+            file: string;
+            /**
+             * Scope
+             * @default global
+             */
+            scope: string;
+            /**
+             * Section
+             * @default
+             */
+            section: string;
+            /**
+             * Target
+             * @default
+             */
+            target: string;
+        };
+        /**
+         * MemoryUpdateView
+         * @description One offline-consolidation pass's result, for the conversation-tail card.
+         *
+         *     Projected from a ``memory_updates`` row: ``items`` is what the AI remembered FROM this
+         *     conversation (读可见、写也可见). Returned only with the LATEST messages window (the card
+         *     sits after the last message), and pushed live on the per-user firehose.
+         */
+        MemoryUpdateView: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Items */
+            items?: components["schemas"]["MemoryUpdateItemView"][];
         };
         /** MemoryWriteRequest */
         MemoryWriteRequest: {
@@ -4456,6 +4644,10 @@ export interface components {
          *     Only the direction-relevant flag is computed for a one-sided query (a
          *     ``before`` page sets ``has_more_after=False``; the client already holds the
          *     newer side); an ``around`` window computes both.
+         *
+         *     ``memory_updates`` carries the conversation's 记忆已更新 cards (记忆更新对话内可见,
+         *     §1.6) — populated ONLY for the latest window (the cards sit at the thread tail, after
+         *     the last message); empty on scroll-up/around pages and when nothing was consolidated.
          */
         MessageListResponse: {
             /** Data */
@@ -4470,6 +4662,8 @@ export interface components {
              * @default false
              */
             has_more_before: boolean;
+            /** Memory Updates */
+            memory_updates?: components["schemas"]["MemoryUpdateView"][];
             /** Total */
             total: number;
         };
@@ -4490,16 +4684,6 @@ export interface components {
             dst: string;
             /** Src */
             src: string;
-        };
-        /** PausedTurnListResponse */
-        PausedTurnListResponse: {
-            /** Data */
-            data?: components["schemas"]["PausedTurnSummary"][];
-            /**
-             * Total
-             * @default 0
-             */
-            total: number;
         };
         /**
          * PausedTurnSummary
@@ -4760,34 +4944,6 @@ export interface components {
             kind: "approval";
         };
         /**
-         * ResolveCheckpointInteraction
-         * @description Settle a paused checkpoint the CEO raised (``ask_user`` interaction).
-         *
-         *     ``decision`` is ``continue`` (proceed with the CEO's direction), ``adjust``
-         *     (steer the CEO with ``note``, then continue), or ``stop`` (end the turn). The
-         *     engine-only ``timeout`` value is never sent by a client. ``note`` carries the
-         *     user's steer for ``adjust`` (and an optional closing remark for ``stop``);
-         *     ``selected`` carries the option(s) the user picked from the CEO's menu — one
-         *     for a single-select ask, several for a ``multiple`` one — and rides ``continue``
-         *     too (the picks are the answer, not just an ``adjust`` steer). The server drops
-         *     any pick that was not in the offered options.
-         */
-        ResolveCheckpointInteraction: {
-            decision: components["schemas"]["CheckpointDecision"];
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "ask_user";
-            /**
-             * Note
-             * @default
-             */
-            note: string;
-            /** Selected */
-            selected?: string[];
-        };
-        /**
          * ResolveClientToolInteraction
          * @description Deliver a bound desktop's result for a paused local-workspace op (``client_tool``).
          *
@@ -4816,12 +4972,31 @@ export interface components {
          *     can steer depth instead of letting the judge auto-converge. ``decision`` is ``continue``
          *     (debate another round — ``focus``, if given, overrides the next round's framing = 「加角度」,
          *     steering the debate onto the dimension the user cares about) or ``conclude`` (stop now and
-         *     emit the brief, even if the judge had not converged). A late resolve (the round already
-         *     timed out → judge auto-convergence took over) falls through the route as 404, so the desktop
-         *     renders it as「已关闭」rather than an error. In-process only (not durably persisted): a
-         *     disconnect / restart drops the live debate, so there is no ``resume`` counterpart.
+         *     emit the brief, even if the judge had not converged).
+         *
+         *     ``ask`` is an optional user 【追问】 — orthogonal to ``focus`` (focus reframes the round's
+         *     topic; ask is a concrete question the next round's debaters MUST answer head-on). ``ask_target``
+         *     optionally directs it at one side (a :class:`DebateSide` key; empty = ask everyone). A follow-up
+         *     rides a ``continue`` (追问即续辩, the next round addresses it); it is recorded verbatim as a
+         *     :class:`~agentcore.runtime.debate.types.UserInterjection` on that round and survives reload via
+         *     ``debate_result.rounds[*].user_interjections``.
+         *
+         *     A late resolve (the round already timed out → judge auto-convergence took over) falls through
+         *     the route as 404, so the desktop renders it as「已关闭」rather than an error. In-process only
+         *     (not durably persisted): a disconnect / restart drops the live debate, so there is no
+         *     ``resume`` counterpart.
          */
         ResolveDebateRoundInteraction: {
+            /**
+             * Ask
+             * @default
+             */
+            ask: string;
+            /**
+             * Ask Target
+             * @default
+             */
+            ask_target: string;
             /**
              * Decision
              * @default continue
@@ -4866,30 +5041,6 @@ export interface components {
              * @default false
              */
             use_assumption: boolean;
-        };
-        /**
-         * ResolvePlanReviewInteraction
-         * @description Settle a paused structured DAG checkpoint (``plan_review`` interaction, 结构化挂起 2a).
-         *
-         *     Raised when a delegate step marked ``checkpoint_after`` completed and the
-         *     WaveScheduler paused before its dependents. ``decision`` is ``continue`` (run
-         *     the downstream steps as-is), ``adjust`` (inject ``note`` as a steer onto the
-         *     checkpoint's not-yet-run downstream dependents, then proceed), or ``stop`` (end
-         *     the run here). Reuses :class:`CheckpointResponse` (same shape as ask_user) on the
-         *     engine side.
-         */
-        ResolvePlanReviewInteraction: {
-            decision: components["schemas"]["CheckpointDecision"];
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "plan_review";
-            /**
-             * Note
-             * @default
-             */
-            note: string;
         };
         /**
          * ResumeTurnRequest
@@ -5089,6 +5240,7 @@ export interface components {
             attachments?: components["schemas"]["MessageAttachment"][];
             /** Content */
             content: string;
+            debate_seed?: components["schemas"]["DebateSeedInput"] | null;
         };
         /**
          * SetLlmKeyRequest
@@ -5343,12 +5495,32 @@ export interface components {
             error_rate: number;
             /** Errors */
             errors: number;
+            /**
+             * Escalations
+             * @default 0
+             */
+            escalations: number;
+            /**
+             * First Plan Survival Rate
+             * @default 0
+             */
+            first_plan_survival_rate: number;
             /** Input Tokens */
             input_tokens: number;
             /** Output Tokens */
             output_tokens: number;
             /** P95 Duration Ms */
             p95_duration_ms: number;
+            /**
+             * Revises
+             * @default 0
+             */
+            revises: number;
+            /**
+             * Scope Signals
+             * @default 0
+             */
+            scope_signals: number;
             /** Turns */
             turns: number;
         };
@@ -5396,6 +5568,38 @@ export interface components {
             user_id: string;
             /** Workers */
             workers: number;
+        };
+        /**
+         * TurnRecoveryResponse
+         * @description One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).
+         *
+         *     Reopen needs to know, from ONE owner-gated point-in-time read, how to recover the
+         *     conversation's latest turn:
+         *
+         *     - ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看
+         *       C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.
+         *     - ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and
+         *       lost their live stream (结构化挂起 2b) — each renders a resume card.
+         *
+         *     A turn parked at a checkpoint is BOTH live (its run is parked on the interaction,
+         *     holding the workspace lock until checkpoint_timeout) and paused (its frame is
+         *     persisted before the suspend ``await``), so these overlap. Returning them together
+         *     lets the client pick ONE actionable surface: a durable paused frame is the
+         *     authoritative "this turn is paused" marker, so when ``paused`` is non-empty the
+         *     resume card is the single surface and the client does NOT attach; it attaches only
+         *     when ``live_running`` and ``paused`` is empty (a genuinely in-flight, non-paused
+         *     turn). Folding both into one snapshot removes the former two-probe reopen
+         *     (``GET /paused`` + the ``GET /stream`` attach) whose independent results raced into a
+         *     duplicate 拍板 card.
+         */
+        TurnRecoveryResponse: {
+            /**
+             * Live Running
+             * @default false
+             */
+            live_running: boolean;
+            /** Paused */
+            paused?: components["schemas"]["PausedTurnSummary"][];
         };
         /**
          * UpdateBoardRequest
@@ -7656,7 +7860,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveCheckpointInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolvePlanReviewInteraction"] | components["schemas"]["ResolveEscalationInteraction"] | components["schemas"]["ResolveDebateRoundInteraction"];
+                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolveEscalationInteraction"] | components["schemas"]["ResolveDebateRoundInteraction"];
             };
         };
         responses: {
@@ -7914,7 +8118,7 @@ export interface operations {
             };
         };
     };
-    list_conversation_paused_turns_v1_conversations__conversation_id__paused_get: {
+    get_conversation_recovery_v1_conversations__conversation_id__recovery_get: {
         parameters: {
             query?: never;
             header?: {
@@ -7935,7 +8139,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PausedTurnListResponse"];
+                    "application/json": components["schemas"]["TurnRecoveryResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10518,6 +10722,119 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryProjectsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_memory_topics_v1_users_me_memory_topics_get: {
+        parameters: {
+            query?: {
+                folder_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryTopicsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_memory_topic_v1_users_me_memory_topics__slug__get: {
+        parameters: {
+            query?: {
+                folder_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                slug: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryFileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_my_memory_topic_v1_users_me_memory_topics__slug__put: {
+        parameters: {
+            query?: {
+                folder_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                slug: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryWriteResult"];
                 };
             };
             /** @description Validation Error */

@@ -1,6 +1,7 @@
 import { FileDetail } from "@/components/files/FileDetail";
 import { MemoryProfileSplitEditor } from "@/components/files/MemoryProfileSplitEditor";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
+import { MemorySection } from "@/components/files/fileWorkbench/MemorySection";
 import { WorkspaceSection } from "@/components/files/fileWorkbench/WorkspaceSection";
 import {
   type Tab,
@@ -18,25 +19,19 @@ import type { FileSource } from "@/lib/fileSource";
 import { cn } from "@/lib/utils";
 import { listMemoryProjects } from "@/services/memory";
 import {
-  GLOBAL_PREFERENCES_PATH,
-  GLOBAL_PROFILE_PATH,
   createMemorySource,
-  memoryProjectProfilePath,
   parseProjectProfilePath,
 } from "@/services/sources/memorySource";
 import { resolveWorkspaceSource } from "@/services/sources/workspaceSource";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Brain,
   FileText,
   FolderOpen,
   FolderPlus,
   HardDrive,
   Loader2,
   Search,
-  SlidersHorizontal,
-  UserRound,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -46,39 +41,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  * directly (path-aware: one source serves all leaves) and exempted from the "workspace
  * gone → close its tabs" cleanup. */
 const MEMORY_WS = "__memory__";
-
-/** One memory leaf row in the rail (偏好 / 画像 / 本项目记忆) — a slim button that opens
- * the leaf in the detail pane like any file. */
-function MemoryLeafButton({
-  icon,
-  label,
-  active,
-  indented,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active: boolean;
-  indented?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex h-7 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-sm transition-colors",
-        indented ? "pl-7" : "pl-4",
-        active
-          ? "bg-accent text-foreground"
-          : "text-foreground hover:bg-accent/60",
-      )}
-    >
-      {icon}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-    </button>
-  );
-}
 
 /**
  * The cross-project 文件 hub's **split** file UI (VSCode 式左树右详情) — the merged
@@ -122,6 +84,7 @@ export function FileWorkbench({
   showMemory,
   focusWsId,
   focusKey,
+  openMemoryLeaf,
 }: {
   workspaces: WorkspaceInfo[];
   isLoading: boolean;
@@ -141,6 +104,10 @@ export function FileWorkbench({
    * `focusKey` (= navigation key) makes re-focusing the same project on a later jump
    * fire again. */
   focusWsId?: string | null;
+  /** When navigated here from a对话页「记忆已更新」card deep-link, open this exact memory
+   * leaf as a tab (记忆更新对话内可见 §1.6). Gated on `focusKey` so it fires once per
+   * navigation. */
+  openMemoryLeaf?: { path: string; name: string } | null;
   focusKey?: string;
 }) {
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -155,6 +122,7 @@ export function FileWorkbench({
   // 从 /conversations「浏览文件」跳来时高亮的工作区根（1.5s 后消失，呼应对话页的 flash）。
   const [flashWsId, setFlashWsId] = useState<string | null>(null);
   const appliedFocusRef = useRef<string | null>(null);
+  const appliedMemoryLeafRef = useRef<string | null>(null);
 
   const toggleWs = useCallback((wsId: string) => {
     setExpandedWs((prev) => {
@@ -234,6 +202,24 @@ export function FileWorkbench({
     const t = setTimeout(() => setFlashWsId(null), 1500);
     return () => clearTimeout(t);
   }, [focusWsId, focusKey, workspaces, expandWs]);
+
+  // 对话页「记忆已更新」卡片深链跳来：打开目标记忆叶子的 tab（记忆更新对话内可见 §1.6）。每个
+  // focusKey（导航键）只应用一次。记忆源与工作区列表无关，故无需等 workspaces 就绪即可打开；
+  // 项目画像叶子的双栏编辑器会在 workspaces 到位后自行解析项目名。内联开 tab 逻辑（与 openFile
+  // 同义）避免依赖在其后定义的 openFile。
+  useEffect(() => {
+    if (!openMemoryLeaf || !focusKey) return;
+    if (appliedMemoryLeafRef.current === focusKey) return;
+    appliedMemoryLeafRef.current = focusKey;
+    const { path, name } = openMemoryLeaf;
+    const key = tabKey(MEMORY_WS, path);
+    setTabs((prev) =>
+      prev.some((t) => tabKey(t.wsId, t.path) === key)
+        ? prev
+        : [...prev, { wsId: MEMORY_WS, path, name }],
+    );
+    setActiveKey(key);
+  }, [openMemoryLeaf, focusKey]);
 
   // 每个工作区一个稳定的 FileSource（树与详情共用，按 ws 复用，避免重复构建/反复重载）。
   const sourceByWs = useMemo(() => {
@@ -315,58 +301,61 @@ export function FileWorkbench({
         style={{ width: railWidth }}
         className="flex shrink-0 flex-col border-r border-border"
       >
-        <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
-          <span className="text-base font-medium text-foreground">文件</span>
-          <div className="flex items-center">
-            {fsAvailable && (
-              <IconButton title="添加本地文件夹" onClick={onAddLocal}>
-                <HardDrive size={16} />
-              </IconButton>
+        {/* First row merges the workspace name-filter with the page's create actions: the
+            rail is too narrow (~288px) for a separate「文件」title + a usable search + buttons,
+            so the search owns the row (its placeholder labels the panel) and 新建/添加本地 sit
+            inline to its right (always present so the first workspace can be created). */}
+        <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
+          <div className="relative min-w-0 flex-1">
+            <Search
+              size={14}
+              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setFilter("");
+                }
+              }}
+              placeholder="筛选工作区…"
+              aria-label="按名称筛选工作区"
+              className="h-8 w-full rounded-lg border border-border bg-background pl-7 pr-7 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+            />
+            {filter && (
+              <UiIconButton
+                onClick={() => setFilter("")}
+                aria-label="清除筛选"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2"
+              >
+                <X size={13} />
+              </UiIconButton>
             )}
-            <IconButton title="新建文件夹" onClick={onNewFolder}>
-              <FolderPlus size={16} />
-            </IconButton>
           </div>
+          {fsAvailable && (
+            <IconButton title="添加本地文件夹" onClick={onAddLocal}>
+              <HardDrive size={16} />
+            </IconButton>
+          )}
+          <IconButton title="新建文件夹" onClick={onNewFolder}>
+            <FolderPlus size={16} />
+          </IconButton>
         </div>
 
         {/* Pinned「AI 记忆」entry — private per-user data, not a workspace, so it sits above
             the workspace list. The always-injected GLOBAL core is split into 偏好 + 画像
-            (记忆作用域与画像分层 §四); each opens in the detail pane like any file (合成 ws +
+            (Agent记忆与知识系统 §1.4); each opens in the detail pane like any file (合成 ws +
             path-aware memorySource). Per-project 画像 hangs under its own workspace section
             below. The enable/disable switch lives in 设置 → AI 记忆. */}
         {showMemory && (
-          <div className="shrink-0 border-b border-border py-1">
-            <div className="flex h-7 items-center gap-2 px-4 text-xs font-medium text-muted-foreground">
-              <Brain size={14} className="shrink-0 text-primary" />
-              <span className="min-w-0 flex-1 truncate">AI 记忆 · 全局</span>
-            </div>
-            <MemoryLeafButton
-              indented
-              icon={
-                <SlidersHorizontal
-                  size={14}
-                  className="shrink-0 text-muted-foreground"
-                />
-              }
-              label="偏好"
-              active={activeKey === tabKey(MEMORY_WS, GLOBAL_PREFERENCES_PATH)}
-              onClick={() =>
-                openFile(MEMORY_WS, GLOBAL_PREFERENCES_PATH, "偏好.md")
-              }
-            />
-            <MemoryLeafButton
-              indented
-              icon={
-                <UserRound
-                  size={14}
-                  className="shrink-0 text-muted-foreground"
-                />
-              }
-              label="画像"
-              active={activeKey === tabKey(MEMORY_WS, GLOBAL_PROFILE_PATH)}
-              onClick={() =>
-                openFile(MEMORY_WS, GLOBAL_PROFILE_PATH, "画像.md")
-              }
+          <div className="shrink-0 border-b border-border px-2 py-1">
+            <MemorySection
+              scope={{ kind: "global" }}
+              activePath={activeTab?.wsId === MEMORY_WS ? activeTab.path : null}
+              onOpen={(path, name) => openFile(MEMORY_WS, path, name)}
+              onTopicDeleted={(path) => closeTab(tabKey(MEMORY_WS, path))}
             />
           </div>
         )}
@@ -392,37 +381,6 @@ export function FileWorkbench({
           />
         ) : (
           <>
-            <div className="shrink-0 px-2 pb-1 pt-2">
-              <div className="relative">
-                <Search
-                  size={14}
-                  className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-                />
-                <input
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Escape") {
-                      e.preventDefault();
-                      setFilter("");
-                    }
-                  }}
-                  placeholder="筛选工作区…"
-                  aria-label="按名称筛选工作区"
-                  className="h-8 w-full rounded-lg border border-border bg-background pl-7 pr-7 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-                />
-                {filter && (
-                  <UiIconButton
-                    onClick={() => setFilter("")}
-                    aria-label="清除筛选"
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2"
-                  >
-                    <X size={13} />
-                  </UiIconButton>
-                )}
-              </div>
-            </div>
-
             <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
               {visibleWorkspaces.length === 0 ? (
                 <p className="px-2 py-6 text-center text-xs text-muted-foreground">
@@ -435,9 +393,6 @@ export function FileWorkbench({
                     !!showMemory &&
                     !!folderId &&
                     memoryProjectIds.has(folderId);
-                  const projectMemoryPath = folderId
-                    ? memoryProjectProfilePath(folderId)
-                    : null;
                   return (
                     <WorkspaceSection
                       key={ws.wsId}
@@ -454,20 +409,14 @@ export function FileWorkbench({
                       onViewConversations={onViewConversations}
                       flashing={ws.wsId === flashWsId}
                       hasProjectMemory={hasProjectMemory}
-                      projectMemoryActive={
-                        !!projectMemoryPath &&
-                        activeTab?.wsId === MEMORY_WS &&
-                        activeTab.path === projectMemoryPath
+                      memoryActivePath={
+                        activeTab?.wsId === MEMORY_WS ? activeTab.path : null
                       }
-                      onOpenProjectMemory={
-                        projectMemoryPath
-                          ? () =>
-                              openFile(
-                                MEMORY_WS,
-                                projectMemoryPath,
-                                `${ws.name}·画像.md`,
-                              )
-                          : undefined
+                      onOpenMemory={(path, name) =>
+                        openFile(MEMORY_WS, path, name)
+                      }
+                      onMemoryTopicDeleted={(path) =>
+                        closeTab(tabKey(MEMORY_WS, path))
                       }
                     />
                   );

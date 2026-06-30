@@ -1,7 +1,9 @@
 import { notifyInfo } from "@/lib/toast";
 import { BASE_URL, notifyUnauthorized, tryRefresh } from "@/services/api";
+import { toMemoryUpdate } from "@/services/messages";
 import type { ChatMessageDetail } from "@/services/messaging";
 import { applyConversationPromotion } from "@/services/workspacePromotion";
+import { useConversationStore } from "@/stores/conversation";
 import { useMessagingStore } from "@/stores/messaging";
 
 /**
@@ -50,6 +52,27 @@ interface WorkspacePromotedEvent {
   local_subpath: string;
 }
 
+/** 记忆更新对话内可见 (§1.6): one offline-consolidation pass that changed a memory
+ * file. `update` (the conversation-tail card payload) is present whenever the pass
+ * recorded a row; its shape mirrors the REST `MemoryUpdateView` so {@link toMemoryUpdate}
+ * maps it. Absent on older/edge passes — then we fall back to the heads-up toast. */
+interface MemoryUpdatedEvent {
+  type: "memory_updated";
+  conversation_id: string;
+  update?: {
+    id: string;
+    created_at: string;
+    items?: {
+      action: string;
+      file: string;
+      section: string;
+      scope: string;
+      content: string;
+      target: string;
+    }[];
+  };
+}
+
 /** Re-sync state that may have changed while disconnected. */
 function catchUp(): void {
   const store = useMessagingStore.getState();
@@ -82,8 +105,23 @@ function handleFrame(frame: string): void {
       });
     } else if (event.type === "memory_updated") {
       // The offline consolidation pass refreshed the user's long-term memory (off the
-      // turn path) — a heads-up toast so an open「AI 记忆」editor knows to reload.
-      notifyInfo("AI 刚刚更新了你的记忆");
+      // turn path). 记忆更新对话内可见 (§1.6): live-append the「记忆已更新」card to the
+      // conversation it came from (no-op if that conversation isn't loaded — it fetches
+      // the card itself on next open).
+      const e = event as MemoryUpdatedEvent;
+      const conv = useConversationStore.getState();
+      if (e.update && e.conversation_id) {
+        conv.addMemoryUpdate(toMemoryUpdate(e.update), e.conversation_id);
+      }
+      // When the user is looking at that very conversation the inline card IS the signal,
+      // so skip the toast; otherwise a heads-up so another surface (e.g. an open「AI 记忆」
+      // editor) knows to reload.
+      const cardShown =
+        !!(e.update && e.conversation_id) &&
+        conv.currentConversationId === e.conversation_id;
+      if (!cardShown) {
+        notifyInfo("AI 刚刚更新了你的记忆");
+      }
     }
     // "ready" and any other event types: no-op here.
   } catch {

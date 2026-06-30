@@ -53,8 +53,14 @@ async def run_and_persist(
     profile_set: ProfileSet | None = None,
     memory_enabled: bool = True,
     board_id: str | None = None,
+    debate_seed: dict | None = None,
 ) -> None:
-    """Run the pipeline, persist the assistant reply, then title + memory."""
+    """Run the pipeline, persist the assistant reply, then title + memory.
+
+    ``debate_seed`` (结构化补轮·B): the prior debate's projected result, sent by the
+    desktop when the user starts a 续辩 from a settled debate card — threaded to the
+    DebateTool so this turn's debate continues the prior one. ``None`` for an ordinary turn.
+    """
     session_saver, session_loader = session_callbacks(conversation_id)
     suspension_saver, suspension_deleter = suspension_callbacks()
 
@@ -94,6 +100,7 @@ async def run_and_persist(
                 session_loader=session_loader,
                 suspension_saver=suspension_saver,
                 suspension_deleter=suspension_deleter,
+                debate_seed=debate_seed,
             )
         except asyncio.CancelledError:
             salvage_incomplete_turn(sink=sink, conversation_id=conversation_id, trace_id=trace_id)
@@ -102,6 +109,7 @@ async def run_and_persist(
         cost_runs = result.get("cost_runs") or []
         duration_ms = int((time.monotonic() - started) * 1000)
         workers = max(len(cost_runs) - 1, 0)
+        collab = result.get("collab") or {}
         logger.info(
             "chat.turn_complete",
             finish_reason=getattr(finish, "value", finish),
@@ -112,6 +120,12 @@ async def run_and_persist(
             reply_chars=len(result.get("content") or ""),
             delegated=workers > 0,
             workers=workers,
+            # 协作质量 (学·度量 §2.5): per-turn orchestration signals, also persisted to
+            # turn_metrics for the operator面 (offline log_stats derives the same from raw events).
+            boundary_yields=collab.get("boundary_yields", 0),
+            scope_signals=collab.get("scope_signals", 0),
+            escalations=collab.get("escalations", 0),
+            revises=collab.get("revises", 0),
             duration_ms=duration_ms,
             error=result.get("error"),
         )

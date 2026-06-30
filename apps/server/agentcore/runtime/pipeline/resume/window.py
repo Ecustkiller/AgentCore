@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 def resumed_captain_window(
     suspension: TurnSuspension, history: list[dict] | None
 ) -> list[LLMMessage]:
-    """Rebuild the resumed CEO window from the §18.3 turn journal (Phase 2 ④/⑤).
+    """Rebuild the resumed CEO window from the §8.3 turn journal (Phase 2 ④/⑤).
 
     The captain transcript at pause is a PROJECTION of the journal, not a stored blob:
     fold ``suspension.journal_entries`` (the fact stream re-hydrated by ``claim_paused_turn``

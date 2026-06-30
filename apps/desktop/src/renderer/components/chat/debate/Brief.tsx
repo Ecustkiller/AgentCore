@@ -10,6 +10,8 @@ import {
 import { agentColorVar } from "@/lib/agentIdentity";
 import type { DebateBriefInfo, DebateSideInfo } from "@/types/events";
 import {
+  ChevronDown,
+  ChevronRight,
   HelpCircle,
   Lightbulb,
   MessagesSquare,
@@ -22,7 +24,7 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { SideIdentity } from "./SideChip";
 import type { DebateForm } from "./model";
 
@@ -69,18 +71,25 @@ function DebateBrief({
           confidence={brief.confidence}
         />
         <CruxLine crux={brief.crux} />
-        <DecisionNeeded items={brief.value_disputes} />
+        <DisputeTriage
+          value={brief.value_disputes}
+          factual={brief.factual_disputes}
+        />
         <RecommendationInline text={brief.recommendation} />
       </section>
-      <SidePointsGrid
-        label="各方最强论点"
-        sides={sides}
-        points={brief.strongest_points}
-      />
-      <StillToClarify
-        factual={brief.factual_disputes}
-        open={brief.open_questions}
-      />
+      {/* 渐进披露：默认极简（裁决 hero + 需你拍板），各方论点 / 事实分歧 / 待解作为「依据」折叠
+          (设计 §四「极简一页·渐进披露」)。 */}
+      <Disclosure summary="展开依据" teaser={evidenceTeaser(brief, true)}>
+        <SidePointsGrid
+          label="各方最强论点"
+          sides={sides}
+          points={brief.strongest_points}
+        />
+        <StillToClarify
+          factual={brief.factual_disputes}
+          open={brief.open_questions}
+        />
+      </Disclosure>
     </div>
   );
 }
@@ -89,8 +98,8 @@ function DebateBrief({
  * 红队审查 (结论先行 · 与正反辩论同一套主次)：**方案评定英雄卡**（评定 + 置信 + 需你拍板）独占焦点
  * → 风险清单（产物侧重，每条红队成员的最尖锐风险）→ 加固建议 → 方案方回应 → 弱化的「还需厘清」。
  * subject (被审方案) 由 `is_subject` 分出：红队成员的「最强论点」即风险、被审方的即抗辩，
- * recommendation 即加固建议。价值之争提进英雄卡（{@link DecisionNeeded}）、事实分歧 / 待解降级收尾
- * （{@link StillToClarify}）——与 {@link DebateBrief} 同骨架，去掉旧版等权 DisputeSection（三形态一致）。
+ * recommendation 即加固建议。分歧二分提进英雄卡（{@link DisputeTriage}）、事实分歧 / 待解渐进披露收尾
+ * （{@link Disclosure} 内 {@link StillToClarify}）——与 {@link DebateBrief} 同骨架（三形态一致）。
  */
 function RedTeamBrief({
   brief,
@@ -118,7 +127,10 @@ function RedTeamBrief({
           leaning={brief.leaning}
           confidence={brief.confidence}
         />
-        <DecisionNeeded items={brief.value_disputes} />
+        <DisputeTriage
+          value={brief.value_disputes}
+          factual={brief.factual_disputes}
+        />
       </section>
 
       <RiskBoard risks={risks} />
@@ -153,10 +165,14 @@ function RedTeamBrief({
         </div>
       )}
 
-      <StillToClarify
-        factual={brief.factual_disputes}
-        open={brief.open_questions}
-      />
+      {hasClarify(brief) && (
+        <Disclosure summary="展开依据" teaser={evidenceTeaser(brief, false)}>
+          <StillToClarify
+            factual={brief.factual_disputes}
+            open={brief.open_questions}
+          />
+        </Disclosure>
+      )}
     </div>
   );
 }
@@ -174,8 +190,8 @@ const RISK_SEVERITY = {
   medium: {
     label: "中危",
     rank: 1,
-    pill: statusPillInline.warning,
-    surface: surfaceSubtle.warning,
+    pill: statusPillInline.destructive,
+    surface: "border-destructive/30 bg-destructive/5",
   },
   low: {
     label: "低危",
@@ -206,7 +222,7 @@ function rankOf(level: RiskLevel | null): number {
 
 /**
  * 风险看板（红队产物侧重）：把红队成员的最尖锐风险按严重度【总览计数 + 由危到轻排序 + 分级配色】
- * 呈现——顶部一行盘口计数让用户一眼看清风险结构（高危 N · 中危 N · 低危 N），卡片高危(红)→中危(黄)
+ * 呈现——顶部一行盘口计数让用户一眼看清风险结构（高危 N · 中危 N · 低危 N），卡片高危/中危(红)
  * →低危(灰)依次降权，取代旧版「等权平铺列表」。严重度取自 {@link DebateBriefInfo.risk_severities}；
  * 旧产物缺级时降级为无徽章中性卡（honest gap，不杜撰档位）。空清单整块省略。
  */
@@ -221,7 +237,7 @@ function RiskBoard({ risks }: { risks: RiskItem[] }) {
     <div>
       <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <h4 className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-          <ShieldAlert size={14} className={statusAccentText.warning} />
+          <ShieldAlert size={14} className={statusAccentText.destructive} />
           风险清单
         </h4>
         <RiskTally counts={counts} />
@@ -334,11 +350,18 @@ function RoundtableBrief({ brief }: { brief: DebateBriefInfo }) {
           </span>
         </p>
       )}
-      <DecisionNeeded items={brief.value_disputes} />
-      <StillToClarify
+      <DisputeTriage
+        value={brief.value_disputes}
         factual={brief.factual_disputes}
-        open={brief.open_questions}
       />
+      {hasClarify(brief) && (
+        <Disclosure summary="展开依据" teaser={evidenceTeaser(brief, false)}>
+          <StillToClarify
+            factual={brief.factual_disputes}
+            open={brief.open_questions}
+          />
+        </Disclosure>
+      )}
     </div>
   );
 }
@@ -395,29 +418,112 @@ function CruxLine({ crux }: { crux: string }) {
 }
 
 /**
- * 「需你拍板」= 价值 / 偏好之争（AI 判不了、必须老板定，辩论编排设计.md §4.1）。提进裁决卡、紧跟
- * 倾向——这是简报里对用户**最有行动价值**的一块，故 warning 语气强调（旧版与事实分歧等权埋在「分歧
- * 归类」里、被淹没）。空则省略。
+ * 分歧分诊（**事实 / 价值二分**，吸收「争点分诊」骨架，设计 §四）—— 把两类分歧**显式并置**，让用户
+ * 一眼分清「哪些要我定、哪些靠查证」：
+ *  - **价值 / 偏好之争 → 需你拍板**：AI 判不了、必须老板定（辩论编排设计.md §4.1），warning 语气
+ *    强调（最有行动价值）；
+ *  - **事实分歧 → 可查证、无需你拍板**：靠证据 / 补轮可厘清，这里只给计数指引到下方「依据」，完整
+ *    清单走渐进披露（{@link Disclosure} 里的 {@link StillToClarify}），不与裁决抢焦点。
+ * 两类皆空则整块省略。
  */
-function DecisionNeeded({ items }: { items: string[] }) {
-  if (items.length === 0) return null;
+function DisputeTriage({
+  value,
+  factual,
+}: {
+  value: string[];
+  factual: string[];
+}) {
+  if (value.length === 0 && factual.length === 0) return null;
+  const hasValue = value.length > 0;
   return (
-    <div className={`rounded-lg border p-2.5 ${surfaceSubtle.warning}`}>
-      <h4 className="flex items-center gap-1 text-xs font-medium">
-        <UserRound size={14} className={statusAccentText.warning} />
-        <span className={statusAccentText.warning}>需你拍板</span>
-        <span className="text-muted-foreground">
-          · 价值 / 偏好之争，AI 判不了
-        </span>
-      </h4>
-      <ul className="mt-1.5 space-y-1">
-        {items.map((it) => (
-          <li key={it} className="flex gap-1.5 text-sm text-foreground">
-            <span className="shrink-0 text-muted-foreground">·</span>
-            <span className="min-w-0 flex-1">{it}</span>
-          </li>
-        ))}
-      </ul>
+    <div
+      className={`rounded-lg border p-2.5 ${hasValue ? surfaceSubtle.primary : surfaceMutedPanel}`}
+    >
+      {hasValue && (
+        <>
+          <h4 className="flex flex-wrap items-center gap-1 text-xs font-medium">
+            <UserRound size={14} className={statusAccentText.primary} />
+            <span className={statusAccentText.primary}>价值 / 偏好之争</span>
+            <span className="text-muted-foreground">· AI 判不了，需你定夺</span>
+          </h4>
+          <ul className="mt-1.5 space-y-1">
+            {value.map((it) => (
+              <li key={it} className="flex gap-1.5 text-sm text-foreground">
+                <span className="shrink-0 text-muted-foreground">·</span>
+                <span className="min-w-0 flex-1">{it}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {factual.length > 0 && (
+        <p
+          className={`flex items-start gap-1 text-xs text-muted-foreground ${hasValue ? "mt-2 border-t border-border/60 pt-2" : ""}`}
+        >
+          <SearchCheck size={13} className="mt-0.5 shrink-0" />
+          <span>
+            <span className="font-medium text-foreground">
+              事实分歧 {factual.length}
+            </span>
+            <span> · 靠证据可厘清，无需你定夺（见下方依据）</span>
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** 简报「依据」是否有可折叠内容（事实分歧 / 待解）——红队 / 圆桌据此决定是否出渐进披露壳。 */
+function hasClarify(brief: DebateBriefInfo): boolean {
+  return brief.factual_disputes.length > 0 || brief.open_questions.length > 0;
+}
+
+/** 渐进披露壳的折叠摘要：让收起态也一眼看清「依据里有什么」（各方论点 / 事实分歧 N / 待解 N）。 */
+function evidenceTeaser(
+  brief: DebateBriefInfo,
+  withSidePoints: boolean,
+): string {
+  return [
+    withSidePoints ? "各方论点" : null,
+    brief.factual_disputes.length
+      ? `事实分歧 ${brief.factual_disputes.length}`
+      : null,
+    brief.open_questions.length ? `待解 ${brief.open_questions.length}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/**
+ * 渐进披露壳（设计 §四「极简一页·渐进披露」）—— 把简报的**次级依据**（各方论点 / 事实分歧 / 待解）
+ * 默认收起，裁决 hero + 需你拍板恒显的「极简一页」，想深究再展开。`teaser` 让收起态也露出内容线索。
+ */
+function Disclosure({
+  summary,
+  teaser,
+  children,
+}: {
+  summary: string;
+  teaser?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-lg border border-border">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50"
+      >
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span className="font-medium text-foreground">{summary}</span>
+        {teaser && <span className="min-w-0 truncate">· {teaser}</span>}
+        <span className="ml-auto shrink-0">{open ? "收起" : "展开"}</span>
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-border p-3">{children}</div>
+      )}
     </div>
   );
 }
@@ -429,7 +535,7 @@ function RecommendationInline({ text }: { text: string }) {
     <p className="flex items-start gap-1.5 text-sm text-foreground">
       <Lightbulb
         size={14}
-        className={`mt-0.5 shrink-0 ${statusAccentText.warning}`}
+        className={`mt-0.5 shrink-0 ${statusAccentText.primary}`}
       />
       <span>
         <span className="font-medium">建议：</span>
@@ -440,9 +546,9 @@ function RecommendationInline({ text }: { text: string }) {
 }
 
 /**
- * 「还需厘清」= 事实分歧（靠证据可厘清）+ 待解问题，合并成裁决卡**之后**的弱化收尾。价值之争已提进
- * 裁决卡（{@link DecisionNeeded}），这里只剩「AI 能帮判 / 尚未解决」的次要项 → 走中性 muted 面板、
- * 低视觉权重，与英雄裁决卡拉开主次。两者皆空则整块省略。
+ * 「还需厘清」= 事实分歧（靠证据可厘清）+ 待解问题，作为渐进披露「依据」（{@link Disclosure}）里的
+ * 次要项。价值之争已提进裁决卡（{@link DisputeTriage}），这里只剩「AI 能帮判 / 尚未解决」的次要项 →
+ * 走中性 muted 面板、低视觉权重，与英雄裁决卡拉开主次。两者皆空则整块省略。
  */
 function StillToClarify({
   factual,

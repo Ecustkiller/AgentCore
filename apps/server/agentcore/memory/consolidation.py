@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Awaitable, Callable
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
 from agentcore.config import settings
@@ -37,11 +38,16 @@ from agentcore.conversation.history import load_recent_history
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.errors import is_schema_error
-from agentcore.db.repositories import ConversationRepository, MessageRepository, UserRepository
+from agentcore.db.repositories import (
+    ConversationRepository,
+    MemoryUpdateRepository,
+    MessageRepository,
+    UserRepository,
+)
 from agentcore.llm.byok import resolve_user_llm_credentials
 from agentcore.llm.factory import build_provider
 from agentcore.memory.locks import user_memory_lock
-from agentcore.memory.maintenance import maintain_user_memory
+from agentcore.memory.maintenance import MemoryUpdateItem, maintain_user_memory
 from agentcore.memory.store import MemoryStore, default_memory_store
 from agentcore.memory.user_memory import LLMMemoryExtractor
 from agentcore.messaging.hub import default_chat_hub
@@ -84,7 +90,7 @@ async def consolidate_conversation(
                 if synced is not None and latest <= synced:
                     return False  # nothing new since the last pass
                 # The conversation's project (folder_id) → memory scope: facts true only in
-                # this project route to its layer, not global (记忆作用域与画像分层 §三). Captured
+                # this project route to its layer, not global (Agent记忆与知识系统 §1.5). Captured
                 # here while the row is loaded; None for a bare/global chat.
                 folder_id = conv.folder_id
                 window = await load_recent_history(
@@ -104,6 +110,9 @@ async def consolidate_conversation(
                 return False
 
             changed = False
+            # The applied changes this pass made (记忆更新对话内可见, §1.6) — the
+            # conversation-tail card's「记了什么」. Stays empty when nothing changed.
+            collected: list[MemoryUpdateItem] = []
             if window:
                 provider = build_provider(credentials)
                 try:
@@ -116,20 +125,40 @@ async def consolidate_conversation(
                         section_cap=settings.memory_section_bullet_cap,
                         max_topic_files=settings.memory_max_topic_files,
                         project_id=folder_id,
+                        collect_items=collected,
                     )
                 finally:
                     await provider.close()
 
+            update_payload: dict | None = None
             async with async_session_factory() as session:
                 await ConversationRepository(session).set_memory_synced_at(conversation_id, latest)
-            # Nudge any live client (the「AI 记忆」editor / a toast) that the file moved
-            # under it, so a viewer reloads instead of saving onto a stale baseline. The
-            # offline pass is off the request path, so this rides the per-user firehose
-            # (messaging hub) rather than the turn SSE. Best-effort — a hub hiccup must
-            # not flip the consolidation's result.
+                # 记忆更新对话内可见 (§1.6): persist this pass's applied changes as a
+                # conversation-tail record so the「记忆已更新」card replays on reload — it
+                # is conversation-level (folds a window of turns), so its own row keyed by
+                # conversation_id, not a per-turn turn_journal fact.
+                if changed and collected:
+                    items = [asdict(it) for it in collected]
+                    row = await MemoryUpdateRepository(session).record(
+                        conversation_id=conversation_id, user_id=user_id, items=items
+                    )
+                    update_payload = {
+                        "id": row.id,
+                        "conversation_id": conversation_id,
+                        "created_at": row.created_at.isoformat(),
+                        "items": items,
+                    }
+            # Nudge any live client that memory moved: now conversation-scoped + carrying
+            # the applied summary, so an OPEN thread inserts the card live and the「AI 记忆」
+            # editor knows to reload (else the shell shows a heads-up toast). The offline
+            # pass is off the request path, so this rides the per-user firehose (messaging
+            # hub), not the turn SSE. Best-effort — a hub hiccup must not flip the result.
             if changed:
                 with contextlib.suppress(Exception):
-                    await default_chat_hub().publish([user_id], {"type": "memory_updated"})
+                    event: dict = {"type": "memory_updated", "conversation_id": conversation_id}
+                    if update_payload is not None:
+                        event["update"] = update_payload
+                    await default_chat_hub().publish([user_id], event)
             logger.info(
                 "memory.consolidated",
                 conversation_id=conversation_id,

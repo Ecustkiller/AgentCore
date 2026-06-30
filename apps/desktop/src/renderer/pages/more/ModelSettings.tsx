@@ -1,6 +1,7 @@
 import { Button, IconButton } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { hasLocalEngine } from "@/lib/capabilities";
 import { ApiError } from "@/services/api";
 import {
   type LlmKeyStatus,
@@ -91,7 +92,8 @@ export function ModelSettings() {
         </div>
       )}
 
-      <LocalEngineToggle />
+      {/* 本地引擎是桌面专属（web 无 sidecar，恒走云端）——web 不挂此开关。 */}
+      {hasLocalEngine() && <LocalEngineToggle />}
     </div>
   );
 }

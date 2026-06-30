@@ -110,6 +110,10 @@ const EMPTY_EXEC: ExecutionRuntime = {
 function statusFromFinish(finishReason: string): ExecutionStatus {
   if (finishReason === "error") return "failed";
   if (finishReason === "cancelled") return "cancelled";
+  // 挂起即收口 (②): a turn finalized AT a durable checkpoint carries finish_reason=paused;
+  // its graph stayed paused (the resume card drives it), so a hydrate must keep it paused
+  // rather than collapse it to "completed" (mirrors the conformance fold's FINISH_TO_STATUS).
+  if (finishReason === "paused") return "paused";
   return "completed";
 }
 

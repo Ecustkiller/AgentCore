@@ -74,6 +74,7 @@ jobs:
       - name: Lint eval cases (hard gate, zero LLM)
         run: |
           uv run python -m agentcore.evals --suite "$SUITE" --lint-only
+          uv run python -m agentcore.evals --suite mast --lint-only
           uv run python -m agentcore.evals --suite probe --lint-only
           uv run python -m agentcore.evals --routing --lint-only
           uv run python -m agentcore.evals --compare --lint-only
@@ -98,6 +99,14 @@ jobs:
         if: steps.key.outputs.present == 'true'
         continue-on-error: true
         run: uv run python -m agentcore.evals --suite "$SUITE" --out eval-reports/functional.json
+
+      # MAST 失败标签套件（学·度量 §2.5 / §五 ①）：这是「拆·lead B / 通·便签墙 / 合·验证」
+      # 默认铺开的**数据闸门**——按 MAST 14 类 / 三组聚合通过率（report 的 summary.by_mast），
+      # 看「哪一类失败被压下去了」。team 路径 + milestone 裁判（layer 2 默认），故必须真模型。
+      - name: MAST failure-label suite (collab rollout gate, soft)
+        if: steps.key.outputs.present == 'true'
+        continue-on-error: true
+        run: uv run python -m agentcore.evals --suite mast --out eval-reports/mast.json
 
       - name: Routing accuracy (confusion matrix, soft)
         if: steps.key.outputs.present == 'true'
@@ -138,6 +147,11 @@ jobs:
             if [ -f eval-reports/functional.json ]; then
               echo "### 功能套件"
               jq -r '.summary | "通过 \(.passed)/\(.total)（\((.pass_rate*100)|floor)%）  成本 $\(.cost_usd)"' eval-reports/functional.json
+            fi
+            if [ -f eval-reports/mast.json ]; then
+              echo "### MAST 失败标签套件（协作铺开闸门）"
+              jq -r '.summary | "通过 \(.passed)/\(.total)（\((.pass_rate*100)|floor)%）  成本 $\(.cost_usd)"' eval-reports/mast.json
+              jq -r '.summary.by_mast.by_group | to_entries[] | "- \(.key) \(.value.passed)/\(.value.total)（\((.value.pass_rate*100)|floor)%）"' eval-reports/mast.json
             fi
             if [ -f eval-reports/routing.json ]; then
               echo "### 路由准确率"

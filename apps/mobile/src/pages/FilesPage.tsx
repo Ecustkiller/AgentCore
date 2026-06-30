@@ -14,11 +14,15 @@ import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
 // alias here, first-class workspace id there) and this page's header / back target. A 裸聊 with
 // no workspace yields an empty list.
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 export function FilesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id: conversationId } = useParams<{ id: string }>();
+  // 一键直达：从聊天「本回合产出文件」卡跳来时带着要打开的文件路径（router state）。
+  const openPath =
+    (location.state as { openPath?: string } | null)?.openPath ?? null;
   const [cwd, setCwd] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -89,6 +93,7 @@ export function FilesPage() {
         cwd={cwd}
         onCwdChange={setCwd}
         reloadKey={reloadKey}
+        openPath={openPath}
         emptyHint="此对话还没有工作区文件。"
       />
 

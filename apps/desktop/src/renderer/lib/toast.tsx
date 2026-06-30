@@ -7,7 +7,9 @@ import { toast } from "sonner";
 // app signals state with icons elsewhere (color-tokens).
 const errorIcon = <AlertTriangle size={16} className="text-destructive" />;
 const successIcon = <CheckCircle2 size={16} className="text-success" />;
-const warningIcon = <AlertTriangle size={16} className="text-warning" />;
+const warningIcon = (
+  <AlertTriangle size={16} className="text-muted-foreground" />
+);
 const infoIcon = <Info size={16} className="text-primary" />;
 
 /**
@@ -43,11 +45,12 @@ export function notifyError(err: unknown, context?: string): void {
     : undefined;
   const title = context ?? described.message;
   const description = context ? described.message : undefined;
-  // Config remedy (去配置) — amber warning, same tone as RetryBanner for BYOK key errors.
+  // Config remedy (去配置) — a blue info toast with a one-click fix-it action, matching
+  // RetryBanner where the 去配置 affordance is the primary (蓝) action (极简中性：行动=蓝).
   if (action) {
-    toast.warning(title, {
+    toast(title, {
       description,
-      icon: warningIcon,
+      icon: infoIcon,
       action: toastAction,
     });
     return;
@@ -88,7 +91,7 @@ export function notifyActionError(context: string, err: unknown): void {
  *
  * Distinct from {@link notifyError}: the user's primary action SUCCEEDED, this just
  * flags a degraded side-effect they can act on (e.g. a best-effort write-back that
- * failed and can be retried). Amber icon on the neutral surface (color-tokens), so it
+ * failed and can be retried). Muted icon on the neutral surface (color-tokens), so it
  * reads as "heads up", not "failed". The action is caller-supplied (not the error map).
  */
 export function notifyWarning(

@@ -203,7 +203,7 @@ async def _drive_captain_loop(
         duration_ms = int((time.monotonic() - start) * 1000)
         usage_dict = usage.as_dict()
         cost = asdict(calculate_cost(profile.model, usage))
-        # 执行级事件溯源 (§18.3): the captain's FULL reply (vs the run_completed
+        # 执行级事件溯源 (§8.3): the captain's FULL reply (vs the run_completed
         # summary) so the turn's reply is reconstructable from the journal alone.
         record_turn_fact(
             MessageFinalFact(run_id=spec.run_id, content=content, reasoning=reasoning).to_fact()

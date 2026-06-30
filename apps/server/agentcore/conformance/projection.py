@@ -44,6 +44,13 @@ _FINISH_TO_STATUS: dict[str, str] = {
     "unproductive": "completed",
     "error": "failed",
     "cancelled": "cancelled",
+    # 挂起即收口 (②): a turn that ended AT a durable checkpoint (ask_user blocking /
+    # plan_review) finalizes with finish_reason=paused — the stream carries a terminal
+    # message_end yet the turn is NOT done. It must STAY paused (the *_required already set
+    # status + pendingInteraction; message_end only adds finishReason + cost), so the single
+    # resume card renders, NOT a completed bubble. Without this the trailing message_end would
+    # fall through to "completed" and erase the pause.
+    "paused": "paused",
 }
 
 
@@ -118,6 +125,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     # 辩论逐轮叙事（debate_round_started / debate_round）：进行中实时叠加，折叠累积按 round_no
     # 升序。transport-only 事件 → 重载（journal 无之）恒为 []，届时全量叙事线在 debate 里。
     debate_rounds: list[dict[str, Any]] = []
+    # 团队便签墙 (§2.2 通): the batch's posted notes in chronological order. Journaled, so it
+    # replays on reload (unlike transport-only board ops). Deduped by noteId for replay safety.
+    team_notes: list[dict[str, Any]] = []
     # plan_review_resolved carries only the checkpoint id → remember the gated run ids.
     checkpoint_steps: dict[str, list[str]] = {}
 
@@ -461,6 +471,40 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 }
             )
 
+        elif etype == "team_note_posted":
+            # 团队便签墙 (§2.2 通): a worker broadcast a one-line decision / heads-up to its
+            # concurrent siblings. Fold it onto the turn's teamNotes (chronological), deduped by
+            # noteId for replay safety (mirrors the desktop/mobile folds; conformance pins them
+            # equal). The wall is engine-scoped; the panel just lists the turn's notes.
+            note_id = p.get("note_id", "")
+            supersedes = p.get("supersedes")
+            if not any(n.get("noteId") == note_id for n in team_notes):
+                team_notes.append(
+                    {
+                        "noteId": note_id,
+                        "runId": p.get("run_id", ""),
+                        "agentId": p.get("agent_id", ""),
+                        "role": p.get("role", ""),
+                        "kind": p.get("kind", ""),
+                        "text": p.get("text", ""),
+                        "ts": p.get("ts"),
+                        # 便签会过期 → supersession (§2.2): a fresh note is active; this fold marks
+                        # the TARGET stale below. `supersedes` is the note this one 改写/作废s (None
+                        # for a fresh post) — kept so the panel can link an amendment to its origin.
+                        "status": "active",
+                        "supersedes": supersedes,
+                    }
+                )
+            # An amendment (carries `supersedes`) marks its TARGET superseded (改写) / voided
+            # (作废) — `supersede_mode` is the single discriminator every fold shares. The target
+            # was posted earlier, so it is already in the list (events replay in order).
+            if supersedes:
+                target = next((n for n in team_notes if n.get("noteId") == supersedes), None)
+                if target is not None:
+                    target["status"] = (
+                        "voided" if p.get("supersede_mode") == "void" else "superseded"
+                    )
+
         elif etype == "approval_required":
             pending = {
                 "kind": "approval",
@@ -551,9 +595,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         else:
             # message_start / turn_saved / title_generated / followups_generated /
-            # board_op_required / tool_progress / workspace_op_required / handoff_* —
-            # not part of the normalized turn judge state (no-op). Mirrored by the frontend folds'
-            # assertNever switch so the set stays in lockstep.
+            # board_op_required / board_read_required / tool_progress / workspace_op_required /
+            # handoff_* — not part of the normalized turn judge state (no-op). Mirrored by the
+            # frontend folds' assertNever switch so the set stays in lockstep.
             pass
 
     # A cancelled turn never received terminal frames for in-flight nodes; freeze them
@@ -593,4 +637,6 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         "cost": cost,
         "debate": debate,
         "debateRounds": debate_rounds,
+        # 团队便签墙 (§2.2 通): the turn's posted notes (chronological), [] when none.
+        "teamNotes": team_notes,
     }

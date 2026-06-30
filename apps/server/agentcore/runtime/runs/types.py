@@ -14,7 +14,7 @@ it moves through (:class:`RunPhase`). The plan that holds nodes lives in
 节点标识沿用），``agent_name`` 取角色名做展示。RunPolicy 中的审计/契约/best-of-N 择优
 （``candidates``）等槽位先声明、暂不启用，留给阶段2。
 
-→ 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
+→ 见设计: docs/03-AI核心/执行引擎架构设计.md §八（Run 模型）
 """
 
 from __future__ import annotations

@@ -34,7 +34,7 @@ import {
   activeRuntime,
   lastAssistantMessageId,
 } from "./runtime";
-import type { ConversationRuntime, Message } from "./types";
+import type { ConversationRuntime, MemoryUpdate, Message } from "./types";
 
 export interface ConversationState {
   currentConversationId: string | null;
@@ -61,6 +61,14 @@ export interface ConversationState {
   ) => void;
   setLoadingOlder: (v: boolean, conversationId?: string | null) => void;
   setLoadingNewer: (v: boolean, conversationId?: string | null) => void;
+  setMemoryUpdates: (
+    updates: MemoryUpdate[],
+    conversationId?: string | null,
+  ) => void;
+  addMemoryUpdate: (
+    update: MemoryUpdate,
+    conversationId?: string | null,
+  ) => void;
   addMessage: (message: Message, conversationId?: string | null) => void;
   appendToLastMessage: (chunk: string, conversationId?: string | null) => void;
   resetStreamingContent: (conversationId?: string | null) => void;
@@ -74,6 +82,10 @@ export interface ConversationState {
   ) => void;
   setTraceIdOnLastMessage: (
     traceId: string,
+    conversationId?: string | null,
+  ) => void;
+  setServerMessageIdOnLastMessage: (
+    messageId: string,
     conversationId?: string | null,
   ) => void;
   attachWorkspacePromotionToLastMessage: (
@@ -240,6 +252,30 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     setLoadingNewer: (v, conversationId) =>
       patchConversation(conversationId, () => ({ loadingNewer: v })),
 
+    // 记忆更新对话内可见 (§1.6): replace the tail cards — only the latest-window
+    // loads call this (a jump/around window has no tail), so it never clobbers cards
+    // while the user is reading mid-history.
+    setMemoryUpdates: (updates, conversationId) =>
+      patchConversation(conversationId, () => ({ memoryUpdates: updates })),
+
+    // Live firehose append (`memory_updated`): dedup by id, and ONLY when the slice is
+    // already loaded — never materialise an empty runtime for a background conversation
+    // (it would have a card but no messages); that conversation fetches the card itself
+    // on next open. Appended last because consolidation post-dates every message.
+    addMemoryUpdate: (update, conversationId) =>
+      set((state) => {
+        const key = conversationId ?? state.currentConversationId ?? DRAFT_KEY;
+        const cur = state.byId[key];
+        if (!cur) return {};
+        if (cur.memoryUpdates.some((u) => u.id === update.id)) return {};
+        return {
+          byId: {
+            ...state.byId,
+            [key]: { ...cur, memoryUpdates: [...cur.memoryUpdates, update] },
+          },
+        };
+      }),
+
     addMessage: (message, conversationId) =>
       patchConversation(conversationId, (rt) => ({
         messages: [...rt.messages, message],
@@ -304,6 +340,16 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const last = messages[messages.length - 1];
         if (!last || last.role !== "assistant") return null;
         messages[messages.length - 1] = { ...last, traceId };
+        return { messages };
+      }),
+
+    setServerMessageIdOnLastMessage: (messageId, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        if (!messageId) return null;
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") return null;
+        messages[messages.length - 1] = { ...last, serverMessageId: messageId };
         return { messages };
       }),
 
@@ -673,6 +719,7 @@ export const useConversationStore = create<ConversationState>((set, get) => {
     clearMessages: () =>
       patchActive(() => ({
         messages: [],
+        memoryUpdates: [],
         isGenerating: false,
         messageFocus: null,
         hasMoreBefore: false,

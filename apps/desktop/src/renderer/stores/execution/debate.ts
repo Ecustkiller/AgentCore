@@ -93,17 +93,23 @@ export function upsertDebateRound(
 }
 
 /**
- * Whether a turn is a 辩论/审查 (前端UX设计.md §四): any run carries a stance tag.
+ * Whether a turn is a 辩论/审查 (前端UX设计.md §四).
  *
  * This is the single client-side signal that differentiates a debate from an
  * ordinary parallel batch — the DAG shape and SSE are identical (守住「形状是数据
- * 不是模式」), so the strip title / node badge / graph 分列 all key off it.
+ * 不是模式」), so the strip title / node badge / graph 分列 / 放大态「交锋」页 all key
+ * off it.
  */
 export function isDebate(execution: Execution): boolean {
-  // 收场产物是辩论的强信号（debate_result 必带）；进行中或旧 journal 无产物时退回
-  // stance 标签（辩手 run 携带）——两者任一即「这是一场辩论」。
+  // 收场产物是辩论的强信号（debate_result 必带）。进行中无产物时退回辩手 run 的标签：
+  // 2 方正反带 stance；多方圆桌/红队无 stance，靠 `group=debate:*`（与 {@link
+  // debateLiveRounds} / liveForm 同一权威信号）——否则进行中的圆桌会被漏判为普通并行批，
+  // 「交锋」页与对话式直播都不出现。三者任一即「这是一场辩论」。
   return (
-    execution.debate != null || execution.runs.some((r) => r.stance != null)
+    execution.debate != null ||
+    execution.runs.some(
+      (r) => r.stance != null || r.group?.startsWith("debate:"),
+    )
   );
 }
 

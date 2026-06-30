@@ -1,6 +1,7 @@
 import { Button, IconButton } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { agentColorVar } from "@/lib/agentIdentity";
 import { formatCompact, formatCost, formatUsd } from "@/lib/format";
 import { useUIStore } from "@/stores/ui";
 import { useUsageStore } from "@/stores/usage";
@@ -132,8 +133,8 @@ function RefreshErrorBanner({
   onRetry: () => void;
 }) {
   return (
-    <div className="mt-6 flex items-center justify-between gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-2.5">
-      <p className="text-xs text-warning">{message}</p>
+    <div className="mt-6 flex items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-2.5">
+      <p className="text-xs text-destructive">{message}</p>
       <Button variant="neutral" onClick={onRetry}>
         重试
       </Button>
@@ -243,7 +244,7 @@ function Dashboard({
             caption={moneyCaption}
           />
           {monthNear && (
-            <p className="-mt-3 text-xs text-warning">
+            <p className="-mt-3 text-xs text-destructive">
               接近本月额度，超出将暂停服务。
             </p>
           )}
@@ -327,14 +328,14 @@ function QuotaMeter({
     <div>
       <div className="flex items-center justify-between text-sm">
         <span className="text-foreground">{label}</span>
-        <span className={near ? "text-warning" : "text-muted-foreground"}>
+        <span className={near ? "text-destructive" : "text-muted-foreground"}>
           {unlimited ? "不限" : `${pct}%`}
         </span>
       </div>
       <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
         {!unlimited && (
           <div
-            className={`h-full rounded-full ${near ? "bg-warning" : "bg-primary"}`}
+            className={`h-full rounded-full ${near ? "bg-destructive" : "bg-primary"}`}
             style={{ width: `${pct}%` }}
           />
         )}
@@ -407,6 +408,7 @@ const ROLE_LABELS: Record<string, string> = {
   arena: "辩论",
   title: "标题生成",
   memory: "记忆整理",
+  vision: "视觉读图",
 };
 
 function roleLabel(role: string): string {
@@ -439,10 +441,18 @@ function RolePayroll({
               i > 0 ? "border-t border-border" : ""
             }`}
           >
-            <span className="text-foreground">
-              {roleLabel(line.role)}
-              <span className="ml-2 text-xs text-muted-foreground">
-                {line.turns} 回合
+            <span className="flex items-center gap-2 text-foreground">
+              {/* 角色身份色圆点 (color-tokens.mdc 角色身份 --agent-N)：让 vision/各角色花销一眼可辨，身份≠状态。 */}
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: agentColorVar(line.role) }}
+                aria-hidden
+              />
+              <span>
+                {roleLabel(line.role)}
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {line.turns} 回合
+                </span>
               </span>
             </span>
             <span className="tabular-nums text-foreground">

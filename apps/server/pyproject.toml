@@ -68,8 +68,10 @@ ignore = ["B008", "A002", "E402"]
 "agentcore/runtime/planner.py" = ["E501"]
 "agentcore/runtime/prompt.py" = ["E501"]
 "agentcore/runtime/resolve/prompt.py" = ["E501"]
+"agentcore/tools/builtin/debate/prompt.py" = ["E501"]
 # Conformance vectors embed long Chinese fixture strings; reflowing hurts diff readability.
-"agentcore/conformance/vectors.py" = ["E501"]
+# (vectors became a package — match every vector module, not just the old single file.)
+"agentcore/conformance/vectors/*.py" = ["E501"]
 # Protocol exception names are stable public API (workspace/storage error taxonomy).
 "agentcore/workspace/protocol.py" = ["N818"]
 "agentcore/storage/protocol.py" = ["N818"]

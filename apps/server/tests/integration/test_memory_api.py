@@ -1,4 +1,4 @@
-"""End-to-end API integration tests for the per-leaf memory surface (记忆作用域与画像分层 P2).
+"""End-to-end API integration tests for the per-leaf memory surface (Agent记忆与知识系统 §1.6).
 
 Covers the route/DI/serialization chain for ``/v1/users/me/memory/files/{kind}`` and
 ``/v1/users/me/memory/projects`` against a real PG schema: per-leaf CAS round-trip +
@@ -117,6 +117,64 @@ async def test_preferences_folder_id_is_ignored_and_stays_global(client, make_in
     assert (await client.get("/v1/users/me/memory/projects")).json()["folders"] == []
 
 
+async def test_topics_list_read_write_clear_and_scope(client, make_invite):
+    code = await make_invite("INV-MEM-4")
+    await _register_and_login(client, code, "mem4")
+
+    # A brand-new user has no topics, and an unknown topic reads empty (stable empty tag).
+    assert (await client.get("/v1/users/me/memory/topics")).json()["topics"] == []
+    r = await client.get("/v1/users/me/memory/topics/部署流程")
+    assert r.status_code == 200, r.text
+    empty_version = r.json()["version"]
+    assert r.json()["content"] == ""
+
+    # First write (baseline = empty tag) is conflict-free; it then lists + reads back.
+    body = "# 部署流程\n- 先构建后推送\n"
+    r = await client.put(
+        "/v1/users/me/memory/topics/部署流程",
+        json={"content": body, "baseline": empty_version},
+    )
+    assert r.json()["ok"] is True and r.json()["conflict"] is False
+    assert (await client.get("/v1/users/me/memory/topics")).json()["topics"] == ["部署流程"]
+    assert (await client.get("/v1/users/me/memory/topics/部署流程")).json()["content"] == body
+
+    # A project-scoped topic is isolated from global; each scope lists only its own.
+    await client.put(
+        "/v1/users/me/memory/topics/调试配方?folder_id=F1",
+        json={"content": "本项目调试", "baseline": None},
+    )
+    assert (await client.get("/v1/users/me/memory/topics")).json()["topics"] == ["部署流程"]
+    p = await client.get("/v1/users/me/memory/topics?folder_id=F1")
+    assert p.json()["topics"] == ["调试配方"]
+    # Project topics also make the project surface in the rail enumeration.
+    assert (await client.get("/v1/users/me/memory/projects")).json()["folders"] == ["F1"]
+
+    # Clearing (empty body, unconditional) deletes the note → it leaves the directory.
+    r = await client.put(
+        "/v1/users/me/memory/topics/部署流程",
+        json={"content": "", "baseline": None},
+    )
+    assert r.json()["ok"] is True
+    assert (await client.get("/v1/users/me/memory/topics")).json()["topics"] == []
+
+
+async def test_topic_cas_conflict_is_not_clobbered(client, make_invite):
+    code = await make_invite("INV-MEM-5")
+    await _register_and_login(client, code, "mem5")
+
+    empty_version = (await client.get("/v1/users/me/memory/topics/笔记")).json()["version"]
+    await client.put(
+        "/v1/users/me/memory/topics/笔记", json={"content": "v1", "baseline": empty_version}
+    )
+    # A stale baseline (the old empty tag) is rejected as a conflict, content untouched.
+    r = await client.put(
+        "/v1/users/me/memory/topics/笔记", json={"content": "v2", "baseline": empty_version}
+    )
+    assert r.json()["ok"] is False and r.json()["conflict"] is True
+    assert (await client.get("/v1/users/me/memory/topics/笔记")).json()["content"] == "v1"
+
+
 async def test_memory_files_require_auth(client):
     assert (await client.get("/v1/users/me/memory/files/profile")).status_code == 401
     assert (await client.get("/v1/users/me/memory/projects")).status_code == 401
+    assert (await client.get("/v1/users/me/memory/topics")).status_code == 401

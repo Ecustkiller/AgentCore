@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import {
+  agentColorVar,
   cn,
   fmtCny,
   fmtCompact,
@@ -12,6 +13,7 @@ import {
   fmtMs,
   fmtTime,
   nanoUsdToCny,
+  roleLabel,
 } from "@/lib/utils";
 import { errorMessage } from "@/services/api";
 import type { UsageWindow } from "@/services/adminUsage";
@@ -202,7 +204,17 @@ export function UserDetail({
                       key={row.role}
                       className="border-border border-b last:border-0"
                     >
-                      <td className="px-5 py-3 text-foreground">{row.role}</td>
+                      <td className="px-5 py-3 text-foreground">
+                        <span className="inline-flex items-center gap-2">
+                          {/* 角色身份色圆点 (color-tokens.mdc 角色身份 --agent-N)：vision/各角色一眼可辨。 */}
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: agentColorVar(row.role) }}
+                            aria-hidden
+                          />
+                          {roleLabel(row.role)}
+                        </span>
+                      </td>
                       <td className="px-5 py-3 text-right font-medium text-foreground tabular-nums">
                         {fmtCny(nanoUsdToCny(row.cost_total, data.cny_per_usd))}
                       </td>

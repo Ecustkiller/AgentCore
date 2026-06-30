@@ -247,7 +247,7 @@ async def test_maintain_enforces_topic_cap(tmp_path):
     assert sorted(m.path for m in await store.list("u1")) == ["主题/A.md", "主题/B.md"]
 
 
-# --- scope isolation (FileMemoryStore global vs project layers, 记忆作用域与画像分层 §5.1) ---
+# --- scope isolation (FileMemoryStore global vs project layers, Agent记忆与知识系统 §1.4) ---
 
 
 async def test_store_project_scope_is_isolated_from_global(tmp_path):

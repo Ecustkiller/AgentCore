@@ -50,17 +50,23 @@ def test_registry_excludes_ceo_only_delegate():
     assert "delegate" not in names
 
 
-def test_worker_registry_adds_escalate_without_leaking_it():
-    # escalate is the worker-only upward channel: present in the worker toolset, but
-    # NOT in the builtin catalog (GET /tools) nor the CEO's own toolset (the CEO uses
-    # ask_user, not escalate). This keeps the orchestration primitive where it belongs.
+# Worker-only orchestration primitives: present in the worker toolset, but NOT in the
+# builtin catalog (GET /tools) nor the CEO's own toolset. `escalate` is the upward
+# channel (worker → CEO); `post_note` / `read_notes` / `amend_note` are the sideways
+# broadcast / read / 改写·作废 channels to 并行队友 (worker ↔ 团队便签墙, §2.2 通 + §2.4
+# 变·worker 的「拉」). All stay where they belong instead of leaking platform-wide.
+_WORKER_ONLY_NAMES = {"escalate", "post_note", "read_notes", "amend_note"}
+
+
+def test_worker_registry_adds_worker_only_tools_without_leaking_them():
     worker = {s.name for s in build_worker_registry().list_all()}
     builtin = {s.name for s in build_builtin_registry().list_all()}
     ceo = {s.name for s in build_ceo_tool_registry().list_all()}
-    assert "escalate" in worker
-    assert worker == _EXPECTED_NAMES | {"escalate"}  # builtins + escalate, nothing else
-    assert "escalate" not in builtin
-    assert "escalate" not in ceo
+    assert worker >= _WORKER_ONLY_NAMES
+    # builtins + the worker-only primitives, nothing else.
+    assert worker == _EXPECTED_NAMES | _WORKER_ONLY_NAMES
+    assert builtin.isdisjoint(_WORKER_ONLY_NAMES)
+    assert ceo.isdisjoint(_WORKER_ONLY_NAMES)
 
 
 def test_write_and_exec_tools_are_grantable():

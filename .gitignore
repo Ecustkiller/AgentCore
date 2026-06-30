@@ -27,6 +27,15 @@ out/
 release/
 # pnpm shoot 截图（须在 out/ 外，避免 electron-builder 误打进安装包）
 apps/desktop/shoot-out/
+# pnpm smoke:webapp 截图（同上：web 冒烟产物，不入仓 / 不打包）
+apps/desktop/smoke-out/
+# web 客户端构建产物（渲染层跑浏览器，形态 A）——由 deploy:web / deploy-web.yml 的
+# build:webapp 每次重新构建，不入仓。
+apps/desktop/dist-web/
+# 临时截图评审产物（配色 / 卡片 / 房间视觉自检）——同 shoot-out，不入仓 / 不打包。
+apps/desktop/color-review/
+apps/desktop/shoot-fix/
+apps/desktop/shoot-room/
 # 内置 Python 运行时（sidecar 打包产物，由 apps/desktop/scripts/bundle-sidecar.mjs 生成）
 apps/desktop/resources/sidecar/
 # apps/desktop/build/ 是 electron-builder 的 buildResources（应用图标源），不是上面 Python

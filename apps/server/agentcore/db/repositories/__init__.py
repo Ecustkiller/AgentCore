@@ -29,6 +29,7 @@ from .conversation_shares import ConversationShareRepository
 from .conversations import ConversationRepository
 from .devices import PushDeviceRepository
 from .folders import FolderRepository
+from .memory_updates import MemoryUpdateRepository
 from .messages import MessageRepository
 from .model_modes import ModelModeRepository
 from .runs import (
@@ -57,6 +58,7 @@ __all__ = [
     "FolderRepository",
     "HandoffJobRepository",
     "InviteRepository",
+    "MemoryUpdateRepository",
     "MessageRepository",
     "ModelModeRepository",
     "PausedTurnRepository",

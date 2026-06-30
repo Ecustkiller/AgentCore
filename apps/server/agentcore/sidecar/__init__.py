@@ -6,7 +6,7 @@ stdio JSON-RPC, so a turn runs entirely on the user's machine (files + code touc
 the real local disk directly — no ``WorkspaceChannel`` round-trip per op).
 
 The engine itself is reused verbatim (``runtime.pipeline.run_chat_pipeline``);
-only the §18.6 host ports are swapped for local implementations:
+only the §8.6 host ports are swapped for local implementations:
 
 - **EventSink** → the turn's events are pumped out as ``turn/event`` JSON-RPC
   notifications instead of an SSE stream (``sidecar.server``).

@@ -114,10 +114,34 @@ export async function createConversation(title?: string): Promise<string> {
   return data.id;
 }
 
-/** A window of messages plus whether older ones exist (drives 加载更早). */
+/** One applied memory change in a 记忆已更新 card (Agent记忆与知识系统 §1.6; maps the OpenAPI
+ *  MemoryUpdateItemView). `action` ∈ add/update/remove; `content` is the bullet (add/update) or
+ *  the matched text (remove); `file`·`section` name the leaf; `scope` ∈ global/project; `target`
+ *  is the desktop memory-leaf path (unused by the mobile lite card — it just opens AI 记忆). */
+export interface MemoryUpdateItem {
+  action: string;
+  file: string;
+  section: string;
+  scope: string;
+  content: string;
+  target: string;
+}
+
+/** One offline-consolidation pass — what the AI remembered FROM this conversation (写也可见,
+ *  §1.6). Returned ONLY with the latest messages window (the card sits at the thread tail).
+ *  Mobile has no per-user firehose, so unlike desktop it surfaces on (re)load, not live push. */
+export interface MemoryUpdate {
+  id: string;
+  createdAt: string;
+  items: MemoryUpdateItem[];
+}
+
+/** A window of messages plus whether older ones exist (drives 加载更早). `memoryUpdates` is
+ *  the conversation-tail 记忆已更新 cards — non-empty only on the latest window. */
 export interface MessageWindow {
   messages: MessageDetail[];
   hasMoreBefore: boolean;
+  memoryUpdates: MemoryUpdate[];
 }
 
 function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
@@ -163,5 +187,18 @@ export async function getMessages(
   return {
     messages: data.data.map(toMessageDetail),
     hasMoreBefore: data.has_more_before,
+    // Backend returns these only on the latest window; older/around pages send none.
+    memoryUpdates: (data.memory_updates ?? []).map((u) => ({
+      id: u.id,
+      createdAt: u.created_at,
+      items: (u.items ?? []).map((it) => ({
+        action: it.action,
+        file: it.file,
+        section: it.section,
+        scope: it.scope,
+        content: it.content,
+        target: it.target,
+      })),
+    })),
   };
 }

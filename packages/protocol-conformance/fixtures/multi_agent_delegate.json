@@ -346,6 +346,7 @@
       "currency": "USD"
     },
     "debate": null,
-    "debateRounds": []
+    "debateRounds": [],
+    "teamNotes": []
   }
 }

@@ -6,6 +6,8 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
+from starlette.requests import Request
+
 from agentcore.config import settings
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.core.errors import RateLimitedError
@@ -13,6 +15,7 @@ from agentcore.middleware.rate_limit import (
     AuthRateLimitMiddleware,
     FixedWindowRateLimiter,
     SlidingWindowRateLimiter,
+    _client_key,
 )
 
 # --- core limiter ---
@@ -90,6 +93,43 @@ async def test_middleware_ignores_get_and_non_auth_paths():
         # ...and a non-auth POST is never throttled.
         for _ in range(5):
             assert (await c.post("/v1/conversations")).status_code == 200
+
+
+# --- client-key derivation (X-Forwarded-For trust, SEC-008) ---
+
+
+def _req(*, xff: str | None, peer: str = "203.0.113.9") -> Request:
+    headers = [(b"x-forwarded-for", xff.encode())] if xff is not None else []
+    return Request({"type": "http", "headers": headers, "client": (peer, 12345)})
+
+
+def test_client_key_ignores_xff_when_proxy_untrusted(monkeypatch):
+    # Default posture: don't trust XFF at all → key off the real socket peer.
+    monkeypatch.setattr(settings, "trust_proxy", False)
+    assert _client_key(_req(xff="1.2.3.4, 5.6.7.8", peer="203.0.113.9")) == "203.0.113.9"
+
+
+def test_client_key_takes_rightmost_hop_when_trusted(monkeypatch):
+    # SEC-008: one trusted proxy → the trustworthy client IP is the entry IT appended
+    # (rightmost), not the spoofable leftmost the client controls.
+    monkeypatch.setattr(settings, "trust_proxy", True)
+    monkeypatch.setattr(settings, "trusted_proxy_hops", 1)
+    assert _client_key(_req(xff="spoofed-by-client, 198.51.100.7")) == "198.51.100.7"
+
+
+def test_client_key_honors_multiple_trusted_hops(monkeypatch):
+    # Two trusted proxies (CDN + nginx) → the client is the 2nd entry from the right.
+    monkeypatch.setattr(settings, "trust_proxy", True)
+    monkeypatch.setattr(settings, "trusted_proxy_hops", 2)
+    assert _client_key(_req(xff="spoof, 198.51.100.7, 70.0.0.2")) == "198.51.100.7"
+
+
+def test_client_key_falls_back_to_peer_when_chain_too_short(monkeypatch):
+    # A spoofer sending a short XFF can't downgrade to a controlled value: a chain
+    # shorter than the trusted-hop count is untrustworthy → fall back to the peer.
+    monkeypatch.setattr(settings, "trust_proxy", True)
+    monkeypatch.setattr(settings, "trusted_proxy_hops", 2)
+    assert _client_key(_req(xff="1.2.3.4", peer="10.0.0.1")) == "10.0.0.1"
 
 
 # --- sliding-window limiter ---

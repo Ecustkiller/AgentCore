@@ -1,7 +1,7 @@
 """Run/turn durability + telemetry models.
 
 HandoffJob (本地→云交接), RunSessionRow (recoverable worker runs), PausedTurnRow
-(结构化挂起 durable resume), TurnJournalRow (§18.3 唯一事实源), TurnMetricsRow
+(结构化挂起 durable resume), TurnJournalRow (§8.3 唯一事实源), TurnMetricsRow
 (运营观测 telemetry).
 """
 
@@ -135,7 +135,7 @@ class RunSessionRow(Base):
 # live SSE turn settles via the interaction bridge instead); ``POST .../resume``
 # claims-and-deletes it to continue on a fresh process. Deleted on resume / a
 # live in-process resolve / timeout. Its journal-so-far is NOT stored here — it
-# lives in the turn_journal fact stream (唯一事实源, §18.3): the pause mirrors it
+# lives in the turn_journal fact stream (唯一事实源, §8.3): the pause mirrors it
 # there and the resume re-hydrates from it, so the frame holds only resume control
 # state (plan / seed_completed / CEO context / pending payload).
 
@@ -159,7 +159,7 @@ class PausedTurnRow(Base):
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     # The resumable CONTROL snapshot (runtime/suspension.py TurnSuspension): plan +
     # seed_completed + CEO context + pending checkpoint payload. The journal-so-far is
-    # NOT here — it rides turn_journal (唯一事实源, §18.3), re-hydrated on claim.
+    # NOT here — it rides turn_journal (唯一事实源, §8.3), re-hydrated on claim.
     frame: Mapped[dict] = mapped_column(JSONB, default=dict, server_default=text("'{}'::jsonb"))
     # Originating turn's log trace_id, so the resumed continuation joins back to the
     # interaction that spawned it. NULL when untraced. See core/log_context.py.
@@ -173,7 +173,7 @@ class PausedTurnRow(Base):
 
 
 class TurnJournalRow(Base):
-    """One fact of a turn's append-only execution journal (§18.3 Turn Journal · 唯一事实源).
+    """One fact of a turn's append-only execution journal (§8.3 Turn Journal · 唯一事实源).
 
     A turn's ordered execution facts (run/tool/interaction events for a multi-agent
     turn, or reasoning/tool 步 for a single-agent turn, plus a closing ``turn_end``)
@@ -280,6 +280,17 @@ class TurnMetricsRow(Base):
     workers: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     input_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    # 协作质量 (学·度量, docs/05-平台与运维/管理员后台.md §四): per-turn orchestration signals,
+    # the operator面 counterpart of the offline log_stats 方向盘. ``boundary_yields`` = 受监督边界
+    # 让出次数 (首计划存活率 = delegated turns whose boundary_yields==0); ``scope_signals`` =
+    # escalate kind=scope count (漂移率); ``revises`` = 定向唤回 次数 (返工率 的一半; contract
+    # 重试 stays a dev-log signal); ``escalations`` = total worker→captain escalations. 空转·早收
+    # reads off the existing ``finish_reason`` (no new column). All default 0 — a plain
+    # single-agent turn writes zeros, unchanged.
+    boundary_yields: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    scope_signals: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    revises: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    escalations: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

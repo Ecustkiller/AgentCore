@@ -14,7 +14,7 @@ from agentcore.core.types import new_id
 from agentcore.llm.config import apply_overrides
 from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.pricing import calculate_cost
-from agentcore.llm.protocol import LLMProvider, TokenUsage
+from agentcore.llm.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import (
     EventSink,
@@ -25,15 +25,19 @@ from agentcore.runtime.events import (
     run_context,
     run_failed,
     run_started,
+    team_note_posted,
 )
 from agentcore.runtime.facts import record_turn_fact
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
 from agentcore.runtime.runs.constants import (
+    AMEND_NOTE_TOOL_NAME,
     DEFAULT_CONTRACT_RETRIES,
     ESCALATE_TOOL_NAME,
     MAX_CONTRACT_RETRIES,
     MAX_DELEGATION_DEPTH,
+    POST_NOTE_TOOL_NAME,
+    READ_NOTES_TOOL_NAME,
 )
 from agentcore.runtime.runs.contract import ContractVerdict, check_contract, format_feedback
 from agentcore.runtime.runs.executor_context import (
@@ -47,6 +51,7 @@ from agentcore.runtime.runs.executor_identities import (
     _WORKER_IDENTITY,
     ESCALATION_CONCURRENCY_CAP,
     DelegateFactory,
+    LeadSubteam,
 )
 from agentcore.runtime.runs.executor_shared import (
     _is_hard_failure,
@@ -55,6 +60,7 @@ from agentcore.runtime.runs.executor_shared import (
     _registry_with,
     _retry_message,
 )
+from agentcore.runtime.runs.notewall import NoteWall, format_notes_for_injection
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.serialize import (
@@ -88,6 +94,7 @@ def build_agent_executor(
     interaction_bridge: ClientRequestBridge | None = None,
     escalation_timeout: float = 0.0,
     escalation_armed: bool = False,
+    note_wall: NoteWall | None = None,
 ) -> RunExecutor:
     """Build a :class:`RunExecutor` bound to one turn's wiring.
 
@@ -134,6 +141,17 @@ def build_agent_executor(
     # file (its ancestor) is still allowed.
     write_coordinator = WriteCoordinator()
     ancestors_by_id = _ancestors_by_id(plan)
+
+    # 团队便签墙 (§2.2 通): one sticky-note wall for this batch (the executor's lifetime),
+    # the soft-collaboration counterpart of write_coordinator's hard write-conflict guard.
+    # Concurrent siblings broadcast one-line decisions / heads-ups onto it (post_note) and
+    # see each other's fresh notes pushed in before their next step (推增量) — so the parallel
+    # silos can build on each other's evolving work. Scoped to this fan-out: only the siblings
+    # actually running in parallel here share it, never the whole tree. The delegate driver
+    # (drive.py) OWNS it and passes it in so the CEO finalize can read the outstanding notes for
+    # 合·对账 (§2.3); standalone callers (debate / tests) pass None → one is created here, so
+    # their behaviour is unchanged (去特例).
+    note_wall = note_wall or NoteWall()
 
     # Per-turn snapshot of the workspace's PRE-EXISTING files (uploads / prior turns),
     # shared by every worker in this delegate batch. "What was already on disk when the
@@ -270,6 +288,11 @@ def build_agent_executor(
         # NOT by re-parsing the tool result prose (防补丁绊线, 设计 §4.7). A worker is
         # sequential, so escalates land here in call order, one at a time.
         resolutions: dict[str, dict[str, Any]] = {}
+        # 受监督子计划 B: a lead's nested-delegation handle (delegate + replan + dispose),
+        # hoisted so the finally can fold a sub-plan the lead yielded-but-never-resumed back
+        # into the ledger before the parent absorbs this child (堵漏账). Stays None for a leaf
+        # worker (no opt-in / at the depth cap / no factory wired).
+        lead_subteam: LeadSubteam | None = None
         try:
             profile = apply_overrides(
                 profiles.agent(spec.model_preference),
@@ -307,6 +330,31 @@ def build_agent_executor(
                 # 阻塞式求决策: the suspend-for-the-user channel for escalate(blocking=true).
                 # None when no bridge (CEO / tests) → escalate stays non-blocking.
                 escalation=_escalation_channel(spec.run_id, agent_id, resolutions),
+                # 团队便签墙 (§2.2 通): the batch wall this worker's post_note broadcasts onto,
+                # its display role stamped on its notes (谁贴的), and a live emit so the
+                # team-notes panel lights up the instant a note is pinned. The executor owns
+                # event shape (引擎纯化) — post_note just hands it the TeamNote; run/agent come
+                # off the note so the UI attributes it to the right sibling. The durable record
+                # rides the journaled team_note_posted event emitted here.
+                note_wall=note_wall,
+                agent_role=spec.role or "",
+                on_note=lambda note: sink.emit(
+                    team_note_posted(
+                        execution_id=execution_id,
+                        note_id=note.note_id,
+                        run_id=note.run_id,
+                        agent_id=note.agent_id,
+                        role=note.role,
+                        kind=note.kind,
+                        text=note.text,
+                        ts=note.ts,
+                        # 改写/作废 (§2.2 supersession): an amendment note carries the target it
+                        # 改写/作废s + the mode; a fresh post leaves both None (omitted from the
+                        # payload). The same on_note path serves post_note AND amend_note.
+                        supersedes=note.supersedes,
+                        supersede_mode=note.supersede_mode,
+                    )
+                ),
             )
             # 阶段2 嵌套子任务: hand this worker its own delegate tool only when it
             # opted in and is still above the depth cap — then it leads a sub-team
@@ -322,13 +370,17 @@ def build_agent_executor(
                 and spec.can_delegate
                 and spec.depth < MAX_DELEGATION_DEPTH
             ):
-                child_delegate = delegate_factory(spec.run_id, spec.depth)
-                worker_tools = _registry_with(tools, child_delegate)
-                # Unrestricted (None) stays None — the delegate now lives in
-                # worker_tools, so "offer all" already includes it. A restricted list
-                # must explicitly gain the delegate name to keep it callable.
+                # The lead gets BOTH its own delegate AND the companion replan bound to
+                # that delegate instance, so it supervises its sub-plan's 波边界
+                # (bind_after_deps / 子队员 escalate scope) exactly like the CEO
+                # (受监督子计划 B 去特例). Its turn-end dispose runs in the finally below.
+                lead_subteam = delegate_factory(spec.run_id, spec.depth)
+                worker_tools = _registry_with(tools, *lead_subteam.tools)
+                # Unrestricted (None) stays None — the new tools now live in worker_tools,
+                # so "offer all" already includes them. A restricted list must explicitly
+                # gain their names (delegate + replan) to keep them callable.
                 allowed_tools = (
-                    None if spec.tools is None else [*spec.tools, child_delegate.schema.name]
+                    None if spec.tools is None else [*spec.tools, *lead_subteam.tool_names]
                 )
                 identity = _WORKER_CAPTAIN_IDENTITY
             # escalate is a worker's always-available upward channel — a safety primitive,
@@ -337,6 +389,21 @@ def build_agent_executor(
             # keep it explicitly, so it can still flag a blocker instead of guessing.
             if allowed_tools is not None and ESCALATE_TOOL_NAME not in allowed_tools:
                 allowed_tools = [*allowed_tools, ESCALATE_TOOL_NAME]
+            # post_note rides the same posture (便签墙 broadcast, §2.2 通): a worker's
+            # always-available channel to align with siblings, so a least-privilege
+            # worker keeps it explicitly too (off a team it's a clean no-op).
+            if allowed_tools is not None and POST_NOTE_TOOL_NAME not in allowed_tools:
+                allowed_tools = [*allowed_tools, POST_NOTE_TOOL_NAME]
+            # read_notes is post_note's pull dual (便签墙 on-demand read, §2.4 变·worker 的「拉」):
+            # same always-available posture so even a least-privilege worker can look up what a
+            # sibling already decided (off a team it cleanly reports「无队友可看」).
+            if allowed_tools is not None and READ_NOTES_TOOL_NAME not in allowed_tools:
+                allowed_tools = [*allowed_tools, READ_NOTES_TOOL_NAME]
+            # amend_note completes the trio (便签会过期 → 改写/作废, §2.2 supersession): a worker
+            # must always be able to correct its OWN stale note so a sibling never builds on a
+            # dead decision, so a least-privilege worker keeps it too (off a team a clean no-op).
+            if allowed_tools is not None and AMEND_NOTE_TOOL_NAME not in allowed_tools:
+                allowed_tools = [*allowed_tools, AMEND_NOTE_TOOL_NAME]
             # Produce → check contract → re-prompt with the specific shortfalls.
             # This content-quality retry is intentionally separate from the
             # scheduler's infra-failure retry (RunPolicy.on_failure): they answer
@@ -383,6 +450,19 @@ def build_agent_executor(
             # LLM react loop) so the frontend's run detail lights up its「收到的上下文」as
             # soon as the worker starts thinking. Bodies capped + journaled (see run_context).
             sink.emit(run_context(spec.run_id, agent_id, _context_block_payloads(received_blocks)))
+
+            # 团队便签墙 推增量 (§2.2 通): pull the notes siblings posted since this worker last
+            # looked and hand them to react_loop as one user message before each of its NEXT
+            # steps — so it builds on the team's evolving decisions / heads-ups, not a snapshot
+            # frozen at its opening. new_for already excludes self-posted, caps the burst, and
+            # advances this run's cursor (each note delivered at most once). Empty (solo / no
+            # fresh notes) → [] → a no-op round, identical to today's behaviour.
+            def _pull_notes(_rid: str = spec.run_id) -> list[LLMMessage]:
+                fresh = note_wall.new_for(_rid)
+                if not fresh:
+                    return []
+                return [LLMMessage(role="user", content=format_notes_for_injection(fresh))]
+
             attempts = 1 + min(DEFAULT_CONTRACT_RETRIES, MAX_CONTRACT_RETRIES)
             for attempt in range(attempts):
                 content, reasoning, round_usage, round_rounds = await _react_and_capture(
@@ -398,6 +478,7 @@ def build_agent_executor(
                     citation_sink=worker_citations,
                     approval_gate=approval_gate,
                     usage_sink=inflight,
+                    on_round_begin=_pull_notes,
                 )
                 run_usage = run_usage + round_usage
                 run_rounds += round_rounds
@@ -516,6 +597,15 @@ def build_agent_executor(
                 rounds=run_rounds,
                 duration_ms=duration_ms,
             )
+        finally:
+            # 堵漏账: if this lead opened a sub-plan at a 波边界 but its react loop ended
+            # without a final replan (answered directly / hit MAX_ROUNDS / raised), the held
+            # sub-team spend still sits in the child delegate's _supervised. Fold it in now —
+            # BEFORE the parent drive's absorb_children merges this child's ledger — so no
+            # sub-team usage is stranded unbilled. No-op when nothing is paused; best-effort,
+            # and in a finally so it runs on the success, MAX_ROUNDS, and exception paths alike.
+            if lead_subteam is not None:
+                await lead_subteam.dispose()
 
     async def execute(spec: RunSpec, completed: Mapping[str, RunState]) -> RunState:
         # Bind this worker's identity so EVERY log emitted under it (tool.execute_end,

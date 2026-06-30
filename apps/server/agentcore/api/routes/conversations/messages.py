@@ -16,10 +16,12 @@ from agentcore.api.dependencies import (
     get_conversation_repo,
     get_cost_event_repo,
     get_db,
+    get_memory_update_repo,
     get_message_repo,
     get_turn_journal_repo,
 )
 from agentcore.api.schemas import (
+    MemoryUpdateView,
     MessageDetail,
     MessageListResponse,
     RecordTurnRequest,
@@ -36,12 +38,13 @@ from agentcore.core.errors import NotFoundError
 from agentcore.db.repositories import (
     ConversationRepository,
     CostEventRepository,
+    MemoryUpdateRepository,
     MessageRepository,
     TurnJournalRepository,
 )
 from agentcore.llm.byok import resolve_user_llm_credentials
 from agentcore.runtime.events import EventSink
-from agentcore.runtime.journal import runs_from_entries
+from agentcore.runtime.journal import runs_from_entries_cached
 from agentcore.runtime.turn_runs import turn_runs
 
 from ._helpers import _preflight_turn_llm, _require_owned_conversation
@@ -60,6 +63,7 @@ async def list_messages(
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     repo: MessageRepository = Depends(get_message_repo),
     journal_repo: TurnJournalRepository = Depends(get_turn_journal_repo),
+    mem_update_repo: MemoryUpdateRepository = Depends(get_memory_update_repo),
 ):
     """A window of a conversation's messages (cursor-windowed, chronological).
 
@@ -97,13 +101,15 @@ async def list_messages(
         messages, has_more_before = await repo.list_latest(conversation_id, limit=limit)
 
     # Project each assistant message's replay payload (runs) from the唯一事实源
-    # turn_journal (§18.3) — it is no longer stored on the message row. One batched
+    # turn_journal (§8.3) — it is no longer stored on the message row. One batched
     # query over the page's message ids (no N+1); turns with no facts stay runs=None.
+    # The per-row fold is memoized by (message_id, journal version) so re-opening /
+    # reloading a window doesn't re-project unchanged turns (项目审计-成本性能专项 PERF-003).
     journal_map = await journal_repo.load_map([m.id for m in messages])
     details: list[MessageDetail] = []
     for m in messages:
         detail = MessageDetail.model_validate(m)
-        runs = runs_from_entries(journal_map.get(m.id))
+        runs = runs_from_entries_cached(m.id, journal_map.get(m.id))
         if runs is not None:
             detail.runs = RunsPayload.model_validate(runs)
         # 回合轮次 (Tier 2 重载): rounds shares the row's usage column but has no own
@@ -114,11 +120,22 @@ async def list_messages(
             detail.rounds = rounds
         details.append(detail)
 
+    # 记忆更新对话内可见 (§1.6): the conversation-tail「记忆已更新」cards. They sit AFTER
+    # the last message, so they belong only to the LATEST window (no before/after/around) —
+    # scroll-up / search-hit pages skip the read entirely.
+    memory_updates: list[MemoryUpdateView] = []
+    if around is None and before is None and after is None:
+        memory_updates = [
+            MemoryUpdateView.model_validate(row)
+            for row in await mem_update_repo.list_for_conversation(conversation_id)
+        ]
+
     return MessageListResponse(
         data=details,
         total=total,
         has_more_before=has_more_before,
         has_more_after=has_more_after,
+        memory_updates=memory_updates,
     )
 
 
@@ -182,6 +199,8 @@ async def send_message(
             sink=sink,
             attachments=[a.model_dump() for a in body.attachments],
             llm_credentials=credentials,
+            # 结构化补轮·B：续辩种子（前端从收场卡发起时携带；普通消息为 None）。
+            debate_seed=body.debate_seed.model_dump() if body.debate_seed else None,
         )
     )
     turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)

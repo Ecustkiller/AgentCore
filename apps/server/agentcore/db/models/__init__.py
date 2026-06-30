@@ -19,7 +19,13 @@ from .auth import Credentials, Invite, RefreshToken, UserLlmKey
 from .billing import CostEvent
 from .boards import Board
 from .chat import Chat, ChatMember, ChatMessage
-from .conversations import Conversation, ConversationShare, Folder, Message
+from .conversations import (
+    Conversation,
+    ConversationShare,
+    Folder,
+    MemoryUpdateRow,
+    Message,
+)
 from .devices import PushDeviceRow
 from .model_modes import ModelMode
 from .runs import (
@@ -44,6 +50,7 @@ __all__ = [
     "Folder",
     "HandoffJob",
     "Invite",
+    "MemoryUpdateRow",
     "Message",
     "ModelMode",
     "PausedTurnRow",

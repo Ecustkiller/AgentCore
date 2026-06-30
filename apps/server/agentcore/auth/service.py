@@ -53,6 +53,12 @@ _LOCKOUT_DURATION = timedelta(minutes=15)
 # refresh calls (services/api.ts) so this window is a backstop, not the only guard.
 _REFRESH_REUSE_GRACE = timedelta(seconds=10)
 
+# Constant-time login: an argon2 hash of a throwaway value. When the username/credentials
+# don't exist we still run one verify against this, so "no such user" costs the same
+# wall-clock as "wrong password" — denying the timing oracle an unauthenticated caller
+# would otherwise use to enumerate valid usernames (SEC-004). Computed once at import.
+_DUMMY_PASSWORD_HASH = hash_password("agentcore-login-timing-equalizer")
+
 # Sentinel for "field not provided" in a partial profile update, distinct from an
 # explicit None (which clears the nullable email column).
 _UNSET: Any = object()
@@ -118,8 +124,11 @@ class AuthService:
     async def login(self, *, username: str, password: str) -> tuple[User, TokenPair]:
         user = await self._users.get_by_username(username.strip())
         creds = await self._credentials.get_by_user_id(user.user_id) if user else None
-        # Uniform failure: never reveal whether the username exists.
+        # Uniform failure: never reveal whether the username exists. Run one verify
+        # against a dummy hash so a missing user takes the same wall-clock as a wrong
+        # password — no timing oracle for username enumeration (SEC-004). Result ignored.
         if user is None or creds is None:
+            verify_password(password, _DUMMY_PASSWORD_HASH)
             raise AuthenticationError("用户名或密码错误")
 
         now = datetime.now(UTC)

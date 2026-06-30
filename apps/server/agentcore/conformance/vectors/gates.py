@@ -5,8 +5,11 @@ See ``vectors/__init__.py`` for the aggregated ``VECTORS`` registry.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from agentcore.runtime.events import (
     FinishReason,
+    SSEEvent,
     approval_required,
     approval_resolved,
     checkpoint_required,
@@ -26,7 +29,6 @@ from agentcore.runtime.events import (
 
 from ._common import _CONV, _COST, _USAGE
 
-from collections.abc import Callable
 
 def _approval_paused() -> list[SSEEvent]:
     return [
@@ -144,6 +146,29 @@ def _single_agent_checkpoint() -> list[SSEEvent]:
         ),
     ]
 
+def _single_agent_checkpoint_finalized() -> list[SSEEvent]:
+    """单聊·检查点【收口即终止】(②)：ask_user(blocking) 落帧后【不再
+    挂在内存 Future】，回合直接以 ``message_end(finish_reason=paused)`` 收口——流到此【终止】（对照
+    ``_single_agent_checkpoint`` 的「停在 ``checkpoint_required``、无 ``message_end``」挂起态）。
+    关键断言：``status`` 仍 ``paused``、``pendingInteraction`` 仍 checkpoint（同一张 resume 卡），但
+    ``finishReason="paused"`` + ``cost`` 落账——客户端据「流以 paused 收尾」渲成单张 resume 卡（统一
+    冷路 ``POST .../resume``，根除 live/durable 双态）。验「终止式挂起 == 挂起态的同一恢复面」。"""
+    return [
+        *_single_agent_checkpoint(),
+        message_end(FinishReason.PAUSED, input_tokens=1900, output_tokens=210, cost=_COST),
+    ]
+
+def _plan_review_finalized() -> list[SSEEvent]:
+    """结构化挂起·计划复核【收口即终止】(②)：delegate ``checkpoint_after`` 落帧后回合以
+    ``message_end(finish_reason=paused)`` 收口（对照 ``_plan_review_paused`` 的「停在
+    ``plan_review_required``、无 ``message_end``」挂起态）。``status`` 仍 ``paused``、
+    ``pendingInteraction`` 仍 plan_review、已完成 r1 仍带 checkpoint 徽标，但 ``finishReason="paused"``
+    + ``cost`` 落账。delegate 的 plan_review 对偶，证终止式挂起在多 Agent 图上同样退回单张 resume 卡。"""
+    return [
+        *_plan_review_paused(),
+        message_end(FinishReason.PAUSED, input_tokens=3000, output_tokens=400, cost=_COST),
+    ]
+
 def _single_agent_non_blocking_ask() -> list[SSEEvent]:
     """单聊·非阻塞发问 (ask_user blocking=false)：CEO 抛出一个已有默认值的问题但**继续干**，不
     挂起、不结算。时间线**原位**落一个 `ask` 标记（卡片正文另路 fold，按 ask_id 取回），回合
@@ -167,6 +192,8 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "approval_resolved_continue": ("审批：通过后继续到 end_turn", _approval_resolved_continue),
     "plan_review_paused": ("结构化挂起：plan_review_required 暂停", _plan_review_paused),
     "plan_review_resolved_continue": ("结构化挂起：放行后跑完下游", _plan_review_resolved_continue),
+    "plan_review_finalized": ("结构化挂起：计划复核收口即终止（②，plan_review_required→message_end(paused)，单一冷路 resume）", _plan_review_finalized),
     "single_agent_checkpoint": ("单聊：检查点 ask_user(blocking) 在时间线原位落 checkpoint 标记 + 暂停", _single_agent_checkpoint),
+    "single_agent_checkpoint_finalized": ("单聊：检查点收口即终止（②，checkpoint_required→message_end(paused)，单一冷路 resume）", _single_agent_checkpoint_finalized),
     "single_agent_non_blocking_ask": ("单聊：非阻塞发问 question_posted 在时间线原位落 ask 标记、回合照常收尾", _single_agent_non_blocking_ask),
 }

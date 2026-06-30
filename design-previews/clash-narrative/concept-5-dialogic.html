@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>概念 5 · 对话式裁决台 — 交锋叙事重设计</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <style>
+      .c5 { max-width: 760px; margin: 0 auto; padding: 22px 20px 40px; }
+
+      .vstrip {
+        display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 18px;
+        border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); box-shadow: var(--shadow-sm);
+      }
+      .vstrip .vt { flex: 1; min-width: 0; }
+      .vstrip .lbl { font-size: 12px; color: var(--muted-foreground); }
+      .vstrip .v { font-size: 16px; font-weight: 750; color: var(--side); margin-top: 1px; }
+
+      .thread { display: flex; flex-direction: column; gap: 14px; }
+      .msg { display: flex; gap: 10px; max-width: 90%; }
+      .msg.bench { align-self: flex-start; }
+      .msg.you { align-self: flex-end; flex-direction: row-reverse; }
+      .msg .av {
+        flex: none; width: 30px; height: 30px; border-radius: 999px; display: grid; place-items: center;
+        font-size: 13px; box-shadow: var(--shadow-sm);
+      }
+      .msg.bench .av { background: color-mix(in oklch, var(--primary) 14%, transparent); color: var(--primary); }
+      .msg.you .av { background: var(--muted); color: var(--muted-foreground); }
+      .msg .bubble { padding: 11px 14px; border-radius: 14px; font-size: 13.5px; line-height: 1.7; }
+      .msg.bench .bubble { background: var(--card); border: 1px solid var(--border); border-top-left-radius: 4px; }
+      .msg.you .bubble { background: var(--primary); color: var(--primary-foreground); border-top-right-radius: 4px; }
+      .msg .bubble .who { font-size: 11px; font-weight: 600; color: var(--muted-foreground); margin-bottom: 3px; }
+      .msg .bubble ul { margin: 8px 0 0; padding-left: 18px; }
+      .msg .bubble li { margin-bottom: 5px; }
+      .msg .bubble .tail { margin-top: 8px; font-size: 12.5px; color: var(--muted-foreground); }
+
+      .suggest { margin-top: 18px; }
+      .suggest .sg-lbl { font-size: 12px; color: var(--muted-foreground); margin-bottom: 9px; display: flex; align-items: center; gap: 6px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+      .chip {
+        border: 1px solid var(--border); border-radius: 999px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+        background: var(--card); color: var(--foreground); transition: 0.12s; display: inline-flex; align-items: center; gap: 6px; font-family: inherit;
+      }
+      .chip:hover { border-color: color-mix(in oklch, var(--primary) 50%, var(--border)); color: var(--primary); }
+      .chip:disabled { opacity: 0.4; cursor: default; }
+      .chip .ico { color: var(--muted-foreground); }
+      .chip:hover .ico { color: var(--primary); }
+
+      .composer {
+        position: sticky; bottom: 16px; margin-top: 20px; display: flex; align-items: center; gap: 8px;
+        padding: 8px 8px 8px 16px; border: 1px solid var(--border); border-radius: 999px; background: var(--background); box-shadow: var(--shadow-md);
+      }
+      .composer input { flex: 1; border: 0; outline: 0; background: transparent; font-family: inherit; font-size: 13.5px; color: var(--foreground); }
+      .composer .send { flex: none; width: 34px; height: 34px; border-radius: 999px; border: 0; background: var(--primary); color: var(--primary-foreground); display: grid; place-items: center; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="chrome">
+        <a class="back" href="index.html">‹ 返回</a>
+        <span class="title" id="title"></span>
+        <div class="tabs">
+          <button aria-pressed="true">⚖ 交锋叙事</button>
+          <button aria-pressed="false">⛬ 协作图</button>
+        </div>
+      </div>
+      <div id="root"></div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="icons.js"></script>
+    <script>
+      const D = window.DEBATE;
+      document.getElementById("title").textContent = D.motion;
+      const sideBy = (k) => D.sides.find((s) => s.key === k);
+      const winner = sideBy(D.brief.leaningSide);
+
+      const QA = [
+        { q: "为什么倾向「咸为正统」？", a: D.brief.leaning },
+        { q: "甜党最强的点是什么？", a: sideBy("sweet").name + "（甜党）：" + sideBy("sweet").point },
+        { q: "咸党最强的点是什么？", a: sideBy("salty").name + "（咸党）：" + sideBy("salty").point },
+        { q: "什么情况下结论会反转？", a: D.brief.reversal },
+        { q: "核心分歧到底在哪？", a: D.brief.crux },
+        {
+          q: "那哪些得我自己定？", a: "有两件是价值取向，AI 判不了 —— 得你拍板：",
+          bullets: D.brief.valueDisputes,
+          tail: "主持人建议：" + D.brief.recommendation,
+        },
+        { q: "如果我只在乎口感、不在乎正统呢？", a: "那就没有「正统」问题了 —— 口感是纯个人偏好，甜咸按你喜欢的来即可，无所谓谁正统。「正统」之争只在你想追历史本源时才成立。" },
+      ];
+
+      const thread = h("div", { class: "thread" });
+      const c5 = h("div", { class: "c5" });
+
+      c5.append(
+        h(
+          "div",
+          { class: "vstrip", style: `--side: var(${winner.colorVar})` },
+          h("div", { class: "ring", style: `--pct:${D.brief.confidencePct};--ring-color:var(--warning);--size:48px` }, h("div", { class: "val" }, h("b", { style: "font-size:13px" }, D.brief.confidencePct + "%"))),
+          h("div", { class: "vt" }, h("div", { class: "lbl" }, "裁判倾向 · 置信 " + D.brief.confidenceLabel + " · " + D.stopReason), h("div", { class: "v" }, D.brief.leaningTitle)),
+        ),
+      );
+
+      const benchMsg = (text, bullets, tail) =>
+        h(
+          "div",
+          { class: "msg bench" },
+          h("div", { class: "av" }, svg("gavel", 15)),
+          h(
+            "div",
+            { class: "bubble" },
+            h("div", { class: "who" }, "主持人 / 裁判台"),
+            h("div", {}, text),
+            bullets ? h("ul", {}, ...bullets.map((b) => h("li", {}, b))) : null,
+            tail ? h("div", { class: "tail" }, tail) : null,
+          ),
+        );
+      const youMsg = (text) => h("div", { class: "msg you" }, h("div", { class: "av" }, svg("user", 15)), h("div", { class: "bubble" }, text));
+
+      thread.append(
+        benchMsg("我已听完两方两轮交锋。" + D.brief.leaning, null, "这场已澄清为价值之争 —— 想深挖随便问我。"),
+      );
+      c5.append(thread);
+
+      const chips = h("div", { class: "chips" });
+      const ask = (item, btn) => {
+        thread.append(youMsg(item.q));
+        const reply = benchMsg(item.a, item.bullets, item.tail);
+        thread.append(reply);
+        if (btn) btn.disabled = true;
+        reply.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      };
+      QA.forEach((item) => {
+        const btn = h("button", { class: "chip" }, h("span", { class: "ico" }, svg("message", 13)), item.q);
+        btn.addEventListener("click", () => ask(item, btn));
+        chips.append(btn);
+      });
+      c5.append(
+        h("div", { class: "suggest" }, h("div", { class: "sg-lbl" }, svg("sparkles", 13), "试着追问 / 挑战裁判"), chips),
+      );
+
+      c5.append(
+        h(
+          "div",
+          { class: "composer" },
+          h("input", { placeholder: "向裁判台追问…（演示：点上面的问题即可）", disabled: "true" }),
+          h("button", { class: "send" }, svg("send", 15)),
+        ),
+      );
+
+      document.getElementById("root").append(c5);
+    </script>
+  </body>
+</html>

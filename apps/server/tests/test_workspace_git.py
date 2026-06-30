@@ -70,6 +70,24 @@ async def test_clone_repo_rejects_non_http_urls(url: str, tmp_path: Path, monkey
         await clone_repo(user_id="u1", folder_id=None, conversation_id="c1", repo_url=url)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost/owner/repo.git",
+        "http://127.0.0.1/owner/repo.git",
+        "http://169.254.169.254/owner/repo.git",  # cloud metadata (link-local)
+        "http://[::1]/owner/repo.git",
+    ],
+)
+async def test_clone_repo_blocks_ssrf_private_targets(url: str, tmp_path: Path, monkeypatch):
+    """SEC-006: an http(s) URL resolving to a local/internal/reserved address is
+    refused by the shared SSRF guard (read_url / favicon parity), even though it
+    passes the http(s) scheme check — so git clone can't reach internal services."""
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    with pytest.raises(ValueError):
+        await clone_repo(user_id="u1", folder_id=None, conversation_id="c1", repo_url=url)
+
+
 async def test_clone_repo_rejects_existing_nonempty_dest(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     from agentcore.workspace.locate import resolve_workspace_root

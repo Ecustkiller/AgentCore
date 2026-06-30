@@ -2,6 +2,7 @@
 
 import asyncio
 
+from agentcore.core.types import ToolEffect
 from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import EventSink, EventType
@@ -33,7 +34,7 @@ async def _resolve_when_pending(registry, conversation_id, decision, note=""):
     raise AssertionError("no pending plan_review appeared")
 
 
-async def test_durable_pause_persists_frame_then_drops_on_live_resolve():
+async def test_durable_pause_persists_frame_on_finalize():
     from agentcore.runtime.suspension import TurnSuspension, captain_transcript
 
     registry = InteractionRegistry()
@@ -63,12 +64,12 @@ async def test_durable_pause_persists_frame_then_drops_on_live_resolve():
     ]
     token = captain_transcript.set(transcript)
     try:
-        exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG}, ctx()))
-        await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
-        result = await exec_task
+        # ②: the durable checkpoint finalizes in place (SUSPEND) — no live resolve, no drop.
+        result = await t.execute({"tasks": CKPT_DAG}, ctx())
     finally:
         captain_transcript.reset(token)
 
+    assert result.effect is ToolEffect.SUSPEND
     assert len(saved) == 1
     frame = saved[0]
     assert frame.message_id == "m1"
@@ -80,14 +81,13 @@ async def test_durable_pause_persists_frame_then_drops_on_live_resolve():
     assert any(s["role"] == "研究员" for s in frame.steps)
     assert any(p["role"] == "写手" for p in frame.pending)
     assert any(e["type"] == "plan_review_required" for e in frame.journal)
-    assert dropped == ["m1"]
-    assert "S1OUT" in result.output and "S2OUT" in result.output
+    assert dropped == []  # finalize never drops the frame — it IS the resume record
 
 
 async def test_durable_pause_captures_resume_scope():
     # The turn's project scope AND the memory master switch ride the durable frame so a
     # fresh-process resume re-wires consult_memory exactly as this turn did: same project
-    # (project 主题 first, then global) and memory-off stays off — 记忆作用域与画像分层 §5.2 /
+    # (project 主题 first, then global) and memory-off stays off — Agent记忆与知识系统 §二 /
     # resume folder_id + memory_enabled 缺口.
     from agentcore.runtime.suspension import captain_transcript
 
@@ -121,9 +121,7 @@ async def test_durable_pause_captures_resume_scope():
     ]
     token = captain_transcript.set(transcript)
     try:
-        exec_task = asyncio.create_task(t.execute({"tasks": CKPT_DAG}, ctx()))
-        await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
-        await exec_task
+        await t.execute({"tasks": CKPT_DAG}, ctx())  # ②: finalizes in place
     finally:
         captain_transcript.reset(token)
 
@@ -186,9 +184,7 @@ async def test_durable_resume_drives_tail_from_journal_not_frame():
     log_token = current_fact_log.set(log)
     ct_token = captain_transcript.set(transcript)
     try:
-        exec_task = asyncio.create_task(pause_tool.execute({"tasks": CKPT_DAG}, ctx()))
-        await _resolve_when_pending(registry, "conv1", CheckpointDecision.CONTINUE)
-        await exec_task
+        await pause_tool.execute({"tasks": CKPT_DAG}, ctx())  # ②: finalizes in place
     finally:
         captain_transcript.reset(ct_token)
         current_fact_log.reset(log_token)

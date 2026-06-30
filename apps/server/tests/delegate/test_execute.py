@@ -216,6 +216,57 @@ def test_task_description_matches_what_worker_actually_receives():
     assert "只收到这段" not in task_desc
 
 
+async def test_playbook_instantiates_whole_team_and_runs():
+    # 拆·playbook 固化 (§2.1): naming a固化形状 + slots expands to a full team and flows through the
+    # SAME pipeline as a hand-written tasks array (compare_options → 2 evaluators + 1 summary).
+    t = tool(Provider([]))
+    result = await t.execute(
+        {"playbook": "compare_options", "playbook_args": {"question": "选 A 还是 B", "options": ["A", "B"]}},
+        ctx(),
+    )
+    assert result.success is True
+    assert result.is_terminal is False
+    assert "汇总分析师" in result.output  # the summary role the playbook minted
+
+
+async def test_playbook_unknown_name_rejected():
+    t = tool(Provider([]))
+    result = await t.execute({"playbook": "does_not_exist"}, ctx())
+    assert result.success is False
+    assert "未知 playbook" in (result.error or "")
+
+
+async def test_playbook_missing_required_slot_rejected():
+    t = tool(Provider([]))
+    result = await t.execute({"playbook": "research_report", "playbook_args": {}}, ctx())
+    assert result.success is False
+    assert "topic" in (result.error or "")
+
+
+async def test_playbook_and_tasks_are_mutually_exclusive():
+    t = tool(Provider([]))
+    result = await t.execute(
+        {
+            "playbook": "research_report",
+            "playbook_args": {"topic": "X"},
+            "tasks": [{"role": "a", "task": "b"}],
+        },
+        ctx(),
+    )
+    assert result.success is False
+    assert "二选一" in (result.error or "")
+
+
+def test_schema_exposes_playbook_params_and_relaxes_required():
+    t = tool(Provider([]))
+    params = t.schema.parameters
+    props = params["properties"]
+    assert set(props["playbook"]["enum"]) == {"research_report", "build_feature", "compare_options"}
+    assert "playbook_args" in props
+    # tasks is no longer HARD-required (playbook is an alternative entry); runtime enforces XOR.
+    assert "tasks" not in params.get("required", [])
+
+
 def test_strict_description_separates_rework_from_disposition():
     t = tool(Provider([]))
     contract_props = t.schema.parameters["properties"]["tasks"]["items"]["properties"]["contract"]

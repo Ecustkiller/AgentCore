@@ -5,13 +5,14 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from agentcore.core.types import ToolEffect
+from agentcore.llm.protocol import LLMMessage
 from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
 from agentcore.runtime.events import EventSink, checkpoint_resolved, plan_review_resolved
 from agentcore.runtime.journal import completed_from_journal, plan_from_journal
 from agentcore.runtime.suspension import AskUserSuspension, PlanReviewSuspension, TurnSuspension
 from agentcore.tools.builtin.ask_user import ask_user_tool_result
+from agentcore.tools.builtin.ask_user.schema import option_label
 from agentcore.tools.builtin.delegate import DelegateTool
-from agentcore.llm.protocol import LLMMessage
 
 
 def append_resumed_tool_results(
@@ -85,7 +86,11 @@ async def settle_resumed_suspension(
         response = CheckpointResponse(decision=decision, note=note, selected=list(selected))
         # Drop any pick that was not on some question's menu (same guard as the live
         # tool; the desktop composes its answer into ``note`` and sends no picks).
-        allowed = {o for q in suspension.questions for o in q.get("options", [])}
+        # ``option_label`` tolerates both the rich-object shape and a bare-string option
+        # from a frame persisted before options carried detail/recommended.
+        allowed = {
+            option_label(o) for q in suspension.questions for o in q.get("options", [])
+        }
         response.selected = [s for s in response.selected if s in allowed]
         sink.emit(
             checkpoint_resolved(
@@ -107,7 +112,7 @@ async def settle_resumed_suspension(
                 note=note,
             )
         )
-        # Re-seed finished workers from the §18.3 journal run-final facts (执行级事件溯源
+        # Re-seed finished workers from the §8.3 journal run-final facts (执行级事件溯源
         # Phase 2 ⑥ — `completed_from_journal` == the dropped `frame.completed`, gated by
         # the conformance golden), so the resumed plan bills the whole graph once without
         # the旁路 blob. Falls back to the in-memory `completed` for a same-process resume

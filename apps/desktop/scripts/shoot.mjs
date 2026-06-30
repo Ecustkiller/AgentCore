@@ -131,6 +131,17 @@ async function main() {
     deviceScaleFactor: SCALE,
     colorScheme: THEME,
   });
+  // The app's theme is class-based via its store (lib/theme.ts → `.dark` on <html>),
+  // seeded from localStorage `agentcore:theme`; `colorScheme` alone only drives the
+  // `system` choice and did not flip the preview here. Seed the store key so
+  // SHOOT_THEME deterministically selects light/dark on every navigation.
+  await page.addInitScript((theme) => {
+    try {
+      localStorage.setItem("agentcore:theme", theme);
+    } catch {
+      /* localStorage unavailable — fall back to colorScheme */
+    }
+  }, THEME);
   // Collect uncaught renderer errors per shot. An error means the AI state failed
   // to render even if the tree didn't fully unmount, so the smoke gate counts it
   // as a failure.

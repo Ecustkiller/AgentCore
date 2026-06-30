@@ -1,17 +1,29 @@
-import { DebateBody } from "@/components/chat/DebateCompare";
 import {
   ParallelTimeline,
   hasParallelTimeline,
 } from "@/components/chat/ParallelTimeline";
+import { DebateArena } from "@/components/chat/debate/Arena";
+import { DebateStream } from "@/components/chat/debate/DebateStream";
+import { toDebateModel } from "@/components/chat/debate/model";
 import { Button } from "@/components/ui";
-import { useActiveGenerating, useActiveMessages } from "@/stores/conversation";
+import {
+  useActiveGenerating,
+  useActiveMessages,
+  useConversationStore,
+} from "@/stores/conversation";
 import {
   ExecutionScopeContext,
   isDebate,
   useMessageExecution,
 } from "@/stores/execution";
 import { type EndpointKind, useSidePanelStore } from "@/stores/sidePanel";
-import { ArrowLeft, Clock, MessagesSquare, Network } from "lucide-react";
+import {
+  ArrowLeft,
+  Clock,
+  MessagesSquare,
+  Network,
+  Swords,
+} from "lucide-react";
 import {
   type ReactNode,
   useCallback,
@@ -23,8 +35,9 @@ import {
 import { CanvasCommandBar } from "./CanvasCommandBar";
 import { GraphView } from "./GraphView";
 
-/** 放大态可切换的视图：协作图 (依赖结构) / 交锋叙事 (辩论主角) / 并行时间线 (时间真相)。 */
-type TurnView = "graph" | "clash" | "timeline";
+/** 放大态可切换的视图：群聊 (辩论室·统一 IM 主视图) / 对比擂台 (正反 2 方左右对开·可选透镜) /
+ *  协作图 (依赖结构) / 并行时间线 (时间真相)。 */
+type TurnView = "room" | "graph" | "compare" | "timeline";
 
 /**
  * The canvas's 放大态 (前端UX设计.md §六 · Route A): one turn's full collaboration
@@ -64,32 +77,48 @@ export function CanvasZoomedTurn({
   const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
   const showContentDetail = useSidePanelStore((s) => s.showContentDetail);
   const messages = useActiveMessages();
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  // 群聊掌舵需知本回合是否仍 live 可操作（决策卡 transport-only，重载即失）：取焦点回合的
+  // isStreaming（与画布指挥台同口径）透传给 DebateStream。
+  const interactive =
+    messages.find((m) => m.id === scopeId)?.isStreaming ?? false;
 
-  // 放大态视图切换 (前端UX设计.md §四/§六/§6.5)：交锋叙事 (辩论主角，决策简报 + 叙事线) /
-  // 协作图 (依赖结构) / 并行时间线 (时间真相，多任务并行图)。辩论默认落交锋、其余默认落图；回放
-  // 本回合则落图让时间线在图上播放。并行时间线恒为可选透镜 (从不作默认)。切回合 (跟随新指令)
-  // 时按新回合性质复位 (deps 含 scopeId)。
+  // 放大态视图切换 (前端UX设计.md §4.1/§六/§6.5)：群聊 (辩论室·统一 IM 主视图) / 对比擂台
+  // (正反 2 方·可选透镜) / 协作图 (依赖结构) / 并行时间线 (时间真相)。
+  // 辩论默认落群聊、其余默认落图；回放本回合则落图让时间线在图上播放。并行时间线恒为可选透镜
+  // (从不作默认)。切回合 (跟随新指令) 时按新回合性质复位 (deps 含 scopeId)。
   const debate = !!execution && isDebate(execution);
+  // 对比擂台仅正反 2 方 (form==="debate") 才出——多方圆桌 / 红队无左右两列可对齐 (擂台占位引去群聊)。
+  const twoSideDebate =
+    debate && execution ? toDebateModel(execution)?.form === "debate" : false;
   const parallel = !!execution && hasParallelTimeline(execution);
   const [view, setView] = useState<TurnView>(
-    debate && !(autoplay && scopeId === turnId) ? "clash" : "graph",
+    debate && !(autoplay && scopeId === turnId) ? "room" : "graph",
   );
   useEffect(() => {
     const replayThisTurn = autoplay && scopeId === turnId;
-    setView(debate && !replayThisTurn ? "clash" : "graph");
+    setView(debate && !replayThisTurn ? "room" : "graph");
   }, [debate, scopeId, autoplay, turnId]);
-  const showClash = debate && view === "clash";
+  const showRoom = debate && view === "room";
+  const showCompare = debate && view === "compare";
   const showTimeline = parallel && view === "timeline";
 
-  // The 放大态 view switcher's available tabs (≥2 ⇒ it renders): 交锋 only for a debate,
-  // 时间线 only when there's parallel-execution data, 协作图 always.
+  // The 放大态 view switcher's available tabs (≥2 ⇒ it renders): 群聊 for any debate,
+  // 对比擂台 only for a 正反 2-side debate, 时间线 only when there's parallel-execution data,
+  // 协作图 always.
   const viewTabs = useMemo(() => {
     const tabs: { id: TurnView; label: string; icon: ReactNode }[] = [];
     if (debate)
       tabs.push({
-        id: "clash",
-        label: "交锋叙事",
+        id: "room",
+        label: "群聊",
         icon: <MessagesSquare size={14} />,
+      });
+    if (twoSideDebate)
+      tabs.push({
+        id: "compare",
+        label: "对比擂台",
+        icon: <Swords size={14} />,
       });
     tabs.push({ id: "graph", label: "协作图", icon: <Network size={14} /> });
     if (parallel)
@@ -99,7 +128,7 @@ export function CanvasZoomedTurn({
         icon: <Clock size={14} />,
       });
     return tabs;
-  }, [debate, parallel]);
+  }, [debate, twoSideDebate, parallel]);
 
   // This turn's final answer bubble (mirrors GraphView's `finalAnswer`): the
   // assistant message stamped with this execution id once the CEO starts writing.
@@ -212,7 +241,7 @@ export function CanvasZoomedTurn({
               {taskSummary}
             </span>
           )}
-          {/* 放大态视图切换 (交锋叙事 / 协作图 / 并行时间线)：≥2 个可用视图才出现。 */}
+          {/* 放大态视图切换 (群聊 / 对比擂台 / 协作图 / 并行时间线)：≥2 个可用视图才出现。 */}
           {viewTabs.length >= 2 && (
             <div className="ml-auto flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-card p-0.5">
               {viewTabs.map((v) => (
@@ -236,11 +265,22 @@ export function CanvasZoomedTurn({
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {showClash && execution ? (
-            // 交锋叙事页：决策简报 + 叙事线全高阅读区；各方发言点角色钻右侧详情面板
-            // (与图节点 / 端点钻取同一 SidePanel)。
+          {showRoom && execution ? (
+            // 群聊页（辩论室·统一 IM 主视图）：自然时序单条群聊流（议题头 → 辩手左 / 你右 / 主持人
+            // 居中 → 流末「主持人终审」唯一结论面），发言点角色钻右侧详情面板（与图节点 / 端点钻取同一 SidePanel）。
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <DebateBody execution={execution} messageId={scopeId} />
+              <DebateStream
+                execution={execution}
+                messageId={scopeId}
+                conversationId={conversationId}
+                interactive={interactive}
+              />
+            </div>
+          ) : showCompare && execution ? (
+            // 对比擂台页（可选透镜·正反 2 方）：左右对开擂台逐轮较真比对；发言点角色钻右侧详情面板
+            // （与图节点 / 端点钻取同一 SidePanel）。
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <DebateArena execution={execution} messageId={scopeId} />
             </div>
           ) : showTimeline && execution ? (
             // 并行时间线页 (多任务并行图)：把队员执行铺在真实时间轴上，看真并发 / 串行化 / 关键路径。

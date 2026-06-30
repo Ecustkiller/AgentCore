@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>概念 2 · 擂台 — 交锋叙事重设计</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <style>
+      .c2 { max-width: 1100px; margin: 0 auto; padding: 22px 24px 60px; }
+
+      .ribbon {
+        display: flex; align-items: center; gap: 16px;
+        padding: 14px 18px; margin-bottom: 18px;
+        border: 1px solid var(--border); border-radius: var(--radius-lg);
+        background:
+          linear-gradient(90deg,
+            color-mix(in oklch, var(--agent-sweet) 8%, transparent),
+            transparent 35%, transparent 65%,
+            color-mix(in oklch, var(--agent-salty) 9%, transparent));
+        box-shadow: var(--shadow-sm);
+      }
+      .ribbon .verdict-txt { flex: 1; min-width: 0; }
+      .ribbon .verdict-txt .lbl { font-size: 12px; color: var(--muted-foreground); font-weight: 600; }
+      .ribbon .verdict-txt .v { font-size: 16px; font-weight: 700; color: var(--side); margin-top: 2px; }
+      .ribbon .steps { display: flex; align-items: center; gap: 6px; }
+      .ribbon .step {
+        display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground);
+      }
+      .ribbon .step .d { width: 9px; height: 9px; border-radius: 999px; background: var(--border); }
+      .ribbon .step .d.quiet { background: color-mix(in oklch, var(--muted-foreground) 45%, transparent); }
+      .ribbon .step .d.clash { background: var(--primary); }
+      .ribbon .step .d.converged { background: var(--success); }
+      .ribbon .sep { width: 18px; height: 2px; background: var(--border); }
+
+      /* arena grid */
+      .arena { display: grid; grid-template-columns: 1fr 132px 1fr; column-gap: 0; }
+      .col-head {
+        padding: 14px 16px; border: 1px solid var(--border);
+        background: color-mix(in oklch, var(--side) 7%, var(--card));
+        border-bottom: 3px solid var(--side);
+        position: sticky; top: 52px; z-index: 5;
+      }
+      .col-head.left  { border-radius: var(--radius-lg) 0 0 0; }
+      .col-head.right { border-radius: 0 var(--radius-lg) 0 0; }
+      .col-head .who { display: flex; align-items: center; gap: 9px; }
+      .col-head .av {
+        width: 30px; height: 30px; border-radius: 999px; flex: none;
+        background: color-mix(in oklch, var(--side) 18%, transparent);
+        color: var(--side); display: grid; place-items: center; font-weight: 800; font-size: 14px;
+      }
+      .col-head .nm { font-weight: 700; font-size: 15px; color: var(--side); }
+      .col-head .meta { display: flex; gap: 6px; margin-top: 2px; }
+      .col-head .thesis { margin-top: 10px; font-size: 12.5px; line-height: 1.6; color: var(--foreground); }
+      .col-head.right .who, .col-head.right .meta { flex-direction: row-reverse; }
+      .col-head.right .nm, .col-head.right .thesis { text-align: right; }
+
+      .spine-head {
+        border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+        background: var(--muted); display: grid; place-items: center;
+      }
+      .spine-head .badge {
+        width: 38px; height: 38px; border-radius: 999px; background: var(--background);
+        border: 1px solid var(--border); display: grid; place-items: center;
+        font-weight: 800; font-size: 12px; color: var(--muted-foreground); box-shadow: var(--shadow-sm);
+      }
+
+      /* cells per round */
+      .cell {
+        border: 1px solid var(--border); border-top: 0; padding: 14px 16px;
+        background: var(--card); min-height: 60px;
+      }
+      .cell.left  { border-right: 0; }
+      .cell.right { border-left: 0; }
+      .cell .spk {
+        font-size: 13px; line-height: 1.7; color: var(--foreground);
+        border-left: 3px solid var(--side); padding-left: 12px;
+      }
+      .cell.right .spk { border-left: 0; border-right: 3px solid var(--side); padding-left: 0; padding-right: 12px; text-align: right; }
+      .cell.empty { color: var(--muted-foreground); font-size: 12.5px; display: grid; place-items: center; }
+
+      .spine {
+        border-top: 0; background: var(--muted);
+        position: relative; display: flex; flex-direction: column; align-items: center;
+        padding: 16px 8px; gap: 10px;
+      }
+      .spine::before {
+        content: ""; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--border);
+      }
+      .spine .node {
+        position: relative; z-index: 1; width: 28px; height: 28px; border-radius: 999px;
+        background: var(--background); border: 2px solid var(--border);
+        display: grid; place-items: center; font-size: 12px; font-weight: 800; color: var(--muted-foreground);
+      }
+      .spine .node.clash { border-color: var(--primary); color: var(--primary); }
+      .spine .node.converged { border-color: var(--success); color: var(--success); }
+      .spine .focus {
+        position: relative; z-index: 1; text-align: center; font-size: 11.5px;
+        font-weight: 600; color: var(--foreground); line-height: 1.4;
+        background: var(--muted); padding: 2px 4px;
+      }
+      .spine .vpills { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
+      .spine .vpills .pill { font-size: 10.5px; padding: 1px 7px; }
+
+      /* clash arrows row (spanning full width under a round) */
+      .clash-row { grid-column: 1 / -1; padding: 0; }
+      .clash-band {
+        border: 1px solid var(--border); border-top: 0;
+        background: color-mix(in oklch, var(--primary) 4%, var(--card));
+        padding: 10px 16px; display: flex; flex-direction: column; gap: 8px;
+      }
+      .clash-band .ct { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: var(--muted-foreground); }
+      .clash {
+        display: flex; align-items: center; gap: 10px; font-size: 12.5px; line-height: 1.5;
+      }
+      .clash.toRight { flex-direction: row; }
+      .clash.toLeft  { flex-direction: row-reverse; text-align: right; }
+      .clash .src { font-weight: 700; color: var(--side); flex: none; }
+      .clash .arrow { color: var(--primary); flex: none; }
+      .clash.toLeft .arrow { transform: scaleX(-1); }
+      .clash .pt { color: var(--foreground); }
+
+      /* judge bench */
+      .bench {
+        margin-top: 22px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+        overflow: hidden; box-shadow: var(--shadow-sm);
+      }
+      .bench .bh {
+        display: flex; align-items: center; gap: 8px; padding: 12px 18px;
+        background: var(--muted); border-bottom: 1px solid var(--border); font-weight: 650;
+      }
+      .bench .bb { padding: 16px 18px; }
+      .bench .reason { font-size: 13.5px; line-height: 1.7; }
+      .bench .need {
+        margin-top: 14px; padding: 12px 14px; border-radius: var(--radius-sm);
+        background: color-mix(in oklch, var(--warning) 9%, var(--card));
+        border: 1px solid color-mix(in oklch, var(--warning) 40%, var(--border));
+      }
+      .bench .need .nt { font-size: 13px; font-weight: 650; color: var(--warning-foreground); display: flex; gap: 6px; align-items: center; }
+      .bench .need ul { margin: 8px 0 0; padding-left: 18px; }
+      .bench .need li { font-size: 13px; line-height: 1.6; margin-bottom: 5px; }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="chrome">
+        <a class="back" href="index.html">‹ 返回</a>
+        <span class="title" id="title"></span>
+        <div class="tabs">
+          <button aria-pressed="true">⚔ 交锋叙事</button>
+          <button aria-pressed="false">⛬ 协作图</button>
+        </div>
+      </div>
+      <div id="root"></div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="icons.js"></script>
+    <script>
+      const D = window.DEBATE;
+      document.getElementById("title").textContent = D.motion;
+      const [L, R] = D.sides; // left = sweet, right = salty
+      const winner = D.sides.find((s) => s.key === D.brief.leaningSide);
+      const root = document.getElementById("root");
+      const c2 = h("div", { class: "c2" });
+
+      // ribbon (verdict + convergence steps)
+      const steps = h("div", { class: "steps" });
+      D.rounds.forEach((r, i) => {
+        if (i) steps.append(h("span", { class: "sep" }));
+        steps.append(
+          h(
+            "div",
+            { class: "step" },
+            h("span", { class: "d " + r.signal }),
+            "第" + r.no + "轮",
+          ),
+        );
+      });
+      steps.append(h("span", { class: "sep" }), h("div", { class: "step" }, h("span", { class: "d converged" }), "收场"));
+      c2.append(
+        h(
+          "div",
+          { class: "ribbon", style: `--side: var(${winner.colorVar})` },
+          h(
+            "div",
+            { class: "ring", style: `--pct:${D.brief.confidencePct};--ring-color:var(--warning);--size:62px` },
+            h("div", { class: "val" }, h("b", { style: "font-size:15px" }, D.brief.confidencePct + "%")),
+          ),
+          h(
+            "div",
+            { class: "verdict-txt" },
+            h("div", { class: "lbl" }, "裁判倾向 · 置信 " + D.brief.confidenceLabel),
+            h("div", { class: "v" }, D.brief.leaningTitle),
+          ),
+          steps,
+        ),
+      );
+
+      // arena
+      const arena = h("div", { class: "arena" });
+      const colHead = (s, cls) =>
+        h(
+          "div",
+          { class: "col-head " + cls, style: `--side: var(${s.colorVar})` },
+          h(
+            "div",
+            { class: "who" },
+            h("span", { class: "av" }, s.name.slice(0, 1)),
+            h(
+              "div",
+              {},
+              h("div", { class: "nm" }, s.name),
+              h(
+                "div",
+                { class: "meta" },
+                h("span", { class: "pill pill-outline" }, s.stance),
+                h("span", { class: "pill pill-muted" }, s.model),
+              ),
+            ),
+          ),
+          h("div", { class: "thesis" }, s.point),
+        );
+      arena.append(
+        colHead(L, "left"),
+        h("div", { class: "spine-head" }, h("div", { class: "badge" }, "VS")),
+        colHead(R, "right"),
+      );
+
+      const vpill = (on, a, b) =>
+        h("span", { class: "pill " + (on ? "pill-primary" : "pill-muted") }, on ? a : b);
+
+      D.rounds.forEach((r) => {
+        // left speech
+        arena.append(
+          h(
+            "div",
+            { class: "cell left", style: `--side: var(${L.colorVar})` },
+            h("div", { class: "spk" }, r.speeches[L.key]),
+          ),
+        );
+        // spine
+        const node = h("div", { class: "node " + r.signal }, r.no);
+        const sp = h(
+          "div",
+          { class: "spine" },
+          node,
+          h("div", { class: "focus" }, r.focus),
+          h(
+            "div",
+            { class: "vpills" },
+            vpill(r.verdict.real_clash, "有交锋", "各说各话"),
+            r.verdict.converged ? h("span", { class: "pill pill-success" }, "收敛") : null,
+          ),
+        );
+        arena.append(sp);
+        // right speech
+        arena.append(
+          h(
+            "div",
+            { class: "cell right", style: `--side: var(${R.colorVar})` },
+            h("div", { class: "spk" }, r.speeches[R.key]),
+          ),
+        );
+        // clash band full-width
+        if (r.clashes.length) {
+          const band = h(
+            "div",
+            { class: "clash-band" },
+            h("div", { class: "ct" }, svg("swords", 13), "本轮交锋点"),
+          );
+          r.clashes.forEach((c) => {
+            const src = D.sides.find((s) => s.key === c.from);
+            const toRight = c.from === L.key;
+            band.append(
+              h(
+                "div",
+                { class: "clash " + (toRight ? "toRight" : "toLeft"), style: `--side: var(${src.colorVar})` },
+                h("span", { class: "src" }, src.name),
+                h("span", { class: "arrow" }, svg("arrowRight", 16)),
+                h("span", { class: "pt" }, c.point),
+              ),
+            );
+          });
+          arena.append(h("div", { class: "clash-row" }, band));
+        } else {
+          arena.append(
+            h(
+              "div",
+              { class: "clash-row" },
+              h(
+                "div",
+                { class: "clash-band", style: "color:var(--muted-foreground);font-size:12px" },
+                "本轮各说各话 · 双方尚未正面接火",
+              ),
+            ),
+          );
+        }
+      });
+      c2.append(arena);
+
+      // judge bench
+      const lastReason = D.rounds[D.rounds.length - 1].verdict.rationale;
+      const need = h(
+        "div",
+        { class: "need" },
+        h("div", { class: "nt" }, svg("user", 14), "需要你拍板（价值之争，AI 判不了）"),
+        h("ul", {}, ...D.brief.valueDisputes.map((t) => h("li", {}, t))),
+      );
+      c2.append(
+        h(
+          "div",
+          { class: "bench" },
+          h("div", { class: "bh" }, svg("gavel", 16), "裁判台 · 结论"),
+          h(
+            "div",
+            { class: "bb" },
+            h("p", { class: "reason", style: "margin:0" }, D.brief.leaning),
+            h("p", { class: "reason muted", style: "margin:10px 0 0;font-size:12.5px" }, "裁判说明：" + lastReason),
+            need,
+          ),
+        ),
+      );
+
+      root.append(c2);
+    </script>
+  </body>
+</html>

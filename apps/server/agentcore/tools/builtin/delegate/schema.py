@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentcore.runtime.runs.playbooks import PLAYBOOKS, available_playbooks
+
 # The CEO's synthesis reads the aggregated worker products as this tool's output;
 # raise the model-facing truncation budget well above the 4000 default so a
 # multi-worker batch isn't clipped before the CEO can integrate it. ``format_for_ceo``
@@ -31,6 +33,8 @@ DELEGATE_DESCRIPTION = (
     "粒度由你定：传入一个 tasks 数组（每个元素一个内联角色，role + task 必填）。无依赖且"
     "仅 1 个=单兵；无依赖多个=并行；任一任务声明 depends_on（引用其它任务的 id）=按依赖"
     "图分波执行，上游产出自动注入下游。\n"
+    "若本次的活正好是几个高频形状之一（调研报告 / 接口＋页面＋测试 / 多选项对比），可改用 "
+    "`playbook` 一键实例化整支团队、免手搓 tasks（与 tasks 二选一，槽位见 playbook / playbook_args 说明）。\n"
     "简单问答 / 闲聊 / 检索自己答；交付物（要产出或改动产物的活——写 / 改文件、删除 / 移动、"
     "运行代码，这些工具只 worker 持有）才用本工具，哪怕只派一个。其余进阶档位（finalize / "
     "can_delegate / contract / 模型档位 / 流水线等）见对应参数说明与 "
@@ -225,6 +229,21 @@ DELEGATE_PARAMETERS = {
                 "就不要设——默认会把结果交回你来收尾；worker 失败时也会自动回落到由你收尾。"
             ),
         },
+        "playbook": {
+            "type": "string",
+            "enum": sorted(PLAYBOOKS),
+            "description": (
+                "可选：用一个【固化形状】一键实例化整支团队，替代手搓 tasks（与 tasks 二选一）。"
+                "设了 playbook 就把槽位放进 playbook_args、不要再传 tasks。可用：" + available_playbooks()
+                + "。仅当你的活正好是这些高频形状之一时用；形态特殊就照常手写 tasks 数组。"
+            ),
+        },
+        "playbook_args": {
+            "type": "object",
+            "description": (
+                "可选：playbook 的槽位填充（与 playbook 搭配；不传 playbook 时忽略）。各 playbook 槽位——"
+                + "；".join(f"{p.name}：{p.slots}" for p in PLAYBOOKS.values())
+            ),
+        },
     },
-    "required": ["tasks"],
 }

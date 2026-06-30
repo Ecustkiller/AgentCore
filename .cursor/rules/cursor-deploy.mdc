@@ -26,8 +26,11 @@ alwaysApply: false
 | 3 | 官网 | `pnpm -C apps/website deploy:pages` |
 | 4 | 手机 | `pnpm -C apps/mobile deploy:pages` |
 | 5 | 管理后台 | `pnpm -C apps/admin deploy:production` |
-| 6 | 验收 | 见下表 |
-| 7 | 打发布点 tag（**不触发 GHA**） | `git tag prod-vN && git push origin prod-vN` |
+| 6 | web 客户端 | `pnpm -C apps/desktop deploy:web` |
+| 7 | 验收 | 见下表 |
+| 8 | 打发布点 tag（**不触发 GHA**） | `git tag prod-vN && git push origin prod-vN` |
+
+> web 客户端 `deploy:web` **仅同步静态文件 + reload**；一次性 Nginx 接线（app. `:443` 兜底 `location /` 替换为静态 SPA，保留 `/api`、`/storage` 等）已于 2026-06-30 完成 → 参考 `deploy/nginx/app-web.conf`、docs §二。
 
 协议变更类另需桌面发版 → 见 §桌面发版。
 
@@ -36,6 +39,7 @@ alwaysApply: false
 | 目标 | 检查 |
 |------|------|
 | API | `curl.exe https://app.fashitianxia.xyz/api/version` → `git_sha` |
+| web 客户端 | `curl.exe https://app.fashitianxia.xyz/` → 200 出 SPA（同源 cookie + 云 SSE） |
 | 官网 / 手机 / admin | HTTP 200（见 §二 URL） |
 
 Windows 用 **`curl.exe`**（PowerShell `curl` = `Invoke-WebRequest`）。

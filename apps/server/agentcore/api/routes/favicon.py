@@ -12,8 +12,9 @@ don't refetch.
 
 Security:
 - **SSRF** — every fetched URL (and each redirect hop) is run through the same
-  private-IP guard as ``read_url`` (:func:`_is_safe_url`), so the proxy can't be
-  used to reach internal hosts / cloud metadata.
+  private-IP guard as ``read_url`` (:func:`agentcore.core.net.is_safe_url`, the
+  shared definition), so the proxy can't be used to reach internal hosts / cloud
+  metadata.
 - **Isolated from the egress breaker** — favicon fetches deliberately do NOT use
   ``read_url``'s shared per-host circuit breaker; a site whose *icon* fails must
   not trip the breaker that gates the agent's actual page reads of that host.
@@ -33,8 +34,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import Response
 
 from agentcore.core.logging import get_logger
-from agentcore.tools.builtin.web._net import describe_net_error, web_timeout
-from agentcore.tools.builtin.web.read_url import _is_safe_url
+from agentcore.core.net import describe_net_error, is_safe_url, web_timeout
 
 logger = get_logger(__name__)
 
@@ -175,7 +175,7 @@ async def _fetch_checked(client: httpx.AsyncClient, url: str) -> httpx.Response 
     """
     request = client.build_request("GET", url, headers=_BROWSER_HEADERS)
     for _ in range(_MAX_REDIRECTS + 1):
-        if not await _is_safe_url(str(request.url)):
+        if not await is_safe_url(str(request.url)):
             return None
         resp = await client.send(request)
         nxt = resp.next_request

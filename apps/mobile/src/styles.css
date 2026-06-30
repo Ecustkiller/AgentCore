@@ -830,6 +830,155 @@ button.link {
   color: var(--muted);
 }
 
+/* --- 「本回合产出文件」卡 (回合内文件呈现 §九): 折叠清单 + 一键直达预览 --- */
+.artifacts {
+  margin-top: 10px;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.artifacts-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  color: var(--fg);
+  background: var(--bg);
+  border: none;
+  border-radius: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.artifacts-folder {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.artifacts-title {
+  flex: 1;
+  text-align: left;
+}
+
+.artifacts-count {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.artifacts-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.artifacts-list > li + li {
+  border-top: 1px solid var(--border);
+}
+
+.artifact-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  color: var(--fg);
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-weight: 400;
+}
+
+.artifact-row:active:not(.artifact-static) {
+  background: var(--bg);
+}
+
+.artifact-static {
+  opacity: 0.7;
+}
+
+.artifact-icon {
+  flex-shrink: 0;
+}
+
+/* op 色调（复用状态色映射）：写=success / 改=品牌 / 删=error / 移=中性。 */
+.art-write {
+  color: var(--success);
+}
+
+.art-edit {
+  color: var(--accent);
+}
+
+.art-delete {
+  color: var(--error);
+}
+
+.art-move {
+  color: var(--muted);
+}
+
+.artifact-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.artifact-dir {
+  color: var(--muted);
+}
+
+.artifact-name {
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.artifact-op {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+}
+
+.artifact-op.art-write {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+}
+
+.artifact-op.art-edit {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.artifact-op.art-delete {
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+}
+
+.artifact-op.art-move {
+  color: var(--muted);
+  background: var(--border);
+}
+
+.artifact-go {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
 /* --- Multi-agent team view (多 Agent 团队视图): progress + vertical worker cards --- */
 .team {
   display: flex;
@@ -1003,9 +1152,167 @@ button.link {
   color: var(--muted);
 }
 
+/* 阻塞式求决策「待你拍板」(②): the interactive variant — a worker SUSPENDED on a blocking
+   escalate, answerable on a live turn. Stronger amber + an answer box and 提交/按假设继续. */
+.run-escalation-live {
+  gap: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+}
+
+.run-escalation-note {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 16px; /* >=16px avoids iOS zoom-on-focus */
+  font-family: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  resize: none;
+}
+
+.run-escalation-note:focus {
+  border-color: var(--accent);
+}
+
+.run-escalation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.esc-btn {
+  min-height: 40px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.esc-btn:disabled {
+  opacity: 0.5;
+}
+
+.esc-btn-primary {
+  color: #fff;
+  background: var(--accent);
+}
+
+.esc-btn-neutral {
+  color: var(--fg);
+  background: transparent;
+  border-color: var(--border);
+}
+
+.run-escalation-busy {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .run-foot {
   font-size: 11px;
   color: var(--muted);
+}
+
+/* 团队便签墙 (§2.2 通): the one-line decisions / heads-ups workers broadcast to their concurrent
+   siblings — a glass-box notes panel under the team runs (贴事实·不要求回应, NOT a chat). */
+.team-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.team-notes-head {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.team-note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.team-note-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.team-note-kind {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  font-size: 11px;
+  border-radius: 999px;
+}
+
+.team-note-kind.kind-decision {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.team-note-kind.kind-headsup {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+}
+
+/* claim 我领了: 认领一块活 / 文件 (success tone reads as「已认领」, distinct from decision / heads_up). */
+.team-note-kind.kind-claim {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+}
+
+.team-note-author {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-note-text {
+  font-size: 13px;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+/* 便签会过期 → supersession (§2.2): a 改写 (superseded) / 作废 (voided) note is dimmed and its text
+   struck through, so a stale decision is never mistaken for current truth. */
+.team-note-stale {
+  opacity: 0.6;
+}
+
+.team-note-stale .team-note-text {
+  text-decoration: line-through;
+}
+
+.team-note-status {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+}
+
+.team-note-status.status-superseded {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 14%, transparent);
+}
+
+.team-note-status.status-voided {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 14%, transparent);
 }
 
 .debate {
@@ -1255,6 +1562,220 @@ button.link {
 }
 
 .debate-clash-point {
+  color: var(--muted);
+}
+
+/* 本轮「你的追问」(交互式逐轮 verbatim 复盘)：向谁问 + 问题原文 + 承接状态，warning 调与桌面同口径。 */
+.debate-asks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  list-style: none;
+  border: 1px solid var(--warning-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.debate-ask {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.debate-ask-edge {
+  margin-right: 6px;
+  font-weight: 600;
+  color: var(--warning);
+  white-space: nowrap;
+}
+
+.debate-ask-text {
+  color: var(--fg);
+}
+
+.debate-ask-state {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.debate-ask-state.ask-ok {
+  color: var(--success);
+}
+
+/* 下一步推荐 (CEO→用户): one-tap quick-reply chips above the composer for a finished turn —
+   tapping fills the input (review/edit before send). Transport-only; retires on the next turn. */
+.followups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 16px 0;
+}
+
+.followups-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.followups-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.followup-chip {
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  white-space: normal;
+}
+
+.followup-chip:active:not(:disabled) {
+  background: var(--border);
+}
+
+/* 非阻塞提问卡 (ask_user blocking=false): inline in the answer timeline at its `ask` marker.
+   AI 中途问你一句但没阻塞（已按默认继续）；点 chip 即回填输入框（可改后发），不回复保持默认。
+   品牌弱底，区别于「待裁决」的琥珀 .pause（那是阻塞、必须答）。 */
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 12px;
+}
+
+.ask-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.ask-icon {
+  flex-shrink: 0;
+}
+
+.ask-q {
+  font-size: 14px;
+  color: var(--fg);
+  white-space: pre-wrap;
+}
+
+.ask-context {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.ask-assume {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border-left: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 8px;
+}
+
+.ask-assume-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.ask-assume-row {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.ask-assume-k {
+  flex-shrink: 0;
+  width: 64px;
+  color: var(--muted);
+}
+
+.ask-assume-v {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg);
+  white-space: pre-wrap;
+}
+
+.ask-question {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-prompt {
+  font-size: 13px;
+  color: var(--fg);
+  white-space: pre-wrap;
+}
+
+.ask-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ask-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg);
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  white-space: normal;
+}
+
+.ask-chip:active:not(:disabled) {
+  background: var(--border);
+}
+
+.ask-badge {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.ask-badge-rec {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.ask-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -1998,4 +2519,155 @@ dialog.viewer::backdrop {
   font-size: 14px;
   line-height: 1.5;
   color: var(--muted);
+}
+
+/* 「记忆已更新」卡 (③ Agent记忆与知识系统 §1.6): offline-consolidation results pinned at the
+   thread tail — the WRITE side of memory made visible (读侧 consult_memory 本就内联可见)。
+   中性 chrome：记忆是被动后台行为，不是「需要你」的面（品牌/状态色留给待裁决类），故卡身走
+   neutral border + panel 底，仅动作标用语义状态色。 */
+.mem-updates {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.mem-update {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.mem-update-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.mem-update-icon {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.mem-update-title {
+  font-weight: 500;
+  color: var(--fg);
+}
+
+.mem-update-count {
+  padding: 1px 7px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.mem-update-when {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.mem-update-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mem-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.mem-action {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+}
+
+/* 动作语义色对齐桌面 (add=success / update=primary(品牌) / remove=muted)。 */
+.mem-action.mem-add {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+}
+
+.mem-action.mem-update-on {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.mem-action.mem-remove,
+.mem-action.mem-update-other {
+  color: var(--muted);
+  background: var(--border);
+}
+
+.mem-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mem-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mem-item-leaf {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mem-item-scope {
+  flex-shrink: 0;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.mem-item-text {
+  font-size: 14px;
+  color: var(--fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mem-item-removed {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.mem-update-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  align-self: flex-end;
+  padding: 4px 2px;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border: none;
+}
+
+.mem-update-link:active {
+  color: var(--fg);
 }

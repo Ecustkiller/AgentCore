@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 from agentcore.config import settings
+from agentcore.core.log_context import log_context, new_trace_id
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.evals.prompt_profiles import resolve_prompt_profile
@@ -217,7 +218,17 @@ class EvalHarness:
         # use_profile 必复位，变体不泄漏到本例之外。
         prompt_profile = resolve_prompt_profile(case.prompt_profile)
         t0 = time.monotonic()
-        with use_profile(prompt_profile):
+        # Bind a correlation context for this case the way the prod turn boundary does
+        # (turn_runner / local_turn): evals drive react_loop / run_chat_pipeline directly,
+        # bypassing turn_runner, so without this the engine's convergence logs (loop_nudge /
+        # loop_finalize / max_rounds_exhausted) would carry NO trace_id — leaving them
+        # un-correlatable and skewing offline log_stats. ``case`` is the eval analogue of
+        # turn_id (already used as the failure-log key below). Evals never emit
+        # chat.turn_complete, so these traces stay correctly excluded from the 空转率 turn set.
+        with (
+            log_context(trace_id=new_trace_id(), user_id=_EVAL_USER_ID, case=case.id),
+            use_profile(prompt_profile),
+        ):
             try:
                 if case.path == "single":
                     return await self._run_single(case, backend, profiles, sink, t0)

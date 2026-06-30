@@ -1,53 +1,74 @@
-import {
-  Excalidraw,
-  convertToExcalidrawElements,
-  restore,
-  serializeAsJSON,
-} from "@excalidraw/excalidraw";
-import "@excalidraw/excalidraw/index.css";
 import { Button, IconButton } from "@/components/ui";
-import { resolveDark } from "@/lib/theme";
 import { notifyError, notifyInfo } from "@/lib/toast";
 import {
+  buildCrystallizedElements,
+  crystallizedRunIds,
+} from "@/services/boardCrystallize";
+import {
   type BoardApplyResult,
-  type BoardElement,
-  applyExistingEdits,
-  applyGroups,
-  buildNodeSkeletons,
-  mergeAppliedScene,
   registerBoardApplier,
 } from "@/services/boardOps";
 import {
-  describeSelection,
+  type OverlayAnchor,
+  buildProgressOverlay,
+} from "@/services/boardProgress";
+import {
+  type BoardRasterResult,
+  registerBoardReader,
+} from "@/services/boardRead";
+import {
+  implementSelectionPrompt,
+  iterateArtifactPrompt,
   organizeSelectionPrompt,
   sendBoardTurn,
 } from "@/services/boardTurn";
 import {
   type BoardDetail,
+  type BoardScene,
   getBoard,
   renameBoard,
   saveBoardScene,
 } from "@/services/boards";
-import { useUIStore } from "@/stores/ui";
-import type { BoardOp } from "@/types/events";
-import { ArrowLeft, ArrowUp, Loader2, Sparkles, Square } from "lucide-react";
 import {
-  type ComponentProps,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+  lastAssistantMessageId,
+  runtimeOf,
+  useConversationStore,
+} from "@/stores/conversation";
+import { type Execution, useMessageExecution } from "@/stores/execution";
+import type { BoardOp } from "@/types/events";
+import {
+  type SceneElement,
+  type Viewport,
+  type WhiteboardApi,
+  WhiteboardCanvas,
+  parseScene,
+  serializeScene,
+} from "@/whiteboard";
+import { ArrowLeft, ArrowUp, Loader2, Sparkles, Square } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-type ExcalidrawProps = ComponentProps<typeof Excalidraw>;
-type SceneChange = NonNullable<ExcalidrawProps["onChange"]>;
-type ChangeArgs = Parameters<SceneChange>;
-type ExcalidrawAPI = Parameters<
-  NonNullable<ExcalidrawProps["excalidrawAPI"]>
->[0];
-type SceneElements = Parameters<ExcalidrawAPI["updateScene"]>[0]["elements"];
+/** Subscribe to a board conversation's live team run tree (M3 进度贴源). The execution store is
+ * keyed by assistant message id, so resolve the board conversation's latest assistant message
+ * (the in-flight / last turn) reactively, then project its run tree — re-folds on every frame
+ * and re-targets when a new turn appends a new assistant message. Null until a turn delegates a
+ * team (a solo CEO turn declares no run plan, so there is nothing to show). */
+function useBoardExecution(conversationId: string | null): Execution | null {
+  const messageId = useConversationStore((s) =>
+    conversationId
+      ? lastAssistantMessageId(runtimeOf(s, conversationId).messages)
+      : null,
+  );
+  return useMessageExecution(messageId);
+}
+
+/** A team run that has stopped producing frames — its progress overlay can hand off to the
+ * persistent crystallized cards (M3 Slice 3). */
+function isExecTerminal(status: Execution["status"]): boolean {
+  return (
+    status === "completed" || status === "failed" || status === "cancelled"
+  );
+}
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -58,13 +79,14 @@ const STATUS_TEXT: Record<SaveStatus, string> = {
   error: "保存失败",
 };
 
-/** One board's canvas (AI协作白板.md §六 集成层 / §九 M1). Loads the scene from the
- * backend, autosaves it back (debounced) with a CAS ``baseline`` so a stale tab/device
- * never clobbers — on conflict autosave pauses and offers a reload (§七 不覆盖). */
+/** One board's canvas (AI协作白板.md §六 自研引擎 / §十 M1). Loads the scene from the
+ * backend into the self-built {@link WhiteboardCanvas}, autosaves it back (debounced) with
+ * a CAS ``baseline`` so a stale tab/device never clobbers — on conflict autosave pauses and
+ * offers a reload (§七 不覆盖). The 2026-06-27 engine reversal replaced Excalidraw here; the
+ * backend board_ops protocol is unchanged (§五.4), the applier now drives `applyOps`. */
 export function WhiteboardCanvasPage() {
   const { boardId = "" } = useParams();
   const navigate = useNavigate();
-  const theme = useUIStore((s) => s.theme);
 
   const [board, setBoard] = useState<BoardDetail | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -78,17 +100,27 @@ export function WhiteboardCanvasPage() {
   const [aiBusy, setAiBusy] = useState(false);
   const aiAbortRef = useRef<AbortController | null>(null);
 
-  // Imperative Excalidraw handle (set via the excalidrawAPI callback): the AI applier
-  // reads the live scene + pushes ops through it.
-  const excalidrawApiRef = useRef<ExcalidrawAPI | null>(null);
+  // M3 进度贴源 (AI协作白板.md §十 Slice 2): the board's AI conversation id (resolved on the
+  // first turn) drives the live run-tree subscription; the brief anchor is the launching
+  // selection's bbox, snapshotted at send so the team cards sit beside what was asked.
+  const [boardConvId, setBoardConvId] = useState<string | null>(null);
+  const briefAnchorRef = useRef<OverlayAnchor | null>(null);
+  // M3 产物回贴 (Slice 3): the execution id already crystallized into the scene, so a finished
+  // team becomes persistent cards exactly once per turn (re-fires also dedupe by run id below).
+  const crystallizedExecRef = useRef<string | null>(null);
+
+  // Imperative engine handle — the AI applier reads the live scene + pushes ops through it.
+  const apiRef = useRef<WhiteboardApi | null>(null);
   // CAS version of the last load/save; sent as the next write's baseline.
   const versionRef = useRef(0);
-  // Latest onChange args (Excalidraw fires often) — the debounced flush reads this.
-  const latestRef = useRef<ChangeArgs | null>(null);
-  // Serialized scene of the last persisted/loaded state — skip no-op saves so merely
-  // opening a board (Excalidraw's own init onChange) doesn't bump the version.
+  // Latest scene snapshot from the engine (the debounced flush reads this).
+  const latestRef = useRef<{
+    elements: SceneElement[];
+    viewport: Viewport;
+  } | null>(null);
+  // Serialized elements of the last persisted/loaded state — skip no-op saves (and ignore
+  // pan/zoom, which never reach onChange) so merely opening a board doesn't bump the version.
   const savedSceneRef = useRef("");
-  // Once a conflict is seen, stop scheduling writes until the user reloads.
   const conflictRef = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -121,37 +153,30 @@ export function WhiteboardCanvasPage() {
     };
   }, []);
 
-  const initialData = useMemo<ExcalidrawProps["initialData"]>(() => {
+  const initialData = useMemo(() => {
     if (!board) return null;
-    const restored = restore(
-      board.scene as Parameters<typeof restore>[0],
-      null,
-      null,
-    );
-    restored.appState.gridModeEnabled = true;
-    savedSceneRef.current = serializeAsJSON(
-      restored.elements,
-      restored.appState,
-      restored.files ?? {},
-      "database",
-    );
-    return restored;
+    const parsed = parseScene(board.scene);
+    savedSceneRef.current = JSON.stringify(parsed.elements);
+    return parsed;
   }, [board]);
 
-  // CAS-write a serialized scene. Shared by the debounced autosave (user edits) and the
-  // AI applier (which needs the resulting version for its回执). Returns the new version,
-  // or null on conflict/error. A no-op (scene unchanged) returns the current version so
-  // the AI applier's explicit save right after an updateScene doesn't double-write.
-  const persist = useCallback(
-    async (sceneStr: string): Promise<number | null> => {
-      if (sceneStr === savedSceneRef.current) return versionRef.current;
+  // CAS-write the scene. Shared by the debounced autosave (user edits) and the AI applier
+  // (which needs the resulting version for its 回执). Returns the new version, or null on
+  // conflict/error. A no-op (elements unchanged) returns the current version.
+  const persistScene = useCallback(
+    async (
+      elements: SceneElement[],
+      viewport: Viewport,
+    ): Promise<number | null> => {
+      const key = JSON.stringify(elements);
+      if (key === savedSceneRef.current) return versionRef.current;
       setStatus("saving");
       try {
-        const res = await saveBoardScene(
-          boardId,
-          JSON.parse(sceneStr),
-          versionRef.current,
-        );
+        const scene = serializeScene(
+          elements,
+          viewport,
+        ) as unknown as BoardScene;
+        const res = await saveBoardScene(boardId, scene, versionRef.current);
         if (res.conflict) {
           conflictRef.current = true;
           setConflict(true);
@@ -159,7 +184,7 @@ export function WhiteboardCanvasPage() {
           return null;
         }
         versionRef.current = res.version;
-        savedSceneRef.current = sceneStr;
+        savedSceneRef.current = key;
         setStatus("saved");
         return res.version;
       } catch {
@@ -173,12 +198,12 @@ export function WhiteboardCanvasPage() {
   const flush = useCallback(async () => {
     const snap = latestRef.current;
     if (!snap || conflictRef.current) return;
-    await persist(serializeAsJSON(snap[0], snap[1], snap[2], "database"));
-  }, [persist]);
+    await persistScene(snap.elements, snap.viewport);
+  }, [persistScene]);
 
-  const handleChange = useCallback<SceneChange>(
-    (...args) => {
-      latestRef.current = args;
+  const handleChange = useCallback(
+    (elements: SceneElement[], viewport: Viewport) => {
+      latestRef.current = { elements, viewport };
       if (conflictRef.current) return;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => void flush(), 1500);
@@ -186,50 +211,23 @@ export function WhiteboardCanvasPage() {
     [flush],
   );
 
-  // The AI's hands on this canvas (AI协作白板.md §六 M2): convert the op batch to
-  // Excalidraw elements, apply existing-element edits + grouping, push to the scene, and
-  // CAS-save so the回执 carries the real version. Registered (keyed by board id) only
-  // while THIS canvas is open, so board_op_required for a board no one is viewing fails
-  // cleanly (the handler reports「画布未打开」).
+  // The AI's hands on this canvas (AI协作白板.md §六 M2): apply the op batch through the
+  // engine, then CAS-save so the 回执 carries the real version. Registered (keyed by board
+  // id) only while THIS canvas is open, so board_op_required for a board no one is viewing
+  // fails cleanly (the handler reports「画布未打开」).
   const applyOps = useCallback(
     async (ops: BoardOp[]): Promise<BoardApplyResult> => {
-      const api = excalidrawApiRef.current;
+      const api = apiRef.current;
       if (!api) throw new Error("画布尚未就绪");
       if (conflictRef.current) {
         throw new Error("白板存在版本冲突，已暂停修改，请先重新加载");
       }
-      const current = api.getSceneElements() as unknown as BoardElement[];
-      const edited = applyExistingEdits(current, ops);
-      // `connect` may target existing nodes, so the converter needs their geometry to bind
-      // the arrow (passthrough skeletons); build the lookup from the POST-edit set so a
-      // same-batch move/delete is respected.
-      const editedById = new Map(edited.map((el) => [el.id, el]));
-      const { skeletons, createdIds, refToId } = buildNodeSkeletons(
-        ops,
-        editedById,
-      );
-      // regenerateIds:false keeps our node ids + the passthrough endpoints' real ids, so
-      // arrows bind to the live elements and the merge can tell new from existing.
-      const converted = skeletons.length
-        ? (convertToExcalidrawElements(
-            skeletons as Parameters<typeof convertToExcalidrawElements>[0],
-            { regenerateIds: false },
-          ) as unknown as BoardElement[])
-        : [];
-      const finalEls = mergeAppliedScene(edited, converted);
-      applyGroups(finalEls, ops, refToId);
-      api.updateScene({ elements: finalEls as unknown as SceneElements });
-      const sceneStr = serializeAsJSON(
-        finalEls as unknown as Parameters<typeof serializeAsJSON>[0],
-        api.getAppState(),
-        api.getFiles(),
-        "database",
-      );
-      const version = await persist(sceneStr);
+      const { created } = api.applyOps(ops);
+      const version = await persistScene(api.getScene(), api.getViewport());
       if (version === null) throw new Error("白板保存失败（可能版本冲突）");
-      return { applied: ops.length, created: createdIds, version };
+      return { applied: ops.length, created, version };
     },
-    [persist],
+    [persistScene],
   );
 
   useEffect(() => {
@@ -237,17 +235,37 @@ export function WhiteboardCanvasPage() {
     return registerBoardApplier(boardId, applyOps);
   }, [boardId, applyOps]);
 
-  // Run one AI turn on this board's conversation (老板命令栏 / 整理选区). board_op_required
-  // events stream back to the applier above and draw; a user stop aborts the stream (the
-  // server turn detaches). Turns don't stack — `aiBusy` gates re-entry.
+  // The AI's eyes on this canvas (AI协作白板.md §九 读图): rasterize a subset of elements to a
+  // PNG for the vision reader. Read-only (no CAS save). Registered (keyed by board id) only
+  // while THIS canvas is open, so board_read for a board no one is viewing fails cleanly.
+  const rasterize = useCallback(
+    async (ids: string[]): Promise<BoardRasterResult> => {
+      const api = apiRef.current;
+      if (!api) throw new Error("画布尚未就绪");
+      return api.rasterizeElements(ids);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!boardId) return;
+    return registerBoardReader(boardId, rasterize);
+  }, [boardId, rasterize]);
+
   const runBoardTurn = useCallback(
     async (prompt: string) => {
       if (!boardId || aiBusy) return;
+      // Snapshot the brief anchor (the selection the team works "from") so live progress cards
+      // dock beside it; no selection (a bare command-bar order) → no anchor → no overlay.
+      briefAnchorRef.current = apiRef.current?.getSelectionBounds() ?? null;
       setAiBusy(true);
       const ac = new AbortController();
       aiAbortRef.current = ac;
       try {
-        await sendBoardTurn(boardId, prompt, ac.signal);
+        await sendBoardTurn(boardId, prompt, {
+          signal: ac.signal,
+          onConversation: setBoardConvId,
+        });
       } catch (err) {
         if (!ac.signal.aborted) notifyError(err, "AI 作画失败");
       } finally {
@@ -258,6 +276,42 @@ export function WhiteboardCanvasPage() {
     [boardId, aiBusy],
   );
 
+  // M3 进度贴源 (Slice 2): the live team run tree → transient overlay cards anchored beside the
+  // brief. Shows ONLY a non-terminal run — a finished turn hands off to the persistent
+  // crystallize below, so the completed cards aren't briefly doubled. Clears when there is no
+  // team (a solo CEO turn) or no anchor. Pure overlay — never enters the scene / history / save.
+  const execution = useBoardExecution(boardConvId);
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api) return;
+    const anchor = briefAnchorRef.current;
+    const live =
+      execution && !isExecTerminal(execution.status) ? execution : null;
+    api.setOverlay(live && anchor ? buildProgressOverlay(live, anchor) : []);
+  }, [execution]);
+
+  // M3 产物回贴 (Slice 3): when a team turn ends, crystallize its run tree into persistent
+  // `agentNode` / `artifactCard` cards beside the brief (one CAS save via the normal autosave),
+  // then drop the transient overlay. Idempotent — keyed by execution id and deduped by the run
+  // ids already on the board, so a re-fire or a follow-up iteration turn (Slice 4) never dupes.
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api || !execution || !isExecTerminal(execution.status)) return;
+    if (crystallizedExecRef.current === execution.id) return;
+    const anchor = briefAnchorRef.current;
+    if (!anchor) return;
+    const cards = buildCrystallizedElements(
+      execution,
+      anchor,
+      crystallizedRunIds(api.getScene()),
+    );
+    crystallizedExecRef.current = execution.id;
+    if (cards.length > 0) {
+      api.addElements(cards);
+      api.setOverlay([]);
+    }
+  }, [execution]);
+
   const submitOrder = useCallback(() => {
     const text = aiInput.trim();
     if (!text || aiBusy) return;
@@ -265,22 +319,48 @@ export function WhiteboardCanvasPage() {
     void runBoardTurn(text);
   }, [aiInput, aiBusy, runBoardTurn]);
 
-  // 选区 → 帮我整理结构: describe the current selection (real ids the AI targets with
-  // board_ops) and ask it to tidy them. No selection → a hint, not a turn.
+  // 选区 → 帮我整理结构 (§九 混合 payload): structured elements go as text (real ids the AI
+  // targets with board_ops); hand-drawn/截图 (freedraw) in the selection make the prompt tell
+  // the CEO to board_read those ids first. No selection → a hint, not a turn.
   const organizeSelection = useCallback(() => {
-    const api = excalidrawApiRef.current;
+    const api = apiRef.current;
     if (!api || aiBusy) return;
-    const selectedMap = api.getAppState().selectedElementIds;
-    const ids = Object.keys(selectedMap).filter((id) => selectedMap[id]);
+    const ids = api.getSelectedIds();
     if (ids.length === 0) {
       notifyInfo("请先在白板上选择要整理的元素");
       return;
     }
-    const desc = describeSelection(
-      api.getSceneElements() as unknown as BoardElement[],
-      ids,
-    );
-    void runBoardTurn(organizeSelectionPrompt(desc));
+    void runBoardTurn(organizeSelectionPrompt(api.getScene(), ids));
+  }, [aiBusy, runBoardTurn]);
+
+  // 选区 / frame →「让团队照这实现」(§十 M3 发起入口): hand the selection to the CEO as the
+  // requirement brief and let it assemble the team + implement — delegate / debate / 单干 is
+  // the CEO's call (提案 A). Same 混合 payload as 整理 (structured as text, 手绘/截图 via
+  // board_read); no selection → a hint, not a turn.
+  const implementSelection = useCallback(() => {
+    const api = apiRef.current;
+    if (!api || aiBusy) return;
+    const ids = api.getSelectedIds();
+    if (ids.length === 0) {
+      notifyInfo("请先在白板上选择作为需求的内容");
+      return;
+    }
+    void runBoardTurn(implementSelectionPrompt(api.getScene(), ids));
+  }, [aiBusy, runBoardTurn]);
+
+  // 在产物上迭代 (§十 M3 Slice 4 贴源迭代): feed the selected crystallized artifactCard(s) — plus
+  // any annotations drawn beside them — back to the CEO as「上一版 + 改进意见」for the next
+  // version. The crystallizer appends the new run's cards beside the old (旧版留痕). The floating
+  // button is shown only when an artifactCard is selected, so ids always carry one here.
+  const iterateArtifact = useCallback(() => {
+    const api = apiRef.current;
+    if (!api || aiBusy) return;
+    const ids = api.getSelectedIds();
+    if (ids.length === 0) {
+      notifyInfo("请先选中要迭代的产物卡");
+      return;
+    }
+    void runBoardTurn(iterateArtifactPrompt(api.getScene(), ids));
   }, [aiBusy, runBoardTurn]);
 
   const stopBoardTurn = useCallback(() => {
@@ -343,12 +423,12 @@ export function WhiteboardCanvasPage() {
       </header>
 
       {conflict ? (
-        <div className="flex shrink-0 items-center gap-3 border-b border-border bg-warning/10 px-3 py-2">
+        <div className="flex shrink-0 items-center gap-3 border-b border-border bg-destructive/10 px-3 py-2">
           <span className="text-xs text-foreground">
             此白板已在别处更新，为避免覆盖已暂停自动保存。
           </span>
           <Button
-            variant="warning"
+            variant="primary"
             size="sm"
             className="ml-auto"
             onClick={fetchBoard}
@@ -360,14 +440,16 @@ export function WhiteboardCanvasPage() {
 
       <div className="relative flex-1">
         {board && initialData ? (
-          <Excalidraw
-            initialData={initialData}
-            excalidrawAPI={(api) => {
-              excalidrawApiRef.current = api;
-            }}
-            langCode="zh-CN"
+          <WhiteboardCanvas
+            key={board.id}
+            ref={apiRef}
+            initialElements={initialData.elements}
+            initialViewport={initialData.viewport}
             onChange={handleChange}
-            theme={resolveDark(theme) ? "dark" : "light"}
+            onOrganizeSelection={organizeSelection}
+            onImplementSelection={implementSelection}
+            onIterateArtifact={iterateArtifact}
+            aiBusy={aiBusy}
           />
         ) : (
           <div className="flex h-full items-center justify-center">

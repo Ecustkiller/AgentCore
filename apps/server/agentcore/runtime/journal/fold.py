@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from agentcore.runtime.events import FinishReason, _JOURNAL_SURFACE_TYPES, EventType
+from agentcore.runtime.events import _JOURNAL_SURFACE_TYPES, EventType, FinishReason
 from agentcore.runtime.facts import EXECUTION_ONLY_KINDS, FactKind
 from agentcore.runtime.runs.types import RunKind
 
-from .entries import KIND_TURN_END, _PROCESS_PREFIX
+from .entries import _PROCESS_PREFIX, KIND_TURN_END
 
 if TYPE_CHECKING:
     from agentcore.llm.protocol import LLMMessage
@@ -207,11 +207,11 @@ def window_from_journal(
     """Project a turn's journal facts into ONE run's LLM window (EXECUTION).
 
     The execution-side counterpart of :func:`runs_from_entries`: where that rebuilds
-    the *display* runs payload, this folds the §18.3 execution facts back into the
+    the *display* runs payload, this folds the §8.3 execution facts back into the
     ``list[LLMMessage]`` the engine actually fed the model — the same shape the live
     captain transcript / a worker's ``messages`` take, so resume can feed it straight
     back and the conformance golden can assert it ``==`` the transcript at a pause
-    (执行级事件溯源 §18.3, the ``window_from_journal`` projection).
+    (执行级事件溯源 §8.3, the ``window_from_journal`` projection).
 
     Correct-by-construction — only outputs are journaled, so the window is the fold of
     all prior facts (no quadratic input duplication):

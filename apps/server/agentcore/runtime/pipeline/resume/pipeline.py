@@ -16,7 +16,7 @@ from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.checkpoints import CheckpointDecision
-from agentcore.runtime.costing import captain_run_cost_from_state
+from agentcore.runtime.costing import RunCost, captain_run_cost_from_state
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
@@ -43,9 +43,15 @@ from agentcore.runtime.suspension import (
     captain_transcript,
     turn_history,
 )
-from agentcore.tools.builtin import build_worker_registry, file_mutation_tool_names
+from agentcore.tools.builtin import (
+    build_worker_registry,
+    file_mutation_tool_names,
+    per_call_tool_names,
+)
 from agentcore.tools.builtin.board_ops import BoardOpsTool
+from agentcore.tools.builtin.board_read import BoardReadTool
 from agentcore.tools.protocol import ToolContext
+from agentcore.vision import build_vision_reader
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
@@ -70,7 +76,7 @@ async def resume_chat_pipeline(
 ) -> dict:
     """Continue a turn paused at a plan_review / ask_user checkpoint (结构化挂起 2b resume).
 
-    Rebuilds the turn from the §18.3 turn journal and finishes it: re-wire the CEO
+    Rebuilds the turn from the §8.3 turn journal and finishes it: re-wire the CEO
     toolset, seed the display journal with the pre-pause graph, **rebuild the CEO window
     by folding the journal facts** (:func:`resumed_captain_window` — the captain
     transcript is a projection of the journal, no longer read from ``frame.transcript``,
@@ -127,6 +133,10 @@ async def resume_chat_pipeline(
             if board_id
             else None
         )
+        # AI 协作白板 §九.4 Gap ②: the resumed turn's vision cost sink, shared by reference
+        # across derived run contexts — symmetric with the fresh-turn path (run.py). A
+        # board_read after the checkpoint bills its 读图 row here; folded into cost_runs below.
+        vision_cost_sink: list[RunCost] = []
         base_tool_context = ToolContext(
             execution_id=new_id(),
             run_id=new_id(),
@@ -135,6 +145,10 @@ async def resume_chat_pipeline(
             user_id=suspension.user_id,
             conversation_id=conversation_id,
             board_channel=board_channel,
+            # §九.4: vision provider (QwenVL) — set VISION_API_KEY to enable; None ⇒
+            # board_read returns a clean「读图能力未配置」error (「插上即用」).
+            vision_reader=build_vision_reader(),
+            cost_sink=vision_cost_sink,
         )
         approval_gate = (
             ApprovalGate(
@@ -143,6 +157,7 @@ async def resume_chat_pipeline(
                 registry=default_interaction_registry(),
                 timeout_seconds=settings.approval_timeout_seconds,
                 file_op_tools=file_mutation_tool_names(),
+                per_call_tools=per_call_tool_names(),
             )
             if settings.approval_gate_enabled
             else None
@@ -174,13 +189,14 @@ async def resume_chat_pipeline(
             memory_enabled=suspension.memory_enabled,
         )
 
-        # AI 协作白板 (§六 M2): re-give the resumed CEO the ``board_ops`` tool so it can keep
-        # drawing after the checkpoint. Registered into the assembled toolset BEFORE the loop
-        # runs, so it joins this resume's LLM function catalog (the replayed system prompt is
-        # the stored slim one — the catalog, not the prompt, is what makes the tool callable).
-        # Only in a 白板会话 — every other resume never sees it.
+        # AI 协作白板: re-give the resumed CEO the board tools (``board_ops`` §六 M2 +
+        # ``board_read`` §九) so it can keep drawing / reading after the checkpoint. Registered
+        # into the assembled toolset BEFORE the loop runs, so they join this resume's LLM
+        # function catalog (the replayed system prompt is the stored slim one — the catalog,
+        # not the prompt, is what makes a tool callable). Only in a 白板会话.
         if board_channel is not None:
             chat_tools.register(BoardOpsTool())
+            chat_tools.register(BoardReadTool())
 
         sink.emit(message_start(message_id, conversation_id=conversation_id))
         # Continue the pre-pause exchange: seed the journal so the persisted turn
@@ -189,7 +205,7 @@ async def resume_chat_pipeline(
         sink.seed_journal(suspension.journal)
 
         # Rebuild the CEO window by FOLDING the turn journal (Phase 2 ④): the captain
-        # transcript at pause is a projection of the §18.3 facts, not a stored blob —
+        # transcript at pause is a projection of the §8.3 facts, not a stored blob —
         # window_from_journal(journal_entries) + the reloaded history reconstructs the
         # exact messages the CEO suspended on (the conformance golden gates this ==).
         transcript = resumed_captain_window(suspension, history)
@@ -263,11 +279,16 @@ async def resume_chat_pipeline(
             # Bill the resumed captain's partial spend on a hard failure (B-deep 失败
             # 计费), same as the fresh-turn path: priced onto captain_state, persisted
             # by _persist_turn_result even without an assistant reply. No usage → no row.
-            cost_runs = (
-                [asdict(captain_run_cost_from_state(captain_run_id, captain_state))]
-                if captain_state.usage
-                else []
-            )
+            cost_runs = [
+                *(
+                    [asdict(captain_run_cost_from_state(captain_run_id, captain_state))]
+                    if captain_state.usage
+                    else []
+                ),
+                # A board_read after the checkpoint may have billed before the captain
+                # died (§九.4 Gap ②): carry those vision rows so the spend isn't lost.
+                *(asdict(r) for r in vision_cost_sink),
+            ]
             return {
                 "message_id": message_id,
                 "content": "",
@@ -288,6 +309,7 @@ async def resume_chat_pipeline(
             profile=profile,
             citations=citations,
             sink=sink,
+            vision_cost_runs=vision_cost_sink,
         )
 
     except Exception as e:
@@ -308,6 +330,7 @@ async def resume_chat_pipeline(
         }
     finally:
         turn_history.reset(history_token)
-        sink.close()
+        # Do NOT close the sink here (see run_chat_pipeline): its owner closes it, so the
+        # resumed turn's persist_turn_result tail (title / followups) still reaches the client.
         with contextlib.suppress(Exception):
             await llm.close()

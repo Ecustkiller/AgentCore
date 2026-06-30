@@ -16,6 +16,7 @@ import { useApprovalStore } from "@/stores/approvals";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import type { SSEEvent } from "@/types/events";
 import type {
+  SidecarDebateSeed,
   SidecarHistoryEntry,
   SidecarTurnResult,
 } from "@shared/sidecar-contract";
@@ -53,6 +54,9 @@ export interface StreamViaSidecarOptions {
   /** 本轮用户气泡的乐观 id：回写落库后据此把它换成云端权威 id（仅当它仍是末条 user
    *  消息时——防用户在回写返回前又发了一条而误改）。 */
   optimisticUserId: string;
+  /** 续辩种子（结构化补轮·B）：非空 = 本回合 debate 续上一场（焦点正交、首轮辩手读到上一场
+   *  摘要）。普通回合缺省，逐字回退全新辩论。 */
+  debateSeed?: SidecarDebateSeed;
   signal?: AbortSignal;
 }
 
@@ -119,6 +123,7 @@ export async function streamConversationViaSidecar({
   content,
   history,
   optimisticUserId,
+  debateSeed,
   signal,
 }: StreamViaSidecarOptions): Promise<SidecarTurnResult> {
   const turnId = newTurnId();
@@ -144,6 +149,7 @@ export async function streamConversationViaSidecar({
         userMessage: content,
         history,
         inference,
+        debateSeed,
       }),
     writeBack: (result) =>
       persistAndReconcile(

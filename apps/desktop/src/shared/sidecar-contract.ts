@@ -14,11 +14,18 @@
  * 本文件是「引擎本体就在本地」的通道，两者是双模式的两条独立链路。
  */
 
+import type { components } from "@agentcore/contract-rest-types";
+
 /** 一次回合的云代理推理凭据：把引擎的 LLM 调用指向云端推理代理（平台 key 不下放本机）。 */
 export interface SidecarInference {
   baseUrl: string;
   apiKey: string;
 }
+
+/** 续辩种子（结构化补轮·B / 可逆叫停）：前端从收场卡发起续辩时把上一场 debate_result 投影成
+ *  的最小种子。= 云链路 `SendMessageRequest.debate_seed` 同一生成类型（snake_case，逐字对齐
+ *  引擎 `DebateSeed.from_payload`）；IPC 仅透传，引擎侧宽容解析。 */
+export type SidecarDebateSeed = components["schemas"]["DebateSeedInput"];
 
 /** renderer 发起一次本地回合所需的入参（主进程据此驱动对应 root 的 sidecar）。 */
 export interface SidecarStartTurnRequest {
@@ -45,6 +52,10 @@ export interface SidecarStartTurnRequest {
   history?: SidecarHistoryEntry[];
   /** 云代理凭据；缺省则 sidecar 回退到其自身 server 配置（dev 便利，非生产姿态）。 */
   inference?: SidecarInference;
+  /** 续辩种子（结构化补轮·B / 可逆叫停）：非空 = 本回合的 debate 续上一场（主持人焦点正交于
+   *  已谈、首轮辩手读到上一场摘要）。普通回合缺省。主进程原样透传给 Python sidecar 的
+   *  `startTurn.debateSeed`，引擎经 `params.get("debateSeed")` 喂 `run_chat_pipeline`。 */
+  debateSeed?: SidecarDebateSeed;
 }
 
 /** 一条历史消息（与引擎 `run_chat_pipeline` 的 history 形状对齐）。 */

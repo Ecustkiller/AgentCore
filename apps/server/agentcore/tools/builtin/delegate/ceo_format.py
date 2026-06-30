@@ -59,7 +59,10 @@ def escalation_block(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
                 answered.append(f"- {label}：{question} → 用户已答：{answer}")
                 continue
             blocking = bool(e.get("blocking"))
-            mark = "【关键阻塞】" if blocking else ""
+            # 卡在缺输入·依赖缺口 (§2.4 变·worker 的「拉」): if this run got here (synthesis) rather
+            # than being settled at the reactive wave boundary, mark it so the CEO补 a producer.
+            is_dep = e.get("kind") == "dep"
+            mark = "【关键阻塞】" if blocking else ("【缺输入·依赖缺口】" if is_dep else "")
             line = f"- {mark}{label}：{question}"
             assumption = str(e.get("assumption") or "").strip()
             if assumption:
@@ -75,7 +78,9 @@ def escalation_block(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
             "以下是队员无法独自拍板、需要你定夺的关键岔路 / 缺失信息。它们已按各自的暂定假设"
             "继续交付，但你应先处理这些问题：能自己答的就在概览里给出并据此判断相关产物是否需"
             "返工；确需用户拍板的就用 ask_user 问（可把问题 near-verbatim 转给用户）；需要原"
-            "作者据答案重做的就用 revise 唤回。\n" + "\n".join(line for _, line in pending)
+            "作者据答案重做的就用 revise 唤回；标【缺输入·依赖缺口】的是队员卡在缺一个还不存在"
+            "的输入——用 delegate 补一个产出它的步骤，再用 revise 把结果交回原作者据此续写。\n"
+            + "\n".join(line for _, line in pending)
         )
     if answered:
         out += (
@@ -173,6 +178,25 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
     return products
 
 
+def team_notes_block(tool: DelegateTool) -> str:
+    """The CEO-facing【团队便签】section feeding 合·对账 (§2.3), or "" when the wall is empty / absent.
+
+    The batch's NoteWall (owned by ``drive``, stashed on the tool) holds the 决定 / 认领 / 提醒 the
+    team broadcast while working — its outstanding ACTIVE notes are the ready-made input to the
+    semantic-boundary reconciliation in the closing instruction (便签墙本身又是对账的现成输入).
+    Absent (a CEO that never delegated) or empty (nothing posted / all retracted) ⇒ "" so nothing
+    is added — 零行为变化 for a team that didn't use the wall."""
+    wall = tool._note_wall
+    if wall is None:
+        return ""
+    notes = wall.active_notes()
+    if not notes:
+        return ""
+    from agentcore.runtime.runs.notewall import format_notes_for_synthesis
+
+    return "\n" + format_notes_for_synthesis(notes)
+
+
 def format_for_ceo(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
     """Render the workers' products as the CEO's overview input."""
     lines = ["## 团队执行结果（据此写一段简短概览交给用户；完整详情用户自行查看）"]
@@ -193,6 +217,12 @@ def format_for_ceo(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
             "用户的概览里自然带出『团队建议接下来可以…』即可；无价值的忽略，不要逐条复述。\n"
             + "\n".join(f"- {role}：{ns}" for role, ns in suggestions)
         )
+    # 团队便签 → 合·对账 (§2.3): surface the team's outstanding broadcast 决定 / 认领 so the CEO
+    # reconciles the assembled result against them in the closing instruction (the wall is 对账 的
+    # 现成输入). Empty wall / a CEO that never delegated ⇒ "" → nothing added.
+    notes_block = team_notes_block(tool)
+    if notes_block:
+        lines.append(notes_block)
     for wp in products:
         lines.append(
             f"\n### {wp['role']}（{wp['status']}） · run_id: `{wp['run_id']}`\n{wp['body']}"
@@ -208,7 +238,30 @@ def format_for_ceo(tool: DelegateTool, plan: RunPlan, results: dict) -> str:
         "交付判为【未达成】，用 revise 唤回原作者真正调用 file_write 落盘，或重新委派。"
         "（仅产出文本结论的 worker——调研 / 分析 / 辩论 / 对比等——本就没有文件产出，属正常，"
         "不在此列，也不必在概览里提它。）\n"
-        "请用你自己的声音写一段【简短概览】：综述各成员的关键结论、串起整体、"
+        "若本次是【相互依赖、要拼到一起】的并行（多块共享同一接口 / 数据格式 / 字段，或一块产出要被"
+        "另一块接住——典型如『接口＋页面＋测试』），合并前先做一步【语义边界对账】：只查三样"
+        "『拼不拼得上』、不评每块好不好（后者是各 worker 自带质检那条线，别混）——①【冲突】两块对"
+        "同一共享点的假设对不上（一端叫 `/login`、另一端按 `/auth/session`；一端发 `password`、"
+        "另一端收 `pwd`）；②【缺口】该做的事掉在分工缝里没人认领（谁都没做错误处理 / 边界态）；"
+        "③【重复】两块做了同一件事（上方若有【团队便签】，据队员广播过的决定 / 认领一并对照："
+        "决定改了成品没跟上、两人认领了同一块、成品与某条广播决定矛盾）。"
+        "这是今天『跑偏只能等 worker 举手(escalate scope)』的主动版"
+        "——你主动对一遍、不等谁举手。对出问题别在概览里糊过去：就地用 `revise` 唤回相关产物对齐、"
+        "或用 `replan` 操舵 / 追加修一块，高风险需用户拍板时用 `ask_user`。若各块本就【各干各的、"
+        "最后汇成一篇】（如查三个不相干话题），无缝可对，跳过这步。\n"
+        "收尾前先做一步【对照原始目标的完工核验】（比逐块检查更值钱，别跳过）：把团队已完成的整体"
+        "成果，对照【用户最初的请求】以及你当初给各步写的目标 / 预期产出（task / expected_output），"
+        "逐条核对——用户真正要的每一件事，是否都【实质达成】了？重点抓两类「面上过了、实则没办成」："
+        "①用户明确要的某件事整体掉了、根本没人做到（缺失的功能 / 章节 / 交付物）；②某产物形式上交"
+        "了、却答非所问、没解决用户真正要的问题（『跑得通却没解决』那类）。这一层查的是【整体是否达成"
+        "原始意图】，与上面的『文件是否真落盘』（防幻觉铁律）、各 worker 自带的质检提醒（单块是否达"
+        "标）层次不同、不可互相替代。\n"
+        "据此给出明确的【完工判定】，二者择一、别含糊：\n"
+        "- 若确有【实质未达成】之处：别假装收工、也别把缺口一笔带过——就地补齐再收尾（缺整块用 "
+        "`delegate` 补、在原计划上用 `replan` 追加 / 操舵相应步骤、或让原作者用 `revise` 补正）。\n"
+        "- 若已【确实达成】用户所求：就自信收尾，不要为求稳重复委派已做好的事、也不要无谓空转——"
+        "达成即应收口。\n"
+        "确认达成（或已补齐）后，再用你自己的声音写一段【简短概览】：综述各成员的关键结论、串起整体、"
         "指引用户去看细节即可——不要逐字复述每个 worker 的全文，也不要罗列内部"
         "步骤或 Agent。如仍需补充工作，可再次调用 delegate；若用户希望对其中某个产物"
         "做小改 / 增补、且仍由原角色来改，可用 revise（传该产物上面的 run_id + 修改"

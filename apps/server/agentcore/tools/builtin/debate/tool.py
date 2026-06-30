@@ -11,6 +11,7 @@ from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.protocol import LLMProvider
 from agentcore.runtime.debate import (
     DebateConfig,
+    DebateSeed,
     Moderator,
     RoundBoundary,
     RoundDecision,
@@ -75,6 +76,7 @@ class DebateTool:
         conversation_id: str = "",
         round_decision_timeout: float = 0.0,
         interactive_armed: bool = False,
+        prior_seed: DebateSeed | None = None,
     ) -> None:
         self._llm = llm
         self._sink = sink
@@ -94,6 +96,10 @@ class DebateTool:
         self._conversation_id = conversation_id
         self._round_decision_timeout = round_decision_timeout
         self._interactive_armed = interactive_armed
+        # 结构化补轮·B（可逆叫停）：上一场辩论的结构化种子（前端从收场卡发起续辩时直传，经
+        # pipeline 线到此）。非空 ⇒ 本回合的 debate 调用是「续辩」：主持人 _frame 正交于上一场
+        # 焦点、首轮辩手读到上一场摘要。``None`` = 全新辩论（逐字回退，零行为变化）。
+        self._prior_seed = prior_seed
         # 每个 side 的可续写 session（跨轮带记忆）：首轮执行后留人，后续轮 continue_run 取用。
         self._debater_sessions: dict[str, RunSession] = {}
         from agentcore.runtime.costing import WorkerResultAccumulator
@@ -241,6 +247,9 @@ class DebateTool:
                 return None
             decision = str(outcome.get("decision") or "").strip()
             focus = str(outcome.get("focus") or "").strip()
+            # 追问（与 focus 正交）：要下一轮辩手正面回答的问题，可定向某方（ask_target=side key）。
+            ask = str(outcome.get("ask") or "").strip()
+            ask_target = str(outcome.get("ask_target") or "").strip()
             self._sink.emit(
                 debate_round_decision_resolved(
                     execution_id=execution_id,
@@ -251,9 +260,14 @@ class DebateTool:
                 )
             )
             if decision == "conclude":
-                return RoundBoundary(decision=RoundDecision.CONCLUDE)
-            # continue（含未知值兜底）：续辩；focus 非空=用户「加角度」覆写下一轮议题。
-            return RoundBoundary(decision=RoundDecision.CONTINUE, focus=focus)
+                # 收场仍带追问 ⇒ 主持人记为未应答留痕（无后续轮可答）。
+                return RoundBoundary(
+                    decision=RoundDecision.CONCLUDE, ask=ask, ask_target=ask_target
+                )
+            # continue（含未知值兜底）：续辩；focus 非空=「加角度」、ask 非空=追问注入下一轮。
+            return RoundBoundary(
+                decision=RoundDecision.CONTINUE, focus=focus, ask=ask, ask_target=ask_target
+            )
 
         started_at = time.monotonic()
         try:
@@ -263,6 +277,7 @@ class DebateTool:
                 on_round_start=_emit_round_start,
                 on_round=_emit_round,
                 on_round_boundary=_round_boundary if interactive else None,
+                seed=self._prior_seed,
             )
         except Exception as exc:  # noqa: BLE001 — 辩论崩溃降级为工具失败，让 CEO 回落
             logger.exception("debate.failed", motion=motion[:80])

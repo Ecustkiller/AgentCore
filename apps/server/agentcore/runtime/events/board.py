@@ -6,6 +6,11 @@ batch of structured ops to the open Excalidraw canvas and POSTs the result back 
 the ops-resolve endpoint (settling the suspended :class:`BoardChannel` future). It
 carries the target ``board_id`` plus the op batch; the desktop converts ops → scene
 elements, applies + autosaves, and returns created ids / the new version.
+
+``board_read_required`` is the read counterpart (§九): the server asks the desktop to
+rasterize a subset of elements (手绘 / 截图) to a PNG and POST it back, so the vision
+reader can turn pixels into text. Same transport-only / client-tool / interaction-bridge
+mechanism — it carries the ``board_id`` plus the element ``ids`` to rasterize.
 """
 
 from __future__ import annotations
@@ -31,5 +36,23 @@ def board_op_required(
             "board_id": board_id,
             "ops": ops,
             "summary": summary,
+        },
+    )
+
+
+def board_read_required(
+    *,
+    request_id: str,
+    conversation_id: str,
+    board_id: str,
+    ids: list[str],
+) -> SSEEvent:
+    return SSEEvent(
+        type=EventType.BOARD_READ_REQUIRED,
+        payload={
+            "request_id": request_id,
+            "conversation_id": conversation_id,
+            "board_id": board_id,
+            "ids": ids,
         },
     )

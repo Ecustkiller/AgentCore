@@ -68,8 +68,36 @@ export interface MessageAttachmentMeta {
   conversationId?: string;
 }
 
+/** One applied change in a「记忆已更新」card (记忆更新对话内可见, Agent记忆与知识系统 §1.6).
+ * `file` is a friendly label (偏好 / 画像 / 主题·<slug>); `scope` is `"global"` |
+ * `"project"`; `content` is the bullet (add/update) or matched text (remove); `target`
+ * is the synthetic memory-leaf path the card deep-links to (`""` = no leaf). */
+export interface MemoryUpdateItem {
+  action: string;
+  file: string;
+  section: string;
+  scope: string;
+  content: string;
+  target: string;
+}
+
+/** One offline-consolidation pass's result, rendered as a conversation-tail card —
+ * what the AI remembered FROM this conversation (写也可见). Loaded with the latest
+ * messages window + pushed live on the per-user firehose (`memory_updated`). */
+export interface MemoryUpdate {
+  id: string;
+  createdAt: string;
+  items: MemoryUpdateItem[];
+}
+
 export interface Message {
   id: string;
+  /** 挂起即收口 (②): the SERVER's assistant message_id from `message_start` (the live
+   * bubble's own `id` is a client UUID). It is the resume KEY — the id a durable frame is
+   * persisted under and that `POST .../resume` claims — so a turn that ends paused
+   * in-session must surface its resume card keyed by THIS, not the client id (which 404s).
+   * Absent until message_start stamps it (and on reload, where `id` is already the server id). */
+  serverMessageId?: string;
   role: "user" | "assistant";
   content: string;
   reasoning?: string;
@@ -105,6 +133,10 @@ export interface Message {
 
 export interface ConversationRuntime {
   messages: Message[];
+  /** Conversation-tail「记忆已更新」cards (记忆更新对话内可见, §1.6): what the AI
+   * remembered FROM this conversation, appended after the last message. Loaded with
+   * the latest window + appended live from the firehose. */
+  memoryUpdates: MemoryUpdate[];
   isGenerating: boolean;
   abort: AbortController | null;
   error: string | null;

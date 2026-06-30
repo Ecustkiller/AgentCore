@@ -8,7 +8,7 @@ wave-synchronous) — runs nodes concurrently through an injected
 executor (*how* a node runs) is the host's concern, not the scheduler's (which only
 owns *when*).
 
-→ 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
+→ 见设计: docs/03-AI核心/执行引擎架构设计.md §八（Run 模型）
 """
 
 from __future__ import annotations

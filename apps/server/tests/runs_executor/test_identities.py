@@ -5,6 +5,7 @@ from agentcore.llm.protocol import LLMChunk, ToolCallDelta
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import build_agent_executor
+from agentcore.runtime.runs.executor_identities import LeadSubteam
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec
 from agentcore.runtime.runs.wave import WaveScheduler
@@ -37,6 +38,18 @@ class _StubDelegate:
         return ToolResult(tool_call_id="", success=True, output="")
 
 
+async def _noop_dispose() -> None:
+    return None
+
+
+def _stub_subteam() -> LeadSubteam:
+    """The factory's return shape (受监督子计划 B): a lead's delegate + replan bundle. These
+    identity / depth-cap tests only care that a bundle is minted (not its contents), so one
+    stub delegate with a no-op dispose stands in for the real make_lead_subteam output."""
+    stub = _StubDelegate()
+    return LeadSubteam(tools=(stub,), tool_names=(stub.schema.name,), dispose=_noop_dispose)
+
+
 def _spec(run_id: str, *, depth: int, can_delegate: bool):
     return RunSpec(
         run_id=run_id,
@@ -67,7 +80,7 @@ async def test_nested_delegate_offered_only_within_depth_cap():
 
     def factory(captain_run_id: str, captain_depth: int):
         calls.append((captain_run_id, captain_depth))
-        return _StubDelegate()
+        return _stub_subteam()
 
     plan = RunPlan()
     plan.add(_spec("d1", depth=1, can_delegate=True))
@@ -85,7 +98,7 @@ async def test_nested_delegate_withheld_without_opt_in():
 
     def factory(captain_run_id: str, captain_depth: int):
         calls.append(captain_run_id)
-        return _StubDelegate()
+        return _stub_subteam()
 
     plan = RunPlan()
     plan.add(_spec("d1", depth=1, can_delegate=False))
@@ -98,7 +111,7 @@ async def test_captain_worker_gets_captain_identity_and_delegate_tool():
     provider = _ContentProvider(["X"])
     plan = RunPlan()
     plan.add(_spec("d1", depth=1, can_delegate=True))
-    executor = _nesting_executor(plan, provider, lambda rid, d: _StubDelegate())
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
     await executor(plan.by_id("d1"), {})
     # The opted-in, above-cap worker is told it may lead one nested sub-team.
     assert "再向下委派一层子团队" in provider.system_messages[0]
@@ -108,10 +121,35 @@ async def test_leaf_worker_keeps_no_nesting_identity():
     provider = _ContentProvider(["X"])
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     # A factory is available, but the leaf worker did not opt in → leaf identity.
-    executor = _nesting_executor(plan, provider, lambda rid, d: _StubDelegate())
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
     await executor(plan.by_id("t_1"), {})
     assert "不能再向下委派" in provider.system_messages[0]
     assert "再向下委派一层子团队" not in provider.system_messages[0]
+
+
+async def test_worker_identities_carry_tool_safety_caution():
+    # 按角色 right-size (反向): the environment-mutation caution (<tool_safety>) moved OUT of
+    # the shared base (where the read-only coordinator CEO carried it inertly) INTO the worker
+    # identities — workers hold the mutating tools (file_write / code_execute / file_delete…),
+    # so the caution rides them now. Pin it on BOTH the leaf and the captain identity so a
+    # refactor can't drop the mutation caution from the agents that can actually act
+    # (the absence-from-base/CEO side is pinned in tests/test_prompt.py).
+    leaf_provider = _ContentProvider(["X"])
+    leaf_plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    leaf_exec = _nesting_executor(leaf_plan, leaf_provider, lambda rid, d: _stub_subteam())
+    await leaf_exec(leaf_plan.by_id("t_1"), {})
+    leaf_sys = leaf_provider.system_messages[0]
+    assert "<tool_safety>" in leaf_sys
+    assert "本地模式" in leaf_sys
+
+    captain_provider = _ContentProvider(["Y"])
+    captain_plan = RunPlan()
+    captain_plan.add(_spec("d1", depth=1, can_delegate=True))
+    captain_exec = _nesting_executor(captain_plan, captain_provider, lambda rid, d: _stub_subteam())
+    await captain_exec(captain_plan.by_id("d1"), {})
+    captain_sys = captain_provider.system_messages[0]
+    assert "再向下委派一层子团队" in captain_sys  # captain identity in play
+    assert "<tool_safety>" in captain_sys
 
 
 async def test_worker_escalation_is_harvested_and_nonblocking():
@@ -246,3 +284,15 @@ async def test_escalate_callback_failure_is_non_fatal():
     ctx = replace(_ctx(), on_escalate=_boom)
     ok = await EscalateTool().execute({"question": "Q?"}, ctx)
     assert ok.success is True and ok.is_terminal is False
+
+
+async def test_escalate_dep_kind_acks_with_replan_add_steer():
+    # §2.4 变·worker 的「拉」(case b): escalate(kind="dep") flags a依赖缺口·卡在缺输入. It is a
+    # non-blocking CONTINUE — the worker keeps going on its assumption while the CEO/lead补 a
+    # producer at the boundary; the ACK names the replan(add) lever and the「绝不空等」rule.
+    ok = await EscalateTool().execute(
+        {"question": "缺错误返回结构才能写测试", "kind": "dep"}, _ctx()
+    )
+    assert ok.success is True and ok.is_terminal is False
+    assert "replan" in ok.output
+    assert "继续" in ok.output
