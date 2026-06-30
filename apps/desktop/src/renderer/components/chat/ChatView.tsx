@@ -7,6 +7,7 @@ import {
   loadOlderMessages,
 } from "@/services/messages";
 import {
+  useActiveGenerating,
   useActiveHasMoreAfter,
   useActiveHasMoreBefore,
   useActiveLoadingNewer,
@@ -17,6 +18,7 @@ import {
 import { ArrowDown, Loader2 } from "lucide-react";
 import { useCallback } from "react";
 import { ApprovalPrompt } from "./ApprovalPrompt";
+import { FollowupChips } from "./FollowupChips";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
 import { ResumePrompt } from "./ResumePrompt";
@@ -25,6 +27,7 @@ import { RetryBanner } from "./RetryBanner";
 export function ChatView() {
   const messages = useActiveMessages();
   const conversationId = useConversationStore((s) => s.currentConversationId);
+  const isGenerating = useActiveGenerating();
   const hasMessages = messages.length > 0;
   const hasMoreBefore = useActiveHasMoreBefore();
   const hasMoreAfter = useActiveHasMoreAfter();
@@ -47,6 +50,15 @@ export function ChatView() {
   const contentKey = last
     ? `${last.id}-${last.content.length}-${last.reasoning?.length ?? 0}`
     : "";
+
+  // 下一步推荐 chips ride the live tail: surface the latest finished assistant turn's
+  // followups directly above the composer — the 「what next」 affordance belongs where you
+  // type and stays put regardless of scroll. Transport-only, so a new turn / refresh
+  // retires them; FollowupChips renders nothing for an empty list.
+  const followups =
+    !isGenerating && last?.role === "assistant" && !last.isStreaming
+      ? (last.followups ?? [])
+      : [];
   const { scrollRef, atBottom, jumpToBottom } = useChatScroll({
     messages,
     resetKey: conversationId,
@@ -125,6 +137,7 @@ export function ChatView() {
         <ResumePrompt />
         <ApprovalPrompt />
         <RetryBanner />
+        <FollowupChips followups={followups} />
         <MessageInput />
       </div>
     </div>

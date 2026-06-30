@@ -7,6 +7,7 @@ JSON dict 与 (2) 控制台文本。刻意用 ASCII 标记（``[+]``/``[-]``）�
 
 from __future__ import annotations
 
+from agentcore.evals.mast import group_of, label_of
 from agentcore.evals.types import CaseReport, EvalReport
 
 
@@ -24,11 +25,38 @@ def category_breakdown(report: EvalReport) -> dict[str, dict[str, float]]:
     return by_cat
 
 
+def mast_breakdown(report: EvalReport) -> dict[str, dict[str, dict[str, float]]]:
+    """按 MAST 组 + 类聚合通过率（学·度量 §2.5），**仅计带 ``mast`` 标签的用例**。
+
+    返回 ``{"by_group": {FCx: {total,passed,pass_rate}}, "by_mode": {code: {...}}}``——使
+    「拆·lead / 合·验证 到底把哪一类失败压下去了」可逐组 / 逐类对照 baseline。无标签用例
+    （core/routing 等）不计入，故对非 MAST 套件返回两个空 dict（report 据此跳过该段）。
+    """
+    by_group: dict[str, dict[str, float]] = {}
+    by_mode: dict[str, dict[str, float]] = {}
+    for c in report.cases:
+        code = c.mast
+        if not code:
+            continue
+        group = group_of(code) or "?"
+        for bucket_map, key in ((by_group, group), (by_mode, code)):
+            bucket = bucket_map.setdefault(key, {"total": 0, "passed": 0})
+            bucket["total"] += 1
+            if c.passed:
+                bucket["passed"] += 1
+    for bucket_map in (by_group, by_mode):
+        for bucket in bucket_map.values():
+            total = bucket["total"]
+            bucket["pass_rate"] = round(bucket["passed"] / total, 4) if total else 0.0
+    return {"by_group": by_group, "by_mode": by_mode}
+
+
 def _case_to_dict(c: CaseReport) -> dict:
     o = c.outcome
     return {
         "case_id": c.case_id,
         "category": c.category,
+        "mast": c.mast,
         "passed": c.passed,
         "checks": [
             {"name": ck.name, "passed": ck.passed, "detail": ck.detail, "gating": ck.gating}
@@ -83,6 +111,7 @@ def report_to_dict(report: EvalReport) -> dict:
             "pass_rate": round(report.pass_rate, 4),
             "cost_usd": total_cost,
             "by_category": category_breakdown(report),
+            "by_mast": mast_breakdown(report),
         },
         "cases": [_case_to_dict(c) for c in report.cases],
     }
@@ -116,6 +145,22 @@ def format_report(report: EvalReport) -> str:
         total = int(bucket["total"])
         pct = bucket["pass_rate"] * 100
         lines.append(f"  {cat:<14} {passed}/{total}  ({pct:.0f}%)")
+    # MAST 失败标签通过率（仅当本套件挂了标签时；学·度量 §2.5）：先按三大组、再逐类，使
+    # 「哪一类失败被压下去了」对照 baseline 一目了然。
+    mast = mast_breakdown(report)
+    if mast["by_group"]:
+        lines.append("-" * 64)
+        lines.append("  MAST 失败标签通过率")
+        for group, bucket in sorted(mast["by_group"].items()):
+            passed = int(bucket["passed"])
+            total = int(bucket["total"])
+            pct = bucket["pass_rate"] * 100
+            lines.append(f"  [{group}] {passed}/{total}  ({pct:.0f}%)")
+        for code, bucket in sorted(mast["by_mode"].items()):
+            passed = int(bucket["passed"])
+            total = int(bucket["total"])
+            pct = bucket["pass_rate"] * 100
+            lines.append(f"    {label_of(code):<18} {passed}/{total}  ({pct:.0f}%)")
     lines.append("-" * 64)
     total_cost = sum(c.outcome.cost_usd for c in report.cases)
     pct = report.pass_rate * 100

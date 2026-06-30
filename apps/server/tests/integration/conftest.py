@@ -38,6 +38,7 @@ from agentcore.db.repositories import (
 from agentcore.main import app
 from agentcore.security import hash_password
 
+
 # Cookie-session integration tests predate CSRF; keep them green unless marked @pytest.mark.csrf.
 @pytest.fixture(autouse=True)
 def _disable_csrf_unless_marked(monkeypatch, request):

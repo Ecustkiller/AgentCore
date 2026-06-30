@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 # ── 轮次治理默认（辩论编排设计.md §五） ──────────────────────────────────────
 # 轮数永不暴露给用户设定：用户只选形态，收敛由主持人逐轮自判（无最小轮门槛强制多轮）。这些
@@ -153,6 +153,26 @@ class DebateClash:
     point: str
 
 
+@dataclass(frozen=True)
+class UserInterjection:
+    """直播中用户向某轮辩论注入的「追问」—— verbatim 复盘单元（辩论编排设计.md §逐轮交互 / 交锋
+    叙事直播态设计 Phase 2）。
+
+    用户在第 N 轮边界选 ``CONTINUE`` 时可附带一个问题（``ask``），可选定向某方（``target_key``
+    = :class:`DebateSide` 的 key，空=问全场）。该追问被注入【下一轮】辩手 prompt（见
+    :func:`round_feedback`）令其正面回应——故它逻辑上归属「被它驱动的那一轮」（round N+1）。
+    ``answered`` 记录【结构事实】：是否真有后续轮跑起来承接它（追问即续辩，正常恒 True；若在轮数
+    上限边界追问、其后无轮，或紧接超时/异常无下一轮，则 False）——非「答得好不好」的语义判断。
+
+    这是唯一【耐久】的用户追问痕迹（决策事件 transport-only 不入 journal）：随 ``RoundResult``
+    进 ``debate_result.rounds[*].user_interjections``，重载后复盘可见。
+    """
+
+    ask: str
+    target_key: str = ""
+    answered: bool = False
+
+
 class RoundDecision(StrEnum):
     """用户在一轮辩论边界的抉择（交互式逐轮，opt-in；辩论编排设计.md §逐轮交互）。
 
@@ -168,15 +188,23 @@ class RoundDecision(StrEnum):
 
 @dataclass(frozen=True)
 class RoundBoundary:
-    """一轮边界的处置 —— :class:`RoundDecision` + 可选的下一轮焦点覆写（「加角度」）。
+    """一轮边界的处置 —— :class:`RoundDecision` + 可选的下一轮焦点覆写（「加角度」）+ 追问。
 
     ``focus`` 仅在 ``decision is CONTINUE`` 且非空时生效：作为下一轮的议题覆写主持人自动定焦点
-    （用户把辩论引向自己在意的维度）；``CONCLUDE`` 时忽略。主持人收到 ``None``（未接钩子 / 超时
-    / 无活跃用户）则回退到裁判的自动收敛判定。
+    （用户把辩论引向自己在意的维度=「引导」）；``CONCLUDE`` 时忽略。
+
+    ``ask`` 是用户的【追问】（与 ``focus`` 正交：焦点改的是议题，追问是一个要辩手正面回答的问题）：
+    非空时注入【下一轮】辩手 prompt 令其回应（``ask_target`` 指定方 key，空=问全场），并作为
+    :class:`UserInterjection` 随下一轮 :class:`RoundResult` 留痕复盘。追问即续辩，故仅 ``CONTINUE``
+    时被承接；``CONCLUDE`` 时若仍带 ``ask`` 则记为未应答（无后续轮）。
+
+    主持人收到 ``None``（未接钩子 / 超时 / 无活跃用户）则回退到裁判的自动收敛判定。
     """
 
     decision: RoundDecision
     focus: str = ""
+    ask: str = ""
+    ask_target: str = ""
 
 
 @dataclass
@@ -231,6 +259,9 @@ class RoundResult:
     turns: list[SideTurn]
     verdict: JudgeVerdict
     summary: str = ""
+    # 驱动本轮的用户追问（交互式逐轮，opt-in）：用户在【上一轮】边界注入、本轮辩手须正面回应的
+    # 问题（verbatim 复盘单元）。非交互 / 无追问恒空。详见 :class:`UserInterjection`。
+    user_interjections: list[UserInterjection] = field(default_factory=list)
 
     @property
     def ok_turns(self) -> list[SideTurn]:
@@ -268,6 +299,11 @@ class RoundResult:
             "clashes": [
                 {"from_key": c.from_key, "to_key": c.to_key, "point": c.point}
                 for c in self.verdict.clashes
+            ],
+            # 驱动本轮的用户追问（verbatim 复盘）：恒带（无追问为空列表），载荷形状统一。
+            "user_interjections": [
+                {"ask": i.ask, "target_key": i.target_key, "answered": i.answered}
+                for i in self.user_interjections
             ],
         }
 
@@ -381,6 +417,98 @@ class DebateResult:
         }
 
 
+@dataclass(frozen=True)
+class DebateSeedRound:
+    """上一场辩论某轮的摘要单元（结构化补轮种子，辩论编排设计.md §6.6）。"""
+
+    round_no: int
+    focus: str
+    summary: str
+
+
+@dataclass(frozen=True)
+class DebateSeed:
+    """上一场辩论的结构化摘要 —— 「结构化补轮」（可逆叫停·B）的播种源。
+
+    来自前端持有的上一场 ``debate_result`` 载荷（**不含辩手全文**——全文随辩手 run 走执行事件、
+    不进 debate_result），由前端投影成最小形回传。据此让续辩：① :meth:`Moderator._frame` 正交于
+    已谈焦点（不重复换汤）；② 首个新轮辩手 task 读到上一场的论点摘要（各方最强论点 + 逐轮焦点/小结
+    + 未决分歧），从「读懂上一场」处接着辩。新一场仍是独立 :class:`DebateResult`（新 turn = 新卡），
+    由本种子「告知」而非原地改写（守事件源 turn 模型）。空 / 无实质内容时 :meth:`from_payload` 返
+    ``None``（=不播种、逐字回退到全新辩论，零行为变化）。
+    """
+
+    motion: str = ""
+    rounds: tuple[DebateSeedRound, ...] = ()
+    strongest_points: dict[str, str] = field(default_factory=dict)  # side_key → 上一场最强论点
+    crux: str = ""
+    leaning: str = ""
+    value_disputes: tuple[str, ...] = ()
+    open_questions: tuple[str, ...] = ()
+
+    @property
+    def covered_focuses(self) -> list[str]:
+        """上一场已谈过的逐轮焦点（喂给 ``_frame`` 强制正交，续辩不重复换说法重谈）。"""
+        return [r.focus for r in self.rounds if r.focus]
+
+    @classmethod
+    def from_payload(cls, payload: dict | None) -> DebateSeed | None:
+        """从前端送来的 ``debate_result``-形载荷宽容解析；无实质内容 → ``None``（不播种）。
+
+        容忍完整 debate_result 载荷或前端投影的最小形（两者同形：``motion`` / ``rounds[*].
+        {round_no,focus,summary}`` / ``brief.{crux,strongest_points,leaning,value_disputes,
+        open_questions}``）。任意字段缺失 / 类型不符都降级为空，绝不抛错中断辩论。
+        """
+        if not isinstance(payload, dict):
+            return None
+
+        def _str(v: Any) -> str:
+            return v.strip() if isinstance(v, str) else ""
+
+        def _strs(v: Any) -> tuple[str, ...]:
+            if not isinstance(v, list):
+                return ()
+            return tuple(s for s in (_str(x) for x in v) if s)
+
+        rounds: list[DebateSeedRound] = []
+        raw_rounds = payload.get("rounds")
+        if isinstance(raw_rounds, list):
+            for r in raw_rounds:
+                if not isinstance(r, dict):
+                    continue
+                focus = _str(r.get("focus"))
+                summary = _str(r.get("summary"))
+                if not (focus or summary):
+                    continue
+                try:
+                    rno = int(r.get("round_no") or 0)
+                except (TypeError, ValueError):
+                    rno = 0
+                rounds.append(DebateSeedRound(round_no=rno, focus=focus, summary=summary))
+
+        raw_brief = payload.get("brief")
+        brief = raw_brief if isinstance(raw_brief, dict) else {}
+        raw_sp = brief.get("strongest_points")
+        strongest = (
+            {str(k): _str(v) for k, v in raw_sp.items() if _str(v)}
+            if isinstance(raw_sp, dict)
+            else {}
+        )
+        seed = cls(
+            motion=_str(payload.get("motion")),
+            rounds=tuple(rounds),
+            strongest_points=strongest,
+            crux=_str(brief.get("crux")),
+            leaning=_str(brief.get("leaning")),
+            value_disputes=_strs(brief.get("value_disputes")),
+            open_questions=_strs(brief.get("open_questions")),
+        )
+        # 无任何实质内容（没轮次摘要、没最强论点、没未决分歧）⇒ 不值得播种，回退全新辩论。
+        if not (seed.rounds or seed.strongest_points or seed.value_disputes or seed.open_questions):
+            return None
+        return seed
+
+
 class RoundRunner(Protocol):
     """主持人「派一轮辩手发言」的注入接口 —— 隔离编排循环与执行器。
 
@@ -388,7 +516,9 @@ class RoundRunner(Protocol):
     发言，后续轮用 ``continue_run`` 让同一辩手在自己 transcript 上续写（把对方上轮论点当
     feedback 注入）——这正是「辩手跨轮带记忆」的落点。单测注入 fake，零成本驱动循环。
 
-    入参 ``history`` 是已完成的各轮（含各方上轮发言），实现据此给辩手注入对方论点；返回本轮
+    入参 ``history`` 是已完成的各轮（含各方上轮发言），实现据此给辩手注入对方论点；
+    ``interjections`` 是用户在上一轮边界注入、本轮须正面回应的【追问】（交互式逐轮，opt-in；
+    非交互 / 无追问恒空）——实现把它拼进辩手 feedback（见 :func:`round_feedback`）。返回本轮
     各方发言（与 ``sides`` 一一对应，失败方 ``ok=False``）。
     """
 
@@ -399,6 +529,7 @@ class RoundRunner(Protocol):
         focus: str,
         sides: Sequence[DebateSide],
         history: Sequence[RoundResult],
+        interjections: Sequence[UserInterjection] = (),
     ) -> list[SideTurn]: ...
 
 

@@ -1,6 +1,7 @@
 import type { components } from "@/types/api.generated";
 import type {
   AskAssumption,
+  AskOption,
   AskQuestion,
   AskStyleOption,
   PlanReviewPending,
@@ -14,8 +15,8 @@ type SuspensionKind = components["schemas"]["SuspensionKind"];
 /**
  * A turn that paused at a plan_review / ask_user checkpoint, was DURABLY persisted,
  * then lost its live SSE — client disconnect / server restart (结构化挂起 2b). On
- * conversation reopen the client lists these (GET /paused) and offers 继续 / 调整 /
- * 停止, each driving POST .../resume to continue the turn on a fresh stream.
+ * conversation reopen the client loads these from the recovery snapshot (GET /recovery)
+ * and offers 继续 / 调整 / 停止, each driving POST .../resume to continue on a fresh stream.
  *
  * Mirrors the approvals store: one entry per paused turn, tagged with its
  * `conversationId` so several conversations can each hold their own pending
@@ -79,12 +80,27 @@ const toAssumptions = (
     value: String(a.value ?? ""),
   }));
 
+/** Options rehydrate as either rich `{label, detail?, recommended?}` objects or — from a
+ * frame persisted before options carried trade-offs — bare strings; normalize both. */
+const toOptions = (raw: unknown): AskOption[] =>
+  Array.isArray(raw)
+    ? raw.map((o) => {
+        if (typeof o === "string") return { label: o };
+        const obj = (o ?? {}) as Record<string, unknown>;
+        return {
+          label: String(obj.label ?? ""),
+          ...(obj.detail ? { detail: String(obj.detail) } : {}),
+          ...(obj.recommended ? { recommended: true } : {}),
+        };
+      })
+    : [];
+
 const toQuestions = (raw: PausedTurnSummary["questions"]): AskQuestion[] =>
   (raw ?? []).map((q, i) => ({
     id: String(q.id ?? `q${i}`),
     prompt: String(q.prompt ?? ""),
     kind: q.kind === "text" ? "text" : "choice",
-    options: Array.isArray(q.options) ? q.options.map(String) : [],
+    options: toOptions(q.options),
     multiple: Boolean(q.multiple),
     default: String(q.default ?? ""),
   }));
@@ -99,14 +115,27 @@ const toStyleOptions = (
 
 interface PausedTurnState {
   pending: PendingResume[];
-  /** Replace one conversation's pending resumes (from GET /paused on reopen),
+  /** Replace one conversation's pending resumes (from the recovery snapshot on reopen),
    * leaving other conversations' entries untouched. */
   setForConversation: (
     conversationId: string,
     summaries: PausedTurnSummary[],
   ) => void;
+  /** 挂起即收口 (②): add/replace ONE turn's resume entry the moment its LIVE stream ENDS
+   * at a checkpoint (message_end finish_reason=paused). Built from the *_required payload
+   * already folded onto the bubble — no /recovery round-trip — so it reproduces offline in
+   * #/preview. Idempotent by messageId, so a later reopen's setForConversation (the same
+   * frame, re-read from the backend) simply replaces it rather than stacking a duplicate. */
+  addLiveResume: (entry: PendingResume) => void;
   /** Drop one paused turn (it is being / has been resumed). Idempotent. */
   remove: (messageId: string) => void;
+  /** Drop the paused turn whose checkpoint just settled on the LIVE stream
+   * (checkpoint_resolved / plan_review_resolved). The server deletes the durable
+   * frame on an in-process resolve, so mirror that here — otherwise a 待恢复 card
+   * left over from a duplicate surface lingers and 404s when clicked (its frame is
+   * already gone). Keyed by checkpoint_id (what the resolve event carries).
+   * Idempotent; a no-op when no entry matches. */
+  removeByCheckpoint: (checkpointId: string) => void;
   /** Forget pending resumes. Pass a conversationId to drop only that
    * conversation's; omit for a full reset (e.g. logout / tests). */
   clear: (conversationId?: string) => void;
@@ -136,10 +165,26 @@ export const usePausedTurnStore = create<PausedTurnState>((set) => ({
       ],
     })),
 
+  addLiveResume: (entry) =>
+    set((state) => ({
+      pending: [
+        ...state.pending.filter((p) => p.messageId !== entry.messageId),
+        entry,
+      ],
+    })),
+
   remove: (messageId) =>
     set((state) => ({
       pending: state.pending.filter((p) => p.messageId !== messageId),
     })),
+
+  removeByCheckpoint: (checkpointId) =>
+    set((state) => {
+      const pending = state.pending.filter(
+        (p) => p.checkpointId !== checkpointId,
+      );
+      return pending.length === state.pending.length ? state : { pending };
+    }),
 
   clear: (conversationId) =>
     set((state) =>

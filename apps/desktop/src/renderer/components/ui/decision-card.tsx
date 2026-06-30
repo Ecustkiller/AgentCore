@@ -18,7 +18,7 @@ export interface DecisionCardProps extends HTMLAttributes<HTMLDivElement> {
 
 /** Pattern shell for inline boss-decision cards in the chat timeline. */
 export function DecisionCard({
-  tone = "warning",
+  tone = "primary",
   animate = false,
   className,
   ...props
@@ -37,7 +37,7 @@ export function DecisionCard({
 }
 
 export function DecisionCardFooter({
-  tone = "warning",
+  tone = "primary",
   className,
   ...props
 }: HTMLAttributes<HTMLDivElement> & { tone?: DecisionTone }) {
@@ -55,7 +55,7 @@ export function DecisionCardFooter({
 
 export function DecisionCardIcon({
   className,
-  tone = "warning",
+  tone = "primary",
   children,
 }: {
   tone?: DecisionTone;

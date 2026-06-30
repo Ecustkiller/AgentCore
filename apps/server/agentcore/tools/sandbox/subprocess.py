@@ -1,10 +1,22 @@
-"""SubprocessSandbox implementation (MVP).
+"""SubprocessSandbox — run code in a child process (MVP; NOT an isolation boundary).
 
-Executes code in a restricted subprocess with:
-- Timeout enforcement (kill on timeout)
-- Temporary directory isolation (per-execution)
+What it actually provides:
+- Timeout enforcement (kill the whole process tree on timeout / cancel)
+- A per-execution temp dir used as the default working directory
 - stdout/stderr capture
-- Basic resource limits (where supported)
+
+What it does NOT provide — read before enabling on a shared/cloud host:
+- NO real isolation: the child runs with the **full privileges of the API process**
+  (filesystem read/write, free network egress, and access to in-process secrets such as
+  JWT_SECRET_KEY / ENCRYPTION_KEY and every user's encrypted keys).
+- NO namespace / seccomp / cgroup / rlimit / egress controls of any kind.
+
+So it is safe ONLY where the caller already trusts the code: local/sidecar mode
+(``location=local`` — the user's own machine). On a cloud/server worker it is gated off
+by default and guarded at startup (see ``code_execute_cloud_enabled`` /
+``code_execute_cloud_unsafe_ack`` and ``main._validate_production_security``); a true
+sandbox (container/gVisor/nsjail/firecracker) is required before exposing it to
+untrusted input (SEC-005).
 """
 
 import asyncio

@@ -52,8 +52,14 @@ export function NonBlockingAskCard({ ask }: { ask: NonBlockingAskDisplay }) {
         )}
 
         {ask.questions.map((q) => {
+          // Uniform chip shape across kinds: a text question's default is its lone chip;
+          // a choice question's options already carry label/detail/recommended.
           const chips =
-            q.kind === "text" ? (q.default ? [q.default] : []) : q.options;
+            q.kind === "text"
+              ? q.default
+                ? [{ label: q.default }]
+                : []
+              : q.options;
           return (
             <div key={q.id} className="min-w-0">
               <p className="whitespace-pre-wrap text-sm text-foreground">
@@ -62,15 +68,20 @@ export function NonBlockingAskCard({ ask }: { ask: NonBlockingAskDisplay }) {
               {chips.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {chips.map((opt) => {
-                    const isDefault = !!q.default && opt === q.default;
+                    const isDefault = !!q.default && opt.label === q.default;
                     return (
                       <Button
-                        key={opt}
+                        key={opt.label}
                         variant="neutral"
                         className="h-auto border border-border bg-card py-1 text-muted-foreground hover:border-primary/40"
-                        onClick={() => pick(q.prompt, opt)}
+                        onClick={() => pick(q.prompt, opt.label)}
                       >
-                        <span className="whitespace-pre-wrap">{opt}</span>
+                        <span className="whitespace-pre-wrap">{opt.label}</span>
+                        {opt.recommended && (
+                          <Badge tone="primary" pill className="ml-1">
+                            推荐
+                          </Badge>
+                        )}
                         {isDefault && (
                           <Badge tone="muted" pill className="ml-1">
                             默认

@@ -63,3 +63,16 @@ def test_budget_is_carried_but_not_enforced_today():
     asm = ContextAssembler().add("base", "x" * 100, SectionOrder.BASE, budget=10)
     assert asm.render() == "x" * 100
     assert asm.contributors()[0].budget == 10
+
+
+def test_observe_is_chainable_and_side_effect_free():
+    # COST-004 仅观测起步: observe() only logs per-section chars — it returns self (chainable)
+    # and the rendered prompt is byte-identical with or without it (zero behavior change).
+    asm = (
+        ContextAssembler()
+        .add("base", "BASE", SectionOrder.BASE)
+        .add("attach", "ATTACH", SectionOrder.ATTACHMENT)
+    )
+    before = asm.render()
+    assert asm.observe(scope="test", soft_cap=1000) is asm  # chainable (returns self)
+    assert asm.render() == before == "BASE\nATTACH"  # observe trimmed/changed nothing

@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
-from agentcore.runtime.debate import DebateConfig, DebateForm, DebateSide, RoundResult
-
+from agentcore.runtime.debate import (
+    DebateConfig,
+    DebateForm,
+    DebateSeed,
+    DebateSide,
+    RoundResult,
+    UserInterjection,
+)
 from agentcore.tools.builtin.debate.schema import (
     DEBATER_TOOLS,
     FORM_LABELS,
@@ -57,18 +64,60 @@ def side_system(config: DebateConfig, side: DebateSide) -> str:
     return f"{base}{role_directive(config, side)}"
 
 
+def seed_block(seed: DebateSeed | None, side: DebateSide) -> str:
+    """续辩（结构化补轮·B）首轮辩手的「上一场摘要」块——让本方读懂上一场后【接着往深里辩】。
+
+    只喂【事实性的过程摘要】（逐轮焦点/小结 + 本方上一场最强论点 + 仍未决的分歧 + 争议焦点），
+    **刻意不喂主持人的倾向判断 leaning**（那是裁判口径，喂给辩手会污染新一场的中立性）。无种子
+    返回空串（首轮 task 不变、逐字回退到全新辩论）。"""
+    if seed is None:
+        return ""
+    parts: list[str] = []
+    if seed.rounds:
+        arc = "\n".join(
+            f"- 第 {r.round_no} 轮 · {r.focus}：{r.summary}" for r in seed.rounds if r.focus or r.summary
+        )
+        if arc:
+            parts.append(f"上一场各轮交锋：\n{arc}")
+    mine = seed.strongest_points.get(side.key, "")
+    if mine:
+        parts.append(f"你（{side.name}）上一场最强论点：{mine}")
+    if seed.crux:
+        parts.append(f"上一场争议焦点：{seed.crux}")
+    unresolved = list(seed.value_disputes) + list(seed.open_questions)
+    if unresolved:
+        parts.append("上一场仍【未决】的分歧（本场请往这些上面推进）：\n" + "\n".join(f"- {u}" for u in unresolved))
+    if not parts:
+        return ""
+    body = "\n\n".join(parts)
+    return (
+        "\n\n【这是续辩——接着上一场辩论往深里辩】\n"
+        f"{body}\n"
+        "请在上一场的基础上提出【新的】论点或更深一层的论证，别重复上一场已说透的内容。\n"
+    )
+
+
 def debater_task(
-    config: DebateConfig, side: DebateSide, idx: int, *, round_no: int, focus: str
+    config: DebateConfig,
+    side: DebateSide,
+    idx: int,
+    *,
+    round_no: int,
+    focus: str,
+    seed: DebateSeed | None = None,
 ) -> dict[str, Any]:
-    """构造首轮单个辩手的 task dict（build_run_plan 入参）。"""
+    """构造首轮单个辩手的 task dict（build_run_plan 入参）。
+
+    ``seed`` 非空时（结构化补轮·B）注入上一场摘要块，让本方从「读懂上一场」处接着辩。"""
     # 快速对碰：注入轻量约束压住「为小题深挖」（少检索、收窄论点）；认真辩透则不加。
     quick_suffix = "" if config.policy.thorough else f"\n{QUICK_DEBATER_HINT}"
+    prior = seed_block(seed, side)
     task = (
         f"你在一场【{FORM_LABELS.get(config.form, '辩论')}】中代表「{side.name}」。\n"
         f"辩论命题：{config.motion}\n"
         f"你的立场 / 视角：{side.stance}\n"
         f"本轮议题：{focus}\n\n"
-        f"{role_directive(config, side)}\n"
+        f"{role_directive(config, side)}{prior}\n"
         f"请就本轮议题给出有力、具体、有论据的论证（这是你的开场立论）：聚焦你最能站住的论点，"
         f"用具体证据 / 例子 / 推理链支撑（必要时用 web_search / read_url 取证）。{LENGTH_HINT}{quick_suffix}"
     )
@@ -108,26 +157,46 @@ def _challenged_block(config: DebateConfig, side: DebateSide, last_round: RoundR
     )
 
 
+def _interjection_block(side: DebateSide, interjections: Sequence[UserInterjection]) -> str:
+    """把用户【追问】拼进本辩手的 feedback —— 定向某方（``target_key``）的只喂给那一方，未定向
+    （空 target）的喂给全场。追问是用户的最高优先级诉求，故明令【本轮优先正面回答】（先答追问、
+    再展开），别答非所问。无（指向本方的）追问返回空串（feedback 不变、零行为变化）。"""
+    mine = [i for i in interjections if i.ask and (not i.target_key or i.target_key == side.key)]
+    if not mine:
+        return ""
+    directed = any(i.target_key == side.key for i in mine)
+    who = "向你" if directed else "向全场"
+    lines = "\n".join(f"- {i.ask}" for i in mine)
+    return (
+        f"\n\n⚠️ 用户在本轮追问（{who}提出，请【本轮优先正面回答】，先答这个、再展开你的论点，"
+        f"别回避、别答非所问）：\n{lines}"
+    )
+
+
 def round_feedback(
     config: DebateConfig,
     side: DebateSide,
     round_no: int,
     focus: str,
     last_round: RoundResult,
+    interjections: Sequence[UserInterjection] = (),
 ) -> str:
-    """后续轮喂给 continue_run 的 feedback：本轮焦点 + 对方上轮论点（裁剪）+ 上轮被驳命门 +
-    「只补新论点、勿重述」约束。
+    """后续轮喂给 continue_run 的 feedback：本轮焦点 + 用户追问（如有）+ 对方上轮论点（裁剪）+
+    上轮被驳命门 + 「只补新论点、勿重述」约束。
 
     辩手在【自己的 transcript】上续写（已带自己上轮全文），故无需也不应重述自己上轮——明令
     「只补本轮焦点下的新论点 / 新回应」根治冗余轮的「修订 v2 内容相似」（与 ``_frame`` 的焦点
     正交约束一上一下夹击：换维度提问 + 只答新东西）。对手发言【头尾裁剪】（:func:`_clip`）防多方
-    圆桌 prompt 暴涨；并把上轮裁判指向本方的 clash 命门喂回，驱动精准接招（见 :func:`_challenged_block`）。"""
+    圆桌 prompt 暴涨；并把上轮裁判指向本方的 clash 命门喂回，驱动精准接招（见 :func:`_challenged_block`）。
+    ``interjections`` 是用户在上一轮边界注入、本轮须正面回应的【追问】（交互式逐轮，opt-in；定向
+    本方或全场的才喂给本辩手）——置于焦点之后、最高优先级（见 :func:`_interjection_block`）。"""
     opponents = [t for t in last_round.ok_turns if t.side_key != side.key]
     if opponents:
         opp_block = "\n\n".join(f"### {t.side_name}\n{_clip(t.content)}" for t in opponents)
     else:
         opp_block = "（对方上一轮无有效发言）"
     challenged = _challenged_block(config, side, last_round)
+    ask_block = _interjection_block(side, interjections)
     # 圆桌不强求对立：把「针对性回应」软化为「回应并补充」，贴合 role_directive 的圆桌语义。
     if config.form is DebateForm.ROUNDTABLE:
         engage = "请【回应并补充】（呼应有道理的、标出你视角下的分歧、贡献你这一视角独有的洞察）"
@@ -135,7 +204,7 @@ def round_feedback(
         engage = "请【针对性回应】（驳斥站不住的、承认确有道理的、推进你的立场）"
     return (
         f"## 第 {round_no} 轮 · 本轮焦点：{focus}\n"
-        f"{role_directive(config, side)}\n\n"
+        f"{role_directive(config, side)}{ask_block}\n\n"
         f"对方上一轮的论点如下，{engage}：\n"
         f"{opp_block}{challenged}\n\n"
         f"直接输出你本轮的【完整发言】：**只补本轮焦点下的新论点 / 新回应**，用具体证据 / 例子 / "

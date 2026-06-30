@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 import type { FsApi } from "@shared/ipc-contract";
+import type { LogApi } from "@shared/log-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
 
@@ -23,9 +24,15 @@ declare global {
     sidecarApi: SidecarApi;
     /** Electron preload 注入；纯浏览器 / 单测环境可能缺失。 */
     updaterApi?: UpdaterApi;
+    /** 结构化产品日志（落主进程 desktop.jsonl）；纯浏览器 / 单测环境可能缺失。 */
+    logApi?: LogApi;
     windowApi: WindowApi;
-    /** 仅由纯浏览器预览入口（main.web.tsx → browserStubs）设置，标记「离线、无后端」运行，
-     *  使 AuthGate 跳过认证 bootstrap。Electron 构建里始终缺失。 */
+    /** 由浏览器入口（生产 web 客户端 main.webapp.tsx / 离线预览 main.web.tsx → browserStubs）
+     *  设置，标记「浏览器运行时、无原生 fs/sidecar/updater/window 能力」。能力代理
+     *  （lib/capabilities）据此让本地专属功能降级、并使会话恒走云端。Electron 构建里始终缺失。 */
+    __WEB__?: boolean;
+    /** 仅由离线预览入口（main.web.tsx → markPreview）额外设置，标记「离线、无后端」运行，
+     *  使 AuthGate 跳过认证 bootstrap（生产 web 客户端不设置，保留真实鉴权）。 */
     __WEB_PREVIEW__?: boolean;
   }
 }

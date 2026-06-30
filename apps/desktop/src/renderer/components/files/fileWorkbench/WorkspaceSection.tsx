@@ -24,7 +24,6 @@ import type { WorkspaceInfo } from "@/services/workspaces";
 import { useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import {
-  Brain,
   ChevronDown,
   ChevronRight,
   Cloud,
@@ -41,6 +40,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { MemorySection } from "./MemorySection";
 import { folderIdOf } from "./storage";
 
 /**
@@ -67,8 +67,9 @@ export function WorkspaceSection({
   onViewConversations,
   flashing,
   hasProjectMemory,
-  projectMemoryActive,
-  onOpenProjectMemory,
+  memoryActivePath,
+  onOpenMemory,
+  onMemoryTopicDeleted,
 }: {
   ws: WorkspaceInfo;
   source: FileSource | null;
@@ -80,11 +81,15 @@ export function WorkspaceSection({
   onDelete: (folderId: string) => void;
   onViewConversations: (folderId: string) => void;
   flashing: boolean;
-  /** This (cloud) project has its own AI 记忆 layer → show a「本项目记忆」row atop the
-   * expanded body. The memory leaf opens in the shared detail pane (记忆作用域与画像分层 P2). */
+  /** This (cloud) project has its own AI 记忆 layer → show a「本项目记忆」folder atop the
+   * expanded body (画像 + 主题/), opening in the shared detail pane (Agent记忆与知识系统 §1.6). */
   hasProjectMemory?: boolean;
-  projectMemoryActive?: boolean;
-  onOpenProjectMemory?: () => void;
+  /** The synthetic path of the open memory tab (highlights the matching row), or null. */
+  memoryActivePath?: string | null;
+  /** Open a memory leaf in the detail pane (synthetic leaf path + display name). */
+  onOpenMemory?: (path: string, name: string) => void;
+  /** A topic was deleted — close its tab if open (its synthetic path). */
+  onMemoryTopicDeleted?: (path: string) => void;
 }) {
   const folderId = folderIdOf(ws.wsId);
   const isLocal = ws.location === "local";
@@ -383,21 +388,14 @@ export function WorkspaceSection({
       />
       {expanded && (
         <>
-          {hasProjectMemory && onOpenProjectMemory && (
-            <button
-              type="button"
-              onClick={onOpenProjectMemory}
-              title="本项目专属的 AI 记忆（画像）"
-              className={cn(
-                "flex h-7 w-full items-center gap-1.5 rounded-lg pl-7 pr-2 text-left text-sm transition-colors",
-                projectMemoryActive
-                  ? "bg-accent text-foreground"
-                  : "text-foreground hover:bg-accent/60",
-              )}
-            >
-              <Brain size={14} className="shrink-0 text-primary" />
-              <span className="min-w-0 flex-1 truncate">本项目记忆</span>
-            </button>
+          {hasProjectMemory && folderId && onOpenMemory && (
+            <MemorySection
+              scope={{ kind: "project", folderId, projectName: ws.name }}
+              activePath={memoryActivePath ?? null}
+              onOpen={onOpenMemory}
+              onTopicDeleted={onMemoryTopicDeleted ?? (() => {})}
+              indent={14}
+            />
           )}
           {tree}
         </>

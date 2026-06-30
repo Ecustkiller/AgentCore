@@ -65,7 +65,7 @@ MVP 支持四种范式，**串行/并行/混合均由 `delegate` 的 DAG（`depe
 
 ## 二、通信机制 ✅ 已确定
 
-Agent 间**不直接通信**——上游产物经调度器中转注入下游；另有三条**被动协作通道**（扇出感知、拓扑位置感知、worker `escalate` 升级经 CEO 中转）。产物传递 / 递指针 / 工作区清单 → 见 [`编排器与CEO主Agent.md` §2.3](/docs/03-AI核心/编排器与CEO主Agent.md)。
+Agent 间**不直接通信**——上游产物经调度器中转注入下游；另有**被动协作通道**（扇出感知、拓扑位置感知、worker `escalate` 升级经 CEO 中转），以及波内**主动共享**的**便签墙**（§波内共享上下文：便签墙）。产物传递 / 递指针 / 工作区清单 → 见 [`编排器与CEO主Agent.md` §2.3](/docs/03-AI核心/编排器与CEO主Agent.md)。
 
 > **扇出兄弟判据**：兄弟 = 共享同一 `depends_on` 集（刻意窄于「同拓扑波」）；扁平并行批是全体无依赖的退化特例。
 
@@ -90,9 +90,54 @@ worker 唯一的向上通道。`blocking=false`（默认）= 上报后按 `assum
 | 同回合并发阻塞上限 | 3（超出退化非阻塞） |
 | 回合状态 | 阻塞升级**不**翻 `paused`（兄弟继续跑）；`escalation_required`/`escalation_resolved` 单一发射者 = awaiter |
 
-`kind=scope`（非阻塞）在波边界被 CEO 消费，用于计划漂移纠偏——见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard`（结构化升级与 `ask_user` 共用问答内核 `AskUserFields`）、图节点「待你拍板」角标；⏳ 手机交互层（fold 已有、应答卡未落地）。
+**`kind` 三档（非阻塞，喂波边界）✅ 已落地**：`normal`（普通上报）/ `scope`（职责偏离）/ `dep`（依赖缺口）。后两者**同走反应臂波边界**（`wave.py::_scope_pending` + `BoundaryReason.SCOPE` 一处机器）被 CEO / lead 一等消费：
+
+- `kind=scope`：worker 发现自己 / 下游 scope 错了 → 主管在波边界**操舵已有步骤**纠偏（计划漂移）。
+- `kind=dep`：worker 卡在一个**还不存在**的输入 / 依赖（没人产出过、计划也没安排）→ 主管在波边界用 `replan(add)` **追加一个产出它的步骤 / 接一条依赖边**。它是「变·拉取」里「东西不存在」那一支（见 §波内共享上下文：便签墙·拉取）。
+
+worker 全程 non-blocking、照常按假设把能做的做完；简报（`supervised.py::format_scope_boundary`）按 kind 分标「偏离 / 缺输入」并指向对应 `replan` 杠杆，无下游可补时退回收尾路。**度量不串**：`dep` 计入总升级数但**不进** `scope_escalations`，漂移率口径仍纯。执行语义见 [执行引擎 §一·受监督的波循环](/docs/03-AI核心/执行引擎架构设计.md)。前端：`EscalationCard`（结构化升级与 `ask_user` 共用问答内核 `AskUserFields`）、图节点「待你拍板」角标；⏳ 手机交互层（fold 已有、应答卡未落地）。
+
+> **schema 姿态（2026-06-30）**：`normal` / `blocking` 克制使用（小事自行假设别升级、blocking 省着用，避「问题墙 / 动辄打断用户」反模式）；**唯独 `dep` 该喊就喊**——真卡在「再猜也是错」的缺口上别硬猜瞎编，主动发 `dep` 强过闷头产一堆作废的东西。
 
 → 见代码：`tools/builtin/escalate.py`、`runtime/interaction.py`（`ESCALATION`）、`runtime/runs/executor_agent.py`（`_escalation_channel`）
+
+### 波内共享上下文：便签墙（NoteWall）✅ 已落地
+
+**解决的痛**：同扇出的并行兄弟过去只看到「开局快照」（队友产物去重清单 + 兄弟感知块），波内**看不到彼此「进行中」的发现**——各自猜接口 / 字段、最后才发现对不上、返工。便签墙把「开局冻住的快照」升级为「**边干边更新的共享面**」，让「中间的互相影响」真正发生。
+
+**本质是「贴便签」，不是「打电话」**（故仍守 §为什么不要 Agent 直接通信）：
+
+- **贴在明处**：每张便签是一条被记录的事件（`team_note_posted`，入 journal），能 fold 进团队卡「团队便签」面板——平台全可见，守玻璃箱。
+- **不要求回应**：贴完接着干自己的、不等回复（顺手副作用），顺带保证**不会无限绕圈**（没有「你回我我再回你」）。
+- **避开直聊两毛病**：黑盒 + N² 调用都不存在。
+
+**便签四能力（worker-only，闭集、防滑向聊天区）**：
+
+| 能力 | 工具 | 语义 |
+|---|---|---|
+| 我定了 X | `post_note(kind=decision)` | 别人要依赖的决定：接口 / 字段名 / 格式 / 命名 |
+| 提个醒 Y | `post_note(kind=heads_up)` | 我踩到的坑 / 发现（如「这个模块是异步的」）|
+| 我领了 Z | `post_note(kind=claim)` | 避免重复 / 撞活——`WriteCoordinator` 防撞的**台面化** |
+| 拉取 | `read_notes` | 干到一半需要某队友已定的接口 / 约定却想不起来 → 主动翻当前整面墙（纯读·排除自己·不动推送游标）|
+
+> **「我卡在 W」不走便签**：缺一个**还不存在**的输入是**计划问题**，走 `escalate kind=dep` + 边界 `replan(add)`（见上 §escalate）。「缺」分两种正好对到两件：(a) 东西已存在 → `read_notes` 读出来；(b) 不存在 → `escalate kind=dep`。
+
+**便签会过期——可改写 / 作废（supersession）✅**：`amend_note`（worker 只能改自己的活跃便签，防 cross-worker edit war）把目标便签翻 `superseded`（改写）或 `voided`（作废），带 provenance + `supersedes`。**仅推 / 仅收 ACTIVE**——被改写 / 作废的不再推增量，直治「陈旧传播 / 矛盾常驻」这一多 Agent 头号坑。
+
+**推增量 + 拉整墙**：
+
+- **推（默认）**：每个兄弟动下一步前，引擎 `on_round_begin` 钩子把「上次之后新贴、且非自己贴的」便签（`new_for` per-run 游标）渲成一条 user 消息塞进去——新鲜、互相影响真发生。
+- **拉（按需）**：`read_notes` 主动翻整墙。
+
+**护栏（不烧爆 / 不失控）**：`MAX_NOTE_CHARS=200`（一行硬截断）/ `MAX_WALL_NOTES=50`（满了丢最旧）/ `MAX_PUSH_PER_ROUND=8`；**可见域 = 同一扇出批**（一个 `build_agent_executor` 生命周期一面墙，非全树）；脱队（无并行兄弟）返干净的「无队友可看」结果而非假装贴成功。
+
+**并入「合·对账」收尾**：CEO 收尾时读 `NoteWall.active_notes()`（全队当前有效便签），经 `format_notes_for_synthesis` 渲成概览里的【团队便签】清单，并把语义边界对账（见 [`编排器与CEO主Agent.md` §一·合·验证](/docs/03-AI核心/编排器与CEO主Agent.md)）指到它（改了成品没跟 / 两人认领同一块 / 成品与广播决定矛盾 → 就地 `revise`/`replan`）。
+
+**三端一致折叠**：`team_note_posted`（journaled，随 delegate 回合 surface、重载可回放）三端 fold 到 `ProjectedTurn.teamNotes`（按贴出序、`noteId` 去重，与图节点 / process 正交），据 `supersedes` 翻 target 状态渲「已被更新 / 已作废」；桌面 `TeamNotesPanel`、手机 `TeamView` 渲染。
+
+> **被否决**：worker↔worker 点对点直聊（见 §为什么不要 Agent 直接通信）——便签墙正是「兄弟需横向对齐」这个真需求的**结构化可观测**答案。**变味信号**：若便签被拿来「你问我答、来回讨论」就是在往聊天滑，立即收住（回到「贴事实、不要求回应」）。
+
+→ 见代码：`runtime/runs/notewall.py`（`NoteWall`：`post`/`amend`/`new_for`/`all_for`/`active_notes`）、`tools/builtin/post_note.py` / `read_notes.py` / `amend_note.py`、`runtime/engine/loop.py`（`on_round_begin`）、`runtime/runs/executor_agent.py`（`_pull_notes`）、`runtime/events/run.py`（`team_note_posted`）、三端 fold（oracle `conformance/projection.py` + 桌面 `stores/execution` + 手机 `protocol/fold.ts`）。
 
 ---
 

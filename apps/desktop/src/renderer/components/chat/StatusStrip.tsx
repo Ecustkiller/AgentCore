@@ -240,7 +240,7 @@ function CompletedStrip({
       {showRecovery && (
         <>
           {failedRuns.length > 0 && (
-            <div className="mt-2 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+            <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" />
               <span>{failureNotice}</span>
             </div>

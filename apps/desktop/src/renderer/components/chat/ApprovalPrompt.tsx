@@ -1,7 +1,11 @@
 import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { notifyError } from "@/lib/toast";
-import { decideApproval, isFileOpTool } from "@/services/approvals";
+import {
+  decideApproval,
+  isFileOpTool,
+  supportsTurnGrant,
+} from "@/services/approvals";
 import { type PendingApproval, useApprovalStore } from "@/stores/approvals";
 import { useConversationStore } from "@/stores/conversation";
 import type { ApprovalDecision } from "@/types/events";
@@ -76,9 +80,9 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
     );
 
   return (
-    <DecisionCard tone="warning" animate className="mx-0">
+    <DecisionCard tone="primary" animate className="mx-0">
       <div className="flex items-start gap-2">
-        <DecisionCardIcon tone="warning">
+        <DecisionCardIcon tone="primary">
           <ShieldAlert size={16} />
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
@@ -127,14 +131,16 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
         >
           允许一次
         </Button>
-        <Button
-          variant="neutral"
-          icon={spinnerOr("approve_always", <CheckCheck size={13} />)}
-          disabled={busy}
-          onClick={() => onDecide("approve_always")}
-        >
-          本轮内都允许
-        </Button>
+        {supportsTurnGrant(approval.toolName) && (
+          <Button
+            variant="neutral"
+            icon={spinnerOr("approve_always", <CheckCheck size={13} />)}
+            disabled={busy}
+            onClick={() => onDecide("approve_always")}
+          >
+            本轮内都允许
+          </Button>
+        )}
         {isFileOp && (
           <Button
             variant="neutral"

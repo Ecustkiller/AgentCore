@@ -18,7 +18,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # Long-conversation compaction (执行引擎架构设计 §十三 长对话压缩). Purely additive:
+    # Long-conversation compaction (执行引擎架构设计 §三 长对话压缩). Purely additive:
     # all NULL = never compacted, so existing conversations just fall back to the plain
     # recent window until their first over-threshold turn triggers a fold — no backfill.
     # Not indexed: the columns are read when loading ONE conversation by id (the loader)

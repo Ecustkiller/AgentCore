@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict
 
 from agentcore.llm.config import ModelProfile
@@ -21,14 +22,17 @@ from agentcore.tools.protocol import Tool, ToolContext
 from agentcore.tools.registry import ToolRegistry
 
 
-def _registry_with(base: ToolRegistry, extra: Tool) -> ToolRegistry:
-    """A per-worker registry = the shared team tools + one extra tool (its nested
-    delegate). Returns a fresh registry; the shared ``base`` is never mutated (it
-    backs every worker in the team and must stay delegate-free for leaf workers)."""
+def _registry_with(base: ToolRegistry, *extra: Tool) -> ToolRegistry:
+    """A per-worker registry = the shared team tools + the worker's own extra tools
+    (its nested ``delegate`` and the companion ``replan`` that supervises that
+    delegate's sub-plan). Returns a fresh registry; the shared ``base`` is never
+    mutated (it backs every worker in the team and must stay delegate-free for leaf
+    workers)."""
     registry = ToolRegistry()
     for schema in base.list_all():
         registry.register(base.get(schema.name))
-    registry.register(extra)
+    for tool in extra:
+        registry.register(tool)
     return registry
 
 
@@ -87,6 +91,7 @@ async def _react_and_capture(
     citation_sink: list[dict],
     approval_gate: ApprovalGate | None,
     usage_sink: list[TokenUsage] | None = None,
+    on_round_begin: Callable[[], list[LLMMessage]] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run one ReAct pass over ``messages`` (mutated in place — the loop appends
     each assistant tool-call turn + tool results), then append the final assistant
@@ -125,6 +130,7 @@ async def _react_and_capture(
         annotate_citations=False,
         approval_gate=approval_gate,
         usage_sink=usage_sink,
+        on_round_begin=on_round_begin,
         run_id=run_id,
         role="worker",
     )

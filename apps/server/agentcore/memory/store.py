@@ -6,7 +6,7 @@ subsystem that will ultimately host these files does not exist yet, so the MVP b
 them with a per-user *folder* under the server data dir — one markdown file per memory
 note, addressed by a path relative to that folder.
 
-Phase 2 of「记忆文件夹化」(记忆作用域与画像分层, §03 §1.4 / §5.3) adds two axes on top of
+Phase 2 of「记忆文件夹化」(Agent记忆与知识系统 §1.4 / §5.3) adds two axes on top of
 the phase-1 single-folder layout, both behind the same ``MemoryStore`` seam:
 
 - **作用域 (scope)**: a note lives either GLOBAL (the user's cloud root — injected into
@@ -34,7 +34,7 @@ from agentcore.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-# A memory note's SCOPE (记忆作用域与画像分层 §三): ``None`` = global (the user's cloud root,
+# A memory note's SCOPE (Agent记忆与知识系统 §1.4): ``None`` = global (the user's cloud root,
 # injected into every conversation); a ``str`` is a ``folder_id`` = that project's scope
 # (injected only for conversations bound to that folder). 位置即作用域 — no manual switch.
 MemoryScope = str | None
@@ -137,7 +137,7 @@ class MemoryStore(Protocol):
 class FileMemoryStore:
     """MVP MemoryStore: a per-(user, scope) folder of markdown files under a base directory.
 
-    Layout (记忆作用域与画像分层 §5.1):
+    Layout (Agent记忆与知识系统 §1.4):
     - GLOBAL (``scope=None``): ``<base>/<user_id>/<path>`` — unchanged from phase 1, so
       existing memory IS the global layer (zero migration).
     - PROJECT (``scope=<folder_id>``): ``<base>/<user_id>/_folders/<folder_id>/<path>`` —

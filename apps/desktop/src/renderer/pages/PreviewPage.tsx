@@ -1,7 +1,10 @@
 import { ChatView } from "@/components/chat/ChatView";
 import { ConversationCanvas } from "@/components/graph/ConversationCanvas";
 import { SidePanel } from "@/components/layout/SidePanel";
+import { ScenarioList } from "@/components/preview/ScenarioList";
 import { Button } from "@/components/ui";
+import { applyTheme } from "@/lib/theme";
+import { useIsDark } from "@/lib/useIsDark";
 import { PREVIEW_FIXTURES } from "@/preview/fixtures";
 import { deleteRecording, useRecordings } from "@/preview/recordings";
 import {
@@ -10,15 +13,9 @@ import {
   replayFixtureStreamed,
 } from "@/preview/replay";
 import { useConversationStore } from "@/stores/conversation";
+import { useUIStore } from "@/stores/ui";
 import type { SSEEvent } from "@/types/events";
-import {
-  FlaskConical,
-  MessageSquare,
-  Network,
-  Play,
-  Radio,
-  Trash2,
-} from "lucide-react";
+import { MessageSquare, Moon, Network, Play, Radio, Sun } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -95,10 +92,30 @@ export function PreviewPage() {
   // and shoot-gated too, not just the chat surface. URL-driven so the harness can
   // deep-link it and a human can bookmark it.
   const view = searchParams.get("view") === "canvas" ? "canvas" : "chat";
-  // Preserve the current view across selection / scrubbing so flipping a scenario
-  // or dragging the frame slider doesn't kick canvas back to chat.
-  const withView = (params: Record<string, string>) =>
-    view === "canvas" ? { ...params, view } : params;
+
+  // Render theme (`#/preview?s=…&theme=light|dark`): an ephemeral light/dark
+  // override for the preview surface so a component can be eyeballed in both modes
+  // without flipping (or persisting) the whole app's theme. URL-driven like
+  // `s` / `k` / `view` so it's deep-linkable and survives selection / scrubbing.
+  // Absent → follow the app's real theme (`useApplyTheme` keeps owning it).
+  const themeParam =
+    searchParams.get("theme") === "dark"
+      ? "dark"
+      : searchParams.get("theme") === "light"
+        ? "light"
+        : null;
+  const appIsDark = useIsDark();
+  const isDark = themeParam ? themeParam === "dark" : appIsDark;
+
+  // Preserve the current view + theme across selection / scrubbing so flipping a
+  // scenario or dragging the frame slider doesn't kick canvas back to chat or drop
+  // the chosen preview theme.
+  const withChrome = (params: Record<string, string>) => {
+    const next: Record<string, string> = { ...params };
+    if (view === "canvas") next.view = view;
+    if (themeParam) next.theme = themeParam;
+    return next;
+  };
 
   const stopStreamed = () => {
     cancelRef.current?.();
@@ -106,7 +123,7 @@ export function PreviewPage() {
   };
 
   const select = (name: string) => {
-    setSearchParams(withView({ s: name }), { replace: true });
+    setSearchParams(withChrome({ s: name }), { replace: true });
   };
 
   const setView = (next: "chat" | "canvas") => {
@@ -114,6 +131,19 @@ export function PreviewPage() {
     if (selected) params.s = selected;
     if (frame !== null) params.k = String(frame);
     if (next === "canvas") params.view = next;
+    if (themeParam) params.theme = themeParam;
+    setSearchParams(params, { replace: true });
+  };
+
+  // Flip the preview surface light/dark via the URL. Ephemeral: it overrides the
+  // root `.dark` class while previewing but never writes the persisted app theme,
+  // and preserves the current scenario / frame / view.
+  const setTheme = (next: "light" | "dark") => {
+    const params: Record<string, string> = {};
+    if (selected) params.s = selected;
+    if (frame !== null) params.k = String(frame);
+    if (view === "canvas") params.view = view;
+    params.theme = next;
     setSearchParams(params, { replace: true });
   };
 
@@ -131,10 +161,10 @@ export function PreviewPage() {
   const setFrame = (value: number) => {
     if (!selected) return;
     if (value >= total) {
-      setSearchParams(withView({ s: selected }), { replace: true });
+      setSearchParams(withChrome({ s: selected }), { replace: true });
     } else {
       setSearchParams(
-        withView({ s: selected, k: String(Math.max(1, value)) }),
+        withChrome({ s: selected, k: String(Math.max(1, value)) }),
         { replace: true },
       );
     }
@@ -190,104 +220,37 @@ export function PreviewPage() {
     };
   }, []);
 
+  // Apply the URL-selected preview theme by toggling the root `.dark` class (the
+  // same mechanism as the app's `applyTheme`), so the replayed surface — and
+  // theme-sensitive renderers like mermaid that read `.dark` off the root — flip
+  // exactly as in a real dark-mode session. Only overrides while `?theme=` is set;
+  // restores the app's persisted theme on change / unmount so the user's saved
+  // preference is never clobbered.
+  useEffect(() => {
+    if (!themeParam) return;
+    applyTheme(themeParam);
+    return () => {
+      applyTheme(useUIStore.getState().theme);
+    };
+  }, [themeParam]);
+
   return (
     <div
       className="flex h-full min-h-0"
       data-preview-scenario={selected ?? ""}
       data-preview-frame={frame !== null ? String(frame) : "full"}
     >
-      <aside className="flex w-72 shrink-0 flex-col border-r border-border">
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <FlaskConical size={18} className="text-primary" />
-          <div>
-            <h1 className="text-base font-semibold text-foreground">
-              前端预览
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              {scenarios.length} 个场景 · 离线回放
-            </p>
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          {scenarios.length === 0 ? (
-            <p className="px-2 py-4 text-xs text-muted-foreground">
-              未找到场景。请确认 packages/protocol-conformance/fixtures
-              存在，或用标题栏「录制」按钮录一个回合。
-            </p>
-          ) : (
-            <>
-              {recordings.length > 0 && (
-                <div className="mb-2">
-                  <p className="px-3 py-1 text-xs font-medium text-muted-foreground">
-                    录制（本地）
-                  </p>
-                  <ul className="space-y-0.5">
-                    {recordings.map((r) => (
-                      <li key={r.name} className="relative">
-                        <button
-                          type="button"
-                          onClick={() => select(r.name)}
-                          className={`w-full rounded-lg px-3 py-2 pr-9 text-left ${
-                            selected === r.name
-                              ? "bg-accent text-foreground"
-                              : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                          }`}
-                        >
-                          <span className="block truncate text-sm font-medium">
-                            {r.name}
-                          </span>
-                          <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                            {r.description}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => removeRecording(r.name)}
-                          aria-label={`删除录制 ${r.name}`}
-                          className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {recordings.length > 0 && (
-                <p className="px-3 py-1 text-xs font-medium text-muted-foreground">
-                  内置场景
-                </p>
-              )}
-              <ul className="space-y-0.5">
-                {PREVIEW_FIXTURES.map((fx) => (
-                  <li key={fx.name}>
-                    <button
-                      type="button"
-                      onClick={() => select(fx.name)}
-                      className={`w-full rounded-lg px-3 py-2 text-left ${
-                        selected === fx.name
-                          ? "bg-accent text-foreground"
-                          : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                      }`}
-                    >
-                      <span className="block truncate text-sm font-medium">
-                        {fx.name}
-                      </span>
-                      <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-                        {fx.description}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
-      </aside>
+      <ScenarioList
+        recordings={recordings}
+        fixtures={PREVIEW_FIXTURES}
+        selected={selected}
+        onSelect={select}
+        onDeleteRecording={removeRecording}
+      />
 
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
-          <div className="min-w-0">
+        <div className="flex items-center gap-3 border-b border-border px-4 py-2">
+          <div className="min-w-0 shrink">
             <p className="truncate text-sm font-medium text-foreground">
               {current?.name ?? "选择一个场景"}
             </p>
@@ -297,11 +260,50 @@ export function PreviewPage() {
               </p>
             )}
           </div>
+          {/* Frame scrubber pulled inline so a single control bar carries title +
+              scrubbing + actions; falls back to a spacer (keeps the actions
+              right-aligned) when the scenario has no mid-stream frames to scrub. */}
+          {current && total > 1 ? (
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                帧
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={total}
+                step={1}
+                value={frame ?? total}
+                onChange={(e) => setFrame(Number(e.target.value))}
+                className="h-1 min-w-16 flex-1 cursor-pointer accent-primary"
+                aria-label="流式中间帧 scrubber"
+              />
+              <span className="shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                {frame !== null
+                  ? `第 ${frame} / ${total} 事件`
+                  : `终态 · ${total} 事件`}
+              </span>
+              {frame !== null && (
+                <button
+                  type="button"
+                  onClick={() => setFrame(total)}
+                  className="shrink-0 text-xs font-medium text-primary hover:underline"
+                >
+                  回终态
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex-1" />
+          )}
           {current && (
             <div className="flex shrink-0 items-center gap-1.5">
-              {/* 聊天 ⇄ 画布: flip the render surface for the SAME replayed slice, so a
-                  canvas-only state (team graph + 指挥台 region) can be eyeballed offline
-                  without spinning up a real multi-agent run. */}
+              {/* Merged segmented control: 聊天⇄画布 (render surface) + 浅⇄深
+                  (ephemeral preview theme) share one divider-split container so the
+                  chrome reads as a single compact control. Both flip the SAME
+                  replayed slice — the canvas-only state (team graph + 指挥台) and
+                  either theme — without spinning up a real run or touching the
+                  app's persisted theme. */}
               <div className="mr-1 flex items-center gap-0.5 rounded-lg border border-border p-0.5">
                 <Button
                   variant="ghost"
@@ -329,6 +331,31 @@ export function PreviewPage() {
                 >
                   画布
                 </Button>
+                <span className="mx-0.5 h-5 w-px shrink-0 bg-border" />
+                <Button
+                  variant="ghost"
+                  onClick={() => setTheme("light")}
+                  aria-pressed={!isDark}
+                  aria-label="浅色预览"
+                  icon={<Sun size={14} />}
+                  className={
+                    !isDark
+                      ? "bg-accent text-foreground hover:bg-accent"
+                      : undefined
+                  }
+                />
+                <Button
+                  variant="ghost"
+                  onClick={() => setTheme("dark")}
+                  aria-pressed={isDark}
+                  aria-label="深色预览"
+                  icon={<Moon size={14} />}
+                  className={
+                    isDark
+                      ? "bg-accent text-foreground hover:bg-accent"
+                      : undefined
+                  }
+                />
               </div>
               <Button
                 variant="neutral"
@@ -347,37 +374,6 @@ export function PreviewPage() {
             </div>
           )}
         </div>
-        {current && total > 1 && (
-          <div className="flex items-center gap-3 border-b border-border px-4 py-1.5">
-            <span className="shrink-0 text-xs font-medium text-muted-foreground">
-              帧
-            </span>
-            <input
-              type="range"
-              min={1}
-              max={total}
-              step={1}
-              value={frame ?? total}
-              onChange={(e) => setFrame(Number(e.target.value))}
-              className="h-1 flex-1 cursor-pointer accent-primary"
-              aria-label="流式中间帧 scrubber"
-            />
-            <span className="w-32 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-              {frame !== null
-                ? `第 ${frame} / ${total} 事件`
-                : `终态 · ${total} 事件`}
-            </span>
-            {frame !== null && (
-              <button
-                type="button"
-                onClick={() => setFrame(total)}
-                className="shrink-0 text-xs font-medium text-primary hover:underline"
-              >
-                回终态
-              </button>
-            )}
-          </div>
-        )}
         {view === "canvas" ? (
           // Mirror ConversationPage's canvas layout: the canvas takes the main
           // column and the unified SidePanel docks on the right (where the 指挥台

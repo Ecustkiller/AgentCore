@@ -1,7 +1,8 @@
-"""Tests for memory injection assembly (global + project layers, 记忆作用域与画像分层 §5.2)."""
+"""Tests for memory injection assembly (global + project layers, Agent记忆与知识系统 §二)."""
 
-from agentcore.memory.injection import load_injected_memory, load_memory_topics
+from agentcore.memory.injection import MemoryTopic, load_injected_memory, load_memory_topics
 from agentcore.memory.store import CORE_MEMORY_FILE, PREFERENCES_MEMORY_FILE, FileMemoryStore
+from agentcore.memory.user_memory import topic_summary_line
 
 
 async def test_injected_memory_combines_preferences_and_profile(tmp_path):
@@ -53,7 +54,8 @@ async def test_memory_topics_merge_global_and_project(tmp_path):
     await store.save("u1", "主题/全局主题.md", "## 要点\n- g\n")
     await store.save("u1", "主题/项目主题.md", "## 要点\n- p\n", scope="F1")
     topics = await load_memory_topics(store, "u1", folder_id="F1", enabled=True)
-    assert topics == ["全局主题", "项目主题"]
+    # Names merged + sorted, each carrying its note's first-line summary (§1.4).
+    assert topics == [MemoryTopic("全局主题", "g"), MemoryTopic("项目主题", "p")]
 
 
 async def test_memory_topics_dedupe_across_scopes(tmp_path):
@@ -61,10 +63,57 @@ async def test_memory_topics_dedupe_across_scopes(tmp_path):
     await store.save("u1", "主题/部署.md", "## 要点\n- g\n")
     await store.save("u1", "主题/部署.md", "## 要点\n- p\n", scope="F1")
     topics = await load_memory_topics(store, "u1", folder_id="F1", enabled=True)
-    assert topics == ["部署"]
+    # Same name in both scopes appears once; the GLOBAL summary wins (stable-prefix layer).
+    assert topics == [MemoryTopic("部署", "g")]
 
 
 async def test_memory_topics_empty_when_disabled(tmp_path):
     store = FileMemoryStore(tmp_path)
     await store.save("u1", "主题/部署.md", "## 要点\n- g\n")
     assert await load_memory_topics(store, "u1", folder_id=None, enabled=False) == []
+
+
+async def test_memory_topics_summary_skips_chrome_and_section(tmp_path):
+    # The summary is the first SUBSTANTIVE line: H1/blockquote chrome + ## headers skipped,
+    # the first bullet's text wins (记忆系统 §1.4「拟存主题文件首行」).
+    store = FileMemoryStore(tmp_path)
+    body = "# 用户记忆\n> 本文件由 AI 自动维护。\n\n## 要点\n- 先 build 再 deploy\n- 二线\n"
+    await store.save("u1", "主题/部署流程.md", body)
+    topics = await load_memory_topics(store, "u1", folder_id=None, enabled=True)
+    assert topics == [MemoryTopic("部署流程", "先 build 再 deploy")]
+
+
+async def test_injected_memory_caps_oversized_file_deterministically(tmp_path):
+    # COST-001 读侧 backstop: an abnormally large memory file is DETERMINISTICALLY capped
+    # (head slice + fixed notice), so it can't blow up the <rules> prefix AND the same body
+    # yields the same truncation every turn (memory is the stable prefix → cache-safe).
+    store = FileMemoryStore(tmp_path)
+    big = "## 沟通偏好\n" + "- 用中文\n" * 5000
+    await store.save("u1", PREFERENCES_MEMORY_FILE, big)
+    out1 = await load_injected_memory(store, "u1", folder_id=None, enabled=True, file_char_cap=200)
+    out2 = await load_injected_memory(store, "u1", folder_id=None, enabled=True, file_char_cap=200)
+    assert out1 == out2  # deterministic → prefix-cache safe
+    assert "已截断" in out1  # the fixed truncation notice rode along
+    assert len(out1) < 400  # capped to ~200 + short notice, nowhere near the original
+
+
+async def test_injected_memory_uncapped_when_no_cap_given(tmp_path):
+    # Default (no file_char_cap) is unbounded — backward compatible with callers/tests
+    # that don't pass it.
+    store = FileMemoryStore(tmp_path)
+    body = "## 沟通偏好\n" + "- 用中文\n" * 500
+    await store.save("u1", PREFERENCES_MEMORY_FILE, body)
+    out = await load_injected_memory(store, "u1", folder_id=None, enabled=True)
+    assert "已截断" not in out
+    assert out.count("用中文") == 500
+
+
+def test_topic_summary_line_handles_freeform_truncation_and_empty():
+    # Freeform first line (no bullet) is taken verbatim.
+    assert topic_summary_line("自由文本第一行\n第二行") == "自由文本第一行"
+    # Over-long summary is truncated with an ellipsis (directory stays cheap).
+    summary = topic_summary_line("- " + "а" * 100)
+    assert summary.endswith("…") and len(summary) == 60
+    # Empty / chrome-only note → "" so the directory shows just the name.
+    assert topic_summary_line("") == ""
+    assert topic_summary_line("# 用户记忆\n> 注释\n") == ""

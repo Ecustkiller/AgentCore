@@ -24,7 +24,7 @@ export function TitleBar() {
           <span className="flex flex-1 items-center gap-1.5 text-sm font-semibold text-sidebar-foreground [-webkit-app-region:no-drag]">
             AgentCore
             {import.meta.env.DEV && (
-              <span className="rounded-full bg-warning/20 px-1.5 py-0.5 text-xs font-medium text-warning">
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
                 DEV
               </span>
             )}

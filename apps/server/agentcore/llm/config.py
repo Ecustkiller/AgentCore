@@ -130,7 +130,7 @@ PROFILES: dict[str, ModelProfile] = {
         temperature=0.3,
         max_rounds=1,
     ),
-    # Long-conversation compaction (执行引擎架构设计 §十三 长对话压缩): fold older turns
+    # Long-conversation compaction (执行引擎架构设计 §三 长对话压缩): fold older turns
     # into a rolling structured summary. Fast + non-thinking (World B narrow task, like
     # memory/title); low temperature for faithful, drift-free summarization; one-shot
     # (never ReAct). max_tokens left open — the summary is bounded by its prompt budget

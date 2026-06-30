@@ -1,5 +1,5 @@
 """探针：真跑「项目内 ask_user 挂起 → 断线 → POST /resume」，验证 resume 后 consult_memory
-命中【项目作用域】主题（记忆作用域与画像分层 / resume folder_id+memory_enabled 缺口的端到端活体验证）。
+命中【项目作用域】主题（Agent记忆与知识系统 §二 / resume folder_id+memory_enabled 缺口的端到端活体验证）。
 
 全走正规 HTTP（dev 账号 BYOK），步骤：
 1. 登录；确保长期记忆开关 ON（PUT /users/me/memory/enabled）。
@@ -9,7 +9,7 @@
    default_memory_store() 直写到后端同一 data 目录。
 4. 发一条产出类请求 → CEO 走「发问门」ask_user 挂起（持久化帧）→ 读到 checkpoint_required 即断线。
    发问门是判断式触发，故最多在 4 个新会话间重试，直到某轮真的挂起。
-5. GET /paused 确认帧已落库。断线后在线 run 仍阻塞在 ask_user、握着 folder 级 workspace_lock，但探针
+5. GET /recovery 确认帧已落库（读 paused 数组）。断线后在线 run 仍阻塞在 ask_user、握着 folder 级 workspace_lock，但探针
    直接走 durable /resume —— 服务端 resume_message 会先 stop_and_drain 掉该在线 run（释放锁、留帧）再
    续跑，这正是「断线未重启 → fallback durable resume」的真实路径（兼回归该服务端防线）。
 6. POST /resume（note 明确要求先 consult_memory 查『部署流程』再答）。
@@ -255,9 +255,11 @@ async def run(args: argparse.Namespace) -> int:
         #    stop_and_drain 掉这个在线 run（cancel 释放锁、留帧），再用帧续跑。这正是「断线未重启 →
         #    fallback durable resume」的真实路径，同时回归验证该服务端自洽防线。
         await asyncio.sleep(0.5)  # 给 suspension_saver 落帧一点时间
-        pl = await client.get(f"{base}/v1/conversations/{conv_id}/paused", headers=headers)
+        pl = await client.get(
+            f"{base}/v1/conversations/{conv_id}/recovery", headers=headers
+        )
         pl.raise_for_status()
-        frames = pl.json().get("data", [])
+        frames = pl.json().get("paused", [])
         if not frames:
             print("[paused] 没有挂起帧——可能帧尚未落库或已被消费。")
             return 3

@@ -12,6 +12,7 @@ from agentcore.tools.builtin.web.search_cache import (
     SearchCacheEntry,
     default_search_cache_registry,
 )
+from agentcore.tools.builtin.web.source_domains import default_source_domain_registry
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 
 logger = get_logger(__name__)
@@ -83,6 +84,7 @@ class WebSearchTool:
             hit = cache.get(query, min_results=max_results)
             if hit is not None:
                 logger.info("tool.web_search_cache_hit", query=query, result_count=len(hit.results))
+                self._record_source_domains(context.conversation_id, hit.results)
                 return self._success_result(query, hit.results, start, cached=True)
             # 负缓存（案例1 防重搜风暴）：同一查询刚返回空（常见于引擎 CAPTCHA 后 HTTP 200 +
             # 空结果），短时内直接回空、不再打网，避免降级 worker 对同一空查询反复重搜把共享
@@ -132,7 +134,24 @@ class WebSearchTool:
                 )
             else:
                 cache.note_empty(query)
+        self._record_source_domains(context.conversation_id, results)
         return self._success_result(query, results, start, cached=False)
+
+    @staticmethod
+    def _record_source_domains(conversation_id: str, results: list[SearchResult]) -> None:
+        """Record the domains this search surfaced so a later ``read_url`` of one of
+        them is recognised as a legitimate deep-read, not a novel-domain exfil (PI-002).
+
+        No-op when unscoped (``conversation_id == ""``) or empty. Best-effort: a failure
+        to record only degrades a future read to "treated as novel" (logged, blocked only
+        under the opt-in flag), never breaks the search.
+        """
+        if not conversation_id or not results:
+            return
+        domains = {site_of(r.url) for r in results}
+        domains.discard("")
+        if domains:
+            default_source_domain_registry().record(conversation_id, domains)
 
     def _success_result(
         self,

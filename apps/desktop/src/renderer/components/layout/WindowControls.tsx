@@ -1,4 +1,5 @@
 import { IconButton } from "@/components/ui";
+import { hasWindowControls } from "@/lib/capabilities";
 import { isMac } from "@/lib/platform";
 import { Minus, Square, X } from "lucide-react";
 
@@ -12,7 +13,8 @@ export function WindowControls({
   className,
   buttonClassName = "h-10 w-12 rounded-none",
 }: WindowControlsProps) {
-  if (isMac) return null;
+  // 桌面 macOS 用原生交通灯；web（任意 OS）用浏览器自带窗口 chrome——都不画自绘控件。
+  if (isMac || !hasWindowControls()) return null;
 
   return (
     <div className={className}>

@@ -58,6 +58,12 @@ def boundary_hook(tool: DelegateTool, plan: RunPlan):
             return BoundaryOutcome.YIELD
         if registry is None or conversation_id is None:
             return BoundaryOutcome.PROCEED
+        # 挂起即收口 (②, Phase 3): plan_review 是「顶层 (depth 0) 用户监督点」。嵌套子团队
+        # (depth>0) 的回合无法 durable 恢复（``can_persist_suspension`` 要求 depth==0），② 收口
+        # 只在顶层成立；嵌套若在此暂停只能退到已退役的 live-park 双态。故嵌套不再为复核暂停，
+        # 直接放行（顶层 CEO 仍照常 checkpoint）。BIND/SCOPE（上面）与 escalation 不受此限。
+        if tool._depth != 0:
+            return BoundaryOutcome.PROCEED
 
         checkpoint_id = new_id()
         steps = [review_step(n, completed) for n in nodes]
@@ -68,7 +74,27 @@ def boundary_hook(tool: DelegateTool, plan: RunPlan):
             steps=steps,
             pending=pending,
         )
-        await persist_suspension(tool, checkpoint_id, plan, completed, steps, pending, required)
+        saved = await persist_suspension(
+            tool, checkpoint_id, plan, completed, steps, pending, required
+        )
+        # 挂起即收口 (②): once the durable frame is saved, END the turn at the wave boundary
+        # instead of parking the scheduler on the in-memory Future. We emit the card here (the
+        # wait path emits it via ``on_suspended``) and YIELD — the scheduler soft-pauses
+        # (in-flight drained, the un-run tail left for a resume), then ``drive`` reads
+        # ``_pending_pause`` and returns a SUSPEND ToolResult so the engine maps the turn to
+        # FinishReason.PAUSED. Every resolution (even in-session) now flows through the one cold
+        # ``POST .../resume`` path. Gated on ``saved`` (§六-1 窄兜底): a plan we could not
+        # persist can't be finalized (resume would have no frame to reclaim), so it falls
+        # through to the backend-only timed wait below.
+        if saved:
+            tool._sink.emit(required)
+            tool._pending_pause = True
+            logger.info("plan_review.finalized", checkpoint_id=checkpoint_id)
+            return BoundaryOutcome.YIELD
+        # 窄兜底（薄网，挂起即收口 ② Phase 3）: no durable frame, so hold the wave on a BACKEND-ONLY
+        # bounded wait — the card is surfaced, but no client can settle a plan_review anymore (its
+        # resolve schema is gone from the unified endpoint), so this ends only by timeout →
+        # auto-continue / 放行下游 (不丢回合). A disconnect cancels it and the engine salvages.
         try:
             response = await registry.suspend(
                 checkpoint_id,

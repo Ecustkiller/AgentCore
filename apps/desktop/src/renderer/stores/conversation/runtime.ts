@@ -5,6 +5,7 @@ export const DRAFT_KEY = "";
 
 export const EMPTY_RUNTIME: ConversationRuntime = {
   messages: [],
+  memoryUpdates: [],
   isGenerating: false,
   abort: null,
   error: null,

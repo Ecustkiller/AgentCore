@@ -279,6 +279,7 @@
     "pendingInteraction": null,
     "cost": null,
     "debate": null,
-    "debateRounds": []
+    "debateRounds": [],
+    "teamNotes": []
   }
 }

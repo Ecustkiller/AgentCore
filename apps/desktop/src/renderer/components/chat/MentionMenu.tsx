@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui";
+import { hasLocalFiles } from "@/lib/capabilities";
 import type { IndexedEntry } from "@/lib/fileIndex";
 import { File, Folder, FolderPlus, MessageSquare, Search } from "lucide-react";
 import { useEffect, useRef } from "react";
@@ -62,17 +63,24 @@ export function MentionMenu({
       )}
 
       {noRoots ? (
-        <div className="px-3 py-4 text-center">
-          <p className="text-sm text-muted-foreground">还没有授权目录</p>
-          <Button
-            variant="neutral"
-            onClick={onAddRoot}
-            className="mt-2 bg-accent text-accent-foreground hover:bg-accent/80"
-            icon={<FolderPlus size={14} />}
-          >
-            添加目录
-          </Button>
-        </div>
+        hasLocalFiles() ? (
+          <div className="px-3 py-4 text-center">
+            <p className="text-sm text-muted-foreground">还没有授权目录</p>
+            <Button
+              variant="neutral"
+              onClick={onAddRoot}
+              className="mt-2 bg-accent text-accent-foreground hover:bg-accent/80"
+              icon={<FolderPlus size={14} />}
+            >
+              添加目录
+            </Button>
+          </div>
+        ) : (
+          // web 无本地目录可授权；引用对象来自云端项目（建项目后即出现）。
+          <div className="px-3 py-4 text-center text-sm text-muted-foreground">
+            还没有可引用的文件
+          </div>
+        )
       ) : loading ? (
         <div className="px-3 py-4 text-center text-sm text-muted-foreground">
           正在索引文件…

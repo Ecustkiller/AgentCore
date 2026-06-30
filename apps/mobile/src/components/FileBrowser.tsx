@@ -20,7 +20,7 @@ import { canShareFiles, downloadBlob, shareOrDownloadFile } from "@/lib/share";
 // `reloadKey` bump (stay in the current folder after a write). The list endpoint only returns
 // 顶层 or 整树, so the whole tree is fetched once (recursive) and walked in memory — one
 // round-trip, instant folder nav (same as the original per-conversation browser).
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 /** The injected data source: how to list the tree and fetch one file's bytes. */
@@ -119,17 +119,22 @@ export function FileBrowser({
   onCwdChange,
   reloadKey = 0,
   emptyHint = "（空）",
+  openPath = null,
 }: {
   source: FileBrowserSource;
   cwd: string;
   onCwdChange: (cwd: string) => void;
   reloadKey?: number;
   emptyHint?: string;
+  /** 深链：树加载后自动打开该路径文件的预览并落到其所在目录（聊天「本回合产出文件」卡的
+   *  一键直达）。只消费一次；树里找不到则按路径直接构造节点（下载失败由预览器兜底报错）。 */
+  openPath?: string | null;
 }) {
   const navigate = useNavigate();
   const [tree, setTree] = useState<Map<string, FileNode[]> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<FileNode | null>(null);
+  const openedRef = useRef(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey is an intentional manual-reload trigger — bumping it re-lists even though the body doesn't read it
   useEffect(() => {
@@ -156,6 +161,21 @@ export function FileBrowser({
       cancelled = true;
     };
   }, [source, reloadKey, navigate]);
+
+  // 一键直达：树就绪后，把请求的文件落到其目录并打开预览。只跑一次（openedRef 守门），
+  // 避免折回目录/二次打开。找不到精确节点就按路径构造一个（预览器自行下载、失败兜底）。
+  useEffect(() => {
+    if (!openPath || openedRef.current || tree === null) return;
+    openedRef.current = true;
+    const slash = openPath.lastIndexOf("/");
+    const dir = slash >= 0 ? openPath.slice(0, slash) : "";
+    const name = openPath.slice(slash + 1) || openPath;
+    const node = (tree.get(dir) ?? []).find(
+      (n) => !n.isDir && n.path === openPath,
+    ) ?? { name, path: openPath, isDir: false };
+    if (dir) onCwdChange(dir);
+    setViewing(node);
+  }, [openPath, tree, onCwdChange]);
 
   const children = tree?.get(cwd) ?? [];
   const crumbs = cwd ? cwd.split("/") : [];

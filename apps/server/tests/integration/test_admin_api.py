@@ -637,6 +637,34 @@ async def test_admin_usage_summary_aggregates_across_users(client, make_admin, s
     assert b["billing_mode"] == settings.billing_mode
 
 
+async def test_admin_usage_summary_splits_month_by_role(client, make_admin, session_factory):
+    """全站工资单 also splits this month's spend by ledger role (含 vision 读图子调用),
+    aggregated across *every* account and ordered spend-desc — the platform-wide
+    counterpart of the per-user by-role payroll."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    alice = await _seed_user(session_factory, "alice")
+    bob = await _seed_user(session_factory, "bob")
+
+    # Two accounts, two roles: captain spend dwarfs the vision read-image sub-calls,
+    # and each role spans both users so the split is a true cross-user merge.
+    await _seed_spend(session_factory, user_id=alice, total=5000, role="captain")
+    await _seed_spend(session_factory, user_id=bob, total=3000, role="captain")
+    await _seed_spend(session_factory, user_id=alice, total=400, role="vision")
+    await _seed_spend(session_factory, user_id=bob, total=200, role="vision")
+
+    r = await client.get("/v1/admin/usage/summary")
+    assert r.status_code == 200, r.text
+    rows = r.json()["month_by_role"]
+
+    # Spend-desc across the whole platform: captain (8000, 2 turns) leads vision
+    # (600, 2 turns); each role merges both accounts' spend.
+    assert [row["role"] for row in rows] == ["captain", "vision"]
+    by_role = {row["role"]: row for row in rows}
+    assert by_role["captain"] == {"role": "captain", "cost_total": 8000, "turns": 2}
+    assert by_role["vision"] == {"role": "vision", "cost_total": 600, "turns": 2}
+
+
 async def test_admin_usage_summary_empty_is_zero(client, make_admin):
     username, password = await make_admin()
     await _login(client, username, password)
@@ -646,6 +674,7 @@ async def test_admin_usage_summary_empty_is_zero(client, make_admin):
     b = r.json()
     assert b["today"]["cost"]["total"] == 0
     assert b["month_by_user"] == []
+    assert b["month_by_role"] == []
     assert [p["cost_total"] for p in b["recent_daily_cost"]] == [0] * 7
 
 
@@ -715,6 +744,10 @@ async def _seed_turn(
     workers: int = 0,
     input_tokens: int = 100,
     output_tokens: int = 50,
+    boundary_yields: int = 0,
+    scope_signals: int = 0,
+    revises: int = 0,
+    escalations: int = 0,
 ) -> None:
     """Seed one turn_metrics row for ``user_id`` landing in today's window
     (created_at server-defaults to now). The write path is exercised end-to-end by
@@ -736,6 +769,10 @@ async def _seed_turn(
             workers=workers,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            boundary_yields=boundary_yields,
+            scope_signals=scope_signals,
+            revises=revises,
+            escalations=escalations,
         )
 
 
@@ -753,6 +790,39 @@ async def test_non_admin_cannot_access_observability(client, make_invite):
     assert (
         await client.get(f"/v1/admin/observability/conversations/{new_id()}")
     ).status_code == 403
+
+
+async def test_admin_observability_surfaces_collab_quality(client, make_admin, session_factory):
+    """学·度量 §2.5: the health window surfaces 协作质量 — 首计划存活率 over delegated turns plus
+    raw scope / revise / escalation sums — so the operator面 sees the same 方向盘 as offline."""
+    username, password = await make_admin()
+    await _login(client, username, password)
+    user = await _seed_user(session_factory, "collab")
+
+    # 3 delegated turns: 2 ran the first plan clean (boundary_yields==0); 1 needed a mid-course
+    # replan (boundary_yields=1), drifted (scope_signals=2), took 1 revise + 3 escalations.
+    await _seed_turn(session_factory, user_id=user, delegated=True, workers=2)
+    await _seed_turn(session_factory, user_id=user, delegated=True, workers=1)
+    await _seed_turn(
+        session_factory,
+        user_id=user,
+        delegated=True,
+        workers=2,
+        boundary_yields=1,
+        scope_signals=2,
+        revises=1,
+        escalations=3,
+    )
+    # A non-delegated turn: excluded from the 首计划存活 denominator, doesn't add scope signals.
+    await _seed_turn(session_factory, user_id=user)
+
+    today = (await client.get("/v1/admin/observability/summary")).json()["today"]
+    assert today["delegated_turns"] == 3
+    # 首计划存活率: 2 of 3 delegated turns had boundary_yields == 0.
+    assert today["first_plan_survival_rate"] == 2 / 3
+    assert today["scope_signals"] == 2
+    assert today["revises"] == 1
+    assert today["escalations"] == 3
 
 
 async def test_admin_observability_summary_aggregates(client, make_admin, session_factory):

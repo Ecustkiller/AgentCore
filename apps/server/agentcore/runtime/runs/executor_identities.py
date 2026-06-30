@@ -1,12 +1,41 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from agentcore.tools.protocol import Tool
 
+
+@dataclass(frozen=True)
+class LeadSubteam:
+    """A worker-captain's nested-delegation handle (阶段2 嵌套 + 受监督子计划 B).
+
+    The factory mints this in the tools layer so ``runs`` stays free of a concrete
+    tools dependency (it only touches the opaque :class:`~agentcore.tools.protocol.Tool`
+    objects + the ``dispose`` closure here):
+
+    - ``tools`` — the lead's own ``delegate`` PLUS the companion ``replan`` bound to
+      THAT delegate instance, both registered onto the lead's per-worker tool set.
+      Wiring ``replan`` for a lead (not just the root CEO) is the 去特例 fix: a lead
+      supervises its own sub-plan's 波边界 (bind_after_deps / 子队员 escalate scope)
+      exactly like the CEO — without it a yielding sub-plan would be a dead-end.
+    - ``tool_names`` — re-grant those names on a least-privilege allow-list (mirrors
+      how ``escalate`` is kept callable for a restricted worker).
+    - ``dispose`` — turn-end disposition of a sub-plan the lead yielded but never
+      resumed (堵漏账): fold its completed workers' usage/ledger/citations in before
+      the parent absorbs this child, so a lead that wrapped up without a ``replan``
+      never strands sub-team spend. No-op when nothing is paused; best-effort.
+    """
+
+    tools: tuple[Tool, ...]
+    tool_names: tuple[str, ...]
+    dispose: Callable[[], Awaitable[None]]
+
+
 # A worker's nested-delegate factory: given (captain_run_id, captain_depth) — the
-# worker's own run id + depth — it mints a ``delegate`` tool bound to that worker
-# as the sub-team's captain. Owned by the DelegateTool (which can import the tools
-# package), passed in here so ``runs`` stays free of a tools dependency.
-DelegateFactory = Callable[[str, int], Tool]
+# worker's own run id + depth — it mints the worker's :class:`LeadSubteam` (its own
+# ``delegate`` + the companion ``replan`` bound to it as the sub-team's captain).
+# Owned by the DelegateTool (which can import the tools package), passed in here so
+# ``runs`` stays free of a concrete tools dependency.
+DelegateFactory = Callable[[str, int], LeadSubteam]
 
 # 阻塞式求决策 并发上限 (设计 §4.6): at most this many workers may be suspended on a
 # blocking escalate at once (per conversation). Beyond it a further blocking escalate
@@ -51,6 +80,53 @@ file_write 把它真正写进工作区，而不是把整份内容粘在回复正
 escalate 是「缺了它整件事会走偏、需要现在有人拍板」，\
 交接简报里的建议是「我已做完、提示个后续方向」。"""
 
+# Shared by every delegated worker (leaf + captain): how to use the team note wall
+# (§2.2 通·便签墙 + §2.4 变·worker 的「拉」). Workers run in parallel silos; without this they
+# each guess in isolation and only reconcile at the CEO. Four moves, stated explicitly so the
+# wall stays a 玻璃箱 broadcast (NOT a chat / question channel — the doc's main risk): PUSH a
+# decision / heads-up / claim (post_note — claim 我领了 is the proactive, visible counterpart of
+# WriteCoordinator's hard file guard: announce a piece you're taking so siblings don't dup it),
+# PULL the whole wall on demand (read_notes), 改写/作废 a stale note you posted (amend_note,
+# §2.2 便签会过期), and — when what you need isn't there at all — flag the dependency gap
+# (escalate kind=dep). Framed 主动-but-no-chatter (07-规划 §五 全量铺开, 2026-06-30 — 人决策,
+# 先于 §2.5 度量闸门): workers ACTIVELY broadcast every real decision / heads-up / claim and PULL
+# (read_notes) when unsure; only 社交闲聊 is held back, so the wall stays signal not noise.
+_WORKER_TEAM_NOTE_POLICY = """\
+你和若干队友正在【并行】干这一批活。当你做出别人要依赖的决定、踩到值得提醒队友的坑 / 发现、\
+或要认领一块活 / 文件免得和队友撞活时，用 post_note 贴一条【一行、具体】的便签广播给并行队友：\
+kind=decision 是「我定了」（接口 / 字段名 / 格式 / 命名等别人要对齐的决定），\
+kind=heads_up 是「提个醒」（坑 / 发现），\
+kind=claim 是「我领了」（你要负责的一块活 / 文件，如『登录页我来写』，免得俩人干同一件事或抢同一个文件）。\
+贴完就【立刻继续做你的活】——\
+它是顺手广播、不等任何回复，既不是聊天也不是提问（要上级拍板仍用 escalate）。\
+你每一步开始前，队友新贴的便签会自动推给你：据此对齐接口、避免和队友重复或冲突，但你【不必回应】。\
+当你干到一半、需要某个队友已定下的东西（接口 / 字段名 / 约定）却想不起来时，\
+用 read_notes 主动翻一遍当前整面便签墙取用——它只是读、不打断你也不等回复。\
+若你早先贴的某条决定后来【变了 / 不作数了】（如字段从 password 改成 pwd），\
+用 amend_note 把它更正掉，免得队友照过时的便签做错：\
+ref 填那条便签的编号（post_note 成功时返回的 N 编号），\
+给 text 写新内容＝改写、省略 text＝作废——别让旧便签一直挂着误导队友。\
+若你要的东西【墙上根本没有】（没人产出过、计划也没安排），那是依赖缺口：别硬猜瞎编一个凑数、\
+真卡在再猜也是错的缺口上就主动用 escalate kind=dep 写清你卡在缺什么（强过闷头产出一堆作废的东西），\
+主管 / lead 会在波边界补上；期间你照常按假设把能做的做完，【绝不要空等队友】。\
+拿捏分寸：凡是【别人要依赖的决定 / 会害人踩坑的发现 / 你认领的一块活】都值得【主动】贴出来——\
+这是团队不撞车的关键，别自己定了却闷不吭声；拿不准某个接口 / 字段 / 约定时也先 read_notes 翻一遍\
+再动手，别凭空猜。唯一要避开的是寒暄与无关碎话（这里不是聊天区）：只要是真影响活的事，就主动发、主动拉。"""
+
+# Shared by every delegated worker (leaf + captain): the environment-mutation caution
+# (按角色 right-size, 反向). It used to live in the SHARED base prompt, so the CEO carried
+# it too — but the coordinator CEO holds only read-only tools (build_ceo_tool_registry):
+# write / delete / move / execute are worker-only, so this caution was inert weight on the
+# CEO's prompt. It now rides ONLY the worker identities, where the mutating tools actually
+# live; the CEO sheds it, workers keep the wording verbatim (近零行为风险). Symmetric to the
+# charting HOW moving the OTHER way, onto the CEO-only <visualization> block.
+_WORKER_TOOL_SAFETY_POLICY = """\
+<tool_safety>
+写文件、删除、移动、执行代码等会改动环境的工具，可能需要用户确认后才执行；你放手\
+调用即可，由确认机制处理同意，不必在正文里反复征求许可。对不可逆或破坏性的操作\
+（删除、整体覆盖、危险命令）要格外谨慎——尤其在本地模式下，它们作用于用户自己的机器。
+</tool_safety>"""
+
 # Prepended to every delegated worker's system prompt (right after the shared
 # base). A leaf worker runs in an isolated context with one scoped task, no chance
 # to ask follow-ups, and no `delegate` tool — stated explicitly so it makes a
@@ -67,7 +143,11 @@ _WORKER_IDENTITY = f"""\
 结构化 questions（把候选写进 options），让拍板者一键选定、不必读你的散文再手敲；没有明确候选的\
 开放问题则照常用一句话问、不必硬凑选项。
 
-{_WORKER_DELIVERABLE_POLICY}"""
+{_WORKER_TEAM_NOTE_POLICY}
+
+{_WORKER_DELIVERABLE_POLICY}
+
+{_WORKER_TOOL_SAFETY_POLICY}"""
 
 # Variant identity for a worker that opted into one nested delegation level
 # (``can_delegate`` and still above the depth cap). Unlike the leaf worker it MAY
@@ -80,8 +160,15 @@ _WORKER_CAPTAIN_IDENTITY = f"""\
 好的任务，外加完成它所需的上下文；你够不到用户、不会有人实时答疑。如果这个任务复杂到需要进一步\
 拆分，你可以调用 delegate 把它拆给一支由你指挥的子团队（只能再嵌套这一层，你的子成员\
 不能再向下委派），看到他们的产出后由你整合；若任务并不需要拆分，就自己直接完成，不要\
-为委派而委派。信息不足时做出最合理的假设、简短说明，然后照常交付；只有遇到必须由上级\
+为委派而委派。你带的子队若声明了 bind_after_deps（依赖完成后再定稿）的步骤、或子队员用 \
+escalate kind=scope 报告了职责偏离，控制权会在波边界交回你（子队输出『计划已让出』）——\
+这时用 replan 据上游产出把待定稿步骤定稿 / 操舵尚未运行的步骤，续跑【同一张】子计划；确认\
+无需改动可直接续跑、确无需继续则 replan(stop=true) 收口。信息不足时做出最合理的假设、简短说明，然后照常交付；只有遇到必须由上级\
 拍板的关键岔路，才用 escalate 上报给主管（你够不到用户），上报后仍按假设照常把活做完。\
 岔路若是干净的二选一 / 多选一，就在 escalate 里附结构化 questions（候选写进 options）让人一键拍板。
 
-{_WORKER_DELIVERABLE_POLICY}"""
+{_WORKER_TEAM_NOTE_POLICY}
+
+{_WORKER_DELIVERABLE_POLICY}
+
+{_WORKER_TOOL_SAFETY_POLICY}"""

@@ -26,7 +26,7 @@ Failure strategy per node is :attr:`RunPolicy.on_failure` (retry → re-run then
 degrade; skip → cascade-skip dependents; abort → drain in-flight then stop; degrade
 → dependents proceed).
 
-→ 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
+→ 见设计: docs/03-AI核心/执行引擎架构设计.md §八（Run 模型）
 """
 
 from __future__ import annotations
@@ -274,13 +274,14 @@ class WaveScheduler:
                         elif outcome is BoundaryOutcome.YIELD:
                             stopped = True
 
-                # 偏离信号边界 (受监督的波循环 SCOPE arm / 自底向上反应臂): a COMPLETED node
-                # flagged a 职责/范围 deviation (escalate kind=scope). Once in-flight work has
-                # drained (quiescent) and not-yet-run downstream remains to redirect, yield to
-                # the CEO — it reads the deviation + the node's output and re-steers the un-run
-                # tail (replan). Each signal fires ONCE: surfacing it marks it consumed, so a
-                # PROCEED can't spin and a YIELD's resume (which re-seeds the same completed
-                # nodes) won't re-fire. Inert unless a hook is wired AND a scope escalation
+                # 反应臂边界 (受监督的波循环 SCOPE arm / 自底向上反应臂): a COMPLETED node
+                # flagged a 职责/范围 deviation (escalate kind=scope) OR a 依赖缺口·卡在缺输入
+                # (escalate kind=dep, §2.4 变·worker 的「拉」). Once in-flight work has drained
+                # (quiescent) and not-yet-run downstream remains, yield to the CEO/lead — it reads
+                # the signal + the node's output and re-steers (scope) / replan(add)s a producer
+                # (dep) for the un-run tail. Each signal fires ONCE: surfacing it marks it consumed,
+                # so a PROCEED can't spin and a YIELD's resume (which re-seeds the same completed
+                # nodes) won't re-fire. Inert unless a hook is wired AND a scope/dep escalation
                 # surfaced — an ordinary plan never enters here (零新增回合).
                 if on_boundary is not None and not running and not aborted and not stopped:
                     scope_nodes = self._scope_pending(plan, completed)
@@ -293,7 +294,7 @@ class WaveScheduler:
                             state = completed.get(node.run_id)
                             if state is not None:
                                 for e in state.escalations:
-                                    if e.get("kind") == "scope":
+                                    if e.get("kind") in ("scope", "dep"):
                                         e["consumed"] = True
                         if outcome is BoundaryOutcome.ABORT:
                             aborted = True
@@ -451,18 +452,23 @@ class WaveScheduler:
         plan: RunPlan,
         completed: Mapping[str, RunState],
     ) -> list[RunSpec]:
-        """COMPLETED nodes carrying an unconsumed scope-deviation escalation
-        (``escalate kind=scope``) — the SCOPE boundary's triggers (偏离信号 / 自底向上反应
-        臂). A consumed signal (already surfaced to the host at a prior boundary) is
-        skipped, so each deviation yields the CEO exactly once. Empty for any plan whose
-        completed nodes raised no scope escalation, so the boundary stays inert there.
+        """COMPLETED nodes carrying an unconsumed reactive-boundary escalation — a 职责/范围
+        deviation (``escalate kind=scope``) OR a 依赖缺口·卡在缺输入 (``escalate kind=dep``,
+        §2.4) — the SCOPE boundary's triggers (自底向上反应臂). Both ride the SAME boundary:
+        the CEO/lead re-steers (scope) or replan(add)s a producer (dep) for the un-run tail.
+        A consumed signal (already surfaced at a prior boundary) is skipped, so each yields the
+        host exactly once. Empty for any plan whose completed nodes raised no scope/dep
+        escalation, so the boundary stays inert there.
         """
         ready: list[RunSpec] = []
         for node in plan.nodes:
             state = completed.get(node.run_id)
             if state is None or state.phase is not RunPhase.COMPLETED:
                 continue
-            if any(e.get("kind") == "scope" and not e.get("consumed") for e in state.escalations):
+            if any(
+                e.get("kind") in ("scope", "dep") and not e.get("consumed")
+                for e in state.escalations
+            ):
                 ready.append(node)
         return ready
 

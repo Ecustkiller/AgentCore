@@ -60,7 +60,7 @@ class ToolEffect(StrEnum):
     """How a tool result steers the ReAct loop.
 
     The engine acts on THIS effect — never on a tool's name or category (引擎纯化,
-    设计 §18.5). The default ``CONTINUE`` feeds the tool output back and loops; a
+    设计 §8.5). The default ``CONTINUE`` feeds the tool output back and loops; a
     terminal effect ends the turn in-band, surfacing the result's ``final_text``
     instead of letting the model generate a second, duplicate reply.
     """
@@ -77,3 +77,11 @@ class ToolEffect(StrEnum):
     # note is the reply). A "submit" answer instead resumes the loop (CONTINUE), so
     # only stop is terminal here.
     INTERACT = "interact"
+    # 挂起即收口 (②): the tool hit a durable checkpoint and persisted a resume frame, so
+    # the loop must END the turn awaiting ``POST .../resume`` — NOT because an answer was
+    # produced. Unlike INTERACT/HANDOFF it carries NO ``final_text`` (there is no reply
+    # yet) and the suspended tool_call is left PENDING (no tool result recorded), so the
+    # resumed window ends exactly at the assistant. The engine maps it to
+    # FinishReason.PAUSED. Returned by any durable checkpoint whose frame was persisted
+    # (§六-1 narrow fallback: an un-persistable pause parks on the in-memory wait instead).
+    SUSPEND = "suspend"

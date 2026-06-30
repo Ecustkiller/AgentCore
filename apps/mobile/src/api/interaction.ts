@@ -7,11 +7,16 @@ import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];
 
-/** Settle a paused interaction — discriminated on `kind` (OpenAPI union). */
+/** Settle a paused interaction — discriminated on `kind` (OpenAPI union).
+ *
+ * 挂起即收口 (②, Phase 3): `ask_user` / `plan_review` are no longer settled here — a CEO
+ * checkpoint finalizes the turn (message_end finish_reason=paused) and is continued via the
+ * cold resume endpoint (api/turn.ts `resumeStream`), so their resolve schemas are gone from
+ * the backend union. Mobile resolves only an approval (PauseCard) or a worker's blocking
+ * escalation (decideEscalation) live in-stream. */
 export type ResolveInteractionBody =
   | Schemas["ResolveApprovalInteraction"]
-  | Schemas["ResolveCheckpointInteraction"]
-  | Schemas["ResolvePlanReviewInteraction"];
+  | Schemas["ResolveEscalationInteraction"];
 
 /**
  * POST a paused interaction's answer; the live SSE stream resumes.
@@ -33,4 +38,33 @@ export async function resolveInteraction(
   if (!res.ok && res.status !== 404) {
     throw new Error(`放行失败 (${res.status})`);
   }
+}
+
+/**
+ * 阻塞式求决策 (§4.5): the two calls a user can make on a worker's blocking escalation —
+ * answer it, or 按假设继续 (degrade to the worker's stated assumption, == a timeout). UNLIKE
+ * plan_review there is no 停止: ending the whole turn is the CEO `ask_user` job, not one
+ * worker's escalation. Mirrors the desktop `decideEscalation` (services/escalation.ts).
+ */
+export type EscalationUserDecision =
+  | { kind: "answer"; answer: string }
+  | { kind: "use_assumption" };
+
+/**
+ * POST the user's call on a worker's blocking escalate to the SAME unified resolve endpoint
+ * (keyed by `escalation_id`). The suspending tool's awaiter — never this route — emits
+ * `escalation_resolved` on the live stream, which folds the run's pending escalation to
+ * resolved/timeout and unmounts the card. A 404 (already closed) is swallowed by
+ * {@link resolveInteraction}; any other failure propagates so the card can re-enable.
+ */
+export function decideEscalation(
+  conversationId: string,
+  escalationId: string,
+  decision: EscalationUserDecision,
+): Promise<void> {
+  return resolveInteraction(conversationId, escalationId, {
+    kind: "escalation",
+    answer: decision.kind === "answer" ? decision.answer : "",
+    use_assumption: decision.kind === "use_assumption",
+  });
 }

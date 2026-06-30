@@ -31,7 +31,7 @@ class CostEvent(Base):
     __tablename__ = "cost_events"
     __table_args__ = (
         CheckConstraint(
-            "role in ('captain', 'member', 'arena', 'title', 'memory')",
+            "role in ('captain', 'member', 'arena', 'title', 'memory', 'vision')",
             name="ck_cost_events_role",
         ),
         # Account-window aggregation (dashboard + quota): SUM over a user's recent

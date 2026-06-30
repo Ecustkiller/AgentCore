@@ -23,11 +23,20 @@ def failed_turn(side: DebateSide, run_id: str) -> SideTurn:
 def make_round_runner(
     tool: DebateTool, execution_id: str, moderator_run_id: str, config: DebateConfig
 ):
-    async def run_round(*, round_no, focus, sides, history):
+    async def run_round(*, round_no, focus, sides, history, interjections=()):
         if round_no <= 1 or not tool._debater_sessions:
+            # 首轮无前序边界 ⇒ 恒无用户追问（追问只在第 1 轮之后的边界产生）。
             return await first_round(tool, execution_id, moderator_run_id, config, focus, sides)
         return await next_round(
-            tool, execution_id, moderator_run_id, config, round_no, focus, sides, history
+            tool,
+            execution_id,
+            moderator_run_id,
+            config,
+            round_no,
+            focus,
+            sides,
+            history,
+            interjections,
         )
 
     return run_round
@@ -53,8 +62,10 @@ async def first_round(
     )
 
     sides = list(sides)
+    # 结构化补轮·B：若本回合带上一场种子，首轮辩手 task 注入上一场摘要（接着辩、不重复）。
+    seed = tool._prior_seed
     tasks_raw = [
-        debater_task(config, side, idx, round_no=1, focus=focus)
+        debater_task(config, side, idx, round_no=1, focus=focus, seed=seed)
         for idx, side in enumerate(sides)
     ]
     valid_tools = {s.name for s in tool._tools.list_all()}
@@ -148,6 +159,7 @@ async def next_round(
     focus: str,
     sides,
     history,
+    interjections=(),
 ) -> list[SideTurn]:
     """后续轮：各辩手【并行】continue_run 续写（注入对方上轮论点），收齐后按序留人 + 折算。
 
@@ -170,7 +182,7 @@ async def next_round(
         if session is None:
             return None
         revision_run_id = f"{moderator_run_id}_r{round_no}_{side.key}"
-        feedback = round_feedback(config, side, round_no, focus, last_round)
+        feedback = round_feedback(config, side, round_no, focus, last_round, interjections)
         async with semaphore:
             return await continue_run(
                 session=session,

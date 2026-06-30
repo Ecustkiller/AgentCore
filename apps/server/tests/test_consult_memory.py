@@ -15,6 +15,7 @@ Covers the read side of memory folderization:
 from pathlib import Path
 
 from agentcore.core.types import ToolCategory
+from agentcore.memory import MemoryTopic
 from agentcore.memory.store import CORE_MEMORY_FILE, FileMemoryStore, topic_path
 from agentcore.runtime.prompt import (
     assemble_system_prompt,
@@ -115,7 +116,7 @@ async def test_consult_memory_is_per_user(tmp_path):
     assert not result.success
 
 
-# --- scope-aware recall (project + global, 记忆作用域与画像分层 §5.2) -----------------
+# --- scope-aware recall (project + global, Agent记忆与知识系统 §二) -----------------
 
 
 async def test_consult_memory_resolves_project_topic(tmp_path):
@@ -160,11 +161,13 @@ async def test_consult_memory_miss_lists_both_scopes(tmp_path):
 
 
 def test_topic_directory_lists_names_and_points_at_consult():
-    out = render_memory_topic_directory(["部署流程", "项目背景"])
+    out = render_memory_topic_directory(
+        [MemoryTopic("部署流程", "先 build 再 deploy"), MemoryTopic("项目背景", "")]
+    )
     assert "<记忆主题目录>" in out and "</记忆主题目录>" in out
     assert "consult_memory" in out  # the soft push to pull a topic
-    assert "- 部署流程" in out
-    assert "- 项目背景" in out
+    assert "- 部署流程：先 build 再 deploy" in out  # name + one-line summary (§1.4)
+    assert "- 项目背景" in out and "- 项目背景：" not in out  # no summary ⇒ just the name
 
 
 def test_topic_directory_empty_when_no_topics():
@@ -181,18 +184,18 @@ def test_ceo_prompt_lists_topic_directory_only_when_consult_memory_wired():
         base,
         skill_registry=registry,
         ceo_tool_names={"delegate", "consult_skill", "consult_memory"},
-        memory_topics=["部署流程"],
+        memory_topics=[MemoryTopic("部署流程", "先 build")],
     )
     assert "<记忆主题目录>" in with_memory
-    assert "- 部署流程" in with_memory
+    assert "- 部署流程：先 build" in with_memory
 
     # Memory off ⇒ consult_memory NOT wired ⇒ the directory is gated out entirely, even
-    # if topic names were passed (the directory↔tool privacy invariant).
+    # if topics were passed (the directory↔tool privacy invariant).
     without_memory = compose_ceo_chat_prompt(
         base,
         skill_registry=registry,
         ceo_tool_names={"delegate", "consult_skill"},
-        memory_topics=["部署流程"],
+        memory_topics=[MemoryTopic("部署流程", "先 build")],
     )
     assert "<记忆主题目录>" not in without_memory
 
@@ -204,7 +207,7 @@ def _assemble_chat_tools(*, folder_id: str | None, memory_enabled: bool = True):
     """Run the real CEO toolset assembly and return its chat ToolRegistry.
 
     The SAME ``_assemble_ceo_toolset`` a fresh turn and a 2b resume call — the resume now
-    passes the frame's ``folder_id`` (记忆作用域与画像分层 §5.2), so this pins that a
+    passes the frame's ``folder_id`` (Agent记忆与知识系统 §二), so this pins that a
     non-None folder_id scopes consult_memory to that project rather than global-only.
     """
     from agentcore.llm.modes import default_profile_set

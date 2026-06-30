@@ -1,5 +1,6 @@
 import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
+import { hasLocalEngine } from "@/lib/capabilities";
 import { getRuntime } from "@/stores/conversation";
 import { useUIStore } from "@/stores/ui";
 import type { SidecarHistoryEntry } from "@shared/sidecar-contract";
@@ -61,13 +62,9 @@ export function getActiveSidecarTarget(
   return activeSidecarTurns.get(conversationId) ?? null;
 }
 
-/** sidecar 路由是否启用（用户设置开关「本地引擎」+ 桌面环境）。 */
+/** sidecar 路由是否启用（桌面本地引擎可用 + 用户设置开关「本地引擎」；web 恒 false → 走云）。 */
 export function isSidecarEnabled(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    !!window.sidecarApi &&
-    useUIStore.getState().sidecarEnabled
-  );
+  return hasLocalEngine() && useUIStore.getState().sidecarEnabled;
 }
 
 /**
@@ -123,7 +120,7 @@ export async function resolveSidecarRoot(
 export async function canConversationUseSidecar(
   conversationId: string,
 ): Promise<boolean> {
-  if (typeof window === "undefined" || !window.sidecarApi) return false;
+  if (!hasLocalEngine()) return false;
   return (await resolveLocalTarget(conversationId)) !== null;
 }
 

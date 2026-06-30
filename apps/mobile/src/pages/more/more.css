@@ -337,3 +337,67 @@
 .about-value.mono {
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
+
+/* AI 记忆 (/memory). */
+.mem-textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: 10px 12px;
+  font: inherit;
+  line-height: 1.5;
+  color: var(--fg);
+  resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.mem-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mem-toggle-state {
+  font-size: 14px;
+  color: var(--fg);
+}
+
+.mem-topic + .mem-topic {
+  border-top: 1px solid var(--border);
+}
+
+.mem-topic-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 0;
+  text-align: left;
+  background: transparent;
+  border: none;
+}
+
+.mem-topic-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mem-topic-chevron {
+  flex-shrink: 0;
+  font-size: 16px;
+  color: var(--muted);
+}
+
+.mem-topic-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0 12px;
+}

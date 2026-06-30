@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from agentcore.tools.builtin import build_ceo_tool_registry, build_worker_registry
 from agentcore.tools.builtin.ask_user import AskUserTool
 from agentcore.tools.builtin.board_ops import BoardOpsTool
+from agentcore.tools.builtin.board_read import BoardReadTool
 from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
 from agentcore.tools.builtin.consult_skill import ConsultSkillTool
 from agentcore.tools.builtin.delegate import DelegateTool
@@ -57,10 +58,11 @@ _CEO_ORCHESTRATION_TOOLS: tuple[type, ...] = (
     ConsultSkillTool,
     ConsultMemoryTool,
     AskUserTool,
-    # board_ops is wired only in a 白板会话 (run.py, when the conversation is bound to a
-    # board), but advertised here so the 能力图鉴 shows the CEO's full repertoire — same
-    # posture as ask_user (wired only on the live-user path) above.
+    # board_ops / board_read are wired only in a 白板会话 (run.py, when the conversation is
+    # bound to a board), but advertised here so the 能力图鉴 shows the CEO's full repertoire —
+    # same posture as ask_user (wired only on the live-user path) above.
     BoardOpsTool,
+    BoardReadTool,
 )
 
 

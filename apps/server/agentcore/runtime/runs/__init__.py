@@ -5,7 +5,7 @@ executor）是 CEO ``delegate`` 原语的执行地基：``delegate`` 用 ``build
 建图、``WaveScheduler`` + ``build_agent_executor`` 分波执行。旧的外部 planner +
 ``run_multi_agent`` 路径已退役。
 
-→ 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
+→ 见设计: docs/03-AI核心/执行引擎架构设计.md §八（Run 模型）
 """
 
 from __future__ import annotations

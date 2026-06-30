@@ -1,7 +1,7 @@
 """Execution span tree — project a turn's journal into an OTel-aligned trace (D2).
 
 A multi-agent turn already records everything an execution trace needs into the
-§18.3 Turn Journal (唯一事实源): the run tree (``run_started`` / ``run_completed`` /
+§8.3 Turn Journal (唯一事实源): the run tree (``run_started`` / ``run_completed`` /
 ``run_failed`` — parent links, per-run wall-clock ``duration_ms``, model, token
 usage, cost), the per-round LLM facts (``round_boundary`` / ``llm_call``), and the
 tool calls (``tool_call`` facts + the ``tool_use_start`` / ``tool_use_end`` display

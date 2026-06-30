@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from agentcore.api.schemas.usage import UsageBreakdown
 from agentcore.runtime.approvals import ApprovalDecision
-from agentcore.runtime.checkpoints import CheckpointDecision, CheckpointResponse
+from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.suspension import SuspensionKind
 
 
@@ -58,6 +58,35 @@ class StoredAttachment(BaseModel):
     thumb_path: str | None = None
 
 
+class DebateSeedRoundInput(BaseModel):
+    """One prior-debate round's digest (结构化补轮·B seed)."""
+
+    round_no: int = 0
+    focus: str = Field("", max_length=2000)
+    summary: str = Field("", max_length=8000)
+
+
+class DebateSeedBriefInput(BaseModel):
+    """The prior debate's brief digest carried in a 续辩 seed (no 辩手全文)."""
+
+    crux: str = Field("", max_length=8000)
+    strongest_points: dict[str, str] = Field(default_factory=dict)
+    leaning: str = Field("", max_length=8000)
+    value_disputes: list[str] = Field(default_factory=list, max_length=40)
+    open_questions: list[str] = Field(default_factory=list, max_length=40)
+
+
+class DebateSeedInput(BaseModel):
+    """结构化补轮·B（可逆叫停）：前端从收场卡发起续辩时，把上一场 ``debate_result`` 投影成的最小
+    种子（辩论编排设计.md §6.6）。后端据此让本回合的 debate 续上一场（主持人焦点
+    正交于已谈、首轮辩手读到上一场摘要）。只带过程摘要 + 简报关键项，**不带辩手全文**（全文随辩手
+    run 走执行事件，体量大）。"""
+
+    motion: str = Field("", max_length=8000)
+    rounds: list[DebateSeedRoundInput] = Field(default_factory=list, max_length=40)
+    brief: DebateSeedBriefInput = Field(default_factory=DebateSeedBriefInput)
+
+
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=32000)
     attachments: list[MessageAttachment] = Field(default_factory=list, max_length=20)
@@ -65,6 +94,9 @@ class SendMessageRequest(BaseModel):
     # conversation state (``Conversation.local_container_root_id``, set at creation and
     # read by every promotion path), so a 裸聊 promotes to the same place whether the
     # turn or a panel write lands first (工作区对称化 D1a).
+    # 结构化补轮·B (可逆叫停): a 续辩 turn started from a settled debate card carries the prior
+    # debate's projected result so this turn's debate continues it. None for an ordinary turn.
+    debate_seed: DebateSeedInput | None = None
 
 
 class RegenerateMessageRequest(BaseModel):
@@ -79,7 +111,7 @@ class RegenerateMessageRequest(BaseModel):
     content: str | None = Field(None, min_length=1, max_length=32000)
 
 
-# --- Interaction resolve (§18.2 unified suspend-resume bridge) ---
+# --- Interaction resolve (§8.2 unified suspend-resume bridge) ---
 # One ``POST /conversations/{id}/interactions/{interaction_id}`` settles any paused
 # interaction; the body is discriminated on ``kind`` (approval / ask_user /
 # client_tool), each carrying its kind-specific answer. Replaces the three former
@@ -95,25 +127,6 @@ class ResolveApprovalInteraction(BaseModel):
 
     kind: Literal["approval"] = "approval"
     decision: ApprovalDecision
-
-
-class ResolveCheckpointInteraction(BaseModel):
-    """Settle a paused checkpoint the CEO raised (``ask_user`` interaction).
-
-    ``decision`` is ``continue`` (proceed with the CEO's direction), ``adjust``
-    (steer the CEO with ``note``, then continue), or ``stop`` (end the turn). The
-    engine-only ``timeout`` value is never sent by a client. ``note`` carries the
-    user's steer for ``adjust`` (and an optional closing remark for ``stop``);
-    ``selected`` carries the option(s) the user picked from the CEO's menu — one
-    for a single-select ask, several for a ``multiple`` one — and rides ``continue``
-    too (the picks are the answer, not just an ``adjust`` steer). The server drops
-    any pick that was not in the offered options.
-    """
-
-    kind: Literal["ask_user"] = "ask_user"
-    decision: CheckpointDecision
-    note: str = Field("", max_length=4000)
-    selected: list[str] = Field(default_factory=list, max_length=6)
 
 
 class WorkspaceOpError(BaseModel):
@@ -145,22 +158,6 @@ class ResolveClientToolInteraction(BaseModel):
     error: WorkspaceOpError | None = None
 
 
-class ResolvePlanReviewInteraction(BaseModel):
-    """Settle a paused structured DAG checkpoint (``plan_review`` interaction, 结构化挂起 2a).
-
-    Raised when a delegate step marked ``checkpoint_after`` completed and the
-    WaveScheduler paused before its dependents. ``decision`` is ``continue`` (run
-    the downstream steps as-is), ``adjust`` (inject ``note`` as a steer onto the
-    checkpoint's not-yet-run downstream dependents, then proceed), or ``stop`` (end
-    the run here). Reuses :class:`CheckpointResponse` (same shape as ask_user) on the
-    engine side.
-    """
-
-    kind: Literal["plan_review"] = "plan_review"
-    decision: CheckpointDecision
-    note: str = Field("", max_length=4000)
-
-
 class ResolveEscalationInteraction(BaseModel):
     """Settle a worker's blocking escalate (``escalation`` interaction, 阻塞式求决策 §4.5).
 
@@ -184,23 +181,32 @@ class ResolveDebateRoundInteraction(BaseModel):
     can steer depth instead of letting the judge auto-converge. ``decision`` is ``continue``
     (debate another round — ``focus``, if given, overrides the next round's framing = 「加角度」,
     steering the debate onto the dimension the user cares about) or ``conclude`` (stop now and
-    emit the brief, even if the judge had not converged). A late resolve (the round already
-    timed out → judge auto-convergence took over) falls through the route as 404, so the desktop
-    renders it as「已关闭」rather than an error. In-process only (not durably persisted): a
-    disconnect / restart drops the live debate, so there is no ``resume`` counterpart.
+    emit the brief, even if the judge had not converged).
+
+    ``ask`` is an optional user 【追问】 — orthogonal to ``focus`` (focus reframes the round's
+    topic; ask is a concrete question the next round's debaters MUST answer head-on). ``ask_target``
+    optionally directs it at one side (a :class:`DebateSide` key; empty = ask everyone). A follow-up
+    rides a ``continue`` (追问即续辩, the next round addresses it); it is recorded verbatim as a
+    :class:`~agentcore.runtime.debate.types.UserInterjection` on that round and survives reload via
+    ``debate_result.rounds[*].user_interjections``.
+
+    A late resolve (the round already timed out → judge auto-convergence took over) falls through
+    the route as 404, so the desktop renders it as「已关闭」rather than an error. In-process only
+    (not durably persisted): a disconnect / restart drops the live debate, so there is no
+    ``resume`` counterpart.
     """
 
     kind: Literal["debate_round"] = "debate_round"
     decision: Literal["continue", "conclude"] = "continue"
     focus: str = Field("", max_length=2000)
+    ask: str = Field("", max_length=2000)
+    ask_target: str = Field("", max_length=200)
 
 
 # Discriminated union body for the unified resolve endpoint.
 ResolveInteractionRequest = (
     ResolveApprovalInteraction
-    | ResolveCheckpointInteraction
     | ResolveClientToolInteraction
-    | ResolvePlanReviewInteraction
     | ResolveEscalationInteraction
     | ResolveDebateRoundInteraction
 )
@@ -216,9 +222,6 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
     - ``approval`` → the bare :class:`~agentcore.runtime.approvals.ApprovalDecision`
       (the gate compares it by identity, so it MUST be the enum member, never a plain
       string — a bare ``"approve_always"`` would silently fail the grant/sweep checks);
-    - ``ask_user`` / ``plan_review`` → a
-      :class:`~agentcore.runtime.checkpoints.CheckpointResponse` (decision + note, plus
-      the user's option picks for ask_user);
     - ``client_tool`` → the desktop op's result envelope dict.
 
     Shared by the cloud resolve route (``routes/conversations.py``) and the sidecar's
@@ -227,10 +230,6 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
     """
     if isinstance(body, ResolveApprovalInteraction):
         return body.decision
-    if isinstance(body, ResolveCheckpointInteraction):
-        return CheckpointResponse(decision=body.decision, note=body.note, selected=body.selected)
-    if isinstance(body, ResolvePlanReviewInteraction):
-        return CheckpointResponse(decision=body.decision, note=body.note)
     if isinstance(body, ResolveClientToolInteraction):
         return {
             "ok": body.ok,
@@ -242,9 +241,14 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
         # is an early timeout (the worker falls back to its assumption).
         return {"answer": body.answer, "use_assumption": body.use_assumption}
     if isinstance(body, ResolveDebateRoundInteraction):
-        # 逐轮交互: the Moderator's round-boundary hook awaits {decision, focus}; conclude stops
-        # now, continue (+ optional focus = 加角度) debates another round.
-        return {"decision": body.decision, "focus": body.focus}
+        # 逐轮交互: the round-boundary hook awaits {decision, focus, ask, ask_target}; conclude
+        # stops now, continue (+ optional focus=加角度 / ask=追问) debates another round.
+        return {
+            "decision": body.decision,
+            "focus": body.focus,
+            "ask": body.ask,
+            "ask_target": body.ask_target,
+        }
     raise ValueError(f"unknown interaction kind: {getattr(body, 'kind', None)!r}")
 
 
@@ -297,9 +301,31 @@ class PausedTurnSummary(BaseModel):
     style_options: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class PausedTurnListResponse(BaseModel):
-    data: list[PausedTurnSummary] = Field(default_factory=list)
-    total: int = 0
+class TurnRecoveryResponse(BaseModel):
+    """One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).
+
+    Reopen needs to know, from ONE owner-gated point-in-time read, how to recover the
+    conversation's latest turn:
+
+    - ``live_running``: a detached in-flight run is still alive to 续看 (实时重连续看
+      C1 · slice 1b) — the client attaches (``GET .../stream``) to replay + tail it.
+    - ``paused``: turns that durably paused at a plan_review / ask_user checkpoint and
+      lost their live stream (结构化挂起 2b) — each renders a resume card.
+
+    A turn parked at a checkpoint is BOTH live (its run is parked on the interaction,
+    holding the workspace lock until checkpoint_timeout) and paused (its frame is
+    persisted before the suspend ``await``), so these overlap. Returning them together
+    lets the client pick ONE actionable surface: a durable paused frame is the
+    authoritative "this turn is paused" marker, so when ``paused`` is non-empty the
+    resume card is the single surface and the client does NOT attach; it attaches only
+    when ``live_running`` and ``paused`` is empty (a genuinely in-flight, non-paused
+    turn). Folding both into one snapshot removes the former two-probe reopen
+    (``GET /paused`` + the ``GET /stream`` attach) whose independent results raced into a
+    duplicate 拍板 card.
+    """
+
+    live_running: bool = False
+    paused: list[PausedTurnSummary] = Field(default_factory=list)
 
 
 class Citation(BaseModel):
@@ -396,6 +422,38 @@ class MessageDetail(BaseModel):
         return v
 
 
+class MemoryUpdateItemView(BaseModel):
+    """One applied memory change in a 记忆已更新 card (Agent记忆与知识系统 §1.6).
+
+    ``file`` is a friendly label (偏好 / 画像 / 主题·<slug>); ``scope`` is ``global`` or
+    ``project`` (the conversation's project layer); ``content`` is the bullet text for an
+    add/update or the matched text for a remove. ``target`` is the synthetic memory-leaf
+    path the card deep-links to (desktop ``memorySource`` scheme; "" = no leaf). Shape
+    mirrors ``memory/maintenance.py`` ``MemoryUpdateItem`` (the stored
+    ``memory_updates.items`` JSONB)."""
+
+    action: str
+    file: str
+    section: str = ""
+    scope: str = "global"
+    content: str = ""
+    target: str = ""
+
+
+class MemoryUpdateView(BaseModel):
+    """One offline-consolidation pass's result, for the conversation-tail card.
+
+    Projected from a ``memory_updates`` row: ``items`` is what the AI remembered FROM this
+    conversation (读可见、写也可见). Returned only with the LATEST messages window (the card
+    sits after the last message), and pushed live on the per-user firehose."""
+
+    id: str
+    items: list[MemoryUpdateItemView] = Field(default_factory=list)
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class MessageListResponse(BaseModel):
     """A window of a conversation's messages (chronological, oldest-first).
 
@@ -406,12 +464,17 @@ class MessageListResponse(BaseModel):
     Only the direction-relevant flag is computed for a one-sided query (a
     ``before`` page sets ``has_more_after=False``; the client already holds the
     newer side); an ``around`` window computes both.
+
+    ``memory_updates`` carries the conversation's 记忆已更新 cards (记忆更新对话内可见,
+    §1.6) — populated ONLY for the latest window (the cards sit at the thread tail, after
+    the last message); empty on scroll-up/around pages and when nothing was consolidated.
     """
 
     data: list[MessageDetail]
     total: int
     has_more_before: bool = False
     has_more_after: bool = False
+    memory_updates: list[MemoryUpdateView] = Field(default_factory=list)
 
 
 # --- Local turn recording (双模式工作区 §一.1: sidecar 本地引擎回合回传落库) ---

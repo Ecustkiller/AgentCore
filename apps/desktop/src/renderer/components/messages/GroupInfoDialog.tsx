@@ -245,7 +245,7 @@ export function GroupInfoDialog({ chatId, open, onClose }: Props) {
                         </span>
                       )}
                       {m.muted_by_admin && viewerIsAdmin && (
-                        <span className="shrink-0 rounded-full bg-warning/10 px-1.5 py-0.5 text-xs font-medium text-warning">
+                        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
                           已禁言
                         </span>
                       )}

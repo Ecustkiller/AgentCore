@@ -1,10 +1,13 @@
 import type { ErrorAction } from "@/lib/errors";
 import { activeRuntime, runtimeOf } from "./runtime";
 import { useConversationStore } from "./store";
-import type { ConversationRuntime, Message } from "./types";
+import type { ConversationRuntime, MemoryUpdate, Message } from "./types";
 
 export const useActiveMessages = (): Message[] =>
   useConversationStore((s) => activeRuntime(s).messages);
+
+export const useActiveMemoryUpdates = (): MemoryUpdate[] =>
+  useConversationStore((s) => activeRuntime(s).memoryUpdates);
 
 export const useActiveGenerating = (): boolean =>
   useConversationStore((s) => activeRuntime(s).isGenerating);

@@ -19,17 +19,17 @@ export const FINISH_REASON_META: Record<
   max_rounds: {
     label: "已达最大轮次 · 提前收尾",
     Icon: Repeat,
-    tone: "warning",
+    tone: "muted",
   },
   degraded: {
     label: "降级完成 · 模型多次空响应",
     Icon: TrendingDown,
-    tone: "warning",
+    tone: "muted",
   },
   unproductive: {
     label: "无有效进展 · 提前收尾",
     Icon: CircleOff,
-    tone: "warning",
+    tone: "muted",
   },
 };
 

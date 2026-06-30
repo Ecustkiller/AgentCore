@@ -1,7 +1,7 @@
 import CollaborationNetwork from "@/components/CollaborationNetwork";
 import HeroFlow from "@/components/HeroFlow";
 import Reveal from "@/components/Reveal";
-import { DOWNLOAD_PAGE_PATH, MOBILE_WEB_URL } from "@/lib/download";
+import { DOWNLOAD_PAGE_PATH, MOBILE_WEB_URL, WEB_APP_URL } from "@/lib/download";
 
 const NAV = [
   { href: "#value", label: "能力" },
@@ -135,6 +135,29 @@ function DownloadIcon() {
   );
 }
 
+function WebIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <circle
+        cx="8"
+        cy="8"
+        r="6.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      />
+      <path
+        d="M1.7 8h12.6M8 1.7c1.9 1.7 2.9 3.9 2.9 6.3S9.9 12.6 8 14.3C6.1 12.6 5.1 10.4 5.1 8S6.1 3.4 8 1.7Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function Home() {
   return (
     <div className="relative">
@@ -169,9 +192,21 @@ export default function Home() {
             >
               手机网页版
             </a>
-            <a href={DOWNLOAD_PAGE_PATH} className="btn btn-primary px-4 py-2 text-sm">
+            <a
+              href={DOWNLOAD_PAGE_PATH}
+              className="btn btn-ghost hidden px-3 py-2 text-sm sm:inline-flex"
+            >
               <DownloadIcon />
               下载客户端
+            </a>
+            <a
+              href={WEB_APP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-primary px-4 py-2 text-sm"
+            >
+              <WebIcon />
+              网页版
             </a>
           </div>
         </nav>
@@ -229,7 +264,16 @@ export default function Home() {
               </figure>
 
               <div className="mt-9 flex flex-wrap items-center gap-3">
-                <a href={DOWNLOAD_PAGE_PATH} className="btn btn-primary">
+                <a
+                  href={WEB_APP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary"
+                >
+                  <WebIcon />
+                  立即使用 · 网页版
+                </a>
+                <a href={DOWNLOAD_PAGE_PATH} className="btn btn-ghost">
                   <DownloadIcon />
                   下载客户端
                 </a>
@@ -241,12 +285,9 @@ export default function Home() {
                 >
                   手机网页版
                 </a>
-                <a href="#how" className="btn btn-ghost">
-                  看他们怎么干活
-                </a>
               </div>
               <p className="mt-3 text-sm text-muted-foreground">
-                支持 Windows · macOS ·{" "}
+                网页版免安装、浏览器即开即用 · 也支持 Windows · macOS 桌面客户端与{" "}
                 <a
                   href={MOBILE_WEB_URL}
                   target="_blank"
@@ -606,10 +647,19 @@ export default function Home() {
               <div className="mx-auto mt-6 flex flex-wrap items-center justify-center gap-2.5">
                 <span className="pill">MCP 工具协议</span>
                 <span className="pill">可私有部署</span>
-                <span className="pill">桌面 + 手机</span>
+                <span className="pill">网页 + 桌面 + 手机</span>
               </div>
               <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
-                <a href={DOWNLOAD_PAGE_PATH} className="btn btn-primary">
+                <a
+                  href={WEB_APP_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary"
+                >
+                  <WebIcon />
+                  立即使用 · 网页版
+                </a>
+                <a href={DOWNLOAD_PAGE_PATH} className="btn btn-ghost">
                   <DownloadIcon />
                   下载客户端
                 </a>
@@ -620,9 +670,6 @@ export default function Home() {
                   className="btn btn-ghost"
                 >
                   手机网页版
-                </a>
-                <a href="#how" className="btn btn-ghost">
-                  看他们怎么干活
                 </a>
               </div>
             </Reveal>
@@ -646,6 +693,16 @@ export default function Home() {
             <div>
               <p className="font-semibold">产品</p>
               <ul className="mt-3 space-y-2 text-muted-foreground">
+                <li>
+                  <a
+                    href={WEB_APP_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-foreground"
+                  >
+                    网页版
+                  </a>
+                </li>
                 <li>
                   <a href={DOWNLOAD_PAGE_PATH} className="hover:text-foreground">
                     下载客户端

@@ -102,14 +102,14 @@ function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
     );
 
   return (
-    <DecisionCard tone="warning" animate className="mx-0">
+    <DecisionCard tone="primary" animate className="mx-0">
       <div className="flex items-start gap-2">
-        <DecisionCardIcon tone="warning">
+        <DecisionCardIcon tone="primary">
           <GitBranch size={16} />
         </DecisionCardIcon>
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium text-warning">
-            上次执行已暂停（连接已断开）· 待你决定是否继续
+          <p className="text-xs font-medium text-primary">
+            已暂停 · 待你决定是否继续
           </p>
           <p className="mt-0.5 text-sm text-foreground">
             这一步已完成，请过目：
@@ -123,7 +123,7 @@ function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
             disabled={busy}
             rows={2}
             placeholder="可选 · 备注（调整时作为对下游的指示；停止时作为收尾备注）"
-            className="mt-2 w-full border-border bg-card/70 focus:border-warning/60"
+            className="mt-2 w-full border-border bg-card/70 focus:border-primary/60"
           />
         </div>
       </div>
@@ -162,7 +162,7 @@ function AskUserResumeCard({ turn }: { turn: PendingResume }) {
   return (
     <AskUserCard
       content={turn}
-      caption="上次执行已暂停（连接已断开）· CEO 在等你拍板"
+      caption="已暂停 · CEO 在等你拍板"
       onSubmit={(decision, note) =>
         runResume(turn.messageId, decision, note, [])
       }

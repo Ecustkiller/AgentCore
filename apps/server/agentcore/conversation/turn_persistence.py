@@ -76,6 +76,19 @@ async def persist_turn_result(
 
     finish = result.get("finish_reason")
     finish_value = getattr(finish, "value", finish)
+    # 挂起即收口 (②): the turn parked at a durable checkpoint (FinishReason.PAUSED) — its
+    # ONLY record is the paused_turns frame the suspending tool persisted before the loop
+    # returned. Writing an assistant row / journal / cost / metrics here would create a
+    # phantom completed reply and double-count when ``POST .../resume`` later persists the
+    # finished turn under this SAME message_id. Nothing to persist until the turn actually
+    # ends on resume — mirrors today's blocking pause, where the loop never returned here.
+    if finish_value == FinishReason.PAUSED.value:
+        logger.info(
+            "chat.turn_paused",
+            conversation_id=conversation_id,
+            message_id=result.get("message_id"),
+        )
+        return
     turn_error = result.get("error")
     run_error = (
         {
@@ -147,6 +160,7 @@ async def persist_turn_result(
                 )
 
         workers = max(len(cost_runs) - 1, 0)
+        collab = result.get("collab") or {}
         try:
             await TurnMetricsRepository(session).record(
                 turn_id=turn_id,
@@ -166,6 +180,11 @@ async def persist_turn_result(
                 workers=workers,
                 input_tokens=int(result.get("input_tokens", 0) or 0),
                 output_tokens=int(result.get("output_tokens", 0) or 0),
+                # 协作质量 (学·度量 §2.5): persisted for the operator面 看板.
+                boundary_yields=int(collab.get("boundary_yields", 0) or 0),
+                scope_signals=int(collab.get("scope_signals", 0) or 0),
+                revises=int(collab.get("revises", 0) or 0),
+                escalations=int(collab.get("escalations", 0) or 0),
             )
         except Exception as e:
             await session.rollback()

@@ -19,7 +19,9 @@
       "electron"
     ],
     "overrides": {
-      "@radix-ui/react-slot": "1.3.0"
+      "@radix-ui/react-slot": "1.3.0",
+      "esbuild": "^0.25.0",
+      "js-yaml": "^4.2.0"
     }
   }
 }

@@ -551,6 +551,61 @@ async def test_scope_boundary_consumed_not_refired_on_resume():
     assert resumed["b"].phase is RunPhase.COMPLETED
 
 
+# --- 依赖缺口·卡在缺输入 (escalate kind=dep, §2.4 变·worker 的「拉」) ---
+
+
+def _dep_state(run_id: str) -> RunState:
+    """A COMPLETED state carrying a dependency-gap escalation (escalate kind=dep)."""
+    return RunState(
+        phase=RunPhase.COMPLETED,
+        content=run_id,
+        escalations=[{"question": "缺错误返回结构才能写测试", "assumption": "暂按X", "kind": "dep"}],
+    )
+
+
+async def _dep_exec(spec: RunSpec, _completed) -> RunState:
+    # Node "a" flags a dependency gap (卡在缺输入); everything else completes plainly.
+    if spec.run_id == "a":
+        return _dep_state("a")
+    return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+
+async def test_dep_escalation_rides_reactive_boundary_and_is_consumed():
+    # §2.4: a worker卡在缺输入 (escalate kind=dep) is a reactive-boundary trigger just like a
+    # scope deviation — it yields the CEO/lead (to replan(add) a producer) when un-run downstream
+    # remains, and surfacing it marks it consumed so the resume loop terminates (no respin).
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+    seen: list = []
+
+    async def yield_hook(reason, nodes, completed):
+        seen.append((reason, [n.run_id for n in nodes], set(completed)))
+        return BoundaryOutcome.YIELD
+
+    paused = await WaveScheduler().run(plan, _dep_exec, on_boundary=yield_hook)
+    assert seen == [(BoundaryReason.SCOPE, ["a"], {"a"})]
+    assert "b" not in paused  # soft pause leaves the tail for the CEO's replan(add) resume
+    assert paused["a"].escalations[0]["consumed"] is True  # surfaced → consumed
+
+
+async def test_dep_escalation_not_in_scope_drift_tally():
+    # 学·度量 §2.5 漂移率 must stay scope-only: a dep (依赖缺口) is counted in the TOTAL
+    # escalation tally but NOT in scope_escalations, so it can't pollute the drift metric.
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+
+    async def hook(_reason, _nodes, _completed):
+        return BoundaryOutcome.PROCEED
+
+    sink: list[BatchMetrics] = []
+    await WaveScheduler().run(plan, _dep_exec, on_boundary=hook, metrics_sink=sink)
+    m = sink[0]
+    assert m.scope_boundaries == 1  # the dep rode the reactive boundary
+    assert (m.escalations, m.scope_escalations) == (1, 0)  # counted in total, not in drift
+
+
 # --- 调度埋点量化 (BatchMetrics) ---
 
 

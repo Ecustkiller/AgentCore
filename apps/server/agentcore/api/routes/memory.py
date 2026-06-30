@@ -24,6 +24,11 @@ Two editor surfaces sit on top, both reusing the workspace markdown editor (CAS 
   separately. ``preferences`` (偏好.md) is GLOBAL-only by invariant; ``profile`` (画像.md)
   honors an optional ``folder_id`` to address a project layer. ``GET …/projects`` lists the
   folder_ids that have project memory so the rail only surfaces a node where there is one.
+- **On-demand topic surface** (``GET /users/me/memory/topics`` + ``GET/PUT …/topics/{slug}``):
+  lists / reads / writes the ``主题/<slug>.md`` notes the agent pulls via ``consult_memory``,
+  so the rail's 主题/ folder can finally browse·edit·delete them (Agent记忆与知识系统 §1.6).
+  Same ``folder_id`` scope convention as the per-leaf surface (None = global); an empty PUT
+  body deletes a note (mirrors clearing a leaf), which drops it from the 记忆主题目录.
 """
 
 from enum import StrEnum
@@ -37,9 +42,12 @@ from agentcore.memory import (
     CORE_MEMORY_FILE,
     PREFERENCES_MEMORY_FILE,
     default_memory_store,
+    is_topic_path,
     memory_version,
     merge_global_core,
     split_global_core,
+    topic_path,
+    topic_slug,
 )
 from agentcore.memory.locks import user_memory_lock
 
@@ -47,7 +55,7 @@ router = APIRouter(prefix="/users/me/memory", tags=["memory"])
 
 
 class MemoryKind(StrEnum):
-    """Which always-injected core leaf an editor surface addresses (记忆作用域与画像分层 §四).
+    """Which always-injected core leaf an editor surface addresses (Agent记忆与知识系统 §1.4).
 
     ``preferences`` → 偏好.md (沟通/工作习惯, GLOBAL-only); ``profile`` → 画像.md
     (技术栈/关于用户的事实, global or — with a ``folder_id`` — a project layer).
@@ -107,6 +115,16 @@ class MemoryProjectsResponse(BaseModel):
     """folder_ids whose PROJECT memory layer is non-empty (the rail shows a node each)."""
 
     folders: list[str]
+
+
+class MemoryTopicsResponse(BaseModel):
+    """On-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).
+
+    Names only (``主题/<slug>.md`` → ``slug``), sorted; the body is pulled per-note via
+    ``GET …/topics/{slug}`` when the user opens one (渐进披露, mirrors ``consult_memory``).
+    """
+
+    topics: list[str]
 
 
 @router.get("", response_model=MemoryResponse)
@@ -182,6 +200,58 @@ async def list_my_memory_projects(user: AuthUser) -> MemoryProjectsResponse:
     """
     store = default_memory_store()
     return MemoryProjectsResponse(folders=await store.project_scopes(user.user_id))
+
+
+@router.get("/topics", response_model=MemoryTopicsResponse)
+async def list_my_memory_topics(
+    user: AuthUser, folder_id: str | None = None
+) -> MemoryTopicsResponse:
+    """List on-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).
+
+    ``folder_id`` None = the GLOBAL 主题/ folder; a folder_id = that project's. Same scope
+    convention as ``/files/{kind}`` (no separate ``scope`` enum). Declared before
+    ``/topics/{slug}`` / ``/files/{kind}`` so the static segment wins the route match.
+    """
+    store = default_memory_store()
+    metas = await store.list(user.user_id, scope=folder_id)
+    return MemoryTopicsResponse(
+        topics=sorted(topic_slug(m.path) for m in metas if is_topic_path(m.path))
+    )
+
+
+@router.get("/topics/{slug}", response_model=MemoryFileResponse)
+async def get_my_memory_topic(
+    slug: str, user: AuthUser, folder_id: str | None = None
+) -> MemoryFileResponse:
+    """Load ONE on-demand TOPIC note's body — global (``folder_id`` None) or a project's."""
+    store = default_memory_store()
+    content = await store.load(user.user_id, topic_path(slug), scope=folder_id)
+    return MemoryFileResponse(content=content, version=memory_version(content))
+
+
+@router.put("/topics/{slug}", response_model=MemoryWriteResult)
+async def put_my_memory_topic(
+    slug: str, body: MemoryWriteRequest, user: AuthUser, folder_id: str | None = None
+) -> MemoryWriteResult:
+    """Write ONE TOPIC note back (CAS-guarded; an empty body deletes — mirrors ``/files/{kind}``).
+
+    Holds the per-user memory lock so the read-compare-write is atomic against the offline
+    consolidation pass. A ``baseline`` that no longer matches the note's current version
+    returns ``ok=False, conflict=True`` (never a blind overwrite). Clearing a note (empty
+    content) deletes the underlying file so it leaves the 记忆主题目录 (and stops being
+    consult-able).
+    """
+    store = default_memory_store()
+    async with user_memory_lock(user.user_id):
+        current = await store.load(user.user_id, topic_path(slug), scope=folder_id)
+        current_version = memory_version(current)
+        if body.baseline is not None and body.baseline != current_version:
+            return MemoryWriteResult(ok=False, version=current_version, conflict=True)
+        if body.content:
+            await store.save(user.user_id, topic_path(slug), body.content, scope=folder_id)
+        else:
+            await store.delete(user.user_id, topic_path(slug), scope=folder_id)
+    return MemoryWriteResult(ok=True, version=memory_version(body.content))
 
 
 @router.get("/files/{kind}", response_model=MemoryFileResponse)

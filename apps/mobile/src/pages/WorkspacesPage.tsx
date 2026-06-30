@@ -1,5 +1,6 @@
 import { getTokens } from "@/api/client";
 import { type WorkspaceSummary, listWorkspaces } from "@/api/workspaces";
+import { Brain } from "lucide-react";
 // 文件 tab home — the cross-workspace file overview (手机端布局重构 · 跨工作区文件总览).
 //
 // Lists the user's CLOUD workspaces (= folders); tapping one drills into its file tree
@@ -52,6 +53,20 @@ export function WorkspacesPage() {
       </header>
 
       <div className="list">
+        <button
+          type="button"
+          className="file-row"
+          onClick={() => navigate("/memory")}
+        >
+          <span className="file-icon" aria-hidden>
+            <Brain size={16} />
+          </span>
+          <span className="file-name">AI 记忆</span>
+          <span className="file-chevron" aria-hidden>
+            ›
+          </span>
+        </button>
+
         {items === null && !error && <p className="muted hint">加载中…</p>}
         {error && <p className="error hint">{error}</p>}
         {items !== null && clouds.length === 0 && !error && (

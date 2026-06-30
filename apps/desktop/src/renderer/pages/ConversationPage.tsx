@@ -4,7 +4,7 @@ import { SidePanel } from "@/components/layout/SidePanel";
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { fetchMessageWindow, jumpToMessage } from "@/services/messages";
-import { loadPausedTurns } from "@/services/resume";
+import { loadRecovery } from "@/services/resume";
 import { attachOnOpen } from "@/services/turns";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { WORKSPACE_TAB_ID, useSidePanelStore } from "@/stores/sidePanel";
@@ -30,10 +30,15 @@ export function ConversationPage() {
     }
     if (id !== store.currentConversationId) store.switchConversation(id);
 
-    // Surface any turn that paused at a plan_review checkpoint then disconnected
-    // (结构化挂起 2b) as a resume card above the composer. Best-effort + independent
-    // of the history load, so it never blocks rendering the conversation.
-    void loadPausedTurns(id);
+    // Load this conversation's recovery snapshot on reopen (recovery 统一, 对称 §8.2):
+    // ONE owner-gated read that both (a) surfaces any turn paused at a plan_review /
+    // ask_user checkpoint then disconnected (结构化挂起 2b) as a resume card above the
+    // composer, and (b) reports whether a detached run is still live to 续看. Best-effort
+    // + independent of the history load, so it never blocks rendering the conversation.
+    // Kept as a promise (not fire-and-forget) so the reattach decision below can gate on
+    // its result — see the attach block. `loadRecovery` never rejects (it swallows its own
+    // errors), so the handle is safe to leave unawaited on the paths that skip the gate.
+    const recoveryLoaded = loadRecovery(id);
 
     let cancelled = false;
     void (async () => {
@@ -57,12 +62,27 @@ export function ConversationPage() {
               },
               id,
             );
+            // 记忆更新对话内可见 (§1.6): adopt the conversation-tail「记忆已更新」cards
+            // returned with the latest window, so they replay on open.
+            s.setMemoryUpdates(win.memoryUpdates, id);
             // 实时重连续看 (C1 · slice 1b): a transcript that ends on a user message
-            // has no persisted reply yet — since 断连不再取消 (slice 1a) a turn may
-            // still be running detached. Rejoin it so its progress streams in live;
-            // a 204 (nothing running) is a clean no-op.
+            // has no persisted reply yet — since 断连不再取消 (slice 1a) a turn may still
+            // be running detached. The recovery snapshot picks the SINGLE actionable
+            // surface (recovery 统一, 对称 §8.2): attach (GET .../stream) to 续看 a detached
+            // live run ONLY when nothing is durably paused. 挂起即收口 (②): a turn that hit a
+            // checkpoint has FINALIZED (run ended, frame persisted), so it is durable-only —
+            // its 待恢复 resume card is the sole surface and we must NOT attach (the lone
+            // live∩paused overlap is the rare §六-1 thin-net, which has no saved frame, so
+            // pausedCount is 0 there anyway and this gate isn't reached). `liveRunning` mirrors
+            // the attach endpoint's own liveness test, so gating on it (vs. attach-then-204)
+            // drops the doomed probe — and because the snapshot is one read, liveRunning /
+            // pausedCount can't disagree (the race is eliminated at the source).
             if (win.messages.at(-1)?.role === "user") {
-              void attachOnOpen(id);
+              const recovery = await recoveryLoaded;
+              if (cancelled) return;
+              if (recovery.liveRunning && recovery.pausedCount === 0) {
+                void attachOnOpen(id);
+              }
             }
           }
         }

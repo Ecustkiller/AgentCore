@@ -7,7 +7,7 @@ DB** (双模式工作区 / 远期规划 §一.1): a turn that paused at a plan_r
 checkpoint lived only on the in-proc ``InteractionRegistry`` Future, so closing the
 app (or any subprocess death) lost it.
 
-This module is the §18.6 ``Journal`` / paused-turn port's **local implementation**:
+This module is the §8.6 ``Journal`` / paused-turn port's **local implementation**:
 one JSON file per paused turn under a desktop-provided data dir, carrying the same
 :class:`~agentcore.runtime.suspension.TurnSuspension` frame the cloud stores PLUS the
 journal-so-far inline (no local ``turn_journal`` table — the file is self-contained).
@@ -74,7 +74,7 @@ class LocalPausedTurnStore:
         this local file is its ENTIRE persistence: the cloud splits a pause across the
         ``turn_journal`` table (the fact stream) + the messages table (prior-turn history),
         but here BOTH ride inline —
-          * ``journal_entries`` — the §18.3 fact stream the resume folds via
+          * ``journal_entries`` — the §8.3 fact stream the resume folds via
             ``window_from_journal`` to rebuild the CEO window (the display ``journal`` is the
             degraded fallback / resume seed);
           * ``history`` — the window's prior-turn prefix the resume splices ahead of the
@@ -89,7 +89,7 @@ class LocalPausedTurnStore:
             "user_id": suspension.user_id,
             "frame": suspension.to_json(),
             "journal": list(suspension.journal),
-            # The §18.3 fact stream + prior-turn history — the window-rebuild inputs the
+            # The §8.3 fact stream + prior-turn history — the window-rebuild inputs the
             # cloud keeps in turn_journal + the message DB. Here they ride inline since the
             # Sidecar has no DB (this file is self-contained).
             "journal_entries": list(suspension.journal_entries),

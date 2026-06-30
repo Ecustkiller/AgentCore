@@ -47,6 +47,23 @@ def _content(text: str) -> LLMChunk:
     return LLMChunk(delta_content=text)
 
 
+class _TraceCapturingProvider:
+    """Records the trace_id bound in the log context at the moment react_loop calls it —
+    proving run_case wraps the engine in a correlation scope (so engine convergence logs
+    carry a trace_id even though evals bypass turn_runner)."""
+
+    def __init__(self) -> None:
+        self.seen_trace: str | None = None
+        self.calls = 0
+
+    async def stream(self, request):  # noqa: ANN001
+        from agentcore.core.log_context import get_log_value
+
+        self.seen_trace = get_log_value("trace_id")
+        self.calls += 1
+        yield _content("ok")
+
+
 # --- single 路径：真 react_loop + 脚本化 provider ------------------------------
 
 
@@ -71,6 +88,22 @@ def test_harness_single_path_content_only():
 
     checks = apply_checks(case, outcome)
     assert all(c.passed for c in checks)
+
+
+def test_run_case_binds_trace_id_for_engine_logs():
+    # Evals drive react_loop directly (bypassing turn_runner), so run_case must itself bind
+    # a trace_id — otherwise the engine's loop_nudge / loop_finalize / max_rounds logs carry
+    # none and can't be correlated (the skew this fix removes from offline log_stats).
+    provider = _TraceCapturingProvider()
+    harness = EvalHarness(provider=provider)
+    case = EvalCase(id="t_trace", category="qa", user_message="hi", path="single", checks=[])
+
+    outcome = asyncio.run(harness.run_case(case))
+
+    assert outcome.error is None
+    assert provider.calls == 1
+    assert provider.seen_trace  # a trace_id was bound while the engine ran
+    assert len(provider.seen_trace) == 32  # uuid4().hex
 
 
 def test_harness_single_path_surfaces_degraded():

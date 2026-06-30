@@ -106,7 +106,10 @@ export function initUpdater(window: BrowserWindow): void {
   );
 
   // renderer 传入 API 基址后才启动调度——确保首次检查也先过远程熔断闸（fail-open）。
-  ipcMain.handle(UPDATER_CHANNELS.configure, (_e, baseUrl: string) => {
+  ipcMain.handle(UPDATER_CHANNELS.configure, (_e, baseUrl: unknown) => {
+    // IPC-004（第五轮 IPC 权限面审计）：边界结构校验——非 string 基址直接忽略（renderer 是
+    // API 地址单一源，畸形仅可能来自被攻破的 renderer）。不抛：configure 契约为 Promise<void>。
+    if (typeof baseUrl !== "string") return;
     apiBaseUrl = baseUrl;
     startSchedule();
   });

@@ -4,10 +4,7 @@ import {
   resolvedCheckpointTone,
 } from "@/components/ui/tone-presets";
 import { notifyError } from "@/lib/toast";
-import {
-  type CheckpointUserDecision,
-  decideCheckpoint,
-} from "@/services/checkpoint";
+import type { CheckpointUserDecision } from "@/services/checkpoint";
 import type { CheckpointDisplay } from "@/stores/conversation";
 import {
   Check,
@@ -36,38 +33,23 @@ import {
  * assistant bubble that raised it (会话流内), so it both gates the live turn and
  * replays inline on reload.
  *
- * The interactive body lives in {@link AskUserCard}, shared with the durable
- * 待恢复 resume card (ResumePrompt) so a pause answered live and one answered after a
- * reconnect read identically — one card, one answer model.
+ * The interactive body lives in {@link AskUserCard}, reused by the durable 待恢复 resume
+ * card (ResumePrompt) — one card, one answer model.
  *
- * `interactive` is true only for the live, suspended turn (the owning message is
- * still streaming). A pending card on a finished/reloaded turn renders as a passive
- * record (its actionable resume lives in the 待恢复 paused-turn card); a resolved
- * one always renders its settled state.
+ * 挂起即收口 (②, Phase 3): an inline ask_user card is never live-interactive anymore — a
+ * CEO checkpoint finalizes the turn (its in-process resolve Future is never parked), so
+ * the actionable surface is always the durable resume card. Inline, this renders only as a
+ * passive record (pending → dormant; settled → its resolved state).
  */
 export function CheckpointCard({
   checkpoint,
-  conversationId,
-  interactive,
 }: {
   checkpoint: CheckpointDisplay;
-  conversationId: string | null;
-  interactive: boolean;
 }) {
   if (checkpoint.status === "resolved") {
     return <ResolvedCheckpoint checkpoint={checkpoint} />;
   }
-  if (!interactive || !conversationId) {
-    return <DormantCheckpoint checkpoint={checkpoint} />;
-  }
-  return (
-    <AskUserCard
-      content={checkpoint}
-      onSubmit={(decision, note) =>
-        decideCheckpoint(conversationId, checkpoint.id, decision, note, [])
-      }
-    />
-  );
+  return <DormantCheckpoint checkpoint={checkpoint} />;
 }
 
 /** Per-tone class sets — from shared tone-presets (Tailwind literal strings). */
@@ -81,10 +63,11 @@ const TONE = interactiveCheckpointTone;
  * into ONE readable note (答复模型 α — the only reader is the CEO), handed to
  * `onSubmit`; the caller wires it to the resolve (live) or resume (durable) endpoint.
  *
- * Tone / icon / CTA are derived from CONTENT, not a separate tool: an opening (起步
- * 计划 / 风格, or every question pre-filled) reads as `primary` (蓝=就绪/确认即开做);
- * a bare high-cost fork reads as `warning` (琥珀=待裁决). `caption` overrides the top
- * status line (the resume card states it reconnected).
+ * Tone / icon / CTA are derived from CONTENT, not a separate tool: both an opening
+ * (起步计划 / 风格, or every question pre-filled) and a mid-task fork read as `primary`
+ * (蓝 = 需要你拍板 / 邀请你决定，而非警告)；icon + caption + CTA 文案区分提案 vs 决策叉。
+ * 真·风险审批（写文件 / 执行代码）由 ApprovalPrompt 承载（极简中性下亦为品牌蓝）。`caption` overrides
+ * the top status line (the resume card states it reconnected).
  */
 export function AskUserCard({
   content,
@@ -99,7 +82,8 @@ export function AskUserCard({
   ) => void | Promise<void>;
 }) {
   const opening = isOpeningFlavored(content);
-  const tone = opening ? TONE.primary : TONE.warning;
+  // ask_user 是邀请你拍板/决定（非警告）→ 统一品牌蓝；提案 vs 决策叉靠 icon/caption/CTA 区分。
+  const tone = TONE.primary;
   const ans = useAskAnswer(content);
   const [submitting, setSubmitting] = useState<CheckpointUserDecision | null>(
     null,
@@ -124,11 +108,7 @@ export function AskUserCard({
   };
 
   return (
-    <DecisionCard
-      tone={opening ? "primary" : "warning"}
-      animate
-      className="overflow-hidden p-0"
-    >
+    <DecisionCard tone="primary" animate className="overflow-hidden p-0">
       <div className="space-y-3 px-3 pt-3">
         <div className="flex items-start gap-2">
           {opening ? (
@@ -173,7 +153,7 @@ export function AskUserCard({
         />
       </div>
 
-      <DecisionCardFooter tone={opening ? "primary" : "warning"}>
+      <DecisionCardFooter tone="primary">
         <Button
           size="md"
           variant="primary"

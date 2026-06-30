@@ -64,7 +64,7 @@ class Conversation(Base):
     memory_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    # Long-conversation compaction (执行引擎架构设计 §十三 长对话压缩 / conversation/
+    # Long-conversation compaction (执行引擎架构设计 §三 长对话压缩 / conversation/
     # compaction.py). A rolling summary folds turns OLDER than the recency window into
     # 已确立事实 / 决策 / 未决问题 / 文件路径, so a long chat feeds [summary] + recent
     # turns instead of the whole transcript — fighting context rot + cache-lapse cost,
@@ -132,9 +132,19 @@ class Folder(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = (
+        # 全 App 最高频读形「按时序翻页一个对话」: 每个读路径都是
+        # WHERE conversation_id = ? ORDER BY created_at [LIMIT ?]
+        # (list_latest/list_before/list_after/list_recent/list_recent_after/
+        #  list_all_for_conversation/delete_after/latest_created_at)。复合
+        # (conversation_id, created_at) 让其走索引有序扫描 + LIMIT 提前停; 并按最左前缀
+        # 覆盖「仅按 conversation_id 过滤」(counts_for_conversations / journal load_map 的
+        # IN(...)), 故无需再单列索引 conversation_id (项目审计-成本性能专项 PERF-001)。
+        Index("ix_messages_conversation_created", "conversation_id", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
-    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     reasoning_content: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -150,7 +160,7 @@ class Message(Base):
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
     # The turn's replay payload (team graph / single-agent 思考+工具 timeline) is NO
-    # LONGER stored here — it is the唯一事实源 ``turn_journal`` table (§18.3 Turn
+    # LONGER stored here — it is the唯一事实源 ``turn_journal`` table (§8.3 Turn
     # Journal), keyed by this message id, and PROJECTED into MessageDetail.runs on
     # read. See agentcore.runtime.journal.
     finish_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)
@@ -213,3 +223,49 @@ class ConversationShare(Base):
     # on the public page. Soft (not a row delete) so revocation is observable and the
     # link can never silently reactivate.
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# --- Memory updates (记忆更新对话内可见: Agent记忆与知识系统 §1.6 实时提示) ---
+# One offline consolidation pass's applied result, anchored to the conversation that
+# triggered it, so the thread can show a「记忆已更新」card at its tail — what the AI
+# remembered FROM this conversation (读可见、写也可见). Consolidation runs OFF the turn
+# path (memory/consolidation.py), AFTER the turn + its turn_journal are already persisted,
+# and is conversation-level (it folds a window of turns), so it is its OWN record — not a
+# per-turn ``turn_journal`` fact: a dedicated row keyed by conversation_id (never a message
+# id), projected into the messages-window read (latest page only) + pushed live on the
+# per-user firehose.
+
+
+class MemoryUpdateRow(Base):
+    """One offline memory-consolidation pass's applied changes, anchored to a conversation.
+
+    Written by the consolidation pass (memory/consolidation.py) ONLY when a pass actually
+    changed a memory file, so the table holds just real updates. ``items`` is a list of
+    ``{action, file, section, scope, content}`` — the human-readable「记了什么」the
+    conversation-tail card lists (and the future「记忆动态」feed reuses).
+
+    **Lifecycle** (no DB FK — app-level cascade, per repo convention): dropped with its
+    conversation on hard-delete (``ConversationRepository.hard_delete``). NOT tied to any
+    message id (it post-dates the whole window), so message delete / regenerate never touch
+    it — a re-run doesn't un-remember what an earlier pass already learned.
+    """
+
+    __tablename__ = "memory_updates"
+    __table_args__ = (
+        # The conversation-tail card read (newest-first) + whole-conversation cascade.
+        Index("ix_memory_updates_conversation", "conversation_id", "created_at"),
+        # Account-注销 cascade + future per-user「记忆动态」feed.
+        Index("ix_memory_updates_user", "user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
+    user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
+    # Applied changes: list of {action, file, section, scope, content}. JSONB so the card /
+    # feed render it directly; the shape is owned by memory/maintenance.py MemoryUpdateItem.
+    items: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )

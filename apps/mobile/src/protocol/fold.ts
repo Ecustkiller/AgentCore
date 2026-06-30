@@ -11,6 +11,9 @@
 import type {
   ApprovalRequiredPayload,
   ApprovalResolvedPayload,
+  AskAssumption,
+  AskQuestion,
+  AskStyleOption,
   CheckpointRequiredPayload,
   CheckpointResolvedPayload,
   CitationsPayload,
@@ -23,6 +26,7 @@ import type {
   DebateRoundStartedPayload,
   EscalationRequiredPayload,
   EscalationResolvedPayload,
+  FollowupsGeneratedPayload,
   MessageEndPayload,
   PlanAgentPayload,
   PlanReviewRequiredPayload,
@@ -41,6 +45,7 @@ import type {
   RunStartedPayload,
   RunToolProgressPayload,
   SSEEvent,
+  TeamNotePostedPayload,
   ToolUseEndPayload,
   ToolUseStartPayload,
 } from "@agentcore/contract-types";
@@ -50,6 +55,7 @@ import type {
   ProjectedAgent,
   ProjectedCitation,
   ProjectedRun,
+  ProjectedTeamNote,
   ProjectedTurn,
   TurnStatus,
 } from "@agentcore/protocol-conformance";
@@ -61,6 +67,11 @@ const FINISH_TO_STATUS: Record<string, TurnStatus> = {
   unproductive: "completed",
   error: "failed",
   cancelled: "cancelled",
+  // 挂起即收口 (②): a turn finalized AT a durable checkpoint ends with finish_reason=paused
+  // — a terminal message_end whose turn is NOT done. Stay paused (the *_required already set
+  // status + pendingInteraction; this only adds finishReason + cost) so the single resume
+  // card renders, not a completed bubble. Without this it'd fall to "completed" below.
+  paused: "paused",
 };
 
 function assertNever(x: never): never {
@@ -185,6 +196,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   let cost: CostBreakdown | null = null;
   let debate: DebateResultPayload | null = null;
   let debateRounds: DebateNarrativeRound[] = [];
+  // 团队便签墙 (§2.2 通): notes broadcast to siblings this turn, in post order (deduped by noteId).
+  const teamNotes: ProjectedTeamNote[] = [];
   let pending: PendingInteraction | null = null;
   const checkpointSteps = new Map<string, string[]>();
 
@@ -521,6 +534,34 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         });
         break;
       }
+      // 团队便签墙 (§2.2 通): a worker broadcast a one-line decision / heads-up to its
+      // concurrent siblings — fold onto teamNotes (post order), deduped by noteId for replay
+      // safety. Mirrors the backend oracle + desktop fold (conformance pins them equal).
+      case "team_note_posted": {
+        const p = ev.payload as TeamNotePostedPayload;
+        if (!teamNotes.some((n) => n.noteId === p.note_id)) {
+          teamNotes.push({
+            noteId: p.note_id,
+            runId: p.run_id,
+            agentId: p.agent_id,
+            role: p.role,
+            kind: p.kind,
+            text: p.text,
+            ts: p.ts,
+            status: "active",
+            supersedes: p.supersedes ?? null,
+          });
+        }
+        // 便签会过期 → supersession (§2.2): an amendment (carries `supersedes`) marks its TARGET
+        // superseded (改写) / voided (作废). Target was posted earlier so it is already in the list.
+        if (p.supersedes) {
+          const target = teamNotes.find((n) => n.noteId === p.supersedes);
+          if (target) {
+            target.status = p.supersede_mode === "void" ? "voided" : "superseded";
+          }
+        }
+        break;
+      }
       case "approval_required": {
         const p = ev.payload as ApprovalRequiredPayload;
         pending = {
@@ -622,13 +663,16 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "message_start":
       case "turn_saved":
       case "title_generated":
-      // CEO→用户「下一步推荐」: post-turn quick-reply chips. A desktop-only live affordance
-      // (filled into the composer on click); mobile has no chip UI yet, and it is not part of
-      // the normalized turn judge state regardless → fold to nothing here.
+      // CEO→用户「下一步推荐」: post-turn quick-reply chips, filled into the composer on tap.
+      // Transport-only — never journaled/persisted and excluded from the normalized judge
+      // state (same as the desktop oracle) → no-op here. The live chip UI reads it straight
+      // off the raw turn events via `extractFollowups` (below), NOT off this fold.
       case "followups_generated":
-      // AI 协作白板 client-tool request: a transport-only request/response exchange (settle the
-      // bound desktop's board), never turn content → no-op (mobile has no board surface).
+      // AI 协作白板 client-tool requests (board_op = 改板 / board_read = 读板): transport-only
+      // request/response exchanges that settle the bound desktop's board, never turn content →
+      // no-op (mobile has no board surface). Mirrors the desktop conformanceFold no-op group.
       case "board_op_required":
+      case "board_read_required":
       case "tool_progress":
       // 调度埋点量化 (深层诊断指标): a desktop-only 诊断模式 surface (run detail's 调度 block) —
       // mobile has no diagnostic panel, so it folds to nothing here and stays out of the
@@ -675,5 +719,96 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
     cost,
     debate,
     debateRounds,
+    teamNotes,
   };
+}
+
+/**
+ * 下一步推荐 (CEO→用户): pull a finished turn's followup suggestions straight off its raw SSE
+ * events — a transport-only sibling of {@link fold}, deliberately kept OUT of the normalized
+ * {@link ProjectedTurn}. Followups are never journaled/persisted and are excluded from the
+ * conformance golden (matching the desktop oracle), so the fold no-ops `followups_generated`;
+ * the live chat surfaces them as one-tap chips above the composer instead.
+ *
+ * Returns the LAST emitted batch (the backend emits at most one per turn, after `message_end`);
+ * empty when none. A reloaded turn (history replay) carries no `followups_generated`, so stale
+ * chips never reappear — same semantics as desktop.
+ */
+export function extractFollowups(events: SSEEvent[]): string[] {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === "followups_generated") {
+      return (events[i].payload as FollowupsGeneratedPayload).followups;
+    }
+  }
+  return [];
+}
+
+/** 非阻塞提问 (ask_user blocking=false) 的卡片内容：question + 可选 选项/默认/风格。 The
+ *  conformance fold only drops a positional `ask` MARKER (`{kind:"ask", ask_id}`) in the
+ *  timeline — the question text/options are transport-only and excluded from the golden
+ *  (same as the desktop oracle). This carries that content so the chat can render the card
+ *  AT the marker; it is read straight off the raw events, NOT the ProjectedTurn. */
+export interface NonBlockingAsk {
+  id: string;
+  question: string;
+  context: string;
+  assumptions: AskAssumption[];
+  questions: AskQuestion[];
+  styleOptions: AskStyleOption[];
+}
+
+/**
+ * 非阻塞提问 (CEO→用户, blocking=false): pull a turn's `question_posted` cards off its raw SSE
+ * events — a transport-only sibling of {@link fold} (twin of {@link extractFollowups}),
+ * keyed/ordered by `ask_id`. Mirrors the desktop `nonBlockingAsksFromEvents` projection.
+ *
+ * Only LIVE turns and MULTI-agent history carry these events (a single-agent turn persists
+ * an empty `runs.events`, so its reload keeps just the bare `ask` marker — no card, exactly
+ * like desktop). De-duped by `ask_id`, preserving first-seen order; empty when none.
+ */
+export function extractAsks(events: SSEEvent[]): NonBlockingAsk[] {
+  const byId = new Map<string, NonBlockingAsk>();
+  const order: string[] = [];
+  for (const ev of events) {
+    if (ev.type !== "question_posted") continue;
+    const p = ev.payload as QuestionPostedPayload;
+    if (byId.has(p.ask_id)) continue;
+    order.push(p.ask_id);
+    byId.set(p.ask_id, {
+      id: p.ask_id,
+      question: p.question,
+      context: p.context,
+      assumptions: p.assumptions ?? [],
+      questions: p.questions ?? [],
+      styleOptions: p.style_options ?? [],
+    });
+  }
+  return order.map((id) => byId.get(id) as NonBlockingAsk);
+}
+
+/**
+ * 阻塞式求决策 (escalate blocking=true): the `escalation_id` of each run's CURRENTLY-pending
+ * blocking escalation — a transport-only sibling of {@link fold} (twin of {@link extractAsks}),
+ * keyed by `run_id`. The conformance {@link RunEscalation} carries no id (it is excluded from
+ * the golden), so the interactive answer card reads the resolve key from HERE, off the raw
+ * `escalation_required` events, and clears it on the matching `escalation_resolved`.
+ *
+ * A worker is sequential ⇒ at most one pending escalation per run (设计 §4.7), so a flat
+ * runId→escalationId map suffices. Only LIVE turns carry these events (history replays them
+ * already settled → empty), so the card is naturally live-only — matching desktop.
+ */
+export function extractPendingEscalations(
+  events: SSEEvent[],
+): Map<string, string> {
+  const pending = new Map<string, string>();
+  for (const ev of events) {
+    if (ev.type === "escalation_required") {
+      const p = ev.payload as EscalationRequiredPayload;
+      pending.set(p.run_id, p.escalation_id);
+    } else if (ev.type === "escalation_resolved") {
+      const p = ev.payload as EscalationResolvedPayload;
+      pending.delete(p.run_id);
+    }
+  }
+  return pending;
 }

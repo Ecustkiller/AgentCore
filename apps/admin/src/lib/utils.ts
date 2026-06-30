@@ -66,3 +66,52 @@ export function nanoUsdToCny(nano: number, cnyPerUsd: number): number {
 export function nanoUsdToUsd(nano: number): number {
   return nano / NANO_PER_USD;
 }
+
+/**
+ * Ledger `cost_events.role` → 大众-facing zh label, mirroring the desktop/mobile
+ * 工资单 so an operator reads「视觉读图」not raw「vision」. Unknown roles fall back
+ * to the raw string. `vision` tags a board_read 读图 sub-call to a separate vision
+ * model (AI协作白板.md §九.4); `title`/`memory` are off-turn background calls.
+ */
+const ROLE_LABELS: Record<string, string> = {
+  captain: "CEO",
+  member: "队员",
+  arena: "辩论",
+  title: "标题生成",
+  memory: "记忆整理",
+  vision: "视觉读图",
+};
+
+/** A ledger role's zh label; unknown roles fall back to the raw string. */
+export function roleLabel(role: string): string {
+  return ROLE_LABELS[role] ?? role;
+}
+
+/** Number of `--agent-N` identity tokens defined in styles/globals.css. */
+const AGENT_PALETTE_SIZE = 8;
+
+/**
+ * Deterministic FNV-1a string hash, so a given role always maps to the same
+ * identity slot across reloads — never `Math.random` / insertion order, which
+ * would reshuffle colors. Mirrors the desktop renderer's `agentIdentity` (each
+ * frontend reimplements presentation helpers, no shared business logic).
+ */
+function hashRole(role: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < role.length; i++) {
+    h ^= role.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/**
+ * The role's identity color as a CSS `var(--agent-N)` reference (color-tokens.mdc
+ * 角色身份色 — use inline; these are semantic OKLCH tokens, not ad-hoc colors).
+ * Blank role falls back to slot 1.
+ */
+export function agentColorVar(role: string): string {
+  const key = role.trim();
+  const idx = key ? (hashRole(key) % AGENT_PALETTE_SIZE) + 1 : 1;
+  return `var(--agent-${idx})`;
+}

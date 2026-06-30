@@ -47,6 +47,7 @@ _CASE_FIELDS = frozenset(
         "milestone_threshold",
         "samples",
         "prompt_profile",
+        "mast",
     }
 )
 
@@ -134,6 +135,7 @@ async def run_case_report(
                 checks=checks,
                 judge=verdict,
                 milestone=milestone,
+                mast=case.mast,
             )
         )
     return reports

@@ -300,6 +300,27 @@ async def test_login_unknown_user_raises():
         await svc.login(username="ghost", password=_PW)
 
 
+async def test_login_unknown_user_still_runs_verify_for_constant_time(monkeypatch):
+    """SEC-004: a missing username must still run one password verify (against the dummy
+    hash) so its timing matches the wrong-password path — no enumeration oracle."""
+    import agentcore.auth.service as service_mod
+
+    calls: list[tuple[str, str]] = []
+    real_verify = service_mod.verify_password
+
+    def _spy(password: str, password_hash: str) -> bool:
+        calls.append((password, password_hash))
+        return real_verify(password, password_hash)
+
+    monkeypatch.setattr(service_mod, "verify_password", _spy)
+    svc, *_ = _make()
+    with pytest.raises(AuthenticationError):
+        await svc.login(username="ghost", password=_PW)
+    # verify ran exactly once, against the dummy hash (the branch is not short-circuited).
+    assert len(calls) == 1
+    assert calls[0][1] == service_mod._DUMMY_PASSWORD_HASH
+
+
 async def test_login_resets_failures_on_success():
     svc, _u, creds, _t, invites = _make()
     await invites.create(code="C1")

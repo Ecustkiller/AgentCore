@@ -331,7 +331,7 @@ export function ConversationItem({ conversation }: Props) {
                   className={`size-1.5 shrink-0 rounded-full ${
                     status === "running"
                       ? "animate-pulse bg-primary"
-                      : "bg-warning"
+                      : "bg-primary"
                   }`}
                 />
               </SimpleTooltip>

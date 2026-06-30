@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>概念 1 · 裁决书 — 交锋叙事重设计</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <style>
+      .c1 { max-width: 880px; margin: 0 auto; padding: 26px 28px 72px; }
+
+      .meta-row {
+        display: flex; align-items: center; gap: 10px;
+        margin-bottom: 18px; font-size: 13px;
+      }
+      .meta-row .spacer { flex: 1; }
+      .link-btn {
+        display: inline-flex; align-items: center; gap: 5px;
+        color: var(--primary); cursor: pointer; font-weight: 500;
+      }
+      .link-btn:hover { text-decoration: underline; }
+
+      /* HERO */
+      .hero {
+        display: flex; gap: 26px; align-items: center;
+        padding: 26px 28px;
+        border-radius: var(--radius-xl);
+        background:
+          radial-gradient(120% 140% at 0% 0%, color-mix(in oklch, var(--primary) 7%, transparent), transparent 60%),
+          var(--card);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow-md);
+      }
+      .hero .eyebrow {
+        font-size: 12px; font-weight: 600; letter-spacing: .06em;
+        color: var(--muted-foreground); text-transform: none;
+      }
+      .hero h1 {
+        margin: 6px 0 10px; font-size: 23px; line-height: 1.3; font-weight: 750;
+        color: var(--side, var(--foreground));
+      }
+      .hero p.lead { margin: 0; font-size: 14.5px; line-height: 1.7; color: var(--foreground); }
+      .reversal {
+        margin-top: 14px; display: flex; gap: 8px; align-items: flex-start;
+        font-size: 12.5px; color: var(--muted-foreground);
+        padding-top: 12px; border-top: 1px dashed var(--border);
+      }
+      .reversal b { color: var(--foreground); font-weight: 600; }
+
+      /* ACTION: 需要你拍板 */
+      .decide {
+        margin-top: 22px;
+        border: 1px solid color-mix(in oklch, var(--warning) 45%, var(--border));
+        background: color-mix(in oklch, var(--warning) 9%, var(--card));
+        border-radius: var(--radius-lg);
+        padding: 16px 18px;
+      }
+      .decide h2 {
+        margin: 0 0 4px; font-size: 14px; font-weight: 650;
+        display: flex; align-items: center; gap: 7px; color: var(--warning-foreground);
+      }
+      .decide .sub { font-size: 12.5px; color: var(--muted-foreground); margin-bottom: 12px; }
+      .choice {
+        display: flex; gap: 12px; align-items: flex-start;
+        padding: 12px 14px; border-radius: var(--radius-sm);
+        background: var(--card); border: 1px solid var(--border);
+        margin-top: 8px; cursor: pointer; transition: .12s;
+      }
+      .choice:hover { border-color: color-mix(in oklch, var(--warning) 55%, var(--border)); box-shadow: var(--shadow-sm); }
+      .choice .n {
+        flex: none; width: 22px; height: 22px; border-radius: 999px;
+        background: color-mix(in oklch, var(--warning) 16%, transparent);
+        color: var(--warning-foreground); font-size: 12px; font-weight: 700;
+        display: grid; place-items: center;
+      }
+      .choice .t { font-size: 13.5px; line-height: 1.6; }
+
+      .reco {
+        display: flex; gap: 9px; align-items: flex-start;
+        margin-top: 16px; padding: 0 2px; font-size: 13.5px; line-height: 1.7;
+      }
+      .reco .ico { color: var(--warning); margin-top: 2px; }
+
+      /* SECTIONS */
+      section.block { margin-top: 30px; }
+      section.block > .section-label { margin-bottom: 14px; }
+
+      /* VS strongest points */
+      .vs {
+        display: grid; grid-template-columns: 1fr auto 1fr; gap: 0; align-items: stretch;
+      }
+      .vs .side {
+        padding: 16px 18px; border: 1px solid var(--border); background: var(--card);
+        border-top: 3px solid var(--side); position: relative;
+      }
+      .vs .side.left { border-radius: var(--radius-lg) 0 0 var(--radius-lg); }
+      .vs .side.right { border-radius: 0 var(--radius-lg) var(--radius-lg) 0; }
+      .vs .mid {
+        display: grid; place-items: center; width: 46px;
+        border-block: 1px solid var(--border); background: var(--muted);
+      }
+      .vs .mid .badge {
+        width: 34px; height: 34px; border-radius: 999px; background: var(--background);
+        border: 1px solid var(--border); display: grid; place-items: center;
+        font-size: 12px; font-weight: 800; color: var(--muted-foreground);
+        box-shadow: var(--shadow-sm);
+      }
+      .vs .side .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+      .vs .side .pt { font-size: 13.5px; line-height: 1.7; }
+      .favored {
+        position: absolute; top: -3px; right: 14px; transform: translateY(-50%);
+      }
+
+      /* clarify */
+      .clarify { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+      .clarify h3 {
+        margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: var(--foreground);
+        display: flex; align-items: center; gap: 6px;
+      }
+      .clarify h3 .ico { color: var(--muted-foreground); }
+      .clarify h3 .hint { font-weight: 400; color: var(--muted-foreground); }
+      .clarify ul { margin: 0; padding: 0; list-style: none; }
+      .clarify li {
+        position: relative; padding-left: 16px; margin-bottom: 8px;
+        font-size: 13px; line-height: 1.6; color: var(--foreground);
+      }
+      .clarify li::before {
+        content: ""; position: absolute; left: 3px; top: 9px;
+        width: 4px; height: 4px; border-radius: 999px; background: var(--muted-foreground);
+      }
+
+      /* process expander */
+      .proc { margin-top: 34px; border-top: 1px solid var(--border); padding-top: 18px; }
+      .proc .toggle {
+        display: flex; width: 100%; align-items: center; gap: 9px;
+        background: none; border: 0; cursor: pointer; padding: 6px 2px;
+        font-size: 13.5px; font-weight: 600; color: var(--foreground); font-family: inherit;
+      }
+      .proc .toggle .chev { color: var(--muted-foreground); margin-left: auto; transition: .15s; }
+      .proc.open .toggle .chev { transform: rotate(180deg); }
+      .proc .body { display: none; padding-top: 8px; }
+      .proc.open .body { display: block; }
+
+      .round {
+        display: flex; gap: 14px; padding: 14px 2px;
+      }
+      .round .rail { position: relative; width: 12px; flex: none; display: flex; justify-content: center; }
+      .round .rail .dot {
+        margin-top: 4px; width: 11px; height: 11px; border-radius: 999px;
+        outline: 4px solid var(--background); z-index: 1;
+      }
+      .round .rail .line { position: absolute; top: 18px; bottom: -14px; width: 2px; background: var(--border); }
+      .round:last-child .rail .line { display: none; }
+      .dot.quiet { background: color-mix(in oklch, var(--muted-foreground) 40%, transparent); }
+      .dot.clash { background: var(--primary); }
+      .dot.converged { background: var(--success); }
+      .round .rc { flex: 1; min-width: 0; }
+      .round .rc .top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .round .rc .focus { font-weight: 600; font-size: 13.5px; }
+      .round .rc .sum { margin: 6px 0 0; font-size: 13px; color: var(--muted-foreground); line-height: 1.6; }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="chrome">
+        <a class="back" href="index.html">‹ 返回</a>
+        <span class="title" id="title"></span>
+        <div class="tabs">
+          <button aria-pressed="true">⚖ 交锋叙事</button>
+          <button aria-pressed="false">⛬ 协作图</button>
+        </div>
+      </div>
+      <div id="root"></div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="icons.js"></script>
+    <script>
+      const D = window.DEBATE;
+      document.getElementById("title").textContent = D.motion;
+      const sideBy = (k) => D.sides.find((s) => s.key === k);
+      const winner = sideBy(D.brief.leaningSide);
+
+      const root = document.getElementById("root");
+      const c1 = h("div", { class: "c1" });
+
+      // meta row
+      c1.append(
+        h(
+          "div",
+          { class: "meta-row" },
+          h("span", { class: "pill pill-success" }, svg("check", 13), D.stopReason),
+          h("span", { class: "pill pill-muted" }, D.form),
+          h("span", { class: "spacer" }),
+          h("span", { class: "link-btn" }, svg("gavel", 14), "主持人裁决过程"),
+        ),
+      );
+
+      // HERO
+      c1.append(
+        h(
+          "div",
+          { class: "hero", style: `--side: var(${winner.colorVar})` },
+          h(
+            "div",
+            {
+              class: "ring",
+              style: `--pct:${D.brief.confidencePct}; --ring-color: var(--warning); --size: 104px`,
+            },
+            h(
+              "div",
+              { class: "val" },
+              h("b", {}, D.brief.confidencePct + "%"),
+              h("br"),
+              h("small", {}, "置信 " + D.brief.confidenceLabel),
+            ),
+          ),
+          h(
+            "div",
+            { style: "min-width:0; flex:1" },
+            h("div", { class: "eyebrow" }, "主持人裁决 · 结论倾向"),
+            h("h1", {}, D.brief.leaningTitle),
+            h("p", { class: "lead" }, D.brief.leaning),
+            h(
+              "div",
+              { class: "reversal" },
+              svg("rotate", 15),
+              h("span", {}, h("b", {}, "何时会反转："), D.brief.reversal),
+            ),
+          ),
+        ),
+      );
+
+      // DECIDE
+      const decide = h(
+        "div",
+        { class: "decide" },
+        h("h2", {}, svg("user", 15), "需要你拍板"),
+        h(
+          "div",
+          { class: "sub" },
+          "以下是价值 / 偏好之争 —— AI 判不了，得你来定，定了结论才算数。",
+        ),
+      );
+      D.brief.valueDisputes.forEach((t, i) =>
+        decide.append(
+          h(
+            "div",
+            { class: "choice" },
+            h("span", { class: "n" }, i + 1),
+            h("span", { class: "t" }, t),
+          ),
+        ),
+      );
+      decide.append(
+        h(
+          "div",
+          { class: "reco" },
+          h("span", { class: "ico" }, svg("lightbulb", 16)),
+          h("span", {}, h("b", {}, "主持人建议："), D.brief.recommendation),
+        ),
+      );
+      c1.append(decide);
+
+      // VS strongest points
+      const [s0, s1] = D.sides;
+      const sideCol = (s, cls) =>
+        h(
+          "div",
+          { class: "side " + cls, style: `--side: var(${s.colorVar})` },
+          s.key === winner.key
+            ? h(
+                "span",
+                { class: "favored pill pill-success" },
+                svg("check", 12),
+                "裁判更认可",
+              )
+            : null,
+          h(
+            "div",
+            { class: "head" },
+            h(
+              "span",
+              { class: "id-chip", style: `--side: var(${s.colorVar})` },
+              h("span", { class: "id-dot", style: `--side: var(${s.colorVar})` }),
+              h("span", { class: "name" }, s.name),
+              h("span", { class: "model" }, s.model),
+            ),
+            h("span", { class: "pill pill-outline" }, s.stance),
+          ),
+          h("div", { class: "pt" }, s.point),
+        );
+      c1.append(
+        h(
+          "section",
+          { class: "block" },
+          h("div", { class: "section-label" }, h("span", { class: "ico" }, svg("swords", 15)), "各方最强论点"),
+          h(
+            "div",
+            { class: "vs" },
+            sideCol(s0, "left"),
+            h("div", { class: "mid" }, h("div", { class: "badge" }, "VS")),
+            sideCol(s1, "right"),
+          ),
+        ),
+      );
+
+      // crux
+      c1.append(
+        h(
+          "section",
+          { class: "block" },
+          h(
+            "div",
+            { class: "section-label", style: "margin-bottom:8px" },
+            h("span", { class: "ico" }, svg("target", 15)),
+            "争点",
+          ),
+          h("p", { class: "muted", style: "margin:0;font-size:13.5px;line-height:1.7" }, D.brief.crux),
+        ),
+      );
+
+      // clarify
+      const clarGroup = (icon, label, hint, items) =>
+        h(
+          "div",
+          {},
+          h(
+            "h3",
+            {},
+            h("span", { class: "ico" }, svg(icon, 14)),
+            label,
+            hint ? h("span", { class: "hint" }, "· " + hint) : null,
+          ),
+          h("ul", {}, ...items.map((t) => h("li", {}, t))),
+        );
+      c1.append(
+        h(
+          "section",
+          { class: "block" },
+          h("div", { class: "section-label", style: "margin-bottom:14px" }, h("span", { class: "ico" }, svg("search", 15)), "还需厘清"),
+          h(
+            "div",
+            { class: "clarify" },
+            clarGroup("search", "事实分歧", "靠证据可厘清", D.brief.factualDisputes),
+            clarGroup("help", "待解问题", null, D.brief.openQuestions),
+          ),
+        ),
+      );
+
+      // process expander
+      const proc = h("div", { class: "proc" });
+      const body = h("div", { class: "body" });
+      D.rounds.forEach((r) => {
+        body.append(
+          h(
+            "div",
+            { class: "round" },
+            h(
+              "div",
+              { class: "rail" },
+              h("span", { class: "dot " + r.signal }),
+              h("span", { class: "line" }),
+            ),
+            h(
+              "div",
+              { class: "rc" },
+              h(
+                "div",
+                { class: "top" },
+                h("span", { class: "pill pill-muted" }, "第 " + r.no + " 轮"),
+                h("span", { class: "focus" }, r.focus),
+                r.verdict.converged ? h("span", { class: "pill pill-success" }, "已收敛") : null,
+              ),
+              h("p", { class: "sum" }, r.summary),
+            ),
+          ),
+        );
+      });
+      const toggle = h(
+        "button",
+        {
+          class: "toggle",
+          onclick: () => proc.classList.toggle("open"),
+        },
+        svg("scroll", 16),
+        "查看完整交锋过程 · " + D.rounds.length + " 轮",
+        h("span", { class: "chev" }, svg("chevronDown", 16)),
+      );
+      proc.append(toggle, body);
+      c1.append(proc);
+
+      root.append(c1);
+    </script>
+  </body>
+</html>

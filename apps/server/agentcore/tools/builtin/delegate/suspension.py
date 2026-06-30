@@ -31,10 +31,16 @@ async def persist_suspension(
     steps,
     pending,
     required_event,
-) -> None:
-    """Capture + persist the durable suspension frame for this pause (2b)."""
+) -> bool:
+    """Capture + persist the durable suspension frame for this pause (2b).
+
+    Returns ``True`` iff a durable frame was actually saved. The 挂起即收口 (②) finalize
+    path keys its「end the turn now」decision on this so it NEVER finalizes a plan it could
+    not later resume — a nested (depth>0) / un-wired / transcript-less delegate returns
+    ``False`` and falls back to the in-memory wait.
+    """
     if not can_persist_suspension(tool):
-        return
+        return False
     from agentcore.core.log_context import get_log_value
     from agentcore.runtime.suspension import (
         PlanReviewSuspension,
@@ -46,7 +52,7 @@ async def persist_suspension(
     transcript = captain_transcript.get()
     if not transcript:
         logger.info("suspension.no_transcript", checkpoint_id=checkpoint_id)
-        return
+        return False
     from agentcore.runtime.facts import snapshot_fact_log
 
     journal = list(tool._sink.execution_journal() or [])
@@ -88,6 +94,7 @@ async def persist_suspension(
         trace_id=get_log_value("trace_id"),
     )
     await tool._suspension_saver(frame)  # type: ignore[misc]
+    return True
 
 
 async def drop_suspension(tool: DelegateTool) -> None:

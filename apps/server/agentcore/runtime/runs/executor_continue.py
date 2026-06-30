@@ -158,7 +158,7 @@ async def _continue_run_scoped(
             spec.policy.contract,
             files_written=len(files_touched_from_transcript(messages)),
         )
-        # 执行级事件溯源 (§18.3): the revised FULL product (content + 思考) under the
+        # 执行级事件溯源 (§8.3): the revised FULL product (content + 思考) under the
         # revision run id, so the version chain's latest output AND thinking are
         # reconstructable from the journal — the reload synthesizes this run node's
         # run_output_delta / run_reasoning_delta from here once the live deltas stop

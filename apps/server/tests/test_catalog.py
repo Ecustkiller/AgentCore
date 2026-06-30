@@ -18,7 +18,8 @@ from agentcore.tools.catalog import (
 
 # What the CEO holds beyond the read-only built-ins (mirrors pipeline._assemble_ceo_toolset).
 _CEO_ORCHESTRATION = {"delegate", "revise", "consult_skill", "consult_memory", "ask_user"}
-# Mutation built-ins the coordinator must NOT hold (they belong to workers).
+# Mutation built-ins the coordinator must NOT hold (they belong to workers), plus the
+# worker-only collaboration channels (escalate upward + post_note/read_notes 便签墙).
 _WORKER_ONLY_BUILTINS = {
     "file_write",
     "str_replace",
@@ -26,6 +27,8 @@ _WORKER_ONLY_BUILTINS = {
     "file_move",
     "code_execute",
     "escalate",
+    "post_note",
+    "read_notes",
 }
 
 

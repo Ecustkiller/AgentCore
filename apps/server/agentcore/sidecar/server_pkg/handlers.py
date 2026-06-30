@@ -157,8 +157,9 @@ class HandlerMixin:
         # Mirror the cloud resolve route's guards (routes/conversations.py): refuse a
         # stale / cross-conversation / kind-mismatched settle, and build the kind's
         # typed result via the SHARED projection — so an approval resolves with an
-        # ApprovalDecision enum (the gate compares it by identity), an ask_user /
-        # plan_review with a CheckpointResponse, etc., exactly as in cloud mode.
+        # ApprovalDecision enum (the gate compares it by identity), a client_tool with
+        # its op envelope, etc., exactly as in cloud mode. ask_user / plan_review are no
+        # longer resolvable here (挂起即收口 ②, Phase 3 — they finalize and resume cold).
         registry = default_interaction_registry()
         pending = registry.get(interaction_id)
         if (
@@ -240,8 +241,9 @@ class HandlerMixin:
     async def _on_list_paused(self, request_id: Any, params: dict[str, Any]) -> None:
         """A conversation's pending durable pauses, as resume-card summaries.
 
-        Read-only (does not claim); ``resume`` claims. Mirrors the cloud
-        ``GET .../paused`` shape so the desktop renders the same resume cards.
+        Read-only (does not claim); ``resume`` claims. Mirrors the cloud recovery
+        snapshot's ``paused`` summaries (``GET .../recovery``) so the desktop renders
+        the same resume cards.
         """
         conversation_id = str(params.get("conversationId") or "").strip()
         if self._paused_store is None or not conversation_id:

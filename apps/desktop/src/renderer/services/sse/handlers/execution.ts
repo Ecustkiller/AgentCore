@@ -101,7 +101,12 @@ export function handleExecutionEvent(
     // the turn — siblings keep running — so there is no conversation-store card, just the journaled
     // frame; both are journaled, so the exchange replays inline on reload.
     case "escalation_required":
-    case "escalation_resolved": {
+    case "escalation_resolved":
+    // 团队便签墙 (§2.2 通): a worker broadcast a one-line decision / heads-up to its
+    // concurrent siblings. Turn-level (folds onto Execution.teamNotes via the same frame
+    // path, not onto a node); journaled, so it replays on reload. Fire-and-forget — it never
+    // pauses the turn (no conversation-store card), just the journaled frame.
+    case "team_note_posted": {
       recordFrame(event, conversationId);
       return true;
     }

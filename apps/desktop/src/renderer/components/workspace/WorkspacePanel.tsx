@@ -2,6 +2,7 @@ import { EmptyHint, IconButton } from "@/components/files/parts";
 import { Button } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
+import { hasLocalFiles } from "@/lib/capabilities";
 import { createDeferredLocalSource } from "@/services/sources/deferredLocalSource";
 import {
   createWorkspaceSource,
@@ -41,7 +42,7 @@ export function WorkspaceMode() {
     : null;
   const localIntent = conv?.localContainerRootId ?? null;
   const title = conv?.title ?? "工作区";
-  const fsAvailable = typeof window !== "undefined" && !!window.fsApi;
+  const fsAvailable = hasLocalFiles();
   const source = useMemo(() => {
     // 已提升：按绑定选源（本地 IPC / 云端 REST）。
     if (ws) return resolveWorkspaceSource(ws, fsAvailable);

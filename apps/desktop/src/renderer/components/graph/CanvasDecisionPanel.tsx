@@ -1,7 +1,6 @@
 import { ApprovalPrompt } from "@/components/chat/ApprovalPrompt";
 import { BackgroundTaskCard } from "@/components/chat/BackgroundTaskCard";
 import { CheckpointCard } from "@/components/chat/CheckpointCard";
-import { DebateRoundDecisionCards } from "@/components/chat/DebateRoundDecisionCard";
 import { EscalationCards } from "@/components/chat/EscalationCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { ResumePrompt } from "@/components/chat/ResumePrompt";
@@ -58,21 +57,40 @@ import { useEffect, useMemo, useRef } from "react";
  * never inflates the 待你拍板 decision count.
  */
 
-/** Count of UNANSWERED boss decisions on ONE turn (ask_user + plan_review + 工作者上报).
- * Turn-scoped: drives the focused node's「待你拍板」chip, and is the turn-level summand of
- * the host's panel auto-surface (which also adds conversation-level approval / resume). */
+/** Count of UNANSWERED boss decisions on ONE turn — 工作者上报 (escalation) +, by default,
+ * 交互式辩论的逐轮掌舵 (debate round), PLUS an inline ask_user / plan_review **only while the
+ * turn is still live**. Turn-scoped: drives the focused node's「待你拍板」chip (counts debate,
+ * so the overview still flags「zoom in to steer」), and is the turn-level summand of the host's
+ * panel auto-surface (which also adds conversation-level approval / resume).
+ *
+ * 挂起即收口 (②, Phase 3): a finalized ask_user / plan_review (the normal path — SUSPEND→PAUSED)
+ * renders inline as a passive record; its actionable surface is the conversation-level durable
+ * resume (counted via `resumeCount` in the dock, and the node carries a `paused` status ring). So
+ * we count an inline checkpoint ONLY while `message.isStreaming` (the rare §六-1 backend thin-net
+ * wait); counting a terminal turn's inline pending would double-count it against that resume.
+ *
+ * `includeDebate=false` excludes debate round boundaries — the 指挥台 passes this because debate
+ * 掌舵 now lives canvas-native in the 群聊 room ({@link import("../chat/debate/DebateStream").DebateStream}
+ * 的 SteeringBar), NOT in the dock; counting it there would pop an empty panel for a decision the
+ * room already owns (群聊为唯一掌舵处, 前端UX设计.md §4.3). */
 export function countPendingDecisions(
   message: Message | undefined,
   execution: Execution | null | undefined,
+  opts: { includeDebate?: boolean } = {},
 ): number {
+  const { includeDebate = true } = opts;
   let n = 0;
-  for (const c of message?.checkpoints ?? []) if (c.status === "pending") n++;
-  for (const p of message?.planReviews ?? []) if (p.status === "pending") n++;
+  // Inline ask_user / plan_review count ONLY while the turn is live (see docstring): once
+  // finalized, the action is the conversation-level resume, not this now-passive inline card.
+  if (message?.isStreaming) {
+    for (const c of message.checkpoints ?? []) if (c.status === "pending") n++;
+    for (const p of message.planReviews ?? []) if (p.status === "pending") n++;
+  }
   for (const r of execution?.runs ?? [])
     for (const e of r.escalations) if (e.status === "pending") n++;
-  // 交互式逐轮辩论 (opt-in, §逐轮交互): a round boundary awaiting the user counts too.
-  for (const d of execution?.debateDecisions ?? [])
-    if (d.status === "pending") n++;
+  if (includeDebate)
+    for (const d of execution?.debateDecisions ?? [])
+      if (d.status === "pending") n++;
   return n;
 }
 
@@ -142,7 +160,11 @@ export function useCommandRegion(): CommandRegionData {
   );
   const backgroundCount = useBackgroundTasks(conversationId).length;
 
-  const turnDecisions = countPendingDecisions(message, execution);
+  // 辩论逐轮掌舵不计入 dock（群聊 room 的 SteeringBar 是唯一掌舵处）；其提醒由总览焦点节点的
+  // 「待你拍板」chip + 放大查看入口承载，dock 不为它弹面。
+  const turnDecisions = countPendingDecisions(message, execution, {
+    includeDebate: false,
+  });
   const pending = turnDecisions + approvalCount + resumeCount;
   const firefighting = !!convError || isTurnRecoverable(execution);
   // 后台云端任务 是 非阻塞的「另一类」: it keeps the region present but never inflates the
@@ -215,11 +237,11 @@ export function CommandRegion({
   return (
     <section className="flex max-h-[55%] shrink-0 flex-col border-b border-border bg-card">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border pl-3 pr-1">
-        <Gavel size={15} className="shrink-0 text-warning" />
+        <Gavel size={15} className="shrink-0 text-primary" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
           指挥台
           {pending > 0 && (
-            <span className="ml-1.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-xs font-medium text-warning">
+            <span className="ml-1.5 rounded-full bg-primary/15 px-1.5 py-0.5 text-xs font-medium text-primary">
               {pending}
             </span>
           )}
@@ -260,20 +282,10 @@ export function CommandRegion({
           {/* Turn-level: scoped to the focused turn's message + execution. */}
           <div className="space-y-2 px-4">
             {checkpoints.map((cp) => (
-              <CheckpointCard
-                key={cp.id}
-                checkpoint={cp}
-                conversationId={conversationId}
-                interactive={interactive}
-              />
+              <CheckpointCard key={cp.id} checkpoint={cp} />
             ))}
             {planReviews.map((pr) => (
-              <PlanReviewCard
-                key={pr.id}
-                review={pr}
-                conversationId={conversationId}
-                interactive={interactive}
-              />
+              <PlanReviewCard key={pr.id} review={pr} />
             ))}
             {message && (
               <EscalationCards
@@ -282,13 +294,8 @@ export function CommandRegion({
                 interactive={interactive}
               />
             )}
-            {message && (
-              <DebateRoundDecisionCards
-                messageId={message.id}
-                conversationId={conversationId}
-                interactive={interactive}
-              />
-            )}
+            {/* 辩论逐轮掌舵不在此渲染：它是 canvas 原生的，归 群聊 room 的 SteeringBar
+                （前端UX设计.md §4.3「群聊为唯一掌舵处」）。dock 只复活聊天面在画布态被卸载的卡。 */}
           </div>
           {/* 后台云端任务 (handoff jobs, 非阻塞 · 跨对话的另一类): last, below every
               blocking decision. */}

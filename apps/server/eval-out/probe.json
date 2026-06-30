@@ -1,0 +1,1167 @@
+{
+  "summary": {
+    "total": 25,
+    "passed": 22,
+    "pass_rate": 0.88,
+    "cost_usd": 0.005235,
+    "by_category": {
+      "qa": {
+        "total": 25,
+        "passed": 22,
+        "pass_rate": 0.88
+      }
+    }
+  },
+  "cases": [
+    {
+      "case_id": "probe_acceleration_kmh",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=436 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '(?<![0-9])3\\\\.75' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1178,
+          "output": 374,
+          "reasoning": 139,
+          "cache_hit": 0,
+          "cache_miss": 1178
+        },
+        "cost_usd": 0.00027,
+        "latency_ms": 5049,
+        "error": null,
+        "content_preview": "已知：初速度 \\(v_0 = 0\\)，末速度 \\(v = 108\\ \\text{km/h}\\)，时间 \\(t = 8\\ \\text{s}\\)。\n\n**1. 单位换算**  \n将 km/h 换算为 m/s：\n\\[\n1\\ \\text{km/h} = \\frac{1000\\ \\text{m}}{3600\\ \\text{s}} = \\frac{1}{3.6}\\ \\text{m/s}\n\\]\n\\[\nv = 1"
+      }
+    },
+    {
+      "case_id": "probe_acceleration_kmh",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=656 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '(?<![0-9])3\\\\.75' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1178,
+          "output": 523,
+          "reasoning": 204,
+          "cache_hit": 1152,
+          "cache_miss": 26
+        },
+        "cost_usd": 0.000153,
+        "latency_ms": 6147,
+        "error": null,
+        "content_preview": "## 解答过程\n\n**已知条件**  \n- 初速度 \\(v_0 = 0\\)（从静止开始）  \n- 末速度 \\(v = 108 \\; \\text{km/h}\\)  \n- 时间 \\(t = 8 \\; \\text{s}\\)  \n\n---\n\n### 1️⃣ 单位换算（km/h → m/s）\n\n换算关系：  \n\\[\n1 \\; \\text{km/h} = \\frac{1000 \\; \\text{m}}{360"
+      }
+    },
+    {
+      "case_id": "probe_acceleration_kmh",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=449 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '(?<![0-9])3\\\\.75' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1178,
+          "output": 375,
+          "reasoning": 143,
+          "cache_hit": 1152,
+          "cache_miss": 26
+        },
+        "cost_usd": 0.000112,
+        "latency_ms": 5118,
+        "error": null,
+        "content_preview": "**已知条件：**\n- 初速度 \\(v_0 = 0\\)\n- 末速度 \\(v = 108\\ \\text{km/h}\\)\n- 时间 \\(t = 8\\ \\text{s}\\)\n\n---\n\n**步骤一：单位换算（km/h → m/s）**\n\n\\[\n1\\ \\text{km/h} = \\frac{1000\\ \\text{m}}{3600\\ \\text{s}} = \\frac{1}{3.6}\\ \\text{m/s"
+      }
+    },
+    {
+      "case_id": "probe_acceleration_kmh",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=455 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '(?<![0-9])3\\\\.75' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1178,
+          "output": 444,
+          "reasoning": 220,
+          "cache_hit": 1152,
+          "cache_miss": 26
+        },
+        "cost_usd": 0.000131,
+        "latency_ms": 5575,
+        "error": null,
+        "content_preview": "### 换算过程\n\n**速度单位换算：**\n\\[\n108 \\, \\text{km/h} = 108 \\times \\frac{1000 \\, \\text{m}}{3600 \\, \\text{s}} \n= 108 \\times \\frac{5}{18} \\, \\text{m/s}\n= \\frac{540}{18} \\, \\text{m/s}\n= 30 \\, \\text{m/s}\n\\]\n\n### 加速"
+      }
+    },
+    {
+      "case_id": "probe_acceleration_kmh",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=507 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '(?<![0-9])3\\\\.75' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1178,
+          "output": 397,
+          "reasoning": 145,
+          "cache_hit": 1152,
+          "cache_miss": 26
+        },
+        "cost_usd": 0.000118,
+        "latency_ms": 5215,
+        "error": null,
+        "content_preview": "**解答过程：**\n\n1. **速度单位换算**  \n   已知末速度 \\(v = 108 \\, \\text{km/h}\\)，需换算为 \\(\\text{m/s}\\)：  \n   \\[\n   1 \\, \\text{km/h} = \\frac{1000 \\, \\text{m}}{3600 \\, \\text{s}} = \\frac{1}{3.6} \\, \\text{m/s}\n   \\]  \n   所以："
+      }
+    },
+    {
+      "case_id": "probe_big_multiplication",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=861 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '15[,，]?592[,，]?984' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1171,
+          "output": 1015,
+          "reasoning": 542,
+          "cache_hit": 0,
+          "cache_miss": 1171
+        },
+        "cost_usd": 0.000448,
+        "latency_ms": 10507,
+        "error": null,
+        "content_preview": "# 计算 4789 × 3256\n\n## 竖式计算\n\n```\n        4  7  8  9\n    ×   3  2  5  6\n    ───────────────\n        2  8  7  3  4   ← 4789 × 6\n      2  3  9  4  5  0   ← 4789 × 50  (即 4789 × 5，左移一位)\n      9  5  7  8  0 "
+      }
+    },
+    {
+      "case_id": "probe_big_multiplication",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=960 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '15[,，]?592[,，]?984' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1171,
+          "output": 1245,
+          "reasoning": 785,
+          "cache_hit": 1152,
+          "cache_miss": 19
+        },
+        "cost_usd": 0.000354,
+        "latency_ms": 12270,
+        "error": null,
+        "content_preview": "好的，我们手算 4789 × 3256。\n\n---\n\n## 方法一：分解法（分配律）\n\n将 3256 拆成 3000 + 200 + 50 + 6：\n\n```\n4789 × 3000 = 4789 × 3 × 1000 = 14,367 × 1000 = 14,367,000\n4789 ×  200 = 4789 × 2 × 100  = 9,578 × 100   =    957,800\n47"
+      }
+    },
+    {
+      "case_id": "probe_big_multiplication",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=1340 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '15[,，]?592[,，]?984' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1171,
+          "output": 1809,
+          "reasoning": 998,
+          "cache_hit": 1152,
+          "cache_miss": 19
+        },
+        "cost_usd": 0.000512,
+        "latency_ms": 16738,
+        "error": null,
+        "content_preview": "# 计算 4789 × 3256\n\n## 竖式乘法\n\n```\n        4 7 8 9\n      × 3 2 5 6\n      ---------\n        2 8 7 3 4   ← 4789 × 6\n      2 3 9 4 5 0   ← 4789 × 50\n    0 9 5 7 8 0 0   ← 4789 × 200\n  1 4 3 6 7 0 0 0   ← 478"
+      }
+    },
+    {
+      "case_id": "probe_big_multiplication",
+      "category": "qa",
+      "passed": false,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=699 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": false,
+          "detail": "must-match '15[,，]?592[,，]?984' -> miss",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1171,
+          "output": 975,
+          "reasoning": 593,
+          "cache_hit": 1152,
+          "cache_miss": 19
+        },
+        "cost_usd": 0.000279,
+        "latency_ms": 9607,
+        "error": null,
+        "content_preview": "# 4789 × 3256 的竖式计算\n\n## 竖式\n\n```\n        4  7  8  9\n      × 3  2  5  6\n      -------------\n        2  8  7  3  4    ← 4789 × 6\n       2  3  9  4  5  0   ← 4789 × 50\n       9  5  7  8  0  0   ← 4789 × 2"
+      }
+    },
+    {
+      "case_id": "probe_big_multiplication",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=930 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '15[,，]?592[,，]?984' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1171,
+          "output": 945,
+          "reasoning": 408,
+          "cache_hit": 1152,
+          "cache_miss": 19
+        },
+        "cost_usd": 0.00027,
+        "latency_ms": 10249,
+        "error": null,
+        "content_preview": "好的，我们手算 4789 × 3256，先列出竖式，再分步相加。\n\n## 竖式\n\n```\n      4 7 8 9\n×     3 2 5 6\n─────────────\n```\n\n## 分步计算\n\n### 第一步：4789 × 6（个位）\n\n```\n  4 7 8 9\n×       6\n────────\n 2 8 7 3 4\n```\n> 4 7 8 9 × 6 = **28,734**\n\n-"
+      }
+    },
+    {
+      "case_id": "probe_compound_interest",
+      "category": "qa",
+      "passed": false,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=999 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": false,
+          "detail": "must-match '11[,，]?268' -> miss",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1192,
+          "output": 1124,
+          "reasoning": 581,
+          "cache_hit": 1024,
+          "cache_miss": 168
+        },
+        "cost_usd": 0.000341,
+        "latency_ms": 10088,
+        "error": null,
+        "content_preview": "## 计算过程\n\n**已知条件：**\n- 本金 \\( P = 10000 \\) 元\n- 月利率 \\( r = 1\\% = 0.01 \\)\n- 计息期数 \\( n = 12 \\) 个月\n\n**复利公式：**\n\\[\nA = P \\times (1 + r)^n\n\\]\n\n---\n\n### 逐步计算 \\( (1.01)^{12} \\)\n\n| 指数 | 计算过程 | 结果 |\n|:---:|:---|:--"
+      }
+    },
+    {
+      "case_id": "probe_compound_interest",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=723 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '11[,，]?268' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1192,
+          "output": 730,
+          "reasoning": 354,
+          "cache_hit": 1152,
+          "cache_miss": 40
+        },
+        "cost_usd": 0.000213,
+        "latency_ms": 7920,
+        "error": null,
+        "content_preview": "本息合计 **11268.25 元**。\n\n**计算过程：**\n\n- 本金 \\( P = 10000 \\) 元  \n- 月利率 \\( r = \\frac{12\\%}{12} = 1\\% = 0.01 \\)  \n- 计息期数 \\( n = 12 \\) 个月  \n\n复利公式：  \n\\[\nA = P \\times (1 + r)^n = 10000 \\times (1.01)^{12}\n\\]\n\n逐步计算"
+      }
+    },
+    {
+      "case_id": "probe_compound_interest",
+      "category": "qa",
+      "passed": false,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=432 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": false,
+          "detail": "must-match '11[,，]?268' -> miss",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1192,
+          "output": 1146,
+          "reasoning": 836,
+          "cache_hit": 1152,
+          "cache_miss": 40
+        },
+        "cost_usd": 0.00033,
+        "latency_ms": 10719,
+        "error": null,
+        "content_preview": "本金 10 000 元，月利率 = 12% ÷ 12 = 1% = 0.01，期数 n = 12。\n\n复利公式：  \n本息合计 = 本金 × (1 + 月利率)ⁿ = 10 000 × (1.01)¹²\n\n逐步计算 (1.01)¹²：\n\n- 1.01² = 1.0201  \n- 1.01⁴ = (1.01²)² = 1.0201² = 1.040 604 01  \n- 1.01⁸ = (1.01⁴"
+      }
+    },
+    {
+      "case_id": "probe_compound_interest",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=696 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '11[,，]?268' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1192,
+          "output": 708,
+          "reasoning": 351,
+          "cache_hit": 1152,
+          "cache_miss": 40
+        },
+        "cost_usd": 0.000207,
+        "latency_ms": 7481,
+        "error": null,
+        "content_preview": "**计算过程：**\n\n- 本金：\\( P = 10000 \\) 元\n- 月利率：\\( r = 12\\% \\div 12 = 1\\% = 0.01 \\)\n- 计息期数：\\( n = 12 \\) 个月\n\n复利终值公式：  \n\\[\nA = P \\times (1 + r)^n = 10000 \\times (1.01)^{12}\n\\]\n\n逐步计算 \\( 1.01^{12} \\)：\n\n\\[\n\\begin{"
+      }
+    },
+    {
+      "case_id": "probe_compound_interest",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=497 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '11[,，]?268' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1192,
+          "output": 1122,
+          "reasoning": 840,
+          "cache_hit": 1152,
+          "cache_miss": 40
+        },
+        "cost_usd": 0.000323,
+        "latency_ms": 11714,
+        "error": null,
+        "content_preview": "本金: 10000 元  \n月利率: 12% / 12 = 1% = 0.01  \n期数: 12 个月  \n\n**计算公式**  \n\\[\n\\text{本息合计} = 本金 \\times (1 + 月利率)^{月数}\n= 10000 \\times (1.01)^{12}\n\\]\n\n**逐步计算 (1.01)^12**  \n\n- 1.01² = 1.0201  \n- 1.01⁴ = (1.01²)² ="
+      }
+    },
+    {
+      "case_id": "probe_nth_prime_100",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=771 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '(?<![0-9])541(?![0-9])' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1187,
+          "output": 384,
+          "reasoning": 131,
+          "cache_hit": 1024,
+          "cache_miss": 163
+        },
+        "cost_usd": 0.000133,
+        "latency_ms": 5761,
+        "error": null,
+        "content_preview": "```python\ndef nth_prime(n: int) -> int:\n    \"\"\"返回第 n 个素数（约定第 1 个素数是 2）。\"\"\"\n    if n < 1:\n        raise ValueError(\"n 必须 >= 1\")\n    count = 0\n    candidate = 2\n    while True:\n        # 判断 candidate 是否"
+      }
+    },
+    {
+      "case_id": "probe_nth_prime_100",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=698 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '(?<![0-9])541(?![0-9])' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1187,
+          "output": 304,
+          "reasoning": 58,
+          "cache_hit": 1152,
+          "cache_miss": 35
+        },
+        "cost_usd": 9.3e-05,
+        "latency_ms": 5111,
+        "error": null,
+        "content_preview": "```python\ndef nth_prime(n: int) -> int:\n    \"\"\"返回第 n 个素数，约定第 1 个素数是 2。\"\"\"\n    if n < 1:\n        raise ValueError(\"n 必须为正整数\")\n    count = 0\n    candidate = 2\n    while True:\n        # 判断 candidate 是否为素"
+      }
+    },
+    {
+      "case_id": "probe_nth_prime_100",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=761 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '(?<![0-9])541(?![0-9])' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1187,
+          "output": 674,
+          "reasoning": 421,
+          "cache_hit": 1152,
+          "cache_miss": 35
+        },
+        "cost_usd": 0.000197,
+        "latency_ms": 7053,
+        "error": null,
+        "content_preview": "```python\ndef nth_prime(n: int) -> int:\n    \"\"\"返回第 n 个素数（约定第 1 个素数是 2）。\"\"\"\n    if n < 1:\n        raise ValueError(\"n 必须 ≥ 1\")\n    count = 0\n    candidate = 1\n    while count < n:\n        candidate += "
+      }
+    },
+    {
+      "case_id": "probe_nth_prime_100",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=1069 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '(?<![0-9])541(?![0-9])' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1187,
+          "output": 724,
+          "reasoning": 377,
+          "cache_hit": 1152,
+          "cache_miss": 35
+        },
+        "cost_usd": 0.000211,
+        "latency_ms": 8288,
+        "error": null,
+        "content_preview": "以下是实现 `nth_prime(n)` 的 Python 函数，并给出第 100 个素数的值。\n\n```python\ndef nth_prime(n: int) -> int:\n    \"\"\"返回第 n 个素数（约定第 1 个素数是 2）。\"\"\"\n    if n < 1:\n        raise ValueError(\"n 必须 >= 1\")\n    \n    count = 0     "
+      }
+    },
+    {
+      "case_id": "probe_nth_prime_100",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=786 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '(?<![0-9])541(?![0-9])' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1187,
+          "output": 448,
+          "reasoning": 164,
+          "cache_hit": 1152,
+          "cache_miss": 35
+        },
+        "cost_usd": 0.000134,
+        "latency_ms": 6447,
+        "error": null,
+        "content_preview": "好的，我们直接来写代码和答案。\n\n## nth_prime(n) 函数实现\n\n```python\ndef nth_prime(n):\n    \"\"\"返回第 n 个素数（第 1 个素数是 2）。\"\"\"\n    if n <= 0:\n        raise ValueError(\"n 必须为正整数\")\n    if n == 1:\n        return 2\n\n    count = 1  "
+      }
+    },
+    {
+      "case_id": "probe_weekday_plus_100",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=192 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '星期六|周六' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1166,
+          "output": 239,
+          "reasoning": 117,
+          "cache_hit": 1024,
+          "cache_miss": 142
+        },
+        "cost_usd": 9e-05,
+        "latency_ms": 5077,
+        "error": null,
+        "content_preview": "## 推算过程\n\n1. 一周有 **7 天**，星期是每 7 天循环一次。\n2. 计算 **100 ÷ 7**：\n   - 7 × 14 = 98，余数 **2**。\n   - 即 100 天 = 14 周整 + **2 天**。\n3. 从**星期四**往后推 **2 天**：\n   - 星期四 → 星期五（+1）\n   - 星期五 → 星期六（+2）\n\n**答案：星期六。** 🎯"
+      }
+    },
+    {
+      "case_id": "probe_weekday_plus_100",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=148 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '星期六|周六' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1166,
+          "output": 273,
+          "reasoning": 173,
+          "cache_hit": 1152,
+          "cache_miss": 14
+        },
+        "cost_usd": 8.2e-05,
+        "latency_ms": 5292,
+        "error": null,
+        "content_preview": "从今天（星期四）算起，100 天后的星期推算如下：\n\n**算法：**\n1. 一周有 7 天，用总天数对 7 取模：100 ÷ 7 = 14 周 **余 2 天**。\n2. 今天是星期四，余数 2 表示向后数 2 天：星期四 → 星期五（+1）→ **星期六（+2）**。\n\n**答案：星期六。**"
+      }
+    },
+    {
+      "case_id": "probe_weekday_plus_100",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=105 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '星期六|周六' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1166,
+          "output": 126,
+          "reasoning": 64,
+          "cache_hit": 1152,
+          "cache_miss": 14
+        },
+        "cost_usd": 4e-05,
+        "latency_ms": 3487,
+        "error": null,
+        "content_preview": "从 **星期四** 算起，100 天后的星期推算如下：\n\n- 一周 = 7 天  \n- 100 ÷ 7 = **14 周余 2 天**  \n- 星期四 + 2 天 = **星期六**\n\n**答案：星期六** ✅"
+      }
+    },
+    {
+      "case_id": "probe_weekday_plus_100",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=216 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '星期六|周六' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1166,
+          "output": 219,
+          "reasoning": 88,
+          "cache_hit": 1152,
+          "cache_miss": 14
+        },
+        "cost_usd": 6.7e-05,
+        "latency_ms": 4663,
+        "error": null,
+        "content_preview": "从今天（星期四）算起，100 天之后是 **星期六**。\n\n**算法简述**：\n- 一周有 7 天，星期以 7 为周期循环。\n- 计算 100 ÷ 7 的余数：  \n  \\(100 \\div 7 = 14\\) 周余 \\(2\\) 天（因为 \\(14 \\times 7 = 98\\)，\\(100 - 98 = 2\\)）。\n- 从星期四往后推 2 天：星期四 → 星期五（+1）→ **星期六（+2）**。"
+      }
+    },
+    {
+      "case_id": "probe_weekday_plus_100",
+      "category": "qa",
+      "passed": true,
+      "checks": [
+        {
+          "name": "FinishReason",
+          "passed": true,
+          "detail": "finish_reason='end_turn'",
+          "gating": true
+        },
+        {
+          "name": "NonEmpty",
+          "passed": true,
+          "detail": "len=174 (min 10)",
+          "gating": true
+        },
+        {
+          "name": "ContentMatches",
+          "passed": true,
+          "detail": "must-match '星期六|周六' -> hit",
+          "gating": true
+        }
+      ],
+      "judge": null,
+      "milestone": null,
+      "outcome": {
+        "finish_reason": "end_turn",
+        "rounds": 1,
+        "delegated": false,
+        "roster": [],
+        "tool_calls": [],
+        "citations": 0,
+        "usage": {
+          "input": 1166,
+          "output": 434,
+          "reasoning": 326,
+          "cache_hit": 1152,
+          "cache_miss": 14
+        },
+        "cost_usd": 0.000127,
+        "latency_ms": 7052,
+        "error": null,
+        "content_preview": "从今天（星期四）算起，100 天之后是 **星期六**。\n\n**算法简述**：\n一周有 7 天，星期几每 7 天循环一次。  \n计算 100 除以 7 的余数：  \n100 ÷ 7 = 14 周 …… **余 2 天**  \n因此，从星期四向后推 2 天：  \n星期四 → 星期五（1 天）→ 星期六（2 天）。  \n\n所以答案是 **星期六**。"
+      }
+    }
+  ]
+}

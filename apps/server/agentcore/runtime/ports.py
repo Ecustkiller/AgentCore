@@ -1,7 +1,7 @@
-"""Engine host ports — the §18.6 contract the runtime faces (the Sidecar seam).
+"""Engine host ports — the §8.6 contract the runtime faces (the Sidecar seam).
 
 The engine runs the SAME code locally and in the cloud; everything host-specific is
-injected behind a port. This module is the in-code mirror of 执行引擎架构设计 §18.6 —
+injected behind a port. This module is the in-code mirror of 执行引擎架构设计 §8.6 —
 a single catalog of the seams a fully-offline Sidecar (07-规划/远期规划 §一.1 完全离线)
 would swap for local implementations (SQLite / in-memory / in-proc). The Sidecar itself
 has landed (hybrid: local engine, cloud persistence/billing — see 双模式工作区 §十); these
@@ -15,13 +15,13 @@ Landed as Protocols here:
   kinds (approval / ask_user / client_tool), implemented by
   ``runtime.interaction.InteractionRegistry``. The engine-side faces depend on this
   port, not the concrete registry.
-- **Journal** — the engine's single durable persistence exit (§18.3 Turn Journal,
+- **Journal** — the engine's single durable persistence exit (§8.3 Turn Journal,
   唯一事实源): each turn's ordered execution facts, from which the assistant
   message's replay payload is projected on read. Postgres impl =
   ``db.repositories.TurnJournalRepository``; the ``runs``↔facts transform lives in
   ``runtime/journal.py``.
 
-The remaining §18.6 ports stay as their concrete implementations until 完全离线
+The remaining §8.6 ports stay as their concrete implementations until 完全离线
 (07-规划/远期规划 §一.1) needs them swappable — Protocol-izing them now, with
 no second implementation to satisfy, would be premature abstraction:
 
@@ -51,7 +51,7 @@ __all__ = ["ClientRequestBridge", "EventSink", "Journal"]
 
 @runtime_checkable
 class ClientRequestBridge(Protocol):
-    """Unified suspend-resume bridge (§18.6) — see ``runtime.interaction``.
+    """Unified suspend-resume bridge (§8.6) — see ``runtime.interaction``.
 
     The engine-side faces (ApprovalGate / AskUserTool / WorkspaceChannel) and the
     resolve endpoint depend on this port rather than the concrete registry, so a
@@ -89,7 +89,7 @@ class ClientRequestBridge(Protocol):
 
 @runtime_checkable
 class Journal(Protocol):
-    """The engine's single durable persistence exit (§18.6 / §18.3 唯一事实源).
+    """The engine's single durable persistence exit (§8.6 / §8.3 唯一事实源).
 
     The engine records each turn's ordered execution facts (``{kind, payload, ts}``)
     keyed by ``turn_id`` (== the assistant message id); everything replayable — the

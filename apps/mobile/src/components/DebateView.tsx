@@ -154,10 +154,37 @@ function Narrative({ debate }: { debate: DebateResultPayload }) {
               <div className="debate-round-summary">{r.summary}</div>
             )}
             <RoundClashes round={r} />
+            <RoundInterjections round={r} />
           </div>
         ))}
       </div>
     </details>
+  );
+}
+
+/** 本轮「你的追问」(辩论编排设计.md §6.3)：向谁问 + 问题原文 +
+ *  是否被承接。`answered` 是结构事实（是否真有后续轮跑起来答它，追问即续辩则恒真），非「答得好不好」。
+ *  仅收场 {@link DebateRoundInfo} 携带（live 孪生 {@link DebateNarrativeRound} 不带）；无追问 → 不渲染。
+ *  手机端只读复盘——逐轮决策 / 追问输入是桌面端能力（手机无掌舵卡）。 */
+function RoundInterjections({ round }: { round: DebateRoundInfo }) {
+  const items = round.user_interjections ?? [];
+  if (items.length === 0) return null;
+  const nameOf = (key: string) =>
+    round.sides.find((s) => s.key === key)?.name ?? key;
+  return (
+    <ul className="debate-asks">
+      {items.map((it, i) => (
+        <li key={`${it.ask}-${i}`} className="debate-ask">
+          <span className="debate-ask-edge">
+            {it.target_key ? `向 ${nameOf(it.target_key)}` : "向全场"}
+          </span>
+          <span className="debate-ask-text">{it.ask}</span>
+          <span className={`debate-ask-state${it.answered ? " ask-ok" : ""}`}>
+            {it.answered ? "已回应" : "未及回应"}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

@@ -37,7 +37,7 @@ async def force_finalize(
     content was already accumulated rather than raising.
     """
     messages.append(LLMMessage(role="user", content=FINALIZE_INSTRUCTION))
-    # 执行级事件溯源 (§18.3): the forced-finalize instruction is injected into the real
+    # 执行级事件溯源 (§8.3): the forced-finalize instruction is injected into the real
     # LLM window, so the window fold needs it as a fact (no-op outside a turn). Scoped to
     # the calling run so the captain window picks it up even mid-delegate (边界②).
     record_turn_fact(

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from typing import Any
 
 from agentcore.core.logging import get_logger
@@ -34,12 +35,14 @@ from agentcore.runtime.debate.types import (
     DebateConfig,
     DebateForm,
     DebateResult,
+    DebateSeed,
     JudgeVerdict,
     RoundBoundary,
     RoundDecision,
     RoundResult,
     RoundRunner,
     SideTurn,
+    UserInterjection,
 )
 
 logger = get_logger(__name__)
@@ -190,6 +193,24 @@ def _turns_block(turns: Sequence[SideTurn], *, clip: int = _TURN_CLIP) -> str:
     return "\n\n".join(blocks)
 
 
+def _interjections_block(rounds: Sequence[RoundResult]) -> str:
+    """全场用户追问块（喂给 :meth:`Moderator._brief`）—— 把各轮承接的用户追问按轮汇总，让简报
+    【交代是否已回应】（未应答的进 open_questions）。无追问返回空串（简报 prompt 不变、零变化）。"""
+    items: list[str] = []
+    for rr in rounds:
+        for i in rr.user_interjections:
+            target = f"（向 {i.target_key}）" if i.target_key else "（向全场）"
+            state = "已在该轮请辩手回应" if i.answered else "未及回应"
+            items.append(f"- 第 {rr.round_no} 轮{target}：{i.ask} — {state}")
+    if not items:
+        return ""
+    body = "\n".join(items)
+    return (
+        "辩论过程中用户提出的【追问】（你的简报须交代是否已被回应；仍未答清的须进 "
+        f"open_questions / recommendation，别让用户的问题石沉大海）：\n{body}\n\n"
+    )
+
+
 class Moderator:
     """主持人辩论循环（辩论编排设计.md §二）。
 
@@ -227,6 +248,7 @@ class Moderator:
         on_round_start: RoundStartHook | None = None,
         on_round: RoundHook | None = None,
         on_round_boundary: RoundBoundaryHook | None = None,
+        seed: DebateSeed | None = None,
     ) -> DebateResult:
         """驱动整场辩论到收敛 / 上限，返回双产物（决策简报 + 交锋叙事线）。
 
@@ -241,20 +263,37 @@ class Moderator:
         辩）。钩子返回 ``None``（超时 / 无活跃用户）则回退到裁判自动收敛。未接钩子时循环逐字不变
         （与 ``checkpoint`` marker 无 hook 即惰性同辙），故非交互辩论零行为变化。``max_rounds`` 始
         终是硬上限：用户连续 ``CONTINUE`` 也不会越过它。
+
+        结构化补轮（可逆叫停·B，辩论编排设计.md §6.6）：``seed`` 非空时本场是
+        【续辩】——:meth:`_frame` 让焦点正交于上一场已谈焦点（不重复），首个新轮辩手 task 注入上一场
+        摘要（由 ``run_round`` 实现读取，见 ``rounds.first_round``），从「读懂上一场」处接着
+        往深里辩。``None``（全新辩论）时逐字不变。
         """
         rounds: list[RoundResult] = []
         stop_reason = STOP_MAX_ROUNDS  # 循环跑满未 break ⇒ 触上限兜底
         # 交互式「加角度」：用户在上一轮边界给的下一轮焦点覆写（空=主持人自动定焦点）。
         focus_override = ""
+        # 交互式「追问」：用户在上一轮边界注入、待【本轮】辩手正面回应的问题（消费后清空）。
+        pending_interjections: list[UserInterjection] = []
         for round_no in range(1, config.policy.max_rounds + 1):
-            focus = focus_override or await self._frame(config, rounds)
+            focus = focus_override or await self._frame(config, rounds, seed=seed)
             focus_override = ""
+            interjections = pending_interjections
+            pending_interjections = []
             # 焦点既定、发言之前先报本轮开场（前端据此亮出焦点头，再流式各方发言）。
             if on_round_start is not None:
                 await on_round_start(round_no, focus)
             turns = list(
-                await run_round(round_no=round_no, focus=focus, sides=config.sides, history=rounds)
+                await run_round(
+                    round_no=round_no,
+                    focus=focus,
+                    sides=config.sides,
+                    history=rounds,
+                    interjections=interjections,
+                )
             )
+            # 追问被本轮承接（无论发言成败，本轮确已带着它跑过）⇒ 标记 answered，随本轮留痕复盘。
+            answered = [replace(i, answered=True) for i in interjections]
             if not any(t.ok for t in turns):
                 # 全员失败：无可裁判内容，主持人提前终止并出降级简报（别假装辩成了）。
                 verdict = JudgeVerdict(
@@ -270,6 +309,7 @@ class Moderator:
                     turns,
                     verdict,
                     summary="本轮各方均未产出有效发言，辩论提前终止。",
+                    user_interjections=answered,
                 )
                 rounds.append(rr)
                 if on_round is not None:
@@ -280,7 +320,7 @@ class Moderator:
             verdict = await self._judge(config, focus, turns, rounds)
             # rounds 此刻是【已完成的历史轮】（本轮 rr 尚未 append）——喂给 _summarize 作上一轮锚点。
             summary = await self._summarize(config, focus, turns, verdict, rounds)
-            rr = RoundResult(round_no, focus, turns, verdict, summary)
+            rr = RoundResult(round_no, focus, turns, verdict, summary, user_interjections=answered)
             rounds.append(rr)
             if on_round is not None:
                 await on_round(rr)
@@ -298,8 +338,21 @@ class Moderator:
                 if boundary is not None:
                     if boundary.decision is RoundDecision.CONCLUDE:
                         stop_reason = STOP_USER_CONCLUDED
+                        # 收场仍带追问 ⇒ 无后续轮可答，挂到本轮记为未应答（honest gap，别静默丢）。
+                        if boundary.ask:
+                            rr.user_interjections.append(
+                                UserInterjection(
+                                    ask=boundary.ask,
+                                    target_key=boundary.ask_target,
+                                    answered=False,
+                                )
+                            )
                         break
                     focus_override = boundary.focus  # CONTINUE：续辩（可带「加角度」焦点）
+                    if boundary.ask:  # CONTINUE 带追问 ⇒ 待下一轮承接（消费时翻 answered）。
+                        pending_interjections = [
+                            UserInterjection(ask=boundary.ask, target_key=boundary.ask_target)
+                        ]
                     continue
 
             if verdict.converged:
@@ -308,12 +361,32 @@ class Moderator:
                 )
                 break
 
+        # 用户在轮数上限边界仍追问 CONTINUE 但已无后续轮承接 ⇒ 挂到最后一轮记未应答（别静默丢）。
+        if pending_interjections and rounds:
+            rounds[-1].user_interjections.extend(pending_interjections)
+
         brief = await self._brief(config, rounds)
         return DebateResult(config=config, rounds=rounds, brief=brief, stop_reason=stop_reason)
 
     # ── 第1步：定本轮议题 ────────────────────────────────────────────────
-    async def _frame(self, config: DebateConfig, history: list[RoundResult]) -> str:
-        if not history:
+    async def _frame(
+        self, config: DebateConfig, history: list[RoundResult], seed: DebateSeed | None = None
+    ) -> str:
+        # 结构化补轮·B：上一场已谈焦点（续辩须正交于它，不重复换说法重谈）。扁平 if/elif/else 避免
+        # 嵌套加深缩进（否则全新辩论 prompt 行被推过 100 字超长）。
+        prior_focuses = seed.covered_focuses if seed else []
+        if not history and prior_focuses:
+            # 续辩首轮：把上一场焦点列为「已覆盖」，逼出一个正交的新焦点（更深 / 换维度）。
+            covered = "\n".join(f"- {f}" for f in prior_focuses)
+            user = (
+                f"辩论命题：{config.motion}\n\n这是【续辩】——上一场已覆盖这些焦点"
+                f"（本场须正交、勿换说法重谈）：\n{covered}\n\n"
+                f"参与方：\n{_sides_block(config)}\n\n{_frame_form_hint(config.form)}\n\n"
+                "请为【本场第一轮】定一个【正交于已谈焦点】的争议点——换一个尚未谈透的"
+                "维度或更深一层，把上一场辩论往前推。焦点须是【一句≤30 字短语】、像小标题，"
+                '聚焦单一争议点、不复述命题。只输出 JSON：{"focus": "..."}'
+            )
+        elif not history:
             user = (
                 f"辩论命题：{config.motion}\n\n参与方：\n{_sides_block(config)}\n\n"
                 f"{_frame_form_hint(config.form)}\n\n"
@@ -326,7 +399,10 @@ class Moderator:
             last = history[-1]
             # 已覆盖焦点清单（全部历史轮，非仅上轮）：让主持人据【整场】已谈维度挑下一轮焦点，
             # 强制【正交】——根治「焦点换汤不换药 → 续写者输入几乎相同 → 输出相似」的冗余轮。
-            covered = "\n".join(f"- 第 {rr.round_no} 轮：{rr.focus}" for rr in history)
+            # 续辩时上一场焦点也并入「已覆盖」，跨场也不重谈。
+            covered_lines = [f"- （上一场）{f}" for f in prior_focuses]
+            covered_lines += [f"- 第 {rr.round_no} 轮：{rr.focus}" for rr in history]
+            covered = "\n".join(covered_lines)
             user = (
                 f"辩论命题：{config.motion}\n\n已覆盖焦点（本轮须正交、勿换说法重谈）：\n{covered}\n\n"
                 f"上一轮小结：{_clip(last.summary, _SUMMARY_CLIP)}\n"
@@ -456,6 +532,9 @@ class Moderator:
             f"第 {rr.round_no} 轮（{rr.focus}）：{_clip(rr.summary, _SUMMARY_CLIP)}"
             for rr in rounds
         )
+        # 用户追问（交互式逐轮）：把全场用户注入的问题喂进简报，让结论【交代是否已回应】——未应答的
+        # 追问应进 open_questions（仅剩需你拍板/查证的点），别让用户的问题石沉大海。无追问则省略。
+        followups_block = _interjections_block(rounds)
         last_turns = _turns_block(rounds[-1].ok_turns, clip=_TURN_CLIP)
         sides_keys = ", ".join(s.key for s in config.sides)
         is_red_team = config.form is DebateForm.RED_TEAM
@@ -474,7 +553,7 @@ class Moderator:
         )
         user = (
             f"辩论命题：{config.motion}\n参与方：\n{_sides_block(config)}\n\n"
-            f"各轮推进：\n{timeline}\n\n最后一轮各方发言：\n{last_turns}\n\n"
+            f"各轮推进：\n{timeline}\n\n{followups_block}最后一轮各方发言：\n{last_turns}\n\n"
             f"{_brief_form_hint(config.form)}\n"
             "请据此产出简报，为用户负责到底（不要只把各方观点并排甩给他）：各方最强论点要"
             "【去水压成单句、只留命门】、leaning / confidence 要写清【反转条件】（在什么前提下"

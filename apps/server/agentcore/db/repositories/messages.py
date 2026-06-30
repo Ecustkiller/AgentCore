@@ -159,7 +159,7 @@ class MessageRepository:
     ) -> Sequence[Message]:
         """The most recent ``limit`` messages STRICTLY NEWER than ``after``, chronological.
 
-        The compaction loader's window above the watermark (执行引擎 §十三 长对话压缩):
+        The compaction loader's window above the watermark (执行引擎 §三 长对话压缩):
         replays the un-folded tail (everything after ``compacted_through``) prefixed by
         the rolling summary. Recent-biased like ``list_recent`` — under a stalled
         compaction the tail can outgrow ``limit``, and dropping the OLDEST of it (which
@@ -309,7 +309,7 @@ class MessageRepository:
         reply (and any later turns) before re-running. Messages have no
         soft-delete column — replacing a turn means the old branch is gone
         (conversation branching is a separate, later feature). Each dropped
-        message's ``turn_journal`` replay stream goes with it (§18.3 唯一事实源 — it
+        message's ``turn_journal`` replay stream goes with it (§8.3 唯一事实源 — it
         could never project without its message).
         """
         await delete_journal_after(
@@ -331,7 +331,7 @@ class MessageRepository:
         won't match (the route has already proven ownership of this conversation —
         IDOR-safe; the turn_journal delete is scoped the same way, so a cross-tenant
         id touches neither row). Messages have no soft-delete column, so this is a
-        physical delete; its ``turn_journal`` replay stream is dropped with it (§18.3
+        physical delete; its ``turn_journal`` replay stream is dropped with it (§8.3
         唯一事实源), but the append-only ``cost_events`` ledger is intentionally left
         intact (real spend is never rewritten — 不变量 #1). No-op (False) if absent.
         """

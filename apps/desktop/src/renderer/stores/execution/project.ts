@@ -8,6 +8,7 @@ import {
   type ExecutionPlan,
   type ExecutionStatus,
   type RunNode,
+  type TeamNote,
   toolLabel,
 } from "./types";
 
@@ -100,6 +101,9 @@ export function projectExecution(
   // 调度埋点量化 (深层诊断指标): WaveScheduler snapshots fold here in fire order, one per
   // delegate segment (a checkpoint / scope yield + resume appends another).
   const batches: BatchMetricsSnapshot[] = [];
+
+  // 团队便签墙 (§2.2 通): notes workers broadcast to siblings, in post order (deduped by noteId).
+  const teamNotes: TeamNote[] = [];
 
   for (const f of frames) {
     switch (f.kind) {
@@ -298,6 +302,35 @@ export function projectExecution(
         batches.push(f.metrics);
         break;
       }
+      case "team_note_posted": {
+        // 团队便签墙 (§2.2 通): a worker broadcast a one-line decision / heads-up to its
+        // concurrent siblings — accrue TURN-LEVEL (not onto a node), in post order, deduped
+        // by noteId for replay safety. Mirrors the backend oracle + mobile fold.
+        if (!teamNotes.some((n) => n.noteId === f.noteId)) {
+          teamNotes.push({
+            noteId: f.noteId,
+            runId: f.runId,
+            agentId: f.agentId,
+            role: f.role,
+            kind: f.noteKind,
+            text: f.text,
+            ts: f.ts,
+            status: "active",
+            supersedes: f.supersedes,
+          });
+        }
+        // 便签会过期 → supersession (§2.2): an amendment (carries `supersedes`) marks its TARGET
+        // superseded (改写) / voided (作废) — `supersedeMode` is the shared discriminator. The
+        // target was posted earlier so it is already in the list (frames replay in order).
+        if (f.supersedes) {
+          const target = teamNotes.find((n) => n.noteId === f.supersedes);
+          if (target) {
+            target.status =
+              f.supersedeMode === "void" ? "voided" : "superseded";
+          }
+        }
+        break;
+      }
       case "run_escalation": {
         // 升级实时可见 (非阻塞): a worker flagged a decision/blocker for the CEO — append it
         // to its run so the node shows a ⚠️ badge and the card raises a live notice the
@@ -430,6 +463,7 @@ export function projectExecution(
     debate,
     debateRounds,
     debateDecisions,
+    teamNotes,
   };
 }
 
@@ -491,6 +525,8 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
       if (steered) parts.push(`操舵 ${steered}`);
       return `计划已调整 · ${parts.join(" · ")}`;
     }
+    case "team_note_posted":
+      return `${frame.role || role(frame.agentId)} 贴便签`;
   }
 }
 

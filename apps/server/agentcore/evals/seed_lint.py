@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentcore.evals.checks import CHECK_NAMES
+from agentcore.evals.mast import MAST_CODES
 from agentcore.evals.prompt_profiles import PROFILE_NAMES
 
 _CATEGORIES = {"qa", "retrieval", "team", "tool_use", "no_fabrication", "routing"}
@@ -124,6 +125,12 @@ def lint_case(raw: dict[str, Any]) -> list[str]:
     profile = raw.get("prompt_profile")
     if profile is not None and profile not in PROFILE_NAMES:
         errors.append(f"[{cid}] prompt_profile={profile!r} 未注册（须属 {sorted(PROFILE_NAMES)}）")
+
+    # 学·度量 §2.5：声明的 MAST 失败标签必须是已注册的 14 类之一（写错码立刻挂，避免聚合时
+    # 静默漏标）。非 MAST 套件不挂此字段、平凡通过。
+    mast = raw.get("mast")
+    if mast is not None and mast not in MAST_CODES:
+        errors.append(f"[{cid}] mast={mast!r} 非法（须属 MAST 14 类 {sorted(MAST_CODES)}）")
 
     return errors
 

@@ -1,4 +1,4 @@
-"""Unit tests for the per-leaf memory route helpers (记忆作用域与画像分层 P2).
+"""Unit tests for the per-leaf memory route helpers (Agent记忆与知识系统 §1.6).
 
 The full HTTP round-trip (CAS / clear / scope) is exercised by the PG-gated
 ``tests/integration/test_memory_api.py``; here we pin the pure ``kind × folder_id →

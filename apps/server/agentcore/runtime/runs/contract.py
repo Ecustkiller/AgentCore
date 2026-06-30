@@ -9,7 +9,7 @@ A worker's product is accepted only if it satisfies its node's delivery contract
 校验的后续处置（带反馈返工 / 按 ``strict`` 决定硬退或软提醒）在执行器里，本模块只产出结论
 （:class:`ContractVerdict`）、给模型的修正说明与产出要求描述，保持纯函数、可独立单测。
 
-→ 见设计: docs/03-AI核心/执行引擎架构设计.md §十八（Run 模型）
+→ 见设计: docs/03-AI核心/执行引擎架构设计.md §八（Run 模型）
 """
 
 from __future__ import annotations

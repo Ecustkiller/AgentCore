@@ -21,7 +21,7 @@ export interface TurnRailItem {
   /** Projected execution status for a team turn; null for a simple Q&A turn. */
   status: ExecutionStatus | null;
   running: boolean;
-  /** 待你拍板 count on this turn — drives the warning tone (outranks run state). */
+  /** 待你拍板 count on this turn — drives the primary tone (outranks run state). */
   pendingDecisions: number;
   /** 待救火 — drives the destructive tone (outranks run state, under 待你拍板). */
   recoverable: boolean;
@@ -39,7 +39,7 @@ const RAIL_MIN_TURNS = 5;
 function dotClass(t: TurnRailItem, focused: boolean): string {
   const tone =
     t.pendingDecisions > 0
-      ? "bg-warning"
+      ? "bg-primary"
       : t.recoverable
         ? "bg-destructive"
         : t.running

@@ -8,7 +8,7 @@ so a turn is never resumed twice) + :func:`list_paused_turns` (a conversation's 
 frames on reopen). Uses ``async_session_factory`` directly (not an injected request
 session), matching the cost-ledger / session-roster persistence posture.
 
-The paused turn's journal-so-far rides the ``turn_journal`` table (唯一事实源, §18.3),
+The paused turn's journal-so-far rides the ``turn_journal`` table (唯一事实源, §8.3),
 NOT the frame: :func:`save_paused_turn` mirrors it there and :func:`claim_paused_turn`
 re-hydrates it, so the replay stream has a single home whether the turn is paused or
 completed.
@@ -43,7 +43,7 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
     scope) so the persisted pause links back to its originating turn's logs.
     Upsert: re-pausing the same turn (resume → pause again) overwrites in place.
     The journal-so-far is NOT in the frame — it is mirrored into ``turn_journal``
-    (唯一事实源, §18.3) by :func:`_save_pause_journal`.
+    (唯一事实源, §8.3) by :func:`_save_pause_journal`.
     """
     trace_id = suspension.trace_id or get_log_value("trace_id") or None
     try:
@@ -109,7 +109,7 @@ async def _save_pause_journal(suspension: TurnSuspension, trace_id: str | None) 
     (``record`` replaces). Re-pausing (resume → pause again) replaces the cumulative
     stream. A failure logs and degrades — never breaks the pause.
 
-    Persists the §18.3 fact-log stream (:attr:`TurnSuspension.journal_entries` — the
+    Persists the §8.3 fact-log stream (:attr:`TurnSuspension.journal_entries` — the
     suspending face's ``current_fact_log`` snapshot: execution facts interleaved with
     forwarded display facts) so the paused journal is ``window_from_journal``-rebuildable
     for resume.
@@ -162,7 +162,7 @@ async def claim_paused_turn(
     The journal-so-far is re-hydrated from ``turn_journal`` (唯一事实源, it is not in
     the frame) onto :attr:`TurnSuspension.journal`, so the resume seeds + replays the
     whole pre-pause graph. The raw loaded stream is ALSO carried onto
-    :attr:`TurnSuspension.journal_entries` (the §18.3 fact-log stream, incl. the execution
+    :attr:`TurnSuspension.journal_entries` (the §8.3 fact-log stream, incl. the execution
     facts the display projection drops): the resume folds it via ``window_from_journal`` to
     rebuild the captain window (执行级事件溯源 Phase 2 ④/⑤ — the window is a projection of the
     journal, no longer read from a frame ``transcript`` blob, which is no longer serialized).

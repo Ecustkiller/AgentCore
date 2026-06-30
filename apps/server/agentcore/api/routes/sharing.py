@@ -24,7 +24,12 @@ from agentcore.api.dependencies import (
     get_conversation_share_repo,
     get_message_repo,
 )
-from agentcore.api.schemas import CreateShareRequest, ShareListResponse, ShareSummary, StatusResponse
+from agentcore.api.schemas import (
+    CreateShareRequest,
+    ShareListResponse,
+    ShareSummary,
+    StatusResponse,
+)
 from agentcore.conversation.sharing import build_share_snapshot, render_share_html
 from agentcore.core.errors import NotFoundError
 from agentcore.db.models import ConversationShare

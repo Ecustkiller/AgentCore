@@ -233,6 +233,28 @@ export interface DebateRoundDecision {
   decisionFocus: string;
 }
 
+/** 团队便签墙 (§2.2 通): one note a worker broadcast to its CONCURRENT siblings via `post_note`
+ * (`team_note_posted`), folded TURN-LEVEL onto {@link Execution.teamNotes} (not onto a graph
+ * node) for the「团队便签」panel. `kind` is `decision` (我定了 — others depend on it: an interface /
+ * field name / format / naming) or `heads_up` (提个醒 — a pitfall / discovery); `runId`/`agentId`/
+ * `role` are the author (谁贴的); `ts` is epoch seconds. `noteId` is the stable key (dedup). In
+ * post order. Mirrors the conformance ProjectedTeamNote (golden-pinned).
+ *
+ * 便签会过期 → supersession (§2.2): `status` is the lifecycle (`active` / `superseded` 改写 /
+ * `voided` 作废); `supersedes` is the `noteId` an amendment note 改写/作废s (else `null`), so the
+ * panel can strike a stale note and link an amendment to its origin. */
+export interface TeamNote {
+  noteId: string;
+  runId: string;
+  agentId: string;
+  role: string;
+  kind: string;
+  text: string;
+  ts: number | null;
+  status: "active" | "superseded" | "voided";
+  supersedes: string | null;
+}
+
 export interface RunNode {
   id: string;
   agentId: string;
@@ -362,6 +384,11 @@ export interface Execution {
    * local & transport-only —— STRIPPED from the conformance ProjectedTurn、重载恒 `[]`（事件不进
    * journal）。仅 `debate(interactive=true)` 且有活跃用户的辩论非空；其余恒 `[]`。 */
   debateDecisions: DebateRoundDecision[];
+  /** 团队便签墙 (§2.2 通): the notes workers broadcast to their concurrent siblings this turn
+   * (`team_note_posted`), in post order, deduped by noteId — folded from the frame stream by
+   * {@link projectExecution}. Journaled, so it replays on reload (hydrateFromJournal). Empty for
+   * a single-agent turn or a multi-agent turn with no notes. */
+  teamNotes: TeamNote[];
 }
 
 /**

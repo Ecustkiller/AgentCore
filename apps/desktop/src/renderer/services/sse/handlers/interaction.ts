@@ -1,6 +1,7 @@
 import { useApprovalStore } from "@/stores/approvals";
 import { useConversationStore } from "@/stores/conversation";
 import { frameFromEvent, useExecutionStore } from "@/stores/execution";
+import { usePausedTurnStore } from "@/stores/pausedTurns";
 import type {
   ApprovalRequiredPayload,
   ApprovalResolvedPayload,
@@ -55,6 +56,9 @@ export function handleInteractionEvent(
           p.selected ?? [],
           conversationId,
         );
+      // The live resolve deleted the durable frame server-side; mirror it so a
+      // 待恢复 card from a duplicate surface can't linger and 404 on click.
+      usePausedTurnStore.getState().removeByCheckpoint(p.checkpoint_id);
       return true;
     }
     case "question_posted": {
@@ -92,6 +96,9 @@ export function handleInteractionEvent(
           p.note ?? "",
           conversationId,
         );
+      // The live resolve deleted the durable frame server-side; mirror it so a
+      // 待恢复 card from a duplicate surface can't linger and 404 on click.
+      usePausedTurnStore.getState().removeByCheckpoint(p.checkpoint_id);
       {
         const mid = execMessageId(conversationId);
         const frame = frameFromEvent(event);

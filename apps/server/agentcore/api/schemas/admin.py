@@ -147,6 +147,10 @@ class AdminUsageSummary(BaseModel):
     month: UsageWindow
     # This month's spend split by user (工资单 by user), spend-desc, >0 only, capped.
     month_by_user: list[AdminUserCostLine]
+    # This month's spend split by role across *every* account (团队工资单 by role,
+    # 含 vision 读图子调用), spend-desc, >0 only — the platform-wide counterpart of
+    # ``UsageSummary.month_by_role``.
+    month_by_role: list[RoleCostLine]
     # Last 7 UTC days incl today, oldest-first, zero-filled — the platform trend.
     recent_daily_cost: list[DailyCost]
     cny_per_usd: float
@@ -225,6 +229,14 @@ class TurnHealthWindow(BaseModel):
     delegated_rate: float
     input_tokens: int
     output_tokens: int
+    # 协作质量 (学·度量 §2.5): first_plan_survival_rate = share of delegated turns whose opening
+    # plan ran without a supervised boundary handing control back (首计划存活率); scope_signals /
+    # revises / escalations are raw window sums (漂移 / 返工 / 升级). Default 0 so a window with
+    # no delegated turns renders clean.
+    first_plan_survival_rate: float = 0.0
+    scope_signals: int = 0
+    revises: int = 0
+    escalations: int = 0
 
 
 class DailyTurns(BaseModel):

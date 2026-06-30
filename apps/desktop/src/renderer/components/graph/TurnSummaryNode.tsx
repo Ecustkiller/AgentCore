@@ -30,9 +30,11 @@ export interface TurnSummaryData {
   agentCount: number;
   completed: number;
   total: number;
-  /** 图上指挥扫视 (前端UX设计.md §6.2): unanswered boss decisions on this folded turn
-   * (ask_user / plan_review / 工作者上报). >0 → a warning「待你拍板」chip so the spine
-   * shows which folded turns await you without focusing each. */
+  /** 图上指挥扫视 (前端UX设计.md §6.2): unanswered boss decisions on this folded turn —
+   * 工作者上报 (escalation) + a live ask_user / plan_review. >0 → a warning「待你拍板」chip so
+   * the spine shows which folded turns await you without focusing each. 挂起即收口 (②): a
+   * finalized checkpoint pause is NOT counted here — it shows via the `paused` status ring +
+   * the dock's durable resume (see {@link countPendingDecisions}). */
   pendingDecisions: number;
   /** 图上指挥扫视: this folded turn has recoverable terminal trouble (failed / cancelled
    * / 部分失败). Drives a destructive「待救火」chip; shown only when no decision pends
@@ -54,8 +56,8 @@ const STATUS_STYLES: Record<
     icon: <Loader2 size={14} className="animate-spin text-primary" />,
   },
   paused: {
-    ring: "ring-warning",
-    icon: <Pause size={14} className="text-warning" />,
+    ring: "ring-primary",
+    icon: <Pause size={14} className="text-primary" />,
   },
   completed: {
     ring: "ring-success",
@@ -100,7 +102,7 @@ export function TurnSummaryNode({ data }: NodeProps) {
               a long spine flags which turns need the boss. 待你拍板 (actionable) outranks
               待救火 (terminal) when both apply; the title truncates to make room. */}
           {d.pendingDecisions > 0 ? (
-            <span className="flex shrink-0 items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
               <AlertTriangle size={11} />
               待你拍板{d.pendingDecisions > 1 ? ` ${d.pendingDecisions}` : ""}
             </span>

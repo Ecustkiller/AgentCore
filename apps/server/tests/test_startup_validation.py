@@ -62,3 +62,38 @@ def test_platform_mode_tolerates_missing_master_key(prod_settings, monkeypatch):
     monkeypatch.setattr(prod_settings, "billing_mode", "platform")
     monkeypatch.setattr(prod_settings, "encryption_key", "")
     _validate_production_security()  # no raise
+
+
+def test_cloud_code_execute_without_ack_refuses_boot(prod_settings, monkeypatch):
+    """SEC-005: enabling cloud code_execute (RCE in the API container) without the
+    explicit unsafe acknowledgement must fail closed, so a single flag can't expose it."""
+    monkeypatch.setattr(prod_settings, "billing_mode", "platform")
+    monkeypatch.setattr(prod_settings, "code_execute_cloud_enabled", True)
+    monkeypatch.setattr(prod_settings, "code_execute_cloud_unsafe_ack", False)
+    with pytest.raises(RuntimeError, match="CODE_EXECUTE_CLOUD_ENABLED"):
+        _validate_production_security()
+
+
+def test_cloud_code_execute_with_ack_boots(prod_settings, monkeypatch):
+    """The deliberate second flag (CODE_EXECUTE_CLOUD_UNSAFE_ACK) lets an operator who
+    has a real sandbox in front opt in explicitly."""
+    monkeypatch.setattr(prod_settings, "billing_mode", "platform")
+    monkeypatch.setattr(prod_settings, "code_execute_cloud_enabled", True)
+    monkeypatch.setattr(prod_settings, "code_execute_cloud_unsafe_ack", True)
+    _validate_production_security()  # no raise
+
+
+def test_cloud_code_execute_default_off_boots(prod_settings, monkeypatch):
+    # Default posture: cloud code_execute off → nothing to acknowledge.
+    monkeypatch.setattr(prod_settings, "billing_mode", "platform")
+    monkeypatch.setattr(prod_settings, "code_execute_cloud_enabled", False)
+    monkeypatch.setattr(prod_settings, "code_execute_cloud_unsafe_ack", False)
+    _validate_production_security()  # no raise
+
+
+def test_debug_skips_cloud_code_execute_guard(monkeypatch):
+    # debug bypasses every production guard, including the cloud-RCE one.
+    monkeypatch.setattr(settings, "debug", True)
+    monkeypatch.setattr(settings, "code_execute_cloud_enabled", True)
+    monkeypatch.setattr(settings, "code_execute_cloud_unsafe_ack", False)
+    _validate_production_security()  # no raise

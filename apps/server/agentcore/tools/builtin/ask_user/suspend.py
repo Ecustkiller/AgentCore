@@ -32,7 +32,7 @@ async def persist_suspension(
     questions: list[dict[str, Any]],
     style_options: list[dict[str, Any]],
     required_event: Any,
-) -> None:
+) -> bool:
     """Capture + persist the durable suspension frame for this ask_user pause (2b).
 
     Reads the CEO transcript off the ``captain_transcript`` contextvar (published
@@ -40,9 +40,14 @@ async def persist_suspension(
     capture is skipped (the live resolve still works). Folds the about-to-emit
     ``checkpoint_required`` into the frame's journal so a resume replays the
     prompt+resolution as a pair. Best-effort: the saver swallows its own errors.
+
+    Returns ``True`` iff a durable frame was actually saved. The 挂起即收口 (②)
+    finalize path keys its「end the turn now」decision on this so it NEVER finalizes a
+    turn it could not later resume — an un-wired / transcript-less construction (tests,
+    标准 standalone) returns ``False`` and falls back to the in-memory wait.
     """
     if not can_persist_suspension(tool):
-        return
+        return False
     from agentcore.core.log_context import get_log_value
     from agentcore.runtime.suspension import (
         AskUserSuspension,
@@ -54,7 +59,7 @@ async def persist_suspension(
     transcript = captain_transcript.get()
     if not transcript:
         logger.info("suspension.no_transcript", checkpoint_id=checkpoint_id)
-        return
+        return False
     from agentcore.runtime.facts import snapshot_fact_log
 
     journal = list(tool.sink.execution_journal() or [])
@@ -65,7 +70,7 @@ async def persist_suspension(
             "timestamp": required_event.timestamp,
         }
     )
-    # The §18.3 fact-log stream at this same instant — the persist source (the
+    # The §8.3 fact-log stream at this same instant — the persist source (the
     # display ``journal`` above is the degraded fallback). The suspending card is
     # emitted only AFTER this save, so fold it in so the persisted stream carries it.
     journal_entries = snapshot_fact_log(
@@ -100,6 +105,7 @@ async def persist_suspension(
         trace_id=get_log_value("trace_id"),
     )
     await tool.suspension_saver(frame)  # type: ignore[misc]
+    return True
 
 
 async def drop_suspension(tool: AskUserTool) -> None:

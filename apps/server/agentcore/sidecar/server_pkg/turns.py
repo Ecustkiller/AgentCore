@@ -27,6 +27,10 @@ class TurnExecutionMixin:
         # The desktop mints one trace_id per local turn and threads it here + into the
         # write-back, so this turn's proxied LLM calls and its persisted reply share it.
         trace_id = str(params.get("traceId") or "")
+        # 结构化补轮·B（可逆叫停）：续辩 turn 从收场卡发起时带上一场 debate 的投影种子（普通回合为
+        # None）。引擎据此让本场 debate 续上一场（焦点正交、首轮辩手读到上一场摘要）。
+        raw_seed = params.get("debateSeed")
+        debate_seed = raw_seed if isinstance(raw_seed, dict) else None
 
         turn_creds = self._creds_for(conversation_id, trace_id)
 
@@ -35,30 +39,37 @@ class TurnExecutionMixin:
         saver, deleter = self._suspension_hooks()
         pump = asyncio.create_task(self._pump(turn_id, sink))
         try:
-            # Bind the turn's trace_id here (the cloud binds it in stream_chat; the engine
-            # itself doesn't) so the engine's message_start carries it and the live bubble
-            # joins the same trace as the proxy logs + write-back (打通气泡↔日志, live ==
-            # reload). Task-local + auto-restored; copied into delegated worker tasks.
-            with log_context(
-                trace_id=trace_id,
-                conversation_id=conversation_id,
-                user_id=self._user_id,
-            ):
-                from agentcore.sidecar import server as sidecar_server
-
-                result = await sidecar_server.run_chat_pipeline(
+            try:
+                # Bind the turn's trace_id here (the cloud binds it in stream_chat; the engine
+                # itself doesn't) so the engine's message_start carries it and the live bubble
+                # joins the same trace as the proxy logs + write-back (打通气泡↔日志, live ==
+                # reload). Task-local + auto-restored; copied into delegated worker tasks.
+                with log_context(
+                    trace_id=trace_id,
                     conversation_id=conversation_id,
-                    user_message=user_message,
-                    history=list(history),
-                    sink=sink,
                     user_id=self._user_id,
-                    backend=backend,
-                    approvals_enabled=self._approvals_enabled,
-                    llm_credentials=turn_creds,
-                    suspension_saver=saver,
-                    suspension_deleter=deleter,
-                )
-            await pump  # pipeline closed the sink → all events flushed
+                ):
+                    from agentcore.sidecar import server as sidecar_server
+
+                    result = await sidecar_server.run_chat_pipeline(
+                        conversation_id=conversation_id,
+                        user_message=user_message,
+                        history=list(history),
+                        sink=sink,
+                        user_id=self._user_id,
+                        backend=backend,
+                        approvals_enabled=self._approvals_enabled,
+                        llm_credentials=turn_creds,
+                        suspension_saver=saver,
+                        suspension_deleter=deleter,
+                        debate_seed=debate_seed,
+                    )
+            finally:
+                # The pipeline no longer closes the sink (its owner does); the sidecar owns
+                # this one, so close it on EVERY path — success or crash — or the pump would
+                # await the None sentinel forever.
+                sink.close()
+            await pump  # sink closed above → all events flushed
             await self._send(protocol.make_result(request_id, trim_result(turn_id, result)))
         except asyncio.CancelledError:
             with contextlib.suppress(Exception):
@@ -100,31 +111,37 @@ class TurnExecutionMixin:
         saver, deleter = self._suspension_hooks()
         pump = asyncio.create_task(self._pump(turn_id, sink))
         try:
-            # Bind this continuation's trace_id (same rationale as _run_turn) so the
-            # resumed reply's message_start + local logs join its proxy logs + write-back.
-            with log_context(
-                trace_id=trace_id,
-                conversation_id=suspension.conversation_id,
-                user_id=self._user_id,
-            ):
-                from agentcore.sidecar import server as sidecar_server
+            try:
+                # Bind this continuation's trace_id (same rationale as _run_turn) so the
+                # resumed reply's message_start + local logs join its proxy logs + write-back.
+                with log_context(
+                    trace_id=trace_id,
+                    conversation_id=suspension.conversation_id,
+                    user_id=self._user_id,
+                ):
+                    from agentcore.sidecar import server as sidecar_server
 
-                result = await sidecar_server.resume_chat_pipeline(
-                    suspension=suspension,
-                    decision=decision,
-                    note=note,
-                    selected=selected,
-                    sink=sink,
-                    backend=backend,
-                    # The Sidecar has no message DB, so the prior-turn history rides in the
-                    # local frame record (rehydrated onto the suspension at claim) — the resume
-                    # splices it ahead of the journal-folded rounds (Phase 2 ⑤).
-                    history=suspension.history,
-                    llm_credentials=self._creds_for(suspension.conversation_id, trace_id),
-                    suspension_saver=saver,
-                    suspension_deleter=deleter,
-                )
-            await pump  # pipeline closed the sink → all events flushed
+                    result = await sidecar_server.resume_chat_pipeline(
+                        suspension=suspension,
+                        decision=decision,
+                        note=note,
+                        selected=selected,
+                        sink=sink,
+                        backend=backend,
+                        # The Sidecar has no message DB, so the prior-turn history rides in the
+                        # local frame record (rehydrated onto the suspension at claim) — the resume
+                        # splices it ahead of the journal-folded rounds (Phase 2 ⑤).
+                        history=suspension.history,
+                        llm_credentials=self._creds_for(suspension.conversation_id, trace_id),
+                        suspension_saver=saver,
+                        suspension_deleter=deleter,
+                    )
+            finally:
+                # The pipeline no longer closes the sink (its owner does); the sidecar owns
+                # this one, so close it on EVERY path — success or crash — or the pump would
+                # await the None sentinel forever.
+                sink.close()
+            await pump  # sink closed above → all events flushed
             await self._send(protocol.make_result(request_id, trim_result(turn_id, result)))
         except asyncio.CancelledError:
             with contextlib.suppress(Exception):

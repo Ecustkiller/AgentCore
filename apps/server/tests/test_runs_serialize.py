@@ -118,22 +118,28 @@ def test_escalations_from_transcript_collects_in_call_order():
     ]
 
 
-def test_escalations_from_transcript_marks_scope_kind():
-    # 受监督的波循环: escalate(kind="scope") is harvested with kind="scope"
-    # (the WaveScheduler consumes it at a SCOPE boundary so the CEO re-steers the un-run
-    # tail); an unknown kind degrades to "normal", and a plain escalate defaults to it.
+def test_escalations_from_transcript_marks_scope_and_dep_kinds():
+    # 受监督的波循环: escalate(kind="scope") 职责偏离 and escalate(kind="dep") 依赖缺口
+    # (§2.4 卡在缺输入 X) are BOTH harvested with their kind (the WaveScheduler consumes both
+    # at the reactive boundary); an unknown kind degrades to "normal", a plain escalate defaults.
     transcript = [
         _assistant_call(
             "c1",
             "escalate",
             '{"question": "真问题是X不是Y", "assumption": "暂按X", "kind": "scope"}',
         ),
-        _assistant_call("c2", "escalate", '{"question": "未知档", "kind": "weird"}'),
-        _assistant_call("c3", "escalate", '{"question": "普通问题"}'),
+        _assistant_call(
+            "c2",
+            "escalate",
+            '{"question": "缺错误返回结构才能写测试", "assumption": "暂按 {code,msg}", "kind": "dep"}',
+        ),
+        _assistant_call("c3", "escalate", '{"question": "未知档", "kind": "weird"}'),
+        _assistant_call("c4", "escalate", '{"question": "普通问题"}'),
     ]
     out = escalations_from_transcript(transcript)
-    assert [e["kind"] for e in out] == ["scope", "normal", "normal"]
+    assert [e["kind"] for e in out] == ["scope", "dep", "normal", "normal"]
     assert out[0]["question"] == "真问题是X不是Y"
+    assert out[1]["question"] == "缺错误返回结构才能写测试"
 
 
 def test_escalations_from_transcript_skips_malformed_and_empty_question():

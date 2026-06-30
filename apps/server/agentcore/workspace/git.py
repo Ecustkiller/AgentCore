@@ -11,6 +11,9 @@ Safety:
 - Only ``http(s)`` URLs are accepted (public repos; private-repo tokens come
   later). ``ssh``/``file``/etc. are rejected so the server can't be coerced into
   reading local repos or arbitrary hosts via a different transport.
+- The URL is run through the shared SSRF guard (``core.net.classify_url``, the same
+  policy as ``read_url`` / favicon), so a clone target that resolves to a
+  local/internal/reserved address (e.g. ``169.254.169.254``) is refused (SEC-006).
 - The clone is shallow + single-branch, has a timeout, and runs with
   ``GIT_TERMINAL_PROMPT=0`` so an auth-required repo fails fast instead of
   hanging on a credential prompt.
@@ -26,6 +29,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from agentcore.config import settings
+from agentcore.core.net import URLBlock, classify_url
 from agentcore.workspace._paths import resolve_safe_path
 from agentcore.workspace.locate import resolve_workspace_root
 
@@ -42,6 +46,25 @@ def _validate_url(repo_url: str) -> None:
         raise ValueError("仅支持 http(s) 协议的仓库地址")
     if not parsed.netloc:
         raise ValueError("仓库地址无效")
+
+
+async def _reject_ssrf(repo_url: str) -> None:
+    """Block a clone target that resolves to a local/internal/reserved address.
+
+    ``git clone`` makes the server an HTTP client to ``repo_url``; without this it
+    would be an SSRF hole (clone ``http://169.254.169.254/…`` or an intranet host)
+    that bypasses the same private-IP guard ``read_url`` / the favicon proxy already
+    apply (SEC-006). Reuses the single shared definition (``core.net``) so there is
+    one SSRF policy.
+
+    Scope is only the *address* check: scheme policy is :func:`_validate_url`'s job
+    (it runs first, so only http(s) URLs reach here). A DNS failure is left to
+    ``git`` itself, so a transient lookup miss surfaces as an honest network error
+    rather than a misleading SSRF refusal.
+    """
+    block = await classify_url(repo_url)
+    if block in (URLBlock.BLOCKED_HOST, URLBlock.PRIVATE_IP):
+        raise ValueError("仓库地址被拒：不可指向本地 / 内网 / 保留地址")
 
 
 def _derive_dest_name(repo_url: str) -> str:
@@ -68,6 +91,7 @@ async def clone_repo(
     for a bad URL / destination, ``CloneError`` if the clone itself fails.
     """
     _validate_url(repo_url)
+    await _reject_ssrf(repo_url)
     root = resolve_workspace_root(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )

@@ -5,7 +5,7 @@ import { startRealtime, stopRealtime } from "@/services/realtime";
 import { startUpdates } from "@/stores/updates";
 import { useUsageStore } from "@/stores/usage";
 import { useEffect, useRef } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { ShareConversationDialog } from "../conversation/ShareConversationDialog";
 import { Sidebar } from "../sidebar/Sidebar";
 import { CommandPalette } from "./CommandPalette";
@@ -53,6 +53,13 @@ export function AppShell() {
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+
+  // The offline preview (#/preview) is a full-window dev surface with its own
+  // scenario navigator, so the app's conversation sidebar is pure chrome there.
+  // Hide it (the TitleBar stays) to give every replayed AI state — the canvas
+  // view especially — the full window width.
+  const { pathname } = useLocation();
+  const hideSidebar = pathname === "/preview";
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
@@ -71,7 +78,7 @@ export function AppShell() {
       <TitleBar />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Sidebar />
+        {!hideSidebar && <Sidebar />}
         <main className="relative flex min-h-0 flex-1 overflow-hidden">
           <Outlet />
         </main>

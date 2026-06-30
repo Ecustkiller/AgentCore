@@ -1,7 +1,6 @@
 from uuid import uuid4
 
 from agentcore.db.repositories import UserRepository
-
 from tests.integration.test_admin_api import _login
 
 

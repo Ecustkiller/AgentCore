@@ -117,6 +117,47 @@ def test_plan_review_resolved_runs_downstream(projected):
     assert p["progress"] == {"completed": 2, "total": 2}
 
 
+def test_single_agent_checkpoint_finalized_stays_paused(projected):
+    # 挂起即收口 (②): a checkpoint that FINALIZES the turn (a trailing message_end with
+    # finish_reason=paused) must STAY paused with the SAME resume surface as the parked shape —
+    # only finishReason + cost are added. Hand-verified so a correlated oracle+fold
+    # "paused→completed" bug (the exact risk this new finish reason introduces, since all three
+    # FINISH_TO_STATUS maps default unknown → completed) can't pass the gate by matching itself.
+    p = projected["single_agent_checkpoint_finalized"]
+    parked = projected["single_agent_checkpoint"]
+    assert p["status"] == "paused"
+    assert p["finishReason"] == "paused"
+    # The terminal message_end bills the pre-pause spend (vs the parked shape's null cost).
+    assert p["cost"]["total"] == 360_000
+    assert parked["cost"] is None
+    # Same single resume surface as the parked checkpoint — timeline + card body byte-identical,
+    # so the client renders the one resume card whether the stream parked or finalized.
+    assert p["pendingInteraction"] == parked["pendingInteraction"]
+    assert p["process"] == parked["process"]
+    assert p["content"] == parked["content"]
+
+
+def test_plan_review_finalized_stays_paused(projected):
+    # 挂起即收口 (②) 的 delegate 对偶: a plan_review that FINALIZES the turn stays paused with the
+    # gated node's checkpoint badge + progress intact; only finishReason + cost are added vs the
+    # parked shape, so the multi-agent graph退回 the same single resume card.
+    p = projected["plan_review_finalized"]
+    parked = projected["plan_review_paused"]
+    assert p["status"] == "paused"
+    assert p["finishReason"] == "paused"
+    assert p["cost"]["total"] == 360_000
+    assert p["pendingInteraction"] == {
+        "kind": "plan_review",
+        "checkpointId": "cp1",
+        "runIds": ["r1"],
+    }
+    assert p["runs"][0]["checkpoint"] == {"status": "pending", "decision": None}
+    assert p["progress"] == {"completed": 1, "total": 2}
+    # Same resume surface as the parked plan_review — only the terminal frame differs.
+    assert p["pendingInteraction"] == parked["pendingInteraction"]
+    assert p["runs"] == parked["runs"]
+
+
 def test_single_agent_citations(projected):
     p = projected["single_agent_citations"]
     assert p["status"] == "completed"
@@ -235,6 +276,50 @@ def test_multi_agent_plan_revised_trace(projected):
     assert p["progress"] == {"completed": 3, "total": 3}
 
 
+def test_multi_agent_lead_subplan_bind_replan_nests_and_traces(projected):
+    # 受监督子计划 B (docs/03-AI核心/编排器与CEO主Agent.md §2.4): a LEAD's sub-plan shares the parent
+    # execution_id, so the two run_plans MERGE into one team graph linked by parentRunId (NOT a
+    # reset) — sa/sb hang under the lead L1. The lead's OWN replan finalises the late-bound sb
+    # (revised="bind") without pausing the turn; one `team` marker despite two run_plans.
+    p = projected["multi_agent_lead_subplan_bind_replan"]
+    assert p["status"] == "completed"
+    assert p["pendingInteraction"] is None
+    assert [s["execution_id"] for s in p["process"] if s["kind"] == "team"] == ["exec1"]
+    by_id = {r["id"]: r for r in p["runs"]}
+    assert by_id["L1"]["parentRunId"] is None  # the lead is a top-level worker (CEO is the bubble)
+    assert by_id["sa"]["parentRunId"] == "L1"  # sub-team nests under the lead — graph NOT reset
+    assert by_id["sb"]["parentRunId"] == "L1"
+    assert by_id["sb"]["revised"] == "bind"  # the lead's own late-bind finalise is visible
+    assert by_id["sa"]["revised"] is None
+    assert by_id["L1"]["revised"] is None
+    assert p["progress"] == {"completed": 3, "total": 3}
+
+
+def test_multi_agent_lead_subplan_scope_steer_nests_and_traces(projected):
+    # 受监督子计划 B 自底向上 (SCOPE 臂): a sub-worker (sa) reports a scope deviation
+    # (run_escalation, non-blocking → node ⚠️ badge, turn not paused); the lead catches the
+    # SCOPE boundary and its OWN replan re-steers the un-run downstream sb (revised="steer").
+    # Same shared-execution_id nesting (sa/sb under L1) as the bind arm.
+    p = projected["multi_agent_lead_subplan_scope_steer"]
+    assert p["status"] == "completed"
+    assert p["pendingInteraction"] is None
+    by_id = {r["id"]: r for r in p["runs"]}
+    assert by_id["sa"]["parentRunId"] == "L1"
+    assert by_id["sb"]["parentRunId"] == "L1"
+    assert by_id["sb"]["revised"] == "steer"
+    assert by_id["sb"]["escalations"] == []
+    assert by_id["sa"]["escalations"] == [
+        {
+            "question": "真正要做的是 X 而非初始子计划的 Y，下游写法应随之调整。",
+            "assumption": "暂按 X 推进",
+            "blocking": False,
+            "status": "raised",
+            "answer": None,
+        }
+    ]
+    assert p["progress"] == {"completed": 3, "total": 3}
+
+
 def test_multi_agent_escalation_nonblocking_banner(projected):
     # 非阻塞 run_escalation: folded onto the raising run as a "raised" record (drives the
     # node ⚠️ badge); the worker kept working → COMPLETED. A sibling that never escalated
@@ -312,3 +397,39 @@ def test_multi_agent_blocking_escalate_multi_settles_each(projected):
         ("resolved", "用 Postgres。"),
         ("timeout", None),
     ]
+
+
+def test_multi_agent_team_notes_kinds(projected):
+    # 三类便签 kind (§2.2 通): decision 我定了 / heads_up 提个醒 / claim 我领了 (claim = WriteCoordinator
+    # 的台面化). Hand-verified so the oracle's kind passthrough can't silently drop / coerce the claim
+    # kind, and notes stay orthogonal to the run graph (post order, all active, not in runs/process).
+    p = projected["multi_agent_team_notes"]
+    assert p["status"] == "completed"
+    by_id = {n["noteId"]: n for n in p["teamNotes"]}
+    assert by_id["n1"]["kind"] == "decision"
+    assert by_id["n2"]["kind"] == "heads_up"
+    assert by_id["n3"]["kind"] == "claim"
+    assert by_id["n3"]["text"] == "示例文档这部分我来写，别人不用重复"
+    assert [n["noteId"] for n in p["teamNotes"]] == ["n1", "n2", "n3"]
+    assert all(n["status"] == "active" for n in p["teamNotes"])
+
+
+def test_multi_agent_team_notes_amended_supersession(projected):
+    # 便签会过期 → supersession (§2.2): an AMENDMENT note (carries `supersedes` + `supersede_mode`)
+    # marks its TARGET superseded (改写) / voided (作废), while staying active itself. Hand-verified
+    # here so the oracle's status-flip can't pass by matching a fold that makes the same mistake.
+    p = projected["multi_agent_team_notes_amended"]
+    assert p["status"] == "completed"
+    by_id = {n["noteId"]: n for n in p["teamNotes"]}
+    # n3 改写 n1 → n1 superseded; the amendment is active and points back at its origin.
+    assert by_id["n1"]["status"] == "superseded"
+    assert by_id["n1"]["supersedes"] is None
+    assert by_id["n3"]["status"] == "active"
+    assert by_id["n3"]["supersedes"] == "n1"
+    assert by_id["n3"]["text"] == "登录字段改用 pwd（替代 password）"
+    # n4 作废 n2 → n2 voided; the retraction note is active and links to its origin.
+    assert by_id["n2"]["status"] == "voided"
+    assert by_id["n4"]["status"] == "active"
+    assert by_id["n4"]["supersedes"] == "n2"
+    # All four notes are kept in post order (stale ones stay visible, just tagged).
+    assert [n["noteId"] for n in p["teamNotes"]] == ["n1", "n3", "n2", "n4"]

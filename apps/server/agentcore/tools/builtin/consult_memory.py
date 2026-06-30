@@ -4,8 +4,8 @@ CEO-only: wired in ``runtime.pipeline`` next to ``consult_skill`` and deliberate
 in ``build_builtin_registry`` (a delegated worker does not hold it). The user's memory is
 a FOLDER (docs/03-AI核心/Agent记忆与知识系统.md §二): a small always-injected CORE note
 (``画像.md``, rides every prompt via the ``<rules>`` section) plus any number of TOPIC notes
-(``主题/<slug>.md``). The CEO's prompt carries only a one-line「记忆主题目录」of the topic
-names (``prompt.render_memory_topic_directory``); when a topic is relevant it calls
+(``主题/<slug>.md``). The CEO's prompt carries a one-line「记忆主题目录」of the topic names
++ a 1-line summary each (``prompt.render_memory_topic_directory``); when a topic is relevant it calls
 ``consult_memory(name)`` to feed that note's full body back into its own ReAct loop
 (``ToolEffect.CONTINUE``), then acts on it. This keeps the常驻 prompt cheap while letting
 deep, occasional knowledge live in the folder.
@@ -49,7 +49,7 @@ class ConsultMemoryTool:
 
     ``project_id`` is the conversation's project (None for a bare/global chat): when set, a
     topic name is resolved in the PROJECT scope first (more specific) then GLOBAL, and the
-    "available topics" hint merges both scopes (记忆作用域与画像分层 §5.2).
+    "available topics" hint merges both scopes (Agent记忆与知识系统 §二).
     """
 
     store: MemoryStore
@@ -113,7 +113,7 @@ class ConsultMemoryTool:
         hit_scope: str | None = None
         if slug:
             # The current project's note is more specific → try it first, then fall back to
-            # the global note of the same name (记忆作用域与画像分层 §5.2).
+            # the global note of the same name (Agent记忆与知识系统 §二).
             if self.project_id:
                 body = await self.store.load(
                     context.user_id, topic_path(slug), scope=self.project_id

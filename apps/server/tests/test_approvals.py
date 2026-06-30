@@ -23,6 +23,7 @@ from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
 from agentcore.runtime.engine import react_loop
 from agentcore.runtime.events import EventSink, EventType, SSEEvent
 from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
+from agentcore.tools.builtin import per_call_tool_names
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -246,6 +247,71 @@ async def test_approve_always_files_grants_whole_class():
     later_exec = await gate.authorize(tool_name="code_execute", tool_call_id="x2", arguments={})
     await resolver
     assert later_exec is ApprovalDecision.DENY
+
+
+async def test_per_call_tool_grant_downgraded_to_one_shot():
+    """code_execute is per-call: a「本轮内都允许」(APPROVE_ALWAYS) is downgraded to a
+    one-shot APPROVE and NOT whitelisted, so the next code_execute call prompts again —
+    injected content later in the turn can't ride the earlier grant (PI-004)."""
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = ApprovalGate(
+        sink=sink,
+        conversation_id="conv-1",
+        registry=reg,
+        timeout_seconds=5.0,
+        per_call_tools=frozenset({"code_execute"}),
+    )
+
+    resolver = asyncio.create_task(
+        _resolve_when_ready(reg, "id1", ApprovalDecision.APPROVE_ALWAYS, "conv-1")
+    )
+    first = await gate.authorize(tool_name="code_execute", tool_call_id="id1", arguments={})
+    await resolver
+    assert first is ApprovalDecision.APPROVE  # downgraded from APPROVE_ALWAYS
+
+    _drain(sink)
+    # The SECOND code_execute is NOT auto-approved — it must prompt again (deny to prove).
+    resolver2 = asyncio.create_task(
+        _resolve_when_ready(reg, "id2", ApprovalDecision.DENY, "conv-1")
+    )
+    second = await gate.authorize(tool_name="code_execute", tool_call_id="id2", arguments={})
+    await resolver2
+    assert second is ApprovalDecision.DENY
+    assert any(e.type is EventType.APPROVAL_REQUIRED for e in _drain(sink))
+
+
+async def test_per_call_tool_does_not_affect_other_tools_turn_grant():
+    """The per-call exemption is scoped to its tools: a file_write APPROVE_ALWAYS still
+    whitelists file_write for the turn (the existing batch放行 path is unchanged)."""
+    reg = InteractionRegistry()
+    sink = EventSink()
+    gate = ApprovalGate(
+        sink=sink,
+        conversation_id="conv-1",
+        registry=reg,
+        timeout_seconds=5.0,
+        per_call_tools=frozenset({"code_execute"}),
+    )
+    resolver = asyncio.create_task(
+        _resolve_when_ready(reg, "w1", ApprovalDecision.APPROVE_ALWAYS, "conv-1")
+    )
+    first = await gate.authorize(tool_name="file_write", tool_call_id="w1", arguments={})
+    await resolver
+    assert first is ApprovalDecision.APPROVE_ALWAYS
+
+    _drain(sink)
+    second = await gate.authorize(tool_name="file_write", tool_call_id="w2", arguments={})
+    assert second is ApprovalDecision.APPROVE  # whitelisted for the turn, no new prompt
+    assert _drain(sink) == []
+
+
+def test_per_call_tool_names_is_code_execute():
+    """The single-source helper marks code_execute (GRANTABLE ∩ EXECUTION) per-call, and
+    NOT the file-mutation tools (which keep the turn / class grant)."""
+    names = per_call_tool_names()
+    assert "code_execute" in names
+    assert "file_write" not in names and "str_replace" not in names
 
 
 async def test_gate_truncates_large_argument_preview():

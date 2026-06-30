@@ -66,9 +66,15 @@ class EscalateTool:
                 "true【阻塞·求决策】——仅当岔路【只有用户能定、且猜错你的产物基本作废】时用：你"
                 "原地挂起、把问题直送用户、拿到答复再继续（须写明 assumption）。\n"
                 "kind 维度（正交）：默认 normal=普通待决问题；scope=【职责偏离】——你发现真正"
-                "该做的与初始计划/子任务设定不符（如上游产出显示真问题是 X 不是 Y），主管会在"
-                "波边界据此校准【尚未运行】的下游步骤（你照常把当前能做的做完、不必阻塞）。"
-                "克制使用。"
+                "该做的与初始计划/子任务设定不符（如上游产出显示真问题是 X 不是 Y）；dep=【卡在"
+                "缺输入】——你缺一个【还不存在】的输入 / 依赖才能继续（没人产出过、计划也没安排；"
+                "先用 read_notes 翻墙确认队友确实没贴过再上报）。dep 该主动：真卡在这种再猜也是"
+                "错的缺口上时别硬猜瞎编一个，发 dep 让上级在波边界补，强过闷头产出一堆作废的东西。"
+                "scope / dep 主管 / lead 都会在波"
+                "边界据此校准【尚未运行】的下游（scope→操舵已有步骤，dep→replan 追加一个产出它的"
+                "步骤 / 接一条依赖边）；两者都【不停工】——你照常按假设把当前能做的做完。"
+                "克制使用 normal 与 blocking——能自行合理假设的小事别升级、blocking 省着用；"
+                "唯独 dep（卡在【不存在】的输入、再猜也是错）该喊就喊、别硬猜瞎编。"
             ),
             parameters={
                 "type": "object",
@@ -99,12 +105,18 @@ class EscalateTool:
                     },
                     "kind": {
                         "type": "string",
-                        "enum": ["normal", "scope"],
+                        "enum": ["normal", "scope", "dep"],
                         "description": (
                             "可选，默认 normal。scope=【职责偏离】：你发现真正要做的事与初始计划"
                             "/你的子任务设定不符（例如上游产出显示真问题是 X 不是 Y），需要主管据此"
                             "校准【尚未运行】的下游步骤——主管会在波边界读到你的偏离信号并操舵下游。"
-                            "你仍照常把当前能做的做完、不必阻塞。normal=普通待决问题（默认）。"
+                            "dep=【卡在缺输入】：你缺一个【还不存在】的输入 / 依赖才能继续——没人产"
+                            "出过、计划也没安排（先用 read_notes 翻墙确认队友确实没贴过；若墙上已有"
+                            "就直接读、不必升级）。这一类该【主动】：真卡在再猜也是错的缺口上时，别硬"
+                            "猜瞎编、主动发 dep，强过闷头产出一堆作废的东西。"
+                            "主管 / lead 会在波边界用 replan 追加一个产出它的"
+                            "步骤 / 接一条依赖边。scope / dep 你都仍照常把当前能做的做完、不必阻塞。"
+                            "normal=普通待决问题（默认）。"
                         ),
                     },
                     "questions": {
@@ -132,8 +144,33 @@ class EscalateTool:
                                 },
                                 "options": {
                                     "type": "array",
-                                    "items": {"type": "string"},
                                     "description": "kind=choice 时的候选项（最多 6 个）。",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "label": {
+                                                "type": "string",
+                                                "description": (
+                                                    "选项文字（即用户选它时回传的答案）。"
+                                                ),
+                                            },
+                                            "detail": {
+                                                "type": "string",
+                                                "description": (
+                                                    "可选：这一项的一行权衡 / 代价，"
+                                                    "帮用户看懂取舍。"
+                                                ),
+                                            },
+                                            "recommended": {
+                                                "type": "boolean",
+                                                "description": (
+                                                    "可选：标记你倾向的那一项（至多一个，仅高亮"
+                                                    "不预选；要预选用 default）。"
+                                                ),
+                                            },
+                                        },
+                                        "required": ["label"],
+                                    },
                                 },
                                 "multiple": {
                                     "type": "boolean",
@@ -142,7 +179,7 @@ class EscalateTool:
                                 "default": {
                                     "type": "string",
                                     "description": (
-                                        "可选：你的暂定倾向（choice 时应是 options 中一项）。"
+                                        "可选：你的暂定倾向（choice 时应是 options 中某项 label）。"
                                     ),
                                 },
                             },
@@ -167,11 +204,12 @@ class EscalateTool:
             )
         assumption = str(arguments.get("assumption") or "").strip()
         blocking = bool(arguments.get("blocking"))
-        # 执行引擎架构设计.md §受监督的波循环: kind=scope marks a 职责/范围 deviation
-        # the WaveScheduler consumes at a wave boundary (CEO re-steers the un-run tail);
-        # (which is the 阻塞式求决策 user axis). Unknown values degrade to "normal".
+        # 执行引擎架构设计.md §受监督的波循环: kind=scope marks a 职责/范围 deviation and
+        # kind=dep a 依赖缺口 (卡在缺输入 X, §2.4) — BOTH are consumed at the reactive wave
+        # boundary (the CEO re-steers / replan(add)s the un-run tail), distinct from the
+        # 阻塞式求决策 blocking axis. Unknown values degrade to "normal".
         kind = str(arguments.get("kind") or "normal").strip().lower()
-        if kind not in ("normal", "scope"):
+        if kind not in ("normal", "scope", "dep"):
             kind = "normal"
         # blocking=true 须带 assumption: it is the超时回落 (设计 §4.1, the dual of
         # ask_user(blocking=false) requiring a fallback). Without it a timeout would have
@@ -217,13 +255,22 @@ class EscalateTool:
                 context.on_escalate(question, assumption, blocking)
             except Exception:  # noqa: BLE001 — liveliness only; never break the worker
                 logger.warning("worker.escalate.emit_failed", run_id=context.run_id)
-        note = (
-            "已记录你的职责偏离信号，主管会在波边界据此校准尚未运行的下游步骤。"
-            "这不是停工：请立刻按你当前最合理的假设把任务继续做完、交付最佳结果"
-            if kind == "scope"
-            else "已记录你的升级，主管会在汇总你的产物时处理。"
-            "这不是停工：请立刻按你当前最合理的假设把任务继续做完、交付最佳结果"
-        )
+        if kind == "scope":
+            note = (
+                "已记录你的职责偏离信号，主管会在波边界据此校准尚未运行的下游步骤。"
+                "这不是停工：请立刻按你当前最合理的假设把任务继续做完、交付最佳结果"
+            )
+        elif kind == "dep":
+            note = (
+                "已记录你的依赖缺口（卡在缺输入）信号，主管 / lead 会在波边界用 replan 追加一个"
+                "产出它的步骤 / 接一条依赖边。这不是停工，也不会同步等队友：请立刻按你当前最合理的"
+                "假设把任务继续做完、交付最佳结果"
+            )
+        else:
+            note = (
+                "已记录你的升级，主管会在汇总你的产物时处理。"
+                "这不是停工：请立刻按你当前最合理的假设把任务继续做完、交付最佳结果"
+            )
         note += (
             "（你已写明假设，主管能据此判断是否需要返工）。"
             if assumption

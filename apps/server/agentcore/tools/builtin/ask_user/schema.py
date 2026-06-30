@@ -8,8 +8,52 @@ from typing import Any
 # card always lets the user steer beyond these.
 _MAX_QUESTIONS = 5  # 开场重点问题最多 5 个（对齐 Cursor 2.1 的 3–5）
 _MAX_OPTIONS = 6  # 每个 choice 问题的选项上限
+_MAX_OPTION_DETAIL = 120  # 单个选项的权衡说明上限（一行内）
 _MAX_ASSUMPTIONS = 10
 _MAX_STYLES = 6
+
+
+def option_label(opt: Any) -> str:
+    """The canonical label of a choice option, tolerant of both shapes.
+
+    Options normalize to ``{label, detail?, recommended?}`` dicts, but a durable frame
+    persisted before that change (or a hand-built test) may still carry a bare string —
+    both the live tool and a resume read labels through here so an old paused turn still
+    settles. The label is the answer value (答复模型 α): no separate wire value exists.
+    """
+    if isinstance(opt, dict):
+        return str(opt.get("label") or "").strip()
+    return str(opt).strip()
+
+
+def normalize_options(raw: Any) -> list[dict[str, Any]]:
+    """Cap (≤6) the choice options, accepting either bare strings or rich objects.
+
+    A bare ``"Postgres"`` becomes ``{"label": "Postgres"}``; an object may add a one-line
+    ``detail`` (the trade-off shown under the label) and ``recommended`` (the asker's
+    advised option — advisory only, never a pre-selection). Empty-label entries drop, and
+    only the FIRST ``recommended`` survives (至多一个推荐项), so the card shows one clear
+    「推荐」without a wall of badges.
+    """
+    items = raw if isinstance(raw, list) else []
+    out: list[dict[str, Any]] = []
+    recommended_taken = False
+    for it in items:
+        label = option_label(it)
+        if not label:
+            continue
+        opt: dict[str, Any] = {"label": label}
+        if isinstance(it, dict):
+            detail = str(it.get("detail") or "").strip()
+            if detail:
+                opt["detail"] = detail[:_MAX_OPTION_DETAIL]
+            if bool(it.get("recommended")) and not recommended_taken:
+                opt["recommended"] = True
+                recommended_taken = True
+        out.append(opt)
+        if len(out) >= _MAX_OPTIONS:
+            break
+    return out
 
 
 def normalize_assumptions(raw: Any) -> list[dict[str, Any]]:
@@ -43,9 +87,7 @@ def normalize_questions(raw: Any) -> list[dict[str, Any]]:
             continue
         kind = "text" if str(it.get("kind") or "").strip() == "text" else "choice"
         if kind == "choice":
-            options = [str(o).strip() for o in (it.get("options") or []) if str(o).strip()][
-                :_MAX_OPTIONS
-            ]
+            options = normalize_options(it.get("options"))
             multiple = bool(it.get("multiple") or False)
         else:
             options = []

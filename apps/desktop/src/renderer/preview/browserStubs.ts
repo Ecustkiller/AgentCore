@@ -1,13 +1,17 @@
 import type { FsApi, FsResult, WorkspaceOpResult } from "@shared/ipc-contract";
+import type { LogApi } from "@shared/log-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
 
 // The desktop renderer reaches native capability through four preload-injected
-// globals. In a plain browser (the screenshot harness / `pnpm dev:web`) there is no
-// Electron preload, so we install benign stubs BEFORE the app boots. The preview
-// route only replays recorded events and never exercises real fs/sidecar, so
-// empty / failing defaults suffice. Each global is installed only if absent, so this
-// module is a no-op inside the real Electron shell.
+// globals. In a plain browser there is no Electron preload, so we install benign stubs
+// BEFORE the app boots and mark the browser runtime via `window.__WEB__`. Two browser
+// entries import this: the production web client (main.webapp.tsx) and the offline
+// screenshot / preview harness (main.web.tsx). In both, native fs/sidecar are genuinely
+// absent, so these empty / failing defaults are the correct "degraded" behavior —
+// capability proxies (lib/capabilities) gate local-only features off via `__WEB__`
+// rather than calling these. Each global installs only if absent, so this module is a
+// no-op inside the real Electron shell.
 
 const noop = (): void => {};
 const fail = (): FsResult<never> => ({ ok: false, reason: "web-preview" });
@@ -66,6 +70,10 @@ const updaterApi: UpdaterApi = {
   onStatus: () => noop,
 };
 
+const logApi: LogApi = {
+  write: noop,
+};
+
 const windowApi = {
   minimize: noop,
   maximize: noop,
@@ -76,9 +84,13 @@ if (typeof window !== "undefined") {
   if (!window.fsApi) window.fsApi = fsApi;
   if (!window.sidecarApi) window.sidecarApi = sidecarApi;
   if (!window.updaterApi) window.updaterApi = updaterApi;
+  if (!window.logApi) window.logApi = logApi;
   if (!window.windowApi) window.windowApi = windowApi;
-  // Mark this as an offline, backend-less run so AuthGate skips auth bootstrap and
-  // renders the app (incl. #/preview) without a server. Set only here, so the real
-  // Electron shell never sees it.
-  window.__WEB_PREVIEW__ = true;
+  // Mark the browser runtime (no native fs/sidecar/updater/window): capability proxies
+  // (lib/capabilities) read this so the app creates cloud — never local — conversations
+  // and routes turns to the cloud SSE path. Shared by the production web client
+  // (main.webapp.tsx) and the offline preview (main.web.tsx). Set only by these browser
+  // entries, so the real Electron shell never sees it. (Offline preview ALSO sets
+  // __WEB_PREVIEW__ via markPreview to skip auth; the web client keeps real auth.)
+  window.__WEB__ = true;
 }

@@ -19,6 +19,7 @@ from agentcore.runtime.debate import (
     JudgeVerdict,
     RoundResult,
     SideTurn,
+    UserInterjection,
 )
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
@@ -283,6 +284,68 @@ def test_round_feedback_demands_new_args_and_no_self_restate():
     assert "反方上轮论点内容" in fb  # 注入【对方】上轮论点
     assert "正方上轮论点内容" not in fb  # 不注入【自己】上轮（自己 transcript 已有）
     assert "只补" in fb and "不要重述你上一轮" in fb
+    assert "用户在本轮追问" not in fb  # 无追问时不出现追问块（零行为变化）
+
+
+def test_round_feedback_injects_targeted_user_followup():
+    """用户【追问】注入后续轮 feedback：定向某方的只喂那一方、未定向的喂全场，且明令【本轮优先正面
+    回答】——把用户的最高优先级诉求摆到辩手面前（交互式逐轮 / Phase 2）。"""
+    config = DebateConfig(
+        motion="该不该做 X",
+        form=DebateForm.DEBATE,
+        sides=[DebateSide("pro", "正方", "支持"), DebateSide("con", "反方", "反对")],
+    )
+    last = RoundResult(
+        1,
+        "第一轮焦点",
+        [
+            SideTurn("pro", "正方", "r1_pro", "正方上轮论点内容"),
+            SideTurn("con", "反方", "r1_con", "反方上轮论点内容"),
+        ],
+        JudgeVerdict(real_clash=True, new_arguments=True, converged=False),
+    )
+    # 定向【正方】的追问。
+    asks = [UserInterjection(ask="灰度期谁兜底？", target_key="pro")]
+    fb_pro = round_feedback(config, config.sides[0], 2, "第二轮焦点", last, asks)
+    fb_con = round_feedback(config, config.sides[1], 2, "第二轮焦点", last, asks)
+
+    assert "灰度期谁兜底？" in fb_pro and "用户在本轮追问" in fb_pro
+    assert "优先正面回答" in fb_pro and "向你" in fb_pro
+    assert "灰度期谁兜底？" not in fb_con  # 定向正方 → 不喂反方
+
+    # 未定向（全场）的追问 → 各方都喂。
+    all_ask = [UserInterjection(ask="边界在哪？", target_key="")]
+    fb_pro_all = round_feedback(config, config.sides[0], 2, "焦点", last, all_ask)
+    fb_con_all = round_feedback(config, config.sides[1], 2, "焦点", last, all_ask)
+    assert "边界在哪？" in fb_pro_all and "向全场" in fb_pro_all
+    assert "边界在哪？" in fb_con_all
+
+
+def test_resolve_debate_round_body_carries_ask():
+    """REST resolve body → 引擎侧 outcome 的契约缝：debate_round 把 decision/focus/ask/ask_target
+    透传给主持人轮边界钩子（tool._round_boundary 据此构造 RoundBoundary）。"""
+    from agentcore.api.schemas.messages import (
+        ResolveDebateRoundInteraction,
+        interaction_result_from_body,
+    )
+
+    body = ResolveDebateRoundInteraction(
+        decision="continue", focus="加角度", ask="谁兜底？", ask_target="pro"
+    )
+    assert interaction_result_from_body(body) == {
+        "decision": "continue",
+        "focus": "加角度",
+        "ask": "谁兜底？",
+        "ask_target": "pro",
+    }
+    # 缺省时全空（与现有非追问 resolve 行为一致，零行为变化）。
+    bare = ResolveDebateRoundInteraction(decision="conclude")
+    assert interaction_result_from_body(bare) == {
+        "decision": "conclude",
+        "focus": "",
+        "ask": "",
+        "ask_target": "",
+    }
 
 
 # --- 本地执行门（双模式工作区 P2d）：辩手仅在 local backend 继承 CEO 的 gate -----

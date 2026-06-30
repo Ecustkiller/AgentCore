@@ -228,7 +228,7 @@ function ContextBlockCard({
                   </span>
                 )}
                 {block.truncated && (
-                  <span className="rounded-lg bg-background px-1.5 py-0.5 text-warning">
+                  <span className="rounded-lg bg-background px-1.5 py-0.5 text-muted-foreground">
                     已截断
                   </span>
                 )}

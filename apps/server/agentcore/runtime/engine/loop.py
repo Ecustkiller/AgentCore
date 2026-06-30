@@ -5,6 +5,7 @@ from dataclasses import replace
 from typing import Any
 
 from agentcore.core.logging import get_logger
+from agentcore.core.types import ToolEffect
 from agentcore.llm.config import ModelProfile, get_profile
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.protocol import LLMMessage, TokenUsage
@@ -57,6 +58,7 @@ async def react_loop(
     on_reasoning: Callable[[str], None] | None = None,
     on_tool_progress: Callable[[str, int], None] | None = None,
     on_reset: Callable[[], None] | None = None,
+    on_round_begin: Callable[[], list[LLMMessage]] | None = None,
     raise_on_error: bool = False,
     citation_sink: list[dict[str, Any]] | None = None,
     annotate_citations: bool = True,
@@ -87,6 +89,12 @@ async def react_loop(
     default clears the CEO bubble (``content_reset``); a worker passes ``on_reset``
     to clear its run card (``run_output_reset``) instead — so the rewrite replaces
     the discarded draft cleanly on whichever surface streamed it (统一底线).
+    ``on_round_begin`` (when provided) is called at the top of every round AFTER the
+    first; the messages it returns are appended to the window before that round's LLM
+    call. A generic「inject context that accrued while the run was working」hook — a
+    delegated worker wires it to pull teammates' freshly-posted 便签 (§2.2 通·便签墙)
+    so the team builds on each other's evolving work; ``None`` (CEO / solo / tests) is a
+    no-op. The engine only appends what it returns — the caller owns the semantics.
     ``allowed_tool_names`` filters which tools the model may call (``None`` = all,
     ``[]`` = none). Tool execution events always go to the sink. When
     ``citation_sink`` is provided, web sources consulted by research tools are
@@ -116,7 +124,7 @@ async def react_loop(
     entry; left empty on a normal finish (one channel, since a run takes at most one
     such terminal path).
 
-    ``run_id`` / ``role`` scope the execution-level facts (§18.3) this loop records
+    ``run_id`` / ``role`` scope the execution-level facts (§8.3) this loop records
     into the turn's ambient :data:`~agentcore.runtime.facts.current_fact_log`
     (round_boundary / llm_call / note) — captain vs worker, so a multi-agent turn's
     facts split per run. They default to empty (a standalone loop / test records
@@ -152,6 +160,15 @@ async def react_loop(
         logger.debug("react.round_start", round=round_idx, messages=len(messages))
         record_round_start(round_idx=round_idx, run_id=run_id, role=role)
         content_before_round = final_content
+        # 团队便签墙 推增量 (§2.2 通): before each step AFTER the first, inject context that
+        # accrued WHILE this run was working — e.g. teammates' freshly-posted notes — so the
+        # team builds on each other's evolving work instead of each guessing in isolation.
+        # The opening round already carries the run's assembled context, so the hook starts at
+        # round 1 (which also avoids two back-to-back user messages on the very first request).
+        # Generic by design: the engine only appends what the hook returns; the caller owns the
+        # semantics (引擎纯化), mirroring on_content / on_reasoning.
+        if round_idx and on_round_begin is not None:
+            messages.extend(on_round_begin())
 
         round_result = await run_llm_round(
             llm=llm,
@@ -253,7 +270,17 @@ async def react_loop(
                         cache_hit_tokens=usage_meta.get("cache_hit_tokens", 0),
                         cache_miss_tokens=usage_meta.get("cache_miss_tokens", 0),
                     )
-                    directive = Return(extra_content=outcome.terminal_handoff or "")
+                    # 挂起即收口 (②): a SUSPEND terminal ended the turn at a durable
+                    # checkpoint awaiting /resume — NOT because an answer was produced.
+                    # Stamp FinishReason.PAUSED (via finish_override_sink) so the pipeline
+                    # emits a paused message_end and the persist tail parks the turn (the
+                    # frame is its record). INTERACT / HANDOFF carry their final_text and
+                    # finish on the default reason (finish_reason=None).
+                    paused = terminal.effect is ToolEffect.SUSPEND
+                    directive = Return(
+                        finish_reason=FinishReason.PAUSED if paused else None,
+                        extra_content=outcome.terminal_handoff or "",
+                    )
                 else:
                     controller.record(outcome.attempts)
                     breaker = apply_circuit_breaker(

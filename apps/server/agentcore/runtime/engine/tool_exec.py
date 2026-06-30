@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolApproval
+from agentcore.core.types import ToolApproval, ToolEffect
 from agentcore.llm.protocol import LLMMessage, ToolCall
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
 from agentcore.runtime.citations import annotate_tool_citations, merge_citations
@@ -172,7 +172,17 @@ async def execute_tools(
             return await _run_one(tc)
 
     quads = await asyncio.gather(*[_bounded(tc) for tc in tool_calls])
-    messages = [m for m, _, _, _ in quads]
+
+    # 挂起即收口 (②): a SUSPEND terminal leaves its call PENDING — the suspended tool_call
+    # gets NO result message AND NO §8.3 tool_call fact (recorded below), so the resumed
+    # window ends exactly at the assistant (the fold reads the missing result as「still
+    # pending」). This reproduces the shape the old blocking pause produced by never
+    # returning from ``execute``. INTERACT / HANDOFF differ: they DID produce the turn's
+    # answer, so they keep their tool message + fact like any completed call.
+    def _suspends(t: ToolResult | None) -> bool:
+        return t is not None and t.effect is ToolEffect.SUSPEND
+
+    messages = [m for m, t, _, _ in quads if not _suspends(t)]
     terminal = next((t for _, t, _, _ in quads if t is not None), None)
     attempts = [a for _, _, a, _ in quads]
 
@@ -193,15 +203,18 @@ async def execute_tools(
                     message.content or "", message_citations, numbers
                 )
 
-    # 执行级事件溯源 (§18.3 / Phase 2 边界①): record each completed call's FINAL
+    # 执行级事件溯源 (§8.3 / Phase 2 边界①): record each completed call's FINAL
     # model-facing result as a tool_call fact — captured HERE, after the citation
     # annotation above, so it is byte-for-byte what the next round's window carried (the
     # forwarded tool_use_end fires inside _run_one with the pre-annotation text). The
     # window fold reads tool results from these facts. ``tool_calls`` is positionally
     # aligned with ``quads`` (asyncio.gather preserves order), so zip pairs each result
-    # to its issuing call. A suspended call never reaches here (it blocks in execute), so
-    # no fact is recorded for it — the fold reads that absence as "result still pending".
-    for tc, (message, _terminal, attempt, _citations) in zip(tool_calls, quads, strict=False):
+    # to its issuing call. A SUSPEND call is skipped (挂起即收口 ②): recording its fact
+    # would inject a phantom result into the resumed window — matching the old blocking
+    # pause, where ``gather`` never returned so no fact was recorded for the parked call.
+    for tc, (message, terminal_q, attempt, _citations) in zip(tool_calls, quads, strict=False):
+        if _suspends(terminal_q):
+            continue
         record_turn_fact(
             ToolCallFact(
                 run_id=run_id,

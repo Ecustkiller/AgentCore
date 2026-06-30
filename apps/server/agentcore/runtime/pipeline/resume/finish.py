@@ -30,6 +30,7 @@ def finish_resume_turn(
     profile,
     citations: list[dict],
     sink: EventSink,
+    vision_cost_runs: list | None = None,
 ) -> dict:
     """Bill + close a resumed turn whose CEO loop ran (plan_review / ask_user continue).
 
@@ -37,6 +38,11 @@ def finish_resume_turn(
     workers' usage (seeds + tail, folded by ``resume_plan``) + any revise. Mirrors
     :func:`run_chat_pipeline`'s tail (usage roll-up, per-run ledger, citations,
     message_end), returning the same result shape for the service to persist.
+
+    ``vision_cost_runs`` are the resumed turn's board_read 读图 ledger rows (role=vision,
+    §九.4 Gap ②), collected off the shared ``ToolContext.cost_sink``. Folded into
+    ``cost_runs`` like the delegate / revise rows; vision spend has no usage that rolls
+    into ``turn_usage`` (a separate model, billed only as its own priced row).
     """
     final_content = join_segments(pre_pause_content, captain_state.content)
     final_reasoning = captain_state.reasoning
@@ -56,6 +62,8 @@ def finish_resume_turn(
         *(asdict(r) for r in delegate_tool.run_ledger),
         *(asdict(r) for r in revise_tool.run_ledger),
         *(asdict(r) for r in debate_tool.run_ledger),
+        # board_read 视觉子调用账（§九.4 Gap ②），与 delegate/revise 同形折账。
+        *(asdict(r) for r in (vision_cost_runs or [])),
     ]
     turn_cost = aggregate_cost(cost_runs)
     merge_citations(citations, delegate_tool.citations)
@@ -98,6 +106,11 @@ def finish_resume_turn(
         "citations": citations,
         "cost_runs": cost_runs,
         "journal_entries": journal_entries,
+        # 协作质量 (学·度量 §2.5): same turn-level signals as the fresh-turn path.
+        "collab": {
+            **delegate_tool.collab,
+            "revises": len(revise_tool.run_ledger),
+        },
     }
 
 

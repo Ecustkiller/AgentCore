@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/popover";
 import { useGroupedConversations } from "@/hooks/useConversations";
 import { getFolders, useCreateFolder } from "@/hooks/useFolders";
+import { hasLocalFiles } from "@/lib/capabilities";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
 import type { FolderMeta } from "@/services/folders";
 import { useFoldersStore } from "@/stores/folders";
@@ -23,7 +24,9 @@ import {
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 
-const isDesktop = typeof window !== "undefined" && !!window.fsApi;
+// 本地文件能力（web 缺 fsApi → false）。browserStubs 在 main 之前装桩并置 __WEB__，故此
+// 模块加载时该判定已稳定。
+const isDesktop = hasLocalFiles();
 const RECENT_WHEN_IDLE = 3;
 const SEARCH_RESULT_CAP = 12;
 

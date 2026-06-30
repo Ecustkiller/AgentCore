@@ -391,12 +391,12 @@ function EscalationSection({
  * A「阻断性」flag marks one where a wrong guess would void the product. */
 function RaisedEscalationRow({ esc }: { esc: RunEscalation }) {
   return (
-    <div className="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs">
-      <div className="flex items-center gap-1.5 font-medium text-warning">
+    <div className="rounded-lg border border-border bg-muted/40 px-2.5 py-2 text-xs">
+      <div className="flex items-center gap-1.5 font-medium text-muted-foreground">
         <ArrowUp size={12} className="shrink-0" />
         <span>向上求决策</span>
         {esc.blocking && (
-          <span className="rounded-full bg-warning/20 px-1.5 py-0.5 text-warning">
+          <span className="rounded-full bg-destructive/15 px-1.5 py-0.5 text-destructive">
             阻断性
           </span>
         )}

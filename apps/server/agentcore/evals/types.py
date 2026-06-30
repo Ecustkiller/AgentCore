@@ -50,6 +50,10 @@ class EvalCase:
     # 方向① 变体注入：命名的 prompt 变体（见 evals/prompt_profiles.py）。None=基线（恒等，
     # 与生产逐字节一致）；非 None 时 harness 在本例运行期 use_profile 注入该变体，A/B 提示词。
     prompt_profile: str | None = None
+    # 学·度量 §2.5：本例探测的 MAST 失败模式码（如 ``"1.3"``，见 evals/mast.py 的 14 类）。
+    # None=不挂 MAST 标签（非 MAST 套件如 core/routing）；非 None 时 report 据此按 MAST 组/类
+    # 聚合通过率，使「某类失败被压低没有」可逐类对照 baseline。seed_lint 校验码已注册。
+    mast: str | None = None
 
 
 @dataclass
@@ -136,6 +140,8 @@ class CaseReport:
     checks: list[CheckOutcome] = field(default_factory=list)
     judge: JudgeVerdict | None = None
     milestone: MilestoneVerdict | None = None
+    # 学·度量 §2.5：从 ``EvalCase.mast`` 透传的失败模式码（report 按 MAST 组/类聚合用）。
+    mast: str | None = None
 
     @property
     def checks_passed(self) -> bool:

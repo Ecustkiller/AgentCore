@@ -1,0 +1,861 @@
+{
+  "name": "multi_agent_debate_followup",
+  "description": "多 Agent：辩论收场带用户追问（user_interjections verbatim 复盘）",
+  "events": [
+    {
+      "type": "message_start",
+      "payload": {
+        "message_id": "m1",
+        "conversation_id": "conv_demo"
+      },
+      "timestamp": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "我发起一场可追问的正反辩论来定夺。"
+      },
+      "timestamp": "2026-01-01T00:00:00.001Z"
+    },
+    {
+      "type": "run_plan",
+      "payload": {
+        "execution_id": "exec1",
+        "plan_type": "debate",
+        "task_summary": "正反辩论（可追问）：是否采用方案 A",
+        "agents": [
+          {
+            "id": "debate_fu_mod1",
+            "role": "主持人",
+            "model_preference": "strong",
+            "thinking": true,
+            "reasoning_effort": "high"
+          }
+        ],
+        "runs": [
+          {
+            "id": "debate_fu_mod1",
+            "agent_id": "debate_fu_mod1",
+            "task": "主持正反辩论（可追问）：是否采用方案 A",
+            "depends_on": [],
+            "parent_run_id": "captain1"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "debate_fu_mod1",
+        "agent_id": "debate_fu_mod1",
+        "parent_run_id": "captain1",
+        "kind": "agent",
+        "revision": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "run_plan",
+      "payload": {
+        "execution_id": "exec1",
+        "plan_type": "debate",
+        "task_summary": "",
+        "agents": [
+          {
+            "id": "d_pro",
+            "role": "支持方",
+            "model_preference": "strong",
+            "thinking": true,
+            "reasoning_effort": "high"
+          },
+          {
+            "id": "d_con",
+            "role": "反对方",
+            "model_preference": "strong",
+            "thinking": true,
+            "reasoning_effort": "high"
+          }
+        ],
+        "runs": [
+          {
+            "id": "debate_fu_mod1_r1_pro",
+            "agent_id": "d_pro",
+            "task": "论证支持采用方案 A",
+            "depends_on": [],
+            "parent_run_id": "debate_fu_mod1",
+            "stance": "pro",
+            "group": "debate:debate",
+            "round": 1
+          },
+          {
+            "id": "debate_fu_mod1_r1_con",
+            "agent_id": "d_con",
+            "task": "论证反对采用方案 A",
+            "depends_on": [],
+            "parent_run_id": "debate_fu_mod1",
+            "stance": "con",
+            "group": "debate:debate",
+            "round": 1
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "debate_fu_mod1_r1_pro",
+        "agent_id": "d_pro",
+        "parent_run_id": "debate_fu_mod1",
+        "kind": "agent",
+        "revision": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.005Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "debate_fu_mod1_r1_pro",
+        "agent_id": "d_pro",
+        "delta": "支持理由：收益可量化。"
+      },
+      "timestamp": "2026-01-01T00:00:00.006Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "debate_fu_mod1_r1_pro",
+        "agent_id": "d_pro",
+        "output_summary": "支持方陈述完成",
+        "duration_ms": 800,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.007Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "debate_fu_mod1_r1_con",
+        "agent_id": "d_con",
+        "parent_run_id": "debate_fu_mod1",
+        "kind": "agent",
+        "revision": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.008Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "debate_fu_mod1_r1_con",
+        "agent_id": "d_con",
+        "delta": "反对理由：风险无兜底。"
+      },
+      "timestamp": "2026-01-01T00:00:00.009Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "debate_fu_mod1_r1_con",
+        "agent_id": "d_con",
+        "output_summary": "反对方陈述完成",
+        "duration_ms": 850,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.010Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "debate_fu_mod1_r2_pro",
+        "agent_id": "debate_fu_mod1_r2_pro",
+        "parent_run_id": "debate_fu_mod1_r1_pro",
+        "kind": "agent",
+        "revision": 2
+      },
+      "timestamp": "2026-01-01T00:00:00.011Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "debate_fu_mod1_r2_pro",
+        "agent_id": "debate_fu_mod1_r2_pro",
+        "delta": "回应追问：灰度以保守口径为准并设熔断。"
+      },
+      "timestamp": "2026-01-01T00:00:00.012Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "debate_fu_mod1_r2_pro",
+        "agent_id": "debate_fu_mod1_r2_pro",
+        "output_summary": "支持方回应追问完成",
+        "duration_ms": 820,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.013Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "debate_fu_mod1_r2_con",
+        "agent_id": "debate_fu_mod1_r2_con",
+        "parent_run_id": "debate_fu_mod1_r1_con",
+        "kind": "agent",
+        "revision": 2
+      },
+      "timestamp": "2026-01-01T00:00:00.014Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "debate_fu_mod1_r2_con",
+        "agent_id": "debate_fu_mod1_r2_con",
+        "delta": "仍存疑：熔断阈值过松。"
+      },
+      "timestamp": "2026-01-01T00:00:00.015Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "debate_fu_mod1_r2_con",
+        "agent_id": "debate_fu_mod1_r2_con",
+        "output_summary": "反对方续论完成",
+        "duration_ms": 830,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.016Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "debate_fu_mod1",
+        "agent_id": "debate_fu_mod1",
+        "output_summary": "灰度兜底已达成，仅剩回滚阈值待你拍板",
+        "duration_ms": 2400,
+        "role": "主持人",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.017Z"
+    },
+    {
+      "type": "debate_result",
+      "payload": {
+        "execution_id": "exec1",
+        "moderator_run_id": "debate_fu_mod1",
+        "form": "debate",
+        "motion": "是否采用方案 A",
+        "stop_reason": "converged",
+        "narrative_first": false,
+        "sides": [
+          {
+            "key": "pro",
+            "name": "支持方",
+            "stance": "支持采用方案 A",
+            "is_subject": false,
+            "model": "doubao/doubao-seed-2-1-turbo-260628"
+          },
+          {
+            "key": "con",
+            "name": "反对方",
+            "stance": "反对采用方案 A",
+            "is_subject": false,
+            "model": "deepseek-v4-pro"
+          }
+        ],
+        "rounds": [
+          {
+            "round_no": 1,
+            "focus": "方案 A 的收益与风险敞口",
+            "summary": "支持方强调收益可量化，反对方指出缺乏风险兜底，焦点收敛到风险可控性。",
+            "verdict": {
+              "real_clash": true,
+              "new_arguments": true,
+              "converged": false,
+              "stop_reason": "",
+              "rationale": "核心交锋已起，但风险兜底尚未谈透，值得再探一轮。"
+            },
+            "sides": [
+              {
+                "key": "pro",
+                "name": "支持方",
+                "run_id": "debate_fu_mod1_r1_pro",
+                "ok": true
+              },
+              {
+                "key": "con",
+                "name": "反对方",
+                "run_id": "debate_fu_mod1_r1_con",
+                "ok": true
+              }
+            ],
+            "clashes": [
+              {
+                "from_key": "con",
+                "to_key": "pro",
+                "point": "收益可量化但未对冲风险敞口，量化口径回避了尾部风险。"
+              }
+            ],
+            "user_interjections": []
+          },
+          {
+            "round_no": 2,
+            "focus": "灰度期数据口径不一致时的兜底机制",
+            "summary": "支持方正面回应追问：灰度期以反对方数据口径为准并设熔断；分歧收敛到回滚阈值。",
+            "verdict": {
+              "real_clash": true,
+              "new_arguments": false,
+              "converged": true,
+              "stop_reason": "双方就兜底机制达成共识，仅剩阈值需用户拍板。",
+              "rationale": "支持方接住了用户追问、给出兜底，争点收敛到回滚阈值这一价值取舍。"
+            },
+            "sides": [
+              {
+                "key": "pro",
+                "name": "支持方",
+                "run_id": "debate_fu_mod1_r2_pro",
+                "ok": true
+              },
+              {
+                "key": "con",
+                "name": "反对方",
+                "run_id": "debate_fu_mod1_r2_con",
+                "ok": true
+              }
+            ],
+            "clashes": [
+              {
+                "from_key": "con",
+                "to_key": "pro",
+                "point": "以反对方口径为准虽稳妥，但熔断阈值过松仍可能放大尾部风险。"
+              }
+            ],
+            "user_interjections": [
+              {
+                "ask": "灰度期如果出现数据口径不一致，谁来兜底、按谁的口径？",
+                "target_key": "pro",
+                "answered": true
+              }
+            ]
+          }
+        ],
+        "brief": {
+          "crux": "方案 A 的风险是否可控、灰度兜底是否到位",
+          "strongest_points": {
+            "pro": "收益显著且可量化，已就追问给出灰度兜底（以保守口径为准 + 熔断）",
+            "con": "风险敞口缺乏兜底，熔断阈值仍可能过松"
+          },
+          "factual_disputes": [
+            "历史故障率的数据口径不一致"
+          ],
+          "value_disputes": [
+            "增长优先 vs 稳健优先"
+          ],
+          "leaning": "倾向有条件采用",
+          "confidence": "medium",
+          "recommendation": "采纳支持方的灰度兜底方案，回滚阈值需你拍板。",
+          "open_questions": [
+            "灰度的回滚阈值如何设定（你的追问已促成兜底，阈值仍需你定）？"
+          ]
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.018Z"
+    },
+    {
+      "type": "message_end",
+      "payload": {
+        "finish_reason": "end_turn",
+        "usage": {
+          "input_tokens": 3600,
+          "output_tokens": 620,
+          "reasoning_tokens": 0,
+          "cache_hit_tokens": 0,
+          "cache_miss_tokens": 0
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "rounds": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.019Z"
+    }
+  ],
+  "projected": {
+    "status": "completed",
+    "finishReason": "end_turn",
+    "content": "我发起一场可追问的正反辩论来定夺。",
+    "reasoning": "",
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "我发起一场可追问的正反辩论来定夺。"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec1"
+      }
+    ],
+    "citations": [],
+    "agents": [
+      {
+        "id": "debate_fu_mod1",
+        "role": "主持人",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "d_pro",
+        "role": "支持方",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "支持理由：收益可量化。",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "d_con",
+        "role": "反对方",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "反对理由：风险无兜底。",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "debate_fu_mod1_r2_pro",
+        "role": "支持方",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "回应追问：灰度以保守口径为准并设熔断。",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "debate_fu_mod1_r2_con",
+        "role": "反对方",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "仍存疑：熔断阈值过松。",
+        "reasoning": "",
+        "toolProgress": null
+      }
+    ],
+    "runs": [
+      {
+        "id": "debate_fu_mod1",
+        "agentId": "debate_fu_mod1",
+        "task": "主持正反辩论（可追问）：是否采用方案 A",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "灰度兜底已达成，仅剩回滚阈值待你拍板",
+        "durationMs": 2400,
+        "error": null,
+        "parentRunId": "captain1",
+        "kind": "agent",
+        "role": "主持人",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": null,
+        "group": null,
+        "round": 0,
+        "revisionOf": null,
+        "revision": 0,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      },
+      {
+        "id": "debate_fu_mod1_r1_pro",
+        "agentId": "d_pro",
+        "task": "论证支持采用方案 A",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "支持方陈述完成",
+        "durationMs": 800,
+        "error": null,
+        "parentRunId": "debate_fu_mod1",
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": "pro",
+        "group": "debate:debate",
+        "round": 1,
+        "revisionOf": null,
+        "revision": 0,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      },
+      {
+        "id": "debate_fu_mod1_r1_con",
+        "agentId": "d_con",
+        "task": "论证反对采用方案 A",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "反对方陈述完成",
+        "durationMs": 850,
+        "error": null,
+        "parentRunId": "debate_fu_mod1",
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": "con",
+        "group": "debate:debate",
+        "round": 1,
+        "revisionOf": null,
+        "revision": 0,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      },
+      {
+        "id": "debate_fu_mod1_r2_pro",
+        "agentId": "debate_fu_mod1_r2_pro",
+        "task": "论证支持采用方案 A",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "支持方回应追问完成",
+        "durationMs": 820,
+        "error": null,
+        "parentRunId": "debate_fu_mod1_r1_pro",
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": null,
+        "group": null,
+        "round": 0,
+        "revisionOf": "debate_fu_mod1_r1_pro",
+        "revision": 2,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      },
+      {
+        "id": "debate_fu_mod1_r2_con",
+        "agentId": "debate_fu_mod1_r2_con",
+        "task": "论证反对采用方案 A",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "反对方续论完成",
+        "durationMs": 830,
+        "error": null,
+        "parentRunId": "debate_fu_mod1_r1_con",
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": null,
+        "group": null,
+        "round": 0,
+        "revisionOf": "debate_fu_mod1_r1_con",
+        "revision": 2,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      }
+    ],
+    "progress": {
+      "completed": 5,
+      "total": 5
+    },
+    "pendingInteraction": null,
+    "cost": {
+      "input": 240000,
+      "cached": 64000,
+      "output": 120000,
+      "total": 360000,
+      "currency": "USD"
+    },
+    "debate": {
+      "execution_id": "exec1",
+      "moderator_run_id": "debate_fu_mod1",
+      "form": "debate",
+      "motion": "是否采用方案 A",
+      "stop_reason": "converged",
+      "narrative_first": false,
+      "sides": [
+        {
+          "key": "pro",
+          "name": "支持方",
+          "stance": "支持采用方案 A",
+          "is_subject": false,
+          "model": "doubao/doubao-seed-2-1-turbo-260628"
+        },
+        {
+          "key": "con",
+          "name": "反对方",
+          "stance": "反对采用方案 A",
+          "is_subject": false,
+          "model": "deepseek-v4-pro"
+        }
+      ],
+      "rounds": [
+        {
+          "round_no": 1,
+          "focus": "方案 A 的收益与风险敞口",
+          "summary": "支持方强调收益可量化，反对方指出缺乏风险兜底，焦点收敛到风险可控性。",
+          "verdict": {
+            "real_clash": true,
+            "new_arguments": true,
+            "converged": false,
+            "stop_reason": "",
+            "rationale": "核心交锋已起，但风险兜底尚未谈透，值得再探一轮。"
+          },
+          "sides": [
+            {
+              "key": "pro",
+              "name": "支持方",
+              "run_id": "debate_fu_mod1_r1_pro",
+              "ok": true
+            },
+            {
+              "key": "con",
+              "name": "反对方",
+              "run_id": "debate_fu_mod1_r1_con",
+              "ok": true
+            }
+          ],
+          "clashes": [
+            {
+              "from_key": "con",
+              "to_key": "pro",
+              "point": "收益可量化但未对冲风险敞口，量化口径回避了尾部风险。"
+            }
+          ],
+          "user_interjections": []
+        },
+        {
+          "round_no": 2,
+          "focus": "灰度期数据口径不一致时的兜底机制",
+          "summary": "支持方正面回应追问：灰度期以反对方数据口径为准并设熔断；分歧收敛到回滚阈值。",
+          "verdict": {
+            "real_clash": true,
+            "new_arguments": false,
+            "converged": true,
+            "stop_reason": "双方就兜底机制达成共识，仅剩阈值需用户拍板。",
+            "rationale": "支持方接住了用户追问、给出兜底，争点收敛到回滚阈值这一价值取舍。"
+          },
+          "sides": [
+            {
+              "key": "pro",
+              "name": "支持方",
+              "run_id": "debate_fu_mod1_r2_pro",
+              "ok": true
+            },
+            {
+              "key": "con",
+              "name": "反对方",
+              "run_id": "debate_fu_mod1_r2_con",
+              "ok": true
+            }
+          ],
+          "clashes": [
+            {
+              "from_key": "con",
+              "to_key": "pro",
+              "point": "以反对方口径为准虽稳妥，但熔断阈值过松仍可能放大尾部风险。"
+            }
+          ],
+          "user_interjections": [
+            {
+              "ask": "灰度期如果出现数据口径不一致，谁来兜底、按谁的口径？",
+              "target_key": "pro",
+              "answered": true
+            }
+          ]
+        }
+      ],
+      "brief": {
+        "crux": "方案 A 的风险是否可控、灰度兜底是否到位",
+        "strongest_points": {
+          "pro": "收益显著且可量化，已就追问给出灰度兜底（以保守口径为准 + 熔断）",
+          "con": "风险敞口缺乏兜底，熔断阈值仍可能过松"
+        },
+        "factual_disputes": [
+          "历史故障率的数据口径不一致"
+        ],
+        "value_disputes": [
+          "增长优先 vs 稳健优先"
+        ],
+        "leaning": "倾向有条件采用",
+        "confidence": "medium",
+        "recommendation": "采纳支持方的灰度兜底方案，回滚阈值需你拍板。",
+        "open_questions": [
+          "灰度的回滚阈值如何设定（你的追问已促成兜底，阈值仍需你定）？"
+        ]
+      }
+    },
+    "debateRounds": [],
+    "teamNotes": []
+  }
+}

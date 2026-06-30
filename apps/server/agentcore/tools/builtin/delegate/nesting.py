@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from agentcore.tools.builtin.replan import ReplanTool
+
 if TYPE_CHECKING:
+    from agentcore.runtime.runs.executor_identities import LeadSubteam
     from agentcore.tools.builtin.delegate.tool import DelegateTool
 
 
@@ -34,6 +37,41 @@ def make_child(tool: DelegateTool, captain_run_id: str, captain_depth: int) -> D
     )
     tool._children.append(child)
     return child
+
+
+def make_lead_subteam(
+    tool: DelegateTool, captain_run_id: str, captain_depth: int
+) -> LeadSubteam:
+    """Mint a worker-captain's full nested-delegation handle (阶段2 嵌套 + 受监督子计划 B).
+
+    Beyond :func:`make_child` (which mints only the lead's own ``delegate``), this wires the
+    two pieces that make a lead a *real* captain rather than a dead-end:
+
+    - the companion ``replan`` bound to THAT child delegate, so the lead finalises /
+      re-steers and resumes its OWN sub-plan at a 波边界 exactly like the CEO (去特例);
+    - a turn-end ``dispose`` that folds a sub-plan the lead yielded but never resumed
+      (堵漏账), so the parent's ``absorb_children`` never misses sub-team spend.
+
+    Returned to the ``runs`` layer as the opaque :class:`LeadSubteam` bundle so ``runs``
+    stays free of a concrete tools dependency (lazy import, as elsewhere in this package).
+    """
+    from agentcore.runtime.runs.executor_identities import LeadSubteam
+
+    child = make_child(tool, captain_run_id, captain_depth)
+    replan = ReplanTool(delegate=child)
+
+    async def _dispose() -> None:
+        # Implicit stop for a sub-plan the lead yielded but never resumed: folds the
+        # completed sub-team's usage/ledger/citations onto the child's _acc (which the
+        # parent then absorbs) and materialises the un-run tail SKIPPED. No-op when nothing
+        # is paused; the returned ToolResult is unused — the lead already moved on.
+        await child.dispose_open_supervised()
+
+    return LeadSubteam(
+        tools=(child, replan),
+        tool_names=(child.schema.name, replan.schema.name),
+        dispose=_dispose,
+    )
 
 
 def absorb_children(tool: DelegateTool) -> None:

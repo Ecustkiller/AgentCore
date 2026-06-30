@@ -25,6 +25,14 @@ export default defineConfig({
   },
   renderer: {
     define: clientBuildDefine,
+    // SECURITY (XSS-001 前端XSS·CSP): drop Vite's inline modulepreload polyfill. Electron's
+    // bundled Chromium supports <link rel=modulepreload> natively, so the polyfill is dead
+    // weight — and removing it means the built index.html has NO inline <script>, which is
+    // what lets the app:// CSP use a strict `script-src 'self'` (see src/main/index.ts)
+    // without a blank-screen regression.
+    build: {
+      modulePreload: { polyfill: false },
+    },
     resolve: {
       alias: {
         "@": resolve("src/renderer"),

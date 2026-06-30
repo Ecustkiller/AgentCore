@@ -61,8 +61,8 @@ const CALLOUT = {
   },
   warning: {
     Icon: AlertTriangle,
-    box: "border-warning/30 bg-warning/5",
-    icon: "text-warning",
+    box: "border-border bg-muted/40",
+    icon: "text-muted-foreground",
   },
 } as const;
 
@@ -199,8 +199,8 @@ export function DoDont({
           ))}
         </ul>
       </div>
-      <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
-        <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-warning">
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+        <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-destructive">
           <AlertTriangle size={14} className="shrink-0" />
           {bad.label ?? "别这样"}
         </p>

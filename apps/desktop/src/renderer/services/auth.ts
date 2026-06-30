@@ -1,3 +1,4 @@
+import { logEvent } from "@/lib/log";
 import {
   ApiError,
   BASE_URL,
@@ -232,6 +233,30 @@ export type BootstrapResult =
   | { kind: "unavailable"; reason: string };
 
 /**
+ * One structured line per cold-start outcome, landing in the desktop product log
+ * (`userData/logs/desktop.jsonl`) tagged prod/dev by the main process. This is
+ * what makes the "have to log in every launch" class of bug observable AND tells
+ * an installed build apart from a dev build: only dev ever logs `dev_auto_login`
+ * (the .env.local path that silently masked the missing-refresh bug).
+ */
+type BootstrapOutcome =
+  | "me_ok"
+  | "refreshed"
+  | "dev_auto_login"
+  | "logged_out"
+  | "outage";
+
+function logBootstrap(
+  outcome: BootstrapOutcome,
+  fields?: Record<string, unknown>,
+): void {
+  logEvent(outcome === "outage" ? "warn" : "info", "auth.bootstrap", {
+    result: outcome,
+    ...fields,
+  });
+}
+
+/**
  * Resolve the initial auth state on app start. Critically, it tells an
  * infrastructure outage apart from "not logged in" so the gate can show a retry
  * screen rather than a login form the user could never get past.
@@ -239,21 +264,57 @@ export type BootstrapResult =
 export async function bootstrapAuth(): Promise<BootstrapResult> {
   // 1. Existing session via the access cookie.
   try {
-    return { kind: "authenticated", user: await fetchMe() };
+    const user = await fetchMe();
+    logBootstrap("me_ok");
+    return { kind: "authenticated", user };
   } catch (err) {
     if (isOutage(err)) {
       const reason = (await diagnoseOutage()) ?? "后端服务异常：请稍后重试。";
+      logBootstrap("outage", { stage: "me", reason });
       return { kind: "unavailable", reason };
     }
-    // 401 → no valid session; fall through to dev auto-login.
+    // 401 → the access token is absent/expired. This does NOT mean the session
+    // is gone: the refresh cookie outlives the access cookie by days. Fall
+    // through to a silent refresh before concluding the user is logged out.
   }
 
-  // 2. Dev convenience auto-login (no-op in prod / when unconfigured).
-  const dev = await devAutoLogin();
-  if (dev.kind === "ok") return { kind: "authenticated", user: dev.user };
+  // 2. Silent refresh on cold start. The access cookie's TTL (~30min) is far
+  //    shorter than the refresh cookie's (~30d), so relaunching the app any real
+  //    time later finds /auth/me 401'ing on an expired access token while the
+  //    refresh token is still perfectly valid. `request()` deliberately skips
+  //    its own 401→refresh for /v1/auth/* paths (so login/refresh never
+  //    recurse), which means /auth/me can't self-heal — bootstrap must drive the
+  //    refresh here, or every relaunch past the access TTL forces a needless
+  //    re-login (precisely the "have to log in every time I open the app" bug).
+  try {
+    if (await tryRefresh()) {
+      const user = await fetchMe();
+      logBootstrap("refreshed");
+      return { kind: "authenticated", user };
+    }
+  } catch (err) {
+    if (isOutage(err)) {
+      const reason = (await diagnoseOutage()) ?? "后端服务异常：请稍后重试。";
+      logBootstrap("outage", { stage: "refresh", reason });
+      return { kind: "unavailable", reason };
+    }
+    // Refreshed but /auth/me still 401'd → genuinely logged out; fall through.
+  }
 
-  // 3. No session. If the backend is actually unreachable, surface that instead
+  // 3. Dev convenience auto-login (no-op in prod / when unconfigured).
+  const dev = await devAutoLogin();
+  if (dev.kind === "ok") {
+    logBootstrap("dev_auto_login");
+    return { kind: "authenticated", user: dev.user };
+  }
+
+  // 4. No session. If the backend is actually unreachable, surface that instead
   //    of a doomed login form; otherwise it's a genuine logged-out state.
   const reason = await diagnoseOutage();
-  return reason ? { kind: "unavailable", reason } : { kind: "unauthenticated" };
+  if (reason) {
+    logBootstrap("outage", { stage: "final", reason });
+    return { kind: "unavailable", reason };
+  }
+  logBootstrap("logged_out");
+  return { kind: "unauthenticated" };
 }

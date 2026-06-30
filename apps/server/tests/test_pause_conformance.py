@@ -23,7 +23,6 @@ exercising the live loop + the live capture pins that. The棘轮: when a real pa
 breaks the fold, add it here FIRST, then fix the projection.
 """
 
-import asyncio
 import json
 from pathlib import Path
 
@@ -343,26 +342,6 @@ async def test_pause_journal_after_completed_tool_round():
 # --- plan_review / delegate suspend golden (the harder pause shape) ----------------
 
 
-async def _resolve_plan_review(registry: InteractionRegistry, conversation_id: str) -> None:
-    """Poll the bridge for the parked plan_review and CONTINUE it (mimics the user).
-
-    Lets the suspended delegate finish so the captain loop runs on; the frame under test
-    was already snapshotted by the saver BEFORE this resolves, so HOW it settles does not
-    affect the pause snapshot.
-    """
-    for _ in range(1000):
-        pending = registry.list_pending(conversation_id)
-        if pending:
-            registry.resolve(
-                pending[0].id,
-                CheckpointResponse(decision=CheckpointDecision.CONTINUE),
-                conversation_id=conversation_id,
-            )
-            return
-        await asyncio.sleep(0.002)
-    raise AssertionError("no pending plan_review appeared")
-
-
 async def test_plan_review_pause_journal_projects_to_captain_transcript():
     # The delegate counterpart of the ask_user golden — the harder shape: drive the REAL
     # captain loop to a `delegate` whose plan checkpoints after s1, suspending the
@@ -454,22 +433,19 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript():
     fl_token = current_fact_log.set(log)
     ct_token = captain_transcript.set(messages)
     try:
-        # Run the captain loop as a task so a concurrent resolver can settle the parked
-        # plan_review; the contextvars (fact log + transcript) are copied into the task.
-        drive = asyncio.create_task(
-            react_loop(
-                messages=messages,
-                llm=captain_provider,
-                tools=reg,
-                sink=sink,
-                tool_context=_context(),
-                profile=profile,
-                run_id="cap",
-                role="captain",
-            )
+        # ②: the delegate checkpoint finalizes the turn at the wave boundary (frame saved) —
+        # react_loop ends on PAUSED in place, with no parked plan_review to resolve. The saver
+        # snapshotted the pause frame under test before the boundary yielded.
+        await react_loop(
+            messages=messages,
+            llm=captain_provider,
+            tools=reg,
+            sink=sink,
+            tool_context=_context(),
+            profile=profile,
+            run_id="cap",
+            role="captain",
         )
-        await _resolve_plan_review(registry, "c1")
-        await drive
     finally:
         captain_transcript.reset(ct_token)
         current_fact_log.reset(fl_token)

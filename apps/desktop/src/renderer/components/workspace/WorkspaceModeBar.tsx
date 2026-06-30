@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/popover";
 import { getConversations } from "@/hooks/useConversations";
 import { patchFolderCache } from "@/hooks/useFolders";
+import { hasLocalFiles } from "@/lib/capabilities";
 import { ApiError } from "@/services/api";
 import { runHandoff } from "@/services/handoff";
 import {
@@ -188,11 +189,14 @@ export function WorkspaceModeBar({
         <Button
           variant="ghost"
           className={`h-auto min-w-0 shrink gap-1.5 overflow-hidden px-2 py-1 text-xs font-medium ${
-            isLocal && rootMissing ? "text-warning" : "text-foreground"
+            isLocal && rootMissing ? "text-muted-foreground" : "text-foreground"
           }`}
         >
           {isLocal && rootMissing ? (
-            <AlertTriangle size={13} className="shrink-0 text-warning" />
+            <AlertTriangle
+              size={13}
+              className="shrink-0 text-muted-foreground"
+            />
           ) : isLocal ? (
             <HardDrive size={13} className="shrink-0 text-primary" />
           ) : (
@@ -239,16 +243,16 @@ export function WorkspaceModeBar({
                 {/* §八 degradation: the bound root isn't on this device (removed,
                     or bound on another machine — local projects don't follow you
                     across devices). */}
-                <div className="mb-1 flex items-start gap-2 rounded-lg bg-warning/10 px-2.5 py-2 text-xs text-warning-foreground">
+                <div className="mb-1 flex items-start gap-2 rounded-lg bg-muted px-2.5 py-2 text-xs text-foreground">
                   <AlertTriangle
                     size={14}
-                    className="mt-px shrink-0 text-warning"
+                    className="mt-px shrink-0 text-muted-foreground"
                   />
                   <p className="text-foreground/80">
                     这个项目的本地目录在本机找不到了。重新选择该文件夹即可继续，或切回云端工作区。
                   </p>
                 </div>
-                {fsApi && (
+                {hasLocalFiles() && (
                   <ModeAction
                     icon={<FolderOpen size={14} />}
                     label="重新连接…"
@@ -316,7 +320,7 @@ export function WorkspaceModeBar({
                 )}
               </>
             )
-          ) : fsApi ? (
+          ) : hasLocalFiles() ? (
             <ModeAction
               icon={<FolderOpen size={14} />}
               label="打开本地文件夹"

@@ -133,6 +133,48 @@ def escalation_raised(
     )
 
 
+def team_note_posted(
+    *,
+    execution_id: str,
+    note_id: str,
+    run_id: str,
+    agent_id: str,
+    role: str,
+    kind: str,
+    text: str,
+    ts: float,
+    supersedes: str | None = None,
+    supersede_mode: str | None = None,
+) -> SSEEvent:
+    """A worker pinned a note to the batch 便签墙 (§2.2 通). Carries the author (run/agent/
+    role), the ``kind`` (``decision`` 我定了 / ``heads_up`` 提个醒) and the one-line ``text``,
+    scoped by ``execution_id`` so the team-notes panel groups a turn's notes. Journaled (rides
+    the delegate turn), so it replays on reload; folded onto the ProjectedTurn so both ends
+    render it. ``note_id`` is the stable key (dedup).
+
+    便签会过期 → supersession (§2.2): an AMENDMENT note also carries ``supersedes`` (the note_id
+    it 改写/作废s) + ``supersede_mode`` (``update`` → target superseded / ``void`` → target
+    voided). Those two are the single signal every fold uses to mark the TARGET stale — a fresh
+    post omits them (kept off the payload so its shape is unchanged)."""
+    payload: dict[str, Any] = {
+        "execution_id": execution_id,
+        "note_id": note_id,
+        "run_id": run_id,
+        "agent_id": agent_id,
+        "role": role,
+        "kind": kind,
+        "text": text,
+        "ts": ts,
+    }
+    # Only present on an amendment — a fresh post keeps its original payload shape (and existing
+    # fixtures stay byte-identical for non-amendment notes).
+    if supersedes is not None:
+        payload["supersedes"] = supersedes
+    if supersede_mode is not None:
+        payload["supersede_mode"] = supersede_mode
+    return SSEEvent(type=EventType.TEAM_NOTE_POSTED, payload=payload)
+
+
 def run_completed(
     run_id: str,
     agent_id: str,

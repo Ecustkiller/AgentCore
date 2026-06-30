@@ -21,7 +21,10 @@ the whole hint stack that follows (see ``runtime.prompt`` and ``pipeline.run``).
 
 from __future__ import annotations
 
+from agentcore.core.logging import get_logger
 from agentcore.runtime.context.contributor import PromptContributor
+
+logger = get_logger(__name__)
 
 
 class ContextAssembler:
@@ -69,6 +72,27 @@ class ContextAssembler:
     def contributors(self) -> list[PromptContributor]:
         """The kept contributors in RENDER order (sorted; for debugging / budgeting)."""
         return sorted(self._contributors, key=lambda c: c.order)
+
+    def observe(self, *, scope: str, soft_cap: int | None = None) -> ContextAssembler:
+        """Log this prompt's assembled size + per-section chars — observe-only (COST-004).
+
+        零行为副作用: 只埋点不改装配 (返回 ``self`` 供链式调用)。``cost.prompt_assembled`` 给出
+        每段 chars 明细 (归因哪段膨胀) + 总 chars + 是否越软闸——为「开发期无真实数据」攒据, 待数据
+        出再据此开「仅裁易变尾 (order≥800)」软闸 (项目审计-成本性能专项 §九)。trace / conversation
+        上下文由 contextvars 自动并入每行日志, 故此处无需显式传。``soft_cap`` 为 None ⇒ 不判越限。
+        """
+        kept = sorted(self._contributors, key=lambda c: c.order)
+        sections = {c.key: len(c.text) for c in kept}
+        total = sum(sections.values())
+        logger.info(
+            "cost.prompt_assembled",
+            scope=scope,
+            total_chars=total,
+            sections=sections,
+            over_soft_cap=soft_cap is not None and soft_cap > 0 and total > soft_cap,
+            soft_cap=soft_cap,
+        )
+        return self
 
     def render(self) -> str:
         """Sort kept contributors by ``order`` (stable) and join with ``"\\n"``."""

@@ -129,6 +129,39 @@ class ScopeProvider:
         yield LLMChunk(delta_content="BOUT" if is_b else "AOUT")
 
 
+class DepProvider:
+    """Fake LLM where upstream escalates a dependency gap (escalate kind=dep, §2.4 变·worker
+    的「拉」: 卡在缺输入) then produces output — the reactive-boundary twin of ScopeProvider."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.requests: list = []
+
+    async def stream(self, request):
+        self.requests.append(request)
+        self.calls += 1
+        user = next((m.content or "" for m in request.messages if m.role == "user"), "")
+        has_tool_result = any(m.role == "tool" for m in request.messages)
+        is_b = "撰写最终报告" in user
+        if not is_b and not has_tool_result:
+            args = json.dumps(
+                {
+                    "question": "缺错误返回结构才能写完整测试",
+                    "assumption": "暂按 {code,msg}",
+                    "kind": "dep",
+                }
+            )
+            yield LLMChunk(
+                delta_tool_calls=[
+                    ToolCallDelta(
+                        index=0, id="esc-tc", function_name="escalate", arguments_delta=args
+                    )
+                ]
+            )
+            return
+        yield LLMChunk(delta_content="BOUT" if is_b else "AOUT")
+
+
 def ctx() -> ToolContext:
     return ToolContext(
         execution_id="e",
@@ -264,7 +297,9 @@ def tool_durable(
     )
 
 
-def scope_tool(provider: ScopeProvider) -> DelegateTool:
+def scope_tool(provider: ScopeProvider | DepProvider) -> DelegateTool:
+    # Shared by the scope (职责偏离) and dep (依赖缺口) reactive-boundary tests — both ride the
+    # same SCOPE boundary, both just need a worker that can call escalate.
     tools = ToolRegistry()
     tools.register(EscalateTool())
     return DelegateTool(

@@ -128,20 +128,3 @@ async def test_checkpoint_inert_when_disabled():
     sink.close()
     types = [e.type async for e in sink]
     assert EventType.PLAN_REVIEW_REQUIRED not in types
-
-
-def test_plan_review_resolve_body_discriminates():
-    from typing import Annotated
-
-    from pydantic import Field, TypeAdapter
-
-    from agentcore.api.schemas import (
-        ResolveInteractionRequest,
-        ResolvePlanReviewInteraction,
-    )
-
-    adapter = TypeAdapter(Annotated[ResolveInteractionRequest, Field(discriminator="kind")])
-    body = adapter.validate_python({"kind": "plan_review", "decision": "stop", "note": "halt"})
-    assert isinstance(body, ResolvePlanReviewInteraction)
-    assert body.decision is CheckpointDecision.STOP
-    assert body.note == "halt"

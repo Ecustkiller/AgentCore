@@ -202,7 +202,7 @@ def test_ask_user_suspension_round_trips():
                 "id": "q0",
                 "prompt": "A 还是 B?",
                 "kind": "choice",
-                "options": ["A", "B"],
+                "options": [{"label": "A"}, {"label": "B"}],
                 "multiple": True,
                 "default": "",
             }
@@ -223,7 +223,7 @@ def test_ask_user_suspension_round_trips():
     assert restored.context == "两者代价不同"
     assert restored.assumptions == [{"id": "a0", "label": "部署", "value": "纯静态"}]
     assert restored.questions[0]["prompt"] == "A 还是 B?"
-    assert restored.questions[0]["options"] == ["A", "B"]
+    assert restored.questions[0]["options"] == [{"label": "A"}, {"label": "B"}]
     assert restored.questions[0]["multiple"] is True
     assert restored.style_options == [{"id": "s0", "label": "深色科技"}]
     # transcript / history are NOT serialized (Phase 2 ⑤): resume echoes the call via the

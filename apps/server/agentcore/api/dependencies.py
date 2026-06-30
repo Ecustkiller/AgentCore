@@ -22,6 +22,7 @@ from agentcore.db.repositories import (
     FolderRepository,
     HandoffJobRepository,
     InviteRepository,
+    MemoryUpdateRepository,
     MessageRepository,
     ModelModeRepository,
     PushDeviceRepository,
@@ -113,6 +114,10 @@ def get_model_mode_repo(session: AsyncSession = Depends(get_db)) -> ModelModeRep
 
 def get_message_repo(session: AsyncSession = Depends(get_db)) -> MessageRepository:
     return MessageRepository(session)
+
+
+def get_memory_update_repo(session: AsyncSession = Depends(get_db)) -> MemoryUpdateRepository:
+    return MemoryUpdateRepository(session)
 
 
 def get_cost_event_repo(session: AsyncSession = Depends(get_db)) -> CostEventRepository:

@@ -1,0 +1,201 @@
+/*
+ * Shared tokens + base for clash-narrative redesign previews (TEMPORARY / throwaway).
+ * Light-theme only, mirrors packages/design-tokens/src/tokens.css :root (OKLCH, hue 255).
+ */
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.15 0.01 255);
+  --card: var(--background);
+  --primary: oklch(0.55 0.18 255);
+  --primary-foreground: oklch(0.985 0.01 255);
+  --muted: oklch(0.97 0.006 255);
+  --muted-foreground: oklch(0.55 0.02 255);
+  --accent: oklch(0.96 0.012 255);
+  --accent-foreground: oklch(0.25 0.03 255);
+  --destructive: oklch(0.58 0.22 27);
+  --success: oklch(0.55 0.14 152);
+  --warning: oklch(0.66 0.15 65);
+  --warning-foreground: oklch(0.25 0.05 65);
+  --border: oklch(0.92 0.008 255);
+
+  /* identity palette (agent-N) — sides pick from these */
+  --agent-sweet: oklch(0.62 0.15 55);   /* 甜党 暖橙 */
+  --agent-salty: oklch(0.55 0.15 245);  /* 咸党 蓝 */
+
+  --radius-sm: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-sm: 0 1px 2px oklch(0.15 0.01 255 / 0.05);
+  --shadow-md: 0 4px 16px oklch(0.15 0.04 255 / 0.08);
+  --shadow-lg: 0 12px 40px oklch(0.15 0.05 255 / 0.12);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--muted);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a { color: inherit; }
+
+/* ---- App chrome (mimics CanvasZoomedTurn top bar) ---- */
+.app {
+  max-width: 1180px;
+  margin: 0 auto;
+  background: var(--background);
+  min-height: 100vh;
+  box-shadow: var(--shadow-md);
+}
+.chrome {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: oklch(1 0 0 / 0.85);
+  backdrop-filter: blur(8px);
+}
+.chrome .back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+}
+.chrome .back:hover { background: var(--accent); color: var(--foreground); }
+.chrome .title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+.tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.tabs button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+/* ---- Shared pills ---- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.pill-primary { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+.pill-success { background: color-mix(in oklch, var(--success) 14%, transparent); color: var(--success); }
+.pill-warning { background: color-mix(in oklch, var(--warning) 18%, transparent); color: var(--warning-foreground); }
+.pill-muted   { background: var(--muted); color: var(--muted-foreground); }
+.pill-outline { border: 1px solid var(--border); color: var(--muted-foreground); }
+
+/* ---- Generic helpers ---- */
+.muted { color: var(--muted-foreground); }
+.section-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+  letter-spacing: 0.01em;
+}
+.section-label .ico { color: var(--muted-foreground); display: inline-flex; }
+.divider { height: 1px; background: var(--border); border: 0; margin: 0; }
+
+/* identity dot/avatar */
+.id-dot {
+  width: 10px; height: 10px; border-radius: 999px;
+  background: var(--side, var(--primary));
+  flex: none;
+}
+.id-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-weight: 600;
+}
+.id-chip .name { color: var(--side, var(--foreground)); }
+.id-chip .model {
+  font-size: 11px; font-weight: 500; color: var(--muted-foreground);
+  background: var(--muted); border-radius: 999px; padding: 1px 7px;
+}
+
+/* confidence ring (conic) */
+.ring {
+  position: relative;
+  width: var(--size, 92px);
+  height: var(--size, 92px);
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--ring-color, var(--warning)) calc(var(--pct, 0) * 1%),
+    var(--border) 0
+  );
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.ring::after {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background: var(--background);
+}
+.ring .val {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  line-height: 1.1;
+}
+.ring .val b { font-size: 22px; font-weight: 700; }
+.ring .val small { font-size: 11px; color: var(--muted-foreground); }
+
+/* meter bar (alt confidence) */
+.meter { height: 8px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.meter > span { display: block; height: 100%; border-radius: 999px; background: var(--warning); }

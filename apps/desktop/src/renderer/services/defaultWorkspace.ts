@@ -15,14 +15,16 @@
  * 「云端临时对话」逃生口不在此：建会话处直接以 `local_container_root_id=null` 创建即可。
  */
 
+import { hasLocalFiles } from "@/lib/capabilities";
+
 // 本次会话内已解析出的默认容器根 id（解析一次后缓存复用）。
 let cachedRootId: string | null = null;
 // 进行中的解析（防 StrictMode 双触发 / 并发点击重复授权）。
 let inflight: Promise<string | null> | null = null;
 
-/** 桌面 FS 桥是否可用（web / 手机：否 → 整条本地优先逻辑 no-op）。 */
+/** 桌面 FS 桥是否可用（web：否 → 整条本地优先逻辑 no-op，会话以云端意向创建）。 */
 function isDesktop(): boolean {
-  return typeof window !== "undefined" && !!window.fsApi;
+  return hasLocalFiles();
 }
 
 /**

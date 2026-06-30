@@ -1,3 +1,4 @@
+import { surfaceResumeFromLiveTurn } from "@/services/resume";
 import { traceTurnEnd } from "@/services/sseTrace";
 import { useApprovalStore } from "@/stores/approvals";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
@@ -41,11 +42,17 @@ export function handleMessageStreamEvent(
       // dev「复制 trace id」link jumps straight to this turn's logs. Optional on the wire
       // (absent on untraced turns); idempotent on a reconnect replay (re-sent first).
       {
-        const traceId = (event.payload as MessageStartPayload).trace_id;
-        if (traceId)
+        const payload = event.payload as MessageStartPayload;
+        if (payload.trace_id)
           useConversationStore
             .getState()
-            .setTraceIdOnLastMessage(traceId, conversationId);
+            .setTraceIdOnLastMessage(payload.trace_id, conversationId);
+        // 挂起即收口 (②): keep the SERVER message_id (the live bubble's id is a client
+        // UUID) so a turn that ends paused in-session can surface its resume card under
+        // the resume KEY the durable frame was persisted under (else resume 404s).
+        useConversationStore
+          .getState()
+          .setServerMessageIdOnLastMessage(payload.message_id, conversationId);
       }
       // Turn (re)start — clear the captain context accumulator so a reconnect replay
       // (which re-sends message_start first) rebuilds it idempotently (上下文传递可视化 通道①+⑤).
@@ -113,15 +120,25 @@ export function handleMessageStreamEvent(
       );
       conv.finalizeLastMessage(conversationId);
       useApprovalStore.getState().clear(conversationId);
+      // 挂起即收口 (②): a turn can END at a durable checkpoint — message_end carries
+      // finish_reason=paused. The turn is NOT done: its frame was persisted and its
+      // in-process resolve Future was never parked, so keep the graph paused (not
+      // "completed") and let the now-dormant inline checkpoint card hand off to the
+      // (single) durable resume card, surfaced from the *_required payload already on the
+      // bubble (no /recovery round-trip → reproduces offline in #/preview).
+      const paused = payload.finish_reason === "paused";
       const mid = execMessageId(conversationId);
       if (mid) {
         const rt = execRuntime(useExecutionStore.getState(), mid);
         if (rt.plan && rt.status !== "failed") {
-          useExecutionStore.getState().setStatus("completed", mid);
+          useExecutionStore
+            .getState()
+            .setStatus(paused ? "paused" : "completed", mid);
         }
       }
       conv.releaseBackgroundSlice(conversationId);
       finalizeTurnTrace(conversationId);
+      if (paused) surfaceResumeFromLiveTurn(conversationId);
       return true;
     }
     case "error": {

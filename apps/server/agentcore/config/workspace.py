@@ -36,3 +36,10 @@ class WorkspaceSettings(BaseModel):
     # Cloud (server-location) workers: code_execute runs in the API container subprocess
     # — not a real isolation boundary. Default off; local/sidecar keeps code_execute.
     code_execute_cloud_enabled: bool = False
+    # Second, deliberate acknowledgement that the cloud subprocess "sandbox" is NOT a real
+    # isolation boundary (no namespace/seccomp/rlimit/egress control): enabling cloud code
+    # execution gives any authenticated user full-permission RCE inside the API container.
+    # ``_validate_production_security`` refuses to boot a non-debug server that turns
+    # ``code_execute_cloud_enabled`` on without ALSO setting this, so the dangerous config
+    # can never be reached by flipping a single flag (SEC-005).
+    code_execute_cloud_unsafe_ack: bool = False

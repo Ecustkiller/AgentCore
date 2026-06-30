@@ -10,14 +10,17 @@ state into a ledger row. Money is integer nano-USD throughout.
 from dataclasses import asdict
 
 from agentcore.llm.config import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
-from agentcore.llm.pricing import calculate_cost
+from agentcore.llm.pricing import QWEN_VL_MAX, calculate_cost
 from agentcore.llm.protocol import TokenUsage
 from agentcore.runtime.costing import (
     ROLE_CAPTAIN,
     ROLE_MEMBER,
+    ROLE_VISION,
+    WorkerResultAccumulator,
     aggregate_cost,
     captain_run_cost_from_state,
     member_run_cost,
+    vision_run_cost,
 )
 from agentcore.runtime.runs.types import RunSpec, RunState
 
@@ -132,6 +135,40 @@ def test_captain_cost_values_are_integers():
     assert isinstance(row.cost_total_nano, int)
 
 
+def test_vision_run_cost_prices_subcall_under_vision_role():
+    # AI 协作白板 读图入账 (§九.4 Gap ②): a board_read sub-call to a SEPARATE vision model
+    # gets its own priced ledger row under role=vision — priced once here via the one
+    # calculate_cost (a stub state would misprice it at the run's DeepSeek tier), parented
+    # to the calling run so it nests under that captain in the turn's run tree.
+    usage = TokenUsage(input_tokens=1200, output_tokens=40)
+    priced = calculate_cost(QWEN_VL_MAX, usage)
+
+    row = vision_run_cost(QWEN_VL_MAX, usage, parent_run_id="cap-1", duration_ms=210)
+
+    assert row.role == ROLE_VISION
+    assert row.run_id.startswith("vis_")  # unique id keeps the upsert-by-run_id honest
+    assert row.parent_run_id == "cap-1"
+    assert row.agent_id is None  # not a Run/Agent, just a tool-layer sub-call
+    assert row.model == QWEN_VL_MAX
+    assert row.rounds == 1
+    assert row.duration_ms == 210
+    assert row.tokens == usage.as_dict()
+    assert row.cost == {
+        "input": priced.input,
+        "cached": priced.cached,
+        "output": priced.output,
+        "total": priced.total,
+    }
+    assert row.cost_total_nano == priced.total
+    # qwen-vl-max: input billed as a miss (no cache split) 1200×$0.80/1M = 960_000 nano;
+    # output 40×$3.20/1M = 128_000 — pins the price table + miss reconciliation.
+    assert row.cost["input"] == 960_000
+    assert row.cost["cached"] == 0
+    assert row.cost["output"] == 128_000
+    assert row.cost["total"] == 1_088_000
+    assert all(isinstance(v, int) for v in row.cost.values())
+
+
 def test_aggregate_cost_sums_priced_rows_across_tiers():
     # The turn total (message_end.cost) is the SUM of the already-priced rows, NOT
     # a re-price of the combined usage — a captain on Flash + a member on Pro must
@@ -184,3 +221,28 @@ def test_aggregate_cost_empty_is_zero():
         "total": 0,
         "currency": "USD",
     }
+
+
+def test_collab_tally_starts_at_zero():
+    # 协作质量 (学·度量 §2.5): a fresh accumulator carries a zeroed tally, so a plain
+    # single-agent / no-boundary turn persists zeros (byte-for-byte unchanged behavior).
+    acc = WorkerResultAccumulator()
+    assert acc.collab == {"boundary_yields": 0, "scope_signals": 0, "escalations": 0}
+
+
+def test_collab_tally_rolls_up_nested_subteams_via_merge():
+    # A nested lead's sub-team signals must roll up to the captain the SAME parent/child
+    # path as usage — merge() folds the child accumulator's collab counters in, so a
+    # depth-2 boundary/drift is not lost from the turn-level 方向盘.
+    captain = WorkerResultAccumulator()
+    captain.collab["boundary_yields"] += 1
+    captain.collab["scope_signals"] += 2
+
+    lead = WorkerResultAccumulator()
+    lead.collab["boundary_yields"] += 1
+    lead.collab["scope_signals"] += 3
+    lead.collab["escalations"] += 4
+
+    captain.merge(lead)
+
+    assert captain.collab == {"boundary_yields": 2, "scope_signals": 5, "escalations": 4}

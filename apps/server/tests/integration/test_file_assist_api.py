@@ -91,10 +91,13 @@ class _FakeProvider:
 
 @pytest.fixture
 def stub_provider(monkeypatch):
-    """Route's ``build_provider`` → a fake provider echoing a fixed rewrite, so the
-    happy path stays fully offline (and still exercises the real rewrite_selection)."""
+    """Assist service's ``build_provider`` → a fake provider echoing a fixed rewrite, so
+    the happy path stays fully offline (and still exercises the real rewrite_selection).
+
+    Patched in ``assist.rewrite`` (where the provider is now built): the route is a thin
+    delegate that no longer touches ``llm`` (api ⊥ llm)."""
     monkeypatch.setattr(
-        "agentcore.api.routes.files.build_provider",
+        "agentcore.assist.rewrite.build_provider",
         lambda creds: _FakeProvider(_REWRITTEN),
     )
 

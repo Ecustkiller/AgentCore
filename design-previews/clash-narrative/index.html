@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>交锋叙事重设计 · 预览总览</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <style>
+      .lp { max-width: 1120px; margin: 0 auto; padding: 48px 24px 80px; }
+
+      .lp-head .eyebrow { font-size: 12.5px; font-weight: 600; color: var(--primary); letter-spacing: 0.04em; }
+      .lp-head h1 { margin: 8px 0 0; font-size: 30px; font-weight: 800; letter-spacing: -0.01em; line-height: 1.2; }
+      .lp-head p.sub { margin: 12px 0 0; font-size: 15px; line-height: 1.7; color: var(--muted-foreground); max-width: 760px; }
+      .lp-head .motion { margin-top: 16px; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; padding: 7px 13px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--muted-foreground); }
+      .lp-head .motion b { color: var(--foreground); font-weight: 600; }
+
+      .grp-head { display: flex; align-items: baseline; gap: 10px; margin: 38px 0 4px; }
+      .grp-head h2 { font-size: 17px; font-weight: 750; margin: 0; }
+      .grp-head .gt { font-size: 13px; color: var(--muted-foreground); }
+      .grp-note { font-size: 13px; color: var(--muted-foreground); margin: 0 0 16px; }
+
+      .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+      @media (max-width: 920px) { .cards { grid-template-columns: 1fr; } }
+      .card { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); box-shadow: var(--shadow-sm); text-decoration: none; color: inherit; overflow: hidden; transition: 0.14s; }
+      .card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); border-color: color-mix(in oklch, var(--primary) 40%, var(--border)); }
+      .card .cbody { padding: 15px 17px 17px; display: flex; flex-direction: column; flex: 1; }
+      .card .crow { display: flex; align-items: center; gap: 8px; }
+      .card .cnum { font-size: 12px; font-weight: 600; color: var(--muted-foreground); }
+      .card .badge { margin-left: auto; font-size: 11px; }
+      .card .cname { font-size: 17px; font-weight: 750; display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+      .card .cname .ico { color: var(--primary); transition: 0.14s; }
+      .card:hover .cname .ico { transform: translateX(3px); }
+      .card .ctag { font-size: 12.5px; color: var(--muted-foreground); margin: 4px 0 11px; }
+      .card .ctraits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+      .card .ctraits li { font-size: 12px; line-height: 1.45; color: var(--foreground); display: flex; gap: 8px; }
+      .card .ctraits li b { flex: none; width: 30px; color: var(--muted-foreground); font-weight: 600; }
+      .card .open { margin-top: 13px; font-size: 12.5px; font-weight: 600; color: var(--primary); }
+
+      /* wireframe thumbnails */
+      .wf { margin: 13px 13px 0; height: 104px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--muted); padding: 11px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; }
+      .wf .bar { display: block; border-radius: 4px; background: color-mix(in oklch, var(--muted-foreground) 22%, transparent); }
+      .wf1 .hero { height: 30px; background: color-mix(in oklch, var(--primary) 24%, transparent); }
+      .wf1 .row2 { display: flex; gap: 6px; }
+      .wf1 .half { flex: 1; height: 22px; }
+      .wf1 .half.s { background: color-mix(in oklch, var(--agent-sweet) 28%, transparent); }
+      .wf1 .half.t { background: color-mix(in oklch, var(--agent-salty) 28%, transparent); }
+      .wf1 .line { height: 6px; }
+      .wf1 .line.short { width: 55%; }
+
+      .wf2 { flex-direction: row; gap: 7px; }
+      .wf2 .col { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+      .wf2 .col span { height: 16px; border-radius: 4px; background: color-mix(in oklch, var(--agent-sweet) 30%, transparent); }
+      .wf2 .col.r span { background: color-mix(in oklch, var(--agent-salty) 30%, transparent); }
+      .wf2 .spine { width: 16px; display: flex; flex-direction: column; align-items: center; justify-content: space-around; position: relative; }
+      .wf2 .spine::before { content: ""; position: absolute; top: 2px; bottom: 2px; width: 2px; background: var(--border); }
+      .wf2 .spine i { width: 11px; height: 11px; border-radius: 999px; background: var(--background); border: 2px solid var(--muted-foreground); z-index: 1; }
+
+      .wf3 .chips { display: flex; gap: 6px; }
+      .wf3 .chips span { flex: 1; height: 20px; border-radius: 4px; }
+      .wf3 .chips span:nth-child(1) { background: color-mix(in oklch, var(--warning) 32%, transparent); }
+      .wf3 .chips span:nth-child(2) { background: color-mix(in oklch, var(--success) 30%, transparent); }
+      .wf3 .chips span:nth-child(3) { background: color-mix(in oklch, var(--muted-foreground) 24%, transparent); }
+      .wf3 .tcard { height: 20px; border-radius: 4px; border: 1px solid var(--border); border-left: 3px solid var(--warning); background: var(--card); }
+      .wf3 .tcard.f { border-left-color: var(--success); }
+
+      .wf4 { flex-direction: row; align-items: center; gap: 12px; }
+      .wf4 .gauge { width: 40px; height: 40px; border-radius: 999px; flex: none; background: conic-gradient(color-mix(in oklch, var(--agent-salty) 55%, transparent) 65%, var(--border) 0); }
+      .wf4 .gauge::after { content: ""; display: block; width: 24px; height: 24px; margin: 8px; border-radius: 999px; background: var(--muted); }
+      .wf4 .togs { flex: 1; display: flex; flex-direction: column; gap: 9px; }
+      .wf4 .tog { height: 16px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); position: relative; }
+      .wf4 .tog::after { content: ""; position: absolute; top: 1px; left: 1px; width: 48%; height: 12px; border-radius: 999px; background: color-mix(in oklch, var(--primary) 30%, transparent); }
+      .wf4 .tog.b::after { left: auto; right: 1px; background: color-mix(in oklch, var(--agent-sweet) 35%, transparent); }
+
+      .wf5 { gap: 6px; }
+      .wf5 .bub { height: 13px; border-radius: 7px; background: var(--card); border: 1px solid var(--border); }
+      .wf5 .bub.l { width: 72%; }
+      .wf5 .bub.r { width: 56%; align-self: flex-end; background: color-mix(in oklch, var(--primary) 25%, transparent); border: 0; }
+      .wf5 .chiprow { display: flex; gap: 5px; margin-top: auto; }
+      .wf5 .chiprow span { height: 13px; flex: 1; border-radius: 999px; border: 1px solid var(--border); background: var(--card); }
+
+      .wf6 { gap: 11px; justify-content: center; }
+      .wf6 .eval { display: flex; height: 16px; border-radius: 5px; overflow: hidden; border: 1px solid var(--border); }
+      .wf6 .eval .l { width: 42%; background: color-mix(in oklch, var(--agent-sweet) 40%, transparent); }
+      .wf6 .eval .r { flex: 1; background: color-mix(in oklch, var(--agent-salty) 40%, transparent); }
+      .wf6 .track { display: flex; align-items: center; gap: 7px; }
+      .wf6 .track .play { width: 16px; height: 16px; border-radius: 999px; background: var(--primary); flex: none; }
+      .wf6 .track .line { flex: 1; height: 3px; border-radius: 999px; background: var(--border); position: relative; }
+      .wf6 .track .line::after { content: ""; position: absolute; left: 32%; top: -3px; width: 9px; height: 9px; border-radius: 999px; background: var(--primary); }
+
+      .wf7 { padding: 6px; }
+      .wf7 svg { width: 100%; height: 100%; }
+
+      .wf8 { align-items: center; justify-content: center; gap: 9px; }
+      .wf8 .big { width: 66%; height: 15px; border-radius: 5px; background: color-mix(in oklch, var(--foreground) 16%, transparent); }
+      .wf8 .sm { width: 42%; height: 7px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); }
+      .wf8 .btn { width: 92px; height: 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); margin-top: 3px; }
+
+      .wf9 { gap: 11px; }
+      .wf9 .steps { display: flex; align-items: center; gap: 5px; justify-content: center; }
+      .wf9 .steps i { width: 11px; height: 11px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); }
+      .wf9 .steps i.on { background: var(--primary); border-color: var(--primary); }
+      .wf9 .steps .ln { width: 13px; height: 2px; background: var(--border); }
+      .wf9 .choices { display: flex; gap: 8px; flex: 1; }
+      .wf9 .choices span { flex: 1; border-radius: 6px; border: 1px solid var(--border); border-top: 3px solid var(--agent-sweet); background: var(--card); }
+      .wf9 .choices span:last-child { border-top-color: var(--agent-salty); }
+
+      /* featured process-state demo */
+      .feature { display: flex; border: 1px solid color-mix(in oklch, var(--warning) 35%, var(--border)); border-radius: var(--radius-lg); background: color-mix(in oklch, var(--warning) 5%, var(--card)); box-shadow: var(--shadow-sm); text-decoration: none; color: inherit; overflow: hidden; transition: 0.14s; }
+      .feature:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); border-color: color-mix(in oklch, var(--warning) 55%, var(--border)); }
+      .feature .fwf { flex: none; width: 210px; background: var(--muted); border-right: 1px solid var(--border); padding: 16px; display: flex; flex-direction: column; gap: 7px; justify-content: center; }
+      .feature .fwf .frow { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted-foreground); font-weight: 600; }
+      .feature .fwf .ld { width: 8px; height: 8px; border-radius: 999px; background: var(--destructive); }
+      .feature .fwf .fbars { display: flex; gap: 6px; }
+      .feature .fwf .fbars span { flex: 1; height: 16px; border-radius: 4px; }
+      .feature .fwf .fbars span:first-child { background: color-mix(in oklch, var(--agent-sweet) 32%, transparent); }
+      .feature .fwf .fbars span:last-child { background: color-mix(in oklch, var(--agent-salty) 32%, transparent); }
+      .feature .fwf .farrow { font-size: 11px; color: var(--muted-foreground); text-align: center; }
+      .feature .fwf .fhero { height: 24px; border-radius: 5px; background: color-mix(in oklch, var(--warning) 28%, transparent); }
+      .feature .fbody { padding: 16px 20px; flex: 1; min-width: 0; }
+      .feature .fname { font-size: 18px; font-weight: 750; display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+      .feature .fname .ico { color: var(--primary); }
+      .feature .ftag { font-size: 13px; color: var(--muted-foreground); margin: 6px 0 0; line-height: 1.6; max-width: 620px; }
+      .feature .open { display: inline-block; margin-top: 12px; font-size: 12.5px; font-weight: 600; color: var(--primary); }
+      @media (max-width: 680px) { .feature { flex-direction: column; } .feature .fwf { width: auto; border-right: 0; border-bottom: 1px solid var(--border); } }
+
+      /* comparison */
+      .cmp { margin-top: 46px; }
+      .cmp h2 { font-size: 16px; font-weight: 700; margin: 0 0 14px; display: flex; align-items: center; gap: 8px; }
+      .cmp h2 .ico { color: var(--muted-foreground); }
+      .cmp .tbl { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+      .cmp table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      .cmp th, .cmp td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.5; }
+      .cmp thead th { background: var(--muted); font-weight: 650; }
+      .cmp tbody td:first-child { font-weight: 650; white-space: nowrap; }
+      .cmp tbody tr:last-child td { border-bottom: 0; }
+      .cmp tbody tr.sep td { background: color-mix(in oklch, var(--muted) 45%, transparent); font-size: 11.5px; font-weight: 600; color: var(--muted-foreground); padding: 6px 14px; }
+
+      .foot { margin-top: 34px; font-size: 12.5px; color: var(--muted-foreground); line-height: 1.7; border-top: 1px solid var(--border); padding-top: 16px; }
+      .foot code { background: var(--muted); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="lp">
+      <header class="lp-head">
+        <div class="eyebrow">交锋叙事重设计 · 临时预览</div>
+        <h1>九个方向，挑你想往下走的</h1>
+        <p class="sub">
+          全部用<b>同一场样例辩论</b>渲染，方便横向对比。前 3 个是同一套「报告」骨架的不同排法（你觉得它们差不多，正因为骨架没变）；<b>后 6 个换了交互与结构</b>，是范式上的探索，多数可点着玩。这些是一次性预览页，<b>不进产品代码</b>。
+        </p>
+        <div class="motion">样例命题：<b id="motion"></b></div>
+      </header>
+
+      <div class="grp-head"><h2>过程态</h2><span class="gt">直播中怎么渲染 + 怎么交互 · 你提的关键缺口（新增）</span></div>
+      <p class="grp-note">前面 9 个都是终局态。这两个演示直播中的体验：一个定「怎么渲染」（重心迁移），一个定「怎么交互」（追问/引导/站队/叫停）。已定：直播=对话式、复盘=擂台。</p>
+      <a class="feature" href="concept-live-shift.html">
+        <div class="fwf">
+          <div class="frow"><span class="ld"></span> 直播 · 逐轮流式</div>
+          <div class="fbars"><span></span><span></span></div>
+          <div class="farrow">↓ 收敛终审</div>
+          <div class="fhero"></div>
+        </div>
+        <div class="fbody">
+          <div class="crow"><span class="cnum">渲染模型</span><span class="badge pill pill-warning">直播态 · 帧滑块</span></div>
+          <div class="fname">直播态 · 重心迁移 <span class="ico">→</span></div>
+          <div class="ftag">拖帧滑块：准备 → 逐轮直播（发言流式 + 主持人小结）→ 收敛终审。看裁决如何浮到顶部、交锋过程如何退为可展开下文。直播段已定为「对话式」，可一键切回擂台对比。</div>
+          <span class="open">打开渲染演示 →</span>
+        </div>
+      </a>
+      <a class="feature" href="concept-live-interact.html">
+        <div class="fwf">
+          <div class="frow"><span class="ld"></span> 直播 · 对话式流</div>
+          <div class="fbars"><span></span><span></span></div>
+          <div class="farrow">↑ 你介入</div>
+          <div class="fhero" style="background: color-mix(in oklch, var(--primary) 28%, transparent)"></div>
+        </div>
+        <div class="fbody">
+          <div class="crow"><span class="cnum">交互模型</span><span class="badge pill pill-primary">直播态 · 你能动手</span></div>
+          <div class="fname">直播交互 · 追问 / 引导 / 站队 / 叫停 <span class="ico">→</span></div>
+          <div class="ftag">底部「交互坞」是你介入的入口。走一遍：插话追问 → 被主持人采纳 → 引导加码改下一轮焦点 → 站队 → 提前叫停 → 终审对比「你的倾向 vs AI」，并把你的追问/加码并入擂台复盘。</div>
+          <span class="open">打开交互演示 →</span>
+        </div>
+      </a>
+
+      <div class="grp-head"><h2>报告式排布</h2><span class="gt">同一骨架的三种排法 · 只读</span></div>
+      <p class="grp-note">结论 + 双方论点 + 过程/争点，只是重新排了排 —— 这就是它们「差不多」的根因。</p>
+      <div class="cards" id="cards-report"></div>
+
+      <div class="grp-head"><h2>范式探索</h2><span class="gt">换交互 / 换结构 · 多数可交互（推荐从这里挑）</span></div>
+      <p class="grp-note">沿 4 条轴拉开差距：只读→可操作、成品→可回放、旁观者→参与者、散文→图/工具/对话。</p>
+      <div class="cards" id="cards-paradigm"></div>
+
+      <section class="cmp">
+        <h2><span class="ico" id="cmpIco"></span>九个方向横向对比</h2>
+        <div class="tbl">
+          <table>
+            <thead>
+              <tr><th>方向</th><th>范式 / 核心机制</th><th>交互</th><th>适合「想要…」</th></tr>
+            </thead>
+            <tbody id="cmpBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <p class="foot">
+        共享样例数据：<code>data.js</code>（甜 vs 咸豆腐脑，2 轮、4 个争点）。改数据全部页面同步更新。各概念页可独立打开，左上「‹ 返回」回到本页。
+      </p>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="icons.js"></script>
+    <script>
+      const D = window.DEBATE;
+      document.getElementById("motion").textContent = D.motion;
+      document.getElementById("cmpIco").append(svg("scale", 16));
+
+      const wf1 = () => h("div", { class: "wf wf1" }, h("span", { class: "bar hero" }), h("div", { class: "row2" }, h("span", { class: "bar half s" }), h("span", { class: "bar half t" })), h("span", { class: "bar line" }), h("span", { class: "bar line short" }));
+      const wf2 = () => h("div", { class: "wf wf2" }, h("div", { class: "col l" }, h("span"), h("span"), h("span")), h("div", { class: "spine" }, h("i"), h("i"), h("i")), h("div", { class: "col r" }, h("span"), h("span"), h("span")));
+      const wf3 = () => h("div", { class: "wf wf3" }, h("div", { class: "chips" }, h("span"), h("span"), h("span")), h("div", { class: "tcard" }), h("div", { class: "tcard f" }));
+      const wf4 = () => h("div", { class: "wf wf4" }, h("div", { class: "gauge" }), h("div", { class: "togs" }, h("div", { class: "tog" }), h("div", { class: "tog b" })));
+      const wf5 = () => h("div", { class: "wf wf5" }, h("div", { class: "bub l" }), h("div", { class: "bub r" }), h("div", { class: "bub l" }), h("div", { class: "chiprow" }, h("span"), h("span"), h("span")));
+      const wf6 = () => h("div", { class: "wf wf6" }, h("div", { class: "eval" }, h("div", { class: "l" }), h("div", { class: "r" })), h("div", { class: "track" }, h("div", { class: "play" }), h("div", { class: "line" })));
+      const wf7 = () => { const d = h("div", { class: "wf wf7" }); d.innerHTML = `<svg viewBox="0 0 220 96"><g fill="none" stroke="var(--muted-foreground)" stroke-width="1.5" opacity="0.6"><path d="M110,22 C110,34 56,34 56,46"/><path d="M110,22 C110,34 164,34 164,46"/></g><line x1="84" y1="58" x2="136" y2="58" stroke="var(--destructive)" stroke-width="1.5" stroke-dasharray="4 3"/><rect x="84" y="8" width="52" height="16" rx="4" fill="var(--muted)" stroke="var(--border)"/><rect x="28" y="46" width="56" height="20" rx="4" fill="var(--card)" stroke="var(--agent-sweet)" stroke-width="1.5"/><rect x="136" y="46" width="56" height="20" rx="4" fill="var(--card)" stroke="var(--agent-salty)" stroke-width="1.5"/><rect x="78" y="76" width="64" height="15" rx="4" fill="color-mix(in oklch, var(--warning) 12%, var(--card))" stroke="color-mix(in oklch, var(--warning) 45%, var(--border))"/></svg>`; return d; };
+      const wf8 = () => h("div", { class: "wf wf8" }, h("div", { class: "big" }), h("div", { class: "sm" }), h("div", { class: "btn" }));
+      const wf9 = () => h("div", { class: "wf wf9" }, h("div", { class: "steps" }, h("i", { class: "on" }), h("span", { class: "ln" }), h("i", { class: "on" }), h("span", { class: "ln" }), h("i"), h("span", { class: "ln" }), h("i")), h("div", { class: "choices" }, h("span"), h("span")));
+
+      const CARDS = [
+        { g: "report", n: "概念 1", name: "裁决书", file: "concept-1-verdict.html", wf: wf1, badge: ["只读", "pill-muted"], tag: "结论先行的单列裁决页", traits: [["范式", "报告 · 只读"], ["重心", "裁决 / 结论"], ["适合", "先给我结论"]] },
+        { g: "report", n: "概念 2", name: "擂台", file: "concept-2-arena.html", wf: wf2, badge: ["只读", "pill-muted"], tag: "逐轮对阵的宽屏擂台", traits: [["范式", "报告 · 只读"], ["重心", "交锋过程"], ["适合", "看怎么吵的"]] },
+        { g: "report", n: "概念 3", name: "争点分诊", file: "concept-3-triage.html", wf: wf3, badge: ["只读", "pill-muted"], tag: "按争点分诊的决策清单", traits: [["范式", "报告 · 只读"], ["重心", "争点 / 决策"], ["适合", "我要拍哪些板"]] },
+        { g: "paradigm", n: "概念 4", name: "决策驾驶舱", file: "concept-4-cockpit.html", wf: wf4, badge: ["可交互", "pill-primary"], tag: "可调假设，结论实时翻转", traits: [["机制", "拨开关 → 重算结论"], ["交互", "可操作"], ["适合", "试不同取向"]] },
+        { g: "paradigm", n: "概念 5", name: "对话式裁决台", file: "concept-5-dialogic.html", wf: wf5, badge: ["可交互", "pill-primary"], tag: "向裁判追问 / 挑战", traits: [["机制", "问答式裁决"], ["交互", "可对话"], ["适合", "边问边懂"]] },
+        { g: "paradigm", n: "概念 6", name: "比赛回放", file: "concept-6-replay.html", wf: wf6, badge: ["可交互", "pill-primary"], tag: "时间轴回放 + 态势条", traits: [["机制", "拖时间轴看演变"], ["交互", "拖动 / 播放"], ["适合", "看过程"]] },
+        { g: "paradigm", n: "概念 7", name: "论证地图", file: "concept-7-argmap.html", wf: wf7, badge: ["图", "pill-success"], tag: "节点 + 支持 / 反驳连线", traits: [["机制", "论证结构图"], ["交互", "空间浏览"], ["适合", "看清推理"]] },
+        { g: "paradigm", n: "概念 8", name: "极简一页", file: "concept-8-minimal.html", wf: wf8, badge: ["可展开", "pill-primary"], tag: "一句结论 + 一个决定 + 展开", traits: [["机制", "渐进披露"], ["交互", "展开全部"], ["适合", "只要结论"]] },
+        { g: "paradigm", n: "概念 9", name: "选边体验", file: "concept-9-pickside.html", wf: wf9, badge: ["可交互", "pill-primary"], tag: "steelman → 投票 → 揭晓", traits: [["机制", "先体验再揭晓"], ["交互", "多步"], ["适合", "先参与"]] },
+      ];
+
+      const mkCard = (c) =>
+        h(
+          "a",
+          { class: "card", href: c.file },
+          c.wf(),
+          h(
+            "div",
+            { class: "cbody" },
+            h("div", { class: "crow" }, h("span", { class: "cnum" }, c.n), h("span", { class: "badge pill " + c.badge[1] }, c.badge[0])),
+            h("div", { class: "cname" }, c.name, h("span", { class: "ico" }, svg("arrowRight", 17))),
+            h("div", { class: "ctag" }, c.tag),
+            h("ul", { class: "ctraits" }, ...c.traits.map(([k, v]) => h("li", {}, h("b", {}, k), h("span", {}, v)))),
+            h("span", { class: "open" }, "打开预览 →"),
+          ),
+        );
+
+      const rep = document.getElementById("cards-report");
+      const par = document.getElementById("cards-paradigm");
+      CARDS.forEach((c) => (c.g === "report" ? rep : par).append(mkCard(c)));
+
+      const CMP = [
+        ["sep", "报告式排布（同一骨架）"],
+        ["概念 1 裁决书", "结论先行的报告", "只读", "先给我结论"],
+        ["概念 2 擂台", "逐轮对阵的报告", "只读", "看怎么一轮轮打的"],
+        ["概念 3 争点分诊", "按争点归类的报告", "只读", "我要拍哪些板"],
+        ["sep", "范式探索（换交互 / 结构）"],
+        ["概念 4 决策驾驶舱", "可调假设 → 结论实时翻转", "可操作（开关）", "自己试不同取向看结论变"],
+        ["概念 5 对话式裁决台", "向裁判追问 / 挑战", "可操作（问答）", "边问边搞懂"],
+        ["概念 6 比赛回放", "时间轴回放 + 态势条", "可操作（拖动 / 播放）", "看过程怎么演变"],
+        ["概念 7 论证地图", "节点 + 支持 / 反驳连线", "空间浏览", "看清推理结构"],
+        ["概念 8 极简一页", "一句结论 + 一个决定 + 展开", "渐进披露", "大多数时候只要结论"],
+        ["概念 9 选边体验", "steelman → 投票 → 揭晓", "可操作（多步）", "先参与再看答案"],
+      ];
+      const body = document.getElementById("cmpBody");
+      CMP.forEach((row) => {
+        if (row[0] === "sep") body.append(h("tr", { class: "sep" }, h("td", { colspan: "4" }, row[1])));
+        else body.append(h("tr", {}, ...row.map((cell) => h("td", {}, cell))));
+      });
+    </script>
+  </body>
+</html>

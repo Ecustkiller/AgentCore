@@ -1,4 +1,4 @@
-"""Unified interaction primitive — the one suspend-resume bridge (§18.2 / §18.6).
+"""Unified interaction primitive — the one suspend-resume bridge (§8.2 / §8.6).
 
 A turn suspends whenever it needs something out-of-band settled by the client: a
 GRANTABLE tool awaiting the user's approval, the CEO's ``ask_user`` checkpoint, or a
@@ -7,7 +7,7 @@ engine task ``await``s an :class:`asyncio.Future`; a separate HTTP request (the
 resolve endpoint) sets it — so they share ONE registry instead of three parallel
 ones.
 
-This is the §18.6 **ClientRequestBridge** port (Protocol in ``runtime/ports.py``):
+This is the §8.6 **ClientRequestBridge** port (Protocol in ``runtime/ports.py``):
 one pending registry → one ``list_pending`` → one resolve endpoint. Per-kind
 differences (the typed result; whether the exchange is journaled) stay in the thin
 typed faces: :class:`~agentcore.runtime.approvals.ApprovalGate`,
@@ -76,7 +76,7 @@ class InteractionRegistry:
     the engine task ``create``s a request and awaits its Future; the resolve
     endpoint ``resolve``s it. One instance holds every kind, so there is a single
     source of pending interactions (``list_pending``) and a single resolve path —
-    the §18.6 ClientRequestBridge. Bridges the engine task (producer of the request,
+    the §8.6 ClientRequestBridge. Bridges the engine task (producer of the request,
     consumer of the result) and the resolve HTTP request (which delivers it); both
     run in the same process / event loop in the MVP.
     """

@@ -9,6 +9,7 @@ load -> consolidate -> apply -> save.
 
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from agentcore.core.logging import get_logger
 from agentcore.memory.conversation_title import ChatMessage
@@ -31,6 +32,68 @@ from agentcore.memory.user_memory import (
 logger = get_logger(__name__)
 
 
+@dataclass
+class MemoryUpdateItem:
+    """One human-readable applied change, for the conversation-tail「记忆已更新」card.
+
+    Built from the ops that landed in a file that actually changed this pass (Agent记忆与
+    知识系统 §1.6). ``file`` is a friendly label (偏好 / 画像 / 主题·<slug>), ``scope`` is
+    ``"global"`` or ``"project"`` (the conversation's project layer), ``content`` is the
+    bullet text for add/update or the matched text for remove. Serialized to the
+    ``memory_updates.items`` JSONB + the firehose event payload via ``dataclasses.asdict``.
+    """
+
+    action: str  # "add" | "update" | "remove"
+    file: str  # friendly label: 偏好 / 画像 / 主题·<slug>
+    section: str  # core section name; "" for a topic note's default bucket
+    scope: str  # "global" | "project"
+    content: str  # bullet text (add/update) or matched text (remove)
+    target: str  # synthetic memory-leaf path the card deep-links to ("" = no leaf)
+
+
+def _memory_file_label(file: str) -> str:
+    """Map a stored memory file path to the friendly label the card shows."""
+    if file == PREFERENCES_MEMORY_FILE:
+        return "偏好"
+    if file == CORE_MEMORY_FILE:
+        return "画像"
+    if is_topic_path(file):
+        return f"主题·{topic_slug(file)}"
+    return file
+
+
+def _memory_leaf_target(file: str, scope: MemoryScope) -> str:
+    """The synthetic memory-leaf path the desktop card deep-links to.
+
+    Mirrors the desktop ``memorySource`` scheme EXACTLY so the conversation-tail card can
+    open the precise leaf in the「AI 记忆」editor (Agent记忆与知识系统 §1.6): 偏好 →
+    ``global/preferences`` (global-only, §二); 画像 → ``global/profile`` or
+    ``project/<folderId>/profile``; 主题 → ``{global|project/<folderId>}/topics/<slug>``.
+    "" when the file maps to no editable leaf (no deep-link). ``scope`` is the project
+    ``folder_id`` (truthy) or None for the global layer.
+    """
+    if file == PREFERENCES_MEMORY_FILE:
+        return "global/preferences"
+    if file == CORE_MEMORY_FILE:
+        return f"project/{scope}/profile" if scope else "global/profile"
+    if is_topic_path(file):
+        slug = topic_slug(file)
+        return f"project/{scope}/topics/{slug}" if scope else f"global/topics/{slug}"
+    return ""
+
+
+def _item_from_op(op: MemoryOp, *, file: str, scope: MemoryScope) -> MemoryUpdateItem:
+    """Project one applied op into the card's summary item (friendly labels + deep-link)."""
+    return MemoryUpdateItem(
+        action=op.action.value,
+        file=_memory_file_label(file),
+        section=op.section or "",
+        scope="project" if scope else "global",
+        content=(op.content or op.match or "").strip(),
+        target=_memory_leaf_target(file, scope),
+    )
+
+
 def _enforce_topic_cap(
     ops: Sequence[MemoryOp],
     existing_topics_by_scope: dict[MemoryScope, set[str]],
@@ -39,7 +102,7 @@ def _enforce_topic_cap(
     """Drop ops that would create a NEW topic note beyond ``cap`` — PER SCOPE (anti-bloat).
 
     Core ops and ops on an already-existing topic always pass; new topic files are admitted
-    until that scope's total reaches ``cap``, then dropped (记忆作用域与画像分层 §5.3「按作用域
+    until that scope's total reaches ``cap``, then dropped (Agent记忆与知识系统 §1.5「按作用域
     各算一份」). A non-positive / None cap means no limit. The cap is counted independently
     for the global and each project layer, since they are separate folders.
     """
@@ -73,6 +136,7 @@ async def maintain_user_memory(
     section_cap: int | None = None,
     max_topic_files: int | None = None,
     project_id: str | None = None,
+    collect_items: list[MemoryUpdateItem] | None = None,
 ) -> bool:
     """Consolidate durable knowledge from `messages` into the user's memory folders.
 
@@ -81,13 +145,18 @@ async def maintain_user_memory(
     `max_topic_files` caps on-demand topic notes per scope. `project_id` is the
     conversation's folder (None for a bare chat): it unlocks the PROJECT scope so a fact
     true only in this project lands in the project layer instead of polluting global memory
-    (记忆作用域与画像分层 §三).
+    (Agent记忆与知识系统 §1.5).
 
     The extractor sees both the global preferences/profile/topics and (when in a project)
     the project's profile/topics, then emits ops targeting a `(scope, file)`. Ops are grouped
     per `(scope, file)` and applied independently, so a per-file CAS / edit only touches the
     notes that moved. Returns True iff at least one memory file changed. No ops (or a no-op
     apply) skips the write. Never raises — failures are logged and swallowed.
+
+    When `collect_items` is given, the ops that landed in files that actually changed are
+    appended to it as :class:`MemoryUpdateItem`s — the human-readable「记了什么」the
+    conversation-tail card lists (记忆更新对话内可见, §1.6). The list is left empty when
+    nothing changed, so the caller persists/pushes a card only for a real update.
     """
     if not messages:
         return False
@@ -134,6 +203,14 @@ async def maintain_user_memory(
             if updated != current:
                 await store.save(user_id, file, updated, scope=scope)
                 changed_files += 1
+                if collect_items is not None:
+                    # Summarize the ops that drove THIS file's change for the tail card.
+                    # File-granular (a dedup no-op op on a file that changed for another
+                    # op may ride along) — truthful enough for「记了什么」, and the user
+                    # can edit/delete any bullet in the memory editor.
+                    collect_items.extend(
+                        _item_from_op(op, file=file, scope=scope) for op in file_ops
+                    )
         if changed_files:
             logger.info("memory.user_updated", user_id=user_id, ops=len(ops), files=changed_files)
         return changed_files > 0

@@ -7,6 +7,7 @@ from agentcore.tools.builtin.replan import ReplanTool
 from tests.delegate.conftest import (
     LATE_BIND_DAG,
     SCOPE_DAG,
+    DepProvider,
     Provider,
     ScopeProvider,
     ctx,
@@ -42,7 +43,15 @@ async def test_late_bind_yields_brief_then_replan_resumes_to_terminal():
     assert "计划已让出" in first.output
     assert "AOUT" in first.output
     assert "BOUT" not in first.output
+    # 合·验证 4b (docs/03-AI核心/编排器与CEO主Agent.md §收尾即验收 第一道): the bind brief tells the captain to
+    # reconcile the upstream pieces' seams (语义边界对账) before binding downstream — catch a
+    # conflict/gap BEFORE the tail builds on it (catch-early at 交下一棒之前).
+    assert "语义边界对账" in first.output
+    assert "拼图边" in first.output
     assert provider.calls == 1
+    # 协作质量 tally (学·度量 §2.5): the bind boundary handed control back to the captain → the
+    # opening plan did not run untouched, so boundary_yields is counted (首计划存活 signal).
+    assert t.collab["boundary_yields"] == 1
     sup = t._supervised
     assert sup is not None
     bind_id = sup.boundary_run_ids[0]
@@ -157,9 +166,18 @@ async def test_scope_escalation_yields_brief_then_replan_steers_resumes():
     assert "职责偏离" in first.output
     assert "真问题是X不是Y" in first.output
     assert "BOUT" not in first.output
+    # 合·验证 4b (主动版): a scope deviation likely ripples to siblings, so the brief tells the
+    # captain to proactively reconcile the OTHER pieces' seams (语义边界对账), not just react to
+    # the one that raised — the active counterpart of waiting for a worker to escalate.
+    assert "语义边界对账" in first.output
+    assert "波及兄弟步骤" in first.output
     sup = t._supervised
     assert sup is not None
     assert sup.reason is BoundaryReason.SCOPE
+    # 协作质量 tally (学·度量 §2.5): a scope boundary is BOTH a boundary_yield (首计划存活) and a
+    # drift signal (漂移率, from the worker's escalate kind=scope).
+    assert t.collab["boundary_yields"] == 1
+    assert t.collab["scope_signals"] >= 1
     b_id = next(n.run_id for n in sup.plan.nodes if n.role == "写手")
 
     result = await t.replan({"steers": [{"run_id": b_id, "note": "改写X方向"}]})
@@ -174,6 +192,40 @@ async def test_scope_escalation_yields_brief_then_replan_steers_resumes():
         if m.role == "user" and "撰写最终报告" in (m.content or "")
     )
     assert "改写X方向" in b_user
+
+
+async def test_dep_escalation_yields_brief_then_replan_add_resumes():
+    # §2.4 变·worker 的「拉」(case b): a worker卡在缺一个还不存在的输入 (escalate kind=dep) rides
+    # the SAME reactive boundary as a scope deviation — control yields to the captain with a brief
+    # that flags it as 缺输入·依赖缺口 and steers toward replan(add) a producer, then the captain
+    # adds the missing step and the plan resumes on the same DAG.
+    provider = DepProvider()
+    t = scope_tool(provider)
+    first = await t.execute({"tasks": SCOPE_DAG}, ctx())
+
+    assert first.success is True
+    assert first.is_terminal is False
+    assert "计划已让出" in first.output
+    # The brief distinguishes a dep gap from a scope deviation and points at replan(add).
+    assert "卡在缺输入" in first.output
+    assert "缺输入：缺错误返回结构才能写完整测试" in first.output
+    assert "add" in first.output
+    sup = t._supervised
+    assert sup is not None
+    assert sup.reason is BoundaryReason.SCOPE
+    # 协作质量 tally: a dep boundary is a boundary_yield (首计划存活) but NOT a drift signal
+    # (漂移率 stays scope-only) — it is still counted in the total escalation tally.
+    assert t.collab["boundary_yields"] == 1
+    assert t.collab["scope_signals"] == 0
+    assert t.collab["escalations"] >= 1
+
+    # The captain replan(add)s a producer for the missing input; the plan resumes to terminal.
+    result = await t.replan(
+        {"add": [{"role": "接口设计", "task": "定义错误返回结构 {code,msg}"}]}
+    )
+    assert result.success is True
+    assert t._supervised is None
+    assert "BOUT" in result.output
 
 
 async def test_scope_replan_bare_resume_runs_tail_unchanged():

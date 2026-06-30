@@ -88,7 +88,7 @@ export function ChatThread({ chatId }: Props) {
       </div>
 
       {isRequest && (
-        <div className="mx-4 mt-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+        <div className="mx-4 mt-3 rounded-lg border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
           这是一条消息请求，回复即代表接受。
         </div>
       )}

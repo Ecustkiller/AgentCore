@@ -147,6 +147,29 @@ export interface ProjectedRun {
   escalations: RunEscalation[];
 }
 
+/** 团队便签墙 (§2.2 通): one note a worker broadcast to its CONCURRENT siblings (`team_note_posted`),
+ * folded onto the turn for the team-notes panel. `kind` is `decision` (我定了 — others depend on it:
+ * an interface / field name / format / naming), `heads_up` (提个醒 — a pitfall / discovery), or
+ * `claim` (我领了 — a piece of work / file this worker is taking, so siblings don't duplicate it);
+ * `runId` / `agentId` / `role` are the author (谁贴的); `ts` is epoch seconds. `noteId` is the stable
+ * key (dedup). Carried in post order.
+ *
+ * 便签会过期 → supersession (§2.2): `status` is the lifecycle — `active`, or `superseded` (改写: a
+ * later note replaced it) / `voided` (作废: retracted). `supersedes` is set only on an amendment
+ * note (the `noteId` it 改写/作废s, else `null`), so the panel can strike a stale note and link an
+ * amendment to its origin. */
+export interface ProjectedTeamNote {
+  noteId: string;
+  runId: string;
+  agentId: string;
+  role: string;
+  kind: string;
+  text: string;
+  ts: number | null;
+  status: "active" | "superseded" | "voided";
+  supersedes: string | null;
+}
+
 /** A pending user gate — the one surface the turn is blocked on (`paused`). Only the
  * GATING interactions (approval / ask_user checkpoint / plan_review) appear; the
  * non-blocking `question_posted` never gates so it is not represented here. */
@@ -209,4 +232,7 @@ export interface ProjectedTurn {
    * 就叠出主持人逐轮焦点 / 小结 / 裁判，而非干等 {@link debate} 收场。Transport-only 事件，
    * 故重载（journal 无逐轮事件）恒为 `[]`——届时全量叙事线已在 {@link debate} 里。非辩论恒 `[]`。 */
   debateRounds: DebateNarrativeRound[];
+  /** 团队便签墙 (§2.2 通): the notes workers broadcast to their siblings this turn (`team_note_posted`),
+   * in post order. Journaled, so it replays on reload. Empty for a turn with no team notes. */
+  teamNotes: ProjectedTeamNote[];
 }

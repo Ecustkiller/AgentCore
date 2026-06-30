@@ -3,7 +3,17 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
-import { cn, fmtCny, fmtCompact, fmtInt, fmtMs, fmtTime, nanoUsdToCny } from "@/lib/utils";
+import {
+  agentColorVar,
+  cn,
+  fmtCny,
+  fmtCompact,
+  fmtInt,
+  fmtMs,
+  fmtTime,
+  nanoUsdToCny,
+  roleLabel,
+} from "@/lib/utils";
 import {
   type AdminObservabilitySummary,
   type TurnHealthWindow,
@@ -65,7 +75,7 @@ export function AnalyticsPage() {
   const subtitle =
     segment === "cost"
       ? "跨用户聚合 · 今日 / 本月成本、Top 花销用户、近 7 日趋势"
-      : "跨用户聚合 · 回合健康（错误率 / P95 延迟 / 委派率）、近 7 日趋势、近期错误";
+      : "跨用户聚合 · 回合健康（错误率 / P95 延迟 / 委派率 / 协作质量）、近 7 日趋势、近期错误";
 
   return (
     <div className="mx-auto max-w-[1200px] px-6 py-8">
@@ -236,6 +246,54 @@ function CostPanel({
         <CostTrendBars data={data.recent_daily_cost} cnyPerUsd={data.cny_per_usd} />
       </section>
 
+      {data.month_by_role.length > 0 && (
+        <section className="overflow-hidden rounded-xl border border-border bg-card">
+          <div className="border-border border-b px-5 py-3.5">
+            <h2 className="text-base font-semibold text-foreground">
+              本月各角色花销
+            </h2>
+            <p className="mt-0.5 text-muted-foreground text-xs">
+              全站多 Agent 团队工资单（按角色拆分，含视觉读图，成本降序）
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
+                <th className="px-5 py-2.5 font-medium">角色</th>
+                <th className="px-5 py-2.5 text-right font-medium">本月成本</th>
+                <th className="px-5 py-2.5 text-right font-medium">回合数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.month_by_role.map((row) => (
+                <tr
+                  key={row.role}
+                  className="border-border border-b last:border-0 hover:bg-accent/40"
+                >
+                  <td className="px-5 py-3 text-foreground">
+                    <span className="inline-flex items-center gap-2">
+                      {/* 角色身份色圆点 (color-tokens.mdc 角色身份 --agent-N)：vision/各角色一眼可辨。 */}
+                      <span
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: agentColorVar(row.role) }}
+                        aria-hidden
+                      />
+                      {roleLabel(row.role)}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3 text-right font-medium text-foreground tabular-nums">
+                    {fmtCny(nanoUsdToCny(row.cost_total, data.cny_per_usd))}
+                  </td>
+                  <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
+                    {fmtInt(row.turns)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
       <section className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="border-border border-b px-5 py-3.5">
           <h2 className="text-base font-semibold text-foreground">
@@ -383,6 +441,9 @@ function HealthCard({
       : window.error_rate <= 0.05
         ? "warning"
         : "destructive";
+  // 协作质量 (学·度量 §2.5): the four MAST-labeled signals only mean something once a turn
+  // delegated — survival rate is share-of-delegated, the rest are window sums over members.
+  const hasDelegated = window.delegated_turns > 0;
   return (
     <div className="rounded-xl border border-border bg-card p-5">
       <div className="flex items-baseline justify-between">
@@ -398,6 +459,33 @@ function HealthCard({
         <Stat label="P95 延迟" value={fmtMs(window.p95_duration_ms)} />
         <Stat label="平均轮数" value={window.avg_rounds.toFixed(1)} />
         <Stat label="委派率" value={fmtPct(window.delegated_rate)} />
+      </div>
+      <div className="mt-4 border-border border-t pt-4">
+        <div className="mb-2.5 text-muted-foreground text-xs">
+          协作质量 · MAST（委派 {fmtInt(window.delegated_turns)} 回合）
+        </div>
+        <div className="grid grid-cols-4 gap-4 text-sm">
+          <Stat
+            label="首计划存活"
+            value={hasDelegated ? fmtPct(window.first_plan_survival_rate) : "—"}
+            hint="［规格］委派回合中，首个计划未被监督边界（让出 / 改判）打断、一气跑到底的占比 —— 越高越好"
+          />
+          <Stat
+            label="漂移"
+            value={hasDelegated ? fmtInt(window.scope_signals) : "—"}
+            hint="［错位］worker 越界（scope）升级次数 —— 越低越好"
+          />
+          <Stat
+            label="返工"
+            value={hasDelegated ? fmtInt(window.revises) : "—"}
+            hint="［验证］队长定向唤回（revise）次数 —— 越低越好"
+          />
+          <Stat
+            label="升级"
+            value={hasDelegated ? fmtInt(window.escalations) : "—"}
+            hint="worker → 队长 升级信号总数（协作信号）"
+          />
+        </div>
       </div>
     </div>
   );
@@ -468,9 +556,17 @@ function ErrorsTable({
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
   return (
-    <div>
+    <div title={hint}>
       <div className="text-muted-foreground text-xs">{label}</div>
       <div className="mt-0.5 font-medium text-foreground tabular-nums">{value}</div>
     </div>

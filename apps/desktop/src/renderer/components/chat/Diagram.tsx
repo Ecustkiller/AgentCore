@@ -81,12 +81,37 @@ type VegaEmbed = (
   opts?: Record<string, unknown>,
 ) => Promise<{ finalize?: () => void }>;
 
-let vegaPromise: Promise<VegaEmbed> | null = null;
+// SECURITY (PI-001 提示注入·渲染侧外泄 · 图表取数信标): a model-emitted ```vega-lite``` spec is
+// untrusted (the same indirect-injection surface PI-001's <img> downgrade guards). Vega's loader
+// fetches `data.url` and image-mark urls AT RENDER TIME — a no-click egress beacon that the
+// markdown image downgrade never covered, and which the app CSP's intentionally-broad connect-src
+// (main/index.ts) does NOT contain. So we hand vega a loader whose `sanitize` refuses every
+// network-reaching fetch; only inline schemes (data:/blob:, no network) pass. Self-contained
+// charts (inline `data.values`) never hit the loader and render unchanged.
+interface VegaLoader {
+  sanitize: (uri: string, options: unknown) => Promise<{ href: string }>;
+}
+interface VegaNamespace {
+  loader: () => VegaLoader;
+}
+const INLINE_ONLY_SCHEME = /^\s*(?:data|blob):/i;
+function makeSafeLoader(vega: VegaNamespace): VegaLoader {
+  const loader = vega.loader();
+  const sanitize = loader.sanitize.bind(loader);
+  loader.sanitize = (uri, options) =>
+    INLINE_ONLY_SCHEME.test(String(uri))
+      ? sanitize(uri, options)
+      : Promise.reject(new Error(`已拦截图表的远程资源请求：${uri}`));
+  return loader;
+}
+
+let vegaPromise: Promise<{ embed: VegaEmbed; loader: VegaLoader }> | null = null;
 function getVega() {
   if (!vegaPromise) {
-    vegaPromise = import("vega-embed").then(
-      (m) => m.default as unknown as VegaEmbed,
-    );
+    vegaPromise = import("vega-embed").then((m) => ({
+      embed: m.default as unknown as VegaEmbed,
+      loader: makeSafeLoader(m.vega as unknown as VegaNamespace),
+    }));
   }
   return vegaPromise;
 }
@@ -547,15 +572,16 @@ function VegaCanvas({
     (async () => {
       try {
         const spec = JSON.parse(code);
-        const vegaEmbed = await getVega();
+        const { embed, loader } = await getVega();
         if (cancelled || !ref.current) return;
         finalizeRef.current?.();
         ref.current.innerHTML = "";
-        const result = await vegaEmbed(ref.current, spec, {
+        const result = await embed(ref.current, spec, {
           renderer: "svg",
           actions: false,
           theme: dark ? "dark" : undefined,
           config: { background: "transparent" },
+          loader, // 渲染侧外泄防线：拒绝一切联网取数/取图（见上方 makeSafeLoader）
         });
         finalizeRef.current = result.finalize ?? null;
       } catch (e) {
