@@ -160,8 +160,14 @@ interface UIState {
   conversationViews: Record<string, "chat" | "canvas">;
   /** 聊天侧「在画布打开 / 回放」→ 画布「放大某回合」的一次性请求（前端UX设计.md §六）。
    * 聊天里的内嵌图按钮把目标回合（+ 是否自动回放）塞进这里并切到画布视图；`ConversationCanvas`
-   * 挂载后消费并立即清空（用完即清，避免下次进画布误触发放大）。null = 无待处理请求。 */
-  pendingCanvasFocus: { turnId: string; autoplay: boolean } | null;
+   * 挂载后消费并立即清空（用完即清，避免下次进画布误触发放大）。null = 无待处理请求。
+   * `view` 可选——聊天侧信号（如「改了 N 版」→「对比」）借此**深链**到放大态对应视图直达，缺省走
+   * 该回合的自然默认视图（辩论=群聊、其余=协作图）。 */
+  pendingCanvasFocus: {
+    turnId: string;
+    autoplay: boolean;
+    view?: CanvasFocusView;
+  } | null;
   /** 画布「放大态」桥（前端UX设计.md §六）：`ConversationCanvas` 进入某回合放大态时置 true，
    * 退出 / 卸载时复位 false。`ConversationPage` 据此在放大态隐藏对话级浮动开关（聊天/画布、
    * 侧面板）——它们与放大态自带的顶栏（返回、图工具栏）同处两角且同层，不隐藏会盖住「返回」。
@@ -190,11 +196,19 @@ interface UIState {
     conversationId: string,
     mode: "chat" | "canvas",
   ) => void;
-  requestCanvasFocus: (turnId: string, autoplay: boolean) => void;
+  requestCanvasFocus: (
+    turnId: string,
+    autoplay: boolean,
+    view?: CanvasFocusView,
+  ) => void;
   clearCanvasFocus: () => void;
   setCanvasZoomed: (v: boolean) => void;
   setSidecarEnabled: (v: boolean) => void;
 }
+
+/** 放大态可被聊天侧信号**深链**到的初始视图（画布放大态 `CanvasZoomedTurn` 的视图子集）。
+ * 目前仅「对比」由聊天状态条「改了 N 版」信号直达；辩论走该回合自然默认（群聊），无需深链。 */
+export type CanvasFocusView = "compare";
 
 export const useUIStore = create<UIState>((set) => ({
   searchOpen: false,
@@ -244,8 +258,8 @@ export const useUIStore = create<UIState>((set) => ({
       persistConversationViews(conversationViews);
       return { conversationViews };
     }),
-  requestCanvasFocus: (turnId, autoplay) =>
-    set({ pendingCanvasFocus: { turnId, autoplay } }),
+  requestCanvasFocus: (turnId, autoplay, view) =>
+    set({ pendingCanvasFocus: { turnId, autoplay, view } }),
   clearCanvasFocus: () => set({ pendingCanvasFocus: null }),
   setCanvasZoomed: (canvasZoomed) => set({ canvasZoomed }),
   setSidecarEnabled: (sidecarEnabled) => {

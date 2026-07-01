@@ -76,6 +76,11 @@ class CodeExecuteTool:
             timeout_seconds=timeout,
         )
 
+        # 工具执行阶段进度 (联网前端展示优化): the sandbox run is the slow blocking leg —
+        # signal「正在执行」so the waiting row is live. Best-effort; ``on_phase`` is None on
+        # unscoped call sites (tests / evals).
+        if context.on_phase:
+            context.on_phase("executing")
         result = await context.backend.execute(request)
         duration_ms = int((time.monotonic() - start) * 1000)
 

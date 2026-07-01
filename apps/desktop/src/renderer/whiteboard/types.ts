@@ -74,7 +74,11 @@ export interface SceneElement {
    * its meaning lives in pixels → read via vision (board_read, §九 混合 payload). */
   src?: string;
   /** Clockwise rotation in radians about the element's box center (omit = 0). Linear
-   * elements (`arrow`/`line`) and `freedraw` are not rotated (their geometry is the points). */
+   * elements (`arrow`/`line`) and `freedraw` are not rotated (their geometry is the points).
+   * RESERVED (WB-007): render / hit-test / persist all honor rotation, but no producer exists
+   * yet — no rotate tool·gesture·handle, no toolbar/style/menu action, no AI `board_op` sets it;
+   * MVP does not expose it (only hand-edited persisted JSON can). Add a rotate handle + a Pointer
+   * `rotate` state (± a board_op verb) when the interaction FSM / PointerController is settled. */
   rotation?: number;
   /** Whole-element opacity 0..1 (omit = 1). */
   opacity?: number;

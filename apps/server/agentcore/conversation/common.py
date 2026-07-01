@@ -54,7 +54,7 @@ async def resolve_local_binding(session: AsyncSession, conv: Conversation) -> Lo
     """Resolve a turn's local-mode binding (双模式工作区 §七), or None for cloud."""
     folder = None
     if conv.folder_id:
-        folder = await FolderRepository(session).get_by_id(conv.folder_id)
+        folder = await FolderRepository(session).get_by_id_unscoped(conv.folder_id)
     return locate_local_binding(
         folder_id=conv.folder_id,
         folder_local_root_id=folder.local_root_id if folder else None,

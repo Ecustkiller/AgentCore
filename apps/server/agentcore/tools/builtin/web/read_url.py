@@ -16,6 +16,7 @@ from agentcore.core.net import classify_url as _classify_url
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.builtin.web._net import (
     EgressError,
+    PinnedIPTransport,
     circuit_remaining,
     describe_net_error,
     note_failure,
@@ -349,8 +350,25 @@ class ReadUrlTool:
             "User-Agent": "Mozilla/5.0 (compatible; AgentCore/1.0; +https://agentcore.dev)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
+        # 工具执行阶段进度 (联网前端展示优化): signal the slow blocking leg so the waiting row
+        # is live, not a dead spinner — and stay honest about egress control. If THIS host's
+        # circuit is OPEN, ``_safe_request`` is about to fast-fail (EgressError), NOT queue —
+        # so report「出网受限·快速失败」(blocked) rather than a fake「正在抓取」/「排队」; read_url
+        # has no token-bucket/semaphore wait, so it never has a real「排队」state. Otherwise the
+        # fetch proceeds → 「正在抓取网页」. Best-effort; ``on_phase`` is None on unscoped call
+        # sites (tests / evals). Enforcement stays in ``_safe_request`` (single source of truth);
+        # this is an observe-only mirror of the same breaker state.
+        if context.on_phase:
+            host = (urlparse(url).hostname or "").lower()
+            context.on_phase("blocked" if circuit_remaining(host) > 0 else "fetching")
         try:
-            async with httpx.AsyncClient(timeout=web_timeout(), follow_redirects=False) as client:
+            # PinnedIPTransport: connect to the IP we validated, closing the DNS-rebinding
+            # TOCTOU between the per-hop classify_url check and httpx's own resolution.
+            async with httpx.AsyncClient(
+                timeout=web_timeout(),
+                follow_redirects=False,
+                transport=PinnedIPTransport(),
+            ) as client:
                 resp = await _safe_request(client, "GET", url, headers=headers)
                 resp.raise_for_status()
                 html = resp.text
@@ -382,6 +400,10 @@ class ReadUrlTool:
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
+        # 工具执行阶段进度: fetched — now parse/extract the main text (可感知的第二段，长页面
+        # 抽取有耗时). Signals「正在提取正文」.
+        if context.on_phase:
+            context.on_phase("reading")
         title, text, description = _extract_page(html, max_chars)
         snippet = _make_snippet(description, text)
         site = site_of(url)

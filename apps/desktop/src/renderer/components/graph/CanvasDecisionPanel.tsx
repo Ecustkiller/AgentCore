@@ -174,15 +174,25 @@ export function useCommandRegion(): CommandRegionData {
 
   // Auto-surface (子决策 3): a brand-new actionable item opens the dock + re-expands
   // the region — but never switches the active tab (子决策 A), so a run-detail the user
-  // is reading stays put and the region just hangs above it. Reset to 0 while inactive
-  // (chat mode) so re-entering the canvas with pending work surfaces it afresh.
-  const prevActionable = useRef(0);
+  // is reading stays put and the region just hangs above it. Baseline on canvas mount
+  // (first active tick) without opening — re-entering canvas must not treat existing
+  // pending work as "new" just because chat mode zeroed the ref on the way out.
+  const prevActionable = useRef<number | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is an intentional re-run key — reset the baseline when switching conversations.
   useEffect(() => {
-    if (active && actionable > prevActionable.current) {
+    prevActionable.current = null;
+  }, [conversationId]);
+  useEffect(() => {
+    if (!active) return;
+    if (prevActionable.current === null) {
+      prevActionable.current = actionable;
+      return;
+    }
+    if (actionable > prevActionable.current) {
       useSidePanelStore.getState().openPanel();
       setCollapsed(false);
     }
-    prevActionable.current = active ? actionable : 0;
+    prevActionable.current = actionable;
   }, [active, actionable, setCollapsed]);
 
   // Re-arm on focus switch: another turn's decisions deserve a fresh, open look.

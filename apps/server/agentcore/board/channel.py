@@ -1,7 +1,7 @@
 """BoardChannel — route a batch of board ops to the desktop and await the result.
 
 The board counterpart of ``workspace/channel.py``. ``board_ops`` (the server tool)
-can't touch the user's Excalidraw canvas directly — the canvas lives in the desktop
+can't touch the user's whiteboard canvas directly — the canvas lives in the desktop
 renderer — so it hands a structured op batch to this channel, which suspends the run
 on the unified interaction bridge, emits a ``board_op_required`` SSE event, and awaits
 the desktop's reply. The bound desktop converts ops → scene elements, applies them to

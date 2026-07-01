@@ -10,7 +10,6 @@
 import type { BoardOp } from "@/types/events";
 import { cloneElements } from "./clone";
 import { type Palette, readPalette } from "./colors";
-import { smoothFreedraw } from "./freedrawSmooth";
 import {
   type Box,
   boxesIntersect,
@@ -20,14 +19,22 @@ import {
   screenToWorld,
   unionBox,
 } from "./geometry";
+import { arrowDragPoint, dragBox, squareDragBox } from "./gestures";
 import { History } from "./history";
 import { ImageCache, loadImageForImport } from "./images";
+import { type KeyCommands, handleKeyDown, handleKeyUp } from "./keymap";
 import { layoutGrid } from "./layout";
 import { applyBoardOps } from "./ops";
-import { handlePositions, renderScene } from "./render";
+import { renderScene, selectionHandlesScreen } from "./render";
 import * as selOps from "./selectionOps";
 import { computeMoveSnap as snapMove } from "./snap";
 import { type TextCommit, TextEditor } from "./textEditor";
+import {
+  normalizeFreedraw,
+  resizeBox,
+  scaleElements,
+  syncArrowBox,
+} from "./transform";
 import {
   MAX_ZOOM,
   MIN_ZOOM,
@@ -71,47 +78,7 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-const NUDGE = 1;
-const NUDGE_LARGE = 10;
 const PASTE_OFFSET = 16;
-
-/** Single-key tool shortcuts (no modifier). `d`/`a` only pick a tool here — Ctrl+D / Ctrl+A
- * are duplicate / select-all, handled before this map is consulted. */
-const TOOL_KEYS: Record<string, Tool> = {
-  v: "select",
-  h: "hand",
-  r: "rectangle",
-  o: "ellipse",
-  d: "diamond",
-  s: "sticky",
-  t: "text",
-  a: "arrow",
-  l: "line",
-  f: "frame",
-  p: "freedraw",
-  e: "eraser",
-};
-
-/** Recompute an arrow's bbox (x/y/width/height) from its world points, so selection +
- * marquee work. Rendering uses the points/bindings directly; the box is bookkeeping. */
-function syncArrowBox(el: SceneElement): void {
-  const pts = el.points;
-  if (!pts || pts.length === 0) return;
-  let minX = Number.POSITIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  for (const [px, py] of pts) {
-    minX = Math.min(minX, px);
-    minY = Math.min(minY, py);
-    maxX = Math.max(maxX, px);
-    maxY = Math.max(maxY, py);
-  }
-  el.x = minX;
-  el.y = minY;
-  el.width = maxX - minX;
-  el.height = maxY - minY;
-}
 
 export class WhiteboardEngine {
   private elements: SceneElement[] = [];
@@ -140,6 +107,34 @@ export class WhiteboardEngine {
   private clipboard: SceneElement[] = [];
   private guides: Array<[number, number, number, number]> = [];
   private readonly textEditor: TextEditor;
+
+  /** Keyboard shortcut policy lives in {@link keymap}; this adapts the engine's methods to the
+   * {@link KeyCommands} surface it drives (each entry is an existing method or a small hook). */
+  private readonly keyCommands: KeyCommands = {
+    hasSelection: () => this.selected.size > 0,
+    undo: () => this.undo(),
+    redo: () => this.redo(),
+    selectAll: () => this.selectAll(),
+    copySelection: () => this.copySelection(),
+    cutSelection: () => this.cutSelection(),
+    duplicateSelected: () => this.duplicateSelected(),
+    bringToFront: () => this.bringToFront(),
+    sendToBack: () => this.sendToBack(),
+    groupSelected: () => this.groupSelected(),
+    ungroupSelected: () => this.ungroupSelected(),
+    zoomToSelection: () => this.zoomToSelection(),
+    deleteSelected: () => this.deleteSelected(),
+    nudgeSelected: (dx, dy) => this.nudgeSelected(dx, dy),
+    clearSelection: () => {
+      this.setSelection([]);
+      this.scheduleRender();
+    },
+    setTool: (tool) => this.setTool(tool),
+    setSpace: (down) => {
+      this.spaceDown = down;
+      this.updateCursor();
+    },
+  };
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -527,24 +522,22 @@ export class WhiteboardEngine {
     return null;
   }
 
+  /** Hit-test the on-screen resize/scale handles against a screen point → handle id
+   * (nw/n/ne/e/se/s/sw/w) or null. Uses the SAME {@link selectionHandlesScreen} the renderer
+   * paints from (single source of truth), so a single box (rotation included), a lone linear /
+   * freedraw (no handles), and a multi-selection union frame all hit-test exactly what's drawn.
+   * A lone locked element shows no handles; in a multi-selection {@link applyScale} skips locked
+   * members, so the frame still grabs. */
   private handleAt(sx: number, sy: number): string | null {
-    if (this.selected.size !== 1) return null;
-    const only = this.elements.find((e) => this.selected.has(e.id));
-    if (
-      !only ||
-      only.locked ||
-      only.type === "arrow" ||
-      only.type === "freedraw"
-    )
-      return null;
-    const b = elementBox(only);
-    const screenBox: Box = {
-      x: b.x * this.viewport.zoom + this.viewport.panX,
-      y: b.y * this.viewport.zoom + this.viewport.panY,
-      width: b.width * this.viewport.zoom,
-      height: b.height * this.viewport.zoom,
-    };
-    for (const h of handlePositions(screenBox)) {
+    const selected = this.elements.filter((e) => this.selected.has(e.id));
+    if (selected.length === 0) return null;
+    if (selected.length === 1 && selected[0].locked) return null;
+    const handles = selectionHandlesScreen(
+      selected,
+      this.viewport,
+      this.byId(),
+    );
+    for (const h of handles) {
       if (
         Math.abs(sx - h.x) <= HANDLE_HIT &&
         Math.abs(sy - h.y) <= HANDLE_HIT
@@ -694,12 +687,7 @@ export class WhiteboardEngine {
         break;
       }
       case "marquee": {
-        this.marquee = {
-          x: Math.min(p.start[0], wx),
-          y: Math.min(p.start[1], wy),
-          width: Math.abs(wx - p.start[0]),
-          height: Math.abs(wy - p.start[1]),
-        };
+        this.marquee = dragBox(p.start[0], p.start[1], wx, wy);
         this.scheduleRender();
         break;
       }
@@ -735,21 +723,14 @@ export class WhiteboardEngine {
       case "create": {
         const el = this.elements.find((x) => x.id === p.id);
         if (!el) break;
-        let ex = wx;
-        let ey = wy;
         // Shift = lock to a square (1:1) growing from the start corner.
-        if (e.shiftKey) {
-          const s = Math.max(
-            Math.abs(wx - p.origin[0]),
-            Math.abs(wy - p.origin[1]),
-          );
-          ex = p.origin[0] + Math.sign(wx - p.origin[0] || 1) * s;
-          ey = p.origin[1] + Math.sign(wy - p.origin[1] || 1) * s;
-        }
-        el.x = Math.min(p.origin[0], ex);
-        el.y = Math.min(p.origin[1], ey);
-        el.width = Math.abs(ex - p.origin[0]);
-        el.height = Math.abs(ey - p.origin[1]);
+        const box = e.shiftKey
+          ? squareDragBox(p.origin[0], p.origin[1], wx, wy)
+          : dragBox(p.origin[0], p.origin[1], wx, wy);
+        el.x = box.x;
+        el.y = box.y;
+        el.width = box.width;
+        el.height = box.height;
         this.dragDirty = true;
         this.scheduleRender();
         break;
@@ -765,19 +746,14 @@ export class WhiteboardEngine {
       case "arrowdraw": {
         const el = this.elements.find((x) => x.id === p.id);
         if (!el?.points) break;
-        let ex = wx;
-        let ey = wy;
         // Shift = snap the segment angle to the nearest 45°.
-        if (e.shiftKey) {
-          const ddx = wx - p.origin[0];
-          const ddy = wy - p.origin[1];
-          const len = Math.hypot(ddx, ddy);
-          const ang =
-            Math.round(Math.atan2(ddy, ddx) / (Math.PI / 4)) * (Math.PI / 4);
-          ex = p.origin[0] + Math.cos(ang) * len;
-          ey = p.origin[1] + Math.sin(ang) * len;
-        }
-        el.points[1] = [ex, ey];
+        el.points[1] = arrowDragPoint(
+          p.origin[0],
+          p.origin[1],
+          wx,
+          wy,
+          e.shiftKey,
+        );
         syncArrowBox(el);
         this.dragDirty = true;
         this.scheduleRender();
@@ -838,7 +814,7 @@ export class WhiteboardEngine {
     ) {
       if (p.kind === "freedraw") {
         const el = this.elements.find((x) => x.id === p.id);
-        if (el) this.finishFreedrawNormalize(el);
+        if (el) normalizeFreedraw(el);
       }
       if (this.dragDirty && this.dragBefore) {
         this.history.push(this.dragBefore);
@@ -916,30 +892,6 @@ export class WhiteboardEngine {
     this.emitChange();
   }
 
-  private finishFreedrawNormalize(el: SceneElement): void {
-    // Recenter freedraw bbox so x/y is the points' min corner.
-    const pts = el.points ?? [];
-    if (pts.length === 0) return;
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-    for (const [px, py] of pts) {
-      minX = Math.min(minX, px);
-      minY = Math.min(minY, py);
-      maxX = Math.max(maxX, px);
-      maxY = Math.max(maxY, py);
-    }
-    el.x += minX;
-    el.y += minY;
-    el.width = maxX - minX;
-    el.height = maxY - minY;
-    el.points = pts.map(
-      ([px, py]) => [px - minX, py - minY] as [number, number],
-    );
-    smoothFreedraw(el);
-  }
-
   /** Resize the single selected element from a handle drag. With `lockAspect` (Shift), the
    * original aspect ratio is preserved: corner handles anchor the opposite corner; edge
    * handles scale the cross axis symmetrically about the box center. */
@@ -951,68 +903,11 @@ export class WhiteboardEngine {
   ): void {
     const el = this.elements.find((x) => x.id === p.id);
     if (!el) return;
-    const b = p.box;
-    const h = p.handle;
-    let left = b.x;
-    let top = b.y;
-    let right = b.x + b.width;
-    let bottom = b.y + b.height;
-
-    if (lockAspect && b.width > 0 && b.height > 0) {
-      const aspect = b.width / b.height;
-      const horiz = h.includes("w") || h.includes("e");
-      const vert = h.includes("n") || h.includes("s");
-      // The edge NOT being dragged stays fixed (the anchor).
-      const ax = h.includes("w") ? b.x + b.width : b.x;
-      const ay = h.includes("n") ? b.y + b.height : b.y;
-      if (horiz && vert) {
-        let dw = wx - ax;
-        let dh = wy - ay;
-        // Follow whichever axis the cursor pushed further (relative to the start size).
-        if (Math.abs(dw) / b.width >= Math.abs(dh) / b.height) {
-          dh =
-            ((dh !== 0 ? Math.sign(dh) : h.includes("n") ? -1 : 1) *
-              Math.abs(dw)) /
-            aspect;
-        } else {
-          dw =
-            (dw !== 0 ? Math.sign(dw) : h.includes("w") ? -1 : 1) *
-            Math.abs(dh) *
-            aspect;
-        }
-        left = Math.min(ax, ax + dw);
-        right = Math.max(ax, ax + dw);
-        top = Math.min(ay, ay + dh);
-        bottom = Math.max(ay, ay + dh);
-      } else if (horiz) {
-        const dw = wx - ax;
-        const newH = Math.abs(dw) / aspect;
-        const cy = b.y + b.height / 2;
-        left = Math.min(ax, ax + dw);
-        right = Math.max(ax, ax + dw);
-        top = cy - newH / 2;
-        bottom = cy + newH / 2;
-      } else {
-        const dh = wy - ay;
-        const newW = Math.abs(dh) * aspect;
-        const cx = b.x + b.width / 2;
-        top = Math.min(ay, ay + dh);
-        bottom = Math.max(ay, ay + dh);
-        left = cx - newW / 2;
-        right = cx + newW / 2;
-      }
-    } else {
-      if (h.includes("w")) left = wx;
-      if (h.includes("e")) right = wx;
-      if (h.includes("n")) top = wy;
-      if (h.includes("s")) bottom = wy;
-    }
-
-    const minSize = 8;
-    el.x = Math.min(left, right);
-    el.y = Math.min(top, bottom);
-    el.width = Math.max(minSize, Math.abs(right - left));
-    el.height = Math.max(minSize, Math.abs(bottom - top));
+    const nb = resizeBox(p.box, p.handle, wx, wy, lockAspect);
+    el.x = nb.x;
+    el.y = nb.y;
+    el.width = nb.width;
+    el.height = nb.height;
   }
 
   // --- arrow / line tools --------------------------------------------------
@@ -1381,91 +1276,11 @@ export class WhiteboardEngine {
   // --- keyboard ------------------------------------------------------------
 
   private onKeyDown = (e: KeyboardEvent): void => {
-    const target = e.target as HTMLElement | null;
-    const typing =
-      target &&
-      (target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable);
-    if (typing) return;
-
-    const mod = e.ctrlKey || e.metaKey;
-    const key = e.key.toLowerCase();
-
-    if (mod) {
-      if (key === "z") {
-        e.preventDefault();
-        if (e.shiftKey) this.redo();
-        else this.undo();
-      } else if (key === "y") {
-        e.preventDefault();
-        this.redo();
-      } else if (key === "a") {
-        e.preventDefault();
-        this.selectAll();
-      } else if (key === "c") {
-        this.copySelection();
-      } else if (key === "x") {
-        e.preventDefault();
-        this.cutSelection();
-        // Ctrl+V is intentionally NOT handled here: the window `paste` event (onPaste) is the
-        // single paste path, so a system-clipboard image and the internal element clipboard
-        // can't both fire. We don't preventDefault Ctrl+V, so the native paste event runs.
-      } else if (key === "d") {
-        e.preventDefault();
-        this.duplicateSelected();
-      } else if (key === "]") {
-        e.preventDefault();
-        this.bringToFront();
-      } else if (key === "[") {
-        e.preventDefault();
-        this.sendToBack();
-      } else if (key === "g") {
-        e.preventDefault();
-        if (e.shiftKey) this.ungroupSelected();
-        else this.groupSelected();
-      } else if (key === "2") {
-        e.preventDefault();
-        this.zoomToSelection();
-      }
-      return;
-    }
-
-    if (e.key === "Delete" || e.key === "Backspace") {
-      if (this.selected.size) {
-        e.preventDefault();
-        this.deleteSelected();
-      }
-      return;
-    }
-    if (e.key.startsWith("Arrow") && this.selected.size) {
-      e.preventDefault();
-      const step = e.shiftKey ? NUDGE_LARGE : NUDGE;
-      if (e.key === "ArrowLeft") this.nudgeSelected(-step, 0);
-      else if (e.key === "ArrowRight") this.nudgeSelected(step, 0);
-      else if (e.key === "ArrowUp") this.nudgeSelected(0, -step);
-      else if (e.key === "ArrowDown") this.nudgeSelected(0, step);
-      return;
-    }
-    if (e.key === " ") {
-      this.spaceDown = true;
-      this.updateCursor();
-      return;
-    }
-    if (e.key === "Escape" && this.selected.size) {
-      this.setSelection([]);
-      this.scheduleRender();
-      return;
-    }
-    const toolKey = TOOL_KEYS[key];
-    if (toolKey) this.setTool(toolKey);
+    handleKeyDown(e, this.keyCommands);
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {
-    if (e.key === " ") {
-      this.spaceDown = false;
-      this.updateCursor();
-    }
+    handleKeyUp(e, this.keyCommands);
   };
 
   // --- text editing --------------------------------------------------------
@@ -1595,55 +1410,14 @@ export class WhiteboardEngine {
     wy: number,
     lockAspect: boolean,
   ): void {
-    const b = p.box;
-    const h = p.handle;
-    let left = b.x;
-    let top = b.y;
-    let right = b.x + b.width;
-    let bottom = b.y + b.height;
-
-    if (h.includes("w")) left = wx;
-    if (h.includes("e")) right = wx;
-    if (h.includes("n")) top = wy;
-    if (h.includes("s")) bottom = wy;
-
-    let newW = Math.max(8, Math.abs(right - left));
-    let newH = Math.max(8, Math.abs(bottom - top));
-
-    if (lockAspect && b.width > 0 && b.height > 0) {
-      const aspect = b.width / b.height;
-      if (newW / newH > aspect) newW = newH * aspect;
-      else newH = newW / aspect;
-      if (h.includes("w")) left = right - newW;
-      else right = left + newW;
-      if (h.includes("n")) top = bottom - newH;
-      else bottom = top + newH;
-    }
-
-    const anchorX = h.includes("w") ? b.x + b.width : b.x;
-    const anchorY = h.includes("n") ? b.y + b.height : b.y;
-    const scaleX = newW / b.width;
-    const scaleY = newH / b.height;
-
-    const idSet = this.selected;
-    this.elements = p.base.map((el) => {
-      if (!idSet.has(el.id) || el.locked) return el;
-      const copy = cloneElements([el])[0];
-      const eb = elementBox(el);
-      copy.x = anchorX + (eb.x - anchorX) * scaleX;
-      copy.y = anchorY + (eb.y - anchorY) * scaleY;
-      copy.width = eb.width * scaleX;
-      copy.height = eb.height * scaleY;
-      if (isLinear(copy.type) && copy.points) {
-        copy.points = copy.points.map(
-          ([px, py]) =>
-            [
-              anchorX + (px - anchorX) * scaleX,
-              anchorY + (py - anchorY) * scaleY,
-            ] as [number, number],
-        );
-      }
-      return copy;
-    });
+    this.elements = scaleElements(
+      p.base,
+      this.selected,
+      p.box,
+      p.handle,
+      wx,
+      wy,
+      lockAspect,
+    );
   }
 }

@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlparse
@@ -40,6 +41,13 @@ from agentcore.tools.builtin.web._net import (
 logger = get_logger(__name__)
 
 DEFAULT_MAX_RESULTS = 5
+
+# 工具执行阶段进度回调 (联网搜索前端展示优化): a backend fires this with a coarse phase token —
+# "queued" (排队中: gated by the rate/concurrency limiter under a parallel-team burst),
+# "querying" (正在检索: the engine request is in flight), "fallback" (改用备用引擎: the primary
+# went search-blind, retrying via Tavily). Lets the tool layer surface a live waiting state; the
+# backend stays off the event vocabulary — it only names phases (引擎纯化). ``None`` = no live sink.
+PhaseCallback = Callable[[str], None]
 
 # Cap concurrent in-flight requests to the single self-hosted SearXNG instance. A
 # parallel team (A/B/C unlocked multi-worker research) can otherwise fire dozens of
@@ -83,7 +91,10 @@ class SearchResult:
 
 class SearchBackend(Protocol):
     async def search(
-        self, query: str, max_results: int = DEFAULT_MAX_RESULTS
+        self,
+        query: str,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        on_phase: PhaseCallback | None = None,
     ) -> list[SearchResult]: ...
 
 
@@ -133,6 +144,16 @@ class _TokenBucket:
         self._tokens = capacity  # start full: a cold first search isn't penalised
         self._updated = time.monotonic()
         self._lock = asyncio.Lock()
+
+    def would_wait(self) -> bool:
+        """Whether :meth:`acquire` would currently block (best-effort, non-consuming).
+
+        Peeks the refilled token count WITHOUT mutating state — used only to decide whether to
+        surface a「排队中」phase hint, never for correctness. A racing acquire may change the
+        answer between this check and the real acquire; that's fine for a pure UI hint."""
+        now = time.monotonic()
+        tokens = min(self._capacity, self._tokens + (now - self._updated) * self._rate)
+        return tokens < 1.0
 
     async def acquire(self) -> None:
         while True:
@@ -217,7 +238,10 @@ class SearXNGBackend:
         self._bucket = None  # re-lazied (rebinds to a fresh loop) on next use
 
     async def search(
-        self, query: str, max_results: int = DEFAULT_MAX_RESULTS
+        self,
+        query: str,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        on_phase: PhaseCallback | None = None,
     ) -> list[SearchResult]:
         host = _searxng_host(self.base_url)
         remaining = circuit_remaining(host)
@@ -238,11 +262,21 @@ class SearXNGBackend:
         # a token) and OUTSIDE the semaphore (waiting for a token mustn't hold a slot).
         # Retries inside the loop are already paced by their own backoff, so they don't
         # re-acquire a token here.
-        await self._get_bucket().acquire()
+        bucket = self._get_bucket()
+        sem = self._get_sem()
+        # 工具执行阶段进度: surface「排队中」ONLY when the rate/concurrency gates will actually make
+        # this call wait (a parallel-team burst) — a lone search from a full bucket skips straight
+        # to「正在检索」. Best-effort, non-consuming peek, so an approximate answer is fine.
+        if on_phase and (bucket.would_wait() or sem.locked()):
+            on_phase("queued")
+        await bucket.acquire()
 
         params = {"q": query, "format": "json", "safesearch": "0"}
         client = self._get_client()
-        async with self._get_sem():  # throttle the parallel-team burst (see _SEARCH_CONCURRENCY)
+        async with sem:  # throttle the parallel-team burst (see _SEARCH_CONCURRENCY)
+            # 工具执行阶段进度: a slot is held and the request is about to fly — the main wait.
+            if on_phase:
+                on_phase("querying")
             for attempt in range(_SEARCH_ATTEMPTS):
                 try:
                     resp = await client.get(f"{self.base_url}/search", params=params)
@@ -321,13 +355,20 @@ class TavilyBackend:
             self._client = None
 
     async def search(
-        self, query: str, max_results: int = DEFAULT_MAX_RESULTS
+        self,
+        query: str,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        on_phase: PhaseCallback | None = None,
     ) -> list[SearchResult]:
         # Guard: only reached if mis-wired without a key (get_search_backend builds
         # this backend only when a key is set). Honest, model-facing reason.
         if not self.api_key:
             raise EgressError("Tavily 回退搜索未配置 API key（设置 TAVILY_API_KEY 启用）")
 
+        # 工具执行阶段进度: the Tavily request is in flight (reached standalone, or as the
+        # fallback leg right after the wrapper signalled「改用备用引擎」).
+        if on_phase:
+            on_phase("querying")
         payload = {
             "query": query,
             "max_results": max(1, min(max_results, _TAVILY_MAX_RESULTS_CAP)),
@@ -366,18 +407,29 @@ class FallbackSearchBackend:
         self.fallback = fallback
 
     async def search(
-        self, query: str, max_results: int = DEFAULT_MAX_RESULTS
+        self,
+        query: str,
+        max_results: int = DEFAULT_MAX_RESULTS,
+        on_phase: PhaseCallback | None = None,
     ) -> list[SearchResult]:
         try:
-            return await self.primary.search(query, max_results=max_results)
+            return await self.primary.search(
+                query, max_results=max_results, on_phase=on_phase
+            )
         except Exception as primary_exc:  # noqa: BLE001 - any primary failure → try fallback
             logger.warning(
                 "search.primary_failed_try_fallback",
                 reason=describe_net_error(primary_exc),
                 error_repr=repr(primary_exc),
             )
+            # 工具执行阶段进度: the primary went search-blind — signal「改用备用引擎」so the
+            # waiting UI explains the Tavily leg's extra latency instead of a stalled spinner.
+            if on_phase:
+                on_phase("fallback")
             try:
-                results = await self.fallback.search(query, max_results=max_results)
+                results = await self.fallback.search(
+                    query, max_results=max_results, on_phase=on_phase
+                )
             except Exception as fb_exc:  # noqa: BLE001 - both down → surface primary's reason
                 logger.warning(
                     "search.fallback_failed",

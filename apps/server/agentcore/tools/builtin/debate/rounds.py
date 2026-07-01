@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import TYPE_CHECKING
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.debate import DebateConfig, DebateSide, RoundResult, SideTurn
+from agentcore.runtime.events import batch_metrics as batch_metrics_event
 from agentcore.tools.builtin.debate.prompt import debater_task, round_feedback
 
 if TYPE_CHECKING:
@@ -131,6 +132,10 @@ async def first_round(
             failed=m.failed,
             skipped=m.skipped,
         )
+        # 深层诊断指标 (前端UX设计.md §十): also hand the scheduler snapshot to the client so
+        # 诊断模式 shows the debaters' fan-out in run detail (journaled → replays on reload),
+        # mirroring the delegate drive path. Whole-batch verbatim; the host already logged it.
+        tool._sink.emit(batch_metrics_event(execution_id=execution_id, metrics=asdict(m)))
 
     turns: list[SideTurn] = []
     for side, node in zip(sides, plan.nodes, strict=False):
@@ -195,6 +200,9 @@ async def next_round(
                 execution_id=execution_id,
                 profile_set=tool._profile_set,
                 approval_gate=worker_gate,
+                # 单一轮次投影: carry this side's TRUE round onto the revision's run_started
+                # (辩论逐轮), so every fold reads 第几轮 from the wire, not the version number.
+                round_no=round_no,
             )
 
     states = await asyncio.gather(*(_continue_side(side) for side in sides))

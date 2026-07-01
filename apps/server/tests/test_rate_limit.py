@@ -5,7 +5,6 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
-
 from starlette.requests import Request
 
 from agentcore.config import settings

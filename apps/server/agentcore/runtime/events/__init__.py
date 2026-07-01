@@ -21,6 +21,7 @@ from agentcore.runtime.events.chat import (
     title_generated,
     tool_progress,
     tool_use_end,
+    tool_use_progress,
     tool_use_start,
     turn_saved,
 )
@@ -82,6 +83,7 @@ __all__ = [
     "content_reset",
     "reasoning_delta",
     "tool_progress",
+    "tool_use_progress",
     "tool_use_start",
     "tool_use_end",
     "citations_event",

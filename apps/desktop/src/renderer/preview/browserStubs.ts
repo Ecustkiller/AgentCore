@@ -2,6 +2,7 @@ import type { FsApi, FsResult, WorkspaceOpResult } from "@shared/ipc-contract";
 import type { LogApi } from "@shared/log-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
+import type { WindowApi } from "@shared/window-contract";
 
 // The desktop renderer reaches native capability through four preload-injected
 // globals. In a plain browser there is no Electron preload, so we install benign stubs
@@ -74,10 +75,12 @@ const logApi: LogApi = {
   write: noop,
 };
 
-const windowApi = {
+const windowApi: WindowApi = {
   minimize: noop,
   maximize: noop,
   close: noop,
+  applyFramePreset: async () => {},
+  getFramePreset: async () => "free" as const,
 };
 
 if (typeof window !== "undefined") {

@@ -60,6 +60,7 @@ export function projectExecution(
       status: "pending",
       dependsOn: spec.dependsOn,
       outputSummary: null,
+      debrief: null,
       durationMs: null,
       error: null,
       parentRunId: spec.parentRunId ?? null,
@@ -142,6 +143,7 @@ export function projectExecution(
               status: "pending",
               dependsOn: [],
               outputSummary: null,
+              debrief: null,
               durationMs: null,
               error: null,
               parentRunId: f.parentRunId,
@@ -150,9 +152,13 @@ export function projectExecution(
               model: null,
               usage: null,
               cost: null,
-              stance: null,
-              group: null,
-              round: 0,
+              // 乙 wire 携 round/stance (单一轮次投影): a debate 续写 keeps its debater
+              // identity (stance/group) + its TRUE round, so debateGroups / debateLiveRounds
+              // bucket 第几轮/哪一方 off ONE field. New journals carry them on the frame; a
+              // legacy journal falls back to the original's stance/group + revision-as-round.
+              stance: f.stance ?? original.stance,
+              group: f.group ?? original.group,
+              round: f.round || f.revision,
               revisionOf: f.parentRunId,
               revision: f.revision,
               revised: null,
@@ -223,6 +229,7 @@ export function projectExecution(
         if (run) {
           run.status = "completed";
           run.outputSummary = f.outputSummary;
+          run.debrief = f.debrief ?? null;
           run.durationMs = f.durationMs;
           // Light up this run's payroll row (§7.3B); absent on cost-less frames.
           run.role = f.role ?? null;
@@ -282,6 +289,7 @@ export function projectExecution(
         if (run) {
           run.status = "failed";
           run.error = f.error;
+          run.debrief = f.debrief ?? null;
         }
         const agent = agentById(f.agentId);
         if (agent) {
@@ -389,10 +397,15 @@ export function projectExecution(
         break;
       }
       case "tool_use_start": {
-        // Tool events are not run-scoped on the wire; attach to whichever run
-        // is running at this point in the fold (matches prior live behaviour).
-        const running = runs.find((s) => s.status === "running");
-        const agent = running ? agentById(running.agentId) : undefined;
+        // A delegated worker tags its calls with `runId`, so file the call onto
+        // THAT run's agent — with width>1 several workers run concurrently and the
+        // old "first running run" heuristic mis-attributed them all to one. The
+        // captain's own calls carry no runId (and an unresolvable id can't be
+        // placed), so those fall back to the running-run heuristic as before.
+        const owner =
+          (f.runId ? runById(f.runId) : undefined) ??
+          runs.find((s) => s.status === "running");
+        const agent = owner ? agentById(owner.agentId) : undefined;
         if (agent) {
           agent.toolCalls.push({
             id: f.toolCallId,

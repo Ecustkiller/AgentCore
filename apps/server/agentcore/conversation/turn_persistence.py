@@ -195,7 +195,7 @@ async def persist_turn_result(
                 error=str(e),
             )
 
-        conv = await conv_repo.get_by_id(conversation_id)
+        conv = await conv_repo.get_by_id_unscoped(conversation_id)
         needs_title = bool(generate_title and conv and not conv.title)
 
     # 下一步推荐 (CEO→用户): quick-reply chips for the just-finished turn. Only for a
@@ -217,7 +217,7 @@ async def persist_turn_result(
                 )
                 if title:
                     async with async_session_factory() as session:
-                        await ConversationRepository(session).update_title(
+                        await ConversationRepository(session).update_title_unscoped(
                             conversation_id, title
                         )
                     sink.emit(title_generated(title, conversation_id=conversation_id))

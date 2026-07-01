@@ -43,8 +43,9 @@ def finish_guard(content: str, *, citation_count: int, check_citations: bool = T
     这是**所有 react_loop 收尾共过的统一底线**——CEO captain 与 worker 都在 done 点过此关。
     现查两类，二者的适用面不同：
 
-    1. **造引用**（仅 ``check_citations``）：:func:`~agentcore.runtime.citations.out_of_range_markers`
-       抓正文里指向不存在来源卡的角标 ``[n]``（编号 < 1 或 > ``citation_count``）。``citation_count``
+    1. **造引用**（仅 ``check_citations``）：
+       :func:`~agentcore.runtime.citations.out_of_range_markers` 抓正文里指向不存在来源卡的角标
+       ``[n]``（编号 < 1 或 > ``citation_count``）。``citation_count``
        是本回合实际收集到的来源卡数；为 0 时正文里任何 ``[n]`` 都视为编造（与客户端「越界角标
        降级为纯文本」同义）。仅 CEO 路径开（``check_citations=annotate_citations``）：worker 文本
        未编号、其本地 ``[n]`` 汇入回合卡时会重排，角标校验语义不适用，故 worker 关此查。
@@ -110,12 +111,18 @@ def format_guard_steer(reworks: list[str]) -> str:
     镜像 ``loop_controller`` 各 steer 的「``[系统提示]`` + 锚定事实」风格：陈述查出的具体
     问题、点明下一步（改正或补来源），不空泛说教。由 react_loop append 进真实窗口、回炉
     一轮——故措辞允许模型继续调检索工具补依据，而非强制只能改写正文。
+
+    因这条以 ``role="user"`` 进窗口（reasoner 靠一条 user 轮可靠触发下一步动作），模型易把它
+    当成用户在纠错、回一句「谢谢指正，我重新整理」——而那句寒暄会随正常旁白通道漏进可见交付
+    （真实事故）。故文案显式自证「系统自动核验、非用户反馈」并禁止致谢/复述/寒暄；共享基座提示词
+    的 ``<system_feedback>`` 段对所有 ``[系统提示]`` 注入做同一约束（见 resolve/prompt.py）。
     """
     if not reworks:
         return ""
     items = "\n".join(f"- {r}" for r in reworks)
     return (
-        "[系统提示] 交付前核验未通过，发现以下问题：\n"
+        "[系统提示] 交付前核验未通过（系统自动核验，非用户反馈），发现以下问题：\n"
         f"{items}\n"
-        "请修正后再给出最终答案；如需补充依据，可继续调用检索工具后再作答。"
+        "请直接修正正文后再给出最终答案；如需补充依据，可继续调用检索工具后再作答。"
+        "不要为此道谢、复述或寒暄，直接改。"
     )

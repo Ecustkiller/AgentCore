@@ -291,7 +291,7 @@ async def test_web_search_surfaces_domain_so_later_read_url_is_allowed(monkeypat
     monkeypatch.setattr(read_url_mod.settings, "read_url_block_novel_query", True)
 
     class _Backend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             return [SearchResult("T", "https://research.example.com/article?id=1", "snip")]
 
     monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())

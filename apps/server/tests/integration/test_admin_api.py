@@ -483,7 +483,7 @@ async def test_admin_deletes_user_anonymizes_and_cascades(client, make_admin, se
 
     # Cross-domain cascade: the account's conversation was soft-deleted.
     async with session_factory() as session:
-        assert await ConversationRepository(session).get_by_id(conv_id) is None
+        assert await ConversationRepository(session).get_by_id_unscoped(conv_id) is None
 
 
 async def test_admin_cannot_delete_self(client, make_admin):

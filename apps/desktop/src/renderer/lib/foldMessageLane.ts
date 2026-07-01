@@ -6,6 +6,7 @@ import type {
   Citation,
   ProcessStep,
   ToolUseEndPayload,
+  ToolUseProgressPayload,
   ToolUseStartPayload,
 } from "@/types/events";
 import {
@@ -18,6 +19,7 @@ import {
   appendToolStep,
   dropTrailingContentSteps,
   resolveToolStep,
+  resolveToolStepPhase,
 } from "./processTimeline";
 
 export interface MessageLaneState {
@@ -88,6 +90,19 @@ export function foldToolUseEnd(
   payload: ToolUseEndPayload,
 ): MessageLaneState {
   const process = resolveToolStep(state.process, payload);
+  if (!process || process === state.process) return state;
+  return { ...state, process };
+}
+
+/** 工具执行阶段进度 (联网搜索前端展示优化): stamp a running tool step's coarse `phase` from a
+ * `tool_use_progress` event. LIVE-ONLY — this event never rides a journal / conformance vector,
+ * so `conformanceFold` no-ops it and the golden stays phase-less; only the production stream
+ * calls this. No-op (same state) when no running step matches. */
+export function foldToolUsePhase(
+  state: MessageLaneState,
+  payload: ToolUseProgressPayload,
+): MessageLaneState {
+  const process = resolveToolStepPhase(state.process, payload);
   if (!process || process === state.process) return state;
   return { ...state, process };
 }

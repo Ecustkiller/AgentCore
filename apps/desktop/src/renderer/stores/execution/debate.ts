@@ -192,10 +192,13 @@ export interface DebateLiveRound {
  * inline view — the gap {@link debateGroups} leaves (it only pairs stance-tagged 2方
  * debates, so 圆桌/红队 showed nothing inline until 收场). Under the moderator +
  * continue_run redesign a debater's round 1 is a plan-declared node (group `debate:*`,
- * no stance) and every later round is a 续写 revision of it (revision N == 第 N 轮), so
- * we walk each side's revision chain to lay the rounds out. Each cell still renders via
- * {@link RunNode}'s agent (the revision inherits the side's role + streams its own
- * output). Empty for 非辩论 / 2方正反 (handled by debateGroups) / 收场后.
+ * no stance) and every later round is a 续写 revision of it, so we walk each side's
+ * revision chain and bucket by the revision's TRUE {@link RunNode.round} (乙 wire 携
+ * round/stance · 单一轮次投影) — the SAME `round` field debateGroups reads, not the version
+ * number (which drifts from the round once a side fails mid-debate). A legacy journal
+ * whose revisions predate the wire round falls back to the version number. Each cell
+ * renders via {@link RunNode}'s agent (the revision inherits the side's role + streams
+ * its own output). Empty for 非辩论 / 2方正反 (handled by debateGroups) / 收场后.
  */
 export function debateLiveRounds(execution: Execution): DebateLiveRound[] {
   const sides = execution.runs.filter(
@@ -212,10 +215,13 @@ export function debateLiveRounds(execution: Execution): DebateLiveRound[] {
     list.push(run);
     revisionsByOriginal.set(run.revisionOf, list);
   }
+  // 单一轮次投影: a revision's round is its canonical `round`; only a legacy journal
+  // (no wire round) falls back to the version number.
+  const roundOf = (r: RunNode): number => r.round || r.revision;
   let maxRound = 1;
   for (const side of sides) {
     for (const rev of revisionsByOriginal.get(side.id) ?? []) {
-      maxRound = Math.max(maxRound, rev.revision);
+      maxRound = Math.max(maxRound, roundOf(rev));
     }
   }
   const rounds: DebateLiveRound[] = [];
@@ -227,7 +233,7 @@ export function debateLiveRounds(execution: Execution): DebateLiveRound[] {
         continue;
       }
       const rev = (revisionsByOriginal.get(side.id) ?? []).find(
-        (x) => x.revision === r,
+        (x) => roundOf(x) === r,
       );
       if (rev) runs.push(rev);
     }

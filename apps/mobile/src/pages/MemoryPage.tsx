@@ -4,6 +4,7 @@ import {
   getMemory,
   getMemoryFile,
   getMemoryTopic,
+  isFeatureUnavailable,
   listMemoryTopics,
   setMemoryEnabled,
   writeMemoryFile,
@@ -246,6 +247,9 @@ function LeafEditor({
 function TopicList({ onAuthError }: { onAuthError: (e: unknown) => unknown }) {
   const [slugs, setSlugs] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A 404/501 = this deployed backend predates the 主题 endpoint (前后端版本漂移). Held
+  // apart from `error` so it shows as a calm note (服务端待升级), not a red failure.
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -253,10 +257,10 @@ function TopicList({ onAuthError }: { onAuthError: (e: unknown) => unknown }) {
       .then((s) => alive && setSlugs(s))
       .catch((e) => {
         onAuthError(e);
-        if (alive) {
-          setError("加载主题失败");
-          setSlugs([]);
-        }
+        if (!alive) return;
+        if (isFeatureUnavailable(e)) setUnavailable(true);
+        else setError("加载主题失败");
+        setSlugs([]);
       });
     return () => {
       alive = false;
@@ -268,9 +272,14 @@ function TopicList({ onAuthError }: { onAuthError: (e: unknown) => unknown }) {
       title="主题记忆"
       note="AI 按需查阅的主题笔记。可查看、编辑或删除。"
     >
-      {slugs === null && !error && <p className="section-note">加载中…</p>}
+      {slugs === null && !error && !unavailable && (
+        <p className="section-note">加载中…</p>
+      )}
+      {unavailable && (
+        <p className="section-note">主题记忆暂不可用（服务端待升级）。</p>
+      )}
       {error && <p className="error">{error}</p>}
-      {slugs !== null && slugs.length === 0 && !error && (
+      {slugs !== null && slugs.length === 0 && !error && !unavailable && (
         <p className="section-note">还没有主题记忆。</p>
       )}
       {slugs?.map((slug) => (

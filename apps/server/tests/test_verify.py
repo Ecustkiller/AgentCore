@@ -102,6 +102,15 @@ def test_format_steer_empty_when_clean():
     assert format_guard_steer([]) == ""
 
 
+def test_format_steer_marks_automated_and_suppresses_acknowledgement():
+    # 这条 steer 以 role=user 进窗口，模型易把它当用户纠错而回「谢谢指正」——那句寒暄会漏进
+    # 可见交付（真实事故）。文案须自证是系统自动核验、非用户，并禁止致谢/复述/寒暄。
+    steer = format_guard_steer(["问题甲"])
+    assert "自动核验" in steer
+    assert "非用户" in steer
+    assert "道谢" in steer
+
+
 def test_guard_to_steer_roundtrip():
     # finish_guard 命中 → format_guard_steer 出一条非空提示；干净 → 空串。
     assert format_guard_steer(finish_guard("坏引用 [9]", citation_count=1)).startswith("[系统提示]")

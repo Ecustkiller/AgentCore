@@ -1,11 +1,8 @@
 import {
-  brandPanelPrimary,
   confidenceLabel,
   confidencePill,
   statusAccentText,
   statusPillInline,
-  surfaceMutedPanel,
-  surfaceSubtle,
 } from "@/components/ui/tone-presets";
 import { agentColorVar } from "@/lib/agentIdentity";
 import type { DebateBriefInfo, DebateSideInfo } from "@/types/events";
@@ -35,6 +32,11 @@ import type { DebateForm } from "./model";
  *  - **圆桌探讨**：观点光谱已提到叙事**之前**的英雄区 ({@link RoundtableSpectrum})，本卡只剩
  *    叙事之后的简报小结 (共同焦点 + 分歧 + 待解)；无单一裁决、不挂置信表。
  * 三套共用同一组 brief 字段与子部件，仅骨架不同；无内容的区块一律省略 (honest gaps)。
+ *
+ * **布局 = 全展平、无自带卡面**：本简报只被流末「主持人终审」发言气泡内嵌
+ * ({@link import("./DebateStream").DebateStream} 的 FinalVerdict)，**气泡即唯一卡面**，故各区块一律
+ * 去面板 / 边框、改「分段」呈现 + 至多一条轻量左强调 (价值之争 primary、各方论点 / 风险按身份色或危度)，
+ * 根治「卡片套卡片」(用户反馈)。区块层级仍靠标题 + 间距 + 分隔线区分，不再靠嵌套描边。
  */
 export function BriefCard({
   brief,
@@ -64,7 +66,7 @@ function DebateBrief({
 }) {
   return (
     <div className="space-y-3">
-      <section className={brandPanelPrimary}>
+      <div className="space-y-3">
         <VerdictHero
           label="结论倾向"
           leaning={brief.leaning}
@@ -76,7 +78,7 @@ function DebateBrief({
           factual={brief.factual_disputes}
         />
         <RecommendationInline text={brief.recommendation} />
-      </section>
+      </div>
       {/* 渐进披露：默认极简（裁决 hero + 需你拍板），各方论点 / 事实分歧 / 待解作为「依据」折叠
           (设计 §四「极简一页·渐进披露」)。 */}
       <Disclosure summary="展开依据" teaser={evidenceTeaser(brief, true)}>
@@ -121,7 +123,7 @@ function RedTeamBrief({
   const defense = subject ? brief.strongest_points[subject.key] : undefined;
   return (
     <div className="space-y-3">
-      <section className={brandPanelPrimary}>
+      <div className="space-y-3">
         <VerdictHero
           label="方案评定"
           leaning={brief.leaning}
@@ -131,12 +133,12 @@ function RedTeamBrief({
           value={brief.value_disputes}
           factual={brief.factual_disputes}
         />
-      </section>
+      </div>
 
       <RiskBoard risks={risks} />
 
       {brief.recommendation && (
-        <div className={`rounded-lg border p-2.5 ${surfaceSubtle.primary}`}>
+        <div className="border-l-2 border-primary/40 pl-2.5">
           <h4 className="mb-1 flex items-center gap-1 text-xs font-medium text-primary">
             <Wrench size={14} />
             加固建议
@@ -147,7 +149,7 @@ function RedTeamBrief({
 
       {defense && subject && (
         <div
-          className="rounded-lg border border-l-2 border-border bg-card p-2.5"
+          className="border-l-2 pl-2.5"
           style={{ borderLeftColor: agentColorVar(subject.name) }}
         >
           <div className="mb-1 flex flex-wrap items-center gap-1.5">
@@ -185,19 +187,19 @@ const RISK_SEVERITY = {
     label: "高危",
     rank: 0,
     pill: statusPillInline.destructive,
-    surface: "border-destructive/30 bg-destructive/5",
+    surface: "border-l-2 border-destructive/50 pl-2.5",
   },
   medium: {
     label: "中危",
     rank: 1,
     pill: statusPillInline.destructive,
-    surface: "border-destructive/30 bg-destructive/5",
+    surface: "border-l-2 border-destructive/50 pl-2.5",
   },
   low: {
     label: "低危",
     rank: 2,
     pill: statusPillInline.muted,
-    surface: "border-border bg-muted/30",
+    surface: "border-l-2 border-border pl-2.5",
   },
 } as const;
 type RiskLevel = keyof typeof RISK_SEVERITY;
@@ -248,7 +250,7 @@ function RiskBoard({ risks }: { risks: RiskItem[] }) {
           return (
             <li
               key={r.side.key}
-              className={`rounded-lg border p-2.5 ${meta?.surface ?? "border-border bg-card"}`}
+              className={meta?.surface ?? "border-l-2 border-border pl-2.5"}
             >
               <div className="flex items-center justify-between gap-2">
                 <SideIdentity
@@ -296,7 +298,7 @@ export function RoundtableSpectrum({
   sides: DebateSideInfo[];
 }) {
   return (
-    <section className={brandPanelPrimary}>
+    <div className="space-y-3">
       <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
         <Users size={15} className={statusAccentText.primary} />
         圆桌观点光谱
@@ -307,7 +309,7 @@ export function RoundtableSpectrum({
         points={brief.strongest_points}
       />
       {brief.leaning && (
-        <div className={`${surfaceMutedPanel} p-3`}>
+        <div className="border-t border-border pt-2.5">
           <h4 className="mb-1 flex items-center gap-1 text-xs font-medium text-muted-foreground">
             <MessagesSquare size={14} />
             综合观察
@@ -320,7 +322,7 @@ export function RoundtableSpectrum({
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -436,9 +438,7 @@ function DisputeTriage({
   if (value.length === 0 && factual.length === 0) return null;
   const hasValue = value.length > 0;
   return (
-    <div
-      className={`rounded-lg border p-2.5 ${hasValue ? surfaceSubtle.primary : surfaceMutedPanel}`}
-    >
+    <div className={hasValue ? "border-l-2 border-primary/40 pl-2.5" : ""}>
       {hasValue && (
         <>
           <h4 className="flex flex-wrap items-center gap-1 text-xs font-medium">
@@ -509,21 +509,19 @@ function Disclosure({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-lg border border-border">
+    <div className="border-t border-border pt-1">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50"
+        className="flex w-full items-center gap-1.5 py-1 text-xs text-muted-foreground hover:text-foreground"
       >
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span className="font-medium text-foreground">{summary}</span>
         {teaser && <span className="min-w-0 truncate">· {teaser}</span>}
         <span className="ml-auto shrink-0">{open ? "收起" : "展开"}</span>
       </button>
-      {open && (
-        <div className="space-y-3 border-t border-border p-3">{children}</div>
-      )}
+      {open && <div className="space-y-3 pt-2">{children}</div>}
     </div>
   );
 }
@@ -559,7 +557,7 @@ function StillToClarify({
 }) {
   if (factual.length === 0 && open.length === 0) return null;
   return (
-    <div className={`${surfaceMutedPanel} space-y-2 p-3`}>
+    <div className="space-y-2">
       <h4 className="text-xs font-medium text-muted-foreground">还需厘清</h4>
       {factual.length > 0 && (
         <ClarifyList
@@ -669,7 +667,7 @@ function SidePointsGrid({
           return (
             <div
               key={s.key}
-              className="rounded-lg border border-l-2 border-border bg-card p-2.5"
+              className="border-l-2 pl-2.5"
               style={{ borderLeftColor: colorVar }}
             >
               <SideIdentity name={s.name} colorVar={colorVar} model={s.model} />

@@ -193,7 +193,9 @@ export function TeamView({
                   {statusLabel && (
                     <span
                       className={`team-note-status ${
-                        note.status === "voided" ? "status-voided" : "status-superseded"
+                        note.status === "voided"
+                          ? "status-voided"
+                          : "status-superseded"
                       }`}
                     >
                       {statusLabel}
@@ -355,7 +357,9 @@ function EscalationAnswer({
     <div className="run-escalation run-escalation-live">
       <span className="run-escalation-q">↑ {esc.question}</span>
       {esc.assumption && (
-        <span className="run-escalation-a">未答则按此继续：{esc.assumption}</span>
+        <span className="run-escalation-a">
+          未答则按此继续：{esc.assumption}
+        </span>
       )}
       <textarea
         className="run-escalation-note"

@@ -51,7 +51,8 @@ MAX_PUSH_PER_ROUND = 8  # most notes pushed into a sibling before one of its ste
 # kind — so a malformed call never invents a category.
 NOTE_KIND_DECISION = "decision"  # 我定了 X（别人要依赖的决定：接口 / 字段名 / 格式 / 命名）
 NOTE_KIND_HEADS_UP = "heads_up"  # 提个醒 Y（我踩到的坑 / 发现）
-NOTE_KIND_CLAIM = "claim"  # 我领了 Z（认领一块活 / 文件，避免和队友撞活 / 重复——WriteCoordinator 的台面化）
+# 我领了 Z（认领一块活 / 文件，避免和队友撞活 / 重复——WriteCoordinator 的台面化）
+NOTE_KIND_CLAIM = "claim"
 NOTE_KINDS: frozenset[str] = frozenset(
     {NOTE_KIND_DECISION, NOTE_KIND_HEADS_UP, NOTE_KIND_CLAIM}
 )
@@ -196,7 +197,8 @@ def format_notes_for_synthesis(notes: list[TeamNote]) -> str:
     lines = [_render_note_line(n) for n in notes]
     return (
         "### 团队便签（队员过程中广播的【当前有效】决定 / 认领 / 提醒——合并对账时一并核对）\n"
-        "把下列便签和合好的成品对照，是【语义边界对账】的现成依据：〔我定了〕的接口 / 字段 / 命名 / "
+        "把下列便签和合好的成品对照，是【语义边界对账】的现成依据：〔我定了〕的接口 / "
+        "字段 / 命名 / "
         "格式，成品须跟到最新（被〔…·更新〕改过的以新值为准）；两条〔我领了〕认领同一块 = 重复、"
         "某该做的没人认领 = 缺口；成品与某条广播决定对不上 = 冲突。对不上就就地用 `revise` / "
         "`replan` 修，别在概览里糊过去。\n"

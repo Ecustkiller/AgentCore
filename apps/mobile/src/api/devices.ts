@@ -16,7 +16,10 @@ export async function registerDevice(
   const res = await apiFetch("/v1/devices", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, platform } satisfies Schemas["DeviceRegistration"]),
+    body: JSON.stringify({
+      token,
+      platform,
+    } satisfies Schemas["DeviceRegistration"]),
   });
   if (!res.ok) throw new Error(`设备注册失败 (${res.status})`);
 }

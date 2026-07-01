@@ -77,6 +77,9 @@ def _run_from_plan(s: dict[str, Any]) -> dict[str, Any]:
         "status": "pending",
         "dependsOn": list(s.get("depends_on") or []),
         "outputSummary": None,
+        # 完工交接简报: the worker's authored {summary/key_points/assumptions/next_steps},
+        # set by run_completed; None until then (辩手 / trivial worker / captain carry none).
+        "debrief": None,
         "durationMs": None,
         "error": None,
         "parentRunId": s.get("parent_run_id"),
@@ -289,6 +292,14 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "kind": kind,
                         "revisionOf": parent,
                         "revision": revision,
+                        # 乙 wire 携 round/stance (单一轮次投影): a debate 续写 keeps its
+                        # debater identity (stance/group) + its TRUE round, so every view
+                        # derives 第几轮/哪一方 from ONE projected field. New journals carry
+                        # them on the wire; a legacy journal falls back to inheriting the
+                        # original's stance/group + revision-as-round.
+                        "stance": p.get("stance") or original.get("stance"),
+                        "group": p.get("group") or original.get("group"),
+                        "round": p.get("round") or revision,
                     }
                     runs.append(run)
             if run is not None:
@@ -326,7 +337,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # 交付前核验回炉 (finish_guard) 的 worker 对偶（content_reset 之于 CEO）：worker done
             # 轮草稿未过轻层核验（统一底线·结构完整性），引擎丢弃这一版、发 run_output_reset、回炉
             # 重写。清该 agent 的 output 标量（重写版从干净态重累积），reasoning 是真实过程、保留
-            # ——否则会把「违规版+修正版」拼在一起。transport-only（不进 journal），与三端 fold 一致。
+            # ——否则会把「违规版+修正版」拼在一起。transport-only（不进 journal），
+            # 与三端 fold 一致。
             ag = agent_by_id(p.get("agent_id", ""))
             if ag:
                 ag["output"] = ""
@@ -349,6 +361,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if run is not None:
                 run["status"] = "completed"
                 run["outputSummary"] = p.get("output_summary")
+                # 完工交接简报: verbatim structured brief when the worker authored one (else absent
+                # → stays None), so the run-detail 摘要 shows the author's own wrap-up.
+                run["debrief"] = p.get("debrief")
                 run["durationMs"] = p.get("duration_ms")
                 run["role"] = p.get("role")
                 run["model"] = p.get("model")
@@ -365,6 +380,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if run is not None:
                 run["status"] = "failed"
                 run["error"] = p.get("error")
+                # 完工交接简报 on a failed run: the author's wrap-up when a contract-missing
+                # worker still produced one (else absent → stays None).
+                run["debrief"] = p.get("debrief")
             ag = agent_by_id(p.get("agent_id", ""))
             if ag:
                 ag["status"] = "error"

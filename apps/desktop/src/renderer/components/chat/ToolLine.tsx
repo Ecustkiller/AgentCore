@@ -14,7 +14,20 @@ import {
   toolDetail,
   toolGroupSummary,
   toolMeta,
+  toolPhaseText,
 } from "./message-bubble/constants";
+
+/** Tools whose rich result card auto-opens once when they finish (结果卡自动展开): the output
+ * IS the payload the user was waiting on — web_search's hits, code_execute's terminal output
+ * (incl. a failing run's stderr), file_write/str_replace's diff — so hiding it behind a click
+ * is pure friction. Every other tool keeps the collapsed default; a later manual collapse on
+ * these still sticks. */
+const AUTO_EXPAND_ON_DONE = new Set([
+  "web_search",
+  "code_execute",
+  "file_write",
+  "str_replace",
+]);
 
 /** Live transport line while the model streams tool-call JSON (不持久化). */
 export function ComposingToolLine({
@@ -37,6 +50,45 @@ export function ComposingToolLine({
       </span>
       <span className="inline-block animate-pulse text-primary">▋</span>
     </span>
+  );
+}
+
+/** Seconds a tool has been running, ticking client-side from when this row first saw
+ * `running` (≈ the tool_use_start instant). A live liveliness cue for a BLOCKING tool
+ * (web_search) whose execution streams no incremental progress. Resets when not running. */
+function useRunningElapsed(running: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) {
+      setElapsed(0);
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(
+      () => setElapsed(Math.floor((Date.now() - start) / 1000)),
+      1000,
+    );
+    return () => clearInterval(id);
+  }, [running]);
+  return elapsed;
+}
+
+/** Shimmer placeholder rows shown while web_search is running — turns the bare waiting
+ * spinner into a「结果正在来」affordance. The search is atomic (nothing to stream), so
+ * this only previews the result cards' shape until the real hits land. */
+function WebSearchSkeleton() {
+  return (
+    <div className="mt-1 space-y-1.5" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <div key={i} className="flex items-start gap-2 px-2 py-1">
+          <div className="mt-0.5 size-4 shrink-0 animate-pulse rounded bg-muted" />
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="h-3 w-1/2 animate-pulse rounded bg-muted" />
+            <div className="h-3 w-4/5 animate-pulse rounded bg-muted/70" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -71,6 +123,30 @@ export function ToolLine({
     status: step.status,
   };
   const hasBody = hasToolResultBody(data);
+  const running = step.status === "running";
+  const isWebSearch = step.tool_name === "web_search";
+  const autoExpandsOnDone = AUTO_EXPAND_ON_DONE.has(step.tool_name);
+  const elapsed = useRunningElapsed(running);
+
+  // 结果卡自动展开: open the rich result once when an auto-expand tool finishes, so the
+  // user sees the payload without a click — web_search hits, code_execute terminal,
+  // file_write/str_replace diff. One-shot on the running→done edge — a later manual
+  // collapse sticks; other tools keep the collapsed default.
+  const prevRunning = useRef(running);
+  useEffect(() => {
+    if (prevRunning.current && !running && autoExpandsOnDone && hasBody)
+      setOpen(true);
+    prevRunning.current = running;
+  }, [running, autoExpandsOnDone, hasBody]);
+
+  // Waiting-state hint (联网搜索前端展示优化): coarse phase (正在检索 / 排队中 / 改用备用引擎)
+  // plus a live elapsed timer, replacing the dead spinner. Empty at the very first instant
+  // (no phase yet, <1s) — the pulsing dot + skeleton still convey life.
+  const runningHint = running
+    ? [toolPhaseText(step.phase), elapsed >= 1 ? `${elapsed}s` : null]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
   return (
     <div className="min-w-0">
       <Button
@@ -91,6 +167,11 @@ export function ToolLine({
                 </span>
               )}
             </span>
+            {runningHint && (
+              <span className="block truncate text-xs text-muted-foreground/70">
+                {runningHint}
+              </span>
+            )}
             {hasBody && !open && (
               <span
                 className={`block truncate text-xs ${
@@ -106,6 +187,7 @@ export function ToolLine({
           <ToolStatusIcon status={step.status} />
         </span>
       </Button>
+      {running && isWebSearch && <WebSearchSkeleton />}
       {open && hasBody && <ToolResultView data={data} />}
     </div>
   );

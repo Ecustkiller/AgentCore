@@ -14,7 +14,8 @@ wherever it is re-shown:
 The POLICY (file-producer → pointer; ``summarize`` deps → digest; else pass_through
 prose water-filled across a shared budget, head+tail trimmed on overflow) lives at
 each call site; this module is just the MECHANISM. All char budgets live in
-``constants.py``. ``summarize`` (workspace) is reused for the prose digests.
+``constants.py``. Every over-budget cut here is HEAD+TAIL (``core.text.truncate_head_tail``)
+so trailing details (金额 / 法条编号 / 收尾) survive — never a head-only chop.
 """
 
 from __future__ import annotations
@@ -24,7 +25,6 @@ from agentcore.runtime.runs.constants import (
     DEP_POINTER_MAX_FILES,
     DEP_POINTER_SUMMARY_CHARS,
 )
-from agentcore.runtime.workspace import summarize
 
 
 def pointer_body(content: str, files: list[str]) -> str:
@@ -37,7 +37,11 @@ def pointer_body(content: str, files: list[str]) -> str:
     怎么用 / 关键取舍); the path list is the pointer. Both are bounded
     (``DEP_POINTER_SUMMARY_CHARS`` / ``DEP_POINTER_MAX_FILES``)."""
     parts: list[str] = []
-    digest = summarize(content, limit=DEP_POINTER_SUMMARY_CHARS) if content.strip() else ""
+    # HEAD+TAIL trim (not head-only): the digest keeps the worker's orientation note whose
+    # 关键取舍 / 收尾 often sit at the tail — a head-only chop would silently drop them.
+    digest = (
+        _truncate_head_tail(content, DEP_POINTER_SUMMARY_CHARS) if content.strip() else ""
+    )
     if digest:
         parts.append(digest)
     listed = files[:DEP_POINTER_MAX_FILES]

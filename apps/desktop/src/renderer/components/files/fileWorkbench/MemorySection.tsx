@@ -4,6 +4,7 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { isFeatureUnavailable } from "@/lib/errors";
 import { notifyActionError, notifySuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { listMemoryTopics, writeMemoryTopic } from "@/services/memory";
@@ -107,6 +108,11 @@ export function MemorySection({
     queryFn: () => listMemoryTopics(folderId),
     enabled: topicsOpen,
     staleTime: 30_000,
+    // A 404/501 = this deployed backend predates the 主题 endpoint (前后端版本漂移);
+    // retrying can't fix it, so fail fast to the calm "暂不可用" state below instead of
+    // hammering a route that will keep 404ing. Other errors keep the default retries.
+    retry: (failureCount, error) =>
+      !isFeatureUnavailable(error) && failureCount < 3,
   });
 
   const profilePath = folderId
@@ -223,14 +229,27 @@ export function MemorySection({
                 加载中…
               </div>
             ) : topics.isError ? (
-              <button
-                type="button"
-                onClick={() => void topics.refetch()}
-                style={{ paddingLeft: topicPad }}
-                className="flex h-7 w-full items-center gap-1 text-left text-xs text-destructive/80 hover:underline"
-              >
-                加载失败，点此重试
-              </button>
+              isFeatureUnavailable(topics.error) ? (
+                // The deployed backend lacks the 主题 endpoint (前后端版本漂移). Not the
+                // user's fault and no retry can fix it, so state it calmly (muted, no
+                // red, no retry button) — resolves once the backend is upgraded.
+                <div
+                  title="服务端升级后自动恢复"
+                  className="flex min-h-7 items-center py-1 text-xs text-muted-foreground/60"
+                  style={{ paddingLeft: topicPad }}
+                >
+                  主题记忆暂不可用（服务端待升级）
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void topics.refetch()}
+                  style={{ paddingLeft: topicPad }}
+                  className="flex h-7 w-full items-center gap-1 text-left text-xs text-destructive/80 hover:underline"
+                >
+                  加载失败，点此重试
+                </button>
+              )
             ) : (topics.data ?? []).length === 0 ? (
               <div
                 className="flex h-7 items-center text-xs text-muted-foreground/60"

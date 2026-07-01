@@ -2,7 +2,7 @@
 
 ``board_op_required`` is the board counterpart of ``workspace_op_required``: a
 transport-only client-tool request the server emits so the bound desktop applies a
-batch of structured ops to the open Excalidraw canvas and POSTs the result back to
+batch of structured ops to the open whiteboard canvas and POSTs the result back to
 the ops-resolve endpoint (settling the suspended :class:`BoardChannel` future). It
 carries the target ``board_id`` plus the op batch; the desktop converts ops → scene
 elements, applies + autosaves, and returns created ids / the new version.

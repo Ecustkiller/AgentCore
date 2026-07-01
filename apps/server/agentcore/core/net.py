@@ -51,6 +51,16 @@ class EgressError(Exception):
     """
 
 
+class PinnedAddressError(httpx.ConnectError):
+    """Raised by :class:`PinnedIPTransport` when a host resolves — *at connect time* —
+    to a blocked address (or cannot be resolved), closing the DNS-rebinding TOCTOU.
+
+    Subclasses ``httpx.ConnectError`` so existing ``except httpx.NetworkError`` paths
+    (e.g. the egress breaker in ``read_url._safe_request``) catch it unchanged; its
+    ``str()`` is the honest, model-facing reason (see :func:`describe_net_error`).
+    """
+
+
 def web_timeout(read: float = WEB_READ_TIMEOUT) -> httpx.Timeout:
     """Timeout with a short connect deadline and a configurable read window."""
     return httpx.Timeout(read, connect=WEB_CONNECT_TIMEOUT)
@@ -96,6 +106,10 @@ def describe_net_error(e: BaseException) -> str:
     real cause instead of an empty string.
     """
     if isinstance(e, EgressError):
+        return str(e)
+    # A pinned-IP block already carries the honest URLBlock reason. Must precede the
+    # generic ConnectError/NetworkError branch below (it subclasses ConnectError).
+    if isinstance(e, PinnedAddressError):
         return str(e)
     if _is_ssl_error(e):
         return (
@@ -156,6 +170,20 @@ def ip_is_safe(ip: str) -> bool:
     )
 
 
+async def _getaddrinfo(host: str, port: int | None = None) -> list[str]:
+    """Resolve ``host`` to its IP strings (TCP), de-duplicated, order-preserving.
+
+    The single DNS chokepoint so the pre-flight guard (:func:`classify_url`) and the
+    connect-time pinning (:class:`PinnedIPTransport`) resolve through identical logic
+    — and so a test can monkeypatch one place to simulate DNS (including a rebind).
+    """
+    infos = await asyncio.get_running_loop().getaddrinfo(
+        host, port, proto=socket.IPPROTO_TCP
+    )
+    # dict (not set) keeps resolution order so the transport pins deterministically.
+    return list(dict.fromkeys(info[4][0] for info in infos))
+
+
 async def classify_url(url: str) -> URLBlock | None:
     """SSRF 检查并区分拒绝原因；返回 None 表示可安全请求。
 
@@ -181,12 +209,9 @@ async def classify_url(url: str) -> URLBlock | None:
             pass  # 不是字面 IP，下面走 DNS 解析
 
         try:
-            infos = await asyncio.get_running_loop().getaddrinfo(
-                hostname, None, proto=socket.IPPROTO_TCP
-            )
+            addrs = await _getaddrinfo(hostname)
         except OSError:
             return URLBlock.DNS_FAIL
-        addrs = {info[4][0] for info in infos}
         if not addrs:
             return URLBlock.DNS_FAIL
         if not all(ip_is_safe(a) for a in addrs):
@@ -201,11 +226,109 @@ async def is_safe_url(url: str) -> bool:
     return await classify_url(url) is None
 
 
+# --- SEC-007: pinned-IP transport (DNS-rebinding TOCTOU close) ---------------
+# classify_url (pre-flight) and httpx's own connect-time resolution are two
+# separate DNS lookups; a hostile resolver can answer "public" to the first and
+# "127.0.0.1 / 169.254.169.254" to the second. The transport below makes the
+# *validated* address and the *connected* address the same one.
+
+
+def _literal_ip(host: str) -> str | None:
+    """Return ``host`` if it is already an IP literal (no DNS step to race), else None."""
+    try:
+        ipaddress.ip_address(host)
+        return host
+    except ValueError:
+        return None
+
+
+def _authority(url: httpx.URL) -> str:
+    """``host[:port]`` for the ``Host`` header (omits a default port, brackets IPv6)."""
+    host = url.host
+    if ":" in host:  # IPv6 literal
+        host = f"[{host}]"
+    return f"{host}:{url.port}" if url.port is not None else host
+
+
+async def _resolve_pinned_ip(host: str, port: int, *, request: httpx.Request) -> str:
+    """Resolve ``host`` and return one validated IP to pin the connection to.
+
+    Mirrors :func:`classify_url`'s policy — every resolved address must be globally
+    routable, else the whole request is refused (a name that mixes a public and a
+    private answer is treated as hostile). Pins to the first resolved address.
+    """
+    try:
+        addrs = await _getaddrinfo(host, port)
+    except OSError as e:
+        raise PinnedAddressError(URLBlock.DNS_FAIL.value, request=request) from e
+    if not addrs:
+        raise PinnedAddressError(URLBlock.DNS_FAIL.value, request=request)
+    if not all(ip_is_safe(a) for a in addrs):
+        raise PinnedAddressError(URLBlock.PRIVATE_IP.value, request=request)
+    return addrs[0]
+
+
+class PinnedIPTransport(httpx.AsyncBaseTransport):
+    """SSRF-hardening transport that closes the DNS-rebinding TOCTOU.
+
+    It resolves the host once, refuses the request unless *every* resolved address
+    is globally routable, then rewrites the connection target to a pinned IP literal
+    so httpcore connects to exactly that IP (no second resolution). The original
+    hostname is preserved for the ``Host`` header and — over TLS — the SNI / cert
+    hostname, so vhost routing and certificate verification are unaffected.
+
+    Scope: wrap clients that fetch *model/user-supplied* URLs (``read_url``, the
+    favicon proxy). Intentionally NOT used for fixed, trusted infrastructure (e.g.
+    the self-hosted SearXNG), which may legitimately resolve to a private IP.
+    """
+
+    def __init__(
+        self,
+        inner: httpx.AsyncBaseTransport | None = None,
+        *,
+        verify: bool = True,
+    ) -> None:
+        # Own the inner transport's lifecycle: ``aclose`` tears its pool down so a
+        # client built with ``transport=PinnedIPTransport(...)`` still cleans up.
+        self._inner = inner if inner is not None else httpx.AsyncHTTPTransport(verify=verify)
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        if not host:
+            raise PinnedAddressError(URLBlock.DNS_FAIL.value, request=request)
+
+        literal = _literal_ip(host)
+        if literal is not None:
+            # No DNS step to race; just enforce the same private/reserved policy.
+            if not ip_is_safe(literal):
+                raise PinnedAddressError(URLBlock.PRIVATE_IP.value, request=request)
+            return await self._inner.handle_async_request(request)
+
+        port = request.url.port or (443 if request.url.scheme == "https" else 80)
+        ip = await _resolve_pinned_ip(host, port, request=request)
+
+        # Capture the authority BEFORE rewriting so the Host header keeps the real
+        # hostname (httpx usually pre-set it; fall back to building it defensively).
+        authority = request.headers.get("host") or _authority(request.url)
+        if request.url.scheme == "https":
+            # Preserve TLS SNI + cert-hostname verification against the real host
+            # even though we dial an IP literal (httpcore honors this extension).
+            request.extensions["sni_hostname"] = host
+        request.url = request.url.copy_with(host=ip)
+        request.headers["host"] = authority
+        return await self._inner.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+
 __all__ = [
     "SEARCH_TIMEOUT",
     "WEB_CONNECT_TIMEOUT",
     "WEB_READ_TIMEOUT",
     "EgressError",
+    "PinnedAddressError",
+    "PinnedIPTransport",
     "URLBlock",
     "classify_url",
     "describe_net_error",

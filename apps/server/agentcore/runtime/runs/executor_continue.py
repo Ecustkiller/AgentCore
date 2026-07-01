@@ -23,7 +23,6 @@ from agentcore.runtime.runs.executor_shared import (
 from agentcore.runtime.runs.serialize import debrief_from_content, files_touched_from_transcript
 from agentcore.runtime.runs.session import RunSession
 from agentcore.runtime.runs.types import RunPhase, RunState
-from agentcore.runtime.workspace import summarize
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
@@ -42,11 +41,16 @@ async def continue_run(
     execution_id: str,
     profile_set: ProfileSet | None = None,
     approval_gate: ApprovalGate | None = None,
+    round_no: int = 0,
 ) -> RunState:
     """续写 a saved worker session under the revision's log scope: binds
     run_id/agent_id/depth so all of the 热修's logs (tool.execute_end, run.*, llm.*)
     split by worker like any delegated run. Delegates to :func:`_continue_run_scoped`
-    (see it for the full behavior); the scope auto-clears and is task-local."""
+    (see it for the full behavior); the scope auto-clears and is task-local.
+
+    ``round_no`` (辩论逐轮, 0 = ordinary 热修) is the revision's TRUE debate round — carried
+    onto its ``run_started`` so every fold reads 第几轮 from the wire, not the version
+    number (which drifts from the round once a side fails mid-debate)."""
     with log_context(
         run_id=revision_run_id,
         agent_id=revision_run_id,
@@ -63,6 +67,7 @@ async def continue_run(
             execution_id=execution_id,
             profile_set=profile_set,
             approval_gate=approval_gate,
+            round_no=round_no,
         )
 
 
@@ -78,6 +83,7 @@ async def _continue_run_scoped(
     execution_id: str,
     profile_set: ProfileSet | None = None,
     approval_gate: ApprovalGate | None = None,
+    round_no: int = 0,
 ) -> RunState:
     """续写 a saved worker session: recall the SAME author to revise its own draft.
 
@@ -96,6 +102,10 @@ async def _continue_run_scoped(
     # Version number for the graph's「修订 vN」child node (P4 版本链): the original is
     # v1, so the first revision (recall_count 0 here, pre-increment) is v2.
     revision = session.recall_count + 2
+    # 乙 wire 携 round/stance (单一轮次投影): a debate 续写 keeps the original debater's
+    # stance/group (same author, same side) and carries its TRUE round (round_no) so every
+    # fold reads 第几轮/哪一方 from one place. A plain 热修 (round_no=0, spec.stance="") emits
+    # none of the three → its run_started stays byte-identical.
     sink.emit(
         run_started(
             revision_run_id,
@@ -103,6 +113,9 @@ async def _continue_run_scoped(
             parent_run_id=session.run_id,
             kind=spec.kind,
             revision=revision,
+            stance=spec.stance or None,
+            group=spec.group or None,
+            round_no=round_no,
         )
     )
     start = time.monotonic()
@@ -166,16 +179,20 @@ async def _continue_run_scoped(
         record_turn_fact(
             MessageFinalFact(run_id=revision_run_id, content=content, reasoning=reasoning).to_fact()
         )
+        # 交接简报单一源: harvest the revised product's authored 交接简报 once, so its 结论 is the
+        # summary (best-effort "") and the structured brief rides the run_completed for the UI.
+        debrief = debrief_from_content(content)
         sink.emit(
             run_completed(
                 revision_run_id,
                 agent_id,
-                output_summary=summarize(content),
+                output_summary=(debrief or {}).get("summary", ""),
                 duration_ms=duration_ms,
                 role="member",
                 model=profile.model,
                 usage=usage,
                 cost=cost,
+                debrief=debrief,
             )
         )
         return RunState(
@@ -188,7 +205,7 @@ async def _continue_run_scoped(
             duration_ms=duration_ms,
             rounds=round_rounds,
             files_touched=files_touched_from_transcript(messages),
-            debrief=debrief_from_content(content),
+            debrief=debrief,
             usage=usage,
             cost=cost,
             transcript=messages,

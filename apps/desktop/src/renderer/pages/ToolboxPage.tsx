@@ -51,7 +51,7 @@ const CREATION_TOOLS: ToolboxEntry[] = [
   {
     id: "doc",
     title: "文档",
-    description: "在线富文本，AI 协同写作",
+    description: "在线 Markdown，AI 协同写作",
     icon: FileText,
     color: "doc",
   },

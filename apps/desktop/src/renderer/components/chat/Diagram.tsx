@@ -23,14 +23,14 @@ import {
 import { createPortal } from "react-dom";
 
 /**
- * In-chat diagram rendering — the "表达形态" tier (工具与能力系统 §8): the model
+ * In-chat diagram rendering — the "表达形态" tier (工具与能力系统 §三): the model
  * writes a fenced ```mermaid / ```markmap / ```vega-lite block and the frontend
  * renders it, with NO tool and NO persisted artifact. Every engine is
  * dynamically imported so it costs nothing until a diagram actually appears in a
  * message.
  *
  * Streaming: a half-written diagram (mermaid syntax / vega-lite JSON) is invalid
- * mid-stream (§8.2), so we defer rendering until the turn finishes
+ * mid-stream (§3.2), so we defer rendering until the turn finishes
  * (`streaming=false`) and show the source as a code block meanwhile; any render
  * failure falls back to the source too — a diagram never blanks the message.
  */
@@ -105,7 +105,8 @@ function makeSafeLoader(vega: VegaNamespace): VegaLoader {
   return loader;
 }
 
-let vegaPromise: Promise<{ embed: VegaEmbed; loader: VegaLoader }> | null = null;
+let vegaPromise: Promise<{ embed: VegaEmbed; loader: VegaLoader }> | null =
+  null;
 function getVega() {
   if (!vegaPromise) {
     vegaPromise = import("vega-embed").then((m) => ({

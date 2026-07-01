@@ -115,7 +115,8 @@ export function applyBoardOps(
   // 3) move / set_text / delete (target an existing id or a same-batch ref)
   const deleted = new Set<string>();
   for (const op of ops) {
-    const target = op.id ? resolve(op.id) : null;
+    const key = op.id ?? op.ref;
+    const target = key ? resolve(key) : null;
     if (!target) continue;
     const el = byId.get(target);
     if (!el) continue;

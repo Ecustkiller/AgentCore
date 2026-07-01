@@ -37,6 +37,7 @@ const run = (
   status,
   dependsOn: [],
   outputSummary: null,
+  debrief: null,
   durationMs: null,
   error: null,
   parentRunId: null,

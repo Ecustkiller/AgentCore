@@ -95,7 +95,13 @@ class WebSearchTool:
 
         try:
             backend = get_search_backend()
-            results = await backend.search(query, max_results=max_results)
+            # 工具执行阶段进度 (联网搜索前端展示优化): thread the engine-injected phase
+            # callback so the backend can surface「排队中 / 正在检索 / 改用备用引擎」live
+            # while this blocking request is in flight. ``None`` on unscoped call
+            # sites (tests / evals) — the backend skips it.
+            results = await backend.search(
+                query, max_results=max_results, on_phase=context.on_phase
+            )
         except Exception as e:
             reason = describe_net_error(e)
             logger.warning("tool.web_search_error", query=query, error=reason, error_repr=repr(e))

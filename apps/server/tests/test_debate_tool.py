@@ -174,6 +174,23 @@ async def test_emits_debate_result_event_for_frontend_view():
     assert p["brief"]["strongest_points"]
 
 
+async def test_emits_batch_metrics_for_diagnostics():
+    """首轮辩手经 WaveScheduler 并行扇出 → 调度埋点快照也 emit 给前端 (诊断模式/时间线),
+    与 delegate drive 同形 (前端UX设计.md §十)；此前只 logger.info、前端诊断区为空。"""
+    sink = EventSink()
+    llm = _DebateLLM(converge_at=1)
+    tool = _tool(llm, sink=sink)
+    await tool.execute(
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides(), "thorough": False}, _ctx()
+    )
+    sink.close()
+    events = [e async for e in sink if e.type == EventType.BATCH_METRICS]
+    assert len(events) == 1
+    p = events[0].payload
+    assert p["execution_id"]
+    assert p["nodes"] == 2  # 两名辩手一波并行
+
+
 async def test_ledger_three_tier_parenting():
     llm = _DebateLLM(converge_at=1)
     tool = _tool(llm)

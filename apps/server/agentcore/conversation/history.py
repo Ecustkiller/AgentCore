@@ -78,7 +78,7 @@ async def load_chat_context(
     :func:`load_recent_history` — it reconciles ACTUAL turns into the memory file and
     must not see a synthetic summary block.
     """
-    conv = await ConversationRepository(session).get_by_id(conversation_id)
+    conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
     if conv is not None and conv.compaction_summary and conv.compacted_through:
         rows = await MessageRepository(session).list_recent_after(
             conversation_id,

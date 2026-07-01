@@ -248,6 +248,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "调研结论",
+        "debrief": null,
         "durationMs": 1000,
         "error": null,
         "parentRunId": null,
@@ -287,6 +288,7 @@
           "r1"
         ],
         "outputSummary": "撰写完成",
+        "debrief": null,
         "durationMs": 1100,
         "error": null,
         "parentRunId": null,

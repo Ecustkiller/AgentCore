@@ -155,6 +155,34 @@ describe("applyBoardOps — move / set_text / delete", () => {
     expect(elements).toHaveLength(2);
   });
 
+  // A batch commonly creates a node then edits it in the same commit, addressing it
+  // by its `ref` (its real id doesn't exist yet). The applier must resolve ref, not
+  // only id, for move/set_text/delete — else these silently no-op (regression guard).
+  it("moves a same-batch element addressed by ref", () => {
+    const { elements, created } = applyBoardOps(scene(), [
+      { op: "add_node", ref: "n", text: "fresh" },
+      { op: "move", ref: "n", x: 33, y: 44 },
+    ]);
+    expect(find(elements, created[0])).toMatchObject({ x: 33, y: 44 });
+  });
+
+  it("rewrites a same-batch element's text addressed by ref", () => {
+    const { elements, created } = applyBoardOps(scene(), [
+      { op: "add_node", ref: "n", text: "before" },
+      { op: "set_text", ref: "n", text: "after" },
+    ]);
+    expect(find(elements, created[0])?.text).toBe("after");
+  });
+
+  it("deletes a same-batch element addressed by ref", () => {
+    const { elements, created } = applyBoardOps(scene(), [
+      { op: "add_node", ref: "n" },
+      { op: "delete", ref: "n" },
+    ]);
+    expect(created).toHaveLength(1);
+    expect(find(elements, created[0])).toBeUndefined();
+  });
+
   it("does not mutate the input array", () => {
     const input = scene();
     applyBoardOps(input, [{ op: "delete", id: "x" }]);

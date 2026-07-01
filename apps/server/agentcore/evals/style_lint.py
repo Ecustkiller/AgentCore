@@ -7,7 +7,8 @@
 
 **两种用法**：(1) 作为确定性 :class:`~agentcore.evals.checks.StyleCleanCheck` 让用例就地断言
 「这条回复零 slop」；(2) 作为 :func:`style_metrics` 聚合器在整套用例上算**违规率**，回答
-[`docs/07-规划/提示词优化方向.md`](../../../docs/07-规划/提示词优化方向.md) 方向④ 的「`<output_style>`
+[`docs/07-规划/远期规划.md`](../../../docs/07-规划/远期规划.md) §2.4「提示词优化」
+方向④ 的「`<output_style>`
 那段到底有没有用、能不能瘦」——这是「先可观测」的产出。
 
 **确定性边界**：linter 规则本身是纯函数，可零 LLM 单测；但要**产生**被检文本，仍需把用例跑过
@@ -209,9 +210,18 @@ def format_style_report(m: StyleMetrics) -> str:
     lines: list[str] = ["=" * 64, "AgentCore 输出风格违规（anti-slop linter）", "=" * 64]
     lines.append(f"  计入回复 {m.total}    干净 {m.clean}    干净率 {_pct(m.clean_rate)}")
     lines.append("-" * 64)
-    lines.append(f"  套话开场   {m.per_rule.get(RULE_OPENING, 0)}    率 {_pct(m.violation_rate(RULE_OPENING))}")
-    lines.append(f"  客套收尾   {m.per_rule.get(RULE_CLOSING, 0)}    率 {_pct(m.violation_rate(RULE_CLOSING))}")
-    lines.append(f"  未授权emoji {m.per_rule.get(RULE_EMOJI, 0)}    率 {_pct(m.violation_rate(RULE_EMOJI))}")
+    lines.append(
+        f"  套话开场   {m.per_rule.get(RULE_OPENING, 0)}    "
+        f"率 {_pct(m.violation_rate(RULE_OPENING))}"
+    )
+    lines.append(
+        f"  客套收尾   {m.per_rule.get(RULE_CLOSING, 0)}    "
+        f"率 {_pct(m.violation_rate(RULE_CLOSING))}"
+    )
+    lines.append(
+        f"  未授权emoji {m.per_rule.get(RULE_EMOJI, 0)}    "
+        f"率 {_pct(m.violation_rate(RULE_EMOJI))}"
+    )
     if m.offenders:
         lines.append("-" * 64)
         lines.append("  违规逐条:")

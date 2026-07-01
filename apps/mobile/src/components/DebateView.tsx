@@ -20,14 +20,15 @@ const FORM_LABEL: Record<DebateResultPayload["form"], string> = {
   roundtable: "圆桌探讨",
 };
 
-/** 辩论收场原因 → 中文 (后端 DebateResult.stop_reason). Unknown reasons render raw. */
+/** 辩论收场原因 → 中文 (镜像后端 STOP_REASONS，与桌面 STOP_LABELS 同文；跨端各自一份、文案对齐)。
+ *  权威词表见 `runtime/debate/types.py` 的 STOP_REASONS。识别不到的原样渲染。 */
 const STOP_LABEL: Record<string, string> = {
   converged: "已收敛",
+  focus_clarified: "已澄清为价值之争",
+  red_team_exhausted: "风险已挖尽",
   max_rounds: "达轮次上限",
-  unproductive: "无新进展",
-  degraded: "质量下降",
-  error: "异常中止",
-  cancelled: "已停止",
+  all_failed: "发言失败提前终止",
+  user_concluded: "你叫停出结论",
 };
 
 const CONFIDENCE_LABEL: Record<string, string> = {
@@ -62,7 +63,7 @@ export function DebateView({ debate }: { debate: DebateResultPayload }) {
   return (
     <div className="debate">
       <div className="debate-head">
-        <span className="debate-title">辩论结论</span>
+        <span className="debate-title">主持人终审</span>
         <span className="debate-tag">{FORM_LABEL[debate.form] ?? "辩论"}</span>
         <span className="debate-stop">
           {STOP_LABEL[debate.stop_reason] ?? debate.stop_reason}
@@ -150,15 +151,24 @@ function Narrative({ debate }: { debate: DebateResultPayload }) {
                 <span className="debate-vpill vpill-ok">已收敛</span>
               )}
             </div>
-            {r.summary && (
-              <div className="debate-round-summary">{r.summary}</div>
-            )}
+            <ModeratorSummary summary={r.summary} />
             <RoundClashes round={r} />
             <RoundInterjections round={r} />
           </div>
         ))}
       </div>
     </details>
+  );
+}
+
+/** 主持人小结 —— 逐轮小结由主持人（中立裁判）给出，用一枚「主持人」小标记明确作者身份（桌面端是
+ *  法槌头像 + 发言气泡，手机端精简为小标记 + 文本）。空小结不渲染。 */
+function ModeratorSummary({ summary }: { summary: string }) {
+  if (!summary) return null;
+  return (
+    <div className="debate-round-summary">
+      <span className="debate-round-no">主持人</span> {summary}
+    </div>
   );
 }
 
@@ -249,9 +259,7 @@ export function LiveDebateNarrative({
                 )}
               </div>
             )}
-            {r.summary && (
-              <div className="debate-round-summary">{r.summary}</div>
-            )}
+            <ModeratorSummary summary={r.summary} />
             <RoundClashes round={r} />
           </div>
         ))}

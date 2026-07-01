@@ -34,26 +34,33 @@ class BoardRepository:
         await self._session.refresh(board)
         return board
 
-    async def get_by_id(self, board_id: str, *, user_id: str | None = None) -> Board | None:
-        conditions = [Board.id == board_id, Board.deleted_at.is_(None)]
-        if user_id is not None:
-            conditions.append(Board.user_id == user_id)
-        result = await self._session.execute(select(Board).where(*conditions))
+    async def get_by_id(self, board_id: str, *, user_id: str) -> Board | None:
+        """Owner-scoped fetch (non-owner / unknown id → None → route 404). ``user_id``
+        mandatory so scoping is the structural default (SEC-002)."""
+        result = await self._session.execute(
+            select(Board).where(
+                Board.id == board_id,
+                Board.deleted_at.is_(None),
+                Board.user_id == user_id,
+            )
+        )
         return result.scalar_one_or_none()
 
-    async def get_by_conversation_id(
-        self, conversation_id: str, *, user_id: str | None = None
-    ) -> Board | None:
+    async def get_by_conversation_id(self, conversation_id: str, *, user_id: str) -> Board | None:
         """The board bound to a conversation, if any (AI协作白板.md §三 A / M2 反查).
 
         The run assembler calls this to decide whether a turn is a 白板会话 — if so it
-        wires ``board_ops`` + a :class:`BoardChannel` for that board. User-scoped like
-        the other reads (a non-owner is treated as absent). Indexed on ``conversation_id``.
+        wires ``board_ops`` + a :class:`BoardChannel` for that board. Owner-scoped (a
+        non-owner is treated as absent); ``user_id`` mandatory (SEC-002). Indexed on
+        ``conversation_id``.
         """
-        conditions = [Board.conversation_id == conversation_id, Board.deleted_at.is_(None)]
-        if user_id is not None:
-            conditions.append(Board.user_id == user_id)
-        result = await self._session.execute(select(Board).where(*conditions))
+        result = await self._session.execute(
+            select(Board).where(
+                Board.conversation_id == conversation_id,
+                Board.deleted_at.is_(None),
+                Board.user_id == user_id,
+            )
+        )
         return result.scalar_one_or_none()
 
     async def list_by_user(self, user_id: str) -> Sequence[Board]:

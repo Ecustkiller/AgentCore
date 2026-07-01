@@ -29,8 +29,10 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  History,
   Loader2,
   Maximize2,
+  MessagesSquare,
   Pencil,
   Play,
   RotateCw,
@@ -46,6 +48,9 @@ export interface StatusStripProps {
   onToggle: () => void;
   onMaximize: () => void;
   onReplay: () => void;
+  /** 定向唤回「修订 vN」的回合：聊天正文不再内联版本对比大卡，改由状态条「改了 N 版」信号 chip
+   *  深链画布放大态统一「对比」视图（前端UX设计.md §4.2/§6.4）。无修订 / 未提供则不出 chip。 */
+  onOpenRevisions?: () => void;
 }
 
 /**
@@ -97,10 +102,16 @@ function StripControls({
   onToggle,
   onMaximize,
   onReplay,
+  onOpenRevisions,
 }: StatusStripProps) {
   const isRunning = execution.status === "running";
   const canReplay =
     execution.status === "completed" || execution.status === "cancelled";
+  const debate = isDebate(execution);
+  // 定向唤回「修订 vN」条数（版本对比信号 chip 的计数与门）；0 则不出信号。
+  const revisionCount = execution.runs.filter(
+    (r) => r.revisionOf != null,
+  ).length;
 
   return (
     <>
@@ -123,14 +134,29 @@ function StripControls({
         title={expanded ? "收起协作图" : "展开协作图"}
         onClick={onToggle}
       />
-      {/* 单一入口：通向画布的放大态（Route A，再无独立全屏）。回放走同一去处 + 自动播放。 */}
+      {/* 「改了 N 版」信号：本回合有定向唤回续写时，正文不再内联版本对比大卡，改为一枚 chip →
+          深链画布放大态统一「对比」视图并排比对（前端UX设计.md §4.2/§6.4）。 */}
+      {revisionCount > 0 && onOpenRevisions && (
+        <SimpleTooltip label="查看各版本并排对比（在画布）">
+          <Button
+            variant="ghost"
+            className="ml-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+            icon={<History size={13} />}
+            onClick={onOpenRevisions}
+          >
+            改了 {revisionCount} 版
+          </Button>
+        </SimpleTooltip>
+      )}
+      {/* 入口：辩论回合给醒目「打开辩论室」CTA（更可发现、直达群聊主视图），其余给通用「在画布打开」；
+          二者同去处（放大态 Route A），辩论默认落群聊、回放走同一去处 + 自动播放。 */}
       <Button
         variant="ghost"
         className="ml-0.5 shrink-0 bg-primary/10 text-primary hover:bg-primary/20"
-        icon={<Maximize2 size={13} />}
+        icon={debate ? <MessagesSquare size={13} /> : <Maximize2 size={13} />}
         onClick={onMaximize}
       >
-        在画布打开
+        {debate ? "打开辩论室" : "在画布打开"}
       </Button>
     </>
   );
@@ -142,6 +168,7 @@ function RunningStrip({
   onToggle,
   onMaximize,
   onReplay,
+  onOpenRevisions,
 }: StatusStripProps) {
   const { completed, total } = execution.progress;
 
@@ -162,6 +189,7 @@ function RunningStrip({
           onToggle={onToggle}
           onMaximize={onMaximize}
           onReplay={onReplay}
+          onOpenRevisions={onOpenRevisions}
         />
       </div>
       <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
@@ -181,6 +209,7 @@ function CompletedStrip({
   onToggle,
   onMaximize,
   onReplay,
+  onOpenRevisions,
 }: StatusStripProps & { stopped?: boolean }) {
   const frames = useActiveExecField((rt) => rt.frames);
   const { completed, total } = execution.progress;
@@ -234,6 +263,7 @@ function CompletedStrip({
           onToggle={onToggle}
           onMaximize={onMaximize}
           onReplay={onReplay}
+          onOpenRevisions={onOpenRevisions}
         />
       </div>
 
@@ -258,6 +288,7 @@ function FailureStrip({
   onToggle,
   onMaximize,
   onReplay,
+  onOpenRevisions,
 }: StatusStripProps) {
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
 
@@ -288,6 +319,7 @@ function FailureStrip({
           onToggle={onToggle}
           onMaximize={onMaximize}
           onReplay={onReplay}
+          onOpenRevisions={onOpenRevisions}
         />
       </div>
 

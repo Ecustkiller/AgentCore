@@ -15,6 +15,13 @@ class EventType(StrEnum):
     REASONING_DELTA = "reasoning_delta"
     TOOL_PROGRESS = "tool_progress"
     TOOL_USE_START = "tool_use_start"
+    # 工具执行阶段进度（联网搜索前端展示优化）: a running tool reports a coarse EXECUTION phase
+    # between tool_use_start and tool_use_end — distinct from TOOL_PROGRESS (which means the
+    # LLM is still streaming the call's ARGUMENTS). web_search emits querying/queued/fallback
+    # so the waiting UI shows a live, honest state instead of a dead spinner. Transport-only
+    # liveliness (like TOOL_PROGRESS): never journaled, never in the process timeline / judge
+    # state — a reloaded turn's tools are already done, so it only rides the live stream.
+    TOOL_USE_PROGRESS = "tool_use_progress"
     TOOL_USE_END = "tool_use_end"
     MESSAGE_END = "message_end"
     ERROR = "error"
@@ -36,7 +43,7 @@ class EventType(StrEnum):
     WORKSPACE_OP_REQUIRED = "workspace_op_required"
     WORKSPACE_PROMOTED = "workspace_promoted"
     # AI 协作白板 (AI协作白板.md §六 M2): a transport-only client-tool request — the
-    # server asks the bound desktop to apply structured board ops to the open Excalidraw
+    # server asks the bound desktop to apply structured board ops to the open whiteboard
     # canvas and report back. Like WORKSPACE_OP_REQUIRED it is NOT journaled (it is a
     # request/response exchange, not turn content), so it stays out of the journal sets.
     BOARD_OP_REQUIRED = "board_op_required"

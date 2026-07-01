@@ -56,10 +56,12 @@ class PostNoteTool:
                 "escalate）。\n"
                 "便签必须【一行、简短具体】（如"
                 "『POST /auth/session 收 {email,password} 返 {token}』"
-                "『用户表是软删除，查询要带 deleted_at IS NULL』『登录页我来写』），别写成寒暄或长篇。\n"
+                "『用户表是软删除，查询要带 deleted_at IS NULL』『登录页我来写』），"
+                "别写成寒暄或长篇。\n"
                 "kind 三类：decision=【我定了】别人要依赖的决定（接口 / 字段名 / 格式 / 命名）；"
                 "heads_up=【提个醒】你踩到的坑 / 发现；claim=【我领了】你要负责的一块活 / 文件"
-                "（避免和队友撞活 / 重复）。凡是真影响队友的决定 / 发现 / 认领都值得主动贴，唯一避开寒暄碎话。"
+                "（避免和队友撞活 / 重复）。凡是真影响队友的决定 / 发现 / 认领都值得主动贴，"
+                "唯一避开寒暄碎话。"
             ),
             parameters={
                 "type": "object",

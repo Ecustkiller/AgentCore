@@ -213,6 +213,21 @@ def test_debate_skill_teaches_debate_tool_forms_and_dual_products():
     assert "delegate" in body and "ask_user" in body
 
 
+def test_debate_skill_teaches_intent_alignment_before_opening():
+    # §四 意图对齐（法律辩论案例的根因修复）: before opening a debate the CEO must stay
+    # faithful to the user's framing — cover every pole the user named (don't silently
+    # drop / swap the「减轻」pole for a milder「审慎派」), and clarify an ambiguous
+    # reference the debate hinges on (「最近很火的那个」) via ask_user rather than picking
+    # one reading and diving in. Pins the范式 so it can't silently regress.
+    body = _body("debate_and_review")
+    # ① 忠于用户点名的对立极：不得砍掉 / 偷换一极
+    assert "对立极" in body
+    assert "偷换" in body
+    # ② 关键指代模糊先澄清，用 ask_user 确认，而非自挑一解开辩
+    assert "先澄清" in body
+    assert "ask_user" in body
+
+
 def test_revise_skill_teaches_recall_and_delegate_fallback():
     body = _body("revising_a_product")
     assert "revise" in body

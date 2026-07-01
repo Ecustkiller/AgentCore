@@ -1,7 +1,8 @@
-"""拆·playbook 固化 (docs/03-AI核心/编排器与CEO主Agent.md §playbook): a tiny registry of high-frequency,
-high-variance team SHAPES promoted from prose guidance to instantiable deterministic DAG
-skeletons — the CEO names one + fills a few slots instead of hand-crafting the ``tasks`` array
-every time (像 `debate` 的确定性骨架, [辩论编排设计](docs/03-AI核心/辩论编排设计.md)).
+"""拆·playbook 固化 (docs/03-AI核心/编排器与CEO主Agent.md §playbook): a tiny registry of
+high-frequency, high-variance team SHAPES promoted from prose guidance to instantiable
+deterministic DAG skeletons — the CEO names one + fills a few slots instead of
+hand-crafting the ``tasks`` array every time
+(像 `debate` 的确定性骨架, [辩论编排设计](docs/03-AI核心/辩论编排设计.md)).
 
 Each playbook is a PURE ``slots -> (tasks, errors)`` builder whose output is exactly the
 ``tasks`` dict-list :func:`agentcore.runtime.runs.builder.build_run_plan` already consumes, so an
@@ -20,7 +21,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-# Cap the slot-driven fan-out (调研子方向 / 待比较选项) so a playbook can't silently balloon a batch;
+# Cap the slot-driven fan-out (调研子方向 / 待比较选项) so a playbook can't silently balloon a
+# batch;
 # build_run_plan still enforces the global MAX_DELEGATION_TASKS on the expanded result as the real
 # net. Kept modest because a playbook is a STANDARD shape, not a place to launch a huge swarm.
 MAX_PLAYBOOK_FANOUT = 6
@@ -170,7 +172,8 @@ def _build_feature(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str
                 "role": "前端工程师",
                 "task": (
                     f"实现【{feature}】的前端页面{stack_hint}，严格对接 api 步骤广播的接口契约"
-                    "（路径 / 字段 / 返回）。发现契约对不上就按最新契约对齐、必要时 post_note 提醒；"
+                    "（路径 / 字段 / 返回）。发现契约对不上就按最新契约对齐、"
+                    "必要时 post_note 提醒；"
                     "务必用 file_write 把代码写进工作区。"
                 ),
                 "depends_on": ["api"],
@@ -184,7 +187,8 @@ def _build_feature(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str
                 "id": "test",
                 "role": "测试工程师",
                 "task": (
-                    f"为【{feature}】写测试，按便签墙上 api 广播的接口契约覆盖正常 + 边界 + 错误形状；"
+                    f"为【{feature}】写测试，按便签墙上 api 广播的接口契约"
+                    "覆盖正常 + 边界 + 错误形状；"
                     "务必用 file_write 把测试文件写进工作区。"
                 ),
                 "depends_on": ["api"],
@@ -248,7 +252,8 @@ PLAYBOOKS: dict[str, Playbook] = {
         summary="调研→提纲→写作的报告流水线（N 路并行调研，汇拢成纲再成文）",
         slots=(
             "topic(必填,主题) / angles(可选,调研子方向数组,各派一名调研员) / "
-            "checkpoint(可选,成纲后写作前暂停过目) / audience(可选,读者) / deliverable(可选,产出形态)"
+            "checkpoint(可选,成纲后写作前暂停过目) / audience(可选,读者) / "
+            "deliverable(可选,产出形态)"
         ),
         build=_research_report,
     ),
@@ -286,7 +291,8 @@ def expand_playbook(
 
     Returns ``(tasks, errors)``; a non-empty ``errors`` means the instantiation is rejected (unknown
     name, bad args type, or a missing required slot) and the caller must NOT run it — mirroring
-    ``build_run_plan``'s reject-on-error contract so the delegate entry handles both the same way."""
+    ``build_run_plan``'s reject-on-error contract so the delegate entry handles both the same
+    way."""
     pb = PLAYBOOKS.get(name)
     if pb is None:
         return [], [f"未知 playbook『{name}』；可用：{available_playbooks()}"]

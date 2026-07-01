@@ -73,7 +73,7 @@ async def consolidate_conversation(
                 return False
             async with async_session_factory() as session:
                 latest = await MessageRepository(session).latest_created_at(conversation_id)
-                conv = await ConversationRepository(session).get_by_id(conversation_id)
+                conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
                 if conv is None or latest is None:
                     return False
                 # Master switch off (Agent记忆与知识系统 §一): don't grow memory. Advance
@@ -185,7 +185,7 @@ class _UserLockForConversation:
 
     async def __aenter__(self) -> str | None:
         async with async_session_factory() as session:
-            conv = await ConversationRepository(session).get_by_id(self._conversation_id)
+            conv = await ConversationRepository(session).get_by_id_unscoped(self._conversation_id)
         if conv is None:
             return None
         self._cm = user_memory_lock(conv.user_id)

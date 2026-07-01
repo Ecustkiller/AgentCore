@@ -179,14 +179,36 @@ export function buildGraphStructure(
       });
     }
   }
+  // A revised worker's versions all point at the SAME original (revisionOf ==
+  // 原始 run) — a star, the data model the debate room / 版本对比 card read (乙 热修
+  // P4). But the graph must lay them out as a version CHAIN (原始 → v2 → v3 …): if
+  // we drew one edge per revision straight off the original, ELK would place every
+  // revision in the original's single successor slot AND alignRevisionChains would
+  // snap them all onto its one lane — v2…vN stack at identical coordinates, so only
+  // the latest stays visible (a 5-轮辩论 collapsed to「原始 + 修订 vN」= 2 版本). Group
+  // each original's revisions, order by version, and link consecutive ones so each
+  // gets its own layer/lane. Display-only: revisionOf is untouched.
+  const revisionsByOriginal = new Map<string, GraphRunLike[]>();
   for (const r of workerRuns) {
-    if (isRevision(r) && r.revisionOf) {
+    if (isRevision(r) && r.revisionOf && workerIds.has(r.revisionOf)) {
+      const list = revisionsByOriginal.get(r.revisionOf) ?? [];
+      list.push(r);
+      revisionsByOriginal.set(r.revisionOf, list);
+    }
+  }
+  for (const [originalId, revisions] of revisionsByOriginal) {
+    const ordered = revisions
+      .slice()
+      .sort((a, b) => (a.revision ?? 0) - (b.revision ?? 0));
+    let prev = originalId;
+    for (const rev of ordered) {
       rawEdges.push({
-        id: `${r.revisionOf}~>${r.id}`,
-        source: r.revisionOf,
-        target: r.id,
+        id: `${prev}~>${rev.id}`,
+        source: prev,
+        target: rev.id,
         kind: "revision",
       });
+      prev = rev.id;
     }
   }
   if (topWorkers.length > 0 && captainId) {

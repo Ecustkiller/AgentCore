@@ -2,6 +2,7 @@ import { join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { is } from "@electron-toolkit/utils";
 import { isSafeExternalUrl } from "@shared/safe-url";
+import { WINDOW_CHANNELS } from "@shared/window-contract";
 import { net, BrowserWindow, app, ipcMain, protocol, shell } from "electron";
 // `?asset` 让 electron-vite 把图标拷入产物并解析为运行时绝对路径；用作窗口/任务栏图标
 // （dev 与 Linux 主要靠它；打包后 Windows exe / macOS 包图标另由 electron-builder 从
@@ -11,6 +12,7 @@ import { registerFsIpc } from "./fs-service";
 import { registerLogIpc } from "./log-service";
 import { registerSidecarIpc } from "./sidecar-service";
 import { initUpdater } from "./updater";
+import { registerWindowFrameIpc } from "./window-frame";
 import { loadWindowState, manageWindowState } from "./window-state";
 
 // Production renderer is served from a custom app:// scheme instead of file://,
@@ -41,6 +43,31 @@ const RENDERER_ROOT = join(__dirname, "../renderer");
 // NOTE: 此 header 仅作用于 app://（prod）；`pnpm dev` 经 loadURL 走 Vite server，HMR 不受影响。
 // 兜底阶梯（若未来 mermaid 改为主线程 eval 而报错）: 升级为 mermaid securityLevel:'sandbox'
 // （沙箱 iframe 隔离其动态代码），而【绝不】全局加 'unsafe-eval'。
+
+// 后端源：由 electron.vite.config.ts 的 main.define 在构建期注入（= 渲染层 VITE_API_URL 的同源，
+// 见 .env.production）。用于把 img-src 精确收窄到「自己 + 后端」——只放行后端头像 / favicon，任意
+// 第三方远程图被 Chromium 拦死。无法解析（极端构建配置缺失）→ 空串 → 退化为「只允许自己 + data:」。
+declare const __API_BASE_URL__: string;
+function apiOriginForCsp(): string {
+  try {
+    return new URL(__API_BASE_URL__).origin;
+  } catch {
+    return "";
+  }
+}
+const API_ORIGIN = apiOriginForCsp();
+
+// connect-src（XSS-001·纵深）: connect-src 管的是渲染层 fetch / SSE / WebSocket 出网。后端源是
+// 【构建期】烘焙的——渲染层 services/api.ts 的 BASE_URL 与本 CSP 的 __API_BASE_URL__ 同出一个
+// VITE_API_URL（见 electron.vite.config.ts），故全应用只有一个后端源、可钉死它。渲染层每个请求都走
+// `${BASE_URL}/...`（REST + fetch 式 SSE；今日无 WebSocket、无跨源 fetch），所以收窄到「自己 + 该源」
+// 对真实流量是 no-op，却把 connect-src 变成 script-src 'self' 背后的【外泄墙】（未来即便出 DOM-XSS 也
+// 无处 POST 数据 / 开 socket）。仅当源不可解析（极端构建缺 env）才【失败放开】退回宽策略——宁宽勿把
+// 自己锁在 API 门外。ws/wss 收同源（后端 http→ws / https→wss），放行未来同主机实时通道。
+const CONNECT_SRC = API_ORIGIN
+  ? `connect-src 'self' ${API_ORIGIN} ${API_ORIGIN.replace(/^http/, "ws")}`
+  : "connect-src 'self' https: http: ws: wss:";
+
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
   "script-src 'self'",
@@ -48,12 +75,13 @@ const CONTENT_SECURITY_POLICY = [
   // 解析挪进 Web Worker，self + blob 让动态能力留在 worker 边界内，仍不必污染主文档 script-src。
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https:",
+  // 渲染期外泄信标·纵深防线（红队 2026-06-30 · V1/V2/V3 同一类）：vega/mermaid/markmap 等引擎会在
+  // 渲染期对 <img src=远程> / data.url 零点击取资源（DOMPurify 只清脚本/事件、不挡「取图」这种联网，
+  // 故 mermaid strict 也挡不住）。img-src 只放行 自己 + data: 内联 + 你的后端源（头像/favicon），任意
+  // 第三方远程图被浏览器拦在网络层——比逐引擎加门卫更治本（连未来新增的图表引擎一并覆盖）。
+  `img-src 'self' data:${API_ORIGIN ? ` ${API_ORIGIN}` : ""}`,
   "font-src 'self' data:",
-  // connect-src stays broad: the cloud API base URL is user-configured at runtime (https,
-  // and http(s)://localhost for self-host) and SSE/websocket may ride it — script-src is
-  // what contains XSS here, not connect-src.
-  "connect-src 'self' https: http: ws: wss:",
+  CONNECT_SRC,
   "object-src 'none'",
   "base-uri 'none'",
   "frame-ancestors 'none'",
@@ -128,6 +156,7 @@ function createWindow(): BrowserWindow {
   });
   if (windowState.isMaximized) mainWindow.maximize();
   manageWindowState(mainWindow);
+  registerWindowFrameIpc(mainWindow);
 
   // Dev-only: forward the renderer's console warnings/errors to this process's
   // stdout so a renderer crash (e.g. a React error-boundary stack logged via
@@ -144,11 +173,11 @@ function createWindow(): BrowserWindow {
     );
   }
 
-  ipcMain.on("window:minimize", () => mainWindow.minimize());
-  ipcMain.on("window:maximize", () => {
+  ipcMain.on(WINDOW_CHANNELS.minimize, () => mainWindow.minimize());
+  ipcMain.on(WINDOW_CHANNELS.maximize, () => {
     mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
   });
-  ipcMain.on("window:close", () => mainWindow.close());
+  ipcMain.on(WINDOW_CHANNELS.close, () => mainWindow.close());
 
   mainWindow.on("ready-to-show", () => {
     mainWindow.show();

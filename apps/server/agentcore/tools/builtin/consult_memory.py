@@ -5,7 +5,8 @@ in ``build_builtin_registry`` (a delegated worker does not hold it). The user's 
 a FOLDER (docs/03-AI核心/Agent记忆与知识系统.md §二): a small always-injected CORE note
 (``画像.md``, rides every prompt via the ``<rules>`` section) plus any number of TOPIC notes
 (``主题/<slug>.md``). The CEO's prompt carries a one-line「记忆主题目录」of the topic names
-+ a 1-line summary each (``prompt.render_memory_topic_directory``); when a topic is relevant it calls
++ a 1-line summary each (``prompt.render_memory_topic_directory``);
+when a topic is relevant it calls
 ``consult_memory(name)`` to feed that note's full body back into its own ReAct loop
 (``ToolEffect.CONTINUE``), then acts on it. This keeps the常驻 prompt cheap while letting
 deep, occasional knowledge live in the folder.

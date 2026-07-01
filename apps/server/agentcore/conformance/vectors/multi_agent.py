@@ -19,6 +19,7 @@ from agentcore.runtime.events import (
     plan_revised,
     run_completed,
     run_context,
+    run_failed,
     run_output_delta,
     run_output_reset,
     run_plan,
@@ -70,6 +71,8 @@ def _multi_agent_delegate() -> list[SSEEvent]:
         ),
         run_started("r1", "w1"),
         run_output_delta("r1", "w1", "调研结论"),
+        # 完工交接简报: r1 authored a full「## 交接简报」— its summary(结论) is the display
+        # summary, the structured brief rides run_completed (surfaced in the run-detail 摘要).
         run_completed(
             "r1",
             "w1",
@@ -79,9 +82,17 @@ def _multi_agent_delegate() -> list[SSEEvent]:
             model="deepseek-v4-flash",
             usage=_USAGE,
             cost=_COST,
+            debrief={
+                "summary": "完成调研",
+                "key_points": ["横评了主流方案 A/B/C", "方案 A 综合成本最低"],
+                "assumptions": "按团队现有技术栈评估",
+                "next_steps": "由撰写员据此产出定稿",
+            },
         ),
         run_started("r2", "w2"),
         run_output_delta("r2", "w2", "成稿"),
+        # r2 authored no 交接简报 → debrief absent (the null-degrade branch): the run-detail
+        # falls back to the full 输出, and output_summary stays a plain scan line.
         run_completed(
             "r2",
             "w2",
@@ -97,6 +108,53 @@ def _multi_agent_delegate() -> list[SSEEvent]:
         content_delta(" 团队已完成。"),
         message_end(FinishReason.END_TURN, input_tokens=4000, output_tokens=800, cost=_COST),
     ]
+
+def _multi_agent_worker_failed_debrief() -> list[SSEEvent]:
+    """多 Agent：worker 未过契约（run_failed）但仍亲笔「## 交接简报」——失败节点也 surface 交接简报。
+    验 run_failed 携 debrief 折到 run.debrief（run 详情在错误旁展示作者结论 + 建议下一步），
+    而不是让失败运行只剩一条错误。progress = 0/1（失败终态不计入 completed）。"""
+    agents = [
+        {
+            "id": "w1",
+            "role": "研究员",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "调研", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排调研。"),
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "研究员"}]}),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="调研 X",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_output_delta("r1", "w1", "初步调研，但缺少必需的引用来源"),
+        # 契约未过但产出 + 交接简报仍在：run_failed 携 debrief，run 详情在错误旁展示作者结论。
+        run_failed(
+            "r1",
+            "w1",
+            "未通过契约：缺少必需的引用来源",
+            debrief={
+                "summary": "完成初步调研，但未满足引用契约",
+                "key_points": ["覆盖了三个主流方案", "引用来源缺失，结论待核实"],
+                "assumptions": "暂按公开资料整理",
+                "next_steps": "补齐权威引用后再定稿",
+            },
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成（含 1 项未达标）。"),
+        content_delta(" 调研初步完成，但引用需补齐。"),
+        message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
+    ]
+
 
 def _multi_agent_worker_tool() -> list[SSEEvent]:
     """多 Agent：worker 工具调用。worker 的 ``tool_use_start/end`` 与 CEO 的同形地走顶层流，
@@ -921,6 +979,60 @@ def _multi_agent_worker_output_reset() -> list[SSEEvent]:
     ]
 
 
+def _multi_agent_worker_deliverable_reset() -> list[SSEEvent]:
+    """多 Agent·交付正文只留最终交付、旁白入 journal (Fork-B, 全队对称)：worker 在调【非终止】工具
+    前写了一段旁白（"我先看下现状。"），引擎判定这是过程旁白而非交付 → 回退交付正文并发一次
+    ``run_output_reset`` 清掉卡片已流式的旁白 → 工具后重累积【最终交付】。
+
+    与 ``worker_output_reset``（finish_guard 结构缺陷回炉）同用 ``run_output_reset`` 机制，但落点不同：
+    这里 reset 落在【worker 工具调用之后】、旁白与最终交付之间。三端 fold + oracle 必须一致：清 agent
+    output 标量（重累积最终交付），reasoning 是真实过程、保留；旁白只活在 journal 的 llm_call fact 里，
+    不进 message_final / 卡片重载 / CEO 综述输入。故 r1 的 ``output`` 末态只剩「结论：应采用方案 A。」。"""
+    agents = [
+        {
+            "id": "w1",
+            "role": "工程师",
+            "model_preference": "strong",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [{"id": "r1", "agent_id": "w1", "task": "调研现状并给结论", "depends_on": []}]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排队员调研。"),
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "工程师"}]}),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="调研并给结论",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_reasoning_delta("r1", "w1", "先看现状再下结论。"),  # 思考：真实过程，保留
+        run_output_delta("r1", "w1", "我先看下现状。"),  # 调工具前的旁白（将被 reset 清掉）
+        tool_use_start("tc1", "grep", {"pattern": "x"}, run_id="r1"),
+        tool_use_end("tc1", "grep", success=True, output="命中 3 处", run_id="r1"),
+        # 引擎回退交付正文、发 run_output_reset 清卡片旁白（直播==重载==最终交付）。
+        run_output_reset("r1", "w1"),
+        run_output_delta("r1", "w1", "结论：应采用方案 A。"),  # 最终交付
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成调研",
+            duration_ms=1300,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="队员已给出结论。"),
+        content_delta(" 队员已给出结论。"),
+        message_end(FinishReason.END_TURN, input_tokens=3000, output_tokens=500, cost=_COST),
+    ]
+
+
 def _multi_agent_lead_subplan_bind_replan() -> list[SSEEvent]:
     """多 Agent·嵌套 lead 在自己子计划上晚定稿续跑 (受监督子计划 B, docs/03-AI核心/编排器与CEO主Agent.md
     §2.4)。CEO 把「整块后端」交给一个 lead（L1，顶层 worker）；L1 上手后自己扇出一支子队
@@ -1383,10 +1495,18 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "多 Agent·通·便签墙·改写/作废：队员 改写(update)/作废(void) 自己贴过的便签，目标便签标 superseded/voided",
         _multi_agent_team_notes_amended,
     ),
+    "multi_agent_worker_failed_debrief": (
+        "多 Agent：worker 未过契约（run_failed）但亲笔交接简报——失败节点也 surface debrief",
+        _multi_agent_worker_failed_debrief,
+    ),
     "multi_agent_worker_tool": ("多 Agent：worker 工具调用 + run_tool_progress 实时态", _multi_agent_worker_tool),
     "multi_agent_worker_output_reset": (
         "多 Agent：交付前核验回炉 worker 对偶 run_output_reset 丢弃违规版 worker 草稿、保留思考、重写修正版",
         _multi_agent_worker_output_reset,
+    ),
+    "multi_agent_worker_deliverable_reset": (
+        "多 Agent·交付正文只留最终交付：worker 调非终止工具前的旁白 run_output_reset 清掉（落点在工具后）、保留思考、只留最终交付",
+        _multi_agent_worker_deliverable_reset,
     ),
     "multi_agent_revision": ("多 Agent：定向唤回续写（revision 合成节点）", _multi_agent_revision),
     "multi_agent_plan_revised": ("多 Agent：自主再绑定「计划已调整」轻痕迹（plan_revised 折 bind/steer 到节点 revised）", _multi_agent_plan_revised),

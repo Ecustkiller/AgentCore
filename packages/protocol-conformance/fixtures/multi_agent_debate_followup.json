@@ -201,7 +201,10 @@
         "agent_id": "debate_fu_mod1_r2_pro",
         "parent_run_id": "debate_fu_mod1_r1_pro",
         "kind": "agent",
-        "revision": 2
+        "revision": 2,
+        "stance": "pro",
+        "group": "debate:debate",
+        "round": 2
       },
       "timestamp": "2026-01-01T00:00:00.011Z"
     },
@@ -247,7 +250,10 @@
         "agent_id": "debate_fu_mod1_r2_con",
         "parent_run_id": "debate_fu_mod1_r1_con",
         "kind": "agent",
-        "revision": 2
+        "revision": 2,
+        "stance": "con",
+        "group": "debate:debate",
+        "round": 2
       },
       "timestamp": "2026-01-01T00:00:00.014Z"
     },
@@ -287,12 +293,110 @@
       "timestamp": "2026-01-01T00:00:00.016Z"
     },
     {
+      "type": "run_started",
+      "payload": {
+        "run_id": "debate_fu_mod1_r3_pro",
+        "agent_id": "debate_fu_mod1_r3_pro",
+        "parent_run_id": "debate_fu_mod1_r1_pro",
+        "kind": "agent",
+        "revision": 3,
+        "stance": "pro",
+        "group": "debate:debate",
+        "round": 3
+      },
+      "timestamp": "2026-01-01T00:00:00.017Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "debate_fu_mod1_r3_pro",
+        "agent_id": "debate_fu_mod1_r3_pro",
+        "delta": "收敛：按尾部损失分位设阈并自动回滚。"
+      },
+      "timestamp": "2026-01-01T00:00:00.018Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "debate_fu_mod1_r3_pro",
+        "agent_id": "debate_fu_mod1_r3_pro",
+        "output_summary": "支持方第三轮收敛完成",
+        "duration_ms": 810,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.019Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "debate_fu_mod1_r3_con",
+        "agent_id": "debate_fu_mod1_r3_con",
+        "parent_run_id": "debate_fu_mod1_r1_con",
+        "kind": "agent",
+        "revision": 3,
+        "stance": "con",
+        "group": "debate:debate",
+        "round": 3
+      },
+      "timestamp": "2026-01-01T00:00:00.020Z"
+    },
+    {
+      "type": "run_output_delta",
+      "payload": {
+        "run_id": "debate_fu_mod1_r3_con",
+        "agent_id": "debate_fu_mod1_r3_con",
+        "delta": "认可机制，仅阈值取值仍需拍板。"
+      },
+      "timestamp": "2026-01-01T00:00:00.021Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "debate_fu_mod1_r3_con",
+        "agent_id": "debate_fu_mod1_r3_con",
+        "output_summary": "反对方第三轮收敛完成",
+        "duration_ms": 820,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.022Z"
+    },
+    {
       "type": "run_completed",
       "payload": {
         "run_id": "debate_fu_mod1",
         "agent_id": "debate_fu_mod1",
-        "output_summary": "灰度兜底已达成，仅剩回滚阈值待你拍板",
-        "duration_ms": 2400,
+        "output_summary": "灰度兜底已达成，仅剩阈值取值待你拍板",
+        "duration_ms": 2800,
         "role": "主持人",
         "model": "deepseek-v4-flash",
         "usage": {
@@ -310,7 +414,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.017Z"
+      "timestamp": "2026-01-01T00:00:00.023Z"
     },
     {
       "type": "debate_result",
@@ -375,13 +479,13 @@
           {
             "round_no": 2,
             "focus": "灰度期数据口径不一致时的兜底机制",
-            "summary": "支持方正面回应追问：灰度期以反对方数据口径为准并设熔断；分歧收敛到回滚阈值。",
+            "summary": "支持方正面回应追问：灰度期以反对方数据口径为准并设熔断；分歧收敛到阈值该如何设。",
             "verdict": {
               "real_clash": true,
-              "new_arguments": false,
-              "converged": true,
-              "stop_reason": "双方就兜底机制达成共识，仅剩阈值需用户拍板。",
-              "rationale": "支持方接住了用户追问、给出兜底，争点收敛到回滚阈值这一价值取舍。"
+              "new_arguments": true,
+              "converged": false,
+              "stop_reason": "",
+              "rationale": "支持方接住追问、给出兜底，但回滚/熔断阈值该多严仍有实质分歧，值得再探一轮。"
             },
             "sides": [
               {
@@ -411,12 +515,46 @@
                 "answered": true
               }
             ]
+          },
+          {
+            "round_no": 3,
+            "focus": "回滚与熔断阈值该如何设定",
+            "summary": "支持方提出按尾部损失分位设阈并自动回滚，反对方认可机制、仅保留阈值取值分歧，收敛到价值取舍。",
+            "verdict": {
+              "real_clash": true,
+              "new_arguments": false,
+              "converged": true,
+              "stop_reason": "兜底机制已谈透，仅剩阈值取值这一价值判断需用户拍板。",
+              "rationale": "阈值机制双方达成一致，取值严松是风险偏好取舍、AI 判不了，交用户拍板。"
+            },
+            "sides": [
+              {
+                "key": "pro",
+                "name": "支持方",
+                "run_id": "debate_fu_mod1_r3_pro",
+                "ok": true
+              },
+              {
+                "key": "con",
+                "name": "反对方",
+                "run_id": "debate_fu_mod1_r3_con",
+                "ok": true
+              }
+            ],
+            "clashes": [
+              {
+                "from_key": "con",
+                "to_key": "pro",
+                "point": "按分位设阈方向对，但分位取多少直接决定放行多少尾部风险，仍需拍板。"
+              }
+            ],
+            "user_interjections": []
           }
         ],
         "brief": {
           "crux": "方案 A 的风险是否可控、灰度兜底是否到位",
           "strongest_points": {
-            "pro": "收益显著且可量化，已就追问给出灰度兜底（以保守口径为准 + 熔断）",
+            "pro": "收益显著且可量化，已就追问给出灰度兜底（保守口径 + 熔断 + 按分位设阈自动回滚）",
             "con": "风险敞口缺乏兜底，熔断阈值仍可能过松"
           },
           "factual_disputes": [
@@ -427,13 +565,13 @@
           ],
           "leaning": "倾向有条件采用",
           "confidence": "medium",
-          "recommendation": "采纳支持方的灰度兜底方案，回滚阈值需你拍板。",
+          "recommendation": "采纳支持方的灰度兜底方案（按分位设阈 + 自动回滚），阈值取值需你拍板。",
           "open_questions": [
-            "灰度的回滚阈值如何设定（你的追问已促成兜底，阈值仍需你定）？"
+            "灰度的回滚/熔断阈值取多少（你的追问已促成兜底，取值仍需你定）？"
           ]
         }
       },
-      "timestamp": "2026-01-01T00:00:00.018Z"
+      "timestamp": "2026-01-01T00:00:00.024Z"
     },
     {
       "type": "message_end",
@@ -455,7 +593,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.019Z"
+      "timestamp": "2026-01-01T00:00:00.025Z"
     }
   ],
   "projected": {
@@ -535,6 +673,30 @@
         "output": "仍存疑：熔断阈值过松。",
         "reasoning": "",
         "toolProgress": null
+      },
+      {
+        "id": "debate_fu_mod1_r3_pro",
+        "role": "支持方",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "收敛：按尾部损失分位设阈并自动回滚。",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "debate_fu_mod1_r3_con",
+        "role": "反对方",
+        "modelPreference": "strong",
+        "thinking": true,
+        "reasoningEffort": "high",
+        "status": "completed",
+        "currentRunId": null,
+        "output": "认可机制，仅阈值取值仍需拍板。",
+        "reasoning": "",
+        "toolProgress": null
       }
     ],
     "runs": [
@@ -544,8 +706,9 @@
         "task": "主持正反辩论（可追问）：是否采用方案 A",
         "status": "completed",
         "dependsOn": [],
-        "outputSummary": "灰度兜底已达成，仅剩回滚阈值待你拍板",
-        "durationMs": 2400,
+        "outputSummary": "灰度兜底已达成，仅剩阈值取值待你拍板",
+        "debrief": null,
+        "durationMs": 2800,
         "error": null,
         "parentRunId": "captain1",
         "kind": "agent",
@@ -582,6 +745,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "支持方陈述完成",
+        "debrief": null,
         "durationMs": 800,
         "error": null,
         "parentRunId": "debate_fu_mod1",
@@ -619,6 +783,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "反对方陈述完成",
+        "debrief": null,
         "durationMs": 850,
         "error": null,
         "parentRunId": "debate_fu_mod1",
@@ -656,6 +821,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "支持方回应追问完成",
+        "debrief": null,
         "durationMs": 820,
         "error": null,
         "parentRunId": "debate_fu_mod1_r1_pro",
@@ -676,9 +842,9 @@
           "total": 360000,
           "currency": "USD"
         },
-        "stance": null,
-        "group": null,
-        "round": 0,
+        "stance": "pro",
+        "group": "debate:debate",
+        "round": 2,
         "revisionOf": "debate_fu_mod1_r1_pro",
         "revision": 2,
         "revised": null,
@@ -693,6 +859,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "反对方续论完成",
+        "debrief": null,
         "durationMs": 830,
         "error": null,
         "parentRunId": "debate_fu_mod1_r1_con",
@@ -713,11 +880,87 @@
           "total": 360000,
           "currency": "USD"
         },
-        "stance": null,
-        "group": null,
-        "round": 0,
+        "stance": "con",
+        "group": "debate:debate",
+        "round": 2,
         "revisionOf": "debate_fu_mod1_r1_con",
         "revision": 2,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      },
+      {
+        "id": "debate_fu_mod1_r3_pro",
+        "agentId": "debate_fu_mod1_r3_pro",
+        "task": "论证支持采用方案 A",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "支持方第三轮收敛完成",
+        "debrief": null,
+        "durationMs": 810,
+        "error": null,
+        "parentRunId": "debate_fu_mod1_r1_pro",
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": "pro",
+        "group": "debate:debate",
+        "round": 3,
+        "revisionOf": "debate_fu_mod1_r1_pro",
+        "revision": 3,
+        "revised": null,
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": []
+      },
+      {
+        "id": "debate_fu_mod1_r3_con",
+        "agentId": "debate_fu_mod1_r3_con",
+        "task": "论证反对采用方案 A",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "反对方第三轮收敛完成",
+        "debrief": null,
+        "durationMs": 820,
+        "error": null,
+        "parentRunId": "debate_fu_mod1_r1_con",
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "USD"
+        },
+        "stance": "con",
+        "group": "debate:debate",
+        "round": 3,
+        "revisionOf": "debate_fu_mod1_r1_con",
+        "revision": 3,
         "revised": null,
         "checkpoint": null,
         "receivedContext": [],
@@ -725,8 +968,8 @@
       }
     ],
     "progress": {
-      "completed": 5,
-      "total": 5
+      "completed": 7,
+      "total": 7
     },
     "pendingInteraction": null,
     "cost": {
@@ -797,13 +1040,13 @@
         {
           "round_no": 2,
           "focus": "灰度期数据口径不一致时的兜底机制",
-          "summary": "支持方正面回应追问：灰度期以反对方数据口径为准并设熔断；分歧收敛到回滚阈值。",
+          "summary": "支持方正面回应追问：灰度期以反对方数据口径为准并设熔断；分歧收敛到阈值该如何设。",
           "verdict": {
             "real_clash": true,
-            "new_arguments": false,
-            "converged": true,
-            "stop_reason": "双方就兜底机制达成共识，仅剩阈值需用户拍板。",
-            "rationale": "支持方接住了用户追问、给出兜底，争点收敛到回滚阈值这一价值取舍。"
+            "new_arguments": true,
+            "converged": false,
+            "stop_reason": "",
+            "rationale": "支持方接住追问、给出兜底，但回滚/熔断阈值该多严仍有实质分歧，值得再探一轮。"
           },
           "sides": [
             {
@@ -833,12 +1076,46 @@
               "answered": true
             }
           ]
+        },
+        {
+          "round_no": 3,
+          "focus": "回滚与熔断阈值该如何设定",
+          "summary": "支持方提出按尾部损失分位设阈并自动回滚，反对方认可机制、仅保留阈值取值分歧，收敛到价值取舍。",
+          "verdict": {
+            "real_clash": true,
+            "new_arguments": false,
+            "converged": true,
+            "stop_reason": "兜底机制已谈透，仅剩阈值取值这一价值判断需用户拍板。",
+            "rationale": "阈值机制双方达成一致，取值严松是风险偏好取舍、AI 判不了，交用户拍板。"
+          },
+          "sides": [
+            {
+              "key": "pro",
+              "name": "支持方",
+              "run_id": "debate_fu_mod1_r3_pro",
+              "ok": true
+            },
+            {
+              "key": "con",
+              "name": "反对方",
+              "run_id": "debate_fu_mod1_r3_con",
+              "ok": true
+            }
+          ],
+          "clashes": [
+            {
+              "from_key": "con",
+              "to_key": "pro",
+              "point": "按分位设阈方向对，但分位取多少直接决定放行多少尾部风险，仍需拍板。"
+            }
+          ],
+          "user_interjections": []
         }
       ],
       "brief": {
         "crux": "方案 A 的风险是否可控、灰度兜底是否到位",
         "strongest_points": {
-          "pro": "收益显著且可量化，已就追问给出灰度兜底（以保守口径为准 + 熔断）",
+          "pro": "收益显著且可量化，已就追问给出灰度兜底（保守口径 + 熔断 + 按分位设阈自动回滚）",
           "con": "风险敞口缺乏兜底，熔断阈值仍可能过松"
         },
         "factual_disputes": [
@@ -849,9 +1126,9 @@
         ],
         "leaning": "倾向有条件采用",
         "confidence": "medium",
-        "recommendation": "采纳支持方的灰度兜底方案，回滚阈值需你拍板。",
+        "recommendation": "采纳支持方的灰度兜底方案（按分位设阈 + 自动回滚），阈值取值需你拍板。",
         "open_questions": [
-          "灰度的回滚阈值如何设定（你的追问已促成兜底，阈值仍需你定）？"
+          "灰度的回滚/熔断阈值取多少（你的追问已促成兜底，取值仍需你定）？"
         ]
       }
     },

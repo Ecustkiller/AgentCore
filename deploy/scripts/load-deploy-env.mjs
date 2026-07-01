@@ -119,3 +119,100 @@ export function sshScript(scriptText) {
     "bash -s",
   ], { input: scriptText });
 }
+
+/** Run a git command from REPO_ROOT and capture trimmed stdout. */
+function git(args) {
+  const r = spawnSync("git", args, {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+  return { ok: r.status === 0, out: (r.stdout ?? "").trim() };
+}
+
+/**
+ * Deploy-time guard against 前后端版本漂移 — a FRONTEND deployed AHEAD of the backend.
+ * A newer client calls endpoints the older *deployed* backend lacks → 404 (e.g. the
+ * 记忆·主题 incident: web shipped the 主题 UI while prod backend预 `/topics`). All three
+ * SPAs (web client / mobile / admin) hit the same API, so they share this check.
+ *
+ * Compares the commit being deployed (git HEAD) against the LIVE backend's git_sha
+ * (`GET <apiBaseUrl>/version`). Ships only when the backend already CONTAINS this
+ * commit — i.e. HEAD is an ancestor of the backend sha (backend == or newer), so every
+ * endpoint this build calls exists server-side. A strictly-newer / diverged frontend is
+ * hard-blocked with how to fix; pass `--force` (or `DEPLOY_SKIP_CONTRACT_GATE=1`) to
+ * override for a vetted frontend-only change.
+ *
+ * Fails OPEN (warn + allow) ONLY when it genuinely can't compare — backend git_sha
+ * unknown, the /version probe failed, or the sha isn't in local history after a fetch —
+ * so a flaky probe never blocks a deploy while the real "frontend ahead" case is caught.
+ */
+export async function assertBackendContractSatisfied({ apiBaseUrl, force = false }) {
+  const skip =
+    force ||
+    process.argv.includes("--force") ||
+    process.env.DEPLOY_SKIP_CONTRACT_GATE === "1";
+
+  const head = git(["rev-parse", "HEAD"]);
+  if (!head.ok) {
+    console.warn("⚠ 契约门禁：无法解析 git HEAD — 跳过校验");
+    return;
+  }
+  const webSha = head.out;
+
+  let backendSha;
+  try {
+    const res = await fetch(`${apiBaseUrl}/version`, {
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    backendSha = (await res.json()).git_sha;
+  } catch (e) {
+    console.warn(
+      `⚠ 契约门禁：读不到 ${apiBaseUrl}/version（${e.message}）— 跳过校验`,
+    );
+    return;
+  }
+
+  if (!backendSha || backendSha === "unknown") {
+    console.warn("⚠ 契约门禁：后端 /version 的 git_sha 为 unknown — 跳过校验");
+    return;
+  }
+
+  // Ancestry needs the backend sha in local history; fetch once if it's missing.
+  if (!git(["cat-file", "-e", `${backendSha}^{commit}`]).ok) {
+    git(["fetch", "--quiet", "origin"]);
+    if (!git(["cat-file", "-e", `${backendSha}^{commit}`]).ok) {
+      console.warn(
+        `⚠ 契约门禁：后端 sha ${backendSha} 不在本地 git 历史里（先 git fetch）— 跳过校验`,
+      );
+      return;
+    }
+  }
+
+  // Safe iff the backend already contains this commit (HEAD ⊆ backend).
+  if (git(["merge-base", "--is-ancestor", webSha, backendSha]).ok) {
+    console.log(
+      `✓ 契约门禁：线上后端 ${backendSha} 已含本次构建 ${webSha.slice(0, 7)}，放行`,
+    );
+    return;
+  }
+
+  const msg = [
+    "",
+    "✖ 部署被拦截：前端比线上后端新（前后端版本漂移）。",
+    `  本次构建 HEAD    : ${webSha.slice(0, 7)}`,
+    `  线上后端 /version: ${backendSha}`,
+    "  前端可能调用后端还没有的接口（如 记忆·主题 → 404）。",
+    "  先部署后端：pnpm deploy:backend <short-sha>，待 /api/version 追上后再发前端。",
+    "  确需强发（纯前端改动、确认无新接口）：加 --force 或设 DEPLOY_SKIP_CONTRACT_GATE=1。",
+    "",
+  ].join("\n");
+  if (skip) {
+    console.warn(msg);
+    console.warn("⚠ 已设 --force / DEPLOY_SKIP_CONTRACT_GATE：跳过拦截，继续部署。");
+    return;
+  }
+  console.error(msg);
+  process.exit(1);
+}

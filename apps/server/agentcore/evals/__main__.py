@@ -39,6 +39,14 @@ from agentcore.evals.comparison import (
     load_comparison_cases,
     run_comparison_suite,
 )
+from agentcore.evals.debate_converge import (
+    SCENARIOS,
+    _debate_provider_and_model,
+    debate_converge_to_dict,
+    format_debate_converge_report,
+    lint_scenarios,
+    run_debate_converge,
+)
 from agentcore.evals.judge import build_default_judge, build_default_milestone_judge
 from agentcore.evals.report import baseline_regression, format_report, report_to_dict
 from agentcore.evals.routing import (
@@ -126,6 +134,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--calibrate",
         action="store_true",
         help="裁判校准：人工 gold-set 过生产裁判，算判↔人 kappa（kappa>=门 才准上 baseline 门）",
+    )
+    p.add_argument(
+        "--debate-converge",
+        action="store_true",
+        help="辩论收敛校准：合成场景过生产 _judge，量『裁判是否系统性过保守』（§三·诊断，不卡门）",
     )
     p.add_argument(
         "--gold-set",
@@ -257,7 +270,37 @@ async def _run_calibration(args: argparse.Namespace) -> int:
     return 0 if result.trustworthy else 1
 
 
+async def _run_debate_converge(args: argparse.Namespace) -> int:
+    """辩论收敛校准分支：合成场景过生产 `_judge` → 过保守/过早收敛率 + kappa（§三）。
+
+    诊断性（非硬门禁）：目的是把「裁判是否系统性过保守」变成可复跑信号，故恒以退出码 0 返回
+    （与 ``--compare`` / ``--style`` 同为信息性）。``--lint-only`` 零 LLM 只校验场景集结构；场景集
+    结构错误经 :class:`EvalConfigError` → 2（由 :func:`main` 捕获）。真跑需
+    ``EVAL_DEEPSEEK_API_KEY``。
+    """
+    lint_scenarios(SCENARIOS)
+    if args.lint_only:
+        print(f"[lint] OK — {len(SCENARIOS)} 个辩论收敛场景结构合法")
+        return 0
+
+    provider, model = _debate_provider_and_model(args.judge_mode)
+    result = await run_debate_converge(provider, model, SCENARIOS)
+    print(format_debate_converge_report(result))
+
+    if args.out:
+        out = Path(args.out)
+        out.write_text(
+            json.dumps(debate_converge_to_dict(result), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"\n[report] 已写出 JSON -> {out}")
+
+    return 0  # 诊断信号，不以过保守率卡退出码（先量化再调，见 §三）
+
+
 async def _run(args: argparse.Namespace) -> int:
+    if args.debate_converge:
+        return await _run_debate_converge(args)
     if args.calibrate:
         return await _run_calibration(args)
     if args.compare:

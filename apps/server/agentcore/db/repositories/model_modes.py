@@ -23,11 +23,16 @@ class ModelModeRepository:
         await self._session.refresh(mode)
         return mode
 
-    async def get_by_id(self, mode_id: str, *, user_id: str | None = None) -> ModelMode | None:
-        conditions = [ModelMode.id == mode_id, ModelMode.deleted_at.is_(None)]
-        if user_id is not None:
-            conditions.append(ModelMode.user_id == user_id)
-        result = await self._session.execute(select(ModelMode).where(*conditions))
+    async def get_by_id(self, mode_id: str, *, user_id: str) -> ModelMode | None:
+        """Owner-scoped fetch (non-owner / unknown id → None). ``user_id`` mandatory so
+        scoping is the structural default (SEC-002)."""
+        result = await self._session.execute(
+            select(ModelMode).where(
+                ModelMode.id == mode_id,
+                ModelMode.deleted_at.is_(None),
+                ModelMode.user_id == user_id,
+            )
+        )
         return result.scalar_one_or_none()
 
     async def list_by_user(self, user_id: str) -> Sequence[ModelMode]:

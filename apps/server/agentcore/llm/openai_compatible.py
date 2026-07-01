@@ -280,7 +280,9 @@ class OpenAICompatibleProvider:
                     raise
                 retry_after = e.retry_after if isinstance(e, LLMRateLimitError) else None
                 wait = retry_after or backoff
-                logger.warning("llm.stream_retry", provider=self._name, attempt=attempt + 1, wait=wait)
+                logger.warning(
+                    "llm.stream_retry", provider=self._name, attempt=attempt + 1, wait=wait
+                )
                 await asyncio.sleep(wait)
                 backoff *= _BACKOFF_MULTIPLIER
             except httpx.TimeoutException as e:
@@ -316,7 +318,9 @@ class OpenAICompatibleProvider:
         if code in (401, 403):
             raise LLMError(f"{self._name} API Key 无效或无权限（鉴权失败），请检查后重试")
         if code == 402:
-            raise LLMInsufficientBalanceError(f"{self._name} API Key 有效，但账户余额不足，请充值后使用。")
+            raise LLMInsufficientBalanceError(
+                f"{self._name} API Key 有效，但账户余额不足，请充值后使用。"
+            )
         if code == 404:
             raise LLMError(f"{self._name} 接口地址不可达（404），请检查 base_url 配置")
         if code >= 500:

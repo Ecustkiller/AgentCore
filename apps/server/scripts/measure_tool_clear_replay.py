@@ -68,7 +68,7 @@ def clearable_count(window: list[LLMMessage]) -> int:
         window, clearable_tools=INVESTIGATION,
         keep_recent=0, min_chars=settings.engine_tool_clear_min_chars,
     )
-    return 0 if cleared is window else sum(1 for a, b in zip(window, cleared) if a.content != b.content)
+    return 0 if cleared is window else sum(1 for a, b in zip(window, cleared, strict=True) if a.content != b.content)
 
 
 async def main() -> None:
@@ -118,7 +118,7 @@ async def main() -> None:
                     window, clearable_tools=INVESTIGATION, keep_recent=kr, min_chars=min_chars
                 )
                 n_cleared = 0 if proj is window else sum(
-                    1 for a, b in zip(window, proj) if a.content != b.content
+                    1 for a, b in zip(window, proj, strict=True) if a.content != b.content
                 )
             chars = sum(len(m.content or "") for m in proj)
             await provider.complete(make_request(proj))  # cold（暖缓存）

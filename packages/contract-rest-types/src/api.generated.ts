@@ -1049,12 +1049,19 @@ export interface paths {
          * Resolve Interaction
          * @description Settle any paused interaction over the unified bridge (§8.2).
          *
-         *     One endpoint for every suspend kind, discriminated on ``body.kind``:
+         *     One endpoint for every client-resolvable suspend kind, discriminated on
+         *     ``body.kind``:
          *
          *     - ``approval`` — authorize / deny a paused GRANTABLE tool call (the gate
          *       auto-denies anything left unanswered);
-         *     - ``ask_user`` — the user's checkpoint answer (continue / adjust / stop);
-         *     - ``client_tool`` — a bound desktop's result envelope for a local-workspace op.
+         *     - ``client_tool`` — a bound desktop's result envelope for a local-workspace op;
+         *     - ``escalation`` — a worker's blocking escalate (answer / 按假设继续);
+         *     - ``debate_round`` — an interactive debate round boundary (continue / conclude).
+         *
+         *     ``ask_user`` / ``plan_review`` are NOT settled here anymore: 挂起即收口 (②, Phase 3)
+         *     retired their live in-process resolve — a CEO checkpoint now finalizes the turn
+         *     (``SUSPEND → PAUSED``) and is continued via the single cold ``POST .../resume`` path
+         *     instead, so their resolve schemas are gone from ``ResolveInteractionRequest``.
          *
          *     The pending interaction (awaiting in the live ``send_message`` SSE turn) resumes
          *     with its kind-specific result. 404 if it is unknown, already settled, timed out,
@@ -1244,15 +1251,18 @@ export interface paths {
          * Get Conversation Recovery
          * @description One-shot recovery snapshot for a conversation reopen (recovery 统一, 对称 §8.2).
          *
-         *     Folds the two former reopen probes — is a detached run still live (实时重连续看
-         *     1b)? are there durably paused turns (结构化挂起 2b)? — into a single owner-gated
-         *     read so the client picks ONE actionable surface without racing two endpoints. A turn
-         *     parked at a checkpoint is BOTH live (its run is parked holding the workspace lock)
-         *     and durably paused (its frame persisted before the ``await``); probing ``/paused``
-         *     and the ``/stream`` attach independently surfaced a duplicate 拍板 card. The client
-         *     attaches (``GET .../stream``) only when ``live_running`` and ``paused`` is empty;
-         *     otherwise a paused turn's resume card is its single surface. ``live_running`` mirrors
-         *     the attach endpoint's own liveness test (a registered run whose task is not done).
+         *     Folds the two reopen probes — is a detached run still live (实时重连续看 1b)? are there
+         *     durably paused turns (结构化挂起 2b)? — into a single owner-gated read so the client picks
+         *     ONE actionable surface without racing two endpoints. The client attaches (``GET .../stream``)
+         *     only when ``live_running`` and ``paused`` is empty; otherwise a paused turn's resume card is
+         *     its single surface. ``live_running`` mirrors the attach endpoint's own liveness test (a
+         *     registered run whose task is not done).
+         *
+         *     挂起即收口 (②): a checkpoint turn now FINALIZES (SUSPEND→PAUSED, the run ends) rather than
+         *     parking, so a paused turn is durable-only — the former live∩paused 冷热重叠 (a run parked on
+         *     its interaction while its frame also persisted) now survives ONLY as the rare §六-1 thin-net
+         *     (a frame that could not be saved keeps a bounded backend wait). Reporting both fields still
+         *     resolves that rare overlap — and a non-paused detached run (1b) — to the one right surface.
          */
         get: operations["get_conversation_recovery_v1_conversations__conversation_id__recovery_get"];
         put?: never;

@@ -67,19 +67,38 @@ class ConversationRepository:
         await self._session.refresh(conv)
         return conv
 
-    async def get_by_id(
-        self, conversation_id: str, *, user_id: str | None = None
-    ) -> Conversation | None:
-        # When user_id is given, scope by owner so a non-owner gets None (the
-        # route then 404s, preventing cross-user access / existence leaks).
-        # Internal trusted callers omit user_id.
-        conditions = [
-            Conversation.id == conversation_id,
-            Conversation.deleted_at.is_(None),
-        ]
-        if user_id is not None:
-            conditions.append(Conversation.user_id == user_id)
-        result = await self._session.execute(select(Conversation).where(*conditions))
+    async def get_by_id(self, conversation_id: str, *, user_id: str) -> Conversation | None:
+        """Owner-scoped fetch: a non-owner (or unknown id) gets None, which the route
+        turns into a 404 — no cross-user access nor existence leak.
+
+        ``user_id`` is mandatory so owner-scoping is the structural default rather than
+        a caller convention (SEC-002). Trusted internal / admin callers that legitimately
+        cross owners use :meth:`get_by_id_unscoped`.
+        """
+        result = await self._session.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.deleted_at.is_(None),
+                Conversation.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_id_unscoped(self, conversation_id: str) -> Conversation | None:
+        """Cross-owner fetch for trusted internal / admin callers — the turn pipeline,
+        background consolidation/compaction, admin cross-user views — that operate on an
+        already-authorized ``conversation_id`` without a user in hand.
+
+        The explicit ``_unscoped`` name keeps the un-scoped surface greppable and out of
+        user-facing routes (SEC-002); it is not reachable from a user request without an
+        upstream owner check.
+        """
+        result = await self._session.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.deleted_at.is_(None),
+            )
+        )
         return result.scalar_one_or_none()
 
     async def get_folder_id(self, conversation_id: str) -> str | None:
@@ -234,9 +253,19 @@ class ConversationRepository:
         return result.scalars().all()
 
     async def update_title(
-        self, conversation_id: str, title: str, *, user_id: str | None = None
+        self, conversation_id: str, title: str, *, user_id: str
     ) -> Conversation | None:
+        """Owner-scoped rename (user-facing). ``user_id`` mandatory (SEC-002)."""
         conv = await self.get_by_id(conversation_id, user_id=user_id)
+        return await self._write_title(conv, title)
+
+    async def update_title_unscoped(self, conversation_id: str, title: str) -> Conversation | None:
+        """Title write for trusted internal callers — post-turn auto-title minting — that
+        hold an already-authorized ``conversation_id`` but no user (SEC-002)."""
+        conv = await self.get_by_id_unscoped(conversation_id)
+        return await self._write_title(conv, title)
+
+    async def _write_title(self, conv: Conversation | None, title: str) -> Conversation | None:
         if conv:
             conv.title = title
             await self._session.commit()
@@ -286,7 +315,9 @@ class ConversationRepository:
             await self._session.refresh(conv)
         return conv
 
-    async def soft_delete(self, conversation_id: str, *, user_id: str | None = None) -> bool:
+    async def soft_delete(self, conversation_id: str, *, user_id: str) -> bool:
+        """Owner-scoped soft delete (user-facing). ``user_id`` mandatory (SEC-002);
+        account-wide deletion uses :meth:`soft_delete_all_for_user`."""
         conv = await self.get_by_id(conversation_id, user_id=user_id)
         if conv:
             conv.deleted_at = datetime.now()

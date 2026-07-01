@@ -175,6 +175,20 @@ function resolveMessage(f: ErrorFacts): string {
 }
 
 /**
+ * Whether an error means "this backend build doesn't offer this endpoint" — a 404
+ * (route not registered) or 501 (declared but not implemented). Distinct from a
+ * transient failure: retrying won't help until the server is upgraded, so a caller
+ * degrades to a calm "feature unavailable" state (no red 加载失败, no retry) instead
+ * of an alarming error. Guards the 前后端版本漂移 window — a newer client calling an
+ * endpoint the older *deployed* backend lacks (e.g. 记忆·主题 shipped in the client
+ * before the backend redeploy). NOT for 401 (auth, handled by redirect) or 5xx
+ * outages (transient, worth a retry).
+ */
+export function isFeatureUnavailable(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 404 || err.status === 501);
+}
+
+/**
  * Normalize any error into the {@link DescribedError} the UI shows, or `null`
  * when the UI should stay silent (auth → the login redirect handles it).
  */

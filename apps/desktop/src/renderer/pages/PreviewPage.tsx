@@ -12,7 +12,7 @@ import {
   replayFixturePrefix,
   replayFixtureStreamed,
 } from "@/preview/replay";
-import { useConversationStore } from "@/stores/conversation";
+import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { useUIStore } from "@/stores/ui";
 import type { SSEEvent } from "@/types/events";
 import { MessageSquare, Moon, Network, Play, Radio, Sun } from "lucide-react";
@@ -92,6 +92,13 @@ export function PreviewPage() {
   // and shoot-gated too, not just the chat surface. URL-driven so the harness can
   // deep-link it and a human can bookmark it.
   const view = searchParams.get("view") === "canvas" ? "canvas" : "chat";
+
+  // Deep-link into a canvas 放大态 view (`#/preview?s=…&view=canvas&zoom=<view>`): after
+  // the fixture replays, request canvas focus on the team turn so a zoomed view that is
+  // otherwise only reachable by clicking (e.g. 对比) is deep-linkable + shoot-gatable.
+  // `zoom=compare` (旧别名 `revisions`) → 统一「对比」view; any other truthy value → the
+  // turn's default view.
+  const zoom = searchParams.get("zoom");
 
   // Render theme (`#/preview?s=…&theme=light|dark`): an ephemeral light/dark
   // override for the preview surface so a component can be eyeballed in both modes
@@ -219,6 +226,26 @@ export function PreviewPage() {
       useConversationStore.getState().switchConversation(null);
     };
   }, []);
+
+  // After replay lands, honor `?zoom=` by focusing the team turn into the canvas 放大态
+  // (the `pendingCanvasFocus` bridge `useCanvasZoom` consumes). Runs after the replay
+  // effect above so the turn exists; the short delay lets the canvas lay the node out.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: frame is an intentional re-run key — re-focus after each replay frame lands.
+  useEffect(() => {
+    if (view !== "canvas" || !zoom || !selected) return;
+    const focusView =
+      zoom === "compare" || zoom === "revisions" ? "compare" : undefined;
+    const t = setTimeout(() => {
+      const msgs = getRuntime(convIdFor(selected)).messages;
+      const turn =
+        [...msgs].reverse().find((m) => m.executionId != null) ??
+        [...msgs].reverse().find((m) => m.role === "assistant");
+      if (turn) {
+        useUIStore.getState().requestCanvasFocus(turn.id, false, focusView);
+      }
+    }, 120);
+    return () => clearTimeout(t);
+  }, [view, zoom, selected, frame]);
 
   // Apply the URL-selected preview theme by toggling the root `.dark` class (the
   // same mechanism as the app's `applyTheme`), so the replayed surface — and

@@ -123,6 +123,13 @@ export const debateSignalText: Record<DebateSignal, string> = {
   clash: "text-primary",
   quiet: "text-muted-foreground",
 };
+/** 「一句人话」轮状态 pill 配色（与 {@link debateSignalDot} 同信号家族）：收敛绿 / 交锋蓝 / 平淡灰。 */
+export const debateSignalPill: Record<DebateSignal, string> = {
+  inflight: statusPillInline.primary,
+  converged: statusPillInline.success,
+  clash: statusPillInline.primary,
+  quiet: statusPillInline.muted,
+};
 
 /** Brand-tinted panel (brief card, highlighted sections). */
 export const brandPanelPrimary = `space-y-3 rounded-lg border p-4 ${surfaceSubtle.primary}`;
@@ -131,13 +138,6 @@ export const brandPanelPrimary = `space-y-3 rounded-lg border p-4 ${surfaceSubtl
 export const surfaceMutedPanel = "rounded-lg border border-border bg-muted/30";
 export const surfaceMutedPanelLight =
   "rounded-lg border border-border bg-muted/20";
-
-/** Verdict / toggle pill — active = primary, inactive = muted. */
-export function verdictTogglePill(active: boolean): string {
-  return `rounded-full px-1.5 py-0.5 text-xs ${
-    active ? statusPillSoft.primary : statusPillSoft.muted
-  }`;
-}
 
 /** Graph node classification badge with optional leading icon. */
 export const graphBadgePrimary = `flex shrink-0 items-center gap-1 ${statusPillInline.primary}`;

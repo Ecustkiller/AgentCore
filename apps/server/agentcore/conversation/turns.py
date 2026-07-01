@@ -57,7 +57,7 @@ async def stream_chat(
     """
     try:
         async with async_session_factory() as session:
-            conv = await ConversationRepository(session).get_by_id(conversation_id)
+            conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
             if not conv:
                 sink.emit(error_event(ErrorCode.NOT_FOUND, "Conversation not found"))
                 sink.emit(message_end(FinishReason.ERROR))
@@ -151,7 +151,7 @@ async def regenerate_chat(
             conv_repo = ConversationRepository(session)
             msg_repo = MessageRepository(session)
 
-            conv = await conv_repo.get_by_id(conversation_id)
+            conv = await conv_repo.get_by_id_unscoped(conversation_id)
             if not conv:
                 sink.emit(error_event(ErrorCode.NOT_FOUND, "Conversation not found"))
                 sink.emit(message_end(FinishReason.ERROR))
@@ -239,7 +239,7 @@ async def resume_chat(
     user_id = suspension.user_id
     try:
         async with async_session_factory() as session:
-            conv = await ConversationRepository(session).get_by_id(conversation_id)
+            conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
             if not conv:
                 sink.emit(error_event(ErrorCode.NOT_FOUND, "Conversation not found"))
                 sink.emit(message_end(FinishReason.ERROR))

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from dataclasses import replace
 from typing import Any
 
 from agentcore.core.logging import get_logger
@@ -10,7 +11,12 @@ from agentcore.core.types import ToolApproval, ToolEffect
 from agentcore.llm.protocol import LLMMessage, ToolCall
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate
 from agentcore.runtime.citations import annotate_tool_citations, merge_citations
-from agentcore.runtime.events import EventSink, tool_use_end, tool_use_start
+from agentcore.runtime.events import (
+    EventSink,
+    tool_use_end,
+    tool_use_progress,
+    tool_use_start,
+)
 from agentcore.runtime.facts import ToolCallFact, record_turn_fact
 from agentcore.runtime.loop_controller import ToolAttempt, fingerprint_tool_call
 from agentcore.tools.protocol import ToolContext, ToolResult
@@ -94,13 +100,22 @@ async def execute_tools(
                     [],
                 )
 
+        # 工具执行阶段进度 (联网搜索前端展示优化): inject a per-call phase callback so a
+        # long-running tool (web_search) can report a coarse EXECUTION phase mid-flight. The
+        # executor owns event shape (引擎纯化) — the tool passes only a phase token; we close
+        # over this call's id/name/run_id and emit the transport-only ``tool_use_progress``.
+        def _emit_phase(phase: str) -> None:
+            sink.emit(tool_use_progress(tc.id, name, phase, run_id=run_id))
+
+        ctx = replace(context, on_phase=_emit_phase)
+
         started = time.monotonic()
         timeout = resolve_tool_timeout(tool.schema)
         try:
             if timeout is None:
-                result = await tool.execute(args, context)
+                result = await tool.execute(args, ctx)
             else:
-                result = await asyncio.wait_for(tool.execute(args, context), timeout)
+                result = await asyncio.wait_for(tool.execute(args, ctx), timeout)
         except TimeoutError:
             # B1 backstop: the call blew its ceiling. wait_for has already cancelled
             # the tool coroutine (a cancel-safe tool releases its side effects in

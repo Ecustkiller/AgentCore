@@ -4,12 +4,7 @@ import type { FsApi } from "@shared/ipc-contract";
 import type { LogApi } from "@shared/log-contract";
 import type { SidecarApi } from "@shared/sidecar-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
-
-interface WindowApi {
-  minimize: () => void;
-  maximize: () => void;
-  close: () => void;
-}
+import type { WindowApi } from "@shared/window-contract";
 
 declare global {
   interface ImportMetaEnv {

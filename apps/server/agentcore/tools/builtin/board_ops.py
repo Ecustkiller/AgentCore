@@ -6,7 +6,7 @@ calling ``board_ops`` off a board returns a clean error instead of touching anyt
 
 The tool is a thin, stateless mapper. It validates the op batch and hands it to the
 :class:`BoardChannel`, which suspends the run, asks the bound desktop to apply the ops to
-the open Excalidraw canvas (convert → updateScene → CAS autosave), and returns what
+the open whiteboard canvas (convert → updateScene → CAS autosave), and returns what
 landed. The tool never sees a ``Path`` or the scene JSON — the canvas lives in the
 desktop, the server only speaks the structured op vocabulary (空间 JSON 为真相 §七).
 

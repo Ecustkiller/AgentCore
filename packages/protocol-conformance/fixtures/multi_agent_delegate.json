@@ -118,6 +118,15 @@
           "output": 120000,
           "total": 360000,
           "currency": "USD"
+        },
+        "debrief": {
+          "summary": "完成调研",
+          "key_points": [
+            "横评了主流方案 A/B/C",
+            "方案 A 综合成本最低"
+          ],
+          "assumptions": "按团队现有技术栈评估",
+          "next_steps": "由撰写员据此产出定稿"
         }
       },
       "timestamp": "2026-01-01T00:00:00.006Z"
@@ -263,6 +272,15 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "完成调研",
+        "debrief": {
+          "summary": "完成调研",
+          "key_points": [
+            "横评了主流方案 A/B/C",
+            "方案 A 综合成本最低"
+          ],
+          "assumptions": "按团队现有技术栈评估",
+          "next_steps": "由撰写员据此产出定稿"
+        },
         "durationMs": 1000,
         "error": null,
         "parentRunId": null,
@@ -302,6 +320,7 @@
           "r1"
         ],
         "outputSummary": "完成撰写",
+        "debrief": null,
         "durationMs": 1200,
         "error": null,
         "parentRunId": null,

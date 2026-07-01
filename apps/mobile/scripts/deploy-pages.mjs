@@ -7,6 +7,7 @@
 import { join } from "node:path";
 import {
   REPO_ROOT,
+  assertBackendContractSatisfied,
   cfEnv,
   loadDeployEnv,
   run,
@@ -16,6 +17,10 @@ const PROJECT = "agentcore-mobile";
 const API_URL = "https://app.fashitianxia.xyz/api";
 
 loadDeployEnv();
+
+// Guard against shipping a frontend newer than the live backend (前后端版本漂移).
+await assertBackendContractSatisfied({ apiBaseUrl: API_URL });
+
 const deployEnv = {
   ...cfEnv(),
   VITE_API_URL: API_URL,

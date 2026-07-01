@@ -144,6 +144,7 @@
         "status": "running",
         "dependsOn": [],
         "outputSummary": null,
+        "debrief": null,
         "durationMs": null,
         "error": null,
         "parentRunId": null,
@@ -179,6 +180,7 @@
           "r1"
         ],
         "outputSummary": null,
+        "debrief": null,
         "durationMs": null,
         "error": null,
         "parentRunId": null,

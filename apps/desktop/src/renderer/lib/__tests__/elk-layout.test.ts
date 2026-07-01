@@ -1,3 +1,7 @@
+import {
+  type GraphRunLike,
+  buildGraphStructure,
+} from "@/components/graph/helpers";
 import type { GraphEdge } from "@/stores/graph";
 import { describe, expect, it } from "vitest";
 import { computeLayout } from "../elk-layout";
@@ -416,5 +420,103 @@ describe("computeLayout · 树形分叉对称", () => {
     ).toEqual([]);
     const maxY = Math.max(...ids.map((id) => positions[id].y));
     expect(positions.cap.y).toBe(maxY);
+  });
+});
+
+// 多轮辩论版本链（原始 + 修订 v2…v5 全部 revisionOf==原始 的「星型」数据）必须铺成一条可见的链，
+// 而非全部堆叠在原始的唯一后继槽里——回归「5 轮辩论协作图只显 2 个版本」bug（修订 v3/v4 被 v5 压盖）。
+describe("buildGraphStructure · 多修订版本链（辩论逐轮）", () => {
+  const side = (
+    prefix: string,
+    stance: "pro" | "con",
+    rounds: number,
+  ): GraphRunLike[] => {
+    const original: GraphRunLike = {
+      id: `mod_r1_${prefix}`,
+      dependsOn: [],
+      parentRunId: "mod",
+      revision: 0,
+      revisionOf: null,
+      stance,
+    };
+    // 后续每一轮都是首轮的续写 revision——真实投影里 revisionOf 恒指向【原始】(r1)，形成星型。
+    // 乙 wire 携 round/stance 后每个修订也继承本方 stance（fold 投上去），故这里也带 stance——
+    // 它改变 nodeId 的 stance 排序（同方版本聚拢），链式修订边仍须成立、布局仍不叠。
+    const revs: GraphRunLike[] = [];
+    for (let r = 2; r <= rounds; r++) {
+      revs.push({
+        id: `mod_r${r}_${prefix}`,
+        dependsOn: [],
+        parentRunId: original.id,
+        revision: r,
+        revisionOf: original.id,
+        stance,
+      });
+    }
+    return [original, ...revs];
+  };
+
+  const debateRuns = (rounds: number): GraphRunLike[] => [
+    { id: "mod", dependsOn: [], parentRunId: null, kind: "agent" },
+    ...side("pro", "pro", rounds),
+    ...side("con", "con", rounds),
+  ];
+
+  it("星型 revisionOf 被铺成链式修订边（原始→v2→v3→…），不是从原始发散的星", () => {
+    const { rawEdges } = buildGraphStructure(debateRuns(5), "__input__");
+    const revEdges = rawEdges
+      .filter((e) => e.kind === "revision")
+      .map((e) => `${e.source}->${e.target}`)
+      .sort();
+    expect(revEdges).toEqual(
+      [
+        "mod_r1_pro->mod_r2_pro",
+        "mod_r2_pro->mod_r3_pro",
+        "mod_r3_pro->mod_r4_pro",
+        "mod_r4_pro->mod_r5_pro",
+        "mod_r1_con->mod_r2_con",
+        "mod_r2_con->mod_r3_con",
+        "mod_r3_con->mod_r4_con",
+        "mod_r4_con->mod_r5_con",
+      ].sort(),
+    );
+    // 没有从原始直接连到 v3/v4/v5 的星型边（那正是导致堆叠的形状）。
+    expect(revEdges).not.toContain("mod_r1_pro->mod_r3_pro");
+    expect(revEdges).not.toContain("mod_r1_pro->mod_r5_pro");
+  });
+
+  it("布局后 5 个版本全部落在各自图元、两两不重叠（不再折叠成 2 个）", async () => {
+    const { nodeIds, rawEdges } = buildGraphStructure(
+      debateRuns(5),
+      "__input__",
+    );
+    const { positions } = await computeLayout(
+      nodeIds,
+      rawEdges,
+      "leftright",
+      true,
+      { source: "__input__" },
+    );
+    const proVersions = [
+      "mod_r1_pro",
+      "mod_r2_pro",
+      "mod_r3_pro",
+      "mod_r4_pro",
+      "mod_r5_pro",
+    ];
+    const conVersions = [
+      "mod_r1_con",
+      "mod_r2_con",
+      "mod_r3_con",
+      "mod_r4_con",
+      "mod_r5_con",
+    ];
+    // 每个版本都被 ELK 放置（有坐标）。
+    for (const id of [...proVersions, ...conVersions]) {
+      expect(positions[id]).toBeDefined();
+    }
+    // 同一辩手的 5 个版本两两不重叠（旧星型下 v2…v5 会叠在同一坐标 → 只看得到 v5）。
+    expect(noneOverlap(positions, proVersions)).toEqual([]);
+    expect(noneOverlap(positions, conVersions)).toEqual([]);
   });
 });

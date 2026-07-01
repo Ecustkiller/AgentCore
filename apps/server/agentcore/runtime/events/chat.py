@@ -43,6 +43,31 @@ def tool_progress(tool_name: str, chars: int) -> SSEEvent:
     )
 
 
+def tool_use_progress(
+    tool_call_id: str,
+    tool_name: str,
+    phase: str,
+    *,
+    run_id: str = "",
+) -> SSEEvent:
+    """A running tool reported a coarse EXECUTION phase (工具执行阶段进度).
+
+    Emitted between ``tool_use_start`` and ``tool_use_end`` so the waiting UI shows a
+    live, honest state instead of a bare spinner. ``phase`` is a short machine token the
+    client maps to text (``web_search`` → ``querying`` 正在检索 / ``queued`` 排队中 /
+    ``fallback`` 改用备用引擎). Transport-only liveliness: never journaled, never folded
+    into the process timeline — a reloaded turn's tools are already resolved. Carries
+    ``run_id`` for a delegated worker's call (like the tool_use_start/end pair)."""
+    payload: dict[str, Any] = {
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "phase": phase,
+    }
+    if run_id:
+        payload["run_id"] = run_id
+    return SSEEvent(type=EventType.TOOL_USE_PROGRESS, payload=payload)
+
+
 def tool_use_start(
     tool_call_id: str,
     tool_name: str,

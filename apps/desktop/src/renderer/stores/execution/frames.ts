@@ -21,6 +21,7 @@ import type {
   RunStartedPayload,
   RunToolProgressPayload,
   SSEEvent,
+  Stance,
   TeamNotePostedPayload,
   ToolDisplay,
   ToolUseEndPayload,
@@ -48,6 +49,13 @@ export type RunFrame =
       // 续写 version (乙 热修 P4): 0 for an ordinary run, >=2 for a revision (then
       // parentRunId is the original run it revises).
       revision: number;
+      // 乙 wire 携 round/stance (单一轮次投影): a debate 续写 (辩手后续轮) carries its
+      // debater identity + TRUE round so the fold projects 第几轮/哪一方 from one source.
+      // Undefined on an ordinary run / hot-fix revision (the fold falls back to the
+      // original's stance/group + revision-as-round).
+      stance?: Stance;
+      group?: string;
+      round?: number;
     }
   | {
       t: number;
@@ -74,6 +82,8 @@ export type RunFrame =
       runId: string;
       agentId: string;
       outputSummary: string;
+      // 完工交接简报: the worker's structured wrap-up; absent when it authored none.
+      debrief?: import("@/types/events").RunDebrief;
       durationMs: number;
       // Cost-ledger fields from `run_completed` (§7.3B payroll). Optional so a
       // frame without them (older streams / a journal replay that lacks cost)
@@ -89,6 +99,8 @@ export type RunFrame =
       runId: string;
       agentId: string;
       error: string;
+      // 完工交接简报: a contract-missing run's authored wrap-up; absent for infra failures.
+      debrief?: import("@/types/events").RunDebrief;
     }
   | { t: number; kind: "run_progress"; completed: number; total: number }
   | {
@@ -136,6 +148,10 @@ export type RunFrame =
       toolCallId: string;
       toolName: string;
       arguments: Record<string, unknown>;
+      // The delegated worker run this call belongs to; absent/"" for the captain's
+      // own calls. Lets the fold file concurrent workers' calls onto the right run
+      // instead of the first-running one (workers share the top-level tool stream).
+      runId?: string;
     }
   | {
       t: number;
@@ -209,6 +225,9 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         parentRunId: p.parent_run_id,
         runKind: p.kind,
         revision: p.revision ?? 0,
+        stance: p.stance,
+        group: p.group,
+        round: p.round,
       };
     }
     case "run_context": {
@@ -264,6 +283,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         runId: p.run_id,
         agentId: p.agent_id,
         outputSummary: p.output_summary,
+        debrief: p.debrief,
         durationMs: p.duration_ms,
         role: p.role,
         model: p.model,
@@ -279,6 +299,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         runId: p.run_id,
         agentId: p.agent_id,
         error: p.error,
+        debrief: p.debrief,
       };
     }
     case "run_progress": {
@@ -363,6 +384,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         toolCallId: p.tool_call_id,
         toolName: p.tool_name,
         arguments: p.arguments,
+        runId: p.run_id ?? "",
       };
     }
     case "tool_use_end": {

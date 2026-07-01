@@ -48,6 +48,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   reasoning_delta: { verdict: "ported", surface: "AssistantView · 思考块" },
   tool_use_start: { verdict: "ported", surface: "AssistantView · 工具步" },
   tool_use_end: { verdict: "ported", surface: "AssistantView · 工具步" },
+  tool_use_progress: {
+    verdict: "ported",
+    surface:
+      "AssistantView · 工具步执行阶段 (正在检索/排队中/改用备用引擎，extractToolPhases)",
+  },
   citations: { verdict: "ported", surface: "AssistantView · 来源" },
 
   // —— 多 Agent 团队 ——
@@ -204,10 +209,6 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   InlineTeamGraph: {
     verdict: "simplified",
     reason: "手机用竖排 TeamView 代 React-Flow 画布（小屏合理）",
-  },
-  RevisionCompare: {
-    verdict: "simplified",
-    reason: "手机仅 run 修订 badge，无并排修订对比 (niche)",
   },
   MentionMenu: {
     verdict: "simplified",

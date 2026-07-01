@@ -12,6 +12,7 @@ model cites by a number that always lines up with the card).
 """
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -143,6 +144,8 @@ async def _run(
     max_rounds: int,
     citation_sink: list[dict] | None = None,
     annotate_citations: bool = True,
+    deliverable_only: bool = False,
+    on_reset: Callable[[], None] | None = None,
 ):
     messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
     profile = ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=max_rounds)
@@ -155,6 +158,8 @@ async def _run(
         profile=profile,
         citation_sink=citation_sink,
         annotate_citations=annotate_citations,
+        deliverable_only=deliverable_only,
+        on_reset=on_reset,
     )
     return result, messages
 
@@ -373,6 +378,164 @@ async def test_worker_path_collects_citations_without_annotating():
     tool_msg = next(m for m in messages if m.role == "tool")
     assert tool_msg.content == "result"
     assert "[来源编号]" not in (tool_msg.content or "")
+
+
+# --- 交付正文只留最终交付、旁白入 journal (Fork-B: deliverable_only) --------------
+#
+# Every real run passes deliverable_only=True: prose written BEFORE a non-terminal tool
+# call is process narration (a lead-in, or an acknowledgement of an injected [系统提示]
+# steer) and is rolled back off the RETURNED content so the persisted product / next-turn
+# history / CEO synthesis carry only the final deliverable. It is always journaled per
+# round (旁白入 journal). Display discipline splits by channel架构:
+#   * CEO captain (on_reset=None): narration STAYS in the separate process timeline
+#     (透明可见); only messages.content (旁路 conformance) trims — no reset.
+#   * worker/debater/revision (on_reset→run_output_reset, card replays from message_final,
+#     a single display+data channel): the rollback ALSO emits run_output_reset so
+#     直播==重载==deliverable (conformance invariant).
+
+
+async def test_deliverable_only_drops_pre_tool_narration():
+    # round0 写旁白 + 调非终止工具 → round1 给最终答案：交付正文只留最终答案。
+    provider = _ScriptedProvider(
+        [
+            [_content_chunk("我先查一下资料。"), _tool_chunk("search", '{"q": "x"}')],
+            [_content_chunk("最终结论：一二三。")],
+        ]
+    )
+    (content, *_), _messages = await _run(
+        provider, _StubTool(), max_rounds=20, deliverable_only=True
+    )
+    assert content == "最终结论：一二三。"
+    assert "我先查一下" not in content
+
+
+async def test_default_keeps_pre_tool_narration():
+    # 默认 / worker 路径（deliverable_only=False）逐字不变：旁白仍并入返回正文，
+    # 保证 message_final 的重放合成（reload → run_output_delta）与直播不失真。
+    provider = _ScriptedProvider(
+        [
+            [_content_chunk("我先查一下资料。"), _tool_chunk("search", '{"q": "x"}')],
+            [_content_chunk("最终结论：一二三。")],
+        ]
+    )
+    (content, *_), _messages = await _run(provider, _StubTool(), max_rounds=20)
+    assert "我先查一下资料。" in content
+    assert "最终结论：一二三。" in content
+
+
+async def test_deliverable_only_keeps_terminal_checkpoint_content():
+    # 终止工具（ask_user / handoff / suspend）之前的正文是该边界的交付（如提问前的说明），
+    # 即便 deliverable_only 也要保留——只回退「非终止工具轮」的前置旁白。
+    provider = _ScriptedProvider(
+        [[_content_chunk("我来帮你，先确认一点："), _tool_chunk("assemble", "{}")]]
+    )
+    (content, *_), _messages = await _run(
+        provider,
+        _StubTool(name="assemble", terminal=True),
+        max_rounds=20,
+        deliverable_only=True,
+    )
+    assert "我来帮你，先确认一点：" in content  # 前置说明保留
+    assert "streamed answer" in content  # terminal 的 final_text 追加在其后
+
+
+async def test_deliverable_only_drops_steer_acknowledgement_after_rework():
+    # 真实事故复现：finish_guard 以 role=user 注入纠错 → 模型回「谢谢指正，我重新整理」
+    # 后接着调工具。那句寒暄是「非终止工具轮」的前置旁白，deliverable_only 下必须回退，
+    # 不得进入 message.content；最终只留修正后的答案。（Fork-A 让模型少说这句；Fork-B 是
+    # 结构兜底：即便说了，也不落进交付正文。）
+    provider = _ScriptedProvider(
+        [
+            [_content_chunk("我先查一下。"), _tool_chunk("search", '{"q": "a"}', call_id="c0")],
+            [_content_chunk("结论见 [1]。")],  # 0 来源 → 越界角标 → finish_guard 回炉
+            [
+                _content_chunk("谢谢指正，我重新整理。"),
+                _tool_chunk("search", '{"q": "b"}', call_id="c1"),
+            ],
+            [_content_chunk("修正后的最终结论，无来源角标。")],
+        ]
+    )
+    (content, *_), messages = await _run(
+        provider, _StubTool(), max_rounds=20, citation_sink=[], deliverable_only=True
+    )
+    assert content == "修正后的最终结论，无来源角标。"
+    assert "谢谢指正" not in content
+    assert "我先查一下" not in content
+    # 证明确实走了回炉路径（注入过一条 finish_guard 纠错 steer）。
+    steers = [m for m in messages if m.role == "user" and m.content and "核验未通过" in m.content]
+    assert len(steers) == 1
+
+
+async def test_worker_deliverable_only_resets_card_on_narration_rollback():
+    # worker 路径（on_reset→run_output_reset，卡片=数据同一通道）：写旁白 + 调非终止工具 →
+    # 回退交付正文时【必须】发一次 reset 清掉卡片已流式草稿，使 直播==重载(合成自 message_final)。
+    resets: list[bool] = []
+    provider = _ScriptedProvider(
+        [
+            [_content_chunk("我先查一下资料。"), _tool_chunk("search", '{"q": "x"}')],
+            [_content_chunk("最终结论：一二三。")],
+        ]
+    )
+    (content, *_), _messages = await _run(
+        provider,
+        _StubTool(),
+        max_rounds=20,
+        deliverable_only=True,
+        on_reset=lambda: resets.append(True),
+    )
+    assert content == "最终结论：一二三。"
+    assert "我先查一下" not in content
+    assert len(resets) == 1  # 恰好清一次卡片（那一轮旁白）
+
+
+async def test_captain_deliverable_only_keeps_timeline_no_reset():
+    # CEO 路径（on_reset=None，正文与过程时间线是两条通道）：同样回退交付正文，但【不】发 reset
+    # ——旁白仍以 content_delta 流在过程时间线里透明可见，只有持久化正文被裁。与 worker 对偶互补。
+    provider = _ScriptedProvider(
+        [
+            [_content_chunk("我先查一下资料。"), _tool_chunk("search", '{"q": "x"}')],
+            [_content_chunk("最终结论：一二三。")],
+        ]
+    )
+    sink = _RecordingSink()
+    content, _r, _u, _rounds = await react_loop(
+        messages=[LLMMessage(role="user", content="go")],
+        llm=provider,
+        tools=_registry(_StubTool()),
+        sink=sink,
+        tool_context=_context(),
+        profile=ModelProfile(model="m", thinking=False, reasoning_effort=None, max_rounds=20),
+        deliverable_only=True,
+    )
+    assert content == "最终结论：一二三。"
+    # 关键：CEO 的旁白回退【不】发 content_reset（旁白留在时间线；仅数据通道 messages.content 被裁）。
+    assert [e for e in sink.emitted if e.type == EventType.CONTENT_RESET] == []
+    # 旁白确实以 content_delta 直播过（时间线可见）。
+    assert any(
+        e.type == EventType.CONTENT_DELTA and "我先查一下" in (e.payload.get("delta") or "")
+        for e in sink.emitted
+    )
+
+
+async def test_worker_deliverable_only_no_reset_when_no_pre_tool_content():
+    # worker 只在末轮给产出、工具轮无正文（既有向量的常态）→ 无旁白可回退 → 不发 reset，
+    # 逐字等价今日行为（保证既有 multi_agent 向量不被这次改动改动）。
+    resets: list[bool] = []
+    provider = _ScriptedProvider(
+        [
+            [_tool_chunk("search", '{"q": "x"}')],  # 工具轮无正文
+            [_content_chunk("成稿")],
+        ]
+    )
+    (content, *_), _messages = await _run(
+        provider,
+        _StubTool(),
+        max_rounds=20,
+        deliverable_only=True,
+        on_reset=lambda: resets.append(True),
+    )
+    assert content == "成稿"
+    assert resets == []  # 没有旁白 → 不清卡片
 
 
 # --- usage_sink: partial usage survives a mid-loop raise (B-deep 失败计费) ----

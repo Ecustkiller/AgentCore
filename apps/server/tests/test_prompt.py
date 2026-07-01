@@ -83,6 +83,26 @@ def test_untrusted_content_guard_frames_external_and_cross_agent_text():
     assert "<untrusted_content>" in ceo and "队友便签" in ceo
 
 
+def test_system_feedback_block_frames_engine_steers_as_non_user():
+    # 回合中引擎自动注入的 [系统提示]（交付前核验 / 熔断 / 进度复盘 / 循环提醒）以 role=user 进窗口，
+    # 模型易误当用户纠错、回一句「谢谢指正，我重新整理」，那句寒暄再随正常旁白通道漏进可见交付
+    # （真实事故）。共享 base 的 <system_feedback> 把这类注入定性为「系统自动机制、非用户发言」并禁止
+    # 致谢/复述/寒暄——放共享 base 所以 CEO 与每个 worker 都受约束。Pin 住块、非用户定性、以及点名要
+    # 避免的原话，防重构悄悄丢掉。
+    base = assemble_system_prompt()
+    assert "<system_feedback>" in base and "</system_feedback>" in base
+    assert "[系统提示]" in base
+    assert "不是用户" in base  # 定性：非用户发言
+    assert "谢谢指正" in base  # 点名要避免的原话
+    # 复合进 CEO 提示后仍在（worker 走 bare base，天然带上）。
+    ceo = compose_ceo_chat_prompt(
+        base,
+        skill_registry=build_system_skill_registry(),
+        ceo_tool_names={"delegate", "consult_skill"},
+    )
+    assert "<system_feedback>" in ceo
+
+
 def test_tool_safety_moved_out_of_shared_base_and_ceo():
     # 按角色 right-size (反向): the environment-mutation caution (<tool_safety>) used to ride
     # the shared base, so the CEO carried it too — but the coordinator CEO holds only

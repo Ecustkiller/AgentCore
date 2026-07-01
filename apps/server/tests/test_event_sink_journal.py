@@ -18,6 +18,7 @@ from agentcore.runtime.events import (
     run_plan,
     run_started,
     tool_use_end,
+    tool_use_progress,
     tool_use_start,
 )
 
@@ -137,6 +138,56 @@ def test_tool_use_end_carries_capped_display():
     assert len(d["stdout"]) == 6001  # _DISPLAY_STR_CAP (6000) + ellipsis
     assert len(d["results"]) == 50  # _DISPLAY_LIST_CAP
     assert d["exit_code"] == 0
+
+
+def test_tool_use_progress_factory_shape():
+    # 工具执行阶段进度: the factory carries call id + name + phase; run_id only for a worker's call.
+    ev = tool_use_progress("t1", "web_search", "querying")
+    assert ev.type is EventType.TOOL_USE_PROGRESS
+    assert ev.payload == {
+        "tool_call_id": "t1",
+        "tool_name": "web_search",
+        "phase": "querying",
+    }
+    assert "run_id" not in ev.payload
+
+    worker = tool_use_progress("t1", "web_search", "fallback", run_id="run-9")
+    assert worker.payload["run_id"] == "run-9"
+
+
+def test_tool_use_progress_is_not_journalled():
+    # Transport-only liveliness: the phase ping rides the LIVE stream only — the team-graph
+    # journal keeps the start/end pair but never the progress ping (a reloaded turn's tool is
+    # already resolved).
+    sink = EventSink()
+    sink.emit(_plan())
+    sink.emit(run_started("s1", "a1"))
+    sink.emit(tool_use_start("t1", "web_search", {"query": "x"}))
+    sink.emit(tool_use_progress("t1", "web_search", "querying"))
+    sink.emit(tool_use_end("t1", "web_search", success=True, output="ok"))
+
+    journal = sink.execution_journal()
+    assert journal is not None
+    types = [e["type"] for e in journal]
+    assert EventType.TOOL_USE_PROGRESS.value not in types
+    assert EventType.TOOL_USE_START.value in types
+    assert EventType.TOOL_USE_END.value in types
+
+
+def test_tool_use_progress_absent_from_process_timeline():
+    # The single-agent timeline folds start→end into one tool step; the phase ping in between
+    # never appears (transport-only) and leaves the folded step phase-less.
+    sink = EventSink()
+    sink.emit(content_delta("查一下"))
+    sink.emit(tool_use_start("t1", "web_search", {"query": "x"}))
+    sink.emit(tool_use_progress("t1", "web_search", "querying"))
+    sink.emit(tool_use_end("t1", "web_search", success=True, output="ok"))
+
+    timeline = sink.process_timeline()
+    assert timeline is not None
+    tool_step = next(s for s in timeline if s.get("kind") == "tool")
+    assert tool_step["status"] == "success"
+    assert "phase" not in tool_step
 
 
 def test_process_timeline_resolves_tool_display():

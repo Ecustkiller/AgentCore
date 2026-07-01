@@ -7,7 +7,7 @@ projection on the latest messages window) and the live firehose push.
 
 from collections.abc import Sequence
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.db.models import MemoryUpdateRow

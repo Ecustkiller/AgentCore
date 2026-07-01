@@ -25,6 +25,7 @@ const ACTION_FILTERS: { value: string; label: string }[] = [
   { value: "invite.create", label: "生成邀请码" },
   { value: "invite.batch_create", label: "批量生成" },
   { value: "invite.revoke", label: "撤销邀请码" },
+  { value: "conversation.replay", label: "回放对话" },
 ];
 
 function fmtTime(iso: string): string {
@@ -60,6 +61,18 @@ function AuditTarget({ row }: { row: AdminAuditLogLine }) {
     return (
       <Link
         to="/invites"
+        className="font-mono text-xs text-primary underline-offset-2 hover:underline"
+        title={row.target_id}
+      >
+        {label}
+      </Link>
+    );
+  }
+
+  if (row.target_type === "conversation") {
+    return (
+      <Link
+        to={`/replay/${row.target_id}`}
         className="font-mono text-xs text-primary underline-offset-2 hover:underline"
         title={row.target_id}
       >

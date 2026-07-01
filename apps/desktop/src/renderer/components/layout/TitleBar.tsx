@@ -1,5 +1,6 @@
 import { PreviewRecorderButton } from "@/components/layout/PreviewRecorderButton";
 import { WindowControls } from "@/components/layout/WindowControls";
+import { WindowFrameMenu } from "@/components/layout/WindowFrameMenu";
 import { Button, IconButton } from "@/components/ui";
 import { isMac, macTitleBarInsetClass } from "@/lib/platform";
 import { chord } from "@/lib/shortcuts";
@@ -46,6 +47,7 @@ export function TitleBar() {
       <div className="flex items-center [-webkit-app-region:no-drag]">
         {/* Dev-only: record a real turn into the offline preview (#/preview). */}
         {import.meta.env.DEV && <PreviewRecorderButton />}
+        <WindowFrameMenu />
         <Button
           variant="neutral"
           onClick={openSearch}
