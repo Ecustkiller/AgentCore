@@ -83,6 +83,8 @@ pnpm -C apps/desktop exec electron-builder --win --publish always   # mac 改 --
 
 **⚠️ 竞态坑（electron-builder#6676）**：本地**单平台** `--publish always` 会并行创建 release，常只传上 `.blockmap` 而**丢掉 120MB 的 `.exe` / `latest.yml`**。对策二选一：① 先 `gh release create vX.Y.Z --repo Lawofall/AgentCore-releases --draft` 建空 draft 再 `--publish always`；② 构建后直接 `gh release upload vX.Y.Z apps/desktop/release/<ver>/AgentCore-*.exe apps/desktop/release/<ver>/latest.yml --repo Lawofall/AgentCore-releases --clobber`。**传完必用 `gh release view vX.Y.Z --repo Lawofall/AgentCore-releases` 核对资产齐全。**
 
+**开发期例外（单平台转正）**：无真实用户时可仅 win 转正（`gh release edit vX.Y.Z --repo Lawofall/AgentCore-releases --draft=false --latest`）；mac 就绪后 `gh release upload vX.Y.Z …mac… --clobber` 补进**同版本**。站点缺 mac 资产会自动隐藏 mac 按钮、win 自更新不受影响；`FALLBACK_VERSION` 暂留上一含 mac 的版本。正式上线后恢复「Win+Mac 齐全再转正」。
+
 **禁止**依赖 `release-desktop.yml` 的 push 触发。
 
 ## 跨轨道发布（摘要）
