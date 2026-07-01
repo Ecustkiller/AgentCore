@@ -72,12 +72,16 @@ SSH 到生产机 → `git checkout` → `docker buildx build`（默认清华 PyP
 ```bash
 pnpm bump-version desktop patch
 git commit && git push && git tag desktop-vX.Y.Z && git push origin desktop-vX.Y.Z
-# tag 不再触发 GHA — 本地构建：
-pnpm -C apps/desktop build:win          # Windows（本机）
-pnpm -C apps/desktop build:mac            # macOS arm64（须 Apple Silicon Mac）
-# 上传至 Lawofall/AgentCore-releases draft vX.Y.Z（需 RELEASE_GH_TOKEN 环境变量）
-# draft 含 7 资产 → Publish → 更新 website FALLBACK_VERSION → deploy:pages
+# tag 不触发 GHA — 本地分步构建+发布（勿用 build:win/build:mac：它们不带 --publish）：
+pnpm -C apps/desktop bundle:sidecar                      # 内置 CPython（仅当前平台）
+pnpm -C apps/desktop exec electron-vite build
+$env:GH_TOKEN = (gh auth token)                         # gh 登录 Lawofall 且对 releases 仓有写权；RELEASE_GH_TOKEN 未入本地 env
+pnpm -C apps/desktop exec electron-builder --win --publish always   # mac 改 --mac --arm64（须 Apple Silicon）
+# 上传目标 = Lawofall/AgentCore-releases 的 vX.Y.Z draft（win/mac 汇入同一 draft）
+# draft 齐 7 资产（win+mac）→ Publish → 更新 website FALLBACK_VERSION → deploy:pages
 ```
+
+**⚠️ 竞态坑（electron-builder#6676）**：本地**单平台** `--publish always` 会并行创建 release，常只传上 `.blockmap` 而**丢掉 120MB 的 `.exe` / `latest.yml`**。对策二选一：① 先 `gh release create vX.Y.Z --repo Lawofall/AgentCore-releases --draft` 建空 draft 再 `--publish always`；② 构建后直接 `gh release upload vX.Y.Z apps/desktop/release/<ver>/AgentCore-*.exe apps/desktop/release/<ver>/latest.yml --repo Lawofall/AgentCore-releases --clobber`。**传完必用 `gh release view vX.Y.Z --repo Lawofall/AgentCore-releases` 核对资产齐全。**
 
 **禁止**依赖 `release-desktop.yml` 的 push 触发。
 
