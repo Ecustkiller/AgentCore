@@ -95,5 +95,5 @@ pnpm -C apps/desktop build:mac            # macOS arm64（须 Apple Silicon Mac�
 
 - 不重新启用任何 deploy/release workflow 的 **push / tag / schedule 自动部署**
 - `prod-*` / `desktop-v*` tag 仅作发布点标记与漂移检测
-- CI（`ci.yml`）仍走 GHA push/PR；账单挂时发布前本地跑 conformance + pytest
+- **CI（`ci.yml`）实际不跑**：GHA 无配额（push/PR job 0 step 秒失败）；触发保留不动，配额恢复即自动复活。**发布前本地跑全套门禁为唯一验证**（backend ruff+pytest / contracts 漂移 / desktop lint+test+shoot+web 冲烟 / mobile lint+typecheck+conformance / admin typecheck）
 - **新增/改接口先部署后端**；前端 deploy 脚本已内置版本漂移门禁（见 §版本漂移防护），被拦截时先补后端而非直接 `--force`

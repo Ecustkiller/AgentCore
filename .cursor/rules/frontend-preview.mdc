@@ -19,7 +19,7 @@ alwaysApply: false
 ## 纪律
 
 - 改桌面组件/样式/布局 → `pnpm shoot` → 读 `shoot-out/*.png` 自检，形成「改→截→看→迭代」紧回路。
-- **CI frontend job 跑 `pnpm shoot` 作渲染冒烟门禁**：任一场景渲染崩（未捕获报错 / `#/preview` 挂不上）即 CI 红。推送前先自检，省得吃红。
+- **`pnpm shoot` 是渲染冒烟门禁**（`ci.yml` frontend job，但 GHA 无配额、实际不跑）：任一场景渲染崩（未捕获报错 / `#/preview` 挂不上）即红。**发布前本地必跑自检**——CI 不会替你兜。
 - 盲区与补法：内置场景只回放**已录**向量。全新 AI 态想立刻看 → 标题栏「录制」(DEV) 跑一次真实回合，**回合结束自动存**为「录制（本地）」进 `#/preview`（scratch、不入仓）。要长期入库 → `cd apps/server && uv run python -m agentcore.conformance.export` 重导为正式 fixture。
 
 完整机制 / 浏览器打桩 / AuthGate 离线旁路 / 被否决方案（Storybook、手写 mock 态）→ [`前端技术与架构.md §12.3`](/docs/04-前端/前端技术与架构.md)。
