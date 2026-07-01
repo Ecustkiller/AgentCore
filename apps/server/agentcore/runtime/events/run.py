@@ -54,17 +54,30 @@ def run_started(
     parent_run_id: str | None = None,
     kind: str = "agent",
     revision: int = 0,
+    stance: str | None = None,
+    group: str | None = None,
+    round_no: int = 0,
 ) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.RUN_STARTED,
-        payload={
-            "run_id": run_id,
-            "agent_id": agent_id,
-            "parent_run_id": parent_run_id,
-            "kind": kind,
-            "revision": revision,
-        },
-    )
+    """A run began. A 续写 revision (辩手的后续轮) additionally carries its debater
+    identity (``stance``/``group``) + its TRUE ``round`` so every fold projects 第几轮/
+    哪一方 from a single source — round ≠ revision# once a side fails mid-debate, so the
+    round is authoritative, not inferred from the version number. These three ride the
+    payload ONLY when set (mirrors ``run_payload``), so an ordinary run / hot-fix
+    revision keeps its byte-identical shape."""
+    payload: dict[str, Any] = {
+        "run_id": run_id,
+        "agent_id": agent_id,
+        "parent_run_id": parent_run_id,
+        "kind": kind,
+        "revision": revision,
+    }
+    if stance:
+        payload["stance"] = stance
+    if group:
+        payload["group"] = group
+    if round_no:
+        payload["round"] = round_no
+    return SSEEvent(type=EventType.RUN_STARTED, payload=payload)
 
 
 def run_context(run_id: str, agent_id: str, blocks: list[dict[str, Any]]) -> SSEEvent:
@@ -185,31 +198,44 @@ def run_completed(
     model: str = "",
     usage: dict[str, int] | None = None,
     cost: dict[str, Any] | None = None,
+    debrief: dict[str, Any] | None = None,
 ) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.RUN_COMPLETED,
-        payload={
-            "run_id": run_id,
-            "agent_id": agent_id,
-            "output_summary": output_summary,
-            "duration_ms": duration_ms,
-            "role": role,
-            "model": model,
-            "usage": usage
-            if usage is not None
-            else {"input": 0, "output": 0, "reasoning": 0, "cache_hit": 0, "cache_miss": 0},
-            "cost": cost
-            if cost is not None
-            else {"input": 0, "cached": 0, "output": 0, "total": 0, "currency": "USD"},
-        },
-    )
+    payload: dict[str, Any] = {
+        "run_id": run_id,
+        "agent_id": agent_id,
+        "output_summary": output_summary,
+        "duration_ms": duration_ms,
+        "role": role,
+        "model": model,
+        "usage": usage
+        if usage is not None
+        else {"input": 0, "output": 0, "reasoning": 0, "cache_hit": 0, "cache_miss": 0},
+        "cost": cost
+        if cost is not None
+        else {"input": 0, "cached": 0, "output": 0, "total": 0, "currency": "USD"},
+    }
+    # 完工交接简报 (surfacing): the worker's authored 交接简报 — {summary(结论) / key_points /
+    # assumptions / next_steps}, each present only when non-empty — carried VERBATIM so the
+    # run-detail 摘要 becomes the author's own wrap-up, not a machine truncation of raw prose.
+    # Added ONLY when present (a 辩手 / trivial worker / the CEO writes none), so no-debrief
+    # fixtures stay byte-identical and the client folds default it to null.
+    if debrief:
+        payload["debrief"] = debrief
+    return SSEEvent(type=EventType.RUN_COMPLETED, payload=payload)
 
 
-def run_failed(run_id: str, agent_id: str, error: str) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.RUN_FAILED,
-        payload={"run_id": run_id, "agent_id": agent_id, "error": error},
-    )
+def run_failed(
+    run_id: str, agent_id: str, error: str, *, debrief: dict[str, Any] | None = None
+) -> SSEEvent:
+    payload: dict[str, Any] = {"run_id": run_id, "agent_id": agent_id, "error": error}
+    # 完工交接简报 on a FAILED run: a worker that produced a product + authored a 交接简报 but
+    # missed its contract still has a useful wrap-up (结论/关键假设/建议下一步) — carried so the
+    # run-detail shows the author's own conclusion next to the failure. Added ONLY when present
+    # (infra-failure paths and the captain carry none), so no-debrief fixtures stay byte-identical
+    # and the client folds default it to null.
+    if debrief:
+        payload["debrief"] = debrief
+    return SSEEvent(type=EventType.RUN_FAILED, payload=payload)
 
 
 def run_progress(completed: int, total: int) -> SSEEvent:

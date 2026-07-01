@@ -65,7 +65,7 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 
-def _ctx(conversation_id: str = "") -> ToolContext:
+def _ctx(conversation_id: str = "", on_phase=None) -> ToolContext:
     return ToolContext(
         execution_id="e",
         run_id="s",
@@ -73,6 +73,7 @@ def _ctx(conversation_id: str = "") -> ToolContext:
         backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
         conversation_id=conversation_id,
+        on_phase=on_phase,
     )
 
 
@@ -283,6 +284,82 @@ async def test_read_url_emits_citation_snippet_from_description(monkeypatch):
     assert cite["title"] == "深圳天气"
     assert cite["site"] == "weather.example.com"
     assert cite["snippet"] == "今天多云转晴，气温 20-28 度。"
+
+
+async def test_read_url_emits_fetching_then_reading_phases(monkeypatch):
+    # 工具执行阶段进度 (联网前端展示优化): read_url signals 抓取→提取 while its blocking fetch
+    # + parse legs run, so the waiting row is live (正在抓取网页 → 正在提取正文) not a dead spinner.
+    from agentcore.tools.builtin.web import _net as net_mod
+
+    monkeypatch.setattr(net_mod, "_states", {})  # closed circuit → the 抓取 branch, not blocked
+    html = "<html><head><title>T</title></head><body><p>正文</p></body></html>"
+
+    async def _allow(_url: str):
+        return None
+
+    async def _fake_request(_client, _method, url, **_kwargs):
+        return httpx.Response(200, html=html, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _fake_request)
+
+    phases: list[str] = []
+    result = await ReadUrlTool().execute(
+        {"url": "https://x.example.com/a"}, _ctx(on_phase=phases.append)
+    )
+    assert result.success is True
+    assert phases == ["fetching", "reading"]
+
+
+async def test_read_url_circuit_open_emits_blocked_phase(monkeypatch):
+    # 出网熔断是真实的「快速失败」瞬时态（read_url 无令牌桶/信号量，没有真实「排队」）：诚实报
+    # blocked（出网受限·快速失败），随即照常由 ``_safe_request`` 的熔断器快速失败——不虚构 queued。
+    from agentcore.tools.builtin.web import _net as net_mod
+
+    monkeypatch.setattr(net_mod, "_states", {})
+    host = "blocked.example.com"
+    for _ in range(net_mod.WEB_HOST_FAIL_THRESHOLD):
+        net_mod.note_failure(host)
+
+    async def _allow(_url: str):
+        return None
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+
+    phases: list[str] = []
+    result = await ReadUrlTool().execute(
+        {"url": "https://blocked.example.com/a"}, _ctx(on_phase=phases.append)
+    )
+    assert result.success is False  # fast-failed via the per-host egress circuit breaker
+    assert phases == ["blocked"]  # honest block, never a fake fetching/reading/queued
+
+
+async def test_read_url_cache_hit_emits_no_phase(monkeypatch):
+    # A served-from-cache read does no outbound fetch, so it emits no phase (nothing to wait on).
+    html = "<html><head><title>T</title></head><body><p>正文</p></body></html>"
+
+    async def _allow(_url: str):
+        return None
+
+    async def _fake_request(_client, _method, url, **_kwargs):
+        return httpx.Response(200, html=html, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _fake_request)
+
+    tool = ReadUrlTool()
+    # Prime the conversation cache with a first (real) read, then the second is served hot.
+    await tool.execute(
+        {"url": "https://x.example.com/a"}, _ctx(conversation_id="conv-phase-cache")
+    )
+    phases: list[str] = []
+    r2 = await tool.execute(
+        {"url": "https://x.example.com/a"},
+        _ctx(conversation_id="conv-phase-cache", on_phase=phases.append),
+    )
+    assert r2.success is True
+    assert r2.metadata.get("cached") is True
+    assert phases == []
 
 
 async def test_read_url_snippet_falls_back_to_body_when_no_meta(monkeypatch):
@@ -590,7 +667,7 @@ async def test_probe_search_results_reports_ok(monkeypatch):
     # The real-search canary (D5): a query that returns ≥1 result confirms the engine
     # pool actually works, not just that /healthz is 200.
     class _Backend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             return [SearchResult("t", "https://a.com", "s")]
 
     monkeypatch.setattr(search_backend_mod, "_backend", _Backend())
@@ -602,7 +679,7 @@ async def test_probe_search_results_flags_empty(monkeypatch):
     # → real search returns empty. The canary must surface this (ok=False), unlike the
     # reachability probe which would still report healthy.
     class _Backend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             return []
 
     monkeypatch.setattr(search_backend_mod, "_backend", _Backend())
@@ -612,7 +689,7 @@ async def test_probe_search_results_flags_empty(monkeypatch):
 async def test_probe_search_results_never_raises(monkeypatch):
     # Best-effort like the reachability probe: a failing search must never break startup.
     class _Backend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             raise httpx.ConnectError("down")
 
     monkeypatch.setattr(search_backend_mod, "_backend", _Backend())
@@ -704,6 +781,22 @@ async def test_tavily_backend_raises_on_http_error(monkeypatch):
         await backend.search("q")
 
 
+async def test_tavily_backend_emits_querying_phase(monkeypatch):
+    # 工具执行阶段进度 (联网搜索前端展示优化): the leg signals「正在检索」right before its
+    # request flies, so the waiting UI is live instead of a dead spinner.
+    req = httpx.Request("POST", "https://api.tavily.com/search")
+
+    class _Client:
+        async def post(self, *args, **kwargs):
+            return httpx.Response(200, json={"results": []}, request=req)
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _Client())
+    backend = TavilyBackend(api_key="tvly-test", base_url="https://api.tavily.com")
+    phases: list[str] = []
+    await backend.search("q", on_phase=phases.append)
+    assert "querying" in phases
+
+
 class _StubBackend:
     """Minimal SearchBackend: returns canned results or raises a canned error."""
 
@@ -712,8 +805,10 @@ class _StubBackend:
         self._exc = exc
         self.calls = 0
 
-    async def search(self, query, max_results=5):
+    async def search(self, query, max_results=5, on_phase=None):
         self.calls += 1
+        if on_phase:
+            on_phase("querying")
         if self._exc is not None:
             raise self._exc
         return self._results
@@ -747,6 +842,28 @@ async def test_fallback_surfaces_primary_error_when_both_fail():
 
     with pytest.raises(EgressError, match="主熔断信息"):
         await FallbackSearchBackend(primary, fallback).search("q")
+
+
+async def test_fallback_emits_fallback_phase():
+    # 工具执行阶段进度: when the primary goes search-blind, the wrapper signals「改用备用引擎」
+    # so the waiting UI explains the Tavily leg's extra latency (not a stalled spinner).
+    primary = _StubBackend(exc=EgressError("熔断"))
+    fallback = _StubBackend(results=[SearchResult("F", "https://f.com", "fs")])
+    phases: list[str] = []
+    results = await FallbackSearchBackend(primary, fallback).search(
+        "q", on_phase=phases.append
+    )
+    assert [r.url for r in results] == ["https://f.com"]
+    assert "fallback" in phases
+
+
+async def test_success_path_emits_no_fallback_phase():
+    # A healthy primary never signals fallback — the fallback leg (and its phase) stays untouched.
+    primary = _StubBackend(results=[SearchResult("P", "https://p.com", "ps")])
+    fallback = _StubBackend(results=[])
+    phases: list[str] = []
+    await FallbackSearchBackend(primary, fallback).search("q", on_phase=phases.append)
+    assert "fallback" not in phases
 
 
 async def test_fallback_aclose_closes_both_legs():
@@ -949,7 +1066,7 @@ async def test_web_search_caches_within_conversation(monkeypatch):
     calls = {"n": 0}
 
     class _Backend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             calls["n"] += 1
             return [SearchResult("标题", "https://a.com", "摘要")]
 
@@ -971,7 +1088,7 @@ async def test_web_search_skips_cache_without_conversation(monkeypatch):
     calls = {"n": 0}
 
     class _Backend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             calls["n"] += 1
             return [SearchResult("t", "https://a.com", "s")]
 
@@ -992,7 +1109,7 @@ async def test_web_search_empty_result_negatively_cached(monkeypatch):
     calls = {"n": 0}
 
     class _Backend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             calls["n"] += 1
             return []
 
@@ -1018,7 +1135,7 @@ async def test_web_search_empty_result_is_honest(monkeypatch):
     # explicit note + ``empty`` flag so the model doesn't read silence as "this doesn't
     # exist" — a CAPTCHA-suspended engine returns HTTP 200 + zero results all the same.
     class _Backend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             return []
 
     monkeypatch.setattr(search_mod, "get_search_backend", lambda: _Backend())
@@ -1038,7 +1155,7 @@ async def test_web_search_cache_refetches_when_more_results_needed(monkeypatch):
     calls = {"n": 0}
 
     class _Backend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             calls["n"] += 1
             # always return exactly max_results (capped) → "more may exist"
             return [SearchResult(f"t{i}", f"https://a.com/{i}", "s") for i in range(max_results)]
@@ -1094,7 +1211,7 @@ def test_site_of_strips_www_and_lowercases():
 
 async def test_web_search_emits_structured_citations(monkeypatch):
     class _FakeBackend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             return [
                 SearchResult("标题一", "https://www.example.com/a", "摘要一"),
                 SearchResult("标题二", "https://b.cn/p", "摘要二"),
@@ -1119,7 +1236,7 @@ async def test_web_search_emits_structured_display(monkeypatch):
     # 工具结果富渲染: the client renders the hits as cards from ``display`` (not the
     # JSON output), so it carries each hit's title/url/snippet + parsed site.
     class _FakeBackend:
-        async def search(self, query, max_results=5):
+        async def search(self, query, max_results=5, on_phase=None):
             return [
                 SearchResult("标题一", "https://www.example.com/a", "摘要一"),
                 SearchResult("标题二", "https://b.cn/p", "摘要二"),

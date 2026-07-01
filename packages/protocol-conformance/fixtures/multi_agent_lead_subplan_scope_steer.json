@@ -336,6 +336,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "前端整块完成",
+        "debrief": null,
         "durationMs": 3000,
         "error": null,
         "parentRunId": null,
@@ -373,6 +374,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "完成子调研（含 1 条偏离）",
+        "debrief": null,
         "durationMs": 1000,
         "error": null,
         "parentRunId": "L1",
@@ -420,6 +422,7 @@
           "sa"
         ],
         "outputSummary": "完成子撰写（已据偏离校准）",
+        "debrief": null,
         "durationMs": 1200,
         "error": null,
         "parentRunId": "L1",

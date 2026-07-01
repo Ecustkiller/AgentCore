@@ -402,6 +402,64 @@ describe("projectExecution (fold)", () => {
     );
   });
 
+  // FE-003 (run_id 归属): a delegated worker tags its tool calls with `runId`.
+  // Workers share the turn's top-level tool_use stream, so with width>1 a call
+  // must land on ITS run's agent — not whichever run started first. (Before: the
+  // fold dropped runId and attached every call to `runs.find(running)`, so the
+  // first-started worker hogged all concurrent workers' tool rows.)
+  it("attributes a worker tool call by runId under concurrency (width>1)", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1", 1),
+      started("agent-2", "run-2", 2),
+      // agent-1 started first, yet each call is tagged for a specific run.
+      {
+        t: 3,
+        kind: "tool_use_start",
+        toolCallId: "tc-2",
+        toolName: "web_search",
+        arguments: { query: "Vue" },
+        runId: "run-2",
+      },
+      {
+        t: 4,
+        kind: "tool_use_start",
+        toolCallId: "tc-1",
+        toolName: "grep",
+        arguments: { pattern: "React" },
+        runId: "run-1",
+      },
+    ];
+    const exec = projectExecution(plan, frames, "running");
+    const a1 = exec.agents.find((a) => a.id === "agent-1");
+    const a2 = exec.agents.find((a) => a.id === "agent-2");
+    // Each call lands on its own run's agent — not both on the first-started one.
+    expect(a1?.toolCalls.map((t) => t.toolName)).toEqual(["grep"]);
+    expect(a2?.toolCalls.map((t) => t.toolName)).toEqual(["web_search"]);
+  });
+
+  // The captain's own calls carry no runId ("" on the wire) — they keep the
+  // legacy running-run attribution, so a tagless call still lands (no regression).
+  it("falls back to the running run for an untagged (captain) tool call", () => {
+    const frames: RunFrame[] = [
+      started("agent-2", "run-2"),
+      {
+        t: 2,
+        kind: "tool_use_start",
+        toolCallId: "tc-x",
+        toolName: "web_search",
+        arguments: {},
+        runId: "",
+      },
+    ];
+    const exec = projectExecution(plan, frames, "running");
+    expect(exec.agents.find((a) => a.id === "agent-2")?.toolCalls).toHaveLength(
+      1,
+    );
+    expect(exec.agents.find((a) => a.id === "agent-1")?.toolCalls).toHaveLength(
+      0,
+    );
+  });
+
   it("is a pure prefix fold — replaying an earlier playhead drops later facts", () => {
     const frames: RunFrame[] = [
       started("agent-1", "run-1"),
@@ -1829,6 +1887,113 @@ describe("定向唤回 版本链 (乙 热修 P4)", () => {
     // full stream → the revision is present.
     const after = projectExecution(plan, frames, "completed");
     expect(hasRevisions(after)).toBe(true);
+  });
+});
+
+// 乙 wire 携 round/stance (单一轮次投影): a debate 续写 (辩手后续轮) carries its debater
+// identity (stance/group) + its TRUE round on the run_started, so the fold projects them onto
+// the synthesized 修订 node. That root-fixes the live 2方 view dropping rounds≥2 (debateGroups
+// only buckets stance-tagged runs) and gives every view ONE `round` field to read. A legacy
+// revision frame (no wire fields) falls back to inheriting the original's stance/group +
+// revision-as-round. Mirrors the backend oracle + mobile fold (conformance pins them equal).
+describe("乙 wire 携 round/stance (单一轮次投影)", () => {
+  const debatePlan2: ExecutionPlan = {
+    id: "exec-w",
+    planType: "multi_agent",
+    taskSummary: "正反辩论",
+    agents: [
+      { id: "a-pro", role: "支持方", modelPreference: "strong" },
+      { id: "a-con", role: "反对方", modelPreference: "strong" },
+    ],
+    runs: [
+      {
+        id: "pro1",
+        agentId: "a-pro",
+        task: "支持",
+        dependsOn: [],
+        stance: "pro",
+        group: "debate:debate",
+        round: 1,
+      },
+      {
+        id: "con1",
+        agentId: "a-con",
+        task: "反对",
+        dependsOn: [],
+        stance: "con",
+        group: "debate:debate",
+        round: 1,
+      },
+    ],
+  };
+
+  // A round-N debater 续写 frame carrying its debater identity + TRUE round on the wire
+  // (parent is the ORIGINAL round-1 run — the star every revision points back at).
+  const roundFrame = (
+    runId: string,
+    parentRunId: string,
+    stance: "pro" | "con",
+    roundNo: number,
+    t: number,
+  ): RunFrame => ({
+    ...revised(runId, parentRunId, roundNo, t),
+    stance,
+    group: "debate:debate",
+    round: roundNo,
+  });
+
+  it("projects wire stance/group/round onto the synthesized 修订 node", () => {
+    const frames: RunFrame[] = [
+      started("a-pro", "pro1"),
+      started("a-con", "con1"),
+      roundFrame("pro2", "pro1", "pro", 2, 3),
+      roundFrame("con2", "con1", "con", 2, 4),
+    ];
+    const exec = projectExecution(debatePlan2, frames, "running");
+    expect(exec.runs.find((r) => r.id === "pro2")).toMatchObject({
+      stance: "pro",
+      group: "debate:debate",
+      round: 2,
+      revision: 2,
+      revisionOf: "pro1",
+    });
+  });
+
+  it("debateGroups now buckets rounds≥2 (root-fixes the live 2方 dropped-speech bug)", () => {
+    const frames: RunFrame[] = [
+      started("a-pro", "pro1"),
+      started("a-con", "con1"),
+      roundFrame("pro2", "pro1", "pro", 2, 3),
+      roundFrame("con2", "con1", "con", 2, 4),
+      roundFrame("pro3", "pro1", "pro", 3, 5),
+      roundFrame("con3", "con1", "con", 3, 6),
+    ];
+    const groups = debateGroups(
+      projectExecution(debatePlan2, frames, "running"),
+    );
+    expect(groups).toHaveLength(1);
+    // All three rounds present — before the fix, rounds 2/3 were dropped (revisions
+    // had no stance, so debateGroups never saw them → only round 1 rendered).
+    expect(groups[0].rounds.map((r) => r.round)).toEqual([1, 2, 3]);
+    expect(groups[0].rounds[1].pro.map((r) => r.id)).toEqual(["pro2"]);
+    expect(groups[0].rounds[1].con.map((r) => r.id)).toEqual(["con2"]);
+    expect(groups[0].rounds[2].pro.map((r) => r.id)).toEqual(["pro3"]);
+  });
+
+  it("legacy revision frame (no wire fields) inherits stance/group + round=version", () => {
+    const frames: RunFrame[] = [
+      started("a-pro", "pro1"),
+      // No stance/group/round on the wire (a pre-乙 journal) — the fold inherits the
+      // original's stance/group and falls back to the version number for the round.
+      revised("pro2", "pro1", 2, 3),
+    ];
+    const exec = projectExecution(debatePlan2, frames, "running");
+    expect(exec.runs.find((r) => r.id === "pro2")).toMatchObject({
+      stance: "pro",
+      group: "debate:debate",
+      round: 2,
+      revision: 2,
+    });
   });
 });
 

@@ -136,7 +136,7 @@ class ToolContext:
     # RunState recording) so the tool stays off the event vocabulary (引擎纯化).
     escalation: EscalationChannel | None = None
     # AI 协作白板 (AI协作白板.md §六 M2): the per-run channel that lets ``board_ops`` apply
-    # structured ops to the user's open Excalidraw canvas via the bound desktop. Set per
+    # structured ops to the user's open whiteboard canvas via the bound desktop. Set per
     # run by the assembler ONLY when the conversation is bound to a board (a 白板会话);
     # ``None`` for every ordinary chat / worker / test — then ``board_ops`` returns a clean
     # "not on a board" error instead of touching anything. The channel owns the mechanism
@@ -156,6 +156,15 @@ class ToolContext:
     # shared by every derived run via ``replace`` (a plain list, shared by reference); only
     # ``board_read`` writes it, only in a 白板会话. ``None`` everywhere else (tests / no board).
     cost_sink: list[RunCost] | None = None
+    # 工具执行阶段进度 (联网搜索前端展示优化): a narrow callback a long-running tool fires to report
+    # a coarse EXECUTION phase (web_search → "querying" 正在检索 / "queued" 排队中 / "fallback"
+    # 改用备用引擎) so the waiting UI shows a live, honest state instead of a dead spinner. Called
+    # with the phase token ONLY; the executor (``execute_tools``) owns event shape — it closes over
+    # this call's tool_call_id / tool_name / run_id and emits the
+    # transport-only ``tool_use_progress``
+    # (引擎纯化, exactly like ``on_note`` / ``on_escalate``). ``None`` for call sites without a live
+    # sink (tests / evals) — the tool simply skips the ping.
+    on_phase: Callable[[str], None] | None = None
 
 
 @dataclass

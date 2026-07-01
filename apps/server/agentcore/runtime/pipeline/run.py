@@ -122,7 +122,7 @@ async def run_chat_pipeline(
 
     ``board_id`` marks this turn as a 白板会话 (AI协作白板.md §六 M2): when set, the CEO
     gains the ``board_ops`` tool + a :class:`BoardChannel` bound to that board, so it can
-    apply structured ops to the user's open Excalidraw canvas. ``None`` for every ordinary
+    apply structured ops to the user's open whiteboard canvas. ``None`` for every ordinary
     chat — then ``board_ops`` is neither wired nor reachable.
 
     ``profile_set`` carries the turn's resolved 质量档 (经济/高质量/custom): which

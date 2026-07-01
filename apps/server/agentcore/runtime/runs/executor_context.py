@@ -21,7 +21,6 @@ from agentcore.runtime.runs.fidelity import allocate, pointer_body, truncate_hea
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.serialize import split_debrief
 from agentcore.runtime.runs.types import ContextBlock, RunContract, RunSpec, RunState
-from agentcore.runtime.workspace import summarize
 
 logger = get_logger(__name__)
 
@@ -326,7 +325,7 @@ def _dep_context_blocks(
       ``file_read``. The product is already on disk and reachable, so re-shipping it
       whole through the prompt wastes tokens and risks tail-trimming (递指针不递全文,
       Agent协作模式.md). A pointer does NOT draw on the pass_through budget.
-    - ``summarize`` deps (no files) get a tight head digest (``DEP_SUMMARY_CHARS``),
+    - ``summarize`` deps (no files) get a tight head+tail digest (``DEP_SUMMARY_CHARS``),
       the large-fan-in token-saving case; no budget draw either.
     - ``pass_through`` PROSE deps (no file to point at — the default, for 分析/检索→写作
       链路 where 金额 / 法条编号 must survive) SHARE one per-worker total budget
@@ -375,7 +374,9 @@ def _dep_context_blocks(
                 body = author_summary
                 truncated = len(content) > len(author_summary)
             else:
-                body = summarize(content, limit=DEP_SUMMARY_CHARS)
+                # No authored 结论 → HEAD+TAIL digest (not head-only): keep the deliverable's
+                # opening AND its tail (结论/取舍 often land last) instead of dropping the tail.
+                body = truncate_head_tail(content, DEP_SUMMARY_CHARS)
                 truncated = len(content) > DEP_SUMMARY_CHARS
         else:
             allowance = next(allowances)

@@ -97,10 +97,10 @@ def _patch_persistence(
         def __init__(self, _session):
             pass
 
-        async def get_by_id(self, _conversation_id):
+        async def get_by_id_unscoped(self, _conversation_id):
             return SimpleNamespace(title=existing_title)
 
-        async def update_title(self, conversation_id, title):
+        async def update_title_unscoped(self, conversation_id, title):
             events.append(("title", conversation_id, title))
 
     async def _fake_journal(_session, **kw):

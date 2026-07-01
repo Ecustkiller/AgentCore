@@ -43,11 +43,26 @@ class FolderRepository:
         await self._session.refresh(folder)
         return folder
 
-    async def get_by_id(self, folder_id: str, *, user_id: str | None = None) -> Folder | None:
-        conditions = [Folder.id == folder_id, Folder.deleted_at.is_(None)]
-        if user_id is not None:
-            conditions.append(Folder.user_id == user_id)
-        result = await self._session.execute(select(Folder).where(*conditions))
+    async def get_by_id(self, folder_id: str, *, user_id: str) -> Folder | None:
+        """Owner-scoped fetch (non-owner / unknown id → None → route 404). ``user_id``
+        mandatory so scoping is the structural default (SEC-002); trusted internal callers
+        use :meth:`get_by_id_unscoped`."""
+        result = await self._session.execute(
+            select(Folder).where(
+                Folder.id == folder_id,
+                Folder.deleted_at.is_(None),
+                Folder.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_id_unscoped(self, folder_id: str) -> Folder | None:
+        """Cross-owner fetch for trusted internal callers resolving a conversation's own
+        folder (already authorized via that conversation). The explicit name keeps the
+        unscoped surface greppable (SEC-002)."""
+        result = await self._session.execute(
+            select(Folder).where(Folder.id == folder_id, Folder.deleted_at.is_(None))
+        )
         return result.scalar_one_or_none()
 
     async def list_by_user(self, user_id: str) -> Sequence[Folder]:

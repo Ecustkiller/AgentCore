@@ -46,7 +46,9 @@ import type {
   RunToolProgressPayload,
   SSEEvent,
   TeamNotePostedPayload,
+  ToolPhase,
   ToolUseEndPayload,
+  ToolUseProgressPayload,
   ToolUseStartPayload,
 } from "@agentcore/contract-types";
 import type {
@@ -155,6 +157,7 @@ function runFromPlan(s: RunPlanPayload["runs"][number]): ProjectedRun {
     status: "pending",
     dependsOn: s.depends_on ?? [],
     outputSummary: null,
+    debrief: null,
     durationMs: null,
     error: null,
     parentRunId: s.parent_run_id ?? null,
@@ -338,6 +341,14 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
               kind: p.kind,
               revisionOf: p.parent_run_id,
               revision,
+              // 乙 wire 携 round/stance (单一轮次投影): a debate 续写 keeps its debater
+              // identity (stance/group) + TRUE round so every fold reads 第几轮/哪一方 from
+              // one field. Legacy journals fall back to the original's stance/group +
+              // revision-as-round. Mirrors the desktop fold + backend oracle (conformance
+              // pins them equal).
+              stance: p.stance ?? original.stance,
+              group: p.group ?? original.group,
+              round: p.round || revision,
             };
             runs.push(run);
           }
@@ -405,6 +416,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         if (run) {
           run.status = "completed";
           run.outputSummary = p.output_summary;
+          run.debrief = p.debrief ?? null;
           run.durationMs = p.duration_ms;
           run.role = p.role;
           run.model = p.model;
@@ -425,6 +437,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         if (run) {
           run.status = "failed";
           run.error = p.error;
+          run.debrief = p.debrief ?? null;
         }
         const ag = agentById(p.agent_id);
         if (ag) {
@@ -557,7 +570,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         if (p.supersedes) {
           const target = teamNotes.find((n) => n.noteId === p.supersedes);
           if (target) {
-            target.status = p.supersede_mode === "void" ? "voided" : "superseded";
+            target.status =
+              p.supersede_mode === "void" ? "voided" : "superseded";
           }
         }
         break;
@@ -674,6 +688,12 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "board_op_required":
       case "board_read_required":
       case "tool_progress":
+      // 工具执行阶段进度 (联网搜索前端展示优化): a running tool's coarse phase (web_search →
+      // querying / queued / fallback). Transport-only liveliness — NEVER journaled and excluded
+      // from the normalized judge state (so the golden stays phase-less), exactly like
+      // `tool_progress`. The LIVE waiting UI reads it off the raw events via {@link
+      // extractToolPhases}, NOT this fold → no-op here (enumerated to keep assertNever exhaustive).
+      case "tool_use_progress":
       // 调度埋点量化 (深层诊断指标): a desktop-only 诊断模式 surface (run detail's 调度 block) —
       // mobile has no diagnostic panel, so it folds to nothing here and stays out of the
       // conformance ProjectedTurn (desktop folds it onto Execution.batches instead).
@@ -741,6 +761,32 @@ export function extractFollowups(events: SSEEvent[]): string[] {
     }
   }
   return [];
+}
+
+/**
+ * 工具执行阶段进度 (联网搜索前端展示优化): the LATEST coarse phase per still-running tool call,
+ * pulled straight off a live turn's raw SSE events — a transport-only sibling of {@link fold}
+ * (twin of {@link extractFollowups} / {@link extractAsks}), deliberately kept OUT of the
+ * normalized {@link ProjectedTurn} (so the conformance golden stays phase-less, exactly like the
+ * `tool_use_progress` no-op inside the fold). Keyed by `tool_call_id`; an entry is CLEARED on the
+ * matching `tool_use_end` so a finished tool shows no stale phase. web_search fires querying /
+ * queued / fallback while its blocking request is in flight.
+ *
+ * Only a LIVE turn carries these events (they are never journaled), so history replay yields an
+ * empty map and tool rows fall back to their plain running/done status — the same live-only
+ * semantics as the followups / asks siblings.
+ */
+export function extractToolPhases(events: SSEEvent[]): Map<string, ToolPhase> {
+  const phases = new Map<string, ToolPhase>();
+  for (const ev of events) {
+    if (ev.type === "tool_use_progress") {
+      const p = ev.payload as ToolUseProgressPayload;
+      phases.set(p.tool_call_id, p.phase as ToolPhase);
+    } else if (ev.type === "tool_use_end") {
+      phases.delete((ev.payload as ToolUseEndPayload).tool_call_id);
+    }
+  }
+  return phases;
 }
 
 /** 非阻塞提问 (ask_user blocking=false) 的卡片内容：question + 可选 选项/默认/风格。 The

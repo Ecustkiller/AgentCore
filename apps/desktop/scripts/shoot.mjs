@@ -22,7 +22,13 @@
 // SHOOT_SCALE (2), SHOOT_THEME ("light" | "dark", default light),
 // SHOOT_VIEW ("chat" default | "canvas" → appends &view=canvas to shoot the canvas
 // layout + 指挥台 region instead of the chat surface; canvas async layout (elk) wants
-// a longer SHOOT_SETTLE_MS, e.g. 1500).
+// a longer SHOOT_SETTLE_MS, e.g. 1500),
+// SHOOT_ZOOM ("" default | e.g. "compare" [旧别名 "revisions"] → appends &view=canvas&zoom=<v>
+// to deep-link the canvas 放大态 view [对比 / 群聊 / …] otherwise only reachable by clicking;
+// pair with a longer SHOOT_SETTLE_MS, e.g. 1800, and a scenario filter like `revision`),
+// SHOOT_CLICK ("" default | button accessible-name → after settle, click the first
+// matching button then re-settle before the shot, to capture an interaction-gated state
+// like「对比两版」/「对比发言」; a scenario without the button is left as-is, not failed).
 
 import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -47,7 +53,9 @@ const VIEWPORT = {
 const SCALE = Number(process.env.SHOOT_SCALE ?? 2);
 const THEME = process.env.SHOOT_THEME === "dark" ? "dark" : "light";
 const FRAMES = Math.max(0, Number(process.env.SHOOT_FRAMES ?? 0) | 0);
-const VIEW = process.env.SHOOT_VIEW === "canvas" ? "canvas" : "chat";
+const ZOOM = process.env.SHOOT_ZOOM ?? "";
+const CLICK = process.env.SHOOT_CLICK ?? "";
+const VIEW = process.env.SHOOT_VIEW === "canvas" || ZOOM ? "canvas" : "chat";
 const filter = (process.argv[2] ?? "").toLowerCase();
 
 /** Up to `frames` evenly-spaced event counts in (0, total) for mid-stream frames. */
@@ -173,10 +181,11 @@ async function main() {
       const url = new URL("index.web.html", base);
       url.searchParams.set("shoot", String(i));
       const viewSuffix = VIEW === "canvas" ? "&view=canvas" : "";
+      const zoomSuffix = ZOOM ? `&zoom=${encodeURIComponent(ZOOM)}` : "";
       url.hash =
         shot.k === null
-          ? `/preview?s=${encodeURIComponent(shot.name)}${viewSuffix}`
-          : `/preview?s=${encodeURIComponent(shot.name)}&k=${shot.k}${viewSuffix}`;
+          ? `/preview?s=${encodeURIComponent(shot.name)}${viewSuffix}${zoomSuffix}`
+          : `/preview?s=${encodeURIComponent(shot.name)}&k=${shot.k}${viewSuffix}${zoomSuffix}`;
       await page.goto(url.href, { waitUntil: "load", timeout: 30_000 });
       const frameSel = shot.k === null ? "full" : String(shot.k);
       await page.waitForSelector(
@@ -186,6 +195,16 @@ async function main() {
       await page.evaluate(() => document.fonts?.ready).catch(() => {});
       // Let async renderers (elk team-graph layout, mermaid, katex) settle.
       await page.waitForTimeout(SETTLE_MS);
+      // Optional interaction-gated state: click a button by accessible name, then
+      // re-settle. Absent target is fine (not every scenario has it).
+      if (CLICK) {
+        await page
+          .getByRole("button", { name: CLICK })
+          .first()
+          .click({ timeout: 3000 })
+          .then(() => page.waitForTimeout(500))
+          .catch(() => {});
+      }
     } catch (err) {
       failure = String(err?.message ?? err);
     }

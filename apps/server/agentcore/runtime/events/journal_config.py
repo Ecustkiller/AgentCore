@@ -14,8 +14,8 @@ _JOURNAL_EVENT_TYPES = frozenset(
         EventType.RUN_PROGRESS,
         # 调度埋点量化 (深层诊断指标, 前端UX设计.md §十): journaled so the run-detail 诊断信息
         # replays the scheduler snapshot on reload. Like PLAN_REVISED it only fires inside a
-        # delegate turn (alongside RUN_PLAN, a surface type), so it needs no _JOURNAL_SURFACE_TYPES
-        # entry to gate journal persistence.
+        # delegate/debate turn (both fan out via WaveScheduler alongside RUN_PLAN, a surface
+        # type), so it needs no _JOURNAL_SURFACE_TYPES entry to gate journal persistence.
         EventType.BATCH_METRICS,
         EventType.DEBATE_RESULT,
         EventType.TOOL_USE_START,
@@ -53,6 +53,10 @@ _PROCESS_RESULT_CAP = 8000
 _HISTORY_SKIP_TYPES = frozenset(
     {
         EventType.TOOL_PROGRESS,
+        # 工具执行阶段进度 (transport-only liveliness): like TOOL_PROGRESS, a running-tool
+        # phase ping is live-stream only — not replayed on reload (the tool is already done)
+        # and never journaled / accumulated into the process timeline.
+        EventType.TOOL_USE_PROGRESS,
         EventType.RUN_TOOL_PROGRESS,
         EventType.MESSAGE_END,
         EventType.ERROR,

@@ -26,7 +26,7 @@ async def _recorded_turn_response(
                 message_id, conversation_id=conversation_id
             )
             assistant_id = assistant.id if assistant else None
-        conv = await ConversationRepository(session).get_by_id(conversation_id)
+        conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
     return {
         "user_message_id": user_message_id,
         "assistant_message_id": assistant_id,
@@ -116,7 +116,7 @@ async def record_local_turn(
                 )
 
         async with async_session_factory() as session:
-            conv = await ConversationRepository(session).get_by_id(conversation_id)
+            conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
             needs_title = bool(conv and not conv.title)
 
         title: str | None = None
@@ -133,7 +133,9 @@ async def record_local_turn(
                 await provider.close()
             if title:
                 async with async_session_factory() as session:
-                    await ConversationRepository(session).update_title(conversation_id, title)
+                    await ConversationRepository(session).update_title_unscoped(
+                        conversation_id, title
+                    )
 
         schedule_consolidation(conversation_id)
 

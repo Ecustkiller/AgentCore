@@ -176,7 +176,13 @@ def test_format_for_ceo_digests_file_producer_not_full_content():
     }
     out = t._format_for_ceo(plan, results)
     assert "`report.md`" in out
-    assert "结尾独特标记XYZ" not in out
+    # HEAD+TAIL digest (not head-only): the product is still digested — its 5000-char
+    # middle is elided, so it is NOT the full content — but BOTH ends now survive, so the
+    # 收尾 / 关键取舍 at the tail reach the CEO instead of being silently dropped.
+    assert "开头摘要" in out
+    assert "结尾独特标记XYZ" in out
+    assert "中间省略" in out
+    assert ("废" * 5_000) not in out
     assert len(out) < len(long_body)
 
 

@@ -9,7 +9,9 @@
 
 import type {
   ProcessStep,
+  ToolPhase,
   ToolUseEndPayload,
+  ToolUseProgressPayload,
   ToolUseStartPayload,
 } from "@/types/events";
 
@@ -123,6 +125,42 @@ export function resolveToolStep(
       const resolved = { ...s, result: payload.result, status: payload.status };
       if (payload.display != null) resolved.display = payload.display;
       return resolved;
+    }
+    return s;
+  });
+  return changed ? steps : process;
+}
+
+/**
+ * 工具执行阶段进度 (联网搜索前端展示优化): stamp a RUNNING tool step's latest coarse `phase`
+ * from a `tool_use_progress` event (web_search → queued / querying / fallback), driving the
+ * waiting-state text so the user sees a live, honest state instead of a bare spinner.
+ *
+ * LIVE-ONLY: this event never rides a journal / conformance vector, so it is folded ONLY on the
+ * production stream (conformanceFold never calls this) — the golden's tool steps stay phase-less
+ * and the optional `phase` field keeps every ProjectedTurn byte-identical. Writes ONLY while the
+ * step is still `running` (a late phase racing after `tool_use_end` is ignored) and only for the
+ * captain's OWN calls (a worker / orchestration call never entered this timeline — see
+ * {@link appendToolStep}). Returns the same reference when nothing matched so callers no-op.
+ */
+export function resolveToolStepPhase(
+  process: ProcessStep[] | undefined,
+  payload: ToolUseProgressPayload,
+): ProcessStep[] | undefined {
+  if (payload.run_id || isOrchestrationTool(payload.tool_name)) return process;
+  if (!process) return process;
+  let changed = false;
+  const steps = process.map((s) => {
+    if (
+      !changed &&
+      s.kind === "tool" &&
+      s.id === payload.tool_call_id &&
+      s.status === "running"
+    ) {
+      changed = true;
+      // Wire `phase` is a widened string (forward-compat); the UI maps known ToolPhase
+      // values to text and falls back to a generic label for anything else.
+      return { ...s, phase: payload.phase as ToolPhase };
     }
     return s;
   });

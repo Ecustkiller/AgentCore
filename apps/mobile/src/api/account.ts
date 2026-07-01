@@ -68,7 +68,9 @@ export async function deleteAccount(password: string): Promise<void> {
   const res = await apiFetch("/v1/auth/me", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ password } satisfies Schemas["DeleteAccountRequest"]),
+    body: JSON.stringify({
+      password,
+    } satisfies Schemas["DeleteAccountRequest"]),
   });
   if (!res.ok) throw new Error(await errorMessage(res, "注销失败"));
 }

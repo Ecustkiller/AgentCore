@@ -325,6 +325,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "后端整块完成",
+        "debrief": null,
         "durationMs": 3000,
         "error": null,
         "parentRunId": null,
@@ -362,6 +363,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "完成子调研",
+        "debrief": null,
         "durationMs": 1000,
         "error": null,
         "parentRunId": "L1",
@@ -401,6 +403,7 @@
           "sa"
         ],
         "outputSummary": "完成子撰写",
+        "debrief": null,
         "durationMs": 1200,
         "error": null,
         "parentRunId": "L1",

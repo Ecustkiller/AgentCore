@@ -42,6 +42,40 @@ export interface ToolProgressPayload {
   chars: number;
 }
 
+/** A running tool's coarse EXECUTION phase (工具执行阶段进度) — surfaced live so a blocking
+ * tool's waiting row is honest instead of a dead spinner. Known values:
+ * - web_search: `queued` (排队中 — gated by the rate/concurrency limiter under a parallel-team
+ *   burst), `querying` (正在检索 — the engine request is in flight), `fallback` (改用备用引擎 —
+ *   the primary went search-blind, retrying via Tavily).
+ * - read_url: `fetching` (正在抓取网页 — the GET is in flight), `reading` (正在提取正文 — parsing
+ *   the fetched HTML), `blocked` (出网受限 — this host's egress circuit is OPEN so the read
+ *   fast-fails; read_url has no queue, so it has no `queued` state, only this honest block).
+ * - code_execute: `executing` (正在执行 — the sandbox run is in flight).
+ * Kept as a widened `string` on the wire so the backend can add phases without a client bump —
+ * an unknown value maps to a generic「处理中」. */
+export type ToolPhase =
+  | "queued"
+  | "querying"
+  | "fallback"
+  | "fetching"
+  | "reading"
+  | "executing"
+  | "blocked";
+
+/** A running tool reported an EXECUTION phase — emitted between `tool_use_start` and
+ * `tool_use_end` so the waiting UI shows a live, honest state instead of a bare spinner.
+ * Distinct from `tool_progress` (which means the LLM is still streaming this call's
+ * ARGUMENTS). Transport-only liveliness: NEVER journaled and NEVER folded into the process
+ * timeline / ProjectedTurn — a reloaded turn's tools are already resolved, so it only rides
+ * the LIVE stream (the client updates the running tool step's ephemeral `phase`). `run_id`
+ * is present for a delegated worker's call (twin of {@link ToolUseStartPayload.run_id}). */
+export interface ToolUseProgressPayload {
+  tool_call_id: string;
+  tool_name: string;
+  phase: string;
+  run_id?: string;
+}
+
 export interface ToolUseStartPayload {
   tool_call_id: string;
   tool_name: string;
@@ -97,6 +131,13 @@ export type ProcessStep =
       result: string | null;
       status: "running" | "success" | "error";
       display?: ToolDisplay | null;
+      /** 工具执行阶段进度 (联网搜索前端展示优化): the running tool's latest coarse phase from a
+       * `tool_use_progress` event (web_search → queued / querying / fallback), driving the
+       * waiting-state text. LIVE-ONLY ephemeral: never journaled and never in the backend /
+       * conformance ProjectedTurn (the golden's tool steps carry no phase — a reloaded turn's
+       * tools are already resolved), so it stays absent under conformance replay and is
+       * meaningful only while `status === "running"`. */
+      phase?: ToolPhase;
     }
   | { kind: "team"; execution_id: string }
   | { kind: "checkpoint"; checkpoint_id: string }
@@ -279,6 +320,14 @@ export interface RunStartedPayload {
   parent_run_id: string | null;
   kind: RunKind;
   revision?: number;
+  /** 乙 wire 携 round/stance: a 续写 revision (a debater's later round) carries its
+   * debater identity + TRUE round on the wire, so every view derives 第几轮/哪一方 from
+   * ONE place instead of re-guessing (round ≠ revision# once a side fails mid-debate).
+   * Absent on an ordinary run / hot-fix revision (folds fall back to the original's
+   * stance/group + revision-as-round for legacy journals). Mirrors {@link RunPlanPayload}. */
+  stance?: Stance;
+  group?: string;
+  round?: number;
 }
 
 /** One labeled segment of context a run received at assembly time (上下文传递可视化) —
@@ -464,21 +513,43 @@ export interface CostBreakdown {
   currency: string;
 }
 
+/** 完工交接简报 (a worker's authored「## 交接简报」wrap-up, parsed server-side by
+ * `split_debrief`). Carried VERBATIM on `run_completed` so the run-detail 摘要 renders the
+ * author's own conclusion instead of a machine truncation of raw prose. Every field is
+ * optional — a worker writes only the sections it has (`summary` 结论 / `key_points` 关键要点 /
+ * `assumptions` 关键假设 / `next_steps` 建议下一步); a 辩手 / trivial worker / the CEO captain
+ * authors none, so the whole object is absent (see {@link RunCompletedPayload.debrief}). */
+export interface RunDebrief {
+  summary?: string;
+  key_points?: string[];
+  assumptions?: string;
+  next_steps?: string;
+}
+
 export interface RunCompletedPayload {
   run_id: string;
   agent_id: string;
+  /** The worker's authored 结论 (`debrief.summary`), or "" when it wrote none — a
+   * best-effort scan line for the whiteboard card / mobile resume, NEVER a truncation of
+   * the full deliverable (which is always streamed + persisted + shown in full). */
   output_summary: string;
   duration_ms: number;
   role: string;
   model: string;
   usage: UsageBreakdown;
   cost: CostBreakdown;
+  /** 完工交接简报: the worker's structured wrap-up, present ONLY when it authored one
+   * (absent for a 辩手 / trivial worker / the captain) so the client folds default it null. */
+  debrief?: RunDebrief;
 }
 
 export interface RunFailedPayload {
   run_id: string;
   agent_id: string;
   error: string;
+  /** 完工交接简报: the worker's structured wrap-up when a contract-missing run still authored
+   * one — surfaced beside the failure in the run detail. Absent for infra failures / captain. */
+  debrief?: RunDebrief;
 }
 
 export interface RunProgressPayload {
@@ -779,7 +850,7 @@ export interface BoardOp {
 }
 
 /** Transport-only client-tool request: apply a batch of board ops to the user's open
- * Excalidraw canvas (`board_id`) and POST the result to the interaction-resolve endpoint
+ * whiteboard canvas (`board_id`) and POST the result to the interaction-resolve endpoint
  * (settling the server's `BoardChannel`). The board counterpart of
  * `workspace_op_required`; NOT journaled (a request/response exchange, not turn content). */
 export interface BoardOpRequiredPayload {
@@ -852,6 +923,7 @@ export type SSEPayloadMap = {
   content_reset: ContentResetPayload;
   reasoning_delta: ReasoningDeltaPayload;
   tool_progress: ToolProgressPayload;
+  tool_use_progress: ToolUseProgressPayload;
   tool_use_start: ToolUseStartPayload;
   tool_use_end: ToolUseEndPayload;
   approval_required: ApprovalRequiredPayload;

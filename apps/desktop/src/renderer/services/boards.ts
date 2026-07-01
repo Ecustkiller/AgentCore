@@ -5,13 +5,13 @@ type Schemas = components["schemas"];
 
 /** Board list/meta row (no scene) — the「白板」list payload. */
 export type BoardSummary = Schemas["BoardSummary"];
-/** A board plus its full Excalidraw scene — the canvas load payload. */
+/** A board plus its full scene (self-built engine format) — the canvas load payload. */
 export type BoardDetail = Schemas["BoardDetail"];
 /** CAS write outcome; `board` is the live state, populated only on conflict. */
 export type BoardWriteResult = Schemas["BoardWriteResult"];
 /** The board's dedicated AI conversation id (existing or just-minted). */
 export type BoardConversationResponse = Schemas["BoardConversationResponse"];
-/** The opaque spatial-JSON scene blob (Excalidraw serialized scene). */
+/** The opaque spatial-JSON scene blob (self-built engine serialized scene). */
 export type BoardScene = BoardDetail["scene"];
 
 /** All of the signed-in user's live boards, most-recently-updated first. */

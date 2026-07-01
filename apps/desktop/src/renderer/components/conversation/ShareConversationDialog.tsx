@@ -165,6 +165,14 @@ function ShareDialogBody({ conversationId }: { conversationId: string }) {
                   <div className="truncate text-sm text-foreground">
                     {shareLink(share)}
                   </div>
+                  {share.title && share.title !== title ? (
+                    <div
+                      className="truncate text-xs text-muted-foreground"
+                      title={share.title}
+                    >
+                      快照标题：{share.title}
+                    </div>
+                  ) : null}
                   <div className="text-xs text-muted-foreground">
                     {formatMessageTime(share.created_at)} 创建
                     {share.expires_at

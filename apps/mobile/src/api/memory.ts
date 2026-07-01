@@ -33,9 +33,38 @@ export interface MemoryWriteResult {
  */
 export type MemoryKind = "preferences" | "profile";
 
+/**
+ * A failed memory REST call, carrying the HTTP status so callers can tell a missing
+ * endpoint (404/501 — this deployed backend predates the feature) apart from a
+ * transient failure. Still a plain Error subclass, so existing catch sites that only
+ * read `.message` are unaffected.
+ */
+export class MemoryApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "MemoryApiError";
+  }
+}
+
+/**
+ * Whether an error means the deployed backend lacks this endpoint (404/501) — the
+ * 前后端版本漂移 window (a newer client calling an endpoint an older *deployed* backend
+ * lacks, e.g. 记忆·主题 shipped in the client before the backend redeploy). Retrying
+ * can't fix it, so the caller degrades to a calm "暂不可用" note (no red error).
+ */
+export function isFeatureUnavailable(err: unknown): boolean {
+  return (
+    err instanceof MemoryApiError && (err.status === 404 || err.status === 501)
+  );
+}
+
 async function getJson<T>(path: string, fallback: string): Promise<T> {
   const res = await apiFetch(path);
-  if (!res.ok) throw new Error(`${fallback} (${res.status})`);
+  if (!res.ok)
+    throw new MemoryApiError(res.status, `${fallback} (${res.status})`);
   return (await res.json()) as T;
 }
 
@@ -49,7 +78,8 @@ async function putJson<T>(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${fallback} (${res.status})`);
+  if (!res.ok)
+    throw new MemoryApiError(res.status, `${fallback} (${res.status})`);
   return (await res.json()) as T;
 }
 

@@ -60,7 +60,9 @@ describe("ResumeCard · ask_user", () => {
 });
 
 describe("ResumeCard · plan_review", () => {
-  const planReview = (over: Partial<PausedTurnSummary> = {}): PausedTurnSummary =>
+  const planReview = (
+    over: Partial<PausedTurnSummary> = {},
+  ): PausedTurnSummary =>
     summary({
       kind: "plan_review",
       checkpoint_id: "pr1",

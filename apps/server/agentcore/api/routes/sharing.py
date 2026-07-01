@@ -57,10 +57,7 @@ def _share_summary(share: ConversationShare) -> ShareSummary:
 
 def _expires_at_from_request(body: CreateShareRequest | None) -> datetime | None:
     """Map create-body TTL to an absolute expiry (``None`` = never)."""
-    if body is None:
-        days = 30
-    else:
-        days = body.expires_in_days
+    days = 30 if body is None else body.expires_in_days
     if days is None:
         return None
     return datetime.now(UTC) + timedelta(days=days)

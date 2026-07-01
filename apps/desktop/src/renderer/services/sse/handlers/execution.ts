@@ -15,6 +15,7 @@ import type {
   RunStartedPayload,
   SSEEvent,
   ToolUseEndPayload,
+  ToolUseProgressPayload,
   ToolUseStartPayload,
 } from "@/types/events";
 import {
@@ -124,6 +125,19 @@ export function handleExecutionEvent(
       useConversationStore
         .getState()
         .endProcessTool(event.payload as ToolUseEndPayload, conversationId);
+      return true;
+    }
+    // 工具执行阶段进度 (联网搜索前端展示优化): a running tool reported a coarse EXECUTION phase
+    // (web_search → querying / queued / fallback). Transport-only liveliness — NOT journaled, so
+    // no frame is recorded (a reloaded turn's tools are already resolved); it only stamps the live
+    // running tool step's phase for the waiting UI.
+    case "tool_use_progress": {
+      useConversationStore
+        .getState()
+        .setProcessToolPhase(
+          event.payload as ToolUseProgressPayload,
+          conversationId,
+        );
       return true;
     }
     case "debate_result": {

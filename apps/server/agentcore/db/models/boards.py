@@ -1,6 +1,6 @@
 """AI 协作白板 (collaborative whiteboard) model.
 
-A board is a spatial-JSON canvas (Excalidraw scene) owned by a user and optionally
+A board is a spatial-JSON canvas (self-built engine scene) owned by a user and optionally
 filed under a folder workspace (AI协作白板.md §三 G3 / §七). ``folder_id`` is
 nullable — NULL = an ungrouped board surfaced in the top-level「白板」list, mirroring
 the conversation pattern — so creating a board needs no folder up front.
@@ -8,7 +8,7 @@ the conversation pattern — so creating a board needs no folder up front.
 The scene is the canonical model (空间 JSON 为真相, §七): a single ``scene`` JSONB blob
 holds elements / positions / arrows / groups / freehand. S3 offload + image-file
 externalization (scene_blob_ref) is DEFERRED for v1 — scenes stay inline in Postgres
-(Excalidraw text/shape scenes are small; TOAST covers occasional large ones). ``version``
+(text/shape scenes are small; TOAST covers occasional large ones). ``version``
 is the CAS counter: a write must present a matching baseline or it is reported as a
 conflict (照 memory.py), so a stale device/tab can never silently clobber.
 """
@@ -43,7 +43,7 @@ class Board(Base):
         PG_UUID(as_uuid=False), index=True, nullable=True
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False, server_default=text("''"))
-    # Canonical scene (Excalidraw JSON: elements / appState / files). Empty object for a
+    # Canonical scene (self-built engine JSON: schemaVersion + elements[]). Empty object for a
     # brand-new board; the client restores an empty scene to a usable canvas.
     scene: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")

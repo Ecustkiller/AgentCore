@@ -67,6 +67,7 @@ async def react_loop(
     finish_override_sink: list[FinishReason] | None = None,
     run_id: str = "",
     role: str = "",
+    deliverable_only: bool = False,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run the ReAct loop.
 
@@ -129,6 +130,27 @@ async def react_loop(
     (round_boundary / llm_call / note) — captain vs worker, so a multi-agent turn's
     facts split per run. They default to empty (a standalone loop / test records
     facts with no scope, or none at all when no log is bound).
+
+    ``deliverable_only`` makes the RETURNED ``final_content`` the 交付正文 only — the
+    prose a round streams BEFORE a *non-terminal* tool call is treated as PROCESS
+    narration ("我先查一下" / an acknowledgement of an injected ``[系统提示]`` steer)
+    and rolled back off the accumulator (mirroring the finish_guard ``Rework``
+    rollback), so it never accrues into the persisted product / next-turn history /
+    CEO synthesis input. It is always journaled per round (llm_call fact → 旁白入
+    journal). Two display disciplines by channel架构:
+
+    - CEO captain (``on_reset`` is None → default ``content_delta`` / ``content_reset``):
+      the narration STAYS streamed + visible in the SEPARATE process timeline
+      (透明可见); only ``messages.content`` (旁路 conformance) is trimmed. No reset.
+    - worker / debater / revision (``on_reset`` routes ``run_output_reset``, and the
+      card replays from the ``message_final`` fact — a SINGLE display+data channel):
+      the narration rollback ALSO emits ``run_output_reset`` to clear the streamed
+      draft off the card, so 直播 == the rolled-back deliverable == 重载 (synthesized
+      from ``message_final``) — the conformance invariant.
+
+    Terminal rounds (ask_user / handoff / suspend checkpoints) KEEP their pre-tool
+    text — that IS the deliverable at that boundary. Default ``False`` leaves the
+    accumulation byte-identical to before (standalone loops / tests).
     """
     profile = profile or get_profile("chat")
     if usage_sink is not None:
@@ -282,6 +304,25 @@ async def react_loop(
                         extra_content=outcome.terminal_handoff or "",
                     )
                 else:
+                    # 交付正文只留最终交付、旁白入 journal (Fork-B): this round wrote prose
+                    # and then called a NON-terminal tool, so that prose is process
+                    # narration (a lead-in, or an acknowledgement of an injected
+                    # [系统提示] steer such as「谢谢指正，我重新整理」), not deliverable. Roll it
+                    # back off final_content — it already streamed live + was journaled this
+                    # round (llm_call fact) — mirroring the finish_guard Rework rollback, so
+                    # only the FINAL answer round's text reaches the persisted product.
+                    if deliverable_only and round_result.content:
+                        # A run whose LIVE display shares the deliverable channel (worker /
+                        # debater / revision: on_reset routes run_output_reset, and the card
+                        # replays from the message_final fact) must also clear the streamed
+                        # narration off its card, so 直播 == the rolled-back deliverable ==
+                        # 重载 (合成自 message_final) — the conformance invariant. The CEO
+                        # streams to a SEPARATE process timeline (on_reset is None): its
+                        # narration stays visible there (透明可见), only its persisted content
+                        # (messages.content, 旁路 conformance) is trimmed.
+                        if on_reset is not None:
+                            emit_reset()
+                        final_content = content_before_round
                     controller.record(outcome.attempts)
                     breaker = apply_circuit_breaker(
                         controller,

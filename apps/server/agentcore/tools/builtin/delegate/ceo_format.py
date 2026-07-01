@@ -96,7 +96,6 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
     from agentcore.runtime.runs.constants import CEO_SYNTHESIS_BUDGET, DEP_POINTER_SUMMARY_CHARS
     from agentcore.runtime.runs.fidelity import allocate, truncate_head_tail
     from agentcore.runtime.runs.serialize import split_debrief
-    from agentcore.runtime.workspace import summarize
 
     # 完工交接简报: peel each worker's「## 交接简报」off its product ONCE — the prose body sizes on
     # the deliverable alone, the author's own 结论 LEADS the body, and 建议下一步 is surfaced
@@ -137,7 +136,9 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
         fidelity = ""
         truncated = False
         if mode == "pointer":
-            body = summarize(clean, limit=DEP_POINTER_SUMMARY_CHARS)
+            # HEAD+TAIL digest (not head-only): the full product is on disk (pointer), and the
+            # digest keeps the deliverable's opening AND its tail so 收尾 / 关键取舍 aren't dropped.
+            body = truncate_head_tail(clean, DEP_POINTER_SUMMARY_CHARS)
             fidelity, truncated = "pointer", True
         elif mode == "pass_through":
             allowance = next(allowances)

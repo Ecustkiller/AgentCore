@@ -172,7 +172,11 @@ export function confirmExecute(
   const cwd = String(args.cwd ?? "");
   const code = String(args.code ?? "");
   const stdin = args.stdin == null ? "" : String(args.stdin);
-  const sections = [`工作目录：${cwd || "（绑定根）"}`, "", clip(code) || "（空）"];
+  const sections = [
+    `工作目录：${cwd || "（绑定根）"}`,
+    "",
+    clip(code) || "（空）",
+  ];
   if (stdin) sections.push("", "── 标准输入 stdin ──", clip(stdin));
   return confirmDanger({
     message: `即将在本机运行 ${language} 代码`,

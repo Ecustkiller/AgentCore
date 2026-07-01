@@ -114,7 +114,7 @@ def variant_window(full: list[LLMMessage], keep_recent: int | None, min_chars: i
     cleared = project_cleared_window(
         full, clearable_tools=frozenset({"file_read"}), keep_recent=keep_recent, min_chars=min_chars
     )
-    n = 0 if cleared is full else sum(1 for a, b in zip(full, cleared) if a.content != b.content)
+    n = 0 if cleared is full else sum(1 for a, b in zip(full, cleared, strict=True) if a.content != b.content)
     return cleared, n, sum(len(m.content or "") for m in cleared)
 
 

@@ -59,6 +59,7 @@ function makeRun(p: Partial<ProjectedRun> & { id: string }): ProjectedRun {
     status: "completed",
     dependsOn: [],
     outputSummary: null,
+    debrief: null,
     durationMs: null,
     error: null,
     parentRunId: null,
@@ -141,6 +142,45 @@ describe("AssistantContent", () => {
     expect(screen.getByText("搜索网页")).toBeTruthy();
     expect(screen.getByText("openai 新闻")).toBeTruthy();
     expect(screen.getByText("完成")).toBeTruthy();
+  });
+
+  // 工具执行阶段进度 (联网搜索前端展示优化)
+  it("shows the live 执行阶段 text for a running web_search tool", () => {
+    const process: ProcessStep[] = [
+      {
+        kind: "tool",
+        id: "t1",
+        tool_name: "web_search",
+        arguments: { query: "天气" },
+        result: null,
+        status: "running",
+      },
+    ];
+    render(
+      <AssistantContent
+        content=""
+        process={process}
+        toolPhases={new Map([["t1", "querying"]])}
+      />,
+    );
+    // Phase text replaces the bare「进行中」(a timer may be appended once ≥1s elapses).
+    expect(screen.getByText(/正在检索/)).toBeTruthy();
+    expect(screen.queryByText("进行中")).toBeNull();
+  });
+
+  it("falls back to 进行中 for a running tool with no known phase", () => {
+    const process: ProcessStep[] = [
+      {
+        kind: "tool",
+        id: "t1",
+        tool_name: "web_search",
+        arguments: { query: "天气" },
+        result: null,
+        status: "running",
+      },
+    ];
+    render(<AssistantContent content="" process={process} />);
+    expect(screen.getByText("进行中")).toBeTruthy();
   });
 
   it("renders the team graph for a multi-agent turn", () => {

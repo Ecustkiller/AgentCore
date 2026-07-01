@@ -30,4 +30,5 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   "invite.create": "生成邀请码",
   "invite.batch_create": "批量生成邀请码",
   "invite.revoke": "撤销邀请码",
+  "conversation.replay": "回放对话",
 };

@@ -29,7 +29,6 @@ from agentcore.runtime.runs.executor_context import (
 from agentcore.runtime.runs.executor_shared import _priced_failure
 from agentcore.runtime.runs.types import ContextBlock, RunPhase, RunSpec, RunState
 from agentcore.runtime.suspension import captain_transcript
-from agentcore.runtime.workspace import summarize
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
@@ -199,6 +198,13 @@ async def _drive_captain_loop(
             finish_override_sink=finish_override,
             run_id=spec.run_id,
             role="captain",
+            # 交付正文只留最终交付、旁白入 journal (Fork-B): the CEO bubble's persisted
+            # content (→ messages.content + MessageFinalFact + next-turn history) drops
+            # the prose written before a non-terminal tool call (process narration /
+            # steer acknowledgements). Captain-only: its content is NOT reload-synthesized
+            # from message_final (unlike workers), so this stays conformance-neutral —
+            # the live content_delta stream the folds/oracle read is untouched.
+            deliverable_only=True,
         )
         duration_ms = int((time.monotonic() - start) * 1000)
         usage_dict = usage.as_dict()
@@ -212,7 +218,10 @@ async def _drive_captain_loop(
             run_completed(
                 spec.run_id,
                 agent_id,
-                output_summary=summarize(content),
+                # The captain IS the chat bubble: its full reply is streamed live + persisted
+                # (MessageFinalFact above) and rendered in full, so its run_completed carries no
+                # display summary — no truncation, no debrief (the CEO authors no 交接简报).
+                output_summary="",
                 duration_ms=duration_ms,
                 role="captain",
                 model=profile.model,

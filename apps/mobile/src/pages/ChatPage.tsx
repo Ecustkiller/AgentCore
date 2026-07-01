@@ -29,6 +29,7 @@ import {
   extractAsks,
   extractFollowups,
   extractPendingEscalations,
+  extractToolPhases,
   fold,
 } from "@/protocol/fold";
 import type {
@@ -192,6 +193,12 @@ function AssistantBubble({
   );
   // 非阻塞提问卡内容：随时间线 `ask` 标记原位呈现（旁路读原始事件，不入 ProjectedTurn）。
   const asks = useMemo(() => extractAsks(turn.events), [turn.events]);
+  // 工具执行阶段进度 (联网搜索前端展示优化): tool_call_id→阶段，旁路读原始事件（不入 ProjectedTurn），
+  // 让运行中的工具（web_search）显示「正在检索/排队中/改用备用引擎」而非干等。已结束的工具自动清空。
+  const toolPhases = useMemo(
+    () => extractToolPhases(turn.events),
+    [turn.events],
+  );
   // 阻塞式求决策「待你拍板」: runId→pending escalation_id (旁路读原始事件)，喂给团队视图把待答
   // 的 worker 升级渲染成可交互答复卡；仅实时回合 (live) 可答。
   const pendingEscalations = useMemo(
@@ -230,6 +237,7 @@ function AssistantBubble({
           debate={p.debate}
           debateRounds={p.debateRounds}
           asks={asks}
+          toolPhases={toolPhases}
           onFill={onFill}
         />
       )}

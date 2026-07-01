@@ -22,6 +22,7 @@ import type {
   DebateResultPayload,
   PlanRevisionKind,
   ProcessStep,
+  RunDebrief,
   RunKind,
   Stance,
   UsageBreakdown,
@@ -34,6 +35,7 @@ export type {
   DebateResultPayload,
   PlanRevisionKind,
   ProcessStep,
+  RunDebrief,
   UsageBreakdown,
 };
 
@@ -116,7 +118,12 @@ export interface ProjectedRun {
   task: string;
   status: RunStatus;
   dependsOn: string[];
+  /** The worker's authored 结论 (`debrief.summary`) or "" — a scan line, not a truncation;
+   * null until run_completed folds in. */
   outputSummary: string | null;
+  /** 完工交接简报: the worker's structured wrap-up (结论/关键要点/关键假设/建议下一步), set by
+   * run_completed when it authored one; null otherwise (辩手 / trivial worker / captain). */
+  debrief: RunDebrief | null;
   durationMs: number | null;
   error: string | null;
   parentRunId: string | null;

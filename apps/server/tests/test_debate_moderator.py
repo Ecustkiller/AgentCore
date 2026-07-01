@@ -280,6 +280,40 @@ def test_converged_stop_reason_propagates():
     assert result.stop_reason == STOP_FOCUS_CLARIFIED
 
 
+def test_judge_normalizes_stop_reason_to_converged_invariant():
+    """回归：``stop_reason`` 仅在收敛时有意义，_judge 须据此归一，不逐字透传 LLM 误填。
+
+    真实 trace 里第 1 轮 ``converged=false`` 却带 ``stop_reason=focus_clarified``，随本轮
+    verdict 流进 journal / 前端（口径错位）。根因＝_judge 逐字透传 LLM 的 stop_reason。这里
+    双向钉死：① 未收敛 → stop_reason 恒空；② 收敛但取值非法 → 回落 STOP_CONVERGED。
+    """
+    turns = [
+        SideTurn("pro", "正方", "r1_pro", "正方开场"),
+        SideTurn("con", "反方", "r1_con", "反方开场"),
+    ]
+
+    class _ScriptedJudge:
+        def __init__(self, payload: dict) -> None:
+            self._payload = payload
+
+        async def complete(self, request):  # noqa: ANN001
+            return LLMResponse(content=json.dumps(self._payload))
+
+    # ① 未收敛却误填 stop_reason → 必须被丢弃（留空）。
+    stray = {**_KEEP_GOING, "stop_reason": "focus_clarified"}
+    mod = Moderator(provider=_ScriptedJudge(stray), model="m")
+    v1 = asyncio.run(mod._judge(_config(policy=RoundPolicy(max_rounds=5)), "焦点", turns, []))
+    assert v1.converged is False
+    assert v1.stop_reason == ""
+
+    # ② 收敛但 stop_reason 非法 → 回落 STOP_CONVERGED（与循环层同口径）。
+    bad = {**_CONVERGE, "stop_reason": "not_a_real_reason"}
+    mod2 = Moderator(provider=_ScriptedJudge(bad), model="m")
+    v2 = asyncio.run(mod2._judge(_config(policy=RoundPolicy(max_rounds=5)), "焦点", turns, []))
+    assert v2.converged is True
+    assert v2.stop_reason == STOP_CONVERGED
+
+
 # --- 跨轮记忆 / 容错 / 失败 --------------------------------------------------
 
 

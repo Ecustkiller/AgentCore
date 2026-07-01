@@ -34,6 +34,12 @@ alwaysApply: false
 
 协议变更类另需桌面发版 → 见 §桌面发版。
 
+### 版本漂移防护（后端先行 + 自动门禁）
+
+**铁律：新增/改接口 → 后端必须先部署（步 2）。** 后端对旧前端向后兼容，早部署安全；反过来「前端先上」会调到后端还没有的接口 → 404（记忆·主题 曾因此在生产显示「不可用」）。**绝不从比线上后端新的 commit 单发前端**（哪怕自以为是「纯 UI」——里面可能夹着需新后端的功能）。
+
+三个前端 deploy 脚本（`deploy:web` / mobile `deploy:pages` / admin `deploy:production`）在**构建前**都跑 `assertBackendContractSatisfied`（`deploy/scripts/load-deploy-env.mjs`）：比对本次 `git HEAD` 与线上 `GET /api/version` 的 `git_sha`，仅当**后端已含本次 commit**（HEAD 是后端 sha 的祖先）才放行；前端更新则**直接拦截退出**。确需强发（已核实无新接口）加 `--force` 或 `DEPLOY_SKIP_CONTRACT_GATE=1`。探针失败/sha 未知时**放行并告警**（不因抖动阻断）。
+
 ## 验收
 
 | 目标 | 检查 |
@@ -90,3 +96,4 @@ pnpm -C apps/desktop build:mac            # macOS arm64（须 Apple Silicon Mac�
 - 不重新启用任何 deploy/release workflow 的 **push / tag / schedule 自动部署**
 - `prod-*` / `desktop-v*` tag 仅作发布点标记与漂移检测
 - CI（`ci.yml`）仍走 GHA push/PR；账单挂时发布前本地跑 conformance + pytest
+- **新增/改接口先部署后端**；前端 deploy 脚本已内置版本漂移门禁（见 §版本漂移防护），被拦截时先补后端而非直接 `--force`

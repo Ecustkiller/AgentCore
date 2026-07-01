@@ -214,6 +214,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "实现完成",
+        "debrief": null,
         "durationMs": 1500,
         "error": null,
         "parentRunId": null,
@@ -253,6 +254,7 @@
           "r1"
         ],
         "outputSummary": null,
+        "debrief": null,
         "durationMs": null,
         "error": null,
         "parentRunId": null,

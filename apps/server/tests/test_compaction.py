@@ -280,7 +280,7 @@ def _wire_runner(monkeypatch, *, conv, messages, provider) -> dict:
         def __init__(self, session):
             pass
 
-        async def get_by_id(self, conversation_id):
+        async def get_by_id_unscoped(self, conversation_id):
             return conv
 
         async def set_compaction(

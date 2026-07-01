@@ -154,7 +154,7 @@ async def compact_conversation(
         return False
     try:
         async with async_session_factory() as session:
-            conv = await ConversationRepository(session).get_by_id(conversation_id)
+            conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
             if conv is None:
                 return False
             recency = settings.compaction_recency_messages

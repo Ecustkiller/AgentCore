@@ -6,8 +6,11 @@
 现状见 ``docs/02-架构/后端架构.md`` §五、未落地 P1+ 见 ``docs/07-规划/远期规划.md`` §2.4；
 本包不被服务代码引用，纯离线工具。
 
-P0（本阶段）：types + harness + 确定性 Check + seed_lint + runner + report + CLI。
-P1+（待落）：LLMJudge（语义打分）、baseline 回归门禁、CI 接入。
+P0–P1（均已落地）：types + harness + 确定性 Check + seed_lint + runner + report + CLI +
+LLMJudge（语义打分）+ milestone 覆盖裁判 + 成对裁判（团队 vs 单体）+ baseline 回归门禁 +
+kappa 校准回路 + MAST 标签聚合 + CI nightly（evals-nightly.yml）。
+P2+（待落，皆非代码缺口）：L2/L3 真模型出数（需 EVAL_DEEPSEEK_API_KEY + 预算）+
+gold-set 人工核验（kappa 门，cases/gold/labels.json 现 30 条 seed「暂定·待人核」）。
 
 本 ``__init__`` 只暴露**纯静态**部分（types + checks 注册表 + seed_lint）——故意不在此
 import ``harness`` / ``runner`` / ``report``，让 ``seed_lint`` 这类零 LLM 静态校验

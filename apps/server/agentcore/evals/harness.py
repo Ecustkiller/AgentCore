@@ -280,6 +280,10 @@ class EvalHarness:
             profile=profile,
             citation_sink=citations,
             finish_override_sink=finish_override,
+            # 交付正文只留最终交付 (Fork-B, 全队对称): score the SAME deliverable a real
+            # single-agent turn persists — the executor_captain path is deliverable_only,
+            # so an eval must be too, else it grades process narration users never see.
+            deliverable_only=True,
         )
         return single_outcome(
             content,

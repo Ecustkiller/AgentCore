@@ -213,6 +213,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "修正后产出完成",
+        "debrief": null,
         "durationMs": 1100,
         "error": null,
         "parentRunId": null,

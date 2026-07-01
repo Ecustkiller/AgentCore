@@ -161,6 +161,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "方案就绪",
+        "debrief": null,
         "durationMs": 900,
         "error": null,
         "parentRunId": null,
@@ -203,6 +204,7 @@
           "r1"
         ],
         "outputSummary": null,
+        "debrief": null,
         "durationMs": null,
         "error": null,
         "parentRunId": null,

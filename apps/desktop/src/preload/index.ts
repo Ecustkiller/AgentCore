@@ -15,6 +15,11 @@ import {
   type UpdaterApi,
   type UpdaterStatus,
 } from "@shared/updater-contract";
+import {
+  WINDOW_CHANNELS,
+  type WindowApi,
+  type WindowFramePreset,
+} from "@shared/window-contract";
 import { contextBridge, ipcRenderer } from "electron";
 
 const fsApi: FsApi = {
@@ -97,10 +102,13 @@ const logApi: LogApi = {
   write: (entry) => ipcRenderer.send(LOG_CHANNELS.write, entry),
 };
 
-const windowApi = {
-  minimize: () => ipcRenderer.send("window:minimize"),
-  maximize: () => ipcRenderer.send("window:maximize"),
-  close: () => ipcRenderer.send("window:close"),
+const windowApi: WindowApi = {
+  minimize: () => ipcRenderer.send(WINDOW_CHANNELS.minimize),
+  maximize: () => ipcRenderer.send(WINDOW_CHANNELS.maximize),
+  close: () => ipcRenderer.send(WINDOW_CHANNELS.close),
+  applyFramePreset: (preset: WindowFramePreset) =>
+    ipcRenderer.invoke(WINDOW_CHANNELS.applyFramePreset, preset),
+  getFramePreset: () => ipcRenderer.invoke(WINDOW_CHANNELS.getFramePreset),
 };
 
 if (process.contextIsolated) {

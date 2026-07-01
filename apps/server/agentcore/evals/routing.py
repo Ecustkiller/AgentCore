@@ -3,7 +3,8 @@
 把一套 ``category="routing"`` 的黄金用例跑出的 :class:`CaseReport` 聚合成**混淆矩阵 +
 两类业务化错误率**。与「功能评估」的逐例 PASS/FAIL（``report.py``）正交：那只回「这例过没过」，
 本模块回「整套里 CEO 该委派时漏委派多少、不该委派却过度编排多少」——后者才是 Multi-Agent
-产品命门（[`docs/07-规划/提示词优化方向.md`](../../../docs/07-规划/提示词优化方向.md) 方向③）。
+产品命门（[`docs/07-规划/远期规划.md`](../../../docs/07-规划/远期规划.md)
+§2.4「提示词优化」方向③）。
 
 **单一标签源**：每条路由用例用它声明的 check 编码期望方向——``Delegated`` = 期望委派
 （正类），``NotDelegated`` = 期望自答（负类）。聚合器从 :class:`CheckOutcome` 的 ``name``
@@ -160,7 +161,10 @@ def format_routing_report(m: RoutingMetrics) -> str:
     lines.append(f"    TP(该委派·确委派) {m.tp}    FN(该委派·却自答) {m.fn}")
     lines.append(f"    FP(该自答·却委派) {m.fp}    TN(该自答·确自答) {m.tn}")
     lines.append("-" * 64)
-    lines.append(f"  准确率   {_pct(m.accuracy)}    精确率 {_pct(m.precision)}    召回率 {_pct(m.recall)}    F1 {_pct(m.f1)}")
+    lines.append(
+        f"  准确率   {_pct(m.accuracy)}    精确率 {_pct(m.precision)}    "
+        f"召回率 {_pct(m.recall)}    F1 {_pct(m.f1)}"
+    )
     lines.append(f"  过度编排率 {_pct(m.over_delegation_rate)}（该自答却拆团队）")
     lines.append(f"  组队不足率 {_pct(m.under_delegation_rate)}（该委派却自己做）")
     if m.misroutes:

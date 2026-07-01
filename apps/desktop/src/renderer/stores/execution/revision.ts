@@ -16,8 +16,8 @@ export interface RevisionChain {
 }
 
 /** Whether any worker in the turn was 定向唤回 revised — the single signal that
- * gates the「版本对比」card + the graph's revision styling (mirrors {@link isDebate}
- * for debates). */
+ * gates the统一「对比」透镜的版本轨 (compare/RevisionOverview) + the graph's revision
+ * styling (mirrors {@link isDebate} for debates). */
 export function hasRevisions(execution: Execution): boolean {
   return execution.runs.some((r) => r.revisionOf != null);
 }
@@ -25,8 +25,9 @@ export function hasRevisions(execution: Execution): boolean {
 /**
  * Group the turn's runs into revision chains (乙 热修 P4), one per revised original
  * (in first-seen original order). Each chain is the original (v1) followed by its
- * 续写 versions in ascending version order — the projection the「版本对比」card lays
- * out side by side. Originals with no revision are omitted (a chain needs ≥2
+ * 续写 versions in ascending version order — the projection the统一「对比」透镜的版本轨
+ * (compare/RevisionOverview) lays out side by side. Originals with no revision are
+ * omitted (a chain needs ≥2
  * versions to compare); a stray revision whose original is absent is dropped.
  */
 export function revisionChains(execution: Execution): RevisionChain[] {

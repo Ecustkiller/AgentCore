@@ -21,13 +21,14 @@ import type {
   DebateNarrativeRound,
   DebateResultPayload,
   ProcessStep,
+  ToolPhase,
 } from "@agentcore/contract-types";
 import type {
   ProjectedAgent,
   ProjectedRun,
   ProjectedTeamNote,
 } from "@agentcore/protocol-conformance";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type ToolStepData = Extract<ProcessStep, { kind: "tool" }>;
 
@@ -59,6 +60,7 @@ export function AssistantContent({
   debate,
   debateRounds,
   asks,
+  toolPhases,
   onFill,
 }: {
   process?: ProcessStep[];
@@ -78,6 +80,10 @@ export function AssistantContent({
    *  read off raw events via {@link extractAsks} (NOT the ProjectedTurn). The timeline's
    *  `ask` marker resolves to its card here; empty/absent → the marker no-ops. */
   asks?: NonBlockingAsk[];
+  /** 工具执行阶段进度 (联网搜索前端展示优化): tool_call_id → latest coarse phase for a still-running
+   *  tool, from the transport-only live sibling {@link extractToolPhases}. Live turns only; absent
+   *  on history replay (the events are never journaled) → tool rows show plain status. */
+  toolPhases?: Map<string, ToolPhase>;
   /** Tap an ask/chip → fill the composer (回填输入框, review before send). Absent → chips
    *  render but no-op (e.g. a read-only context with no composer). */
   onFill?: (text: string) => void;
@@ -99,6 +105,7 @@ export function AssistantContent({
           citations={citations}
           team={hasTeam ? team : undefined}
           asks={asks}
+          toolPhases={toolPhases}
           onFill={onFill}
         />
       ) : (
@@ -197,6 +204,43 @@ const TOOL_LABEL: Record<string, string> = {
 };
 const toolLabel = (name: string): string => TOOL_LABEL[name] ?? name;
 
+/** 工具执行阶段进度 → 等待态文案 (联网前端展示优化): a running tool's coarse phase (from a
+ *  transport-only `tool_use_progress` event, read live via extractToolPhases) as user-facing
+ *  text — so a waiting slow tool reads「正在检索 / 正在抓取网页 / 正在执行」rather than a bare
+ *「进行中」. Mirrors the desktop labels (各端全新建; chrome, not shared logic). Unknown phase →
+ *  generic「处理中」. */
+const TOOL_PHASE_TEXT: Record<ToolPhase, string> = {
+  queued: "排队中",
+  querying: "正在检索",
+  fallback: "改用备用引擎",
+  fetching: "正在抓取网页",
+  reading: "正在提取正文",
+  executing: "正在执行",
+  blocked: "出网受限",
+};
+const toolPhaseText = (phase: ToolPhase | undefined): string | null =>
+  phase ? (TOOL_PHASE_TEXT[phase] ?? "处理中") : null;
+
+/** Seconds a tool has been running, ticking client-side from when this row first saw `running`
+ *  (≈ the tool_use_start instant) — a liveliness cue for a BLOCKING tool (web_search) whose
+ *  execution streams no incremental progress. Resets when not running. Mirrors desktop. */
+function useRunningElapsed(running: boolean): number {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!running) {
+      setElapsed(0);
+      return;
+    }
+    const start = Date.now();
+    const id = setInterval(
+      () => setElapsed(Math.floor((Date.now() - start) / 1000)),
+      1000,
+    );
+    return () => clearInterval(id);
+  }, [running]);
+  return elapsed;
+}
+
 /** The most descriptive string arg to show beside a tool (its query / url / path / …);
  *  empty when the call carries no representative string arg. Mirrors desktop. */
 const TOOL_DETAIL_KEYS = [
@@ -290,12 +334,14 @@ function ProcessTimeline({
   citations,
   team,
   asks,
+  toolPhases,
   onFill,
 }: {
   steps: ProcessStep[];
   citations?: Citation[];
   team?: TeamProjection;
   asks?: NonBlockingAsk[];
+  toolPhases?: Map<string, ToolPhase>;
   onFill?: (text: string) => void;
 }) {
   const nodes = groupToolRuns(steps);
@@ -331,8 +377,20 @@ function ProcessTimeline({
         if (node.kind === "checkpoint" || node.kind === "plan_review")
           return null;
         if (node.kind === "tool-group")
-          return <ToolGroup key={node.tools[0].id} tools={node.tools} />;
-        return <ToolStep key={node.step.id} step={node.step} />;
+          return (
+            <ToolGroup
+              key={node.tools[0].id}
+              tools={node.tools}
+              toolPhases={toolPhases}
+            />
+          );
+        return (
+          <ToolStep
+            key={node.step.id}
+            step={node.step}
+            phase={toolPhases?.get(node.step.id)}
+          />
+        );
       })}
     </div>
   );
@@ -353,7 +411,13 @@ function Reasoning({ text }: { text: string }) {
  *  (mobile has no streaming-aware auto-expand for either) — whose summary is the per-category
  *  count / file names plus any 失败 count; expands to the unchanged per-tool {@link ToolStep}
  *  rows, each still openable to its own result. */
-function ToolGroup({ tools }: { tools: ToolStepData[] }) {
+function ToolGroup({
+  tools,
+  toolPhases,
+}: {
+  tools: ToolStepData[];
+  toolPhases?: Map<string, ToolPhase>;
+}) {
   const errorCount = tools.reduce(
     (n, t) => n + (t.status === "error" ? 1 : 0),
     0,
@@ -368,7 +432,7 @@ function ToolGroup({ tools }: { tools: ToolStepData[] }) {
       </summary>
       <div className="tool-group-body">
         {tools.map((t) => (
-          <ToolStep key={t.id} step={t} />
+          <ToolStep key={t.id} step={t} phase={toolPhases?.get(t.id)} />
         ))}
       </div>
     </details>
@@ -382,11 +446,28 @@ const TOOL_STATUS: Record<ToolStepData["status"], string> = {
 };
 
 /** A tool call: 中文名 (+ its 参数 detail) · status, expandable to its full arguments and
- *  result. */
-function ToolStep({ step }: { step: ToolStepData }) {
+ *  result. While running, the status shows the coarse 执行阶段 (正在检索 / 排队中 / 改用备用引擎,
+ *  from the live `phase`) + an elapsed timer — a live waiting cue instead of a static「进行中」. */
+function ToolStep({
+  step,
+  phase,
+}: {
+  step: ToolStepData;
+  phase?: ToolPhase;
+}) {
   const [open, setOpen] = useState(false);
   const args = Object.keys(step.arguments).length > 0 ? step.arguments : null;
   const detail = toolDetail(step.arguments);
+  const running = step.status === "running";
+  const elapsed = useRunningElapsed(running);
+  const runningStatus = running
+    ? [
+        toolPhaseText(phase) ?? TOOL_STATUS.running,
+        elapsed >= 1 ? `${elapsed}s` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : TOOL_STATUS[step.status];
   return (
     <div className={`tool tool-${step.status}`}>
       <button
@@ -398,7 +479,7 @@ function ToolStep({ step }: { step: ToolStepData }) {
           {toolLabel(step.tool_name)}
           {detail && <span className="tool-detail">{detail}</span>}
         </span>
-        <span className="tool-status">{TOOL_STATUS[step.status]}</span>
+        <span className="tool-status">{runningStatus}</span>
       </button>
       {open && (args || step.result != null) && (
         <div className="tool-body">

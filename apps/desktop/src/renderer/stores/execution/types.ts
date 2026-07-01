@@ -6,6 +6,7 @@ import type {
   DebateNarrativeRound,
   DebateResultPayload,
   PlanRevisionKind,
+  RunDebrief,
   RunKind,
   SSEEvent,
   Stance,
@@ -93,9 +94,16 @@ export const TOOL_LABELS: Record<string, string> = {
   delegate: "委派任务",
   ask_user: "向你确认",
   consult_skill: "查阅能力",
+  consult_memory: "查阅记忆",
   revise: "修订产物",
   // Worker-only upward channel (build_worker_registry); surfaces in run detail.
   escalate: "上报问题",
+  // 团队便签墙 (workers broadcast to concurrent siblings) + AI 协作白板 (board-bound turns).
+  post_note: "发布便签",
+  read_notes: "查看便签",
+  amend_note: "修订便签",
+  board_ops: "操作白板",
+  board_read: "读取白板",
 };
 
 export function toolLabel(name: string): string {
@@ -261,7 +269,13 @@ export interface RunNode {
   task: string;
   status: RunStatus;
   dependsOn: string[];
+  /** The worker's authored 结论 (`debrief.summary`) or "" — a scan line for the whiteboard
+   * card, NOT a truncation; null until `run_completed`. */
   outputSummary: string | null;
+  /** 完工交接简报 (run_completed): the worker's authored wrap-up — 结论 / 关键要点 / 关键假设 /
+   * 建议下一步, each present only when written — rendered structured in the run-detail 摘要.
+   * null when the worker authored none (辩手 / trivial worker / the captain). */
+  debrief: RunDebrief | null;
   durationMs: number | null;
   /** Failure reason from `run_failed`; null unless this run failed. */
   error: string | null;

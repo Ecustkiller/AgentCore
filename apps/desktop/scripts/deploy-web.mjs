@@ -22,18 +22,25 @@ import { copyFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
   REPO_ROOT,
+  assertBackendContractSatisfied,
   loadDeployEnv,
   run,
   scp,
   sshScript,
 } from "../../../deploy/scripts/load-deploy-env.mjs";
 
+// Same-origin API the built SPA calls (pinned in apps/desktop/.env.production).
+const API_URL = "https://app.fashitianxia.xyz/api";
 const WEB_ROOT = "/opt/agentcore/web";
 const DESKTOP_DIR = join(REPO_ROOT, "apps/desktop");
 const DIST = join(DESKTOP_DIR, "dist-web");
 const TARBALL = join(REPO_ROOT, "web-dist.tgz");
 
 loadDeployEnv();
+
+// Guard against shipping a frontend newer than the live backend (前后端版本漂移) —
+// runs before the build so a mismatch fails fast (see the 记忆·主题 404 incident).
+await assertBackendContractSatisfied({ apiBaseUrl: API_URL });
 
 run("pnpm --filter agentcore-desktop build:webapp", "pnpm", [
   "--filter",

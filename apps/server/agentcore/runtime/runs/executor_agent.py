@@ -70,7 +70,6 @@ from agentcore.runtime.runs.serialize import (
     run_final_fact,
 )
 from agentcore.runtime.runs.types import ContextBlock, RunPhase, RunSpec, RunState
-from agentcore.runtime.workspace import summarize
 from agentcore.tools.protocol import EscalationChannel, EscalationOutcome, ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.write_claims import WriteCoordinator
@@ -530,7 +529,10 @@ def build_agent_executor(
             if not verdict.ok and _is_hard_failure(content, contract):
                 reason = "；".join(verdict.failures)
                 logger.info("contract.failed", run_id=spec.run_id, failures=verdict.failures)
-                sink.emit(run_failed(spec.run_id, agent_id, reason))
+                # A contract miss still produced a deliverable + (often) a 交接简报: surface it so
+                # the run-detail shows the author's wrap-up beside the failure (the infra-failure
+                # except path below has no reliable content, so it carries none).
+                sink.emit(run_failed(spec.run_id, agent_id, reason, debrief=debrief))
                 return RunState(
                     phase=RunPhase.FAILED,
                     content=content,
@@ -554,7 +556,10 @@ def build_agent_executor(
                 run_completed(
                     spec.run_id,
                     agent_id,
-                    output_summary=summarize(content),
+                    # 交接简报单一源: the summary IS the worker's authored 结论 (best-effort "" when
+                    # it wrote none — the full deliverable is persisted + shown either way), never a
+                    # truncation; the structured debrief rides alongside for the run-detail card.
+                    output_summary=(debrief or {}).get("summary", ""),
                     duration_ms=duration_ms,
                     # 阶段1 scheduled runs are all delegated workers → member row;
                     # the already-priced usage/cost light up the payroll live.
@@ -562,6 +567,7 @@ def build_agent_executor(
                     model=profile.model,
                     usage=usage,
                     cost=cost,
+                    debrief=debrief,
                 )
             )
             return RunState(

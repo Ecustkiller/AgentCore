@@ -109,7 +109,8 @@ class DelegateTool:
         # plan_review pause (frame saved) — ``drive`` reads it after the scheduler soft-pauses
         # and returns a SUSPEND ToolResult. False on every ordinary drive.
         self._pending_pause: bool = False
-        # 团队便签墙 (§2.2 通 / §2.3 合·对账): the most recent batch's wall, set by ``drive`` when it
+        # 团队便签墙 (§2.2 通 / §2.3 合·对账): the most recent batch's wall,
+        # set by ``drive`` when it
         # builds the executor so the CEO finalize (``format_for_ceo``, both the normal-终态 and the
         # ``replan(stop)`` finalize_stopped paths) can fold the team's outstanding 决定 / 认领 into
         # 语义边界对账. None until a batch runs (a CEO that never delegated has no wall).
@@ -157,7 +158,10 @@ class DelegateTool:
                 msg = "playbook 必须是非空字符串（playbook 名）。"
                 return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
             if arguments.get("tasks"):
-                msg = "playbook 与 tasks 二选一：用 playbook 时把槽位放进 playbook_args，别同时传 tasks。"
+                msg = (
+                    "playbook 与 tasks 二选一：用 playbook 时把槽位放进 "
+                    "playbook_args，别同时传 tasks。"
+                )
                 return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
             tasks_raw, pb_errors = expand_playbook(playbook.strip(), arguments.get("playbook_args"))
             if pb_errors:

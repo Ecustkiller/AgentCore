@@ -1,9 +1,10 @@
-import { RevisionCompare } from "@/components/chat/RevisionCompare";
+import { TurnCompare } from "@/components/chat/compare/TurnCompare";
 import { IconButton } from "@/components/ui";
 import { useActiveMessages } from "@/stores/conversation";
 import {
   ExecutionScopeContext,
   hasRevisions,
+  isDebate,
   useMessageExecution,
 } from "@/stores/execution";
 import { type EndpointKind, useSidePanelStore } from "@/stores/sidePanel";
@@ -39,7 +40,8 @@ import { GraphView } from "./GraphView";
  * full text (the prompt / the CEO's final answer) in the shared right-docked panel as a
  * content tab — like a worker drill, so a deliverable is read without leaving the canvas
  * and detail always opens to the right. The foot drawer is reserved for the 版本对比 peek
- * ({@link RevisionCompare}, header chip when this turn revised a worker); it splits the
+ * ({@link import("@/components/chat/compare/TurnCompare").TurnCompare}, header chip when
+ * this turn revised a 非辩论 worker); it splits the
  * fixed node height with the graph (total stays {@link FOCUS_NODE_HEIGHT}, so the host's
  * stacking offsets never shift). A 辩论 turn has no peek here — its full surface is the
  * 统一辩论室 in 放大态 ({@link import("./CanvasZoomedTurn").CanvasZoomedTurn}), reached via
@@ -70,11 +72,13 @@ export function FocusedTurnNode({ data }: NodeProps) {
   const showContentDetail = useSidePanelStore((s) => s.showContentDetail);
   const messages = useActiveMessages();
 
-  // In-place foot drawer: the 版本对比 peek (RevisionCompare). Endpoints (提问 / 最终回答)
+  // In-place foot drawer: the 版本对比 peek (TurnCompare). Endpoints (提问 / 最终回答)
   // drill to the shared right panel instead (a content tab), not here. A 辩论 turn has no
-  // peek here — its full surface is the 统一辩论室 in 放大态 (via the 放大 button).
+  // peek here — its full surface is the 统一辩论室 in 放大态 (via the 放大 button), and the
+  // 擂台 matrix wouldn't read in this小抽屉 — so the peek is gated to 非辩论 revisions.
   const [revisionsOpen, setRevisionsOpen] = useState(false);
-  const showRevisions = !!execution && hasRevisions(execution);
+  const showRevisions =
+    !!execution && hasRevisions(execution) && !isDebate(execution);
 
   // 图上指挥 (§6.2): on-graph awareness that THIS turn awaits a boss decision or needs
   // 救火 — the host {@link import("./ConversationCanvas")} surfaces the actionable cards
@@ -188,11 +192,7 @@ export function FocusedTurnNode({ data }: NodeProps) {
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto p-3">
                 {execution && (
-                  <RevisionCompare
-                    execution={execution}
-                    messageId={messageId}
-                    bare
-                  />
+                  <TurnCompare execution={execution} messageId={messageId} />
                 )}
               </div>
             </div>

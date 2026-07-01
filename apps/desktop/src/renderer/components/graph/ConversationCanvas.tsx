@@ -61,6 +61,7 @@ export function ConversationCanvas() {
   const {
     zoomedTurn,
     zoomAutoplay,
+    zoomView,
     zoomShown,
     openZoom,
     exitZoom,
@@ -218,6 +219,7 @@ export function ConversationCanvas() {
             key={zoomedTurn}
             turnId={zoomedTurn}
             autoplay={zoomAutoplay}
+            initialView={zoomView}
             onClose={exitZoom}
           />
         </div>

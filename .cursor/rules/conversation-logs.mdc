@@ -47,6 +47,7 @@ Get-Content logs/dev.jsonl | %{ $_ | ConvertFrom-Json } | ? trace_id -eq <trace_
 ## 提示
 
 - 找"优化点"先看：`level=error` 聚类、`chat.turn_complete` 的 `duration_ms` / `rounds` 尾部、`engine.loop_nudge`/`engine.loop_finalize`/`engine.max_rounds_exhausted` 计数、`delegated=true` 回合的 `workers` 数、`tool.execute_end` 的失败率（`status!=ok`）与慢工具（`duration_ms` 尾部）。
+- **联网工具全失败 / 辩论"无据可依"**（`read_url`·`web_search` 成批 `status!=ok`，或 `read_url` 1ms 内秒失败报「私有/保留地址」）：先跑 `uv run python scripts/probe_egress.py`（`apps/server` 下）查是不是**本机代理 fake-IP**——它把所有域名 DNS 应答成 `198.18.x.x` 保留段 → SSRF 正确拦截（**环境坑、非产品 bug**）；处置见脚本汇总（代理关 fake-ip / 改 `redir-host`）。
 - LLM 层：`llm.call` 的 `latency_ms` 尾部（按 `scenario·model` 看谁慢/谁贵）、`finish_reason=length`（回答被截断，可能要调 `max_tokens`）或 `content_filter`、`reasoning_tokens` 异常飙高（想得费劲）；`cost.recorded` 的 per-turn `total_usd`（贵回合）。调 prompt 时临时 `LOG_LLM_BODIES=true`+`LOG_LEVEL=debug` 抓 `llm.request`/`llm.response`。
 - 文件持续追加常达数十 MB，**rg/grep 偶尔漏命中刚写入的行**；验证刚触发的回合改用 `Read` 读末尾或 `Select-String`。
 - 数据库连接：`agentcore:agentcore_dev@localhost:5433/agentcore`（`apps/server/.env`）。

@@ -124,7 +124,7 @@ async def observability_conversation(
     failed turn in full context (prompt + reply/error + rounds/latency + ¥ + the
     turn's tool/LLM spans).
     """
-    conv = await conversations.get_by_id(conversation_id)  # unscoped: admin cross-user
+    conv = await conversations.get_by_id_unscoped(conversation_id)  # admin cross-user
     if conv is None:
         raise NotFoundError("对话不存在")
 

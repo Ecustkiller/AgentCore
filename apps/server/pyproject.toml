@@ -69,6 +69,9 @@ ignore = ["B008", "A002", "E402"]
 "agentcore/runtime/prompt.py" = ["E501"]
 "agentcore/runtime/resolve/prompt.py" = ["E501"]
 "agentcore/tools/builtin/debate/prompt.py" = ["E501"]
+# Legal-vertical Skill bodies are verbatim Chinese LLM guidance (string literals),
+# same reason-to-exempt as runtime/skills.py: reflowing changes what the CEO consults.
+"agentcore/runtime/legal_skills.py" = ["E501"]
 # Conformance vectors embed long Chinese fixture strings; reflowing hurts diff readability.
 # (vectors became a package — match every vector module, not just the old single file.)
 "agentcore/conformance/vectors/*.py" = ["E501"]

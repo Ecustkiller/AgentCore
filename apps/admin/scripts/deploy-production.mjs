@@ -8,6 +8,7 @@ import { readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
   REPO_ROOT,
+  assertBackendContractSatisfied,
   loadDeployEnv,
   run,
   scp,
@@ -20,6 +21,9 @@ const NGINX_CONF = join(REPO_ROOT, "deploy/nginx/office-admin.conf");
 const REMOTE_SCRIPT = join(REPO_ROOT, "deploy/scripts/admin-remote-install.sh");
 
 loadDeployEnv();
+
+// Guard against shipping a frontend newer than the live backend (前后端版本漂移).
+await assertBackendContractSatisfied({ apiBaseUrl: API_URL });
 
 const buildEnv = { ...process.env, VITE_API_URL: API_URL };
 

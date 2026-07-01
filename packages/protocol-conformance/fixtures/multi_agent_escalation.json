@@ -246,6 +246,7 @@
         "status": "completed",
         "dependsOn": [],
         "outputSummary": "完成选型调研（含 1 条升级）",
+        "debrief": null,
         "durationMs": 1000,
         "error": null,
         "parentRunId": null,
@@ -293,6 +294,7 @@
           "r1"
         ],
         "outputSummary": "完成建议",
+        "debrief": null,
         "durationMs": 1200,
         "error": null,
         "parentRunId": null,

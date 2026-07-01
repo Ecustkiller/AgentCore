@@ -9,6 +9,7 @@ import {
   foldReasoningDelta,
   foldTeamMarker,
   foldToolUseEnd,
+  foldToolUsePhase,
   foldToolUseStart,
   messageLaneFromMessage,
 } from "@/lib/foldMessageLane";
@@ -24,6 +25,7 @@ import type {
   PlanReviewRequiredPayload,
   QuestionPostedPayload,
   ToolUseEndPayload,
+  ToolUseProgressPayload,
   ToolUseStartPayload,
   UsageBreakdown,
 } from "@/types/events";
@@ -98,6 +100,10 @@ export interface ConversationState {
   ) => void;
   endProcessTool: (
     payload: ToolUseEndPayload,
+    conversationId?: string | null,
+  ) => void;
+  setProcessToolPhase: (
+    payload: ToolUseProgressPayload,
     conversationId?: string | null,
   ) => void;
   attachCitationsToLastMessage: (
@@ -386,6 +392,19 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const last = messages[messages.length - 1];
         if (!last || last.role !== "assistant") return null;
         const lane = foldToolUseEnd(messageLaneFromMessage(last), payload);
+        if (lane.process === last.process) return null;
+        messages[messages.length - 1] = { ...last, process: lane.process };
+        return { messages };
+      }),
+
+    // 工具执行阶段进度 (联网搜索前端展示优化): stamp the running tool step's coarse phase from a
+    // (transport-only, live-stream) tool_use_progress event so the waiting UI is honest.
+    setProcessToolPhase: (payload, conversationId) =>
+      patchConversation(conversationId, (rt) => {
+        const messages = [...rt.messages];
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== "assistant") return null;
+        const lane = foldToolUsePhase(messageLaneFromMessage(last), payload);
         if (lane.process === last.process) return null;
         messages[messages.length - 1] = { ...last, process: lane.process };
         return { messages };

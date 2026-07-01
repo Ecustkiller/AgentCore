@@ -482,11 +482,21 @@ class Moderator:
                 converged=False,
                 rationale="裁判输出无法解析，保守判未收敛。",
             )
+        converged = _as_bool(data.get("converged"), False)
+        # stop_reason 仅在【收敛】时有意义（见 JudgeVerdict 契约）：未收敛时强制留空，杜绝
+        # 「converged=false 却带 stop_reason」的口径错位随本轮 verdict 流入 journal / 前端
+        # （真实 trace 曾出现第 1 轮未收敛却标 focus_clarified）。收敛时校验取值落在词表内，
+        # 否则回落 STOP_CONVERGED——与循环层归一（下方 verdict.converged 分支）同一口径。
+        raw_stop = _as_str(data.get("stop_reason"))
+        if converged:
+            stop_reason = raw_stop if raw_stop in STOP_REASONS else STOP_CONVERGED
+        else:
+            stop_reason = ""
         return JudgeVerdict(
             real_clash=_as_bool(data.get("real_clash"), True),
             new_arguments=_as_bool(data.get("new_arguments"), True),
-            converged=_as_bool(data.get("converged"), False),
-            stop_reason=_as_str(data.get("stop_reason")),
+            converged=converged,
+            stop_reason=stop_reason,
             next_focus=_as_str(data.get("next_focus")),
             rationale=_as_str(data.get("rationale")),
             clashes=_as_clashes(

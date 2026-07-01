@@ -46,6 +46,7 @@ export type SSEEventType =
   | "title_generated"
   | "tool_progress"
   | "tool_use_end"
+  | "tool_use_progress"
   | "tool_use_start"
   | "turn_saved"
   | "workspace_op_required"

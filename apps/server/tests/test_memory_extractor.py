@@ -8,11 +8,11 @@ import agentcore.memory.user_memory as mem_mod
 from agentcore.llm import LLMRequest, LLMResponse
 from agentcore.memory.user_memory import (
     _EXTRACT_SYSTEM_PROMPT,
-    _injection_style_marker,
     LLMMemoryExtractor,
     MarkdownMemoryApplier,
     MemoryAction,
     MemoryExtractInput,
+    _injection_style_marker,
     parse_memory_ops,
 )
 

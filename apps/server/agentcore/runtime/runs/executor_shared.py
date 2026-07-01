@@ -133,6 +133,13 @@ async def _react_and_capture(
         on_round_begin=on_round_begin,
         run_id=run_id,
         role="worker",
+        # 交付正文只留最终交付、旁白入 journal (Fork-B, 全队对称): a worker/debater/revision's
+        # persisted product (message_final → run card 重载合成 + CEO synthesis input +
+        # contract/debrief harvest) drops the prose it streams before a non-terminal tool
+        # (a lead-in / steer acknowledgement). Because a worker's live card shares the
+        # deliverable channel, react_loop also emits run_output_reset (via on_reset above)
+        # so 直播==重载 — keeping the conformance invariant while cleaning the product.
+        deliverable_only=True,
     )
     messages.append(LLMMessage(role="assistant", content=content))
     return content, reasoning, usage, rounds

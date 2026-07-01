@@ -1,4 +1,4 @@
-import type { ProcessStep } from "@/types/events";
+import type { ProcessStep, ToolPhase } from "@/types/events";
 import {
   ArrowUp,
   BookOpen,
@@ -40,6 +40,27 @@ export const TOOL_META: Record<string, { Icon: LucideIcon; label: string }> = {
 
 export const toolMeta = (name: string): { Icon: LucideIcon; label: string } =>
   TOOL_META[name] ?? { Icon: Wrench, label: name };
+
+/** 工具执行阶段进度 → 等待态文案 (联网前端展示优化): a running tool's coarse phase (from a
+ * `tool_use_progress` event) as user-facing text — a slow builtin fires these while its blocking
+ * leg is in flight so the waiting row is live instead of a dead spinner. web_search: 检索/排队/
+ * 备用引擎; read_url: 抓取/提取; code_execute: 执行. */
+const TOOL_PHASE_TEXT: Record<ToolPhase, string> = {
+  queued: "排队中",
+  querying: "正在检索",
+  fallback: "改用备用引擎",
+  fetching: "正在抓取网页",
+  reading: "正在提取正文",
+  executing: "正在执行",
+  blocked: "出网受限",
+};
+
+/** Waiting-state text for a running tool step's `phase`, or null when it has none yet.
+ * An unrecognized (newer-backend) phase degrades to a generic「处理中」rather than vanishing. */
+export function toolPhaseText(phase: string | undefined): string | null {
+  if (!phase) return null;
+  return TOOL_PHASE_TEXT[phase as ToolPhase] ?? "处理中";
+}
 
 const TOOL_DETAIL_KEYS = [
   "query",

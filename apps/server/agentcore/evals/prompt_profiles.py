@@ -1,6 +1,7 @@
 """eval 侧的 prompt 变体注册表（方向①）：把命名变体解析成运行期注入的 :class:`PromptProfile`.
 
-用例用 ``EvalCase.prompt_profile``（一个名字）声明跑哪个变体；harness 经 :func:`resolve_prompt_profile`
+用例用 ``EvalCase.prompt_profile``（一个名字）声明跑哪个变体；harness 经
+:func:`resolve_prompt_profile`
 查表、在本例运行期 ``use_profile`` 注入。``seed_lint`` 用 :data:`PROFILE_NAMES` 校验名字是否存在
 （写错立刻挂）。机制细节见 [`runtime/prompt_profile.py`](../runtime/prompt_profile.py)。
 
