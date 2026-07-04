@@ -12,7 +12,7 @@
 
 它对每个 URL：① 用应用同路径 ``_getaddrinfo`` 解析、标出 fake-IP / 保留段；② 跑
 ``classify_url`` 的 SSRF 判定；③ 判定放行则调**真实 ``ReadUrlTool``** 端到端读一次。末尾给
-PASS/FAIL 汇总。见 .cursor/rules/conversation-logs.mdc、docs/07-规划/辩论会话优化点盘点.md。
+PASS/FAIL 汇总。见 .cursor/rules/conversation-logs.mdc、docs/02-架构/本地开发.md（fake-IP 排障）。
 """
 
 import asyncio

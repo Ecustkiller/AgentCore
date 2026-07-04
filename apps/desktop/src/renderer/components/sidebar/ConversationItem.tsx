@@ -19,6 +19,7 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   useArchiveConversation,
   useDeleteConversation,
+  useDuplicateConversation,
   useMoveConversation,
   useRenameConversation,
   useTogglePin,
@@ -33,7 +34,6 @@ import {
 import { useApprovalStore } from "@/stores/approvals";
 import {
   type Conversation,
-  runtimeOf,
   useConversationGenerating,
   useConversationStore,
 } from "@/stores/conversation";
@@ -41,11 +41,11 @@ import { useShareStore } from "@/stores/share";
 import {
   Archive,
   Check,
+  Copy,
   Download,
   FileJson,
   Folder,
   Inbox,
-  Lock,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -78,14 +78,11 @@ export function ConversationItem({ conversation }: Props) {
   const moveMutation = useMoveConversation();
   const deleteMutation = useDeleteConversation();
   const pinMutation = useTogglePin();
+  const duplicateMutation = useDuplicateConversation();
   const archiveMutation = useArchiveConversation();
   const unarchiveMutation = useUnarchiveConversation();
   const folders = useFolders();
   const isGenerating = useConversationGenerating(conversation.id);
-  const hasLiveMessages = useConversationStore(
-    (s) => runtimeOf(s, conversation.id).messages.length > 0,
-  );
-  const workspaceLocked = conversation.messageCount > 0 || hasLiveMessages;
   const awaitingApproval = useApprovalStore((s) =>
     s.pending.some((p) => p.conversationId === conversation.id),
   );
@@ -176,6 +173,17 @@ export function ConversationItem({ conversation }: Props) {
     moveMutation.mutate({ id: conversation.id, folderId });
   };
 
+  const handleDuplicate = () => {
+    setMoreOpen(false);
+    duplicateMutation.mutate(conversation.id, {
+      onSuccess: (conv) => {
+        switchConversation(conv.id);
+        navigate(`/conversations/${conv.id}`);
+      },
+      onError: (err) => notifyError(err, "克隆失败"),
+    });
+  };
+
   const handleExport = async (format: ExportFormat) => {
     try {
       await exportConversation(conversation.id, format);
@@ -197,69 +205,55 @@ export function ConversationItem({ conversation }: Props) {
   const rowActionClass =
     "size-6 text-sidebar-foreground/40 hover:text-sidebar-foreground";
 
-  const moveMenuSection = workspaceLocked ? (
-    <>
-      <DropdownMenuSeparator />
-      <DropdownMenuItem disabled>
-        <Lock size={14} className="shrink-0" />
-        <span className="flex-1 truncate">开始后不可更换工作区</span>
-      </DropdownMenuItem>
-    </>
-  ) : folders.length > 0 || currentFolderId ? (
-    <>
-      <DropdownMenuSeparator />
-      <DropdownMenuLabel>移到</DropdownMenuLabel>
-      <div className="max-h-52 overflow-y-auto">
-        {folders.map((f) => (
-          <DropdownMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
-            <Folder size={14} className="shrink-0" />
-            <span className="flex-1 truncate">{f.name}</span>
-            {f.id === currentFolderId && (
-              <Check size={13} className="shrink-0" />
-            )}
+  const moveMenuSection =
+    folders.length > 0 || currentFolderId ? (
+      <>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>移到</DropdownMenuLabel>
+        <div className="max-h-52 overflow-y-auto">
+          {folders.map((f) => (
+            <DropdownMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
+              <Folder size={14} className="shrink-0" />
+              <span className="flex-1 truncate">{f.name}</span>
+              {f.id === currentFolderId && (
+                <Check size={13} className="shrink-0" />
+              )}
+            </DropdownMenuItem>
+          ))}
+        </div>
+        {currentFolderId && (
+          <DropdownMenuItem onSelect={() => void moveTo(null)}>
+            <Inbox size={14} className="shrink-0" />
+            <span className="flex-1 truncate">移出文件夹</span>
           </DropdownMenuItem>
-        ))}
-      </div>
-      {currentFolderId && (
-        <DropdownMenuItem onSelect={() => void moveTo(null)}>
-          <Inbox size={14} className="shrink-0" />
-          <span className="flex-1 truncate">移出文件夹</span>
-        </DropdownMenuItem>
-      )}
-    </>
-  ) : null;
+        )}
+      </>
+    ) : null;
 
-  const contextMoveSection = workspaceLocked ? (
-    <>
-      <ContextMenuSeparator />
-      <ContextMenuItem disabled>
-        <Lock size={14} className="shrink-0" />
-        <span className="flex-1 truncate">开始后不可更换工作区</span>
-      </ContextMenuItem>
-    </>
-  ) : folders.length > 0 || currentFolderId ? (
-    <>
-      <ContextMenuSeparator />
-      <ContextMenuLabel>移到</ContextMenuLabel>
-      <div className="max-h-52 overflow-y-auto">
-        {folders.map((f) => (
-          <ContextMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
-            <Folder size={14} className="shrink-0" />
-            <span className="flex-1 truncate">{f.name}</span>
-            {f.id === currentFolderId && (
-              <Check size={13} className="shrink-0" />
-            )}
+  const contextMoveSection =
+    folders.length > 0 || currentFolderId ? (
+      <>
+        <ContextMenuSeparator />
+        <ContextMenuLabel>移到</ContextMenuLabel>
+        <div className="max-h-52 overflow-y-auto">
+          {folders.map((f) => (
+            <ContextMenuItem key={f.id} onSelect={() => void moveTo(f.id)}>
+              <Folder size={14} className="shrink-0" />
+              <span className="flex-1 truncate">{f.name}</span>
+              {f.id === currentFolderId && (
+                <Check size={13} className="shrink-0" />
+              )}
+            </ContextMenuItem>
+          ))}
+        </div>
+        {currentFolderId && (
+          <ContextMenuItem onSelect={() => void moveTo(null)}>
+            <Inbox size={14} className="shrink-0" />
+            <span className="flex-1 truncate">移出文件夹</span>
           </ContextMenuItem>
-        ))}
-      </div>
-      {currentFolderId && (
-        <ContextMenuItem onSelect={() => void moveTo(null)}>
-          <Inbox size={14} className="shrink-0" />
-          <span className="flex-1 truncate">移出文件夹</span>
-        </ContextMenuItem>
-      )}
-    </>
-  ) : null;
+        )}
+      </>
+    ) : null;
 
   if (editing) {
     return (
@@ -424,6 +418,10 @@ export function ConversationItem({ conversation }: Props) {
                   </DropdownMenuItem>
                   {moveMenuSection}
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={handleDuplicate}>
+                    <Copy size={14} className="shrink-0" />
+                    <span className="flex-1 truncate">克隆对话</span>
+                  </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={() =>
                       useShareStore.getState().open(conversation.id)
@@ -483,6 +481,10 @@ export function ConversationItem({ conversation }: Props) {
         </ContextMenuItem>
         {contextMoveSection}
         <ContextMenuSeparator />
+        <ContextMenuItem onSelect={handleDuplicate}>
+          <Copy size={14} className="shrink-0" />
+          <span className="flex-1 truncate">克隆对话</span>
+        </ContextMenuItem>
         <ContextMenuItem
           onSelect={() => useShareStore.getState().open(conversation.id)}
         >

@@ -158,6 +158,7 @@ def team_note_posted(
     ts: float,
     supersedes: str | None = None,
     supersede_mode: str | None = None,
+    source: str | None = None,
 ) -> SSEEvent:
     """A worker pinned a note to the batch 便签墙 (§2.2 通). Carries the author (run/agent/
     role), the ``kind`` (``decision`` 我定了 / ``heads_up`` 提个醒) and the one-line ``text``,
@@ -185,6 +186,8 @@ def team_note_posted(
         payload["supersedes"] = supersedes
     if supersede_mode is not None:
         payload["supersede_mode"] = supersede_mode
+    if source is not None:
+        payload["source"] = source
     return SSEEvent(type=EventType.TEAM_NOTE_POSTED, payload=payload)
 
 

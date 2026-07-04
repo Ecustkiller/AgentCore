@@ -111,6 +111,18 @@ class RegenerateMessageRequest(BaseModel):
     content: str | None = Field(None, min_length=1, max_length=32000)
 
 
+class SetMessageFeedbackRequest(BaseModel):
+    """Set or clear the user's 点赞/点踩 on an assistant message (回复反馈).
+
+    ``feedback`` is ``"up"`` / ``"down"`` to rate the reply, or ``null`` to clear the
+    rating back to 未评价 (toggling the same side off). The route does not restrict by
+    role — rating is only meaningful on assistant replies, but a value on any row is a
+    harmless store.
+    """
+
+    feedback: Literal["up", "down"] | None = None
+
+
 # --- Interaction resolve (§8.2 unified suspend-resume bridge) ---
 # One ``POST /conversations/{id}/interactions/{interaction_id}`` settles any paused
 # interaction; the body is discriminated on ``kind`` (approval / ask_user /
@@ -252,6 +264,23 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
     raise ValueError(f"unknown interaction kind: {getattr(body, 'kind', None)!r}")
 
 
+class SubmitRunRedirectRequest(BaseModel):
+    """User mid-flight steer for one running worker (中间可见性 Phase 2a).
+
+    Queued while ``delegate`` drives; the scheduler drains and applies cancel + re-run
+    in a later step. Does not pause the turn (parallel siblings keep running).
+    """
+
+    execution_id: str = Field(..., min_length=1, max_length=128)
+    run_id: str = Field(..., min_length=1, max_length=128)
+    feedback: str = Field(..., min_length=1, max_length=4000)
+
+
+class SubmitRunRedirectResponse(BaseModel):
+    ok: bool = True
+    queued: int = Field(..., description="Pending redirect count for this execution after enqueue.")
+
+
 class ResumeTurnRequest(BaseModel):
     """Body for ``POST .../messages/{message_id}/resume`` (结构化挂起 2b).
 
@@ -387,6 +416,11 @@ class MessageDetail(BaseModel):
     trace_id: str | None = None
     attachments: list[StoredAttachment] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
+    # 回合级「下一步推荐」chips (下一步推荐, DERIVED 持久化): the assistant row's persisted
+    # quick-reply suggestions (messages.followups column), surfaced so reopening a
+    # conversation replays the last turn's chips — live they ride followups_generated.
+    # Auto-populated from the ORM attribute via from_attributes. [] for user / none-minted.
+    followups: list[str] = Field(default_factory=list)
     runs: RunsPayload | None = None
     # 回合 token 用量 + 轮次 (Tier 2 重载持久化): the assistant row's ``usage`` column carries
     # the turn's token snapshot + rounds; surfaced so the bubble's meta row (用量 + 轮次)
@@ -397,6 +431,10 @@ class MessageDetail(BaseModel):
     # errored / empty turn that spent no tokens — parity with the live bubble's omission).
     usage: UsageBreakdown | None = None
     rounds: int | None = None
+    # 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's satisfaction signal on this assistant
+    # reply — "up" | "down" | null(未评价). Auto-populated from the ORM attribute via
+    # from_attributes so a reloaded bubble replays the user's rating. null for user rows.
+    feedback: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -490,9 +528,11 @@ class RecordTurnRequest(BaseModel):
 
     Carries the assistant outcome the local pipeline returned (content / reasoning /
     citations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored
-    ids agree). The display token totals ride on ``Message.usage``. Spend is NOT sent:
-    a sidecar turn's LLM calls are metered authoritatively at the cloud inference proxy
-    (``/v1/inference``, Slice 4a), so this write-back persists content only.
+    ids agree). The FULL token snapshot rides on ``Message.usage`` (input / output /
+    reasoning / cache hit / cache miss + rounds) so a reloaded sidecar turn's meta row
+    matches a cloud turn's. Spend is NOT sent: a sidecar turn's LLM calls are metered
+    authoritatively at the cloud inference proxy (``/v1/inference``, Slice 4a), so this
+    write-back persists content only.
     """
 
     user_message: str = Field(..., min_length=1, max_length=32000)
@@ -506,8 +546,14 @@ class RecordTurnRequest(BaseModel):
     # duplicate the user/assistant rows (双模式工作区 §一.1 回写可靠性).
     user_message_id: str = Field(..., min_length=1, max_length=64)
     message_id: str | None = Field(None, max_length=64)
+    # Full usage snapshot — persisted verbatim into ``Message.usage`` to match the cloud
+    # turn's 6-key row (cloud ``persist_turn_result``). reasoning / cache tokens are additive
+    # (default 0), so an older desktop that omits them degrades to today's partial snapshot.
     input_tokens: int = Field(0, ge=0)
     output_tokens: int = Field(0, ge=0)
+    reasoning_tokens: int = Field(0, ge=0)
+    cache_hit_tokens: int = Field(0, ge=0)
+    cache_miss_tokens: int = Field(0, ge=0)
     rounds: int = Field(0, ge=0)
     # The local turn's trace_id (32-hex), stamped by the desktop on every cloud
     # inference-proxy LLM call this turn made. Reusing it for the persisted reply joins

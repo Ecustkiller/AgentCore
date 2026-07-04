@@ -2,9 +2,7 @@ import {
   confidenceLabel,
   confidencePill,
   statusAccentText,
-  statusPillInline,
 } from "@/components/ui/tone-presets";
-import { agentColorVar } from "@/lib/agentIdentity";
 import type { DebateBriefInfo, DebateSideInfo } from "@/types/events";
 import {
   ChevronDown,
@@ -16,6 +14,7 @@ import {
   SearchCheck,
   ShieldAlert,
   ShieldCheck,
+  Swords,
   Target,
   UserRound,
   Users,
@@ -23,7 +22,16 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { SideIdentity } from "./SideChip";
-import type { DebateForm } from "./model";
+import { type DebateForm, debateSideColorVar } from "./model";
+import {
+  RISK_LEVELS,
+  RISK_SEVERITY,
+  type RiskItem,
+  type RiskLevel,
+  buildRiskItems,
+  rankOf,
+  riskCounts,
+} from "./severity";
 
 /**
  * 决策简报 (结论卡) — 按形态分派，每形态以其**产物侧重**先行 (辩论编排设计.md §三)：
@@ -37,70 +45,80 @@ import type { DebateForm } from "./model";
  * ({@link import("./DebateStream").DebateStream} 的 FinalVerdict)，**气泡即唯一卡面**，故各区块一律
  * 去面板 / 边框、改「分段」呈现 + 至多一条轻量左强调 (价值之争 primary、各方论点 / 风险按身份色或危度)，
  * 根治「卡片套卡片」(用户反馈)。区块层级仍靠标题 + 间距 + 分隔线区分，不再靠嵌套描边。
+ *
+ * **裁决头条已前置**（三版观感）：倾向 + 置信 + 争点抽成 {@link VerdictHeadline}，由终审气泡壳
+ * (FinalVerdict / DebateVerdict) 渲染进顶部**染头区**（{@link verdictHeadTint}）——结论这句「最后
+ * 的话」获得舞台，本卡只剩次级区块（分诊 / 建议 / 风险 / 依据）。
  */
 export function BriefCard({
   brief,
   sides,
   form,
+  scores,
 }: {
   brief: DebateBriefInfo;
   sides: DebateSideInfo[];
   form: DebateForm;
+  /** 各方累计净分（sideKey → 净分，记分裁判 P2）——仅正反辩论「双方一眼看」英雄区用作「谁占优」信号；
+   *  缺省（未开启记分 / 旧产物）时不显净分 pill。红队 / 圆桌不消费。 */
+  scores?: Record<string, number>;
 }) {
   if (form === "red_team") return <RedTeamBrief brief={brief} sides={sides} />;
   if (form === "roundtable") return <RoundtableBrief brief={brief} />;
-  return <DebateBrief brief={brief} sides={sides} />;
+  return <DebateBrief brief={brief} sides={sides} scores={scores} />;
 }
 
 /**
- * 正反辩论 (结论先行 · 主次分明)：**裁决英雄卡**（倾向 + 置信 + 争点 + 需你拍板 + 建议）独占焦点
- * → 各方最强论点速览 → 弱化的「还需厘清」。把对用户最有行动价值的**价值之争（需你拍板）**提进裁决
- * 卡紧跟倾向，事实分歧 / 待解降级收尾——根治旧版「6 段等权堆叠、找不到落点」的杂（用户反馈）。
+ * 正反辩论 (结论先行 · 主次分明)：裁决头条（倾向 + 置信 + 争点）已前置到终审气泡染头区
+ * ({@link VerdictHeadline})。本卡先给**「双方一眼看」对照英雄区**（P2 价值密度：两边最强论点 +
+ * 累计净分并置，一屏读懂「谁在争什么、谁占优」，此前各方论点埋在「展开依据」折叠里、用户多半没点开），
+ * 再「需你拍板」→ 建议 → 弱化的「还需厘清」（事实分歧 / 待解渐进披露收尾）。对照区回应用户「站在双方
+ * 角度」的看两边诉求，与单向的裁决头条互补——根治旧版「结论只给 AI 一面之词、两边被折叠」。
  */
 function DebateBrief({
   brief,
   sides,
+  scores,
 }: {
   brief: DebateBriefInfo;
   sides: DebateSideInfo[];
+  scores?: Record<string, number>;
 }) {
   return (
     <div className="space-y-3">
-      <div className="space-y-3">
-        <VerdictHero
-          label="结论倾向"
-          leaning={brief.leaning}
-          confidence={brief.confidence}
-        />
-        <CruxLine crux={brief.crux} />
-        <DisputeTriage
-          value={brief.value_disputes}
-          factual={brief.factual_disputes}
-        />
-        <RecommendationInline text={brief.recommendation} />
-      </div>
-      {/* 渐进披露：默认极简（裁决 hero + 需你拍板），各方论点 / 事实分歧 / 待解作为「依据」折叠
-          (设计 §四「极简一页·渐进披露」)。 */}
-      <Disclosure summary="展开依据" teaser={evidenceTeaser(brief, true)}>
-        <SidePointsGrid
-          label="各方最强论点"
-          sides={sides}
-          points={brief.strongest_points}
-        />
-        <StillToClarify
-          factual={brief.factual_disputes}
-          open={brief.open_questions}
-        />
-      </Disclosure>
+      {/* 双方一眼看（P2）：两边最强论点 + 净分提到英雄位，无需展开即可对照两边——对标圆桌的观点光谱
+          英雄区（{@link RoundtableSpectrum}），把此前折叠在「展开依据」里的各方论点提上来。 */}
+      <SidePointsGrid
+        label="双方一眼看"
+        sides={sides}
+        points={brief.strongest_points}
+        scores={scores}
+      />
+      <DisputeTriage
+        value={brief.value_disputes}
+        factual={brief.factual_disputes}
+      />
+      <RecommendationInline text={brief.recommendation} />
+      {/* 渐进披露：英雄区（对照 + 裁决头条）之外的次级「依据」（事实分歧 / 待解）默认折叠
+          （设计 §四「极简一页·渐进披露」）；无可厘清项则整壳省略。 */}
+      {hasClarify(brief) && (
+        <Disclosure summary="展开依据" teaser={evidenceTeaser(brief, false)}>
+          <StillToClarify
+            factual={brief.factual_disputes}
+            open={brief.open_questions}
+          />
+        </Disclosure>
+      )}
     </div>
   );
 }
 
 /**
- * 红队审查 (结论先行 · 与正反辩论同一套主次)：**方案评定英雄卡**（评定 + 置信 + 需你拍板）独占焦点
- * → 风险清单（产物侧重，每条红队成员的最尖锐风险）→ 加固建议 → 方案方回应 → 弱化的「还需厘清」。
+ * 红队审查 (结论先行 · 与正反辩论同一套主次)：方案评定头条（评定 + 置信 + 争点）已前置到终审气泡
+ * 染头区 ({@link VerdictHeadline})，本卡从「需你拍板」直入 → 风险清单（产物侧重，每条红队成员的
+ * 最尖锐风险）→ 加固建议 → 方案方回应 → 弱化的「还需厘清」。
  * subject (被审方案) 由 `is_subject` 分出：红队成员的「最强论点」即风险、被审方的即抗辩，
- * recommendation 即加固建议。分歧二分提进英雄卡（{@link DisputeTriage}）、事实分歧 / 待解渐进披露收尾
+ * recommendation 即加固建议。事实分歧 / 待解渐进披露收尾
  * （{@link Disclosure} 内 {@link StillToClarify}）——与 {@link DebateBrief} 同骨架（三形态一致）。
  */
 function RedTeamBrief({
@@ -111,29 +129,14 @@ function RedTeamBrief({
   sides: DebateSideInfo[];
 }) {
   const subject = sides.find((s) => s.is_subject) ?? null;
-  const severities = brief.risk_severities ?? {};
-  const risks: RiskItem[] = sides
-    .filter((s) => !s.is_subject)
-    .map((s) => ({
-      side: s,
-      text: brief.strongest_points[s.key],
-      level: riskLevelOf(severities[s.key]),
-    }))
-    .filter((r): r is RiskItem => Boolean(r.text));
+  const risks = buildRiskItems(sides, brief);
   const defense = subject ? brief.strongest_points[subject.key] : undefined;
   return (
     <div className="space-y-3">
-      <div className="space-y-3">
-        <VerdictHero
-          label="方案评定"
-          leaning={brief.leaning}
-          confidence={brief.confidence}
-        />
-        <DisputeTriage
-          value={brief.value_disputes}
-          factual={brief.factual_disputes}
-        />
-      </div>
+      <DisputeTriage
+        value={brief.value_disputes}
+        factual={brief.factual_disputes}
+      />
 
       <RiskBoard risks={risks} />
 
@@ -150,7 +153,9 @@ function RedTeamBrief({
       {defense && subject && (
         <div
           className="border-l-2 pl-2.5"
-          style={{ borderLeftColor: agentColorVar(subject.name) }}
+          style={{
+            borderLeftColor: debateSideColorVar(subject.key, subject.name),
+          }}
         >
           <div className="mb-1 flex flex-wrap items-center gap-1.5">
             <ShieldCheck size={14} className={statusAccentText.primary} />
@@ -159,7 +164,7 @@ function RedTeamBrief({
             </span>
             <SideIdentity
               name={subject.name}
-              colorVar={agentColorVar(subject.name)}
+              colorVar={debateSideColorVar(subject.key, subject.name)}
               model={subject.model}
             />
           </div>
@@ -179,49 +184,6 @@ function RedTeamBrief({
   );
 }
 
-/** 红队风险严重度三档 → 展示元数据（与后端 `risk_severities` 的 high/medium/low 同口径）。注意
- * 语义与 {@link confidencePill} 相反：风险 high=最坏=destructive(红)、low=最轻=muted(灰)，故另起一套
- * 而非复用置信色。`rank` 决定看板内由危到轻的排序。 */
-const RISK_SEVERITY = {
-  high: {
-    label: "高危",
-    rank: 0,
-    pill: statusPillInline.destructive,
-    surface: "border-l-2 border-destructive/50 pl-2.5",
-  },
-  medium: {
-    label: "中危",
-    rank: 1,
-    pill: statusPillInline.destructive,
-    surface: "border-l-2 border-destructive/50 pl-2.5",
-  },
-  low: {
-    label: "低危",
-    rank: 2,
-    pill: statusPillInline.muted,
-    surface: "border-l-2 border-border pl-2.5",
-  },
-} as const;
-type RiskLevel = keyof typeof RISK_SEVERITY;
-const RISK_LEVELS = ["high", "medium", "low"] as const;
-type RiskItem = { side: DebateSideInfo; text: string; level: RiskLevel | null };
-
-/** 把后端风险严重度（已归一为 high/medium/low）映射成档位；容忍中文「高/中/低」与同义词，识别不到
- * （如旧产物无此字段）返回 null = 未评级（看板降级为中性卡，不杜撰档位）。 */
-function riskLevelOf(raw: string | undefined): RiskLevel | null {
-  if (!raw) return null;
-  const s = raw.trim().toLowerCase();
-  if ((RISK_LEVELS as readonly string[]).includes(s)) return s as RiskLevel;
-  if (s.includes("high") || raw.includes("高")) return "high";
-  if (s.includes("low") || raw.includes("低")) return "low";
-  if (s.includes("medium") || raw.includes("中")) return "medium";
-  return null;
-}
-
-function rankOf(level: RiskLevel | null): number {
-  return level ? RISK_SEVERITY[level].rank : 99;
-}
-
 /**
  * 风险看板（红队产物侧重）：把红队成员的最尖锐风险按严重度【总览计数 + 由危到轻排序 + 分级配色】
  * 呈现——顶部一行盘口计数让用户一眼看清风险结构（高危 N · 中危 N · 低危 N），卡片高危/中危(红)
@@ -230,10 +192,7 @@ function rankOf(level: RiskLevel | null): number {
  */
 function RiskBoard({ risks }: { risks: RiskItem[] }) {
   if (risks.length === 0) return null;
-  const counts: Record<RiskLevel, number> = { high: 0, medium: 0, low: 0 };
-  for (const r of risks) {
-    if (r.level) counts[r.level] += 1;
-  }
+  const counts = riskCounts(risks);
   const ordered = [...risks].sort((a, b) => rankOf(a.level) - rankOf(b.level));
   return (
     <div>
@@ -255,7 +214,7 @@ function RiskBoard({ risks }: { risks: RiskItem[] }) {
               <div className="flex items-center justify-between gap-2">
                 <SideIdentity
                   name={r.side.name}
-                  colorVar={agentColorVar(r.side.name)}
+                  colorVar={debateSideColorVar(r.side.key, r.side.name)}
                   model={r.side.model}
                 />
                 {meta && <span className={meta.pill}>{meta.label}</span>}
@@ -369,53 +328,76 @@ function RoundtableBrief({ brief }: { brief: DebateBriefInfo }) {
 }
 
 /**
- * 裁决 hero: 倾向 prominent + **单一**置信表达（一枚档位 chip）+ 置信成立条件全文。Label varies
- * by form. 置信过去用「3 段信号条 + chip + 全文」三重表达同一件事（用户反馈看着像迷你图表 / 冗余），
- * 现只留 chip（档位）+ 成立条件句（条件，与档位互补、非重复）；当 confidence 只是裸档位词
- * （"medium"/"中"）时连句子也省，不把枚举当条件展示。
+ * 终审气泡「染头区」样式（单一源，FinalVerdict / DebateVerdict 两壳共用）——品牌蓝自顶向下淡出
+ * `var(--card)`，与辩手发言气泡的「身份色染头栏」同一语汇：辩手气泡染各自阵营色，主持人终审这条
+ * 「最后的话」染 primary（结论 = 邀你行动 / 拍板的落点，遵 color-tokens「行动 / 需要你 = primary」）。
+ * 配套气泡顶缘 2px primary 色线（壳侧 `border-t-2` + {@link verdictTopBorder}），让终审在一排
+ * 灰底主持人小结里一眼读出「这是收场裁决」。
  */
-function VerdictHero({
-  label,
-  leaning,
-  confidence,
-}: {
-  label: string;
-  leaning: string;
-  confidence: string;
-}) {
-  return (
-    <div className="flex items-start gap-2.5">
-      <Scale
-        size={16}
-        className={`mt-1 shrink-0 ${statusAccentText.primary}`}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">{label}</span>
-          <ConfidenceChip level={confidenceLevel(confidence)} />
-        </div>
-        <p className="mt-1 text-base font-semibold leading-snug text-foreground">
-          {leaning}
-        </p>
-        {confidence && !isBareLevel(confidence) && (
-          <p className="mt-1 text-xs text-muted-foreground">{confidence}</p>
-        )}
-      </div>
-    </div>
-  );
-}
+export const verdictHeadTint = {
+  background:
+    "linear-gradient(to bottom, color-mix(in oklch, var(--primary) 8%, var(--card)), var(--card))",
+} as const;
 
-/** 争点（框定双方真正分歧的一句话），压成裁决卡内一行 muted 注脚——比独立区块轻、不与倾向抢焦点. */
-function CruxLine({ crux }: { crux: string }) {
-  if (!crux) return null;
+/** 终审气泡顶缘色（与 {@link verdictHeadTint} 配套；壳侧 `border-t-2` 内联用）。 */
+export const verdictTopBorder = "var(--primary)" as const;
+
+/**
+ * 裁决头条（倾向 + 置信 + 争点）——简报的「最后的话」，由终审气泡壳渲染进顶部染头区
+ * ({@link verdictHeadTint})，紧跟「主持人终审」头行：问题（争点）→ 回答（倾向）一眼读完。
+ * 置信只留**单一**表达：档位 chip + 成立条件句（互补非重复）；confidence 是裸档位词
+ * （"medium"/"中"）时连句子也省。圆桌无单一裁决（no winner）→ null，其 takeaway 由观点光谱的
+ * 「综合观察」承载（{@link RoundtableSpectrum}）。
+ */
+export function VerdictHeadline({
+  brief,
+  form,
+}: {
+  brief: DebateBriefInfo;
+  form: DebateForm;
+}) {
+  if (form === "roundtable") return null;
+  const label = form === "red_team" ? "方案评定" : "结论倾向";
   return (
-    <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-      <Target size={13} className="mt-0.5 shrink-0" />
-      <span>
-        <span className="font-medium text-foreground">争点：</span>
-        {crux}
-      </span>
-    </p>
+    <div className="mt-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={`flex items-center gap-1 text-xs font-medium ${statusAccentText.primary}`}
+        >
+          <Scale size={13} />
+          {label}
+        </span>
+        <ConfidenceChip level={confidenceLevel(brief.confidence)} />
+      </div>
+      <p className="mt-1 text-base font-semibold leading-snug text-foreground">
+        {brief.leaning}
+      </p>
+      {brief.confidence && !isBareLevel(brief.confidence) && (
+        <p className="mt-1 text-xs text-muted-foreground">{brief.confidence}</p>
+      )}
+      {/* 胜负手（记分裁判 P2）：据逐轮记分点名倾向的由来，让「为何这么判」可追溯（而非拍脑袋）。 */}
+      {brief.decisive && (
+        <p className="mt-1.5 flex items-start gap-1.5 text-xs text-muted-foreground">
+          <Swords
+            size={13}
+            className={`mt-0.5 shrink-0 ${statusAccentText.primary}`}
+          />
+          <span>
+            <span className="font-medium text-foreground">胜负手：</span>
+            {brief.decisive}
+          </span>
+        </p>
+      )}
+      {brief.crux && (
+        <p className="mt-1.5 flex items-start gap-1.5 text-xs text-muted-foreground">
+          <Target size={13} className="mt-0.5 shrink-0" />
+          <span>
+            <span className="font-medium text-foreground">争点：</span>
+            {brief.crux}
+          </span>
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -498,12 +480,12 @@ function evidenceTeaser(
  * 渐进披露壳（设计 §四「极简一页·渐进披露」）—— 把简报的**次级依据**（各方论点 / 事实分歧 / 待解）
  * 默认收起，裁决 hero + 需你拍板恒显的「极简一页」，想深究再展开。`teaser` 让收起态也露出内容线索。
  */
-function Disclosure({
+export function Disclosure({
   summary,
   teaser,
   children,
 }: {
-  summary: string;
+  summary: ReactNode;
   teaser?: string;
   children: ReactNode;
 }) {
@@ -651,10 +633,14 @@ function SidePointsGrid({
   label,
   sides,
   points,
+  scores,
 }: {
   label: string;
   sides: DebateSideInfo[];
   points: Record<string, string>;
+  /** 各方累计净分（sideKey → 净分）：传入则每格身份右侧挂一枚净分 pill（「谁占优」一眼信号）；
+   *  缺省（圆桌观点光谱 / 未开启记分）则不显。 */
+  scores?: Record<string, number>;
 }) {
   return (
     <div>
@@ -663,14 +649,24 @@ function SidePointsGrid({
       </h4>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {sides.map((s) => {
-          const colorVar = agentColorVar(s.name);
+          const colorVar = debateSideColorVar(s.key, s.name);
+          const score = scores?.[s.key];
           return (
             <div
               key={s.key}
               className="border-l-2 pl-2.5"
               style={{ borderLeftColor: colorVar }}
             >
-              <SideIdentity name={s.name} colorVar={colorVar} model={s.model} />
+              <div className="flex items-center justify-between gap-1.5">
+                <SideIdentity
+                  name={s.name}
+                  colorVar={colorVar}
+                  model={s.model}
+                />
+                {score !== undefined && (
+                  <SideScorePill score={score} colorVar={colorVar} />
+                )}
+              </div>
               <p className="mt-1 text-sm text-foreground">
                 {points[s.key] ?? "—"}
               </p>
@@ -679,5 +675,30 @@ function SidePointsGrid({
         })}
       </div>
     </div>
+  );
+}
+
+/**
+ * 「双方一眼看」每格的累计净分 pill（记分裁判 P2）—— 紧跟身份、一眼读「谁占优」的信号：身份色描边 +
+ * 净分，与折叠的「记分总览」比分条（{@link import("./DebateStream").Scoreboard}）同数不同密度（此处一眼、
+ * 那里带三维明细 + 罚分）。净分可为负（罚分多）；缺省（未开启记分 / 旧产物）时上层不传 → 不渲染。
+ */
+function SideScorePill({
+  score,
+  colorVar,
+}: {
+  score: number;
+  colorVar: string;
+}) {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-xs font-semibold tabular-nums"
+      style={{
+        color: colorVar,
+        backgroundColor: `color-mix(in oklch, ${colorVar} 12%, transparent)`,
+      }}
+    >
+      净 {score}
+    </span>
   );
 }

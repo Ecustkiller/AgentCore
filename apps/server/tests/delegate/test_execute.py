@@ -1,8 +1,10 @@
 """Basic delegate execute, validation, events, and schema tests."""
 
+import agentcore.tools.builtin.delegate.tool as delegate_tool_mod
 from agentcore.core.types import ToolEffect
 from agentcore.llm.protocol import TokenUsage
 from agentcore.runtime.events import EventSink, EventType
+from tests.conftest import LogSpy
 from tests.delegate.conftest import Provider, ctx, tool
 
 
@@ -92,6 +94,50 @@ async def test_finalize_falls_back_to_synthesis_when_worker_fails():
         ctx(),
     )
     assert result.is_terminal is False
+
+
+async def test_delegate_started_logs_who_what_and_first_wave_parallel(monkeypatch):
+    # 决策可观测: delegate.started must carry「派了谁·干什么」(agents) + 首波扇出 (parallel),
+    # not just a node count — so an offline analysis can see the delegation's input basis.
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    t = tool(Provider(["AOUT", "BOUT"]))
+    await t.execute(
+        {
+            "tasks": [
+                {"role": "研究员", "task": "调研市场规模"},
+                {"role": "写手", "task": "撰写初稿"},
+            ]
+        },
+        ctx(),
+    )
+    started = spy.get("delegate.started")
+    assert started["nodes"] == 2
+    assert started["call"] == 1
+    # both nodes are dependency-free → the whole batch is one parallel wave
+    assert started["parallel"] == 2
+    # who + what, in plan order — the delegation's actual content
+    assert started["agents"] == ["研究员: 调研市场规模", "写手: 撰写初稿"]
+
+
+async def test_delegate_started_parallel_reflects_dag_first_wave(monkeypatch):
+    # A DAG (s2 depends_on s1) is NOT fully parallel: the first-wave width is 1 (only s1
+    # has no deps), which `parallel` must reflect even though `nodes` is 2.
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    t = tool(Provider(["UP", "FINAL"]))
+    await t.execute(
+        {
+            "tasks": [
+                {"id": "s1", "role": "研究员", "task": "调研"},
+                {"id": "s2", "role": "写手", "task": "撰写", "depends_on": ["s1"]},
+            ]
+        },
+        ctx(),
+    )
+    started = spy.get("delegate.started")
+    assert started["nodes"] == 2
+    assert started["parallel"] == 1
 
 
 async def test_empty_tasks_rejected():

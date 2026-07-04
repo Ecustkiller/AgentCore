@@ -340,9 +340,20 @@ def _inline_spec(
         bind_after_deps=bool(item.get("bind_after_deps")),
         parent_run_id=parent_run_id,
         depth=depth,
-        can_delegate=bool(item.get("can_delegate")),
+        can_delegate=_parse_can_delegate(item.get("can_delegate")),
         policy=policy,
     )
+
+
+def _parse_can_delegate(raw: Any) -> bool | str:
+    """Normalise a task's ``can_delegate`` knob → ``False``, ``True``, or ``"auto"``."""
+    if raw == "auto":
+        return "auto"
+    if raw is True:
+        return True
+    if raw is False:
+        return False
+    return False
 
 
 def _tools(declared: Any, valid_tools: set[str] | None) -> list[str] | None:

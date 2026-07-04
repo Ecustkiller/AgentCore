@@ -2,6 +2,7 @@ import { queryClient } from "@/lib/queryClient";
 import { conversationKeys } from "@/lib/queryKeys";
 import {
   deleteConversation as apiDeleteConversation,
+  duplicateConversation as apiDuplicateConversation,
   moveConversation as apiMoveConversation,
   renameConversation as apiRenameConversation,
   setConversationArchived as apiSetArchived,
@@ -11,6 +12,7 @@ import {
 } from "@/services/conversations";
 import type { FolderMeta } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
+import { clearDisclosureForConversation } from "@/stores/disclosure";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 /**
@@ -172,7 +174,23 @@ export function useMoveConversation() {
 export function useDeleteConversation() {
   return useMutation({
     mutationFn: (id: string) => apiDeleteConversation(id),
-    onSuccess: (_data, id) => removeConversationFromCache(id),
+    onSuccess: (_data, id) => {
+      removeConversationFromCache(id);
+      // Purge this conversation's persisted fold/expand prefs so the disclosure
+      // map doesn't leak keys for gone conversations (守「表恒收敛不膨胀」).
+      clearDisclosureForConversation(id);
+    },
+  });
+}
+
+/** Clone a conversation into a new one carrying a copy of its transcript (克隆对话).
+ * Server-first (the copy only exists once the backend commits it); on success the
+ * returned row is prepended to the sidebar cache so it appears at the top, and the
+ * caller navigates into it. */
+export function useDuplicateConversation() {
+  return useMutation({
+    mutationFn: (id: string) => apiDuplicateConversation(id),
+    onSuccess: (conv) => upsertConversationFront(conv),
   });
 }
 

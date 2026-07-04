@@ -59,6 +59,7 @@ async def react_loop(
     on_tool_progress: Callable[[str, int], None] | None = None,
     on_reset: Callable[[], None] | None = None,
     on_round_begin: Callable[[], list[LLMMessage]] | None = None,
+    round_sink: list[int] | None = None,
     raise_on_error: bool = False,
     citation_sink: list[dict[str, Any]] | None = None,
     annotate_citations: bool = True,
@@ -179,6 +180,8 @@ async def react_loop(
     finish_guard_reworks = 0
 
     for round_idx in range(profile.max_rounds):
+        if round_sink is not None:
+            round_sink[:] = [round_idx + 1]
         logger.debug("react.round_start", round=round_idx, messages=len(messages))
         record_round_start(round_idx=round_idx, run_id=run_id, role=role)
         content_before_round = final_content
@@ -221,7 +224,10 @@ async def react_loop(
                 error_message=round_result.error_message,
             )
             directive: LoopDirective = decide_llm_failure(
-                profile=profile, active_model=active_model, final_content=final_content
+                profile=profile,
+                active_model=active_model,
+                final_content=final_content,
+                upstream_error=round_result.upstream_error,
             )
         else:
             usage = round_result.usage
@@ -324,6 +330,10 @@ async def react_loop(
                             emit_reset()
                         final_content = content_before_round
                     controller.record(outcome.attempts)
+                    # Mark post-delegate mode if delegate was called
+                    if any(a.tool_name == "delegate" for a in outcome.attempts if a.tool_name):
+                        controller.mark_post_delegate()
+                    tool_defs = _resolve_tool_defs()
                     breaker = apply_circuit_breaker(
                         controller,
                         messages=messages,

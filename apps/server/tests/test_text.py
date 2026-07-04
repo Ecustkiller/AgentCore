@@ -1,8 +1,8 @@
-"""Unit tests for the leaf text primitive ``core.text.truncate_head_tail``."""
+"""Unit tests for the leaf text primitives in ``core.text``."""
 
 from __future__ import annotations
 
-from agentcore.core.text import DEFAULT_ELISION_MARKER, truncate_head_tail
+from agentcore.core.text import DEFAULT_ELISION_MARKER, clip_preview, truncate_head_tail
 
 
 def test_keeps_both_ends_with_marker_between():
@@ -36,3 +36,27 @@ def test_degenerate_tiny_budget_falls_back_to_head_plus_ellipsis():
     out = truncate_head_tail("a" * 100, 10)
     assert out.startswith("a")
     assert out.endswith("…")
+
+
+# --- clip_preview: the canonical single-line log-preview shaper ---
+
+
+def test_clip_preview_collapses_all_whitespace_to_single_spaces():
+    # A multi-line prompt / task / feedback must fit ONE log field: newlines, tabs and
+    # runs of spaces all collapse to single spaces, with the ends trimmed.
+    assert clip_preview("  a\n\n  b\t\tc   ", 100) == "a b c"
+
+
+def test_clip_preview_head_clips_with_single_ellipsis():
+    out = clip_preview("x" * 300, 200)
+    assert out == "x" * 200 + "…"
+    assert len(out) == 201  # 200-char head + the one ellipsis char
+
+
+def test_clip_preview_noop_when_within_limit():
+    assert clip_preview("short 文本", 200) == "short 文本"
+
+
+def test_clip_preview_empty_and_none_are_safe():
+    assert clip_preview("", 200) == ""
+    assert clip_preview("   \n  ", 200) == ""  # whitespace-only collapses to empty

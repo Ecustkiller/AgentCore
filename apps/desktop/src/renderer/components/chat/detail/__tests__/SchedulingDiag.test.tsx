@@ -11,7 +11,7 @@
 import type { BatchMetricsSnapshot } from "@/stores/execution";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { SchedulingDiag } from "../RunDetailBody";
+import { SchedulingDiag } from "../sections/RunDiagnostics";
 
 afterEach(cleanup);
 

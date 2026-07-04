@@ -29,7 +29,11 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.tools.builtin.debate.events import account_moderator, moderator_plan_event
-from agentcore.tools.builtin.debate.rounds import make_round_runner
+from agentcore.tools.builtin.debate.rounds import (
+    make_closing_runner,
+    make_cross_exam_runner,
+    make_round_runner,
+)
 from agentcore.tools.builtin.debate.schema import (
     DEBATE_DESCRIPTION,
     DEBATE_OUTPUT_LIMIT,
@@ -166,6 +170,12 @@ class DebateTool:
 
         moderator = Moderator(provider=self._llm, model=moderator_model)
         runner = make_round_runner(self, execution_id, moderator_run_id, config)
+        # 质询回合（P1）：注入质询作答 runner；主持人仅在【认真辩透 + 对抗形态】开启质询 beat
+        # （见 Moderator._cross_exam_enabled），快速对碰 / 圆桌自动跳过，零额外开销。
+        cross_exam_runner = make_cross_exam_runner(self, execution_id, moderator_run_id, config)
+        # 结辩收束（P4）：注入结辩 runner；主持人仅在【认真辩透 + 对抗形态】收场后开结辩 beat
+        # （见 Moderator._closing_enabled），快速对碰 / 圆桌 / 全员失败自动跳过，零额外开销。
+        closing_runner = make_closing_runner(self, execution_id, moderator_run_id, config)
 
         # 逐轮增量 SSE（进行中实时叠加，transport-only）：开场先报焦点，收尾再报本轮裁判 + 小结。
         async def _emit_round_start(round_no: int, focus: str) -> None:
@@ -274,6 +284,8 @@ class DebateTool:
             result = await moderator.run(
                 config,
                 run_round=runner,
+                run_cross_exam=cross_exam_runner,
+                run_closing=closing_runner,
                 on_round_start=_emit_round_start,
                 on_round=_emit_round,
                 on_round_boundary=_round_boundary if interactive else None,

@@ -1,6 +1,8 @@
 """HTTP server, logging, build provenance, desktop updates, push."""
 
-from pydantic import BaseModel
+from typing import Self
+
+from pydantic import BaseModel, model_validator
 
 
 class ServerSettings(BaseModel):
@@ -20,3 +22,10 @@ class ServerSettings(BaseModel):
     push_enabled: bool = False
     fcm_project_id: str = ""
     fcm_service_account_path: str = ""
+
+    @model_validator(mode="after")
+    def _default_dev_log_file(self) -> Self:
+        """Dev writes queryable JSONL without requiring LOG_FILE in .env."""
+        if self.debug and not self.log_file:
+            self.log_file = "logs/dev.jsonl"
+        return self

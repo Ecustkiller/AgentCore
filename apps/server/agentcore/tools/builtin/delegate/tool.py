@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
+from agentcore.core.text import clip_preview
 from agentcore.core.types import ToolApproval, ToolCategory, new_id
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet, default_profile_set
@@ -37,6 +38,10 @@ if TYPE_CHECKING:
     from agentcore.runtime.suspension import SuspensionDeleter, SuspensionSaver
 
 logger = get_logger(__name__)
+
+# Cap on how many nodes `delegate.started` lists by name/task — a big fan-out shouldn't
+# balloon one log line; `nodes` still carries the true total.
+_DELEGATE_LOG_AGENTS_CAP = 12
 
 
 class DelegateTool:
@@ -115,6 +120,8 @@ class DelegateTool:
         # ``replan(stop)`` finalize_stopped paths) can fold the team's outstanding 决定 / 认领 into
         # 语义边界对账. None until a batch runs (a CEO that never delegated has no wall).
         self._note_wall: NoteWall | None = None
+        # Turn-level team consensus (team_brief): survives across delegate calls in one CEO turn.
+        self._team_brief: str | None = None
 
     @property
     def usage(self) -> dict[str, int]:
@@ -176,6 +183,14 @@ class DelegateTool:
                 return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
 
         valid_tools = {s.name for s in self._tools.list_all()}
+        complexity_hint = arguments.get("complexity_hint", "standard")
+        # complexity_hint 联动 can_delegate 默认值
+        for task in tasks_raw:
+            if isinstance(task, dict) and "can_delegate" not in task:
+                if complexity_hint == "light":
+                    task["can_delegate"] = False
+                else:
+                    task["can_delegate"] = "auto"
         self._calls += 1
         prefix = f"del_{new_id()}"
         plan, errors = build_run_plan(
@@ -190,17 +205,47 @@ class DelegateTool:
             logger.info("delegate.rejected", errors=errors)
             return ToolResult(tool_call_id="", success=False, output=msg, error=msg)
 
+        from agentcore.tools.builtin.delegate.seed_notes import (
+            parse_seed_notes,
+            parse_team_brief,
+        )
+
+        seed_notes, seed_err = parse_seed_notes(arguments.get("seed_notes"))
+        if seed_err:
+            return ToolResult(tool_call_id="", success=False, output=seed_err, error=seed_err)
+        brief_raw = arguments.get("team_brief")
+        if brief_raw is not None:
+            brief, brief_err = parse_team_brief(brief_raw)
+            if brief_err:
+                return ToolResult(tool_call_id="", success=False, output=brief_err, error=brief_err)
+            self._team_brief = brief
+
         record_plan_snapshot(plan)
 
         execution_id = self._base_tool_context.execution_id or new_id()
         self._sink.emit(plan_event(self, execution_id, plan))
-        logger.info("delegate.started", nodes=len(plan.nodes), call=self._calls)
+        # 决策可观测: who + what got delegated (the「派了谁、干什么」input basis), not just a
+        # node count. `parallel` = first-wave width (nodes with no deps → run concurrently), so
+        # 扇出 vs 串行 is visible offline. `agents` is capped to keep the line bounded on a big fan-out.
+        logger.info(
+            "delegate.started",
+            nodes=len(plan.nodes),
+            call=self._calls,
+            parallel=sum(1 for n in plan.nodes if not n.depends_on),
+            complexity_hint=complexity_hint,
+            agents=[
+                f"{n.role or n.agent_name or n.run_id}: {clip_preview(n.task, 80)}"
+                for n in plan.nodes[:_DELEGATE_LOG_AGENTS_CAP]
+            ],
+        )
         return await drive(
             self,
             plan,
             execution_id=execution_id,
             seed_completed=None,
             finalize=bool(arguments.get("finalize")),
+            seed_notes=seed_notes,
+            complexity_hint=complexity_hint,
         )
 
     async def _drive(
@@ -210,9 +255,17 @@ class DelegateTool:
         execution_id: str,
         seed_completed: dict[str, RunState] | None,
         finalize: bool,
+        seed_notes: list[dict[str, str]] | None = None,
+        complexity_hint: str = "standard",
     ) -> ToolResult:
         return await drive(
-            self, plan, execution_id=execution_id, seed_completed=seed_completed, finalize=finalize
+            self,
+            plan,
+            execution_id=execution_id,
+            seed_completed=seed_completed,
+            finalize=finalize,
+            seed_notes=seed_notes or [],
+            complexity_hint=complexity_hint,
         )
 
     async def resume_plan(
@@ -367,10 +420,10 @@ class DelegateTool:
 
         return format_scope_boundary(plan, results, nodes)
 
-    def _direct_result(self, content: str):
+    def _direct_result(self, state):
         from agentcore.tools.builtin.delegate.ceo_format import direct_result
 
-        return direct_result(self, content)
+        return direct_result(self, state)
 
     def _make_child(self, captain_run_id: str, captain_depth: int):
         from agentcore.tools.builtin.delegate.nesting import make_child

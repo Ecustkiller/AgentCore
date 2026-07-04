@@ -157,10 +157,6 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     verdict: "impossible",
     reason: "工作区操作绑本地文件夹；纯云瘦客户端无本地侧",
   },
-  workspace_promoted: {
-    verdict: "impossible",
-    reason: "同上 · 工作区晋升绑本地",
-  },
   handoff_snapshot_done: {
     verdict: "impossible",
     reason: "本地↔云交接（后台任务桥）的本地侧，手机无本地",
@@ -255,6 +251,11 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   CodeBlock: { verdict: "internal", reason: "代码块渲染叶" },
   Diagram: { verdict: "internal", reason: "mermaid 渲染叶" },
   Favicon: { verdict: "internal", reason: "站点图标叶" },
+  EvidenceBadge: {
+    verdict: "internal",
+    reason:
+      "辩论发言举证标记渲染叶（remarkEvidence 把【已核实/待核实】渲成徽章）；非交互面，手机 markdown 叶自渲、标记信息随发言全文透传",
+  },
 };
 
 /** 锚 C · 桌面页面（apps/desktop/src/renderer/pages 下每个 .tsx，含子目录）→ 手机对等裁决。

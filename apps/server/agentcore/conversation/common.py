@@ -4,8 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
+from agentcore.core.text import clip_preview
 from agentcore.db.models import Conversation
-from agentcore.db.repositories import FolderRepository, ModelModeRepository, UserRepository
+from agentcore.db.repositories import ModelModeRepository, UserRepository
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet
 from agentcore.llm.modes import resolve_profile_set as resolve_mode_profile_set
@@ -18,7 +19,6 @@ from agentcore.memory import (
     TitleInput,
 )
 from agentcore.workspace.locate import LocalBinding
-from agentcore.workspace.locate import resolve_local_binding as locate_local_binding
 
 logger = get_logger(__name__)
 
@@ -44,22 +44,25 @@ def fallback_title(user_message: str) -> str:
     return title[:TITLE_MAX_CHARS] + "…" if len(title) > TITLE_MAX_CHARS else title
 
 
-def preview(text: str, *, limit: int = 80) -> str:
+# Turn-log message previews: enough of the user prompt / assistant reply to triage
+# 「问了什么 / 答得如何」straight from a log line (no DB round-trip), while staying a
+# bounded snippet — never the full 正文 (logging.mdc 铁律). ~200 chars ≈ a first paragraph.
+LOG_PREVIEW_CHARS = 200
+
+
+def preview(text: str, *, limit: int = LOG_PREVIEW_CHARS) -> str:
     """Single-line, length-capped preview of message text for a log field."""
-    collapsed = " ".join((text or "").split())
-    return collapsed[:limit] + "…" if len(collapsed) > limit else collapsed
+    return clip_preview(text, limit)
 
 
 async def resolve_local_binding(session: AsyncSession, conv: Conversation) -> LocalBinding | None:
-    """Resolve a turn's local-mode binding (双模式工作区 §七), or None for cloud."""
-    folder = None
-    if conv.folder_id:
-        folder = await FolderRepository(session).get_by_id_unscoped(conv.folder_id)
-    return locate_local_binding(
-        folder_id=conv.folder_id,
-        folder_local_root_id=folder.local_root_id if folder else None,
-        folder_local_subpath=folder.local_subpath if folder else None,
-        label=folder.name if folder else None,
+    """Resolve a turn's local-mode binding from the conversation's own columns."""
+    from agentcore.conversation.scratch import resolve_conversation_local_binding
+
+    return resolve_conversation_local_binding(
+        local_root_id=conv.local_root_id,
+        local_subpath=conv.local_subpath,
+        label="workspace",
     )
 
 

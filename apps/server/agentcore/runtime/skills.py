@@ -81,6 +81,10 @@ class SkillRegistry:
 
 _TEAM_ORCHESTRATION_ADVANCED = """\
 <team_orchestration_advanced>
+进阶档位建立在一个前提上：你已确认需要多 worker。但多数任务一个 worker 端到端完成更高效——\
+只有当并行 / 专业化收益明显超出协调成本时，才动用下面的进阶档位。先问自己：一个 coherent worker \
+能做完吗？能就不拆。
+
 按需用好 `delegate` 的进阶档位（不必都填）：
 
 - 模型档位：范围清晰的简单子任务用 `model_preference="fast"` 省成本与时延；需深度推理\
@@ -88,6 +92,16 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 - 质量契约：对产出有硬性要求（须含某些小标题 / 关键词、限定格式或字数）时用 `contract` \
 声明——未达标会带着具体差距自动返工一次；返工后仍不达标默认仅附质检提醒（软），\
 `contract.strict=true` 则判该 worker 失败（硬退）。用 `expected_output` 描述想要的产出形态。
+- 审查类任务的统一契约（派【审查 / 质检 / 评审】worker 时【必设 contract】）：无论并行扇出\
+还是 `depends_on` 链下游，每个审查官 task 都必须带 `contract` 锁定统一输出格式——否则各审查官\
+各说各的、打分维度各异，你收工时无法自动合并，`revise` 也无法字段级操作。推荐 JSON 模板\
+（多路并行时各审查官 contract 完全一致，只换 role 与审查侧重；在 task 里写明该官负责的维度\
+与打分锚点）：\
+`contract: { "output_format": "json" }`，\
+`expected_output: "JSON 对象，必含三顶层字段：problems（问题数组，每项含 severity/description/evidence）、\
+suggestions（修改建议数组）、score（0–10 整数，该维度打分）。只输出 JSON，不要附带说明文字。"`\
+纯文字备选：`required_sections: ["问题", "建议", "评分"]`（优先 JSON，便于机械合并）。审查是中间\
+产物、注入下游或供你汇总，不设 `requires_files`。
 - 依赖流水线：多阶段（设计 → 实现 → 审查）用【同一次 `delegate`】里的 `depends_on` 串成\
 依赖图——这些 worker 都在你下面【同一层】，上游产出自动注入下游；`depends_on` 只定先后、\
 不加层级。用 `result_handling`（`pass_through` 全文 / `summarize` 摘要，默认全文）控制上游\
@@ -143,6 +157,17 @@ worker 据定稿提纲写全文，用 `depends_on` 串起。提纲由专家据�
 开工前先对一下：本次的活是不是正好是这些形状之一？是就直接套（省去手搓、还自带依赖编排与便签墙\
 对齐等最佳实践），别再一片片手搭；只有形态确实特殊时才手写 tasks。各形状的槽位见 `delegate` 的 \
 playbook_args 参数说明。
+- 团队便签墙（并行兄弟对齐）：同一批无 `depends_on`、同时开跑的 worker 共享一面便签墙（`post_note` / \
+`read_notes` / `amend_note`）。**主 Agent 可在 `delegate` 上预置共识**：`seed_notes`（`[{kind,text}]` \
+写入便签墙，首波并行 worker 开局即见）与 `team_brief`（回合级「团队共识」块注入每个 worker 开局上下文，\
+跨多波 `delegate` 仍沿用直至覆盖）——brief 写总述、seed 钉关键决定，减少在各 task 里重复粘贴同一段背景。\
+当你一次派出【多路并行审查 / 质检 / 多角度审同一份上游产物】时：\
+① 每个审查 task 必设统一 `contract`（见上「审查类任务的统一契约」）；② 各 task 写清共享验收\
+维度（受众 / 风格 / 方向底线），但不必给每个审查官复制粘贴同一大段背景——横向重大信号靠便签\
+补齐；③ 在各 task 里明确要求：谁先发现【整体方向错了 / 致命问题 / 继续抠细节已无意义】，必须\
+【立刻】`post_note`（kind=heads_up）广播一行警示，【再】写详细意见，免得并行队友还在无关细节上\
+白费（简介流水线类任务尤甚）；④ `build_feature` 等 playbook 已把接口契约类决定写成「我定了」\
+便签——手搓并行审查时照此照办。收工时读概览里的【团队便签】核对是否与各人产出一致。
 </team_orchestration_advanced>"""
 
 _DEBATE_AND_REVIEW = """\

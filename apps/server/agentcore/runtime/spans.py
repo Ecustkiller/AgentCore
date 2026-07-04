@@ -410,7 +410,7 @@ class SpanExporter(Protocol):
         *,
         trace_id: str | None,
         conversation_id: str,
-        turn_id: str,
+        message_id: str,
     ) -> None: ...
 
 
@@ -434,6 +434,11 @@ class LogSpanExporter:
     an OTel SDK / collector. The flattened span list keeps each node compact
     (:meth:`Span.to_log_dict`); the depth-first order makes the parent/child structure
     readable inline.
+
+    ``trace_id`` is emitted explicitly (not just relied upon from the log context) so the
+    line honours its own「greppable by trace_id」promise even if a caller runs it outside a
+    bound scope. The turn's ``turn_id`` still rides the log context; this line adds the
+    ``message_id`` (the assistant row this turn produced) so it also joins to ``messages``.
     """
 
     def export(
@@ -442,12 +447,13 @@ class LogSpanExporter:
         *,
         trace_id: str | None,
         conversation_id: str,
-        turn_id: str,
+        message_id: str,
     ) -> None:
         flat = root.flatten()
         logger.info(
             "obs.turn_spans",
-            turn_id=turn_id,
+            trace_id=trace_id,
+            message_id=message_id,
             conversation_id=conversation_id,
             span_count=len(flat),
             duration_ms=root.duration_ms,
@@ -465,7 +471,7 @@ def export_turn_spans(
     *,
     trace_id: str | None,
     conversation_id: str,
-    turn_id: str,
+    message_id: str,
     exporter: SpanExporter | None = None,
 ) -> None:
     """Project ``entries`` into a span tree and hand it to the exporter — best-effort.
@@ -483,7 +489,7 @@ def export_turn_spans(
             root,
             trace_id=trace_id,
             conversation_id=conversation_id,
-            turn_id=turn_id,
+            message_id=message_id,
         )
     except Exception as e:  # noqa: BLE001 — observability must never break the turn
-        logger.warning("obs.span_export_failed", turn_id=turn_id, error=str(e))
+        logger.warning("obs.span_export_failed", message_id=message_id, error=str(e))

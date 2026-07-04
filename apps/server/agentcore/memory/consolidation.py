@@ -89,9 +89,11 @@ async def consolidate_conversation(
                 synced = conv.memory_synced_at
                 if synced is not None and latest <= synced:
                     return False  # nothing new since the last pass
-                # The conversation's project (folder_id) → memory scope: facts true only in
-                # this project route to its layer, not global (Agent记忆与知识系统 §1.5). Captured
-                # here while the row is loaded; None for a bare/global chat.
+                # Manual folder grouping (folder_id) → memory project scope (D4 方案 1,
+                # folder-refactor-design §8): facts true only in this group route to its
+                # project layer, not global (Agent记忆与知识系统 §1.5). None for a bare chat
+                # (folder_id=NULL). Auto-promote folders are removed by migration (their
+                # memory merged to global), so any truthy folder_id is a user-created group.
                 folder_id = conv.folder_id
                 window = await load_recent_history(
                     session,

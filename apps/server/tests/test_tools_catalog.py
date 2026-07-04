@@ -54,8 +54,10 @@ def test_registry_excludes_ceo_only_delegate():
 # builtin catalog (GET /tools) nor the CEO's own toolset. `escalate` is the upward
 # channel (worker → CEO); `post_note` / `read_notes` / `amend_note` are the sideways
 # broadcast / read / 改写·作废 channels to 并行队友 (worker ↔ 团队便签墙, §2.2 通 + §2.4
-# 变·worker 的「拉」). All stay where they belong instead of leaking platform-wide.
-_WORKER_ONLY_NAMES = {"escalate", "post_note", "read_notes", "amend_note"}
+# 变·worker 的「拉」); `handoff` is the terminal 完工交接简报 submission (结论 / 关键要点 /
+# 关键假设 / 建议下一步, read off the call args — never parsed out of prose). All stay
+# where they belong instead of leaking platform-wide.
+_WORKER_ONLY_NAMES = {"escalate", "post_note", "read_notes", "amend_note", "handoff"}
 
 
 def test_worker_registry_adds_worker_only_tools_without_leaking_them():

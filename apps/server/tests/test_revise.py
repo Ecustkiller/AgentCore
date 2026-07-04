@@ -8,6 +8,7 @@ roster commit (recall_count bump, transcript extension) and member accounting.
 
 from pathlib import Path
 
+import agentcore.tools.builtin.revise as revise_mod
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.llm.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
 from agentcore.runtime.events import EventSink, EventType
@@ -19,6 +20,7 @@ from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.conftest import LogSpy
 
 
 class _Provider:
@@ -110,6 +112,24 @@ async def test_revise_hit_returns_revised_product_non_terminal():
     assert updated.recall_count == 1
     assert updated.content == "修订版"
     assert updated.transcript[-1].content == "修订版"
+
+
+async def test_revise_started_logs_feedback(monkeypatch):
+    # 决策可观测: revise.started must carry the CEO's feedback (为什么召回 / 改什么), not just
+    # the target run_id — otherwise an offline analysis sees a热修 happened but not why.
+    store = SessionStore()
+    provider = _Provider(["第一版", "修订版"])
+    await _seed_session(store, provider)
+    tool = _tool(store, provider)
+    spy = LogSpy()
+    monkeypatch.setattr(revise_mod, "logger", spy)
+
+    await tool.execute({"target_run_id": "t_1", "feedback": "语气改正式、补充数据来源"}, _ctx())
+
+    started = spy.get("revise.started")
+    assert started["target"] == "t_1"
+    assert started["revision_run_id"] == "t_1_rev1"
+    assert started["feedback"] == "语气改正式、补充数据来源"
 
 
 async def test_revise_accounts_one_member_row_parented_to_original():

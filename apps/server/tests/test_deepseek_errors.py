@@ -15,6 +15,7 @@ from agentcore.core.errors import (
     LLMAuthError,
     LLMError,
     LLMInsufficientBalanceError,
+    LLMUpstreamError,
 )
 from agentcore.llm.config import DEEPSEEK_V4_FLASH
 from agentcore.llm.deepseek import DeepSeekProvider
@@ -85,26 +86,40 @@ async def test_stream_maps_401_403_to_auth_error(code):
 
 
 @pytest.mark.parametrize("code", [500, 502, 503])
-async def test_complete_maps_5xx_to_friendly_chinese(code):
-    provider = await _mock_provider(lambda request: httpx.Response(code))
+async def test_complete_retries_5xx_then_raises(code):
+    call_count = 0
+
+    def handler(request):
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(code)
+
+    provider = await _mock_provider(handler)
     try:
-        with pytest.raises(LLMError) as ei:
+        with pytest.raises(LLMUpstreamError) as ei:
             await provider.complete(_req())
         msg = str(ei.value)
         assert "DeepSeek" in msg and str(code) in msg
-        assert "Server error" not in msg  # no raw English leak into the card
+        assert call_count == 3  # retried _MAX_RETRIES times
     finally:
         await provider.close()
 
 
-async def test_stream_maps_5xx_to_friendly_chinese():
-    provider = await _mock_provider(lambda request: httpx.Response(503))
+async def test_stream_retries_5xx_then_raises():
+    call_count = 0
+
+    def handler(request):
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(503)
+
+    provider = await _mock_provider(handler)
     try:
-        with pytest.raises(LLMError) as ei:
+        with pytest.raises(LLMUpstreamError) as ei:
             async for _ in provider.stream(_req()):
                 pass
         assert "DeepSeek" in str(ei.value)
-        assert "Server error" not in str(ei.value)
+        assert call_count == 3
     finally:
         await provider.close()
 
@@ -116,3 +131,9 @@ def test_balance_and_auth_errors_are_not_retryable():
     assert LLMInsufficientBalanceError().code == "LLM_INSUFFICIENT_BALANCE"
     assert LLMAuthError().retryable is False
     assert LLMAuthError().code == "LLM_KEY_INVALID"
+
+
+def test_upstream_error_is_retryable():
+    err = LLMUpstreamError("test")
+    assert err.retryable is True
+    assert err.code == "LLM_ERROR"

@@ -81,6 +81,14 @@ export function InlineTeamGraph({
   }, [journal, messageId, hydrateFromJournal]);
 
   const execution = useMessageExecution(messageId);
+  const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
+  const onPeekRunning = useCallback(() => {
+    if (!execution) return;
+    const running = execution.runs.find((r) => r.status === "running");
+    if (!running) return;
+    const role = execution.agents.find((a) => a.id === running.agentId)?.role;
+    showRunDetail(messageId, running.id, role);
+  }, [execution, messageId, showRunDetail]);
 
   const [measured, setMeasured] = useState<{
     height: number;
@@ -91,11 +99,13 @@ export function InlineTeamGraph({
     [],
   );
   const layoutKind = useGraphStore((s) => s.layoutKind);
+  const estLayout =
+    layoutKind === "timeline" ? "leftright" : layoutKind;
   const fallbackHeight = useMemo(() => {
     if (!execution) return 0;
-    const est = estimateBbox(workerGraphShape(execution.runs), layoutKind);
+    const est = estimateBbox(workerGraphShape(execution.runs), estLayout);
     return fitWidthBox(est.width, est.height, EMBED_DEFAULT_COL_WIDTH).height;
-  }, [execution, layoutKind]);
+  }, [execution, estLayout]);
 
   if (
     !execution ||
@@ -124,6 +134,7 @@ export function InlineTeamGraph({
           onMaximize={() => openInCanvas(false)}
           onReplay={() => openInCanvas(true)}
           onOpenRevisions={openRevisionsInCanvas}
+          onPeekRunning={onPeekRunning}
         />
         {expanded && (
           <GraphArea

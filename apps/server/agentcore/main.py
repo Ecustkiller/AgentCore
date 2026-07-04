@@ -23,6 +23,7 @@ from agentcore.api.routes import (
     llm_key,
     memory,
     messages,
+    model_modes,
     realtime,
     search,
     sharing,
@@ -39,6 +40,7 @@ from agentcore.core.logging import setup_logging
 from agentcore.db.migration_check import check_migrations
 from agentcore.memory.consolidation import consolidation_loop, shutdown_scheduler
 from agentcore.middleware.csrf import CsrfMiddleware
+from agentcore.middleware.errors import JSONErrorMiddleware
 from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
 from agentcore.runtime.session_retention import session_retention_loop
 from agentcore.runtime.suspension_retention import paused_turn_retention_loop
@@ -205,6 +207,12 @@ app = FastAPI(
 # wraps it and even a 429 response carries the CORS headers the browser needs.
 app.add_middleware(CsrfMiddleware)
 app.add_middleware(AuthRateLimitMiddleware)
+# Added just before CORS so it sits *inside* the CORS layer: an unhandled error
+# (anything not an AgentCoreError, e.g. a raw DB error) becomes a JSON 500 that
+# still flows back out through CORSMiddleware and gets the CORS headers — instead
+# of Starlette's outermost bare 500 that lacks them and surfaces as a misleading
+# CORS/network error in the browser.
+app.add_middleware(JSONErrorMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -250,6 +258,7 @@ app.include_router(inference.router, prefix="/v1")
 app.include_router(llm_key.router, prefix="/v1")
 app.include_router(memory.router, prefix="/v1")
 app.include_router(messages.router, prefix="/v1")
+app.include_router(model_modes.router, prefix="/v1")
 app.include_router(realtime.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 # Conversation sharing (分享对话): owner-only manage under /v1, plus the public

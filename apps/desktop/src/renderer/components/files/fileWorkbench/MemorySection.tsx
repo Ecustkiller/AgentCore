@@ -11,6 +11,7 @@ import { listMemoryTopics, writeMemoryTopic } from "@/services/memory";
 import {
   GLOBAL_PREFERENCES_PATH,
   GLOBAL_PROFILE_PATH,
+  MEMORY_UPDATES_PATH,
   memoryProjectProfilePath,
   memoryTopicPath,
 } from "@/services/sources/memorySource";
@@ -22,6 +23,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  History,
   Loader2,
   SlidersHorizontal,
   Trash2,
@@ -58,6 +60,7 @@ export function MemorySection({
   activePath,
   onOpen,
   onTopicDeleted,
+  onOpenUpdates,
   indent = 0,
 }: {
   scope: MemoryScope;
@@ -67,6 +70,9 @@ export function MemorySection({
   onOpen: (path: string, name: string) => void;
   /** A topic was deleted — let the host close its tab if it is open (its synthetic path). */
   onTopicDeleted: (path: string) => void;
+  /** Open the cross-conversation「记忆动态」feed. GLOBAL-only (memory writes are per-user,
+   * not per-project), so only the rail-root section passes it. */
+  onOpenUpdates?: () => void;
   /** Base left indent (px): 0 at the rail root, > 0 when nested under a workspace section. */
   indent?: number;
 }) {
@@ -165,6 +171,19 @@ export function MemorySection({
 
       {sectionOpen && (
         <>
+          {/* 记忆动态: the cross-conversation「最近更新」feed — the write side's home
+              (记忆更新对话内可见 §1.6). GLOBAL-only, so it sits atop the rail-root section. */}
+          {scope.kind === "global" && onOpenUpdates && (
+            <MemoryLeafRow
+              paddingLeft={leafPad}
+              icon={
+                <History size={14} className="shrink-0 text-muted-foreground" />
+              }
+              label="最近更新"
+              active={activePath === MEMORY_UPDATES_PATH}
+              onClick={onOpenUpdates}
+            />
+          )}
           {scope.kind === "global" && (
             <MemoryLeafRow
               paddingLeft={leafPad}

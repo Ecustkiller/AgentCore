@@ -48,6 +48,8 @@ export interface StatusStripProps {
   onToggle: () => void;
   onMaximize: () => void;
   onReplay: () => void;
+  /** Open the first in-flight worker in the side detail panel (中间可见性). */
+  onPeekRunning?: () => void;
   /** 定向唤回「修订 vN」的回合：聊天正文不再内联版本对比大卡，改由状态条「改了 N 版」信号 chip
    *  深链画布放大态统一「对比」视图（前端UX设计.md §4.2/§6.4）。无修订 / 未提供则不出 chip。 */
   onOpenRevisions?: () => void;
@@ -169,8 +171,11 @@ function RunningStrip({
   onMaximize,
   onReplay,
   onOpenRevisions,
+  onPeekRunning,
 }: StatusStripProps) {
   const { completed, total } = execution.progress;
+  const runningRuns = execution.runs.filter((r) => r.status === "running");
+  const noteCount = execution.teamNotes.length;
 
   return (
     <div className="px-4 py-3">
@@ -192,6 +197,28 @@ function RunningStrip({
           onOpenRevisions={onOpenRevisions}
         />
       </div>
+      {runningRuns.length > 0 && onPeekRunning && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>
+            {runningRuns.length} 人正在干活，节点上会实时显示输出预览
+          </span>
+          <Button
+            variant="ghost"
+            className="h-7 shrink-0 px-2 text-primary hover:bg-primary/10"
+            onClick={onPeekRunning}
+          >
+            查看进行中
+          </Button>
+        </div>
+      )}
+      {noteCount > 0 && (
+        <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <Badge tone="primary" pill className="font-medium">
+            团队便签 {noteCount}
+          </Badge>
+          <span>队员广播的决定 / 提醒，见下方便签墙</span>
+        </div>
+      )}
       <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-muted">
         <div
           className="h-full rounded-full bg-primary transition-all duration-300"

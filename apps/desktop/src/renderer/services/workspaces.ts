@@ -15,9 +15,9 @@ type Schemas = components["schemas"];
 
 /**
  * The first-class workspace REST client, addressed by **workspace id** (文件中枢
- * 统一 Step 1/2): `ws_id = "folder:<id>" | "conv:<id>"`. This backs the file hub,
- * which browses *projects* — distinct from `services/workspace` (the per-
- * conversation alias kept for the chat panel). Both hit the same server service
+ * 统一 Step 1/2): `ws_id = "conv:<conversationId>"` (primary). This backs the file hub,
+ * which browses *conversation scratch spaces* — distinct from `services/workspace` (the
+ * per-conversation alias kept for the chat panel). Both hit the same server service
  * layer; only the addressing differs. File/CRUD here are valid for **cloud**
  * workspaces — local ones are reached over desktop IPC (the server returns 409),
  * so the hub picks `LocalRootSource` for those (§五).

@@ -13,6 +13,7 @@ vi.mock("@/services/localTurns", () => ({ recordLocalTurn: vi.fn() }));
 vi.mock("@/services/streamConversation", () => ({
   dispatchSSEEvent: vi.fn(),
   flushPendingContent: vi.fn(),
+  flushPendingFrames: vi.fn(),
 }));
 vi.mock("@/services/sidecarRouting", () => ({
   setActiveSidecarTurn: vi.fn(),
@@ -50,7 +51,13 @@ function turnResult(): SidecarTurnResult {
     reasoningContent: null,
     finishReason: "stop",
     rounds: 1,
-    usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: 0 },
+    usage: {
+      inputTokens: 10,
+      outputTokens: 5,
+      reasoningTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+    },
     citations: [],
     runs: null,
     error: null,

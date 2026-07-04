@@ -384,6 +384,33 @@ export async function runResume(
   }
 }
 
+/** 续写被截断的回答 (对话基础功能补齐): the latest reply ended early (用户叫停 / 达最大轮次),
+ * so「继续生成」sends a minimal continuation turn — with the transcript in context, the model
+ * picks up where it left off. Mirrors the composer's optimistic-send shape (add the user
+ * bubble, then stream) so the retry-banner / reconcile paths work unchanged. No-op while a
+ * turn is already streaming. */
+export async function continueTurn(conversationId: string): Promise<void> {
+  if (getRuntime(conversationId).isGenerating) return;
+  const userMsgId = crypto.randomUUID();
+  useConversationStore.getState().addMessage(
+    {
+      id: userMsgId,
+      role: "user",
+      content: "继续",
+      createdAt: new Date().toISOString(),
+      executionId: null,
+      isStreaming: false,
+    },
+    conversationId,
+  );
+  await sendTurn({
+    conversationId,
+    content: "继续",
+    attachments: [],
+    optimisticUserId: userMsgId,
+  });
+}
+
 export interface SendTurnSpec {
   conversationId: string;
   content: string;
@@ -493,6 +520,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
           history: buildSidecarHistory(conversationId, optimisticUserId),
           optimisticUserId,
           debateSeed,
+          // 对话级自定义指令：sidecar 无库，从会话缓存喂入，与云链路（服务端从会话行注入）对齐。
+          instructions:
+            getConversations().find((c) => c.id === conversationId)
+              ?.instructions ?? null,
           signal: ac.signal,
         });
       } catch (sidecarErr) {
@@ -586,57 +617,13 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
 }
 
 /**
- * Send a plain-text turn into the ACTIVE conversation from a non-composer surface
- * (the canvas 老板命令栏, 前端UX设计.md §6.1「下达指令」). A reduced twin of the
- * message composer's full `handleSend`: it assumes an existing active conversation
- * and no attachments / background mode / new-conversation creation — just the
- * optimistic user bubble + {@link sendTurn}. No-op (returns false) for blank input,
- * with no active conversation, or while a turn is already generating (turns don't
- * stack — the caller disables its send affordance too); returns true once a turn
- * was dispatched.
- */
-export async function sendQuickTurn(content: string): Promise<boolean> {
-  const trimmed = content.trim();
-  if (!trimmed) return false;
-  const store = useConversationStore.getState();
-  const conversationId = store.currentConversationId;
-  if (!conversationId) return false;
-  if (getActiveRuntime().isGenerating) return false;
-  // Reading history (a search-hit jump left newer messages unloaded)? Snap back to
-  // the live head so the turn lands at the true tail (live-head invariant).
-  if (getActiveRuntime().hasMoreAfter) {
-    try {
-      await loadLatestWindow(conversationId);
-    } catch {
-      /* best-effort: append at the current tail */
-    }
-  }
-  const userMsgId = crypto.randomUUID();
-  store.addMessage({
-    id: userMsgId,
-    role: "user",
-    content: trimmed,
-    createdAt: new Date().toISOString(),
-    executionId: null,
-    isStreaming: false,
-  });
-  await sendTurn({
-    conversationId,
-    content: trimmed,
-    attachments: [],
-    optimisticUserId: userMsgId,
-  });
-  return true;
-}
-
-/**
  * 续辩（结构化补轮·B / 可逆叫停，辩论编排设计.md §6.6）：从一张【已收场】的
  * 辩论卡发起「再辩一轮 / 换角度」——往**当前活跃会话**发一个携 `debate_seed` 的新回合（新 turn =
  * 新辩论卡，守事件源 turn 模型、不原地改写上一场）。`content` 是给 CEO 的续辩指令（含原命题 +
  * 可选新角度），`seed` 让本回合的 debate 续上一场（主持人焦点正交于已谈、首轮辩手读到上一场摘要）。
  *
- * 与 {@link sendQuickTurn} 同构（乐观气泡 + {@link sendTurn}），仅多带种子；空 `content` /
- * 无活跃会话 / 正在生成 → no-op 返回 false（回合不叠加）。
+ * 乐观气泡 + {@link sendTurn}、只多带种子（画布/聊天的常规下达指令则走统一 composer 管线
+ * `useComposerSend`）；空 `content` / 无活跃会话 / 正在生成 → no-op 返回 false（回合不叠加）。
  */
 export async function sendDebateContinuation(
   content: string,

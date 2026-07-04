@@ -21,6 +21,7 @@ from . import (
     handoff,
     interactions,
     messages,
+    run_redirect,
     snapshots,
     turns,
 )
@@ -35,6 +36,7 @@ router = APIRouter()
 router.include_router(crud.router)
 router.include_router(messages.router)
 router.include_router(interactions.router)
+router.include_router(run_redirect.router)
 router.include_router(binding.router)
 router.include_router(handoff.router)
 router.include_router(turns.router)

@@ -7,7 +7,11 @@ import {
   tryRefresh,
 } from "@/services/api";
 import type { PlanReviewUserDecision } from "@/services/planReview";
-import { dispatchSSEEvent, flushPendingContent } from "@/services/sse/dispatch";
+import {
+  dispatchSSEEvent,
+  flushPendingContent,
+  flushPendingFrames,
+} from "@/services/sse/dispatch";
 import { traceTurnMilestone } from "@/services/turnTrace";
 import { useApprovalStore } from "@/stores/approvals";
 import { getRuntime } from "@/stores/conversation";
@@ -179,6 +183,7 @@ export async function attachConversation(
     throw new StreamError("network");
   } finally {
     flushPendingContent(conversationId);
+    flushPendingFrames(conversationId);
   }
 }
 
@@ -238,6 +243,7 @@ async function runMessageStream(
     throw new StreamError("network");
   } finally {
     flushPendingContent(conversationId);
+    flushPendingFrames(conversationId);
   }
 }
 
@@ -332,4 +338,5 @@ export async function resumeConversation({
 export {
   dispatchSSEEvent,
   flushPendingContent,
+  flushPendingFrames,
 } from "./sse/dispatch";

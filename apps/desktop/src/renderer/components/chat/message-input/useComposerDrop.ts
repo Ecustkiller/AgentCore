@@ -61,6 +61,23 @@ export function useComposerDrop(
     setDragOver(false);
   }, []);
 
+  // 粘贴入框 (对话基础功能补齐): Ctrl/Cmd+V of a file (or a screenshot) attaches it via
+  // the SAME path as drop — so a clipboard image hits the same「暂不支持图片附件」guard,
+  // one attachment pipeline, no second policy. Plain-text paste carries no files, so we
+  // never intercept it — the textarea inserts the text as usual.
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      if (isGenerating) return;
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (files.length === 0) return;
+      e.preventDefault();
+      void (async () => {
+        for (const f of files) await attachDroppedFile(f);
+      })();
+    },
+    [isGenerating, attachDroppedFile],
+  );
+
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
       if (!e.dataTransfer.types.includes("Files")) return;
@@ -99,6 +116,7 @@ export function useComposerDrop(
     handleDragOver,
     handleDragLeave,
     handleDrop,
+    handlePaste,
     disposeDropTimer,
   };
 }

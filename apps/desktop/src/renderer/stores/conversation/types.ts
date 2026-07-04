@@ -54,6 +54,9 @@ export interface Conversation {
   folderId?: string | null;
   localContainerRootId?: string | null;
   modelMode?: string | null;
+  /** Per-conversation custom instructions (对话级自定义指令); null/"" = none. Injected
+   * into this conversation's system prompt so every turn follows it. */
+  instructions?: string | null;
   pinned?: boolean;
   archived?: boolean;
 }
@@ -120,15 +123,15 @@ export interface Message {
   error?: { code: string; message: string };
   /** CEO→用户「下一步推荐」(下一步推荐): post-turn quick-reply suggestions, shown as
    * one-click chips under the latest assistant turn (fill the composer on click).
-   * Live-only — never persisted (transport-only `followups_generated`); on reload the
-   * turn is history and its「what next」is stale, so chips simply don't reappear. */
+   * DERIVED-persisted (messages.followups column, twin of the title): live they ride
+   * `followups_generated`; on reload `toMessage` replays them so reopening a conversation
+   * still shows the last turn's chips. */
   followups?: string[];
+  /** 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's satisfaction rating on this assistant
+   * reply — `"up"` / `"down"`, or `null` / undefined for 未评价. Persisted (messages.feedback
+   * column) so a reloaded bubble replays the rating; toggled via the footer thumbs. */
+  feedback?: "up" | "down" | null;
   traceId?: string;
-  /** P2 工作区升级提示 (前端UX设计.md §九): set when THIS turn's first file write
-   * promoted a bare chat into a folder-backed workspace (`workspace_promoted`).
-   * Drives the bubble's inline「已升级为工作区」notice. Live-only — never persisted
-   * (on reload the folder is simply already there, no longer news). */
-  workspacePromotion?: { folderId: string; name: string };
 }
 
 export interface ConversationRuntime {

@@ -1,9 +1,7 @@
 import { EmptyHint, IconButton } from "@/components/files/parts";
 import { Button } from "@/components/ui";
-import { useConversations } from "@/hooks/useConversations";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import { hasLocalFiles } from "@/lib/capabilities";
-import { createDeferredLocalSource } from "@/services/sources/deferredLocalSource";
 import {
   createWorkspaceSource,
   resolveWorkspaceSource,
@@ -36,26 +34,13 @@ export function WorkspaceMode() {
   // 与文件中枢同一份数据 + 同一个解析器：对话→其工作区(WorkspaceInfo)→FileSource。本地走桌面
   // IPC、云端走 REST，故 Agent 在本地写的文件这里也能列出（修复「写在本地、读在云端」）。
   const ws = useConversationWorkspace(conversationId);
-  const conversations = useConversations();
-  const conv = conversationId
-    ? (conversations.find((c) => c.id === conversationId) ?? null)
-    : null;
-  const localIntent = conv?.localContainerRootId ?? null;
-  const title = conv?.title ?? "工作区";
   const fsAvailable = hasLocalFiles();
   const source = useMemo(() => {
-    // 已提升：按绑定选源（本地 IPC / 云端 REST）。
     if (ws) return resolveWorkspaceSource(ws, fsAvailable);
     if (!conversationId) return null;
-    // 裸聊 + 桌面本地意向：走客户端 DeferredWorkspace —— 首次写文件经 IPC 懒建本地工作区
-    // （工作区对称化 D1a），而非云端源（它会把本地文件夹误写到服务端、造成脑裂）。首写后
-    // 经 applyConversationPromotion 反应式带出工作区，面板下一帧切到真正的本地源。
-    if (fsAvailable && localIntent) {
-      return createDeferredLocalSource(conversationId, localIntent, title);
-    }
-    // 云端裸聊（web / 手机 / 云端临时对话）：conversation 维度云端源（云端文件可列、空态提示）。
+    // Cloud scratch (or pre-first-write): conversation-keyed REST source.
     return createWorkspaceSource(conversationId);
-  }, [ws, conversationId, fsAvailable, localIntent, title]);
+  }, [ws, conversationId, fsAvailable]);
 
   if (!conversationId) {
     return (

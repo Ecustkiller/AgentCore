@@ -31,10 +31,8 @@ export function resolveFolderFromIndexedEntry(
 
   const localMatch = /^local:([^:]+)/.exec(entry.sourceId);
   if (localMatch) {
-    const rootId = localMatch[1];
-    const folder = getFolders().find((f) => f.localRootId === rootId);
-    if (!folder) return null;
-    return { folderId: folder.id, folderName: folder.name };
+    // Folders no longer bind local roots — scratch workspaces are per-conversation.
+    return null;
   }
 
   return null;

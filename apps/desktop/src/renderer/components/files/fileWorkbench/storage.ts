@@ -1,4 +1,9 @@
-/** `ws_id = folder:<id>` → its folder id (lifecycle ops are folder ops). */
+/** `ws_id = conv:<conversationId>` → its conversation id (scratch workspace). */
+export function conversationIdOf(wsId: string): string | null {
+  return wsId.startsWith("conv:") ? wsId.slice("conv:".length) : null;
+}
+
+/** @deprecated Legacy `folder:<id>` workspaces — retained for memory-leaf lookups. */
 export function folderIdOf(wsId: string): string | null {
   return wsId.startsWith("folder:") ? wsId.slice("folder:".length) : null;
 }

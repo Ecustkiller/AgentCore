@@ -8,7 +8,7 @@ from typing import Any
 
 from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
-from agentcore.core.errors import error_fields_for
+from agentcore.core.errors import error_fields_for, LLMUpstreamError
 from agentcore.core.logging import get_logger
 from agentcore.llm.config import ModelProfile, build_request
 from agentcore.llm.deepseek import DeepSeekProvider
@@ -89,6 +89,7 @@ class LlmRoundFailure:
 
     error_code: str
     error_message: str
+    upstream_error: bool = False
 
 
 async def run_llm_round(
@@ -120,7 +121,12 @@ async def run_llm_round(
             llm, request, emit_content, emit_reasoning, on_tool_progress
         )
     except Exception as e:
-        logger.error("llm.call_failed", round=round_idx, error=str(e))
+        logger.error(
+            "llm.call_failed",
+            round=round_idx,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         if raise_on_error:
             raise
         code, message = error_fields_for(
@@ -128,7 +134,11 @@ async def run_llm_round(
             fallback_code=ErrorCode.LLM_ERROR,
             fallback_message="出了点问题，请稍后重试。",
         )
-        return LlmRoundFailure(error_code=code, error_message=message)
+        return LlmRoundFailure(
+            error_code=code,
+            error_message=message,
+            upstream_error=isinstance(e, LLMUpstreamError),
+        )
 
     record_turn_fact(
         LlmCallFact(

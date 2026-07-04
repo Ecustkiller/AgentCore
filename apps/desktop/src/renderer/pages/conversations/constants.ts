@@ -39,6 +39,23 @@ export function isRealFolderFilter(
   );
 }
 
+/** Navigation options for `/files` when jumping from a folder context (most-recent conv). */
+export function filesFocusState(
+  conversationId: string | null | undefined,
+): { state: { focusWsId: string } } | undefined {
+  if (!conversationId) return undefined;
+  return { state: { focusWsId: `conv:${conversationId}` } };
+}
+
+export function firstConversationInFolder(
+  conversations: Conversation[],
+  folderId: string,
+): Conversation | undefined {
+  return conversations
+    .filter((c) => c.folderId === folderId)
+    .sort(byPinnedThenRecency)[0];
+}
+
 export function newChatFolderTarget(
   selected: string,
   folderIds: Set<string>,

@@ -15,6 +15,7 @@ import {
   MODEL_TIER_META,
   type RunStatus,
 } from "@/stores/execution";
+import type { ElkGraphLayout } from "@/lib/graph-layout-utils";
 import type { GraphEdge, GraphLayout } from "@/stores/graph";
 import {
   Background,
@@ -467,7 +468,7 @@ interface Scenario {
   title: string;
   desc: string;
   /** ELK 布局；缺省走左右流（与产品默认一致）。串行链用 "tree" 自上而下读。 */
-  layout?: GraphLayout;
+  layout?: ElkGraphLayout;
   /** 进阶形态：默认折进「更多形态」（执行中态 / 多层嵌套 / 热修 / 超大团队），常用四式
    * （并行 / 串行 / 辩论 / 嵌套小队）常驻，避免画廊读起来像测试网格。 */
   advanced?: boolean;
@@ -846,7 +847,7 @@ function EmbeddedGraphCanvas({
 }: {
   nodes: PreviewNode[];
   edges: GraphEdge[];
-  layoutKind: GraphLayout;
+  layoutKind: ElkGraphLayout;
   statuses: Record<string, RunStatus>;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);

@@ -24,13 +24,25 @@ import {
   setCaptainRunId,
 } from "../captainContext";
 import { flushPendingContent } from "../contentBuffer";
+import { flushPendingFrames, queueFrame } from "../execFrameBuffer";
 import { execMessageId } from "../helpers";
 import type { DispatchContext } from "../types";
 
-function recordFrame(event: SSEEvent, conversationId: string): void {
+/** A structural (low-frequency) frame: flush any rAF-buffered hot frames FIRST so global
+ * frame order is preserved, then append this one immediately. */
+function recordFrameNow(event: SSEEvent, conversationId: string): void {
+  flushPendingFrames(conversationId);
   const mid = execMessageId(conversationId);
   const frame = frameFromEvent(event);
   if (mid && frame) useExecutionStore.getState().recordFrame(frame, mid);
+}
+
+/** A high-frequency accumulate-only frame (run_*_delta / tool_progress / output_reset):
+ * coalesce into the next animation frame ({@link queueFrame}) instead of a per-token store
+ * write — the 白屏卡死 fix (逐 token → ≤60Hz). */
+function queueFrameEvent(event: SSEEvent, conversationId: string): void {
+  const frame = frameFromEvent(event);
+  if (frame) queueFrame(conversationId, frame);
 }
 
 export function handleExecutionEvent(
@@ -62,7 +74,7 @@ export function handleExecutionEvent(
     case "run_started": {
       const p = event.payload as RunStartedPayload;
       if (p.kind === "captain") setCaptainRunId(conversationId, p.run_id);
-      recordFrame(event, conversationId);
+      recordFrameNow(event, conversationId);
       return true;
     }
     case "run_context": {
@@ -74,16 +86,21 @@ export function handleExecutionEvent(
           .setCaptainContext(grown, conversationId);
         return true;
       }
-      recordFrame(event, conversationId);
+      recordFrameNow(event, conversationId);
       return true;
     }
+    // 高频纯累积帧 (流式性能，白屏卡死修复): rAF 合批，避免逐 token 全图重折叠 + 全消费者重
+    // 渲染 (整条流 O(n²))。run_output_reset (交付前核验回炉 finish_guard 的 worker 对偶,
+    // content_reset 之于 CEO 气泡: 清 worker 已流式累积的草稿产出、重写版从干净态重累积) 也走
+    // 同一有序缓冲，故与它清理的 delta 天然保序。Folds via the same frame path; transport-only.
     case "run_output_delta":
-    // 交付前核验回炉 (finish_guard) 的 worker 对偶: run_output_reset 清这个 worker 已流式累积
-    // 的草稿产出（content_reset 之于 CEO 气泡），重写版从干净态重累积。Folds via the same frame
-    // path (projectExecution clears the agent's outputChunks); transport-only, not journaled.
     case "run_output_reset":
     case "run_reasoning_delta":
-    case "run_tool_progress":
+    case "run_tool_progress": {
+      queueFrameEvent(event, conversationId);
+      return true;
+    }
+    // 结构性帧 (低频): recordFrameNow 先 flush 高频缓冲以保帧顺序，再立即落。
     case "run_completed":
     case "run_failed":
     case "run_progress":
@@ -108,11 +125,11 @@ export function handleExecutionEvent(
     // path, not onto a node); journaled, so it replays on reload. Fire-and-forget — it never
     // pauses the turn (no conversation-store card), just the journaled frame.
     case "team_note_posted": {
-      recordFrame(event, conversationId);
+      recordFrameNow(event, conversationId);
       return true;
     }
     case "tool_use_start": {
-      recordFrame(event, conversationId);
+      recordFrameNow(event, conversationId);
       flushPendingContent(conversationId);
       useConversationStore
         .getState()
@@ -120,7 +137,7 @@ export function handleExecutionEvent(
       return true;
     }
     case "tool_use_end": {
-      recordFrame(event, conversationId);
+      recordFrameNow(event, conversationId);
       flushPendingContent(conversationId);
       useConversationStore
         .getState()

@@ -47,6 +47,9 @@ async def record_local_turn(
     message_id: str | None = None,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    reasoning_tokens: int = 0,
+    cache_hit_tokens: int = 0,
+    cache_miss_tokens: int = 0,
     rounds: int = 0,
     trace_id: str,
     llm_credentials: LLMCredentials | None = None,
@@ -100,9 +103,15 @@ async def record_local_turn(
                     citations=citations,
                     message_id=message_id,
                     trace_id=trace_id,
+                    # Full usage snapshot — same 6 keys (same order) the cloud writes in
+                    # persist_turn_result, so a reloaded sidecar turn's meta row (incl
+                    # reasoning / cache tokens) is indistinguishable from a cloud turn's.
                     metadata={
                         "input_tokens": input_tokens,
                         "output_tokens": output_tokens,
+                        "reasoning_tokens": reasoning_tokens,
+                        "cache_hit_tokens": cache_hit_tokens,
+                        "cache_miss_tokens": cache_miss_tokens,
                         "rounds": rounds,
                     },
                 )

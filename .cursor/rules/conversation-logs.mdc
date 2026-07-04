@@ -1,14 +1,25 @@
 ---
-description: 查看/分析「对话日志」时阅读——运行时日志 logs/dev.jsonl 的位置、格式(JSONL)、按会话/trace 排查报错与找优化点的查询方法，以及"消息正文在 Postgres 不在日志"等关键事实。用户说"看对话日志/分析日志/会话为什么报错/推荐优化点"时先读本规则。
+description: 查产品 AI 日志（trace_id / conversation_id）时读——两套日志体系区分 + 正确查询命令。
+globs: 
 alwaysApply: false
 ---
 
 # 对话日志（运行时日志）阅读指南
 
+## ⚠️ 两套日志，不要混
+
+| | 产品 AI 日志 | Cursor IDE Agent 会话 |
+|---|---|---|
+| **位置** | `logs/dev.jsonl`（仓库根） | `agent-transcripts/`（`.cursor/projects/.../` 下 UUID.jsonl） |
+| **是什么** | 后端 `structlog` 运行时事件（trace / 回合 / 工具 / LLM） | Cursor 编码 Agent 的 chat 转录，与产品 AI **无关** |
+| **ID 格式** | `trace_id` = **32 位 hex、无连字符**（如 `a1b2c3…`）；`conversation_id` = UUID | 文件名 = **UUID 带连字符**（如 `550e8400-e29b-41d4-a716-446655440000.jsonl`） |
+
+**铁律**：用户给你 `trace_id` 或 `conversation_id` → 去 **`logs/dev.jsonl`** 查（或用下方脚本），**不要去 `agent-transcripts/` 找**。
+
 ## 它是什么 / 在哪
 
-- **`logs/dev.jsonl`**（仓库根）= 后端 `structlog` 运行时日志，**JSON Lines**（一行一个 JSON、无 ANSI），可直接逐行 `json.loads` / `jq` 解析。
-- 需后端设 `LOG_FILE=logs/dev.jsonl`（`apps/server/.env`）才会写文件；否则只有 stdout。
+- **`logs/dev.jsonl`** = 产品 AI 结构化日志，**JSON Lines**（一行一个 JSON、无 ANSI），可直接逐行 `json.loads` / `jq` 解析。
+- dev 环境默认写入此文件（`DEBUG=true` 且未设 `LOG_FILE` 时自动用 `logs/dev.jsonl`；亦可在 `apps/server/.env` 显式设 `LOG_FILE=logs/dev.jsonl`）。
 - 记录每个回合的**事件**：`chat.turn_start/complete`、委派、收敛治理、工具/LLM 报错、落账。
 - ⚠️ **不含消息正文**。用户与 Agent 的实际对话文本在 **Postgres**（`conversations` / `messages`），不在日志里。复盘"说了什么/答得好不好"必须查库；日志可看到回合的 `preview` 与产物指标。
 

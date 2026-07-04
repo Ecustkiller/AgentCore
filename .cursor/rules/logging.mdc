@@ -1,5 +1,5 @@
 ---
-description: 日志系统规范——structlog 双 handler 渲染、trace 关联(log_context)、事件命名(component.action)、关键事件词表。写日志/读日志/调试 AI 行为时阅读。
+description: 日志规范——写日志时阅读。Logger 获取、事件命名、禁止项。
 alwaysApply: false
 globs:
   - "apps/server/agentcore/core/logging.py"
@@ -10,69 +10,23 @@ globs:
 
 # 日志规范
 
-## 架构
-
-渲染按「输出目标 × 环境」分发（`ProcessorFormatter` 给每个 handler 各自的 renderer，见 `core/logging.py`）：
-
-| 输出目标 | dev (`DEBUG=true`) | prod |
-|---|---|---|
-| stdout | ConsoleRenderer（彩色可读） | JSONRenderer |
-| `LOG_FILE` | **JSONRenderer（JSONL）** | JSONRenderer（JSONL） |
-
-- **文件输出始终是 JSON Lines**（一行一个 JSON、无 ANSI），与环境无关——便于工具/AI 逐行 `json.loads` / `jq` 解析。
-- 外部库日志（uvicorn / sqlalchemy）经同一 `foreign_pre_chain` 渲染，格式统一。
-- SQL 全量回显是独立开关 `DB_ECHO`（`db/base.py`），**不挂在 `DEBUG` 上**——开 DEBUG 不会刷屏 SQL。
-
-## 环境变量
-
-- `LOG_LEVEL`：debug / info / warning / error（默认 info）。
-- `LOG_FILE`：日志文件路径（相对路径对仓库根解析），空=仅 stdout。**开发设 `logs/dev.jsonl`**。
-- `LOG_LLM_BODIES`：是否抓取 LLM prompt/回复正文（`llm.request`/`llm.response`，debug 级，需 `LOG_LEVEL=debug` 才出）。默认关；开启也**截断+脱敏**（铁律：永不落 BYOK key / 完整正文）。仅调 prompt 时临时开。
+完整规范（架构、环境变量、事件词表、Context 注入） → [`后端架构.md` §日志系统规范](/docs/02-架构/后端架构.md)。
+分析工具与排查方法 → [`后端架构.md` §对话日志分析指南](/docs/02-架构/后端架构.md)。
 
 ## Logger 获取
 
 ```python
 from agentcore.core.logging import get_logger
-
 logger = get_logger(__name__)
-logger.info("component.action", key=value)        # 事件名第一参数，数据用 kwargs
-logger.error("component.action", error=str(e), exc_info=True)
+logger.info("component.action", key=value)
 ```
-
-- 始终用 `get_logger`，**禁止** `logging.getLogger` / `structlog.get_logger`（否则脱离统一渲染与关联上下文）。
-- 不在日志里记敏感信息（BYOK key、密码、token）；消息正文只记 preview，不落完整体/文件内容。
 
 ## 事件命名
 
-格式 `组件.动作`（动作用 snake_case），如 `chat.turn_start`。全仓库已统一此式，**新增日志必须遵循**——禁止裸名（`pipeline_error` 这类无组件前缀的旧风格）。
+格式 `组件.动作`（snake_case），如 `chat.turn_start`。**禁止裸名**（无组件前缀）。
 
-## 关键事件词表（权威源：代码）
+## 禁止
 
-| 组件 | 关键事件 | 含义 / 排查价值 |
-|---|---|---|
-| `chat` | `chat.turn_start` · `chat.turn_complete` | **回合脊柱**：起点带 `preview`/`chars`/`history`/`location`；收尾带 `finish_reason`/`rounds`/`input_tokens`/`output_tokens`/`delegated`/`workers`/`duration_ms` |
-| `chat` | `chat.title_failed` · `chat.stream_error` · `chat.regenerate_error` | 标题生成失败 / 流式回合异常 / 重答异常 |
-| `delegate` | `delegate.started` · `delegate.rejected` | CEO 委派子团队（`nodes`/`call`）/ 委派被拒 |
-| `tool` | `tool.execute_start`(debug) · `tool.execute_end`(info) | 每次工具执行：end 带 `tool`/`status`(ok/error/not_found/denied)/`duration_ms`——`log_stats` 工具质量段数据源；`duration_ms` 不含授权等待 |
-| `react` | `react.round_start`(debug) · `react.round_end`(info) | 每轮 ReAct：end 带 `round`/`tools`/`input_tokens`/`output_tokens`/`reasoning_tokens`/`done`——推理质量(每轮 reasoning_tokens)+工具强度可观测 |
-| `engine` | `engine.loop_nudge` · `engine.loop_finalize` · `engine.max_rounds_exhausted` · `engine.force_finalize_failed` | 收敛治理：机械循环被提醒 / 强制收尾 / 轮预算耗尽 / 兜底收尾失败 |
-| `llm` | `llm.call`(info) · `llm.request`/`llm.response`(debug, 需 `LOG_LLM_BODIES`) · `llm.call_failed` · `llm.retry`/`timeout_retry`/`stream_retry` | **每次 LLM 调用**：call 带 `scenario`(chat/agent.*/memory/title)·`model`·`latency_ms`·`finish_reason`·in/out/reasoning/cache tokens·`stream`——LLM 层成本/延迟/质量归因（埋点：`llm/observability.py`，choke point=provider `complete` + engine `_stream_llm_round`）；request/response=截断脱敏的 prompt/回复（调 prompt 用，默认关）；失败/重试见 `*_failed`/`retry` |
-| `run` `contract` | `contract.retry` · `contract.failed` · `run.failed` · `run.captain_failed` · `run.revise_failed` | worker 契约重试/失败、run 异常 |
-| `cost` `workspace` | `cost.recorded` · `cost.ledger_write_failed` · `workspace.snapshot_created/failed` | 落账成功（`runs`/`total_nano`/`total_usd`/`models`）/失败 · 工作区快照（best-effort，warning-only） |
-| `pipeline` | `pipeline.error` | 回合管线未捕获异常（带 `exc_info`） |
-
-## Context 注入（Trace 关联）
-
-`structlog.contextvars` 的字段由 `merge_contextvars` 自动并进**每一行**日志。封装在 `core/log_context.py`（`new_trace_id` / `bind_log_context` / `clear_log_context` / `log_context` 作用域版 / `get_log_value`），**勿直接调 `structlog.contextvars`**。
-
-| 键 | 含义 | 绑定点 |
-|---|---|---|
-| `trace_id` | **一次用户交互全生命周期**（唯一关联键） | `conversation/service.py` 回合起点铸造 |
-| `conversation_id` `turn_id` `user_id` `agent_id` | 会话 / 回合 / 用户 / 当前 Agent | 同上 |
-| `run_id` `depth` | 委派 / DAG 子节点 | 用 `log_context(...)` 作用域绑定，退出自动还原 |
-
-> AgentCore 是**进程内 asyncio**：委派 worker 是子 task，`contextvars` 在建 task 时拷贝——`trace_id` 自动随 worker 日志传播，无需像跨进程方案那样手工串 payload。
-
-> **`trace_id` 已落库**（DB↔日志 join 键）：`messages` / `cost_events` / `run_sessions` 各带可空 `trace_id` 列——assistant 回复与该回合的落账行写本回合 trace，recoverable worker 写其**首次**生成回合的 trace（revise 不覆盖）；user 消息与 handoff 任务为 `NULL`（无 trace 作用域）。于是可从一条持久化回复/落账行反查整条日志链，日志轮转后仍能定位。写值点：`conversation/service.py`（本地变量回传，因落库在 `log_context` 退出之后）、`runtime/session_persistence.py`（读 contextvar）。
-
-调试：`grep trace_id=<id>` 拉一次交互全链路；`conversation_id` 关整会话；`run_id` 下钻单个委派节点。分析工具见 `conversation-logs.mdc`。
+- 禁止 `logging.getLogger` / `structlog.get_logger`（脱离统一渲染）
+- 禁止记录敏感信息（BYOK key、密码、token）
+- 消息正文只记 preview，不落完整体

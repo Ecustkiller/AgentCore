@@ -3,8 +3,7 @@
 import { useActiveMessages } from "@/stores/conversation";
 import {
   type Execution,
-  type ExecutionRuntime,
-  projectExecution,
+  projectRuntime,
   useExecutionStore,
 } from "@/stores/execution";
 import type { Edge, Node } from "@xyflow/react";
@@ -50,24 +49,6 @@ function dedupeRoles(exec: Execution): string[] {
   return out;
 }
 
-const projectionCache = new WeakMap<ExecutionRuntime, Execution>();
-
-function projectSlot(rt: ExecutionRuntime | undefined): Execution | null {
-  if (!rt?.plan) return null;
-  const cached = projectionCache.get(rt);
-  if (cached) return cached;
-  const exec = projectExecution(
-    rt.plan,
-    rt.frames.slice(0, rt.playhead ?? rt.frames.length),
-    rt.status,
-    rt.debate,
-    rt.debateRounds,
-    rt.debateDecisions,
-  );
-  projectionCache.set(rt, exec);
-  return exec;
-}
-
 interface UseCanvasTurnsOptions {
   focusedTurn: string | null;
   setFocusedTurn: (id: string) => void;
@@ -106,7 +87,11 @@ export function useCanvasTurns({
       }
       if (m.role !== "assistant") continue;
       if (m.executionId) {
-        const exec = projectSlot(byId[m.id]);
+        // 流式性能 (白屏卡死修复·Stage 3): the shared incremental projection (Stage 2's
+        // liveFolds), not a from-scratch re-fold per tick — the canvas spine had its own
+        // full-fold `projectSlot`, the canvas-side O(n²) twin of the chat's.
+        const rt = byId[m.id];
+        const exec = rt ? projectRuntime(rt) : null;
         out.push({
           id: m.id,
           kind: "team",

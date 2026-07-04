@@ -146,6 +146,13 @@ async function main() {
   await page.addInitScript((theme) => {
     try {
       localStorage.setItem("agentcore:theme", theme);
+      // Reset ephemeral side-panel visibility so each shot is an independent clean
+      // boot: shots share one browser context, and a scenario that auto-opens the
+      // right dock (non-debate final-answer surface / a drilled run) persists
+      // `open=true`, which would then leak into a LATER shot — e.g. squeezing the
+      // debate 竞技场 below its width threshold into the narrow fallback. The app's
+      // own default is closed; scenarios that need it re-open it at runtime.
+      localStorage.setItem("agentcore:side-panel-open", "false");
     } catch {
       /* localStorage unavailable — fall back to colorScheme */
     }

@@ -33,7 +33,7 @@ from agentcore.conversation.export import (
     conversation_to_json,
     conversation_to_markdown,
 )
-from agentcore.core.errors import ConflictError, NotFoundError
+from agentcore.core.errors import NotFoundError
 from agentcore.db.models import Conversation
 from agentcore.db.repositories import (
     ConversationRepository,
@@ -91,6 +91,40 @@ async def create_conversation(
     return ConversationSummary.model_validate(conv)
 
 
+@router.post("/{conversation_id}/duplicate", response_model=ConversationSummary, status_code=201)
+async def duplicate_conversation(
+    conversation_id: str,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    msg_repo: MessageRepository = Depends(get_message_repo),
+):
+    """Clone a conversation into a brand-new one carrying a copy of its transcript (克隆对话).
+
+    Owner-scoped (404 for a non-owner / missing source). The copy inherits the source's
+    folder (so it stays in the same project/workspace), 质量档 (``model_mode``) and
+    local-first intent, with a「… 副本」title, then bulk-copies the source's messages via
+    ``MessageRepository.copy_all`` (content-level fields only — see that method for what is
+    intentionally not carried over, e.g. the team-graph replay journal). Returns the new
+    conversation summary with its (copied) message count so the sidebar can insert it.
+    """
+    src = await conv_repo.get_by_id(conversation_id, user_id=user.user_id)
+    if not src:
+        raise NotFoundError("对话不存在")
+    base = (src.title or "").strip()
+    title = (f"{base} 副本" if base else "副本")[:500]
+    new_conv = await conv_repo.create(
+        user_id=user.user_id,
+        title=title,
+        folder_id=src.folder_id,
+        model_mode=src.model_mode,
+        local_container_root_id=src.local_container_root_id,
+    )
+    count = await msg_repo.copy_all(conversation_id, new_conv.id)
+    summary = ConversationSummary.model_validate(new_conv)
+    summary.message_count = count
+    return summary
+
+
 @router.get("", response_model=ConversationListResponse)
 async def list_conversations(
     user: AuthUser,
@@ -146,7 +180,6 @@ async def list_conversations_grouped(
                 id=f.id,
                 name=f.name,
                 local_dir=f.local_dir,
-                local_root_id=f.local_root_id,
                 conversations=buckets[f.id],
             )
             for f in folders
@@ -186,6 +219,12 @@ async def update_conversation(
     if "model_mode" in fields:
         await validate_mode_ref(body.model_mode, user_id=user.user_id, repo=mode_repo)
         conv = await repo.set_model_mode(conversation_id, body.model_mode, user_id=user.user_id)
+    # 对话级自定义指令: an explicit null / "" clears it back to「none」; the repo strips
+    # and normalizes blank → NULL so a whitespace-only edit reads as cleared.
+    if "instructions" in fields:
+        conv = await repo.set_instructions(
+            conversation_id, body.instructions, user_id=user.user_id
+        )
     # Sidebar housekeeping toggles (对话基础功能补齐): pin floats the row to the top,
     # archive hides it from the live list (both reversible, no tri-state → a null is
     # ignored as「unchanged」).
@@ -203,19 +242,11 @@ async def move_conversation_to_folder(
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
-    msg_repo: MessageRepository = Depends(get_message_repo),
 ):
     """Move a conversation into a folder, or out of one (``folder_id=null``).
 
-    A non-null target must be one of the user's own live folders (else 404), so
-    a chat can never be filed into someone else's or a deleted folder.
-
-    A conversation's workspace is fixed once it starts (双模式工作区 §九 ⑩): its
-    folder decides which workspace directory it runs in — and whether cloud or
-    local — so moving a *started* chat across folders would silently re-point it at
-    a different directory and orphan its accumulated files. Such a move is refused
-    with 409; only an unsent (zero-message) chat is freely fileable. A no-op move
-    (already in the target) never changes the workspace, so it is always allowed.
+    A non-null target must be one of the user's own live folders (else 404). Folder
+    is pure sidebar grouping — moving never changes the conversation's scratch path.
     """
     conv = await conv_repo.get_by_id(conversation_id, user_id=user.user_id)
     if not conv:
@@ -225,8 +256,6 @@ async def move_conversation_to_folder(
             folder = await folder_repo.get_by_id(body.folder_id, user_id=user.user_id)
             if not folder:
                 raise NotFoundError("文件夹不存在")
-        if await msg_repo.count_by_conversation(conversation_id) > 0:
-            raise ConflictError("对话开始后不可更换工作区")
         conv = await conv_repo.set_folder(conversation_id, body.folder_id, user_id=user.user_id)
         if not conv:
             raise NotFoundError("对话不存在")

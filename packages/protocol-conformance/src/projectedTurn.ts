@@ -175,6 +175,8 @@ export interface ProjectedTeamNote {
   ts: number | null;
   status: "active" | "superseded" | "voided";
   supersedes: string | null;
+  /** `ceo` when seeded by the host before workers run. */
+  source?: "ceo" | "worker";
 }
 
 /** A pending user gate — the one surface the turn is blocked on (`paused`). Only the

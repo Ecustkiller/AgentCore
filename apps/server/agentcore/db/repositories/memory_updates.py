@@ -58,6 +58,25 @@ class MemoryUpdateRepository:
         rows.reverse()
         return rows
 
+    async def list_for_user(
+        self, user_id: str, *, limit: int = 50
+    ) -> list[MemoryUpdateRow]:
+        """A user's memory-update records across ALL conversations, NEWEST-first.
+
+        Backs the cross-conversation「记忆动态」feed (记忆编辑器「最近更新」视图,
+        Agent记忆与知识系统 §1.6): the memory-write side is per-user long-term data, so a
+        single chronological stream of "what the AI recently learned" cuts across every
+        conversation — a question the per-conversation tail card cannot answer. Capped at
+        ``limit`` most-recent rows; served by the ``(user_id, created_at)`` index.
+        """
+        result = await self._session.execute(
+            select(MemoryUpdateRow)
+            .where(MemoryUpdateRow.user_id == user_id)
+            .order_by(MemoryUpdateRow.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def load_map(
         self, conversation_ids: Sequence[str]
     ) -> dict[str, list[MemoryUpdateRow]]:

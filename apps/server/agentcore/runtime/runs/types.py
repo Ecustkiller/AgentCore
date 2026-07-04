@@ -54,6 +54,7 @@ class RunPhase(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
+    CANCELLED = "cancelled"
     RETRYING = "retrying"
 
 
@@ -209,7 +210,7 @@ class RunSpec:
     # (阶段2 嵌套子任务). Default off — only a CEO task that explicitly opts in gets
     # the delegate tool, and only while ``depth < MAX_DELEGATION_DEPTH`` (executor
     # enforces the cap). depth-2 sub-workers never delegate regardless of this flag.
-    can_delegate: bool = False
+    can_delegate: bool | str = False
     policy: RunPolicy = field(default_factory=RunPolicy)
     # Fan-out awareness: a concise list of the *other* nodes that fanned out from
     # the same point — those sharing this node's exact ``depends_on`` set, i.e. the
@@ -324,13 +325,15 @@ class RunState:
     # 阶段的冗余 file_list 轮). Best-effort: a file a worker wrote indirectly (e.g. via
     # a code_execute script) is not captured — only direct file-tool calls are.
     files_touched: list[str] = field(default_factory=list)
-    # 完工交接简报 (worker → 下游/CEO): a structured wrap-up the worker appends to its output
-    # (一句话结论 / 关键要点 / 采用的假设 / 建议下一步), harvested once from the content at run
-    # finish (mirrors ``files_touched`` / ``escalations``). Lets a downstream dep block LEAD
-    # with the author's own 结论 — most likely to survive budget-trim, cheapest to read — and
-    # the CEO aggregate surface 建议下一步 to relay to the user, instead of every reader
-    # re-deriving the gist from raw prose. ``None`` when the worker emitted none (or it was
-    # unparseable; harvest degrades gracefully). Keys: summary / key_points / assumptions /
+    # 完工交接简报 (worker → 下游/CEO): a structured wrap-up the worker submits by calling the
+    # ``handoff`` terminal tool (一句话结论 / 关键要点 / 采用的假设 / 建议下一步), harvested once
+    # from that tool call at run finish (mirrors ``files_touched`` / ``escalations`` — all read
+    # off the transcript). It is structured DATA, never re-parsed out of the prose, so the output
+    # stays the pure deliverable and the brief can't overlap it. Lets a downstream dep block LEAD
+    # with the author's own 结论 — most likely to survive budget-trim, cheapest to read — and the
+    # CEO aggregate surface 建议下一步 to relay to the user, instead of every reader re-deriving
+    # the gist from raw prose. ``None`` when the worker never called handoff (or its args were
+    # unusable; harvest degrades gracefully). Keys: summary / key_points / assumptions /
     # next_steps (each present only when non-empty). Best-effort signal, never load-bearing.
     debrief: dict[str, Any] | None = None
     usage: dict[str, int] = field(default_factory=dict)
@@ -409,6 +412,7 @@ class BatchMetrics:
     completed: int
     failed: int
     skipped: int
+    cancelled: int = 0
     # ── 受监督波循环边界埋点 (boundaries fired this run, by reason; see docstring) ──
     bind_boundaries: int = 0  # 晚绑定触发次数 (BIND yields)
     scope_boundaries: int = 0  # 计划漂移返工触发数 (SCOPE yields)

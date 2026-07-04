@@ -13,6 +13,15 @@ import { MessageSquare, Network, PanelRight } from "lucide-react";
 import { useEffect } from "react";
 import { useParams } from "react-router-dom";
 
+/** Read the `msg` query of the current hash route (#/conversations/:id?msg=<id>).
+ * Parsed off window.location so the load effect need not depend on router search state. */
+function readMsgAnchor(): string | null {
+  const hash = window.location.hash;
+  const q = hash.indexOf("?");
+  if (q === -1) return null;
+  return new URLSearchParams(hash.slice(q + 1)).get("msg");
+}
+
 export function ConversationPage() {
   const { id } = useParams<{ id: string }>();
 
@@ -98,6 +107,13 @@ export function ConversationPage() {
       if (pending && pending.conversationId === id) {
         store.clearPendingFocus();
         void jumpToMessage(id, pending.messageId);
+      } else {
+        // 消息永久链接 (对话基础功能补齐): a #/conversations/:id?msg=<messageId> anchor
+        // (from「复制消息链接」or the web build) lands on the exact turn. Read the hash
+        // query imperatively so the load effect stays keyed on [id] alone — re-parsing
+        // via useSearchParams would fold URL churn into the deps and re-fetch the window.
+        const target = readMsgAnchor();
+        if (target) void jumpToMessage(id, target);
       }
     })();
     return () => {

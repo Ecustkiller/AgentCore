@@ -16,8 +16,10 @@ import {
   useConversationStore,
 } from "@/stores/conversation";
 import { ArrowDown, Loader2 } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ApprovalPrompt } from "./ApprovalPrompt";
+import { ConversationOutline } from "./ConversationOutline";
+import { FindBar } from "./FindBar";
 import { FollowupChips } from "./FollowupChips";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
@@ -44,6 +46,29 @@ export function ChatView() {
     if (conversationId) void loadLatestWindow(conversationId);
   }, [conversationId]);
 
+  // 会话内查找: Ctrl/Cmd+F opens the find bar (`f` is free in GLOBAL_SHORTCUTS). Scoped to
+  // when a non-empty conversation is on screen — ChatView only mounts then anyway. Esc /
+  // the ✕ close it (handled inside FindBar).
+  const [findOpen, setFindOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        e.key.toLowerCase() === "f"
+      ) {
+        if (!hasMessages) return;
+        e.preventDefault();
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hasMessages]);
+  useEffect(() => {
+    if (!hasMessages && findOpen) setFindOpen(false);
+  }, [hasMessages, findOpen]);
+
   // Re-run the auto-follow whenever the newest turn grows — both its answer and
   // its live reasoning stream — so the view tracks the model while it thinks.
   const last = messages[messages.length - 1];
@@ -51,10 +76,10 @@ export function ChatView() {
     ? `${last.id}-${last.content.length}-${last.reasoning?.length ?? 0}`
     : "";
 
-  // 下一步推荐 chips ride the live tail: surface the latest finished assistant turn's
-  // followups directly above the composer — the 「what next」 affordance belongs where you
-  // type and stays put regardless of scroll. Transport-only, so a new turn / refresh
-  // retires them; FollowupChips renders nothing for an empty list.
+  // 下一步推荐 chips: surface the latest finished assistant turn's followups directly above
+  // the composer — the 「what next」 affordance belongs where you type and stays put regardless
+  // of scroll. Persisted (messages.followups) so a refresh replays them; a NEW turn retires the
+  // prior turn's chips (they leave the last-message slot). FollowupChips renders nothing if empty.
   const followups =
     !isGenerating && last?.role === "assistant" && !last.isStreaming
       ? (last.followups ?? [])
@@ -78,6 +103,8 @@ export function ChatView() {
           The relative wrapper anchors the floating 回到底部 button to the viewport
           so it stays put instead of scrolling away with the messages. */}
       <div className="relative min-h-0 flex-1">
+        <FindBar open={findOpen} onClose={() => setFindOpen(false)} />
+        <ConversationOutline />
         <div ref={scrollRef} className="h-full overflow-y-auto">
           {hasMessages ? (
             <div className="mx-auto w-full max-w-3xl space-y-4 px-6 pb-4 pt-10">

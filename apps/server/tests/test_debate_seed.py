@@ -173,7 +173,7 @@ def test_frame_first_round_with_seed_demands_orthogonal_focus():
 
     mod = Moderator(provider=_CaptureLLM(), model="m")
     seed = DebateSeed.from_payload(_full_payload())
-    focus = asyncio.run(mod._frame(_config(), [], seed=seed))
+    focus, _ = asyncio.run(mod._frame(_config(), [], seed=seed))
 
     assert focus == "正交新焦点"
     prompt = captured[-1].messages[-1].content
@@ -191,7 +191,7 @@ def test_frame_first_round_without_seed_is_verbatim_fresh():
             return LLMResponse(content=json.dumps({"focus": "开场焦点"}))
 
     mod = Moderator(provider=_CaptureLLM(), model="m")
-    focus = asyncio.run(mod._frame(_config(), []))
+    focus, _ = asyncio.run(mod._frame(_config(), []))
 
     assert focus == "开场焦点"
     prompt = captured[-1].messages[-1].content

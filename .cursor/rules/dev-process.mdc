@@ -38,12 +38,21 @@ alwaysApply: true
 - 优先写接口定义（Protocol / ABC / Pydantic），再实现
 - 模块间通过抽象接口解耦；共享类型放 `shared/` 或 `core/types/`
 - 核心逻辑必须有单元测试
-- 子代理（Task tool）必须指定 `composer-2.5` 模型
+- 子代理委派规范见 `multitask.mdc`
 
 ## 文件编辑安全
 
 - **禁止用脚本批量改源码**（PowerShell/Bash 文本替换易静默损坏文件）
 - 用 StrReplace + `replace_all` 逐文件改，每步可验证
 - 改完用 **Read 读文件**自检（不应出现大量删除/清空）
+
+## 并行开发 Git 约束
+
+本仓库长期处于多 Agent 并行开发，`git status` / `git diff` 的结果**不代表你本次会话的真实改动**。
+
+1. 校验自己的改动用 **Read 读文件内容**，不要用 `git status` / `git diff` / `git diff --stat`。
+2. git 输出与你的改动对不上是**正常噪音**（其他并行 worktree 的修改）——一律直接接受，继续任务。
+3. **禁止排查 git 内部**：不推测 worktree 嵌套、路径大小写/分隔符、git 配置损坏、仓库结构异常。
+4. 只有用户**明确要求** git 操作时才跑 git 命令；仍遵守「非请勿 commit」。
 
 文档治理规范见 `doc-governance.mdc`。

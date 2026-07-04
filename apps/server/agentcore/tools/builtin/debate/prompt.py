@@ -13,7 +13,9 @@ from agentcore.runtime.debate import (
     RoundResult,
     UserInterjection,
 )
+from agentcore.runtime.runs.types import ContextBlock
 from agentcore.tools.builtin.debate.schema import (
+    CLOSING_LENGTH_HINT,
     DEBATER_TOOLS,
     FORM_LABELS,
     LENGTH_HINT,
@@ -33,6 +35,40 @@ def _clip(text: str, limit: int = _OPP_CLIP) -> str:
         return text
     half = max(1, (limit - 20) // 2)
     return f"{text[:half]}\n……（中段略）……\n{text[-half:]}"
+
+
+# 举证责任·证据状态铁律（辩论编排设计.md §4-2.3 契约② P3，方案 A 内联标记）。放进辩手
+# 【系统提示】而非每轮 task：辩手跨轮走 continue_run 复用同一 session（系统提示只发一次却全程生效），
+# 故立论 / 续论 / 质询作答一律受此约束，无需逐条 prompt 重复注入（省 token、口径单一）。前端
+# `remarkEvidence` 与裁判记分读同一套标记（`【已核实·<出处>】` / `【待核实·推断】`），三处咬合：
+# 辩手标 → 裁判据标记记分/罚 → 前端把标记渲成证据徽章。开发期取证层常失败（read_url fake-IP，见 本地开发.md 排障）时本铁律让辩论【诚实标待核实】而非自信臆造，是对 P0 的正交护栏。
+EVIDENCE_RULE = (
+    "\n【举证责任·证据状态铁律】你陈述的每一条【关键事实主张】（具体数字 / 金额 / 日期 / 案号 / "
+    "引用 / 先例 / 统计口径）都必须【紧跟一个证据状态标记】，二选一：\n"
+    "- 【已核实·<出处>】——你确实用 web_search / read_url 查到了出处（标出来源，如「已核实·2024年报」）；\n"
+    "- 【待核实·推断】——你拿不出出处，只是推断 / 常识 / 估算。\n"
+    "拿不出出处就【诚实标注待核实】，绝不臆造具体来源、绝不把推断伪装成已核实事实；未加标记的关键事实"
+    "一律按【待核实】对待。无据主张与「拿待核实当已成立的论据」会在质询里被当面追问、在记分里被扣分——"
+    "诚实标注待核实【不扣分】，硬拗成事实才扣。"
+)
+
+
+# 查询构造铁律（会话 7e1baca0 复盘：辩手 web_search 查询过窄→空手）。与 EVIDENCE_RULE 一同进辩手
+# 【系统提示】（只发一次、跨轮 continue_run 全程生效），治的是复盘实测出的取证主因：辩手在质询轮
+# 被逼核实具体事实（案号 / 「17 件」）时，把 web_search 查询写成 6–8 个关键词硬拼的长句（如
+# 「茉莉奶白 四叶花卉 商标申请 驳回 国家知识产权局 案号 LV 近似」）→ 健康引擎也返 0 结果 → 回落
+# 「无法核实」。对照实测：短查询「茉莉奶白 LV 商标侵权」经同一后端 39 条 / 1.8s。这是【改查询写法】、
+# 不是给辩手取证限次 / 降并发（§二已否决那类节流），不削独立取证、不改契约、不触补丁绊线。
+SEARCH_QUERY_RULE = (
+    "\n【web_search 查询铁律】搜索引擎按【少量核心词】匹配，不是自然语言问答——查询写太长 / 太具体会"
+    "【命中率骤降、经常 0 结果】。故：\n"
+    "- 每次 web_search 只用【2–4 个核心词】（主体 + 主题），别把一句话或 5+ 个限定词硬拼成一条 query；"
+    "先用最核心的词搜到相关页面，再从结果里读细节，而不是一上来就把案号 / 机构 / 年份 / 金额全塞进去；\n"
+    "- 核实某个具体数字 / 案号 / 金额时，用【主体 + 该事实的类别词】去搜（如查赔偿额搜「茉莉奶白 LV 判赔」），"
+    "而不是把数字本身塞进 query；\n"
+    "- 若返回【空结果】，别当成「不存在」——【删掉最具体的那个限定词（案号 / 机构名 / 年份 / 金额）再搜一次】、"
+    "改用更泛或同义的词；连搜两次仍空，才按【证据状态铁律】诚实标【待核实·推断】。"
+)
 
 
 def role_directive(config: DebateConfig, side: DebateSide) -> str:
@@ -61,7 +97,7 @@ def side_system(config: DebateConfig, side: DebateSide) -> str:
         "论据具体、直面对方、不偷换概念、不因篇幅长而堆砌；用具体证据 / 例子 / 推理链支撑论点，"
         "而非泛泛断言或空喊口号。"
     )
-    return f"{base}{role_directive(config, side)}"
+    return f"{base}{role_directive(config, side)}{EVIDENCE_RULE}{SEARCH_QUERY_RULE}"
 
 
 def seed_block(seed: DebateSeed | None, side: DebateSide) -> str:
@@ -119,7 +155,8 @@ def debater_task(
         f"本轮议题：{focus}\n\n"
         f"{role_directive(config, side)}{prior}\n"
         f"请就本轮议题给出有力、具体、有论据的论证（这是你的开场立论）：聚焦你最能站住的论点，"
-        f"用具体证据 / 例子 / 推理链支撑（必要时用 web_search / read_url 取证）。{LENGTH_HINT}{quick_suffix}"
+        f"用具体证据 / 例子 / 推理链支撑（必要时用 web_search / read_url 取证）；关键事实主张按"
+        f"【证据状态铁律】标注【已核实·出处】/【待核实·推断】。{LENGTH_HINT}{quick_suffix}"
     )
     payload: dict[str, Any] = {
         "role": side.name,
@@ -142,26 +179,42 @@ def debater_task(
     return payload
 
 
+def _challenged_lines(config: DebateConfig, side: DebateSide, last_round: RoundResult) -> str:
+    """本方上一轮被反驳的命门（``to_key==本方`` 的 clash 边）渲染成「- {反驳方}：{命门}」多行；
+    无指向本方的边时返回空串。喂 LLM 的 :func:`_challenged_block` 与展示用的
+    :func:`round_context_blocks` 都读它，保证「投喂==展示」同源。"""
+    names = {s.key: s.name for s in config.sides}
+    against = [c for c in last_round.verdict.clashes if c.to_key == side.key]
+    return "\n".join(f"- {names.get(c.from_key, c.from_key)}：{c.point}" for c in against)
+
+
 def _challenged_block(config: DebateConfig, side: DebateSide, last_round: RoundResult) -> str:
     """上一轮裁判抽出的「谁驳了本方、驳在哪」（``to_key==本方`` 的 clash 边）——喂回辩手让它
     【精准回应被攻击的命门】（B2）。与主持人侧 clash 强化形成正反馈：辩手正面接招 → 下一轮交锋
     更针锋相对 → 裁判抽 clash 更干净。无指向本方的边时返回空串（跳过、不硬塞）。"""
-    names = {s.key: s.name for s in config.sides}
-    against = [c for c in last_round.verdict.clashes if c.to_key == side.key]
-    if not against:
+    lines = _challenged_lines(config, side, last_round)
+    if not lines:
         return ""
-    lines = "\n".join(f"- {names.get(c.from_key, c.from_key)}：{c.point}" for c in against)
     return (
         "\n\n上一轮裁判记录你被这样反驳（请【优先正面回应】这些命门——能驳回就驳回、"
         f"该让步就坦诚让步，别回避）：\n{lines}"
     )
 
 
+def _interjection_mine(
+    side: DebateSide, interjections: Sequence[UserInterjection]
+) -> list[UserInterjection]:
+    """本辩手本轮该正面回答的用户追问：定向本方（``target_key==本方``）的 + 未定向（空 target）
+    的全场追问。喂 LLM 的 :func:`_interjection_block` 与展示用的 :func:`round_context_blocks`
+    都读它，保证「投喂==展示」同源。"""
+    return [i for i in interjections if i.ask and (not i.target_key or i.target_key == side.key)]
+
+
 def _interjection_block(side: DebateSide, interjections: Sequence[UserInterjection]) -> str:
     """把用户【追问】拼进本辩手的 feedback —— 定向某方（``target_key``）的只喂给那一方，未定向
     （空 target）的喂给全场。追问是用户的最高优先级诉求，故明令【本轮优先正面回答】（先答追问、
     再展开），别答非所问。无（指向本方的）追问返回空串（feedback 不变、零行为变化）。"""
-    mine = [i for i in interjections if i.ask and (not i.target_key or i.target_key == side.key)]
+    mine = _interjection_mine(side, interjections)
     if not mine:
         return ""
     directed = any(i.target_key == side.key for i in mine)
@@ -208,6 +261,126 @@ def round_feedback(
         f"对方上一轮的论点如下，{engage}：\n"
         f"{opp_block}{challenged}\n\n"
         f"直接输出你本轮的【完整发言】：**只补本轮焦点下的新论点 / 新回应**，用具体证据 / 例子 / "
-        f"推理链支撑（必要时用 web_search / read_url 取证）；不要重述你上一轮已说过的内容、"
+        f"推理链支撑（必要时用 web_search / read_url 取证）；关键事实主张按【证据状态铁律】标注"
+        f"【已核实·出处】/【待核实·推断】；不要重述你上一轮已说过的内容、"
         f"不要复述对方原话、不要罗列改动清单。{LENGTH_HINT}"
     )
+
+
+def cx_answer_feedback(
+    config: DebateConfig,
+    side: DebateSide,
+    round_no: int,
+    focus: str,
+    questions: Sequence[str],
+) -> str:
+    """质询环节（质询回合 P1）喂给 continue_run 的 feedback：主持人代表交锋向本方发出的必答质询。
+
+    要求辩手【逐条正面作答】（先「是 / 否 / 部分成立」表态、再用证据或推理支撑）；涉及具体事实的前提
+    按【证据状态铁律】标注 `【已核实·出处】`/`【待核实·推断】`（举证责任 P3，全文口径见 :data:`EVIDENCE_RULE`）；
+    不得回避 / 答非所问 / 复述已说过的立论——回避会在裁判 engagement 记分被扣。辩手在自己的 transcript 上
+    作答，故答复进入本方跨轮记忆、下一轮立论可见。"""
+    lines = "\n".join(f"- {q}" for q in questions)
+    return (
+        f"## 第 {round_no} 轮 · 质询环节（本轮焦点：{focus}）\n"
+        f"{role_directive(config, side)}\n\n"
+        "主持人代表交锋，向你发出以下【必须正面回答】的质询——请【逐条正面作答】：先用「是 / 否 / "
+        "部分成立」明确表态，再用具体证据或推理支撑；凡涉及具体事实的前提都按【证据状态铁律】标注"
+        "【已核实·出处】/【待核实·推断】，拿不出出处就诚实标【待核实·推断】、别含糊带过或硬拗成已核实。"
+        "不要回避、不要答非所问、不要重复你"
+        f"已说过的立论：\n{lines}\n\n"
+        "直接输出你对这些质询的正面回答（逐条对应、简洁有力）。"
+    )
+
+
+def round_context_blocks(
+    config: DebateConfig,
+    side: DebateSide,
+    round_no: int,
+    focus: str,
+    last_round: RoundResult,
+    interjections: Sequence[UserInterjection] = (),
+) -> list[ContextBlock]:
+    """后续轮 continue_run 的【收到的上下文】展示投影（上下文传递可视化）。
+
+    与 :func:`round_feedback`（渲染给 LLM 吃的字符串）**从同一批输入孪生构造**——本轮焦点 /
+    用户追问 / 对方上一轮论点(每方一段·头尾裁剪) / 上一轮被驳命门。二者共享 :func:`_clip` /
+    :func:`_interjection_mine` / :func:`_challenged_lines` 这几个内容源，避开「拼给 LLM」与
+    「展示给用户」双源漂移（补丁绊线：同一份事实只算一次）。``continue_run`` 把这批 block 作为
+    ``run_context`` 事件抛出，前端修订节点的「任务/收到的上下文」据此渲染（辩论 v2+ 面板不再空白
+    也不再显示首轮通用任务）。"""
+    blocks: list[ContextBlock] = [
+        ContextBlock(channel="round_focus", heading=f"第 {round_no} 轮 · 本轮焦点", body=focus)
+    ]
+    mine = _interjection_mine(side, interjections)
+    if mine:
+        directed = any(i.target_key == side.key for i in mine)
+        who = "向你" if directed else "向全场"
+        blocks.append(
+            ContextBlock(
+                channel="interjection",
+                heading=f"用户本轮追问（{who}提出 · 最高优先级）",
+                body="\n".join(f"- {i.ask}" for i in mine),
+            )
+        )
+    opponents = [t for t in last_round.ok_turns if t.side_key != side.key]
+    if opponents:
+        for t in opponents:
+            over = len(t.content.strip()) > _OPP_CLIP
+            blocks.append(
+                ContextBlock(
+                    channel="opponent",
+                    heading=f"对方上一轮 · {t.side_name}",
+                    body=_clip(t.content),
+                    source_role=t.side_name,
+                    source_run_id=t.run_id,
+                    fidelity="summarize" if over else "",
+                    truncated=over,
+                )
+            )
+    else:
+        blocks.append(
+            ContextBlock(channel="opponent", heading="对方上一轮", body="（对方上一轮无有效发言）")
+        )
+    challenged = _challenged_lines(config, side, last_round)
+    if challenged:
+        blocks.append(
+            ContextBlock(channel="challenge", heading="上一轮你被反驳的命门", body=challenged)
+        )
+    return blocks
+
+
+# 结辩环节喂给辩手的定调（阶段化发言角色 P4）：与 closing_task 从同一句意图孪生，供 run_context 展示。
+_CLOSING_CONTEXT_BODY = (
+    "本场辩论已充分交锋，主持人请你做【结辩陈词】：只讲胜负手（本方最强 1–2 点 + 为何对方最关键的"
+    "反驳不成立），不得引入任何新论据 / 新事实 / 新案例，短而有力地收束。"
+)
+
+
+def closing_task(config: DebateConfig, side: DebateSide) -> str:
+    """结辩环节（阶段化发言角色 P4）喂给 continue_run 的 feedback：辩已辩尽，请本方做【结辩陈词】。
+
+    这是最后陈词、不是新一轮立论——要求辩手【只讲胜负手】：本方最强的 1–2 个论点为何站得住 + 对方针对
+    你最关键的那条反驳为何不成立 / 已被回应。【不得引入任何新论据 / 新事实 / 新案例】、不复述全文、不逐
+    条罗列改动，长度显著收紧（见 :data:`CLOSING_LENGTH_HINT`，阶段化长度预算的落点）。辩手在【自己的
+    transcript】上收尾（全程记忆可见），故无需重述立场；举证铁律仍由系统提示常驻生效（结辩引用既有事实
+    时沿用已核实 / 待核实标记，不新引未核实事实充当胜负手）。"""
+    return (
+        f"## 结辩环节（本场辩论已充分交锋，现在请你做【结辩陈词】）\n"
+        f"{role_directive(config, side)}\n\n"
+        "这是你的**最后陈词**，不是新一轮立论——请【只讲胜负手】：\n"
+        "- 你这一方最强的 1–2 个论点，为何它们站得住；\n"
+        "- 对方针对你最关键的那条反驳，为何【不成立 / 已被你回应】。\n"
+        "【不得引入任何新论据 / 新事实 / 新案例】、不复述你之前的全文、不逐条罗列改动；"
+        "结辩里引用的既有事实沿用你此前的证据状态标记（不把待核实的东西临门包装成已核实当胜负手）。"
+        f"{CLOSING_LENGTH_HINT}\n\n"
+        "直接输出你的结辩陈词。"
+    )
+
+
+def closing_context_blocks(config: DebateConfig, side: DebateSide) -> list[ContextBlock]:
+    """结辩环节 continue_run 的【收到的上下文】展示投影（上下文传递可视化）——与 :func:`closing_task`
+    同源孪生。结辩不再喂对手全文（辩手全程记忆已在 session 里），只给「请做结辩、只讲胜负手」这一定调，
+    前端结辩修订节点的「收到的上下文」据此渲染，而非空白或沿用上一轮的逐轮任务。"""
+    _ = side  # 结辩定调对各方一致（角色差异已由 role_directive 进 feedback），此处不因方而变。
+    return [ContextBlock(channel="closing", heading="结辩环节", body=_CLOSING_CONTEXT_BODY)]

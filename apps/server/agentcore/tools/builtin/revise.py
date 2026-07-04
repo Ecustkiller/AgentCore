@@ -21,6 +21,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
+from agentcore.core.text import clip_preview
 from agentcore.core.types import ToolApproval, ToolCategory, new_id
 from agentcore.llm.deepseek import DeepSeekProvider
 from agentcore.llm.modes import ProfileSet, default_profile_set
@@ -139,6 +140,7 @@ class ReviseTool:
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         from agentcore.runtime.costing import usage_metadata
         from agentcore.runtime.runs import RunPhase, continue_run
+        from agentcore.runtime.runs.types import ContextBlock
 
         target = arguments.get("target_run_id")
         feedback = arguments.get("feedback")
@@ -178,7 +180,20 @@ class ReviseTool:
 
         revision_run_id = f"{target}_rev{session.recall_count + 1}"
         execution_id = self._base_tool_context.execution_id or new_id()
-        logger.info("revise.started", target=target, revision_run_id=revision_run_id)
+        # feedback = the「改什么/为什么召回」an offline analysis needs; target/id alone只说发生了热修.
+        logger.info(
+            "revise.started",
+            target=target,
+            revision_run_id=revision_run_id,
+            feedback=clip_preview(feedback, 200),
+        )
+        # 收到的上下文 (上下文传递可视化): the recall is fed the CEO's feedback via
+        # `_revision_message`, so surface THAT same feedback as the revision node's one
+        # context block — 用户看到的 == LLM 吃到的. Without it a 热修 修订节点 would show an empty
+        # 「收到的上下文」（the debate 逐轮 path already fills its own via round_context_blocks）.
+        context_blocks = [
+            ContextBlock(channel="revision", heading="本次修订要求（定向唤回）", body=feedback)
+        ]
         state = await continue_run(
             session=session,
             feedback=feedback,
@@ -190,6 +205,7 @@ class ReviseTool:
             execution_id=execution_id,
             profile_set=self._profile_set,
             approval_gate=self._approval_gate,
+            context_blocks=context_blocks,
         )
         if state.phase is not RunPhase.COMPLETED or not state.content.strip():
             reason = state.error or "修订未产出有效结果"

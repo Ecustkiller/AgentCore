@@ -36,8 +36,9 @@ export async function recordLocalTurn(
   result: SidecarTurnResult,
 ): Promise<RecordTurnResponse> {
   // 与服务端 `RecordTurnRequest`（snake_case）对齐：结果里的 citations / runs 已是落库形状，
-  // 原样转发；token 总量作为 `Message.usage` 展示快照随行。**不报成本**——计费由云推理代理权威
-  // 落账（见上「计费信任边界」），故 `RecordTurnRequest` 已无 `cost_runs` 字段。
+  // 原样转发；**全量 token 快照**（含 reasoning / cache）随行落 `Message.usage`，使本地回合重载后
+  // 的 meta 行与云回合一致。**不报成本**——计费由云推理代理权威落账（见上「计费信任边界」），
+  // 故 `RecordTurnRequest` 已无 `cost_runs` 字段。
   const body = {
     user_message: userMessage,
     user_message_id: userMessageId,
@@ -48,6 +49,9 @@ export async function recordLocalTurn(
     message_id: result.messageId,
     input_tokens: result.usage.inputTokens,
     output_tokens: result.usage.outputTokens,
+    reasoning_tokens: result.usage.reasoningTokens,
+    cache_hit_tokens: result.usage.cacheHitTokens,
+    cache_miss_tokens: result.usage.cacheMissTokens,
     rounds: result.rounds,
     trace_id: traceId,
   } satisfies components["schemas"]["RecordTurnRequest"];

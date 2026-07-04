@@ -47,6 +47,11 @@ describe("canvas turn view persistence (vitest env = node → stub localStorage)
     expect(loadCanvasTurnView("conv", "turn")).toBe("compare");
   });
 
+  it("migrates a legacy `timeline` preference to `graph` (gantt merged into协作图)", () => {
+    store[KEY] = JSON.stringify({ "conv:turn": "timeline" });
+    expect(loadCanvasTurnView("conv", "turn")).toBe("graph");
+  });
+
   it("round-trips a saved `compare` view and drops unknown values", () => {
     persistCanvasTurnView("conv", "t1", "compare");
     expect(loadCanvasTurnView("conv", "t1")).toBe("compare");

@@ -28,6 +28,7 @@ from agentcore.api.schemas import (
     RecordTurnResponse,
     RunsPayload,
     SendMessageRequest,
+    SetMessageFeedbackRequest,
     StatusResponse,
     StopTurnResponse,
 )
@@ -35,6 +36,7 @@ from agentcore.api.sse import sse_attach_response, sse_response
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import record_local_turn, stream_chat
 from agentcore.core.errors import NotFoundError
+from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import (
     ConversationRepository,
     CostEventRepository,
@@ -162,14 +164,38 @@ async def delete_message(
     return StatusResponse()
 
 
+@router.patch(
+    "/{conversation_id}/messages/{message_id}/feedback", response_model=StatusResponse
+)
+async def set_message_feedback(
+    conversation_id: str,
+    message_id: str,
+    body: SetMessageFeedbackRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    repo: MessageRepository = Depends(get_message_repo),
+):
+    """Set / clear the user's 点赞/点踩 on an assistant reply (回复反馈).
+
+    Owner-scoped like delete (prove conversation ownership first, then update only within
+    it, so a guessed cross-user ``message_id`` can't be rated — IDOR-safe). ``feedback`` is
+    ``"up"`` / ``"down"`` to rate, or ``null`` to clear the rating (toggling the same side
+    off). 404 when the message isn't in this conversation.
+    """
+    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    updated = await repo.set_feedback(
+        message_id, conversation_id=conversation_id, feedback=body.feedback
+    )
+    if not updated:
+        raise NotFoundError("消息不存在")
+    return StatusResponse()
+
+
 @router.post("/{conversation_id}/messages")
 async def send_message(
     conversation_id: str,
     body: SendMessageRequest,
     user: AuthUser,
-    session: AsyncSession = Depends(get_db),
-    conv_repo: ConversationRepository = Depends(get_conversation_repo),
-    cost_repo: CostEventRepository = Depends(get_cost_event_repo),
 ):
     """Send a user message and get a streaming AI response via SSE.
 
@@ -184,10 +210,18 @@ async def send_message(
     flooding account before any resource DB work), then ownership, then the
     BYOK/quota billing gate (BYOK mode requires the user's own key; platform mode
     enforces quota). The resolved BYOK credentials thread through the whole turn.
+
+    DB session scoped to preflight only — released before the SSE stream opens, so a
+    long-lived stream never holds a pooled connection (fixes GC-termination warnings
+    on abrupt teardown).
     """
     await enforce_user_message_rate_limit(user.user_id)
-    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+
+    async with async_session_factory() as session:
+        conv_repo = ConversationRepository(session)
+        cost_repo = CostEventRepository(session)
+        await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+        credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
 
     sink = EventSink()
 
@@ -199,7 +233,6 @@ async def send_message(
             sink=sink,
             attachments=[a.model_dump() for a in body.attachments],
             llm_credentials=credentials,
-            # 结构化补轮·B：续辩种子（前端从收场卡发起时携带；普通消息为 None）。
             debate_seed=body.debate_seed.model_dump() if body.debate_seed else None,
         )
     )
@@ -295,6 +328,9 @@ async def record_local_turn_endpoint(
         message_id=body.message_id,
         input_tokens=body.input_tokens,
         output_tokens=body.output_tokens,
+        reasoning_tokens=body.reasoning_tokens,
+        cache_hit_tokens=body.cache_hit_tokens,
+        cache_miss_tokens=body.cache_miss_tokens,
         rounds=body.rounds,
         trace_id=body.trace_id,
         llm_credentials=credentials,

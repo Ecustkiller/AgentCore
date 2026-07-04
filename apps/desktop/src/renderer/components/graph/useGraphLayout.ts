@@ -1,6 +1,11 @@
-/** ELK layout state and structure-gated recompute for GraphView. */
+/** ELK / time-axis layout state and structure-gated recompute for GraphView. */
 
 import { computeLayout } from "@/lib/elk-layout";
+import {
+  type ElkGraphLayout,
+  isTimelineLayout,
+} from "@/lib/graph-layout-utils";
+import { computeTimeLayout } from "@/lib/time-layout";
 import type { Execution } from "@/stores/execution";
 import type { GraphEdge, GraphLayout } from "@/stores/graph";
 import type { NodeChange } from "@xyflow/react";
@@ -14,6 +19,8 @@ export function useGraphLayout(
 ) {
   const projectedRunsRef = useRef(execution?.runs);
   projectedRunsRef.current = execution?.runs;
+  const projectedBatchesRef = useRef(execution?.batches);
+  projectedBatchesRef.current = execution?.batches;
 
   const [positions, setPositions] = useState<
     Record<string, { x: number; y: number }>
@@ -22,6 +29,12 @@ export function useGraphLayout(
   const [bbox, setBbox] = useState<{ width: number; height: number } | null>(
     null,
   );
+  const [nodeSizes, setNodeSizes] = useState<
+    Record<string, { width: number; height: number }>
+  >({});
+  const [batchDividers, setBatchDividers] = useState<
+    { x: number; label: string }[]
+  >([]);
   const [layoutReady, setLayoutReady] = useState(false);
   const [nodeHeights, setNodeHeights] = useState<Record<string, number>>({});
 
@@ -52,44 +65,72 @@ export function useGraphLayout(
     });
   }, []);
 
-  const structuralKey = useMemo(
-    () =>
-      execution
-        ? execution.runs
-            .map(
-              (s) => `${s.id}:${s.dependsOn.join(",")}:${s.parentRunId ?? ""}`,
-            )
-            .join("|")
-        : "",
-    [execution],
-  );
+  const structuralKey = useMemo(() => {
+    if (!execution) return "";
+    const struct = execution.runs
+      .map((s) => `${s.id}:${s.dependsOn.join(",")}:${s.parentRunId ?? ""}`)
+      .join("|");
+    if (!isTimelineLayout(layoutKind)) return struct;
+    const batchKey = execution.batches
+      .map((b) =>
+        b.timeline.map((t) => `${t.runId}:${t.startMs}-${t.endMs}`).join(","),
+      )
+      .join("|");
+    return `${struct}::${batchKey}`;
+  }, [execution, layoutKind]);
 
   useEffect(() => {
     if (!structuralKey) {
       setLayout({}, []);
       setBbox(null);
+      setNodeSizes({});
+      setBatchDividers([]);
       setLayoutReady(false);
       return;
     }
     const runs = projectedRunsRef.current ?? [];
+    const batches = projectedBatchesRef.current ?? [];
     const debate = runs.some((r) => r.stance != null);
     const captainId = runs.find((r) => r.kind === "captain")?.id ?? null;
     const { nodeIds, rawEdges } = buildGraphStructure(runs, INPUT_ID);
 
+    if (isTimelineLayout(layoutKind)) {
+      if (!execution) return;
+      const result = computeTimeLayout(
+        {
+          ...execution,
+          runs,
+          batches,
+        },
+        nodeIds,
+        INPUT_ID,
+        captainId,
+      );
+      setLayout(result.positions, rawEdges);
+      setBbox({ width: result.width, height: result.height });
+      setNodeSizes(result.sizes);
+      setBatchDividers(result.batchDividers);
+      setLayoutReady(true);
+      return;
+    }
+
     let cancelled = false;
-    computeLayout(nodeIds, rawEdges, layoutKind, debate, {
+    const elkLayout = layoutKind as ElkGraphLayout;
+    computeLayout(nodeIds, rawEdges, elkLayout, debate, {
       source: INPUT_ID,
       sink: captainId ?? undefined,
     }).then((result) => {
       if (cancelled) return;
       setLayout(result.positions, rawEdges);
       setBbox({ width: result.width, height: result.height });
+      setNodeSizes({});
+      setBatchDividers([]);
       setLayoutReady(true);
     });
     return () => {
       cancelled = true;
     };
-  }, [structuralKey, layoutKind, setLayout]);
+  }, [structuralKey, layoutKind, setLayout, execution]);
 
   return {
     positions,
@@ -97,6 +138,8 @@ export function useGraphLayout(
     bbox,
     layoutReady,
     nodeHeights,
+    nodeSizes,
+    batchDividers,
     onNodesChange,
   };
 }

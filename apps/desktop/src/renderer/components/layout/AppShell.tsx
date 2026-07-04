@@ -1,7 +1,9 @@
 import { useGroupedConversations } from "@/hooks/useConversations";
+import { isWebClient } from "@/lib/capabilities";
 import { GLOBAL_SHORTCUTS } from "@/lib/shortcuts";
 import { useApplyTheme } from "@/lib/theme";
 import { startRealtime, stopRealtime } from "@/services/realtime";
+import { startServerHealthMonitor } from "@/services/serverHealth";
 import { startUpdates } from "@/stores/updates";
 import { useUsageStore } from "@/stores/usage";
 import { useEffect, useRef } from "react";
@@ -39,6 +41,15 @@ export function AppShell() {
     return () => stopRealtime();
   }, []);
 
+  // Ambient backend-connectivity heartbeat (probes /readyz) so the composer can
+  // show whether the server is reachable *before* the user sends — offline preview
+  // has no backend, so skip it there. Lives at the shell so it spans the whole
+  // authenticated session regardless of route.
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.__WEB_PREVIEW__) return;
+    return startServerHealthMonitor();
+  }, []);
+
   // Auto-update lives at the shell so a downloaded build surfaces its "重启安装"
   // notice (and the 关于 page status stays live) regardless of the current route.
   // The main process drives the silent download + check schedule; this only mirrors
@@ -60,6 +71,10 @@ export function AppShell() {
   // view especially — the full window width.
   const { pathname } = useLocation();
   const hideSidebar = pathname === "/preview";
+
+  // 生产 web 客户端不画桌面窗口顶栏（浏览器自带窗口 chrome）——品牌/折叠/搜索改由侧栏顶部
+  // 承载（见 Sidebar）。桌面 Electron 外壳与离线预览 #/preview 仍保留顶栏。
+  const webClient = isWebClient();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
@@ -75,7 +90,7 @@ export function AppShell() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden">
-      <TitleBar />
+      {!webClient && <TitleBar />}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {!hideSidebar && <Sidebar />}

@@ -12,7 +12,10 @@ import {
 import type {
   DebateBriefInfo,
   DebateClash,
+  DebateClosing,
+  DebateCrossExam,
   DebateResultPayload,
+  DebateRoundScore,
   DebateRoundSide,
   DebateSideInfo,
   DebateUserInterjection,
@@ -35,6 +38,24 @@ import type {
  */
 
 export type DebateForm = DebateResultPayload["form"];
+
+/**
+ * 正反 2 方的**固定对垒色**（`pro`/`con` 语义 key → 专用辩论阵营 token）——取代「按名字 hash
+ * 取色」：名字一撞 hash 就同色（真实会话里「加重派」「审慎派」双双落 `--agent-1` → 阵营分不开）。
+ * 二元对抗是独立视觉语义，不走 `--agent-N` 身份色板，而用 `--debate-side-pro`（蓝）/
+ * `--debate-side-con`（红）——一眼红蓝对垒、与并排左支持/右反对一致，且色相/彩度与状态色分离
+ * （见 `packages/design-tokens/tokens.css` · color-tokens.mdc）。多方（圆桌 / 红队 / subject…）无
+ * 对立轴 → 落回按名字 hash ({@link agentColorVar})。live↔收场同一 key 恒同色，跨群聊 / 简报一致。
+ */
+const DEBATE_STANCE_COLOR: Record<string, string> = {
+  pro: "var(--debate-side-pro)",
+  con: "var(--debate-side-con)",
+};
+
+/** 一方的身份色：正反 2 方走固定对垒色（按语义 key），其余按名字 hash。见 {@link DEBATE_STANCE_COLOR}。 */
+export function debateSideColorVar(sideKey: string, name: string): string {
+  return DEBATE_STANCE_COLOR[sideKey] ?? agentColorVar(name);
+}
 
 /**
  * 一轮里的一方：身份 (名 + 稳定身份色) + 其辩手 run。`run` 收场/已裁判轮由 `run_id`
@@ -74,6 +95,60 @@ export interface DebateClashView {
 }
 
 /**
+ * 一条质询问答（质询回合 P1）已解析成可渲染的展示态：被质询方 `target` 的显示名 + 身份色 +
+ * 主持人的必答问题清单 + 该方作答的辩手 run（{@link DebateSideModel.run} 同源，取作答全文）。
+ * 由 {@link resolveCrossExam} 把契约的 {@link DebateCrossExam}（语义 key + answer_run_id 引用）据
+ * 本轮 `sides` 与执行图 runs 映射而成——让「主持人当面质询、某方回避/接招」在群聊里可见。
+ */
+export interface DebateCrossExamView {
+  /** 被质询方语义 key（匹配 {@link DebateSideModel.sideKey}）。 */
+  targetKey: string;
+  targetName: string;
+  targetColorVar: string;
+  questions: string[];
+  /** 该方作答的辩手 run（`answer_run_id` 解析）——作答全文在其 `agent.outputChunks`；未解析到（旧
+   *  产物 / 作答失败无 run）为 null。 */
+  answerRun: RunNode | null;
+  /** 是否成功答出（回避 / 失败 → false，前端标注「未正面回答」）。 */
+  ok: boolean;
+}
+
+/**
+ * 一方某轮/累计的记分（记分裁判 P2）已解析成展示态：身份（名 + 稳定身份色）+ 三维分 + 罚分清单 +
+ * 净分。由 {@link resolveScores}（逐轮）/ {@link tallyScores}（累计）把契约的 {@link DebateRoundScore}
+ * （语义 key 引用）据本轮 `sides` 映射成名字/色——让「回避与被戳穿被记分、倾向由记分驱动」可见。
+ */
+export interface DebateScoreView {
+  sideKey: string;
+  name: string;
+  colorVar: string;
+  argument: number;
+  engagement: number;
+  evidence: number;
+  penalties: string[];
+  note: string;
+  /** 净得分（三维和减罚分，后端算好、前端直用不重算，可为负）。 */
+  total: number;
+}
+
+/**
+ * 一方的【结辩陈词】（阶段化发言角色 P4 · 结辩收束）已解析成可渲染的展示态：身份（名 + 稳定身份色）+
+ * 结辩辩手 run（陈词全文在其 `agent.outputChunks`，与发言格同源）+ 是否成功产出。由 {@link resolveClosings}
+ * 把契约的 {@link DebateClosing}（语义 key + run_id 引用）据执行图 runs 映射而成——让「辩已辩尽、各方最后
+ * 亮胜负手」在收场处可见（辩手自己的 advocacy 收束，与裁判中立的 `brief.decisive` 正交并存）。
+ */
+export interface DebateClosingView {
+  sideKey: string;
+  name: string;
+  colorVar: string;
+  /** 结辩辩手 run（`run_id` 解析）——陈词全文在其 `agent.outputChunks`；未解析到（旧产物 / 失败无 run）
+   *  为 null。 */
+  run: RunNode | null;
+  /** 是否成功产出结辩（失败 / 无 session → false，前端标「未产出结辩」）。 */
+  ok: boolean;
+}
+
+/**
  * 一轮的规范化单元——无论 live (verdict 可空、发言流式) 还是收场 (verdict 必有、全文已定)
  * 都是这一个形状。`inFlight` = 该轮尚未裁判 (live 的当前轮)。`clashes` = 本轮 L3 交锋边
  * (已解析名字/色)，进行中当前轮恒空 (尚未裁判)。
@@ -90,6 +165,12 @@ export interface DebateRoundModel {
    *  权威 `debate_result.rounds[*].user_interjections` 为准；进行中恒空——live 孪生
    *  {@link DebateNarrativeRound} 刻意不携带（守 conformance 不动），追问在收场复盘可见。 */
   userInterjections: DebateUserInterjection[];
+  /** 本轮质询环节的问答（质询回合 P1）。收场以权威 `debate_result.rounds[*].cross_exam` 为准；
+   *  进行中恒空——live 孪生刻意不携带（与 `userInterjections` 同策），质询在收场复盘可见。 */
+  crossExam: DebateCrossExamView[];
+  /** 本轮记分裁判的各方得分（记分裁判 P2）。收场以权威 `debate_result.rounds[*].scores` 为准；
+   *  进行中恒空（live 孪生不携带）。空=未开启记分（快速对碰 / 旧产物），前端不渲染比分。 */
+  scores: DebateScoreView[];
 }
 
 /**
@@ -105,6 +186,13 @@ export interface DebateModel {
   rounds: DebateRoundModel[];
   brief: DebateBriefInfo | null;
   sides: DebateSideInfo[] | null;
+  /** 各方结辩陈词（阶段化发言角色 P4 · 结辩收束）：收场以权威 `debate_result.closings` 为准、据 run_id
+   *  解析陈词 run；进行中恒空（结辩是收场后一次性 beat，live 无孪生）。空=未开启结辩（快速对碰 / 圆桌 /
+   *  旧产物），前端不渲染结辩区。 */
+  closings: DebateClosingView[];
+  /** 主持人开场白（收场权威产出）：顶部「会说话的主持人」气泡。空/缺省（进行中、旧产物、未产出）→
+   *  由 {@link DebateStream} 回落到 motion+首轮焦点拼出的模板开场白，故这里 null 不代表不渲染开场。 */
+  opening: string | null;
   settled: boolean;
 }
 
@@ -136,6 +224,10 @@ function settledModel(
     clashes: resolveClashes(round.clashes, round.sides),
     // 收场权威：本轮承接的用户追问（verbatim 复盘）。缺省（旧产物 / 非交互）→ 空。
     userInterjections: round.user_interjections ?? [],
+    // 质询回合（P1）/ 记分裁判（P2）：收场权威，据本轮 sides 解析名字/色、据 answer_run_id 解析
+    // 作答 run。缺省（快速对碰 / 旧产物）→ 空，前端不渲染质询区 / 比分。
+    crossExam: resolveCrossExam(round.cross_exam, round.sides, execution),
+    scores: resolveScores(round.scores, round.sides),
     sides: round.sides.map((side): DebateSideModel => {
       const run = execution.runs.find((r) => r.id === side.run_id) ?? null;
       return {
@@ -146,7 +238,7 @@ function settledModel(
         sideKey: side.key,
         name: side.name,
         stance: run?.stance ?? null,
-        colorVar: agentColorVar(side.name),
+        colorVar: debateSideColorVar(side.key, side.name),
         model: modelBySideKey.get(side.key) ?? "",
         run,
       };
@@ -161,6 +253,9 @@ function settledModel(
     rounds,
     brief: debate.brief,
     sides: debate.sides,
+    // 结辩收束（P4）：收场权威，据 run_id 从执行图解析各方结辩 run。缺省（快速对碰 / 圆桌 / 旧产物）→ 空。
+    closings: resolveClosings(debate.closings, execution),
+    opening: debate.opening ?? null,
     settled: true,
   };
 }
@@ -183,6 +278,9 @@ function liveModel(execution: Execution): DebateModel | null {
     rounds,
     brief: null,
     sides: null,
+    // 进行中无结辩（结辩是收场后一次性 beat，无 live 孪生）；收场由 settledModel 接管。
+    closings: [],
+    opening: null,
     settled: false,
   };
 }
@@ -235,8 +333,10 @@ function liveTwoSideRounds(
       inFlight: !narr?.verdict,
       clashes: resolveClashes(narr?.clashes, narr?.sides ?? []),
       sides,
-      // 进行中无 verbatim 追问（live 孪生不带）；收场由 settledModel 接管。
+      // 进行中无 verbatim 追问 / 质询 / 记分（live 孪生均不带）；收场由 settledModel 接管。
       userInterjections: [],
+      crossExam: [],
+      scores: [],
     });
   }
   return rounds;
@@ -250,7 +350,7 @@ function twoSide(run: RunNode, stance: Stance): DebateSideModel {
     sideKey: stance,
     name,
     stance,
-    colorVar: agentColorVar(name),
+    colorVar: debateSideColorVar(stance, name),
     // 进行中无 roster（模型覆写权威源），故留空；收场由 settledModel 按 sideKey 补回。
     model: "",
     run,
@@ -284,8 +384,10 @@ function liveMultiSideRounds(execution: Execution): DebateRoundModel[] {
       sides: runs.map((run) =>
         multiSide(run, execution, keyByRunId.get(run.id) ?? ""),
       ),
-      // 进行中无 verbatim 追问（live 孪生不带）；收场由 settledModel 接管。
+      // 进行中无 verbatim 追问 / 质询 / 记分（live 孪生均不带）；收场由 settledModel 接管。
       userInterjections: [],
+      crossExam: [],
+      scores: [],
     });
   }
   return rounds;
@@ -303,7 +405,7 @@ function multiSide(
     sideKey,
     name: role,
     stance: null,
-    colorVar: agentColorVar(role),
+    colorVar: debateSideColorVar(sideKey, role),
     // 进行中无 roster；收场由 settledModel 按 sideKey 补回模型。
     model: "",
     run,
@@ -327,14 +429,114 @@ function resolveClashes(
     out.push({
       fromKey: c.from_key,
       fromName,
-      fromColorVar: agentColorVar(fromName),
+      fromColorVar: debateSideColorVar(c.from_key, fromName),
       toKey: c.to_key,
       toName,
-      toColorVar: agentColorVar(toName),
+      toColorVar: debateSideColorVar(c.to_key, toName),
       point: c.point,
     });
   }
   return out;
+}
+
+/** 把契约的 {@link DebateCrossExam}（语义 key + `answer_run_id` 引用）据本轮 `sides` 解析成可渲染的
+ * {@link DebateCrossExamView}（被质询方名字 + 身份色 + 作答 run）。引用不到 side 的交换（防御性）丢弃；
+ * `answer_run_id` 从执行图 runs 直取作答辩手节点（作答全文在其 agent.outputChunks，与发言格同源）。 */
+function resolveCrossExam(
+  cross: readonly DebateCrossExam[] | undefined,
+  sides: readonly DebateRoundSide[],
+  execution: Execution,
+): DebateCrossExamView[] {
+  if (!cross || cross.length === 0) return [];
+  const keyToName = new Map(sides.map((s) => [s.key, s.name]));
+  const out: DebateCrossExamView[] = [];
+  for (const cx of cross) {
+    const targetName = keyToName.get(cx.target);
+    if (!targetName) continue;
+    out.push({
+      targetKey: cx.target,
+      targetName,
+      targetColorVar: debateSideColorVar(cx.target, targetName),
+      questions: cx.questions ?? [],
+      answerRun: execution.runs.find((r) => r.id === cx.answer_run_id) ?? null,
+      ok: cx.ok,
+    });
+  }
+  return out;
+}
+
+/** 把契约的本轮记分 dict（`sideKey` → {@link DebateRoundScore}）据本轮 `sides` 解析成可渲染的
+ * {@link DebateScoreView}[]（按 `sides` 声明序，带名字 + 身份色）。引用不到 side 的记分（防御性）丢弃。 */
+function resolveScores(
+  scores: Record<string, DebateRoundScore> | undefined,
+  sides: readonly DebateRoundSide[],
+): DebateScoreView[] {
+  if (!scores) return [];
+  const out: DebateScoreView[] = [];
+  for (const side of sides) {
+    const sc = scores[side.key];
+    if (!sc) continue;
+    out.push({
+      sideKey: side.key,
+      name: side.name,
+      colorVar: debateSideColorVar(side.key, side.name),
+      argument: sc.argument,
+      engagement: sc.engagement,
+      evidence: sc.evidence,
+      penalties: sc.penalties ?? [],
+      note: sc.note,
+      total: sc.total,
+    });
+  }
+  return out;
+}
+
+/** 把契约的 {@link DebateClosing}（语义 key + `run_id` 引用）解析成可渲染的 {@link DebateClosingView}
+ * （身份名 + 稳定身份色 + 结辩 run）。名字取契约自带（后端 roster 权威），色按 key+name 与发言格同源；
+ * `run_id` 从执行图 runs 直取结辩辩手节点（陈词全文在其 agent.outputChunks，与发言格 / 质询作答同源）。 */
+function resolveClosings(
+  closings: readonly DebateClosing[] | undefined,
+  execution: Execution,
+): DebateClosingView[] {
+  if (!closings || closings.length === 0) return [];
+  return closings.map((c) => ({
+    sideKey: c.key,
+    name: c.name,
+    colorVar: debateSideColorVar(c.key, c.name),
+    run: execution.runs.find((r) => r.id === c.run_id) ?? null,
+    ok: c.ok,
+  }));
+}
+
+/**
+ * 把各轮各方的 {@link DebateScoreView} 累加成每方一个【累计分】（记分裁判 P2，镜像后端
+ * `tally_scores`）——三维逐轮相加、罚分全场并起、净分累加，`note` 累计无意义留空。收场「记分总览」
+ * 据此呈现势均力敌 / 谁占优（净分驱动 leaning，与实际交锋对齐）。无任何记分（未开启 P2）→ 空数组。
+ * 名字/色取该方末次出现的（跨轮稳定）。按各方首次出现序排列（与阵营条一致）。
+ */
+export function tallyScores(rounds: DebateRoundModel[]): DebateScoreView[] {
+  const tally = new Map<string, DebateScoreView>();
+  for (const round of rounds) {
+    for (const sc of round.scores) {
+      const agg = tally.get(sc.sideKey);
+      if (!agg) {
+        tally.set(sc.sideKey, {
+          ...sc,
+          penalties: [...sc.penalties],
+          note: "",
+        });
+      } else {
+        agg.argument += sc.argument;
+        agg.engagement += sc.engagement;
+        agg.evidence += sc.evidence;
+        agg.penalties.push(...sc.penalties);
+        agg.total += sc.total;
+        agg.name = sc.name;
+        agg.colorVar = sc.colorVar;
+      }
+    }
+  }
+  return [...tally.values()];
 }
 
 /** 一条扁平旧批次轮 (无主持人逐轮叙事)：轮号 0 且无焦点。消费方据此免去逐轮外壳。 */
@@ -463,6 +665,22 @@ export function describeRoundVerdict(
         label: "各自亮立场 · 待逼出交锋",
         hint: "本轮双方各自陈述、还没真正接火，下一轮逼出交锋。",
       };
+}
+
+/** 辩论收场原因 → 中文（镜像后端 STOP_REASONS）。未知原样渲染。 */
+const STOP_LABELS: Record<string, string> = {
+  converged: "已收敛",
+  focus_clarified: "已澄清为价值之争",
+  red_team_exhausted: "风险已挖尽",
+  max_rounds: "达轮次上限",
+  all_failed: "发言失败提前终止",
+  user_concluded: "你叫停出结论",
+};
+
+/** 辩论收场原因的人话标签（流末终审 + 右轨裁决台共用；`null` → 「已收场」）。 */
+export function stopLabel(reason: string | null): string {
+  if (!reason) return "已收场";
+  return STOP_LABELS[reason] ?? reason;
 }
 
 /**

@@ -19,6 +19,7 @@ from agentcore.core.errors import (
     LLMInsufficientBalanceError,
     LLMRateLimitError,
     LLMTimeoutError,
+    LLMUpstreamError,
 )
 from agentcore.core.logging import get_logger
 from agentcore.llm.observability import log_llm_call
@@ -255,7 +256,15 @@ class DeepSeekProvider:
                     raise LLMInsufficientBalanceError()
 
                 if response.status_code >= 500:
-                    raise LLMError(f"DeepSeek 服务端错误（{response.status_code}），请稍后再试")
+                    logger.warning(
+                        "llm.upstream_error",
+                        provider="deepseek",
+                        status_code=response.status_code,
+                        attempt=attempt + 1,
+                    )
+                    raise LLMUpstreamError(
+                        f"DeepSeek 服务端错误（{response.status_code}），请稍后再试"
+                    )
 
                 response.raise_for_status()
                 return response.json()
@@ -268,9 +277,11 @@ class DeepSeekProvider:
                 wait = retry_after or backoff
                 logger.warning(
                     "llm.retry",
+                    provider="deepseek",
                     attempt=attempt + 1,
                     wait_seconds=wait,
                     error=str(e),
+                    error_type=type(e).__name__,
                 )
                 import asyncio
 
@@ -312,7 +323,15 @@ class DeepSeekProvider:
                         raise LLMInsufficientBalanceError()
 
                     if response.status_code >= 500:
-                        raise LLMError(f"DeepSeek 服务端错误（{response.status_code}），请稍后再试")
+                        logger.warning(
+                            "llm.upstream_error",
+                            provider="deepseek",
+                            status_code=response.status_code,
+                            attempt=attempt + 1,
+                        )
+                        raise LLMUpstreamError(
+                            f"DeepSeek 服务端错误（{response.status_code}），请稍后再试"
+                        )
 
                     response.raise_for_status()
 
@@ -336,6 +355,10 @@ class DeepSeekProvider:
                 last_error = LLMTimeoutError("连接 DeepSeek 超时，请检查网络后重试")
                 if attempt == _MAX_RETRIES - 1:
                     raise last_error from e
+                # Was silent (unlike the non-stream _request_with_retry which logs
+                # llm.timeout_retry) — a stalled stream would ride 3×120s with zero
+                # log trail. Emit so a frozen turn is diagnosable.
+                logger.warning("llm.stream_timeout_retry", attempt=attempt + 1)
                 import asyncio
 
                 await asyncio.sleep(backoff)

@@ -513,6 +513,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "supersedes": supersedes,
                     }
                 )
+                if p.get("source"):
+                    team_notes[-1]["source"] = p["source"]
             # An amendment (carries `supersedes`) marks its TARGET superseded (改写) / voided
             # (作废) — `supersede_mode` is the single discriminator every fold shares. The target
             # was posted earlier, so it is already in the list (events replay in order).

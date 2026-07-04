@@ -48,6 +48,14 @@ class Conversation(Base):
     # Per-conversation 质量档 override (llm/modes.py): a preset name or custom
     # ModelMode id. NULL = inherit the user's default_model_mode → operator default.
     model_mode: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Per-conversation custom instructions (对话级自定义指令 / 对标 ChatGPT custom
+    # instructions · Claude project instructions): a user-authored directive injected
+    # into THIS conversation's system prompt as a high-priority <对话级指令> block —
+    # above the soft long-term-memory <rules>, below the shared base. Reaches the whole
+    # team (CEO + delegated workers share the assembled prefix). NULL/"" = none. Stable
+    # per conversation, so it rides the cacheable prefix without busting DeepSeek's
+    # exact-prefix cache within the conversation (unlike the per-turn attachment tail).
+    instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Desktop's intended local container root (工作区对称化 D1a), captured at creation
     # from the desktop client (NULL = cloud intent: web / mobile /「云端临时对话」). When
     # a 裸聊 first produces a file — by an Agent turn OR a panel write — it is lazily
@@ -56,6 +64,15 @@ class Conversation(Base):
     # (previously whichever wrote first — turn vs panel — decided cloud-vs-local). Read
     # by every promotion path; ignored once the conversation already has a folder.
     local_container_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Conversation-level scratch workspace binding (Folder 重构: 纯分组 + 对话级
+    # 文件空间). The desktop FS root handle for THIS conversation's local scratch
+    # space. NULL = cloud. Replaces the old folder-level binding — each conversation
+    # now owns its own file space independently of folder grouping.
+    local_root_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Sub-path within ``local_root_id`` for the conversation's scratch workspace.
+    # "" = the root itself (an explicitly-bound directory). A non-empty segment scopes
+    # the workspace under a shared container root.
+    local_subpath: Mapped[str | None] = mapped_column(String(400), nullable=True)
     # Long-term memory consolidation watermark (Agent记忆与知识系统 §1.5): the
     # created_at of the last message folded into the user's memory file by the
     # offline consolidation pass. NULL = never consolidated. The runner skips when
@@ -159,6 +176,20 @@ class Message(Base):
     citations: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    # 回合级「下一步推荐」chips (下一步推荐, DERIVED 持久化): the post-turn World B narrow
+    # task's 2-4 quick-reply suggestions, minted alongside the title AFTER message_end and
+    # written back onto THIS assistant row. Persisted as the twin of Conversation.title
+    # (same finalize tail) so reopening a conversation replays the last turn's chips; live
+    # they ride the followups_generated event. Empty [] for user rows / turns none minted.
+    followups: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    # 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's explicit satisfaction signal on an
+    # assistant reply — "up" | "down" | NULL(未评价). Toggleable (re-clicking the same
+    # side clears it back to NULL). Stored as a plain durable signal only; it does not
+    # feed any runtime logic yet — the column exists so future quality analysis has a
+    # first-class place to read from instead of being lost. NULL on user rows.
+    feedback: Mapped[str | None] = mapped_column(String(4), nullable=True)
     # The turn's replay payload (team graph / single-agent 思考+工具 timeline) is NO
     # LONGER stored here — it is the唯一事实源 ``turn_journal`` table (§8.3 Turn
     # Journal), keyed by this message id, and PROJECTED into MessageDetail.runs on

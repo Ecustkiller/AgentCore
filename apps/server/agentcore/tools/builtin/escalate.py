@@ -37,6 +37,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentcore.core.logging import get_logger
+from agentcore.core.text import clip_preview
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.runs.constants import ESCALATE_TOOL_NAME
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -231,6 +232,10 @@ class EscalateTool:
             blocking=blocking,
             kind=kind,
             has_assumption=bool(assumption),
+            # The 决策/blocker itself + the worker's fallback assumption — the「为什么升级」an
+            # offline analysis needs (kind/blocking alone say一次 escalation happened, not什么).
+            question=clip_preview(question, 200),
+            assumption=clip_preview(assumption, 160),
         )
         # 阻塞·求决策: suspend for the user when the turn is armed (a live interactive
         # client). The channel owns cap / suspend / SSE / RunState recording; we only map

@@ -4,6 +4,7 @@ import asyncio
 import time
 
 from agentcore.conversation.common import (
+    preview,
     resolve_local_binding,
     resolve_memory_enabled,
     resolve_profile_set,
@@ -64,6 +65,7 @@ async def stream_chat(
                 return
             folder_id = conv.folder_id
             title = conv.title
+            instructions = conv.instructions
             local_container_root_id = conv.local_container_root_id
             local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
@@ -77,18 +79,14 @@ async def stream_chat(
 
         backend = build_turn_backend(
             user_id=user_id,
-            folder_id=folder_id,
             conversation_id=conversation_id,
-            title=title,
             sink=sink,
             local_binding=local_binding,
-            user_message=user_message,
-            local_container_root_id=local_container_root_id,
         )
 
         async with workspace_lock(
             workspace_storage_key(
-                user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+                user_id=user_id, folder_id=None, conversation_id=conversation_id
             )
         ):
             resident_attachments = await persist_attachments(backend, attachments)
@@ -117,6 +115,7 @@ async def stream_chat(
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
                 memory_enabled=memory_enabled,
+                instructions=instructions,
                 board_id=board_id,
                 debate_seed=debate_seed,
             )
@@ -180,19 +179,15 @@ async def regenerate_chat(
 
         backend = build_turn_backend(
             user_id=user_id,
-            folder_id=conv.folder_id,
             conversation_id=conversation_id,
-            title=conv.title,
             sink=sink,
             local_binding=local_binding,
-            user_message=user_message,
-            local_container_root_id=conv.local_container_root_id,
         )
 
         async with workspace_lock(
             workspace_storage_key(
                 user_id=user_id,
-                folder_id=conv.folder_id,
+                folder_id=None,
                 conversation_id=conversation_id,
             )
         ):
@@ -209,6 +204,7 @@ async def regenerate_chat(
                 llm_credentials=llm_credentials,
                 profile_set=profile_set,
                 memory_enabled=memory_enabled,
+                instructions=conv.instructions,
                 board_id=board_id,
             )
 
@@ -260,19 +256,16 @@ async def resume_chat(
 
         backend = build_turn_backend(
             user_id=user_id,
-            folder_id=folder_id,
             conversation_id=conversation_id,
-            title=title,
             sink=sink,
             local_binding=local_binding,
-            local_container_root_id=local_container_root_id,
         )
         session_saver, session_loader = session_callbacks(conversation_id)
         suspension_saver, suspension_deleter = suspension_callbacks()
 
         async with workspace_lock(
             workspace_storage_key(
-                user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+                user_id=user_id, folder_id=None, conversation_id=conversation_id
             )
         ):
             trace_id = suspension.trace_id or new_trace_id()
@@ -326,27 +319,31 @@ async def resume_chat(
                     finish_reason=getattr(finish, "value", finish),
                     rounds=result.get("rounds", 0),
                     reply_chars=len(result.get("content") or ""),
+                    reply_preview=preview(result.get("content") or ""),
                     delegated=workers > 0,
                     workers=workers,
                     duration_ms=duration_ms,
                     error=result.get("error"),
                 )
 
-            await persist_turn_result(
-                result=result,
-                conversation_id=conversation_id,
-                user_id=user_id,
-                folder_id=folder_id,
-                backend=backend,
-                sink=sink,
-                user_message=suspension.user_message,
-                generate_title=True,
-                llm_credentials=llm_credentials,
-                trace_id=trace_id,
-                turn_id=turn_id,
-                duration_ms=duration_ms,
-                kind="resume",
-            )
+                # Persist INSIDE the trace scope (same as run_and_persist) so the
+                # resumed turn's tail (cost.recorded / obs.turn_spans / metrics)
+                # inherits trace_id / turn_id instead of losing the join key.
+                await persist_turn_result(
+                    result=result,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    folder_id=folder_id,
+                    backend=backend,
+                    sink=sink,
+                    user_message=suspension.user_message,
+                    generate_title=True,
+                    llm_credentials=llm_credentials,
+                    trace_id=trace_id,
+                    turn_id=turn_id,
+                    duration_ms=duration_ms,
+                    kind="resume",
+                )
 
     except Exception as e:
         logger.error("chat.resume_error", error=str(e), exc_info=True)

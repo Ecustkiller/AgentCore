@@ -199,6 +199,7 @@ export type RunFrame =
       ts: number | null;
       supersedes: string | null;
       supersedeMode: "update" | "void" | null;
+      source?: "ceo" | "worker";
     };
 
 /** Wall-clock time of a wire event (ms), used to label timeline frames. The
@@ -441,6 +442,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         ts: p.ts,
         supersedes: p.supersedes ?? null,
         supersedeMode: p.supersede_mode ?? null,
+        source: p.source,
       };
     }
     default:

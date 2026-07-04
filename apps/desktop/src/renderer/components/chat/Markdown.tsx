@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui";
 import { remarkCitations } from "@/lib/remarkCitations";
+import { remarkEvidence } from "@/lib/remarkEvidence";
 import type { Citation } from "@/types/events";
 import {
   type ComponentPropsWithoutRef,
@@ -15,10 +16,11 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { CodeBlock, nodeText } from "./CodeBlock";
 import { DiagramBlock } from "./Diagram";
+import { EvidenceBadge } from "./EvidenceBadge";
 import { faviconUrl } from "./Favicon";
 import { SourceTooltip } from "./SourcePreview";
 import { rehypeCodeMeta } from "./rehypeCodeMeta";
-import { splitStreamingMarkdown } from "./streamingMarkdown";
+import { splitMarkdownBlocks } from "./streamingMarkdown";
 
 type ReactMarkdownProps = ComponentPropsWithoutRef<typeof ReactMarkdown>;
 
@@ -44,10 +46,11 @@ const rehypeStreaming: ReactMarkdownProps["rehypePlugins"] = [
 /**
  * One memoized Markdown chunk.
  *
- * The streaming reply is split into a frozen prefix + a live tail
- * ({@link splitStreamingMarkdown}); rendering each as its own memoized chunk lets
- * the prefix skip re-parsing on every delta — only the chunk whose `content`
- * actually changed (the tail) re-renders. Plugin/component props are stable
+ * The streaming reply is split into a list of top-level blocks
+ * ({@link splitMarkdownBlocks}); rendering each as its own memoized chunk lets
+ * every finished block skip re-parsing on every delta — only the chunk whose
+ * `content` actually changed (the live tail block) re-renders, so a whole turn
+ * costs O(total) instead of O(n²). Plugin/component props are stable
  * module-level / memoized refs, so `memo`'s shallow compare holds across deltas.
  */
 const MarkdownChunk = memo(function MarkdownChunk({
@@ -140,6 +143,10 @@ interface Props {
   /** Render in a muted tone for secondary content (a turn's reasoning), so the
    * structured thinking reads as quieter than the answer body. */
   muted?: boolean;
+  /** Debate speech only (举证责任 P3): render inline `【已核实·出处】` / `【待核实·推断】`
+   * evidence-status markers as {@link EvidenceBadge} chips. Off everywhere else so the
+   * marker convention never leaks into ordinary assistant markdown. */
+  evidence?: boolean;
 }
 
 /**
@@ -154,17 +161,20 @@ export const Markdown = memo(function Markdown({
   onCitationClick,
   isStreaming = false,
   muted = false,
+  evidence = false,
 }: Props) {
   const citationCount = citations?.length ?? 0;
   // Only enrich once sources exist (they arrive at end-of-turn), so streaming
-  // deltas keep using the stable module-level remark plugins.
-  const remarks = useMemo(
-    () =>
-      citationCount > 0
-        ? [...remarkPlugins, remarkCitations(citationCount)]
-        : remarkPlugins,
-    [citationCount],
-  );
+  // deltas keep using the stable module-level remark plugins. `evidence` (debate
+  // speech) appends remarkEvidence; deps-memoized so it stays a stable ref across deltas.
+  const remarks = useMemo(() => {
+    if (citationCount <= 0 && !evidence) return remarkPlugins;
+    return [
+      ...remarkPlugins,
+      ...(citationCount > 0 ? [remarkCitations(citationCount)] : []),
+      ...(evidence ? [remarkEvidence()] : []),
+    ];
+  }, [citationCount, evidence]);
 
   const comps = useMemo<Components>(() => {
     // Route ```mermaid / ```markmap / ```vega-lite fences to the diagram
@@ -220,61 +230,68 @@ export const Markdown = memo(function Markdown({
       );
     };
 
-    if (citationCount <= 0) return { pre, img };
-    return {
-      pre,
-      img,
-      a({ href, children, node: _node, ...props }) {
-        const m = typeof href === "string" ? /^cite:(\d+)$/.exec(href) : null;
-        if (m) {
-          const n = Number(m[1]);
-          return (
-            <CitationChip
-              n={n}
-              citation={citations?.[n - 1]}
-              onClick={() => onCitationClick?.(n)}
-            />
-          );
-        }
-        return (
-          <a href={href} target="_blank" rel="noreferrer" {...props}>
-            {children}
-          </a>
-        );
-      },
-    };
-  }, [citationCount, citations, onCitationClick, isStreaming]);
+    const base: Components =
+      citationCount <= 0
+        ? { pre, img }
+        : {
+            pre,
+            img,
+            a({ href, children, node: _node, ...props }) {
+              const m =
+                typeof href === "string" ? /^cite:(\d+)$/.exec(href) : null;
+              if (m) {
+                const n = Number(m[1]);
+                return (
+                  <CitationChip
+                    n={n}
+                    citation={citations?.[n - 1]}
+                    onClick={() => onCitationClick?.(n)}
+                  />
+                );
+              }
+              return (
+                <a href={href} target="_blank" rel="noreferrer" {...props}>
+                  {children}
+                </a>
+              );
+            },
+          };
+    // 举证徽章（P3）：remarkEvidence 产出的自定义 `evidencemark` 元素映射到 EvidenceBadge。走
+    // data.hProperties 而非 cite: 那种链接 url——后者会被 react-markdown 的 urlTransform 按非安全
+    // 协议清空（cite:/evi: 同被清空）。仅辩论发言 opt-in（evidence=true），不扰其余 markdown。
+    if (evidence) {
+      (base as Record<string, unknown>).evidencemark = EvidenceBadge;
+    }
+    return base;
+  }, [citationCount, citations, onCitationClick, isStreaming, evidence]);
 
-  // While streaming, freeze the completed-block prefix and re-render only the
-  // live tail (块级记忆化), with highlight deferred (rehypeStreaming). The
-  // finished turn renders as one document with highlight, so any cross-block
-  // references the conservative split would miss mid-stream resolve in the end state.
+  // While streaming, split into per-block memoized chunks so each finished block
+  // parses exactly once (逐块记忆化·Stage 4) — only the live tail re-parses per
+  // delta — with highlight deferred (rehypeStreaming). The finished turn renders
+  // as one document with highlight, so any cross-block references the conservative
+  // split would miss mid-stream resolve in the end state.
   const rehype = isStreaming ? rehypeStreaming : rehypeHighlighted;
-  const split = isStreaming ? splitStreamingMarkdown(content) : null;
+  const blocks = isStreaming ? splitMarkdownBlocks(content) : null;
 
   return (
     <div
       className={`markdown-body ${muted ? "text-muted-foreground" : "text-foreground"}`}
     >
-      {split ? (
-        <>
-          {split.stable && (
-            <MarkdownChunk
-              content={split.stable}
-              remarkPlugins={remarks}
-              rehypePlugins={rehype}
-              components={comps}
-            />
-          )}
-          {split.tail && (
-            <MarkdownChunk
-              content={split.tail}
-              remarkPlugins={remarks}
-              rehypePlugins={rehype}
-              components={comps}
-            />
-          )}
-        </>
+      {blocks ? (
+        blocks.map((block, i) => (
+          <MarkdownChunk
+            // Streaming blocks are an append-only list: block i keeps its identity
+            // across deltas (a finished block never moves), so the index is the
+            // stable key; MarkdownChunk's content-compare handles the rare
+            // tail-boundary flicker before a block finalizes.
+            // biome-ignore lint/suspicious/noArrayIndexKey: append-only streaming blocks — index is the stable identity
+            key={i}
+            content={block}
+            remarkPlugins={remarks}
+            rehypePlugins={rehype}
+            components={comps}
+          />
+        ))
       ) : (
         <MarkdownChunk
           content={content}

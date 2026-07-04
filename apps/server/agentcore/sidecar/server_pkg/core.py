@@ -90,6 +90,8 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
             await self._on_list_paused(request_id, params)
         elif method == "cancel":
             await self._on_cancel(request_id, params)
+        elif method == "runRedirect":
+            await self._on_run_redirect(request_id, params)
         elif method == "shutdown":
             self.shutdown_requested.set()
             await self._reply(request_id, {"ok": True})

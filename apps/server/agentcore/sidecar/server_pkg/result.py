@@ -40,10 +40,16 @@ def trim_result(turn_id: str, result: dict[str, Any]) -> dict[str, Any]:
         "reasoningContent": result.get("reasoning_content"),
         "finishReason": finish_str,
         "rounds": int(result.get("rounds", 0) or 0),
+        # Full usage snapshot (all five token metrics the engine accounts), forwarded to
+        # ``POST .../local-turns`` so a reloaded sidecar turn's ``Message.usage`` matches a
+        # cloud turn's row (cloud ``persist_turn_result`` writes the same 6 keys incl rounds).
+        # Spend is still NOT relayed — it's metered at the cloud inference proxy (Slice 4a).
         "usage": {
             "inputTokens": int(result.get("input_tokens", 0) or 0),
             "outputTokens": int(result.get("output_tokens", 0) or 0),
             "reasoningTokens": int(result.get("reasoning_tokens", 0) or 0),
+            "cacheHitTokens": int(result.get("cache_hit_tokens", 0) or 0),
+            "cacheMissTokens": int(result.get("cache_miss_tokens", 0) or 0),
         },
         # Persistence artifacts the desktop forwards to ``POST .../local-turns`` so a
         # sidecar turn lands in durable history exactly like a cloud turn (the renderer

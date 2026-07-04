@@ -94,13 +94,34 @@
       "timestamp": "2026-01-01T00:00:00.005Z"
     },
     {
+      "type": "run_context",
+      "payload": {
+        "run_id": "r1v2",
+        "agent_id": "w1b",
+        "blocks": [
+          {
+            "channel": "revision",
+            "heading": "本次修订要求（定向唤回）",
+            "body": "补一段风险对冲，并收紧结论口径。",
+            "chars": 16,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.006Z"
+    },
+    {
       "type": "run_output_delta",
       "payload": {
         "run_id": "r1v2",
         "agent_id": "w1b",
         "delta": "修订稿"
       },
-      "timestamp": "2026-01-01T00:00:00.006Z"
+      "timestamp": "2026-01-01T00:00:00.007Z"
     },
     {
       "type": "run_completed",
@@ -126,7 +147,7 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.007Z"
+      "timestamp": "2026-01-01T00:00:00.008Z"
     },
     {
       "type": "message_end",
@@ -148,7 +169,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.008Z"
+      "timestamp": "2026-01-01T00:00:00.009Z"
     }
   ],
   "projected": {
@@ -264,7 +285,19 @@
         "revision": 2,
         "revised": null,
         "checkpoint": null,
-        "receivedContext": [],
+        "receivedContext": [
+          {
+            "channel": "revision",
+            "heading": "本次修订要求（定向唤回）",
+            "body": "补一段风险对冲，并收紧结论口径。",
+            "chars": 16,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          }
+        ],
         "escalations": []
       }
     ],

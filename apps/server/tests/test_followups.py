@@ -248,3 +248,42 @@ async def test_common_wrapper_swallows_provider_error():
         assistant_reply="好的，方案如下……",
     )
     assert out == []
+
+
+# --- MessageDetail followups projection (DERIVED 持久化 read seam) ---
+
+
+def test_message_detail_projects_persisted_followups():
+    """The read schema surfaces the persisted chips (from_attributes) so a reloaded bubble
+    replays them — the read half of followups' DERIVED persistence (twin of the title)."""
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from agentcore.api.schemas.messages import MessageDetail
+
+    row = SimpleNamespace(
+        id="m1",
+        conversation_id="c1",
+        role="assistant",
+        content="好的，方案如下",
+        created_at=datetime(2026, 1, 1),
+        followups=["帮我导出 PDF", "再做一版竞品对比"],
+    )
+    assert MessageDetail.model_validate(row).followups == ["帮我导出 PDF", "再做一版竞品对比"]
+
+
+def test_message_detail_followups_default_empty():
+    """A row with no chips (user / none-minted turn) projects to [] — no stray chips."""
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from agentcore.api.schemas.messages import MessageDetail
+
+    row = SimpleNamespace(
+        id="m1",
+        conversation_id="c1",
+        role="user",
+        content="你好",
+        created_at=datetime(2026, 1, 1),
+    )
+    assert MessageDetail.model_validate(row).followups == []

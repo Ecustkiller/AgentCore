@@ -13,21 +13,20 @@ from agentcore.tools.protocol import ToolResult
 
 if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
+    from agentcore.runtime.runs.types import RunState
     from agentcore.tools.builtin.delegate.tool import DelegateTool
 
 logger = get_logger(__name__)
 
 
-def direct_result(tool: DelegateTool, content: str) -> ToolResult:
+def direct_result(tool: DelegateTool, state: RunState) -> ToolResult:
     """提案2a：把单个成功 worker 的产出直接作为本回合最终答复（HANDOFF 终态）。"""
-    from agentcore.runtime.runs.serialize import split_debrief
-
-    # 完工交接简报: a worker's「## 交接简报」is a handoff for the team, not part of the
-    # user-facing answer — strip it on the finalize path. If it suggested a 建议下一步,
-    # re-attach it as a clean footer (there is no CEO synthesis pass here to relay it).
-    clean, debrief = split_debrief(content)
-    text = clean or content
-    next_steps = (debrief or {}).get("next_steps", "") if debrief else ""
+    # 完工交接简报: the brief is structured (``state.debrief``, submitted via the worker's handoff
+    # tool — never mixed into the prose), so the deliverable IS the clean answer as-is. If the
+    # author suggested a 建议下一步, re-attach it as a readable footer (there is no CEO synthesis
+    # pass here to relay it).
+    text = state.content
+    next_steps = (state.debrief or {}).get("next_steps", "") if state.debrief else ""
     if next_steps:
         text = f"{text}\n\n---\n**建议下一步**：{next_steps}"
     tool._sink.emit(content_delta(text))
@@ -95,15 +94,15 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
     """Each worker's product folded back to the CEO — SINGLE SOURCE for synthesis + run_context."""
     from agentcore.runtime.runs.constants import CEO_SYNTHESIS_BUDGET, DEP_POINTER_SUMMARY_CHARS
     from agentcore.runtime.runs.fidelity import allocate, truncate_head_tail
-    from agentcore.runtime.runs.serialize import split_debrief
 
-    # 完工交接简报: peel each worker's「## 交接简报」off its product ONCE — the prose body sizes on
-    # the deliverable alone, the author's own 结论 LEADS the body, and 建议下一步 is surfaced
-    # separately (format_for_ceo) for the CEO to relay to the user.
+    # 完工交接简报: the content is already the pure deliverable (each worker's brief rides its
+    # structured ``debrief`` from the handoff tool — never appended to the prose), so the body
+    # sizes on the deliverable alone, the author's own 结论 LEADS the body, and 建议下一步 is
+    # surfaced separately (format_for_ceo) for the CEO to relay to the user.
     cleaned: dict[str, tuple[str, dict[str, Any] | None]] = {}
     for node in plan.nodes:
         st = results.get(node.run_id)
-        cleaned[node.run_id] = split_debrief(st.content) if st and st.content else ("", None)
+        cleaned[node.run_id] = (st.content, st.debrief) if st and st.content else ("", None)
 
     def _mode(node) -> str:
         st = results.get(node.run_id)

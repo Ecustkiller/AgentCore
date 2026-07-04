@@ -13,7 +13,7 @@ export function WaveLanes({ waves }: WaveLanesProps) {
       {waves.map((w) => (
         <Fragment key={w.id}>
           <div
-            className="rounded-xl border border-border/60 bg-muted/25"
+            className="rounded-xl border border-border/30 bg-muted/15"
             style={{
               position: "absolute",
               transform: `translate(${w.x}px, ${w.y}px)`,
@@ -24,7 +24,7 @@ export function WaveLanes({ waves }: WaveLanesProps) {
             }}
           />
           <div
-            className="rounded-full bg-card/90 px-2 py-0.5 text-xs font-medium text-muted-foreground shadow-sm"
+            className="rounded-full bg-muted/60 px-2 py-0.5 text-xs text-muted-foreground"
             style={{
               position: "absolute",
               transform: `translate(${w.labelX}px, ${w.labelY}px)`,

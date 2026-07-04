@@ -8,7 +8,6 @@ from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
     get_cost_event_repo,
-    get_folder_repo,
     get_handoff_job_repo,
 )
 from agentcore.api.schemas import (
@@ -29,7 +28,6 @@ from agentcore.core.logging import get_logger
 from agentcore.db.repositories import (
     ConversationRepository,
     CostEventRepository,
-    FolderRepository,
     HandoffJobRepository,
 )
 from agentcore.runtime.events import (
@@ -42,11 +40,8 @@ from agentcore.storage import SnapshotNotFound
 from agentcore.workspace.handoff import snapshot_local
 from agentcore.workspace.handoff_apply import ApplySelection, apply_handoff
 from agentcore.workspace.handoff_diff import compute_handoff_diff
-from agentcore.workspace.locate import (
-    LocalBinding,
-    build_workspace,
-    resolve_local_binding,
-)
+from agentcore.conversation.scratch import resolve_conversation_local_binding
+from agentcore.workspace.locate import LocalBinding, build_workspace
 
 from ._helpers import _get_owned_conversation, _require_owned_conversation
 
@@ -99,7 +94,6 @@ async def handoff_local_workspace(
     conversation_id: str,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
-    folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
     """Snapshot a local-mode workspace to the cloud over the channel (双模式工作区 P2e / e1).
 
@@ -112,15 +106,10 @@ async def handoff_local_workspace(
     and there is nothing on the user's disk to fetch.
     """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
-    folder = (
-        await folder_repo.get_by_id(conv.folder_id, user_id=user.user_id)
-        if conv.folder_id
-        else None
-    )
-    binding = resolve_local_binding(
-        folder_id=conv.folder_id,
-        folder_local_root_id=folder.local_root_id if folder else None,
-        label=folder.name if folder else None,
+    binding = resolve_conversation_local_binding(
+        local_root_id=conv.local_root_id,
+        local_subpath=conv.local_subpath,
+        label="workspace",
     )
     if binding is None:
         raise ValidationError("该对话不是本地模式")
@@ -129,7 +118,7 @@ async def handoff_local_workspace(
     task = asyncio.create_task(
         _run_handoff(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=None,
             conversation_id=conversation_id,
             binding=binding,
             sink=sink,
@@ -145,7 +134,6 @@ async def dispatch_handoff_job(
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     cost_repo: CostEventRepository = Depends(get_cost_event_repo),
-    folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
     """Hand a task off to a cloud team seeded from the local workspace (P2e / e2).
 
@@ -163,15 +151,10 @@ async def dispatch_handoff_job(
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     await enforce_quota(cost_repo, user.user_id, limits=QuotaLimits.for_user(user))
 
-    folder = (
-        await folder_repo.get_by_id(conv.folder_id, user_id=user.user_id)
-        if conv.folder_id
-        else None
-    )
-    binding = resolve_local_binding(
-        folder_id=conv.folder_id,
-        folder_local_root_id=folder.local_root_id if folder else None,
-        label=folder.name if folder else None,
+    binding = resolve_conversation_local_binding(
+        local_root_id=conv.local_root_id,
+        local_subpath=conv.local_subpath,
+        label="workspace",
     )
     if binding is None:
         raise ValidationError("该对话不是本地模式")
@@ -181,7 +164,7 @@ async def dispatch_handoff_job(
         dispatch_handoff(
             conversation_id=conversation_id,
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=None,
             binding=binding,
             task=body.task,
             sink=sink,
@@ -258,7 +241,7 @@ async def get_handoff_job_diff(
     try:
         changes = await compute_handoff_diff(
             user_id=user.user_id,
-            source_folder_id=conv.folder_id,
+            source_folder_id=None,
             source_conversation_id=conversation_id,
             base_snapshot_id=job.base_snapshot_id,
             job_conversation_id=job.job_conversation_id,
@@ -350,7 +333,6 @@ async def apply_handoff_job(
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     job_repo: HandoffJobRepository = Depends(get_handoff_job_repo),
-    folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
     """Apply a finished handoff's selected changes back to the local workspace (P2e / e3).
 
@@ -372,15 +354,10 @@ async def apply_handoff_job(
     if job.status != "succeeded" or not job.result_snapshot_id:
         raise ConflictError("交接任务尚未产出结果")
 
-    folder = (
-        await folder_repo.get_by_id(conv.folder_id, user_id=user.user_id)
-        if conv.folder_id
-        else None
-    )
-    binding = resolve_local_binding(
-        folder_id=conv.folder_id,
-        folder_local_root_id=folder.local_root_id if folder else None,
-        label=folder.name if folder else None,
+    binding = resolve_conversation_local_binding(
+        local_root_id=conv.local_root_id,
+        local_subpath=conv.local_subpath,
+        label="workspace",
     )
     if binding is None:
         raise ValidationError("该对话不是本地模式")
@@ -393,7 +370,7 @@ async def apply_handoff_job(
     task = asyncio.create_task(
         _run_apply(
             user_id=user.user_id,
-            source_folder_id=conv.folder_id,
+            source_folder_id=None,
             source_conversation_id=conversation_id,
             job_id=job.id,
             job_conversation_id=job.job_conversation_id,

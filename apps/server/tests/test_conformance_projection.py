@@ -200,8 +200,10 @@ def test_multi_agent_worker_tool(projected):
 def test_multi_agent_debate_tags(projected):
     p = projected["multi_agent_debate"]
     assert p["status"] == "completed"
-    # 主持人作为完成态节点 + 2 辩手 → 进度 3/3（CEO 不进图，是主气泡）。
-    assert p["progress"] == {"completed": 3, "total": 3}
+    # 进度含主持人节点 + 各方立论 + 各 beat 的续写节点（revision 合成为独立 run，与桌面 projectExecution
+    # 同口径）：1 主持人 + 2 辩手立论 + 2 质询作答（P1 revision）+ 2 结辩（P4·结辩收束 revision）= 7/7
+    # （CEO 不进图，是主气泡）。
+    assert p["progress"] == {"completed": 7, "total": 7}
     mod = next(r for r in p["runs"] if r["id"] == "debate_mod1")
     assert mod["status"] == "completed"
     assert mod["role"] == "主持人"
@@ -433,3 +435,24 @@ def test_multi_agent_team_notes_amended_supersession(projected):
     assert by_id["n4"]["supersedes"] == "n2"
     # All four notes are kept in post order (stale ones stay visible, just tagged).
     assert [n["noteId"] for n in p["teamNotes"]] == ["n1", "n3", "n2", "n4"]
+
+
+def test_multi_agent_team_notes_ceo_seed_and_brief(projected):
+    # Phase 2 共享便签：CEO 播种便签带 source=ceo；worker run_context 含 team_brief 块。
+    p = projected["multi_agent_team_notes_ceo_seed"]
+    assert p["status"] == "completed"
+    by_id = {n["noteId"]: n for n in p["teamNotes"]}
+    assert by_id["n0"]["source"] == "ceo"
+    assert by_id["n0"]["role"] == "主 Agent"
+    assert by_id["n1"]["source"] == "ceo"
+    assert by_id["n2"]["kind"] == "heads_up"
+    assert "source" not in by_id["n2"] or by_id["n2"].get("source") != "ceo"
+    assert [n["noteId"] for n in p["teamNotes"]] == ["n0", "n1", "n2"]
+    brief_blocks = [
+        b
+        for r in p["runs"]
+        for b in (r.get("receivedContext") or [])
+        if b.get("channel") == "team_brief"
+    ]
+    assert len(brief_blocks) == 2
+    assert "初学者" in brief_blocks[0]["body"]

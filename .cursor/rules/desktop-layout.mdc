@@ -5,76 +5,21 @@ globs:
 alwaysApply: false
 ---
 
-# 桌面端布局宽度规范
+# 桌面端布局规范
 
-两级宽度梯度 + 统一 padding，所有页面必须归入其中之一。
+完整规格（宽度梯度、padding、字体、圆角、按钮、图标） → [`UI-Pattern索引.md` §桌面端布局规格](/docs/04-前端/UI-Pattern索引.md)。
 
-## 宽度梯度
+## 速查
 
-| 梯度 | Tailwind | 像素 | 适用场景 |
-|---|---|---|---|
-| **content** | `max-w-4xl mx-auto` | 896px | 详情、表单——居中线性阅读 |
-| **canvas** | `max-w-[1200px] mx-auto` | 1200px | 探索、列表、文件管理——网格/多列 |
-
-> **自有布局豁免**：对话页（见下）、文件页（分栏树）、**设置页**（左二级导航 + 内容分栏）、**真·全屏页**不走上表梯度。设置页内容是**左对齐**的 `max-w-3xl`（768px）阅读列（非居中 content 档）：左栏已是导航轴，内容左锚定贴分隔线读起来重心更稳，宽屏右侧留白是设置布局的常态。→ 见代码 `pages/MorePage.tsx`。真·全屏页（如 `工具箱 → 产品手册` `/toolbox/manual`）用 `fixed inset-0 z-50` 覆盖整窗（含应用 `TitleBar`），故页顶须**自绘窗口控件**（拖拽区 `[-webkit-app-region:drag]` + 最小化/最大化/关闭复用 `window.windowApi`，否则无边框窗口无法移动 / 关闭），内部自定义满宽布局（产品手册用左侧目录 + `max-w-3xl` 阅读列；图密集页可用 `max-w-[1400px]` 阅读容器 + 宽屏多列）并自带返回 / Esc 退出。→ 见代码 `pages/toolbox/ProductManual.tsx`。
-
-## 对话页特殊结构
-
-对话页不走上面的梯度：消息滚动区与底部输入区**统一用 `max-w-3xl`（768px）**，分别用内层 wrapper 居中。768px 比 content 档（896px）窄一档，是为对齐 ChatGPT / Claude 的正文阅读行长——896px 在 14px 字号下英文/代码约 120 字符/行偏长，768px 更舒适。阅读区与输入区**同宽**（早期阅读区曾用 896px，因行长偏宽已收窄对齐）。
-
-```
-滚动容器(full-width) → 内层(max-w-3xl mx-auto, px-6 py-4) → messages
-底部区域(max-w-3xl mx-auto) → error/approval/InputBar
-```
-
-滚动条保持在全宽容器边缘，内容居中。
-
-## padding 规范
-
-- 内容页横向：`px-6`（24px）
-- 内容页纵向：`py-8`（32px）
-- 对话页：上下 `py-4`，InputBar 自带 `px-4 pb-4 pt-2`
-
-## 字体大小层级（严格 4 级）
-
-| 级别 | Tailwind | 像素 | 用途 |
-|---|---|---|---|
-| caption | `text-xs` | 12px | 元数据、badge、时间戳、小按钮 |
-| body | `text-sm` | 14px | 所有正文、表单、按钮、消息 |
-| heading | `text-base` | 16px | 组件标题、导航项 |
-| title | `text-xl` | 20px | 页面标题 |
-
-**禁止**：`text-[10px]`、`text-[11px]`、`text-[13px]`、`text-lg` 及任何自定义像素值。
-
-对话页空状态欢迎语（无消息时的引导 hero）使用 `text-2xl`（24px）为专用例外——空屏中唯一的视觉落点，需更强召唤力；其余场景一律不得超过 `text-xl`。
-
-## 圆角层级（严格 3 级）
-
-| 级别 | Tailwind | 像素 | 用途 |
-|---|---|---|---|
-| small | `rounded-lg` | 8px | 输入框、按钮、小卡片、tab |
-| large | `rounded-xl` | 12px | 卡片、面板、气泡、弹窗 |
-| pill | `rounded-full` | ∞ | 头像、badge、pill 标签、进度条 |
-
-**禁止**：`rounded-sm`、`rounded-md`、`rounded-2xl`、`rounded-3xl`。
-
-## 按钮尺寸（2 档）
-
-| 档位 | 值 | 用途 |
+| 梯度 | Tailwind | 适用 |
 |---|---|---|
-| sm | `size-7` (28px) | icon-only 小按钮 |
-| md | `size-8` (32px) | 标准交互按钮 |
+| content | `max-w-4xl mx-auto` | 详情、表单 |
+| canvas | `max-w-[1200px] mx-auto` | 列表、文件管理 |
+| 对话页 | `max-w-3xl mx-auto` | 消息区 + 输入区（768px） |
 
-导航项使用 `h-9`（36px）为专用例外。
+自有布局豁免：对话页、文件页、设置页、全屏页不走 content/canvas 梯度。
 
-## UI Primitive 层
+## 禁止
 
-交互按钮/图标按钮优先用 `components/ui/` 的 `Button` / `IconButton`（sm h-7 / md h-8），而非手写 `rounded-lg` 类。→ 见 [`UI-Pattern索引.md`](../../docs/04-前端/UI-Pattern索引.md) 与 `components/ui/index.ts`。
-
-## 图标尺寸
-
-| 场景 | lucide size | 像素 | 说明 |
-|---|---|---|---|
-| 主导航项 | `size={18}` | 18px | 配合 heading 级 `text-base` |
-| body 级按钮/列表 | `size={16}` | 16px | 正文行内图标 |
-| caption 级/辅助 | `size={14}` | 14px | 小按钮、元数据图标 |
+- **字号**：禁 `text-[10px]`/`text-[11px]`/`text-[13px]`/`text-lg` 及自定义像素值（4 级：xs/sm/base/xl）。
+- **圆角**：禁 `rounded-sm`/`rounded-md`/`rounded-2xl`/`rounded-3xl`（3 级：lg/xl/full）。

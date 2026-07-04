@@ -126,11 +126,15 @@ DELEGATE_PARAMETERS = {
                         "description": "可选：该产出注入下游时是原样还是摘要，默认原样。",
                     },
                     "can_delegate": {
-                        "type": "boolean",
+                        "oneOf": [
+                            {"type": "boolean"},
+                            {"type": "string", "enum": ["auto"]},
+                        ],
                         "description": (
-                            "可选：是否允许该 worker 自己再向下委派一层子团队（默认否）。"
-                            "仅当这个子任务本身复杂到还需二次拆分时才开；最多再嵌套一层，"
-                            "其子成员不能继续委派。简单子任务不要开。"
+                            "可选：控制该 worker 是否能再向下委派子团队。false（默认，简单任务）= 不能；"
+                            "\"auto\" = worker 自行判断，需要时调用 request_delegate 申请；"
+                            "true = 启动即获得 delegate 权限（过渡兼容，建议改用 auto）。"
+                            "当 complexity_hint=\"standard\" 且未显式设置时，默认为 \"auto\"。"
                         ),
                     },
                     "checkpoint_after": {
@@ -243,6 +247,46 @@ DELEGATE_PARAMETERS = {
             "description": (
                 "可选：playbook 的槽位填充（与 playbook 搭配；不传 playbook 时忽略）。各 playbook 槽位——"
                 + "；".join(f"{p.name}：{p.slots}" for p in PLAYBOOKS.values())
+            ),
+        },
+        "seed_notes": {
+            "type": "array",
+            "description": (
+                "可选：主 Agent 在团队开跑前预贴到便签墙的共识（一行一条，最多 8 条）。"
+                "并行 worker 开局即能通过便签墙收到，减少在每个 task 里重复粘贴同一段背景。"
+                "kind 同 post_note：decision=我定了 / heads_up=提个醒 / claim=我领了。"
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["decision", "heads_up", "claim"],
+                        "description": "便签类型，默认 heads_up。",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "一行具体共识（≤200 字），如接口约定、风格底线。",
+                    },
+                },
+                "required": ["text"],
+            },
+        },
+        "team_brief": {
+            "type": "string",
+            "description": (
+                "可选：本回合团队级共识长文（≤1500 字），注入每个 worker 开局的「团队共识」"
+                "上下文块；同一回合后续 delegate 仍沿用，直到你用新的 team_brief 覆盖。"
+                "与 seed_notes 可并用：brief 写总述，seed_notes 钉关键决定。"
+            ),
+        },
+        "complexity_hint": {
+            "type": "string",
+            "enum": ["light", "standard"],
+            "description": (
+                "可选，默认 standard。声明本次委派的复杂度：light = 轻量委派（单 worker、"
+                "简单任务，引擎跳过不必要的协调设施），standard = 标准委派。引擎据此裁剪：light "
+                "时跳过 playbook 匹配、不初始化便签墙、默认 finalize=true 行为。"
             ),
         },
     },

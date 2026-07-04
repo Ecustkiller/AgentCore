@@ -17,12 +17,13 @@ from agentcore.runtime.events import (
     message_end,
     message_start,
     run_completed,
+    run_context,
     run_output_delta,
     run_plan,
     run_started,
 )
 
-from ._common import _CONV, _COST, _USAGE
+from ._common import _CONV, _COST, _USAGE, _ctx_block
 
 
 def _multi_agent_debate() -> list[SSEEvent]:
@@ -31,9 +32,23 @@ def _multi_agent_debate() -> list[SSEEvent]:
     本轮正反辩手（携 stance/group/round，parent=主持人）；主持人走 run_started→run_completed
     完整生命周期（团队进度因此 3/3 正确收尾，不再有永久 pending 的编排节点），收场 debate_result
     承载【决策简报 + 交锋叙事线】双产物——三端 verbatim 折入 ProjectedTurn.debate，各方发言全文
-    靠 rounds[*].sides[*].run_id 关联执行图辩手节点。"""
+    靠 rounds[*].sides[*].run_id 关联执行图辩手节点。
+
+    亦承载【质询回合 P1 + 记分裁判 P2】端到端契约：本轮 ``cross_exam`` = 主持人代表交锋向各方发的
+    定向必答质询（问题 verbatim 进载荷、作答全文随 ``answer_run_id`` 的 continue_run 事件走，故各方
+    多出一个 ``_r1_cx_{key}`` 质询作答 run——faithful：作答是 continue_run，run_started 携 revision=2 +
+    原辩手 stance/group/round）；``scores`` = 裁判本轮给各方的三维记分 + 罚分 + 净分；``brief.decisive``
+    = 据逐轮记分推导的胜负手。三者均为附加字段（settledModel 据 answer_run_id 取回作答、据 scores/
+    decisive 渲染比分与胜负手），旧产物缺省即空、零破坏。
+
+    亦承载【结辩收束 P4】端到端契约：收场 ``closings`` = 辩已辩尽后各方的结辩陈词（身份 verbatim 进载荷、
+    陈词全文随 ``run_id`` 的 continue_run 事件走，故各方在质询后再多一个 ``_closing_{key}`` 结辩 run——
+    faithful：结辩是 continue_run，run_started 携 revision=3 + 原辩手 stance/group/round）；settledModel 据
+    ``closings[*].run_id`` 取回陈词全文渲染「结辩陈词」区。附加字段、旧产物缺省即空、零破坏。"""
     cap, mod = "captain1", "debate_mod1"
     pro_run, con_run = f"{mod}_r1_pro", f"{mod}_r1_con"
+    pro_cx, con_cx = f"{mod}_r1_cx_pro", f"{mod}_r1_cx_con"
+    pro_closing, con_closing = f"{mod}_closing_pro", f"{mod}_closing_con"
     mod_agents = [
         {
             "id": mod,
@@ -94,6 +109,9 @@ def _multi_agent_debate() -> list[SSEEvent]:
         "form": "debate",
         "motion": "是否采用方案 A",
         "stop_reason": "converged",
+        # 主持人开场白（可选、渐进式契约）：证明「会说话的主持人」开场白经 fold verbatim 折入
+        # ProjectedTurn.debate.opening 的端到端链路；其余向量省略此字段验证缺省回落（前端拼模板）。
+        "opening": "这场要定的是该不该上方案 A，先从最要害的成本与收益切入。",
         "narrative_first": False,
         "sides": [
             # 真·多模型辩论：各方携显式 model（pro=豆包前缀路由 / con=无前缀默认 DeepSeek），
@@ -136,13 +154,62 @@ def _multi_agent_debate() -> list[SSEEvent]:
                         "point": "收益可量化但未对冲风险敞口，量化口径回避了尾部风险。",
                     },
                 ],
+                # 质询回合（P1）：主持人定向必答质询各方，作答全文随 answer_run_id 的 run 走（不塞载荷）。
+                "cross_exam": [
+                    {
+                        "target": "pro",
+                        "questioner": "",
+                        "questions": [
+                            "收益量化口径是否计入了尾部风险？请是/否直接回答。",
+                            "若熔断触发、灰度止损，已投入成本由谁承担？",
+                        ],
+                        "answer_run_id": pro_cx,
+                        "ok": True,
+                    },
+                    {
+                        "target": "con",
+                        "questioner": "",
+                        "questions": [
+                            "你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
+                        ],
+                        "answer_run_id": con_cx,
+                        "ok": True,
+                    },
+                ],
+                # 记分裁判（P2）：本轮各方三维记分 + 罚分（每条 -1）+ 净分 total（后端算好、前端直用）。
+                "scores": {
+                    "pro": {
+                        "argument": 4,
+                        "engagement": 3,
+                        "evidence": 3,
+                        "penalties": [],
+                        "note": "收益量化扎实，质询下承认口径未含尾部但给出熔断兜底。",
+                        "total": 10,
+                    },
+                    "con": {
+                        "argument": 3,
+                        "engagement": 4,
+                        "evidence": 2,
+                        "penalties": ["以未证实的尾部风险当既定事实"],
+                        "note": "紧咬风险敞口命门、回应完整，但缺量化证据且有一处未支撑主张。",
+                        "total": 8,
+                    },
+                },
             },
+        ],
+        # 结辩收束（P4）：辩已辩尽后各方的结辩陈词（身份 verbatim 进载荷、陈词全文随 run_id 的 run 走），
+        # settledModel 据 closings[*].run_id 取回渲染「结辩陈词」区。仅认真辩透 + 对抗形态开启。
+        "closings": [
+            {"key": "pro", "name": "支持方", "run_id": pro_closing, "ok": True},
+            {"key": "con", "name": "反对方", "run_id": con_closing, "ok": True},
         ],
         "brief": {
             "crux": "方案 A 的风险是否可控",
             "strongest_points": {"pro": "收益显著且可量化", "con": "风险敞口缺乏兜底"},
             "factual_disputes": ["历史故障率的数据口径不一致"],
             "value_disputes": ["增长优先 vs 稳健优先"],
+            # 胜负手（P2）：据逐轮记分推导——点名谁的哪点被扣分 / 更站得住，让 leaning 可追溯。
+            "decisive": "反对方紧咬「风险敞口未对冲」命门，却把未证实的尾部风险当既定事实（记分 -1）；支持方收益量化更扎实、质询下给出熔断兜底，综合净分小幅领先（10 : 8）。",
             "leaning": "倾向有条件采用",
             "confidence": "medium",
             "recommendation": "先小流量灰度验证风险，再决定是否全量。",
@@ -168,7 +235,12 @@ def _multi_agent_debate() -> list[SSEEvent]:
             runs=debater_runs,
         ),
         run_started(pro_run, "d_pro", parent_run_id=mod),
-        run_output_delta(pro_run, "d_pro", "支持理由：收益可量化。"),
+        run_output_delta(
+            pro_run,
+            "d_pro",
+            "支持理由：收益可量化——首年可降本【已核实·2024成本审计】约 18%，"
+            "同类系统迁移回收周期约两个季度【待核实·推断】。",
+        ),
         run_completed(
             pro_run,
             "d_pro",
@@ -180,12 +252,136 @@ def _multi_agent_debate() -> list[SSEEvent]:
             cost=_COST,
         ),
         run_started(con_run, "d_con", parent_run_id=mod),
-        run_output_delta(con_run, "d_con", "反对理由：风险无兜底。"),
+        run_output_delta(
+            con_run,
+            "d_con",
+            "反对理由：风险缺兜底——迁移期存在双写不一致窗口【已核实·内部SRE复盘】，"
+            "尾部故障率恐被低估【待核实·推断】。",
+        ),
         run_completed(
             con_run,
             "d_con",
             output_summary="反对方陈述完成",
             duration_ms=850,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        # 质询回合（P1）：陈述后、裁判前，各方对主持人质询 continue_run 作答（faithful：作答是续写，
+        # run_started 携 revision=2 + 原辩手 stance/group/round；run_context 展示被问了什么；作答全文
+        # 随本 run 走，settledModel 据 cross_exam[*].answer_run_id=`_r1_cx_{key}` 取回渲染质询问答对）。
+        run_started(
+            pro_cx, pro_cx, parent_run_id=pro_run, revision=2,
+            stance="pro", group="debate:debate", round_no=1,
+        ),
+        run_context(
+            pro_cx,
+            pro_cx,
+            [
+                _ctx_block(
+                    "cross_exam",
+                    "第 1 轮 · 质询（必须正面回答）",
+                    "- 收益量化口径是否计入了尾部风险？请是/否直接回答。\n"
+                    "- 若熔断触发、灰度止损，已投入成本由谁承担？",
+                ),
+            ],
+        ),
+        run_output_delta(
+            pro_cx,
+            pro_cx,
+            "作答：量化口径未含尾部风险【待核实·推断】；成本由灰度预算池兜底、"
+            "触发熔断即回滚【已核实·灰度预案v2】。",
+        ),
+        run_completed(
+            pro_cx,
+            pro_cx,
+            output_summary="支持方质询作答完成",
+            duration_ms=640,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(
+            con_cx, con_cx, parent_run_id=con_run, revision=2,
+            stance="con", group="debate:debate", round_no=1,
+        ),
+        run_context(
+            con_cx,
+            con_cx,
+            [
+                _ctx_block(
+                    "cross_exam",
+                    "第 1 轮 · 质询（必须正面回答）",
+                    "- 你主张的风险敞口，有无可量化的历史故障率支撑？没有就直说。",
+                ),
+            ],
+        ),
+        run_output_delta(
+            con_cx,
+            con_cx,
+            "作答：暂无统一口径的历史故障率【待核实·推断】；但同类系统的尾部事件可作参照"
+            "【已核实·SRE年报】。",
+        ),
+        run_completed(
+            con_cx,
+            con_cx,
+            output_summary="反对方质询作答完成",
+            duration_ms=620,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        # 结辩收束（P4）：质询后、主持人终审前，各方 continue_run 做结辩陈词（faithful：结辩是续写，
+        # run_started 携 revision=3 + 原辩手 stance/group/round；run_context 展示结辩定调；陈词全文随本
+        # run 走，settledModel 据 closings[*].run_id=`_closing_{key}` 取回渲染「结辩陈词」区）。
+        run_started(
+            pro_closing, pro_closing, parent_run_id=pro_run, revision=3,
+            stance="pro", group="debate:debate", round_no=1,
+        ),
+        run_context(
+            pro_closing,
+            pro_closing,
+            [_ctx_block("closing", "结辩环节", "辩论已充分交锋，请做结辩陈词（只讲胜负手、不引入新论据）。")],
+        ),
+        run_output_delta(
+            pro_closing,
+            pro_closing,
+            "结辩：方案 A 首年降本可核实【已核实·2024成本审计】，尾部风险有熔断兜底、"
+            "触发即回滚可控——收益确定、风险有解，应有条件采用。",
+        ),
+        run_completed(
+            pro_closing,
+            pro_closing,
+            output_summary="支持方结辩完成",
+            duration_ms=520,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_started(
+            con_closing, con_closing, parent_run_id=con_run, revision=3,
+            stance="con", group="debate:debate", round_no=1,
+        ),
+        run_context(
+            con_closing,
+            con_closing,
+            [_ctx_block("closing", "结辩环节", "辩论已充分交锋，请做结辩陈词（只讲胜负手、不引入新论据）。")],
+        ),
+        run_output_delta(
+            con_closing,
+            con_closing,
+            "结辩：对方的收益量化口径始终未含尾部风险【待核实·推断】，双写不一致窗口"
+            "【已核实·内部SRE复盘】未有硬兜底——风险未对冲前不宜全量。",
+        ),
+        run_completed(
+            con_closing,
+            con_closing,
+            output_summary="反对方结辩完成",
+            duration_ms=540,
             role="member",
             model="deepseek-v4-flash",
             usage=_USAGE,
@@ -303,6 +499,17 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
         ],
         # 第 1 轮无前序边界 ⇒ 无用户追问（载荷形状统一，恒带空列表）。
         "user_interjections": [],
+        # 记分裁判（P2）：首轮各方咬合但未见底，支持方量化更实、小幅领先（净分 9 : 8）。
+        "scores": {
+            "pro": {
+                "argument": 4, "engagement": 2, "evidence": 3,
+                "penalties": [], "note": "收益量化扎实，但尚未正面接住风险兜底。", "total": 9,
+            },
+            "con": {
+                "argument": 3, "engagement": 3, "evidence": 2,
+                "penalties": [], "note": "风险敞口命门抓得准，缺量化证据。", "total": 8,
+            },
+        },
     }
     round2_payload = {
         "round_no": 2,
@@ -334,6 +541,19 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
                 "answered": True,
             },
         ],
+        # 记分裁判（P2）：胜负手拉开轮——支持方正面接住追问、给出灰度兜底（回应完整度跳到 4），反对方
+        # 回避了成本归属被扣分（净分 11 : 7）。
+        "scores": {
+            "pro": {
+                "argument": 4, "engagement": 4, "evidence": 3,
+                "penalties": [], "note": "正面接住追问、给出保守口径 + 熔断兜底。", "total": 11,
+            },
+            "con": {
+                "argument": 3, "engagement": 3, "evidence": 2,
+                "penalties": ["回避了灰度兜底的成本归属"],
+                "note": "仍质疑熔断阈值，但对成本归属避而不答。", "total": 7,
+            },
+        },
     }
     round3_payload = {
         "round_no": 3,
@@ -359,6 +579,17 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
         ],
         # 第 3 轮无新的用户追问（载荷形状统一，恒带空列表）。
         "user_interjections": [],
+        # 记分裁判（P2）：收敛轮——阈值机制达成一致、双方势均力敌（净分 10 : 10），仅剩阈值取值待拍板。
+        "scores": {
+            "pro": {
+                "argument": 3, "engagement": 4, "evidence": 3,
+                "penalties": [], "note": "按分位设阈 + 自动回滚，机制落地。", "total": 10,
+            },
+            "con": {
+                "argument": 3, "engagement": 4, "evidence": 3,
+                "penalties": [], "note": "认可机制，保留阈值取值分歧。", "total": 10,
+            },
+        },
     }
     debate_payload = {
         "form": "debate",
@@ -390,6 +621,8 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
             },
             "factual_disputes": ["历史故障率的数据口径不一致"],
             "value_disputes": ["增长优先 vs 稳健优先"],
+            # 胜负手（P2）：据逐轮记分累计（净分 30 : 25）——胜负手在第 2 轮拉开。
+            "decisive": "胜负手在第 2 轮：支持方正面接住你的追问、给出灰度兜底（回应完整度跳升），反对方却回避成本归属被扣分；第 3 轮双方就阈值机制达成一致。累计净分 30 : 25，支持方占优，仅剩阈值取值是价值取舍。",
             "leaning": "倾向有条件采用",
             "confidence": "medium",
             "recommendation": "采纳支持方的灰度兜底方案（按分位设阈 + 自动回滚），阈值取值需你拍板。",
@@ -446,6 +679,26 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
             pro_r2, pro_r2, parent_run_id=pro_r1, revision=2,
             stance="pro", group="debate:debate", round_no=2,
         ),
+        # 续写轮收到的上下文（本轮焦点 + 用户追问 + 对方上轮论点）——修订节点面板据此填充，不再空白。
+        run_context(
+            pro_r2,
+            pro_r2,
+            [
+                _ctx_block("round_focus", "第 2 轮 · 本轮焦点", "灰度期的兜底与熔断机制"),
+                _ctx_block(
+                    "interjection",
+                    "用户本轮追问（向你提出 · 最高优先级）",
+                    "- 灰度期谁来兜底？",
+                ),
+                _ctx_block(
+                    "opponent",
+                    "对方上一轮 · 反方",
+                    "反对理由：风险无兜底。",
+                    source_role="反方",
+                    source_run_id=con_r1,
+                ),
+            ],
+        ),
         run_output_delta(pro_r2, pro_r2, "回应追问：灰度以保守口径为准并设熔断。"),
         run_completed(
             pro_r2,
@@ -460,6 +713,25 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
         run_started(
             con_r2, con_r2, parent_run_id=con_r1, revision=2,
             stance="con", group="debate:debate", round_no=2,
+        ),
+        run_context(
+            con_r2,
+            con_r2,
+            [
+                _ctx_block("round_focus", "第 2 轮 · 本轮焦点", "灰度期的兜底与熔断机制"),
+                _ctx_block(
+                    "opponent",
+                    "对方上一轮 · 正方",
+                    "支持理由：收益可量化。",
+                    source_role="正方",
+                    source_run_id=pro_r1,
+                ),
+                _ctx_block(
+                    "challenge",
+                    "上一轮你被反驳的命门",
+                    "- 正方：收益可量化，风险可用熔断兜底，并非无解。",
+                ),
+            ],
         ),
         run_output_delta(con_r2, con_r2, "仍存疑：熔断阈值过松。"),
         run_completed(
@@ -479,6 +751,20 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
             pro_r3, pro_r3, parent_run_id=pro_r1, revision=3,
             stance="pro", group="debate:debate", round_no=3,
         ),
+        run_context(
+            pro_r3,
+            pro_r3,
+            [
+                _ctx_block("round_focus", "第 3 轮 · 本轮焦点", "熔断阈值如何取值"),
+                _ctx_block(
+                    "opponent",
+                    "对方上一轮 · 反方",
+                    "仍存疑：熔断阈值过松。",
+                    source_role="反方",
+                    source_run_id=con_r2,
+                ),
+            ],
+        ),
         run_output_delta(pro_r3, pro_r3, "收敛：按尾部损失分位设阈并自动回滚。"),
         run_completed(
             pro_r3,
@@ -493,6 +779,20 @@ def _multi_agent_debate_followup() -> list[SSEEvent]:
         run_started(
             con_r3, con_r3, parent_run_id=con_r1, revision=3,
             stance="con", group="debate:debate", round_no=3,
+        ),
+        run_context(
+            con_r3,
+            con_r3,
+            [
+                _ctx_block("round_focus", "第 3 轮 · 本轮焦点", "熔断阈值如何取值"),
+                _ctx_block(
+                    "opponent",
+                    "对方上一轮 · 正方",
+                    "回应追问：灰度以保守口径为准并设熔断。",
+                    source_role="正方",
+                    source_run_id=pro_r2,
+                ),
+            ],
         ),
         run_output_delta(con_r3, con_r3, "认可机制，仅阈值取值仍需拍板。"),
         run_completed(
@@ -701,10 +1001,53 @@ def _multi_agent_roundtable_rounds() -> list[SSEEvent]:
             r2a, "rt_a2", parent_run_id=r1a, revision=2,
             group="debate:roundtable", round_no=2,
         ),
+        # 圆桌续写轮：焦点 + 其余各方上轮论点（多方无 stance，opponent = 除本方外的每一方）。
+        run_context(
+            r2a,
+            "rt_a2",
+            [
+                _ctx_block("round_focus", "第 2 轮 · 本轮焦点", "三方就『问责机制』正面交锋"),
+                _ctx_block(
+                    "opponent",
+                    "对方上一轮 · 监管视角",
+                    "监管视角：问责缺位才是关键。",
+                    source_role="监管视角",
+                    source_run_id=r1b,
+                ),
+                _ctx_block(
+                    "opponent",
+                    "对方上一轮 · 产业视角",
+                    "产业视角：别忽视落地成本。",
+                    source_role="产业视角",
+                    source_run_id=r1c,
+                ),
+            ],
+        ),
         run_output_delta(r2a, "rt_a2", "技术视角续：问责需可观测性支撑。"),
         run_started(
             r2b, "rt_b2", parent_run_id=r1b, revision=2,
             group="debate:roundtable", round_no=2,
+        ),
+        run_context(
+            r2b,
+            "rt_b2",
+            [
+                _ctx_block("round_focus", "第 2 轮 · 本轮焦点", "三方就『问责机制』正面交锋"),
+                _ctx_block(
+                    "opponent",
+                    "对方上一轮 · 技术视角",
+                    "技术视角：能力外溢是根因。",
+                    source_role="技术视角",
+                    source_run_id=r1a,
+                ),
+                _ctx_block(
+                    "opponent",
+                    "对方上一轮 · 产业视角",
+                    "产业视角：别忽视落地成本。",
+                    source_role="产业视角",
+                    source_run_id=r1c,
+                ),
+            ],
         ),
         run_output_delta(r2b, "rt_b2", "监管视角续：可观测性应立法强制。"),
         message_end(FinishReason.CANCELLED, input_tokens=4000, output_tokens=700, cost=_COST),

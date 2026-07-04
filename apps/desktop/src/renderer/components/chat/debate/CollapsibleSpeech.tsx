@@ -1,3 +1,4 @@
+import { usePersistentDisclosure } from "@/stores/disclosure";
 import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
 /**
@@ -12,15 +13,25 @@ import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 export function CollapsibleSpeech({
   contentKey,
   fadeToClass = "from-card",
+  collapsedMaxHClass = "max-h-72",
+  sceneKey,
   children,
 }: {
   /** 内容指纹（发言全文串）：变化时重测是否溢出，避免流式收场后残留旧判定。 */
   contentKey: string;
   /** 折叠渐隐融入的宿主底色 Tailwind `from-*` 类（默认发言气泡 `from-card`）。 */
   fadeToClass?: string;
+  /** 折叠态的最大高度 Tailwind `max-h-*` 类（默认 `max-h-72`）；主对话长回答用更高的阈值，
+   * 只夹真正超长的答案，短/中答案原样全展。 */
+  collapsedMaxHClass?: string;
+  /** 持久化作用域键（回合+轮+方标识）：给了才把「展开全文」跨卸载/刷新记住；缺省走会话内存态。 */
+  sceneKey?: string;
   children: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = usePersistentDisclosure(
+    sceneKey ?? null,
+    false,
+  );
   const [overflow, setOverflow] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -35,7 +46,9 @@ export function CollapsibleSpeech({
       <div
         ref={ref}
         className={
-          expanded ? "text-sm" : "relative max-h-72 overflow-hidden text-sm"
+          expanded
+            ? "text-sm"
+            : `relative ${collapsedMaxHClass} overflow-hidden text-sm`
         }
       >
         {children}

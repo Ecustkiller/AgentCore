@@ -64,16 +64,15 @@ def test_dep_block_prose_dep_unchanged_full_text():
 
 
 def test_dep_block_leads_with_author_debrief_summary():
-    # 完工交接简报: a pass_through dep's block LEADS with the upstream author's own 结论 (so the
-    # downstream sees the gist first / it survives any later trim), and the「## 交接简报」section
-    # is peeled off the body — its 建议下一步 is for the CEO, not downstream deliverable prose.
+    # 完工交接简报: a pass_through dep's block LEADS with the upstream author's own 结论 (from the
+    # structured debrief, so the downstream sees the gist first / it survives any later trim); the
+    # deliverable content is already clean and 建议下一步 is for the CEO, not downstream prose.
     plan = _plan(RunSpec(run_id="u", agent_id="u", role="研究员", task="调研"))
-    content = "详细调研正文……\n\n## 交接简报\n- 结论：方案A明显更优\n- 建议下一步：做A的POC"
-    block = _dep_context_blocks(plan, ["u"], {"u": _state(content)})[0]
+    state = _state("详细调研正文……", debrief={"summary": "方案A明显更优", "next_steps": "做A的POC"})
+    block = _dep_context_blocks(plan, ["u"], {"u": state})[0]
     assert block.body.startswith("【上游交接结论】方案A明显更优")
     assert "详细调研正文" in block.body  # the deliverable body still follows the lead
-    assert "## 交接简报" not in block.body  # section peeled off, not double-shipped
-    assert "建议下一步" not in block.body  # next_steps is CEO-facing, not downstream prose
+    assert "做A的POC" not in block.body  # next_steps is CEO-facing, not shipped downstream
 
 
 def test_dep_summarize_uses_author_summary_over_blind_head_chop():
@@ -85,8 +84,9 @@ def test_dep_summarize_uses_author_summary_over_blind_head_chop():
         task="调研",
         policy=RunPolicy(result_handling="summarize"),
     )
-    content = ("无关开头" + ("噪" * 2000)) + "\n\n## 交接简报\n结论：真正重要的一句结论"
-    block = _dep_context_blocks(_plan(spec), ["u"], {"u": _state(content)})[0]
+    content = "无关开头" + ("噪" * 2000)
+    state = _state(content, debrief={"summary": "真正重要的一句结论"})
+    block = _dep_context_blocks(_plan(spec), ["u"], {"u": state})[0]
     assert block.fidelity == "summarize"
     assert block.body == "真正重要的一句结论"  # author 结论, not 噪噪噪… head-chop
     assert block.truncated is True  # the full product is longer than the digest

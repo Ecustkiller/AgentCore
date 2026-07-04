@@ -49,11 +49,29 @@ def setup_logging() -> None:
         structlog.processors.UnicodeDecoder(),
     ]
 
+    # 代码锚定 (code anchoring): stamp every APP log line with the emitting function + line
+    # so a reader — or Cursor AI optimising the product AI from logs/dev.jsonl — can jump
+    # straight from an event to its source. `logger` already carries the module (add_logger_name),
+    # so func_name + lineno complete a `module.func:line` anchor (e.g. jump from a `delegate.started`
+    # line to the exact emit site instead of grepping the event string).
+    #
+    # Deliberately NOT in `shared_processors` (which is also the foreign_pre_chain): uvicorn /
+    # sqlalchemy records already carry their own stdlib callsite, and running this stack-walking
+    # adder over them would both cost extra and anchor to logging-framework frames, not useful
+    # code. Placed in the structlog-native chain, it captures the app frame in the emitting call.
+    callsite = structlog.processors.CallsiteParameterAdder(
+        {
+            structlog.processors.CallsiteParameter.FUNC_NAME,
+            structlog.processors.CallsiteParameter.LINENO,
+        }
+    )
+
     # Hand the event dict to stdlib logging; each handler picks its own renderer,
     # so stdout and the log file can be formatted differently.
     structlog.configure(
         processors=[
             *shared_processors,
+            callsite,
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=structlog.stdlib.LoggerFactory(),

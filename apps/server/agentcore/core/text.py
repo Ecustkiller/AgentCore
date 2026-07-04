@@ -34,3 +34,16 @@ def truncate_head_tail(content: str, limit: int, *, marker: str = DEFAULT_ELISIO
     head = keep * 3 // 5
     tail = keep - head
     return content[:head].rstrip() + marker + content[len(content) - tail :].lstrip()
+
+
+def clip_preview(text: str, limit: int) -> str:
+    """Single-line, head-clipped preview of ``text`` for a log field.
+
+    Collapses all whitespace runs to single spaces (so a multi-line prompt / task /
+    feedback fits one JSON log field), then head-clips to ``limit`` with an ellipsis.
+    For logs only — a bounded snippet to triage 「问了什么 / 为什么这么决策」, never the
+    full 正文 (logging.mdc 铁律). The canonical log-preview shaper (conversation previews
+    and the orchestration decision logs share it, so they don't drift).
+    """
+    collapsed = " ".join((text or "").split())
+    return collapsed[:limit] + "…" if len(collapsed) > limit else collapsed

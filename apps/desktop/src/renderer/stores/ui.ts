@@ -167,6 +167,9 @@ interface UIState {
     turnId: string;
     autoplay: boolean;
     view?: CanvasFocusView;
+    /** 深链「对比」时预选的 A/B 版本对（run.id）——如从侧面板版本链点 vN 直达 vN-1×vN diff。
+     * 仅 view==="compare" 有意义；缺省则对比视图用该回合自然默认对。 */
+    comparePair?: [string, string];
   } | null;
   /** 画布「放大态」桥（前端UX设计.md §六）：`ConversationCanvas` 进入某回合放大态时置 true，
    * 退出 / 卸载时复位 false。`ConversationPage` 据此在放大态隐藏对话级浮动开关（聊天/画布、
@@ -200,6 +203,7 @@ interface UIState {
     turnId: string,
     autoplay: boolean,
     view?: CanvasFocusView,
+    comparePair?: [string, string],
   ) => void;
   clearCanvasFocus: () => void;
   setCanvasZoomed: (v: boolean) => void;
@@ -258,8 +262,8 @@ export const useUIStore = create<UIState>((set) => ({
       persistConversationViews(conversationViews);
       return { conversationViews };
     }),
-  requestCanvasFocus: (turnId, autoplay, view) =>
-    set({ pendingCanvasFocus: { turnId, autoplay, view } }),
+  requestCanvasFocus: (turnId, autoplay, view, comparePair) =>
+    set({ pendingCanvasFocus: { turnId, autoplay, view, comparePair } }),
   clearCanvasFocus: () => set({ pendingCanvasFocus: null }),
   setCanvasZoomed: (canvasZoomed) => set({ canvasZoomed }),
   setSidecarEnabled: (sidecarEnabled) => {

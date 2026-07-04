@@ -599,6 +599,89 @@ async def test_worker_with_explicit_tools_is_restricted_to_them():
     assert provider.offered[0] == ["code_execute"]
 
 
+async def test_collaboration_off_denies_note_tools_to_restricted_debater():
+    # 团队便签去特例 (辩论): a debater is a RESTRICTED worker (DEBATER_TOOLS = web_search/read_url).
+    # On a non-collaborative batch (collaboration=False, the debate path) the 团队便签 tools are
+    # NOT force-added, so an adversarial debater is offered ONLY its own tools — no
+    # post/read/amend_note, no way to broadcast its 立论 to the opposing side.
+    plan, _ = build_run_plan(
+        [{"role": "正方", "task": "立论", "tools": ["web_search"]}],
+        id_prefix="t",
+        valid_tools={"web_search"},
+    )
+    reg = ToolRegistry()
+    reg.register(_GrantableTool("web_search"))
+    reg.register(_GrantableTool("post_note"))
+    reg.register(_GrantableTool("read_notes"))
+    reg.register(_GrantableTool("amend_note"))
+    provider = _OfferRecorder()
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+        collaboration=False,
+    )
+    await WaveScheduler().run(plan, executor)
+    assert provider.offered[0] == ["web_search"]
+
+
+async def test_collaboration_off_denies_note_tools_to_unrestricted_worker():
+    # The switch means "no collaboration", not "no collaboration only if least-privilege": even
+    # an UNRESTRICTED worker (tools omitted → "offer all team tools") is not handed the 团队便签
+    # tools when collaboration=False — they are stripped from the offered registry.
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    assert plan.nodes[0].tools is None
+    reg = ToolRegistry()
+    reg.register(_GrantableTool("code_execute"))
+    reg.register(_GrantableTool("post_note"))
+    provider = _OfferRecorder()
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+        collaboration=False,
+    )
+    await WaveScheduler().run(plan, executor)
+    assert "post_note" not in provider.offered[0]
+    assert "code_execute" in provider.offered[0]
+
+
+async def test_collaboration_on_grants_note_tools_to_restricted_worker():
+    # The default (collaboration=True, the delegate path) is unchanged: even a least-privilege
+    # worker keeps the 团队便签 broadcast channel so a collaborating team aligns mid-flight.
+    plan, _ = build_run_plan(
+        [{"role": "A", "task": "做A", "tools": ["web_search"]}],
+        id_prefix="t",
+        valid_tools={"web_search"},
+    )
+    reg = ToolRegistry()
+    reg.register(_GrantableTool("web_search"))
+    reg.register(_GrantableTool("post_note"))
+    provider = _OfferRecorder()
+    executor = build_agent_executor(
+        plan=plan,
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        base_tool_context=_ctx(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        execution_id="e",
+    )
+    await WaveScheduler().run(plan, executor)
+    assert "post_note" in provider.offered[0]
+
+
 async def test_worker_collects_web_citations_onto_runstate():
     cites = [{"url": "https://a.com", "title": "A", "snippet": "", "site": "a.com"}]
     plan, _ = build_run_plan([{"role": "研究员", "task": "调研"}], id_prefix="t")

@@ -49,5 +49,4 @@ export type SSEEventType =
   | "tool_use_progress"
   | "tool_use_start"
   | "turn_saved"
-  | "workspace_op_required"
-  | "workspace_promoted";
+  | "workspace_op_required";

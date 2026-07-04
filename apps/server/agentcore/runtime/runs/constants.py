@@ -114,6 +114,9 @@ CEO_SYNTHESIS_BUDGET = 10000
 WORKSPACE_MANIFEST_MAX_FILES = 40
 WORKSPACE_MANIFEST_CHAR_BUDGET = 1800
 
+# Canonical name of the worker-only「申请派人权」tool (auto can_delegate mode).
+REQUEST_DELEGATE_TOOL_NAME = "request_delegate"
+
 # Canonical name of the worker-only「向上升级」tool (worker → CEO clarification
 # channel). One source of truth shared by three sites that must agree without coupling
 # ``runs`` to the ``tools`` package: the EscalateTool's schema name, the executor's
@@ -138,6 +141,15 @@ READ_NOTES_TOOL_NAME = "read_notes"
 # builds on a dead decision. Same single-source posture as post_note / read_notes (the
 # AmendNoteTool's schema name + the executor's allow-list guard).
 AMEND_NOTE_TOOL_NAME = "amend_note"
+
+# Canonical name of the worker-only「交接简报 + 收尾」tool (完工交接简报单一源). A delegated worker
+# ends its run by calling this terminal tool ONCE, in the same turn as its finished deliverable,
+# to submit a STRUCTURED brief (summary / key_points / assumptions / next_steps) — so the brief
+# travels in a structured channel and is read straight off the call args
+# (serialize.debrief_from_transcript), never parsed back out of markdown prose (its former,
+# fragile「## 交接简报」form). Same single-source posture as ESCALATE_TOOL_NAME: the HandoffTool's
+# schema name + serialize's transcript harvest. 见 docs/03-AI核心/Agent协作模式.md.
+HANDOFF_TOOL_NAME = "handoff"
 
 # Default per-node failure strategy (see RunPolicy.on_failure).
 DEFAULT_ON_FAILURE = "degrade"

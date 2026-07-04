@@ -10,6 +10,8 @@ autouse fixture points that at a per-test ``tmp_path`` so the suite is hermetic 
 touches the real data dir.
 """
 
+import uuid
+
 import httpx
 import pytest
 
@@ -174,7 +176,97 @@ async def test_topic_cas_conflict_is_not_clobbered(client, make_invite):
     assert (await client.get("/v1/users/me/memory/topics/笔记")).json()["content"] == "v1"
 
 
+async def test_memory_updates_feed_lists_newest_first_across_conversations(
+    client, make_invite, session_factory
+):
+    # 记忆动态 feed (记忆编辑器「最近更新」视图): the cross-conversation stream of what the AI
+    # recently learned — newest-first, carrying each pass's source conversation + item detail.
+    from agentcore.db.repositories import MemoryUpdateRepository, UserRepository
+
+    code = await make_invite("INV-MEM-6")
+    await _register_and_login(client, code, "mem6")
+
+    async with session_factory() as session:
+        user = await UserRepository(session).get_by_username("mem6")
+        assert user is not None
+        uid = user.user_id
+
+    conv_old = str(uuid.uuid4())
+    conv_new = str(uuid.uuid4())
+    # Two passes in separate transactions → distinct server now() → deterministic order.
+    async with session_factory() as session:
+        await MemoryUpdateRepository(session).record(
+            conversation_id=conv_old,
+            user_id=uid,
+            items=[
+                {
+                    "action": "add",
+                    "file": "画像",
+                    "section": "关于用户的事实",
+                    "scope": "global",
+                    "content": "较早记下的事实",
+                    "target": "global/profile",
+                }
+            ],
+        )
+    async with session_factory() as session:
+        await MemoryUpdateRepository(session).record(
+            conversation_id=conv_new,
+            user_id=uid,
+            items=[
+                {
+                    "action": "update",
+                    "file": "偏好",
+                    "section": "",
+                    "scope": "global",
+                    "content": "较新的偏好",
+                    "target": "global/preferences",
+                }
+            ],
+        )
+
+    r = await client.get("/v1/users/me/memory/updates")
+    assert r.status_code == 200, r.text
+    updates = r.json()["updates"]
+    assert len(updates) == 2
+    # Newest-first, each carrying its own source conversation.
+    assert updates[0]["conversation_id"] == conv_new
+    assert updates[1]["conversation_id"] == conv_old
+    # Item detail (with the leaf deep-link target) round-trips for the feed rows.
+    assert updates[0]["items"][0]["content"] == "较新的偏好"
+    assert updates[0]["items"][0]["target"] == "global/preferences"
+    assert updates[1]["items"][0]["file"] == "画像"
+
+
+async def test_memory_updates_feed_isolated_per_user(
+    client, new_client, make_invite, session_factory
+):
+    # One user's memory activity must never leak into another's feed (private per-user data).
+    from agentcore.db.repositories import MemoryUpdateRepository, UserRepository
+
+    code = await make_invite("INV-MEM-7")
+    await _register_and_login(client, code, "mem7a")
+    async with session_factory() as session:
+        owner = await UserRepository(session).get_by_username("mem7a")
+        assert owner is not None
+    async with session_factory() as session:
+        await MemoryUpdateRepository(session).record(
+            conversation_id=str(uuid.uuid4()),
+            user_id=owner.user_id,
+            items=[{"action": "add", "file": "画像", "scope": "global", "content": "私密"}],
+        )
+
+    # A different user sees an empty feed — the row is scoped to its owner.
+    async with new_client() as other:
+        code2 = await make_invite("INV-MEM-8")
+        await _register_and_login(other, code2, "mem7b")
+        r = await other.get("/v1/users/me/memory/updates")
+        assert r.status_code == 200, r.text
+        assert r.json()["updates"] == []
+
+
 async def test_memory_files_require_auth(client):
     assert (await client.get("/v1/users/me/memory/files/profile")).status_code == 401
     assert (await client.get("/v1/users/me/memory/projects")).status_code == 401
     assert (await client.get("/v1/users/me/memory/topics")).status_code == 401
+    assert (await client.get("/v1/users/me/memory/updates")).status_code == 401

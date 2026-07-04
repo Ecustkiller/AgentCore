@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useDebateRoomStore } from "./debateRoom";
 
 /**
  * Unified conversation side panel (前端UX设计.md §十) — the chat's single
@@ -6,6 +7,8 @@ import { create } from "zustand";
  *
  *  - a fixed, non-closable 「工作区」 home tab (the cloud↔local mode bar + the
  *    files body, with 快照 / 交接 as on-demand overlays), always first;
+ *  - while a debate room is focused on canvas, a fixed 「裁判台」 tab (态势 / 记分 /
+ *    掌舵) sits after 工作区 — not part of `tabs`, same as the home tab;
  *  - a closable detail tab per drill: a run-detail tab for each inline-graph
  *    worker node, or a content tab for an endpoint bubble (提问 / 最终回答) the
  *    canvas surfaces here (no chat column alongside, 前端UX设计.md §五/§六).
@@ -32,6 +35,16 @@ export const SIDE_PANEL_MAX_TABS = MAX_TABS;
 
 /** Reserved id of the fixed 「工作区」 home tab (always first, never closes). */
 export const WORKSPACE_TAB_ID = "workspace";
+
+/** Reserved id of the fixed 「裁判台」 tab (辩论室放大态时出现，承 DebateHud，不可关闭). */
+export const DEBATE_HUD_TAB_ID = "debate-hud";
+
+/** After the last closable detail tab closes: 裁判台 when a debate room is focused, else 工作区. */
+function homeTabAfterDetailClose(): string {
+  return useDebateRoomStore.getState().target
+    ? DEBATE_HUD_TAB_ID
+    : WORKSPACE_TAB_ID;
+}
 
 const clampWidth = (w: number): number =>
   Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(w)));
@@ -131,7 +144,7 @@ interface SidePanelState {
    * filtered at render against the live projection). The 工作区 home tab is implicit
    * and is NOT part of this array. */
   tabs: DetailTab[];
-  /** Active tab: `WORKSPACE_TAB_ID` for the home tab, otherwise a detail tab id.
+  /** Active tab: `WORKSPACE_TAB_ID` / `DEBATE_HUD_TAB_ID` for fixed tabs, else a detail tab id.
    * Defaults to the workspace home so a manual open lands on the project files. */
   activeTabId: string;
   /**
@@ -146,8 +159,10 @@ interface SidePanelState {
   /** Close a detail tab; falls back to a neighbour tab, else the 工作区 home.
    * Never closes the panel (the home tab is always there). */
   closeTab: (id: string) => void;
-  /** Activate a tab (`WORKSPACE_TAB_ID` or a detail tab id). */
+  /** Activate a tab (`WORKSPACE_TAB_ID`, `DEBATE_HUD_TAB_ID`, or a detail tab id). */
   setActiveTab: (id: string) => void;
+  /** Reveal the panel on the 裁判台 tab (辩论室 auto-surface / 掌舵边界). */
+  showDebateHudTab: () => void;
   /**
    * Pin a run (of a specific message's turn) and reveal it. The inline graph
    * highlights whatever run tab is active for that turn, so opening / switching
@@ -226,7 +241,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       if (s.activeTabId === id) {
         // Fall back to the neighbour detail tab (next, else previous), else home.
         const next = tabs[idx] ?? tabs[idx - 1] ?? null;
-        activeTabId = next ? next.id : WORKSPACE_TAB_ID;
+        activeTabId = next ? next.id : homeTabAfterDetailClose();
       }
       return { tabs, activeTabId };
     });
@@ -264,7 +279,7 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
       const activeStillThere = tabs.some((t) => t.id === s.activeTabId);
       const activeTabId = activeStillThere
         ? s.activeTabId
-        : (tabs[tabs.length - 1]?.id ?? WORKSPACE_TAB_ID);
+        : (tabs[tabs.length - 1]?.id ?? homeTabAfterDetailClose());
       return { tabs, activeTabId };
     });
   },
@@ -277,6 +292,11 @@ export const useSidePanelStore = create<SidePanelState>((set, get) => ({
   showWorkspace: () => {
     persist(OPEN_KEY, "true");
     set({ open: true, activeTabId: WORKSPACE_TAB_ID });
+  },
+
+  showDebateHudTab: () => {
+    persist(OPEN_KEY, "true");
+    set({ open: true, activeTabId: DEBATE_HUD_TAB_ID });
   },
 
   showFile: (path, name) => {

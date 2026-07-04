@@ -62,6 +62,7 @@ export function ConversationCanvas() {
     zoomedTurn,
     zoomAutoplay,
     zoomView,
+    zoomComparePair,
     zoomShown,
     openZoom,
     exitZoom,
@@ -220,6 +221,7 @@ export function ConversationCanvas() {
             turnId={zoomedTurn}
             autoplay={zoomAutoplay}
             initialView={zoomView}
+            initialComparePair={zoomComparePair}
             onClose={exitZoom}
           />
         </div>

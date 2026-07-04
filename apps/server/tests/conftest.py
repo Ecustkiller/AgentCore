@@ -82,3 +82,37 @@ def pytest_configure(config: pytest.Config) -> None:
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+class LogSpy:
+    """A drop-in replacement for a module's structlog ``logger`` that records every
+    ``logger.info`` / ``.warning`` / ``.error`` / ``.debug`` call as ``(event, kwargs)``.
+
+    Use via ``monkeypatch.setattr(some_module, "logger", LogSpy())`` to assert on a
+    structured log line's FIELDS deterministically. This is the reliable alternative to
+    ``structlog.testing.capture_logs`` here: ``cache_logger_on_first_use=True`` (core/
+    logging.py) caches a module logger's bound methods on first use, so once an earlier
+    test has exercised a module's logger, ``capture_logs`` no longer intercepts it. Swapping
+    the module attribute sidesteps that entirely (config- and order-independent). Same idiom
+    as ``test_source_domains._LogSpy``, hoisted here for the decision-observability tests.
+    """
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def _record(self, event: str, *args: object, **kwargs: object) -> None:
+        self.events.append((event, dict(kwargs)))
+
+    info = _record
+    warning = _record
+    error = _record
+    debug = _record
+
+    def get(self, event: str) -> dict:
+        """Return the kwargs of the one logged ``event`` (asserts exactly one was logged)."""
+        matches = [kw for name, kw in self.events if name == event]
+        assert len(matches) == 1, (
+            f"expected exactly one {event!r} log, got {len(matches)} "
+            f"(events: {[n for n, _ in self.events]})"
+        )
+        return matches[0]

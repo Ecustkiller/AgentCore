@@ -22,6 +22,7 @@ import { join } from "node:path";
 import {
   SIDECAR_CHANNELS,
   type SidecarCancelRequest,
+  type SidecarRunRedirectRequest,
   type SidecarInference,
   type SidecarListPausedRequest,
   type SidecarPausedTurn,
@@ -483,6 +484,8 @@ export class SidecarManager {
         history: req.history ?? [],
         // 续辩种子（结构化补轮·B）：原样透传给引擎（None=普通回合）。引擎宽容解析，故无需主进程校验。
         ...(req.debateSeed ? { debateSeed: req.debateSeed } : {}),
+        // 对话级自定义指令：原样透传（缺省 = 无）。引擎经 params.get("instructions") 注入系统提示。
+        ...(req.instructions ? { instructions: req.instructions } : {}),
         // Re-send the current cloud-proxy token every turn: the sidecar is long-lived
         // but the token rotates (12h TTL), so the engine adopts the fresh one per turn
         // (initialize-time creds would otherwise 401 after expiry).
@@ -570,6 +573,22 @@ export class SidecarManager {
       await entry.client.request("cancel", { turnId: req.turnId });
     } catch {
       // 进程已退出 / 回合已结束——取消本就无意义，吞掉。
+    }
+  }
+
+  /** 用户中途改某个 worker 的方向（队列入队；Step 2 由 scheduler 消费）。 */
+  async runRedirect(req: SidecarRunRedirectRequest): Promise<void> {
+    const entry = this.entries.get(entryKey(req.rootId, req.subpath));
+    if (!entry) return;
+    try {
+      await entry.client.request("runRedirect", {
+        conversationId: req.conversationId,
+        executionId: req.executionId,
+        runId: req.runId,
+        feedback: req.feedback,
+      });
+    } catch {
+      // sidecar 不可达时静默——与 cancel 一致。
     }
   }
 
@@ -664,6 +683,19 @@ export function registerSidecarIpc(): void {
     );
     return manager.respond(req);
   });
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.runRedirect,
+    (_e, req: SidecarRunRedirectRequest) => {
+      assertShape(
+        SIDECAR_CHANNELS.runRedirect,
+        req,
+        ["rootId", "conversationId", "executionId", "runId", "feedback"],
+        ["subpath"],
+      );
+      return manager.runRedirect(req);
+    },
+  );
 
   ipcMain.handle(
     SIDECAR_CHANNELS.resume,

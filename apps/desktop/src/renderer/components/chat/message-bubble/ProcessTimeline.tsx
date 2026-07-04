@@ -16,24 +16,26 @@ import type {
   PlanReviewDisplay,
 } from "@/stores/conversation";
 import type { ExecutionJournal } from "@/stores/execution";
+import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import type { Citation, ProcessStep } from "@/types/events";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment } from "react";
 import { ThinkingDots, ThinkingHeader } from "./Thinking";
 
 function InlineReasoning({
   text,
   streaming,
+  persistKey,
 }: {
   text: string;
   streaming: boolean;
+  /** 持久化键（`${messageId}:reason:${i}`）：给了才把「思考过程开合」跨卸载/刷新记住；缺省走会话态。 */
+  persistKey?: string | null;
 }) {
-  const [expanded, setExpanded] = useState(streaming);
-  const prevStreaming = useRef(streaming);
-
-  useEffect(() => {
-    if (prevStreaming.current && !streaming) setExpanded(false);
-    prevStreaming.current = streaming;
-  }, [streaming]);
+  // 「直播中自动展开、收场后按保存值」（Q3）——不再收场强制收起并遗忘。
+  const [expanded, toggle] = useStreamAwareDisclosure(
+    persistKey ?? null,
+    streaming,
+  );
 
   return (
     <div>
@@ -42,7 +44,7 @@ function InlineReasoning({
         expanded={expanded}
         streamingLabel="正在思考…"
         doneLabel="思考过程"
-        onToggle={() => setExpanded((v) => !v)}
+        onToggle={toggle}
       />
       {expanded && (
         <div className="mt-1.5 pl-3">
@@ -58,14 +60,26 @@ function ProcessRow({
   streaming,
   citations,
   onCitationClick,
+  turnKey,
+  rowIndex,
 }: {
   step: ProcessStep;
   streaming: boolean;
   citations: Citation[];
   onCitationClick: (n: number) => void;
+  /** 回合作用域（= messageId）：给了才持久化本行的折叠态；缺省走会话态。 */
+  turnKey?: string;
+  /** 本行在时间线的稳定序号（append-only）——推理行按序号做键，工具行按 step.id。 */
+  rowIndex: number;
 }) {
   if (step.kind === "reasoning") {
-    return <InlineReasoning text={step.text} streaming={streaming} />;
+    return (
+      <InlineReasoning
+        text={step.text}
+        streaming={streaming}
+        persistKey={turnKey ? `${turnKey}:reason:${rowIndex}` : null}
+      />
+    );
   }
   if (step.kind === "content") {
     return (
@@ -79,7 +93,7 @@ function ProcessRow({
   }
   // Positional markers (team/checkpoint/ask/plan_review) are resolved in the timeline
   // map, never routed here — only a `tool` step reaches this tail.
-  if (step.kind === "tool") return <ToolLine step={step} />;
+  if (step.kind === "tool") return <ToolLine step={step} turnKey={turnKey} />;
   return null;
 }
 
@@ -172,6 +186,8 @@ export function ProcessTimeline({
               key={i}
               tools={node.tools}
               isStreaming={live}
+              turnKey={messageId}
+              groupIndex={i}
             />
           );
         }
@@ -184,6 +200,8 @@ export function ProcessTimeline({
             streaming={live}
             citations={citations}
             onCitationClick={onCitationClick}
+            turnKey={messageId}
+            rowIndex={i}
           />
         );
       })}

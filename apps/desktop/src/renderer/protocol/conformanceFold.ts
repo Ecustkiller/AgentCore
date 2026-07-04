@@ -326,7 +326,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       default:
         // message_start / turn_saved / title_generated / followups_generated /
         // board_op_required / board_read_required / tool_progress / tool_use_progress /
-        // workspace_op_required / workspace_promoted / handoff_* — not part of the normalized
+        // workspace_op_required / handoff_* — not part of the normalized
         // judge state (tool_use_progress is transport-only 工具执行阶段进度: live-stream phase,
         // never journaled, so it never rides a vector and carries no ProjectedTurn state).
         break;
@@ -414,6 +414,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       ts: n.ts,
       status: n.status,
       supersedes: n.supersedes,
+      ...(n.source ? { source: n.source } : {}),
     })),
   };
 }

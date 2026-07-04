@@ -8,75 +8,15 @@ alwaysApply: false
 
 # 配色 token 规范
 
-只用语义 token，颜色由主题统一定义。**禁止**硬编码任何具体颜色值。
+只用语义 token，颜色由主题统一定义。完整 token 表与规格 → [`UI-Pattern索引.md` §配色 token](/docs/04-前端/UI-Pattern索引.md)。
 
 ## 单一定义源
 
-OKLCH 语义色单源：**`packages/design-tokens/`**
-
-| 文件 | 用途 |
-|---|---|
-| `tokens.css` | 桌面 `:root` + `.dark`（由 `globals.css` `@import`） |
-| `mobile-light.css` | 手机用途映射浅色（由 `styles.css` `@import`） |
-
-桌面 Tailwind 映射仍在 `apps/desktop/src/renderer/styles/globals.css` 的 `@theme inline`。需要新颜色 → 先加进 `packages/design-tokens/tokens.css`，再视需要映射 Tailwind 类。
-
-## 语义 token
-
-| 用途 | token | 典型类 |
-|---|---|---|
-| 品牌 / 主 CTA / 活跃 / 运行中 / 信息提示 | `primary` `primary-foreground` | `bg-primary` `text-primary` |
-| 成功 / 已完成（绿） | `success` `success-foreground` | `text-success` `ring-success` |
-| 警告 / 检查点 / 待裁决（琥珀） | `warning` `warning-foreground` | `text-warning` `bg-warning/10` |
-| 错误 / 失败 / 停止（红） | `destructive` `destructive-foreground` | `text-destructive` |
-| 闲置 / 等待 / 次要文本 / 浅灰表面 | `muted` `muted-foreground` | `text-muted-foreground` `bg-muted` |
-| hover 表面 / 选中底色（**中性，非状态色**） | `accent` `accent-foreground` | `hover:bg-accent` |
-| 表面 / 文本 / 描边 | `background` `foreground` `border` | `bg-background` `border-border` |
-| 卡片 / 浮层 | `card` / `popover`（→ `background`） | `bg-card` `bg-popover`；靠 `border` + `shadow` 分层 |
-| 表单 / 焦点环 | `input`（→ `border`）`ring`（→ `primary`） | `border-input` `ring-primary` |
-| 侧栏专属 | `sidebar` `sidebar-foreground` `sidebar-accent(-foreground)` `sidebar-border` | `bg-sidebar` `bg-sidebar-accent` |
-| shadcn 兼容别名 | `secondary`（→ `muted`） | `bg-secondary` 等同 `bg-muted` |
-
-## 执行状态 → token（统一映射，勿再分叉）
-
-| 状态 | token |
-|---|---|
-| `pending` / `ready` / `cancelled` | `muted` / `muted-foreground` |
-| `running` | `primary`（品牌蓝） |
-| `completed` | `success`（绿） |
-| `failed` | `destructive`（红） |
-| 检查点 / 待裁决 | `warning`（琥珀） |
-
-## 分类色板（非状态语义，定义在 tokens.css）
-
-除上表语义 token，`globals.css` 另有**分类用途**的裸 `--*` 变量（同一 OKLCH 亮度带，读作一个家族）——**仅供对应场景内联使用**（`var(--*)`），不进 `@theme inline`、不做 Tailwind 类：
-
-- **代码高亮** `--syntax-*`：代码块着色。
-- **角色身份** `--agent-1..8`：协作图队员头像的「身份色」，按角色名 hash 取一格（`lib/agentIdentity.ts`）。**身份 ≠ 状态**——身份只画在头像盘，运行状态仍走上表状态色。新增/调整 → 改 `packages/design-tokens/tokens.css`。
-- **产物 / 目录分类** `--artifact-*` `--catalog-*`：工具箱创作工具磁贴、能力图鉴分类图标（`lib/catalogColors.ts`）。**分类 ≠ 状态**——仅启动器/目录层扫视识别，不进 Tailwind 类、内联 `var(--*)` + `color-mix`。
-
-## 跨端（桌面 + 手机）· 品牌不变量
-
-两端是同一产品。token 层唯一的**硬约束 = 跨端品牌不变量必须一致**：
-
-- **品牌色 hue 255**；状态色语义 hue 固定：成功 152 / 警告 65 / 错误 27 / 品牌蓝 255。精确 L/C 值以 **`packages/design-tokens/tokens.css`** 为准（桌面 `:root` + `.dark`；手机 `mobile-light.css` 仅浅色用途映射）。
-- 改品牌 / 状态色 → **只改 `packages/design-tokens/`**，桌面与手机通过 `@import` 自动同步。
-- **手机端暂不做暗色模式**（明确决策，非待办）：手机端是桌面减能力层的瘦客户端，浅色已满足当前需求，暗色为纯增量样式、需要再单独决策。故手机 `styles.css` 只维护 `:root` 一套浅色值、**不引入 `.dark` / `prefers-color-scheme` 分支**；桌面 `.dark` 不要求手机镜像。
-
-实现方式两端不同（各自全新建，符合 `cross-platform-frontend`）：
-
-| 端 | 配色实现 |
-|---|---|
-| 桌面 | Tailwind v4 + `@import @agentcore/design-tokens/tokens.css` + `globals.css` `@theme inline` |
-| 手机 | `@import @agentcore/design-tokens/mobile-light.css` + 裸 `var(--*)` |
+OKLCH 语义色单源：**`packages/design-tokens/`**（`tokens.css` 桌面 / `mobile-light.css` 手机）。需要新颜色 → 先加进 `packages/design-tokens/tokens.css`，再视需要映射 Tailwind 类。
 
 ## 禁止
 
-- **硬编码调色板与 hex**：`bg-blue-500`、`text-red-600`、`#3B82F6`、`bg-[#...]`。唯一彩色出口是上表 token。
-- **`hsl(var(--…))` 包裹**：token 已是 OKLCH，`hsl()` 会产出非法值。内联样式直接写 `var(--primary)`；类名优先用语义工具类（如 `accent-primary` 而非 `accent-[…]`）。
-- **拿 `accent` 当成功色**：`accent` 是中性 hover 表面。「已完成 / 成功」一律 `success`（曾误用为灰，已修正）。
+- **硬编码调色板与 hex**：`bg-blue-500`、`text-red-600`、`#3B82F6`、`bg-[#...]`。唯一彩色出口是语义 token。
+- **`hsl(var(--…))` 包裹**：token 已是 OKLCH，`hsl()` 会产出非法值。
+- **拿 `accent` 当成功色**：`accent` 是中性 hover 表面。成功一律 `success`。
 - **绕过 token 新建散色变量**：先评估能否复用，必须新增则进 `packages/design-tokens/tokens.css`。
-
-## 组件 tone 预设
-
-L2/L3 共享的 Tailwind 类组合 → `apps/desktop/src/renderer/components/ui/tone-presets.ts`（`DecisionCard`、`Badge`、`CheckpointCard` 等消费）。改卡片色调优先改此文件。

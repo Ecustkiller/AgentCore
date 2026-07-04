@@ -875,6 +875,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Duplicate Conversation
+         * @description Clone a conversation into a brand-new one carrying a copy of its transcript (克隆对话).
+         *
+         *     Owner-scoped (404 for a non-owner / missing source). The copy inherits the source's
+         *     folder (so it stays in the same project/workspace), 质量档 (``model_mode``) and
+         *     local-first intent, with a「… 副本」title, then bulk-copies the source's messages via
+         *     ``MessageRepository.copy_all`` (content-level fields only — see that method for what is
+         *     intentionally not carried over, e.g. the team-graph replay journal). Returns the new
+         *     conversation summary with its (copied) message count so the sidebar can insert it.
+         */
+        post: operations["duplicate_conversation_v1_conversations__conversation_id__duplicate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}/export": {
         parameters: {
             query?: never;
@@ -918,15 +945,8 @@ export interface paths {
          * Move Conversation To Folder
          * @description Move a conversation into a folder, or out of one (``folder_id=null``).
          *
-         *     A non-null target must be one of the user's own live folders (else 404), so
-         *     a chat can never be filed into someone else's or a deleted folder.
-         *
-         *     A conversation's workspace is fixed once it starts (双模式工作区 §九 ⑩): its
-         *     folder decides which workspace directory it runs in — and whether cloud or
-         *     local — so moving a *started* chat across folders would silently re-point it at
-         *     a different directory and orphan its accumulated files. Such a move is refused
-         *     with 409; only an unsent (zero-message) chat is freely fileable. A no-op move
-         *     (already in the target) never changes the workspace, so it is always allowed.
+         *     A non-null target must be one of the user's own live folders (else 404). Folder
+         *     is pure sidebar grouping — moving never changes the conversation's scratch path.
          */
         patch: operations["move_conversation_to_folder_v1_conversations__conversation_id__folder_patch"];
         trace?: never;
@@ -1182,6 +1202,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/messages/{message_id}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set Message Feedback
+         * @description Set / clear the user's 点赞/点踩 on an assistant reply (回复反馈).
+         *
+         *     Owner-scoped like delete (prove conversation ownership first, then update only within
+         *     it, so a guessed cross-user ``message_id`` can't be rated — IDOR-safe). ``feedback`` is
+         *     ``"up"`` / ``"down"`` to rate, or ``null`` to clear the rating (toggling the same side
+         *     off). 404 when the message isn't in this conversation.
+         */
+        patch: operations["set_message_feedback_v1_conversations__conversation_id__messages__message_id__feedback_patch"];
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}/messages/{message_id}/regenerate": {
         parameters: {
             query?: never;
@@ -1267,6 +1312,30 @@ export interface paths {
         get: operations["get_conversation_recovery_v1_conversations__conversation_id__recovery_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/run-redirect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Run Redirect
+         * @description Queue a mid-flight redirect for one worker in the current delegate batch.
+         *
+         *       The CEO is blocked inside ``delegate`` — this fire-and-forget endpoint is the
+         *     user直控 channel (Step 2: WaveScheduler cancels the run and cold re-starts with
+         *       ``steer``). Step 1 only enqueues and logs from the drive loop.
+         */
+        post: operations["submit_run_redirect_v1_conversations__conversation_id__run_redirect_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1456,36 +1525,20 @@ export interface paths {
         };
         /**
          * Get Workspace Binding
-         * @description Report a conversation's resolved workspace mode (local vs cloud).
-         *
-         *     Backs the desktop's mode badge: cloud by default, local once its governing
-         *     scope (folder when filed, else the conversation) is bound to a desktop root.
+         * @description Report a conversation's resolved scratch workspace mode (local vs cloud).
          */
         get: operations["get_workspace_binding_v1_conversations__conversation_id__workspace_binding_get"];
         /**
          * Bind Workspace
-         * @description Bind the conversation's workspace to a desktop FS root (switch to local).
+         * @description Bind the conversation's scratch workspace to a desktop FS root (switch to local).
          *
-         *     文件夹即工作区: a binding lives on the folder (= 工作区), shared by its siblings.
-         *     A 裸聊 has no folder yet, so "打开本地文件夹" lazily mints one (named after the
-         *     chat) and files the conversation into it before binding — the explicit-promote
-         *     counterpart to writing a file (§懒建). Idempotent — re-binding overwrites the
-         *     stored root id.
-         *
-         *     The 裸聊 mint goes through the shared ``promote_conversation_folder`` so it's
-         *     serialized + idempotent with the other promotion paths (工作区对称化 D1a §并发提升):
-         *     if a panel write or the turn's first write already minted this chat's folder, bind
-         *     reuses it (applying the requested root) instead of minting a second one.
+         *     Idempotent — re-binding overwrites the stored root id on the conversation row.
          */
         put: operations["bind_workspace_v1_conversations__conversation_id__workspace_binding_put"];
         post?: never;
         /**
          * Unbind Workspace
-         * @description Unbind the conversation's workspace (fall back to cloud).
-         *
-         *     Clears the binding on the folder (= 工作区), returning every conversation in it
-         *     to cloud — which the ``folder`` scope in the response signals. A 裸聊 has no
-         *     workspace to unbind, so it is already cloud (a no-op).
+         * @description Unbind the conversation's scratch workspace (fall back to cloud).
          */
         delete: operations["unbind_workspace_v1_conversations__conversation_id__workspace_binding_delete"];
         options?: never;
@@ -1504,9 +1557,7 @@ export interface paths {
         put?: never;
         /**
          * Clone Repo Into Workspace
-         * @description Clone a public git repository into the conversation's workspace (决策⑤).
-         *
-         *     Cloning into a 裸聊 promotes it into a folder workspace first (§懒建).
+         * @description Clone a public git repository into the conversation's scratch workspace (决策⑤).
          */
         post: operations["clone_repo_into_workspace_v1_conversations__conversation_id__workspace_clone_post"];
         delete?: never;
@@ -1526,7 +1577,7 @@ export interface paths {
         put?: never;
         /**
          * Create Workspace Dir
-         * @description Create a directory in the conversation's workspace (promotes a 裸聊 first).
+         * @description Create a directory in the conversation's scratch workspace.
          */
         post: operations["create_workspace_dir_v1_conversations__conversation_id__workspace_dirs_post"];
         delete?: never;
@@ -1547,7 +1598,7 @@ export interface paths {
          * @description Read a workspace file for in-panel editing (full text + mtime CAS baseline).
          *
          *     Distinct from the raw-bytes download (preview, truncated): editing needs the whole
-         *     file or a save would drop the tail. 裸聊 has no workspace yet, so 404.
+         *     file or a save would drop the tail.
          */
         get: operations["read_workspace_file_for_edit_v1_conversations__conversation_id__workspace_edit__path__get"];
         /**
@@ -1555,8 +1606,7 @@ export interface paths {
          * @description Conditionally write editor text back to a workspace file (mtime CAS).
          *
          *     The write-time CAS (``baseline_mtime_ms``) makes a save that raced an Agent turn
-         *     return ``conflict`` instead of clobbering it. Writing to a 裸聊 promotes it into a
-         *     folder workspace first (文件夹即工作区 §懒建), like upload.
+         *     return ``conflict`` instead of clobbering it.
          */
         put: operations["write_workspace_file_v1_conversations__conversation_id__workspace_edit__path__put"];
         post?: never;
@@ -1575,7 +1625,7 @@ export interface paths {
         };
         /**
          * List Workspace Files
-         * @description List the files in the conversation's workspace (top level or recursive).
+         * @description List the files in the conversation's scratch workspace (top level or recursive).
          */
         get: operations["list_workspace_files_v1_conversations__conversation_id__workspace_files_get"];
         put?: never;
@@ -1595,7 +1645,7 @@ export interface paths {
         };
         /**
          * Download Workspace File
-         * @description Download a single file from the conversation's workspace.
+         * @description Download a single file from the conversation's scratch workspace.
          */
         get: operations["download_workspace_file_v1_conversations__conversation_id__workspace_files__path__get"];
         /**
@@ -1604,14 +1654,13 @@ export interface paths {
          *
          *     The body is the file bytes (no multipart); ``path`` is the workspace-relative
          *     target. Bounded by ``workspace_upload_max_bytes`` so one request can't exhaust
-         *     memory. A path that escapes the workspace is rejected (422). Uploading to a 裸聊
-         *     promotes it into a folder workspace first (文件夹即工作区 §懒建).
+         *     memory. A path that escapes the workspace is rejected (422).
          */
         put: operations["upload_workspace_file_v1_conversations__conversation_id__workspace_files__path__put"];
         post?: never;
         /**
          * Delete Workspace File
-         * @description Delete a file or directory from the conversation's workspace.
+         * @description Delete a file or directory from the conversation's scratch workspace.
          */
         delete: operations["delete_workspace_file_v1_conversations__conversation_id__workspace_files__path__delete"];
         options?: never;
@@ -1688,40 +1737,9 @@ export interface paths {
         put?: never;
         /**
          * Move Workspace File
-         * @description Move/rename a file or directory within the conversation's workspace.
+         * @description Move/rename a file or directory within the conversation's scratch workspace.
          */
         post: operations["move_workspace_file_v1_conversations__conversation_id__workspace_move_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/conversations/{conversation_id}/workspace/promote": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Promote Workspace
-         * @description Lazily promote a 裸聊 into its folder workspace WITHOUT writing a file — the
-         *     server hook for the desktop's *client-side* DeferredWorkspace (工作区对称化 D1a).
-         *
-         *     A desktop 裸聊's panel can't write a **local** workspace over the cloud REST file
-         *     routes (those are server-backed; a local write must go through desktop IPC). So
-         *     before its first panel write the client calls this to mint the folder — locality
-         *     decided by ``conv.local_container_root_id`` via the shared ``_conv_write_folder``
-         *     (== the team's first write / the bind endpoint's explicit promote) — then writes
-         *     via IPC into the returned ``local_root_id`` + ``local_subpath``. Idempotent: an
-         *     already-foldered conversation just returns its existing folder. The client applies
-         *     the same cache patches the ``workspace_promoted`` SSE event would (re-group the
-         *     chat + surface the new card), since a REST call carries no live stream.
-         */
-        post: operations["promote_workspace_v1_conversations__conversation_id__workspace_promote_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1857,11 +1875,10 @@ export interface paths {
         post?: never;
         /**
          * Delete Folder Permanent
-         * @description 彻底删除项目：立即清除文件夹、其下全部对话及云端工作区文件。
+         * @description 彻底删除文件夹：移除分组容器，成员对话解除分组后保留。
          *
          *     Distinct from ``DELETE /{folder_id}`` (soft-delete container with retention).
-         *     Local-bound projects: server metadata + cloud copies only — files on the
-         *     user's machine are not deleted.
+         *     Member conversations keep their scratch workspaces; only the grouping row is removed.
          */
         delete: operations["delete_folder_permanent_v1_folders__folder_id__permanent_delete"];
         options?: never;
@@ -2276,6 +2293,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/model-modes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Model Modes
+         * @description Built-in presets + the user's custom modes + the user's resolved default ref.
+         */
+        get: operations["list_model_modes_v1_model_modes_get"];
+        put?: never;
+        /** Create Model Mode */
+        post: operations["create_model_mode_v1_model_modes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/model-modes/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Model Mode Catalog
+         * @description The option space for building a custom mode: configurable team roles + the
+         *     operator-allowed models. 经济worker is shown read-only (locked to its base model).
+         */
+        get: operations["model_mode_catalog_v1_model_modes_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/model-modes/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Default Model Mode
+         * @description Set (or clear with null) the user's account-default 质量档.
+         */
+        put: operations["set_default_model_mode_v1_model_modes_default_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/model-modes/{mode_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Model Mode */
+        delete: operations["delete_model_mode_v1_model_modes__mode_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Model Mode */
+        patch: operations["update_model_mode_v1_model_modes__mode_id__patch"];
+        trace?: never;
+    };
     "/v1/realtime": {
         parameters: {
             query?: never;
@@ -2612,6 +2709,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/users/me/memory/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Memory Updates
+         * @description The signed-in user's recent memory updates across ALL conversations (记忆动态 feed).
+         *
+         *     Newest-first; the offline consolidation pass appends a row whenever it changed a memory
+         *     file, so this is the「AI 最近学了什么」stream that powers the editor's「最近更新」view.
+         *     Declared before ``/files/{kind}`` / ``/topics/{slug}`` so the static segment wins the
+         *     route match.
+         */
+        get: operations["list_my_memory_updates_v1_users_me_memory_updates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/{user_id}/avatar": {
         parameters: {
             query?: never;
@@ -2645,13 +2767,7 @@ export interface paths {
         };
         /**
          * List Workspaces
-         * @description Enumerate the user's workspaces (文件夹即工作区: a workspace **is** a folder).
-         *
-         *     Every folder is a project, always listed — local ones unconditionally (the
-         *     server can't see their files, and a binding is explicit intent, not noise),
-         *     cloud ones carrying a ``has_files`` flag. Conversations are not workspaces: a
-         *     裸聊 has no space until it is promoted into a folder, after which it appears here
-         *     as that folder.
+         * @description Enumerate conversation scratch workspaces that have files or a local binding.
          */
         get: operations["list_workspaces_v1_workspaces_get"];
         put?: never;
@@ -3929,6 +4045,8 @@ export interface components {
             folder_id?: string | null;
             /** Id */
             id: string;
+            /** Instructions */
+            instructions?: string | null;
             /** Local Container Root Id */
             local_container_root_id?: string | null;
             /**
@@ -4002,8 +4120,6 @@ export interface components {
         CreateFolderRequest: {
             /** Local Dir */
             local_dir?: string | null;
-            /** Local Root Id */
-            local_root_id?: string | null;
             /** Name */
             name: string;
         };
@@ -4011,6 +4127,15 @@ export interface components {
         CreateInviteRequest: {
             /** Expires In Days */
             expires_in_days?: number | null;
+        };
+        /** CreateModelModeRequest */
+        CreateModelModeRequest: {
+            /** Assignments */
+            assignments?: {
+                [key: string]: string;
+            };
+            /** Name */
+            name: string;
         };
         /**
          * CreateShareRequest
@@ -4207,8 +4332,6 @@ export interface components {
             id: string;
             /** Local Dir */
             local_dir: string | null;
-            /** Local Root Id */
-            local_root_id?: string | null;
             /** Name */
             name: string;
         };
@@ -4223,10 +4346,6 @@ export interface components {
             id: string;
             /** Local Dir */
             local_dir: string | null;
-            /** Local Root Id */
-            local_root_id?: string | null;
-            /** Local Subpath */
-            local_subpath?: string | null;
             /** Name */
             name: string;
             /**
@@ -4510,6 +4629,28 @@ export interface components {
             topics: string[];
         };
         /**
+         * MemoryUpdateFeedItem
+         * @description One offline-consolidation pass in the cross-conversation「记忆动态」feed.
+         *
+         *     Same applied-change shape the conversation-tail card renders (``items`` with per-leaf
+         *     deep-links), but carries ``conversation_id`` so the feed can link back to the source
+         *     conversation — the feed cuts ACROSS conversations, so it must say where each change
+         *     came from. Projected from a ``memory_updates`` row via ``from_attributes``.
+         */
+        MemoryUpdateFeedItem: {
+            /** Conversation Id */
+            conversation_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Items */
+            items?: components["schemas"]["MemoryUpdateItemView"][];
+        };
+        /**
          * MemoryUpdateItemView
          * @description One applied memory change in a 记忆已更新 card (Agent记忆与知识系统 §1.6).
          *
@@ -4564,6 +4705,18 @@ export interface components {
             id: string;
             /** Items */
             items?: components["schemas"]["MemoryUpdateItemView"][];
+        };
+        /**
+         * MemoryUpdatesFeedResponse
+         * @description The user's recent memory updates across ALL conversations, NEWEST-first.
+         *
+         *     Backs the「AI 记忆」editor's「最近更新」view (记忆编辑器的跨对话动态视图): the write side
+         *     of memory is per-user long-term data, so its natural home is one chronological stream —
+         *     a question the per-conversation tail card cannot answer.
+         */
+        MemoryUpdatesFeedResponse: {
+            /** Updates */
+            updates: components["schemas"]["MemoryUpdateFeedItem"][];
         };
         /** MemoryWriteRequest */
         MemoryWriteRequest: {
@@ -4630,6 +4783,10 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Feedback */
+            feedback?: string | null;
+            /** Followups */
+            followups?: string[];
             /** Id */
             id: string;
             /** Reasoning Content */
@@ -4676,6 +4833,68 @@ export interface components {
             memory_updates?: components["schemas"]["MemoryUpdateView"][];
             /** Total */
             total: number;
+        };
+        /**
+         * ModelModeCatalog
+         * @description The operator-bounded option space for building a custom mode: which team roles
+         *     exist (and whether each is user-configurable) and which models may be picked.
+         */
+        ModelModeCatalog: {
+            /** Models */
+            models: string[];
+            /** Roles */
+            roles: components["schemas"]["ModelRoleOption"][];
+        };
+        /**
+         * ModelModePreset
+         * @description A built-in, read-only 质量档 (economy / quality).
+         */
+        ModelModePreset: {
+            /** Assignments */
+            assignments: {
+                [key: string]: string;
+            };
+            /** Key */
+            key: string;
+        };
+        /**
+         * ModelModeSummary
+         * @description A user-defined custom 质量档.
+         */
+        ModelModeSummary: {
+            /** Assignments */
+            assignments: {
+                [key: string]: string;
+            };
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /**
+         * ModelModesResponse
+         * @description Everything the picker needs: built-in presets + the user's custom modes + the
+         *     user's resolved default ref.
+         */
+        ModelModesResponse: {
+            /** Custom */
+            custom: components["schemas"]["ModelModeSummary"][];
+            /** Default Mode */
+            default_mode: string;
+            /** Presets */
+            presets: components["schemas"]["ModelModePreset"][];
+        };
+        /**
+         * ModelRoleOption
+         * @description A team role the user may configure in a custom mode (catalog).
+         */
+        ModelRoleOption: {
+            /** Configurable */
+            configurable: boolean;
+            /** Locked Model */
+            locked_model?: string | null;
+            /** Role */
+            role: string;
         };
         /**
          * MoveConversationRequest
@@ -4770,11 +4989,23 @@ export interface components {
          *
          *     Carries the assistant outcome the local pipeline returned (content / reasoning /
          *     citations / replay ``runs`` / the pipeline ``message_id`` so streamed and stored
-         *     ids agree). The display token totals ride on ``Message.usage``. Spend is NOT sent:
-         *     a sidecar turn's LLM calls are metered authoritatively at the cloud inference proxy
-         *     (``/v1/inference``, Slice 4a), so this write-back persists content only.
+         *     ids agree). The FULL token snapshot rides on ``Message.usage`` (input / output /
+         *     reasoning / cache hit / cache miss + rounds) so a reloaded sidecar turn's meta row
+         *     matches a cloud turn's. Spend is NOT sent: a sidecar turn's LLM calls are metered
+         *     authoritatively at the cloud inference proxy (``/v1/inference``, Slice 4a), so this
+         *     write-back persists content only.
          */
         RecordTurnRequest: {
+            /**
+             * Cache Hit Tokens
+             * @default 0
+             */
+            cache_hit_tokens: number;
+            /**
+             * Cache Miss Tokens
+             * @default 0
+             */
+            cache_miss_tokens: number;
             /** Citations */
             citations?: components["schemas"]["Citation"][];
             /**
@@ -4796,6 +5027,11 @@ export interface components {
             output_tokens: number;
             /** Reasoning Content */
             reasoning_content?: string | null;
+            /**
+             * Reasoning Tokens
+             * @default 0
+             */
+            reasoning_tokens: number;
             /**
              * Rounds
              * @default 0
@@ -5253,12 +5489,33 @@ export interface components {
             debate_seed?: components["schemas"]["DebateSeedInput"] | null;
         };
         /**
+         * SetDefaultModeRequest
+         * @description Set (or clear with null) the user's default 质量档.
+         */
+        SetDefaultModeRequest: {
+            /** Mode */
+            mode?: string | null;
+        };
+        /**
          * SetLlmKeyRequest
          * @description Store the user's own DeepSeek API key (BYOK).
          */
         SetLlmKeyRequest: {
             /** Api Key */
             api_key: string;
+        };
+        /**
+         * SetMessageFeedbackRequest
+         * @description Set or clear the user's 点赞/点踩 on an assistant message (回复反馈).
+         *
+         *     ``feedback`` is ``"up"`` / ``"down"`` to rate the reply, or ``null`` to clear the
+         *     rating back to 未评价 (toggling the same side off). The route does not restrict by
+         *     role — rating is only meaningful on assistant replies, but a value on any row is a
+         *     harmless store.
+         */
+        SetMessageFeedbackRequest: {
+            /** Feedback */
+            feedback?: ("up" | "down") | null;
         };
         /** ShareListResponse */
         ShareListResponse: {
@@ -5376,6 +5633,34 @@ export interface components {
             truncated: boolean;
             /** Workspace Path */
             workspace_path?: string | null;
+        };
+        /**
+         * SubmitRunRedirectRequest
+         * @description User mid-flight steer for one running worker (中间可见性 Phase 2a).
+         *
+         *     Queued while ``delegate`` drives; the scheduler drains and applies cancel + re-run
+         *     in a later step. Does not pause the turn (parallel siblings keep running).
+         */
+        SubmitRunRedirectRequest: {
+            /** Execution Id */
+            execution_id: string;
+            /** Feedback */
+            feedback: string;
+            /** Run Id */
+            run_id: string;
+        };
+        /** SubmitRunRedirectResponse */
+        SubmitRunRedirectResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Queued
+             * @description Pending redirect count for this execution after enqueue.
+             */
+            queued: number;
         };
         /**
          * SuspensionKind
@@ -5628,6 +5913,8 @@ export interface components {
         UpdateConversationRequest: {
             /** Archived */
             archived?: boolean | null;
+            /** Instructions */
+            instructions?: string | null;
             /** Model Mode */
             model_mode?: string | null;
             /** Pinned */
@@ -5658,6 +5945,15 @@ export interface components {
             muted?: boolean | null;
             /** Pinned */
             pinned?: boolean | null;
+        };
+        /** UpdateModelModeRequest */
+        UpdateModelModeRequest: {
+            /** Assignments */
+            assignments?: {
+                [key: string]: string;
+            } | null;
+            /** Name */
+            name?: string | null;
         };
         /**
          * UpdateProfileRequest
@@ -7631,6 +7927,41 @@ export interface operations {
             };
         };
     };
+    duplicate_conversation_v1_conversations__conversation_id__duplicate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     export_conversation_v1_conversations__conversation_id__export_get: {
         parameters: {
             query?: {
@@ -8048,6 +8379,46 @@ export interface operations {
             };
         };
     };
+    set_message_feedback_v1_conversations__conversation_id__messages__message_id__feedback_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                message_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMessageFeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     regenerate_message_v1_conversations__conversation_id__messages__message_id__regenerate_post: {
         parameters: {
             query?: never;
@@ -8150,6 +8521,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TurnRecoveryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_run_redirect_v1_conversations__conversation_id__run_redirect_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitRunRedirectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SubmitRunRedirectResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8997,41 +9407,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    promote_workspace_v1_conversations__conversation_id__workspace_promote_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                conversation_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FolderSummary"];
                 };
             };
             /** @description Validation Error */
@@ -10189,6 +10564,220 @@ export interface operations {
             };
         };
     };
+    list_model_modes_v1_model_modes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelModesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_model_mode_v1_model_modes_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateModelModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelModeSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    model_mode_catalog_v1_model_modes_catalog_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelModeCatalog"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_default_model_mode_v1_model_modes_default_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetDefaultModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_model_mode_v1_model_modes__mode_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                mode_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_model_mode_v1_model_modes__mode_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                mode_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateModelModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelModeSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     realtime_firehose_v1_realtime_get: {
         parameters: {
             query?: never;
@@ -10845,6 +11434,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryWriteResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_memory_updates_v1_users_me_memory_updates_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryUpdatesFeedResponse"];
                 };
             };
             /** @description Validation Error */

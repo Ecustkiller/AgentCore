@@ -249,6 +249,11 @@ def resolve_local_binding(
 ) -> LocalBinding | None:
     """Resolve a conversation's local-mode binding from its folder's root id.
 
+    .. deprecated::
+        Folder refactor removed folder-level bindings. Use
+        :func:`agentcore.conversation.scratch.resolve_conversation_local_binding`
+        with the conversation row's ``local_root_id`` / ``local_subpath`` instead.
+
     The 双模式工作区 §七 rule, in one place: **文件夹 = 工作区**, so a binding lives
     only on the folder. A conversation **in a folder** is local iff that folder is
     bound; a **folderless (裸聊)** conversation has no workspace yet, so it is always
@@ -269,6 +274,9 @@ def resolve_local_binding(
 
 def default_workspace_name(title: str | None, *, fallback_text: str | None = None) -> str:
     """Name for an auto-created workspace when a 裸聊 first produces files (B 懒建).
+
+    .. deprecated::
+        Promotion was removed in the Folder refactor. Retained for legacy callers only.
 
     Uses the conversation's title so the new folder reads as "this chat's project".
     The title is generated async (post-turn), so at promote time (mid-turn, on the

@@ -3,13 +3,10 @@
 import asyncio
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
-    get_cost_event_repo,
-    get_db,
 )
 from agentcore.api.schemas import (
     PausedTurnSummary,
@@ -21,6 +18,7 @@ from agentcore.api.sse import sse_response
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import regenerate_chat, resume_chat
 from agentcore.core.errors import NotFoundError
+from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import ConversationRepository, CostEventRepository
 from agentcore.runtime.checkpoints import CheckpointResponse
 from agentcore.runtime.events import EventSink
@@ -64,9 +62,6 @@ async def regenerate_message(
     message_id: str,
     body: RegenerateMessageRequest,
     user: AuthUser,
-    session: AsyncSession = Depends(get_db),
-    conv_repo: ConversationRepository = Depends(get_conversation_repo),
-    cost_repo: CostEventRepository = Depends(get_cost_event_repo),
 ):
     """Re-run a turn from an existing user message via SSE.
 
@@ -81,8 +76,12 @@ async def regenerate_message(
     ``send_message``.
     """
     await enforce_user_message_rate_limit(user.user_id)
-    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+
+    async with async_session_factory() as session:
+        conv_repo = ConversationRepository(session)
+        cost_repo = CostEventRepository(session)
+        await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+        credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
 
     sink = EventSink()
 
@@ -138,9 +137,6 @@ async def resume_message(
     message_id: str,
     body: ResumeTurnRequest,
     user: AuthUser,
-    session: AsyncSession = Depends(get_db),
-    conv_repo: ConversationRepository = Depends(get_conversation_repo),
-    cost_repo: CostEventRepository = Depends(get_cost_event_repo),
 ):
     """Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).
 
@@ -153,8 +149,12 @@ async def resume_message(
     — all BEFORE the claim, so a refused turn keeps its resumable frame.
     """
     await enforce_user_message_rate_limit(user.user_id)
-    await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
+
+    async with async_session_factory() as session:
+        conv_repo = ConversationRepository(session)
+        cost_repo = CostEventRepository(session)
+        await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+        credentials = await _preflight_turn_llm(session=session, user=user, cost_repo=cost_repo)
 
     suspension = await claim_paused_turn(message_id, conversation_id=conversation_id)
     if suspension is None:

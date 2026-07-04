@@ -38,6 +38,7 @@ from agentcore.runtime.runs.constants import (
     MAX_DELEGATION_DEPTH,
     POST_NOTE_TOOL_NAME,
     READ_NOTES_TOOL_NAME,
+    REQUEST_DELEGATE_TOOL_NAME,
 )
 from agentcore.runtime.runs.contract import ContractVerdict, check_contract, format_feedback
 from agentcore.runtime.runs.executor_context import (
@@ -58,18 +59,20 @@ from agentcore.runtime.runs.executor_shared import (
     _priced_failure,
     _react_and_capture,
     _registry_with,
+    _registry_without,
     _retry_message,
 )
 from agentcore.runtime.runs.notewall import NoteWall, format_notes_for_injection
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.scheduler import RunExecutor
 from agentcore.runtime.runs.serialize import (
-    debrief_from_content,
+    debrief_from_transcript,
     escalations_from_transcript,
     files_touched_from_transcript,
     run_final_fact,
 )
 from agentcore.runtime.runs.types import ContextBlock, RunPhase, RunSpec, RunState
+from agentcore.tools.builtin.request_delegate import RequestDelegateTool, WorkerDelegationState
 from agentcore.tools.protocol import EscalationChannel, EscalationOutcome, ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.write_claims import WriteCoordinator
@@ -94,6 +97,8 @@ def build_agent_executor(
     escalation_timeout: float = 0.0,
     escalation_armed: bool = False,
     note_wall: NoteWall | None = None,
+    collaboration: bool = True,
+    team_brief: str | None = None,
 ) -> RunExecutor:
     """Build a :class:`RunExecutor` bound to one turn's wiring.
 
@@ -128,6 +133,14 @@ def build_agent_executor(
     autonomous turns) ⇒ a worker's blocking escalate degrades to non-blocking. A
     nested sub-team inherits the same wiring (its captain's DelegateTool forwards it),
     so a depth-2 worker can reach the user with no depth special-case.
+
+    ``collaboration`` gates the 团队便签墙 soft-collaboration layer (§2.2 通). A fan-out
+    of a COLLABORATING team (delegate) keeps it ``True``: one shared note wall + the
+    post / read / amend_note tools on every worker so siblings align mid-flight. An
+    ADVERSARIAL / independent batch passes ``False`` (debate: 正方 vs 反方 are opponents,
+    not teammates, and already get the moderator's round-gated cross-side channel) ⇒ NO
+    wall is built and the note tools are neither granted nor offered, so nothing posts,
+    no ``team_note_posted`` fires, and opponents can't read each other's notes.
     """
     # None (standalone / tests) = the economy base set; production passes the
     # turn's resolved 质量档 from the delegate tool.
@@ -148,9 +161,12 @@ def build_agent_executor(
     # silos can build on each other's evolving work. Scoped to this fan-out: only the siblings
     # actually running in parallel here share it, never the whole tree. The delegate driver
     # (drive.py) OWNS it and passes it in so the CEO finalize can read the outstanding notes for
-    # 合·对账 (§2.3); standalone callers (debate / tests) pass None → one is created here, so
-    # their behaviour is unchanged (去特例).
-    note_wall = note_wall or NoteWall()
+    # 合·对账 (§2.3); tests pass None → one is created here. A NON-collaborative batch
+    # (collaboration=False, e.g. debate — 正反方是对手不是队友) gets NO wall: the note tools are
+    # neither granted nor offered below, so nothing posts, no team_note_posted fires, and
+    # opponents can't read each other's notes (debate's legit cross-side channel is the
+    # moderator's round-gated feedback, not this wall).
+    note_wall = (note_wall or NoteWall()) if collaboration else None
 
     # Per-turn snapshot of the workspace's PRE-EXISTING files (uploads / prior turns),
     # shared by every worker in this delegate batch. "What was already on disk when the
@@ -355,18 +371,18 @@ def build_agent_executor(
                     )
                 ),
             )
-            # 阶段2 嵌套子任务: hand this worker its own delegate tool only when it
-            # opted in and is still above the depth cap — then it leads a sub-team
-            # (one extra level) and is told so via the captain identity. Otherwise
-            # it is a leaf worker on the shared registry with no delegate.
+            # 阶段2 嵌套子任务: hand this worker delegation tools per its can_delegate mode —
+            # True = delegate+replan at start (过渡兼容); "auto" = request_delegate only until
+            # the worker applies mid-run; False = leaf (no delegation tools).
             worker_tools = tools
             # spec.tools is None for an unrestricted worker → react_loop offers all
             # team tools (the fail-safe default); a non-empty list restricts to those.
             allowed_tools = spec.tools
             identity = _WORKER_IDENTITY
+            delegation_state: WorkerDelegationState | None = None
             if (
                 delegate_factory is not None
-                and spec.can_delegate
+                and spec.can_delegate is True
                 and spec.depth < MAX_DELEGATION_DEPTH
             ):
                 # The lead gets BOTH its own delegate AND the companion replan bound to
@@ -382,27 +398,69 @@ def build_agent_executor(
                     None if spec.tools is None else [*spec.tools, *lead_subteam.tool_names]
                 )
                 identity = _WORKER_CAPTAIN_IDENTITY
+            elif (
+                delegate_factory is not None
+                and spec.can_delegate == "auto"
+                and spec.depth < MAX_DELEGATION_DEPTH
+            ):
+                delegation_state = WorkerDelegationState(
+                    registry=tools,
+                    allowed_tools=allowed_tools,
+                    current_round=[0],
+                )
+                request_tool = RequestDelegateTool(
+                    depth=spec.depth,
+                    max_rounds=profile.max_rounds,
+                    delegate_factory=delegate_factory,
+                    state=delegation_state,
+                )
+                worker_tools = _registry_with(tools, request_tool)
+                delegation_state.registry = worker_tools
+                if allowed_tools is not None and REQUEST_DELEGATE_TOOL_NAME not in allowed_tools:
+                    allowed_tools = [*allowed_tools, REQUEST_DELEGATE_TOOL_NAME]
+                identity = _WORKER_IDENTITY.replace(
+                    "你不能再向下委派。",
+                    "如果你发现任务可以并行拆分，可以调用 request_delegate 申请派人权。",
+                )
+            # 非协作批次 (collaboration=False, e.g. debate): strip the 团队便签 tools from the
+            # offered registry so even an UNRESTRICTED worker (allowed_tools=None → "offer all
+            # team tools") is never handed post/read/amend — "no collaboration" means no channel
+            # at all, not "no channel only for a least-privilege worker". Restricted workers are
+            # covered by skipping the grants below; this closes the unrestricted path too.
+            if not collaboration:
+                worker_tools = _registry_without(
+                    worker_tools,
+                    POST_NOTE_TOOL_NAME,
+                    READ_NOTES_TOOL_NAME,
+                    AMEND_NOTE_TOOL_NAME,
+                )
             # escalate is a worker's always-available upward channel — a safety primitive,
             # not a capability the CEO restricts away. An unrestricted worker (None) is
             # already offered it; a least-privilege worker (non-empty allow-list) must
             # keep it explicitly, so it can still flag a blocker instead of guessing.
             if allowed_tools is not None and ESCALATE_TOOL_NAME not in allowed_tools:
                 allowed_tools = [*allowed_tools, ESCALATE_TOOL_NAME]
-            # post_note rides the same posture (便签墙 broadcast, §2.2 通): a worker's
-            # always-available channel to align with siblings, so a least-privilege
-            # worker keeps it explicitly too (off a team it's a clean no-op).
-            if allowed_tools is not None and POST_NOTE_TOOL_NAME not in allowed_tools:
-                allowed_tools = [*allowed_tools, POST_NOTE_TOOL_NAME]
-            # read_notes is post_note's pull dual (便签墙 on-demand read, §2.4 变·worker 的「拉」):
-            # same always-available posture so even a least-privilege worker can look up what a
-            # sibling already decided (off a team it cleanly reports「无队友可看」).
-            if allowed_tools is not None and READ_NOTES_TOOL_NAME not in allowed_tools:
-                allowed_tools = [*allowed_tools, READ_NOTES_TOOL_NAME]
-            # amend_note completes the trio (便签会过期 → 改写/作废, §2.2 supersession): a worker
-            # must always be able to correct its OWN stale note so a sibling never builds on a
-            # dead decision, so a least-privilege worker keeps it too (off a team a clean no-op).
-            if allowed_tools is not None and AMEND_NOTE_TOOL_NAME not in allowed_tools:
-                allowed_tools = [*allowed_tools, AMEND_NOTE_TOOL_NAME]
+            # 团队便签三件套 (post/read/amend_note) 仅协作批次授予 (便签墙 broadcast, §2.2 通): a
+            # collaborating team keeps them always-available even for a least-privilege worker so
+            # siblings align mid-flight; a non-collaborative batch (collaboration=False, e.g.
+            # debate) skips them entirely — they are also stripped from worker_tools above, so an
+            # unrestricted worker in such a batch isn't offered them either (opponents get no
+            # 便签 channel).
+            if collaboration:
+                if allowed_tools is not None and POST_NOTE_TOOL_NAME not in allowed_tools:
+                    allowed_tools = [*allowed_tools, POST_NOTE_TOOL_NAME]
+                # read_notes is post_note's pull dual (§2.4 变·worker 的「拉」): even a
+                # least-privilege worker can look up what a sibling already decided.
+                if allowed_tools is not None and READ_NOTES_TOOL_NAME not in allowed_tools:
+                    allowed_tools = [*allowed_tools, READ_NOTES_TOOL_NAME]
+                # amend_note completes the trio (便签会过期 → 改写/作废, §2.2 supersession): a
+                # worker must be able to correct its OWN stale note so a sibling never builds on
+                # a dead decision.
+                if allowed_tools is not None and AMEND_NOTE_TOOL_NAME not in allowed_tools:
+                    allowed_tools = [*allowed_tools, AMEND_NOTE_TOOL_NAME]
+            if delegation_state is not None:
+                delegation_state.allowed_tools = allowed_tools
+                delegation_state.registry = worker_tools
             # Produce → check contract → re-prompt with the specific shortfalls.
             # This content-quality retry is intentionally separate from the
             # scheduler's infra-failure retry (RunPolicy.on_failure): they answer
@@ -444,6 +502,7 @@ def build_agent_executor(
                 identity=identity,
                 index_paths=index_paths,
                 blocks_sink=received_blocks,
+                team_brief=team_brief,
             )
             # 上下文传递可视化: emit the received context right after assembly (before the
             # LLM react loop) so the frontend's run detail lights up its「收到的上下文」as
@@ -457,6 +516,8 @@ def build_agent_executor(
             # advances this run's cursor (each note delivered at most once). Empty (solo / no
             # fresh notes) → [] → a no-op round, identical to today's behaviour.
             def _pull_notes(_rid: str = spec.run_id) -> list[LLMMessage]:
+                if note_wall is None:  # 非协作批次 (collaboration=False): no wall → nothing to push
+                    return []
                 fresh = note_wall.new_for(_rid)
                 if not fresh:
                     return []
@@ -478,7 +539,10 @@ def build_agent_executor(
                     approval_gate=approval_gate,
                     usage_sink=inflight,
                     on_round_begin=_pull_notes,
+                    round_sink=delegation_state.current_round if delegation_state else None,
                 )
+                if delegation_state is not None and delegation_state.lead_subteam is not None:
+                    lead_subteam = delegation_state.lead_subteam
                 run_usage = run_usage + round_usage
                 run_rounds += round_rounds
                 # This pass's usage is now folded into run_usage via its return value;
@@ -521,11 +585,12 @@ def build_agent_executor(
                 if settled is not None:
                     esc["status"] = settled["status"]
                     esc["answer"] = settled["answer"]
-            # 完工交接简报: harvest the worker's「## 交接简报」wrap-up once (best-effort; None
-            # when absent) so downstream dep injection / CEO synthesis read the author's own
-            # 结论 + 建议下一步 instead of re-deriving them from prose. Carried on BOTH terminal
-            # states (a worker that failed its contract can still have produced a useful brief).
-            debrief = debrief_from_content(content)
+            # 完工交接简报: harvest the worker's structured brief from its ``handoff`` tool call
+            # (best-effort; None when it finished without one) so downstream dep injection / CEO
+            # synthesis read the author's own 结论 + 建议下一步 instead of re-deriving them from
+            # prose. Carried on BOTH terminal states (a worker that failed its contract can still
+            # have submitted a useful brief before failing).
+            debrief = debrief_from_transcript(messages)
             if not verdict.ok and _is_hard_failure(content, contract):
                 reason = "；".join(verdict.failures)
                 logger.info("contract.failed", run_id=spec.run_id, failures=verdict.failures)
