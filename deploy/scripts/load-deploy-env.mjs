@@ -63,6 +63,21 @@ export function run(label, cmd, args, opts = {}) {
   }
 }
 
+const WRANGLER_PAGES_DEPLOY = join(__dir, "wrangler-pages-deploy.mjs");
+
+/** Upload a dist folder to Cloudflare Pages via a fresh Node child (Windows-safe). */
+export function runWranglerPagesDeploy(project, distPath, { branch = "main" } = {}) {
+  console.log(`→ wrangler pages deploy → ${project} (subprocess)`);
+  const result = spawnSync(
+    process.execPath,
+    [WRANGLER_PAGES_DEPLOY, project, distPath, "--branch", branch],
+    { cwd: REPO_ROOT, stdio: "inherit", env: process.env, shell: false },
+  );
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
+}
+
 export function cfEnv() {
   const token = requireEnv("CLOUDFLARE_API_TOKEN");
   return {
