@@ -31,13 +31,19 @@ Two editor surfaces sit on top, both reusing the workspace markdown editor (CAS 
   body deletes a note (mirrors clearing a leaf), which drops it from the 记忆主题目录.
 """
 
+from datetime import datetime
 from enum import StrEnum
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from agentcore.api.dependencies import AuthUser, get_user_repo
-from agentcore.db.repositories import UserRepository
+from agentcore.api.dependencies import (
+    AuthUser,
+    get_memory_update_repo,
+    get_user_repo,
+)
+from agentcore.api.schemas import MemoryUpdateItemView
+from agentcore.db.repositories import MemoryUpdateRepository, UserRepository
 from agentcore.memory import (
     CORE_MEMORY_FILE,
     PREFERENCES_MEMORY_FILE,
@@ -127,6 +133,34 @@ class MemoryTopicsResponse(BaseModel):
     topics: list[str]
 
 
+class MemoryUpdateFeedItem(BaseModel):
+    """One offline-consolidation pass in the cross-conversation「记忆动态」feed.
+
+    Same applied-change shape the conversation-tail card renders (``items`` with per-leaf
+    deep-links), but carries ``conversation_id`` so the feed can link back to the source
+    conversation — the feed cuts ACROSS conversations, so it must say where each change
+    came from. Projected from a ``memory_updates`` row via ``from_attributes``.
+    """
+
+    id: str
+    conversation_id: str
+    items: list[MemoryUpdateItemView] = Field(default_factory=list)
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MemoryUpdatesFeedResponse(BaseModel):
+    """The user's recent memory updates across ALL conversations, NEWEST-first.
+
+    Backs the「AI 记忆」editor's「最近更新」view (记忆编辑器的跨对话动态视图): the write side
+    of memory is per-user long-term data, so its natural home is one chronological stream —
+    a question the per-conversation tail card cannot answer.
+    """
+
+    updates: list[MemoryUpdateFeedItem]
+
+
 @router.get("", response_model=MemoryResponse)
 async def get_my_memory(user: AuthUser) -> MemoryResponse:
     """Load the signed-in user's long-term memory + whether memory is enabled."""
@@ -200,6 +234,25 @@ async def list_my_memory_projects(user: AuthUser) -> MemoryProjectsResponse:
     """
     store = default_memory_store()
     return MemoryProjectsResponse(folders=await store.project_scopes(user.user_id))
+
+
+@router.get("/updates", response_model=MemoryUpdatesFeedResponse)
+async def list_my_memory_updates(
+    user: AuthUser,
+    mem_update_repo: MemoryUpdateRepository = Depends(get_memory_update_repo),
+    limit: int = 50,
+) -> MemoryUpdatesFeedResponse:
+    """The signed-in user's recent memory updates across ALL conversations (记忆动态 feed).
+
+    Newest-first; the offline consolidation pass appends a row whenever it changed a memory
+    file, so this is the「AI 最近学了什么」stream that powers the editor's「最近更新」view.
+    Declared before ``/files/{kind}`` / ``/topics/{slug}`` so the static segment wins the
+    route match.
+    """
+    rows = await mem_update_repo.list_for_user(user.user_id, limit=limit)
+    return MemoryUpdatesFeedResponse(
+        updates=[MemoryUpdateFeedItem.model_validate(row) for row in rows]
+    )
 
 
 @router.get("/topics", response_model=MemoryTopicsResponse)

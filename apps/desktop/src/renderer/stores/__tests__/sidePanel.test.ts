@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { type ExecutionPlan, useExecutionStore } from "../execution";
 import {
   type DetailTab,
+  DEBATE_HUD_TAB_ID,
   SIDE_PANEL_MAX_TABS,
   SIDE_PANEL_MAX_WIDTH,
   SIDE_PANEL_MIN_WIDTH,
@@ -10,6 +11,7 @@ import {
   runDetailTabId,
   useSidePanelStore,
 } from "../sidePanel";
+import { useDebateRoomStore } from "../debateRoom";
 
 const panel = () => useSidePanelStore.getState();
 const exec = () => useExecutionStore.getState();
@@ -44,6 +46,7 @@ beforeEach(() => {
     activeTabId: WORKSPACE_TAB_ID,
   });
   useExecutionStore.setState({ byId: {} });
+  useDebateRoomStore.setState({ target: null, collapsed: false });
 });
 
 describe("setWidth", () => {
@@ -119,6 +122,16 @@ describe("closeTab", () => {
     expect(panel().activeTabId).toBe(WORKSPACE_TAB_ID);
   });
 
+  it("falls back to the 裁判台 tab when the last run tab is closed inside a debate room", () => {
+    useDebateRoomStore.setState({
+      target: { turnId: MID, conversationId: "conv-1", interactive: true },
+      collapsed: false,
+    });
+    panel().openTab(runDetail("run-1"));
+    panel().closeTab(tabId("run-1"));
+    expect(panel().activeTabId).toBe(DEBATE_HUD_TAB_ID);
+  });
+
   it("keeps the active tab when a different tab is closed", () => {
     panel().openTab(runDetail("run-1"));
     panel().openTab(runDetail("run-2"));
@@ -151,6 +164,14 @@ describe("openPanel", () => {
     panel().openPanel();
     expect(panel().open).toBe(true);
     expect(panel().activeTabId).toBe(tabId("run-1"));
+  });
+});
+
+describe("showDebateHudTab", () => {
+  it("reveals the panel on the 裁判台 tab", () => {
+    panel().showDebateHudTab();
+    expect(panel().open).toBe(true);
+    expect(panel().activeTabId).toBe(DEBATE_HUD_TAB_ID);
   });
 });
 

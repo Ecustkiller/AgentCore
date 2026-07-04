@@ -23,6 +23,7 @@ from agentcore.runtime.events import (
     run_output_delta,
     run_output_reset,
     run_plan,
+    run_progress,
     run_reasoning_delta,
     run_started,
     run_tool_progress,
@@ -71,8 +72,9 @@ def _multi_agent_delegate() -> list[SSEEvent]:
         ),
         run_started("r1", "w1"),
         run_output_delta("r1", "w1", "调研结论"),
-        # 完工交接简报: r1 authored a full「## 交接简报」— its summary(结论) is the display
-        # summary, the structured brief rides run_completed (surfaced in the run-detail 摘要).
+        # 完工交接简报: r1 submitted a 交接简报 via the handoff tool — its summary(结论) is the display
+        # summary, the structured brief rides run_completed (surfaced in the run-detail 摘要). The
+        # output stays the pure deliverable — the brief is never mixed into the prose.
         run_completed(
             "r1",
             "w1",
@@ -89,9 +91,14 @@ def _multi_agent_delegate() -> list[SSEEvent]:
                 "next_steps": "由撰写员据此产出定稿",
             },
         ),
+        # 进度里程碑 (run_progress): the WaveScheduler ticks completed/total as each run lands.
+        # Inert in ProjectedTurn (progress is derived from run states — the wire counter is a
+        # timeline marker only); emitted here so the coverage gate proves all three folds no-op
+        # it identically rather than diverging on a stray counter.
+        run_progress(1, 2),
         run_started("r2", "w2"),
         run_output_delta("r2", "w2", "成稿"),
-        # r2 authored no 交接简报 → debrief absent (the null-degrade branch): the run-detail
+        # r2 never called handoff → debrief absent (the null-degrade branch): the run-detail
         # falls back to the full 输出, and output_summary stays a plain scan line.
         run_completed(
             "r2",
@@ -103,6 +110,7 @@ def _multi_agent_delegate() -> list[SSEEvent]:
             usage=_USAGE,
             cost=_COST,
         ),
+        run_progress(2, 2),
         # delegate resolves only after the whole team finishes (it blocks the CEO round).
         tool_use_end("dc1", "delegate", success=True, output="团队完成 2 项任务。"),
         content_delta(" 团队已完成。"),
@@ -110,7 +118,7 @@ def _multi_agent_delegate() -> list[SSEEvent]:
     ]
 
 def _multi_agent_worker_failed_debrief() -> list[SSEEvent]:
-    """多 Agent：worker 未过契约（run_failed）但仍亲笔「## 交接简报」——失败节点也 surface 交接简报。
+    """多 Agent：worker 未过契约（run_failed）但仍调 handoff 提交了交接简报——失败节点也 surface 交接简报。
     验 run_failed 携 debrief 折到 run.debrief（run 详情在错误旁展示作者结论 + 建议下一步），
     而不是让失败运行只剩一条错误。progress = 0/1（失败终态不计入 completed）。"""
     agents = [
@@ -138,7 +146,7 @@ def _multi_agent_worker_failed_debrief() -> list[SSEEvent]:
         ),
         run_started("r1", "w1"),
         run_output_delta("r1", "w1", "初步调研，但缺少必需的引用来源"),
-        # 契约未过但产出 + 交接简报仍在：run_failed 携 debrief，run 详情在错误旁展示作者结论。
+        # 契约未过但产出 + handoff 交接简报仍在：run_failed 携 debrief，run 详情在错误旁展示作者结论。
         run_failed(
             "r1",
             "w1",
@@ -249,6 +257,13 @@ def _multi_agent_revision() -> list[SSEEvent]:
             cost=_COST,
         ),
         run_started("r1v2", "w1b", parent_run_id="r1", revision=2),
+        # 定向唤回热修：修订节点也 emit run_context——承载 CEO 喂给它的「修订要求」(revision 通道)，
+        # 于是非辩论 V2 节点的「收到的上下文」也有内容，而非空白（用户看到的 == LLM 吃到的）。
+        run_context(
+            "r1v2",
+            "w1b",
+            [_ctx_block("revision", "本次修订要求（定向唤回）", "补一段风险对冲，并收紧结论口径。")],
+        ),
         run_output_delta("r1v2", "w1b", "修订稿"),
         run_completed(
             "r1v2",
@@ -1485,6 +1500,159 @@ def _multi_agent_team_notes_amended() -> list[SSEEvent]:
     ]
 
 
+def _multi_agent_team_notes_ceo_seed() -> list[SSEEvent]:
+    """多 Agent·通·便签墙 Phase 2：CEO ``seed_notes`` + ``team_brief``。
+
+    主 Agent 在首波 worker 开跑前播种两条便签（``source=ceo``，``run_id=__ceo_seed__``），并行审查员
+    开局 ``run_context`` 还收到回合级 ``team_brief`` 块；其中一名审查员再贴 ``heads_up`` 警示。
+    验三端 fold：``teamNotes`` 保留 CEO 来源 + worker 便签顺序；``receivedContext`` 含 ``team_brief``。"""
+    agents = [
+        {
+            "id": "w1",
+            "role": "方向审查",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+        {
+            "id": "w2",
+            "role": "事实审查",
+            "model_preference": "fast",
+            "thinking": True,
+            "reasoning_effort": "high",
+        },
+    ]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "审查方向与受众", "depends_on": []},
+        {"id": "r2", "agent_id": "w2", "task": "核查事实与引用", "depends_on": []},
+    ]
+    brief = "受众：技术初学者；篇幅约 1500 字；风格科普向，避免公式堆砌。"
+    brief_block = _ctx_block(
+        "team_brief",
+        "团队共识（主 Agent 为本回合设定，全员遵循）",
+        brief,
+    )
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排并行审查。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {
+                "tasks": [{"role": "方向审查"}, {"role": "事实审查"}],
+                "seed_notes": [
+                    {"kind": "decision", "text": "整体方向：科普向，不讲推导"},
+                    {"kind": "heads_up", "text": "篇幅硬上限 1500 字"},
+                ],
+                "team_brief": brief,
+            },
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="简介稿并行审查",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        # CEO seed_notes land before the first worker wave (same batch wall).
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n0",
+            run_id="__ceo_seed__",
+            agent_id="ceo",
+            role="主 Agent",
+            kind="decision",
+            text="整体方向：科普向，不讲推导",
+            ts=1_699_999_998.0,
+            source="ceo",
+        ),
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n1",
+            run_id="__ceo_seed__",
+            agent_id="ceo",
+            role="主 Agent",
+            kind="heads_up",
+            text="篇幅硬上限 1500 字",
+            ts=1_699_999_999.0,
+            source="ceo",
+        ),
+        run_started("r1", "w1"),
+        run_context(
+            "r1",
+            "w1",
+            [
+                _ctx_block(
+                    "request",
+                    "原始用户请求（老板交给整个团队的目标，不一定全是你的活；你的具体职责见下方「你的任务」）",
+                    "写一篇向量数据库科普简介。",
+                ),
+                _ctx_block(
+                    "team_position",
+                    "你在团队中的位置",
+                    "并行队友：事实审查（核查事实与引用）。你的产出汇总给老板。",
+                ),
+                brief_block,
+                _ctx_block("task", "你的任务", "审查方向与受众"),
+            ],
+        ),
+        run_started("r2", "w2"),
+        run_context(
+            "r2",
+            "w2",
+            [
+                _ctx_block(
+                    "request",
+                    "原始用户请求（老板交给整个团队的目标，不一定全是你的活；你的具体职责见下方「你的任务」）",
+                    "写一篇向量数据库科普简介。",
+                ),
+                _ctx_block(
+                    "team_position",
+                    "你在团队中的位置",
+                    "并行队友：方向审查（审查方向与受众）。你的产出汇总给老板。",
+                ),
+                brief_block,
+                _ctx_block("task", "你的任务", "核查事实与引用"),
+            ],
+        ),
+        team_note_posted(
+            execution_id="exec1",
+            note_id="n2",
+            run_id="r1",
+            agent_id="w1",
+            role="方向审查",
+            kind="heads_up",
+            text="提个醒：开篇别堆公式，先讲直觉",
+            ts=1_700_000_001.0,
+        ),
+        run_output_delta("r1", "w1", "方向 OK"),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="方向审查完成",
+            duration_ms=900,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_output_delta("r2", "w2", "事实 OK"),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="事实审查完成",
+            duration_ms=950,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="并行审查完成。"),
+        content_delta(" 审查完成。"),
+        message_end(FinishReason.END_TURN, input_tokens=4100, output_tokens=780, cost=_COST),
+    ]
+
+
 VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_delegate": ("多 Agent：委派 2 队员，runs 树 + 进度 + 总账", _multi_agent_delegate),
     "multi_agent_team_notes": (
@@ -1495,8 +1663,12 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "多 Agent·通·便签墙·改写/作废：队员 改写(update)/作废(void) 自己贴过的便签，目标便签标 superseded/voided",
         _multi_agent_team_notes_amended,
     ),
+    "multi_agent_team_notes_ceo_seed": (
+        "多 Agent·通·便签墙 Phase 2：CEO seed_notes（source=ceo）+ team_brief 注入 worker run_context",
+        _multi_agent_team_notes_ceo_seed,
+    ),
     "multi_agent_worker_failed_debrief": (
-        "多 Agent：worker 未过契约（run_failed）但亲笔交接简报——失败节点也 surface debrief",
+        "多 Agent：worker 未过契约（run_failed）但调 handoff 交了交接简报——失败节点也 surface debrief",
         _multi_agent_worker_failed_debrief,
     ),
     "multi_agent_worker_tool": ("多 Agent：worker 工具调用 + run_tool_progress 实时态", _multi_agent_worker_tool),

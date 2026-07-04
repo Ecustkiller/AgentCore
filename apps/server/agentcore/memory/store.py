@@ -10,9 +10,10 @@ Phase 2 of「记忆文件夹化」(Agent记忆与知识系统 §1.4 / §5.3) add
 the phase-1 single-folder layout, both behind the same ``MemoryStore`` seam:
 
 - **作用域 (scope)**: a note lives either GLOBAL (the user's cloud root — injected into
-  every conversation) or under a PROJECT folder (only injected for conversations bound to
-  that folder). ``scope=None`` = global (the phase-1 behavior, unchanged → zero migration);
-  ``scope=<folder_id>`` = that project. 位置即作用域: complements §5.3, no manual switch.
+  every conversation) or under a PROJECT layer keyed by a manual sidebar ``folder_id``
+  (injected only when the conversation is in that group — D4 方案 1). ``scope=None`` =
+  global (the phase-1 behavior, unchanged → zero migration); ``scope=<folder_id>`` = that
+  group's project memory. 位置即作用域: complements §5.3, no manual switch.
 - **偏好/画像 二分**: the always-injected core splits into ``PREFERENCES_MEMORY_FILE``
   (沟通/工作习惯, soft, GLOBAL-only) and ``CORE_MEMORY_FILE`` (技术栈/关于用户的事实, can be
   global OR project). Different change-reasons → different files → different CAS.
@@ -35,8 +36,9 @@ logger = get_logger(__name__)
 
 
 # A memory note's SCOPE (Agent记忆与知识系统 §1.4): ``None`` = global (the user's cloud root,
-# injected into every conversation); a ``str`` is a ``folder_id`` = that project's scope
-# (injected only for conversations bound to that folder). 位置即作用域 — no manual switch.
+# injected into every conversation); a ``str`` is a ``folder_id`` = that manual group's
+# project scope (injected only when the conversation is in that sidebar group — D4 方案 1,
+# folder-refactor-design §8). 位置即作用域 — no manual switch.
 MemoryScope = str | None
 
 # The always-injected PROFILE core (§四「偏好/画像 二分」): durable facts ABOUT the user —
@@ -130,7 +132,7 @@ class MemoryStore(Protocol):
         ...
 
     async def project_scopes(self, user_id: str) -> list[str]:
-        """List ``folder_id``s whose PROJECT layer holds any memory (for the editor rail)."""
+        """List manual-group ``folder_id``s whose PROJECT layer holds any memory (editor rail)."""
         ...
 
 
@@ -174,9 +176,9 @@ class FileMemoryStore:
     def _scope_dir(self, user_id: str, scope: MemoryScope) -> Path:
         """The root folder for one (user, scope) layer.
 
-        Global = the user folder (phase-1 layout); a project = nested under the reserved
-        container so it stays isolated and invisible to the global ``list``. ``scope`` is a
-        server-issued ``folder_id`` UUID, but it is still per-segment sanitized.
+        Global = the user folder (phase-1 layout); a manual group = nested under the
+        reserved container so it stays isolated and invisible to the global ``list``.
+        ``scope`` is a user-created sidebar ``folder_id`` UUID, per-segment sanitized.
         """
         base = self._user_dir(user_id)
         if scope is None:

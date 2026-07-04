@@ -31,7 +31,6 @@ async def create_folder(
         user_id=user.user_id,
         name=body.name,
         local_dir=body.local_dir,
-        local_root_id=body.local_root_id,
     )
     return FolderSummary.model_validate(folder)
 
@@ -83,11 +82,10 @@ async def delete_folder_permanent(
     folder_id: str,
     user: AuthUser,
 ):
-    """彻底删除项目：立即清除文件夹、其下全部对话及云端工作区文件。
+    """彻底删除文件夹：移除分组容器，成员对话解除分组后保留。
 
     Distinct from ``DELETE /{folder_id}`` (soft-delete container with retention).
-    Local-bound projects: server metadata + cloud copies only — files on the
-    user's machine are not deleted.
+    Member conversations keep their scratch workspaces; only the grouping row is removed.
     """
     deleted = await permanent_delete_folder(folder_id=folder_id, user_id=user.user_id)
     if not deleted:

@@ -52,14 +52,24 @@
   --syntax-attr: oklch(0.52 0.12 220);
   --syntax-builtin: oklch(0.55 0.16 25);
 
-  --agent-1: oklch(0.58 0.14 20);
-  --agent-2: oklch(0.58 0.14 65);
-  --agent-3: oklch(0.58 0.14 110);
-  --agent-4: oklch(0.58 0.14 155);
-  --agent-5: oklch(0.58 0.14 200);
-  --agent-6: oklch(0.58 0.14 245);
-  --agent-7: oklch(0.58 0.14 290);
-  --agent-8: oklch(0.58 0.14 335);
+  /* 身份色（角色头像，非状态）：低彩度「安静底色」+ 色相全部避开状态色相
+   * (destructive 27 / warning 65 / success 152 / primary 255)，故一个绿/蓝头像
+   * 不会被误读成「已完成 / 运行中」。彩度 0.07 = 状态色的一半，确保身份永不冒充状态。
+   * 主要辨识仍靠字形 monogram，颜色只承载「同一拨人」的连续性。 */
+  --agent-1: oklch(0.58 0.07 95);
+  --agent-2: oklch(0.58 0.07 120);
+  --agent-3: oklch(0.58 0.07 180);
+  --agent-4: oklch(0.58 0.07 205);
+  --agent-5: oklch(0.58 0.07 230);
+  --agent-6: oklch(0.58 0.07 285);
+  --agent-7: oklch(0.58 0.07 310);
+  --agent-8: oklch(0.58 0.07 335);
+
+  /* 辩论二元对立（阵营色，非状态）：pro=蓝 / con=红，一眼可读 VS 对垒。
+   * 彩度 0.11 介于 agent(0.07) 与 status(~0.18+) 之间——比身份色更醒目、不像错误/运行徽章。
+   * 色相避开 status 带（primary 255 / destructive 27 / success 152 / warning 65）。 */
+  --debate-side-pro: oklch(0.58 0.11 225);
+  --debate-side-con: oklch(0.58 0.11 25);
 
   /* Creation-tool / catalog type identity (toolbox, file tree — not run status). */
   --artifact-doc: oklch(0.58 0.14 255);
@@ -133,14 +143,18 @@
   --syntax-attr: oklch(0.8 0.1 210);
   --syntax-builtin: oklch(0.78 0.14 25);
 
-  --agent-1: oklch(0.72 0.14 20);
-  --agent-2: oklch(0.72 0.14 65);
-  --agent-3: oklch(0.72 0.14 110);
-  --agent-4: oklch(0.72 0.14 155);
-  --agent-5: oklch(0.72 0.14 200);
-  --agent-6: oklch(0.72 0.14 245);
-  --agent-7: oklch(0.72 0.14 290);
-  --agent-8: oklch(0.72 0.14 335);
+  /* 身份色（暗色）：同亮度带低彩度 + 避开状态色相，见 :root 注释。 */
+  --agent-1: oklch(0.72 0.07 95);
+  --agent-2: oklch(0.72 0.07 120);
+  --agent-3: oklch(0.72 0.07 180);
+  --agent-4: oklch(0.72 0.07 205);
+  --agent-5: oklch(0.72 0.07 230);
+  --agent-6: oklch(0.72 0.07 285);
+  --agent-7: oklch(0.72 0.07 310);
+  --agent-8: oklch(0.72 0.07 335);
+
+  --debate-side-pro: oklch(0.72 0.11 225);
+  --debate-side-con: oklch(0.72 0.11 25);
 
   --artifact-doc: oklch(0.72 0.14 255);
   --artifact-mindmap: oklch(0.72 0.14 290);

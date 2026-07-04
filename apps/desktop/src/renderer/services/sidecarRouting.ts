@@ -1,6 +1,8 @@
 import { getConversations } from "@/hooks/useConversations";
-import { getFolders } from "@/hooks/useFolders";
+import { queryClient } from "@/lib/queryClient";
+import { workspaceKeys } from "@/lib/queryKeys";
 import { hasLocalEngine } from "@/lib/capabilities";
+import type { WorkspaceInfo } from "@/services/workspaces";
 import { getRuntime } from "@/stores/conversation";
 import { useUIStore } from "@/stores/ui";
 import type { SidecarHistoryEntry } from "@shared/sidecar-contract";
@@ -13,17 +15,16 @@ import type { SidecarHistoryEntry } from "@shared/sidecar-contract";
  * （见 `turns.sendTurn`），故本地引擎已毕业到**默认开**。
  *
  * 路由判定：会话绑定本机存在的本地根、本回合无附件、且开关有效（默认开，用户可在
- * `设置 → 模型配置` 关闭）时走 sidecar；裸聊 / 云端文件夹 / 带附件 / 显式关闭 → 维持云链路。
+ * `设置 → 模型配置` 关闭）时走 sidecar；无本地绑定 / 带附件 / 显式关闭 → 维持云链路。
  * 注意 sidecar 暂非真离线（LLM 仍经云推理代理）、被委派 worker 仍走审批门——这些是其限制，
  * 不再是 opt-in 的理由。
  */
 
 /**
- * 一次 sidecar 回合的寻址目标：本地容器根 id + 工作区子路径（工作区对称化 D1a）。
+ * 一次 sidecar 回合的寻址目标：本地容器根 id + 工作区子路径（conversation scratch）。
  *
- * `subpath` 空 = 该根自身（显式添加的本地项目，现行为）；非空 = 该容器根下懒建的 per 对话
- * 工作区子目录。主进程据 `rootId + subpath` 把 sidecar 进程绑定到 `容器根/子路径`（每个子路径
- * 工作区独立一进程），故子路径工作区的本地引擎跑在自己目录里，而非共享的容器根。
+ * `subpath` 空 = 该根自身；非空 = 该容器根下 per-conversation scratch 子目录。主进程据
+ * `rootId + subpath` 把 sidecar 进程绑定到 `容器根/子路径`。
  */
 export interface SidecarTarget {
   rootId: string;
@@ -67,37 +68,49 @@ export function isSidecarEnabled(): boolean {
   return hasLocalEngine() && useUIStore.getState().sidecarEnabled;
 }
 
+function scratchFromWorkspaceCache(
+  conversationId: string,
+): { rootId: string | null; subpath: string } | null {
+  const workspaces = queryClient.getQueryData<WorkspaceInfo[]>(
+    workspaceKeys.list,
+  );
+  const ws = workspaces?.find((w) => w.wsId === `conv:${conversationId}`);
+  if (!ws) return null;
+  return { rootId: ws.rootId, subpath: ws.subpath ?? "" };
+}
+
 /**
- * 解析一个会话「能用本地引擎」时的目标（容器根 id + 工作区子路径），**不看开关是否已开**——
+ * 解析一个会话「能用本地引擎」时的目标（容器根 id + scratch 子路径），**不看开关是否已开**——
  * 纯看会话有没有绑定一个本机确实存在的本地根。两处复用：① {@link resolveSidecarRoot} 在
  * 开关开时据此寻址；② {@link canConversationUseSidecar} 作为「该对话能否走本地引擎」的公共
  * 查询（与开关状态正交，供 UI 状态展示 / 启动探活等复用）。
  *
- * 取「会话 → 文件夹 → `localRootId` + `localSubpath`」（文件夹即工作区，绑定挂在文件夹上），
- * 再核对该根**确在本机**（否则属 §八「路径不存在」降级，交回云链路处理）。`subpath` 非空时
- * 主进程把 sidecar 绑定到 `容器根/子路径`（工作区对称化 D1a），故懒建的 per 对话本地工作区
- * 也能用本地引擎、且各跑在自己目录里。裸聊无文件夹 / 云端文件夹 / 根不在本机 → null。
+ * 从 conversation scratch 字段（经 workspace rail 缓存或 `localContainerRootId` 意向）解析，
+ * 再核对该根**确在本机**（否则属 §八「路径不存在」降级，交回云链路处理）。
  */
 async function resolveLocalTarget(
   conversationId: string,
 ): Promise<SidecarTarget | null> {
-  const folderId =
-    getConversations().find((c) => c.id === conversationId)?.folderId ?? null;
-  if (!folderId) return null;
-  const folder = getFolders().find((f) => f.id === folderId) ?? null;
-  const rootId = folder?.localRootId ?? null;
+  const conv =
+    getConversations().find((c) => c.id === conversationId) ?? null;
+  if (!conv) return null;
+
+  const cached = scratchFromWorkspaceCache(conversationId);
+  const rootId =
+    cached?.rootId ?? conv.localContainerRootId ?? null;
+  const subpath = cached?.subpath ?? "";
   if (!rootId) return null;
+
   const roots = await window.fsApi.listRoots();
   if (!roots.some((r) => r.id === rootId)) return null;
-  return { rootId, subpath: folder?.localSubpath ?? "" };
+  return { rootId, subpath };
 }
 
 /**
- * 解析一个会话应在其上跑 sidecar 的目标（容器根 id + 工作区子路径）；不该走 sidecar 则 null。
+ * 解析一个会话应在其上跑 sidecar 的目标（容器根 id + scratch 子路径）；不该走 sidecar 则 null。
  *
  * = 用户开了「本地引擎」开关（{@link isSidecarEnabled}）**且**该会话能用本地引擎
- * （{@link resolveLocalTarget}）。开关关 / 裸聊无文件夹 / 云端文件夹 / 根不在本机 → null（交回
- * 云链路）。
+ * （{@link resolveLocalTarget}）。开关关 / 无本地绑定 / 根不在本机 → null（交回云链路）。
  *
  * 纯「绑定判定」，**不掺运行时健康**：本判定被新回合（`sendTurn`）、续跑（`runResume`）、列暂停
  * 帧（`loadPausedTurns`）三处复用，而「环境能否拉起」（探活 / 降级标记，见 sidecarHealth）对三者

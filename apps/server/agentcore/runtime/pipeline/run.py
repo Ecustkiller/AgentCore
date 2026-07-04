@@ -94,6 +94,7 @@ async def run_chat_pipeline(
     attachments: list[dict] | None = None,
     approvals_enabled: bool = True,
     memory_enabled: bool = True,
+    instructions: str | None = None,
     profile_set: ProfileSet | None = None,
     llm_credentials: LLMCredentials | None = None,
     session_saver: SessionSaver | None = None,
@@ -186,7 +187,13 @@ async def run_chat_pipeline(
         # workers. The (per-turn, variable) attachment block is appended LAST below —
         # after the stable CEO hint stack — so a turn carrying attached files does not
         # bust DeepSeek's prefix cache for the hints (缓存友好: 易变内容置于稳定前缀之后).
-        system_prompt = assemble_system_prompt(memory_markdown=memory_markdown)
+        # 对话级自定义指令 (per-conversation custom instructions): injected here into the
+        # shared, cacheable prefix so BOTH the CEO and the reused worker base carry it —
+        # the whole team obeys this thread's directive. Stable per conversation ⇒ no
+        # per-turn cache bust.
+        system_prompt = assemble_system_prompt(
+            memory_markdown=memory_markdown, instructions=instructions
+        )
         attachment_context = _build_attachment_context(attachments)
         # Workers hold no CEO hints, so their base is the clean base + the same
         # attachment block appended at the end — byte-identical to the old single-call
@@ -580,12 +587,24 @@ async def run_chat_pipeline(
         )
         sink.emit(error_event(code, message))
         sink.emit(message_end(FinishReason.ERROR))
+        # 异常也落库: a crash mid-turn must NOT discard already-finished work (a
+        # completed debate / delegated workers). Carry the journal so persist_turn_result
+        # writes it under the abnormal message even with empty reply content — otherwise a
+        # 6-min debate that survived the turn would vanish on the next refresh. Best-effort:
+        # never let journal assembly mask the original error.
+        try:
+            crash_journal = _journal_entries_for_turn(
+                fact_log, sink=sink, finish=FinishReason.ERROR
+            )
+        except Exception:  # noqa: BLE001 — salvage is best-effort; keep the real error
+            crash_journal = None
         return {
             "message_id": message_id,
             "content": "",
             "error": str(e),
             "error_code": code,
             "finish_reason": FinishReason.ERROR,
+            "journal_entries": crash_journal,
         }
     finally:
         current_fact_log.reset(fact_log_token)

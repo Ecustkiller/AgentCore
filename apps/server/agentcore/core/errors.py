@@ -30,6 +30,12 @@ class LLMError(AgentCoreError):
     status_code = 502
 
 
+class LLMUpstreamError(LLMError):
+    """Upstream provider returned 5xx (transient server error). Retryable."""
+
+    retryable = True
+
+
 class LLMRateLimitError(LLMError):
     """LLM API rate limit hit (429)."""
 

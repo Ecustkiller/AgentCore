@@ -7,9 +7,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatCompact } from "@/lib/format";
+import { usePersistentDisclosure } from "@/stores/disclosure";
 import type { ContextBlockWire } from "@/types/events";
 import { ChevronDown, ChevronRight, CornerDownRight } from "lucide-react";
-import { useState } from "react";
 
 /** Context channel → 中文 label + one-line hint (上下文传递可视化). The single source both
  * the run detail (worker 侧) and the CEO bubble (captain 侧) use to title each「收到的上下文」
@@ -27,6 +27,13 @@ const CONTEXT_CHANNEL_META: Record<string, { label: string; hint: string }> = {
   requirements: { label: "产出要求", hint: "必须满足的硬约束" },
   steer: { label: "中途指示", hint: "执行中追加的操舵" },
   team_result: { label: "队员回传", hint: "委派的队员交回 CEO 的产物" },
+  // 辩论续写通道 (continue_run 逐轮): what a 第 N 轮 debater was fed this round.
+  round_focus: { label: "本轮焦点", hint: "这一轮辩论聚焦的争议点" },
+  opponent: { label: "对方论点", hint: "对方上一轮的发言（供针对性回应）" },
+  challenge: { label: "被驳命门", hint: "上一轮裁判记录你被反驳的点" },
+  interjection: { label: "用户追问", hint: "用户本轮要求正面回应的问题" },
+  // 定向唤回热修 (continue_run 修订): the CEO feedback this recall was fed.
+  revision: { label: "修订要求", hint: "老板定向唤回你本次要改的点" },
 };
 
 /** Dependency fidelity → 中文 label (递指针/摘要/全文): HOW an upstream teammate's product
@@ -52,12 +59,24 @@ export function ReceivedContextSection({
   blocks,
   defaultExpanded,
   powerMode,
+  onNavigate,
+  keyBase,
 }: {
   blocks: ContextBlockWire[];
   defaultExpanded: boolean;
   powerMode: boolean;
+  /** 溯源可点击 (图↔上下文闭环): drill into the run a block came FROM — a dependency's upstream
+   * author or a debate opponent's node. Given `source_run_id`; omit (CEO bubble) to keep
+   * provenance read-only. The caller (run detail) guards that the target exists on this graph. */
+  onNavigate?: (runId: string) => void;
+  /** 回合/运行作用域标识：给了才把「收到的上下文」段 + 各块开合持久化（切对话/刷新后仍在）；
+   *  缺省（如 on-demand 对话框）退化为会话内存态。 */
+  keyBase?: string;
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [expanded, setExpanded] = usePersistentDisclosure(
+    keyBase ? `${keyBase}:ctx` : null,
+    defaultExpanded,
+  );
   // 决策②: gate the system-prompt block behind power mode (it's verbatim boilerplate).
   const visible = powerMode
     ? blocks
@@ -95,6 +114,8 @@ export function ReceivedContextSection({
               key={`${b.channel}-${i}`}
               block={b}
               defaultOpen={powerMode}
+              onNavigate={onNavigate}
+              sceneKey={keyBase ? `${keyBase}:ctxblk:${b.channel}-${i}` : undefined}
             />
           ))}
         </div>
@@ -158,19 +179,27 @@ export function ReceivedContextDialog({
 function ContextBlockCard({
   block,
   defaultOpen,
+  onNavigate,
+  sceneKey,
 }: {
   block: ContextBlockWire;
   defaultOpen: boolean;
+  onNavigate?: (runId: string) => void;
+  /** 持久化作用域键（`${keyBase}:ctxblk:${channel}-${i}`）；缺省退化为会话内存态。 */
+  sceneKey?: string;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = usePersistentDisclosure(sceneKey ?? null, defaultOpen);
   const meta = CONTEXT_CHANNEL_META[block.channel] ?? {
     label: block.channel,
     hint: "",
   };
   // Provenance line (来自 {role} · 保真度 · 截断) for blocks that carry an origin: a worker's
-  // upstream dependency (通道②) and the CEO's team readback (通道⑤ team_result).
+  // upstream dependency (通道②), the CEO's team readback (通道⑤ team_result), and a debate
+  // 续写轮's opponent block (carries the opposing side's role + clip fidelity).
   const hasProvenance =
-    block.channel === "dependency" || block.channel === "team_result";
+    block.channel === "dependency" ||
+    block.channel === "team_result" ||
+    block.channel === "opponent";
   const peek = block.body.slice(0, 140);
   return (
     <div className="rounded-lg bg-muted px-2.5 py-1.5 text-xs">
@@ -217,11 +246,22 @@ function ContextBlockCard({
           {hasProvenance &&
             (block.source_role || block.fidelity || block.truncated) && (
               <div className="flex flex-wrap items-center gap-1.5 text-muted-foreground/80">
-                {block.source_role && (
-                  <span className="rounded bg-background px-1.5 py-0.5">
-                    来自 {block.source_role}
-                  </span>
-                )}
+                {block.source_role &&
+                  (onNavigate && block.source_run_id ? (
+                    <Button
+                      variant="ghost"
+                      onClick={() => onNavigate(block.source_run_id)}
+                      title="跳到来源节点"
+                      className="h-auto gap-1 rounded bg-background px-1.5 py-0.5 text-muted-foreground/80 hover:bg-accent hover:text-foreground"
+                    >
+                      <span>来自 {block.source_role}</span>
+                      <CornerDownRight size={11} className="shrink-0" />
+                    </Button>
+                  ) : (
+                    <span className="rounded bg-background px-1.5 py-0.5">
+                      来自 {block.source_role}
+                    </span>
+                  ))}
                 {block.fidelity && (
                   <span className="rounded bg-background px-1.5 py-0.5">
                     {FIDELITY_META[block.fidelity] ?? block.fidelity}

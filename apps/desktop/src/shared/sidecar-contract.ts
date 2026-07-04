@@ -56,6 +56,11 @@ export interface SidecarStartTurnRequest {
    *  已谈、首轮辩手读到上一场摘要）。普通回合缺省。主进程原样透传给 Python sidecar 的
    *  `startTurn.debateSeed`，引擎经 `params.get("debateSeed")` 喂 `run_chat_pipeline`。 */
   debateSeed?: SidecarDebateSeed;
+  /** 对话级自定义指令（per-conversation custom instructions）：云模式由服务端从会话行取并注入
+   *  系统提示；sidecar 无库，故由 renderer 从会话缓存喂入。主进程原样透传给 Python sidecar 的
+   *  `startTurn.instructions`，引擎经 `params.get("instructions")` 喂 `run_chat_pipeline`。
+   *  缺省 / 空 = 无自定义指令。 */
+  instructions?: string;
 }
 
 /** 一条历史消息（与引擎 `run_chat_pipeline` 的 history 形状对齐）。 */
@@ -89,10 +94,14 @@ export interface SidecarTurnResult {
   reasoningContent: string | null;
   finishReason: string;
   rounds: number;
+  /** 全量 token 快照（引擎记账的五项）——原样回写落 `Message.usage`，使 sidecar 回合重载后
+   *  的 meta 行与云回合一致（云 `persist_turn_result` 落同样键）。成本不随行（云代理权威计费）。 */
   usage: {
     inputTokens: number;
     outputTokens: number;
     reasoningTokens: number;
+    cacheHitTokens: number;
+    cacheMissTokens: number;
   };
   /** 助手回复的 web 来源（落库到 assistant 消息）。 */
   citations: SidecarCitation[];
@@ -208,11 +217,22 @@ export interface SidecarCancelRequest {
   turnId: string;
 }
 
+/** 用户中途改某个 worker 的方向（中间可见性 Phase 2a）。 */
+export interface SidecarRunRedirectRequest {
+  rootId: string;
+  subpath?: string;
+  conversationId: string;
+  executionId: string;
+  runId: string;
+  feedback: string;
+}
+
 /** IPC 通道名 —— 主进程与 preload 共用，避免硬编码漂移。 */
 export const SIDECAR_CHANNELS = {
   startTurn: "sidecar:startTurn",
   cancel: "sidecar:cancel",
   respond: "sidecar:respond",
+  runRedirect: "sidecar:runRedirect",
   resume: "sidecar:resume",
   listPaused: "sidecar:listPaused",
   probe: "sidecar:probe",
@@ -231,6 +251,7 @@ export interface SidecarApi {
   startTurn(req: SidecarStartTurnRequest): Promise<SidecarTurnResult>;
   cancel(req: SidecarCancelRequest): Promise<void>;
   respond(req: SidecarRespondRequest): Promise<void>;
+  runRedirect(req: SidecarRunRedirectRequest): Promise<void>;
   /** 续跑一个持久挂起的本地回合；Promise 在续跑结束时 resolve（同 `startTurn` 携最终结果，
    * 过程事件经 `onEvent` 推来）。 */
   resume(req: SidecarResumeRequest): Promise<SidecarTurnResult>;

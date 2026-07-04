@@ -1,8 +1,8 @@
+import { queryClient } from "@/lib/queryClient";
 import { notifyInfo } from "@/lib/toast";
 import { BASE_URL, notifyUnauthorized, tryRefresh } from "@/services/api";
 import { toMemoryUpdate } from "@/services/messages";
 import type { ChatMessageDetail } from "@/services/messaging";
-import { applyConversationPromotion } from "@/services/workspacePromotion";
 import { useConversationStore } from "@/stores/conversation";
 import { useMessagingStore } from "@/stores/messaging";
 
@@ -13,12 +13,6 @@ import { useMessagingStore } from "@/stores/messaging";
  * to this user (server→client; sending stays POST). It runs at the app shell for
  * the whole authenticated session — not the 消息 page — so unread badges and
  * incoming messages update even while the user is on the 对话 page.
- *
- * The same per-user firehose also carries `workspace_promoted` (跨端实时同步): a 裸聊
- * promoted on ANY surface (the turn's first write, a panel write, or "打开本地文件夹")
- * re-groups the chat + surfaces its workspace card on this device too — the turn SSE /
- * REST response only reaches the surface that drove the promotion, so without this a
- * second device leaves the chat stranded in 未分组 until a refetch.
  *
  * SSE can't refresh a token mid-stream, so this mirrors the POST stream's policy
  * (streamConversation.ts): on a 401, refresh once and reconnect; otherwise drop
@@ -41,15 +35,6 @@ interface ChatMessageEvent {
   type: "chat_message";
   chat_id: string;
   message: ChatMessageDetail;
-}
-
-interface WorkspacePromotedEvent {
-  type: "workspace_promoted";
-  conversation_id: string;
-  folder_id: string;
-  name: string;
-  local_root_id: string | null;
-  local_subpath: string;
 }
 
 /** 记忆更新对话内可见 (§1.6): one offline-consolidation pass that changed a memory
@@ -92,17 +77,6 @@ function handleFrame(frame: string): void {
     if (event.type === "chat_message") {
       const e = event as ChatMessageEvent;
       useMessagingStore.getState().applyIncoming(e.chat_id, e.message);
-    } else if (event.type === "workspace_promoted") {
-      // A 裸聊 promoted on another surface — re-group it + surface its card here too,
-      // via the same client-side sink the turn SSE / panel promote use (no drift).
-      const e = event as WorkspacePromotedEvent;
-      applyConversationPromotion(e.conversation_id, {
-        id: e.folder_id,
-        name: e.name,
-        localDir: null,
-        localRootId: e.local_root_id,
-        localSubpath: e.local_subpath,
-      });
     } else if (event.type === "memory_updated") {
       // The offline consolidation pass refreshed the user's long-term memory (off the
       // turn path). 记忆更新对话内可见 (§1.6): live-append the「记忆已更新」card to the
@@ -113,6 +87,11 @@ function handleFrame(frame: string): void {
       if (e.update && e.conversation_id) {
         conv.addMemoryUpdate(toMemoryUpdate(e.update), e.conversation_id);
       }
+      // 记忆动态 feed live-refresh: mark the cross-conversation「最近更新」query stale so an
+      // OPEN MemoryUpdatesView refetches at once (a closed one just refetches on next open —
+      // free). Without this, focus-refetch being off leaves the feed showing only the toast
+      // until the user reopens the tab. Fires on every pass, card shown or not.
+      void queryClient.invalidateQueries({ queryKey: ["memory-updates"] });
       // When the user is looking at that very conversation the inline card IS the signal,
       // so skip the toast; otherwise a heads-up so another surface (e.g. an open「AI 记忆」
       // editor) knows to reload.

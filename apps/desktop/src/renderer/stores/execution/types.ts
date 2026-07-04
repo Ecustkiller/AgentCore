@@ -261,6 +261,8 @@ export interface TeamNote {
   ts: number | null;
   status: "active" | "superseded" | "voided";
   supersedes: string | null;
+  /** `ceo` = host seed_notes; otherwise worker post_note. */
+  source?: "ceo" | "worker";
 }
 
 export interface RunNode {
@@ -354,7 +356,7 @@ export interface NodeTiming {
  * are raw (`scopeEscalations ⊆ escalations`). `timeline` carries each dispatched node's occupancy
  * window (多任务并行图, §6.5). A delegate turn accrues one per scheduler segment (a checkpoint /
  * scope yield + resume appends another). The aggregates show only in 诊断模式 (run detail); the
- * `timeline` drives the all-users 并行时间线 (canvas 放大态). */
+ * `timeline` drives the graph 时间轴 layout (canvas 放大态 · GraphView toolbar). */
 export interface BatchMetricsSnapshot {
   nodes: number;
   width: number;

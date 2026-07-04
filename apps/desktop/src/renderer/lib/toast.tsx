@@ -62,8 +62,11 @@ export function notifyError(err: unknown, context?: string): void {
 }
 
 /** A success toast for a completed user action (e.g. a snapshot was created). */
-export function notifySuccess(message: string): void {
-  toast.success(message, { icon: successIcon });
+export function notifySuccess(
+  message: string,
+  opts?: { description?: string },
+): void {
+  toast.success(message, { description: opts?.description, icon: successIcon });
 }
 
 /**

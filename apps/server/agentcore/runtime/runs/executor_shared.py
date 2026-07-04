@@ -36,6 +36,23 @@ def _registry_with(base: ToolRegistry, *extra: Tool) -> ToolRegistry:
     return registry
 
 
+def _registry_without(base: ToolRegistry, *names: str) -> ToolRegistry:
+    """A per-worker registry = the team tools MINUS ``names`` (absent names ignored).
+
+    The inverse of :func:`_registry_with`: a NON-collaborative batch (``collaboration=
+    False`` — an adversarial / independent fan-out such as a debate, where 正方 vs 反方
+    are opponents rather than teammates) strips the 团队便签 tools (post/read/amend_note)
+    so even an UNRESTRICTED worker ("offer all team tools") is never handed a
+    collaboration channel. Returns a fresh registry; the shared ``base`` is never
+    mutated."""
+    drop = set(names)
+    registry = ToolRegistry()
+    for schema in base.list_all():
+        if schema.name not in drop:
+            registry.register(base.get(schema.name))
+    return registry
+
+
 def _priced_failure(
     error: str,
     *,
@@ -92,6 +109,7 @@ async def _react_and_capture(
     approval_gate: ApprovalGate | None,
     usage_sink: list[TokenUsage] | None = None,
     on_round_begin: Callable[[], list[LLMMessage]] | None = None,
+    round_sink: list[int] | None = None,
 ) -> tuple[str, str, TokenUsage, int]:
     """Run one ReAct pass over ``messages`` (mutated in place — the loop appends
     each assistant tool-call turn + tool results), then append the final assistant
@@ -131,6 +149,7 @@ async def _react_and_capture(
         approval_gate=approval_gate,
         usage_sink=usage_sink,
         on_round_begin=on_round_begin,
+        round_sink=round_sink,
         run_id=run_id,
         role="worker",
         # 交付正文只留最终交付、旁白入 journal (Fork-B, 全队对称): a worker/debater/revision's

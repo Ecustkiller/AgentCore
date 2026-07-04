@@ -31,6 +31,12 @@ import {
  * underneath surfaces as a conflict, never a silent clobber.
  */
 
+/** Synthetic tab path for the cross-conversation「记忆动态 / 最近更新」feed view — NOT a
+ * memory leaf (the workbench renders {@link MemoryUpdatesView} for it instead of the file
+ * editor). Kept distinct from the `global/…` · `project/…` leaf scheme so it never parses
+ * as a leaf. */
+export const MEMORY_UPDATES_PATH = "__memory_updates__";
+
 /** The synthetic leaf path for the GLOBAL 偏好 (沟通/工作习惯). */
 export const GLOBAL_PREFERENCES_PATH = "global/preferences";
 /** The synthetic leaf path for the GLOBAL 画像 (技术栈/关于用户的事实). */

@@ -338,13 +338,56 @@
       "timestamp": "2026-01-01T00:00:00.017Z"
     },
     {
+      "type": "run_context",
+      "payload": {
+        "run_id": "rt_mod1_r2_a",
+        "agent_id": "rt_a2",
+        "blocks": [
+          {
+            "channel": "round_focus",
+            "heading": "第 2 轮 · 本轮焦点",
+            "body": "三方就『问责机制』正面交锋",
+            "chars": 13,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
+            "channel": "opponent",
+            "heading": "对方上一轮 · 监管视角",
+            "body": "监管视角：问责缺位才是关键。",
+            "chars": 14,
+            "truncated": false,
+            "source_role": "监管视角",
+            "source_run_id": "rt_mod1_r1_b",
+            "fidelity": "",
+            "files": []
+          },
+          {
+            "channel": "opponent",
+            "heading": "对方上一轮 · 产业视角",
+            "body": "产业视角：别忽视落地成本。",
+            "chars": 13,
+            "truncated": false,
+            "source_role": "产业视角",
+            "source_run_id": "rt_mod1_r1_c",
+            "fidelity": "",
+            "files": []
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.018Z"
+    },
+    {
       "type": "run_output_delta",
       "payload": {
         "run_id": "rt_mod1_r2_a",
         "agent_id": "rt_a2",
         "delta": "技术视角续：问责需可观测性支撑。"
       },
-      "timestamp": "2026-01-01T00:00:00.018Z"
+      "timestamp": "2026-01-01T00:00:00.019Z"
     },
     {
       "type": "run_started",
@@ -357,7 +400,50 @@
         "group": "debate:roundtable",
         "round": 2
       },
-      "timestamp": "2026-01-01T00:00:00.019Z"
+      "timestamp": "2026-01-01T00:00:00.020Z"
+    },
+    {
+      "type": "run_context",
+      "payload": {
+        "run_id": "rt_mod1_r2_b",
+        "agent_id": "rt_b2",
+        "blocks": [
+          {
+            "channel": "round_focus",
+            "heading": "第 2 轮 · 本轮焦点",
+            "body": "三方就『问责机制』正面交锋",
+            "chars": 13,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
+            "channel": "opponent",
+            "heading": "对方上一轮 · 技术视角",
+            "body": "技术视角：能力外溢是根因。",
+            "chars": 13,
+            "truncated": false,
+            "source_role": "技术视角",
+            "source_run_id": "rt_mod1_r1_a",
+            "fidelity": "",
+            "files": []
+          },
+          {
+            "channel": "opponent",
+            "heading": "对方上一轮 · 产业视角",
+            "body": "产业视角：别忽视落地成本。",
+            "chars": 13,
+            "truncated": false,
+            "source_role": "产业视角",
+            "source_run_id": "rt_mod1_r1_c",
+            "fidelity": "",
+            "files": []
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.021Z"
     },
     {
       "type": "run_output_delta",
@@ -366,7 +452,7 @@
         "agent_id": "rt_b2",
         "delta": "监管视角续：可观测性应立法强制。"
       },
-      "timestamp": "2026-01-01T00:00:00.020Z"
+      "timestamp": "2026-01-01T00:00:00.022Z"
     },
     {
       "type": "message_end",
@@ -388,7 +474,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.021Z"
+      "timestamp": "2026-01-01T00:00:00.023Z"
     }
   ],
   "projected": {
@@ -646,7 +732,41 @@
         "revision": 2,
         "revised": null,
         "checkpoint": null,
-        "receivedContext": [],
+        "receivedContext": [
+          {
+            "channel": "round_focus",
+            "heading": "第 2 轮 · 本轮焦点",
+            "body": "三方就『问责机制』正面交锋",
+            "chars": 13,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
+            "channel": "opponent",
+            "heading": "对方上一轮 · 监管视角",
+            "body": "监管视角：问责缺位才是关键。",
+            "chars": 14,
+            "truncated": false,
+            "source_role": "监管视角",
+            "source_run_id": "rt_mod1_r1_b",
+            "fidelity": "",
+            "files": []
+          },
+          {
+            "channel": "opponent",
+            "heading": "对方上一轮 · 产业视角",
+            "body": "产业视角：别忽视落地成本。",
+            "chars": 13,
+            "truncated": false,
+            "source_role": "产业视角",
+            "source_run_id": "rt_mod1_r1_c",
+            "fidelity": "",
+            "files": []
+          }
+        ],
         "escalations": []
       },
       {
@@ -672,7 +792,41 @@
         "revision": 2,
         "revised": null,
         "checkpoint": null,
-        "receivedContext": [],
+        "receivedContext": [
+          {
+            "channel": "round_focus",
+            "heading": "第 2 轮 · 本轮焦点",
+            "body": "三方就『问责机制』正面交锋",
+            "chars": 13,
+            "truncated": false,
+            "source_role": "",
+            "source_run_id": "",
+            "fidelity": "",
+            "files": []
+          },
+          {
+            "channel": "opponent",
+            "heading": "对方上一轮 · 技术视角",
+            "body": "技术视角：能力外溢是根因。",
+            "chars": 13,
+            "truncated": false,
+            "source_role": "技术视角",
+            "source_run_id": "rt_mod1_r1_a",
+            "fidelity": "",
+            "files": []
+          },
+          {
+            "channel": "opponent",
+            "heading": "对方上一轮 · 产业视角",
+            "body": "产业视角：别忽视落地成本。",
+            "chars": 13,
+            "truncated": false,
+            "source_role": "产业视角",
+            "source_run_id": "rt_mod1_r1_c",
+            "fidelity": "",
+            "files": []
+          }
+        ],
         "escalations": []
       }
     ],

@@ -809,3 +809,91 @@ async def test_metrics_scope_escalation_counted_without_hook():
     m = sink[0]
     assert m.scope_boundaries == 0  # no hook ⇒ no boundary fired
     assert (m.escalations, m.scope_escalations) == (1, 1)  # but the signal is still tallied
+
+
+# --- Phase 2a: per-run cancel (redirect) ---
+
+
+async def test_cancel_single_run_siblings_continue():
+    """Parallel a + b; cancel a mid-flight → b still completes, a is CANCELLED."""
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b"))
+    cancel_targets: set[str] = set()
+
+    async def slow_ex(spec: RunSpec, _completed) -> RunState:
+        if spec.run_id == "a":
+            await asyncio.sleep(0.1)  # slow — will be cancelled
+        else:
+            await asyncio.sleep(0.01)
+        return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+    # After a short delay, request cancel of "a"
+    async def _schedule_cancel():
+        await asyncio.sleep(0.02)
+        cancel_targets.add("a")
+
+    asyncio.create_task(_schedule_cancel())
+    res = await WaveScheduler().run(
+        plan, slow_ex, cancel_run_ids=lambda: frozenset(cancel_targets)
+    )
+    assert res["a"].phase is RunPhase.CANCELLED
+    assert res["b"].phase is RunPhase.COMPLETED
+
+
+async def test_cancel_does_not_cascade_skip():
+    """Cancel a (which has dependent b) → b still runs (no skip cascade)."""
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",)))
+    cancel_targets: set[str] = set()
+
+    async def slow_ex(spec: RunSpec, _completed) -> RunState:
+        if spec.run_id == "a":
+            await asyncio.sleep(0.1)
+        else:
+            await asyncio.sleep(0.01)
+        return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+    async def _schedule_cancel():
+        await asyncio.sleep(0.02)
+        cancel_targets.add("a")
+
+    asyncio.create_task(_schedule_cancel())
+    res = await WaveScheduler().run(
+        plan, slow_ex, cancel_run_ids=lambda: frozenset(cancel_targets)
+    )
+    assert res["a"].phase is RunPhase.CANCELLED
+    # b depends on a, but cancel is not a failure → b should still run
+    # (its dep "a" is in completed with CANCELLED phase, which counts as resolved)
+    assert res["b"].phase is RunPhase.COMPLETED
+
+
+async def test_cancel_metrics_counts_cancelled():
+    """Cancelled nodes are tallied in BatchMetrics.cancelled, not failed/skipped."""
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b"))
+    cancel_targets: set[str] = set()
+
+    async def slow_ex(spec: RunSpec, _completed) -> RunState:
+        if spec.run_id == "a":
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.01)
+        return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+    async def _schedule_cancel():
+        await asyncio.sleep(0.02)
+        cancel_targets.add("a")
+
+    asyncio.create_task(_schedule_cancel())
+    sink: list[BatchMetrics] = []
+    await WaveScheduler().run(
+        plan, slow_ex,
+        cancel_run_ids=lambda: frozenset(cancel_targets),
+        metrics_sink=sink,
+    )
+    m = sink[0]
+    assert m.cancelled == 1
+    assert m.completed == 1
+    assert m.failed == 0

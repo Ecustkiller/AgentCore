@@ -12,17 +12,24 @@ from agentcore.llm.modes import ProfileSet, default_profile_set
 from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.protocol import LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
-from agentcore.runtime.events import EventSink, run_completed, run_failed, run_started
+from agentcore.runtime.events import (
+    EventSink,
+    run_completed,
+    run_context,
+    run_failed,
+    run_started,
+)
 from agentcore.runtime.facts import MessageFinalFact, record_turn_fact
 from agentcore.runtime.runs.contract import check_contract
+from agentcore.runtime.runs.executor_context import _context_block_payloads
 from agentcore.runtime.runs.executor_shared import (
     _priced_failure,
     _react_and_capture,
     _revision_message,
 )
-from agentcore.runtime.runs.serialize import debrief_from_content, files_touched_from_transcript
+from agentcore.runtime.runs.serialize import debrief_from_transcript, files_touched_from_transcript
 from agentcore.runtime.runs.session import RunSession
-from agentcore.runtime.runs.types import RunPhase, RunState
+from agentcore.runtime.runs.types import ContextBlock, RunPhase, RunState
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
@@ -42,6 +49,7 @@ async def continue_run(
     profile_set: ProfileSet | None = None,
     approval_gate: ApprovalGate | None = None,
     round_no: int = 0,
+    context_blocks: list[ContextBlock] | None = None,
 ) -> RunState:
     """续写 a saved worker session under the revision's log scope: binds
     run_id/agent_id/depth so all of the 热修's logs (tool.execute_end, run.*, llm.*)
@@ -50,7 +58,14 @@ async def continue_run(
 
     ``round_no`` (辩论逐轮, 0 = ordinary 热修) is the revision's TRUE debate round — carried
     onto its ``run_started`` so every fold reads 第几轮 from the wire, not the version
-    number (which drifts from the round once a side fails mid-debate)."""
+    number (which drifts from the round once a side fails mid-debate).
+
+    ``context_blocks`` (上下文传递可视化) is the structured context THIS continuation was fed
+    — a debate 续写 gets 本轮焦点 / 对方上轮论点 / 被驳命门 / 追问 (see
+    :func:`~agentcore.tools.builtin.debate.prompt.round_context_blocks`); it rides a
+    ``run_context`` event right after ``run_started`` so the revision node's「收到的上下文」
+    fills like a first-round worker's (before this, 续写 emitted none → the panel was empty).
+    ``None`` for a plain 热修 whose caller supplies no blocks → no event, unchanged."""
     with log_context(
         run_id=revision_run_id,
         agent_id=revision_run_id,
@@ -68,6 +83,7 @@ async def continue_run(
             profile_set=profile_set,
             approval_gate=approval_gate,
             round_no=round_no,
+            context_blocks=context_blocks,
         )
 
 
@@ -84,6 +100,7 @@ async def _continue_run_scoped(
     profile_set: ProfileSet | None = None,
     approval_gate: ApprovalGate | None = None,
     round_no: int = 0,
+    context_blocks: list[ContextBlock] | None = None,
 ) -> RunState:
     """续写 a saved worker session: recall the SAME author to revise its own draft.
 
@@ -118,6 +135,12 @@ async def _continue_run_scoped(
             round_no=round_no,
         )
     )
+    # 收到的上下文 (上下文传递可视化): surface what THIS continuation was fed right after it
+    # starts — the same fact first-round workers emit (executor_agent). Bodies are head+tail
+    # capped + journaled by `_context_block_payloads`, so the revision node's panel fills on
+    # both live and reload, mirroring the original run instead of showing an empty context.
+    if context_blocks:
+        sink.emit(run_context(revision_run_id, agent_id, _context_block_payloads(context_blocks)))
     start = time.monotonic()
     # Mirror the continuation's spend so a hard failure still bills it (B-deep 失败
     # 计费); priced_model stays None until the profile resolves (an early setup failure
@@ -179,9 +202,9 @@ async def _continue_run_scoped(
         record_turn_fact(
             MessageFinalFact(run_id=revision_run_id, content=content, reasoning=reasoning).to_fact()
         )
-        # 交接简报单一源: harvest the revised product's authored 交接简报 once, so its 结论 is the
-        # summary (best-effort "") and the structured brief rides the run_completed for the UI.
-        debrief = debrief_from_content(content)
+        # 交接简报单一源: harvest the revised product's brief from its ``handoff`` tool call (best-
+        # effort None), so its 结论 is the summary and the structured brief rides the run_completed.
+        debrief = debrief_from_transcript(messages)
         sink.emit(
             run_completed(
                 revision_run_id,

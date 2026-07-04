@@ -1,4 +1,4 @@
-"""Conversation service facade — re-exports the split turn / promotion modules.
+"""Conversation service facade — re-exports the split turn modules.
 
 Import from here to keep route and test import paths stable:
 ``from agentcore.conversation.service import stream_chat``, etc.
@@ -24,19 +24,6 @@ from agentcore.conversation.common import (
 )
 from agentcore.conversation.handoff_jobs import dispatch_handoff, run_handoff_job
 from agentcore.conversation.local_turn import record_local_turn
-from agentcore.conversation.promotion import (
-    bare_chat_promote as _bare_chat_promote,
-)
-from agentcore.conversation.promotion import (
-    promote_bare_chat_to_folder,
-    promote_conversation_folder,
-)
-from agentcore.conversation.promotion import (
-    sanitize_subpath_segment as _sanitize_subpath_segment,
-)
-from agentcore.conversation.promotion import (
-    unique_local_subpath as _unique_local_subpath,
-)
 from agentcore.conversation.turn_backend import build_turn_backend as _build_turn_backend
 from agentcore.conversation.turn_persistence import (
     has_open_durable_pause as _has_open_durable_pause,
@@ -63,15 +50,12 @@ from agentcore.conversation.turns import regenerate_chat, resume_chat, stream_ch
 
 __all__ = [
     "dispatch_handoff",
-    "promote_bare_chat_to_folder",
-    "promote_conversation_folder",
     "record_local_turn",
     "regenerate_chat",
     "resume_chat",
     "run_handoff_job",
     "stream_chat",
     # Test / internal aliases kept on the facade for stable import paths.
-    "_bare_chat_promote",
     "_build_turn_backend",
     "_fallback_title",
     "_generate_title",
@@ -84,8 +68,6 @@ __all__ = [
     "_resolve_profile_set",
     "_run_and_persist",
     "_salvage_incomplete_turn",
-    "_sanitize_subpath_segment",
     "_session_callbacks",
     "_suspension_callbacks",
-    "_unique_local_subpath",
 ]

@@ -1,8 +1,20 @@
-import { SurfaceRowButton } from "@/components/ui";
+import { Button, IconButton, SurfaceRowButton } from "@/components/ui";
+import { isWebClient } from "@/lib/capabilities";
 import { startNewConversation } from "@/lib/newConversation";
+import { chord } from "@/lib/shortcuts";
 import { useUnreadTotal } from "@/stores/messaging";
 import { useSidebarStore } from "@/stores/sidebar";
-import { Compass, Files, Mail, MessageSquare, Wrench } from "lucide-react";
+import { useUIStore } from "@/stores/ui";
+import {
+  Compass,
+  Files,
+  Mail,
+  MessageSquare,
+  PanelLeft,
+  PanelLeftClose,
+  Search,
+  Wrench,
+} from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   RecentConversations,
@@ -22,9 +34,15 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const collapsed = useSidebarStore((s) => s.collapsed);
+  const toggleCollapsed = useSidebarStore((s) => s.toggleCollapsed);
+  const openSearch = useUIStore((s) => s.openSearch);
   const unread = useUnreadTotal();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+
+  // 浏览器版没有桌面顶栏（AppShell 已隐藏），品牌 / 折叠按钮 / 搜索改由侧栏顶部承载。
+  // 桌面 & 离线预览下这里不渲染（它们仍有顶栏）。
+  const webClient = isWebClient();
 
   // 「对话」(route "/") 既是「新建对话」动作、又兼作对话区的区段指示：仅在「没有具体会话被
   // 选中」的状态下高亮——空白草稿 `/` 与「全部对话」页 `/conversations`；一旦进入具体会话
@@ -43,6 +61,65 @@ export function Sidebar() {
       className={`flex flex-shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ${collapsed ? "w-14" : "w-60"}`}
       style={{ backgroundImage: "var(--sidebar-gradient)" }}
     >
+      {/* 浏览器版头部：品牌 + 折叠按钮 + 紧凑搜索（替代被隐藏的桌面顶栏）。折叠成 w-14
+          图标条时按钮仍在，展开 w-60 时显示品牌，两种状态都够得着。 */}
+      {webClient && (
+        <>
+          <div className="space-y-2 px-2 pt-2">
+            <div
+              className={`flex items-center gap-1 ${collapsed ? "justify-center" : "px-1"}`}
+            >
+              {!collapsed && (
+                <span className="flex flex-1 items-center gap-1.5 text-sm font-semibold text-sidebar-foreground">
+                  AgentCore
+                  {import.meta.env.DEV && (
+                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">
+                      DEV
+                    </span>
+                  )}
+                </span>
+              )}
+              <IconButton
+                tone="sidebar"
+                onClick={toggleCollapsed}
+                aria-label={collapsed ? "展开侧栏" : "折叠侧栏"}
+              >
+                {collapsed ? (
+                  <PanelLeft size={16} />
+                ) : (
+                  <PanelLeftClose size={16} />
+                )}
+              </IconButton>
+            </div>
+
+            {collapsed ? (
+              <div className="flex justify-center">
+                <IconButton
+                  tone="sidebar"
+                  onClick={openSearch}
+                  aria-label="搜索"
+                >
+                  <Search size={16} />
+                </IconButton>
+              </div>
+            ) : (
+              <Button
+                variant="neutral"
+                onClick={openSearch}
+                icon={<Search size={13} className="shrink-0" />}
+                className="w-full justify-start gap-2 border border-sidebar-border px-3 text-sm text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              >
+                搜索…
+                <kbd className="ml-auto text-xs text-sidebar-foreground/40">
+                  {chord("k")}
+                </kbd>
+              </Button>
+            )}
+          </div>
+          <div className="mx-3 mt-2 border-t border-sidebar-border" />
+        </>
+      )}
+
       {/* Navigation */}
       <nav className="space-y-0.5 px-2 pt-2 pb-2">
         {NAV_ITEMS.map((item) => {

@@ -64,5 +64,5 @@ async def persist_turn_journal(
             entries,
             trace_id=trace_id,
             conversation_id=conversation_id,
-            turn_id=message_id,
+            message_id=message_id,
         )

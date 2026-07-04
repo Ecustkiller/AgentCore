@@ -1,4 +1,5 @@
-import type { GraphEdge, GraphLayout } from "@/stores/graph";
+import type { GraphEdge } from "@/stores/graph";
+import type { ElkGraphLayout } from "@/lib/graph-layout-utils";
 import ELK from "elkjs/lib/elk.bundled";
 
 const elk = new ELK();
@@ -17,7 +18,7 @@ const NODE_HEIGHT = 110;
 // 间距偏紧：小队（如 1→3→1 的菱形）下层间距/堆叠距过大会让四角空旷、连线过长。
 // 收紧后包围盒变小，内嵌 fit-to-width 缩放更接近 1（节点反而更大、连线更短）。
 // 注意：下方「首屏估算」镜像常量必须与这里逐一对齐。
-const LAYOUT_OPTIONS: Record<GraphLayout, Record<string, string>> = {
+const LAYOUT_OPTIONS: Record<ElkGraphLayout, Record<string, string>> = {
   tree: {
     "elk.algorithm": "layered",
     "elk.direction": "DOWN",
@@ -78,7 +79,7 @@ export interface LayoutBookends {
 export async function computeLayout(
   nodeIds: string[],
   edges: GraphEdge[],
-  layout: GraphLayout = "tree",
+  layout: ElkGraphLayout = "tree",
   preserveOrder = false,
   bookends: LayoutBookends = {},
 ): Promise<LayoutResult> {
@@ -155,6 +156,17 @@ export async function computeLayout(
   // 修订被留在源的**旧**车道上 → 第三波漂移。在此统一对齐，不管是谁移动了源都能复位。
   alignRevisionChains(positions, edges, layout);
 
+  // 碰撞解消：后处理（尤其 dropSubTeamsBelowParent）可能把 delegate 子队与同层 dep
+  // 节点推到交叉轴重叠的位置；多轮扫描推开，只动交叉轴、不动主轴层坐标。
+  resolveOverlaps(positions, layout);
+
+  // 层内节点重排：barycenter heuristic 减少边交叉，改善 fan-out/fan-in 可读性。
+  minimizeCrossings(positions, edges, layout);
+
+  // 交叉最小化只动普通 worker；修订链与碰撞间距在此恢复。
+  alignRevisionChains(positions, edges, layout);
+  resolveOverlaps(positions, layout);
+
   // Post-processing can push nodes negative on the cross axis; shift the whole
   // graph so the bbox origin stays at ELK padding (keeps promo stills / fit-to-width sane).
   let minX = Number.POSITIVE_INFINITY;
@@ -206,7 +218,7 @@ export async function computeLayout(
 function centerLoneEndpoints(
   positions: Record<string, { x: number; y: number }>,
   edges: GraphEdge[],
-  layout: GraphLayout,
+  layout: ElkGraphLayout,
 ): void {
   const ids = Object.keys(positions);
   if (ids.length === 0) return;
@@ -272,7 +284,7 @@ function centerLoneEndpoints(
 function balanceBinaryForks(
   positions: Record<string, { x: number; y: number }>,
   edges: GraphEdge[],
-  layout: GraphLayout,
+  layout: ElkGraphLayout,
 ): void {
   const horizontal = layout === "leftright";
   const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
@@ -379,7 +391,7 @@ function balanceBinaryForks(
 function dropSubTeamsBelowParent(
   positions: Record<string, { x: number; y: number }>,
   edges: GraphEdge[],
-  layout: GraphLayout,
+  layout: ElkGraphLayout,
 ): void {
   const horizontal = layout === "leftright";
   const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
@@ -511,6 +523,192 @@ function dropSubTeamsBelowParent(
 }
 
 /**
+ * Push apart nodes whose AABBs overlap on both axes (same main-axis band + cross-axis
+ * collision). Post-processing — especially {@link dropSubTeamsBelowParent} — can land
+ * a dropped sub-team on the same layer as unrelated dep nodes without checking their
+ * cross-axis positions. Scans in cross-axis order within each main-axis band and
+ * enforces at least {@link NODE_SPACING} between boxes; repeats until stable.
+ *
+ * Cross-axis only: main-axis (layer) coordinates are left untouched so ELK's layer
+ * assignment and bookend pinning stay intact.
+ */
+function resolveOverlaps(
+  positions: Record<string, { x: number; y: number }>,
+  layout: ElkGraphLayout,
+): void {
+  const ids = Object.keys(positions);
+  if (ids.length < 2) return;
+
+  const horizontal = layout === "leftright";
+  const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
+  const mainSize = horizontal ? NODE_WIDTH : NODE_HEIGHT;
+
+  const mainOf = (id: string) =>
+    horizontal ? positions[id].x : positions[id].y;
+  const crossOf = (id: string) =>
+    horizontal ? positions[id].y : positions[id].x;
+  const setCross = (id: string, v: number) => {
+    if (horizontal) positions[id].y = v;
+    else positions[id].x = v;
+  };
+
+  const mainOverlap = (a: string, b: string) =>
+    mainOf(a) < mainOf(b) + mainSize && mainOf(a) + mainSize > mainOf(b);
+
+  const boxesOverlap = (a: string, b: string) => {
+    if (!mainOverlap(a, b)) return false;
+    return (
+      crossOf(a) + crossSize + NODE_SPACING > crossOf(b) &&
+      crossOf(b) + crossSize + NODE_SPACING > crossOf(a)
+    );
+  };
+
+  const maxRounds = ids.length * 2;
+  for (let round = 0; round < maxRounds; round++) {
+    let changed = false;
+
+    // Group by rounded main-axis layer so we only compare nodes that could collide.
+    const byLayer = new Map<string, string[]>();
+    for (const id of ids) {
+      const key = String(Math.round(mainOf(id)));
+      const arr = byLayer.get(key);
+      if (arr) arr.push(id);
+      else byLayer.set(key, [id]);
+    }
+
+    for (const members of byLayer.values()) {
+      if (members.length < 2) continue;
+      members.sort((a, b) => crossOf(a) - crossOf(b));
+
+      for (let i = 1; i < members.length; i++) {
+        const prev = members[i - 1];
+        const curr = members[i];
+        if (!boxesOverlap(prev, curr)) continue;
+        const minCross = crossOf(prev) + crossSize + NODE_SPACING;
+        if (crossOf(curr) < minCross) {
+          setCross(curr, minCross);
+          changed = true;
+        }
+      }
+    }
+
+    if (!changed) break;
+  }
+}
+
+/**
+ * Reorder nodes within each main-axis layer using the barycenter heuristic to
+ * reduce edge crossings. Runs after {@link resolveOverlaps} so spacing is sane,
+ * then redistributes cross-axis coordinates with {@link NODE_SPACING}.
+ *
+ * Cross-axis only — main-axis (layer) coordinates stay untouched.
+ */
+function minimizeCrossings(
+  positions: Record<string, { x: number; y: number }>,
+  edges: GraphEdge[],
+  layout: ElkGraphLayout,
+  iterations = 3,
+): void {
+  const ids = Object.keys(positions);
+  if (ids.length < 2) return;
+
+  const horizontal = layout === "leftright";
+  const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
+  const mainOf = (id: string) =>
+    horizontal ? positions[id].x : positions[id].y;
+  const crossOf = (id: string) =>
+    horizontal ? positions[id].y : positions[id].x;
+  const setCross = (id: string, v: number) => {
+    if (horizontal) positions[id].y = v;
+    else positions[id].x = v;
+  };
+  const crossCenterOf = (id: string) => crossOf(id) + crossSize / 2;
+
+  const push = (m: Map<string, string[]>, k: string, v: string) => {
+    const arr = m.get(k);
+    if (arr) arr.push(v);
+    else m.set(k, [v]);
+  };
+  const incoming = new Map<string, string[]>();
+  const outgoing = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!positions[e.source] || !positions[e.target]) continue;
+    push(outgoing, e.source, e.target);
+    push(incoming, e.target, e.source);
+  }
+
+  // Delegate sub-teams are positioned by dropSubTeamsBelowParent — leave them put.
+  const immovable = new Set<string>();
+  const delegateChildren = new Map<string, string[]>();
+  for (const e of edges) {
+    if (e.kind !== "delegate") continue;
+    push(delegateChildren, e.source, e.target);
+  }
+  for (const roots of delegateChildren.values()) {
+    const stack = [...roots];
+    while (stack.length > 0) {
+      const n = stack.pop() as string;
+      if (immovable.has(n)) continue;
+      immovable.add(n);
+      for (const c of delegateChildren.get(n) ?? []) stack.push(c);
+    }
+  }
+  for (const parent of delegateChildren.keys()) immovable.add(parent);
+
+  const layersOf = (): Map<number, string[]> => {
+    const layers = new Map<number, string[]>();
+    for (const id of ids) {
+      const key = Math.round(mainOf(id));
+      const arr = layers.get(key);
+      if (arr) arr.push(id);
+      else layers.set(key, [id]);
+    }
+    return layers;
+  };
+
+  const redistributeLayer = (members: string[], sorted: string[]): void => {
+    const n = sorted.length;
+    if (n < 2) return;
+    const totalSpan = n * crossSize + (n - 1) * NODE_SPACING;
+    const originalCenter =
+      members.reduce((s, id) => s + crossCenterOf(id), 0) / n;
+    const startCross = originalCenter - totalSpan / 2;
+    for (let i = 0; i < n; i++) {
+      setCross(sorted[i], startCross + i * (crossSize + NODE_SPACING));
+    }
+  };
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const layers = layersOf();
+    const layerKeys = [...layers.keys()].sort((a, b) => a - b);
+
+    for (const key of layerKeys) {
+      const members = layers.get(key)!;
+      if (members.length < 2) continue;
+      if (members.some((id) => immovable.has(id))) continue;
+
+      const paired = members.map((id) => {
+        const neighborIds = [
+          ...(incoming.get(id) ?? []),
+          ...(outgoing.get(id) ?? []),
+        ];
+        const valid = neighborIds.filter((n) => positions[n]);
+        const bc =
+          valid.length > 0
+            ? valid.reduce((s, n) => s + crossCenterOf(n), 0) / valid.length
+            : crossCenterOf(id);
+        return { id, bc };
+      });
+
+      paired.sort(
+        (a, b) => a.bc - b.bc || crossOf(a.id) - crossOf(b.id),
+      );
+      redistributeLayer(members, paired.map((p) => p.id));
+    }
+  }
+}
+
+/**
  * Snap each 修订/续写 revision node onto its source's cross-axis lane so the
  * `原始 → 修订 vN` edge stays straight — the invariant that makes a 圆桌逐轮 /
  * 热修版本链 read as「同一发言人·下一轮」in one lane.
@@ -529,7 +727,7 @@ function dropSubTeamsBelowParent(
 function alignRevisionChains(
   positions: Record<string, { x: number; y: number }>,
   edges: GraphEdge[],
-  layout: GraphLayout,
+  layout: ElkGraphLayout,
 ): void {
   const horizontal = layout === "leftright";
   const sourceOf = new Map<string, string>();
@@ -579,7 +777,7 @@ export const EMBED_DEFAULT_COL_WIDTH = 718;
 // actually produces (within-layer node gap, between-layer gap, outer padding).
 // MUST stay in lockstep with LAYOUT_OPTIONS + elk.padding above.
 const NODE_SPACING = 40;
-const LAYER_SPACING: Record<GraphLayout, number> = { tree: 64, leftright: 80 };
+const LAYER_SPACING: Record<ElkGraphLayout, number> = { tree: 64, leftright: 80 };
 const PADDING = 24;
 
 export interface GraphShape {
@@ -649,7 +847,7 @@ export function workerGraphShape(
  */
 export function estimateBbox(
   shape: GraphShape,
-  layout: GraphLayout,
+  layout: ElkGraphLayout,
 ): { width: number; height: number } {
   const { depth, parallelism } = shape;
   const within = (n: number, size: number) =>

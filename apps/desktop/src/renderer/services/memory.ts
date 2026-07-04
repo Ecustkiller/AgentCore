@@ -1,4 +1,5 @@
 import { api } from "@/services/api";
+import type { MemoryUpdateItem } from "@/stores/conversation";
 
 /**
  * Long-term AI memory REST client (`/v1/users/me/memory`).
@@ -88,6 +89,47 @@ export function writeMemoryFile(
     content,
     baseline,
   });
+}
+
+/**
+ * One offline-consolidation pass in the cross-conversation「记忆动态」feed (记忆编辑器
+ * 「最近更新」视图). Same applied-change items the in-conversation card shows, plus the
+ * `conversationId` it came from so the feed can link back to that thread.
+ */
+export interface MemoryUpdateFeedEntry {
+  id: string;
+  conversationId: string;
+  createdAt: string;
+  items: MemoryUpdateItem[];
+}
+
+interface MemoryUpdateFeedItemWire {
+  id: string;
+  conversation_id: string;
+  created_at: string;
+  items?: MemoryUpdateItem[];
+}
+
+/**
+ * The signed-in user's recent memory updates across ALL conversations, newest-first
+ * (记忆更新对话内可见 §1.6 — the write side's cross-conversation home). Powers the「AI 记忆」
+ * editor's「最近更新」view; `limit` caps how many recent passes to pull.
+ */
+export function listMemoryUpdates(
+  limit = 50,
+): Promise<MemoryUpdateFeedEntry[]> {
+  return api
+    .get<{
+      updates: MemoryUpdateFeedItemWire[];
+    }>(`/v1/users/me/memory/updates?limit=${limit}`)
+    .then((r) =>
+      r.updates.map((u) => ({
+        id: u.id,
+        conversationId: u.conversation_id,
+        createdAt: u.created_at,
+        items: u.items ?? [],
+      })),
+    );
 }
 
 /** folder_ids that have project-scoped memory — the rail shows a「本项目记忆」node each. */

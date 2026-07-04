@@ -170,125 +170,70 @@ def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, 
     return out
 
 
-# 完工交接简报 (worker → 下游/CEO): the worker ends its output with a「## 交接简报」section
-# (结论 / 关键要点 / 关键假设 / 建议下一步) — a structured wrap-up for its READERS, not more
-# deliverable prose. Harvested here so a downstream dep block can LEAD with the author's own
-# 结论 (most likely to survive budget-trim, cheapest to read) and the CEO aggregate can surface
-# 建议下一步 to relay to the user — instead of every reader re-deriving the gist from raw prose.
-# Same discipline as the sibling transcript harvesters: best-effort, pure, unit-testable; a
-# missing / unparseable section degrades to ``(content, None)`` so every caller behaves EXACTLY
-# as before — byte-identical for output that carries no section (load-bearing for conformance
-# stability: existing vectors carry no debrief, so the read sites are unchanged for them).
-_DEBRIEF_SENTINEL = "交接简报"
+# 完工交接简报 (worker → 下游/CEO): a delegated worker ends its run by calling the terminal
+# ``handoff`` tool with a STRUCTURED brief (summary / key_points / assumptions / next_steps) — a
+# wrap-up for its READERS, not more deliverable prose. Because it is structured, it is read
+# STRAIGHT OFF the call's arguments here (never parsed back out of markdown prose — its former,
+# fragile「## 交接简报」form): a downstream dep block can LEAD with the author's own 结论 (cheapest
+# to read, survives budget-trim) and the CEO aggregate can surface 建议下一步 to relay to the user,
+# instead of every reader re-deriving the gist from raw prose. Same discipline as the sibling
+# transcript harvesters (escalations_from_transcript / files_touched_from_transcript): intent-level,
+# best-effort, pure, unit-testable; a run with no ``handoff`` call (a worker that finished with a
+# plain no-tool answer) degrades to ``None`` — the deliverable simply stands alone (never forced,
+# so a short / self-evident product isn't padded with a redundant restatement).
+#
+# The tool name is the literal ``"handoff"`` (= ``HANDOFF_TOOL_NAME``); kept inline here to keep
+# this serialization module dependency-light, exactly as ``escalations_from_transcript`` keeps
+# ``"escalate"`` and the file harvester keeps its file-tool names inline.
+def _debrief_from_handoff_args(args: dict[str, Any]) -> dict[str, Any] | None:
+    """A ``handoff`` call's arguments → the debrief dict, or None when it carried nothing usable.
 
-# The field labels the worker is prompted to use, mapped to the parsed dict keys. Order here is
-# the canonical order; matching is tolerant of leading -/* bullets and **bold** around a label.
-_DEBRIEF_LABELS: tuple[tuple[str, str], ...] = (
-    ("结论", "summary"),
-    ("关键要点", "key_points"),
-    ("关键假设", "assumptions"),
-    ("建议下一步", "next_steps"),
-)
-
-
-def _debrief_strip_markup(line: str) -> str:
-    """Drop leading list bullets / surrounding bold so a label or value line matches cleanly."""
-    s = line.strip()
-    while s[:1] in ("-", "*", "•", "·", "—"):
-        s = s[1:].strip()
-    if s.startswith("**") and s.endswith("**") and len(s) > 4:
-        s = s[2:-2].strip()
-    return s
-
-
-def _debrief_heading_index(lines: list[str]) -> int | None:
-    """Index of the LAST line that reads as the「交接简报」heading (markdown ``#`` or **bold**),
-    or None. Last-wins so an incidental earlier mention in the body isn't mistaken for it."""
-    for i in range(len(lines) - 1, -1, -1):
-        s = lines[i].strip()
-        if not s:
-            continue
-        is_heading = s.startswith("#") or (s.startswith("**") and s.endswith("**"))
-        if is_heading and _DEBRIEF_SENTINEL in s:
-            return i
-    return None
-
-
-def _debrief_match_label(line: str) -> tuple[str, str] | None:
-    """If ``line`` opens a known debrief field, return (dict_key, value-on-this-line)."""
-    s = _debrief_strip_markup(line)
-    for label, key in _DEBRIEF_LABELS:
-        if s.startswith(label):
-            rest = s[len(label) :].lstrip()
-            if rest[:1] in ("：", ":"):
-                return key, rest[1:].strip()
-            if not rest:  # 「结论」alone on its line → its value follows on the next lines
-                return key, ""
-    return None
-
-
-def _parse_debrief_fields(section_lines: list[str]) -> dict[str, Any] | None:
-    """Parse a debrief section's body lines into the debrief dict, or None if nothing parsed.
-
-    Walks line by line: a label line opens a field; following non-label lines append to the
-    open field (so a value may span lines or be a bullet list). ``key_points`` keeps a list;
-    the prose fields are joined into one string."""
-    collected: dict[str, list[str]] = {}
-    current: str | None = None
-    for raw in section_lines:
-        matched = _debrief_match_label(raw)
-        if matched is not None:
-            key, value = matched
-            current = key
-            collected.setdefault(key, [])
-            if value:
-                collected[key].append(value)
-            continue
-        if current is None:
-            continue
-        text = _debrief_strip_markup(raw)
-        if text:
-            collected[current].append(text)
+    Only the fields the author actually filled are kept (each omitted when empty), matching the
+    shape the run-detail card / dep injection / CEO synthesis already consume. ``key_points`` is a
+    list (a lone string is tolerated by wrapping it); the other three are single strings."""
     out: dict[str, Any] = {}
-    summary = " ".join(collected.get("summary", [])).strip()
+    summary = str(args.get("summary") or "").strip()
     if summary:
         out["summary"] = summary
-    key_points = [p for p in collected.get("key_points", []) if p]
+    raw_points = args.get("key_points")
+    if isinstance(raw_points, str):
+        raw_points = [raw_points]
+    key_points = [str(p).strip() for p in (raw_points or []) if str(p).strip()]
     if key_points:
         out["key_points"] = key_points
-    assumptions = " ".join(collected.get("assumptions", [])).strip()
+    assumptions = str(args.get("assumptions") or "").strip()
     if assumptions:
         out["assumptions"] = assumptions
-    next_steps = " ".join(collected.get("next_steps", [])).strip()
+    next_steps = str(args.get("next_steps") or "").strip()
     if next_steps:
         out["next_steps"] = next_steps
     return out or None
 
 
-def split_debrief(content: str) -> tuple[str, dict[str, Any] | None]:
-    """Split a worker's final output into ``(deliverable_body, debrief | None)``.
+def debrief_from_transcript(transcript: list[LLMMessage]) -> dict[str, Any] | None:
+    """The worker's 交接简报, harvested from its ``handoff`` tool call, or None.
 
-    The deliverable body is everything BEFORE the「## 交接简报」section; the debrief is the
-    parsed section ({summary, key_points, assumptions, next_steps} — each present only when
-    non-empty). Best-effort: returns ``(content, None)`` when there is no parseable section,
-    so every reader behaves exactly as it did before debriefs existed."""
-    if not content or _DEBRIEF_SENTINEL not in content:
-        return content, None
-    lines = content.splitlines()
-    idx = _debrief_heading_index(lines)
-    if idx is None:
-        return content, None
-    debrief = _parse_debrief_fields(lines[idx + 1 :])
-    if debrief is None:
-        return content, None
-    body = "\n".join(lines[:idx]).rstrip()
-    return body, debrief
-
-
-def debrief_from_content(content: str) -> dict[str, Any] | None:
-    """The debrief a worker appended to its output, or None. Thin wrapper over
-    :func:`split_debrief` for the harvest choke point, which keeps the full content."""
-    return split_debrief(content)[1]
+    Walks the transcript for ``handoff`` calls and parses the LAST valid one's arguments (a
+    re-worked / revised run may submit more than once — the final brief wins). Mirrors
+    :func:`escalations_from_transcript`: read off the call itself, a call with malformed args or
+    no usable field is skipped. None when there is no ``handoff`` call at all."""
+    result: dict[str, Any] | None = None
+    for msg in transcript:
+        if msg.role != "assistant" or not msg.tool_calls:
+            continue
+        for tc in msg.tool_calls:
+            if tc.function.name != "handoff":
+                continue
+            try:
+                parsed = json.loads(tc.function.arguments or "{}")
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(parsed, dict):
+                continue
+            debrief = _debrief_from_handoff_args(parsed)
+            if debrief is not None:
+                result = debrief  # last valid handoff wins
+    return result
 
 
 def transcript_to_json(transcript: list[LLMMessage]) -> list[dict[str, Any]]:

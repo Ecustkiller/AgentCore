@@ -71,6 +71,7 @@ class WaveScheduler:
         *,
         seed_completed: Mapping[str, RunState] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        cancel_run_ids: Callable[[], frozenset[str]] | None = None,
         on_progress: Callable[[Mapping[str, RunState]], None] | None = None,
         on_boundary: OnBoundary | None = None,
         metrics_sink: list[BatchMetrics] | None = None,
@@ -91,6 +92,11 @@ class WaveScheduler:
           node is launched, in-flight nodes are drained, and the partial map is
           returned (a soft pause — the un-run tail is left out so a resume re-runs
           it). An in-flight node is never interrupted by it.
+        - ``cancel_run_ids`` is polled each cycle; run_ids in the returned set that
+          are currently in-flight are cancelled individually — the cancelled node gets
+          ``RunPhase.CANCELLED``, siblings keep running, and skip cascading does NOT
+          propagate (unlike a failed ``on_failure="skip"`` node). Used by delegate
+          drive for user-initiated worker redirect (Phase 2a).
         - ``on_progress`` fires after *each* node finishes with the completed-so-far
           map, so the host gets smooth progress (one increment per node).
         - ``on_boundary`` (受监督的波循环) is the host's decision-boundary hook, fired
@@ -168,6 +174,7 @@ class WaveScheduler:
         bind_boundaries = 0
         scope_boundaries = 0
         checkpoint_boundaries = 0
+        cancelled_by_redirect: set[str] = set()
 
         try:
             while True:
@@ -221,12 +228,38 @@ class WaveScheduler:
                 if not running:
                     break  # nothing in flight and (holding, or no node is ready) ⇒ done
 
-                done, _ = await asyncio.wait(set(running), return_when=asyncio.FIRST_COMPLETED)
+                # Per-run user cancel (Phase 2a redirect): cancel specific in-flight tasks
+                # without aborting the whole batch. Checked each cycle; a cancelled task
+                # resolves on the next wait and is recorded as CANCELLED (not re-raised).
+                if cancel_run_ids is not None and running:
+                    for target_id in cancel_run_ids():
+                        for task, rid in list(running.items()):
+                            if rid == target_id and rid not in cancelled_by_redirect:
+                                task.cancel()
+                                cancelled_by_redirect.add(rid)
+
+                done, _ = await asyncio.wait(
+                    set(running),
+                    timeout=0.05 if cancel_run_ids is not None else None,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    continue
                 for task in done:
                     run_id = running.pop(task)
-                    if task.cancelled():  # a pause/cancel must never be swallowed
-                        raise asyncio.CancelledError
-                    state = task.result()
+                    if run_id in cancelled_by_redirect:
+                        # User-initiated single cancel: absorb gracefully, don't propagate
+                        if not task.done():
+                            task.cancel()
+                        try:
+                            task.result()
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                        state = RunState(phase=RunPhase.CANCELLED)
+                    elif task.cancelled():
+                        raise asyncio.CancelledError  # external cancel, propagate
+                    else:
+                        state = task.result()
                     completed[run_id] = state
                     started = started_at.pop(run_id, None)
                     if started is not None:  # node occupancy: dispatch → finish
@@ -344,6 +377,7 @@ class WaveScheduler:
                     completed=sum(1 for s in ran if s.phase is RunPhase.COMPLETED),
                     failed=sum(1 for s in ran if s.phase is RunPhase.FAILED),
                     skipped=sum(1 for s in ran if s.phase is RunPhase.SKIPPED),
+                    cancelled=sum(1 for s in ran if s.phase is RunPhase.CANCELLED),
                     bind_boundaries=bind_boundaries,
                     scope_boundaries=scope_boundaries,
                     checkpoint_boundaries=checkpoint_boundaries,

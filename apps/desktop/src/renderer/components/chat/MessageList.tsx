@@ -26,14 +26,15 @@ export function MessageList() {
   // 绑定的本地根，供成功任务的内联评审写回本地（同一对话所有卡共用，故在此读取一次下传）。
   const rootId = useWorkspaceRootId(conversationId);
 
-  // 记忆更新对话内可见 (§1.6): the offline-consolidation cards sit at the very tail —
-  // consolidation folds a window of finished turns, so it post-dates every message and
-  // background card (no timestamp merge needed, just append after them).
+  // 记忆更新对话内可见 (§1.6): offline-consolidation「记忆已更新」cards are merged into
+  // the timeline by their own `created_at` (mergeTimeline), so each sits right after the
+  // window of turns it folded and scrolls into history as the conversation continues —
+  // instead of永久钉在尾部堆叠 (which made stale cards float below every new turn).
   const memoryUpdates = useActiveMemoryUpdates();
 
   const items = useMemo(
-    () => mergeTimeline(messages, tasks),
-    [messages, tasks],
+    () => mergeTimeline(messages, tasks, memoryUpdates),
+    [messages, tasks, memoryUpdates],
   );
 
   return (
@@ -41,13 +42,12 @@ export function MessageList() {
       {items.map((it) =>
         it.kind === "message" ? (
           <MessageBubble key={it.key} message={it.msg} />
-        ) : (
+        ) : it.kind === "task" ? (
           <BackgroundTaskCard key={it.key} job={it.job} rootId={rootId} />
+        ) : (
+          <MemoryUpdateCard key={it.key} update={it.update} />
         ),
       )}
-      {memoryUpdates.map((u) => (
-        <MemoryUpdateCard key={u.id} update={u} />
-      ))}
     </div>
   );
 }

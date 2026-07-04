@@ -124,27 +124,32 @@ def decide_llm_failure(
     profile: ModelProfile,
     active_model: str | None,
     final_content: str,
+    upstream_error: bool = False,
 ) -> LoopDirective:
     """Pick the directive for a round whose LLM call hard-failed (non-raising path).
 
     The provider already exhausted its own network retries (429/5xx backoff) before
-    the exception escaped, so retrying the SAME model is pointless. Escalate to the
-    profile's fallback model once — a different model may be healthy — sharing the
-    one-switch budget with the empty-response ladder via the ``active_model`` gate.
-    When no fallback is available (unconfigured, disabled, or already in use), end the
-    turn on an honest terminal reason: ``ERROR`` when nothing was produced, ``DEGRADED``
-    when partial content already streamed (don't discard a partial answer).
+    the exception escaped, so retrying the SAME model is pointless. For upstream 5xx
+    errors, fallback is skipped entirely — different models on the same provider share
+    infra, so a 502 on Flash means Pro will likely 502 too. For other failures,
+    escalate to the profile's fallback model once — sharing the one-switch budget with
+    the empty-response ladder via the ``active_model`` gate. When no fallback is
+    available (or skipped), end the turn on an honest terminal reason: ``ERROR`` when
+    nothing was produced, ``DEGRADED`` when partial content already streamed.
     """
     fallback_model = profile.fallback_model
     fallback_available = (
         settings.engine_fallback_enabled
         and fallback_model is not None
         and fallback_model != (active_model or profile.model)
+        and not upstream_error
     )
     if fallback_available:
         assert fallback_model is not None  # fallback_available ⇒ a model exists
         logger.warning("engine.fallback_model_on_error", fallback_model=fallback_model)
         return SwitchModel(model=fallback_model)
+    if upstream_error:
+        logger.warning("engine.upstream_error_no_fallback")
 
     reason = FinishReason.DEGRADED if final_content else FinishReason.ERROR
     logger.warning(
@@ -171,6 +176,18 @@ def govern_after_tools(
     Convergence and reflection are suppressed when the circuit breaker already
     steered this round (``breaker_message is not None``) so steers don't stack.
     """
+    # Post-delegate investigation check (优化六: 委派后工具降级)
+    if outcome.has_tool_calls:
+        called_tool_names = {a.tool_name for a in outcome.attempts if a.tool_name}
+        post_delegate_msg = controller.post_delegate_check(called_tool_names)
+        if post_delegate_msg is not None:
+            messages.append(LLMMessage(role="user", content=post_delegate_msg))
+            record_turn_fact(
+                NoteFact(
+                    role="user", content=post_delegate_msg, reason="post_delegate", run_id=run_id
+                ).to_fact()
+            )
+
     controller.note_round_productivity(
         had_tool_calls=outcome.has_tool_calls,
         all_failed=outcome.all_tools_failed,

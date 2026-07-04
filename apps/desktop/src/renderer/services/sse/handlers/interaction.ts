@@ -13,6 +13,7 @@ import type {
   SSEEvent,
 } from "@/types/events";
 import { flushPendingContent } from "../contentBuffer";
+import { flushPendingFrames } from "../execFrameBuffer";
 import { execMessageId } from "../helpers";
 import type { DispatchContext } from "../types";
 
@@ -37,6 +38,7 @@ export function handleInteractionEvent(
       // Flush buffered content first so the checkpoint marker anchors AFTER the CEO's
       // preceding line (统一团队时间线; matches the conformance golden's step order).
       flushPendingContent(conversationId);
+      flushPendingFrames(conversationId);
       useConversationStore
         .getState()
         .addCheckpoint(
@@ -63,6 +65,7 @@ export function handleInteractionEvent(
     }
     case "question_posted": {
       flushPendingContent(conversationId);
+      flushPendingFrames(conversationId);
       useConversationStore
         .getState()
         .addNonBlockingAsk(
@@ -73,6 +76,9 @@ export function handleInteractionEvent(
     }
     case "plan_review_required": {
       flushPendingContent(conversationId);
+      // Land buffered worker frames before this checkpoint frame so the gated node's prior
+      // deltas fold in first (帧顺序), then record the pause frame immediately.
+      flushPendingFrames(conversationId);
       useConversationStore
         .getState()
         .addPlanReview(
@@ -99,6 +105,7 @@ export function handleInteractionEvent(
       // The live resolve deleted the durable frame server-side; mirror it so a
       // 待恢复 card from a duplicate surface can't linger and 404 on click.
       usePausedTurnStore.getState().removeByCheckpoint(p.checkpoint_id);
+      flushPendingFrames(conversationId);
       {
         const mid = execMessageId(conversationId);
         const frame = frameFromEvent(event);

@@ -9,6 +9,7 @@ export {
 export { useConversationStore, type ConversationState } from "./store";
 export {
   useActiveMessages,
+  useActiveMessageContent,
   useActiveMemoryUpdates,
   useActiveGenerating,
   useConversationGenerating,

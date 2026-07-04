@@ -4,8 +4,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { getConversations } from "@/hooks/useConversations";
-import { patchFolderCache } from "@/hooks/useFolders";
+import { patchConversationScratch } from "@/hooks/useWorkspaces";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { ApiError } from "@/services/api";
 import { runHandoff } from "@/services/handoff";
@@ -84,17 +83,14 @@ export function WorkspaceModeBar({
     void refresh();
   }, [refresh]);
 
-  // Mirror a bind/unbind onto the sidebar so its mode badge updates without a
-  // reload. 文件夹即工作区: a binding lives on the folder (every sibling flips), so we
-  // patch the folder cache. A 裸聊 bind promotes the chat into a folder server-side;
-  // its new membership lands on the next conversations refetch, so nothing to patch
-  // here (the folderId isn't in cache yet).
+  // Mirror a bind/unbind onto the workspace rail so the file hub updates without a reload.
   const syncStores = (b: WorkspaceBinding) => {
-    if (b.scope === "folder") {
-      const folderId = getConversations().find(
-        (c) => c.id === conversationId,
-      )?.folderId;
-      if (folderId) patchFolderCache(folderId, { localRootId: b.rootId });
+    if (b.rootId) {
+      patchConversationScratch(conversationId, {
+        rootId: b.rootId,
+        location: "local",
+        hasFiles: true,
+      });
     }
   };
 

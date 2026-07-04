@@ -53,6 +53,77 @@ class MessageRepository:
         await self._session.refresh(msg)
         return msg
 
+    async def set_followups(
+        self, message_id: str, *, conversation_id: str, followups: list[str]
+    ) -> None:
+        """Backfill the post-turn 下一步推荐 chips onto an existing assistant row.
+
+        The followups World B task mints them AFTER the row is created (same finalize tail
+        as the title), so persistence is a targeted UPDATE rather than a create arg. Scoped
+        by conversation_id (defense in depth); a no-match id is a harmless no-op.
+        """
+        await self._session.execute(
+            update(Message)
+            .where(Message.id == message_id, Message.conversation_id == conversation_id)
+            .values(followups=followups)
+        )
+        await self._session.commit()
+
+    async def set_feedback(
+        self, message_id: str, *, conversation_id: str, feedback: str | None
+    ) -> bool:
+        """Set / clear the user's 点赞/点踩 on a message (回复反馈). Returns whether a row matched.
+
+        Scoped by ``conversation_id`` (defense in depth — the route has already proven
+        ownership of the conversation, so a guessed id from another chat won't match →
+        IDOR-safe). ``feedback`` is ``"up"`` / ``"down"`` to rate, or ``None`` to clear
+        the rating back to 未评价. A no-match id is a harmless False (route 404s).
+        """
+        result = await self._session.execute(
+            update(Message)
+            .where(Message.id == message_id, Message.conversation_id == conversation_id)
+            .values(feedback=feedback)
+        )
+        await self._session.commit()
+        return (result.rowcount or 0) > 0
+
+    async def copy_all(self, source_conversation_id: str, target_conversation_id: str) -> int:
+        """Copy every message of one conversation into another (对话克隆). Returns the count.
+
+        Backs 克隆对话 (duplicate a conversation): the target is a freshly-created empty
+        conversation, so this bulk-inserts fresh-id copies of the source's rows, preserving
+        render order (``created_at`` copied verbatim) and content-level fields (role /
+        content / reasoning / usage / attachments / citations / followups / finish_reason).
+
+        Intentionally NOT copied: ``trace_id`` (a copy is not a real turn — reusing it would
+        double-link the original turn's logs), ``feedback`` (a rating belongs to the turn the
+        user actually rated), and the separate ``turn_journal`` replay stream (§8.3, keyed by
+        message id) — so a cloned multi-agent turn keeps its final text but re-renders as a
+        plain bubble rather than replaying its team graph. A pragmatic MVP scope for 克隆.
+        """
+        rows = await self.list_all_for_conversation(source_conversation_id)
+        copies = [
+            Message(
+                id=new_id(),
+                conversation_id=target_conversation_id,
+                role=r.role,
+                content=r.content,
+                reasoning_content=r.reasoning_content,
+                usage=r.usage,
+                attachments=list(r.attachments or []),
+                citations=list(r.citations or []),
+                followups=list(r.followups or []),
+                finish_reason=r.finish_reason,
+                created_at=r.created_at,
+            )
+            for r in rows
+        ]
+        if not copies:
+            return 0
+        self._session.add_all(copies)
+        await self._session.commit()
+        return len(copies)
+
     async def count_by_conversation(self, conversation_id: str) -> int:
         """Number of messages in a conversation (0 for a brand-new, unsent one).
 

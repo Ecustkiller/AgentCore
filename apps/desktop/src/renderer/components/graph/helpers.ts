@@ -79,6 +79,7 @@ export function computeWaves(
   layoutKind: GraphLayout,
   captainId: string | null,
 ): WaveBand[] {
+  if (layoutKind === "timeline") return [];
   const horizontal = layoutKind === "leftright";
   const slots: { x: number; y: number }[] = [];
   for (const r of execution.runs) {
@@ -103,7 +104,7 @@ export function computeWaves(
       const x1 = Math.max(...members.map((m) => m.x + NODE_WIDTH));
       return {
         id: `wave-${i}`,
-        label: `第 ${i + 1} 波`,
+        label: `依赖层 ${i + 1}`,
         x: x0 - WAVE_PAD,
         y: -WAVE_PAD,
         w: x1 - x0 + WAVE_PAD * 2,
@@ -116,7 +117,7 @@ export function computeWaves(
     const y1 = Math.max(...members.map((m) => m.y + NODE_HEIGHT));
     return {
       id: `wave-${i}`,
-      label: `第 ${i + 1} 波`,
+      label: `依赖层 ${i + 1}`,
       x: -WAVE_PAD,
       y: y0 - WAVE_PAD,
       w: bbox.width + WAVE_PAD * 2,

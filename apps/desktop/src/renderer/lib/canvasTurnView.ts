@@ -11,10 +11,12 @@ const VALID: ReadonlySet<CanvasTurnView> = new Set([
   "timeline",
 ]);
 
-/** 迁移：旧「版本对比」独立视图 `revisions` 已并入统一「对比」透镜 `compare`（对比擂台 ∪ 版本链）。
- * 读旧持久值时归一，避免用户下次进画布丢掉曾选的对比视图。 */
+/** 迁移：旧「版本对比」独立视图 `revisions` 已并入统一「对比」透镜 `compare`；旧「并行时间线」
+ * 独立 tab / 底栏甘特已并入协作图 toolbar「时间轴」布局，读旧持久值 `timeline` 时归一到 `graph`。 */
 function migrate(v: string): string {
-  return v === "revisions" ? "compare" : v;
+  if (v === "revisions") return "compare";
+  if (v === "timeline") return "graph";
+  return v;
 }
 
 function entryKey(conversationId: string, turnId: string): string {

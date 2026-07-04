@@ -67,7 +67,7 @@ function revised(
   parentRunId: string,
   revision: number,
   t = 1,
-): RunFrame {
+): Extract<RunFrame, { kind: "run_started" }> {
   return {
     t,
     kind: "run_started",

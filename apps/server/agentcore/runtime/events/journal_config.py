@@ -2,42 +2,14 @@
 
 from __future__ import annotations
 
+from agentcore.runtime.events.disposition import DURABLE_EVENT_TYPES
 from agentcore.runtime.events.types import EventType
 
-_JOURNAL_EVENT_TYPES = frozenset(
-    {
-        EventType.RUN_PLAN,
-        EventType.RUN_STARTED,
-        EventType.RUN_CONTEXT,
-        EventType.RUN_COMPLETED,
-        EventType.RUN_FAILED,
-        EventType.RUN_PROGRESS,
-        # 调度埋点量化 (深层诊断指标, 前端UX设计.md §十): journaled so the run-detail 诊断信息
-        # replays the scheduler snapshot on reload. Like PLAN_REVISED it only fires inside a
-        # delegate/debate turn (both fan out via WaveScheduler alongside RUN_PLAN, a surface
-        # type), so it needs no _JOURNAL_SURFACE_TYPES entry to gate journal persistence.
-        EventType.BATCH_METRICS,
-        EventType.DEBATE_RESULT,
-        EventType.TOOL_USE_START,
-        EventType.TOOL_USE_END,
-        EventType.CHECKPOINT_REQUIRED,
-        EventType.CHECKPOINT_RESOLVED,
-        EventType.QUESTION_POSTED,
-        EventType.PLAN_REVIEW_REQUIRED,
-        EventType.PLAN_REVIEW_RESOLVED,
-        # 自主再绑定的「计划已调整」轻痕迹 (设计 §7.2): journaled so the trace replays on
-        # reload. It only ever fires inside a delegate turn (alongside RUN_PLAN, a surface
-        # type), so it needs no entry in _JOURNAL_SURFACE_TYPES to gate journal persistence.
-        EventType.PLAN_REVISED,
-        EventType.ESCALATION_REQUIRED,
-        EventType.ESCALATION_RESOLVED,
-        # 团队便签墙 (§2.2 通): journaled so the team-notes panel replays on reload. Like
-        # PLAN_REVISED / BATCH_METRICS it only fires inside a delegate turn (alongside
-        # RUN_PLAN, a surface type), so it needs no _JOURNAL_SURFACE_TYPES entry to gate
-        # journal persistence.
-        EventType.TEAM_NOTE_POSTED,
-    }
-)
+# 落 journal 的事件 = 处置表里所有 DURABLE（单一源见 events/disposition.py）。历史上这里手
+# 维护第二份清单，与处置表两处易漂移、新增事件易静默遗漏；现直接复用派生集——新增 DURABLE
+# 只在 disposition.py 声明一处，穷尽门禁（tests/test_event_disposition.py）保证不漏。
+# 各 DURABLE 事件的落库理由见 disposition.py 的 EVENT_DISPOSITION 注释。
+_JOURNAL_EVENT_TYPES = DURABLE_EVENT_TYPES
 
 _JOURNAL_SURFACE_TYPES = frozenset(
     {

@@ -7,9 +7,23 @@ from dataclasses import asdict, replace
 from typing import TYPE_CHECKING
 
 from agentcore.core.logging import get_logger
-from agentcore.runtime.debate import DebateConfig, DebateSide, RoundResult, SideTurn
+from agentcore.runtime.debate import (
+    ClosingStatement,
+    CrossExamExchange,
+    DebateConfig,
+    DebateSide,
+    RoundResult,
+    SideTurn,
+)
 from agentcore.runtime.events import batch_metrics as batch_metrics_event
-from agentcore.tools.builtin.debate.prompt import debater_task, round_feedback
+from agentcore.tools.builtin.debate.prompt import (
+    closing_context_blocks,
+    closing_task,
+    cx_answer_feedback,
+    debater_task,
+    round_context_blocks,
+    round_feedback,
+)
 
 if TYPE_CHECKING:
     from agentcore.tools.builtin.debate.tool import DebateTool
@@ -111,6 +125,9 @@ async def first_round(
         user_message=tool._user_message,
         execution_id=execution_id,
         approval_gate=worker_gate,
+        # 辩手是对手不是协作团队：不配团队便签墙（否则正反方会经便签互读对方立论、面板还冒出
+        # 莫名的「团队便签」）。跨方信息由主持人按轮喂 round_feedback，才是辩论正当的跨方通道。
+        collaboration=False,
     )
     scheduler = WaveScheduler(tool._max_parallel or DEFAULT_MAX_PARALLEL)
     batch_metrics: list[BatchMetrics] = []
@@ -188,6 +205,12 @@ async def next_round(
             return None
         revision_run_id = f"{moderator_run_id}_r{round_no}_{side.key}"
         feedback = round_feedback(config, side, round_no, focus, last_round, interjections)
+        # 收到的上下文 (上下文传递可视化): the display twin of `feedback` — 本轮焦点 / 对方上轮
+        # 论点 / 被驳命门 / 追问 — from the SAME inputs, shipped as this round's run_context so
+        # the revision node's panel shows what it was fed instead of the empty first-round task.
+        context_blocks = round_context_blocks(
+            config, side, round_no, focus, last_round, interjections
+        )
         async with semaphore:
             return await continue_run(
                 session=session,
@@ -203,6 +226,7 @@ async def next_round(
                 # 单一轮次投影: carry this side's TRUE round onto the revision's run_started
                 # (辩论逐轮), so every fold reads 第几轮 from the wire, not the version number.
                 round_no=round_no,
+                context_blocks=context_blocks,
             )
 
     states = await asyncio.gather(*(_continue_side(side) for side in sides))
@@ -225,6 +249,191 @@ async def next_round(
         else:
             turns.append(failed_turn(side, revision_run_id))
     return turns
+
+
+def make_cross_exam_runner(
+    tool: DebateTool, execution_id: str, moderator_run_id: str, config: DebateConfig
+):
+    """质询回合（P1）的 :class:`~agentcore.runtime.debate.CrossExamRunner` 实现工厂。
+
+    主持人已据本轮立论生成【定向各方的必答质询】（``questions``: side_key → 问题列表），本 runner 让每个
+    被质询方用 ``continue_run`` 在【自己的 transcript】上正面作答（受 ``max_parallel`` 并发约束）：答复
+    进入该方 session 记忆（下一轮立论续写可见）、折算进回合账目，返回各方 :class:`CrossExamExchange`
+    （问答对喂回主持人裁判记分）。仅在主持人判定开启质询（认真辩透 + 对抗形态）时被调，与 :func:`next_round`
+    共用同一批辩手 session。"""
+
+    async def run_cross_exam(*, round_no, focus, sides, turns, questions):  # noqa: ANN001, ARG001
+        from agentcore.runtime.runs import DEFAULT_MAX_PARALLEL, RunPhase, continue_run
+        from agentcore.runtime.runs.types import ContextBlock
+
+        sides_by_key = {s.key: s for s in sides}
+        worker_gate = (
+            tool._approval_gate if tool._base_tool_context.backend.location == "local" else None
+        )
+        semaphore = asyncio.Semaphore(tool._max_parallel or DEFAULT_MAX_PARALLEL)
+        # 只质询「首轮已成功立论（有 session）+ 主持人给了问题」的方；顺序固定为 sides 声明序，账目 /
+        # 留人回写次序一致（并发只发生在 continue_run 本身，不碰共享态，与 next_round 同辙）。
+        targets = [
+            (s.key, list(questions[s.key]))
+            for s in sides
+            if s.key in questions and questions[s.key] and s.key in tool._debater_sessions
+        ]
+
+        async def _answer(side_key: str, qs: list[str]):
+            session = tool._debater_sessions.get(side_key)
+            side = sides_by_key.get(side_key)
+            if session is None or side is None:
+                return None
+            cx_run_id = f"{moderator_run_id}_r{round_no}_cx_{side_key}"
+            feedback = cx_answer_feedback(config, side, round_no, focus, qs)
+            # 收到的上下文（上下文传递可视化）：质询作答节点面板展示它被问了什么，而非空白 / 首轮任务。
+            context_blocks = [
+                ContextBlock(
+                    channel="cross_exam",
+                    heading=f"第 {round_no} 轮 · 质询（必须正面回答）",
+                    body="\n".join(f"- {q}" for q in qs),
+                )
+            ]
+            async with semaphore:
+                return await continue_run(
+                    session=session,
+                    feedback=feedback,
+                    revision_run_id=cx_run_id,
+                    llm=tool._llm,
+                    tools=tool._tools,
+                    sink=tool._sink,
+                    base_tool_context=tool._base_tool_context,
+                    execution_id=execution_id,
+                    profile_set=tool._profile_set,
+                    approval_gate=worker_gate,
+                    round_no=round_no,
+                    context_blocks=context_blocks,
+                )
+
+        states = await asyncio.gather(*(_answer(k, qs) for k, qs in targets))
+
+        exchanges: list[CrossExamExchange] = []
+        for (side_key, qs), state in zip(targets, states, strict=False):
+            cx_run_id = f"{moderator_run_id}_r{round_no}_cx_{side_key}"
+            session = tool._debater_sessions.get(side_key)
+            if session is None or state is None:
+                exchanges.append(
+                    CrossExamExchange(
+                        target=side_key, questions=qs, answer_run_id=cx_run_id, ok=False
+                    )
+                )
+                continue
+            rev_spec = replace(session.spec, run_id=cx_run_id, agent_id=cx_run_id)
+            tool._acc.add_run(rev_spec, state, parent_run_id=moderator_run_id)
+            if state.phase is RunPhase.COMPLETED and state.content.strip():
+                # 作答成功：延展后的 transcript 提交回 session，下一轮立论续写在其之上（带质询记忆）。
+                session.transcript = state.transcript
+                session.content = state.content
+                session.recall_count += 1
+                exchanges.append(
+                    CrossExamExchange(
+                        target=side_key,
+                        questions=qs,
+                        answer=state.content,
+                        answer_run_id=cx_run_id,
+                        ok=True,
+                    )
+                )
+            else:
+                exchanges.append(
+                    CrossExamExchange(
+                        target=side_key, questions=qs, answer_run_id=cx_run_id, ok=False
+                    )
+                )
+        return exchanges
+
+    return run_cross_exam
+
+
+def make_closing_runner(
+    tool: DebateTool, execution_id: str, moderator_run_id: str, config: DebateConfig
+):
+    """结辩收束（阶段化发言角色 P4）的 :class:`~agentcore.runtime.debate.ClosingRunner` 实现工厂。
+
+    辩论收场后主持人请各方做结辩：本 runner 让每个仍有 session 的方用 ``continue_run`` 在【自己的
+    transcript】上出一段收尾陈词（受 ``max_parallel`` 并发约束，带全程记忆，只需给「只讲胜负手、不引入
+    新论据」的 feedback，见 :func:`closing_task`），折算进账目，返回各方 :class:`ClosingStatement`（全文进
+    该方 run 事件）。对称于 :func:`make_cross_exam_runner`，与逐轮辩手共用同一批 session；未成功立论 /
+    无 session 的方不参与结辩（advocacy 收尾对失败方无意义）。仅在主持人判定开启结辩时被调。"""
+
+    async def run_closing(*, sides, rounds):  # noqa: ANN001, ARG001
+        from agentcore.runtime.runs import DEFAULT_MAX_PARALLEL, RunPhase, continue_run
+
+        sides = list(sides)
+        worker_gate = (
+            tool._approval_gate if tool._base_tool_context.backend.location == "local" else None
+        )
+        semaphore = asyncio.Semaphore(tool._max_parallel or DEFAULT_MAX_PARALLEL)
+        # 结辩 run 的逐轮标记沿用末轮号（结辩是收场收束、非新一轮）：让画布把结辩修订挂到该方末轮
+        # 修订链尾，前端辩论视图仍按 run_id 直取结辩全文（与轮号解耦）。无轮次（理论不可达，防御）→ 0。
+        final_round_no = rounds[-1].round_no if rounds else 0
+        # 只让「已成功立论（有 session）」的方结辩，顺序固定为 sides 声明序（账目 / 留人回写次序一致，
+        # 并发只发生在 continue_run 本身，与 next_round / cross_exam 同辙）。
+        targets = [s for s in sides if s.key in tool._debater_sessions]
+
+        async def _close(side: DebateSide):
+            session = tool._debater_sessions.get(side.key)
+            if session is None:
+                return None
+            closing_run_id = f"{moderator_run_id}_closing_{side.key}"
+            feedback = closing_task(config, side)
+            # 收到的上下文（上下文传递可视化）：结辩节点面板展示「请做结辩、只讲胜负手」定调，而非空白。
+            context_blocks = closing_context_blocks(config, side)
+            async with semaphore:
+                return await continue_run(
+                    session=session,
+                    feedback=feedback,
+                    revision_run_id=closing_run_id,
+                    llm=tool._llm,
+                    tools=tool._tools,
+                    sink=tool._sink,
+                    base_tool_context=tool._base_tool_context,
+                    execution_id=execution_id,
+                    profile_set=tool._profile_set,
+                    approval_gate=worker_gate,
+                    round_no=final_round_no,
+                    context_blocks=context_blocks,
+                )
+
+        states = await asyncio.gather(*(_close(s) for s in targets))
+
+        closings: list[ClosingStatement] = []
+        for side, state in zip(targets, states, strict=False):
+            closing_run_id = f"{moderator_run_id}_closing_{side.key}"
+            session = tool._debater_sessions.get(side.key)
+            if session is None or state is None:
+                closings.append(
+                    ClosingStatement(side.key, side.name, closing_run_id, ok=False)
+                )
+                continue
+            rev_spec = replace(session.spec, run_id=closing_run_id, agent_id=closing_run_id)
+            tool._acc.add_run(rev_spec, state, parent_run_id=moderator_run_id)
+            if state.phase is RunPhase.COMPLETED and state.content.strip():
+                # 结辩成功：延展后的 transcript 提交回 session（结辩是本方 transcript 的最后一段）。
+                session.transcript = state.transcript
+                session.content = state.content
+                session.recall_count += 1
+                closings.append(
+                    ClosingStatement(
+                        side.key,
+                        side.name,
+                        closing_run_id,
+                        content=state.content,
+                        ok=True,
+                    )
+                )
+            else:
+                closings.append(
+                    ClosingStatement(side.key, side.name, closing_run_id, ok=False)
+                )
+        return closings
+
+    return run_closing
 
 
 def debater_plan_event(tool: DebateTool, execution_id: str, moderator_run_id: str, plan):

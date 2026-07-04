@@ -12,8 +12,6 @@ const mk = (id: string, name = id): FolderMeta => ({
   id,
   name,
   localDir: null,
-  localRootId: null,
-  localSubpath: "",
 });
 
 function readFolders(): FolderMeta[] {
@@ -56,9 +54,8 @@ describe("folder list cache helpers", () => {
 
   it("patchFolderCache shallow-merges one folder", () => {
     seed([mk("a", "Work"), mk("b", "Notes")]);
-    patchFolderCache("a", { name: "Renamed", localRootId: "root-1" });
+    patchFolderCache("a", { name: "Renamed" });
     expect(readFolders().find((f) => f.id === "a")?.name).toBe("Renamed");
-    expect(readFolders().find((f) => f.id === "a")?.localRootId).toBe("root-1");
     expect(readFolders().find((f) => f.id === "b")?.name).toBe("Notes");
   });
 

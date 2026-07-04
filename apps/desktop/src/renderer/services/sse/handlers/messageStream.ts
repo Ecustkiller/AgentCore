@@ -18,7 +18,9 @@ import {
   ensureStreamingAssistant,
   flushPendingContent,
   queueContentDelta,
+  queueReasoningDelta,
 } from "../contentBuffer";
+import { flushPendingFrames } from "../execFrameBuffer";
 import { execMessageId } from "../helpers";
 import type { DispatchContext } from "../types";
 
@@ -74,13 +76,11 @@ export function handleMessageStreamEvent(
     }
     case "reasoning_delta": {
       ensureStreamingAssistant(conversationId);
-      flushPendingContent(conversationId);
-      useConversationStore
-        .getState()
-        .appendReasoningToLastMessage(
-          (event.payload as ReasoningDeltaPayload).delta,
-          conversationId,
-        );
+      // rAF 合批思考流 (流式性能): 与正文共用一条 rAF、同点 flush，避免逐 token 写 store。
+      queueReasoningDelta(
+        conversationId,
+        (event.payload as ReasoningDeltaPayload).delta,
+      );
       return true;
     }
     case "tool_progress": {
@@ -96,6 +96,9 @@ export function handleMessageStreamEvent(
     }
     case "message_end": {
       flushPendingContent(conversationId);
+      // Land any rAF-buffered worker frames before the turn finalizes so the graph's
+      // last deltas aren't dropped on a fast end (流式性能合批的收尾兜底).
+      flushPendingFrames(conversationId);
       const payload = event.payload as MessageEndPayload;
       const conv = useConversationStore.getState();
       if (payload.cost) {
@@ -143,6 +146,7 @@ export function handleMessageStreamEvent(
     }
     case "error": {
       flushPendingContent(conversationId);
+      flushPendingFrames(conversationId);
       ensureStreamingAssistant(conversationId);
       const store = useConversationStore.getState();
       const payload = event.payload as ErrorPayload;

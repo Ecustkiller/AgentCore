@@ -63,11 +63,8 @@ const TONE = interactiveCheckpointTone;
  * into ONE readable note (答复模型 α — the only reader is the CEO), handed to
  * `onSubmit`; the caller wires it to the resolve (live) or resume (durable) endpoint.
  *
- * Tone / icon / CTA are derived from CONTENT, not a separate tool: both an opening
- * (起步计划 / 风格, or every question pre-filled) and a mid-task fork read as `primary`
- * (蓝 = 需要你拍板 / 邀请你决定，而非警告)；icon + caption + CTA 文案区分提案 vs 决策叉。
- * 真·风险审批（写文件 / 执行代码）由 ApprovalPrompt 承载（极简中性下亦为品牌蓝）。`caption` overrides
- * the top status line (the resume card states it reconnected).
+ * Tone: 灰壳灰选项（neutral）——内容区低调如配置表单；Footer 主 CTA 仍用品牌蓝承载行动信号。
+ * icon + caption + CTA 文案区分开工提案 vs 途中决策叉。真·风险审批由 ApprovalPrompt 承载（蓝）。
  */
 export function AskUserCard({
   content,
@@ -82,8 +79,7 @@ export function AskUserCard({
   ) => void | Promise<void>;
 }) {
   const opening = isOpeningFlavored(content);
-  // ask_user 是邀请你拍板/决定（非警告）→ 统一品牌蓝；提案 vs 决策叉靠 icon/caption/CTA 区分。
-  const tone = TONE.primary;
+  const tone = TONE.neutral;
   const ans = useAskAnswer(content);
   const [submitting, setSubmitting] = useState<CheckpointUserDecision | null>(
     null,
@@ -108,8 +104,12 @@ export function AskUserCard({
   };
 
   return (
-    <DecisionCard tone="primary" animate className="overflow-hidden p-0">
-      <div className="space-y-3 px-3 pt-3">
+    <DecisionCard
+      tone="neutral"
+      animate
+      className="flex max-h-[min(50vh,28rem)] flex-col overflow-hidden p-0"
+    >
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pt-3">
         <div className="flex items-start gap-2">
           {opening ? (
             <Rocket size={16} className={`mt-0.5 shrink-0 ${tone.accent}`} />
@@ -153,7 +153,7 @@ export function AskUserCard({
         />
       </div>
 
-      <DecisionCardFooter tone="primary">
+      <DecisionCardFooter tone="neutral" className="mt-0 shrink-0">
         <Button
           size="md"
           variant="primary"

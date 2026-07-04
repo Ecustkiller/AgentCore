@@ -68,7 +68,13 @@ ignore = ["B008", "A002", "E402"]
 "agentcore/runtime/planner.py" = ["E501"]
 "agentcore/runtime/prompt.py" = ["E501"]
 "agentcore/runtime/resolve/prompt.py" = ["E501"]
-"agentcore/tools/builtin/debate/prompt.py" = ["E501"]
+# Debate orchestration + tool packages: dense Chinese design commentary (主持人循环 /
+# 质询·记分·举证·结辩 各阶段的 why) + verbatim LLM feedback templates. Same reason-to-exempt as
+# the vectors glob below — reflowing the CJK prose hurts readability/diff, and E501 counts CJK
+# width×2 so ~50-char comment lines trip it. Glob the whole packages (not just prompt.py) so
+# sibling modules (moderator/types/rounds/tool/schema) stay consistent as the feature grows.
+"agentcore/runtime/debate/*.py" = ["E501"]
+"agentcore/tools/builtin/debate/*.py" = ["E501"]
 # Legal-vertical Skill bodies are verbatim Chinese LLM guidance (string literals),
 # same reason-to-exempt as runtime/skills.py: reflowing changes what the CEO consults.
 "agentcore/runtime/legal_skills.py" = ["E501"]

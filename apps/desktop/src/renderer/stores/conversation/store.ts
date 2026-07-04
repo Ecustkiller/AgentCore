@@ -90,10 +90,6 @@ export interface ConversationState {
     messageId: string,
     conversationId?: string | null,
   ) => void;
-  attachWorkspacePromotionToLastMessage: (
-    promotion: { folderId: string; name: string },
-    conversationId?: string | null,
-  ) => void;
   addProcessTool: (
     payload: ToolUseStartPayload,
     conversationId?: string | null,
@@ -356,18 +352,6 @@ export const useConversationStore = create<ConversationState>((set, get) => {
         const last = messages[messages.length - 1];
         if (!last || last.role !== "assistant") return null;
         messages[messages.length - 1] = { ...last, serverMessageId: messageId };
-        return { messages };
-      }),
-
-    attachWorkspacePromotionToLastMessage: (promotion, conversationId) =>
-      patchConversation(conversationId, (rt) => {
-        const messages = [...rt.messages];
-        const last = messages[messages.length - 1];
-        if (!last || last.role !== "assistant") return null;
-        messages[messages.length - 1] = {
-          ...last,
-          workspacePromotion: promotion,
-        };
         return { messages };
       }),
 

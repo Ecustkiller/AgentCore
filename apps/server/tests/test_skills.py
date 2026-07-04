@@ -197,6 +197,30 @@ def test_team_orchestration_skill_teaches_constraint_vs_solution_and_outline_ste
     assert "checkpoint_after" in body
 
 
+def test_team_orchestration_skill_teaches_parallel_review_notewall():
+    # 便签 Phase 1 (07-规划 产品AI协作优化复盘 §10): parallel reviewers must broadcast
+    # direction-level issues via post_note before nitpicking in isolation.
+    body = _body("team_orchestration_advanced")
+    assert "post_note" in body and "heads_up" in body
+    assert "并行审查" in body or "并行" in body
+
+
+def test_team_orchestration_skill_teaches_review_contract_template():
+    # 07-规划 产品AI协作优化复盘 §3.2: CEO must preset contract on review workers so
+    # outputs share problems/suggestions/score fields for mechanical merge + revise.
+    body = _body("team_orchestration_advanced")
+    assert "审查类任务的统一契约" in body
+    assert "output_format" in body and "json" in body
+    assert "problems" in body and "suggestions" in body and "score" in body
+    assert "expected_output" in body
+    assert "required_sections" in body  # markdown fallback
+
+
+def test_team_orchestration_skill_teaches_seed_notes_and_team_brief():
+    body = _body("team_orchestration_advanced")
+    assert "seed_notes" in body and "team_brief" in body
+
+
 def test_debate_skill_teaches_debate_tool_forms_and_dual_products():
     # 重构后辩论是独立的 `debate` 工具（主持人驱动），不再是 delegate 上的 stance/round 标记。
     # skill 教三形态选择、参与方配置、主持人自调轮数、双产物、与 delegate / ask_user 的边界。

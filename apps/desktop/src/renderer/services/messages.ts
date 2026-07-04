@@ -49,6 +49,15 @@ export interface BackendMessage {
     snippet?: string;
     site?: string;
   }[];
+  /** 下一步推荐 chips (下一步推荐, DERIVED 持久化): the assistant row's persisted quick-reply
+   * suggestions (messages.followups column, twin of the title). Replayed onto
+   * `message.followups` so reopening a conversation shows the last turn's chips again — live
+   * they rode `followups_generated`. Empty [] for user / none-minted turns. */
+  followups?: string[];
+  /** 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's rating on this assistant reply
+   * (messages.feedback column) — "up" | "down" | null(未评价). Replayed onto
+   * `message.feedback` so a reloaded bubble shows the rating the user gave. */
+  feedback?: "up" | "down" | null;
   /** Persisted turn replay payload. `events` is a multi-agent turn's ordered
    * run/tool SSE events (replayed through the same fold as the live stream to
    * rebuild the team graph on reload, §9.3); `process` is a single-agent turn's
@@ -180,6 +189,13 @@ export function toMessage(m: BackendMessage): Message {
     // 「N 轮」caption. Both undefined for user / no-spend turns → no meta row (live parity).
     usage: m.usage ?? undefined,
     rounds: m.rounds ?? undefined,
+    // 下一步推荐 chips (DERIVED 持久化): replay the last turn's persisted chips on reload,
+    // mirroring the live `attachFollowupsToLastMessage` stamp (twin of the title). Empty []
+    // server-side → undefined; ChatView only surfaces them on the latest finished turn.
+    followups: m.followups?.length ? m.followups : undefined,
+    // 回复反馈 (点赞/点踩): replay the persisted rating so a reloaded bubble shows the
+    // user's thumbs; null server-side → null (未评价).
+    feedback: m.feedback ?? null,
     checkpoints: checkpoints.length ? checkpoints : undefined,
     nonBlockingAsks: nonBlockingAsks.length ? nonBlockingAsks : undefined,
     planReviews: planReviews.length ? planReviews : undefined,
@@ -382,4 +398,33 @@ export async function deleteMessage(
 ): Promise<void> {
   await api.delete(`/v1/conversations/${conversationId}/messages/${messageId}`);
   useConversationStore.getState().removeMessage(messageId, conversationId);
+}
+
+/**
+ * Set / clear the user's 点赞/点踩 on an assistant reply (回复反馈). Optimistic: the
+ * bubble flips immediately, then persists; a failed PATCH reverts to the prior rating
+ * and rethrows so the caller can toast. `feedback` is "up" / "down" to rate, or null to
+ * clear (clicking the active side again toggles it off).
+ */
+export async function setMessageFeedback(
+  conversationId: string,
+  messageId: string,
+  feedback: "up" | "down" | null,
+): Promise<void> {
+  const store = useConversationStore.getState();
+  const prev =
+    store.byId[conversationId]?.messages.find((m) => m.id === messageId)
+      ?.feedback ?? null;
+  store.updateMessage(messageId, { feedback });
+  try {
+    await api.patch(
+      `/v1/conversations/${conversationId}/messages/${messageId}/feedback`,
+      { feedback },
+    );
+  } catch (err) {
+    useConversationStore
+      .getState()
+      .updateMessage(messageId, { feedback: prev });
+    throw err;
+  }
 }

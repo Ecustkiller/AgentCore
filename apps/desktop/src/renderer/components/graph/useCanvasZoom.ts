@@ -12,14 +12,25 @@ export function useCanvasZoom(setFocusedTurn: (id: string) => void) {
   const [zoomView, setZoomView] = useState<CanvasFocusView | undefined>(
     undefined,
   );
+  // 深链「对比」预选的 A/B 版本对（如从侧面板版本链点 vN 直达 vN-1×vN diff）；随 openZoom 透传给
+  // CanvasZoomedTurn → TurnCompare 的初始 pair。无则对比视图用自然默认对。
+  const [zoomComparePair, setZoomComparePair] = useState<
+    [string, string] | undefined
+  >(undefined);
   const [zoomShown, setZoomShown] = useState(false);
   const revealRaf = useRef(0);
 
   const openZoom = useCallback(
-    (turnId: string, replay: boolean, view?: CanvasFocusView) => {
+    (
+      turnId: string,
+      replay: boolean,
+      view?: CanvasFocusView,
+      comparePair?: [string, string],
+    ) => {
       setZoomedTurn(turnId);
       setZoomAutoplay(replay);
       setZoomView(view);
+      setZoomComparePair(comparePair);
       setFocusedTurn(turnId);
       if (reduceMotion) setZoomShown(true);
     },
@@ -49,6 +60,7 @@ export function useCanvasZoom(setFocusedTurn: (id: string) => void) {
       pendingCanvasFocus.turnId,
       pendingCanvasFocus.autoplay,
       pendingCanvasFocus.view,
+      pendingCanvasFocus.comparePair,
     );
     clearCanvasFocus();
   }, [pendingCanvasFocus, clearCanvasFocus, openZoom]);
@@ -80,6 +92,7 @@ export function useCanvasZoom(setFocusedTurn: (id: string) => void) {
     zoomedTurn,
     zoomAutoplay,
     zoomView,
+    zoomComparePair,
     zoomShown,
     openZoom,
     exitZoom,

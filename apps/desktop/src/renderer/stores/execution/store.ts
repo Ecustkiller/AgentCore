@@ -65,6 +65,10 @@ interface ExecutionState {
   ingestPlan: (plan: ExecutionPlan, messageId: string) => void;
   clearExecution: (messageId: string) => void;
   recordFrame: (frame: RunFrame, messageId: string) => void;
+  /** Append a rAF-coalesced batch of frames in ONE update (流式性能): the SSE ingest
+   * buffers a frame's worth of `run_*_delta` and flushes them here so a token storm
+   * triggers ≤60 store writes/projections per second instead of one per token. */
+  recordFrames: (frames: RunFrame[], messageId: string) => void;
   /** Store a turn's debate 收场产物 (`debate_result`) on its slot; a no-plan slot
    * ignores it (stray fact). Sibling of {@link recordFrame} — one accrues the frame
    * stream, the other the debate brief/narrative (a回合级 one-shot, not a frame). */
@@ -180,6 +184,13 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
     recordFrame: (frame, messageId) =>
       patchExec(messageId, (cur) =>
         cur.plan ? { frames: [...cur.frames, frame] } : null,
+      ),
+
+    recordFrames: (frames, messageId) =>
+      patchExec(messageId, (cur) =>
+        cur.plan && frames.length
+          ? { frames: [...cur.frames, ...frames] }
+          : null,
       ),
 
     recordDebateResult: (debate, messageId) =>

@@ -217,6 +217,20 @@ class EventSink:
         structural = any(s.get("kind") not in ("reasoning", "content") for s in self._process)
         return self._process if structural else None
 
+    def streamed_content(self) -> str:
+        """The CEO bubble's currently-streamed text — concatenated ``content``-kind
+        process entries, honoring ``content_reset`` (reset pops them).
+
+        断线别白干 (中途取消 salvage): the partial reply the user already saw, read off the
+        turn's live accumulation so a turn CANCELLED before it persisted keeps that text
+        instead of being replaced by a generic「连接中断」note. Empty for a turn that had
+        streamed no assistant text yet (e.g. still mid-tool). Accumulates even while
+        detached, so a disconnect that later cancels still recovers what streamed.
+        """
+        return "".join(
+            step.get("text", "") for step in self._process if step.get("kind") == "content"
+        )
+
     def captain_context(self) -> list[dict[str, Any]] | None:
         from agentcore.runtime.runs.types import RunKind
 

@@ -1,24 +1,26 @@
 import { FileDetail } from "@/components/files/FileDetail";
 import { MemoryProfileSplitEditor } from "@/components/files/MemoryProfileSplitEditor";
+import { MemoryUpdatesView } from "@/components/files/MemoryUpdatesView";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
 import { MemorySection } from "@/components/files/fileWorkbench/MemorySection";
 import { WorkspaceSection } from "@/components/files/fileWorkbench/WorkspaceSection";
 import {
   type Tab,
   clampRail,
-  folderIdOf,
   loadExpandedWs,
   loadRailWidth,
   saveExpandedWs,
   saveRailWidth,
   tabKey,
 } from "@/components/files/fileWorkbench/storage";
-import { EmptyHint, IconButton, InlineError } from "@/components/files/parts";
+import { EmptyHint, InlineError } from "@/components/files/parts";
 import { IconButton as UiIconButton } from "@/components/ui";
+import { getFolders } from "@/hooks/useFolders";
 import type { FileSource } from "@/lib/fileSource";
 import { cn } from "@/lib/utils";
 import { listMemoryProjects } from "@/services/memory";
 import {
+  MEMORY_UPDATES_PATH,
   createMemorySource,
   parseProjectProfilePath,
 } from "@/services/sources/memorySource";
@@ -26,10 +28,8 @@ import { resolveWorkspaceSource } from "@/services/sources/workspaceSource";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import { useQuery } from "@tanstack/react-query";
 import {
-  FileText,
   FolderOpen,
-  FolderPlus,
-  HardDrive,
+  FileText,
   Loader2,
   Search,
   X,
@@ -76,11 +76,6 @@ export function FileWorkbench({
   isError,
   onRetry,
   fsAvailable,
-  onNewFolder,
-  onAddLocal,
-  onRename,
-  onDelete,
-  onViewConversations,
   showMemory,
   focusWsId,
   focusKey,
@@ -91,11 +86,6 @@ export function FileWorkbench({
   isError: boolean;
   onRetry: () => void;
   fsAvailable: boolean;
-  onNewFolder: () => void;
-  onAddLocal: () => void;
-  onRename: (folderId: string, name: string) => void;
-  onDelete: (folderId: string) => void;
-  onViewConversations: (folderId: string) => void;
   /** Show the pinned「AI 记忆」entry atop the rail (opens the memory doc in the detail
    * pane like any file). Off for hosts that shouldn't surface it (e.g. side panels). */
   showMemory?: boolean;
@@ -233,18 +223,13 @@ export function FileWorkbench({
   // 故复用 FileDetail/编辑器）。
   const memorySource = useMemo(() => createMemorySource(), []);
 
-  // 哪些云项目有「本项目记忆」（决定在其工作区段下挂记忆节点）。仅在展示记忆时拉取；记忆是 AI
-  // 维护的、变更不频繁，故 30s staleTime 足够（清空项目记忆后该节点在下次刷新时消失）。
-  const memoryProjects = useQuery({
+  // 哪些云项目有「本项目记忆」——保留查询供后续挂接；scratch 工作区段不再嵌项目记忆。
+  useQuery({
     queryKey: ["memory-projects"],
     queryFn: listMemoryProjects,
     enabled: !!showMemory,
     staleTime: 30_000,
   });
-  const memoryProjectIds = useMemo(
-    () => new Set(memoryProjects.data ?? []),
-    [memoryProjects.data],
-  );
 
   // 过滤只按工作区名（大小写不敏感子串）——本次只做工作区级筛选，不下探文件名。
   const visibleWorkspaces = useMemo(() => {
@@ -320,7 +305,7 @@ export function FileWorkbench({
                   setFilter("");
                 }
               }}
-              placeholder="筛选工作区…"
+              placeholder="筛选对话工作区…"
               aria-label="按名称筛选工作区"
               className="h-8 w-full rounded-lg border border-border bg-background pl-7 pr-7 text-sm placeholder:text-muted-foreground focus:border-primary focus:outline-none"
             />
@@ -334,14 +319,6 @@ export function FileWorkbench({
               </UiIconButton>
             )}
           </div>
-          {fsAvailable && (
-            <IconButton title="添加本地文件夹" onClick={onAddLocal}>
-              <HardDrive size={16} />
-            </IconButton>
-          )}
-          <IconButton title="新建文件夹" onClick={onNewFolder}>
-            <FolderPlus size={16} />
-          </IconButton>
         </div>
 
         {/* Pinned「AI 记忆」entry — private per-user data, not a workspace, so it sits above
@@ -356,6 +333,9 @@ export function FileWorkbench({
               activePath={activeTab?.wsId === MEMORY_WS ? activeTab.path : null}
               onOpen={(path, name) => openFile(MEMORY_WS, path, name)}
               onTopicDeleted={(path) => closeTab(tabKey(MEMORY_WS, path))}
+              onOpenUpdates={() =>
+                openFile(MEMORY_WS, MEMORY_UPDATES_PATH, "记忆动态")
+              }
             />
           </div>
         )}
@@ -372,12 +352,8 @@ export function FileWorkbench({
         ) : workspaces.length === 0 ? (
           <EmptyHint
             icon={<FolderOpen size={24} className="text-muted-foreground/40" />}
-            title="还没有项目工作区"
-            hint={
-              fsAvailable
-                ? "点右上「新建文件夹」建云端项目，或「添加本地文件夹」绑定本机目录。"
-                : "点右上「新建文件夹」建一个云端项目；在对话里产生文件也会自动建工作区。"
-            }
+            title="还没有对话工作区"
+            hint="在对话里产生文件或绑定本地目录后，对应的工作区会出现在这里。"
           />
         ) : (
           <>
@@ -387,40 +363,20 @@ export function FileWorkbench({
                   没有名称匹配「{filter.trim()}」的工作区
                 </p>
               ) : (
-                visibleWorkspaces.map((ws) => {
-                  const folderId = folderIdOf(ws.wsId);
-                  const hasProjectMemory =
-                    !!showMemory &&
-                    !!folderId &&
-                    memoryProjectIds.has(folderId);
-                  return (
-                    <WorkspaceSection
-                      key={ws.wsId}
-                      ws={ws}
-                      source={sourceByWs.get(ws.wsId) ?? null}
-                      activePath={
-                        activeTab?.wsId === ws.wsId ? activeTab.path : null
-                      }
-                      expanded={expandedWs.has(ws.wsId)}
-                      onToggle={() => toggleWs(ws.wsId)}
-                      onOpenFile={(path, name) => openFile(ws.wsId, path, name)}
-                      onRename={onRename}
-                      onDelete={onDelete}
-                      onViewConversations={onViewConversations}
-                      flashing={ws.wsId === flashWsId}
-                      hasProjectMemory={hasProjectMemory}
-                      memoryActivePath={
-                        activeTab?.wsId === MEMORY_WS ? activeTab.path : null
-                      }
-                      onOpenMemory={(path, name) =>
-                        openFile(MEMORY_WS, path, name)
-                      }
-                      onMemoryTopicDeleted={(path) =>
-                        closeTab(tabKey(MEMORY_WS, path))
-                      }
-                    />
-                  );
-                })
+                visibleWorkspaces.map((ws) => (
+                  <WorkspaceSection
+                    key={ws.wsId}
+                    ws={ws}
+                    source={sourceByWs.get(ws.wsId) ?? null}
+                    activePath={
+                      activeTab?.wsId === ws.wsId ? activeTab.path : null
+                    }
+                    expanded={expandedWs.has(ws.wsId)}
+                    onToggle={() => toggleWs(ws.wsId)}
+                    onOpenFile={(path, name) => openFile(ws.wsId, path, name)}
+                    flashing={ws.wsId === flashWsId}
+                  />
+                ))
               )}
             </div>
           </>
@@ -471,6 +427,10 @@ export function FileWorkbench({
             <div className="relative min-h-0 flex-1">
               {tabs.map((t) => {
                 const key = tabKey(t.wsId, t.path);
+                // The synthetic「记忆动态」tab is not a file — render the cross-conversation
+                // feed view instead of a source-backed editor.
+                const isMemoryUpdates =
+                  t.wsId === MEMORY_WS && t.path === MEMORY_UPDATES_PATH;
                 const src =
                   t.wsId === MEMORY_WS
                     ? memorySource
@@ -480,8 +440,9 @@ export function FileWorkbench({
                 // to stripping the tab name if the workspace is gone).
                 const projFolderId =
                   t.wsId === MEMORY_WS ? parseProjectProfilePath(t.path) : null;
-                const projWs = projFolderId
-                  ? workspaces.find((w) => folderIdOf(w.wsId) === projFolderId)
+                const projName = projFolderId
+                  ? (getFolders().find((f) => f.id === projFolderId)?.name ??
+                    t.name.replace(/·画像\.md$/, ""))
                   : null;
                 return (
                   <div
@@ -491,14 +452,18 @@ export function FileWorkbench({
                       key === activeKey ? "" : "hidden",
                     )}
                   >
-                    {src ? (
+                    {isMemoryUpdates ? (
+                      <MemoryUpdatesView
+                        onOpenLeaf={(path, name) =>
+                          openFile(MEMORY_WS, path, name)
+                        }
+                      />
+                    ) : src ? (
                       projFolderId ? (
                         <MemoryProfileSplitEditor
                           source={src}
                           folderId={projFolderId}
-                          projectName={
-                            projWs?.name ?? t.name.replace(/·画像\.md$/, "")
-                          }
+                          projectName={projName ?? t.name.replace(/·画像\.md$/, "")}
                           onClose={() => closeTab(key)}
                         />
                       ) : (

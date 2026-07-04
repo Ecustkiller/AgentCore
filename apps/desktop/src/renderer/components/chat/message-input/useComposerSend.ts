@@ -24,6 +24,7 @@ export function useComposerSend({
   backgroundMode,
   isLocal,
   closeMenu,
+  onDispatch,
 }: {
   value: string;
   setValue: Dispatch<SetStateAction<string>>;
@@ -33,6 +34,9 @@ export function useComposerSend({
   backgroundMode: boolean;
   isLocal: boolean;
   closeMenu: () => void;
+  /** Fires when a FOREGROUND turn is dispatched (not for 后台云端 handoffs) — the
+   * canvas host uses it to start auto-following the new round. */
+  onDispatch?: () => void;
 }) {
   const addMessage = useConversationStore((s) => s.addMessage);
   const navigate = useNavigate();
@@ -129,6 +133,10 @@ export function useComposerSend({
       navigate(`/conversations/${conversationId}`);
     }
 
+    // Same React batch as the optimistic bubble above, so a canvas follow effect
+    // armed here sees the new turn land.
+    onDispatch?.();
+
     const outgoing: OutgoingAttachment[] = pending.map((a) => ({
       name: a.name,
       path: a.path,
@@ -155,6 +163,7 @@ export function useComposerSend({
     isLocal,
     setValue,
     setAttachments,
+    onDispatch,
   ]);
 
   return { handleSend };

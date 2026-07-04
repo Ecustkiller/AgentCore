@@ -1,4 +1,3 @@
-import { getConversations } from "@/hooks/useConversations";
 import type { EntryKind } from "@/lib/fileIndex";
 import type { FileSource } from "@/lib/fileSource";
 import { createLocalRootSource } from "@/services/sources/localRootSource";
@@ -90,14 +89,9 @@ export async function buildMentionSources(
     try {
       const binding = await getWorkspaceBinding(conversationId);
       if (binding.mode === "cloud") {
-        const folderId =
-          getConversations().find((c) => c.id === conversationId)?.folderId ??
-          null;
-        if (folderId) {
-          sources.push(
-            createCloudWorkspaceSource(`folder:${folderId}`, "工作区"),
-          );
-        }
+        sources.push(
+          createCloudWorkspaceSource(`conv:${conversationId}`, "工作区"),
+        );
       }
     } catch {
       // Binding unknown — index local roots only.

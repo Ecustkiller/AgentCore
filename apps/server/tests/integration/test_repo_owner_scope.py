@@ -32,7 +32,7 @@ _CONTRACT: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     "conversations.py": (
         "ConversationRepository",
         ("get_by_id", "update_title", "soft_delete", "set_model_mode",
-         "set_pinned", "set_archived", "set_folder"),
+         "set_instructions", "set_pinned", "set_archived", "set_folder"),
         ("get_by_id_unscoped", "update_title_unscoped"),
     ),
     "boards.py": (

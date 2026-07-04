@@ -68,7 +68,6 @@ from agentcore.runtime.events.workspace import (
     handoff_job_started,
     handoff_snapshot_done,
     workspace_op_required,
-    workspace_promoted,
 )
 
 __all__ = [
@@ -95,7 +94,6 @@ __all__ = [
     "plan_review_required",
     "plan_review_resolved",
     "workspace_op_required",
-    "workspace_promoted",
     "board_op_required",
     "board_read_required",
     "handoff_snapshot_done",

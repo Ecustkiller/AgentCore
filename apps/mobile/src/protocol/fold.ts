@@ -563,6 +563,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
             ts: p.ts,
             status: "active",
             supersedes: p.supersedes ?? null,
+            ...(p.source ? { source: p.source } : {}),
           });
         }
         // 便签会过期 → supersession (§2.2): an amendment (carries `supersedes`) marks its TARGET
@@ -704,7 +705,6 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "debate_round_decision_required":
       case "debate_round_decision_resolved":
       case "workspace_op_required":
-      case "workspace_promoted":
       case "handoff_snapshot_done":
       case "handoff_job_started":
       case "handoff_apply_done":

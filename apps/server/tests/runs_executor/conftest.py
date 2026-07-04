@@ -275,8 +275,18 @@ class _CountingIndexBackend:
         return getattr(self._inner, name)
 
 
-def _state(content: str = "", *, files: list[str] | None = None) -> RunState:
-    return RunState(phase=RunPhase.COMPLETED, content=content, files_touched=list(files or []))
+def _state(
+    content: str = "",
+    *,
+    files: list[str] | None = None,
+    debrief: dict | None = None,
+) -> RunState:
+    return RunState(
+        phase=RunPhase.COMPLETED,
+        content=content,
+        files_touched=list(files or []),
+        debrief=debrief,
+    )
 
 
 def _plan(*specs: RunSpec) -> RunPlan:

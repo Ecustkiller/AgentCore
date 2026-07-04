@@ -12,7 +12,8 @@ import { FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { copyText } from "@/lib/clipboard";
 import { formatCompact } from "@/lib/format";
-import { notifySuccess } from "@/lib/toast";
+import { notifyError, notifySuccess } from "@/lib/toast";
+import { setMessageFeedback } from "@/services/messages";
 import type { UsageBreakdown } from "@/services/usage";
 import type { Message } from "@/stores/conversation";
 import { useConversationStore } from "@/stores/conversation";
@@ -23,9 +24,12 @@ import {
   Copy,
   Fingerprint,
   Layers,
+  Link2,
   Maximize2,
   MoreHorizontal,
   RefreshCw,
+  ThumbsDown,
+  ThumbsUp,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { DeleteMessageAction, MessageTime } from "./MessageActions";
@@ -137,8 +141,22 @@ function UsageDetailPanel({ usage }: { usage: UsageBreakdown }) {
   );
 }
 
-async function copyDiagnostic(label: string, value: string) {
-  if (await copyText(value)) notifySuccess(`已复制 ${label}`);
+async function copyDiagnostic(
+  label: string,
+  value: string,
+  description?: string,
+) {
+  if (await copyText(value))
+    notifySuccess(`已复制 ${label}`, { description });
+}
+
+/** 消息永久链接 (对话基础功能补齐): a hash anchor that reopens the conversation and
+ * lands on this exact turn (scroll + flash). Portable to the web build as a real
+ * shareable URL; in desktop it round-trips through the same #/conversations/:id?msg=
+ * route ConversationPage honors on load. */
+function messagePermalink(conversationId: string, messageId: string): string {
+  const base = window.location.href.split("#")[0];
+  return `${base}#/conversations/${conversationId}?msg=${messageId}`;
 }
 
 function MessageMoreMenu({
@@ -164,6 +182,7 @@ function MessageMoreMenu({
     : null;
 
   const hasMenu =
+    !!conversationId ||
     captainContext.length > 0 ||
     !!message.executionId ||
     !!message.usage ||
@@ -188,6 +207,19 @@ function MessageMoreMenu({
           </IconButton>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="min-w-48">
+          {conversationId && (
+            <DropdownMenuItem
+              onSelect={() =>
+                void copyDiagnostic(
+                  "消息链接",
+                  messagePermalink(conversationId, message.id),
+                )
+              }
+            >
+              <Link2 size={14} className="shrink-0 text-muted-foreground" />
+              复制消息链接
+            </DropdownMenuItem>
+          )}
           {captainContext.length > 0 && (
             <DropdownMenuItem onSelect={() => setContextOpen(true)}>
               <Layers size={14} className="shrink-0 text-muted-foreground" />
@@ -202,9 +234,9 @@ function MessageMoreMenu({
           )}
           {message.usage && (
             <>
-              {(captainContext.length > 0 || message.executionId) && (
-                <DropdownMenuSeparator />
-              )}
+              {(!!conversationId ||
+                captainContext.length > 0 ||
+                message.executionId) && <DropdownMenuSeparator />}
               <DropdownMenuLabel>用量详情</DropdownMenuLabel>
               <UsageDetailPanel usage={message.usage} />
               {message.rounds != null && message.rounds > 1 && (
@@ -233,7 +265,12 @@ function MessageMoreMenu({
                 <DropdownMenuItem
                   onSelect={() => {
                     const traceId = message.traceId;
-                    if (traceId) void copyDiagnostic("trace id", traceId);
+                    if (traceId)
+                      void copyDiagnostic(
+                        "trace id",
+                        traceId,
+                        `log_timeline.py --trace ${traceId}`,
+                      );
                   }}
                 >
                   <Fingerprint
@@ -276,6 +313,47 @@ function MessageMoreMenu({
   );
 }
 
+/** 回复反馈 (点赞/点踩, 对话基础功能补齐): thumbs up/down on an assistant reply. The active
+ * side highlights in the brand color; clicking it again clears the rating (toggle off).
+ * Optimistic — the service flips the bubble immediately and reverts on a failed persist. */
+function FeedbackButtons({ message }: { message: Message }) {
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const feedback = message.feedback ?? null;
+  const rate = (side: "up" | "down") => {
+    if (!conversationId) return;
+    const next = feedback === side ? null : side;
+    void setMessageFeedback(conversationId, message.id, next).catch((err) =>
+      notifyError(err, "反馈失败"),
+    );
+  };
+  return (
+    <>
+      <SimpleTooltip label="有帮助">
+        <IconButton
+          size="sm"
+          aria-label="有帮助"
+          aria-pressed={feedback === "up"}
+          className={feedback === "up" ? "text-primary" : undefined}
+          onClick={() => rate("up")}
+        >
+          <ThumbsUp size={14} />
+        </IconButton>
+      </SimpleTooltip>
+      <SimpleTooltip label="没帮助">
+        <IconButton
+          size="sm"
+          aria-label="没帮助"
+          aria-pressed={feedback === "down"}
+          className={feedback === "down" ? "text-primary" : undefined}
+          onClick={() => rate("down")}
+        >
+          <ThumbsDown size={14} />
+        </IconButton>
+      </SimpleTooltip>
+    </>
+  );
+}
+
 /** Assistant bubble footer — actions left, usage summary + time right, low-freq in「更多」. */
 export function AssistantMessageFooter({
   message,
@@ -301,6 +379,7 @@ export function AssistantMessageFooter({
             {copied ? <Check size={14} /> : <Copy size={14} />}
           </IconButton>
         </SimpleTooltip>
+        <FeedbackButtons message={message} />
         <SimpleTooltip label="重新生成">
           <IconButton size="sm" aria-label="重新生成" onClick={onRegenerate}>
             <RefreshCw size={14} />

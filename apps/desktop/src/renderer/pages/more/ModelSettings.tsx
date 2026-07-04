@@ -1,6 +1,14 @@
 import { Button, IconButton } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { useModelModes } from "@/hooks/useModelModes";
 import { hasLocalEngine } from "@/lib/capabilities";
 import { ApiError } from "@/services/api";
 import {
@@ -10,10 +18,18 @@ import {
   setLlmKey,
   testLlmKey,
 } from "@/services/llmKey";
+import {
+  modeLabel,
+  presetLabel,
+  setDefaultModelMode,
+} from "@/services/modelModes";
 import { clearSidecarHealth } from "@/services/sidecarHealth";
+import { useAuthStore } from "@/stores/auth";
 import { useUIStore } from "@/stores/ui";
 import {
+  Check,
   CheckCircle2,
+  ChevronDown,
   ExternalLink,
   Eye,
   EyeOff,
@@ -92,8 +108,108 @@ export function ModelSettings() {
         </div>
       )}
 
+      <DefaultModelModeCard />
+
       {/* 本地引擎是桌面专属（web 无 sidecar，恒走云端）——web 不挂此开关。 */}
       {hasLocalEngine() && <LocalEngineToggle />}
+    </div>
+  );
+}
+
+/**
+ * 默认质量档 (账户级) — the model tier every NEW conversation starts on (质量档
+ * 选择器 · 账户默认档). Per-conversation overrides live in the composer's picker;
+ * this sets the fallback. `null` = 跟随系统默认 (the operator default). Optimistic:
+ * the label flips at once and reverts if the PUT fails.
+ */
+function DefaultModelModeCard() {
+  const { data: modes, isLoading } = useModelModes();
+  const current = useAuthStore((s) => s.user?.defaultModelMode ?? null);
+  const setStoreDefault = useAuthStore((s) => s.setDefaultModelMode);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const currentLabel =
+    current === null ? "跟随系统默认" : modeLabel(current, modes ?? null);
+
+  const choose = async (next: string | null) => {
+    if (next === current || saving) return;
+    setSaving(true);
+    setError(null);
+    const prev = current;
+    setStoreDefault(next);
+    try {
+      await setDefaultModelMode(next);
+    } catch (e) {
+      setStoreDefault(prev);
+      setError(apiErrorMessage(e, "保存失败，请重试"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const item = (
+    active: boolean,
+    label: string,
+    onSelect: () => void,
+    key: string,
+  ) => (
+    <DropdownMenuItem key={key} onSelect={onSelect}>
+      <span className="flex-1 truncate">{label}</span>
+      {active && <Check size={13} className="shrink-0" />}
+    </DropdownMenuItem>
+  );
+
+  return (
+    <div className="mt-4 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="text-sm text-foreground">默认质量档</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            新对话默认使用的模型档位；单个对话可在输入框临时切换。「高质」更强更贵，「经济」更快更省。
+          </p>
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              disabled={isLoading || saving}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-transparent px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+            >
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              {currentLabel}
+              <ChevronDown size={14} className="opacity-60" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-44">
+            {item(
+              current === null,
+              "跟随系统默认",
+              () => void choose(null),
+              "__sys__",
+            )}
+            {modes && modes.presets.length > 0 && <DropdownMenuSeparator />}
+            {modes?.presets.map((p) =>
+              item(
+                current === p.key,
+                presetLabel(p.key),
+                () => void choose(p.key),
+                `preset:${p.key}`,
+              ),
+            )}
+            {modes && modes.custom.length > 0 && <DropdownMenuSeparator />}
+            {modes?.custom.map((m) =>
+              item(
+                current === m.id,
+                m.name,
+                () => void choose(m.id),
+                `custom:${m.id}`,
+              ),
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
     </div>
   );
 }

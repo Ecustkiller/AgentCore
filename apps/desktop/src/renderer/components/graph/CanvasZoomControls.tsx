@@ -4,7 +4,8 @@ import { Maximize, Minus, Plus } from "lucide-react";
 /**
  * Shared zoom cluster for the canvas surfaces (统一观感, 前端UX设计.md §六). The 总览态
  * ({@link import("./ConversationCanvas")}) and the 放大态 ({@link import("./GraphView")}
- * non-embedded) both float this vertical 放大 / 缩小 / 适应 pill bottom-left, so the two
+ * non-embedded) both float this vertical 放大 / 缩小 / 适应 pill bottom-left, stacked
+ * under {@link CanvasPlaybackControls} when frames exist. Each surface wires its own
  * surfaces read as one design system instead of two one-off control clusters. Each
  * surface wires its own ReactFlow instance through the callbacks. (Fit moved here from
  * 放大态's GraphToolbar, which now selects layout only — zoom + fit live together.)

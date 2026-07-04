@@ -31,6 +31,11 @@ class TurnExecutionMixin:
         # None）。引擎据此让本场 debate 续上一场（焦点正交、首轮辩手读到上一场摘要）。
         raw_seed = params.get("debateSeed")
         debate_seed = raw_seed if isinstance(raw_seed, dict) else None
+        # 对话级自定义指令 (per-conversation custom instructions): the cloud reads it off
+        # the conversation row; the Sidecar has no DB, so the desktop feeds it in the turn
+        # params (缺省 = 无自定义指令). Injected into the system prompt by run_chat_pipeline.
+        raw_instructions = params.get("instructions")
+        instructions = raw_instructions if isinstance(raw_instructions, str) else None
 
         turn_creds = self._creds_for(conversation_id, trace_id)
 
@@ -63,6 +68,7 @@ class TurnExecutionMixin:
                         suspension_saver=saver,
                         suspension_deleter=deleter,
                         debate_seed=debate_seed,
+                        instructions=instructions,
                     )
             finally:
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns

@@ -332,11 +332,17 @@ def test_log_exporter_emits_structured_line(capsys):
         _fact("turn_end", {"finish_reason": "end_turn"}),
     ]
     root = spans_from_entries(entries)
-    LogSpanExporter().export(root, trace_id="tr", conversation_id="c1", turn_id="m1")
+    LogSpanExporter().export(root, trace_id="tr", conversation_id="c1", message_id="m1")
     out = capsys.readouterr().out
     assert "obs.turn_spans" in out
     assert "span_count" in out
     assert "finish_reason" in out
+    # trace_id is emitted explicitly (the line's「greppable by trace_id」promise) and the
+    # assistant row id is labelled message_id — not mislabelled as turn_id (which is the
+    # log-context turn id, joined from the spine, not the message id).
+    assert "tr" in out
+    assert "message_id" in out
+    assert "m1" in out
 
 
 def test_export_turn_spans_uses_injected_exporter():
@@ -353,7 +359,7 @@ def test_export_turn_spans_uses_injected_exporter():
         _fact("turn_end", {"finish_reason": "end_turn"}),
     ]
     export_turn_spans(
-        entries, trace_id="tr", conversation_id="c1", turn_id="m1", exporter=_Capture()
+        entries, trace_id="tr", conversation_id="c1", message_id="m1", exporter=_Capture()
     )
     assert len(captured) == 1
     assert captured[0].span_id == "turn"
@@ -371,7 +377,9 @@ def test_export_turn_spans_is_best_effort_on_exporter_error():
         _fact("turn_end", {"finish_reason": "end_turn"}),
     ]
     # Must NOT raise — observability never breaks the turn.
-    export_turn_spans(entries, trace_id="tr", conversation_id="c1", turn_id="m1", exporter=_Boom())
+    export_turn_spans(
+        entries, trace_id="tr", conversation_id="c1", message_id="m1", exporter=_Boom()
+    )
 
 
 def test_export_turn_spans_noop_on_empty():
@@ -380,7 +388,7 @@ def test_export_turn_spans_noop_on_empty():
         def export(self, root, **kwargs):
             raise AssertionError("should not export an empty tree")
 
-    export_turn_spans([], trace_id="tr", conversation_id="c1", turn_id="m1", exporter=_Boom())
+    export_turn_spans([], trace_id="tr", conversation_id="c1", message_id="m1", exporter=_Boom())
 
 
 def test_noop_exporter_returns_none():

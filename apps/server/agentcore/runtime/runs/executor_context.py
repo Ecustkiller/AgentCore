@@ -19,7 +19,6 @@ from agentcore.runtime.runs.executor_identities import (
 )
 from agentcore.runtime.runs.fidelity import allocate, pointer_body, truncate_head_tail
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.serialize import split_debrief
 from agentcore.runtime.runs.types import ContextBlock, RunContract, RunSpec, RunState
 
 logger = get_logger(__name__)
@@ -58,6 +57,7 @@ def _build_messages(
     identity: str = _WORKER_IDENTITY,
     index_paths: list[str] | None = None,
     blocks_sink: list[ContextBlock] | None = None,
+    team_brief: str | None = None,
 ) -> list[LLMMessage]:
     """Assemble the worker's OPENING (system, user) messages from its inline role,
     the original request, its upstream dependency products, and its task.
@@ -81,7 +81,9 @@ def _build_messages(
         sys_parts.append(spec.system_prompt_supplement)
     system_content = "\n\n".join(p for p in sys_parts if p)
 
-    blocks = _build_context_blocks(plan, spec, completed, user_message, contract, index_paths or [])
+    blocks = _build_context_blocks(
+        plan, spec, completed, user_message, contract, index_paths or [], team_brief
+    )
     if blocks_sink is not None:
         blocks_sink.extend(blocks)
     user_content = "\n\n".join(f"## {b.heading}\n{b.body}" for b in blocks)
@@ -98,6 +100,7 @@ def _build_context_blocks(
     user_message: str,
     contract: RunContract | None,
     index_paths: list[str],
+    team_brief: str | None = None,
 ) -> list[ContextBlock]:
     """The ordered :class:`ContextBlock` list a worker's opening user message is rendered
     FROM — the structured single source behind both the prompt and the ``run_context``
@@ -130,6 +133,14 @@ def _build_context_blocks(
     else:
         blocks.append(ContextBlock(channel="request", heading="原始用户请求", body=user_message))
     blocks.extend(_dep_context_blocks(plan, spec.depends_on, completed))
+    if team_brief:
+        blocks.append(
+            ContextBlock(
+                channel="team_brief",
+                heading="团队共识（主 Agent 为本回合设定，全员遵循）",
+                body=team_brief,
+            )
+        )
     # 工作区产物清单: surface files in the shared workspace this worker can file_read —
     # peer products (role-attributed) + pre-existing files (uploads / prior turns) —
     # beyond its own deps (which got the richer block above). Omitted when empty.
@@ -344,10 +355,11 @@ def _dep_context_blocks(
             continue
         dep_spec = plan.by_id(dep_id)
         label = dep_spec.role if dep_spec and dep_spec.role else dep_id
-        # 完工交接简报: peel the worker's「## 交接简报」off its product so the prose body sizes
-        # on the deliverable alone, and the author's own 结论 can LEAD the block (survives trim).
-        clean, debrief = split_debrief(state.content)
-        author_summary = (debrief or {}).get("summary", "") if debrief else ""
+        # 完工交接简报: the content is already the pure deliverable (the brief rides the run's
+        # structured ``debrief``, submitted via the handoff tool — never appended to the prose), so
+        # the body sizes on the deliverable alone and the author's own 结论 can LEAD the block.
+        clean = state.content
+        author_summary = (state.debrief or {}).get("summary", "") if state.debrief else ""
         if state.files_touched:
             mode = "pointer"
         elif dep_spec and dep_spec.policy.result_handling == "summarize":

@@ -241,6 +241,39 @@ class LoopController:
         # B2 no-output early stop: consecutive unproductive rounds (all tools failed,
         # no content). Reset by any productive round (content OR a tool success).
         self._consecutive_unproductive = 0
+        # Post-delegate synthesis mode (优化六): after delegate returns, steer the CEO away
+        # from repeating investigation work the team already did.
+        self._post_delegate: bool = False
+        self._post_delegate_investigation_count: int = 0
+
+    def mark_post_delegate(self) -> None:
+        """Mark that a delegate call just returned — CEO is now in synthesis mode."""
+        self._post_delegate = True
+        self._post_delegate_investigation_count = 0
+
+    def post_delegate_check(self, tool_names: set[str]) -> str | None:
+        """Check if CEO is doing investigation work after delegating.
+
+        Returns a reminder message if needed, None otherwise.
+        """
+        if not self._post_delegate:
+            return None
+        investigation_used = tool_names & self._investigation_tools
+        if not investigation_used:
+            return None
+        self._post_delegate_investigation_count += 1
+        if self._post_delegate_investigation_count == 1:
+            return (
+                "[系统提示] 你已将此工作委派给团队。请直接基于团队的产出写综述，"
+                "不要重复调查。如需验证某个具体细节可读 worker 产出的文件，"
+                "但不要展开新的调研。"
+            )
+        if self._post_delegate_investigation_count == 2:
+            return (
+                "[系统提示] 你仍在做已委派给团队的调查工作。请立即停止调研，"
+                "基于团队已有产出写综述收尾。"
+            )
+        return None  # 第三次由 convergence_action 处理
 
     def record(self, attempts: list[ToolAttempt]) -> None:
         """Append one round's tool attempts (in call order) to the window.

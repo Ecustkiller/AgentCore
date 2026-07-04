@@ -70,6 +70,7 @@ const sidecarApi: SidecarApi = {
   startTurn: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.startTurn, req),
   cancel: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.cancel, req),
   respond: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.respond, req),
+  runRedirect: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.runRedirect, req),
   resume: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.resume, req),
   listPaused: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.listPaused, req),
   probe: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.probe, req),

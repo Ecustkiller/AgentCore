@@ -6,11 +6,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useGroupedConversations } from "@/hooks/useConversations";
-import { getFolders, useCreateFolder } from "@/hooks/useFolders";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { ensureDefaultContainerRoot } from "@/services/defaultWorkspace";
-import type { FolderMeta } from "@/services/folders";
-import { useFoldersStore } from "@/stores/folders";
 import {
   Check,
   ChevronDown,
@@ -23,9 +20,10 @@ import {
   X,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
+import type { FolderMeta } from "@/services/folders";
+import { useFoldersStore } from "@/stores/folders";
 
-// 本地文件能力（web 缺 fsApi → false）。browserStubs 在 main 之前装桩并置 __WEB__，故此
-// 模块加载时该判定已稳定。
+// 本地文件能力（web 缺 fsApi → false）
 const isDesktop = hasLocalFiles();
 const RECENT_WHEN_IDLE = 3;
 const SEARCH_RESULT_CAP = 12;
@@ -52,13 +50,6 @@ export function DraftWorkspacePicker() {
   const setFolder = useFoldersStore((s) => s.setPendingNewChatFolder);
   const setCloud = useFoldersStore((s) => s.setPendingNewChatCloud);
 
-  const createFolderMut = useCreateFolder();
-
-  const eligibleFolders = useMemo(
-    () => folders.filter((f) => isDesktop || f.localRootId == null),
-    [folders],
-  );
-
   const lastActivity = useMemo(() => {
     const map = new Map<string, number>();
     for (const c of conversations) {
@@ -71,25 +62,25 @@ export function DraftWorkspacePicker() {
 
   const recentFolders = useMemo(
     () =>
-      [...eligibleFolders]
+      [...folders]
         .sort(
           (a, b) =>
             (lastActivity.get(b.id) ?? 0) - (lastActivity.get(a.id) ?? 0),
         )
         .slice(0, RECENT_WHEN_IDLE),
-    [eligibleFolders, lastActivity],
+    [folders, lastActivity],
   );
 
   const listedFolders = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return recentFolders;
-    return [...eligibleFolders]
+    return [...folders]
       .filter((f) => f.name.toLowerCase().includes(q))
       .sort(
         (a, b) => (lastActivity.get(b.id) ?? 0) - (lastActivity.get(a.id) ?? 0),
       )
       .slice(0, SEARCH_RESULT_CAP);
-  }, [query, eligibleFolders, recentFolders, lastActivity]);
+  }, [query, folders, recentFolders, lastActivity]);
 
   const selectedFolder = pendingFolderId
     ? (folders.find((f) => f.id === pendingFolderId) ?? null)
@@ -122,29 +113,10 @@ export function DraftWorkspacePicker() {
     pickNone();
   };
 
-  const openLocalFolder = async () => {
-    const fsApi = window.fsApi;
-    if (!fsApi) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const root = await fsApi.addRoot();
-      if (!root) return;
-      const existing = getFolders().find((f) => f.localRootId === root.id);
-      const folder =
-        existing ??
-        (await createFolderMut.mutateAsync({
-          name: root.name,
-          localRootId: root.id,
-        }));
-      setFolder(folder.id);
-      setCloud(false);
-      setOpen(false);
-    } catch {
-      setError("选择文件夹失败，请重试");
-    } finally {
-      setBusy(false);
-    }
+  const openLocalFolder = () => {
+    // Local-first default: no folder grouping; first send sets local_container_root_id.
+    pickNone();
+    setOpen(false);
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -173,7 +145,7 @@ export function DraftWorkspacePicker() {
       noSearchHits={
         !!query.trim() &&
         listedFolders.length === 0 &&
-        eligibleFolders.length > 0
+        folders.length > 0
       }
     />
   );
@@ -198,19 +170,15 @@ export function DraftWorkspacePicker() {
   }
 
   const chipIcon = selectedFolder ? (
-    selectedFolder.localRootId ? (
-      <HardDrive size={14} className="shrink-0 text-primary" />
-    ) : (
-      <Cloud size={14} className="shrink-0 text-muted-foreground" />
-    )
+    <FolderOpen size={14} className="shrink-0 text-muted-foreground" />
   ) : (
     <Cloud size={14} className="shrink-0 text-muted-foreground" />
   );
 
   const chipLabel = selectedFolder ? selectedFolder.name : "云端";
   const chipTitle = selectedFolder
-    ? `归入：${selectedFolder.name}（${folderLocationHint(selectedFolder.localRootId, selectedFolder.localSubpath)}）`
-    : "仅云端存储，不创建本地项目";
+    ? `归入：${selectedFolder.name}`
+    : "仅云端存储";
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -247,16 +215,6 @@ export function DraftWorkspacePicker() {
       </PopoverContent>
     </Popover>
   );
-}
-
-function folderLocationHint(
-  localRootId: string | null,
-  localSubpath: string,
-): string {
-  if (localRootId) {
-    return localSubpath ? `本地 · ${localSubpath}` : "本地";
-  }
-  return "云端";
 }
 
 function PickerPanel({
@@ -333,15 +291,8 @@ function PickerPanel({
         {listedFolders.map((f) => (
           <PickerRow
             key={f.id}
-            icon={
-              f.localRootId ? (
-                <HardDrive size={14} className="text-primary" />
-              ) : (
-                <Cloud size={14} />
-              )
-            }
+            icon={<FolderOpen size={14} />}
             label={f.name}
-            hint={folderLocationHint(f.localRootId, f.localSubpath)}
             selected={selectedFolderId === f.id}
             onClick={() => onPickFolder(f.id)}
           />
@@ -357,9 +308,9 @@ function PickerPanel({
           <>
             <div className="my-1 border-t border-border" />
             <PickerRow
-              icon={<FolderOpen size={14} />}
-              label="选择本地文件夹…"
-              hint="在电脑上指定目录作为项目"
+              icon={<HardDrive size={14} />}
+              label="默认本地"
+              hint="桌面端首发后在本机容器根下建对话空间"
               onClick={onOpenLocalFolder}
               disabled={busy}
             />

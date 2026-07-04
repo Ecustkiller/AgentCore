@@ -1,4 +1,5 @@
 import { formatCompact } from "@/lib/format";
+import { NODE_HEIGHT, NODE_WIDTH } from "@/lib/elk-layout";
 import {
   BaseEdge,
   type Edge,
@@ -26,6 +27,12 @@ type StepEdgeData = Edge<{
   animated: boolean;
   kind?: "dep" | "delegate" | "revision";
   handoff?: EdgeHandoff | null;
+  handleDirection?: "horizontal" | "vertical";
+  hoveredNodeId?: string | null;
+  sourcePortIndex?: number;
+  sourcePortTotal?: number;
+  targetPortIndex?: number;
+  targetPortTotal?: number;
 }>;
 
 /** Fidelity → short edge-label text (only the lossy ones get a label; 全文 stays clean). */
@@ -57,6 +64,12 @@ function handoffTitle(h: EdgeHandoff): string {
 const PARTICLE_BEGINS = ["0s", "0.5s", "1s"];
 const PARTICLE_DUR = "1.5s";
 
+function portOffset(index: number, total: number, crossSize: number): number {
+  if (total <= 1) return 0;
+  const portRange = crossSize * 0.6;
+  return portRange * (index / (total - 1)) - portRange / 2;
+}
+
 export function StepEdge(props: EdgeProps<StepEdgeData>) {
   const {
     sourceX,
@@ -69,15 +82,32 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
     data,
   } = props;
 
+  const horizontal = data?.handleDirection === "horizontal";
+  const crossSize = horizontal ? NODE_HEIGHT : NODE_WIDTH;
+  const srcOffset = portOffset(
+    data?.sourcePortIndex ?? 0,
+    data?.sourcePortTotal ?? 1,
+    crossSize,
+  );
+  const tgtOffset = portOffset(
+    data?.targetPortIndex ?? 0,
+    data?.targetPortTotal ?? 1,
+    crossSize,
+  );
+  const adjSourceX = horizontal ? sourceX : sourceX + srcOffset;
+  const adjSourceY = horizontal ? sourceY + srcOffset : sourceY;
+  const adjTargetX = horizontal ? targetX : targetX + tgtOffset;
+  const adjTargetY = horizontal ? targetY + tgtOffset : targetY;
+
   // Orthogonal rounded-elbow path (mind-map / org-chart look): a horizontal stub
   // out of the node, a rounded turn, the vertical run, then a rounded turn back
   // into the target — far tidier than bezier when many branches fan in/out of a
   // left-right layout. Particles still ride this path unchanged.
   const [edgePath, labelX, labelY] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
+    sourceX: adjSourceX,
+    sourceY: adjSourceY,
+    targetX: adjTargetX,
+    targetY: adjTargetY,
     sourcePosition,
     targetPosition,
     borderRadius: 10,
@@ -102,15 +132,42 @@ export function StepEdge(props: EdgeProps<StepEdgeData>) {
   // the dashed delegation grouping.
   const isRevision = data?.kind === "revision";
 
+  const hoveredNodeId = data?.hoveredNodeId ?? null;
+  const isHoverRelated =
+    hoveredNodeId != null &&
+    (props.source === hoveredNodeId || props.target === hoveredNodeId);
+  const hoverActive = hoveredNodeId != null;
+
+  let strokeOpacity: number;
+  let strokeWidth: number;
+  let strokeColor: string;
+  if (isAnimated) {
+    strokeOpacity = 1;
+    strokeWidth = 2;
+    strokeColor = "var(--primary)";
+  } else if (!hoverActive) {
+    strokeOpacity = isDelegate || isRevision ? 0.3 : 0.4;
+    strokeWidth = 1.5;
+    strokeColor = "var(--muted-foreground)";
+  } else if (isHoverRelated) {
+    strokeOpacity = 1;
+    strokeWidth = 2;
+    strokeColor = "var(--primary)";
+  } else {
+    strokeOpacity = 0.1;
+    strokeWidth = 1.5;
+    strokeColor = "var(--muted-foreground)";
+  }
+
   return (
     <>
       <BaseEdge
         path={edgePath}
         style={{
           ...style,
-          stroke: isAnimated ? "var(--primary)" : "var(--muted-foreground)",
-          strokeWidth: 2,
-          opacity: isAnimated ? 1 : isDelegate || isRevision ? 0.45 : 0.6,
+          stroke: strokeColor,
+          strokeWidth,
+          opacity: strokeOpacity,
           strokeDasharray: isRevision ? "2 4" : isDelegate ? "5 4" : undefined,
         }}
       />

@@ -46,6 +46,27 @@ const noneOverlap = (
   return hits;
 };
 
+const NODE_SPACING = 40;
+
+/** leftright 下同层（x 重叠）节点在 y 轴上是否违反最小间距。 */
+const crossSpacingViolations = (
+  pos: Record<string, { x: number; y: number }>,
+  ids: string[],
+): string[] => {
+  const hits: string[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      const a = pos[ids[i]];
+      const b = pos[ids[j]];
+      const xOverlap = a.x < b.x + NW && a.x + NW > b.x;
+      if (!xOverlap) continue;
+      const yGap = Math.max(b.y - (a.y + NH), a.y - (b.y + NH));
+      if (yGap < NODE_SPACING) hits.push(`${ids[i]}×${ids[j]}`);
+    }
+  }
+  return hits;
+};
+
 describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
   it("2 级嵌套：子树整块落在父主干线下方、主干线干净、汇聚点钉末层", async () => {
     const ids = ["__input__", "mpm", "lead", "eng1", "eng2", "mcap"];
@@ -118,6 +139,42 @@ describe("computeLayout · 嵌套委派布局不变量（leftright）", () => {
     // 汇聚点仍钉末层。
     const maxX = Math.max(...ids.map((id) => positions[id].x));
     expect(positions.dcap.x).toBe(maxX);
+  });
+
+  it("大扇出 1→8→7→1 DAG + delegate 子队：同层节点无重叠", async () => {
+    // 模拟 3 波复杂协作：wave1 四父各带 2 子队（8 subs），wave2 七普通 worker，
+    // 子队下沉后可能与同层 dep 节点交叉轴碰撞 — resolveOverlaps 须推开。
+    const parents = ["p0", "p1", "p2", "p3"];
+    const subs = Array.from({ length: 8 }, (_, i) => `sub_${i}`);
+    const w2 = Array.from({ length: 7 }, (_, i) => `w2_${i}`);
+    const ids = ["__input__", ...parents, ...subs, ...w2, "cap"];
+    const edges: GraphEdge[] = [
+      ...parents.map((p) => e("__input__", p)),
+      e("p0", "sub_0", "delegate"),
+      e("p0", "sub_1", "delegate"),
+      e("p1", "sub_2", "delegate"),
+      e("p1", "sub_3", "delegate"),
+      e("p2", "sub_4", "delegate"),
+      e("p2", "sub_5", "delegate"),
+      e("p3", "sub_6", "delegate"),
+      e("p3", "sub_7", "delegate"),
+      ...w2.flatMap((w, i) => [
+        e(parents[i % parents.length], w),
+        ...(i + 1 < w2.length ? [e(parents[(i + 1) % parents.length], w)] : []),
+      ]),
+      ...parents.map((p) => e(p, "cap")),
+      ...w2.map((w) => e(w, "cap")),
+    ];
+    const workers = [...parents, ...subs, ...w2];
+    const { positions } = await computeLayout(ids, edges, "leftright", false, {
+      source: "__input__",
+      sink: "cap",
+    });
+
+    expect(noneOverlap(positions, workers)).toEqual([]);
+    expect(crossSpacingViolations(positions, workers)).toEqual([]);
+    const maxX = Math.max(...ids.map((id) => positions[id].x));
+    expect(positions.cap.x).toBe(maxX);
   });
 
   it("扁平并行（无委派）：下沉为 no-op，端点钉首/末层", async () => {

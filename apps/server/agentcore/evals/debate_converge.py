@@ -1,9 +1,10 @@
 """辩论收敛校准（§三：先量化再调裁判是否系统性过保守）.
 
-盘点 `docs/07-规划/辩论会话优化点盘点.md §三` 的疑点：一场真实辩论 5 轮全程 `converged=false`、
-靠 `max_rounds` 兜底停——裁判 [`_judge`](../runtime/debate/moderator.py) 可能【系统性过于不愿
-收敛】。但那是 **n=1** 观察：拿单样本调裁判 prompt 极易过拟合。本模块把「裁判是否过保守」变成
-**可量化、可复跑**的信号，遵循「先量化再调」（dev-process：开发期无真实数据 → 以合成样本为据）。
+对应 `辩论编排设计.md §五`（收敛治理）暴露的疑点：一场真实辩论 5 轮全程 `converged=false`、
+靠 `max_rounds` 兜底停——裁判 [`_judge_and_summarize`](../runtime/debate/moderator.py) 可能【系统性
+过于不愿收敛】。但那是 **n=1** 观察：拿单样本调裁判 prompt 极易过拟合。本模块把「裁判是否过保守」
+变成 **可量化、可复跑**的信号，遵循「先量化再调」（dev-process：开发期无真实数据 →
+以合成样本为据）。
 
 做法与 `calibration.py`（校准 eval LLMJudge ↔ 人工分）同构，但校准的是**辩论裁判自身的收敛判定**：
 
@@ -11,16 +12,21 @@
    覆盖「该收敛」（论点见顶重复 / 归结为价值之争 / 红队风险挖尽 / 快速单轮）与「该继续」
    （开场首轮 / 冒出实质新论点 / 圆桌新视角 / 红队新风险）两侧。
 2. **过真实裁判**（:func:`run_debate_converge`）：对每个场景构 `DebateConfig` + 当前轮发言 + 历史
-   长度（定 `round_no`），调**生产 `_judge`** 收 `converged`，与金标比。
+   长度（定 `round_no`），调**生产合并裁判 `_judge_and_summarize`** 取 `converged`（只读其裁判判定
+   部分、弃小结），与金标比。
 3. **过保守信号**（:class:`ConvergeMetrics`）：混淆矩阵 + 两侧错误率——**over-conservatism（该收敛却
    判继续）** 是本盘点关心的主信号，premature（该继续却判收敛）是反向错误；另出二分 Cohen's
    kappa（判↔金标一致度，复用 `calibration.cohens_kappa`）。
 
-**关键事实（决定怎么读结果 + 未来怎么调）**：`_judge` 只看【当前这一轮】的发言，历史仅用于推出
-`round_no`（见 moderator.py：`round_no = len(history) + 1`，`_judge` 不读历史内容）。故「跨轮重复」
-对裁判本就**不可见**——只有当前轮发言【自身】显出「无新论点 / 已成价值僵局」时它才判得出收敛。
-本模块的场景据此编写（金标信号落在当前轮发言里），量的是裁判在【它真实能看到的输入】上的收敛敏感度；
-若结果显示它在明显该收敛的当前轮仍不收，才坐实「prompt 过保守」，届时再动 `_judge`（另案）。
+**关键事实（决定怎么读结果 + 怎么编场景）**：合并裁判 `_judge_and_summarize` 的【收敛判定】看两块
+输入——① 当前轮发言；② 前几轮的【论点账本】（收敛校准 §三 H2：`_prior_ledger` 把 `history` 的
+focus/summary/clashes 压成紧凑账本喂进裁判，让 `new_arguments` 能判「本轮相比前几轮是否还有跨轮
+新论点」）。故本场景集覆盖两类信号：
+- **in-round**（`prior_rounds` 留空）：收敛信号落在当前轮发言里（辩手自报「无新论点」/ 分歧已成
+  价值僵局 / 快速单轮）——量裁判对当前轮信号的敏感度（≈ H1 过保守假设）。
+- **cross-round**（`prior_rounds` 给足账本）：当前轮把账本里的老论点**换措辞重述、且不自报重复**，
+  须靠跨轮账本才判得出「无跨轮新论点 → 收敛」——量裁判是否补上了「跨轮重复不可见」这一结构盲区
+  （H2，正是真实 trace 5 轮撞满 max_rounds 的形态）。
 
 真跑需 `EVAL_DEEPSEEK_API_KEY`（模型档见 :func:`_debate_provider_and_model`）；单测注入脚本化假
 provider 零成本验证度量与场景集结构（见 tests/test_debate_converge.py）。本模块只 import `types` /
@@ -40,6 +46,7 @@ from agentcore.runtime.debate.types import (
     STOP_CONVERGED,
     STOP_FOCUS_CLARIFIED,
     STOP_RED_TEAM_EXHAUSTED,
+    DebateClash,
     DebateConfig,
     DebateForm,
     DebateSide,
@@ -55,14 +62,29 @@ _CONVERGED_STOPS = frozenset({STOP_CONVERGED, STOP_FOCUS_CLARIFIED, STOP_RED_TEA
 
 
 @dataclass(frozen=True)
+class PriorRound:
+    """账本里的一条前轮记录 —— 收敛校准 §三 H2 的【跨轮】输入。
+
+    喂进 ``moderator._prior_ledger`` 的紧凑摘要：``focus`` 本轮议题、``summary`` 本轮小结、
+    ``clashes`` 交锋边 ``(from_key, to_key, point)``。裁判据这份「已辩论点账本」判当前轮是否还有
+    跨轮新论点。
+    """
+
+    focus: str
+    summary: str
+    clashes: tuple[tuple[str, str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class ConvergeScenario:
     """一个带金标的单轮辩论态 —— 收敛校准的「合成样本」。
 
-    ``turns`` 是【当前轮】各方发言（裁判唯一真实输入）；``round_no`` / ``max_rounds`` / ``thorough``
-    决定裁判的 gate_hint 语境（首轮默认继续、快速单轮即收、thorough 调松紧）。``expect_converge`` 是
-    金标：本轮据当前发言【是否应当收敛】；``expect_stop`` 是可选的金标收敛归因
-    （仅 ``expect_converge`` 为真时有意义）。``why`` 记金标理由，
-    便于读分歧时对照裁判为何与金标不一致。
+    ``turns`` 是【当前轮】各方发言；``prior_rounds`` 是喂裁判的【前几轮论点账本】（收敛校准 §三
+    H2：裁判据此判跨轮新论点，见 ``moderator._prior_ledger``）——留空则退化为「只看当前轮」
+    （in-round 敏感度）。``round_no`` / ``max_rounds`` / ``thorough`` 决定裁判的 gate_hint 语境
+    （首轮默认继续、快速单轮即收、thorough 调松紧）。``expect_converge`` 是金标：本轮据【账本 +
+    当前发言】是否应当收敛；``expect_stop`` 是可选金标收敛归因（仅 ``expect_converge`` 为真时有
+    意义）。``why`` 记金标理由，便于读分歧时对照裁判为何与金标不一致。
     """
 
     id: str
@@ -77,6 +99,7 @@ class ConvergeScenario:
     expect_converge: bool
     why: str
     expect_stop: str = ""
+    prior_rounds: tuple[PriorRound, ...] = ()
 
     def config(self) -> DebateConfig:
         """据场景构造生产 `DebateConfig`（policy 用 thorough + max_rounds，喂裁判 gate_hint）。"""
@@ -88,13 +111,24 @@ class ConvergeScenario:
         )
 
     def history(self) -> list[RoundResult]:
-        """构造 ``round_no - 1`` 条占位历史轮 —— `_judge` 只用其【长度】推 round_no，不读内容。
+        """构造 ``round_no - 1`` 条历史轮 —— 定 round_no（长度）+ 喂裁判的【跨轮论点账本】。
 
-        故占位轮给最小合法 verdict/focus 即可（内容不影响本轮裁判判定）。
+        给了 ``prior_rounds`` 时用其真实 focus/summary/clashes 建轮（收敛校准 §三 H2：账本进裁判
+        判据，测跨轮收敛）；未给时退化为最小占位轮（summary/clashes 空 → 账本空 → 裁判只看当前轮，
+        测 in-round 敏感度）。
         """
+        if self.prior_rounds:
+            out: list[RoundResult] = []
+            for i, pr in enumerate(self.prior_rounds, start=1):
+                clashes = [DebateClash(from_key=f, to_key=t, point=p) for f, t, p in pr.clashes]
+                verdict = JudgeVerdict(
+                    real_clash=True, new_arguments=True, converged=False, clashes=clashes
+                )
+                out.append(RoundResult(i, pr.focus, [], verdict, summary=pr.summary))
+            return out
         placeholder = JudgeVerdict(real_clash=True, new_arguments=True, converged=False)
         return [
-            RoundResult(i, f"（第 {i} 轮焦点）", [], placeholder, summary=f"（第 {i} 轮小结）")
+            RoundResult(i, f"（第 {i} 轮焦点）", [], placeholder, summary="")
             for i in range(1, self.round_no)
         ]
 
@@ -379,6 +413,129 @@ SCENARIOS: tuple[ConvergeScenario, ...] = (
         expect_converge=False,
         why="红队本轮挖出一类此前未涉及、且未被修补的新风险（枚举 → 账户接管），仍有新风险可挖。",
     ),
+    # ── 跨轮账本（H2：信号在 prior_rounds、当前轮不自报，须靠跨轮账本才判得对）──────────
+    ConvergeScenario(
+        id="crossround_reword",
+        form=_S_DEBATE,
+        motion="公司该不该全面转向远程办公",
+        sides=(
+            _side("pro", "正方", "支持全面远程办公"),
+            _side("con", "反方", "反对全面远程办公"),
+        ),
+        focus="远程办公的净影响",
+        round_no=3,
+        max_rounds=5,
+        thorough=True,
+        prior_rounds=(
+            PriorRound(
+                focus="远程办公对个人产出的影响",
+                summary="正方主张远程省通勤、扩大人才池、提升专注；反方主张远程带来协作损耗、"
+                "文化稀释、管理难度上升。",
+                clashes=(
+                    ("pro", "con", "通勤时间省下来直接转化为产出"),
+                    ("con", "pro", "异步协作的沟通损耗抵消了专注收益"),
+                ),
+            ),
+            PriorRound(
+                focus="远程办公对团队协作的影响",
+                summary="正方称工具已能支撑异步协作，反方称临场脑暴不可替代——协作维度已充分展开。",
+                clashes=(("con", "pro", "工具替代不了面对面的高带宽脑暴"),),
+            ),
+        ),
+        turns=(
+            _turn(
+                "pro",
+                "正方",
+                "远程办公最大的好处还是省下通勤、把人才池扩到全国，员工也更能专注——这几点让"
+                "整体产出是提升的。",
+            ),
+            _turn(
+                "con",
+                "反方",
+                "我还是认为面对面协作效率更高、团队文化更容易维系，管理者也更好带团队，这些是"
+                "远程替代不了的。",
+            ),
+        ),
+        expect_converge=True,
+        expect_stop=STOP_CONVERGED,
+        why="当前轮双方只是把账本里已有的老论点（省通勤/扩人才池/专注 vs 协作/文化/管理）换措辞"
+        "重述、无一新论点，且未自报重复——须靠跨轮账本才判得出收敛。",
+    ),
+    ConvergeScenario(
+        id="crossround_genuine_new",
+        form=_S_DEBATE,
+        motion="创业公司该全上云还是自建 IT 基础设施",
+        sides=(
+            _side("cloud", "全上云派", "主张全部上公有云"),
+            _side("onprem", "自建派", "主张自建基础设施"),
+        ),
+        focus="成本与可控性的长期权衡",
+        round_no=2,
+        max_rounds=5,
+        thorough=True,
+        prior_rounds=(
+            PriorRound(
+                focus="早期成本与运维负担",
+                summary="全上云派主张免运维、弹性伸缩、按需付费；自建派主张长期账单更低、硬件可控。",
+                clashes=(("cloud", "onprem", "早期自建的固定投入拖垮现金流"),),
+            ),
+        ),
+        turns=(
+            _turn("cloud", "全上云派", "继续主张全上云：免运维、弹性伸缩、按需付费，早期最省心。"),
+            _turn(
+                "onprem",
+                "自建派",
+                "本轮我提一个账本里没有的新点：部分客户合同强制要求【数据不出自有机房】——这是"
+                "数据主权与合规审计问题，全上云根本满足不了，和之前谈的成本是两码事。",
+            ),
+        ),
+        expect_converge=False,
+        why="自建派本轮引入账本里没有的实质新论点（数据主权/合规），非老论点重述——仍有跨轮新论点，"
+        "不应收敛。",
+    ),
+    ConvergeScenario(
+        id="crossround_redteam_reword",
+        form=_S_RED,
+        motion="压力测试：新版限流方案的漏洞",
+        sides=(
+            _side("plan", "方案方", "为新版限流方案辩护并修补", is_subject=True),
+            _side("red", "红队", "尽力挖新版限流方案的漏洞"),
+        ),
+        focus="剩余未覆盖的失败场景",
+        round_no=3,
+        max_rounds=5,
+        thorough=True,
+        prior_rounds=(
+            PriorRound(
+                focus="突发流量下的失效",
+                summary="红队提出突发流量击穿限流；方案方以分级限流 + 排队降级修补。",
+                clashes=(("red", "plan", "峰值下计数器竞态导致限流失准"),),
+            ),
+            PriorRound(
+                focus="依赖抖动与配置漂移",
+                summary="红队提出依赖抖动、配置漂移两类风险；方案方以熔断兜底 + 配置校验修补。",
+                clashes=(("red", "plan", "配置漂移使阈值静默失效"),),
+            ),
+        ),
+        turns=(
+            _turn(
+                "red",
+                "红队",
+                "我再想想突发流量这块：要是瞬时峰值特别高，限流计数是不是还可能有点不准？"
+                "另外配置那块万一改错了会不会又失效？",
+            ),
+            _turn(
+                "plan",
+                "方案方",
+                "这两点其实就是前两轮的峰值竞态和配置漂移，我们已用分级限流 + 配置校验覆盖，"
+                "换个说法也还是同样的处置，没有新攻击面。",
+            ),
+        ),
+        expect_converge=True,
+        expect_stop=STOP_RED_TEAM_EXHAUSTED,
+        why="红队本轮只把账本里已挖过的风险（峰值竞态/配置漂移）换措辞重提、无账本外新攻击面，"
+        "方案方指出即旧风险——红队风险已挖尽，须靠跨轮账本判收敛。",
+    ),
 )
 
 
@@ -412,6 +569,11 @@ def lint_scenarios(scenarios: Sequence[ConvergeScenario] = SCENARIOS) -> None:
             raise EvalConfigError(
                 f"[{sc.id}] round_no={sc.round_no} 须落在 [1, max_rounds={sc.max_rounds}]"
             )
+        if sc.prior_rounds and len(sc.prior_rounds) != sc.round_no - 1:
+            raise EvalConfigError(
+                f"[{sc.id}] prior_rounds 数 {len(sc.prior_rounds)} 须 == round_no-1 "
+                f"({sc.round_no - 1})：账本轮数须与历史轮数一致"
+            )
         if not sc.turns:
             raise EvalConfigError(f"[{sc.id}] 当前轮 turns 不能为空")
         valid_keys = set(keys)
@@ -420,6 +582,12 @@ def lint_scenarios(scenarios: Sequence[ConvergeScenario] = SCENARIOS) -> None:
                 raise EvalConfigError(f"[{sc.id}] turn 的 side_key={t.side_key!r} 不属于声明方")
             if not t.content.strip():
                 raise EvalConfigError(f"[{sc.id}] 发言 {t.side_key} 内容为空")
+        for pr in sc.prior_rounds:
+            for frm, to, _point in pr.clashes:
+                if frm not in valid_keys or to not in valid_keys:
+                    raise EvalConfigError(
+                        f"[{sc.id}] prior_rounds 交锋 side_key {frm!r}/{to!r} 不属于声明方"
+                    )
         subjects = [s for s in sc.sides if s.is_subject]
         if sc.form is DebateForm.RED_TEAM and len(subjects) != 1:
             raise EvalConfigError(f"[{sc.id}] 红队形态须恰有 1 个 is_subject（现 {len(subjects)}）")
@@ -546,19 +714,23 @@ async def run_debate_converge(
     model: str,
     scenarios: Sequence[ConvergeScenario] = SCENARIOS,
 ) -> ConvergeMetrics:
-    """对每个场景过**生产裁判** `_judge`，逐条收 (金标, 裁判收敛判定)，聚成
+    """对每个场景过**生产合并裁判** `_judge_and_summarize`，逐条收 (金标, 裁判收敛判定)，聚成
     :class:`ConvergeMetrics`。
 
-    直接调 `Moderator._judge`（收敛校准的被测单元就是它）——与它在生产循环里被调用的入参一致：
-    ``(config, focus, 当前轮 turns, 历史)``，历史仅定 round_no（见模块 docstring）。单测注入脚本化
-    假 provider，真模型留给手动 / nightly 校准。
+    直接调 `Moderator._judge_and_summarize`（收敛校准的被测单元＝其【裁判判定】部分，小结弃）——与
+    它在生产循环里被调用的入参一致：``(config, focus, 当前轮 turns, 历史)``，历史定 round_no + 小结
+    锚点（见模块 docstring）。用合并后的真实生产路径校准，量到的即线上那把裁判。单测注入脚本化假
+    provider，真模型留给手动 / nightly 校准。
     """
     if not scenarios:
         raise EvalConfigError("debate-converge 场景集为空，无法校准")
     mod = Moderator(provider=provider, model=model, scenario_prefix="eval.debate_converge")
     per: list[ScenarioJudgement] = []
     for sc in scenarios:
-        verdict = await mod._judge(sc.config(), sc.focus, list(sc.turns), sc.history())
+        # 合并裁判一次产出 (verdict, summary)；收敛校准只读裁判判定，小结弃。
+        verdict, _summary = await mod._judge_and_summarize(
+            sc.config(), sc.focus, list(sc.turns), sc.history()
+        )
         per.append(
             ScenarioJudgement(
                 id=sc.id,

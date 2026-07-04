@@ -13,6 +13,7 @@ from agentcore.runtime.events import (
     approval_required,
     approval_resolved,
     checkpoint_required,
+    checkpoint_resolved,
     content_delta,
     message_end,
     message_start,
@@ -158,6 +159,19 @@ def _single_agent_checkpoint_finalized() -> list[SSEEvent]:
         message_end(FinishReason.PAUSED, input_tokens=1900, output_tokens=210, cost=_COST),
     ]
 
+def _single_agent_checkpoint_resolved() -> list[SSEEvent]:
+    """单聊·检查点【冷路恢复】(② resume)：ask_user(blocking) 落帧暂停后，用户经
+    ``POST .../resume`` 拍板续跑——``checkpoint_resolved`` 清掉 pendingInteraction、status 从
+    paused 回 running，回合继续产出并正常 ``end_turn`` 收尾。对照 ``_single_agent_checkpoint``
+    （停在 ``checkpoint_required`` 的挂起态）验「同一张 resume 卡在续跑后关闭、回合跑到底」。"""
+    return [
+        *_single_agent_checkpoint(),
+        checkpoint_resolved(checkpoint_id="cp1", decision="continue"),
+        content_delta("好，按 A 推进。"),
+        content_delta(" 已完成初稿。"),
+        message_end(FinishReason.END_TURN, input_tokens=2100, output_tokens=260, cost=_COST),
+    ]
+
 def _plan_review_finalized() -> list[SSEEvent]:
     """结构化挂起·计划复核【收口即终止】(②)：delegate ``checkpoint_after`` 落帧后回合以
     ``message_end(finish_reason=paused)`` 收口（对照 ``_plan_review_paused`` 的「停在
@@ -195,5 +209,6 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "plan_review_finalized": ("结构化挂起：计划复核收口即终止（②，plan_review_required→message_end(paused)，单一冷路 resume）", _plan_review_finalized),
     "single_agent_checkpoint": ("单聊：检查点 ask_user(blocking) 在时间线原位落 checkpoint 标记 + 暂停", _single_agent_checkpoint),
     "single_agent_checkpoint_finalized": ("单聊：检查点收口即终止（②，checkpoint_required→message_end(paused)，单一冷路 resume）", _single_agent_checkpoint_finalized),
+    "single_agent_checkpoint_resolved": ("单聊：检查点 ask_user(blocking) 经 resume 续跑（checkpoint_resolved 清挂起→跑到 end_turn）", _single_agent_checkpoint_resolved),
     "single_agent_non_blocking_ask": ("单聊：非阻塞发问 question_posted 在时间线原位落 ask 标记、回合照常收尾", _single_agent_non_blocking_ask),
 }

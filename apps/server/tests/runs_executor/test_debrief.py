@@ -1,101 +1,113 @@
-"""完工交接简报 (debrief) parser — split a worker's product into deliverable + handoff.
+"""完工交接简报 (debrief) harvest — read a worker's brief off its ``handoff`` tool call.
 
-The parser is best-effort and PURE: output that carries no parseable「## 交接简报」section
-must round-trip to ``(content, None)`` so every read site behaves byte-identically to its
-pre-debrief behaviour (load-bearing for conformance stability).
+The brief is STRUCTURED data submitted via the terminal ``handoff`` tool, so it is read straight
+off the call's arguments (never parsed back out of markdown prose — its former, fragile form). The
+harvester is best-effort and PURE: a transcript with no ``handoff`` call round-trips to ``None`` so
+a worker that finished with a plain no-tool answer simply carries no debrief (the deliverable stands
+alone).
 """
 
-from agentcore.runtime.runs.serialize import debrief_from_content, split_debrief
+from agentcore.llm.protocol import LLMMessage, ToolCall, ToolCallFunction
+from agentcore.runtime.runs.serialize import debrief_from_transcript
 
 
-def test_parses_all_four_fields_and_peels_section_off_body():
-    content = (
-        "这是交付正文，第一段。\n第二段。\n\n"
-        "## 交接简报\n"
-        "- 结论：完成了登录接口重构\n"
-        "- 关键要点：响应从 800ms 降到 120ms；改动 auth/login.py\n"
-        "- 关键假设：沿用现有 JWT 方案\n"
-        "- 建议下一步：给注册接口做同样的缓存改造\n"
+def _handoff(arguments: str, call_id: str = "h1") -> LLMMessage:
+    return LLMMessage(
+        role="assistant",
+        content=None,
+        tool_calls=[
+            ToolCall(id=call_id, function=ToolCallFunction(name="handoff", arguments=arguments))
+        ],
     )
-    body, debrief = split_debrief(content)
-    assert body == "这是交付正文，第一段。\n第二段。"
-    assert "交接简报" not in body  # section is peeled off the deliverable
-    assert debrief is not None
-    assert debrief["summary"] == "完成了登录接口重构"
-    assert debrief["key_points"] == ["响应从 800ms 降到 120ms；改动 auth/login.py"]
-    assert debrief["assumptions"] == "沿用现有 JWT 方案"
-    assert debrief["next_steps"] == "给注册接口做同样的缓存改造"
 
 
-def test_no_section_returns_content_unchanged():
-    content = "纯交付正文，没有交接简报小节，结论就写在正文里。"
-    body, debrief = split_debrief(content)
-    assert body == content
-    assert debrief is None
-
-
-def test_mention_in_prose_without_heading_is_not_a_section():
-    # The sentinel appears mid-prose but never as a heading → not a section.
-    content = "我在正文里提到了交接简报这个词，但没有用它作小标题。"
-    body, debrief = split_debrief(content)
-    assert body == content
-    assert debrief is None
-
-
-def test_bold_heading_variant_and_no_bullets():
-    content = "正文。\n\n**交接简报**\n结论：搞定了\n建议下一步：上线灰度"
-    body, debrief = split_debrief(content)
-    assert body == "正文。"
-    assert debrief["summary"] == "搞定了"
-    assert debrief["next_steps"] == "上线灰度"
-
-
-def test_last_heading_wins_earlier_one_stays_in_body():
-    content = (
-        "## 交接简报\n结论：这是早期误用的小标题\n\n"
-        "真正的交付内容在这里。\n\n"
-        "## 交接简报\n结论：以最后这节为准\n"
+def _call(name: str, arguments: str, call_id: str = "c1") -> LLMMessage:
+    return LLMMessage(
+        role="assistant",
+        content=None,
+        tool_calls=[
+            ToolCall(id=call_id, function=ToolCallFunction(name=name, arguments=arguments))
+        ],
     )
-    body, debrief = split_debrief(content)
-    assert debrief["summary"] == "以最后这节为准"
-    assert "真正的交付内容在这里。" in body
-    assert "早期误用" in body  # the earlier mis-heading remains part of the deliverable
 
 
-def test_halfwidth_colon_is_tolerated():
-    content = "正文\n\n## 交接简报\n结论: 半角冒号也能解析\n建议下一步: 同上"
-    _, debrief = split_debrief(content)
-    assert debrief["summary"] == "半角冒号也能解析"
-    assert debrief["next_steps"] == "同上"
+def test_parses_all_four_fields():
+    transcript = [
+        LLMMessage(role="user", content="做事"),
+        LLMMessage(role="assistant", content="这是交付正文。"),
+        _handoff(
+            '{"summary": "完成了登录接口重构", '
+            '"key_points": ["响应从 800ms 降到 120ms", "改动 auth/login.py"], '
+            '"assumptions": "沿用现有 JWT 方案", '
+            '"next_steps": "给注册接口做同样的缓存改造"}'
+        ),
+        LLMMessage(role="tool", content="已收尾并提交交接简报。", tool_call_id="h1"),
+    ]
+    debrief = debrief_from_transcript(transcript)
+    assert debrief == {
+        "summary": "完成了登录接口重构",
+        "key_points": ["响应从 800ms 降到 120ms", "改动 auth/login.py"],
+        "assumptions": "沿用现有 JWT 方案",
+        "next_steps": "给注册接口做同样的缓存改造",
+    }
 
 
-def test_multiline_value_appends_until_next_label():
-    content = "正文\n\n## 交接简报\n结论：第一行结论\n继续补充的第二行\n建议下一步：下一步建议"
-    _, debrief = split_debrief(content)
-    assert debrief["summary"] == "第一行结论 继续补充的第二行"
-    assert debrief["next_steps"] == "下一步建议"
+def test_no_handoff_call_returns_none():
+    # A worker that finished with a plain no-tool answer carries no debrief.
+    transcript = [
+        LLMMessage(role="user", content="做事"),
+        LLMMessage(role="assistant", content="纯交付正文，没有调用 handoff。"),
+    ]
+    assert debrief_from_transcript(transcript) is None
 
 
-def test_key_points_kept_as_a_list_of_bullets():
-    content = "正文\n\n## 交接简报\n关键要点：\n- 要点一\n- 要点二\n- 要点三"
-    _, debrief = split_debrief(content)
-    assert debrief["key_points"] == ["要点一", "要点二", "要点三"]
+def test_other_tool_calls_are_ignored():
+    transcript = [
+        _call("web_search", '{"query": "x"}'),
+        _call("escalate", '{"question": "Y?"}', call_id="c2"),
+    ]
+    assert debrief_from_transcript(transcript) is None
+
+
+def test_last_valid_handoff_wins():
+    # A re-worked / revised run may submit more than once — the final brief is authoritative.
+    transcript = [
+        _handoff('{"summary": "第一版结论"}', call_id="h1"),
+        LLMMessage(role="user", content="改一下"),
+        _handoff('{"summary": "以最后这版为准"}', call_id="h2"),
+    ]
+    assert debrief_from_transcript(transcript) == {"summary": "以最后这版为准"}
 
 
 def test_optional_fields_omitted_when_absent():
-    content = "正文\n\n## 交接简报\n结论：只给了结论一条"
-    _, debrief = split_debrief(content)
-    assert debrief == {"summary": "只给了结论一条"}
+    assert debrief_from_transcript([_handoff('{"summary": "只给了结论一条"}')]) == {
+        "summary": "只给了结论一条"
+    }
 
 
-def test_heading_without_recognizable_fields_degrades_to_none():
-    content = "正文\n\n## 交接简报\n（这里啥结构都没有，只是一句散文）"
-    body, debrief = split_debrief(content)
-    assert debrief is None
-    assert body == content  # nothing parseable → leave the content intact
+def test_key_points_only_no_summary():
+    # Parity with the old parser: a brief may carry key_points without a summary.
+    debrief = debrief_from_transcript([_handoff('{"key_points": ["要点一", "要点二"]}')])
+    assert debrief == {"key_points": ["要点一", "要点二"]}
 
 
-def test_debrief_from_content_wrapper():
-    assert debrief_from_content("正文\n\n## 交接简报\n结论：A") == {"summary": "A"}
-    assert debrief_from_content("无简报") is None
-    assert debrief_from_content("") is None
+def test_lone_string_key_points_is_tolerated():
+    debrief = debrief_from_transcript([_handoff('{"summary": "S", "key_points": "单条要点"}')])
+    assert debrief == {"summary": "S", "key_points": ["单条要点"]}
+
+
+def test_blank_key_points_entries_dropped():
+    debrief = debrief_from_transcript(
+        [_handoff('{"summary": "S", "key_points": ["有内容", "   ", ""]}')]
+    )
+    assert debrief == {"summary": "S", "key_points": ["有内容"]}
+
+
+def test_malformed_arguments_skipped():
+    assert debrief_from_transcript([_handoff("not json")]) is None
+
+
+def test_empty_handoff_degrades_to_none():
+    # A handoff with no usable field carries nothing → None (the deliverable stands alone).
+    assert debrief_from_transcript([_handoff("{}")]) is None
+    assert debrief_from_transcript([_handoff('{"summary": "   "}')]) is None

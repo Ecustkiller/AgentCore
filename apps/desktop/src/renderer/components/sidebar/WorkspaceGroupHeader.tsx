@@ -76,7 +76,8 @@ export function WorkspaceGroupHeader({
   };
 
   const browseFiles = () => {
-    navigate("/files", { state: { focusWsId: `folder:${folder.id}` } });
+    const convId = convs[0]?.id;
+    navigate("/files", convId ? { state: { focusWsId: `conv:${convId}` } } : undefined);
   };
 
   const newChatInProject = () => {
@@ -220,14 +221,10 @@ export function WorkspaceGroupHeader({
                 }
               }}
             >
-              {folder.localRootId ? (
-                <HardDrive size={14} className="shrink-0 text-primary" />
-              ) : (
-                <Cloud
-                  size={14}
-                  className="shrink-0 text-sidebar-foreground/40"
-                />
-              )}
+              <FolderOpen
+                size={14}
+                className="shrink-0 text-sidebar-foreground/40"
+              />
               <span className="min-w-0 flex-1 truncate">{folder.name}</span>
             </div>
             <span
@@ -278,7 +275,7 @@ export function WorkspaceGroupHeader({
         onOpenChange={setDeleteOpen}
         name={folder.name}
         liveConvCount={liveConvCount}
-        isLocal={!!folder.localRootId}
+        isLocal={false}
         onConfirm={() => void confirmDeleteProject()}
         onPermanentConfirm={confirmPermanentDelete}
       />

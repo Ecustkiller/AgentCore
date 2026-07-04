@@ -1,5 +1,5 @@
 """LLM-call observability: the single emit point for ``llm.call`` and the
-optional DEBUG-tier ``llm.request`` / ``llm.response`` body capture.
+optional ``llm.request`` / ``llm.response`` body capture.
 
 Why a shared helper: a finished LLM call has full metrics in exactly two places —
 ``DeepSeekProvider.complete`` (one-shot: memory / title) and
@@ -14,7 +14,10 @@ chat-vs-worker-vs-title-vs-memory split.
 Bodies (the actual prompt + completion) are the lever for prompt tuning but are
 large and sensitive, so they are OFF by default and only captured when
 ``settings.log_llm_bodies`` is on — always TRUNCATED and secret-redacted
-(logging.mdc 铁律: never a BYOK key, never full file/message content).
+(logging.mdc 铁律: never a BYOK key, never full file/message content). That single
+switch fully controls them: when enabled they emit at ``info`` (not ``debug``), so
+dev's default ``LOG_LEVEL=info`` surfaces them without also raising the global level
+(which would flood the log with unrelated debug lines).
 """
 
 from __future__ import annotations
@@ -102,10 +105,12 @@ def log_llm_call(
 
     if not settings.log_llm_bodies:
         return
+    # Emitted at info (not debug) so the single ``log_llm_bodies`` switch is sufficient —
+    # no need to also drop LOG_LEVEL to debug (which would flood unrelated debug lines).
     if messages is not None:
-        logger.debug("llm.request", scenario=scenario, model=model, prompt=_format_prompt(messages))
+        logger.info("llm.request", scenario=scenario, model=model, prompt=_format_prompt(messages))
     if content is not None or reasoning is not None:
-        logger.debug(
+        logger.info(
             "llm.response",
             scenario=scenario,
             model=model,

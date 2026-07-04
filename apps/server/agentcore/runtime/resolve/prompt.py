@@ -178,14 +178,16 @@ _CEO_CORE_HINT = """
 卡」把决策摊给用户——预填默认，想省事的人一键开做、想管的人就地调整。这是这类请求的【默认开场】，\
 不是打扰；提案卡靠预填默认避免变成问题墙（详见能力目录 ask_user_kickoff）。信息已说全、没有值得\
 确认的高杠杆决策，才直接进第②步。
-② 自己做还是交团队：判据是【活的规模与结构】，不是【产出是不是文件】、也不是【能不能用只读\
-工具打出来】（几乎都能）：
-- 自己做（轻量即时）：单点确认（一两处文件 / 一条事实就能答）、读你已知的少量文件、问答 / 闲聊 /\
-解释、分析推理类的简短回应，以及【开工前的轻量探路】（读几处以判断怎么拆、派谁）——保持首字即时、\
-别组团。
-- 交给团队（有规模 / 有结构）：要横扫很多文件 / 模块、天然能拆成多个独立角度并行、需不同专长或值得\
-多视角对比 / 辩论、会产生大量中间内容，或要产出用户【打开 / 运行 / 编辑 / 保存 / 复用】的实质交付物\
-——一律 `delegate`，哪怕最终答案只是一段话、哪怕只写一个文件 / 改一行。
+② 自己做还是交团队——三档路由：
+【直答】单点确认（一两处文件 / 一条事实就能答）、问答 / 闲聊 / 解释、读你已知的少量文件、\
+分析推理类的简短回应——首字即时，零编排开销。
+【轻委派】有实质产出但结构简单（写 / 改一个文件、单方向调查、单模块功能）——\
+派一个 worker 端到端完成，设 `finalize=true` 直出、不用你再写总结。这是最常用的路径。
+【完整编排】多方向并行、多依赖流水线、需要不同专长或多视角对比 / 辩论——\
+完整 `delegate(tasks=[...])` 规划 DAG。
+
+默认倾向：能用【直答】就直答，能用【轻委派】就不上【完整编排】。\
+判据是活的规模与结构，不是产出是不是文件——写一个文件也可以是轻委派。
 
 你的只读工具是给你【侦察与收尾】用的，不是让你独自跑完整场调查：一个只读的【广度调查】（如「这个\
 项目哪些功能没完善」「X 在代码里是怎么实现的」「对比这几个模块」）哪怕最终只回一段话，也是团队的活\
@@ -198,8 +200,17 @@ worker（怎么拆、task 怎么写见能力目录 team_orchestration_advanced�
 铁律：绝不为了省一次委派，自己把整份代码 / 文件内容 / 成篇交付物贴进回复正文充数——那样工作区里没有\
 任何产物，用户无法打开 / 运行 / 留存。你的正文只写规划、澄清、综述与指引。
 
-拆不拆、拆几个，判据是【活儿的自然结构】，不是数量本身：让团队形态贴合产出的真实结构，过度拆碎和\
-塌缩成一个都是偏差。
+拆分默认倾向：一个 worker 能端到端做完的，就别拆。每多一个 worker = 额外的协调成本\
+（上下文传递 + 便签对齐 + 你的收尾综述），只有当并行收益或专业化收益明显大于这笔\
+协调成本时才值得拆。
+拆分条件（满足任一才拆）：
+- 任务天然有独立的并行工作流（前端 + 后端、多个不相关模块、多个独立来源的调查）
+- 需要对抗性多视角（辩论 / 审查 / 红队）
+- 单 worker 上下文窗口不够、或串行做要很久而并行能明显省时间
+不拆的信号：
+- 活在同一个代码库 / 模块 / 文件内
+- 调研和实现需要共享上下文（拆了反而要来回传递）
+- 拆完各 worker 之间需要频繁交换中间产物
 - 一个 worker 顺着就能做完的连贯串行活，交给一个 worker，别硬拆成互相传文件的碎片；
 - 活若天然横跨多个相对独立的部分——多个可并行推进的文件 / 模块、需不同专长的子任务、值得多视角\
 对比或辩论的问题——就别塞进一个 worker 串着做：那既慢、也埋没了团队价值，该并行就并行、该分角色\
@@ -208,8 +219,6 @@ worker（怎么拆、task 怎么写见能力目录 team_orchestration_advanced�
 多步的活），优先给每个大区点一名 lead 负责、只交一个成果级目标（如「你负责整个后端」），让它上手后\
 自己拆自己那摊、边干边据证据调——你只点几个负责人，不必开局就把每片叶子都猜死（直击「太依赖第一次\
 编排」）；几个扁平的并行小活（如查三个不相干话题）则别加 lead，那是纯开销。怎么点 lead 见能力目录。
-落到「单个 worker 直出」或「自己埋头查」前先自检一句：这真是一件轻量单线的活，还是我把本可并行 /\
-本该交团队的多块硬压成了串行？拿不准怎么扇出，就先 `consult_skill(team_orchestration_advanced)` 再定形态。
 有些活是反复出现的标准形状（调研→提纲→写作、后端接口→前端 + 测试、多方案对比…），这类已固化成\
 现成 playbook，可一键套出整支队伍并自带依赖编排 / 便签墙对齐等最佳实践——开工前先看本次是不是其一、\
 是就直接套，别每次手搓（见能力目录）。
@@ -218,7 +227,8 @@ worker（怎么拆、task 怎么写见能力目录 team_orchestration_advanced�
 
 worker 看不到你们的对话历史，只看到你写的 task 和原始用户请求。把本次决策依赖的关键约束 / \
 前提 / 偏好（如「不必向后兼容」「沿用上一版方案」）显式写进 task，别让它去猜根本无从得知的\
-上下文。
+上下文。派【多路并行审查 / 质检】时：共享约束写进各 task，并明确要求队员发现方向级问题时用 \
+`post_note`（heads_up）广播（见能力目录 team_orchestration_advanced·便签墙），别指望他们完工后才对齐。
 
 但「写清」有边界：task 里交的是【需求与约束】——目标、硬指标（篇幅 / 格式 / 范围 / 受众）、\
 关键前提与偏好、验收底线；而交付物的【专业方案】——论文的章节结构与论证脉络、代码的模块划分\
@@ -246,6 +256,26 @@ _MEMORY_RULES_TEMPLATE = """
 </rules>"""
 
 
+_CONVERSATION_INSTRUCTIONS_TEMPLATE = """
+<对话级指令>
+以下是用户为「本次对话」设定的自定义指令，优先级高于长期记忆偏好。请在本对话的每一回合
+都遵循；仅当与用户在具体消息里的显式指令直接冲突时，才以那条更具体的显式指令为准。
+
+{instructions}
+</对话级指令>"""
+
+
+def _format_conversation_instructions(instructions: str | None) -> str | None:
+    """Wrap a conversation's custom instructions into a high-priority block, or None.
+
+    Trimmed and dropped when blank so an empty / whitespace-only setting contributes
+    nothing (no dangling section, prefix stays byte-identical for the cache).
+    """
+    if not instructions or not instructions.strip():
+        return None
+    return _CONVERSATION_INSTRUCTIONS_TEMPLATE.format(instructions=instructions.strip())
+
+
 def _format_memory_rules(memory_markdown: str | None) -> str | None:
     """Wrap the user's memory into a <rules> block, or None if empty.
 
@@ -263,7 +293,10 @@ def _format_memory_rules(memory_markdown: str | None) -> str | None:
 
 
 def assemble_system_prompt(
-    *, memory_markdown: str | None = None, extra_context: str | None = None
+    *,
+    memory_markdown: str | None = None,
+    instructions: str | None = None,
+    extra_context: str | None = None,
 ) -> str:
     """Build the system prompt for a conversation.
 
@@ -271,6 +304,10 @@ def assemble_system_prompt(
     when present it is injected as a soft-priority <rules> block. This base prompt
     is shared by the CEO chat agent and the delegated workers (runs/executor.py),
     so memory reaches every agent.
+
+    `instructions` is the conversation's own custom directive (对话级自定义指令); when
+    present it is injected as a high-priority <对话级指令> block ABOVE memory. Stable per
+    conversation, so it keeps the cacheable prefix intact across the thread's turns.
 
     Sections are stitched by :class:`ContextAssembler` (上下文注入统一): base →
     runtime context → memory <rules> → attachment context, joined with "\n". Empty
@@ -291,6 +328,11 @@ def assemble_system_prompt(
         ContextAssembler()
         .add("base", resolve(FRAGMENT_BASE, _DEFAULT_SYSTEM_PROMPT), SectionOrder.BASE)
         .add("runtime_context", runtime_context, SectionOrder.RUNTIME_CONTEXT)
+        .add(
+            "conversation_instructions",
+            _format_conversation_instructions(instructions),
+            SectionOrder.INSTRUCTIONS,
+        )
         .add("memory_rules", _format_memory_rules(memory_markdown), SectionOrder.MEMORY)
         .add("attachment_context", extra_context, SectionOrder.ATTACHMENT)
         .render()

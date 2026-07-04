@@ -1,7 +1,7 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { Button } from "@/components/ui";
+import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 
 /** Three pulsing dots — the shared「正在思考」liveliness cue (图2 的 ● ● ●). */
 export function ThinkingDots() {
@@ -72,17 +72,18 @@ export function ThinkingHeader({
 export function ThinkingPanel({
   reasoning,
   isStreaming,
+  persistKey,
 }: {
   reasoning: string;
   isStreaming: boolean;
+  /** 持久化键（`${messageId}:reasoning`）：给了才把「思考过程开合」跨卸载/刷新记住；缺省走会话态。 */
+  persistKey?: string | null;
 }) {
-  const [expanded, setExpanded] = useState(isStreaming);
-  const prevStreaming = useRef(isStreaming);
-
-  useEffect(() => {
-    if (prevStreaming.current && !isStreaming) setExpanded(false);
-    prevStreaming.current = isStreaming;
-  }, [isStreaming]);
+  // 「直播中自动展开、收场后按保存值」（Q3）——不再收场强制收起并遗忘。
+  const [expanded, toggle] = useStreamAwareDisclosure(
+    persistKey ?? null,
+    isStreaming,
+  );
 
   return (
     <div className="mb-2">
@@ -91,7 +92,7 @@ export function ThinkingPanel({
         expanded={expanded}
         streamingLabel="正在思考…"
         doneLabel="思考过程"
-        onToggle={() => setExpanded((v) => !v)}
+        onToggle={toggle}
       />
       {expanded && (
         <div className="mt-1.5 pl-3">

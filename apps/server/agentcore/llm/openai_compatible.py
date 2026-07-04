@@ -37,6 +37,7 @@ from agentcore.core.errors import (
     LLMInsufficientBalanceError,
     LLMRateLimitError,
     LLMTimeoutError,
+    LLMUpstreamError,
 )
 from agentcore.core.logging import get_logger
 from agentcore.llm.observability import log_llm_call
@@ -232,7 +233,12 @@ class OpenAICompatibleProvider:
         if status_code == 402:
             raise LLMInsufficientBalanceError()
         if status_code >= 500:
-            raise LLMError(f"{self._name} 服务端错误（{status_code}），请稍后再试")
+            logger.warning(
+                "llm.upstream_error",
+                provider=self._name,
+                status_code=status_code,
+            )
+            raise LLMUpstreamError(f"{self._name} 服务端错误（{status_code}），请稍后再试")
 
     async def _request_with_retry(self, payload: dict) -> dict:
         last_error: Exception | None = None
@@ -289,6 +295,11 @@ class OpenAICompatibleProvider:
                 last_error = LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
                 if attempt == _MAX_RETRIES - 1:
                     raise last_error from e
+                # Mirror the non-stream path's llm.timeout_retry so a stalled stream
+                # leaves a log trail instead of riding 3×120s silently.
+                logger.warning(
+                    "llm.stream_timeout_retry", provider=self._name, attempt=attempt + 1
+                )
                 await asyncio.sleep(backoff)
                 backoff *= _BACKOFF_MULTIPLIER
         raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")

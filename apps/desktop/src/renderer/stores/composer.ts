@@ -1,33 +1,194 @@
+import type { PendingAttachment } from "@/components/chat/message-input/composerAttachments";
+import { useConversationStore } from "@/stores/conversation";
+import type { SetStateAction } from "react";
 import { create } from "zustand";
 
 /**
- * Cross-tree 回填 channel for the chat composer (`MessageInput`).
+ * Per-conversation drafts for the unified turn composer (`TurnComposer` — the chat
+ * `MessageInput` and the canvas `CanvasCommandBar` are two skins over the same core).
  *
- * The composer holds its draft in local state, but a non-blocking ask card
- * ({@link NonBlockingAskCard}) lives deep in the message list and needs to drop the
- * user's pick into that draft when an option chip is clicked. This tiny store is the
- * one-way pipe: the card calls {@link fill}, the composer subscribes to {@link token}
- * (a monotonic counter so even an identical text re-triggers) and applies the text.
+ * Keying the draft (text + pending attachments) by conversation moves it OUT of
+ * component state, which buys the two things the old local-state design couldn't do:
+ * switching 聊天 ⇄ 画布 (which unmounts one skin and mounts the other) keeps the
+ * half-typed order, and the 回填 channel below lands in a real draft even if the
+ * subscribing composer is briefly unmounted. Entries self-delete once both text and
+ * attachments are empty, so the map stays bounded to conversations with a live draft.
  *
- * `append` (the default) adds the text as a new line after any existing draft so a
- * user can stack answers to several questions; `replace` overwrites. The store keeps
- * NO per-conversation key — the composer is a singleton bound to the active
- * conversation, and a stale fill is harmless (the user reviews before sending).
+ * Persistence: draft TEXT survives an app restart (`localStorage`, debounced +
+ * flushed on unload, capped to the {@link PERSIST_LIMIT} most recent). Attachments
+ * are session-only by design — their payloads are full file contents (up to 256KB
+ * each, quota hazard) that go stale on disk anyway; re-attaching is cheap. Same
+ * private-mode / non-DOM wrapper as the other persisted UI stores (a failed read
+ * falls back to empty; a failed write keeps the draft in memory for the session).
+ *
+ * 回填 channel: a non-blocking ask card ({@link NonBlockingAskCard}) or a 下一步推荐
+ * chip ({@link FollowupChips}) drops its pick into the ACTIVE conversation's draft via
+ * {@link fill}. `append` (the default) adds the text as a new line after any existing
+ * draft so a user can stack answers to several questions; `replace` overwrites.
+ * `fillToken` is a monotonic focus hint — the mounted composer refocuses its textarea
+ * when it changes (the draft text itself arrives through the store subscription).
  */
+export interface ComposerDraft {
+  value: string;
+  attachments: PendingAttachment[];
+  /** Last edit (ms epoch) — recency key for the persistence cap. */
+  updatedAt: number;
+}
+
+const EMPTY_DRAFT: ComposerDraft = { value: "", attachments: [], updatedAt: 0 };
+
+const COMPOSER_DRAFTS_KEY = "agentcore:composer-drafts";
+/** Persist at most this many drafts (most recently edited win). */
+const PERSIST_LIMIT = 30;
+const PERSIST_DEBOUNCE_MS = 300;
+
+/** Draft-conversation (no id yet) drafts live under a fixed sentinel key. */
+export function draftKeyFor(conversationId: string | null): string {
+  return conversationId ?? "__draft__";
+}
+
+function loadDrafts(): Record<string, ComposerDraft> {
+  try {
+    const raw = localStorage.getItem(COMPOSER_DRAFTS_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, ComposerDraft> = {};
+    for (const [key, entry] of Object.entries(
+      parsed as Record<string, unknown>,
+    )) {
+      if (!entry || typeof entry !== "object") continue;
+      const { value, updatedAt } = entry as {
+        value?: unknown;
+        updatedAt?: unknown;
+      };
+      if (typeof value !== "string" || !value) continue;
+      out[key] = {
+        value,
+        attachments: [],
+        updatedAt: typeof updatedAt === "number" ? updatedAt : 0,
+      };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function persistDrafts(drafts: Record<string, ComposerDraft>): void {
+  try {
+    const entries = Object.entries(drafts)
+      .filter(([, d]) => d.value)
+      .sort(([, a], [, b]) => b.updatedAt - a.updatedAt)
+      .slice(0, PERSIST_LIMIT)
+      .map(
+        ([key, d]) =>
+          [key, { value: d.value, updatedAt: d.updatedAt }] as const,
+      );
+    if (entries.length === 0) localStorage.removeItem(COMPOSER_DRAFTS_KEY);
+    else
+      localStorage.setItem(
+        COMPOSER_DRAFTS_KEY,
+        JSON.stringify(Object.fromEntries(entries)),
+      );
+  } catch {
+    /* unavailable (private mode / quota) — session-only */
+  }
+}
+
+function resolve<T>(action: SetStateAction<T>, prev: T): T {
+  return typeof action === "function" ? (action as (p: T) => T)(prev) : action;
+}
+
+/** Write back a draft, dropping the key when it emptied (bounded map). */
+function write(
+  drafts: Record<string, ComposerDraft>,
+  key: string,
+  next: ComposerDraft,
+): Record<string, ComposerDraft> {
+  const out = { ...drafts };
+  if (!next.value && next.attachments.length === 0) delete out[key];
+  else out[key] = next;
+  return out;
+}
+
 interface ComposerDraftState {
-  /** Monotonic; bumped on every {@link fill} so the consumer's effect always runs. */
-  token: number;
-  /** The text to drop into the composer on the latest fill. */
-  text: string;
-  mode: "append" | "replace";
-  /** 回填 the composer with `text` (default: append as a new line). */
+  drafts: Record<string, ComposerDraft>;
+  /** Monotonic; bumped on every {@link fill} so the mounted composer refocuses. */
+  fillToken: number;
+  setValue: (key: string, action: SetStateAction<string>) => void;
+  setAttachments: (
+    key: string,
+    action: SetStateAction<PendingAttachment[]>,
+  ) => void;
+  /** 回填 the active conversation's draft with `text` (default: append as a new line). */
   fill: (text: string, mode?: "append" | "replace") => void;
 }
 
 export const useComposerDraftStore = create<ComposerDraftState>((set) => ({
-  token: 0,
-  text: "",
-  mode: "append",
+  drafts: loadDrafts(),
+  fillToken: 0,
+  setValue: (key, action) =>
+    set((s) => {
+      const prev = s.drafts[key] ?? EMPTY_DRAFT;
+      return {
+        drafts: write(s.drafts, key, {
+          ...prev,
+          value: resolve(action, prev.value),
+          updatedAt: Date.now(),
+        }),
+      };
+    }),
+  setAttachments: (key, action) =>
+    set((s) => {
+      const prev = s.drafts[key] ?? EMPTY_DRAFT;
+      return {
+        drafts: write(s.drafts, key, {
+          ...prev,
+          attachments: resolve(action, prev.attachments),
+          updatedAt: Date.now(),
+        }),
+      };
+    }),
   fill: (text, mode = "append") =>
-    set((s) => ({ token: s.token + 1, text, mode })),
+    set((s) => {
+      const key = draftKeyFor(
+        useConversationStore.getState().currentConversationId,
+      );
+      const prev = s.drafts[key] ?? EMPTY_DRAFT;
+      const value =
+        mode === "append" && prev.value.trim()
+          ? `${prev.value}\n${text}`
+          : text;
+      return {
+        drafts: write(s.drafts, key, { ...prev, value, updatedAt: Date.now() }),
+        fillToken: s.fillToken + 1,
+      };
+    }),
 }));
+
+// Debounced persistence: setValue fires per keystroke, so batch writes; flush on
+// unload so the last keystrokes before closing the app aren't lost to the debounce.
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let lastPersisted: Record<string, ComposerDraft> | null = null;
+
+function flushPersist(): void {
+  if (persistTimer !== null) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  const drafts = useComposerDraftStore.getState().drafts;
+  if (drafts === lastPersisted) return;
+  lastPersisted = drafts;
+  persistDrafts(drafts);
+}
+
+useComposerDraftStore.subscribe((s, prev) => {
+  if (s.drafts === prev.drafts) return;
+  if (persistTimer !== null) clearTimeout(persistTimer);
+  persistTimer = setTimeout(flushPersist, PERSIST_DEBOUNCE_MS);
+});
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", flushPersist);
+}

@@ -1,13 +1,15 @@
 import {
   ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { NODE_HEIGHT } from "@/lib/elk-layout";
-import { estimateTokens, formatCost, headText, tailText } from "@/lib/format";
-import { useActiveMessages, useConversationStore } from "@/stores/conversation";
+import {
+  hasParallelTimeline,
+  parallelTimelineMetricsSummary,
+} from "@/components/chat/ParallelTimeline";
+import {
+  isTimelineLayout,
+  resolveEffectiveGraphLayout,
+} from "@/lib/graph-layout-utils";
 import {
   type RunStatus,
   useActiveExecField,
@@ -15,70 +17,33 @@ import {
   useProjectedExecution,
 } from "@/stores/execution";
 import { useGraphStore } from "@/stores/graph";
-import { type EndpointKind, useSidePanelStore } from "@/stores/sidePanel";
+import { type EndpointKind } from "@/stores/sidePanel";
 import { useUsageStore } from "@/stores/usage";
-import { Background, type Edge, type Node, ReactFlow } from "@xyflow/react";
-import { Crosshair, Maximize2, ScanSearch } from "lucide-react";
+import { Background, type Node, ReactFlow } from "@xyflow/react";
 import { useCallback, useMemo, useState } from "react";
+import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasZoomControls } from "./CanvasZoomControls";
+import { GraphContextMenu } from "./GraphContextMenu";
 import { GraphToolbar } from "./GraphToolbar";
-import { Timeline } from "./Timeline";
+import { TimeBatchMarkers } from "./TimeBatchMarkers";
 import { WaveLanes } from "./WaveLanes";
-import { INPUT_ID, edgeTypes, isEndpointId, nodeTypes } from "./constants";
-import {
-  type WaveBand,
-  computeWaves,
-  deriveArtifacts,
-  deriveCaptainStatus,
-  resolveHandoff,
-} from "./helpers";
+import { edgeTypes, nodeTypes } from "./constants";
+import { type WaveBand, computeWaves, deriveCaptainStatus } from "./helpers";
+import { projectFlowEdges, projectFlowNodes } from "./projectFlowGraph";
+import { useGraphDrillIn } from "./useGraphDrillIn";
 import { useGraphLayout } from "./useGraphLayout";
 import { useGraphViewport } from "./useGraphViewport";
 
 interface GraphViewProps {
-  /**
-   * Embedded in the message (vs. the full-screen overlay). Drops the replay
-   * timeline and the layout toolbar — in the message column a node click hands
-   * off to {@link onNodeSelect} (opens a run-detail tab in the conversation
-   * panel) so the narrow column is not split by a second pane.
-   */
   embedded?: boolean;
-  /**
-   * Worker-node drill-in hand-off: when set, a node click reports the run id
-   * instead of opening the run detail itself, and it does NOT close the
-   * surrounding surface. Both the embedded message graph and the canvas 放大态
-   * ({@link import("./CanvasZoomedTurn")}) pass this so a drill opens the shared
-   * docked run-detail tab without dropping their surface. When omitted, a node
-   * click opens the run detail here then calls `onClose`. Endpoint (input /
-   * captain) clicks use {@link onEndpointSelect} instead.
-   */
   onNodeSelect?: (runId: string) => void;
-  /**
-   * Endpoint drill-in hand-off: when set, clicking the 用户输入 / CEO 汇聚点
-   * endpoint reports the chat message to surface (the prompt / the final answer)
-   * + a title + which endpoint it is, so the host (canvas focused node / 放大态)
-   * opens it in the shared right-docked SidePanel as a content tab — like a worker
-   * drill, WITHOUT leaving the canvas. The endpoint node then lights from that
-   * active content tab (same one-source highlight as workers). The in-chat embedded
-   * graph leaves it unset and keeps the jump-to-chat focus (bubble already in column).
-   */
   onEndpointSelect?: (
     contentMessageId: string,
     title: string,
     endpoint: EndpointKind,
   ) => void;
-  /** Embedded only: report the canvas height the graph wants (fit-to-width of
-   * the laid-out bbox, clamped) so the wrapper can size its box to each graph's
-   * real footprint. `overflowing` is true when the graph is taller than the
-   * clamp ceiling, so the wrapper can hint there is more (fade + 全屏). */
   onMeasure?: (m: { height: number; overflowing: boolean }) => void;
-  /** Exit the surrounding canvas 放大态 (non-embedded only); set by
-   * {@link import("./CanvasZoomedTurn")}. Inert when `onNodeSelect` /
-   * `onEndpointSelect` are also set (every drill is handed off in place), so the
-   * zoomed view never closes itself on a drill. */
   onClose?: () => void;
-  /** Start the replay timeline playing on mount — the 回放 entry into the canvas
-   * 放大态 (non-embedded only). */
   autoplay?: boolean;
 }
 
@@ -90,165 +55,61 @@ export function GraphView({
   onClose,
   autoplay = false,
 }: GraphViewProps = {}) {
-  // The message whose graph this is (§9.3). Threaded from the inline graph via
-  // ExecutionScopeContext (survives the full-screen portal), so focus + detail
-  // mutations target the right per-message slot — live or replayed.
   const messageId = useExecutionScope();
   const execution = useProjectedExecution();
   const hasFrames = useActiveExecField((rt) => rt.frames.length > 0);
   const layoutKind = useGraphStore((s) => s.layoutKind);
   const setLayoutKind = useGraphStore((s) => s.setLayoutKind);
-  const { positions, edges, bbox, layoutReady, nodeHeights, onNodesChange } =
-    useGraphLayout(execution, layoutKind);
+  const parallelAvailable = !!execution && hasParallelTimeline(execution);
+  const effectiveLayoutKind = resolveEffectiveGraphLayout(layoutKind, {
+    embedded,
+    parallelAvailable,
+  });
+  const timelineLayout = isTimelineLayout(effectiveLayoutKind);
+  const {
+    positions,
+    edges,
+    bbox,
+    layoutReady,
+    nodeHeights,
+    nodeSizes,
+    batchDividers,
+    onNodesChange,
+  } = useGraphLayout(execution, effectiveLayoutKind);
   const { containerRef, rfRef, overflowing, fitView, centerNode, onInit } =
     useGraphViewport({ embedded, bbox, layoutReady, onMeasure });
-  // Left-right flow re-anchors node handles to the horizontal axis.
   const handleDirection =
-    layoutKind === "leftright" ? "horizontal" : "vertical";
-  const showRunDetail = useSidePanelStore((s) => s.showRunDetail);
-  // Drill into a run through the conversation's right-side detail panel — the
-  // single home for run detail. The embedded graph hands off via `onNodeSelect`
-  // (also a `showRunDetail`); the full-screen overlay calls this directly and
-  // then steps aside (`onClose`) so the panel shows behind it.
-  const showRunDetailHere = useCallback(
-    (runId: string) => {
-      if (!messageId) return;
-      const run = execution?.runs.find((r) => r.id === runId);
-      const role = execution?.agents.find((a) => a.id === run?.agentId)?.role;
-      showRunDetail(messageId, runId, role);
-    },
-    [execution, messageId, showRunDetail],
-  );
-  // Node highlight has one source: the side panel's active detail tab for THIS
-  // turn. Both the embedded graph and the canvas 放大态 drill into that single
-  // panel, so the lit node is whatever the panel currently shows — switching /
-  // closing tabs, selecting the 工作区 home tab (not in `tabs`), or hiding the
-  // panel moves or drops the highlight automatically. A run tab lights its worker;
-  // a content tab (提问 / 最终回答) lights its endpoint node. The two are mutually
-  // exclusive (one active tab is one kind), so exactly one node ever lights.
-  const litRunId = useSidePanelStore((s) => {
-    if (!s.open) return null;
-    const active = s.tabs.find((t) => t.id === s.activeTabId);
-    return active?.kind === "run" && active.messageId === messageId
-      ? active.runId
-      : null;
-  });
-  const litEndpointMessageId = useSidePanelStore((s) => {
-    if (!s.open) return null;
-    const active = s.tabs.find((t) => t.id === s.activeTabId);
-    return active?.kind === "content" && active.messageId === messageId
-      ? active.contentMessageId
-      : null;
-  });
-  // The single FX rate (§7.5) that turns each run's nano-USD total into the ¥
-  // chip on its node; one rate for the whole graph keeps the money consistent.
+    effectiveLayoutKind === "leftright" || timelineLayout
+      ? ("horizontal" as const)
+      : ("vertical" as const);
   const cnyPerUsd = useUsageStore((s) => s.cnyPerUsd);
-  const messages = useActiveMessages();
-  const focusMessage = useConversationStore((s) => s.focusMessage);
-  // The CEO captain's reply streams to the chat bubble (not run-scoped), so the
-  // 汇聚点 node's "output" is this turn's assistant answer — found by the
-  // execution id the bubble was stamped with on run_plan. Drives the captain
-  // node's preview and its jump-to-answer click.
-  const finalAnswer = useMemo(() => {
-    if (!execution) return null;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.role === "assistant" && m.executionId === execution.id) {
-        // Only usable once the captain has actually started writing the answer;
-        // an empty bubble (workers still running) leaves the node inert.
-        return m.content ? { id: m.id, content: m.content } : null;
-      }
-    }
-    return null;
-  }, [messages, execution]);
-  // The input bookend likewise has no run: it stands in for the user's prompt
-  // that opened this turn — the last user message before this turn's answer
-  // bubble. Drives the input node's jump-to-question click (the bubble already
-  // renders the prompt in full, so the jump *is* the "expand").
-  const taskMessage = useMemo(() => {
-    if (!execution) return null;
-    const answerIdx = messages.findIndex(
-      (m) => m.role === "assistant" && m.executionId === execution.id,
-    );
-    if (answerIdx <= 0) return null;
-    for (let i = answerIdx - 1; i >= 0; i--) {
-      if (messages[i].role === "user") return { id: messages[i].id };
-    }
-    return null;
-  }, [messages, execution]);
-  // The CEO captain root run (kind "captain") is the graph's 汇聚点: the turn's
-  // reply engine that every worker hangs under. Declared in the top-level
-  // delegate batch, so it is on the graph from plan time. Its reply lives in the
-  // chat bubble (not run-scoped), so its node jumps to that answer rather than
-  // drilling a bubble-scoped run detail.
-  const captainRun = useMemo(
-    () => execution?.runs.find((r) => r.kind === "captain") ?? null,
-    [execution],
-  );
+
+  const {
+    activateNode,
+    showRunDetailHere,
+    litRunId,
+    litEndpointMessageId,
+    finalAnswer,
+    taskMessage,
+    captainRun,
+  } = useGraphDrillIn(execution, {
+    embedded,
+    messageId,
+    onNodeSelect,
+    onEndpointSelect,
+    onClose,
+  });
+
   const [menuNodeId, setMenuNodeId] = useState<string | null>(null);
-
-  // The single-node drill-in: hand off to the embedded panel, or toggle in-graph
-  // focus. Shared by mouse clicks and keyboard (Enter/Space) activation.
-  const activateNode = useCallback(
-    (id: string) => {
-      // The synthetic bookends have no run to drill into — each stands in for a
-      // real chat message (the user's prompt / the CEO's answer), so activating
-      // one jumps the conversation to that bubble and drops the full-screen
-      // overlay so the chat is visible (in the embedded panel it is already
-      // alongside). The target bubble renders its text in full, so the jump is
-      // also the "expand".
-      if (id === INPUT_ID) {
-        if (!taskMessage) return;
-        // Full-screen: surface the prompt in the in-place panel (no exit);
-        // embedded: jump to the prompt bubble already in the column.
-        if (onEndpointSelect) {
-          onEndpointSelect(taskMessage.id, "提问", "prompt");
-          return;
-        }
-        focusMessage(taskMessage.id);
-        if (!embedded) onClose?.();
-        return;
-      }
-      // The captain 汇聚点 is a real run, but its reply lives in the chat bubble
-      // (not run-scoped), so activating it surfaces the final answer — like the
-      // input node surfaces the prompt — rather than drilling a sparse detail.
-      if (captainRun && id === captainRun.id) {
-        if (!finalAnswer) return;
-        if (onEndpointSelect) {
-          onEndpointSelect(finalAnswer.id, "最终回答", "answer");
-          return;
-        }
-        focusMessage(finalAnswer.id);
-        if (!embedded) onClose?.();
-        return;
-      }
-      // Defensive: the synthetic input endpoint carries no run.
-      if (isEndpointId(id)) return;
-      if (onNodeSelect) {
-        onNodeSelect(id);
-        return;
-      }
-      // Full-screen overlay: open the run in the conversation detail panel, then
-      // step aside so it shows behind the overlay (one home for run detail).
-      showRunDetailHere(id);
-      onClose?.();
-    },
-    [
-      onNodeSelect,
-      onEndpointSelect,
-      showRunDetailHere,
-      finalAnswer,
-      taskMessage,
-      captainRun,
-      focusMessage,
-      embedded,
-      onClose,
-    ],
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const metricsSummary = useMemo(
+    () =>
+      parallelAvailable && execution
+        ? parallelTimelineMetricsSummary(execution)
+        : null,
+    [parallelAvailable, execution],
   );
 
-  // A node click always drills (no modifier multi-select branch): React Flow's
-  // built-in element selection is disabled below, so the graph has no selection
-  // gesture to defer to — every click is a single-node drill-in.
   const onNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => activateNode(node.id),
     [activateNode],
@@ -261,6 +122,13 @@ export function GraphView({
     },
     [],
   );
+
+  const onNodeMouseEnter = useCallback(
+    (_event: React.MouseEvent, node: Node) => setHoveredNodeId(node.id),
+    [],
+  );
+
+  const onNodeMouseLeave = useCallback(() => setHoveredNodeId(null), []);
 
   const onPaneContextMenu = useCallback(
     (event: React.MouseEvent | MouseEvent) => {
@@ -278,201 +146,61 @@ export function GraphView({
     [execution, captainRun],
   );
 
-  const flowNodes = useMemo<Node[]>(() => {
-    if (!execution) return [];
-    // 方案 D：把节点从「ELK 槽位顶对齐」改为「按真实高度居中到槽位」。槽位中心 =
-    // slot.y + NODE_HEIGHT/2；displayY = slot.y + (NODE_HEIGHT − 实测高)/2 使节点真实
-    // 中心落到槽位中心，连线锚点随之齐平。测量到达前回退到原始槽位（顶对齐，仅首帧）。
-    const placed = (id: string) => {
-      const slot = positions[id];
-      if (!slot) return undefined;
-      const h = nodeHeights[id];
-      return h ? { x: slot.x, y: slot.y + (NODE_HEIGHT - h) / 2 } : slot;
-    };
-    // The captain root run renders as the 汇聚点 (below), not as a worker node.
-    const workerRuns = execution.runs.filter((r) => r.id !== captainRun?.id);
-    // 子任务判定只看 worker 之间的父子关系，必须排除 captain：CEO 的顶层 worker 的
-    // parentRunId 正是 captain root，若把 captain 算进来，每个顶层 worker 都会被误判
-    // 成「子任务」(与 layout 处的 isSub 对齐，二者曾不一致)。
-    const workerIdSet = new Set(workerRuns.map((r) => r.id));
-    const nodes: Node[] = workerRuns.map((run, i) => {
-      const agent = execution.agents.find((a) => a.id === run.agentId);
-      const output = agent ? agent.outputChunks.join("") : "";
-      // Reasoning streams run-scoped too (run_reasoning_delta); DeepSeek emits the
-      // whole reasoning before any content, so the node falls back to this tail
-      // while a running worker is still thinking (output empty) — see AgentNode.
-      const reasoning = agent ? agent.reasoningChunks.join("") : "";
-      const focused = litRunId === run.id;
-      // 乙 热修 P4: a「修订 vN」续写 node is badged as a version (not a teammate); it
-      // has a worker parent too, so it must be excluded from the 子任务 check below.
-      const isRevision = run.revision > 0;
-      // 阶段2: a nested sub-worker (its parent is another WORKER on this graph) is
-      // badged so it reads as a delegated sub-task, not a top-level teammate.
-      const isSubtask =
-        !isRevision &&
-        !!run.parentRunId &&
-        run.parentRunId !== run.id &&
-        workerIdSet.has(run.parentRunId);
-      return {
-        id: run.id,
-        type: "agent",
-        position: placed(run.id) ?? { x: 0, y: 0 },
-        data: {
-          agentId: run.agentId,
-          role: agent?.role ?? run.agentId,
-          modelPreference: agent?.modelPreference,
-          reasoningEffort: agent?.reasoningEffort,
-          runId: run.id,
-          status: run.status,
-          isAnimating: run.status === "running",
-          task: run.task,
-          outputPreview: tailText(output),
-          reasoningPreview: tailText(reasoning),
-          // Live tool-call assembly (run_tool_progress): the only signal while a
-          // worker streams a long file body as args — neither content nor reasoning.
-          toolProgress: agent?.toolProgress ?? null,
-          tokenCount: estimateTokens(output),
-          toolCount: agent?.toolCalls.length ?? 0,
-          // 1C 产物落点: files this worker committed via file_write/str_replace.
-          artifacts: agent ? deriveArtifacts(agent.toolCalls) : [],
-          focused,
-          model: run.model,
-          durationMs: run.durationMs,
-          realTokens: run.usage ? run.usage.input + run.usage.output : 0,
-          costText:
-            run.cost && run.cost.total > 0
-              ? formatCost(run.cost.total, cnyPerUsd)
-              : undefined,
-          handleDirection,
-          isSubtask,
-          // 乙 热修 P4: badge a 续写 node「修订 vN」(version number from the wire flag).
-          isRevision,
-          revision: run.revision,
-          //「计划已调整」轻痕迹 (设计 §7.2): the CEO autonomously re-bound (bind) /
-          // re-steered (steer) this node mid-flight → muted「计划已调整」badge; null
-          // on a node the plan never touched.
-          revised: run.revised,
-          // 辩论/审查 side tag (前端UX设计.md §四): badges the node 正方/反方; null on
-          // ordinary teammates.
-          stance: run.stance,
-          // 结构化挂起 2a (7.2A): a `checkpoint_after` pause that fired after this run
-          // → drives the node's「待放行 / 已放行 / 已停止」pause badge; null otherwise.
-          checkpoint: run.checkpoint,
-          // 阻塞式求决策 §4.5B: pending blocking escalations drive the amber「待你拍板」
-          // badge (actionable, clears on resolve); non-blocking raised ones drive the
-          // muted「上报」badge (the CEO resolves these at synthesis). Settled
-          // (resolved/timeout) count toward neither, so the badge clears once handled.
-          escalationPending: run.escalations.filter(
-            (e) => e.status === "pending",
-          ).length,
-          escalationRaised: run.escalations.filter((e) => e.status === "raised")
-            .length,
-          // Input endpoint is index 0, so workers start at 1.
-          enterIndex: i + 1,
-          onActivate: () => activateNode(run.id),
-        },
-      } as Node;
-    });
-
-    // Endpoints render only once ELK has placed them (positions present).
-    if (execution.runs.length > 0) {
-      const inputPos = placed(INPUT_ID);
-      if (inputPos) {
-        nodes.push({
-          id: INPUT_ID,
-          type: "userInput",
-          position: inputPos,
-          data: {
-            variant: "input",
-            status: "completed",
-            label: execution.taskSummary,
+  const projectionBase = useMemo(
+    () =>
+      execution
+        ? {
+            execution,
+            positions,
+            nodeHeights,
+            nodeSizes,
+            timelineLayout,
             handleDirection,
-            enterIndex: 0,
-            // Lit when the panel surfaces this turn's prompt (mirrors a worker's
-            // glow); matched by the input bookend's stand-in message id.
-            focused: !!taskMessage && litEndpointMessageId === taskMessage.id,
-            onActivate: taskMessage ? () => activateNode(INPUT_ID) : undefined,
-          },
-        } as Node);
-      }
-      // The CEO captain 汇聚点: the climax node previewing the team's deliverable
-      // (the chat-bubble answer, since the captain's reply is bubble-scoped, not
-      // run-scoped). Status is derived from team completion; clicking jumps to
-      // that answer rather than drilling a sparse run detail.
-      if (captainRun && captainStatus) {
-        const captainPos = placed(captainRun.id);
-        if (captainPos) {
-          nodes.push({
-            id: captainRun.id,
-            type: "captain",
-            position: captainPos,
-            data: {
-              variant: "captain",
-              status: captainStatus,
-              label: "",
-              // 取答案开头而非末尾：成稿答案开头即结论/主旨，长答案取末尾会截出半句
-              // 乱码（与 worker 运行中取 tail 显「正在写什么」的语义相反）。
-              preview: finalAnswer ? headText(finalAnswer.content) : "",
-              handleDirection,
-              enterIndex: workerRuns.length + 1,
-              // Lit when the panel surfaces the final answer; matched by the
-              // answer's bubble id (the captain's reply is bubble-scoped).
-              focused: !!finalAnswer && litEndpointMessageId === finalAnswer.id,
-              onActivate: finalAnswer
-                ? () => activateNode(captainRun.id)
-                : undefined,
-            },
-          } as Node);
-        }
-      }
-    }
+            cnyPerUsd,
+            litRunId,
+            litEndpointMessageId,
+            captainRun,
+            captainStatus,
+            finalAnswer,
+            taskMessage,
+            activateNode,
+            hoveredNodeId,
+            edges,
+          }
+        : null,
+    [
+      execution,
+      positions,
+      nodeHeights,
+      nodeSizes,
+      timelineLayout,
+      handleDirection,
+      cnyPerUsd,
+      litRunId,
+      litEndpointMessageId,
+      captainRun,
+      captainStatus,
+      finalAnswer,
+      taskMessage,
+      activateNode,
+      hoveredNodeId,
+      edges,
+    ],
+  );
 
-    return nodes;
-  }, [
-    execution,
-    positions,
-    nodeHeights,
-    cnyPerUsd,
-    litRunId,
-    litEndpointMessageId,
-    captainStatus,
-    captainRun,
-    handleDirection,
-    activateNode,
-    finalAnswer,
-    taskMessage,
-  ]);
+  const flowNodes = useMemo(
+    () => (projectionBase ? projectFlowNodes(projectionBase) : []),
+    [projectionBase],
+  );
 
-  const flowEdges = useMemo<Edge[]>(() => {
-    return edges.map((e) => {
-      const animated =
-        e.target === captainRun?.id
-          ? captainStatus === "running"
-          : execution?.runs.find((s) => s.id === e.target)?.status ===
-            "running";
-      const kind = e.kind ?? "dep";
-      // 信息流边 (1A): for a teammate→teammate dependency, look up the REAL handoff
-      // fidelity from the target run's receivedContext (the dependency block whose
-      // source_run_id is this edge's source), so the edge label can mark a 摘要 /
-      // 指针 / 截断 handoff. Bookend / delegate / revision edges carry no such block.
-      const handoff =
-        kind === "dep" && execution
-          ? resolveHandoff(execution, e.source, e.target)
-          : null;
-      return {
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        type: "step",
-        animated,
-        data: { animated, kind, handoff },
-      } as Edge;
-    });
-  }, [edges, execution, captainStatus, captainRun]);
+  const flowEdges = useMemo(
+    () =>
+      projectionBase
+        ? projectFlowEdges({ ...projectionBase, edges })
+        : [],
+    [projectionBase, edges],
+  );
 
-  // 1B 波次泳道: a lane behind each scheduler wave (the laid-out worker columns), so
-  // the team's round-by-round flow reads at a glance. Empty for a single wave / single
-  // agent, so simple turns stay clean. Recomputed only on structure/layout changes.
   const waves = useMemo<WaveBand[]>(
     () =>
       execution && bbox
@@ -480,17 +208,13 @@ export function GraphView({
             execution,
             positions,
             bbox,
-            layoutKind,
+            effectiveLayoutKind,
             captainRun?.id ?? null,
           )
         : [],
-    [execution, positions, bbox, layoutKind, captainRun],
+    [execution, positions, bbox, effectiveLayoutKind, captainRun],
   );
 
-  // The embedded graph lives inside the scrollable chat column, so it behaves as
-  // a static preview: no wheel/pinch/double-click zoom and no drag-pan, plus
-  // preventScrolling=false so the wheel scrolls the conversation instead of being
-  // captured by the canvas. All zoom/pan exploration happens in full-screen.
   const interactionProps = embedded
     ? {
         zoomOnScroll: false,
@@ -498,9 +222,6 @@ export function GraphView({
         zoomOnDoubleClick: false,
         panOnDrag: false,
         preventScrolling: false,
-        // The fit-to-width zoom of a wide DAG can fall below React Flow's default
-        // 0.5 floor; lower it so our programmatic setViewport is never clamped
-        // (the user can't zoom here anyway, so a low floor is inert).
         minZoom: 0.05,
       }
     : {};
@@ -519,10 +240,10 @@ export function GraphView({
   }
 
   return (
-    <div className="flex h-full w-full">
+    <div className="flex h-full w-full flex-col">
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div ref={containerRef} className="relative flex-1">
+          <div ref={containerRef} className="relative min-h-0 flex-1">
             {layoutReady && (
               <ReactFlow
                 nodes={flowNodes}
@@ -532,29 +253,29 @@ export function GraphView({
                 onInit={onInit}
                 onNodesChange={onNodesChange}
                 onNodeClick={onNodeClick}
+                onNodeMouseEnter={onNodeMouseEnter}
+                onNodeMouseLeave={onNodeMouseLeave}
                 onNodeContextMenu={onNodeContextMenu}
                 onPaneContextMenu={onPaneContextMenu}
                 fitView={!embedded}
                 nodesDraggable={false}
                 nodesConnectable={false}
                 nodesFocusable={false}
-                // Node highlight has ONE source: the side panel's active run tab
-                // (projected into each node's `focused`). React Flow's built-in
-                // click-selection would paint a second, competing outline (two lit
-                // nodes, or a stray outline on the endpoints that only jump), so
-                // it is off — clicks still drill via onNodeClick.
                 elementsSelectable={false}
                 proOptions={{ hideAttribution: true }}
                 {...interactionProps}
               >
                 <Background gap={20} size={1} />
                 <WaveLanes waves={waves} />
+                {timelineLayout && bbox && (
+                  <TimeBatchMarkers
+                    dividers={batchDividers}
+                    height={bbox.height}
+                  />
+                )}
               </ReactFlow>
             )}
 
-            {/* Over-tall graph hint (方案 D): the inline canvas caps its height, so a
-            graph taller than the ceiling is top-aligned and faded at the bottom
-            to signal「还有更多」— open 全屏 to see the whole DAG. */}
             {embedded && overflowing && (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-card to-transparent" />
             )}
@@ -563,13 +284,16 @@ export function GraphView({
               <GraphToolbar
                 layoutKind={layoutKind}
                 onLayoutKindChange={setLayoutKind}
+                metricsSummary={metricsSummary}
+                timelineAvailable={parallelAvailable}
               />
             )}
 
-            {/* Zoom cluster — shared with the 总览态 for a unified look (统一观感). Layout
-                selection stays in GraphToolbar (top-right); zoom + fit live here. */}
             {!embedded && (
-              <div className="absolute bottom-3 left-3 z-10">
+              <div className="absolute bottom-3 left-3 z-10 flex flex-col gap-2">
+                {hasFrames && !timelineLayout && (
+                  <CanvasPlaybackControls autoPlay={autoplay} />
+                )}
                 <CanvasZoomControls
                   onZoomIn={() => rfRef.current?.zoomIn({ duration: 200 })}
                   onZoomOut={() => rfRef.current?.zoomOut({ duration: 200 })}
@@ -578,56 +302,21 @@ export function GraphView({
                 />
               </div>
             )}
-
-            {!embedded && hasFrames && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-4">
-                <Timeline autoPlay={autoplay} />
-              </div>
-            )}
           </div>
         </ContextMenuTrigger>
 
-        <ContextMenuContent>
-          {menuNodeId !== null && (
-            <>
-              {!isEndpointId(menuNodeId) && menuNodeId !== captainRun?.id && (
-                <ContextMenuItem
-                  onSelect={() => {
-                    if (onNodeSelect) onNodeSelect(menuNodeId);
-                    else {
-                      showRunDetailHere(menuNodeId);
-                      onClose?.();
-                    }
-                  }}
-                >
-                  <ScanSearch size={14} className="shrink-0" />
-                  <span className="flex-1 truncate">查看详情</span>
-                </ContextMenuItem>
-              )}
-              {menuNodeId === INPUT_ID && taskMessage && (
-                <ContextMenuItem onSelect={() => activateNode(INPUT_ID)}>
-                  <ScanSearch size={14} className="shrink-0" />
-                  <span className="flex-1 truncate">查看完整提问</span>
-                </ContextMenuItem>
-              )}
-              {menuNodeId === captainRun?.id && finalAnswer && (
-                <ContextMenuItem onSelect={() => activateNode(captainRun.id)}>
-                  <ScanSearch size={14} className="shrink-0" />
-                  <span className="flex-1 truncate">查看最终回答</span>
-                </ContextMenuItem>
-              )}
-              <ContextMenuItem onSelect={() => centerNode(menuNodeId)}>
-                <Crosshair size={14} className="shrink-0" />
-                <span className="flex-1 truncate">居中此节点</span>
-              </ContextMenuItem>
-              <ContextMenuSeparator />
-            </>
-          )}
-          <ContextMenuItem onSelect={() => fitView()}>
-            <Maximize2 size={14} className="shrink-0" />
-            <span className="flex-1 truncate">适应画布</span>
-          </ContextMenuItem>
-        </ContextMenuContent>
+        <GraphContextMenu
+          menuNodeId={menuNodeId}
+          captainRunId={captainRun?.id}
+          taskMessage={taskMessage}
+          finalAnswer={finalAnswer}
+          onNodeSelect={onNodeSelect}
+          showRunDetailHere={showRunDetailHere}
+          onClose={onClose}
+          activateNode={activateNode}
+          centerNode={centerNode}
+          fitView={fitView}
+        />
       </ContextMenu>
     </div>
   );

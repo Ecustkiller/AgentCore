@@ -288,6 +288,19 @@ class ConversationRepository:
             await self._session.refresh(conv)
         return conv
 
+    async def set_instructions(
+        self, conversation_id: str, instructions: str | None, *, user_id: str
+    ) -> Conversation | None:
+        """Set (or clear, with ``None``/"") a conversation's custom instructions
+        (对话级自定义指令). Owner-scoped (``user_id`` mandatory, SEC-002). A blank
+        string is normalized to NULL so「no instructions」has one representation."""
+        conv = await self.get_by_id(conversation_id, user_id=user_id)
+        if conv:
+            conv.instructions = (instructions or "").strip() or None
+            await self._session.commit()
+            await self._session.refresh(conv)
+        return conv
+
     async def set_pinned(
         self, conversation_id: str, pinned: bool, *, user_id: str
     ) -> Conversation | None:
@@ -497,6 +510,17 @@ class ConversationRepository:
             .order_by(Conversation.pinned.desc(), Conversation.updated_at.desc())
         )
         return result.scalars().all()
+
+    async def set_local_binding(
+        self, conversation_id: str, *, root_id: str | None, subpath: str | None = None
+    ) -> None:
+        """Set the conversation's scratch workspace local binding."""
+        await self._session.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(local_root_id=root_id, local_subpath=subpath)
+        )
+        await self._session.commit()
 
     async def set_folder(
         self, conversation_id: str, folder_id: str | None, *, user_id: str

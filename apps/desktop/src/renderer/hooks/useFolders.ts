@@ -5,11 +5,6 @@ import {
   removeConversationFromCache,
   useGroupedConversations,
 } from "@/hooks/useConversations";
-import {
-  addWorkspaceFromFolder,
-  patchWorkspaceFromFolder,
-  removeWorkspaceForFolder,
-} from "@/hooks/useWorkspaces";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys } from "@/lib/queryKeys";
 import {
@@ -54,8 +49,7 @@ export function addFolderCache(folder: FolderMeta): void {
   writeFolders((list) => [folder, ...list.filter((f) => f.id !== folder.id)]);
 }
 
-/** Shallow-merge a patch onto one cached folder (no-op if absent). Used for the
- * local-only binding reflection (workspace bind/unbind stamps `localRootId`). */
+/** Shallow-merge a patch onto one cached folder (no-op if absent). */
 export function patchFolderCache(id: string, patch: Partial<FolderMeta>): void {
   writeFolders((list) =>
     list.map((f) => (f.id === id ? { ...f, ...patch } : f)),
@@ -73,23 +67,18 @@ export function useFolders(): FolderMeta[] {
 }
 
 /** Create a folder, then add it to the cache. `mutateAsync` returns the new
- * folder so the caller can name / select / file into it. */
+ * folder so the caller can name / select it. */
 export function useCreateFolder() {
   return useMutation({
     mutationFn: ({
       name,
       localDir,
-      localRootId,
     }: {
       name: string;
       localDir?: string | null;
-      // Bind to a desktop FS root at creation (文件中枢统一 F2: 加文件夹 = 建本地项目).
-      localRootId?: string | null;
-    }) => createFolder(name, localDir, localRootId),
+    }) => createFolder(name, localDir),
     onSuccess: (folder) => {
       addFolderCache(folder);
-      // 文件夹即工作区：新建文件夹随即作为一个工作区出现在 文件 hub 的 rail。
-      addWorkspaceFromFolder(folder);
     },
   });
 }
@@ -110,9 +99,6 @@ export function useUpdateFolder() {
       if (patch.name !== undefined) cachePatch.name = patch.name;
       if (patch.localDir !== undefined) cachePatch.localDir = patch.localDir;
       patchFolderCache(id, cachePatch);
-      // Mirror the rename onto the 文件 hub rail (name is the only rail-visible field).
-      if (patch.name !== undefined)
-        patchWorkspaceFromFolder(id, { name: patch.name });
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
@@ -121,16 +107,13 @@ export function useUpdateFolder() {
           name: ctx.prev.name,
           localDir: ctx.prev.localDir,
         });
-        patchWorkspaceFromFolder(ctx.prev.id, { name: ctx.prev.name });
       }
     },
   });
 }
 
 /** Delete a folder server-side, then drop it from the cache and unbind its
- * conversations into 未分组 (the server does the unbind; we mirror it). Bundling
- * the unbind here keeps the two delete sites (sidebar + page) from duplicating
- * it. */
+ * conversations into 未分组 (the server does the unbind; we mirror it). */
 export function useDeleteFolder() {
   return useMutation({
     mutationFn: (id: string) => deleteFolder(id),
@@ -139,12 +122,11 @@ export function useDeleteFolder() {
         if (c.folderId === id) patchConversationCache(c.id, { folderId: null });
       }
       removeFolderFromCache(id);
-      removeWorkspaceForFolder(id);
     },
   });
 }
 
-/** 彻底删除项目 — hard-delete folder, all member chats, and cloud workspace. */
+/** 彻底删除项目 — hard-delete folder and all member chats. */
 export function usePermanentDeleteFolder() {
   return useMutation({
     mutationFn: (id: string) => permanentDeleteFolder(id),
@@ -153,7 +135,6 @@ export function usePermanentDeleteFolder() {
         if (c.folderId === id) removeConversationFromCache(c.id);
       }
       removeFolderFromCache(id);
-      removeWorkspaceForFolder(id);
       void queryClient.invalidateQueries({
         queryKey: conversationKeys.archived,
       });

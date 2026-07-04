@@ -345,6 +345,12 @@ export interface ContextBlockWire {
   // CEO-side channels: `system`/`history`/`request` (opening, 通道①) and `team_result`
   // (each delegated worker's product folded back to the CEO after a batch, 通道⑤ — carries
   // `source_role`/`fidelity` provenance). The rest are worker-side (通道②–④).
+  //
+  // 续写通道 (continue_run context): a 续写 run (round ≥ 2 / 定向唤回) is fed continuation-scoped
+  // context instead of the opening blocks. Debate 逐轮: `round_focus` (本轮焦点) / `opponent`
+  // (对方上一轮论点, carries `source_role`/`fidelity` like a dependency) / `challenge` (上一轮被驳
+  // 命门) / `interjection` (用户本轮追问) — see debate/prompt.py `round_context_blocks`. 定向唤回热修:
+  // `revision` (本次修订要求, the CEO's feedback the recall was fed) — see tools/builtin/revise.py.
   channel:
     | "system"
     | "history"
@@ -356,7 +362,12 @@ export interface ContextBlockWire {
     | "expected_output"
     | "requirements"
     | "steer"
-    | "team_result";
+    | "team_result"
+    | "round_focus"
+    | "opponent"
+    | "challenge"
+    | "interjection"
+    | "revision";
   heading: string;
   body: string;
   chars: number;
@@ -491,6 +502,8 @@ export interface TeamNotePostedPayload {
   /** Set only on an amendment: `update` (改写 — target becomes superseded, this note carries the
    * corrected decision) or `void` (作废 — target becomes voided, this note is a retraction). */
   supersede_mode?: "update" | "void";
+  /** `ceo` when seeded by the host before workers run; absent or `worker` for worker posts. */
+  source?: "ceo" | "worker";
 }
 
 /** Token counts in the ledger short-key form. `cache_hit + cache_miss === input`;
@@ -513,12 +526,14 @@ export interface CostBreakdown {
   currency: string;
 }
 
-/** 完工交接简报 (a worker's authored「## 交接简报」wrap-up, parsed server-side by
- * `split_debrief`). Carried VERBATIM on `run_completed` so the run-detail 摘要 renders the
- * author's own conclusion instead of a machine truncation of raw prose. Every field is
- * optional — a worker writes only the sections it has (`summary` 结论 / `key_points` 关键要点 /
- * `assumptions` 关键假设 / `next_steps` 建议下一步); a 辩手 / trivial worker / the CEO captain
- * authors none, so the whole object is absent (see {@link RunCompletedPayload.debrief}). */
+/** 完工交接简报 (a worker's structured wrap-up, submitted via its terminal `handoff` tool call
+ * and read server-side straight off the call's arguments — never parsed out of prose).
+ * Carried VERBATIM on `run_completed` so the run-detail 摘要 renders the author's own
+ * conclusion instead of a machine truncation of raw prose. Every field is optional — a worker
+ * fills only the sections it has (`summary` 结论 / `key_points` 关键要点 / `assumptions` 关键假设 /
+ * `next_steps` 建议下一步); a worker that finished without calling `handoff` (辩手 / trivial
+ * worker / the CEO captain) has none, so the whole object is absent
+ * (see {@link RunCompletedPayload.debrief}). */
 export interface RunDebrief {
   summary?: string;
   key_points?: string[];
@@ -657,6 +672,49 @@ export interface DebateUserInterjection {
   answered: boolean;
 }
 
+/** 质询环节的一问一答（质询回合 P1）：主持人代表交锋向某方（`target` = {@link DebateSideInfo.key}）
+ * 发出【必须正面回答】的尖锐质询（`questions`，2–3 条、可含是/否逼答），被质询方在【自己的 transcript】
+ * 上作答——问题 verbatim 进本字段（前端渲染 Q），回答【全文】随 `answer_run_id` 的辩手 run 事件走
+ * （与各方发言全文同策，不塞载荷），前端据 `answer_run_id` 从执行图节点取回作答全文。`questioner` 空=
+ * 主持人代表交锋（当前实现），`ok` 标记是否成功答出（回避 / 失败 → 裁判据此扣 engagement 记分）。
+ * 随 {@link DebateRoundInfo} 进 `debate_result`；仅【认真辩透 + 对抗形态】开启，非质询路径为空数组、
+ * 可缺省（渐进式契约扩展，旧产物 / 快速对碰兼容）。 */
+export interface DebateCrossExam {
+  target: string;
+  questioner: string;
+  questions: string[];
+  answer_run_id: string;
+  ok: boolean;
+}
+
+/** 某方的【结辩陈词】（阶段化发言角色 P4 · 结辩收束）：辩已辩尽（收敛 / 用户 conclude / 达上限）后、
+ * 简报前，各方在【自己的 transcript】上做的一段收尾 advocacy——`key`/`name` 是 {@link DebateSideInfo}
+ * 身份，陈词【全文】随 `run_id` 的辩手 run 事件走（与各方发言 / 质询作答同策，不塞载荷），前端据 `run_id`
+ * 从执行图节点取回全文。`ok` 标记是否成功产出（失败 / 无 session → false，前端标「未产出结辩」）。这一层
+ * 是辩手自己的胜负手收束，与裁判中立的 {@link DebateBriefInfo.decisive} 正交并存（真人辩论：结辩 + 裁决
+ * 并存）。仅【认真辩透 + 对抗形态】开启；快速对碰 / 圆桌 / 旧产物为空数组、可缺省（渐进式契约扩展）。 */
+export interface DebateClosing {
+  key: string;
+  name: string;
+  run_id: string;
+  ok: boolean;
+}
+
+/** 某方在某一轮的记分（记分裁判 P2）：裁判在**辩论领域内**给各方本轮打分——`argument` 论点强度、
+ * `engagement` 回应完整度（是否正面回应对方命门与质询、有无回避）、`evidence` 证据充分度，各 0–5；
+ * `penalties` 记本轮谬误与未支撑主张（每条一句话，如「循环论证：拿未生效判决当论据」），每条计 -1；
+ * `note` 一句话记分理由；`total` 净得分（三维和减罚分，可为负，后端预算好、前端直用不重算）。逐轮记分
+ * 累计驱动收场 {@link DebateBriefInfo.leaning}/`decisive`，让倾向与实际交锋对齐。随 {@link DebateRoundInfo}
+ * 进 `debate_result`；未开启记分（快速对碰 / 坏 JSON 容错）为空对象、可缺省（渐进式契约扩展）。 */
+export interface DebateRoundScore {
+  argument: number;
+  engagement: number;
+  evidence: number;
+  penalties: string[];
+  note: string;
+  total: number;
+}
+
 /** 叙事线的一轮（L1 焦点 + 裁判 / L2 小结 / L3 交锋边）：`sides` 是本轮各方→辩手 run 的映射，
  * `clashes` 是本轮论点级谁驳谁。 */
 export interface DebateRoundInfo {
@@ -669,6 +727,12 @@ export interface DebateRoundInfo {
   /** 驱动本轮的用户追问（交互式逐轮，opt-in；非交互 / 无追问为空数组）。可缺省（旧产物兼容，
    * 与 {@link DebateBriefInfo.risk_severities} 同样的渐进式契约扩展）。 */
   user_interjections?: DebateUserInterjection[];
+  /** 本轮质询环节的问答（质询回合 P1）：主持人代表交锋的定向必答质询 + 各方作答指针。非质询路径
+   * （快速对碰 / 圆桌 / 旧产物）为空数组、可缺省（渐进式契约扩展）。见 {@link DebateCrossExam}。 */
+  cross_exam?: DebateCrossExam[];
+  /** 本轮记分裁判的各方得分（`key` = {@link DebateSideInfo.key} → 三维 + 罚分 + 净分，记分裁判 P2）。
+   * 未开启记分（快速对碰 / 旧产物）为空对象、可缺省（渐进式契约扩展）。见 {@link DebateRoundScore}。 */
+  scores?: Record<string, DebateRoundScore>;
 }
 
 /** 进行中实时叠加的一轮叙事态（debate_round_started / debate_round 折叠累积，进 ProjectedTurn
@@ -694,6 +758,10 @@ export interface DebateBriefInfo {
   risk_severities?: Record<string, string>;
   factual_disputes: string[];
   value_disputes: string[];
+  /** 胜负手（记分裁判 P2）：一句话点名【谁的哪个论点被驳倒 / 被证伪 / 无据】，据逐轮记分累计推导
+   * ——让 `leaning` 由实际交锋记分驱动、可追溯，而非收场拍脑袋。空=未开启记分；可缺省（渐进式
+   * 契约扩展，旧产物 / 快速对碰兼容）。圆桌无单一胜负手恒空。 */
+  decisive?: string;
   leaning: string;
   confidence: string;
   recommendation: string;
@@ -708,10 +776,17 @@ export interface DebateResultPayload {
   motion: string;
   /** 收场原因（converged / focus_clarified / red_team_exhausted / max_rounds / all_failed）。 */
   stop_reason: string;
+  /** 主持人开场白（第 1 轮主持人顺带产出的一句定调）：前端顶部「会说话的主持人」气泡渲染。可选、
+   *  渐进式契约扩展（旧产物 / 未产出时缺省）——空 / 缺省时前端回落到由 motion+焦点拼出的模板开场白。 */
+  opening?: string;
   /** 呈现顺序提示：true=叙事线优先（如 roundtable 探讨），false=简报优先（如 debate 决策）。 */
   narrative_first: boolean;
   sides: DebateSideInfo[];
   rounds: DebateRoundInfo[];
+  /** 各方结辩陈词（阶段化发言角色 P4 · 结辩收束）：辩已辩尽后各方的收尾 advocacy，全文随 `run_id` 走
+   *  执行事件（不塞载荷）。非结辩路径（快速对碰 / 圆桌 / 旧产物）为空数组、可缺省（渐进式契约扩展）。
+   *  见 {@link DebateClosing}。 */
+  closings?: DebateClosing[];
   brief: DebateBriefInfo;
 }
 
@@ -873,21 +948,6 @@ export interface BoardReadRequiredPayload {
   ids: string[];
 }
 
-/** A folderless 裸聊 was lazily promoted into a real folder on its first file write
- * (文件夹即工作区 §懒建 / 工作区对称化 D1a). The chat now belongs to `folder_id`; the
- * live client re-groups it under that folder and surfaces the new workspace in the 文件
- * rail — without this the promotion is invisible until a manual refetch/reload. A local
- * promotion carries `local_root_id` + `local_subpath` (the file landed on the user's
- * machine); a cloud one leaves `local_root_id` null. One-shot signal — the folder is
- * durable state read back on reload, so it is not journaled. */
-export interface WorkspacePromotedPayload {
-  conversation_id: string;
-  folder_id: string;
-  name: string;
-  local_root_id: string | null;
-  local_subpath: string;
-}
-
 export interface HandoffSnapshotDonePayload {
   snapshot_id: string;
   conversation_id: string;
@@ -961,7 +1021,6 @@ export type SSEPayloadMap = {
   turn_saved: TurnSavedPayload;
   citations: CitationsPayload;
   workspace_op_required: WorkspaceOpRequiredPayload;
-  workspace_promoted: WorkspacePromotedPayload;
   board_op_required: BoardOpRequiredPayload;
   board_read_required: BoardReadRequiredPayload;
   handoff_snapshot_done: HandoffSnapshotDonePayload;

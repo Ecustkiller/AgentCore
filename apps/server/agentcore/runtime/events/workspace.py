@@ -27,26 +27,6 @@ def workspace_op_required(
     )
 
 
-def workspace_promoted(
-    *,
-    conversation_id: str,
-    folder_id: str,
-    name: str,
-    local_root_id: str | None,
-    local_subpath: str,
-) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.WORKSPACE_PROMOTED,
-        payload={
-            "conversation_id": conversation_id,
-            "folder_id": folder_id,
-            "name": name,
-            "local_root_id": local_root_id,
-            "local_subpath": local_subpath,
-        },
-    )
-
-
 def handoff_snapshot_done(*, snapshot_id: str, conversation_id: str, size_bytes: int) -> SSEEvent:
     return SSEEvent(
         type=EventType.HANDOFF_SNAPSHOT_DONE,

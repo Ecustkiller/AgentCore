@@ -46,6 +46,10 @@ class ConversationSummary(BaseModel):
     local_container_root_id: str | None = None
     # Selected 质量档 (llm/modes.py); None = inherit user default → operator default.
     model_mode: str | None = None
+    # Per-conversation custom instructions (对话级自定义指令); None/"" = none. Injected
+    # into this conversation's system prompt so every turn (and the delegated team)
+    # follows it. Echoed on reads so the client can populate the editor.
+    instructions: str | None = None
     # Sidebar housekeeping (对话基础功能补齐). ``pinned`` floats the row to the top
     # (置顶对话); ``archived`` marks it as hidden from the live list (归档对话) — the
     # grouped/live endpoints already exclude archived rows, so this is True only on
@@ -68,6 +72,9 @@ class UpdateConversationRequest(BaseModel):
     # Selected 质量档 (llm/modes.py); explicit null clears back to「inherit default」.
     # Optional: omit to leave unchanged (the route reads ``model_fields_set``).
     model_mode: str | None = None
+    # Per-conversation custom instructions (对话级自定义指令). Optional — omit to leave
+    # unchanged (the route reads ``model_fields_set``); an explicit null or "" clears it.
+    instructions: str | None = Field(None, max_length=4000)
     # Sidebar housekeeping toggles (对话基础功能补齐). Optional — omit to leave
     # unchanged (the route reads ``model_fields_set``); never null (no tri-state).
     pinned: bool | None = None
@@ -83,11 +90,6 @@ class MoveConversationRequest(BaseModel):
 class CreateFolderRequest(BaseModel):
     name: str
     local_dir: str | None = None
-    # Bind the new folder to a desktop FS root at creation (文件中枢统一 F2:
-    # "添加文件夹 = 建本地绑定项目"). The hub turns a picked local directory into a
-    # local project in one step; present ⇒ the folder (and its conversations) run
-    # in local mode against this root (§七).
-    local_root_id: str | None = None
 
 
 class UpdateFolderRequest(BaseModel):
@@ -99,15 +101,6 @@ class FolderSummary(BaseModel):
     id: str
     name: str
     local_dir: str | None
-    # Local-mode binding (desktop FS root id); None = cloud. Drives the mode badge
-    # for the folder and all its conversations (§七).
-    local_root_id: str | None = None
-    # Sub-path within the bound local root (工作区对称化 D1a); None/"" = the root
-    # itself (an explicitly-added local project). A non-empty segment marks a
-    # per-conversation workspace lazily promoted under a shared container root —
-    # the desktop binds its sidecar engine to ``local_root_id`` + this subpath so a
-    # promoted bare chat's local engine runs in its own directory (§四).
-    local_subpath: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -120,7 +113,6 @@ class FolderGroup(BaseModel):
     id: str
     name: str
     local_dir: str | None
-    local_root_id: str | None = None
     conversations: list[ConversationSummary]
 
 

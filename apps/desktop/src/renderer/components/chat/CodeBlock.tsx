@@ -1,5 +1,6 @@
 import { Button, IconButton } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
+import { usePersistentDisclosure } from "@/stores/disclosure";
 import {
   Check,
   ChevronDown,
@@ -36,6 +37,15 @@ export function nodeText(node: ReactNode): string {
  * long paste never dominates the bubble. */
 const COLLAPSE_LINES = 24;
 
+/** Stable-per-content fingerprint (djb2) — CodeBlock has no turn/message id (it's
+ * rendered generically by Markdown's `<pre>` mapper), so the fold/wrap prefs key off
+ * the code text itself; the disclosure store adds the conversation scope. */
+function hashCode(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
 /** The `<code>` child's props we read: its `language-x` class, and the file path
  * stashed by {@link rehypeCodeMeta} (read both casings — react-markdown may emit
  * either the hast `dataFile` or the DOM `data-file`). */
@@ -56,10 +66,6 @@ export function CodeBlock({
   children,
   ...props
 }: ComponentPropsWithoutRef<"pre">) {
-  const [copied, setCopied] = useState(false);
-  const [wrap, setWrap] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-
   const codeProps: CodeChildProps = isValidElement(children)
     ? (children.props as CodeChildProps)
     : {};
@@ -67,6 +73,14 @@ export function CodeBlock({
   const lang = /language-([\w-]+)/.exec(className)?.[1] ?? "";
   const file = codeProps["data-file"] ?? codeProps.dataFile ?? "";
   const text = nodeText(children);
+  // 「展开全部」+「自动换行」按代码内容指纹持久化——同一对话内同一段代码，跨切对话/刷新记住。
+  const disclosureKey = `code:${hashCode(text)}`;
+  const [copied, setCopied] = useState(false);
+  const [wrap, setWrap] = usePersistentDisclosure(`${disclosureKey}:wrap`, false);
+  const [expanded, setExpanded] = usePersistentDisclosure(
+    `${disclosureKey}:exp`,
+    false,
+  );
   // Logical lines, ignoring a single trailing newline so the gutter doesn't
   // number a phantom empty last line.
   const lineCount = text.replace(/\n$/, "").split("\n").length;

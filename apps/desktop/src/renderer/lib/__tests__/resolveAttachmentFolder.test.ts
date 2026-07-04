@@ -34,8 +34,6 @@ describe("resolveFolderFromIndexedEntry", () => {
         id: "f-1",
         name: "云项目",
         localDir: null,
-        localRootId: null,
-        localSubpath: "",
       },
     ]);
     const result = resolveFolderFromIndexedEntry(
@@ -44,20 +42,11 @@ describe("resolveFolderFromIndexedEntry", () => {
     expect(result).toEqual({ folderId: "f-1", folderName: "云项目" });
   });
 
-  it("maps local root to bound folder", () => {
-    vi.mocked(getFolders).mockReturnValue([
-      {
-        id: "f-local",
-        name: "本地仓",
-        localDir: null,
-        localRootId: "root-9",
-        localSubpath: "",
-      },
-    ]);
+  it("returns null for local root (folders no longer bind roots)", () => {
     const result = resolveFolderFromIndexedEntry(
       entry({ sourceId: "local:root-9:sub", sourceLabel: "本地仓" }),
     );
-    expect(result).toEqual({ folderId: "f-local", folderName: "本地仓" });
+    expect(result).toBeNull();
   });
 
   it("maps conversation mention to its folder", () => {
@@ -77,8 +66,6 @@ describe("resolveFolderFromIndexedEntry", () => {
         id: "f-2",
         name: "项目 B",
         localDir: null,
-        localRootId: null,
-        localSubpath: "",
       },
     ]);
     const result = resolveFolderFromIndexedEntry(

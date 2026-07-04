@@ -132,6 +132,14 @@
       "timestamp": "2026-01-01T00:00:00.006Z"
     },
     {
+      "type": "run_progress",
+      "payload": {
+        "completed": 1,
+        "total": 2
+      },
+      "timestamp": "2026-01-01T00:00:00.007Z"
+    },
+    {
       "type": "run_started",
       "payload": {
         "run_id": "r2",
@@ -140,7 +148,7 @@
         "kind": "agent",
         "revision": 0
       },
-      "timestamp": "2026-01-01T00:00:00.007Z"
+      "timestamp": "2026-01-01T00:00:00.008Z"
     },
     {
       "type": "run_output_delta",
@@ -149,7 +157,7 @@
         "agent_id": "w2",
         "delta": "成稿"
       },
-      "timestamp": "2026-01-01T00:00:00.008Z"
+      "timestamp": "2026-01-01T00:00:00.009Z"
     },
     {
       "type": "run_completed",
@@ -175,7 +183,15 @@
           "currency": "USD"
         }
       },
-      "timestamp": "2026-01-01T00:00:00.009Z"
+      "timestamp": "2026-01-01T00:00:00.010Z"
+    },
+    {
+      "type": "run_progress",
+      "payload": {
+        "completed": 2,
+        "total": 2
+      },
+      "timestamp": "2026-01-01T00:00:00.011Z"
     },
     {
       "type": "tool_use_end",
@@ -185,14 +201,14 @@
         "status": "success",
         "result": "团队完成 2 项任务。"
       },
-      "timestamp": "2026-01-01T00:00:00.010Z"
+      "timestamp": "2026-01-01T00:00:00.012Z"
     },
     {
       "type": "content_delta",
       "payload": {
         "delta": " 团队已完成。"
       },
-      "timestamp": "2026-01-01T00:00:00.011Z"
+      "timestamp": "2026-01-01T00:00:00.013Z"
     },
     {
       "type": "message_end",
@@ -214,7 +230,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.012Z"
+      "timestamp": "2026-01-01T00:00:00.014Z"
     }
   ],
   "projected": {

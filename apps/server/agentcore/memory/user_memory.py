@@ -91,8 +91,9 @@ class MemoryOp:
     ``core_file_for_section``); for a topic note it is optional (a missing section lands
     under ``_TOPIC_DEFAULT_SECTION``). A topic ``file`` that does not yet exist is created
     on first write (create-on-write, §1.5). ``scope`` selects the layer (Agent记忆与知识系统
-    §1.4): ``None`` = global, a ``folder_id`` = that project. Preferences are GLOBAL-only, so
-    ``偏好.md`` ops are always ``scope=None`` (enforced in coercion).
+    §1.4): ``None`` = global, a ``folder_id`` = that manual sidebar group's project layer
+    (D4 方案 1). Preferences are GLOBAL-only, so ``偏好.md`` ops are always ``scope=None``
+    (enforced in coercion).
     """
 
     action: MemoryAction
@@ -100,7 +101,7 @@ class MemoryOp:
     content: str | None = None  # required for ADD / UPDATE
     match: str | None = None  # required for REMOVE / UPDATE
     file: str = CORE_MEMORY_FILE  # which memory note this op targets
-    scope: MemoryScope = None  # None = global; a folder_id = that project's layer
+    scope: MemoryScope = None  # None = global; folder_id = manual group's project layer
 
 
 @dataclass
@@ -119,8 +120,8 @@ class MemoryExtractInput:
     messages: Sequence[ChatMessage] = ()  # the recent conversation window to consolidate
     # Full markdown of the GLOBAL PREFERENCES core file (偏好.md) — how to work with the user.
     current_preferences: str = ""
-    # The conversation's project (folder_id), or None for a bare chat. Enables the PROJECT
-    # scope: facts true only in this project route to the project layer instead of global.
+    # Manual sidebar group (folder_id), or None for a bare chat (D4 方案 1). Enables the
+    # PROJECT scope: facts true only in this group route to its project layer, not global.
     project_id: str | None = None
     # Full markdown of the PROJECT PROFILE (画像.md under this project) — "" if none / no project.
     current_project_memory: str = ""
@@ -717,8 +718,8 @@ def _injection_style_marker(text: str) -> str | None:
 def parse_memory_ops(raw: str, project_id: str | None = None) -> list[MemoryOp]:
     """Parse an LLM response into validated MemoryOps. Returns [] on any failure.
 
-    ``project_id`` resolves an op's "project" scope token to the conversation's folder
-    (None when there is no current project → everything stays global).
+    ``project_id`` resolves an op's "project" scope token to the conversation's manual
+    group folder_id (None for a bare chat → everything stays global).
 
     A coerced ADD/UPDATE whose ``content`` reads as an injected instruction (override /
     persona / exec / tool-call / exfil) is DROPPED and logged — the deterministic second

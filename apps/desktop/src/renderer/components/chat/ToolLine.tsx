@@ -6,6 +6,10 @@ import {
 } from "@/components/chat/toolResult/ToolResultView";
 import { Badge, Button } from "@/components/ui";
 import { formatCompact } from "@/lib/format";
+import {
+  usePersistentDisclosure,
+  useStreamAwareDisclosure,
+} from "@/stores/disclosure";
 import type { ProcessStep } from "@/types/events";
 import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -109,10 +113,17 @@ function ToolStatusIcon({
 /** Single tool invocation row in the process timeline. */
 export function ToolLine({
   step,
+  turnKey,
 }: {
   step: Extract<ProcessStep, { kind: "tool" }>;
+  /** 回合作用域标识（= messageId）：给了才把「结果卡开合」持久化（切对话/刷新后仍在），
+   *  按 `${turnKey}:tool:${step.id}` 落 localStorage；缺省（如渲染测试）退化为会话内存态。 */
+  turnKey?: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = usePersistentDisclosure(
+    turnKey ? `${turnKey}:tool:${step.id}` : null,
+    false,
+  );
   const { Icon, label } = toolMeta(step.tool_name);
   const detail = toolDetail(step.arguments);
   const data: ToolResultData = {
@@ -197,17 +208,24 @@ export function ToolLine({
 export function ToolLineGroup({
   tools,
   isStreaming,
+  turnKey,
+  groupIndex,
 }: {
   tools: Extract<ProcessStep, { kind: "tool" }>[];
   isStreaming: boolean;
+  /** 回合作用域标识（= messageId）：给了才把「工具组开合」持久化；缺省退化为会话内存态。 */
+  turnKey?: string;
+  /** 该工具组在时间线里的稳定序号（append-only，故稳定）——组成持久化键。 */
+  groupIndex?: number;
 }) {
-  const [expanded, setExpanded] = useState(isStreaming);
-  const prevStreaming = useRef(isStreaming);
-
-  useEffect(() => {
-    if (prevStreaming.current && !isStreaming) setExpanded(false);
-    prevStreaming.current = isStreaming;
-  }, [isStreaming]);
+  // 「直播中自动展开盯着看、收场后按保存值」（Q3）：取代旧的「流式默认展开 + 收场强制收起」，
+  // 收场后不再强收，而是回到用户持久化的选择。
+  const [expanded, toggleExpanded] = useStreamAwareDisclosure(
+    turnKey != null && groupIndex != null
+      ? `${turnKey}:tgrp:${groupIndex}`
+      : null,
+    isStreaming,
+  );
 
   const summary = toolGroupSummary(tools);
   const errorCount = tools.reduce(
@@ -220,7 +238,7 @@ export function ToolLineGroup({
     <div>
       <Button
         variant="ghost"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={toggleExpanded}
         className="h-auto w-full justify-start gap-2 px-0 py-0 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground"
       >
         <span className="flex w-full items-center gap-2">
@@ -242,7 +260,7 @@ export function ToolLineGroup({
       {expanded && (
         <div className="mt-1.5 space-y-2 pl-3">
           {tools.map((t) => (
-            <ToolLine key={t.id} step={t} />
+            <ToolLine key={t.id} step={t} turnKey={turnKey} />
           ))}
         </div>
       )}

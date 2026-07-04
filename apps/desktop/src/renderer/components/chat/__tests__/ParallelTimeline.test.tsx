@@ -12,7 +12,7 @@
 import type { BatchMetricsSnapshot, Execution } from "@/stores/execution";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { ParallelTimeline, hasParallelTimeline } from "../ParallelTimeline";
+import { ParallelGantt, ParallelTimeline, hasParallelTimeline } from "../ParallelTimeline";
 
 afterEach(cleanup);
 
@@ -126,6 +126,28 @@ describe("ParallelTimeline (并行时间线)", () => {
       ParallelTimelineEl([metrics({ timeline: [] })]),
     );
     expect(container.textContent).toBe("");
+  });
+});
+
+describe("ParallelGantt (embedded graph strip)", () => {
+  it("renders compact tracks without the full-page header", () => {
+    const { container } = render(
+      <ParallelGantt
+        execution={exec([
+          metrics({
+            timeline: [
+              { runId: "w1", startMs: 0, endMs: 1800, outcome: "completed" },
+              { runId: "w2", startMs: 5, endMs: 2000, outcome: "completed" },
+            ],
+          }),
+        ])}
+        embedded
+      />,
+    );
+    expect(screen.queryByText("并行时间线")).toBeNull();
+    expect(screen.getByText("真实时间轴")).toBeTruthy();
+    expect(screen.getByText("研究员")).toBeTruthy();
+    expect(container.textContent).toContain("1.8s");
   });
 });
 

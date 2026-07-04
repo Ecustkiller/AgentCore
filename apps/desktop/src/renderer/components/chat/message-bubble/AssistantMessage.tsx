@@ -6,8 +6,10 @@ import { Markdown } from "@/components/chat/Markdown";
 import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { type CitationFlash, SourceCards } from "@/components/chat/SourceCards";
-import { Button } from "@/components/ui";
+import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
+import { Button, IconButton } from "@/components/ui";
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import { referencedCitationNumbers } from "@/lib/citations";
 import { errorActionForCode } from "@/lib/errors";
 import {
@@ -16,8 +18,10 @@ import {
   mergeArtifacts,
 } from "@/lib/fileArtifacts";
 import { formatCost } from "@/lib/format";
-import { runRegenerate } from "@/services/turns";
+import { notifyError } from "@/lib/toast";
+import { continueTurn, runRegenerate } from "@/services/turns";
 import {
+  type Message,
   getActiveRuntime,
   useActiveGenerating,
   useConversationStore,
@@ -25,13 +29,21 @@ import {
 import { useMessageExecution } from "@/stores/execution";
 import { useUsageStore } from "@/stores/usage";
 import type { ProcessStep } from "@/types/events";
-import { AlertTriangle, FolderUp, KeyRound, RefreshCw } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  KeyRound,
+  RefreshCw,
+  StepForward,
+} from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
 import { ComposingToolLine, ProcessTimeline } from "./ProcessTimeline";
 import { ThinkingDots, ThinkingPanel } from "./Thinking";
 import type { MessageBubbleProps } from "./types";
+import { useCopyAction } from "./useCopyAction";
 
 function MultiAgentFileArtifacts({
   messageId,
@@ -53,21 +65,58 @@ function MultiAgentFileArtifacts({
 }
 
 /**
- * P2 工作区升级提示 (前端UX设计.md §九) — a lightweight, live-only inline notice
- * stamped onto the turn whose first file write promoted a bare chat into a
- * folder-backed workspace (`workspace_promoted`). Explains WHY a 工作区/文件夹 just
- * appeared, so the jump from「随手聊」to「有文件的工作区」isn't silent. Not persisted:
- * on reload the folder is simply there, no longer news.
+ * 续写被截断的回答 (对话基础功能补齐) — when the *latest* reply ended early (用户叫停 =
+ * `cancelled`, or the agent hit its round budget = `max_rounds`), offer a one-click
+ * 「继续生成」. It sends a minimal「继续」turn so the model resumes from the transcript.
+ * Only the last turn is resumable (continuing a mid-history turn would fork the thread),
+ * and never while a turn is already streaming.
  */
-function WorkspacePromotionNotice({ name }: { name: string }) {
+function ContinueTurnButton({
+  message,
+  finishReason,
+}: {
+  message: Message;
+  finishReason: string | undefined;
+}) {
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const isGenerating = useActiveGenerating();
+  const isLast = useConversationStore((s) => {
+    const rt = s.currentConversationId ? s.byId[s.currentConversationId] : null;
+    return rt?.messages.at(-1)?.id === message.id;
+  });
+  const [busy, setBusy] = useState(false);
+  const eligible =
+    finishReason === "cancelled" || finishReason === "max_rounds";
+  if (
+    !conversationId ||
+    !isLast ||
+    isGenerating ||
+    !eligible ||
+    message.content.length === 0
+  ) {
+    return null;
+  }
+  const onContinue = async () => {
+    setBusy(true);
+    try {
+      await continueTurn(conversationId);
+    } catch (err) {
+      notifyError(err, "继续生成失败");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <div className="mt-2 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5 text-sm text-foreground">
-      <FolderUp size={15} className="mt-0.5 shrink-0 text-primary" />
-      <p className="min-w-0 flex-1">
-        本对话已升级为工作区
-        <span className="font-medium">「{name}」</span>
-        ，之后生成的文件都会保存在这里。
-      </p>
+    <div className="mt-2">
+      <Button
+        variant="neutral"
+        className="border-border/70"
+        icon={<StepForward size={13} />}
+        disabled={busy}
+        onClick={() => void onContinue()}
+      >
+        {busy ? "继续中…" : "继续生成"}
+      </Button>
     </div>
   );
 }
@@ -163,6 +212,14 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     setCiteFlash((prev) => ({ index: n, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
 
+  // 流式中可复制 (对话基础功能补齐): the full footer is gated until the turn settles (its
+  // usage / regenerate actions are meaningless mid-stream), but a long reply is often worth
+  // copying before it finishes — so expose a lightweight copy affordance while streaming.
+  // The getter reads the latest content each render, so a click copies what's on screen now.
+  const { copied: streamCopied, onCopy: onStreamCopy } = useCopyAction(
+    () => message.content,
+  );
+
   const handleRegenerate = () => {
     const msgs = getActiveRuntime().messages;
     const idx = msgs.findIndex((m) => m.id === message.id);
@@ -204,6 +261,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         <ThinkingPanel
           reasoning={message.reasoning ?? ""}
           isStreaming={message.isStreaming}
+          persistKey={`${message.id}:reasoning`}
         />
       )}
       {message.executionId && (
@@ -213,12 +271,31 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           journal={message.runs}
         />
       )}
-      <Markdown
-        content={message.content}
-        citations={citations}
-        onCitationClick={onCitationClick}
-        isStreaming={message.isStreaming}
-      />
+      {/* 长回答折叠 (对话基础功能补齐): while streaming, render full so the user watches
+          it grow; once settled, cap a truly long answer to a fade + 展开全文 so it doesn't
+          dominate the viewport (短/中答案原样全展). */}
+      {message.isStreaming ? (
+        <Markdown
+          content={message.content}
+          citations={citations}
+          onCitationClick={onCitationClick}
+          isStreaming={message.isStreaming}
+        />
+      ) : (
+        <CollapsibleSpeech
+          contentKey={message.content}
+          fadeToClass="from-background"
+          collapsedMaxHClass="max-h-[40rem]"
+          sceneKey={`answer:${message.id}`}
+        >
+          <Markdown
+            content={message.content}
+            citations={citations}
+            onCitationClick={onCitationClick}
+            isStreaming={false}
+          />
+        </CollapsibleSpeech>
+      )}
       {message.isStreaming &&
         (message.composingTool && message.executionId === null ? (
           <ComposingToolLine tool={message.composingTool} />
@@ -240,6 +317,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     <div className="group min-w-0" onMouseEnter={onPeekCost}>
       <FinishReasonChip reason={finishReason} />
       {turnBody}
+      <ContinueTurnButton message={message} finishReason={finishReason} />
       {message.error && (
         <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
@@ -276,9 +354,6 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           process={message.process}
         />
       )}
-      {message.workspacePromotion && (
-        <WorkspacePromotionNotice name={message.workspacePromotion.name} />
-      )}
       {citations.length > 0 && (
         <SourceCards
           citations={citations}
@@ -301,6 +376,19 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           conversationId={conversationId}
           interactive={message.isStreaming}
         />
+      )}
+      {message.isStreaming && message.content.length > 0 && (
+        <div className="mt-1 flex items-center opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <SimpleTooltip label={streamCopied ? "已复制" : "复制"}>
+            <IconButton
+              size="sm"
+              aria-label="复制"
+              onClick={() => void onStreamCopy()}
+            >
+              {streamCopied ? <Check size={14} /> : <Copy size={14} />}
+            </IconButton>
+          </SimpleTooltip>
+        </div>
       )}
       {!message.isStreaming && !isGenerating && message.content.length > 0 && (
         <AssistantMessageFooter

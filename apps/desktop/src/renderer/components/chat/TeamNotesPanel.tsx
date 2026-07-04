@@ -88,6 +88,11 @@ function NoteRow({ note }: { note: TeamNote }) {
               {status.label}
             </span>
           )}
+          {note.source === "ceo" && (
+            <span className="shrink-0 rounded bg-primary/15 px-1.5 py-0.5 text-xs font-medium text-primary">
+              主 Agent 播种
+            </span>
+          )}
         </div>
         <p
           className={`whitespace-pre-wrap break-words text-sm leading-snug text-foreground ${stale ? "line-through" : ""}`}

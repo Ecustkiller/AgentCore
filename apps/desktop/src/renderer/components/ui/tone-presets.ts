@@ -139,16 +139,18 @@ export const surfaceMutedPanel = "rounded-lg border border-border bg-muted/30";
 export const surfaceMutedPanelLight =
   "rounded-lg border border-border bg-muted/20";
 
-/** Graph node classification badge with optional leading icon. */
+/**
+ * Graph node badges. 极简配色（协作图）：蓝色 (primary) 只留给「运行中 / 待你拍板」这类
+ * 需要你的信号；纯分类信息（立场 / 修订 / 子任务 / 模型档 / 深度）一律走中性灰，避免蓝色
+ * 「该看这里」的语义被稀释。`graphBadgePrimary` 仅剩「待你拍板」一个消费点。
+ */
 export const graphBadgePrimary = `flex shrink-0 items-center gap-1 ${statusPillInline.primary}`;
-export const graphBadgePrimaryPlain = `shrink-0 ${statusPillInline.primary}`;
 export const graphBadgeMuted = `flex shrink-0 items-center gap-1 ${statusPillInline.muted}`;
-export const graphBadgeWarning = `flex shrink-0 items-center gap-1 ${statusPillInline.warning}`;
-export const graphBadgeDestructive = `flex shrink-0 items-center gap-1 ${statusPillInline.destructive}`;
+export const graphBadgeMutedPlain = `shrink-0 ${statusPillInline.muted}`;
 
-/** Model tier chip on graph node (no border). */
+/** Model tier chip on graph node (纯分类，非状态 → 中性；强档用深字重体现层级，不用蓝)。 */
 export const modelTierBadge: Record<"strong" | "fast", string> = {
-  strong: statusPillSoft.primary,
+  strong: "rounded-full px-1.5 py-0.5 text-xs font-medium bg-muted text-foreground",
   fast: statusPillSoft.muted,
 };
 
@@ -172,8 +174,10 @@ export const statusChip: Record<StatusTone, string> = {
 };
 
 /**
- * Interactive ask_user checkpoint shell. 极简中性：开场引导与途中拍板都用 primary(品牌蓝)
- * ——「邀请你决定」不是警告。`warning` 键保留以兼容类型，但映射为与 primary 相同的蓝（已无琥珀）。
+ * Interactive ask_user checkpoint shell.
+ * - `primary`：全蓝（审批 / 队员升级等仍用）。
+ * - `neutral`：灰壳灰选项（AskUserCard 开工提案 / 拍板）——行动信号只留在 Footer 主 CTA。
+ * `warning` 键保留以兼容类型，映射同 primary。
  */
 export const interactiveCheckpointTone = {
   primary: {
@@ -200,6 +204,19 @@ export const interactiveCheckpointTone = {
     dot: "bg-primary-foreground",
     focus: "focus:border-primary/60",
     ctaBar: decisionCtaBar.primary,
+    cta: "bg-primary text-primary-foreground hover:bg-primary/90",
+  },
+  neutral: {
+    wrap: decisionShell.neutral,
+    accent: "text-muted-foreground",
+    badge: "bg-muted text-muted-foreground",
+    optActive: "border-foreground/25 bg-muted text-foreground",
+    optIdle:
+      "border-border bg-card text-muted-foreground hover:border-foreground/20 hover:bg-accent hover:text-foreground",
+    markActive: "border-foreground/50 bg-foreground text-background",
+    dot: "bg-background",
+    focus: "focus:border-foreground/25",
+    ctaBar: decisionCtaBarAll.neutral,
     cta: "bg-primary text-primary-foreground hover:bg-primary/90",
   },
 } as const;

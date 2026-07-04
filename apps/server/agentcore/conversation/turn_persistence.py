@@ -228,7 +228,17 @@ async def persist_turn_result(
                     user_message=user_message,
                     assistant_reply=assistant_reply,
                 )
-                if followups:
+                message_id = result.get("message_id")
+                if followups and message_id:
+                    # DERIVED 持久化 (twin of the title above): write the chips onto this
+                    # assistant row so reopening the conversation replays them, THEN emit the
+                    # live event. Mirrors the title's persist-then-signal order.
+                    async with async_session_factory() as session:
+                        await MessageRepository(session).set_followups(
+                            message_id,
+                            conversation_id=conversation_id,
+                            followups=followups,
+                        )
                     sink.emit(followups_generated(followups, conversation_id=conversation_id))
         finally:
             await provider.close()
@@ -242,10 +252,9 @@ async def persist_turn_result(
         and getattr(backend, "dirty", False)
     ):
         try:
-            snapshot_folder_id = getattr(backend, "folder_id", None) or folder_id
             ref = await create_snapshot(
                 user_id=user_id,
-                folder_id=snapshot_folder_id,
+                folder_id=None,
                 conversation_id=conversation_id,
             )
             logger.info(
@@ -262,23 +271,35 @@ async def persist_turn_result(
             )
 
 
+_INCOMPLETE_NOTE = (
+    "（连接中断，本回合未完成。下面是已完成队员的产出，已为你保留；如需继续，可重新发送消息。）"
+)
+_INCOMPLETE_SUFFIX = "\n\n（连接中断，本回合未完成——以上为已生成部分；如需继续，可重新发送消息。）"
+
+
 async def persist_incomplete_turn(
     *,
     journal: list[dict],
+    content: str,
     conversation_id: str,
     trace_id: str,
     message_id: str | None,
 ) -> None:
-    """Persist a cancelled turn's already-finished work as one incomplete message (断线别白干)."""
-    note = (
-        "（连接中断，本回合未完成。下面是已完成队员的产出，已为你保留；如需继续，可重新发送消息。）"
-    )
+    """Persist a cancelled turn's already-streamed reply + finished work (断线别白干).
+
+    ``content`` is the CEO bubble text the user already saw (best-effort, may be ""). When
+    present it becomes the salvaged message body (marked cut-off) so a mid-stream cancel keeps
+    the partial answer instead of a bare「连接中断」note; when empty we fall back to the note
+    (the finished-worker journal is the record). Either way the journal is persisted for replay.
+    """
+    streamed = (content or "").strip()
+    body = f"{streamed}{_INCOMPLETE_SUFFIX}" if streamed else _INCOMPLETE_NOTE
     try:
         async with async_session_factory() as session:
             msg = await MessageRepository(session).create(
                 conversation_id=conversation_id,
                 role="assistant",
-                content=note,
+                content=body,
                 metadata={
                     "incomplete": True,
                     "finish_reason": FinishReason.CANCELLED.value,
@@ -302,6 +323,7 @@ async def persist_incomplete_turn(
             "chat.incomplete_persisted",
             conversation_id=conversation_id,
             events=len(journal),
+            content_chars=len(streamed),
         )
     except Exception as e:
         logger.warning(
@@ -318,17 +340,26 @@ def salvage_incomplete_turn(
     trace_id: str,
     message_id: str | None = None,
 ) -> None:
-    """On a turn cancel, schedule saving its finished work as an incomplete message."""
+    """On a turn cancel, schedule saving its streamed reply + finished work as one message.
+
+    Salvages when there is EITHER finished team work (a replayable journal) OR the CEO had
+    streamed some reply text — so a cancelled pure-text answer (no team/tool journal surface)
+    is no longer silently dropped. Skips a turn parked at an unresolved durable checkpoint
+    (its paused frame is the record).
+    """
     if not settings.incomplete_turn_persist_enabled:
         return
     journal = sink.execution_journal()
-    if not journal:
+    content = sink.streamed_content()
+    if not journal and not content.strip():
         return
-    if settings.structured_suspension_persist_enabled and has_open_durable_pause(journal):
+    suspend_frames = settings.structured_suspension_persist_enabled
+    if journal and suspend_frames and has_open_durable_pause(journal):
         return
     spawn_background(
         persist_incomplete_turn(
-            journal=list(journal),
+            journal=list(journal) if journal else [],
+            content=content,
             conversation_id=conversation_id,
             trace_id=trace_id,
             message_id=message_id,

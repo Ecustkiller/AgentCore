@@ -20,14 +20,13 @@ export interface GraphEdge {
  * toolbar). `leftright` is the default left-to-right layered flow — it suits the
  * widescreen displays the desktop targets and keeps the inline↔full-screen
  * direction consistent (no 90° flip on maximize); `tree` is the same layered
- * algorithm rotated top-down. Two layouts cover every DAG the MVP teams produce;
- * the earlier `radial` / `force` options added choice without value on small
- * teams (and `force` was the costliest to run), so they were dropped.
+ * algorithm rotated top-down; `timeline` maps worker runs on a real time axis
+ * when `batch_metrics` timing exists (≥2 dispatched workers).
  */
-export type GraphLayout = "tree" | "leftright";
+export type GraphLayout = "tree" | "leftright" | "timeline";
 
 const LAYOUT_KEY = "agentcore:graph-layout";
-const LAYOUTS: GraphLayout[] = ["tree", "leftright"];
+const LAYOUTS: GraphLayout[] = ["tree", "leftright", "timeline"];
 
 // localStorage is wrapped: it throws in private-mode / non-DOM (test) contexts.
 function loadLayout(): GraphLayout {

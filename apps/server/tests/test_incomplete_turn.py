@@ -28,13 +28,17 @@ def _ev(type_: str, checkpoint_id: str | None = None) -> dict:
 
 
 class _Sink:
-    """Minimal stand-in for EventSink — only ``execution_journal`` is read here."""
+    """Minimal stand-in for EventSink — ``execution_journal`` + ``streamed_content`` are read."""
 
-    def __init__(self, journal: list[dict] | None) -> None:
+    def __init__(self, journal: list[dict] | None, content: str = "") -> None:
         self._journal = journal
+        self._content = content
 
     def execution_journal(self) -> list[dict] | None:
         return self._journal
+
+    def streamed_content(self) -> str:
+        return self._content
 
 
 # --- _has_open_durable_pause ---
@@ -106,11 +110,27 @@ def test_salvage_skips_when_gate_off(monkeypatch, capture):
     assert spawned == []
 
 
-def test_salvage_skips_when_no_journal(monkeypatch, capture):
+def test_salvage_skips_when_no_journal_and_no_content(monkeypatch, capture):
     spawned, _ = capture
     monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
+    # Nothing streamed and no finished team work ⇒ nothing to keep.
     service._salvage_incomplete_turn(sink=_Sink(None), conversation_id="conv", trace_id="trace")
     assert spawned == []
+
+
+def test_salvage_spawns_on_streamed_content_without_journal(monkeypatch, capture):
+    # 中途取消 salvage: a pure-text answer (no team/tool journal surface) that was cut off
+    # mid-stream must still be kept — the CEO's streamed text is carried through.
+    spawned, persist_calls = capture
+    monkeypatch.setattr(settings, "incomplete_turn_persist_enabled", True)
+    service._salvage_incomplete_turn(
+        sink=_Sink(None, content="已经写了一半的答案"),
+        conversation_id="conv",
+        trace_id="trace",
+    )
+    assert len(spawned) == 1
+    assert persist_calls[0]["content"] == "已经写了一半的答案"
+    assert persist_calls[0]["journal"] == []
 
 
 def test_salvage_defers_to_resume_on_durable_pause(monkeypatch, capture):
@@ -163,7 +183,7 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
 
     journal = [_ev("run_plan"), _ev("run_completed")]
     await service._persist_incomplete_turn(
-        journal=journal, conversation_id="conv", trace_id="trace", message_id="m1"
+        journal=journal, content="", conversation_id="conv", trace_id="trace", message_id="m1"
     )
 
     assert created["role"] == "assistant"
@@ -183,6 +203,45 @@ async def test_persist_incomplete_writes_cancelled_message(monkeypatch):
     assert turn_end["payload"]["finish_reason"] == FinishReason.CANCELLED.value
 
 
+async def test_persist_incomplete_keeps_streamed_reply(monkeypatch):
+    """When the CEO had already streamed a reply, the salvaged message KEEPS that text
+    (marked cut-off) instead of a bare「连接中断」note (断线别白干)."""
+    created: dict = {}
+
+    class FakeRepo:
+        def __init__(self, _session):
+            pass
+
+        async def create(self, **kwargs):
+            created.update(kwargs)
+            return SimpleNamespace(id=kwargs.get("message_id") or "generated")
+
+    class FakeSessionCM:
+        async def __aenter__(self):
+            return SimpleNamespace()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    async def fake_journal(_session, **kwargs):
+        pass
+
+    monkeypatch.setattr(turn_persistence, "MessageRepository", FakeRepo)
+    monkeypatch.setattr(turn_persistence, "async_session_factory", lambda: FakeSessionCM())
+    monkeypatch.setattr(turn_persistence, "persist_turn_journal", fake_journal)
+
+    await service._persist_incomplete_turn(
+        journal=[],
+        content="这是我已经写了一半的分析",
+        conversation_id="conv",
+        trace_id="trace",
+        message_id="m2",
+    )
+    assert "这是我已经写了一半的分析" in created["content"]
+    assert created["metadata"]["incomplete"] is True
+    assert created["metadata"]["finish_reason"] == FinishReason.CANCELLED.value
+
+
 async def test_persist_incomplete_swallows_db_errors(monkeypatch):
     class BoomCM:
         async def __aenter__(self):
@@ -195,6 +254,7 @@ async def test_persist_incomplete_swallows_db_errors(monkeypatch):
     # Best-effort (文档铁律): a persistence failure must never escape this task.
     await service._persist_incomplete_turn(
         journal=[_ev("run_plan")],
+        content="",
         conversation_id="conv",
         trace_id="trace",
         message_id=None,

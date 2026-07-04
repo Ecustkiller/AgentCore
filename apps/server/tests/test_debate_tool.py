@@ -68,20 +68,20 @@ class _DebateLLM:
         step = (request.scenario or "").rsplit(".", 1)[-1]
         if step == "frame":
             return LLMResponse(content=json.dumps({"focus": "本轮焦点"}), usage=_USAGE)
-        if step == "judge":
+        if step == "assess":
+            # 合并裁判：一次调用同产裁判判定 + 本轮小结（:meth:`Moderator._judge_and_summarize`）。
             self.judge_calls += 1
             converged = self.judge_calls >= self.converge_at
-            verdict = {
+            payload = {
                 "real_clash": True,
                 "new_arguments": not converged,
                 "converged": converged,
                 "stop_reason": "converged",
                 "next_focus": "更深的点",
                 "rationale": "理由",
+                "summary": "本轮小结",
             }
-            return LLMResponse(content=json.dumps(verdict), usage=_USAGE)
-        if step == "summary":
-            return LLMResponse(content=json.dumps({"summary": "本轮小结"}), usage=_USAGE)
+            return LLMResponse(content=json.dumps(payload), usage=_USAGE)
         if step == "brief":
             return LLMResponse(content=json.dumps(self.brief), usage=_USAGE)
         return LLMResponse(content="{}", usage=_USAGE)
@@ -221,16 +221,21 @@ async def test_multi_round_cross_round_memory():
         {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
     )
     assert result.success is True
-    # 3 轮 × 2 辩手 = 6 次 stream（首轮 executor + 第2/3 轮 continue_run 续写）
-    assert llm.stream_calls == 6
+    # 3 轮 × 2 辩手 = 6 次立论 stream（首轮 executor + 第2/3 轮 continue_run 续写）+ 收场结辩 beat
+    # （P4·结辩收束）各方 continue_run 各 1 次 = 2 → 共 8。thorough 正反默认开启结辩（_closing_enabled）。
+    assert llm.stream_calls == 8
     # 后续轮经 continue_run 注入「本轮焦点 + 对方上轮论点」→ 辩手跨轮带记忆
     msgs = [m.content for req in llm.stream_requests for m in req.messages]
     assert any("第 2 轮" in c for c in msgs)
     assert any("辩手发言#" in c for c in msgs)
-    # ledger 含后续轮续写行（run_id 形如 *_r2_pro / *_r3_con，按 side.key 定位同一辩手）
+    # 结辩 beat 的 feedback 注入「结辩陈词 / 只讲胜负手」→ 辩手在自己 transcript 上收尾。
+    assert any("结辩" in c for c in msgs)
+    # ledger 含后续轮续写行（run_id 形如 *_r2_pro / *_r3_con）+ 收场结辩行（*_closing_pro/con）。
     ledger_ids = [r.run_id for r in tool.run_ledger]
     assert any("_r2_pro" in rid for rid in ledger_ids)
     assert any("_r3_con" in rid for rid in ledger_ids)
+    assert any("_closing_pro" in rid for rid in ledger_ids)
+    assert any("_closing_con" in rid for rid in ledger_ids)
 
 
 async def test_rejects_missing_motion():

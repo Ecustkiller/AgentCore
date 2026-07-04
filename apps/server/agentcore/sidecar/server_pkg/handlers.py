@@ -260,3 +260,25 @@ class HandlerMixin:
             await self._reply(request_id, {"cancelled": True})
         else:
             await self._reply(request_id, {"cancelled": False})
+
+    async def _on_run_redirect(self, request_id: Any, params: dict[str, Any]) -> None:
+        from agentcore.runtime.runs.redirect_queue import enqueue_redirect, peek_redirect_count
+
+        execution_id = str(params.get("executionId") or "").strip()
+        run_id = str(params.get("runId") or "").strip()
+        feedback = str(params.get("feedback") or "").strip()
+        conversation_id = str(params.get("conversationId") or "").strip()
+        if not execution_id or not run_id or not feedback or not conversation_id:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.INVALID_PARAMS, "runRedirect requires executionId, runId, feedback, conversationId"
+                )
+            )
+            return
+        enqueue_redirect(
+            execution_id=execution_id,
+            run_id=run_id,
+            feedback=feedback,
+            conversation_id=conversation_id,
+        )
+        await self._reply(request_id, {"ok": True, "queued": peek_redirect_count(execution_id)})

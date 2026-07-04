@@ -143,13 +143,10 @@ export function AskQuestionFields({
   disabled: boolean;
 }) {
   return (
-    <>
-      {/* 起步计划：可折叠的只读信息块（默认展开；收起后 summary 仍预览各项名）。 */}
+    <div className="space-y-2.5">
+      {/* 起步计划：可折叠的只读信息块（默认收起；summary 预览各项名）。 */}
       {content.assumptions.length > 0 && (
-        <details
-          open
-          className="group rounded-lg border-l-2 border-primary/30 bg-muted/40"
-        >
+        <details className="group rounded-lg border-l-2 border-border bg-muted/30">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 [&::-webkit-details-marker]:hidden">
             <ChevronRight
               size={13}
@@ -223,7 +220,7 @@ export function AskQuestionFields({
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
@@ -312,7 +309,13 @@ function QuestionField({
             className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${tone.focus}`}
           />
         ) : (
-          <div className="space-y-1">
+          <div
+            className={
+              question.options.length >= 3
+                ? "grid grid-cols-1 gap-1 sm:grid-cols-2"
+                : "space-y-1"
+            }
+          >
             {question.options.map((opt) => {
               const active = answer.includes(opt.label);
               const isDefault =
@@ -323,7 +326,7 @@ function QuestionField({
                   variant="ghost"
                   disabled={disabled}
                   onClick={() => onToggleChoice(opt.label)}
-                  className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1.5 text-left font-normal disabled:opacity-40 ${
+                  className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1 text-left font-normal disabled:opacity-40 ${
                     active ? tone.optActive : tone.optIdle
                   }`}
                 >
@@ -340,10 +343,10 @@ function QuestionField({
                           <span className={`size-2 rounded-full ${tone.dot}`} />
                         ))}
                     </span>
-                    {/* label + 权衡说明(detail) + 推荐/默认徽标。detail 作次级行帮用户看懂取舍。 */}
+                    {/* label + 权衡说明(detail) + 推荐/默认徽标；detail 仅在选中时展开以控高。 */}
                     <span className="min-w-0 flex-1">
                       <span className="flex items-start gap-1.5">
-                        <span className="min-w-0 flex-1 whitespace-pre-wrap">
+                        <span className="min-w-0 flex-1 whitespace-pre-wrap text-xs">
                           {opt.label}
                         </span>
                         {opt.recommended && (
@@ -365,7 +368,7 @@ function QuestionField({
                           </span>
                         )}
                       </span>
-                      {opt.detail && (
+                      {opt.detail && active && (
                         <span className="mt-0.5 block whitespace-pre-wrap text-xs text-muted-foreground">
                           {opt.detail}
                         </span>
@@ -380,9 +383,9 @@ function QuestionField({
               variant="ghost"
               disabled={disabled}
               onClick={onToggleOther}
-              className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1.5 text-left font-normal disabled:opacity-40 ${
-                otherOn ? tone.optActive : tone.optIdle
-              }`}
+              className={`h-auto w-full justify-start gap-2 rounded-lg border px-2.5 py-1 text-left font-normal disabled:opacity-40 ${
+                question.options.length >= 3 ? "sm:col-span-2" : ""
+              } ${otherOn ? tone.optActive : tone.optIdle}`}
             >
               <span className="flex w-full items-start gap-2">
                 <span
@@ -411,7 +414,9 @@ function QuestionField({
                 // biome-ignore lint/a11y/noAutofocus: 用户点开「其他」才渲染此框，聚焦到刚展开的字段是预期 UX（非页面加载时强夺焦点）。
                 autoFocus
                 placeholder="填写你的答案"
-                className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${tone.focus}`}
+                className={`w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/70 focus:outline-none disabled:opacity-40 ${
+                  question.options.length >= 3 ? "sm:col-span-2" : ""
+                } ${tone.focus}`}
               />
             )}
           </div>

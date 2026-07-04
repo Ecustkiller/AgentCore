@@ -11,6 +11,7 @@ import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import {
   dispatchSSEEvent,
   flushPendingContent,
+  flushPendingFrames,
 } from "@/services/streamConversation";
 import { useApprovalStore } from "@/stores/approvals";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
@@ -57,6 +58,9 @@ export interface StreamViaSidecarOptions {
   /** 续辩种子（结构化补轮·B）：非空 = 本回合 debate 续上一场（焦点正交、首轮辩手读到上一场
    *  摘要）。普通回合缺省，逐字回退全新辩论。 */
   debateSeed?: SidecarDebateSeed;
+  /** 对话级自定义指令（对话级自定义指令）：非空 = 本回合系统提示注入该指令（云模式由服务端注入，
+   *  sidecar 无库故由此喂入）。缺省 = 无。 */
+  instructions?: string | null;
   signal?: AbortSignal;
 }
 
@@ -124,6 +128,7 @@ export async function streamConversationViaSidecar({
   history,
   optimisticUserId,
   debateSeed,
+  instructions,
   signal,
 }: StreamViaSidecarOptions): Promise<SidecarTurnResult> {
   const turnId = newTurnId();
@@ -150,6 +155,8 @@ export async function streamConversationViaSidecar({
         history,
         inference,
         debateSeed,
+        // 对话级自定义指令：空串归一为 undefined（契约里「无」= 缺省），非空才透传。
+        instructions: instructions?.trim() || undefined,
       }),
     writeBack: (result) =>
       persistAndReconcile(
@@ -300,8 +307,9 @@ async function runSidecarTurn({
     });
   } finally {
     // Abort / engine failure skips message_end (and thus its flush); drain any
-    // rAF-buffered content so a partial answer keeps its last frame of tokens.
+    // rAF-buffered content + worker frames so a partial answer keeps its last tokens.
     flushPendingContent(conversationId);
+    flushPendingFrames(conversationId);
     clearActiveSidecarTurn(conversationId);
     unsubscribe();
     signal?.removeEventListener("abort", onAbort);

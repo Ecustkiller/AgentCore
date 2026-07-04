@@ -73,7 +73,11 @@ async def load_injected_memory(
     Each file's human chrome (title + note) is stripped PER FILE before concatenation —
     stripping once over the joined text would only shed the first file's leading H1 and
     leave the others' titles as mid-prompt noise. GLOBAL preferences + profile come first
-    (stable prefix), then the project profile (when the conversation is in a project).
+    (stable prefix), then the project profile when ``folder_id`` is set.
+
+    ``folder_id`` is the conversation's manual sidebar group (D4 方案 1,
+    folder-refactor-design §8): truthy ⇒ load that group's project-layer 画像.md; NULL
+    (bare chat) ⇒ global only. Auto-promote folders no longer exist post-migration.
 
     ``file_char_cap`` deterministically caps EACH file's body (COST-001 读侧 backstop) — see
     :func:`_cap_memory_body`; ``None`` (default) = unbounded, preserving callers/tests that
@@ -136,6 +140,9 @@ async def load_memory_topics(
     via ``consult_memory`` (which searches both scopes); the body itself never rides the常驻
     prefix. De-duplicated by name and sorted for a stable prefix; a topic that exists in both
     scopes appears once (the GLOBAL summary wins, matching the stable-prefix layer).
+
+    ``folder_id`` selects the manual group whose project-layer topics to merge (D4 方案 1);
+    NULL ⇒ global topics only.
     """
     if not enabled:
         return []

@@ -131,7 +131,25 @@ async def test_context_blocks_dependency_carries_provenance():
     assert deps["工程师"].files == ["out/config.json"]
 
 
-def test_context_block_payloads_caps_long_body_with_flag():
+def test_team_brief_block_injected_before_task():
+    plan, errs = build_run_plan(
+        [{"id": "w", "role": "写手", "task": "写稿"}],
+        id_prefix="t",
+    )
+    assert errs == []
+    spec = plan.nodes[0]
+    blocks = _build_context_blocks(
+        plan, spec, {}, "原始请求", None, [], team_brief="受众：初学者；篇幅约 1500 字"
+    )
+    brief = next(b for b in blocks if b.channel == "team_brief")
+    assert "团队共识" in brief.heading
+    assert "初学者" in brief.body
+    msgs = _build_messages(
+        plan, spec, {}, "SYS", "原始请求", team_brief="跨波共识"
+    )
+    user = msgs[1].content or ""
+    assert "跨波共识" in user
+
     # 决策④: the prompt feeds the LLM the FULL block, but the run_context/journal copy is
     # head+tail capped (flagged via `truncated`, ORIGINAL size kept in `chars`) so a huge
     # pasted request can't bloat the journal.

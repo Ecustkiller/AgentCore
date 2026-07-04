@@ -14,6 +14,7 @@ from agentcore.tools.builtin.file_ops import (
     StrReplaceTool,
 )
 from agentcore.tools.builtin.grep import GrepTool
+from agentcore.tools.builtin.handoff import HandoffTool
 from agentcore.tools.builtin.post_note import PostNoteTool
 from agentcore.tools.builtin.read_notes import ReadNotesTool
 from agentcore.tools.builtin.web.read_url import ReadUrlTool
@@ -85,6 +86,11 @@ def build_worker_registry(*, backend: WorkspaceBackend | None = None) -> ToolReg
     # amend_note (改写 / 作废, §2.2 supersession) completes the trio: same worker-only path, so a
     # worker can correct its OWN stale note before a sibling builds on a dead decision.
     registry.register(AmendNoteTool())
+    # handoff (完工交接简报 + 收尾, terminal) rides the same worker-only path: a worker submits
+    # its STRUCTURED brief (结论 / 关键要点 / 关键假设 / 建议下一步) and finishes, so the brief is
+    # read off the call args (never parsed out of prose) so the deliverable「输出」never
+    # doubles it.
+    registry.register(HandoffTool())
     return registry
 
 

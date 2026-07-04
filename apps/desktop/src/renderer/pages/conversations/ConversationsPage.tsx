@@ -33,6 +33,8 @@ import {
   ARCHIVED_KEY,
   STALE_DAYS,
   activeFilterName,
+  filesFocusState,
+  firstConversationInFolder,
   isRealFolderFilter,
   newChatFolderTarget,
 } from "./constants";
@@ -66,6 +68,11 @@ export function ConversationsPage() {
 
   const activeName = activeFilterName(selected, folders);
   const isFolderFilter = isRealFolderFilter(selected, folderIds);
+  const folderFocusConvId = isFolderFilter
+    ? (list[0]?.id ??
+      firstConversationInFolder(conversations, selected)?.id ??
+      null)
+    : null;
 
   const handleNewChat = () => {
     startNewConversation(navigate, newChatFolderTarget(selected, folderIds));
@@ -115,6 +122,9 @@ export function ConversationsPage() {
                   key={f.id}
                   folder={f}
                   count={counts.perFolder.get(f.id) ?? 0}
+                  firstConvId={
+                    firstConversationInFolder(conversations, f.id)?.id ?? null
+                  }
                   selected={selected === f.id}
                   flashing={flashId === f.id}
                   onSelect={() => setSelected(f.id)}
@@ -200,9 +210,7 @@ export function ConversationsPage() {
               <SurfaceRowButton
                 variant="default"
                 onClick={() =>
-                  navigate("/files", {
-                    state: { focusWsId: `folder:${selected}` },
-                  })
+                  navigate("/files", filesFocusState(folderFocusConvId))
                 }
                 className="mt-3 w-full shrink-0 justify-start gap-2 border border-border bg-muted/30 px-3 py-2 text-foreground hover:border-foreground/30 hover:bg-accent/60"
               >
@@ -227,9 +235,7 @@ export function ConversationsPage() {
                   variant="ghost"
                   className="inline h-auto p-0 text-foreground underline-offset-2 hover:underline"
                   onClick={() =>
-                    navigate("/files", {
-                      state: { focusWsId: `folder:${selected}` },
-                    })
+                    navigate("/files", filesFocusState(folderFocusConvId))
                   }
                 >
                   文件页
@@ -392,12 +398,14 @@ function FilterRow({
 function FolderFilterRow({
   folder,
   count,
+  firstConvId,
   selected,
   flashing,
   onSelect,
 }: {
   folder: FolderMeta;
   count: number;
+  firstConvId: string | null;
   selected: boolean;
   flashing: boolean;
   onSelect: () => void;
@@ -422,22 +430,13 @@ function FolderFilterRow({
       >
         <FolderIcon size={16} className="shrink-0 text-muted-foreground" />
         <span className="truncate text-sm">{folder.name}</span>
-        {folder.localRootId && (
-          <HardDrive
-            size={12}
-            className="shrink-0 text-primary"
-            aria-label="本地工作区"
-          />
-        )}
       </SurfaceRowButton>
       {hovered ? (
         <SimpleTooltip label="浏览文件">
           <IconButton
             aria-label="浏览此文件夹的文件"
             onClick={() =>
-              navigate("/files", {
-                state: { focusWsId: `folder:${folder.id}` },
-              })
+              navigate("/files", filesFocusState(firstConvId))
             }
             className="size-6 shrink-0"
           >

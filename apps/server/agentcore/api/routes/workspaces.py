@@ -108,17 +108,24 @@ async def _resolve_owned_workspace(
     conv_repo: ConversationRepository,
     folder_repo: FolderRepository,
 ) -> _WsTarget:
-    """Resolve a ws id to an owned folder workspace, or 404.
-
-    文件夹即工作区: a workspace **is** a folder (``folder:<id>``), so only that kind
-    resolves. A conversation no longer owns a standalone space — a 裸聊 has none until
-    it is promoted into a folder — so a ``conv:<id>`` (or any non-folder id) is 404.
-    ``conv_repo`` is kept in the signature for call-site symmetry across the routes.
-    """
+    """Resolve a ws id to an owned conversation scratch workspace, or 404."""
     try:
         parsed = parse_workspace_id(ws_id)
     except ValueError as e:
         raise NotFoundError("工作区不存在") from e
+
+    if parsed.kind == "conv":
+        conv = await conv_repo.get_by_id(parsed.ident, user_id=user_id)
+        if not conv:
+            raise NotFoundError("工作区不存在")
+        return _WsTarget(
+            ws_id=ws_id,
+            folder_id=None,
+            conversation_id=conv.id,
+            name=conv.title or "未命名对话",
+            location="local" if conv.local_root_id else "cloud",
+            root_id=conv.local_root_id,
+        )
 
     if parsed.kind != "folder":
         raise NotFoundError("工作区不存在")
@@ -157,32 +164,30 @@ def _storage_key(user_id: str, target: _WsTarget) -> str:
 @router.get("", response_model=WorkspaceListResponse)
 async def list_workspaces(
     user: AuthUser,
-    folder_repo: FolderRepository = Depends(get_folder_repo),
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
 ):
-    """Enumerate the user's workspaces (文件夹即工作区: a workspace **is** a folder).
-
-    Every folder is a project, always listed — local ones unconditionally (the
-    server can't see their files, and a binding is explicit intent, not noise),
-    cloud ones carrying a ``has_files`` flag. Conversations are not workspaces: a
-    裸聊 has no space until it is promoted into a folder, after which it appears here
-    as that folder.
-    """
-    folders = await folder_repo.list_by_user(user.user_id)
+    """Enumerate conversation scratch workspaces that have files or a local binding."""
+    conversations = await conv_repo.list_all_by_user(user.user_id)
     items: list[WorkspaceSummary] = []
-    for f in folders:
-        local = f.local_root_id is not None
+    for conv in conversations:
+        local = conv.local_root_id is not None
+        has_files = (
+            True
+            if local
+            else workspace_has_entries(
+                user_id=user.user_id, folder_id=None, conversation_id=conv.id
+            )
+        )
+        if not local and not has_files:
+            continue
         items.append(
             WorkspaceSummary(
-                ws_id=f"folder:{f.id}",
-                name=f.name,
+                ws_id=f"conv:{conv.id}",
+                name=conv.title or "未命名对话",
                 location="local" if local else "cloud",
-                root_id=f.local_root_id,
-                subpath=f.local_subpath,
-                has_files=True
-                if local
-                else workspace_has_entries(
-                    user_id=user.user_id, folder_id=f.id, conversation_id=""
-                ),
+                root_id=conv.local_root_id,
+                subpath=conv.local_subpath,
+                has_files=has_files,
             )
         )
     return WorkspaceListResponse(data=items, total=len(items))

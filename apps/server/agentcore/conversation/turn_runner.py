@@ -52,6 +52,7 @@ async def run_and_persist(
     llm_credentials: LLMCredentials | None,
     profile_set: ProfileSet | None = None,
     memory_enabled: bool = True,
+    instructions: str | None = None,
     board_id: str | None = None,
     debate_seed: dict | None = None,
 ) -> None:
@@ -95,6 +96,7 @@ async def run_and_persist(
                 attachments=attachments,
                 llm_credentials=llm_credentials,
                 memory_enabled=memory_enabled,
+                instructions=instructions,
                 profile_set=profile_set,
                 session_saver=session_saver,
                 session_loader=session_loader,
@@ -118,6 +120,7 @@ async def run_and_persist(
             output_tokens=result.get("output_tokens", 0),
             reasoning_tokens=result.get("reasoning_tokens", 0),
             reply_chars=len(result.get("content") or ""),
+            reply_preview=preview(result.get("content") or ""),
             delegated=workers > 0,
             workers=workers,
             # 协作质量 (学·度量 §2.5): per-turn orchestration signals, also persisted to
@@ -130,18 +133,22 @@ async def run_and_persist(
             error=result.get("error"),
         )
 
-    await persist_turn_result(
-        result=result,
-        conversation_id=conversation_id,
-        user_id=user_id,
-        folder_id=folder_id,
-        backend=backend,
-        sink=sink,
-        user_message=user_message,
-        generate_title=generate_title,
-        llm_credentials=llm_credentials,
-        trace_id=trace_id,
-        turn_id=turn_id,
-        duration_ms=duration_ms,
-        kind="turn",
-    )
+        # Persist INSIDE the trace scope so the post-turn tail (cost.recorded,
+        # obs.turn_spans, turn-metrics/snapshot/title warnings) inherits this turn's
+        # trace_id / turn_id from the log context — otherwise those lines fire after
+        # the scope closes and lose the single 全链路 join key (conversation-logs.mdc).
+        await persist_turn_result(
+            result=result,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            folder_id=folder_id,
+            backend=backend,
+            sink=sink,
+            user_message=user_message,
+            generate_title=generate_title,
+            llm_credentials=llm_credentials,
+            trace_id=trace_id,
+            turn_id=turn_id,
+            duration_ms=duration_ms,
+            kind="turn",
+        )
